@@ -49,6 +49,15 @@ LOCKDOWN_DOOR_COVER_CLASSES = {"door", "garage", "garage_door"}
 LOCKDOWN_BREACH_COOLDOWN = 120  # seconds between repeat breach announcements
 LOCKDOWN_SECURE_VERIFY_DELAY = 25  # seconds to wait before confirming a close actually took (slow covers)
 LOCKDOWN_STATE_PATH = "/config/nova/lockdown_state.json"  # survives reboots/reloads
+# Locks that are NOT physical security (thermostat keypad/child locks, etc).
+# Lockdown's "lock every unlocked lock" sweep and breach re-lock both skip
+# these entities. Overridable via the "lockdown_exempt_locks" config key
+# (panel / config.json) — this set is just the default so it works out of
+# the box even with no config.json entry.
+LOCKDOWN_EXEMPT_LOCKS_DEFAULT = {
+    "lock.downstairs_thermo_lock",
+    "lock.upstairs_thermo_lock",
+}
 FREEZE_WARN_TEMP_F = 35  # outdoor temp (°F) that triggers pipe concern
 FREEZE_CRITICAL_TEMP_F = 20  # act immediately
 IGNORE_FILE = "/config/.nova_ignore_rules.json"
@@ -1136,6 +1145,14 @@ class LockdownManager:
         self.reason = ""
         self.auto = False                 # engaged by the alarm (auto-lift on disarm)
         self.exempt_windows: set = set()   # openings open at engage / adopted as intentional (doors + windows)
+        # Lock entities Lockdown must never touch (e.g. thermostat child
+        # locks) — config-overridable, defaults to LOCKDOWN_EXEMPT_LOCKS_DEFAULT.
+        # NOTE: distinguish "key absent" (None -> use default) from an
+        # explicit empty list (a deliberate "exempt nothing" override) — an
+        # `or` here would silently discard a real [] override (falsy).
+        _exempt_cfg = config.get("lockdown_exempt_locks", None)
+        self.exempt_locks: set = set(
+            _exempt_cfg if _exempt_cfg is not None else LOCKDOWN_EXEMPT_LOCKS_DEFAULT)
         self._secured_by_us: set = set()   # entities Nova closed/locked this lockdown (reopen ⇒ intentional)
         self._alerted: set = set()         # entities already alerted about this lockdown
         self._last_breach_alert = 0.0
@@ -1239,9 +1256,9 @@ class LockdownManager:
                 out.add(st.entity_id)
         return out
 
-    def _is_relevant(self, dom: str, dc) -> bool:
+    def _is_relevant(self, dom: str, dc, eid: str = None) -> bool:
         if dom == "lock":
-            return True
+            return eid not in self.exempt_locks
         if dom == "cover":
             return dc in self._CLOSEABLE_COVERS
         if dom == "binary_sensor":
@@ -1285,8 +1302,10 @@ class LockdownManager:
     async def _lock_all(self) -> list:
         locked = []
         for st in self.hass.states.async_all("lock"):
+            eid = st.entity_id
+            if eid in self.exempt_locks:
+                continue
             if st.state == "unlocked":
-                eid = st.entity_id
                 fname = st.attributes.get("friendly_name", eid)
                 try:
                     await self.hass.services.async_call(
@@ -1396,7 +1415,7 @@ class LockdownManager:
             return None
         dom = eid.split(".", 1)[0]
         dc = new.attributes.get("device_class")
-        if not self._is_relevant(dom, dc):
+        if not self._is_relevant(dom, dc, eid):
             return None
         if self._is_secure(dom, new.state):
             return None
