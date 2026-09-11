@@ -581,6 +581,13 @@ async def test_connection(hass, provider, api_key, model, base_url):
         client = await hass.async_add_executor_job(
             create_provider, provider, api_key, model, base_url or None)
     except Exception as exc:
+        # Without this the config flow only ever shows the generic
+        # "cannot_connect"/"invalid_auth" key in the UI — the real reason
+        # (bad key, DNS, TLS, wrong model) is otherwise lost.
+        _LOGGER.error(
+            "Nova: failed to build '%s' LLM client (model=%s): %s",
+            provider, model, exc,
+        )
         return _classify_conn_error(exc)
     if client is None:
         return "cannot_connect"
@@ -592,4 +599,8 @@ async def test_connection(hass, provider, api_key, model, base_url):
         await hass.async_add_executor_job(_ping)
         return None
     except Exception as exc:
+        _LOGGER.error(
+            "Nova: '%s' LLM connection test failed (model=%s): %s",
+            provider, model, exc,
+        )
         return _classify_conn_error(exc)
