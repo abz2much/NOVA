@@ -378,6 +378,44 @@ _CLOUD_PROVIDERS = {"groq", "gemini", "openai", "anthropic"}
 # No cloud provider uses colon-tagged model ids, which makes this a safe tell.
 _OLLAMA_TAG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*:[a-z0-9][a-z0-9._-]*$", re.I)
 
+# A default model per cloud provider, used when first-run setup detects a
+# provider from the pasted key but the model field is still on its
+# placeholder value — so e.g. an Anthropic key never gets silently sent
+# an OpenAI/Groq-shaped model id and fails with a confusing 404.
+DEFAULT_MODELS = {
+    "groq":      "openai/gpt-oss-120b",
+    "anthropic": "claude-sonnet-5",
+    "openai":    "gpt-5-mini",
+    "gemini":    "gemini-3.6-flash",
+}
+
+
+def detect_provider_from_key(api_key: str) -> str:
+    """
+    Guess the cloud provider from an API key's own shape, so first-run
+    setup doesn't have to ask which service a pasted key belongs to.
+
+    Key prefixes are stable, documented conventions for each vendor:
+      - Anthropic: 'sk-ant-'
+      - Groq:      'gsk_'
+      - Google AI Studio (Gemini): 'AIza'
+      - OpenAI:    'sk-' (checked after Anthropic, which also starts 'sk-')
+
+    Falls back to 'groq' for anything unrecognized — matches the prior
+    hardcoded default, so an unknown key shape still gets a clear
+    'invalid_auth' from test_connection rather than a silent misroute.
+    """
+    k = (api_key or "").strip()
+    if k.startswith("sk-ant-"):
+        return "anthropic"
+    if k.startswith("gsk_"):
+        return "groq"
+    if k.startswith("AIza"):
+        return "gemini"
+    if k.startswith("sk-"):
+        return "openai"
+    return "groq"
+
 
 def normalize_routing(provider_name: str, model: str,
                        base_url: Optional[str]) -> tuple[str, Optional[str], Optional[str]]:

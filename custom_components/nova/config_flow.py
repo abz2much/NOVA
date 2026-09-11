@@ -100,11 +100,18 @@ class NovaConfigFlow(ConfigFlow, domain=DOMAIN):
             base_url = user_input.get("llm_base_url", "").strip()
             if api_key or base_url:
                 # No cloud key + a local URL ⇒ run a local model (Ollama).
-                provider = "groq" if api_key else "ollama"
-                model = user_input.get(CONF_MODEL, DEFAULT_MODEL)
+                # A cloud key's own shape tells us which provider it belongs
+                # to (Anthropic/Groq/Gemini/OpenAI) — no separate provider
+                # picker needed on this first screen.
+                from .llm_provider import test_connection, detect_provider_from_key, DEFAULT_MODELS
+                provider = detect_provider_from_key(api_key) if api_key else "ollama"
+                model = user_input.get(CONF_MODEL, "").strip()
+                if not model or model == DEFAULT_MODEL:
+                    # Field still on its placeholder — use the right default
+                    # for whichever provider we just detected, not Groq's.
+                    model = DEFAULT_MODELS.get(provider, DEFAULT_MODEL)
                 # Validate the endpoint before committing, so a wrong URL or key
                 # fails here instead of installing into a broken state.
-                from .llm_provider import test_connection
                 conn_err = await test_connection(
                     self.hass, provider, api_key, model, base_url or None)
                 if conn_err:
@@ -136,10 +143,13 @@ class NovaConfigFlow(ConfigFlow, domain=DOMAIN):
             }),
             errors=errors,
             description_placeholders={
-                "note": "Enter a cloud API key (e.g. Groq), OR leave it blank and "
-                        "enter a local LLM URL (e.g. http://homeassistant.local:11434/v1) "
-                        "to run Ollama with no cloud account. Everything else is "
-                        "configured later in the Nova panel → Settings.",
+                "note": "Enter a cloud API key (Anthropic, Groq, OpenAI, or Gemini — "
+                        "the provider is detected from the key itself), OR leave it "
+                        "blank and enter a local LLM URL (e.g. "
+                        "http://homeassistant.local:11434/v1) to run Ollama with no "
+                        "cloud account. One of the two is required to get through "
+                        "this step; everything else is configured later in the Nova "
+                        "panel → Settings.",
             },
         )
 
