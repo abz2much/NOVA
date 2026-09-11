@@ -345,6 +345,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.info("Nova: document auto-ingest active (scan every %s min)",
                      int(DOCS_SCAN_INTERVAL.total_seconds() // 60))
 
+    # Automatic database purge (Nova Unification item 3, 11 Sept 2026). Both
+    # nova.database_purge and knowledge.purge_expired() already existed but
+    # nothing ever called them automatically — cleanup was manual-only, so a
+    # DB that's never manually pruned just grows forever. Daily sweep, 30-day
+    # retention, matching the existing service's own default.
+    DB_PURGE_INTERVAL = timedelta(hours=24)
+
+    async def _db_purge_tick(_now) -> None:
+        try:
+            deleted = await hass.async_add_executor_job(purge_old_records, 30)
+            from . import knowledge
+            expired = await hass.async_add_executor_job(knowledge.purge_expired)
+            if deleted or expired:
+                _LOGGER.info("Nova daily purge: %d conversation record(s), %d expired fact(s)",
+                             deleted, expired)
+        except Exception as exc:
+            _LOGGER.debug("Nova db purge tick error: %s", exc)
+
+    if sched.add("db_purge", DB_PURGE_INTERVAL, _db_purge_tick):
+        _LOGGER.info("Nova: automatic database purge active (daily, 30-day retention)")
+
     # ── Scheduled briefings (v6.78.0) ─────────────────────────────────────────
     # Nova delivers its own morning and evening briefing at configured clock
     # times. Off by default; enable per-briefing in Settings. Each run reuses the
