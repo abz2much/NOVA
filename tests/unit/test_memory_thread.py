@@ -106,3 +106,28 @@ def test_should_reseed_boundary_is_inclusive(mt):
 def test_should_reseed_respects_custom_hours(mt):
     assert mt.should_reseed(last_seen=0.0, now=2 * 3600, hours=1) is True
     assert mt.should_reseed(last_seen=0.0, now=2 * 3600, hours=24) is False
+
+
+# ── format_seed_message: seeded turns must read as background, not live ─────
+
+def test_format_seed_message_is_single_system_role(mt):
+    seeded = [{"role": "user", "content": "turn off the living room light"},
+              {"role": "assistant", "content": "Done, sir."}]
+    msg = mt.format_seed_message(seeded)
+    assert msg["role"] == "system"
+    assert isinstance(msg["content"], str)
+
+
+def test_format_seed_message_contains_the_turns(mt):
+    seeded = [{"role": "user", "content": "turn off the living room light"},
+              {"role": "assistant", "content": "Done, sir."}]
+    content = mt.format_seed_message(seeded)["content"]
+    assert "turn off the living room light" in content
+    assert "Done, sir." in content
+
+
+def test_format_seed_message_frames_as_background(mt):
+    content = mt.format_seed_message([{"role": "user", "content": "hi"}])["content"]
+    lowered = content.lower()
+    assert "background" in lowered or "resuming" in lowered
+    assert "do not bring it up again" in lowered
