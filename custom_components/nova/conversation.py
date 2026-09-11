@@ -596,17 +596,17 @@ class NovaAgent(conversation.ConversationEntity):
                 self._llm_text, messages, persona
             )
 
-        tools = [
-            {
-                "type": "function",
-                "function": {
-                    "name":        t.name,
-                    "description": t.description,
-                    "parameters":  t.parameters,
-                },
-            }
-            for t in hass_api.tools
-        ]
+        # HA tool parameters are a voluptuous Schema, not a JSON-serializable
+        # dict — passing t.parameters straight through (as this used to)
+        # makes the LLM request fail as soon as any tool is offered, with
+        # "Object of type Schema/_Unsupported is not JSON serializable".
+        # agent.py's run_agent() already has the real fix (voluptuous_openapi
+        # convert() with HA's selector custom_serializer); reuse it here
+        # instead of keeping a second, out-of-sync copy of this conversion.
+        from .agent import _ha_tools_to_openai_format
+        tools = _ha_tools_to_openai_format(
+            hass_api.tools, getattr(hass_api, "custom_serializer", None)
+        )
 
         working = list(messages)
         for _ in range(MAX_ITERS):
