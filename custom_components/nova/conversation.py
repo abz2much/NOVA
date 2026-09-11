@@ -528,7 +528,12 @@ class NovaAgent(conversation.ConversationEntity):
             return
         seeded = await memory_thread.load_recent(self.hass, hours, limit)
         if seeded:
-            history[:] = seeded  # replace — never blindly prepend on a reseed
+            # Wrapped as one 'system' note, not raw turns — see
+            # memory_thread.format_seed_message for why: raw turns read as
+            # live to the model, which made Nova fixate on stale, completed
+            # exchanges (e.g. re-litigating a light that was turned off days
+            # ago) instead of treating them as background.
+            history[:] = [memory_thread.format_seed_message(seeded)]
 
     # ── HA LLM tool integration ───────────────────────────────────────────────
 

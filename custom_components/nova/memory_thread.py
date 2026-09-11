@@ -89,3 +89,35 @@ async def load_recent(hass, hours: int = DEFAULT_HOURS, limit: int = DEFAULT_MAX
     except Exception as exc:
         _LOGGER.debug("memory_thread load_recent failed: %s", exc)
         return []
+
+
+def format_seed_message(seeded: list) -> dict:
+    """Render seeded turns as ONE 'system'-role message instead of raw
+    user/assistant turns (fixed 11 Sept 2026).
+
+    Bug this fixes: conversation.py used to splice seeded turns straight into
+    the live history as ordinary user/assistant messages. To the model, a
+    seeded turn and a turn from 30 seconds ago look identical — so a
+    completed, days-old exchange ("turn off the living room light" / "done")
+    got treated as live, unfinished business, and Nova kept circling back to
+    it in an unrelated conversation.
+
+    A 'system' message fixes that by construction, not by hoping the model
+    reads the framing text correctly: llm_provider.AnthropicClient.chat pulls
+    every role='system' message out of the transcript entirely and folds it
+    into the top-level system prompt (same as _maybe_summarize's compressed-
+    history note in agent.py already does) — so it never appears as a turn
+    the model might feel compelled to continue. OpenAI-compatible providers
+    (Groq, OpenAI) pass 'system' through natively, where it's still read as
+    background/instruction rather than something the user just said.
+    """
+    lines = [f"{t.get('role', '?')}: {t.get('content', '')}" for t in seeded]
+    return {
+        "role": "system",
+        "content": (
+            "[Resuming after a gap. The following is a completed exchange "
+            "from an earlier, separate conversation — background only. Do "
+            "not bring it up again unless the user does first:\n"
+            + "\n".join(lines) + "]"
+        ),
+    }

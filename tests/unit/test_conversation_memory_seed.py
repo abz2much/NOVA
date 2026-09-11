@@ -33,6 +33,16 @@ def test_reseed_replaces_window_not_prepends():
     # A reseed must REPLACE the thread's window. Prepending onto it (the old
     # behaviour) would duplicate/grow it without bound once seeding can fire
     # more than once per conversation_id.
-    assert "history[:] = seeded" in src
+    assert "history[:] = [memory_thread.format_seed_message(seeded)]" in src
     assert "history[:0] = seeded" not in src, \
         "reseed is prepending again — will duplicate history across repeated reseeds"
+
+
+def test_reseed_wraps_seed_in_format_seed_message():
+    src = SRC.read_text()
+    # Fixed 11 Sept 2026: raw seeded turns spliced straight into history read
+    # as LIVE conversation to the model, which made Nova fixate on stale,
+    # completed exchanges (e.g. a light turned off days ago). Seeded content
+    # must be wrapped as a single system-role note instead — see
+    # memory_thread.format_seed_message.
+    assert "memory_thread.format_seed_message(" in src
