@@ -264,12 +264,20 @@ class AnthropicProvider(LLMProvider):
         self._client = Anthropic(**kwargs)
 
     def chat(self, messages, tools=None, max_tokens=512, temperature=0.7, model_override=None):
-        # Anthropic's API splits system vs user/assistant, and uses a different
-        # image block format than the OpenAI-style image_url our callers send.
+        # Anthropic's API splits system vs user/assistant, uses a different
+        # image block format than the OpenAI-style image_url our callers
+        # send, and has no "tool" role or top-level tool_calls field — tool
+        # use/results are content blocks on ordinary user/assistant turns.
+        # Our callers (agent.py, conversation.py) build history in the
+        # OpenAI shape — {"role": "assistant", "tool_calls": [...]} and
+        # {"role": "tool", "tool_call_id": ..., "content": ...} — so that
+        # shape has to be translated here rather than passed through, or a
+        # tool-calling turn 400s on the very next request to Anthropic.
         system = ""
         chat_msgs = []
         for m in messages:
-            if m["role"] == "system":
+            role = m["role"]
+            if role == "system":
                 sys_c = m["content"]
                 if isinstance(sys_c, list):
                     sys_c = " ".join(
@@ -277,9 +285,50 @@ class AnthropicProvider(LLMProvider):
                         if isinstance(p, dict) and p.get("type") == "text"
                     )
                 system = sys_c if not system else system + "\n\n" + sys_c
+            elif role == "tool":
+                # A tool_result block, sent back as a *user* turn. Anthropic
+                # requires every tool_result from one assistant turn's
+                # (possibly parallel) tool_use calls to land in a single
+                # user message, so merge onto the previous one when it's
+                # already an all-tool_result user turn rather than adding a
+                # second consecutive user message.
+                block = {
+                    "type": "tool_result",
+                    "tool_use_id": m.get("tool_call_id", ""),
+                    "content": m.get("content") or "",
+                }
+                prev = chat_msgs[-1] if chat_msgs else None
+                if (prev and prev["role"] == "user"
+                        and isinstance(prev["content"], list) and prev["content"]
+                        and all(b.get("type") == "tool_result" for b in prev["content"])):
+                    prev["content"].append(block)
+                else:
+                    chat_msgs.append({"role": "user", "content": [block]})
+            elif role == "assistant" and m.get("tool_calls"):
+                # OpenAI-style assistant turn with tool calls -> a text
+                # block (if any) plus one tool_use block per call.
+                content = []
+                text = m.get("content") or ""
+                if text:
+                    content.append({"type": "text", "text": text})
+                for tc in m["tool_calls"]:
+                    fn = tc.get("function", {}) or {}
+                    args = fn.get("arguments", {})
+                    if isinstance(args, str):
+                        try:
+                            args = json.loads(args) if args else {}
+                        except (TypeError, ValueError):
+                            args = {}
+                    content.append({
+                        "type":  "tool_use",
+                        "id":    tc.get("id", ""),
+                        "name":  fn.get("name", ""),
+                        "input": args or {},
+                    })
+                chat_msgs.append({"role": "assistant", "content": content})
             else:
                 chat_msgs.append({
-                    "role": m["role"],
+                    "role": role,
                     "content": self._to_anthropic_content(m["content"]),
                 })
 
