@@ -551,6 +551,30 @@ setTimeout(async () => {
       /No entries match/.test(el.shadowRoot.getElementById("debug-log-entries")?.textContent || "")],
   );
 
+  // ── stored XSS regression (fixed 11 Sept 2026): log entries are built with
+  // innerHTML from e.msg/e.cat/e.ts, which can carry entity names, states, or
+  // model output — content Nova doesn't fully control. A malicious payload in
+  // any of those fields must render as inert text, never as a real element. ──
+  el._logSearch = "";
+  const _realCallWS = hass.callWS;
+  hass.callWS = async (m) => {
+    if (m.type === "nova/get_debug_log") return { entries: [
+      { ts: "09:02:00", cat: "AGENT", msg: '<img src=x onerror="window.__xssFired=true">' },
+    ] };
+    return _realCallWS(m);
+  };
+  window.__xssFired = false;
+  await el._fetchDebugLog();
+  hass.callWS = _realCallWS;
+  const logsXss = el.shadowRoot;
+  checks.push(
+    ["XSS payload in log msg does not create a live <img> element",
+      !logsXss.querySelector("#debug-log-entries img")],
+    ["XSS payload renders as literal escaped text instead",
+      /<img src=x onerror=/.test(logsXss.getElementById("debug-log-entries")?.textContent || "")],
+    ["XSS payload's onerror handler never actually ran", window.__xssFired === false],
+  );
+
   // ── pattern-engine suggestion: approve installs the automation (v6.52.0) ──
   // v7.81.0: suggestions live on their own tab now, not the dashboard.
   el._currentTab = "suggestions";

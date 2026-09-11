@@ -1571,6 +1571,7 @@ def recent_debug_log(n: int = 150) -> list:
     return entries[-n:] if n and n > 0 else entries
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/reload_appliances",
 })
@@ -1599,6 +1600,7 @@ async def ws_reload_appliances(
         connection.send_error(msg["id"], "reload_failed", str(exc))
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/set_lockdown",
     vol.Required("on"): bool,
@@ -1646,6 +1648,7 @@ async def ws_get_knowledge(
         connection.send_error(msg["id"], "knowledge_failed", str(exc))
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/add_knowledge",
     vol.Required("key"): str,
@@ -1674,6 +1677,7 @@ async def ws_add_knowledge(
         connection.send_error(msg["id"], "add_failed", str(exc))
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/forget_knowledge",
     vol.Optional("fact_id"): int,
@@ -1759,6 +1763,7 @@ async def ws_compute_camera_coverage(
         connection.send_error(msg["id"], "coverage_failed", str(exc))
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/update_config",
     vol.Required("key"): str,
@@ -2100,6 +2105,7 @@ async def ws_get_calibration(
         })
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/run_analysis",
 })
@@ -2140,6 +2146,7 @@ async def ws_get_cognitive_status(
         })
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/suggestion_action",
     vol.Required("suggestion_id"): int,
@@ -2232,6 +2239,7 @@ async def ws_camera_snapshot(
         connection.send_error(msg["id"], "snapshot_failed", str(exc))
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/rename_camera",
     vol.Required("entity_id"): str,
@@ -2267,6 +2275,7 @@ async def ws_rename_camera(
         connection.send_error(msg["id"], "rename_failed", str(exc))
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/biometrics",
     vol.Required("action"): vol.In(["status", "enable", "disable"]),
@@ -2304,6 +2313,7 @@ async def ws_biometrics(
         connection.send_error(msg["id"], "biometrics_failed", str(exc))
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/energy",
     vol.Required("action"): vol.In(["status", "set_agency"]),
@@ -2364,6 +2374,7 @@ async def ws_hazard(
         connection.send_error(msg["id"], "hazard_failed", str(exc))
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/mode",
     vol.Required("action"): vol.In(["status", "set"]),
@@ -2400,6 +2411,7 @@ async def ws_mode(
         connection.send_error(msg["id"], "mode_failed", str(exc))
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/intrusion",
     vol.Required("action"): vol.In(["status", "dismiss", "acknowledge",
@@ -2458,6 +2470,7 @@ async def ws_intrusion(
         connection.send_error(msg["id"], "intrusion_failed", str(exc))
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/voice_confirm_test",
 })
@@ -2500,6 +2513,7 @@ async def ws_diagnostics(
         connection.send_error(msg["id"], "diagnostics_failed", str(exc))
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/semantic_search",
     vol.Required("action"): vol.In(["status", "enable", "disable", "test"]),
@@ -2553,6 +2567,7 @@ async def ws_semantic_search(
         connection.send_error(msg["id"], "semantic_search_failed", str(exc))
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/documents",
     vol.Required("action"): vol.In(["status", "ingest", "search", "upload",
@@ -2687,6 +2702,7 @@ async def ws_mmwave_overview(
         connection.send_error(msg["id"], "mmwave_overview_failed", str(exc))
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/camera_location",
     vol.Required("entity_id"): str,
@@ -2810,6 +2826,7 @@ async def ws_get_area_sparklines(
         connection.send_error(msg["id"], "sparklines_failed", str(exc))
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/goal_action",
     vol.Required("action"): vol.In(["cancel", "delete", "create"]),
