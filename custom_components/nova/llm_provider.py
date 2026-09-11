@@ -574,7 +574,12 @@ async def test_connection(hass, provider, api_key, model, base_url):
     the executor; never raises.
     """
     try:
-        client = create_provider(provider, api_key, model, base_url or None)
+        # Constructing a client can itself do blocking I/O (e.g. the
+        # Anthropic SDK reads local credential files and loads the CA
+        # bundle in __init__) — run it off the event loop like the ping
+        # below, so HA's loop guard doesn't raise mid-setup.
+        client = await hass.async_add_executor_job(
+            create_provider, provider, api_key, model, base_url or None)
     except Exception as exc:
         return _classify_conn_error(exc)
     if client is None:
