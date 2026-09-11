@@ -301,7 +301,19 @@ class AnthropicProvider(LLMProvider):
                 for t in tools
             ]
 
-        resp = self._client.messages.create(**kwargs)
+        try:
+            resp = self._client.messages.create(**kwargs)
+        except Exception as exc:
+            # Newer Claude generations (Opus 4.7+, Sonnet 5, ...) reject
+            # `temperature` outright with a 400 instead of ignoring it, and
+            # Anthropic has been rolling this out model-by-model — so retry
+            # once without it rather than hardcoding which model IDs do this.
+            msg = str(exc).lower()
+            if "temperature" in kwargs and "temperature" in msg and "deprecated" in msg:
+                kwargs.pop("temperature")
+                resp = self._client.messages.create(**kwargs)
+            else:
+                raise
 
         text_parts = []
         tool_calls = []
