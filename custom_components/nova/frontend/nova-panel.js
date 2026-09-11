@@ -1411,14 +1411,19 @@ class NovaPanel extends HTMLElement {
       const nearTop = container.scrollTop < 40;
       const prevTop = container.scrollTop;
 
+      // Fixed 11 Sept 2026 (stored XSS): e.msg/e.cat/e.ts are log content —
+      // entity names, states, and model output can end up in them, so they
+      // are attacker/LLM-influenced. Escape with the same this._esc() used
+      // everywhere else in this file before they go into innerHTML.
       container.innerHTML = ordered.length ? ordered.map(e => {
         const cat = cc[e.cat] || { color: 'var(--text)', icon: '•', label: e.cat };
         const isError = e.cat === 'ERROR' || e.msg.toLowerCase().includes('error') || e.msg.toLowerCase().includes('failed');
         const bgClass = isError ? 'log-entry-error' : '';
-        return `<div class="log-entry ${bgClass}" data-cat="${e.cat}">
-          <span class="log-ts">${e.ts}</span>
-          <span class="log-cat" style="color:${cat.color}">${cat.icon} ${e.cat}</span>
-          <span class="log-msg">${e.msg}</span>
+        const safeCat = this._esc(e.cat);
+        return `<div class="log-entry ${bgClass}" data-cat="${safeCat}">
+          <span class="log-ts">${this._esc(e.ts)}</span>
+          <span class="log-cat" style="color:${cat.color}">${cat.icon} ${safeCat}</span>
+          <span class="log-msg">${this._esc(e.msg)}</span>
         </div>`;
       }).join('') : `<div class="log-loading">No entries match${search ? ` "${this._esc(search)}"` : ''}${activeFilter !== 'all' ? ` in ${activeFilter}` : ''}.</div>`;
 
