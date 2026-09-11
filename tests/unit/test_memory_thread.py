@@ -79,3 +79,30 @@ def test_config_defaults(mt, load, monkeypatch):
     jc = load("nova_config")
     monkeypatch.setattr(jc, "get", lambda k, d=None: d)     # nothing set → defaults
     assert mt.config() == (mt.DEFAULT_ENABLED, mt.DEFAULT_HOURS, mt.DEFAULT_MAX)
+
+
+# ── should_reseed: gap-based catch-up, not one-shot (fixed 11 Sept 2026) ─────
+
+def test_should_reseed_true_when_never_seen(mt):
+    assert mt.should_reseed(None, now=1000.0) is True
+
+
+def test_should_reseed_false_within_window(mt):
+    # last turn 1 hour ago, default 48h window — thread is still "warm"
+    assert mt.should_reseed(last_seen=1000.0, now=1000.0 + 3600, hours=48) is False
+
+
+def test_should_reseed_true_after_gap(mt):
+    # last turn 49 hours ago — idle past the 48h window, catch up again
+    assert mt.should_reseed(last_seen=1000.0, now=1000.0 + 49 * 3600, hours=48) is True
+
+
+def test_should_reseed_boundary_is_inclusive(mt):
+    # exactly the threshold counts as due, not "one second short"
+    assert mt.should_reseed(last_seen=0.0, now=48 * 3600, hours=48) is True
+    assert mt.should_reseed(last_seen=0.0, now=48 * 3600 - 1, hours=48) is False
+
+
+def test_should_reseed_respects_custom_hours(mt):
+    assert mt.should_reseed(last_seen=0.0, now=2 * 3600, hours=1) is True
+    assert mt.should_reseed(last_seen=0.0, now=2 * 3600, hours=24) is False

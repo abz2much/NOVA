@@ -273,7 +273,7 @@ class NovaAgent(conversation.ConversationEntity):
             sw_version="4.0.0",
         )
         self._histories: dict[str, list[dict]] = {}
-        self._threaded: set = set()   # conversations already seeded from history
+        self._last_seen: dict[str, float] = {}   # cid -> epoch seconds of its last turn, for gap-based reseed
         self._fallback_idx = 0
 
         # Pull the shared LLM provider from hass.data (created in async_setup_entry).
@@ -512,20 +512,23 @@ class NovaAgent(conversation.ConversationEntity):
         return self._histories[cid]
 
     async def _maybe_seed_history(self, cid: str, history: list) -> None:
-        """Seed a fresh conversation with recent cross-session history, once,
-        so Nova continues where you left off across sessions (v6.86.0)."""
-        if cid in self._threaded:
-            return
-        self._threaded.add(cid)
-        if history:
-            return  # window already holds this session's turns — don't reseed
+        """Seed this conversation with recent cross-session history — on its
+        first-ever turn, and again any time it resumes after being idle past
+        the configured window (default 48h) — so Nova keeps catching up
+        instead of only ever catching up once (fixed 11 Sept 2026; see
+        memory_thread.should_reseed). A reseed REPLACES this thread's window
+        with the fresh pull rather than prepending onto it, so a thread that
+        keeps resuming after gaps can't accumulate duplicate history."""
         from . import memory_thread
         enabled, hours, limit = memory_thread.config()
-        if not enabled:
+        now = time.time()
+        last_seen = self._last_seen.get(cid)
+        self._last_seen[cid] = now
+        if not enabled or not memory_thread.should_reseed(last_seen, now, hours):
             return
         seeded = await memory_thread.load_recent(self.hass, hours, limit)
         if seeded:
-            history[:0] = seeded  # prepend prior context ahead of this turn
+            history[:] = seeded  # replace — never blindly prepend on a reseed
 
     # ── HA LLM tool integration ───────────────────────────────────────────────
 
