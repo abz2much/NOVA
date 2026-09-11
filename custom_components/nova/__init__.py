@@ -1,0 +1,1416 @@
+"""Nova AI Assistant — Home Assistant integration."""
+from __future__ import annotations
+
+import logging
+from datetime import timedelta
+
+import voluptuous as vol
+
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant, ServiceCall, callback
+from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.event import async_track_time_change
+
+from .const import (
+    CONF_API_KEY,
+    CONF_BEDROOM_AREAS,
+    CONF_BROADCAST_GROUP,
+    CONF_HONORIFIC,
+    CONF_TTS_ENGINE,
+    CONF_TTS_PREMIUM_ENGINE,
+    CONF_TTS_PREMIUM_CONTEXTS,
+    DEFAULT_HONORIFIC,
+    DEFAULT_TTS_ENGINE,
+    DEFAULT_TTS_PREMIUM_ENGINE,
+    DEFAULT_TTS_PREMIUM_CONTEXTS,
+    DOMAIN,
+)
+from .audio_routing import broadcast_target
+from .camera import (
+    async_analyze_camera,
+    async_auto_analyze_on_event,
+    register_event_listeners,
+)
+from .briefing import async_briefing
+from .scenes import async_activate_by_intent
+from .routines import async_run_routine, list_routines
+from .reminders import async_add_reminder_service, ReminderWatcher
+from .recognition import register_recognition_listener
+from .summary import async_summarise
+from .sentinel import NovaSentinel
+from .database import purge_old_records, get_stats
+from .llm_provider import create_provider
+from .migrations import migrate_config, CURRENT_SCHEMA_VERSION
+from .panel_register import async_register_panel, async_unregister_panel
+from .websocket import async_register as async_register_ws
+from .proactive_audio import (
+    async_setup_proactive_audio,
+    async_unload_proactive_audio,
+)
+
+_LOGGER = logging.getLogger(__name__)
+
+
+def _prewarm_persisted_state() -> None:
+    """Read persisted state files once, off the event loop (blocking-I/O
+    hygiene). Best-effort — a failure here must never block setup."""
+    try:
+        from . import ha_secrets
+        ha_secrets._read_secrets(force=True)      # refresh + cache secrets.yaml
+    except Exception:
+        pass
+    try:
+        from . import modes
+        modes._load()
+    except Exception:
+        pass
+    try:
+        from . import intrusion
+        intrusion._load_log()
+    except Exception:
+        pass
+    try:
+        from . import reasoning_cache
+        reasoning_cache.load()
+    except Exception:
+        pass
+
+PLATFORMS = ["conversation"]
+# Config-entry only (v6.45.0): warns users who still have `nova:` in YAML.
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
+# v6.45.0: the legacy add-on machinery is gone. Setup is config-entry only
+# (HACS → Add Integration), the conversation agent registers via PLATFORMS,
+# and /config/nova/config.json is the runtime store owned by the panel —
+# nothing external writes it. The old nova_config.json import trigger,
+# async_setup/async_setup_post_start hooks, and the ADDON_OWNED_KEYS
+# reconcile block were all paths for an add-on that no longer exists.
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Set up Nova from a config entry."""
+    hass.data.setdefault(DOMAIN, {})
+
+    # ── Run config migrations if entry is from an older schema ──────────────
+    current_version = entry.data.get("schema_version", 1)
+    if current_version < CURRENT_SCHEMA_VERSION:
+        new_data   = dict(entry.data)
+        new_options = dict(entry.options)
+        new_data, new_options, new_version = migrate_config(
+            new_data, new_options, current_version
+        )
+        new_data["schema_version"] = new_version
+        hass.config_entries.async_update_entry(
+            entry, data=new_data, options=new_options
+        )
+        _LOGGER.info(
+            "Nova: migrated config from schema v%d to v%d",
+            current_version, new_version,
+        )
+
+    honorific = entry.options.get(CONF_HONORIFIC, entry.data.get(CONF_HONORIFIC, DEFAULT_HONORIFIC))
+
+    # ── LLM provider — resolved from the single source of truth (nova_config
+    # wins over stale entry data/options) so the boot client, conversation, and
+    # agent never diverge on which model to run. ───────────────────────────
+    from . import nova_config as _jc
+    _eff = await hass.async_add_executor_job(_jc.effective_config, entry)
+    # Warm the remaining persisted-state caches off the event loop too, so the
+    # hot paths that read them (observer tick, panel data, intrusion log) don't
+    # trip Home Assistant's blocking-I/O detector on first access.
+    await hass.async_add_executor_job(_prewarm_persisted_state)
+    api_key           = _eff.get(CONF_API_KEY, "") or entry.data.get(CONF_API_KEY, "")
+    llm_provider_name = _eff.get("llm_provider", "groq")
+    llm_model         = _eff.get("model", "openai/gpt-oss-120b")
+    llm_base_url      = _eff.get("llm_base_url", "") or None
+
+    try:
+        llm_client = await hass.async_add_executor_job(
+            create_provider,
+            llm_provider_name, api_key, llm_model, llm_base_url,
+        )
+        _LOGGER.info(
+            "Nova: LLM provider '%s' initialised (model=%s)",
+            llm_provider_name, llm_model,
+        )
+    except Exception as exc:
+        _LOGGER.error("Nova: LLM provider init failed: %s", exc)
+        return False
+
+    sentinel = NovaSentinel(hass, llm_client, honorific, entry=entry)
+
+    # Register camera event listeners (nest_event, frigate_event)
+    camera_unsubs = register_event_listeners(hass)
+
+    # Central scheduler for periodic sweeps + a resource registry for one-call,
+    # fail-safe teardown on unload/reload (v7.43.0).
+    from .scheduler import NovaScheduler
+    from .resources import NovaResources
+    sched = NovaScheduler(hass)
+    resources = NovaResources()
+
+    # ── Auto-analyze camera events GOING FORWARD (doorbell / person) ─────────
+    # The listeners above only CACHE Nest/Frigate events — historically nothing
+    # was analyzed unless a user automation called nova.analyze_on_event. These
+    # listeners make Nova inspect notable events itself: a doorbell PRESS always
+    # gets a look; person/motion are throttled per-camera so a busy street/sidewalk
+    # can't spam the vision model, and the spoken announcement is still notability-
+    # gated (only deliveries, unfamiliar people, etc. are voiced). Toggle:
+    # General → "Camera Watch" (camera_auto_analyze); motion behind a second flag.
+    import time as _auto_time
+    from .camera import _nest_device_to_camera as _nest2cam
+
+    _auto_cd: dict[str, float] = {}      # person/motion throttle, per entity
+    _chime_cd: dict[str, float] = {}     # doorbell-press anti-double, per entity
+
+    def _auto_flag(key: str, default: bool) -> bool:
+        try:
+            _d = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+            _rc = _d.get("runtime_config", {}) if isinstance(_d, dict) else {}
+            if key in _rc:
+                _v = _rc[key]
+                return _v if isinstance(_v, bool) else str(_v).lower() in ("1", "true", "yes", "on")
+        except Exception:
+            pass
+        return default
+
+    def _auto_fire(entity_id: str, reason: str, ctx: str, doorbell: bool = False) -> None:
+        honorific = entry.options.get(CONF_HONORIFIC, entry.data.get(CONF_HONORIFIC, DEFAULT_HONORIFIC))
+        tts = _get_tts(hass, entry, context=ctx)
+        spk = _get_speakers(hass, entry)
+        hass.async_create_task(
+            async_auto_analyze_on_event(
+                hass, llm_client, honorific, tts, spk, entity_id, reason, doorbell=doorbell
+            )
+        )
+
+    @callback
+    def _auto_nest(event) -> None:
+        if not _auto_flag("camera_auto_analyze", True):
+            return
+        try:
+            data = event.data
+            device_id = data.get("device_id") or data.get("nest_device_id")
+            etype = str(data.get("type") or data.get("event_type") or "").lower()
+            if not device_id:
+                return
+            # Doorbell PRESS → the full announced analysis. Person events feed
+            # SILENT visitor learning (training data only, never spoken) when
+            # enabled; motion/sound stay ignored.
+            if "chime" not in etype and "doorbell" not in etype:
+                if "person" in etype and _auto_flag("visitor_learning", True):
+                    entity_id = _nest2cam(hass, device_id)
+                    if not entity_id:
+                        return
+                    now = _auto_time.monotonic()
+                    if now - _auto_cd.get(entity_id, float("-inf")) < 180.0:
+                        return
+                    _auto_cd[entity_id] = now
+                    honorific = entry.options.get(CONF_HONORIFIC, entry.data.get(CONF_HONORIFIC, DEFAULT_HONORIFIC))
+                    from .camera import async_visitor_observation
+                    hass.async_create_task(
+                        async_visitor_observation(hass, llm_client, honorific, entity_id)
+                    )
+                return
+            entity_id = _nest2cam(hass, device_id)
+            if not entity_id:
+                return
+            now = _auto_time.monotonic()
+            if now - _chime_cd.get(entity_id, float("-inf")) < 12.0:
+                return  # collapse a rapid double-press
+            _chime_cd[entity_id] = now
+            _auto_fire(entity_id, "Someone is at the front door", "doorbell", doorbell=True)
+        except Exception as exc:
+            _LOGGER.debug("Nova auto-analyze (nest) error: %s", exc)
+
+    @callback
+    def _auto_frigate(event) -> None:
+        # Frigate has no doorbell-press concept; its events are person/object
+        # detections. With the doorbell-only default, leave Frigate dormant unless
+        # the user opts into the noisier non-doorbell analysis.
+        if not (_auto_flag("camera_auto_analyze", True)
+                and _auto_flag("camera_auto_analyze_motion", False)):
+            return
+        try:
+            data = event.data
+            if data.get("type") != "new":
+                return
+            after = data.get("after") or data.get("before") or {}
+            cam = after.get("camera")
+            label = str(after.get("label") or "").lower()
+            if not cam:
+                return
+            entity_id = f"camera.{str(cam).lower()}"
+            if not hass.states.get(entity_id):
+                return
+            if label and label not in (
+                "person", "car", "truck", "package", "dog", "cat", "bicycle", "motorcycle",
+            ):
+                return  # ignore irrelevant tracked objects
+            now = _auto_time.monotonic()
+            if now - _auto_cd.get(entity_id, float("-inf")) < 120.0:
+                return
+            _auto_cd[entity_id] = now
+            _auto_fire(entity_id, f"{label.capitalize()} detected" if label else "Motion detected", "camera")
+        except Exception as exc:
+            _LOGGER.debug("Nova auto-analyze (frigate) error: %s", exc)
+
+    try:
+        camera_unsubs.append(hass.bus.async_listen("nest_event", _auto_nest))
+        camera_unsubs.append(hass.bus.async_listen("frigate_event", _auto_frigate))
+        _LOGGER.info("Nova: camera auto-analysis active (doorbell always, person/motion throttled)")
+    except Exception as exc:
+        _LOGGER.debug("Nova: auto-analyze listener registration failed: %s", exc)
+
+    # ── Package & mail detection — periodic porch check ─────────────────────
+    # Deliveries often don't ring the bell (carrier drops and leaves), so a low-
+    # frequency vision sweep of the doorbell/porch camera catches them. Per-camera
+    # state means a package sitting all day is announced once, on arrival. Skipped
+    # during quiet hours. Toggle: General → "Package Watch" (package_detection).
+    PKG_INTERVAL = timedelta(minutes=15)
+
+    async def _package_tick(_now) -> None:
+        if not _auto_flag("package_detection", True):
+            return
+        try:
+            from . import package_monitor
+            honorific = entry.options.get(CONF_HONORIFIC, entry.data.get(CONF_HONORIFIC, DEFAULT_HONORIFIC))
+            tts = _get_tts(hass, entry, context="package")
+            spk = _get_speakers(hass, entry)
+            report = await package_monitor.periodic_check(
+                hass, llm_client, honorific, tts, spk, configured_camera=None
+            )
+            _LOGGER.debug("Nova package check: %s", report)
+        except Exception as exc:
+            _LOGGER.debug("Nova package tick error: %s", exc)
+
+    if sched.add("package", PKG_INTERVAL, _package_tick):
+        _LOGGER.info("Nova: package/mail detection active (porch sweep every %s min)",
+                     int(PKG_INTERVAL.total_seconds() // 60))
+
+    # Hourly gentle service-health sweep (v6.70.3): re-runs the core-dependency
+    # checks on its own so the panel stays current without the user opening it.
+    # It's reachability-only and never alarms — a synthetic miss yields IDLE, and
+    # only a real-usage failure (recorded by the actual call sites) shows DOWN.
+    HEALTH_INTERVAL = timedelta(hours=1)
+
+    async def _health_tick(_now) -> None:
+        try:
+            from .diagnostics import run_service_health
+            res = await run_service_health(hass)
+            _LOGGER.debug("Nova hourly health: %s", res.get("summary"))
+        except Exception as exc:
+            _LOGGER.debug("Nova health tick error: %s", exc)
+
+    if sched.add("health", HEALTH_INTERVAL, _health_tick):
+        _LOGGER.info("Nova: hourly service-health sweep active")
+
+    # Multi-hazard monitor (v6.71.0): polls USGS/NWS/EONET every 10 min for new
+    # nearby significant events, scoped to home coordinates (or a panel override).
+    # No-op unless the user enables it; each feed fails safe (never fabricates).
+    HAZARD_INTERVAL = timedelta(minutes=10)
+
+    async def _hazard_tick(_now) -> None:
+        try:
+            from . import hazard_monitor
+            honorific = entry.options.get(CONF_HONORIFIC, entry.data.get(CONF_HONORIFIC, DEFAULT_HONORIFIC))
+            res = await hazard_monitor.periodic_check(hass, honorific)
+            if res.get("fired"):
+                _LOGGER.debug("Nova hazard sweep: %s", res)
+        except Exception as exc:
+            _LOGGER.debug("Nova hazard tick error: %s", exc)
+
+    if sched.add("hazard", HAZARD_INTERVAL, _hazard_tick):
+        _LOGGER.info("Nova: multi-hazard monitor active (sweep every %s min)",
+                     int(HAZARD_INTERVAL.total_seconds() // 60))
+
+    # Automatic document ingestion (v6.79.0): pick up files dropped into
+    # /config/nova/documents (and any configured watch folders) without needing
+    # the manual Scan button. Incremental — only new/changed files are ingested,
+    # so this never re-embeds the whole library on a timer.
+    DOCS_SCAN_INTERVAL = timedelta(minutes=10)
+
+    async def _docs_tick(_now) -> None:
+        try:
+            from . import documents
+            res = await documents.auto_ingest_new(hass)
+            watch = await documents.scan_watch_folders(hass)
+            n = (res.get("new_files", 0) or 0) + (watch.get("new_files", 0) or 0)
+            if n:
+                _LOGGER.info("Nova: auto-ingested %d new document(s)", n)
+        except Exception as exc:
+            _LOGGER.debug("Nova docs auto-ingest error: %s", exc)
+
+    if sched.add("documents", DOCS_SCAN_INTERVAL, _docs_tick):
+        _LOGGER.info("Nova: document auto-ingest active (scan every %s min)",
+                     int(DOCS_SCAN_INTERVAL.total_seconds() // 60))
+
+    # ── Scheduled briefings (v6.78.0) ─────────────────────────────────────────
+    # Nova delivers its own morning and evening briefing at configured clock
+    # times. Off by default; enable per-briefing in Settings. Each run reuses the
+    # same content engine as the nova.briefing service, so what you hear is
+    # identical to calling it by hand.
+    class _SchedCall:
+        """Minimal ServiceCall stand-in for a scheduled (non-service) run."""
+        def __init__(self, data: dict):
+            self.data = data
+
+    def _brief_cfg(key, default):
+        try:
+            from . import nova_config
+            v = nova_config.get(key, default)
+            return v if v is not None else default
+        except Exception:
+            return default
+
+    def _parse_hhmm(value, fallback_h, fallback_m):
+        try:
+            h, m = str(value).split(":")[:2]
+            h, m = int(h), int(m)
+            if 0 <= h <= 23 and 0 <= m <= 59:
+                return h, m
+        except Exception:
+            pass
+        return fallback_h, fallback_m
+
+    async def _run_briefing(kind: str) -> None:
+        """Deliver a scheduled briefing if it's enabled and someone's home."""
+        try:
+            if not bool(_brief_cfg(f"briefing_{kind}_enabled", False)):
+                return
+            # Don't talk to an empty house unless explicitly allowed.
+            if bool(_brief_cfg("briefing_require_home", True)):
+                # Only skip when we are CONFIDENT the house is empty — every
+                # tracked person is explicitly away. Unknown/unavailable presence
+                # must not suppress the briefing (fail open); the old check
+                # silenced scheduled briefings whenever presence was not a clean
+                # "home".
+                try:
+                    from .presence import everyone_confidently_away
+                    if everyone_confidently_away(hass):
+                        _LOGGER.debug("Nova: skipping %s briefing — everyone away", kind)
+                        return
+                except Exception:
+                    pass
+            honorific = entry.options.get(CONF_HONORIFIC,
+                                          entry.data.get(CONF_HONORIFIC, DEFAULT_HONORIFIC))
+            tts = _get_tts(hass, entry, context="briefing")
+            spk = _get_speakers(hass, entry)
+            call = _SchedCall({
+                "announce": True,
+                "include_weather": bool(_brief_cfg("briefing_include_weather", True)),
+                "include_calendar": bool(_brief_cfg("briefing_include_calendar", True)),
+                "include_presence": bool(_brief_cfg("briefing_include_presence", True)),
+                "include_events": bool(_brief_cfg("briefing_include_events", True)),
+                "include_energy": bool(_brief_cfg("briefing_include_energy", True)),
+                "include_hazards": bool(_brief_cfg("briefing_include_hazards", True)),
+                # morning looks back overnight; evening looks back over the day
+                "hours": 12 if kind == "morning" else 14,
+            })
+            await async_briefing(hass, call, llm_client, honorific, tts, spk)
+            _LOGGER.info("Nova: delivered %s briefing", kind)
+        except Exception as exc:
+            # A scheduled briefing failing must be VISIBLE — this was
+            # previously debug-level, which hid a NameError entirely.
+            _LOGGER.warning("Nova %s briefing failed: %s", kind, exc)
+
+    async def _morning_briefing(_now) -> None:
+        await _run_briefing("morning")
+
+    async def _evening_briefing(_now) -> None:
+        await _run_briefing("evening")
+
+    try:
+        mh, mm = _parse_hhmm(_brief_cfg("briefing_morning_time", "07:30"), 7, 30)
+        eh, em = _parse_hhmm(_brief_cfg("briefing_evening_time", "19:30"), 19, 30)
+        camera_unsubs.append(async_track_time_change(
+            hass, _morning_briefing, hour=mh, minute=mm, second=0))
+        camera_unsubs.append(async_track_time_change(
+            hass, _evening_briefing, hour=eh, minute=em, second=0))
+        _LOGGER.info("Nova: briefings scheduled (morning %02d:%02d, evening %02d:%02d)",
+                     mh, mm, eh, em)
+    except Exception as exc:
+        _LOGGER.debug("Nova: briefing scheduler registration failed: %s", exc)
+
+    # Register DoubleTake MQTT face recognition listener
+    recognition_unsubs = await register_recognition_listener(hass)
+
+    # Reminder watcher — checks every 30 seconds for due reminders
+    reminder_watcher = ReminderWatcher(
+        hass,
+        honorific_getter=lambda: entry.options.get(
+            CONF_HONORIFIC, entry.data.get(CONF_HONORIFIC, DEFAULT_HONORIFIC)
+        ),
+        tts_getter=lambda: _get_tts(hass, entry, context="reminder"),
+        speakers_getter=lambda: _get_speakers(hass, entry),
+    )
+
+    # Hand every disposable to the resource registry so unload tears them all
+    # down in one fail-safe call. The scheduler is a closeable (its shutdown()
+    # cancels every timer); the listener unsubs are collected too.
+    resources.add_unsubs(camera_unsubs)
+    resources.add_unsubs(recognition_unsubs)
+    resources.add_closeable(sched)
+
+    hass.data[DOMAIN][entry.entry_id] = {
+        "client":             llm_client,
+        "sentinel":           sentinel,
+        "camera_unsubs":      camera_unsubs,
+        "recognition_unsubs": recognition_unsubs,
+        "resources":          resources,
+        "scheduler":          sched,
+        "reminder_watcher":   reminder_watcher,
+        "llm_provider_name":  llm_provider_name,
+        "schema_version":     CURRENT_SCHEMA_VERSION,
+    }
+
+    # Restore persisted panel settings via centralized nova_config module.
+    # This loads from /config/nova/config.json (or migrates from old path).
+    # We restore EVERY panel-writable key (LLM provider/model selections,
+    # cognition tunables, floor plan, etc.) so choices made in the panel win
+    # over addon-config defaults and survive reboots/updates. runtime_config
+    # takes precedence over entry.options/data, so this is authoritative.
+    # Secrets (api_key, gemini_api_key) are intentionally NOT panel-writable and
+    # therefore stay addon-controlled via the reconcile above.
+    try:
+        from . import nova_config
+        from .websocket import PANEL_WRITABLE_KEYS
+
+        # Initialize config from entry data (backfill any missing keys)
+        await hass.async_add_executor_job(
+            nova_config.init_from_entry,
+            dict(entry.data), dict(entry.options),
+        )
+
+        # Load persisted settings into runtime_config
+        cfg = await hass.async_add_executor_job(nova_config.get_all)
+        # v6.48.0: a hand-edited config.json that couldn't be used was
+        # sidelined by nova_config.load() — tell the user loudly instead of
+        # silently reverting every setting to defaults.
+        if getattr(nova_config, "last_load_error", None):
+            try:
+                await hass.services.async_call(
+                    "persistent_notification", "create", {
+                        "title": "Nova: config.json was invalid",
+                        "message": (
+                            f"{nova_config.last_load_error}. Nova started "
+                            "with defaults. Fix the JSON in the preserved file "
+                            "and copy it back to /config/nova/config.json, "
+                            "then restart."),
+                        "notification_id": "nova_config_corrupt",
+                    }, blocking=False)
+            except Exception:
+                pass
+        restore_keys = set(PANEL_WRITABLE_KEYS) | {
+            "broadcast_group", "observer_quiet_start",
+            "observer_quiet_end", "bedroom_areas",
+            "movie_media_player",  # so TTS routing can exclude the TV in-memory
+        }
+        rc = {k: cfg[k] for k in restore_keys if k in cfg}
+        if rc:
+            hass.data[DOMAIN][entry.entry_id]["runtime_config"] = rc
+            _LOGGER.info(
+                "Restored %d panel settings from nova_config (%d total keys in file)",
+                len(rc), len(cfg),
+            )
+    except Exception as exc:
+        _LOGGER.debug("Config restore: %s", exc)
+
+    # Register services — guard against double-registration on reload
+    # Move any plaintext LLM credentials into secrets.yaml (v6.83.0). Safe:
+    # verify-before-strip; config.json is left untouched on any failure.
+    try:
+        from . import ha_secrets as _hs
+        await _hs.relocate_plaintext_credentials(hass)
+    except Exception as exc:
+        _LOGGER.debug("Credential relocation: %s", exc)
+
+    _register_services(hass, entry, llm_client, sentinel)
+
+    # Reload services when options change
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Auto-start Sentinel + Reminder watcher
+    await sentinel.async_start()
+    await reminder_watcher.async_start()
+
+    # ── v5.2 Observer Mode ──────────────────────────────────────────────────
+    # Observer subscribes to state_changed events and proactively announces
+    # interesting things through the LLM tier pipeline. OFF by default. Enabled
+    # via the panel (nova_config) or add-on config — read from effective_config
+    # so a panel-enabled observer stays on across a restart (v7.45.1).
+    observer_enabled = bool(_eff.get("observer_enabled", False))
+    if observer_enabled:
+        # Observer's own settings come from the same effective config (data +
+        # options + panel, panel winning), not bare entry, for the same reason.
+        observer_config = dict(_eff)
+        from . import observer as observer_mod
+        await observer_mod.start(hass, observer_config)
+        hass.data[DOMAIN][entry.entry_id]["observer_running"] = True
+        _LOGGER.info("Nova Observer mode ENABLED — watching for interesting events")
+    else:
+        hass.data[DOMAIN][entry.entry_id]["observer_running"] = False
+        _LOGGER.info(
+            "Nova Observer mode disabled. Enable via addon config → observer_enabled=true"
+        )
+
+    # ── Lockdown (security) — wired independently of Observer / cognitive loop ─
+    # Lockdown is safety-critical, so it must not depend on observer being on or
+    # on the cognitive-core start completing cleanly. Set up the manager + the
+    # event-driven alarm→lockdown sync here, regardless of the above.
+    try:
+        from . import cognitive_core, nova_config
+        rc = hass.data.get(DOMAIN, {}).get(
+            entry.entry_id, {}).get("runtime_config", {})
+        lockdown_config = await hass.async_add_executor_job(
+            nova_config.effective_config_with_runtime, entry, rc)
+        await cognitive_core.ensure_lockdown(hass, lockdown_config)
+    except Exception as exc:
+        _LOGGER.warning("Nova lockdown wiring failed (non-fatal): %s", exc)
+
+    # ── v5.4 Command Center panel ──────────────────────────────────────────
+    # Register sidebar panel. Idempotent — safe if called after reload.
+    try:
+        await async_register_panel(hass)
+    except Exception as exc:
+        _LOGGER.warning("Nova panel registration failed (non-fatal): %s", exc)
+
+    # Register WebSocket API command for live panel data
+    try:
+        async_register_ws(hass)
+    except Exception as exc:
+        _LOGGER.warning("Nova WS command registration failed (non-fatal): %s", exc)
+
+    # ── v6.8 Proactive audio (nova.speak) + infrastructure audit ─────────
+    try:
+        await async_setup_proactive_audio(hass, entry)
+    except Exception as exc:
+        _LOGGER.warning("Nova proactive-audio setup failed (non-fatal): %s", exc)
+
+    # ── v6.28 In-process bootstrap ─────────────────────────────────────────
+    # Re-homes the old add-on's voice-stack setup (Piper/Whisper/openWakeWord
+    # install, Nova voice download, Assist pipeline) into the integration.
+    # No-ops cleanly off-Supervisor; runs once per version as a background task.
+    try:
+        from . import bootstrap
+        bootstrap.schedule_bootstrap(hass)
+    except Exception as exc:
+        _LOGGER.warning("Nova bootstrap scheduling failed (non-fatal): %s", exc)
+
+    # ── v6.34 Voice recognition ────────────────────────────────────────────
+    # Plug an external speaker-recognition service (VoiceBM, speaker-recognition,
+    # etc.) into the identity resolver's voice tier. No-op until enabled + a
+    # source entity is configured.
+    try:
+        from . import voice_recognition
+        voice_recognition.register(hass)
+    except Exception as exc:
+        _LOGGER.warning("Nova voice recognition registration failed (non-fatal): %s", exc)
+
+    _LOGGER.info("Nova online. Good day, %s. Routines available: %s",
+                 honorific, ", ".join(list_routines()))
+    return True
+
+
+async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload the entry when options are updated."""
+    await hass.config_entries.async_reload(entry.entry_id)
+
+
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Unload Nova."""
+    data = hass.data[DOMAIN].get(entry.entry_id, {})
+
+    # Unregister the panel early — best effort
+    try:
+        async_unregister_panel(hass)
+    except Exception as exc:
+        _LOGGER.debug("Panel unregister note: %s", exc)
+
+    sentinel: NovaSentinel | None = data.get("sentinel")
+    if sentinel:
+        await sentinel.async_stop()
+
+    reminder_watcher = data.get("reminder_watcher")
+    if reminder_watcher:
+        await reminder_watcher.async_stop()
+
+    # Stop observer if it's running
+    if data.get("observer_running"):
+        try:
+            from . import observer as observer_mod
+            await observer_mod.stop()
+        except Exception as exc:
+            _LOGGER.debug("Observer stop failed: %s", exc)
+
+    # Tear down listeners, timers, and the scheduler in one fail-safe call.
+    resources = data.get("resources")
+    if resources is not None:
+        try:
+            summary = resources.close_all()
+            _LOGGER.debug("Nova: resource teardown %s", summary)
+        except Exception as exc:
+            _LOGGER.debug("Resource teardown note: %s", exc)
+    else:
+        # Legacy entries (set up before the resource registry existed).
+        sched = data.get("scheduler")
+        if sched is not None:
+            try:
+                sched.shutdown()
+            except Exception:
+                pass
+        for unsub in data.get("camera_unsubs", []):
+            try:
+                unsub()
+            except Exception:
+                pass
+        for unsub in data.get("recognition_unsubs", []):
+            try:
+                if callable(unsub):
+                    unsub()
+            except Exception:
+                pass
+
+    # Cancel proactive-audio listeners (audit interval + startup) and service
+    try:
+        await async_unload_proactive_audio(hass, entry)
+    except Exception as exc:
+        _LOGGER.debug("Proactive-audio unload note: %s", exc)
+
+    # Remove services registered by this entry
+    for service in ("analyze_camera", "analyze_on_event",
+                    "conversation_summary", "briefing",
+                    "scene_by_intent", "routine", "add_reminder",
+                    "sentinel_start", "sentinel_stop",
+                    "database_purge", "database_stats",
+                    "nap", "shush", "unshush",
+                    "observer_start", "observer_stop", "observer_status"):
+        hass.services.async_remove(DOMAIN, service)
+
+    ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if ok:
+        hass.data[DOMAIN].pop(entry.entry_id, None)
+    return ok
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _get_tts(hass: HomeAssistant, entry: ConfigEntry, context: str = "chat") -> str | None:
+    """
+    Return the TTS entity to use for this context.
+
+    For 'premium' contexts (briefing/doorbell/camera/recognition by default)
+    we route to the premium TTS engine (ElevenLabs) if configured.
+    All other contexts use the regular engine (Piper or similar).
+    """
+    from .tts_helper import resolve_tts_for_context
+    # Effective config (nova_config wins). entry.options is empty when all
+    # config lives in the panel store, which previously left the briefing unable
+    # to resolve its TTS engine — so it silently bailed before announcing.
+    try:
+        from . import nova_config
+        cfg = nova_config.effective_config(entry)
+    except Exception:
+        cfg = {**dict(entry.data), **dict(entry.options)}
+
+    regular = cfg.get(CONF_TTS_ENGINE, DEFAULT_TTS_ENGINE)
+    premium = cfg.get(CONF_TTS_PREMIUM_ENGINE, DEFAULT_TTS_PREMIUM_ENGINE)
+    premium_contexts = cfg.get(CONF_TTS_PREMIUM_CONTEXTS, DEFAULT_TTS_PREMIUM_CONTEXTS)
+
+    return resolve_tts_for_context(
+        hass, context, regular, premium, premium_contexts
+    )
+
+
+def _get_speakers(hass: HomeAssistant, entry: ConfigEntry) -> list[str]:
+    """
+    Return the list of speakers for PROACTIVE ANNOUNCEMENTS.
+    Checks runtime_config.announcement_speakers first, falls back to
+    broadcast_group from entry options/data.
+    """
+    import json as _json
+
+    def _as_list(raw):
+        if not raw:
+            return None
+        try:
+            v = _json.loads(raw) if isinstance(raw, str) else raw
+            return v if isinstance(v, list) and v else None
+        except Exception:
+            return None
+
+    # Panel-live value first (runtime_config)
+    try:
+        data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+        rc = data.get("runtime_config", {}) if isinstance(data, dict) else {}
+        live = _as_list(rc.get("announcement_speakers"))
+        if live:
+            _LOGGER.debug("Announcement speakers from panel config: %s", live)
+            return live
+    except Exception as exc:
+        _LOGGER.debug("Error reading announcement_speakers: %s", exc)
+
+    # Authoritative effective config (nova_config wins). entry.options is empty
+    # when all config lives in the panel store — previously this fell through to
+    # an empty broadcast group, leaving announcements with no speakers.
+    try:
+        from . import nova_config
+        cfg = nova_config.effective_config(entry)
+    except Exception:
+        cfg = {**dict(entry.data), **dict(entry.options)}
+    speakers = _as_list(cfg.get("announcement_speakers"))
+    if speakers:
+        return speakers
+    result = broadcast_target(hass, broadcast_group=(cfg.get(CONF_BROADCAST_GROUP) or None))
+    _LOGGER.debug("Announcement speakers from broadcast_group: %s", result)
+    return result
+
+
+def _register_services(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    groq_client,
+    sentinel: NovaSentinel,
+) -> None:
+    """Register all Nova services. Called once per entry setup."""
+
+    async def _camera(call: ServiceCall) -> None:
+        honorific = entry.options.get(CONF_HONORIFIC, entry.data.get(CONF_HONORIFIC, DEFAULT_HONORIFIC))
+        tts = _get_tts(hass, entry, context="camera")
+        spk = _get_speakers(hass, entry)
+        await async_analyze_camera(hass, call, groq_client, honorific, tts, spk)
+
+    hass.services.async_register(
+        DOMAIN, "analyze_camera", _camera,
+        schema=vol.Schema({
+            vol.Required("entity_id"): cv.entity_id,
+            vol.Optional("prompt"): cv.string,
+            vol.Optional("announce", default=True): cv.boolean,
+        }),
+    )
+
+    async def _analyze_on_event(call: ServiceCall) -> None:
+        """Push-triggered analyze — intended for doorbell/motion automations."""
+        honorific = entry.options.get(CONF_HONORIFIC, entry.data.get(CONF_HONORIFIC, DEFAULT_HONORIFIC))
+        tts = _get_tts(hass, entry, context="doorbell")
+        spk = _get_speakers(hass, entry)
+        entity_id = call.data["entity_id"]
+        reason    = call.data.get("reason", "Activity detected")
+        await async_auto_analyze_on_event(
+            hass, groq_client, honorific, tts, spk, entity_id, reason
+        )
+
+    hass.services.async_register(
+        DOMAIN, "analyze_on_event", _analyze_on_event,
+        schema=vol.Schema({
+            vol.Required("entity_id"): cv.entity_id,
+            vol.Optional("reason", default="Activity detected"): cv.string,
+        }),
+    )
+
+    # ── Doorbell backlog → training data ───────────────────────────────────────
+    async def _train_backlog(call: ServiceCall) -> None:
+        """Analyse the Nest doorbell's recorded event history into the training
+        log. Best-effort; reports how many events it managed to analyse."""
+        honorific = entry.options.get(CONF_HONORIFIC, entry.data.get(CONF_HONORIFIC, DEFAULT_HONORIFIC))
+        limit = int(call.data.get("limit", 40) or 40)
+        from . import doorbell_training
+        from .camera import async_analyze_camera, _FakeCall, active_cameras, active_camera_states
+
+        # Resolve a doorbell camera entity for naming/attribution
+        doorbell_entity = None
+        for st in active_camera_states(hass):
+            if any(k in st.entity_id for k in ("doorbell", "front_door")):
+                doorbell_entity = st.entity_id
+                break
+        if doorbell_entity is None:
+            cams = active_cameras(hass)
+            doorbell_entity = cams[0] if cams else "camera.front_doorbell"
+
+        async def _analyze_image(image_bytes, label):
+            prompt = (
+                f"Recorded doorbell event ({label}). Identify who is at the door — "
+                f"appearance, clothing, packages, vehicles. "
+                f"Focus on what {honorific} would want to know."
+            )
+            fc = _FakeCall({"entity_id": doorbell_entity, "prompt": prompt, "announce": False})
+            return await async_analyze_camera(
+                hass, fc, groq_client, honorific, None, [],
+                gate_announce=True, force_images=[image_bytes],
+            )
+
+        report = await doorbell_training.scan_backlog(hass, _analyze_image, honorific, limit=limit)
+        _LOGGER.info("Nova doorbell backlog scan: %s", report)
+        try:
+            from .websocket import nova_log
+            if report.get("ok"):
+                nova_log("CAMERA",
+                           f"Backlog training: analysed {report['analyzed']} doorbell "
+                           f"event(s) into the dataset (of {report['found']} found)")
+            else:
+                nova_log("CAMERA", f"Backlog training: {report.get('reason', 'no events analysed')}")
+        except Exception:
+            pass
+
+    hass.services.async_register(
+        DOMAIN, "train_doorbell_backlog", _train_backlog,
+        schema=vol.Schema({
+            vol.Optional("limit", default=40): vol.Coerce(int),
+        }),
+    )
+
+    # ── Package / mail — on-demand check ───────────────────────────────────────
+    async def _check_packages(call: ServiceCall) -> None:
+        honorific = entry.options.get(CONF_HONORIFIC, entry.data.get(CONF_HONORIFIC, DEFAULT_HONORIFIC))
+        tts = _get_tts(hass, entry, context="package")
+        spk = _get_speakers(hass, entry)
+        from . import package_monitor
+        cam = call.data.get("entity_id")
+        report = await package_monitor.periodic_check(
+            hass, groq_client, honorific, tts, spk, configured_camera=cam
+        )
+        _LOGGER.info("Nova manual package check: %s", report)
+
+    hass.services.async_register(
+        DOMAIN, "check_packages", _check_packages,
+        schema=vol.Schema({
+            vol.Optional("entity_id"): cv.entity_id,
+        }),
+    )
+
+    # ── Briefing ──────────────────────────────────────────────────────────────
+    async def _briefing(call: ServiceCall) -> None:
+        honorific = entry.options.get(CONF_HONORIFIC, entry.data.get(CONF_HONORIFIC, DEFAULT_HONORIFIC))
+        tts = _get_tts(hass, entry, context="briefing")
+        spk = _get_speakers(hass, entry)
+        await async_briefing(hass, call, groq_client, honorific, tts, spk)
+
+    async def _nova_backup(call):
+        from .backup import create_backup
+        path = await hass.async_add_executor_job(create_backup, hass.config.path())
+        _LOGGER.info("Nova state backed up to %s", path)
+        await hass.services.async_call("persistent_notification", "create", {
+            "title": "Nova backup",
+            "message": (f"Nova state saved to:\n`{path}`\n\nDownload this file before "
+                        "re-flashing so memory, patterns and knowledge survive a wipe."),
+            "notification_id": "nova_backup",
+        }, blocking=False)
+
+    hass.services.async_register(DOMAIN, "backup", _nova_backup)
+
+    async def _nova_restore(call):
+        from .backup import restore_backup
+        archive = (call.data or {}).get("archive", "") or ""
+        path = await hass.async_add_executor_job(restore_backup, hass.config.path(), archive)
+        _LOGGER.info("Nova state restored from %s", path)
+        await hass.services.async_call("persistent_notification", "create", {
+            "title": "Nova restore",
+            "message": (f"Nova state restored from:\n`{path}`\n\nRestart Home Assistant "
+                        "to load the restored memory and patterns."),
+            "notification_id": "nova_restore",
+        }, blocking=False)
+
+    hass.services.async_register(
+        DOMAIN, "restore", _nova_restore,
+        schema=vol.Schema({vol.Optional("archive"): str}))
+
+    hass.services.async_register(
+        DOMAIN, "briefing", _briefing,
+        schema=vol.Schema({
+            vol.Optional("announce", default=True): cv.boolean,
+            vol.Optional("include_weather", default=True): cv.boolean,
+            vol.Optional("include_calendar", default=True): cv.boolean,
+            vol.Optional("include_presence", default=True): cv.boolean,
+            vol.Optional("include_events", default=True): cv.boolean,
+            vol.Optional("include_energy", default=True): cv.boolean,
+            vol.Optional("hours", default=12): vol.All(int, vol.Range(min=1, max=48)),
+        }),
+    )
+
+    # ── Scene by intent ───────────────────────────────────────────────────────
+    async def _scene_intent(call: ServiceCall) -> None:
+        honorific = entry.options.get(CONF_HONORIFIC, entry.data.get(CONF_HONORIFIC, DEFAULT_HONORIFIC))
+        tts = _get_tts(hass, entry, context="chat")
+        spk = _get_speakers(hass, entry)
+        await async_activate_by_intent(hass, call, groq_client, honorific, tts, spk)
+
+    hass.services.async_register(
+        DOMAIN, "scene_by_intent", _scene_intent,
+        schema=vol.Schema({
+            vol.Required("intent"): cv.string,
+            vol.Optional("announce", default=True): cv.boolean,
+        }),
+    )
+
+    # ── Routine ───────────────────────────────────────────────────────────────
+    async def _routine(call: ServiceCall) -> None:
+        honorific = entry.options.get(CONF_HONORIFIC, entry.data.get(CONF_HONORIFIC, DEFAULT_HONORIFIC))
+        tts = _get_tts(hass, entry, context="routine")
+        spk = _get_speakers(hass, entry)
+        await async_run_routine(hass, call, honorific, tts, spk)
+
+    hass.services.async_register(
+        DOMAIN, "routine", _routine,
+        schema=vol.Schema({
+            vol.Required("name"): cv.string,
+        }),
+    )
+
+    # ── Add reminder ──────────────────────────────────────────────────────────
+    async def _add_reminder(call: ServiceCall) -> None:
+        honorific = entry.options.get(CONF_HONORIFIC, entry.data.get(CONF_HONORIFIC, DEFAULT_HONORIFIC))
+        tts = _get_tts(hass, entry, context="reminder")
+        spk = _get_speakers(hass, entry)
+        await async_add_reminder_service(hass, call, honorific, tts, spk)
+
+    hass.services.async_register(
+        DOMAIN, "add_reminder", _add_reminder,
+        schema=vol.Schema({
+            vol.Required("label"): cv.string,
+            vol.Required("trigger_at"): cv.string,
+            vol.Optional("repeat"): vol.In(["daily", "weekly", "hourly"]),
+            vol.Optional("require_home", default=True): cv.boolean,
+            vol.Optional("respect_quiet", default=True): cv.boolean,
+        }),
+    )
+
+    async def _summary(call: ServiceCall) -> None:
+        honorific = entry.options.get(CONF_HONORIFIC, entry.data.get(CONF_HONORIFIC, DEFAULT_HONORIFIC))
+        tts = _get_tts(hass, entry, context="summary")
+        spk = _get_speakers(hass, entry)
+        await async_summarise(hass, call, groq_client, honorific, tts, spk)
+
+    hass.services.async_register(
+        DOMAIN, "conversation_summary", _summary,
+        schema=vol.Schema({
+            vol.Optional("hours", default=24): vol.All(int, vol.Range(min=1, max=168)),
+            vol.Optional("device_id"): cv.string,
+            vol.Optional("announce", default=True): cv.boolean,
+            vol.Optional("store", default=True): cv.boolean,
+        }),
+    )
+
+    async def _sentinel_start(call: ServiceCall) -> None:
+        await sentinel.async_start()
+
+    hass.services.async_register(DOMAIN, "sentinel_start", _sentinel_start)
+
+    async def _sentinel_stop(call: ServiceCall) -> None:
+        await sentinel.async_stop()
+
+    hass.services.async_register(DOMAIN, "sentinel_stop", _sentinel_stop)
+
+    async def _db_purge(call: ServiceCall) -> None:
+        days = call.data.get("days", 30)
+        deleted = await hass.async_add_executor_job(purge_old_records, days)
+        _LOGGER.info("Nova DB purge: %d records deleted (>%d days)", deleted, days)
+
+    hass.services.async_register(
+        DOMAIN, "database_purge", _db_purge,
+        schema=vol.Schema({
+            vol.Optional("days", default=30): vol.All(int, vol.Range(min=1, max=365))
+        }),
+    )
+
+    async def _db_stats(call: ServiceCall) -> None:
+        stats = await hass.async_add_executor_job(get_stats)
+        hass.bus.async_fire("nova_db_stats", stats)
+
+    hass.services.async_register(DOMAIN, "database_stats", _db_stats)
+
+    async def _replay_policy(call: ServiceCall) -> None:
+        """Replay recorded decisions of a kind against candidate confidence
+        thresholds and report the best-separating threshold from real outcomes.
+        Read-only — evaluates history, never changes behaviour."""
+        from . import replay as _replay
+        kind = str(call.data.get("kind", "")).strip()
+        min_samples = call.data.get("min_samples") or _replay.DEFAULT_MIN_SAMPLES
+        result = await hass.async_add_executor_job(
+            _replay.replay_kind, kind, int(min_samples))
+        hass.bus.async_fire("nova_replay_result", result)
+        if result.get("ready"):
+            rec = result["recommended"]
+            _LOGGER.info(
+                "Replay[%s]: %d judged decisions — best threshold %.2f "
+                "(accuracy %.0f%%; would avoid %d mistakes, lose %d good calls)",
+                kind, result.get("samples", 0), rec["threshold"],
+                rec["accuracy"] * 100, rec["mistakes_avoided"], rec["good_calls_lost"])
+        else:
+            _LOGGER.info("Replay[%s]: %s", kind, result.get("reason", "no data"))
+
+    hass.services.async_register(
+        DOMAIN, "replay_policy", _replay_policy,
+        schema=vol.Schema({
+            vol.Required("kind"): str,
+            vol.Optional("min_samples"): vol.All(int, vol.Range(min=1, max=100000)),
+        }),
+    )
+
+    # ── v5.2 Observer Mode services ──────────────────────────────────────────
+
+    async def _nap(call: ServiceCall) -> None:
+        """Manual mute for N minutes (default 30). Suppresses non-critical
+        announcements until the duration elapses."""
+        from . import sleep_detection as sd
+        duration = call.data.get("duration_minutes", 30)
+        sd.set_nap(duration)
+        hass.bus.async_fire("nova_observer_nap", {"duration_minutes": duration})
+
+    hass.services.async_register(
+        DOMAIN, "nap", _nap,
+        schema=vol.Schema({
+            vol.Optional("duration_minutes", default=30):
+                vol.All(int, vol.Range(min=1, max=480)),
+        }),
+    )
+
+    async def _shush(call: ServiceCall) -> None:
+        """Tell Nova to stop announcing. Pass all=true for blanket kill switch."""
+        from . import output_gate
+        entity_id = call.data.get("entity_id")
+        category  = call.data.get("category")
+        shush_all = bool(call.data.get("all", False))
+        result = output_gate.shush(entity_id=entity_id, category=category, all=shush_all)
+        hass.bus.async_fire("nova_observer_shushed", result)
+        _LOGGER.info("Nova shushed: %s", result)
+
+    hass.services.async_register(
+        DOMAIN, "shush", _shush,
+        schema=vol.Schema({
+            vol.Optional("entity_id"): cv.string,
+            vol.Optional("category"): cv.string,
+            vol.Optional("all"): cv.boolean,
+        }),
+    )
+
+    async def _unshush(call: ServiceCall) -> None:
+        """Undo a shush. Called with no args clears ALL mutes."""
+        from . import output_gate
+        entity_id = call.data.get("entity_id")
+        category  = call.data.get("category")
+        result = output_gate.unshush(entity_id=entity_id, category=category)
+        hass.bus.async_fire("nova_observer_unshushed", result)
+
+    hass.services.async_register(
+        DOMAIN, "unshush", _unshush,
+        schema=vol.Schema({
+            vol.Optional("entity_id"): cv.string,
+            vol.Optional("category"): cv.string,
+        }),
+    )
+
+    async def _observer_start(call: ServiceCall) -> None:
+        """Start the observer manually (even if config has it disabled)."""
+        from . import observer as observer_mod, nova_config as _jc
+        # Fresh effective config (data + options + panel, panel winning) so a
+        # manual start honors current panel settings, not stale entry data.
+        observer_config = await hass.async_add_executor_job(_jc.effective_config, entry)
+        await observer_mod.start(hass, observer_config)
+        hass.data[DOMAIN][entry.entry_id]["observer_running"] = True
+        _LOGGER.info("Observer started via service call")
+
+    hass.services.async_register(DOMAIN, "observer_start", _observer_start)
+
+    async def _lockdown(call: ServiceCall) -> None:
+        """Engage or lift the formal lockdown state (alarm-armed posture)."""
+        from . import cognitive_core
+        raw = call.data.get("state", call.data.get("enabled", "on"))
+        on = raw in (True, "on", "true", "True", "engage", "lock", 1, "1")
+        ok = await cognitive_core.request_lockdown(
+            on, reason=call.data.get("reason", "requested via service"), hass=hass)
+        if not ok:
+            _LOGGER.warning("Lockdown service: request could not be handled (no hass)")
+        else:
+            _LOGGER.info("Lockdown %s via service call", "engaged" if on else "lifted")
+
+    hass.services.async_register(DOMAIN, "lockdown", _lockdown)
+
+    async def _remember(call: ServiceCall) -> None:
+        """Teach Nova a durable fact or preference (knowledge store)."""
+        from . import knowledge
+        key = str(call.data.get("key", "")).strip()
+        value = str(call.data.get("value", "")).strip()
+        if not key or not value:
+            _LOGGER.warning("nova.remember: 'key' and 'value' are required")
+            return
+        subject = str(call.data.get("subject", knowledge.DEFAULT_SUBJECT)).strip() \
+            or knowledge.DEFAULT_SUBJECT
+        kind = str(call.data.get("kind", "fact"))
+        ttl = call.data.get("ttl_seconds")
+        try:
+            ttl = float(ttl) if ttl not in (None, "") else None
+        except (TypeError, ValueError):
+            ttl = None
+        f = await hass.async_add_executor_job(
+            lambda: knowledge.remember(key, value, subject=subject, kind=kind,
+                                       source="stated", ttl_seconds=ttl))
+        if f:
+            _LOGGER.info("nova.remember: stored %s/%s", subject, key)
+        else:
+            _LOGGER.warning("nova.remember: store failed for %s/%s", subject, key)
+
+    hass.services.async_register(DOMAIN, "remember", _remember)
+
+    async def _forget(call: ServiceCall) -> None:
+        """Forget a stored fact by id, or by key (with optional subject)."""
+        from . import knowledge
+        fid = call.data.get("id")
+        key = call.data.get("key")
+        subject = call.data.get("subject")
+        try:
+            fid = int(fid) if fid not in (None, "") else None
+        except (TypeError, ValueError):
+            fid = None
+        removed = await hass.async_add_executor_job(
+            lambda: knowledge.forget(fact_id=fid, subject=subject, key=key))
+        _LOGGER.info("nova.forget: removed %d fact(s)", removed)
+
+    hass.services.async_register(DOMAIN, "forget", _forget)
+
+    async def _observer_stop(call: ServiceCall) -> None:
+        """Stop the observer."""
+        from . import observer as observer_mod
+        await observer_mod.stop()
+        hass.data[DOMAIN][entry.entry_id]["observer_running"] = False
+        _LOGGER.info("Observer stopped via service call")
+
+    hass.services.async_register(DOMAIN, "observer_stop", _observer_stop)
+
+    async def _observer_status(call: ServiceCall) -> None:
+        """Fire event with current observer state — mute list, recent activity."""
+        from . import output_gate, observer as observer_mod, sleep_detection as sd
+        status = output_gate.status()
+        status["running"] = observer_mod.is_running()
+        # Check if user is currently being treated as sleeping
+        bedroom_areas = entry.options.get(
+            CONF_BEDROOM_AREAS,
+            entry.data.get(CONF_BEDROOM_AREAS, [])
+        ) or []
+        sleeping, reason = sd.is_sleeping(
+            hass,
+            bedroom_area_ids=bedroom_areas,
+            quiet_start=entry.options.get(
+                "observer_quiet_start",
+                entry.data.get("observer_quiet_start", "22:00")
+            ),
+            quiet_end=entry.options.get(
+                "observer_quiet_end",
+                entry.data.get("observer_quiet_end", "07:00")
+            ),
+        )
+        status["sleeping"] = sleeping
+        status["sleep_reason"] = reason
+        status["bedroom_areas"] = list(bedroom_areas)
+        hass.bus.async_fire("nova_observer_status", status)
+        _LOGGER.info("Observer status: %s", status)
+
+    hass.services.async_register(DOMAIN, "observer_status", _observer_status)
+
+    # v5.6.0: Automation creation service
+    async def _create_automation(call: ServiceCall) -> None:
+        """Create an HA automation from service call data."""
+        from .automation_creator import create_automation
+        result = await create_automation(
+            hass,
+            alias=call.data.get("alias", "Unnamed"),
+            description=call.data.get("description", ""),
+            trigger=call.data.get("trigger"),
+            condition=call.data.get("condition"),
+            action=call.data.get("action"),
+            mode=call.data.get("mode", "single"),
+        )
+        if result.get("success"):
+            hass.bus.async_fire("nova_automation_created", result)
+        else:
+            _LOGGER.warning("Automation creation failed: %s", result.get("error"))
+
+    hass.services.async_register(DOMAIN, "create_automation", _create_automation)
+
+    # v5.6.0: Doorbell pipeline diagnostic
+    async def _diagnose_doorbell(call: ServiceCall) -> None:
+        """Run doorbell pipeline diagnostics and fire event with results."""
+        diag = {"checks": [], "verdict": "unknown"}
+
+        # Check 1: Does the doorbell automation exist?
+        auto_state = hass.states.get("automation.doorbell_motion_analysis")
+        if auto_state:
+            diag["checks"].append({"check": "automation exists", "ok": True, "state": auto_state.state})
+        else:
+            diag["checks"].append({"check": "automation exists", "ok": False, "detail": "automation.doorbell_motion_analysis not found"})
+            diag["verdict"] = "Automation missing — create it or check the entity ID"
+            hass.bus.async_fire("nova_doorbell_diag", diag)
+            return
+
+        # Check 2: Is it enabled?
+        if auto_state.state != "on":
+            diag["checks"].append({"check": "automation enabled", "ok": False, "state": auto_state.state})
+            diag["verdict"] = "Automation exists but is disabled"
+            hass.bus.async_fire("nova_doorbell_diag", diag)
+            return
+        diag["checks"].append({"check": "automation enabled", "ok": True})
+
+        # Check 3: Do we have camera entities?
+        from .camera import active_cameras as _active_cams
+        cameras = _active_cams(hass)
+        diag["checks"].append({"check": "cameras found", "ok": len(cameras) > 0, "cameras": cameras[:10]})
+
+        # Check 4: Is nova.analyze_on_event registered?
+        svc_exists = hass.services.has_service(DOMAIN, "analyze_on_event")
+        diag["checks"].append({"check": "analyze_on_event service", "ok": svc_exists})
+
+        # Check 5: TTS working?
+        tts_entities = [s.entity_id for s in hass.states.async_all("tts")]
+        diag["checks"].append({"check": "TTS entities", "ok": len(tts_entities) > 0, "entities": tts_entities})
+
+        if all(c["ok"] for c in diag["checks"]):
+            diag["verdict"] = "All checks passed — trigger the doorbell and watch logs for nova.analyze_on_event"
+        else:
+            failed = [c["check"] for c in diag["checks"] if not c["ok"]]
+            diag["verdict"] = f"Failed checks: {', '.join(failed)}"
+
+        _LOGGER.info("Doorbell diagnostic: %s", diag)
+        hass.bus.async_fire("nova_doorbell_diag", diag)
+
+    hass.services.async_register(DOMAIN, "diagnose_doorbell", _diagnose_doorbell)
+
+    # v5.6.5: Test notification service
+    async def _test_notify(call: ServiceCall) -> None:
+        """Send a test notification to the configured phone."""
+        notify_svc = None
+        # Check runtime_config first
+        data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+        rc = data.get("runtime_config", {}) if isinstance(data, dict) else {}
+        notify_svc = rc.get("notify_service") or entry.options.get(
+            "notify_service", entry.data.get("notify_service", "")
+        )
+        if not notify_svc:
+            _LOGGER.warning("Test notify: no notify_service configured")
+            return
+        try:
+            domain, service = notify_svc.split(".", 1)
+            await hass.services.async_call(
+                domain, service,
+                {
+                    "title": "Nova",
+                    "message": "This is a test notification from Nova. If you see this, phone notifications are working.",
+                },
+                blocking=False,
+            )
+            _LOGGER.info("Test notification sent via %s", notify_svc)
+        except Exception as exc:
+            _LOGGER.warning("Test notification failed: %s", exc)
+
+    hass.services.async_register(DOMAIN, "test_notify", _test_notify)
+
+    # v5.6.7: Test TTS with Nova voice
+    async def _test_tts(call: ServiceCall) -> None:
+        """Play a test tone using Nova Piper voice on the broadcast group."""
+        from .tts_helper import resolve_tts_entity, async_announce
+        from .audio_routing import broadcast_target
+        from . import nova_config
+        cfg = nova_config.effective_config(entry)
+        tts_entity = resolve_tts_entity(hass, cfg.get("tts_engine", "auto"))
+        speakers = broadcast_target(
+            hass,
+            broadcast_group=(cfg.get("broadcast_group") or None),
+            announcement_speakers=cfg.get("announcement_speakers"),
+        )
+        if tts_entity and speakers:
+            await async_announce(
+                hass,
+                "Nova test tone. If you hear this in a British accent, the Nova voice is working.",
+                tts_entity,
+                speakers,
+                context="test",
+            )
+            _LOGGER.info("Test TTS sent via %s → %s", tts_entity, speakers)
+        else:
+            _LOGGER.warning(
+                "Test TTS: no announcement speakers configured — choose speakers "
+                "in Settings → Announcement Speakers (tts=%s, speakers=%s)",
+                tts_entity, speakers)
+
+    hass.services.async_register(DOMAIN, "test_tts", _test_tts)
+
+    # v5.7.00: Routing diagnostic — dumps current routing state to log
+    async def _test_routing(call: ServiceCall) -> None:
+        """Dump routing diagnostics to the HA log."""
+        from .audio_routing import (
+            broadcast_target, reply_target, observer_speak_target,
+            currently_occupied_areas, anyone_home, all_areas_with_satellite,
+            speakers_in_area, satellites_in_area,
+        )
+        from .tts_helper import resolve_tts_entity, find_best_tts_entity
+
+        broadcast_group = entry.options.get(
+            "broadcast_group", entry.data.get("broadcast_group", ""))
+        tts_ent = resolve_tts_entity(
+            hass, entry.options.get("tts_engine",
+                                     entry.data.get("tts_engine", "auto")))
+        bcast = broadcast_target(hass, broadcast_group=broadcast_group or None)
+        occupied = currently_occupied_areas(hass)
+        home = anyone_home(hass)
+        sat_areas = all_areas_with_satellite(hass)
+
+        # Read announcement_speakers from runtime_config
+        ann_spk = None
+        try:
+            import json as _json
+            data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+            rc = data.get("runtime_config", {}) if isinstance(data, dict) else {}
+            raw = rc.get("announcement_speakers")
+            if raw:
+                parsed = _json.loads(raw) if isinstance(raw, str) else raw
+                if isinstance(parsed, list):
+                    ann_spk = parsed
+        except Exception:
+            pass
+
+        # Read satellite_pairings
+        sat_pairs = None
+        try:
+            raw = rc.get("satellite_pairings")
+            if raw:
+                parsed = _json.loads(raw) if isinstance(raw, str) else raw
+                if isinstance(parsed, dict):
+                    sat_pairs = parsed
+        except Exception:
+            pass
+
+        _LOGGER.warning("=== Nova ROUTING DIAGNOSTIC ===")
+        _LOGGER.warning("TTS entity: %s", tts_ent)
+        _LOGGER.warning("TTS auto-pick: %s", find_best_tts_entity(hass))
+        _LOGGER.warning("Broadcast group (config): '%s'", broadcast_group)
+        _LOGGER.warning("Broadcast target resolved: %s", bcast)
+        _LOGGER.warning("Announcement speakers (panel): %s", ann_spk)
+        _LOGGER.warning("Satellite pairings (panel): %s", sat_pairs)
+        _LOGGER.warning("Anyone home: %s", home)
+        _LOGGER.warning("Occupied areas: %s", occupied)
+        _LOGGER.warning("Areas with satellites: %s", sat_areas)
+        for area_id in sat_areas:
+            sats = satellites_in_area(hass, area_id)
+            spks = speakers_in_area(hass, area_id)
+            _LOGGER.warning("  Area '%s': sats=%s, speakers=%s",
+                            area_id, sats, spks)
+            for sat in sats:
+                target = reply_target(
+                    hass, satellite_entity_id=sat,
+                    satellite_pairings=sat_pairs,
+                )
+                _LOGGER.warning("    reply_target(%s) → %s", sat, target)
+
+        # Test observer routing for each urgency
+        for urg in ("low", "medium", "high", "critical"):
+            targets, mode = observer_speak_target(
+                hass, urgency=urg,
+                broadcast_group=broadcast_group or None,
+                announcement_speakers=ann_spk,
+                is_sleeping=False,
+            )
+            _LOGGER.warning("  observer(%s): targets=%s, mode=%s",
+                            urg, targets, mode)
+        _LOGGER.warning("=== END ROUTING DIAGNOSTIC ===")
+
+    hass.services.async_register(DOMAIN, "test_routing", _test_routing)

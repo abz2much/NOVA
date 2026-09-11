@@ -1,0 +1,3564 @@
+## [7.85.5] — excluding an entity now silences already-learnt rules immediately
+
+Completes the exclusion behaviour: excluding an entity now takes effect for rules that were already active, not just new ones. A door/window/garage/lock that Sentinel had already picked up stops being reported the moment you exclude it (by entity, domain, or label) — e.g. an unlocked lock no longer repeats its reminder. Appliance cycle-complete announcements skip excluded entities the same way, even for a cycle already in progress. Nothing is erased or "unlearnt" — exclusion simply gates these at run time, so removing the exclusion brings the behaviour back.
+
+## [7.85.4] — full UI translations for Russian, Polish, Brazilian Portuguese, Swedish
+
+Four more languages are now fully translated (302/302), joining French, German, Spanish, Italian, Dutch and Portuguese: Russian, Polish, Brazilian Portuguese, and Swedish. Ten of the interface languages are now complete. The remaining partially-translated languages (Czech, Danish, Finnish, Norwegian, Romanian, Slovak, Turkish, Ukrainian) will follow in subsequent updates.
+
+## [7.85.3] — full UI translations for German, Spanish, Italian, Dutch, Portuguese
+
+Five languages that were roughly half-translated are now complete: German, Spanish, Italian, Dutch, and Portuguese each cover the full interface (302/302 strings), matching French. If your Home Assistant is set to one of these, the Nova panel is now fully localized rather than falling back to English for the newer controls. The remaining partially-translated languages will be filled in over subsequent updates.
+
+## [7.85.2] — excluded entities now dropped from room cards and group commands
+
+Following up on entity exclusion (7.85.0): excluded entities were still appearing on the room cards and in area commands. Now an excluded entity is left out of a room card's light count, its capabilities list, and its last-motion reading, and it no longer takes part in area or group commands (e.g. "turn on the living-room lights" skips it). Controlling an excluded entity by name still works, as before. This completes exclusion so an excluded item genuinely drops out of Nova's day-to-day behaviour, not just its background monitoring.
+
+## [7.85.1] — fix: Settings page blank when a configured entity was removed
+
+The Settings page could fail to open with a blank screen if a setting still pointed at an entity that no longer exists — most often the departure travel-time sensor, but the same flaw affected the presence-tracker and door/opening pickers. Building those dropdowns threw an error on the missing entity, which aborted the whole panel render. Those pickers now handle a missing entity gracefully (showing its id), and the panel as a whole no longer goes blank if any single part errors while drawing — it shows a short error notice with details in the browser console instead.
+
+## [7.85.0] — Exclude entities from Nova
+
+You can now tell Nova which entities to ignore. In Settings → Excluded Entities (under Learning) you can exclude:
+
+- **Specific entities**, one at a time,
+- **Whole domains** (e.g. every `light` or `switch`), and
+- **By Home Assistant label**, to exclude a whole group at once.
+
+Excluded entities are dropped everywhere Nova looks on its own — presence detection, room routing, the observer, and routine learning — so noise sources stop interfering. A common case: a virtual occupancy sensor from another integration that Nova was treating as a real room-presence sensor; exclude it and it no longer affects presence or where Nova speaks. Excluding an entity only removes it from Nova's awareness — Home Assistant still has it, and Nova can still control it if you ask for it by name.
+
+## [7.84.2] — Settings sub-tabs on translated UIs; temperatures follow your unit system
+
+Two fixes for non-English / metric households:
+
+- **Settings sub-tabs work on a translated interface.** On a non-English UI, every Settings sub-tab except the first showed no cards — the section grouping was matching on the on-screen heading text, which the interface translates. Sections are now tracked independently of the displayed language, so every sub-tab shows its cards in any language.
+- **Temperatures follow Home Assistant's unit system everywhere.** Nova already reported sensor temperatures in your configured unit; now its freeform spoken remarks do too, so a metric home hears Celsius throughout instead of an occasional Fahrenheit value. Set your unit in Home Assistant (Settings → System → General) and Nova follows it — there's no separate switch to keep in sync.
+
+## [7.84.1] — hard backstop: Nova never speaks through a TV
+
+A final safety net now sits at the point where any spoken output is sent: every announcement and reply has its target list stripped of televisions (any media player reported as a TV, and the media player you've designated for movies) before it plays — no matter which feature produced it. Earlier fixes handled the known routing paths; this closes any remaining one, so a TV can't be spoken to even through a path we haven't traced. When it has to drop a TV target, it logs which feature tried, so any unexpected attempt is now traceable. Your movie/TV player still plays movies; it is simply never a voice target.
+
+## [7.84.0] — Settings organized into sections
+
+The Settings tab now has a sub-navigation bar that groups everything into six sections — General, Voice & Audio, Learning, Safety & Energy, Cameras, and Home & Extras — so you see one focused group at a time instead of scrolling one long wall of cards. It opens on General, and switching sections is instant. Nothing was removed or renamed; the same settings are just organized, which should make it far easier for new users to find their way around.
+
+## [7.83.1] — spoken announcements never route to a TV
+
+Nova no longer speaks through televisions. Room-based speech — proactive observer comments and room-targeted announcements — now skips any media player reported as a TV, as well as the media player you've designated for movies. Previously, if a room had a TV alongside a speaker (or only a TV), proactive speech could play through the television; now it uses the room's actual speaker, or stays quiet if the room has none. Your movie/TV player still plays movies as before — it's simply never used as a voice output. This complements the previous change so neither broadcast announcements nor room speech can take over a TV.
+
+## [7.83.0] — announcements no longer blast every device by default
+
+Nova will no longer broadcast to every speaker (and every TV) when you haven't chosen where announcements should play. Until you pick your announcement speakers in Settings → Announcement Speakers — or set a broadcast group — briefings, sentinel alerts, and other announcements stay silent instead of playing on all devices at once. This fixes the first-launch experience where a test briefing came out of the whole house with no way to stop it, and where announcements took over TVs. "Brief me now" now tells you if no announcement speakers are set rather than doing nothing, and the sentinel and voice-test both use your chosen announcement speakers. If your announcements have gone quiet after updating, choose your speakers in Settings → Announcement Speakers and they'll return.
+
+## [7.82.1] — two settings moved into the panel
+
+Two options that previously needed a config-file edit are now toggles in Settings, so you can turn them on without touching files. "Learn button & remote presses" lives with the other pattern-learning switches and lets Nova suggest press-to-scene automations. "Follow me between rooms" lives in the Anticipation & Memory card and moves a continued conversation to the satellite in the room you walked to once the room you started in is empty. Both are off until you turn them on.
+
+## [7.82.0] — conversations can follow you between rooms
+
+When you're mid-conversation with Nova and walk to another room, the follow-up can now follow you. If the room you started in has gone completely empty by the time Nova is ready to listen again, and you've moved to another room that has a voice satellite, Nova reopens the microphone on that room's satellite instead — so you can keep talking where you are. It's deliberately cautious: it only moves the conversation when the starting room is clearly empty and the new room clearly has you in it, and it stays on the original satellite in any uncertain case, so a brief presence dropout never sends the follow-up to the wrong room. This is opt-in and off by default (config key `continued_conversation_multi_satellite`), and applies to homes with more than one satellite.
+
+## [7.81.1] — Vision model picker guidance
+
+The Vision entry under Settings → AI Models now shows a short hint that it needs an image-capable model — moondream on Ollama, or a Groq vision model — and that a text-only model (like gpt-oss) will fail on camera analysis. This heads off a confusing setup where camera analysis errors out only because the wrong kind of model was chosen for vision; the other model roles are unaffected.
+
+## [7.81.0] — a dedicated Suggestions tab
+
+The automations Nova learns from your routines now have their own tab in the panel, instead of being tucked into the Command Center. Each suggestion shows what Nova observed, how confident it is, the devices involved, and the exact automation it would create — so you can review it properly and either approve it (which creates it in Home Assistant) or dismiss it. When there's nothing to review yet, the tab explains that Nova is still watching for patterns. Sensor-threshold suggestions (the "when it drops below X" kind) are labelled clearly alongside the routine, sequence, and presence types.
+
+## [7.80.1] — panel/config settings honored consistently
+
+Settings you set through the Nova panel or config.json — the sentinel and announcement toggles, notification service, TTS engine, honorific, prime-directive preset, and the camera vision/reasoning options — are now read through a single resolver everywhere. Previously a few of these were read straight from the config entry, which is empty on a panel-configured install, so they could quietly fall back to defaults even though you'd set them. They now resolve in the correct order (live panel value, then saved config, then any entry value), so what you configure is what runs.
+
+## [7.80.0] — lockdown notifications are fully localized
+
+The lockdown messages that list the specific doors and locks Nova just secured — and name any openings it couldn't secure remotely — now come through in your language, not just English. This was the last English-only piece of the safety notifications: it's assembled from device names with per-language grammar, so it's built from localized verb phrases, a localized list join (with the right conjunction and comma rules per language), and per-language sentence wrappers. French, German, Spanish, Italian, Dutch, and Portuguese are covered, with English as the fallback. Your device and room names are always left exactly as you named them. The openings-still-open phrasing is worded to read correctly regardless of a device's grammatical gender.
+
+## [7.79.1] — clearer vision errors + no blocking SSL warning
+
+If a camera-vision model can't accept images (for example a text-only Groq model like gpt-oss), the analysis now fails with a plain message telling you to set a vision-capable model — such as moondream on Ollama, or a Llama/Qwen vision model on Groq — instead of a raw "content must be a string" API error. Separately, the vision and camera-reasoning providers are now built off the event loop and reused across analyses, so Home Assistant no longer logs a blocking-call warning about SSL setup when a camera is analyzed.
+
+## [7.79.0] — learned button & remote automations ("press → scene")
+
+Nova can now learn what your buttons and remotes do. When a press consistently precedes an action — the living-room remote's single-press, then the movie scene — it suggests an automation triggered by that press. Modern Home Assistant exposes button and remote presses as event entities, and the suggestion fires on the specific press (single, double, hold) by matching the press type, so one button's different presses stay distinct. Scenes are now learnable as the target too, so "press → scene" resolves to activating that scene rather than each light individually. Button learning is opt-in — turn on button/remote learning to start recording presses — and as always the resulting automation is a suggestion you approve.
+
+## [7.78.0] — learned arrival / departure automations
+
+When something you do consistently lines up with leaving or coming home — the garage closing shortly after you drive off, the entry lights coming on when you get back — the suggestion is now built as a proper arrival/departure trigger instead of a raw state change. Home Assistant treats "leaves home" and "arrives home" as zone events, which handle the edges of your home zone correctly, so these suggestions read as "when person.sam leaves home, close the garage" and behave the way presence automations are meant to. This applies to people and phone/device trackers crossing your home zone; other triggers are unchanged, and it only appears when the pattern is consistent.
+
+## [7.77.0] — time routines can be gated on their owner being home
+
+When a daily routine is one person's habit — "the porch light goes on around 7pm, and it's Sam who's home when it does" — the suggested automation now carries a presence condition, so it only runs when that person is actually home instead of firing on the clock regardless. A time trigger has no built-in sense of who's around, so this is a real guard: the evening routine won't run to an empty house. It only attaches when the routine clearly belongs to one person and that person maps to a Home Assistant person entity, and like every learned automation it's a suggestion you approve — so a routine you deliberately want to run while away (a security light, say) can simply be declined. Household-wide routines with no single owner are unchanged.
+
+## [7.76.0] — learned automations can be gated on a sensor reading
+
+A suggested automation can now carry a numeric condition alongside its trigger — "when motion in the hall, turn on the heater, and only while the temperature is below 62". When an action consistently happens while a temperature, humidity, or light-level sensor sits on one side of a value, that condition is attached, using the same guard as the sensor trigger: it only fires when the readings genuinely cluster on one side and the sensor really spends time on the other, so a sensor that just stays low won't add a bogus condition. Conditions accumulate — a pattern that happens after dark and while it's cold gets both an "after dark" and a "below 62" condition, which Home Assistant requires together. Time-only and unconditioned patterns are unchanged.
+
+## [7.75.0] — Nova learns sensor-threshold automations
+
+Nova can now suggest automations that fire when a sensor crosses a value, not just when something changes state or a time of day arrives. If a habit like "turn on the space heater once it drops below 65°" shows up consistently in your history, the suggestion is built as a numeric trigger — "when the temperature sensor goes below 65, turn on the heater" — so it acts on the reading itself. It looks at temperature, humidity, and light-level sensors, and only proposes a threshold when the action genuinely clusters on one side of it and the sensor really spends time on the other side too, so a sensor that simply stays low all the time won't produce a bogus rule. As with every learned automation, these are suggestions you approve, never changes Nova makes on its own.
+
+## [7.74.0] — learned automations gain an "after dark" condition
+
+Trigger-based suggestions can now be scoped to "after dark" using the sun's position, not just a fixed clock window. When a pattern like "motion in the hall, turn on the light" consistently happens while the sun is down, the suggested automation is conditioned on sunset-to-sunrise — so it tracks the seasons and won't fire the light in daylight, without you picking any times. When the sun position doesn't cleanly explain the pattern, Nova falls back to the time-of-day window from before; patterns that happen at all hours still get no condition.
+
+## [7.73.0] — Intrusion is now its own tab
+
+The intrusion snapshot and the intrusion log (with its real / false-alarm labeling) have moved out of Settings into a dedicated **Intrusion** tab, alongside Command Center, Residence, Settings, Logs, and Memory. Security review and labeling now have a home of their own instead of being buried in Settings — everything else about them works exactly as before.
+
+## [7.72.0] — Analyze Now learns from your history, not just from now on
+
+Previously, enabling something like motion/presence learning only started recording from that moment, so a real habit took days to build up before it could be suggested. Analyze Now now backfills from Home Assistant's own recorded history: for any relevant entity Nova wasn't already tracking (a motion or occupancy sensor you just opted in, for example), it imports the recent past so patterns can surface right away — e.g. "car enters the bay, then the garage door closes" can be recognized from history instead of waiting for it to happen again seven times. It's careful about this: it only imports entities it wasn't already logging (no double-counting), and chatty sensors are throttled exactly as live logging throttles them, so importing history can't bloat the store. The button tells you how much it imported.
+
+## [7.71.0] — see patterns building toward suggestions
+
+When you run Analyze Now, Nova now shows patterns it has detected but that haven't recurred enough times yet to become a suggestion — for example "when the garage bay senses a car, the door closes (3/7)". This makes the difference between "Nova sees the pattern, it just needs to happen a few more times" and "Nova isn't seeing it at all" obvious at a glance, instead of leaving you guessing why a real habit hasn't turned into a suggestion. A suggestion is created once a trigger-based pattern has recurred enough to be trustworthy.
+
+## [7.70.0] — learned automations gain a "when" — time-of-day conditions
+
+Trigger-based suggestions now include a time condition when the pattern clearly warrants one. If a "when motion, turn on the light" pattern only ever happens in the evening, the suggested automation is scoped to that window — so it won't fire the light at noon — and the window is read straight from when the behavior actually occurs (evenings, overnight, mornings; overnight windows wrap correctly). Patterns that happen throughout the day get no time condition, as they shouldn't. This is the first of the "And if" conditions; sun-position and presence conditions are still to come.
+
+## [7.69.0] — learn "when motion, do X" automations (opt-in)
+
+New setting: **Learn motion/presence triggers**. Turn it on and Nova starts learning from your motion and occupancy sensors, so it can suggest trigger-based automations like "when the hallway senses motion, turn on the light" — the follow-on to the cross-device trigger learning added last release. It's off by default, and motion sensors are rate-limited hard when learning (one marker every few minutes, not every pulse) so enabling it can't bloat the pattern store. Door and window sensors remain a separate opt-in; ordinary devices are unaffected.
+
+## [7.68.0] — option to use Home Assistant's default TTS voice
+
+New setting: **Use Home Assistant default voice**. Nova normally speaks with its own Piper voice (en_GB-nova-high). Turn this on and Nova stops requesting that specific voice, letting your TTS engine use whatever voice you've configured in Home Assistant — so a French install with a French Piper voice, for example, will simply be spoken in French, with no dependency on the Nova voice being downloaded. Off by default, so nothing changes unless you choose it. Find it under Settings, in the voice options.
+
+## [7.67.0] — smarter "when this, do that" learning
+
+Nova's detection of actions that follow one another got two upgrades. It now spots these across different device types — a switch triggering a light, a cover triggering a fan — where before it could only relate devices of the same type. And when it turns one into a suggested automation, it uses the real, observed delay between the two events (a switch flip followed by a light ~90 seconds later becomes a 90-second delay) instead of a fixed one-minute guess; near-instant reactions get no artificial wait at all. The result is trigger-based suggestions that match what actually happens in your home.
+
+## [7.66.0] — an "Analyze Now" button, and a last-analysis readout
+
+Pattern analysis normally runs on its own every six hours. There's now an **Analyze Now** button under Quick Actions to run a pass on demand — handy after changing settings or exposing new entities, instead of waiting or restarting. It bypasses only the six-hour wait, not the data requirement (still needs about a week of history), so it can't produce noise on a fresh install, and it tells you the outcome right away: how many patterns it found and how many new suggestions it stored.
+
+The Cognitive Core readout now also shows a **last analysis** line — when the most recent pass ran and what it produced — so you can tell the difference between "hasn't run yet" and "ran, but nothing consistent enough to suggest," at a glance.
+
+## [7.65.0] — routines and automation suggestions form again on large histories
+
+If Nova had been running a while with a lot of activity but never produced any routines or automation suggestions, this is the fix. One part of the pattern analysis — detecting actions that reliably follow one another — was written in a way that slowed down dramatically as your history grew, to the point where on a large home it never finished a pass. Because suggestions are only saved after the full analysis completes, that one slow step quietly blocked everything, so nothing was ever suggested. It now runs in a single efficient pass and finishes quickly even on very large histories, so learned routines and suggestions come through as intended. A smaller inefficiency in the daily-routine detector was tidied up at the same time. No settings change; existing data is used as-is.
+
+## [7.64.0] — the "request too large" recovery now actually fits small tiers
+
+Follow-up to the previous release: the automatic retry after a "request too large" (413) now also trims Nova's own tool set down to the essentials for that one retry, not just the Home Assistant per-entity tools. The full tool definitions are several thousand tokens on their own, so the earlier retry could still be too big for a tight tier like Groq's free gpt-oss-120b. The slimmed retry is now a small fraction of the size — enough to answer and to control devices via the core tools and on-demand entity lookup — so simple voice queries get a reply instead of dropping to offline.
+
+## [7.63.0] — recovers from "request too large", and no longer goes silent on Gemini tool quirks
+
+If your provider rejects a request as too large (a 413 — common on Groq's on-demand tier when you expose a lot of entities, which bloats the tool definitions), Nova now automatically retries once with a slimmer request: it drops the per-entity Home Assistant tool schemas and the full home-state snapshot, keeping its own controls and on-demand entity lookup. A simple question like "what time is it?" gets answered instead of dropping to the offline reply, and Nova can still operate devices via its own tools. If it recurs, lowering "home context max entities" or exposing fewer entities keeps requests small.
+
+Also: when a Gemini "thinking" model rejects a tool call over the OpenAI-compatible endpoint (a "missing thought_signature" error), Nova now answers without tools instead of falling back to offline — so you still get a reply.
+
+## [7.62.0] — safety notifications now speak your language
+
+The freeze, intrusion, and lockdown notifications — the ones generated without the AI so they stay reliable — now appear in your Home Assistant language, titles included, across French, German, Spanish, Italian, Dutch, and Portuguese (English elsewhere). So a metric French home gets a freeze alert written in French, not English. One remaining detail: the lockdown message that lists exactly which doors and locks Nova just secured is still English while it's translated properly — the plain "already secured" and "lockdown lifted" messages are localized. Everything Nova says through its reasoning was already following your language as of the last release.
+
+## [7.61.0] — replies follow your language, and settings apply consistently
+
+Nova now replies in your home's configured language. If Home Assistant is set to French, German, Spanish, and so on, spoken and written conversational replies come back in that language; if you address Nova in another language, it follows yours. English homes are unchanged. Note that a few fixed safety notifications (such as the freeze and lockdown alerts) are still English for now — translating those message templates is separate, tracked work.
+
+Also fixed a class of configuration bug: when the appliance monitor, the observer, or the lockdown manager were (re)started after a settings change, they were rebuilt from an incomplete view of your configuration and could miss panel settings. They now read the same complete, unified configuration the rest of Nova uses, so a setting you changed is the setting that takes effect.
+
+## [7.60.0] — freeze warnings now respect your unit system
+
+On a metric install, Nova was reading the outdoor temperature in Celsius but comparing it against a Fahrenheit freeze threshold — so a mild 18°C day would trip a false "pipe freeze" alert and the message would mislabel it as °F. Freeze detection now converts correctly before comparing and reports the temperature in your own unit (°C or °F), including the suggested heat setting. A genuine freeze still triggers exactly as before; a mild day no longer does. Household temperature summaries also fall back to your configured unit instead of assuming Fahrenheit.
+
+## [7.59.0] — the reasoning-backend problem now shows up in Home Assistant's Repairs
+
+When Nova can't reach its reasoning model and can't recover on the fallback, it now raises a Home Assistant Repair notice — the same actionable card HA uses for other integrations — spelling out the specific cause (for example a model your provider retired, or an authentication problem) and where to fix it. It clears itself automatically the moment reasoning is working again. This never blocks Nova from loading: device control, status, and scenes keep working in the meantime. Available in all seven supported languages.
+
+## [7.58.0] — Nova learns how selective to be, and locks down novel security actions
+
+Suggestions now get better at knowing when to speak up. When you turn on the new Adaptive suggestions setting, Nova watches how often its past suggestions turned out useful versus unnecessary and quietly adjusts how confident it must be before offering a new one — more selective after a run of dismissals, a little more forthcoming when they're landing well. The adjustment is bounded and always visible on the diagnostics card, and it only ever learns from suggestions — never from security or safety decisions. Off by default.
+
+Security actions are also harder to slip past confirmation. The action risk classifier now recognises a lock or alarm action by the kind of device it is, not just by an exact list of known commands — so a lock or alarm service Nova hasn't seen before is treated as sensitive (a guard-dropping action like unlock/disarm as high risk, anything else unrecognised as needing review) instead of quietly passing as routine. Safe directions like locking or arming keep their low-friction behaviour, and everyday devices (lights, media, climate) are unaffected.
+
+## [7.57.0] — when the reasoning backend is unreachable, Nova now tells you why
+
+If a voice command reaches Nova but comes back with the "offline / reasoning systems" reply, the System Diagnostics card now shows the actual cause on the LLM row — for example a model name your provider has retired, or an authentication problem — instead of only reporting that the connection is down. That turns a puzzling silence into a one-line fix.
+
+Also fixed: on installs configured entirely through the panel (where the underlying config entry is empty), the reasoning backend's fallback provider couldn't resolve, so a single hiccup on the primary provider dropped straight to the offline reply. Nova now resolves the full configuration for the fallback, so it can ride out a momentary primary-provider failure instead of going quiet.
+
+## [7.56.0] — see how well Nova's confidence matches reality, and interrupt less when it's wrong
+
+The System Diagnostics card now shows a judgment-calibration readout: for the decisions Nova has made and seen the results of, it groups them by how confident it was and shows how often each group actually turned out right — so you can tell at a glance whether "90% sure" really means 90%. It also reports an overall accuracy score (Brier) and how far confidence drifts from reality.
+
+New optional setting: Adaptive interruptions. When on, Nova quietly interrupts less often after a run of alerts you dismissed as unneeded, and eases back up once its alerts are landing again. Off by default — nothing changes unless you turn it on.
+
+Two settings that were already working under the hood now have controls in the panel: speaker-aware follow-up mic reopen (waits for the reply to finish on your speaker before reopening a satellite's mic) and sibling-burst coalescing (how long to fold a flurry from a bank of numbered sensors into one look).
+
+# Changelog
+
+All notable changes to Nova are documented here. This project uses semantic-ish
+versioning (`MAJOR.MINOR.PATCH`); UI reskins and capability expansions bump MINOR,
+bug fixes bump PATCH.
+
+## [7.55.0] — follow-ups reopen the mic only after the reply finishes on the speaker
+When continued conversation is enabled and Nova asks a follow-up, a mic-only satellite whose reply
+plays on a separate speaker now reopens its microphone only once that speaker goes idle — so the mic
+no longer picks up Nova's own reply. Previously Home Assistant reopened the mic based on the
+satellite's own (instant) playback, before the speaker had finished speaking. If the speaker never
+reports playback (e.g. a speaker group), Nova falls back to a spoken-length estimate so the mic
+still reopens. Tunable via continued_conversation_speaker_reopen (default on); continued conversation
+itself remains off by default.
+
+## [7.54.0] — quieter observer: coalesce bursts from banks of numbered sensors
+Observer mode now collapses a burst of numbered sibling entities — for example an alarm panel toggling
+a whole bank of zone sensors (zone_49, zone_50, … zone_63) at once — into a single classification per
+window instead of one call per sensor. A chattering sensor bank was flooding the language model with
+redundant work and crowding real events out of the activity log. Tunable with observer_group_debounce
+(seconds; default 90, set 0 to disable). Intrusion detection and safety response are unaffected — they
+run on a separate check, and only entities whose name ends in a number are ever coalesced.
+
+## [7.53.5] — fix: device-control commands failed with "connectivity issues"
+Fixes queries that use Home Assistant tools — turning on lights, running scenes, reporting how many
+lights are on, and similar — failing and replying "I'm experiencing connectivity issues with my
+reasoning systems." The Home Assistant tool definitions were sent to the language model without
+converting their parameter schemas into a serializable form, so the request errored before it ever
+reached the model. The schemas are now converted correctly, and a single unconvertible tool no longer
+breaks the whole request. (This path only began running once 7.53.4 restored the conversation handler.)
+
+## [7.53.4] — fix: conversation agent crashed (NotImplementedError) — handler was outside the entity
+Fixes the Nova conversation agent failing every voice/text turn with "Unexpected error during intent
+recognition." A helper function had drifted to module scope in the middle of the conversation entity,
+which ended the class early and left the whole message handler defined outside it — so Home Assistant
+never saw Nova's handler and fell back to its own, which raises an error. The handler is now properly
+part of the conversation entity, verified structurally with a test so it can't be orphaned again. This
+is the root cause behind spoken replies not reaching paired speakers once the pipeline used Nova.
+
+## [7.53.3] — fix: intent queries crash ("NoneType can't be awaited"); proactive TTS options
+Fixes voice and text queries that trigger intent recognition (e.g. "how many lights are on") failing
+with "Unexpected error during intent recognition." Home Assistant awaits Nova's intent-setup hook,
+which was a plain function and could not be awaited; it is now a coroutine. Also fixes a proactive
+announcement error when the text-to-speech engine rejects an option (e.g. speaking rate): Nova now
+retries the announcement without the unsupported option instead of failing. (Reported in issue #12.)
+
+## [7.53.2] — fix: voice turns crash in Nova's handler on current Home Assistant
+Fixes spoken/typed turns failing with "Unexpected error during intent recognition." Nova was
+overriding a conversation method that current Home Assistant marks final and uses to set up each
+turn, which broke handling once the turn reached Nova. Nova now implements only the supported
+handler. As a safety net, an unexpected error in the handler is now spoken back and recorded in
+diagnostics with its cause, instead of surfacing as Home Assistant's generic error with no detail.
+
+## [7.53.1] — make the voice-reply fix apply reliably
+Follow-up to 7.53.0. Pointing the voice pipeline at Nova's own conversation agent now runs on every
+startup instead of once behind the add-on setup, and it matches your pipeline by name or by its Nova
+voice, so the correction actually takes effect and isn't skipped or raced. After this, speaking to a
+satellite is handled by Nova and the reply is delivered to the paired speaker.
+
+## [7.53.0] — voice replies now run through Nova (fixes replies not reaching your speaker)
+Fixes spoken replies being generated but never delivered to the paired room/Cast speaker. The
+auto-created "Nova" voice pipeline was left using Home Assistant's default conversation agent
+instead of Nova's own, so Nova's speaker routing never ran and the reply went to a mic-only
+satellite that can't play it. The pipeline's conversation agent is now set to Nova, and an existing
+Nova pipeline on the wrong agent is repaired automatically on startup. If it isn't corrected for
+any reason, set the pipeline's Conversation agent to Nova under Settings → Voice assistants.
+Also fixes two startup file/import operations that ran on the main loop.
+
+## [7.52.2] — revert reply-delivery change that broke spoken replies
+Reverts the reply-delivery behavior (introduced across 7.50–7.51) that awaited delivery, polled the
+paired speaker for a 'playing' state, and fell back to broadcast speakers. That verification misfired
+on idle Cast/Nest speakers that play a short announcement fine but don't report a 'playing' state
+during it, which broke spoken replies that had been working. Spoken replies now route to the paired
+speaker the original way. Also fixes the diagnostics conversation-log buffer so it survives restarts
+(it previously reset on every reload, making the log look empty after a redeploy).
+
+## [7.52.1] — reply-routing decisions survive log floods
+Added a dedicated conversation and reply-routing log buffer, included in Download Diagnostics, that a
+burst of observer or anomaly activity cannot evict. The reply-delivery decisions — which speaker each
+spoken reply reached and whether it fell back to a broadcast speaker — now stay visible in the
+diagnostics even when the main activity log is flooded.
+
+## [7.52.0] — fix: conversation crash on Home Assistant 2026.8.x
+Fixes 'Unexpected error during intent recognition' (AttributeError: module
+'custom_components.nova.intent' has no attribute 'async_setup_intents') on HA 2026.8.x. Home
+Assistant's intent-platform loader calls async_setup_intents on any integration that exposes an
+intent module; Nova routes intents through its own conversation agent rather than HA's intent
+registry, so it now provides the expected entry point (a no-op) instead of crashing. Also moves the
+lockdown state-file read off the event loop at startup, resolving the 'Detected blocking call to
+open /config/nova/lockdown_state.json' warning. Note: if the custom Piper voice en_GB-nova-high
+isn't installed, spoken output already falls back to the engine's default voice rather than failing.
+
+## [7.51.1] — spoken replies fall back to broadcast speakers, not a silent satellite
+Building on 7.51.0: when the paired room speaker won't play a reply — an idle or disconnected Cast
+device that accepts the request but produces no sound — Nova now sends the reply to the
+broadcast/announcement speakers that briefings already deliver to successfully, rather than the
+voice satellite. Many satellites are mic-only (audio output disabled to free resources), so they
+can't speak the reply themselves; routing to a known-working speaker means the reply is heard
+instead of lost.
+
+## [7.51.0] — fix: spoken reply lost when the paired speaker is idle/off
+When Nova routes a spoken reply to a paired room speaker (a Google/Nest/Cast device), it silences
+the voice satellite so only that speaker talks. But an idle or disconnected Cast device accepts the
+request and plays nothing — so the reply was lost: the satellite stayed silent and the speaker never
+played. Nova now confirms the speaker actually starts playing before silencing the satellite; if
+it doesn't, the satellite speaks the reply itself. The reply is heard either way.
+
+## [7.50.2] — Download Diagnostics is now self-contained
+The diagnostics file is now a complete diagnostic picture rather than a config-and-health snapshot.
+It includes the recent activity log — with the reply-routing decisions (which speaker each spoken
+reply targeted, whether it reached a Cast speaker or fell back to the satellite) — the local
+subsystem stats (cognition, decision record, intrusion, reasoning cache), and a resolved
+audio-routing snapshot: each configured satellite→speaker pairing with its live reachability, plus
+which text-to-speech engines are selected for replies vs premium contexts. Spoken-reply and routing
+issues are now diagnosable straight from the download. Viewing diagnostics on a fresh install no
+longer creates the decision store as a side effect.
+
+## [7.50.1] — reply-routing visibility in the log
+The Logs tab now shows how each spoken reply was delivered — which speaker it targeted, whether it
+reached a Cast/Google speaker, and whether it fell back to the satellite. This makes it clear at a
+glance where a missing spoken response is being lost.
+
+## [7.50.0] — fix: spoken replies lost when a Piper voice is missing
+When Nova routes a spoken reply to a paired room speaker (a Google/Nest/Cast device), it silences
+the voice satellite so only that speaker talks. If the reply's text-to-speech was rejected — most
+often because a custom Piper voice was removed or renamed by a Piper update — the reply was lost
+entirely: the satellite stayed silent and nothing played on the speaker. Nova now (1) falls back
+to the engine's default voice when the custom voice fails, so the reply is still heard, and (2) only
+silences the satellite once the reply has actually been handed to the speaker — otherwise the
+satellite speaks the reply itself. Briefings and other announcements gain the same voice fallback.
+
+## [7.49.1] — fix: blocking file reads on the event loop
+Home Assistant flags integrations that read files on its main loop — it can cause stalls, and it
+prompts users to file bug reports. Nova now reads its persisted state (the panel file, saved
+secrets, mode state, intrusion log, and reasoning cache) off the loop or from an in-memory cache,
+so those warnings are gone and the loop stays responsive.
+
+## [7.49.0] — quieter cognition: stop reasoning about diagnostic sensor noise
+Nova's local cognition no longer treats diagnostic/technical sensors — board and CPU
+temperatures, RF signal strength, reactive power, link stats — as anomalies worth escalating.
+Their values naturally swing, so they were flooding the activity log and spending model calls on
+nothing. Real sensors (room temperature, presence, doors, energy) are unaffected. Separately, any
+single noisy sensor now escalates at most once every 30 minutes, so one flapping value can't drown
+out everything else. Safety and access events are never throttled.
+
+## [7.48.1] — fix: no response from Nova on current Home Assistant
+Restores conversation on Home Assistant versions that moved to the newer conversation-entity API.
+Nova now implements Home Assistant's current message handler, so spoken and typed requests reach
+Nova again instead of failing with "Unexpected error during intent recognition".
+
+## [7.48.0] — replay: test a decision threshold against real history
+New `nova.replay_policy` service. Give it a kind of decision (e.g. intrusion) and, using the
+outcomes you've already labelled, it reports the confidence threshold that best separates Nova's
+right calls from its wrong ones — how accurate each threshold would have been, how many mistakes it
+would have avoided, and how many good calls it would have lost. It's read-only: it evaluates
+history so you can choose a threshold change confidently before making it, and it stays quiet until
+there are enough labelled decisions to give a trustworthy recommendation.
+
+## [7.47.1] — test-suite reliability
+Reworked the camera-tool tests so they no longer depend on Python-build-specific import behavior
+that was failing intermittently in CI. No functional change to Nova.
+
+## [7.47.0] — expanded French translation of the settings panel
+Most of the settings, labels, options, and help text throughout the panel are now translated when
+Home Assistant is set to French — previously only the tabs and section headers were. Set Home
+Assistant's language to French to use it.
+
+## [7.46.0] — tune recognition strictness and Ollama context from the panel
+Two settings are now adjustable from the panel. Recognition confidence sets how sure Nova must
+be about a face before it names a person — below the threshold it records "unknown" — so you can
+raise it to cut false names or lower it to name people more readily. Ollama context window sets
+the context size (num_ctx) for local models, so a larger local model can use more context at the
+cost of more memory; leave it at the default if you're unsure.
+
+## [7.45.1] — Observer enabled from the panel now survives a restart
+Turning on Observer mode from the panel didn't persist across a Home Assistant restart — on boot
+Nova read the older add-on/entry setting instead of your panel choice, so the observer stayed
+off. It's now read from the same single source as the rest of your settings, so a panel-enabled
+observer comes back up after a restart. A manual observer start also now uses your current panel
+settings rather than stale ones.
+
+## [7.45.0] — smarter routine suggestions, judged by consistency
+When Nova proposes an automation from a routine it noticed, it now scores that routine by how
+consistently it happens — how many days it actually occurred out of how many it could have —
+instead of a raw count of times seen. A routine that fires on most days is trusted more than one
+that fires only occasionally, even when both were seen the same number of times, so fewer flaky
+suggestions surface. The "why" behind a suggestion now shows the honest picture too, for example
+"happened on 42 of 60 days (missed 18)".
+
+## [7.44.0] — quick "unlock" commands now unlock (not lock), and honor confirmation
+Fixed a bug where a spoken or typed "unlock the front door" could be read as "lock" and lock it
+instead — unlock now unlocks, for a single door and for "unlock all doors". Separately, when
+spoken confirmation is turned on, protected quick commands (unlocking a door, opening a garage)
+now go through the same confirmation step as the rest of Nova instead of acting immediately, so
+the quick-command path is no longer a way around it. Everyday quick commands — lights, climate,
+media — are unchanged and still instant.
+
+## [7.43.0] — periodic sweeps now scheduled and visible, cleaner reloads
+Nova's recurring background tasks — the package/mail sweep, the service-health check, the
+hazard monitor, and document auto-ingest — now run through a single scheduler that tracks each
+one (when it last ran, how long it took, whether it's failing). The System Diagnostics self-test
+reports scheduler health, so a sweep that quietly starts failing now shows up instead of going
+unnoticed. Reloading or removing Nova also tears everything down through one path, making
+reloads cleaner and less likely to leave stray timers behind. No change to what the sweeps do.
+
+## [7.42.0] — conversation store in the self-test, plus reliability fixes
+The System Diagnostics self-test now covers the conversation store, so a storage problem shows
+up as a clear warning instead of quietly causing missed history. Calling off a false alarm now
+records the outcome against that exact intrusion, keeping the decision history accurate even
+when alerts happen close together. Also clears an internal date-handling deprecation so Nova
+stays reliable on newer Python versions. No other visible change.
+
+## [7.41.0] — protected actions now fail safe, and can't slip through in bulk
+Locking, unlocking, opening a garage, and disarming the alarm now pass through a single
+authorization step before they run. When spoken confirmation is turned on, these actions
+require a clear "yes" — and if the confirmation can't be delivered for any reason, the action
+is held back instead of going ahead. The same check now also covers batch commands and
+multi-step plans, so a protected device can no longer be changed as part of a group without
+confirmation. Everyday actions like lights, climate, and media are unaffected.
+
+## [7.40.0] — decision outcomes: which proactive calls were right
+Wires Nova's existing feedback signals into the decision record so each proactive decision
+can get an outcome: dismissing a suggestion marks it "unnecessary", installing one marks it
+"good", and calling off an intrusion as a false alarm marks it "wrong". This closes the loop —
+the record now links decisions to whether they were actually useful, groundwork for a future
+cognition score. No visible change on its own.
+
+## [7.39.0] — decision record now covers intrusion + suggestions
+Extends the internal decision record to Nova's other two proactive decision types: each
+intrusion alert and each new automation suggestion is now logged with the facts it saw, how it
+read them, and why — the same immutable, outcome-ready format as the anticipation alerts. This
+completes decision recording for proactive behavior; it has no visible effect on its own yet.
+
+## [7.38.0] — more languages + README language guide
+Adds core-UI translations for eleven more languages — Polish, Russian, Ukrainian, Czech,
+Slovak, Swedish, Danish, Norwegian, Finnish, Turkish, Romanian — plus Brazilian Portuguese as
+a regional variant. The README now lists supported languages and explains how to add or
+correct a translation (they're plain JSON files, no code). Untranslated strings fall back to
+English, and community contributions are welcome.
+
+## [7.37.0] — language picker + more panel translations
+Adds a Language selector in Settings → General: choose Auto (follow Home Assistant), English,
+or one of the translated languages, and the panel switches immediately. Also translates the
+remaining diagnostics, status, and section labels, bringing each language to about 176
+strings. Anything not yet translated stays in English.
+
+## [7.36.0] — setup dialog translations (French, German, Spanish, Italian, Portuguese, Dutch)
+The Nova setup and configuration dialogs (config flow) are now translated through Home
+Assistant's own language system — every step, field, description, and error message in French,
+German, Spanish, Italian, Portuguese, and Dutch. Home Assistant shows them automatically in
+your selected language.
+
+## [7.35.0] — broader panel translations (floor plan, toggles, messages)
+Extends panel localization further across French, German, Spanish, Italian, Portuguese, and
+Dutch — the floor-plan editor, proactive and observer toggle descriptions, feature names, and
+common status messages are now translated (about 128 strings per language). Untranslated
+strings continue to fall back to English.
+
+## [7.34.0] — more panel translations + regional language fallback
+Expands panel localization to the settings screen — most field labels, toggles, and buttons
+across French, German, Spanish, Italian, Portuguese, and Dutch, so configuring Nova is far
+clearer in those languages. Also adds regional language support: a variant like Brazilian
+Portuguese (pt-BR) uses its own file if present, otherwise falls back to the base language.
+Anything not yet translated stays in English.
+
+## [7.33.0] — panel localization (French, German, Spanish, Italian, Portuguese, Dutch)
+The Nova panel now follows your Home Assistant language. Section headers, tabs, and labels
+are translated when a matching language file exists — starting with French, German, Spanish,
+Italian, Portuguese, and Dutch. Technical values (entity IDs, model names, numbers) stay
+unchanged. Translations are plain JSON files keyed by the English text, so the community can
+add or extend a language without touching code; anything not yet translated stays English.
+
+## [7.32.0] — decision-record foundation for proactive anticipation
+Begins an internal record of Nova's proactive decisions. Each anticipation heads-up —
+departure, routine, overdue, or presence — is now logged as an immutable entry capturing the
+facts it saw, how it read them, the decision, and why, with a slot for a later outcome. This
+is groundwork for evaluating whether Nova's proactive nudges are actually useful; it has no
+visible effect on its own yet.
+
+## [7.31.0] — bay windows and bump-outs in the 3D roof (floor plan, phase 3b-3)
+Completes the polygonal floor-plan work: a room reshaped to jut out (a bay window or a bump-
+out) is now recognized as its own section of the house and gets its own roof, instead of
+stretching the main roof forward to cover it. Rectangular rooms and homes are unchanged.
+
+## [7.30.0] — roof follows irregular footprints with a garage too (floor plan, phase 3b-2b)
+Extends the irregular-footprint roof to homes with an attached garage: if the main house is
+an irregular (L- or T-shaped) mass, each section gets its own gable, and the garage roof now
+spans the garage's actual depth rather than the full house depth (fixing an overhang when the
+garage is shallower than the house). Rectangular houses are unchanged.
+
+## [7.29.0] — roof follows irregular footprints without a garage (floor plan, phase 3b-2b)
+For homes without an attached garage, the 3D roof now follows an irregular (L- or T-shaped)
+footprint instead of covering the bounding box — each rectangular section of the house gets
+its own gable, so the roof no longer overhangs a notch. Rectangular homes and homes with an
+attached garage are unchanged.
+
+## [7.28.2] — continuous exterior walls in 3D (no seams between rooms)
+Fixes the persistent "breaks" in the 3D exterior walls. Each room was drawing its own wall
+segment, so adjacent rooms' walls met at a seam line that looked like a break. Collinear
+walls now merge into a single continuous run, so a wall spanning several rooms draws as one
+seamless wall.
+
+## [7.28.1] — seamless exterior walls (snap touching rooms in 3D)
+Fixes small gaps ("breaks") in the 3D exterior walls where two rooms were placed nearly — but
+not exactly — touching. The 3D view now aligns edges within about a foot of each other, so
+adjacent rooms form a continuous wall. Your saved layout, the 2D editor, and coverage are
+unchanged; this only affects how the 3D house is drawn.
+
+## [7.28.0] — exterior walls follow the real footprint (floor plan, phase 3b-2a)
+The 3D house's exterior walls now trace the actual footprint outline instead of a bounding
+box, so an L-shaped or stepped floor plan gets walls that follow its real shape, with shared
+interior walls correctly left out. The pitched roof still spans the bounding box for now (the
+polygonal roof is the next step) — so a non-rectangular footprint may show the roof
+overhanging a notch until then. Rectangular homes look the same as before.
+
+## [7.27.0] — floor-below outline in the editor
+When editing an upper floor, the floor directly below now shows as a dashed red outline
+behind your rooms — a footprint reference so you can keep the upper floor within the lower
+one. Editing the 2nd floor shows the 1st floor's outline; editing the 1st floor shows the
+basement's, if you have one. Outdoor zones are excluded from the reference.
+
+## [7.26.1] — fix Prompt size = 0 (counts only) reverting to 15
+Fixes the Prompt size setting snapping back to 15 in the panel after you set it to 0. The
+value was being read back with a check that treated 0 as "unset," so the display reverted —
+though the setting was actually applied behind the scenes. Setting it to 0 now sticks and
+shows counts only, as intended.
+
+## [7.26.0] — polygonal rooms in the per-floor 3D (phase 3b-1)
+Reshaped (non-rectangular) rooms now render with their true shape in the per-floor 3D views
+(1st Floor / 2nd Floor / Basement) — walls trace each polygon edge instead of a bounding box.
+The exterior "All" view still uses the bounding box for the house shell for now; the full
+polygonal shell and roof are the next step.
+
+## [7.25.1] — fix upstairs windows lighting for the whole floor
+Fixes the remaining part of the upstairs occupancy bug: the 2nd-floor windows (gable-end and
+front/back) lit whenever any upstairs room was occupied, while the dormers correctly lit only
+for their own room. Both now use the same per-room occupancy, so an upstairs window lights
+only when the room it belongs to actually has someone in it.
+
+## [7.25.0] — non-rectangular rooms (floor plan, phase 3a)
+Rooms can now be any shape. Select a room and click Reshape to turn it into an editable
+polygon — drag corners, double-click an edge to add one, right-click a corner to remove —
+for L-shaped rooms, angled walls, and the like. Plain rectangular rooms are unchanged, with
+the familiar resize handle. Camera coverage and sightlines use the true room shape. In the
+3D house, reshaped rooms currently render as their bounding box; true polygonal 3D is next.
+
+## [7.24.1] — fix upstairs showing fully occupied in the 3D view
+Fixes the residence 3D view lighting every upstairs dormer when only one room is occupied
+(and appearing to occupy rooms with no presence sensor). Each dormer now lights only for the
+room directly beneath it, so occupancy on the house matches which rooms actually have someone
+in them.
+
+## [7.24.0] — zoom & pan in the floor-plan editor
+The floor-plan editor can now zoom and pan. Scroll to zoom in on the cursor, middle-drag
+(or drag empty space) to pan, and hit Fit to frame the whole plan again. This makes editing
+fine details practical — placing openings, nudging cameras, dragging zone corners — instead
+of being stuck at a zoomed-out view of the whole property.
+
+## [7.23.1] — reduce prompt size for tight LLM token limits
+Adds a "Prompt size" setting (on the AI Models card) controlling how many entity names
+Nova lists per type in the system prompt. Lower it — 0 shows counts only — to shrink each
+request for providers with tight tokens-per-minute limits, such as Groq's free tier, which
+rejects requests over 8000 tokens. The assistant still discovers entities on demand, so
+nothing breaks. Fixes conversations failing with "request too large" on small-quota
+providers.
+
+## [7.23.0] — outdoor zones can be any shape (polygons)
+Outdoor zones are no longer limited to rectangles. Drag a zone's corners to reshape it,
+double-click an edge to add a corner, right-click a corner to remove one — so a zone can
+follow an irregular yard, an L-shaped lot, or a stepped boundary. Drag the zone's body to
+move the whole thing. Camera coverage samples the true polygon shape, and zones still stay
+out of the 3D house.
+
+## [7.22.3] — place outdoor zones anywhere, including left of and in front of the home
+Fixes not being able to move an outdoor zone to the left of the garage or in front of the
+home. The editor was clamping every object to positive coordinates, so nothing could be
+placed past the garage-side or front edges of the house. Objects can now be placed anywhere
+in the editing field, and the field keeps generous room on all sides to work in.
+
+## [7.22.2] — floor-plan grid now covers the whole lot (front & side yards)
+Fixes the editor grid stopping at the front and garage-side edges of the house, which made
+it impossible to place a front-yard or side-yard zone there. The grid was only drawn from
+the origin outward; it now spans the full canvas — including the area in front of and beside
+the home — so outdoor zones can be placed anywhere on the property.
+
+## [7.22.1] — property boundary frames the whole lot (place zones anywhere)
+Fixes not being able to place an outdoor zone at the front or sides of the home. With a
+property boundary set, the editor now frames the entire lot, so the whole property is the
+workspace, and the default boundary is generous — giving room in front, back, and to the
+sides to drop zones. Draw your property, position your home on it, and place front/back/side
+yards where they belong.
+
+## [7.22.0] — property boundary + land size (place your home anywhere on the lot)
+Adds an optional property boundary to the floor plan. Click "+ Property Line" to draw your
+lot, then drag the corners to your actual property lines — double-click an edge to add a
+corner, right-click to remove one — so the boundary can be any shape, not just a rectangle.
+The lot area shows in acres or square feet (hectares/m² in metric). With a boundary set, the
+editor frames the whole lot, so you can position your home anywhere on it — front, back, or
+corner — rather than being forced to the center. It's optional: apartments and interior-only
+setups can skip it entirely.
+
+## [7.21.2] — outdoor zone fixes: openings no longer snap to zones
+Fixes exterior doors and windows snapping to an outdoor zone's edge instead of the house
+(the house footprint now ignores outdoor zones). Also keeps outdoor zones out of the
+interior-opening room picker, spawns new zones just below the house instead of on top of
+it, and adds margin around the house in the editor so there's room to place zones.
+
+## [7.21.1] — Home Assistant 2026.8 LLM API compatibility
+Fixes Nova failing to use Home Assistant's built-in LLM tools on HA 2026.8, where the
+ToolInput and LLMContext APIs changed (the request context moved out of ToolInput, and
+user_prompt was dropped from LLMContext). Nova now adapts to whichever field set the
+installed Home Assistant version expects, so it works on both older and newer HA. Thanks
+to @QuentinVape40 for the detailed report.
+
+## [7.21.0] — outdoor zones for exterior camera coverage
+Adds outdoor zones to the floor plan. Draw areas like Front Yard, Driveway, or Backyard
+(the new + Outdoor Zone button, or Add Room with type "outdoor") and your exterior cameras
+now show what they cover ("sees: Driveway 90%") instead of "nothing in view." Zones are
+kept out of the 3D house so they don't change its shape, and they give Nova a model of
+the areas around the home — which also feeds intrusion, so a camera watching the driveway
+can be chosen to confirm someone there.
+
+## [7.20.0] — coverage wired into intrusion + clipped FOV cones (camera coverage, Phase 3)
+Camera coverage now feeds intrusion confirmation: when Nova detects a breach it
+prefers a camera whose saved coverage actually sees that area, so it can confirm a
+person through a camera in an adjacent room with a sightline — the dining camera seeing
+the living room through the open staircase — not only a camera physically in the room.
+And the camera FOV cones in the floor-plan editor now clip to walls and bleed through
+openings, so each cone shows what the camera really sees instead of passing through
+walls into the yard.
+
+## [7.19.1] — fix phantom exterior door from cased openings
+Fixes a cased opening (an interior open doorway) being drawn as an exterior door on the
+3D house — which could appear as a door on the rear wall that isn't in your plan. Cased
+openings are interior and no longer show up on the exterior shell.
+
+## [7.19.0] — camera coverage: AI judgment + description (camera coverage, Phase 2b)
+The floor-plan editor can now describe camera coverage in plain language. Hit Compute
+coverage and Nova judges which rooms each camera can actually confirm a person in and
+writes a short summary — "the full dining room and most of the living room through the
+open staircase, and a corner of the kitchen." It reasons from the sightline geometry, so
+open plans and pass-throughs are accounted for. Results are saved with the layout. If
+the model is unavailable it falls back to a geometry-only summary.
+
+## [7.18.0] — camera coverage: sightline geometry (camera coverage, Phase 2a)
+Each camera now shows which rooms it can actually see, computed from the floor plan.
+Sightlines travel through open doorways and cased openings and are stopped by solid
+walls — so a camera in an open-plan dining room picks up the kitchen and living room it
+has a line into, while a camera in a closed room sees only that room. Coverage shows
+live under each camera and recomputes as you aim or move it. A following phase adds an
+AI pass to describe coverage in words and feed it into intrusion confirmation.
+
+## [7.17.0] — camera placement + field of view (camera coverage, Phase 1)
+Place cameras on the floor plan. Add a camera, bind its camera entity, and aim it —
+set the facing direction and field-of-view width, and for outdoor cameras how far it
+sees (indoor cameras are bounded by walls). Each camera shows as a dot with a
+translucent FOV cone on the 2D editor; drag the dot to move it, right-click to delete.
+This is the placement groundwork — automatic coverage inference (which rooms each
+camera can actually confirm) comes in the next phase.
+
+## [7.16.0] — cased openings (open doorways) in the floor plan
+You can now place a cased opening — a doorway with no door, an open pass-through — in
+the floor-plan editor, alongside interior doors. Like an interior door it attaches to a
+room and a wall, but it has no sensor (it's always open). This models the open sightlines
+and flow between rooms (e.g. a living room open to a dining room), and lays the groundwork
+for the upcoming camera-coverage feature, which needs to know which spaces are visually
+connected.
+
+## [7.15.0] — Lab & Movie mode room binding + Movie mood
+Lab and Movie can now be scoped to specific rooms from the Operational Mode card.
+Choose which room(s) Lab applies to, so its minimal-interruptions quiet covers just
+the workshop rather than the whole house — the rest of the home stays normal. Bind
+Movie to a room (and optionally a media player) with a dim level, and Nova dims that
+room's lights the moment Movie mode turns on. Both modes stay settable by hand or voice,
+and safety is never affected.
+
+## [7.14.0] — automatic operational mode + more openings sensors
+Nova can now switch its operational mode on its own: when Auto is on (Operational
+Mode card), it follows occupancy — Away when the home empties, back to Normal when
+someone returns. Deliberately chosen modes (Party, Movie, Lab, Guest, Focus) stay put
+while you're home and are only superseded by Away once the house is empty; they remain
+fully hands-on via the mode buttons or voice. Turn Auto off for fully manual control.
+The floor-plan opening → sensor picker now also lists window contact sensors, so every
+window, door, and dormer can be mapped to its sensor.
+
+## [7.13.1] — Cape Cod 2nd-floor window height + lower garage roof
+Second-floor gable-end windows now ride high on the gable — clamped under the roofline
+so they never poke through the slope — instead of sitting low near the eave, and the
+attached garage roof drops further. On a Cape Cod, Cabin, or any 1.5-story gable, the
+upstairs window beside the garage now sits where it should and clears the garage roof.
+
+## [7.13.0] — Dutch Colonial home style (gambrel roof)
+Adds a Dutch Colonial home style with a proper gambrel ("barn") roof — a shallow
+upper slope over a steep lower slope, with second-floor windows sitting high in the
+steep slope where they belong. Attached garage roofs now sit lower, well below the
+second floor, so they no longer collide with upstairs windows. Pick it under Home
+Style on the Residence tab.
+
+## [7.12.0] — bigger floor-plan editor, rotatable 3D preview, window-height fix
+The floor-plan editor is now larger and auto-fits to your rooms, so bigger
+properties and edge elements — like a rear dormer or a far bathroom — are no longer
+cut off. The 3D preview above the editor can be rotated by dragging, and both it and
+the Residence 3D now have quick view buttons (front, rear, left, right, iso). Also
+fixes second-floor windows that aren't in a dormer rendering too low (they now sit
+in the second-floor band instead of at the garage-roof line).
+
+## [7.11.1] — routine-learning entity picker fixes
+The "add specific entities" picker in Routine Learning is now a searchable field
+that fits the panel instead of an oversized dropdown, and entities you add now
+reliably appear in the list. Also includes a small internal cleanup.
+
+## [7.11.0] — opt in doors, windows and presence to routine learning
+Routine learning still skips noisy door/window and presence signals by default, but
+you can now opt them in — a new Routine Learning card in Settings has toggles for
+learning door/window activity and presence/arrivals, plus a picker to add specific
+entities (like a garage-bay occupancy sensor) as routine triggers. This lets Nova
+build routines such as closing a garage door once a car is parked in its bay.
+
+## [7.10.0] — state backup/restore + a routines guardrail
+Two additions. Nova can now back up and restore its own state — memory, patterns,
+knowledge, and config — via the nova.backup and nova.restore services, so a
+device re-flash or migration doesn't lose it (back up, download the file, re-flash,
+restore, restart). And the diagnostics self-test now flags when the identity
+confidence bar is set so high that per-person routines can't attribute, with a
+suggested range.
+
+## [7.9.2] — current Groq models + self-healing model selection
+Groq retired the models Nova shipped as defaults, so a fresh Groq setup failed to
+validate and camera vision returned errors. Two changes fix it: the defaults now use
+Groq's current lineup (openai/gpt-oss-120b for the agent, reasoning, and briefings;
+the multimodal qwen/qwen3.6-27b for camera vision), and — so this doesn't recur as
+providers rotate models — each model setting now checks the provider's live model
+list and switches to an available model if the saved one is gone (keeping vision on
+a multimodal model). Setups with a valid selected model are unaffected.
+
+## [7.9.1] — disabled cameras no longer appear in Command Center
+Cameras you've disabled are now hidden from the Command Center — both the live
+camera selector and the "analyze now" dropdown — matching the rest of Nova.
+
+## [7.9.0] — routines learn who, even before it's certain
+Observed behaviour is now attributed to the most likely person even when Nova
+isn't fully certain, instead of being dropped as "unknown" — so per-person routines
+accumulate and their owner firms up as recognition improves. Certainty still gates
+personalized actions; a genuine coin-flip between people stays unattributed.
+
+## [7.8.3] — model list loads for Ollama without a base URL set
+The model picker now loads Ollama models using the default local endpoint when the
+LOCAL LLM URL field is blank, instead of failing with "base URL required." Setting
+the URL is still recommended — it's what enables embeddings/semantic search.
+
+## [7.8.2] — interior doors render in the floor view
+Fixes interior doors (like a kitchen door) not appearing in the per-floor 3D view
+when their room was matched — the room name is now compared case-insensitively.
+
+## [7.8.1] — basement openings + upstairs window placement
+Basement exterior doors and windows now render on the 3D home — as walkout doors
+and grade-level windows — where before they didn't appear. Second-floor windows on
+the side walls now sit on the actual gable end instead of floating just inside it.
+
+## [7.8.0] — pick the travel sensor and origin from a list
+The departure "Origin tracker" and "Travel sensor" settings are now dropdowns of
+your available entities — people and device trackers for the origin, and
+travel-time sensors for the travel sensor — instead of typing an entity id.
+
+## [7.7.0] — live 3D preview in the floor plan editor
+The floor plan editor now shows a live 3D view of your home above the canvas. It
+updates as you edit — adding or moving rooms, placing windows and doors, and
+positioning dormers — so you can see the model come together without leaving the
+editor.
+
+## [7.6.0] — interior doors in the floor views
+Placed interior doors now render in the per-floor 3D views, on their room's wall,
+and show open or closed based on their mapped sensor.
+
+## [7.5.0] — place your dormers
+Dormers can now be placed individually. On the 2nd-floor editor, add front or rear
+dormers and slide each one along the roof; the number you add sets how many render.
+Homes without placed dormers keep the automatic evenly-spaced dormers from the
+home style.
+
+## [7.4.0] — garage doors show open or closed per bay
+Each garage door in the 3D home now reads its own mapped sensor and shows open
+(rolled up) or closed independently, using the per-bay sensor slots.
+
+## [7.3.2] — bulkhead angle + upstairs window placement
+The bulkhead cellar door now sits at a shallower, more realistic angle and lower
+profile, so it no longer covers nearby windows. Second-floor windows now render
+over the upstairs footprint (the main house) instead of over the garage.
+
+## [7.3.1] — bulkhead cellar door + upstairs windows
+The cellar door now renders as a sloped bulkhead against the wall (Bilco-style)
+instead of a flat panel. Second-floor placed windows now render too — side windows
+on the gable ends and front/back windows on the roof.
+
+## [7.3.0] — the 3D home shows your placed windows and doors
+The whole-house 3D view now draws the windows, exterior doors, and cellar door you
+placed in the editor, at their positions, and each door shows open or closed based
+on its mapped sensor. Homes without any placed openings keep the automatic
+per-room windows.
+
+## [7.2.2] — highlight the opening you're mapping
+When you hover an opening's row or open its sensor dropdown, its marker on the
+floor plan lights up, so it's clear which window or door you're mapping.
+
+## [7.2.1] — opening refinements
+Placed openings now use a dropdown of your door and window sensors instead of a
+text field. Interior doors are attached to a room and then to a wall of that room.
+A Cellar Door option was added, and each garage door has its own sensor mapping —
+one per bay.
+
+## [7.2.0] — place windows and doors in the floor plan editor
+The floor plan editor now lets you place openings on each floor — windows,
+exterior doors, and interior doors. For each one, choose which wall it sits on and
+where along that wall, set its width, and map it to a door or window sensor.
+Placed openings show as markers on the plan.
+
+## [7.1.2] — gabled dormers
+Dormers on the 3D home now have proper gabled (peaked) roofs instead of a flat top.
+
+## [7.1.1] — 3D home refinements
+The whole-house 3D view now gives an attached garage its own lower, shallower
+roofline, so a single-story garage reads correctly next to the taller main house.
+Dormers sit properly on the roof instead of recessed and now also appear on the
+back slope, and a cellar door shows on homes that have a basement.
+
+## [7.1.0] — the whole-house 3D view is a clean exterior again
+The "All" view of the 3D residence now shows the exterior of the home — walls, a
+home-type roof, dormers, garage doors, a chimney, and windows — with occupancy
+shown as lit windows, instead of a stack of interior room boxes. It is built from
+your floor plan and home style, so it reflects your actual home. Individual floor
+views still show that floor's rooms for editing.
+
+## [7.0.0] — choose which cameras Nova uses
+You can now pick which cameras Nova uses. Under Settings -> Cameras, every
+camera has an on/off toggle, with Enable all and Disable all buttons — so you can
+use all of them, only some, or none. A disabled camera is left out of everything
+Nova does with cameras: event watching, doorbell and package detection, and the
+presence scan.
+
+## [6.102.0] — the roof follows your home type
+The 3D residence now wears a roof shaped by the home style — gable, hip, or flat
+— sized to your floor plan's footprint, with dormers by count. A Cape Cod keeps
+its half-story with the upstairs tucked under the roof, a two-story wears the roof
+on top, and modern and apartment styles get a flat roof.
+
+## [6.101.1] — the 3D house updates the moment you save the floor plan
+Saving (or importing and saving) the floor plan now refreshes the 3D residence
+right away instead of waiting for the next background sync, so your layout shows
+up in the 3D house immediately.
+
+## [6.101.0] — the 3D house is built from your floor plan
+The 3D residence model is now generated from the rooms in the floor plan editor
+instead of a fixed built-in layout. Each room's real dimensions size and place it
+in the 3D view, and the footprint and exterior walls follow your rooms — so
+editing the floor plan changes the house.
+
+## [6.100.0] — export and import your floor plan
+The floor plan editor can now export the current layout to a file and import a
+layout back in. Use Export to keep a backup before making changes, and Import to
+restore a saved layout (review it on the canvas, then Save to apply). This makes
+it safe to experiment with the layout and return to a known-good version.
+
+## [6.99.1] — floor plan editor fixes; address comes from Home Assistant
+Fixes the floor plan editor: adding a room now updates the canvas right away,
+switching floors works every time instead of only once, and the controls stay
+responsive after each change. The editor's separate address field and map
+overlay have been removed — Nova now uses the home location already configured
+in Home Assistant.
+
+## [6.99.0] — real per-room dimensions in the floor plan editor
+The floor plan editor now works in real dimensions. Each room shows its size on
+the canvas, and selecting a room lets you set its exact width and length by
+typing them. A units control switches the editor between imperial (feet) and
+metric (metres).
+
+## [6.98.0] — briefings work with reasoning models
+Some local models — including gemma4, qwen3, and deepseek-r1 — are reasoning
+models: they think in a separate channel and only produce their answer once the
+thinking finishes. On the briefing's small token budget the model spent it all
+thinking and returned an empty answer, so the briefing had nothing to say. Nova
+now asks the local model to answer directly instead of thinking out loud, and
+gives the briefing enough room to finish, so reasoning models produce a proper
+spoken briefing.
+
+## [6.97.0] — briefings always speak, even when the model returns nothing
+Briefings were going silent because the language model kept returning an empty
+response, and the briefing skipped the announcement entirely when that happened.
+It now falls back to reading the facts it already gathered — time, weather, who
+is home, overnight events, open doors, calendar, energy, and active hazards — so
+you get a briefing instead of silence even if the model produces nothing.
+
+## [6.96.0] — briefings reach the speakers again
+Scheduled and manual briefings went silent because the briefing service resolved
+its TTS engine and speakers from a config layer that is empty when all settings
+live in the panel. It fell back to defaults, could not find a TTS entity or a
+speaker, and stopped before playing anything. It now reads those settings from
+the same effective configuration everything else uses, so the briefing finds your
+engine and announcement speakers and plays. Voice-requested briefings, which
+reply through the requesting satellite, were never affected.
+
+## [6.95.0] — briefings fire on uncertain presence; tidier settings layout
+Scheduled morning and evening briefings are meant to skip only when the house is
+empty, but the check treated any non-"home" presence — including "unknown" or
+unavailable — as empty, so a scheduled briefing would silently skip whenever
+presence was not a clean "home". It now skips only when every tracked person is
+explicitly away; if presence is uncertain, the briefing plays. Voice-requested
+briefings were never affected.
+
+Separately, the Settings tab laid its cards out in a fixed grid, so each row's
+height was set by its tallest card and shorter cards left large empty gaps
+beneath them. Cards now flow in a tighter column layout that packs them by
+height, so the tab fills the space instead of leaving holes.
+
+## [6.94.0] — activity feed gains category icons
+Each event in the Activity Feed now shows a small icon for its kind — motion,
+doors, security, packages, energy, weather, cameras, briefings, and departures —
+so the feed reads at a glance instead of as a column of repeated text tags.
+
+## [6.93.0] — the system self-test now covers cameras
+The "Run check" self-test under Settings → System Diagnostics now includes your
+cameras alongside the LLM, embeddings, and speech engines. It reports how many
+cameras are available and flags any that are unavailable, so one check tells you
+whether everything Nova relies on is up.
+
+## [6.92.0] — setup checks the LLM connection before finishing
+When you enter a cloud API key or a local LLM URL during setup, Nova makes a
+quick test call before creating the integration. If the endpoint cannot be
+reached or the key is rejected, setup shows the reason and lets you fix it,
+instead of installing and failing only once you try to use it.
+
+## [6.91.0] — onboarding steps jump to the right setting
+Each step in the welcome checklist now has a jump button that opens the Settings
+tab, scrolls to the exact card it refers to — alert destination, cameras,
+personality, or daily briefings — and briefly highlights it, instead of leaving
+you to find it.
+
+## [6.90.0] — the new anticipation & memory settings, in the panel
+Everything the last several releases added — departure and routine alerts,
+cross-session memory, continued conversation — was configurable only by editing
+config on disk. Now it has a home in the Settings tab: a new "Anticipation &
+Memory" card with toggles for departure alerts, routine alerts, memory
+threading, and continued conversation, plus the numeric knobs (departure lead
+time, the memory window and turn cap) and the optional open-source-routing fields
+(origin tracker, OSRM URL, travel sensor). Everything reads its current value and
+writes back through the panel like the rest of the settings.
+
+This is the first of the onboarding-and-UI polish pass. 4 new panel smoke
+assertions cover the card's presence and wiring.
+
+## [6.89.0] — departure travel time goes open-source
+The "leave now, sir" anticipation no longer leans on Google Travel Time or Waze.
+Both are a poor fit here: Google's is a paid API, and both require a fixed origin
+and destination baked into the integration — so covering more than one
+destination would mean standing up a separate instance per place. Departure now
+works dynamically: it takes your live location from device tracking, geocodes the
+event's location with OpenStreetMap's Nominatim, and gets the drive time from
+OSRM — all keyless, with OSRM's endpoint configurable (`departure_osrm_url`) so
+you can point it at a self-hosted server.
+
+When there is no device fix, the event has no location, or a routing call fails,
+it falls back to the configurable fixed lead (`departure_lead_minutes`) exactly
+as before, so nothing regresses; an explicit travel-time sensor is still honored
+if you have set one. All network calls are async with a short timeout, and
+geocoding results are cached in-process. 20 tests cover the routing math, the
+geocode/route orchestration with the network mocked, and the departure logic end
+to end.
+
+## [6.88.0] — continued conversation (turn-taking foundation)
+Nova can now hold a conversation open. When a response ends with a question or
+an offer to act — "which room did you mean?", "shall I schedule it?" — the
+satellite keeps listening for your reply without a fresh wake word, so a
+back-and-forth flows naturally instead of "Nova..." every turn. A response
+that is just a statement ends the turn as before.
+
+The trigger is deliberately conservative (a trailing question or a clear offer,
+nothing more) and the whole behavior is off by default
+(`continued_conversation_enabled`), since natural turn-taking depends on your
+satellites' listen timing and is best switched on and tuned against real
+hardware. The continue signal is set defensively so it degrades gracefully on any
+Home Assistant core. 7 new tests cover the turn-taking heuristic and the switch.
+
+This is the in-process foundation; no-wake ambient response, barge-in,
+multi-satellite continuity, and reopen timing for external (Cast/Nest) speakers
+layer on top and are validated on the satellites themselves.
+
+## [6.87.0] — one situational picture, not a device list
+Nova's reasoning now starts from what is actually happening, not just what it
+can control. The context it reads before every complex request used to be a
+static inventory — areas, entity counts, aliases. Now, alongside that, it
+composites a live situational snapshot: the time, who is home and where, the
+weather, the next couple of calendar events (and any conflict between them),
+current power draw, and a line of recent activity. So "should I turn the heat
+down?" is answered against "it is 9pm, nobody is in the living room, and you are
+drawing 6 kW," not in a vacuum.
+
+Each signal is gathered from what Nova already tracks — presence, calendar,
+energy, weather, the observer's recent-events buffer — and each is independently
+guarded, so a missing weather entity or an unconfigured power meter simply drops
+out of the picture rather than breaking it. 12 new tests cover the composite and
+each signal.
+
+## [6.86.0] — memory that threads across sessions
+Nova now picks up where you left off. Until now each conversation started
+cold, remembering only the last twenty messages of the current session; anything
+from yesterday, or from before the last restart, was gone. It had all been saved
+to disk the whole time — it just was not read back. Now, when a fresh
+conversation begins, Nova seeds it with a bounded slice of recent history (the
+last day or two, capped) so "what did we decide about the thermostat?" or "finish
+that list from earlier" lands with context instead of a blank stare.
+
+The threading is deliberately conservative: it seeds once per conversation, only
+when the in-session window is empty (so it never double-counts the turn you are
+in the middle of), reaches back a configurable window (48 hours, twelve turns by
+default), and truncates long turns to keep the context lean. Memory is unified
+across the home rather than split per satellite, so continuity follows you from
+room to room. 9 new tests cover the shaping, the bounded DB read, and the
+configuration.
+
+## [6.85.0] — person-level routines, unstarved
+Nova learns per-person routines and now speaks them: "around this time you
+usually start the coffee." But first it had to actually *have* them — and it
+did not, for a subtle reason. Every state change is stamped with whoever is
+likely responsible, and that attribution has a sole-occupant shortcut ("only one
+person home, so it is them") — except the shortcut was only reached when the
+event carried no room, and Nova always passes the room now. So on a
+single-person home, room resolution came back inconclusive and the event was
+filed as "unknown," which meant the routine detector — which needs several
+occurrences attributed to a *named* person — never had anything to work with.
+The store was fine; it was starved.
+
+The fix lets a sole occupant be attributed even when the room is known: if room
+resolution is inconclusive but exactly one person is home, it is them.
+Multi-person room logic is unchanged. This is forward-looking — history already
+filed as "unknown" cannot be re-attributed — so routines materialize after about
+a week of newly-attributed behavior, then surface as gentle "you usually start X
+now" prompts through the same gated announce path as the rest of Nova's
+anticipation, and only when that person is actually home.
+
+The per-person routine store also gets its own home: a dedicated
+`person_patterns.py` module owns the table, the upsert, and the read, with the
+pattern analyzer and the Memory panel delegating to it. 18 new tests cover the
+store, the attribution fix, and the routine prompts.
+
+## [6.84.0] — anticipation: "leave now, sir"
+Nova now watches the clock against your calendar and tells you when it's time
+to head out. For the nearest upcoming timed event it warns once — "heads up, the
+dentist at Main St begins in about 20 minutes; you'll want to head out" — timed
+so you are not late. Lead time comes from a travel-time sensor (Waze or Google
+Travel Time, if you have pointed Nova at one via `departure_travel_sensor`)
+plus a small buffer, or a configurable default (`departure_lead_minutes`, 30 by
+default) when you have not. The alert rides the same gated announce path as the
+rest of Nova's proactive awareness — it speaks when you are around and pushes
+quietly when you are not — and only fires while proactive awareness and the
+local cognition layer are on.
+
+This slots into the existing anticipation engine, which already flags things
+unusual for the time of day; departure was the one piece of the "leave now, sir"
+instinct that was not there yet. 8 new tests cover the timing (alert only once
+it is actually time to leave), the travel-sensor lead, all-day and out-of-horizon
+events, the once-per-event-per-day guard, and the off switch.
+
+## [6.83.0] — ephemeral sub-agents, and credentials that live in secrets.yaml
+Nova can now spin up a focused sub-agent for a complex slice of a request. Ask
+for something multi-step and self-contained — "gather this week's schedule and
+the weather for it" — and it delegates that to an in-process sub-agent with a
+minimal objective, a curated read-only tool set, and a small turn budget, then
+folds the result back into the main answer. It is not a separate process and it
+is not parallel — on one machine the point is a tight, focused context the model
+reasons over cleanly, with less drift. Sub-agents are read-only and cannot
+recurse: actuators, anything that writes a persistent store, and delegation
+itself are denied, and depth is capped.
+
+LLM credentials move out of plaintext. API keys previously sat in the panel's
+config.json; they now belong in Home Assistant's secrets.yaml, resolved
+everywhere Nova builds a model client — and secrets.yaml wins. On upgrade, any
+plaintext key still in config.json is relocated automatically and safely: Nova
+writes it to secrets.yaml, re-reads to confirm it is durable, and only then
+removes the plaintext copy. If anything about that fails, config.json is left
+exactly as it was, so a key can never be lost and auth can never break. The
+writer backs up the file and preserves everything else in it.
+
+The README now carries a full capability reference — every agent tool, grouped
+by domain, alongside the features they back. 26 new tests cover the delegation
+machinery (capability scoping, the denylist, the depth cap, nested-invocation
+wiring) and the credential path (the safe writer, the secrets overlay, and
+verify-before-strip relocation).
+
+## [6.82.0] — one source of truth for which model runs
+Nova now resolves its LLM provider, model, and credentials from a single
+authoritative place, ending a class of drift where different parts of the
+integration could each pick a different model. A new resolver treats the panel's
+saved settings (config.json) as the source of truth, layering them over the Home
+Assistant config entry so the panel always wins — but only where it holds a real
+value, so a blank field can never wipe a key the entry is carrying.
+
+Before this, the startup LLM client and the conversation fallback read the
+provider and key straight from the config entry, which can hold stale values
+from an earlier setup — enough to instantiate an impossible pairing like a cloud
+provider with a local model name while the panel showed something else. Those two
+paths now go through the resolver, matching the agent and observer, which already
+honored the panel. Whatever the panel shows under AI Models is what every part of
+Nova runs.
+
+6 new tests cover the resolver: the panel winning over stale entry data and
+options, blank panel values leaving entry credentials intact, entry options
+outranking entry data when the panel is silent, and tolerance of a missing entry.
+
+## [6.81.0] — read-only email, native to the integration, credentials in secrets.yaml
+Ask Nova to check your email and it now can. A new `read_email` tool reads the
+most recent messages from your inbox over IMAP — "anything important come in?",
+"summarize the inbox", "any unread from the office?" — and answers in Nova's
+voice. It runs entirely inside the integration: no separate mail server, no
+add-on, no new dependency, just the Python standard library with the blocking
+IMAP session handed to the executor so the event loop never stalls.
+
+Reading is read-only, and provably so. The mailbox is opened with EXAMINE rather
+than SELECT, bodies are fetched with BODY.PEEK so nothing is ever marked read,
+and the module contains no delete, move, or flag code at all — a test asserts the
+source stays free of those verbs so it can't regress. Fetched mail is treated as
+untrusted: every subject and body is HTML-stripped, length-capped, has common
+prompt-injection phrasing declawed, and is handed to the model wrapped as data to
+summarize, never as instructions to follow.
+
+Credentials move where they belong. The IMAP password is read from Home
+Assistant's secrets.yaml (add it under `nova_imap_password`) through a new
+read-only resolver — it is never written into the panel config. The non-secret
+connection settings (host, port, username, folder, SSL) live under Settings →
+Configure → Email like any other option. A missing or malformed secrets file
+degrades to a clear error instead of taking setup down. 25 new tests cover the
+resolver, the read-only guarantees, the sanitizer, and credential resolution.
+
+## [6.80.1] — embeddings failures say why, and how to fix them
+The embeddings health check could report "Ollama embed call returned no vectors"
+— true, but not a diagnosis. That message covers a model that isn't pulled, an
+unreachable host, and an HTTP error alike, and they need different fixes.
+
+The failure reason is now specific and actionable. A missing model says which
+model and gives the exact command to pull it; an unreachable host says so; an
+HTTP error carries the status. The same specific reason shows in the System
+Diagnostics status and in the Settings embed-test button, and it clears the
+moment a real embedding succeeds. 4 new tests covering the model-not-pulled,
+empty-200, sticky-error-clears, and probe paths.
+
+## [6.80.0] — suggestions show their reasoning, not just their conclusion
+When Nova proposed an automation, the panel showed a one-line description, a
+confidence number, and approve/dismiss. You had to trust it. The evidence that
+justified the suggestion — which entity, what time, how many days running, which
+person — was computed and then thrown away before it reached you.
+
+That evidence now carries all the way through. Each suggestion in the panel shows
+what Nova actually observed: the routine it noticed, how many times over the
+last month, how consistent it was, and who it was tied to — laid out as the
+reasoning behind the proposal. The pattern type is labelled, the entities
+involved are listed, confidence is a colour-graded bar, and the generated
+automation is one click away under "see the automation." Approving becomes an
+informed decision instead of a leap of faith.
+
+Nothing about the detection changed — this surfaces reasoning the analyzer was
+already doing. New pattern_type, entity_ids, and details columns on the
+suggestions table (migrated automatically), a pure explainer that turns pattern
+evidence into a human "why," and a rebuilt review card. 11 new tests.
+
+## [6.79.0] — documents ingest themselves
+Dropping a manual or receipt into the documents folder used to require pressing
+Scan in the panel before Nova could answer questions about it. It now picks up
+new files on its own. Every ten minutes Nova checks the documents folder — and
+any watch folders you've configured — and ingests anything new.
+
+The scan is incremental: it tracks each file's modification time and ingests a
+file only when it's new or has changed, so it never re-embeds the whole library
+on a timer. Drop a PDF in, and within a few minutes you can ask about it; edit
+one, and the change is picked up on the next scan. Unsupported file types and
+oversized files are skipped, and a failure to read one file never stops the
+rest.
+
+This was the one genuinely missing piece from several rounds of looking over the
+codebase — the ingestion pipeline, mtime tracking, and watch-folder scanning all
+existed already; what was missing was running them on a schedule. 6 new tests.
+
+## [6.78.2] — one dead speaker no longer silences the whole house
+Briefings requested from the panel produced nothing, while asking out loud in a
+room worked. The difference was how many speakers each path targets. A spoken
+reply goes to the one speaker in the room you're standing in; a briefing is a
+broadcast, and broadcasts went to every media player in the house as a single
+request. That request succeeds or fails as a unit — so one target that couldn't
+accept it, an off television or a stale cast device, failed the whole thing and
+nobody heard anything.
+
+Two changes. Broadcasts now skip players that are unavailable, since they can
+never render audio anyway. And if a broadcast still fails, Nova retries each
+speaker individually, so the reachable ones hear the briefing and the log names
+the ones that didn't. What used to be all-or-nothing now degrades to
+whoever-can-hear-it.
+
+7 new tests, including the exact case: one dead speaker alongside a working one,
+and the working one still plays.
+
+## [6.78.1] — scheduled briefings actually run
+The morning and evening briefings fired on schedule but produced nothing. The
+scheduler passed the wrong name for the language-model client — one that exists
+in the service handlers but not where the scheduler lives — so every run raised
+an error immediately, and the handler logged it at debug level, which meant the
+failure never surfaced anywhere you'd see it. Fixed the reference, and raised
+that logging to a warning so a briefing that fails says so.
+
+Also corrected the hazard monitor's spoken alert, which passed its arguments in
+the wrong order and would have announced the wrong thing.
+
+Both were invisible to the existing checks, so the audit gained a third gate:
+it now resolves names statically and fails on any reference to something that
+doesn't exist in scope. A plain syntax check accepts that kind of error happily
+— it only appears at runtime, and only if something is listening. The gate
+catches the original bug exactly. 4 new tests, including one that guards every
+spoken-alert call site against the argument-order mistake.
+
+## [6.78.0] — briefings that arrive on their own
+Nova could already deliver a spoken briefing, but only when something called
+the service. It now runs them itself, morning and evening, at times you set.
+
+A new Briefings panel gives each one an on/off switch and a time, plus toggles
+for what goes in: weather and the day's forecast, your calendar, what happened
+overnight, notable power draw, and — new to the briefing — any active hazards
+near home, so a severe-weather warning or a nearby wildfire is part of the
+morning summary rather than something you have to go looking for. There's a
+"brief me now" button for a one-off.
+
+Both briefings are off by default; Nova doesn't start talking on a schedule
+until you ask it to. By default it also stays quiet when nobody is home, rather
+than narrating the day to an empty house. The morning briefing looks back
+overnight and the evening one across the day, and both reuse the same content
+engine as the nova.briefing service, so a scheduled briefing says exactly what
+a manual one would.
+
+9 new tests.
+
+## [6.77.0] — per-person routines that work with more than one person home
+The pattern analyzer has been learning per-person routines for a while, but it
+was starved: a state change was only attributed to someone when *exactly one
+person was home*, and any event it couldn't pin down was discarded. In a house
+with a family in it, that meant most of the day produced no usable data and
+per-person routines stayed thin.
+
+Attribution is now room-aware and probabilistic:
+
+- **Room-scoped identity.** Sole occupancy of the *house* is rare; sole occupancy
+  of a *room* is common. When the camera recognition for the room an event
+  happened in shows one person, that event is attributed to them — even with
+  several people home. Recognitions older than five minutes stop counting, and a
+  room with two people in it contributes a weaker vote to each.
+- **Proximity.** Device trackers and BLE room-presence that resolve to the
+  event's area add a nearest-person vote.
+- **Confidence instead of certainty.** Every attribution now stores how sure it
+  was. A clear front-runner that didn't quite clear the confidence bar is
+  recorded with low confidence rather than thrown away; a genuine tie still
+  stays unknown, because inventing attribution would poison the routines.
+- **The analyzer weighs by confidence.** Patterns are scored by summed
+  confidence rather than raw counts, and a dominant "unknown" bucket no longer
+  kills a pattern outright — it's skipped, and the named attributions are
+  ranked among themselves. Commands keep full weight, since the conversation
+  path already runs the full identity resolver.
+
+New person_confidence column on state_changes (migrated automatically), and
+identity gains room and proximity vote tiers plus a confidence-carrying
+quick_identify. 11 new tests.
+
+## [6.76.1] — the Hazard Monitor and vision-confirm switches actually toggle
+The Hazard Monitor's on/off switch and its three feed switches, plus the
+intrusion vision-confirmation switch, rendered correctly but did nothing when
+clicked. They were built with a button class that has no click handler — the
+panel's toggle handler only binds to buttons carrying the value to write, which
+these were missing. Converted all five to the panel's standard toggle, so they
+save and take effect.
+
+Added a smoke check that fails if any config button is rendered without the
+attribute that makes it clickable, since an inert control looks completely
+normal and passed every previous check.
+
+## [6.76.0] — intrusion log with snapshots, and training from your labels
+Every intrusion event is now recorded to a reviewable log with its snapshot —
+what Nova flagged, where, when, which rooms the motion touched, how far it
+travelled inward, and the still it captured. The log survives restarts.
+
+A new Intrusion Log panel shows the history and lets you mark each event **real**
+or **false alarm**. Those labels are the training signal: when a
+location-and-time pattern has been called a false alarm three times, Nova stops
+firing the low-confidence alerts for it — the initial "investigating" ping and
+the unanswered "unresolved" notice both go quiet for that pattern.
+
+The safety limits on that learning are strict:
+
+- **A confirmed intrusion is never damped.** A person confirmed on camera by
+  Nova's own vision, or motion tracing a real inward route from the point of
+  entry, always fires the full alert regardless of what has been learned.
+- **The investigation always runs.** Damping silences the notification, not the
+  watching — if a damped pattern turns into a real inward route, it escalates
+  normally.
+- **One "real" label cancels damping entirely** for that pattern. If a genuine
+  intrusion ever happened somewhere, Nova will not learn to ignore it.
+- **Labels expire** after 30 days, so a stale pattern stops suppressing.
+
+New nova/intrusion log, label, and learning actions. 18 new tests, including
+ones that pin the safety rules — a confirmed intrusion still alerts through
+maximum damping, and a single real label restores full alerting.
+
+## [6.75.0] — weather forecasts, so "what time is it supposed to rain?" works
+Asking when it would rain returned the current clock time instead of a forecast.
+The cause: Nova had no forecast capability at all — it could see current
+conditions but nothing about what the weather would do later — so a question
+phrased "what time…" matched Home Assistant's built-in current-time intent and
+answered with the clock.
+
+Added a weather_forecast tool that pulls the real hourly, daily, or twice-daily
+outlook from your Home Assistant weather entity, including each period's time,
+condition, temperature, and precipitation, so Nova can say *when* rain is
+expected. Falls back to the daily forecast when an entity doesn't provide hourly
+data, and reports a clear message when no weather entity is configured.
+
+The agent prompt also now states plainly that a "what time" question about
+weather is a forecast question and must never be answered with the clock — the
+current time is only for when you actually ask for it. 9 new tests.
+
+## [6.74.0] — intrusion detection traces the route inward from the entry point
+The remaining source of false "intrusion confirmed" alerts. Confirmation fired
+when motion appeared in two zones and one of them was near the breach — which is
+not a route. Motion that simply lingered at an open window (an AC unit running in
+it, a curtain moving) satisfied "near the breach," and an unanswered alert then
+escalated it to a full house alarm.
+
+Detection is now directional. A real intruder enters at the breach and moves
+*inward* — entry, then deeper rooms. Nova now computes each room's distance
+from the point of entry using the floor plan and tracks how far motion actually
+propagates inward:
+
+- Motion must reach a configurable depth of rooms **from** the breach (default 2)
+  to confirm an intrusion. Motion that lingers at or beside the entry never
+  confirms, no matter how long it continues.
+- An unanswered alert with no confirming inward route no longer reports itself as
+  a confirmed intrusion. It sends a softer notice instead — Nova says it
+  flagged activity near the entry, couldn't reach you, and has *not* confirmed
+  anyone moving through the house — with the snapshot attached.
+- A person confirmed on camera by Nova's own vision still escalates
+  immediately, independent of the motion route.
+- Houses without a mapped floor plan fall back to the previous behavior, so
+  nothing regresses for unmapped setups.
+
+New: hops_from_breach room-distance mapping, intrusion_inward_depth config, and
+the intrusion_unresolved alert type. 6 new tests, including one that pins the
+core fix — motion pinging only the breach room can never confirm an intrusion.
+
+## [6.73.1] — declare the logbook dependency (hassfest/HACS validation)
+The 6.72.0 activity-history work imported Home Assistant's logbook component but
+didn't declare it in the manifest, which failed hassfest's dependency check in
+CI. Added logbook to after_dependencies (alongside recorder, which was already
+there) — Nova uses the logbook when it's present but doesn't require it to
+start. Also added a test that checks every imported HA component is declared in
+the manifest, so this class of validation failure is caught locally by pytest
+instead of after a push.
+
+## [6.73.0] — intrusions confirmed by Nova's own eyes, not just Frigate
+Fixes the intrusion false alarms. Frigate's person detection was being trusted
+as sufficient proof of an intruder — the moment Frigate's person sensor went on,
+Nova escalated to a full alert. But Frigate false-positives on shadows,
+headlights, reflections, and the like, so those became false intrusion alarms.
+
+Now Frigate's person sensor is treated as a *trigger to look*, not proof. Before
+escalating, Nova snapshots the flagged camera and asks its own vision model
+whether a person is actually there:
+
+- Vision confirms a person → escalate, as before.
+- Vision says no person (empty room, shadow, light, reflection) → treat Frigate's
+  signal as a false positive and don't escalate on it. A real intruder still
+  moving through the house is caught by the movement-based logic instead.
+- Vision can't run or is unsure → fall back to the previous behavior (trust the
+  camera), so a broken vision path never *suppresses* a real alert. It fails
+  toward safety, never toward silence.
+
+The check is on by default with a toggle in the Intrusion panel ("Confirm Frigate
+person with Nova vision before alarming") for anyone who wants Frigate-only
+behavior. Uses your configured vision provider/model. 5 new tests covering
+confirm / deny / inconclusive / kill-switch.
+
+## [6.72.0] — Nova can read Home Assistant's activity history
+Nova can now answer "what's been happening in the house?" from Home
+Assistant's own records — not just its last-known state or its private pattern
+log. A new activity_history tool reads HA's native history and logbook through
+two lenses:
+
+- **Device history** — the recorder timeline for an entity or a whole area over
+  a window: every state change with timestamps, plus a count. Ask "when did the
+  front door open?", "how many times did the garage open today?", "what was the
+  thermostat doing overnight?" and Nova reads the real record.
+- **Logbook** — HA's readable activity narrative over a window, optionally for
+  one entity. Ask "what happened while I was out?" or "what's been going on?"
+  and Nova summarizes the actual logbook.
+
+Recorder and logbook internals vary by HA version, so every query is wrapped
+defensively and run through the recorder's own executor — a miss returns an
+empty result with a note, never an error and never a fabricated event, in
+keeping with the rest of Nova. Queries are bounded (entity breadth, row
+counts, and look-back windows are capped) so a broad question can't drag the
+recorder. Conversational only — no panel changes. 11 new tests.
+
+## [6.71.0] — real-time hazard monitor: earthquakes, severe weather, disasters
+Nova now watches for natural hazards near home and speaks up the same way it
+does for anything else. Three free, no-key government/agency feeds, polled every
+10 minutes, scoped to your location:
+
+- **Earthquakes** — USGS, filtered to a radius around home and a minimum
+  magnitude (default 300 km / M2.5), so you hear about a real nearby quake, not
+  micro-tremors or events across the world.
+- **Severe weather** — the National Weather Service's active alerts for your
+  exact point, filtered to genuinely notable severities (Extreme / Severe by
+  default) so a tornado or flash-flood warning alerts but a minor advisory
+  doesn't.
+- **Natural disasters** — NASA's Earth Observatory tracker for wildfires,
+  volcanic activity, and severe storms within range of home.
+
+Location defaults to the coordinates Home Assistant already knows, with an
+optional lat/long override in the panel. Each feed dedups on stable event IDs so
+a standing event never re-alerts, and a feed that can't be reached is skipped
+quietly — a failed fetch is never turned into a false alarm. Alerts push to your
+phone and speak through your speakers like every other Nova alert.
+
+New: a hazard_report agent tool ("any earthquakes nearby?", "are there weather
+warnings?"), a Hazard Monitor panel card (master switch, per-feed toggles,
+location override, radius/magnitude tuning, and a Scan Now button that runs a
+live read-only check), the nova/hazard WS command, and the config to drive it.
+Off by default — enable it in Settings. Crime monitoring is intentionally left
+as a future opt-in, since there's no clean location-specific crime source to
+build on. 35 new tests.
+
+## [6.70.3] — service health stops crying wolf
+The System Diagnostics panel was reporting core services as DOWN when they were
+actually working — a synthetic health poke that missed once (for example, an
+embedding model unloaded from VRAM at idle, or a speech engine that only goes
+available on demand) flipped the service to an alarming red, even though real
+use succeeded moments before. Reworked the health model so it reflects reality:
+
+- **Three states instead of two.** OK (verified working), IDLE (reachable but
+  not recently exercised, or a synthetic poke missed — shown calmly, never red),
+  and DOWN (reserved for a genuine failure during real use). A cold model or an
+  idle engine now reads IDLE, not DOWN.
+- **Only real use can mark something DOWN.** The actual call sites report their
+  outcomes — a real document ingest/search for embeddings, a transcribed voice
+  turn for STT, an agent call for the LLM, a spoken announcement for TTS — and
+  only a genuine-use failure turns a service red. The synthetic probe can set OK
+  or IDLE but never DOWN.
+- **Probes tolerate a transient miss.** Health checks retry a couple times
+  before concluding, so a momentary blip (like a model loading on demand)
+  doesn't alarm.
+- **Hourly background sweep.** The health check now re-runs itself hourly,
+  gently — reachability only, never alarming on its own — so the panel stays
+  current without opening it.
+
+This directly fixes the false "Embeddings DOWN" and "STT DOWN" readings when both
+were functioning. 20 new/updated tests covering the three-state logic, the
+real-usage tracking, and probe retry.
+
+## [6.70.2] — stop acting on questions; fix the diagnostics download
+Two bug fixes.
+
+**Questions no longer trigger actions.** Asking "when did you turn on the
+nightstand and why?" could cause Nova to turn the light on — treating a
+question about the past as a command in the present, then repeating it each time
+you asked again. Two changes stop this: the agent prompt now carries an explicit,
+prominent rule that a question about a device (when/why/whether/how) is never a
+request to change it — it answers by reading state instead of acting — and
+get_entity_state now returns each entity's last_changed / last_updated
+timestamp, so "when did this turn on?" is a question Nova can actually answer
+by looking rather than guessing. Real device commands ("turn on the lamp") work
+exactly as before.
+
+**The Download Diagnostics button works.** The integration page's diagnostics
+download failed with "File wasn't available on site" because the integration
+never exposed Home Assistant's diagnostics entry point. It now produces a useful,
+credential-redacted dump — config, service health, cognitive/connectivity
+status, and entity counts — with all API keys, tokens, and the address stripped
+before anything is written.
+
+9 new tests, heavy on the diagnostics redaction (nothing sensitive reaches the
+file) and the questions-are-not-commands prompt guard.
+
+## [6.70.1] — remove hardcoded sample address from the Residence tab
+The Residence tab displayed a specific street address as its default when none
+was configured — baked into the property banner, a fallback, an input
+placeholder, and a development harness file. Replaced with neutral placeholders
+("ADDRESS NOT SET", a generic "123 Main St" example) so a fresh install shows no
+real address until you enter your own. The address you set still lives only in
+your local config, as before.
+
+## [6.70.0] — first-run welcome, and a friendlier front door
+A new install now greets you instead of dropping you into a wall of settings. A
+dismissible **welcome card** appears on the Command Center for fresh setups with
+a short checklist of the high-value next steps — set an alert destination,
+connect cameras (optional), set up voice (optional), pick a personality level —
+each showing a live done/to-do state computed from your actual configuration,
+plus a progress bar, an "Open Settings" jump, and a "try asking Nova…" prompt.
+It hides itself once the essential step is done or you dismiss it (persisted, so
+it stays gone). The LLM key is still collected during the normal Add-Integration
+flow before the panel ever loads; this fills the "what now?" gap after that.
+
+The README is restructured so a newcomer sees value and a low on-ramp first: a
+"Quick start (5 minutes, no cameras required)" section up top, the deep
+Nest/go2rtc camera setup moved below Installation into a clearly-optional
+"Advanced setup" section, and Requirements split into the two things you
+actually need to begin versus optional add-ons. Content is the same; the order
+now front-loads getting started instead of advanced configuration.
+
+New onboarding state in the panel data, an onboarding welcome card with dismiss
++ settings-jump, and the onboarding_dismissed flag. 7 new tests; no new agent
+tools or LLM surface.
+
+## [6.69.1] — encode the reasoning discipline in the agent prompt
+The agent's system prompt gains a compact "How you reason" section ahead of the
+tool-routing rules, encoding the investigate→verify→act discipline as explicit
+methodology: read actual state before concluding (the house is the source of
+truth, not expectations of it); separate observation from inference; run a
+cheap verification before consequential actions; confirm results after acting
+rather than assuming success; fail safe on thin evidence for anything
+irreversible; and say "I don't know" plainly rather than inventing. Four new
+static guard tests pin the section and its tenets so a future prompt rework
+can't silently drop them.
+
+## [6.69.0] — snapshots in notifications, and escalate if no one answers
+Two safety additions building on the 6.68.0 intrusion work.
+
+**Snapshots ride the notifications now.** When Nova confirms an intruder on
+camera, the still it captures is attached to the push sent to every device —
+not just shown in the panel. Android gets it via `image`, iOS via
+`attachment.url`, so whichever phone you're on renders the snapshot inline; the
+local snapshot path is made absolute with your external URL so the companion
+app can fetch it off your network.
+
+**Unanswered alerts escalate on their own.** The initial "investigating" alert
+goes out to notifications and voice; if no one responds within a configurable
+window (default 2 minutes, tunable 1–10 min in the Intrusion panel) and the
+situation is still active, Nova escalates to the full alert automatically — an
+unanswered possible break-in should fail toward alerting, not toward silently
+waiting. There are now three ways to respond: **call off** (false alarm — stops
+everything), the new **acknowledge** ("I'm looking" / new acknowledge_alert
+tool and an "I'm looking (hold)" button — holds the auto-escalation because
+you're handling it, but Nova still escalates if a person appears on camera),
+and **no response** (the timeout fires).
+
+Care taken on the timeout: motion that starts and then stops still clears as
+benign — a curtain flutter or a pet that moved once won't escalate just because
+no one answered. The timeout only bites while something is actively still
+happening. New acknowledge_alert tool, nova/intrusion gains an acknowledge
+action, intrusion_response_timeout config, and the panel's hold button +
+timeout selector. 18 new tests (heavy on the still-active-vs-benign distinction
+and the notification image data); tool surface now 35.
+
+## [6.68.0] — intruder snapshots, and call off a false alarm
+When Nova confirms an intrusion on camera, it now grabs a **snapshot** from
+that camera and attaches it to the alert — so the notification and the new
+Intrusion panel show who/what triggered it, not just "motion detected." The
+still is saved to a servable path and rides along on a new
+`nova_intrusion_confirmed` event (with `snapshot_url`), so your own
+notification automations can attach the image too.
+
+And you can **call off a false alarm.** Say "it's a false alarm," "that's me,"
+or "stand down" (new `dismiss_intrusion` tool), or hit the call-off button in
+the panel. This clears the active investigation, stops any further escalation,
+and suppresses re-triggering for a cooldown so the same benign motion doesn't
+immediately re-alarm — and it records the false alarm, so recurring harmless
+triggers can inform future tuning. The suppression is time-boxed, then the
+system re-arms on its own.
+
+Safety stays intact: the call-off only suppresses escalation for its cooldown
+window; a genuinely new, unrelated trigger after it expires alarms normally.
+The intrusion investigation now captures the person-detecting camera's entity
+(not just a yes/no), which is what makes the targeted snapshot possible. New
+intrusion.py module, dismiss_intrusion agent tool, nova/intrusion WebSocket
+command, and the Intrusion panel with the live snapshot and call-off. 12 new
+tests (heavy on the call-off suppression window and snapshot capture never
+raising); tool surface now 34.
+
+## [6.67.0] — voice-confirm sensitive actions, and ask out loud
+Nova can now hold a spoken back-and-forth for the moments that need it. Two
+opt-in capabilities, both in Settings → Voice Confirmation:
+
+**Voice-confirm sensitive actions.** Before Nova unlocks a door, opens the
+garage, or disarms the alarm, it asks out loud and waits for a spoken yes/no —
+the confirmation pattern HA built for exactly these. Fail-safe by design: if
+the answer isn't clearly affirmative (or anything goes wrong), the protected
+action does NOT run. Which actions count is sensible by default (lock/unlock,
+cover open, alarm disarm, security switch-off) and tunable per entity — add one
+to always confirm, or prefix with '!' to exempt it.
+
+**Open-ended follow-up.** Nova can ask a question aloud and listen for a free
+answer, passing conversation context so a bare "yes" or "the blue one" is
+understood.
+
+Two delivery paths, chosen by mode. **Native** uses HA's
+assist_satellite.ask_question / start_conversation, which sequence
+announce → wait → listen internally — this works when the satellite's own audio
+output routes to a real speaker. **Gated** is the fallback that fits Nova's
+ears-only satellites: it speaks the prompt through the room speaker (your Nest)
+via the normal announce path, waits for playback to finish (no echo), then
+reopens the mic on the satellite. **Auto** tries native and falls back. Because
+this hinges on where your satellite audio routes, there's a **Test Satellite
+Audio** button that fires a bare announce so you can hear which path your setup
+supports and pick accordingly.
+
+New voice_confirm.py module, nova/voice_confirm_test WebSocket command,
+who_do_you_see stays, and the Voice Confirmation panel with toggle, mode, and
+test. Protected-action gating is wired into control_device. 18 new tests
+(heavy on the fail-safe guarantee); tool surface unchanged at 33.
+
+## [6.66.0] — Nova can actually see you now (Frigate face recognition, fixed)
+Ask Nova "can you recognize me?" and it can finally say yes. The problem: the
+Frigate-native identity added in 6.59.0 read a recognized name off the
+`sub_label` on the `frigate/events` topic — but modern Frigate (0.14+, HA
+integration 5.9.2+) doesn't reliably put it there. It publishes recognized
+faces to a dedicated MQTT topic, `frigate/tracked_object_update`, as
+`{"type":"face","name":"Sam","score":0.93,...}`, and exposes a
+`sensor.<camera>_last_recognized_face` per camera. Nova was listening in the
+wrong place, so its recognition cache stayed empty and it truthfully reported
+that it couldn't see anyone.
+
+This wires up both correct channels. Nova now subscribes to
+`frigate/tracked_object_update` and handles `type: "face"` payloads in
+real time, AND reads the `last_recognized_face` sensors directly — so the
+conversation context ("Recent faces: Sam recognized at dining room ~91%") is
+populated from whichever source has data, and a new `who_do_you_see` agent
+tool answers "who do you see / can you recognize me" on demand by checking the
+sensors live. Person detection and the older sub_label path still work; this
+adds the channels modern Frigate actually uses. Honors the recognition_source
+setting (Frigate side). 12 new tests; tool surface now 33.
+
+## [6.65.0] — fix settings that reset after saving; pick your recognition source
+**Bug fix:** several Settings controls saved your choice but snapped back to
+the default on the next render — most visibly the Nova Character banter level
+(pick "Full — MCU Nova," watch it revert to "Dry"). The save was working
+fine; the problem was that `get_panel_data` never sent these values back to the
+panel, so every re-render re-read the default. Fixed for the whole affected
+set: banter level, web-research backend, SearXNG URL, calendar tight-gap, and —
+found by the same regression test — the Residence model detail controls
+(stories, basement, dormers, garage bays, chimney, bedrooms, bathrooms), which
+had the identical latent bug (masked because the 3D house rebuild used the
+local value until a full refetch). Two new static guards now fail CI if any
+saved-and-read-back config key is missing from the panel-data payload, so this
+bug class can't return.
+
+**New:** a **face recognition source** selector in Settings → Cameras — choose
+Both (Double Take + Frigate), Frigate only (sub_label), or Double Take only.
+Previously both were always active when configured, which double-fired
+recognition events; now you pick. Person *detection* (which triggers camera
+analysis) runs regardless of the choice — only identity firing honors it.
+
+## [6.64.0] — write in and delete goals from the panel
+The Goals panel is now fully manageable by hand. Previously you could only
+cancel an active goal (and only Nova or a voice command could create one).
+Now there's a text box to **write a goal in** directly — type an outcome, hit
+Add, and Nova starts working toward it — and finished or cancelled goals get
+a **delete** button to tidy the list. The panel also shows the Goals card even
+when empty, with the new-goal input, so you can add the first one from
+scratch.
+
+Backend: a new `goals.delete()` that hard-removes a goal row (distinct from
+`cancel()`, which keeps it in history), and the `nova/goal_action` WebSocket
+command extended from cancel-only to create / cancel / delete. Voice goal
+creation (the `create_goal` tool) is unchanged. 3 new goal tests and 2 panel
+smoke checks.
+
+## [6.63.2] — consolidated options flow (menu instead of forced steps)
+The Settings → Configure options flow was four screens you had to click
+through in sequence — change one setting and you walked all four. It's now a
+menu: pick the section you want (Core, Routing, Observer, or Identity), edit
+it, and you're done. Each section saves on its own, so touching the honorific
+no longer means paging past routing, observer, and identity to reach the end.
+
+Every option, default, selector, and the stored-value pre-fill behavior is
+preserved exactly — this is purely how the flow is presented. The (already
+removed in v6.45.0) integration/add-on split stays gone; setup remains
+config-entry-only. Strings and translations updated to match; config-flow
+tests updated for the menu structure with a new check that each section
+saves independently.
+
+## [6.63.1] — document the privacy & data story
+Adds a "Privacy & your data" section to the README, spelling out Nova's
+local-first posture: what it stores and where (all local SQLite under
+`/config/nova/`), that there's no Nova cloud or telemetry, that document
+ingestion is path-guarded to its own folder, and — now that biometrics exist
+— that wellbeing context is opt-in, off by default, never stored or
+transmitted, and explicitly not medical. Documentation only; no code change.
+
+(Reviewed an external suggestion list against the codebase and found nearly
+all of it already implemented — offline reasoning, self-diagnostics, the
+protocol/mode engine, biometrics, environmental sensing, the HUD, CI, and
+pattern automations all already ship. The data-privacy writeup was the one
+genuinely missing piece worth adding.)
+
+## [6.63.0] — biometric wellbeing context (Sensory Integration)
+Nova can now "feel" the user's state by reading biometric entities a
+wearable already surfaces to Home Assistant — heart rate, sleep, steps — so
+it can be quieter when you're resting and factor wellbeing into how it
+behaves. The most useful hook: a wearable's sleep entity now strengthens
+Nova's sleep detection — a watch reporting "asleep" is stronger evidence
+than bedroom occupancy alone, so quiet-hours suppression gets more accurate.
+
+Discovery is heuristic over entity name / device class / unit, so it works
+across wearables — Withings, Google Fit, Apple Health bridges, Oura, Fitbit —
+without hard-coding any integration; an explicit `biometric_entities` mapping
+can override. A new Wellbeing Context panel shows what's connected with an
+enable toggle, and a `wellbeing_context` agent tool answers "how did I sleep?"
+or "what's my heart rate showing?".
+
+**This is not a medical device and never behaves like one.** It reads existing
+entities as comfort/context only — it does not diagnose, does not raise health
+alarms, and does not interpret vitals clinically. Readings are reported plainly
+as what the device shows; anything concerning is deferred to the person's own
+device or a real medical resource, never assessed by Nova. The output carries
+a non-medical disclaimer, and it's strictly opt-in and off by default — health
+data stays private until the user turns it on. New biometrics.py module,
+wellbeing_context tool, nova/biometrics WebSocket command, sleep-detection
+enrichment, and the panel. 19 new tests (including a guarantee the output
+contains no diagnostic or alarm language) and 4 panel smoke checks; tool
+surface now 32.
+
+## [6.62.0] — whole-house energy management
+Nova graduates from sensing power to managing it. The appliance monitor
+already found the whole-home meter and fingerprinted appliances by wattage;
+this adds the decision layer on top — reading current draw, understanding
+what's running, and helping run the house efficiently. Ask "how much power
+are we using?" or "what's running?" (new energy_status tool), or watch the
+new Energy Management panel: live kW, a peak-threshold indicator, running
+high-draw loads, and staggering advice.
+
+The centerpiece is a **configurable agency ladder** you choose your comfort
+level on: advisory (only surfaces insights), opt-in (proposes deferring a
+load, acts only on approval), or autonomous (auto-defers high-draw loads over
+the peak threshold). It ties into the Directive Layer — a mode listed in
+`energy_mode_bump` (e.g. away) can raise the level one step while active,
+letting the house save more aggressively when you're out. The bump is
+opt-in and empty by default, so nothing surprises you: choose advisory and
+Nova only ever advises.
+
+Safety is absolute here: Nova never sheds a critical load — fridge/freezer,
+medical (CPAP, oxygen), security, network, sump/well pump, or heat — matched
+by a never-shed list, regardless of agency. The energy check runs in the
+cognitive loop under the same gating as other proactive offers (kill-switch +
+mode), and every entry point is defensive and never raises.
+
+New energy.py module (reusing the appliance monitor's meter discovery rather
+than duplicating it), energy_status agent tool, nova/energy WebSocket
+command, and the Energy Management panel with an agency selector. 18 new
+tests (agency ladder, never-shed guarantee, per-agency offer shaping, mode
+bump) and 5 panel smoke checks; tool surface now 31.
+
+## [6.61.0] — the Directive Layer: operational modes
+Nova gains high-level operational modes — a single switch that shifts its
+whole behavior profile at once, generalizing the proven Lockdown state
+machine into a proper directive layer. Built-in modes: normal, party (relax
+nagging, full wit, only critical alerts), lab (minimal interruptions), movie
+(near-silent), guest (softer autonomy), away (convenience off, security
+posture), and focus (hold non-critical interrupts). Say "party mode," "movie
+time," "I'm heading out," or "back to normal" — or pick from the new
+Operational Mode panel in Settings.
+
+Each mode is declared as behavior *overrides* (proactivity, persona banter,
+event-surfacing scope, whether graduated autonomy may auto-execute); a mode
+only states what it changes and everything else falls through to normal
+config. The active mode is consulted by three hooks — the proactive gate, the
+persona banter resolver, and the autonomy auto-execute check — so switching
+modes genuinely changes how chatty, how autonomous, and how selective Nova
+is. State persists atomically across reboots, exactly like lockdown.
+
+Crucially, **modes never disable safety.** Pipe-freeze, intrusion, and
+lockdown run regardless of mode — mode gating only touches the
+proactive/convenience layer, never SafetyManager. Users can define their own
+modes via the `custom_modes` config key, overriding built-ins or adding new
+ones. New `set_mode` agent tool and `nova/mode` WebSocket command; 15 new
+tests and 3 panel smoke checks; tool surface now 30.
+
+## [6.60.0] — system diagnostics: is everything Nova needs up?
+A one-glance health check for the core services Nova actually calls — the
+LLM backend, the embedding endpoint (when semantic search is on), the TTS
+engine, and the STT/Whisper engine — surfaced both as a Settings panel with
+per-service status lights and a re-check button, and as a `system_diagnostics`
+agent tool ("Nova, is everything working?"). Anything down comes back with
+a specific reason: "no LLM base URL configured," "stt.whisper is unavailable,"
+"Ollama did not return an embedding — pull the embed model," rather than a
+vague failure.
+
+Signals are matched to each service: the LLM reuses the connectivity circuit
+breaker plus a live /api/tags ping for Ollama hosts; embeddings reuse the
+existing Ollama probe; TTS and STT are Home Assistant entities, so the check
+confirms the configured engine exists and isn't unavailable. Services that
+aren't configured report "off" (not a failure) and are excluded from the
+healthy-count. Every check is defensive — the whole run never raises.
+
+This lives inside the existing diagnostics package (alongside the
+infrastructure-triage and fault-log subsystems) as a new service_health
+module — deliberately narrow to the four services Nova depends on, not the
+whole home. 12 new tests; 4 new panel smoke checks; tool surface now 29.
+
+## [6.59.0] — Frigate-native face identity (Double Take optional)
+Nova can now read a recognized name straight from Frigate. When Frigate's
+own face recognition (or a plus model) attaches a `sub_label` to a person
+event on `frigate/events`, Nova uses it directly — caching the match and
+firing the same `nova_face_recognized` event that drives greetings and
+recognition-aware behavior. Double Take is no longer required for identity;
+it still works for setups that use it, but this is one fewer add-on in the
+chain, with identity coming straight from the detection stream Nova
+already watches.
+
+The sub_label parser handles Frigate's version-to-version format drift — a
+bare `"Name"` string or a `["Name", score]` pair, with 0..1 scores scaled to
+percent and malformed values falling back safely. Both identity sources
+(Frigate-native and Double Take) converge on the same cache and event, so
+downstream persona logic is unchanged. 11 new tests covering every sub_label
+shape and malformed input.
+
+## [6.58.0] — visual questions and standing camera monitors
+Nova can now look at a camera and answer a specific question about what's
+there — "is a tool left on the workbench," "is the garage open," "did a
+package come," "is anyone in the backyard." A new `look_at_camera` agent
+tool captures a fresh snapshot and reasons over it with the vision model,
+using your question as the prompt.
+
+Two shapes, one mechanism. On demand: ask and it checks now. Standing
+monitor: create a goal whose recurring action is a `look_at_camera` check —
+the existing goal loop already handles the interval, re-arming, run budget,
+and stays quiet unless the thing is found, so "keep an eye on the workshop
+for tools left out" needs no new scheduler. The tool defaults to silent
+(announce=false) so a background monitor doesn't narrate every clear check.
+
+Built on the existing camera-analysis pipeline (`async_analyze_camera`), so
+it inherits the tiered snapshot chain and graceful failure — a WebRTC-only
+or offline camera, or a missing vision provider, returns a clear reason and
+hint rather than failing silently. Honest about limits: vision LLMs are
+reliable for presence/absence and coarse identification, not fine detail
+like exact model numbers. 6 new tests; the tool surface is now 28 tools.
+
+Note: gesture recognition (real-time hand-landmark detection) is
+deliberately NOT added here — it needs continuous local CV at video frame
+rate, which doesn't fit a snapshot-plus-cloud-LLM pipeline and would
+reintroduce the native-ML dependency the project avoids. That belongs in a
+dedicated detector (Frigate/MediaPipe) publishing events Nova can consume.
+
+## [6.57.0] — semantic search via Ollama, no ChromaDB
+The 6.56.0 approach hit a wall: ChromaDB's embedded mode depends on
+onnxruntime, which has no wheel for the Python 3.14 that Home Assistant now
+runs on, so the install could never succeed on this platform. Rather than
+wait on an upstream wheel, this replaces it with something more in the
+Nova-AIO spirit — reuse what's already here.
+
+Semantic search now runs on the **Ollama server Nova already talks to**.
+Embeddings come from Ollama's `/api/embed` (`nomic-embed-text` by default) —
+no API key, no Python package, no native wheel to compile, works on any
+Python version. Vectors are stored in Nova's own `nova.db` SQLite file
+alongside the keyword index, and similarity is plain cosine computed in
+stdlib Python (no numpy). No new service, no ChromaDB, no 300–500 MB
+download.
+
+Enable it in Settings → Document Library: it runs a live Ollama health
+check, and once on, re-ingesting embeds your documents so retrieval matches
+on meaning instead of keywords. It degrades to keyword (FTS5) search
+automatically whenever Ollama or the embed model isn't reachable — the
+document tools and panel keep working either way. Requires an Ollama host
+(set `llm_base_url`) and a pulled embed model (`ollama pull
+nomic-embed-text`).
+
+New: `embeddings.py` (Ollama calls + SQLite vector store + cosine search),
+a `nova/semantic_search` WS command (status/enable/disable/test), async
+`ingest_directory_async` / `search_documents_async` in documents.py, and a
+reworked search-engine banner. The obsolete ChromaDB `vector_backend.py` is
+removed. 17 new embeddings tests (vector math, store, mocked Ollama
+batch/legacy endpoints) and updated panel smoke checks.
+
+## [6.56.1] — fix ChromaDB install; modernize CI actions
+Two fixes surfaced by real deployment of 6.56.0.
+
+**Semantic-search install failed** with "HA package helper unavailable:
+cannot import name 'async_install_package'." There is no
+`async_install_package` in `homeassistant.util.package` — the real helper
+is the synchronous `install_package`. Now the enable button calls that
+through an executor job (it shells out to pip/uv, so it must stay off the
+event loop), and semantic search installs as intended. Keyword search was
+never affected.
+
+**CI Node 20 deprecation warning.** `actions/checkout@v4` and
+`actions/setup-python@v5` run on Node 20, which GitHub is retiring in favor
+of Node 24 — the Validate workflow was green but annotated with a warning.
+Bumped to `actions/checkout@v5` and `actions/setup-python@v6` (both on Node
+24), clearing it. No behavior change to the checks themselves.
+
+## [6.56.0] — optional ChromaDB: semantic search, one button
+Nova-AIO leans further into "all-in-one" without punishing small hosts.
+Memory and document retrieval have always worked everywhere via the
+built-in SQLite FTS5 keyword search; now you can upgrade both to true
+semantic vector search by installing ChromaDB from a single button in
+Settings → Document Library — no separate add-on, no manual pip, no HA
+restart.
+
+It's deliberately opt-in, not a hard requirement: ChromaDB pulls ~300–500 MB
+(onnxruntime, tokenizers, etc.) that can be slow or fail to build on a Pi /
+HA Green / Yellow. So Nova ships light and the panel tells you plainly
+what enabling costs and where it's a good idea. The install runs through
+Home Assistant's own package helper (lands in the env HA imports from) and
+then re-initializes the memory and document stores in place, so vector
+search activates immediately. If the host can't build it, the install
+fails gracefully and keyword search keeps working — nothing breaks.
+
+New: `vector_backend.py` (detect / install / re-init), a
+`nova/vector_backend` WS command, and a search-engine banner in the
+Document Library panel showing KEYWORD vs SEMANTIC with an enable button
+and honest host guidance. 7 unit tests (detection, re-init resilience,
+install flow with mocked HA helper, graceful failure) and 4 panel smoke
+checks.
+
+Also: the CI workflow gained a `workflow_dispatch` trigger (so Validate can
+be re-run on demand from the Actions tab without a throwaway commit), plus
+an explicit `permissions: {}` block and branch scoping on push. Note that
+Actions simply hadn't run since 6.47.0 because nothing had been pushed since
+that commit — the workflow was healthy and green, just idle. Verified the
+repo is fully HACS-default-compatible: brand icons are correctly sized
+(256×256 / 512×512) and satisfy the HACS brands check in-repo, manifest keys
+and hassfest ordering are valid, and hacs.json carries the required name.
+
+## [6.55.0] — Document RAG: Nova reads your manuals
+The last un-built agent from the home-agent blueprint. Nova can now
+answer from the household's own paperwork: drop appliance manuals and
+receipts (PDF, .txt, .md) into `/config/nova/documents`, ingest them,
+and ask "what's the furnace filter size?" or "when did we buy the
+dishwasher?" — it retrieves the relevant excerpt and answers, citing the
+source document, instead of guessing.
+
+Built on the same ChromaDB the memory system already runs, but as a
+*separate* collection — a manual isn't a conversation turn, and a furnace
+query shouldn't surface old chats. Documents are chunked with overlap on
+paragraph/sentence boundaries for good recall, embedded via Chroma's
+default function (no extra model dependency), cosine-scored. When ChromaDB
+isn't installed it falls back to FTS5 keyword search in the existing
+nova.db, so retrieval works on a minimal install too. PDF text
+extraction degrades honestly across pypdf / pdfplumber / PyPDF2 and, if
+none is present, says so and skips the file rather than crashing — plain
+text always works. `pypdf` is now a manifest requirement so PDFs work out
+of the box.
+
+Two agent tools (`search_documents`, `ingest_documents`), a
+`nova/documents` WS command, and a **Document Library** panel in Settings
+with an ingest button, live source list, and a test-search box. 17 unit
+tests (the pure chunker, extraction routing, ingest/search through a
+simulated collection, honest fallbacks) plus 4 panel smoke checks.
+
+This completes every blueprint agent that belongs inside Home Assistant.
+
+## [6.54.0] — the floor plan glows from live mmWave
+The residence model now lights up room-by-room from genuine mmWave/presence
+detection, not just the binary area-occupancy flag. A room whose presence
+sensor is actively detecting gets a distinct, punchy aqua-green glow with a
+brighter border — visibly the "hottest" room — while a room lit only by
+generic area occupancy stays standard cyan, and the dominant room keeps its
+mint. At a glance you can now tell *where a body actually is* versus where
+HA merely thinks a zone is active.
+
+Mechanically: `_house3dLit()` overlays the `nova/mmwave_overview` feed
+onto the plan's lit map as a new `mmwave` state that flows through the
+whole 3D builder — floor fill, walls, label, and pulse dot all render it
+distinctly. The plan rebuilds when fresh mmWave data lands, so detection
+appears live. Verified by rasterizing the plan and eyeballing that the
+three presence states are actually distinguishable before shipping.
+
+## [6.53.0] — mmWave presence overview
+The residence tab gains a live **mmWave Presence** panel: every room with a
+presence, motion, or occupancy sensor, showing whether it's occupied right
+now, how many of its sensors are detecting, and — when clear — how long
+since the last detection. Occupied rooms glow green and pulse; the header
+summarizes at a glance ("2/5 OCCUPIED"). It's the ground truth behind the
+floor-plan glow, surfaced directly instead of inferred.
+
+This reads genuine sensor state, not the binary area-occupancy flag — a
+room lit only by a door contact won't masquerade as mmWave presence here.
+A new `nova/mmwave_overview` WS command assembles the per-room breakdown
+from the occupancy sensors already mapped to HA areas; outdoor rooms are
+tagged so yard sensors don't read as living space. Refreshes live on the
+poll while the tab is open. 6 panel smoke checks; verified by rasterizing
+the panel and eyeballing it before ship.
+
+## [6.52.1] — learned automations for locks and covers are now valid
+A latent bug in the pattern generator became reachable the moment 6.52.0
+started installing suggestions. Every learned action was built as
+`{domain}.turn_{state}` — fine for lights and switches, but nonsense for
+other domains: a learned door-lock routine (the pattern module's own
+flagship example, "front door locks after garage closes") would emit
+`lock.turn_locked`, and a garage-cover routine `cover.turn_closed` —
+invalid services that would write a broken automation to `automations.yaml`.
+
+Actions now resolve through a domain-aware `service_for()`: locks get
+`lock.lock`/`unlock`, covers get `open_cover`/`close_cover`, on/off domains
+keep `turn_on`/`turn_off`, and cover transient states (`opening`/`closing`)
+settle to their end state. Domains that need parameters we can't infer from
+a bare state (climate, media_player) return no mapping, so those patterns
+become advisory suggestions rather than broken automations. Time routines
+were already gated to on/off and unaffected. 6 new tests, including the
+end-to-end proof that a lock sequence installs `lock.lock`, not a
+`turn_`-prefixed impossibility.
+
+## [6.52.0] — the pattern engine closes the loop
+The learning pipeline had a dead end: it observed behavior, detected
+patterns, generated automation YAML, surfaced suggestions — and approving
+one only flipped a database flag to `approved`. Nothing was ever installed.
+The user saw "learned a routine," approved it, and… nothing happened.
+
+Approval now **installs the automation into Home Assistant**. A new
+`install_approved_suggestion` bridges the gap: it reads the suggestion's
+stored automation, normalizes the generator's legacy shape into HA's
+current format (translating `platform`→`trigger` and `service`→`action`),
+and writes it live through the existing automation creator — then records
+the suggestion as `installed`. Both approval paths use it: the panel's ✓
+button and the voice tool ("Nova, approve that suggestion"). Concrete
+suggestions (time routines, sequences, presence) install and go live
+immediately; advisory-only ones (vague repeated-command notes) are still
+acknowledged as approved but honestly reported as needing a human to
+design — no fabricated automations. The panel toast and the agent both
+relay which outcome occurred, and a `LEARN` line logs each install.
+
+16 new tests: the normalizer across every pattern shape and malformed
+input, plus the installer wiring end-to-end (installs, advisory skip,
+missing suggestion, write-failure). Plus a panel smoke check for the
+approve→install path.
+
+## [6.51.2] — roadmap: local GPU inference shipped
+Local GPU inference is done — Ollama on a dedicated GPU box (via a HAOS
+GPU AI setup), so the reasoning chain runs templates → cache → local model
+→ cloud on your own hardware. Moved it out of the roadmap's "on the
+horizon" list into "shipped recently," and updated the Requirements note so
+the local GPU server reads as supported now rather than a future item.
+
+## [6.51.1] — README visuals, Nest streaming guide, roadmap trim
+Documentation pass. The README gains faithful HUD visuals — a hero banner
+and a two-up gallery of the Cognitive Core feed and the Camera Watch/DIAG
+panel — rendered as SVG from the panel's actual design tokens (real cyan,
+real fonts, real layout), so they represent the aesthetic without stale
+screenshots to maintain. Added a full **"Continuous streaming for Google
+Nest cameras"** guide: the go2rtc restream setup that defeats Google's
+5-minute expiring streams, with the exact `nest:` source config, where to
+find each credential, the optional Frigate hand-off, and the Nova
+`camera_overrides` mapping that ties it together. Trimmed the roadmap —
+UI Phase 3 (real-time WebSocket subscriptions, sparklines, entity cards,
+log/feed search) has shipped, so it moved to a "shipped recently" note;
+Document RAG is now called out as the last un-built blueprint agent.
+
+## [6.51.0] — three new agents, and Nova finally sounds like Nova
+The home-agent blueprint, reconciled against what already existed. Most of
+its twelve agents were already here under other names — the Supervisor is
+the agentic core, the Memory agent is the Chroma vector store, Vision is
+the camera stack, Voice is the Wyoming pipeline. Three were genuinely
+missing; two of the twelve (OS control, code execution) are deliberately
+NOT built — arbitrary desktop automation and code execution inside the HA
+process are security weight a home butler shouldn't carry, and there's no
+display to drive in the sandbox anyway.
+
+**Web Research agent.** A new `web_research` tool: ask about the outside
+world and Nova looks it up, then relays the gist in its own voice.
+DuckDuckGo's Instant Answer API by default (no key, no signup), switchable
+to a self-hosted SearXNG. Results are summarized, capped, and sanitized —
+never a raw page dump — and a failed lookup returns an honest "couldn't
+find that," never an exception.
+
+**Communication agent.** A new `calendar_agenda` tool reading the
+`calendar.*` entities HA already exposes: upcoming events plus conflict
+detection — overlaps, and back-to-back transitions tighter than a
+configurable gap. Email is deliberately untouched; reading an inbox from
+inside HA is privacy weight better handled by exposing specific mail as an
+entity.
+
+**MCU-Nova persona.** The voice now leans into Stark's Nova — dry,
+clever, unflappable — with an engineered safety valve: full wit only at
+light/neutral register, automatically silenced at urgent/grave. Nova
+does not quip during a smoke alarm, and that's now structurally guaranteed
+(the urgent/grave phrase pools can never gain banter lines — there's a test
+that asserts exactly this). A **banter level** knob (plain / dry / full)
+in Settings → Nova Character tunes it live, flowing into both the phrase
+pools and the LLM's own prompt.
+
+New: `web_research.py`, `comms.py`, banter valve in `persona.py`, two agent
+tools, four panel-writable config keys, a Nova Character settings panel,
+26 tests. The HTTP paths can't be exercised from the build sandbox (no
+egress to the search endpoints), so they're covered by pure-shaper tests
+and run live where HA has normal network access.
+
+## [6.50.0] — camera management moves to Settings
+The ✎ NAME button and its overlay are gone from Command Center — camera
+renaming and indoor/outdoor designation now live in a **Cameras** panel on
+the Settings tab, one row per camera: entity id (with the restream
+override arrow when one is mapped), a name field (Enter or blur saves,
+unchanged blur makes no call, blank reverts — placeholder shows the HA
+name), and the AUTO/⌂ INDOOR/▲ OUTDOOR chips with instant save and the
+resolved heuristic on AUTO. All cameras visible and editable at once
+instead of one-at-a-time through an overlay, and Command Center's Camera
+Watch head is back to just DIAG.
+
+Two mechanics worth noting: the Settings tab already skips poll re-renders,
+so typing a name is never wiped mid-edit; and the row refresh no longer
+depends on `CSS.escape`, which isn't guaranteed in every embedding (found
+by the smoke harness — the chip toggle silently died in its catch).
+
+Same backend as 6.48/6.49 — `nova/rename_camera` and
+`nova/camera_location` unchanged.
+
+## [6.49.0] — tell Nova which side of the walls a camera lives on
+The ✎ camera overlay gains a **LOCATION** row: AUTO / ⌂ INDOOR /
+▲ OUTDOOR, saving instantly per click. AUTO shows what the heuristics
+currently resolve — "AUTO (outdoor)" — so overriding is an informed choice,
+not a guess.
+
+This isn't cosmetic. `outdoor.py` is the single source of truth the whole
+cognitive stack consults — the intrusion investigator (outdoor sensors must
+not seed or confirm indoor investigations), the notable-outdoor-event
+filter, and the motion scan. Its most-authoritative layer has always been
+the user's word (`indoor_entities` / `outdoor_entities`); the new chips pin
+the exact entity id into those lists via `nova/camera_location`, so a
+designation immediately governs everything downstream. AUTO unpins and the
+heuristics resume. Hand-written globs in those lists are preserved
+untouched and still classify — they just read as AUTO in the picker, since
+they aren't a per-camera pin.
+
+Regression-tested end-to-end: an INDOOR pin beats an outdoor name keyword
+(`camera.backyard_playroom` stays inside), an OUTDOOR pin makes a hallway
+camera exterior for the whole stack, and unpinning restores heuristics.
+
+## [6.48.0] — call your cameras what you actually call them
+Cameras can now be renamed **inside Nova only** — HA entity names and
+Frigate stream names stay untouched. Useful now that restream twins exist:
+`eliana_restream` can just be "Eliana's Room" on the panel.
+
+A **✎ NAME** button in the Camera Watch head opens an inline overlay for
+the active camera: type a name, Enter saves, Esc cancels, blank reverts to
+the HA name (shown as the placeholder so you always know what blank means).
+The name applies everywhere the panel shows a camera — chips, the SRC
+strip (including the override-mapping arrow), pickers — via a
+`camera_names` runtime map, persisted through a new `nova/rename_camera`
+WS command with a CONFIG line in the activity log.
+
+Server logs and DIAG probes deliberately keep entity ids — display names
+are for humans, entity ids are for debugging, and mixing them costs
+precision exactly when it matters.
+
+**Also in 6.48.0 — config.json can no longer take the panel down.** A
+hand-edited `/config/nova/config.json` (adding `camera_overrides` by
+hand) that parsed to something other than a JSON object crashed
+`async_setup_entry` *before* panel registration — the integration never
+loaded and the Nova tab died with "Unable to load custom panel."
+`nova_config` is now self-healing: an unparseable or non-object file is
+**sidelined** (preserved as `config.json.corrupt-<timestamp>`, never
+deleted), defaults load, every accessor guards the cache type, and a
+persistent notification explains exactly what happened and where your
+edits went. A typo in that file now costs you a notification, not the
+integration. Seven regression tests, including the exact live failure.
+
+## [6.47.2] — a cloud blip is not a disarm
+Live bug: lockdown was lifting itself overnight. Cause: when the
+Cove/Alula integration lost its cloud connection, the alarm panel entity
+went `unavailable` — and the alarm→lockdown sync only knew two states.
+`_alarm_armed()` said "not armed," the sync read that as a disarm, and an
+auto-engaged lockdown disengaged (with an announcement) because a cloud
+API hiccupped.
+
+The sync now sees three states: **armed** (any panel armed → engage, as
+before), **disarm confirmed** (no panel armed AND at least one
+affirmatively reporting `disarmed` → lift, as before), and
+**indeterminate** (all panels unavailable/unknown, or none exist → HOLD
+everything). During a dropout nothing engages, nothing lifts, the
+manual-exit suppression isn't reset, and a throttled SAFETY line (once
+per 10 min) records "alarm panel unavailable — holding lockdown" in the
+activity feed so the outage itself is visible. Recovery to armed re-adopts
+silently; a genuine disarm after recovery lifts exactly as it always did.
+
+Six regression tests, including the precise live sequence:
+armed_night → unavailable → held → disarmed → lifted.
+
+## [6.47.1] — local model, cloud provider: auto-corrected
+The GPU server's first contact produced a confusing error: Google's API
+404ing on `models/gemma4:26b`. Root cause: `model` was pointed at the
+local Ollama model but `llm_provider` still said a cloud provider, so
+Nova faithfully forwarded an Ollama tag to Google. Two fixes:
+
+  • **Routing correction** at the single provider choke point: a
+    colon-tagged model (Ollama syntax — no cloud provider uses it)
+    configured against groq/gemini/openai/anthropic now auto-routes to
+    the ollama provider with the configured `llm_base_url` (or Ollama's
+    default), with a clear correction logged. Explicit `ollama`/`custom`
+    settings are never touched.
+  • **Smarter fallback**: the agent's failure path used to replay the
+    SAME model on gemini — a 404'd model 404s everywhere identically.
+    Model-not-found is now detected as a settings problem (with an
+    actionable ERROR log naming the fix), and the fallback goes through
+    the reasoning tier's own provider+model instead.
+
+Test-infra fix along the way: the `homeassistant.helpers.llm` stub moved
+from a per-file guard into conftest — agent.py only loaded if a file that
+happened to stub it ran first, and the loader caches half-executed
+modules (the exact order-dependence the standing test lessons warn about).
+
+## [6.47.0] — camera_overrides: let the restream do the work
+The durable fix for Nest's expiring streams and placeholder snapshots
+isn't more heuristics — it's not using Google's transport for frames at
+all. The community-standard architecture is a go2rtc restream (Frigate
+bundles one): go2rtc's native `nest:` source speaks SDM directly, handles
+the 5-minute stream extension, and republishes solid RTSP that HA and
+Nova consume like any local camera.
+
+Nova now meets that halfway with one runtime key:
+
+    camera_overrides: { "camera.eliana_s_camera": "camera.eliana_restream" }
+
+The original entity keeps its identity everywhere — chips, names, doorbell
+events, Nest event metadata — while every FRAME transparently comes from
+the twin: the panel tile (stream URL, token, stills), the Nova snapshot
+tier, the package monitor, vision analysis, all via one server-side
+`resolve_camera_source()` mirrored client-side. The cam strip shows the
+mapping (`SRC eliana_s_camera → eliana_restream`), DIAG probes and labels
+the actual source, and a missing/typo'd target safely falls back to the
+original. 3 new smoke checks, 3 new unit tests.
+
+## [6.46.3] — the black-frame case, cracked by DIAG
+First live DIAG run told the whole story in three lines: `nest×2` (the
+integration is fine), `state=streaming`, and "snapshot: **OK 2KB (13ms)**"
+— declared a success. A real camera frame is tens of KB and takes hundreds
+of ms; a 2KB instant response is a placeholder thumbnail. Meanwhile the
+tile sat in MJPEG mode because the stream *decodes* — a steady all-black
+feed — so `naturalWidth > 0` stood the watchdog down. Every tier reported
+victory while delivering garbage. Fixes on both ends:
+
+**Server**: a first-pass snapshot under 12KB (`SMALL_SUSPECT_SIZE`) is now
+treated as a placeholder even when it isn't literally black — the stream
+gets woken and re-shot for a real frame, with the tiny one kept only as a
+last resort. The DIAG probe reports luminance stats (`lum μ σ W×H`) on
+every frame it sees and calls out SUSPECT sizes instead of declaring
+victory, so the next screenshot self-diagnoses.
+
+**Panel**: the watchdog and the load-listener are now content-aware — a
+decoded frame only proves a tier works if it isn't near-black (mean
+luminance sampled via a 32×32 canvas; unverifiable frames get the benefit
+of the doubt). A black MJPEG stream now escalates exactly like a dead one.
+DIAG gains a **TILE** line reporting the client half of the story: render
+mode, decoded dimensions, and the current frame's luminance — including an
+explicit "BLACK STREAM (decodes fine, shows nothing)" verdict.
+
+## [6.46.2] — stop guessing: camera diagnostics
+Three versions of fixing blank Nest tiles blind is enough. The Camera
+Watch head gains a **DIAG** button that probes the active camera
+end-to-end — the exact tiers `_get_best_image` walks, instrumented:
+backend match and fetch (with *why* it was empty), standard snapshot
+(including the blank-frame check), and the stream-wake retry, each with
+its result and the whole thing timed. The verdict is actionable — a Nest
+camera failing every tier gets told about event media and Pub/Sub
+subscriptions, not just "no frame" — and is also written to the Logs tab.
+
+The probe response always includes a platform histogram of every camera
+entity HA has, which answers the question underneath all of this in one
+glance: **if `nest×N` isn't in that list, the Google Nest integration
+isn't delivering camera entities to HA at all**, and no amount of
+Nova-side code can render what HA doesn't have.
+
+New: `nova/camera_diagnostics` WS command, `camera.probe_camera()`
+(kept tier-for-tier in sync with `_get_best_image`), 6 unit tests, 5
+panel smoke checks.
+
+## [6.46.1] — the fallback chain learns about hangs
+6.46.0's camera escalation was driven entirely by `<img>` error events —
+and the most common Nest failure mode fires none. HA's proxy endpoints
+often HANG for a WebRTC camera (HTTP 200, connection held open, zero
+frames ever sent) while it tries to start a stream that will never
+produce one. No error event → no escalation → tile still blank.
+
+A no-frame watchdog now backs up the error path: if no decoded pixels
+arrive within the window (6s stream / 5s stills — checked via
+`naturalWidth`), the tier escalates exactly as an error would have. A
+frame arriving stands the watchdog down.
+
+Also fixed a self-inflicted diagnosis gap: the Nova snapshot tier
+swallowed WS errors silently. If the command doesn't exist — the classic
+case being HA not restarted after updating — the tile now says
+"restart Home Assistant" instead of showing nothing. Other WS errors
+render their message. Server-side, empty or failed snapshot fetches now
+write a CAMERA line to the activity log (throttled to one per entity per
+5 min) so the Logs tab answers "why is there no frame" directly.
+
+## [6.46.0] — Nest cameras visible, phantom packages gone
+Two long-standing camera complaints, both traced to real bugs.
+
+**Nest tiles were permanently blank.** The panel's fallback was
+stream → stills, but WebRTC-only Nest cameras fail *both* — no MJPEG
+stream exists, and an idle WebRTC camera can't produce stills through
+`/api/camera_proxy` — leaving the tile in a silent error loop. The chain
+now escalates a third time to a new `nova/camera_snapshot` WS command
+that pulls frames through Nova's own backend registry (Nest event media,
+stream-wake), polling gently at 6s. A camera that resolves to this tier is
+remembered, so re-renders jump straight there instead of blank-flashing
+through two 404s. If even Nova can't get a frame, the tile now *says so*
+with a pointer at the Nest integration rather than showing nothing.
+
+**"A package has been delivered" — when none was.** Three compounding
+causes, all fixed:
+  • The doorbell-press path matched keywords with no negation handling —
+    an analysis reading "person at the door, **no package** visible"
+    literally contains "package" and announced a delivery. Negated spans
+    (including "no packages or mail" chains) are now stripped first.
+  • Backend-sourced frames (Nest event media, Frigate snapshots) skipped
+    the blank-frame check that guards the standard snapshot path — a black
+    wake-up frame fed to a vision model is a hallucination machine. Blank
+    frames are now dropped before classification.
+  • A single frame could announce an arrival. A NEW positive now triggers
+    one immediate re-capture + re-classify, and only two independent
+    frames agreeing announce — one extra vision call, only when an
+    announcement is on the line. Pickups still register from one frame.
+
+Also: README gains a proper "Nest cameras (prerequisite)" section — the
+Google Device Access / SDM / Application Credentials setup lives on the
+official Nest integration, which Nova consumes; that's the only path
+Google's licensing allows, now documented instead of tribal knowledge.
+
+## [6.45.2] — hassfest gets its way
+The 6.45.1 push tripped hassfest on four counts, all now fixed:
+
+  • `assist_pipeline` (used by the voice bootstrap's pipeline creation) and
+    `recorder` (used by the sparkline history fetch since 6.43) are now
+    declared in `after_dependencies` — both are opportunistic uses that
+    hassfest rightly wants on the record.
+  • The `llm_base_url` field description in `strings.json` and
+    `translations/en.json` contained a literal example URL, which the
+    translations validator forbids. Reworded to convey the same Ollama
+    default (host/port/path) without a URL.
+
+Also reordered manifest.json keys to hassfest's canonical form (domain,
+name, then alphabetical) — currently only a preference, but the Cove
+project got bitten by it once and it costs nothing to be ahead of it.
+
+## [6.45.1] — Nova gets its face back
+The integration now ships its brand icon at
+`custom_components/nova/brand/` (icon.png 256×256 + icon@2x.png 512×512,
+web-optimized). Since Home Assistant 2026.3, custom integrations serve
+brand images directly from this folder through the local brands proxy —
+taking priority over the CDN, no home-assistant/brands submission needed.
+This is also now HACS's required form for brand assets, so it checks a
+default-store submission box at the same time. Users on HA older than
+2026.3 still see no icon until/unless a brands-repo PR is made; that's
+optional now, not blocking.
+
+## [6.45.0] — the add-on era is officially over
+The last roadmap item from the great cutover: removing the machinery that
+existed to bridge the old add-on and the integration. None of it had a
+living counterpart anymore — the add-on that wrote `nova_config.json` is
+gone, its orchestration long since re-homed into the in-process voice
+bootstrap.
+
+Removed:
+  • The ~95-line "addon-owned keys" reconcile block that ran on every
+    setup, hashing a config file nothing writes. Worse than dead weight: a
+    stale leftover file could have shadowed Configure-dialog choices after
+    any future change to the key list.
+  • The `nova_config.json` import triggers (`async_setup`,
+    `async_setup_post_start`) — the latter had no callers at all.
+  • The v5.8.03 old-path migration in `nova_config.py`.
+  • The legacy path from the config flow's auto-import.
+
+Kept, deliberately: the auto-import itself. `/config/nova/config.json`
+is the panel's runtime store and survives integration removal, so deleting
+and re-adding Nova picks all your settings back up with zero re-entry —
+that was never an add-on feature, just a good one.
+
+Nova is now cleanly config-entry-only: users who still have `nova:` in
+configuration.yaml get a proper warning, the conversation agent registers
+through the platform as it always did, and setup has exactly one path.
+Also updated the README's voice-setup note, which still described the
+in-process bootstrap as a future plan.
+
+## [6.44.0] — activity feed search (and the feed is actually live now)
+The Command Center's Activity Feed gets the same treatment the Logs tab got
+in 6.43: a search box that filters events by message or tag as you type,
+with a "1 of 30" count and a clear empty state.
+
+Wiring it exposed a quiet bug worth its own line: the Activity Feed never
+updated in place. The 5s/real-time refresh patched status rows, the
+dominant room, and area tiles — but not the feed, which only redrew on a
+full structural re-render (an area being added or removed). In practice the
+feed silently went stale the moment you opened the dashboard. It now
+rebuilds its rows on every refresh, respecting whatever search is active,
+without stealing focus from the search box.
+
+## [6.43.0] — UI Phase 3: real-time, sparklines, entity cards, log search
+Four things, in build order.
+
+**Real-time entity subscriptions.** The dashboard polled every 5s flat. It
+now subscribes to HA's native `state_changed` events (the same pattern
+Camera Watch already used for its own events) and refreshes within ~2s of
+anything actually changing — throttled so a burst of activity coalesces
+into one refresh, not one per entity. The 5s poll is now a 20s safety net,
+since real-time now covers the common case.
+
+**Area tile sparklines.** Every area tile with a temperature or humidity
+sensor now shows a compact trend line, not just the instant reading. This
+needed a new data path: `state_changes` (patterns.db) deliberately excludes
+sensor/binary_sensor domains as noise for pattern learning — exactly the
+domains a sparkline needs — so this is the integration's first use of HA's
+`recorder` history API, polled separately and slowly (5 min) since history
+queries are heavier than the rest of the panel payload. This is the one
+piece I couldn't exercise against a live recorder from here — worth a close
+look on first deploy.
+
+**Entity cards.** Click an area tile → a drill-down detail card: full-size
+temp/humidity readouts with their sparklines, lights with the same toggle
+as the tile, last motion, capabilities. Area tiles picked up `temp`/
+`humidity` for the first time too — previously only the dominant room ever
+got that data.
+
+**Log search.** A text box next to the category filters, debounced,
+filtering message and category text together with whatever category's
+selected. A count line ("12 of 340") and a real empty-state message when a
+search or filter matches nothing, instead of a blank pane.
+Two things v6.40 and v6.41 built now have somewhere to show up.
+
+**Goals card** (Command Center): every active goal, with its step progress,
+next-check or deadline countdown, and a cancel button — plus recently
+finished ones for a moment of "oh, it got that done." This existed in the
+backend since the goal planner shipped with no way to see it short of asking
+Nova directly.
+
+**Person Routines** (Memory tab): the per-person habits Nova has learned
+with enough confidence to attribute to one person by name, grouped and
+confidence-scored, sitting next to the household-wide facts it already showed.
+
+Also fixed along the way: the Suggestions card — live since the pattern
+engine shipped — was silently reading `undefined` for its data the whole
+time. `_data()` normalizes the raw panel payload into a fixed shape and never
+carried the `suggestions` field through, so the card only ever rendered
+empty. Both suggestions and the new goals data go through the same fix.
+Since v6.29, every voice command has been tagged with the resolved person —
+but that signal went nowhere. The pattern analyzer only ever learned
+household-wide habits, and a `person_patterns` table has sat in the schema
+since the goal planner shipped, unused.
+
+State changes now carry a person too — stamped cheaply, sole-occupant only,
+by the same listener that logs them for pattern learning (the full face/voice
+resolver is too costly to run on every light flip; that's reserved for the
+much lower-volume conversation path). When one person accounts for the clear
+majority of an entity's routine, or a repeated command, Nova now says so:
+"turns on around 7:00 most days when Sam is home" instead of a blanket
+household statement — and attributes the learned fact to *that person's*
+knowledge subject, not the household's. Mixed or ambiguous patterns behave
+exactly as before.
+
+`person_patterns` finally has a writer: person-owned routines land there,
+independent of the household suggestions/automations flow, ready for a
+per-person Routines card whenever UI work resumes.
+
+This is data-layer only — no new UI this round. Next up: surfacing it.
+Nova now has a goal planner: hand it an *outcome* and it will keep working
+toward it — across minutes, hours, or days — until it's achieved, impossible, or
+you call it off.
+
+  "Get the house ready for guests by Saturday afternoon."
+  "Warm the living room to 72 and let me know when it's actually there."
+  "Keep an eye on the basement humidity today and run the dehumidifier if it climbs."
+
+When you ask for something like that, Nova breaks it into concrete steps and
+opens a goal. From then on it re-engages on its own cadence with its full
+toolset — checking states, acting (every action still self-verifies), marking
+steps off, and deciding when to check back next. It works **quietly**: progress
+lands in the activity log, not your ears. You hear from it when the goal
+*finishes* — done or failed — with a plain-spoken result, through the normal
+announcement routing (so quiet hours still apply). Ask "what are you working
+on?" anytime for status, or tell it to drop one.
+
+Deadlines are honored honestly: if time runs out, Nova wraps up what it can
+and closes the goal rather than pretending. And it can't run away with itself —
+active goals are capped, each goal has an engagement budget, and a hiccup
+mid-run (say the LLM being briefly unreachable) just means it tries again at
+the next check instead of giving up.
+
+This completes the agency ladder: `execute_plan` does many things *now*,
+follow-ups handle one thing *later*, and goals pursue an *outcome* until it's
+real.
+
+## [6.39.0] — Nova knows outside from inside
+An audit of how Nova classifies the outside world found the biggest remaining
+sources of intrusion false alarms — and one filter from the original design that
+had been sketched but never actually connected. All fixed:
+
+  • **A delivery driver can no longer "confirm" a break-in.** Person detections
+    from OUTDOOR cameras (driveway, doorbell, backyard) no longer count as proof
+    someone is inside the house. Only an indoor camera seeing a person confirms
+    an intrusion; the courier at your door stays a doorstep event.
+  • **Outdoor motion can't start an intrusion investigation.** Previously only a
+    handful of hard-coded names ("backyard", "porch"…) were recognized as
+    outdoor — a sensor called *patio*, *deck*, *shed*, *garden*, *pool*, or
+    *doorbell* was treated as motion **inside your house**. Nova now uses a
+    proper classifier: your Home Assistant areas, a much richer set of outdoor
+    names, and — decisively — your own say-so.
+  • **An open yard gate isn't an open house.** Property-perimeter openings (a
+    driveway or side gate) no longer corroborate a break-in the way an open
+    window does. The garage still counts — it's part of the house.
+  • **You get the final word.** Three new settings — `outdoor_areas`,
+    `outdoor_entities`, and `indoor_entities` (globs; indoor wins) — let you
+    force-classify anything the auto-detection gets wrong, no renaming required.
+
+The notable-event policy (a person, package, mail, or damage outdoors is worth
+telling you about; wind, passing cars, and animals are not) is now wired into
+the same classifier, ready for the vision layer to consult.
+
+## [6.38.0] — Nova closes its own loops
+Two upgrades that make Nova genuinely agentic — acting across time and
+confirming its own work — instead of only reacting turn by turn:
+
+**It schedules its own follow-ups.** Nova can now queue work for its future
+self and run it autonomously: "close the garage" can become *close it, then
+check in five minutes that it actually shut*; adjusting the thermostat can come
+with *confirm the room reached temperature in half an hour*; "remind me the
+oven's on in 45 minutes" just works. When a follow-up comes due, Nova runs it
+with its full toolset — checking states, acting if needed — and reports the
+outcome out loud through the normal announcement channel (so quiet hours still
+apply). Ask "what do you have queued?" to review or cancel them.
+
+**It verifies what it was asked to do.** Every deterministic action — on/off,
+lock/unlock, open/close — is now checked a few seconds later. If the device
+didn't reach the target, Nova retries once; if it *still* didn't, that shows
+up honestly in the activity log ("the garage door did not respond to close even
+after a retry — it may be jammed, obstructed, or offline") instead of the
+command silently going nowhere. Successes stay silent; only trouble surfaces.
+
+Both build on everything Nova already learned this cycle: follow-ups announce
+through the same routing as its other proactive speech, failures land in the
+same activity log the root-cause analyzer reads, and the graduated-trust
+autonomy model keeps the user in charge of what runs silently.
+
+## [6.37.0] — ask Nova *why* something happened
+Nova can now perform root cause analysis. Ask it things like "why did the
+kitchen lights turn off?", "what caused the heat to kick on at 3am?", or "who
+unlocked the front door?" — and instead of just reporting the state, it
+investigates: it pulls its own state history, recent voice/text commands, and
+its own actions from around the event, builds a timeline, and ranks the likely
+causes with confidence:
+
+  • a **recorded trigger** — when the change was captured with its cause attached
+  • an **upstream failure** — a related device or hub going unavailable moments
+    before (the classic "everything on that hub dropped" cascade)
+  • a **person's request** — someone asked for it by voice or text, and who
+  • a **Nova action** — it did it itself (lockdown, a routine, an announcement)
+  • a **recurring schedule** — the same change happens at this hour most days,
+    pointing at a Home Assistant automation
+  • **related room activity** — something else changed in the same room just
+    before
+
+When the evidence is thin it says so honestly rather than inventing a story.
+Everything runs locally over history Nova already keeps — no cloud calls to
+analyze — and the answer comes back as a spoken-style explanation with the
+timeline behind it. It's also available to the dashboard for an entity-by-entity
+"why" view.
+
+## [6.36.2] — the Memory forget button works now
+Removing a memory with the ✕ on the Memory tab did nothing. The panel was sending
+the fact's id in a field named `id`, but Home Assistant's WebSocket layer reserves
+`id` for its own message numbering and overwrites it — so the request arrived
+asking to forget the wrong thing, and nothing was deleted. The id now travels in
+its own field, so ✕ removes the memory as expected (and the list updates
+immediately). Added a guard so no future panel action can trip over the same
+reserved field.
+
+## [6.36.1] — spoken replies fall back to your real speakers
+Following on from 6.36.0: if your voice satellite can't play audio itself — a
+mic-only board (Waveshare with the speaker DAC off), or one in a room with no
+real speaker — a spoken reply had nowhere to go and was silently lost, even
+though proactive announcements (the briefing) played fine on your chosen
+speakers. Now, when a reply would land on a satellite that can't speak, Nova
+routes it to the same reply/broadcast speakers the briefing already uses. So if
+the briefing is audible, replies will be too.
+
+(You can still pin a specific speaker per satellite under Settings → satellite
+pairings for room-accurate replies; the fallback only kicks in when there's no
+usable speaker otherwise.)
+
+## [6.36.0] — voice replies come back reliably
+If Nova answered typed questions but went silent over voice, this is the fix.
+Two of Nova's own reply-routing safeguards could swallow a spoken reply while
+leaving text untouched (text never goes through them):
+
+  • **Room-presence gating is now off by default.** Nova used to check the
+    satellite's room for occupancy and stay silent there if a sensor said the
+    room was empty — meant to keep only the right room answering. But if the
+    room's mmWave/occupancy sensor hadn't registered you yet (or was flaky), it
+    silenced the very satellite you were talking to. The multi-satellite dedup
+    already prevents several speakers answering at once, so this gate is now
+    opt-in (`presence_gate: true`) for homes with rock-solid per-room presence.
+  • **A dead reply speaker no longer eats the reply.** When you have a reply/Cast
+    speaker configured, Nova silences the satellite and speaks through that
+    speaker instead — but it was doing so even when the speaker was offline,
+    losing the reply entirely. Now it only hands off to a reply speaker that's
+    actually reachable; otherwise the satellite speaks.
+
+Net effect: the satellite you spoke to answers, unless you've deliberately set up
+room-targeted or Cast-speaker replies and those are healthy.
+
+## [6.35.0] — intrusion checks start at the door and follow the route
+Nova now reasons about *where* activity is before crying wolf. When motion
+happens while no one's home, it anchors the search at the **point of entry** —
+the room with the open window or door — and only concludes there's an intruder
+when activity forms a plausible route from there: motion at the breach, then into
+the room next to it, and onward, the way a person actually moving through a house
+looks. A camera spotting a person still confirms immediately.
+
+Crucially, motion that has *nothing* to do with the open entry — a blip in a far
+room while the open window is elsewhere, with no activity near it — no longer
+trips a full intrusion alert. Nova keeps watching it (as you asked — it still
+investigates activity anywhere), but it won't conclude an intrusion from
+unrelated motion. That's what eliminates the occasional false alarm.
+
+To follow the route it uses your **Residence floor plan** to know which rooms are
+next to which. If a breach room has no motion sensor, or the layout isn't mapped,
+it falls back to requiring sustained movement through several rooms rather than a
+momentary two-sensor blip. Either way the bar for "intrusion" is higher and
+better-reasoned.
+
+The investigation now also reports the breach point and the route it's tracking,
+so the Residence view can show where an intruder is and where they've been.
+
+## [6.34.0] — Nova knows your voice
+Nova can now tell who it's talking to by **voice**, and learn people's voices
+over time from ordinary conversation — the strongest signal yet for its
+per-person features.
+
+It works by consuming a dedicated speaker-recognition service rather than running
+a voice model itself (that keeps Home Assistant light and your GPU free for the
+LLM). Point it at a service like **VoiceBM** or **speaker-recognition** — anything
+that publishes "who's speaking" to Home Assistant as an entity — and Nova folds
+voice into its existing identity picture alongside who's home and who's on camera.
+When the voice is certain it's used; when it isn't, Nova falls back gracefully.
+
+**Learning over time is hands-free.** The service does the enrolling, but Nova
+supplies the missing piece — the *name*. When it already knows who's speaking
+(you're the only one home, or a camera just recognized your face) but the voice
+service hasn't learned that voice yet, Nova flags it so the sample can be
+enrolled under the right person automatically. Voice profiles build themselves
+from normal conversation, no sit-down training session.
+
+Set it up in Configure → Identity: enable the voice tier and give it your
+service's speaker entity (e.g. `binary_sensor.*_voice`). A full setup guide,
+including the auto-enrollment automation, ships alongside this release.
+
+## [6.33.0] — one alert, then Nova investigates and escalates
+Motion while no one's home no longer turns into a stream of repeat alerts. Now
+Nova alerts **once** and then investigates quietly:
+
+  • A window or door left open on purpose is still a valid way in, so motion near
+    it gets the one alert — Nova doesn't ignore it, and doesn't nag about it.
+  • After that single alert it watches silently, tracking whether the motion
+    stays put (a pet, a blind, one sensor) or **spreads through the house** the
+    way a person moving room to room would — and it also watches your cameras for
+    a person. It keeps investigating for as long as it takes to decide.
+  • If it's **nothing** — motion settles, stays in one spot — it quietly stands
+    down. No second alert.
+  • If it **confirms an intrusion** — motion across multiple rooms, or a person
+    on camera — it escalates hard: it announces out loud to the whole house
+    **regardless of the time of day**, and pushes to **every device** connected
+    to your home, not just one phone. A persistent notification is left too.
+
+If residents come home mid-investigation, Nova stands down on its own.
+
+You can tune it: `intrusion_spread_zones` (how many rooms of motion means
+"someone's moving through", default 2), or turn the whole corroboration
+requirement off with `intrusion_require_corroboration: false`.
+
+## [6.32.0] — doors show open, quieter motion alerts, tuned for Ollama
+Three things:
+
+**Doors now actually show open on the Residence tab.** The house model was
+never receiving live door state — the panel was quietly dropping it before it
+reached the 3D view, so garage doors (and every other door) always drew closed
+no matter what. Fixed at the source; open doors now render open, and combined
+with the door-mapping added earlier you can make them match your home exactly.
+
+**Motion alerts only fire when something's actually wrong.** When no one's home,
+plain motion — a pet, a robot vacuum, blinds moving in the airflow, sun on a
+sensor — no longer sets off an intrusion alert. Nova now only alerts on motion
+while away when it's corroborated: the alarm is armed, or a door/window is open
+(a real entry). If you'd rather be alerted on any motion, set
+`intrusion_require_corroboration: false`.
+
+**Optimized for a local Ollama server.** If you point Nova at Ollama, it now
+keeps the model loaded between requests (no reload lag), uses a much larger
+context window than Ollama's small default (so long prompts aren't silently
+truncated), and allows a generous timeout for cold-start model loads. Point it
+at your Ollama endpoint and it'll run local without the first-token stalls.
+
+## [6.31.0] — lockdown closes what it can, and stops repeating itself
+Two things, both from real use:
+
+**It stops nagging.** Lockdown was re-announcing "lockdown engaged" on every
+restart and reload — so during a day of tinkering you'd get the same alert over
+and over. Now an already-armed alarm is adopted silently on startup; the
+announcement only fires when the alarm actually arms (or you engage it yourself).
+And anything it can't secure is mentioned once, never on a loop.
+
+**It actually secures what it can.** On engage, lockdown now:
+  • locks every motorized lock that's unlocked;
+  • **closes motorized openings** — garage doors and powered covers. These have
+    safety sensors, so if something's in the way the close just fails (and you're
+    told it couldn't close), rather than forcing shut on a car or person;
+  • for openings it can't close remotely — a plain window contact with no motor —
+    it alerts you once so you can close it by hand, then treats it as
+    intentionally open and leaves it alone.
+
+So a typical engage now reads like "Sir, lockdown engaged — I locked the front
+door and closed the Garage Door, but Sam's Window 1 is open and I can't secure it
+remotely — you'll want to close it," and you hear it once, not every few minutes.
+
+## [6.30.1] — lockdown tells you what's actually open
+The lockdown announcement could come out nonsensical — "everything already
+locked. 1 opening already open will be left as-is" — which made it sound like
+Nova did nothing and was shrugging off the one door that was actually open.
+During a lockdown an open door is the thing that matters, so the message now
+names it and tells you to deal with it: e.g. "Sir, lockdown engaged. Everything
+was already locked, but the Garage Door is open and I can't secure it remotely —
+you'll want to close it." When nothing needs locking and nothing is open, it
+simply says the home was already fully secured, instead of announcing a non-event.
+
+## [6.30.0] — the Residence doors reflect reality now
+The 3D house shows your doors open and closed live, but it had to *guess* which
+of your entities was the garage, the front door, the cellar, and so on — purely
+from their names. If your garage door's entity didn't happen to contain the word
+"garage", or was exposed without a device class (common), it never showed as
+open. That guessing is why the door states felt unreliable.
+
+Two fixes:
+
+  • **You can now map doors explicitly.** A new section on the Residence tab lets
+    you point each door slot — Front, Garage, Garage Side/Rear, Kitchen↔Garage,
+    Cellar, Basement — at the exact entity in your home (a cover, a door/contact
+    sensor, or a lock). Mapped doors are read directly, with no guessing, so they
+    always match. Leave a slot blank to keep auto-detection.
+  • **Auto-detection is smarter.** Garage doors exposed as a cover with no device
+    class are now recognized by name, while window coverings (shades, blinds) are
+    excluded so they're never mistaken for doors.
+
+So your garage door — and the rest — will track correctly: map it once and it's
+certain, or rely on the improved auto-detection.
+
+## [6.29.2] — the Residence tab saves your settings now
+Changing anything on the **Residence** tab — home style, number of floors,
+whether there's a basement, dormers, garage bays, chimney side, square footage,
+bed/bath counts — was silently failing with an error, because the backend was
+rejecting those settings as "not writable from the panel." Only the room layout
+and background-image editor actually saved. Every Residence control now persists
+correctly, so you can describe your home and have the 3D model match it.
+
+## [6.29.1] — the Configure dialog actually configures now
+If you opened **Settings → Devices & Services → Nova → Configure** and got a
+step that showed a heading but no fields — just a Submit button — that's fixed.
+The Configure dialog is a proper four-step setup (Core, Routing, Observer,
+Identity) with real controls, pre-filled with your current values:
+
+  • **Core** — what Nova calls you, its directive/personality preset (or a
+    custom directive), the conversation model, and whether it can control the home.
+  • **Routing** — your bedroom areas, a broadcast speaker group, and a phone
+    notify service.
+  • **Observer** — turn proactive awareness on, with its Gemini vision key, the
+    model tiers, and quiet hours.
+  • **Identity** — per-person recognition: on/off, the confidence threshold, and
+    the voice-fingerprint tier (the one that needs a GPU).
+
+This is in addition to the in-app Nova panel, which still holds the full set of
+settings. (The empty dialog was leftover skeleton steps from an earlier build;
+the fields had never been wired in.)
+
+## [6.29.0] — Nova knows who it's talking to
+Until now Nova treated everyone the same — it remembered facts and learned
+routines, but couldn't tell who was speaking. It can now figure out *who* it's
+talking to and tailor itself to that person: your preferences surface for you,
+your spoken "remember that I…" is filed under you (not shared), and the routines
+it learns get attributed to the right person instead of a generic "someone."
+One resident's private facts no longer leak into another's conversations.
+
+**It works without any special hardware.** Nova figures out who you are from
+signals your home already has, in tiers:
+
+  • **Who's home** — if you're the only person home, that's almost certainly who
+    it's talking to. (Just Home Assistant person tracking — nothing to set up.)
+  • **Recent face** — if a camera recognized someone moments ago, that's a strong
+    clue. (Uses your existing Frigate/DoubleTake setup, which runs on the camera
+    side — no GPU on your Home Assistant box.)
+  • **Voice** *(optional, needs a GPU)* — recognizing people by their voice is the
+    most direct signal, but it needs local AI horsepower, so it's **off by
+    default**. When your GPU server is online you can switch it on; until then,
+    the two tiers above give a non-power-user a fully working setup with zero
+    configuration.
+
+Nova only commits to a person when it's reasonably sure — when the signals are
+ambiguous (say, two people home and no camera match), it stays neutral rather
+than guessing wrong. The whole feature can be turned off, and the confidence
+threshold tuned, in config.
+
+## [6.28.0] — zero-touch voice setup is back
+The convenience the old add-on gave you — automatically installing the voice
+stack and setting up Nova's voice — now lives inside the integration, so the
+HACS install gets it too. After you add Nova, on Home Assistant OS / Supervised
+it quietly does the legwork in the background: installs the Piper, Whisper, and
+openWakeWord add-ons if they're missing, downloads the Nova voice, restarts
+Piper to pick it up, reconnects Wyoming, and builds an Assist pipeline with
+Nova as the conversation agent. You don't have to touch any of it.
+
+It's careful about it: the setup runs once per version (not on every restart),
+never re-installs things you already have, and if any step can't complete it
+just tells you the one manual step to finish in Settings → Voice Assistants
+rather than failing. On Home Assistant Container/Core (no Supervisor) it cleanly
+does nothing — there are no add-ons to install there — and you set up voice the
+normal way. Power users can turn the whole thing off with `auto_bootstrap: false`.
+
+With this, the move to a HACS integration is complete: install Nova and
+everything — conversation, vision, the cognitive core, memory, the dashboard,
+and now voice — comes up on its own.
+
+## [6.27.0] — Nova is now a HACS integration
+Nova installs through **HACS** now, as an ordinary Home Assistant integration —
+no separate add-on. It runs entirely inside Home Assistant, so there's no extra
+container to manage, and updates come through HACS like any other integration.
+
+To install: add this repository to HACS as a custom **Integration**, install
+"Nova AI Assistant," restart, then add it under Settings → Devices & Services
+and enter your API key (or a local LLM URL). Everything else is still configured
+from the Nova panel.
+
+If you were running the old add-on: your data is safe. Everything under
+`/config/nova/` — learned patterns, the new knowledge store, your persona, and
+your settings — stays on disk, and Nova automatically imports your existing
+configuration on first start, so nothing is re-entered.
+
+One thing is still in flight: the add-on used to auto-install the voice stack
+(Piper, Whisper, openWakeWord), download the Nova voice, and build the Assist
+pipeline for you. That convenience is being re-homed into the integration. Until
+it lands, set the voice pipeline up once via Settings → Voice Assistants with
+Nova as the conversation agent. Everything else — conversation, vision, the
+cognitive core, the dashboard, memory — works immediately on install.
+
+## [6.26.0] — Nova learns your routines on its own
+The pattern engine that watches how you use the house now does two new things
+with what it sees.
+
+First, the strongest routines it spots become things Nova simply *knows* —
+they show up in the Memory tab on their own, marked with a "~" so you can tell
+what it figured out by watching versus what you told it directly. So after a
+week or two you might open Memory and find "porch light turns on → around 18:00
+most days," or "asks 'goodnight' → usually around 23:00," with no effort on your
+part. Anything you've stated yourself always wins and won't be overwritten by a
+guess, and you can forget any of these with the ✕ like any other fact.
+
+Second, a fix: Nova can now actually notice when one thing reliably follows
+another — "the kitchen light comes on right after the hallway light" — and offer
+to automate it. That detection had been silently failing; it works now, so the
+"shall I automate this?" suggestions will be richer.
+
+As before, suggested automations still wait for your yes/no — nothing is created
+behind your back.
+
+## [6.25.0] — Nova remembers
+Nova can now hold on to durable facts and preferences — the kind of thing a
+real butler just knows about your household — and bring them up naturally in
+conversation. Tell it "remember that trash is Tuesday," or "remember I run cold
+at night," and it keeps that. Ask later and it answers from what it knows; it
+also quietly factors these in whenever it talks to you.
+
+There's a new **Memory** tab to see and curate everything Nova knows:
+
+  • Each fact is listed plainly — "trash day → Tuesday" — grouped into things
+    about the household and things about you.
+  • Teach it something on the spot with the box at the top, no voice needed.
+  • Forget anything with the ✕ — this is your control over what it retains.
+  • Facts it picked up by observation rather than being told are marked with a
+    small "~", so you can see at a glance what it's sure of versus inferring.
+  • Facts can be made to expire on their own — handy for the ephemeral ("the
+    sitter comes at 3 today") so they don't linger as stale knowledge.
+
+This sits alongside the conversation memory Nova already had (which recalls the
+gist of past chats); the new layer is curated knowledge you can read and edit
+directly, and it's the foundation the per-person and goal-planning features to
+come will build on.
+
+## [6.24.3] — Lockdown holds, and handles open doors the way you'd expect
+Lockdown now stays put. The earlier "it flips on then flips back" was the header
+not being told the real lockdown state on its regular refresh — it is now, so the
+switch reflects exactly what the house is doing and holds there.
+
+Lockdown is also smarter about doors and windows. Anything already open when you
+engage is treated as deliberate and left alone — no fighting you over a window you
+opened on purpose. From then on it watches for things that were shut and then open:
+
+  • if it's something Nova can close or lock (a smart garage door, a smart lock),
+    it secures it — and if that doesn't actually take, it alerts you;
+  • if it's something Nova can't operate (a plain open/closed sensor with no
+    motor or lock behind it), it assumes you meant to open it and leaves it be;
+  • if Nova closes something and you open it right back, it takes the hint, leaves
+    it open, and tells you once.
+
+Worth knowing: because un-closeable openings are now assumed intentional, a window
+Nova can't physically close that opens mid-lockdown is left alone rather than
+alerted — your call, as requested. Auto-arm-with-the-alarm and surviving reboots
+from the last update are unchanged.
+
+
+## [6.24.2] — Lockdown that actually engages (and follows your alarm)
+Fixed the lockdown toggle for good and made it dependable. It now engages every time you flip
+it, the header switch reflects it immediately, and lockdown follows your alarm on its own — it
+arms whenever any alarm panel is armed and lifts when you disarm, and it holds that state across
+reboots and updates. (Manually flipping it off while armed still wins until you next disarm.)
+
+Why it was stuck: lockdown used to be set up deep inside the optional observer's startup, so any
+hiccup there left it silently switched off — which is exactly why the toggle did nothing while
+everything else worked. It's now its own always-on security feature, created on demand if needed,
+watching your alarm directly so arming/disarming takes effect the instant it happens instead of
+waiting on a background cycle. The add-on log also spells out each lockdown action now, so if
+anything misbehaves it's clear what happened.
+
+
+## [6.24.1] — Basement door
+Added the basement door at the foot of the cellar stairs. It lines up directly under the
+cellar bulkhead and appears on the basement floor view, opening and closing in step with its
+door sensor like every other door.
+
+## [6.24.0] — Your doors, live on the model
+Your doors now appear on the 3D home and light up the moment they open. Nova watches your
+door and garage-door sensors and shows each one's state on the model — an open door glows amber
+and swings ajar, a closed one sits flush in cyan, refreshing within a few seconds.
+
+The home you see is a Cape Cod — the developer's own house, included as a worked example you'd
+reshape into your own (see Settings → Residence / Home). It models a front entry, three garage
+bays, a garage rear/man-door, a cellar bulkhead under the kitchen window, and an interior
+kitchen↔garage door. Exterior doors show on the main view; interior doors show on the matching
+floor view.
+
+Nova matches your sensors to these doors by name — e.g. a sensor with "cellar" or "bulkhead"
+lands on the cellar, "garage" + "side"/"man" on the garage man-door, "front" on the entry. If a
+door never lights up, its sensor name didn't line up with one of those doors.
+
+## [6.23.2] — Lockdown shows its real state · smoother phone rotation
+Lockdown now reflects what's actually happening. Engage it — or have your alarm arm and trigger
+it automatically — and the header switch and status both flip to ARMED and stay there. And on a
+phone, spinning the 3D home no longer drags the page with it: a sideways swipe rotates the
+model, an up/down swipe scrolls the page.
+
+## [6.23.1] — Lockdown is a real switch
+The lockdown control in the header is now an unmistakable on/off switch instead of a vague
+banner. On, it slides over and glows red ("ARMED"); off, it sits grey. One glance tells you
+whether the house is locked down.
+
+## [6.23.0] — Make the model your home
+The residence model is no longer fixed to one house. From Settings → Residence / Home you can
+set it up for your own place: choose a home type (Cape Cod, Colonial, Ranch, Two-Story,
+Craftsman, Modern, Townhouse, Apartment, or Cabin) and your specs — garage bays, dormers,
+chimney side, basement, bedrooms, bathrooms, square footage, and address — and the 3D model and
+the property readout update to match. Out of the box it's a Cape Cod (the developer's own home)
+as a starting point; change the type and specs to make it yours. The floor tabs follow along,
+too — single-story homes drop the 2nd-floor tab, basement-less homes drop the basement.
+
+## [6.22.0] — Nova on your phone
+The whole panel now works on a phone, not just a desktop or tablet. The tab bar scrolls instead
+of running off the edge, the 3D home shrinks to fit the screen, the header and controls stack,
+and you can drag to spin the model without the page fighting you. Nothing changes on desktop.
+
+## [6.21.0] — Rotatable 3D residence model (default)
+The residence overview is now a real, drag-rotatable 3D model of the home, replacing the
+fixed cabinet-projection drawing. It is a pure-geometry axonometric projection rendered to
+SVG (no build step, no CDN), so the same code rotates in the browser and rasterizes for
+release verification.
+- **Drag to rotate** to any angle; the model re-projects live.
+- **Floor isolation** (All / 1st / 2nd / Basement). The "All" view shows the exterior with
+  presence as lit windows; each floor view drops the shell and shows that level's rooms as
+  labeled translucent volumes with per-room occupancy (cyan occupied, green dominant).
+- **Built to the real house** — dimensions from the architectural plan (63′×24′ footprint,
+  garage 30×24, house 33×24, dormered ~400 sf second floor); room layout and labels from the
+  floor-plan editor. Correct gable roof, two front dormers, the round-window rear dormer
+  (upstairs bath), three-car garage, and the exterior chimney on the east gable.
+- **Occupancy is data-driven** from live HA areas matched by name, so rooms light up as people
+  move through the house.
+- **Not hard-wired to one home:** the house spec (dimensions, room list, garage doors, dormers)
+  is a single labeled default-config block at the top of the inlined `NOVA3D` module — edit
+  it for a different house. Address still comes from config.
+- Retired the leader-line presence callouts (a rotating model can't anchor fixed leaders);
+  presence now reads directly off the lit windows and labeled rooms. Smoke test updated to
+  assert the rotatable model, the three garage doors, and floor-isolation labels.
+
+## [6.20.3] — Real-home geometry: 3-car garage + corrected room windows
+Calibrated the cabinet-projection house against the actual property photos.
+- **Three garage doors.** The left wing now renders three evenly-spaced single doors
+  (was two), matching the real garage. All three light together from the `cover.*garage*`
+  state.
+- **Front facade corrected.** The wide left window is now a single Living Room picture
+  window (two sections, no longer a stray "Kitchen" pane); front door and Dining window
+  to the right are unchanged.
+- **Corner rooms on the right gable.** The two windows flanking the end chimney now map to
+  the rooms that actually sit at that corner — Dining Room (front of the stack) and
+  **Kitchen** (behind the stack, rear-right corner side window).
+- **Projection note.** The Guest Bedroom (rear-left) and the upstairs Bath (the round
+  rear-dormer window) face the two elevations this fixed front-right angle can't show, so
+  they appear in the presence callouts rather than as lit windows. Keeping the front-right
+  view is deliberate — it's the only angle that shows the garage doors.
+- Smoke test extended to assert the garage renders exactly three doors (21 checks).
+
+## [6.20.2] — Flanking-window rooms
+The two windows either side of the end chimney now map to distinct rooms (Guest Room in
+front of the stack, a bath window behind) instead of both showing the living room.
+
+## [6.20.1] — Home corrections (chimney, garage doors, windows)
+From marked-up feedback on the render:
+- **Chimney** moved to the right gable end as a tall exterior stack (was floating mid-roof).
+- **Garage doors** redrawn so they clearly read as doors — bolder frame, panel courses, and
+  vertical seams.
+- **Windows added flanking the end chimney** (living-room windows either side of the
+  fireplace), plus the front-facade window set adjusted (Living / Kitchen / door / Dining).
+
+## [6.20.0] — Residence is now a solid home, not a diagram
+Replaced the isometric room-plate cutaway with a real, solid-massed house drawn in cabinet
+projection — walls, a gabled roof with dormers, the attached garage, a chimney, a front
+door. It reads as a *home*, and it is still a fixed SVG that cannot rotate or zoom.
+- **Presence shows as lit windows.** Occupied rooms glow cyan, the dominant room glows
+  green with a brighter halo, idle rooms stay dark — like a house at dusk with lights on
+  where people are. Garage doors light when the garage is active; basement windows light
+  for the basement.
+- **Window-to-room map:** dormers = Master Bedroom / Eliana's Room; first-floor windows =
+  Living Room / Kitchen / Guest Room; garage doors = Garage; base windows = Basement.
+- **Floor tabs focus a level** by dimming the other floors' windows.
+- Property banner, sq-ft / bed-bath / style / occupied stats, and the systems callouts
+  stay as the HUD surround. Audit clean, smoke 20/20, 170 tests passing.
+
+## [6.19.1] — Lock down the iso view
+Confirmed and hardened that the residence drawing cannot rotate or zoom: the 3D
+transform/drag/wheel methods are empty no-ops, no pointer listeners are attached, and the
+SVG is a fixed viewBox with no transform. Also removed the leftover grab cursor so the
+drawing no longer even looks draggable.
+
+## [6.19.0] — Residence is now a 2D isometric cutaway (no more fragile 3D)
+Replaced the CSS-3D house with a fixed 2D isometric SVG drawing. It renders identically
+every time — there is no rotation or zoom, so nothing can collapse to flat lines or blow
+up and scatter the way the 3D model kept doing. This is the isometric look from earlier in
+the project, re-themed to the panel's cyan and wired to live data.
+- **Always-correct cutaway.** Basement, first floor (garage with doors, kitchen, dining,
+  living room, guest room, hallway), and the dormered second floor (master bed, Eliana's
+  room) drawn as a clean Iron-Man-HUD isometric.
+- **Live presence.** Occupied rooms light up; the dominant room is brightest with a
+  pulsing node and a "◉ DOMINANT" tag; idle rooms stay dim — same data that drove the old
+  view.
+- **Floor tabs emphasise a level.** All / 1st / 2nd / Basement dim the other floors so you
+  can focus one. The property banner, sq-ft / bed-bath / style stats, and the OCCUPIED
+  count (now replacing the old ANGLE readout) sit over the drawing, with the systems
+  callouts down the sides.
+- Removed the 3D drag/zoom/angle controls and machinery entirely. Smoke test updated to
+  assert the SVG renders, the rooms draw, and the occupied count wires up. Audit clean,
+  170 tests passing.
+
+
+6.18.0 restored the right renderer but presented it badly: the auto-fit zoom blew the
+house up to its ceiling on the wide Residence tab, and the default tilt was too top-down,
+so the massing looked exploded and scattered instead of compact like the approved view.
+- **Tamed the zoom.** Auto-fit is now capped at 1.5× (was 2.4×) and targets a compact,
+  focal object — the house no longer fills the tab and overlaps itself.
+- **Near-front hero angle.** Default and Fit now sit at ~22° rotation / -18° tilt — a
+  gentle near-front view (matching the angle the approved preview was shown at) where the
+  gable roof and dormers read as a solid mass instead of a foreshortened aerial.
+- Scroll-zoom, drag-rotate, the 45/135/225/315 presets, and Fit are unchanged; Fit returns
+  you to the hero view. Audit clean, smoke 20/20, 170 tests passing.
+
+
+The 3D residence now uses the solid-walled Cape Cod renderer that was approved earlier
+in this project (the one with a real gable roof, dormers, and chimney) — not the flat
+floor-plate version that had crept in and collapsed to lines at low view angles.
+- **Real house, real roof.** Walls render as solid volumes; the roof is an actual gable
+  (front/back slopes + ridge + gable ends) with three dormers and a chimney. Garage
+  doors sit at ground level and read open/closed from any `cover.*garage*` entity.
+- **Live + dominant aware.** Occupied rooms glow cyan, the dominant room brightest with a
+  pulsing node, idle rooms dim — driven by real presence.
+- **Style selector drives the roof.** Cape Cod / Colonial / etc. keep the gabled roof;
+  Modern / Apartment switch to a flat parapet cap. Rooms stay the same underneath.
+- **Angle presets + Fit.** New 45° / 135° / 225° / 315° buttons and a Fit reset on the
+  Residence tab, so a stray drag to a flat angle is one click to recover (the flat view
+  was why the house looked broken). Scroll still zooms; drag still rotates; the house
+  auto-fits the full-width tab.
+- Smoke test (20 checks) now asserts the solid house actually builds (30+ faces, not flat
+  plates) and the angle presets render. Audit clean, 170 tests passing.
+
+> The renderer is the CSS-3D version pulled from this chat's history. It's a faithful
+> stylized model of the actual house, not a Three.js/satellite reconstruction — that
+> remains the separate, larger track if you want true engine-grade 3D.
+
+
+The residence overview moves out of the cramped dashboard column into a dedicated
+full-width tab, which is what unlocks the annotated-house treatment.
+- **New "Residence" tab** between Command Center and Settings. Command Center keeps
+  System Status / Camera Watch / Activity — the camera now owns the full center column
+  (more room for the feed).
+- **Full-width residence + callouts restored.** With the width back, the leader-line
+  callouts return in the margins like the concept render: live presence on the left
+  (dominant red, occupied cyan, idle dim) and system layers on the right, around a
+  larger 3D house that auto-fits the wider canvas.
+- **Home-style templates.** A HOME STYLE selector picks the massing/roof shell that the
+  floor-plan rooms populate — Cape Cod, Colonial, Ranch, Two-Story, Craftsman, Modern,
+  Townhouse, Apartment, Cabin. Peaked styles render a gable (end-walls + ridge), flat
+  styles a parapet cap; the choice persists via `residence_style` config and tags the
+  banner. This is the foundation for the template-driven 3D you described.
+- Smoke test now exercises both tabs (18 checks): Command Center camera at native
+  aspect with the residence moved out, and the Residence tab's scene, style selector,
+  banner stats, restored callouts, and live dominant-room flag. Audit clean, 170 tests.
+
+> Honest scope: the roof massing is a first pass built in CSS, and I can't visually
+> verify 3D in my environment — the gable/flat shells differentiate styles but may need
+> a tuning pass from a screenshot. True per-style accuracy, solid sloped/hip roofs, and
+> satellite-imagery-derived geometry are the WebGL/Three.js build, which I'd take on as
+> its own track on your go-ahead.
+
+
+Corrections to the 6.16.0 dashboard from live feedback.
+- **Camera shows its native aspect ratio.** The feed was a tall flex box with
+  `object-fit: cover`, which cropped a 16:9 stream into an ultra-wide strip. The feed
+  now sizes to the image's own ratio (`width:100%; height:auto`, no crop), so the
+  picture is whole and correctly proportioned.
+- **3D house auto-fits its column.** The house was scaled for the full-width centre it
+  had before the camera split; in the narrower shared column it oversized and clipped.
+  It now computes a fit-zoom from the scene width on every build (honoring a manual
+  wheel-zoom once set), so it stays whole whatever the column width. Reminder: drag
+  rotates — the default ~45° isometric is the intended view; a near-0° drag flattens
+  the floor plates to lines.
+- **Sq-ft estimate sane.** The estimate used a wrong factor and printed ~14,450. It's
+  now clamped to a believable range (and still overridable via `floor_plan_sqft`).
+- **Perimeter callouts pulled back.** They need generous side margins like the concept
+  render; in the narrow secondary column they overlapped the house. The property banner
+  + stats stay; the callouts return only when the residence has the width (see note).
+- Smoke test updated (12 checks): native-aspect feed, banner + sane stats, callouts
+  cleared. Python audit clean, 170 tests passing.
+
+> Note: the residence can't carry the annotated-house concept *and* be a narrow panel
+> beside a primary camera — that composition needs width. Make the residence the wide/
+> primary element and the full callout treatment fits; keep the camera primary and the
+> residence stays a clean house + banner.
+
+
+The 3D Residence Overview now carries the identity of the "satellite + architectural
+data-merge" concept — rendered in the panel's own medium (CSS/SVG, no engine, no
+build), not a photoreal CGI reproduction.
+- **Property banner.** Top-left header — `PROPERTY · <address> · SATELLITE +
+  ARCHITECTURAL DATA MERGE` — with the address pulled from `floor_plan_address`.
+- **Live stat block.** Top-right: EST SQ FT (from `floor_plan_sqft`, else estimated
+  from the floor-plan geometry and labelled `~`), BED / BATH (counted from real
+  area metadata), and the live rotation angle.
+- **Leader-line callouts.** Annotation labels pinned to the scene perimeter with
+  connector lines + nodes, the way the concept image annotates rooms. The left column
+  is fed by **real presence** — dominant room flagged red, occupied rooms cyan, the
+  rest dim — and refreshes every poll. The right column annotates the system layers
+  (HVAC / electrical / plumbing / network mesh). Callouts are pinned to the frame, not
+  projected onto the geometry, so they stay correct while you drag-rotate the house.
+- **Wireframe glow** on the house, and the prior `house3d-hud` corner labels are
+  replaced by the banner/stat overlay. The 3D isometric house, drag-rotate, floor
+  tabs, presence glow and per-room light toggles are all unchanged underneath.
+- Smoke test extended (now 13 checks) to assert the banner, populated stats, callout
+  rendering, and dominant-room flagging. Python audit clean, 170 tests passing.
+
+Not photoreal: this is a stylized HUD interpretation, not the ray-traced render. A true
+volumetric version would need a WebGL/Three.js scene and a real satellite-image asset —
+a separate, much larger build if you ever want to go there.
+
+
+The separate Command Center panel is retired; its capability now lives in the main
+Nova panel, which keeps its 3D isometric floor plan (the 2D top-down experiment is
+dropped).
+- **Camera Watch in the dashboard.** The live/selectable camera feed with event
+  auto-focus — ported from the standalone panel into `nova-panel.js` — now sits in
+  the Command Center tab. The dashboard centre is a 2-up: **Camera Watch (primary,
+  wider) beside the 3D Residence Overview**. Cameras read from `config.cameras`, stream
+  via HA's MJPEG proxy with the entity's access token, switch on chip click, and
+  auto-focus the relevant feed on a `nova_camera_event` / `nova_face_recognized`
+  (banner + 25s revert), with a still-image fallback for Nest/WebRTC. Subscriptions and
+  timers are torn down in `_stopIntervals`.
+- **Single panel.** `panel_register.py` registers only the Nova panel now and removes
+  the stale `/nova-command` sidebar entry on upgrade. `nova-command.js` deleted.
+- **JS behavioural test.** `scripts/smoke_panel.js` retargeted to the combined panel:
+  renders it under jsdom with a realistic payload and asserts the dashboard draws —
+  styles, the 3D scene, and the folded-in Camera Watch (chips from `config.cameras`,
+  auto-selected stream wired with the token). 9/9 pass. Python audit clean, 170 tests
+  passing.
+
+
+First real-deployment look at the new panel surfaced two frontend bugs (data was
+flowing — areas, presence, live log all correct — but the panel was broken):
+- **Orphaned stylesheet.** The component's CSS (`JC_STYLES`) was defined but never
+  injected into the shadow DOM — the `innerHTML` started at `<div class="app">` with
+  no `<style>`. Result: a plain unstyled text stack, no grid/borders/colours. Now
+  injected as `<style>${JC_STYLES}</style>…`.
+- **Data-contract mismatches.** The panel read `d.cameras`, `d.presence`, and
+  `d.lockdown`, but `get_panel_data` returns presence under `dominant` and nests
+  `cameras` + `lockdown` inside `config`. So the camera picker was always empty
+  ("NO CAMERA SELECTED") and the dominant-area temp showed "—". Now reads
+  `d.config.cameras`, `d.dominant`, and `d.config.lockdown` (with fallbacks).
+- **Why the audit missed it + the fix.** The release gates were Python-only
+  (`scripts/audit.py`, pytest) plus `node --check`, which validates JS *syntax* but
+  not behaviour — an orphaned const and a wrong object path are both valid syntax.
+  Added `scripts/smoke_panel.js`: renders the component under jsdom with a realistic
+  `get_panel_data` payload and asserts it actually draws (styles injected, grid +
+  modules present, camera chips populated from `config.cameras`, dominant area/temp
+  shown, live MJPEG `src` wired with the access token). 10/10 pass. Python audit
+  clean, 170 tests passing.
+
+
+Proactive audit (not wait-and-see) of the code paths that only began loading after
+6.14.1 surfaced two real bugs in `intent/intent_router.py`:
+- **`from . import audio_routing` → `from ..`.** `intent_router` lives in the
+  `intent/` subpackage, so the single-dot form resolved to the non-existent
+  `intent.audio_routing` instead of the top-level `audio_routing`. It's a lazy
+  import inside `_area_of`, and `_call_domain_in_area` calls `_area_of` inside a
+  `try/except` that swallows the `ImportError` — so `secure_area`/`lights_off`
+  would have silently matched zero entities and done nothing. Now `..audio_routing`.
+- **`from .automation.mutex import Priority` → `from ..automation.mutex`.** Same
+  class of bug (added in 6.13.0): `.automation` resolved to `intent.automation`
+  (doesn't exist) rather than the top-level `automation` package; would have thrown
+  on any guarded intent execution. Now `..automation.mutex`.
+- **New `scripts/audit.py`.** A real compile gate plus a cross-file resolver that
+  verifies every relative import (top-level and lazy) points at a name that actually
+  exists — the check that catches wrong levels and stale exports. Both bugs above
+  compiled clean and passed the unit tests (which exercise pure functions, not these
+  paths), which is exactly why this gate is now part of the release process. Audit
+  reports clean; 170 tests passing.
+
+
+- **Bug.** `audio/__init__.py` carried two module docstrings (a v6.13.0 edit
+  prepended a second without removing the original), which pushed
+  `from __future__ import annotations` to line 3 → `SyntaxError: from __future__
+  imports must occur at the beginning of the file`. This aborted the whole
+  integration import on HA startup (`Unable to import component: nova`). It was
+  latent through 6.13.0–6.14.0 and only surfaced on the first HA restart after
+  deploying. Fixed by collapsing to a single docstring.
+- **Why the release audit missed it.** The pre-release syntax gate used
+  `ast.parse`, which does **not** enforce `__future__` positioning — it parsed the
+  broken file clean. Switched the gate to a real `compile()` / `py_compile`
+  (bytecode compile), which catches `__future__` placement and matches how HA
+  actually imports. Re-audited the full tree: all 62 modules compile clean. 170
+  tests passing.
+
+
+The tactical HUD ships as a real panel — a second sidebar entry, "Command Center"
+(`/nova-command`), alongside the existing detailed Nova panel.
+- **New panel (`frontend/nova-command.js`, `nova-command`).** The operational
+  HUD: monospace/terminal styling, ASCII rules, the three-over-two layout. All data
+  is live off `nova/get_panel_data` + `nova/get_activity_log` (polled): system
+  status (observer/cognition/satellite count/LLM link), a 2D top-down occupancy plan
+  whose nodes are driven by real per-area presence (dominant area labelled with live
+  temp), and a live activity log. Quick actions are wired to real services —
+  `nova.briefing`, `nova/set_lockdown` (toggles, reflects live state),
+  `nova.diagnose_doorbell`.
+- **Live, selectable camera feeds.** The camera panel streams the selected camera via
+  HA's MJPEG proxy using the entity's rotating `access_token`, with a chip selector
+  built from the live camera list and a still-image fallback for cameras that don't
+  serve MJPEG (e.g. Nest/WebRTC). 
+- **Event auto-focus.** `camera.py` now fires a `nova_camera_event` when a
+  Frigate/Nest detection lands (entity, label, confidence); the panel subscribes to
+  it (and to `nova_face_recognized`) and automatically switches the main feed to
+  the camera of the event, banners "EVENT FOCUS · <label> <conf>%", flags the area on
+  the plan, then reverts to the user's selection after ~25s.
+- **Registration.** `panel_register.py` refactored to a shared `_register_one` helper
+  registering both panels from the same static dir, each with independent content-hash
+  cache-busting. The installer already copies `frontend/*.js`, so the new component
+  ships with no run.sh change. No regressions — 170 passing.
+
+
+Two additions from the resilience blueprint. (§7's `LocalSemanticMemory` was again
+**not** re-added — `memory/` would shadow `memory.py`; the recovery ledger remains
+top-level.)
+- **Entity concurrency mutex (`automation/mutex.py`).** `EntityLockRegistry` enforces
+  per-entity mutual exclusion on a priority ladder (PREDICTIVE < ROUTINE < INTENT <
+  VISUAL < SAFETY): an equal-or-lower priority request is discarded while a lock is
+  held, and a strictly-higher one preempts the holder — so a real-time presence
+  command beats a stochastic predictive one rather than colliding. The intent router
+  now acquires per-entity locks (at INTENT priority) before acting and releases after,
+  skipping any entity already held at higher priority. Lock ops are synchronous dict
+  mutations (safe on HA's single-threaded loop); the registry is stdlib-only and
+  unit-tested, with an async `guard` context manager.
+- **Differential noise gating (`audio/noise_gate.py`).** `NoiseGate` checks appliance
+  power signatures (`sensor.<appliance>_power`) and subtracts the dominant running
+  appliance's known dB contribution from the raw `ambient_db` before it reaches
+  prosody — so a running dishwasher or microwave doesn't push Nova to project
+  louder. Wired into `nova.speak`'s telemetry build; dB is floored at 0 and None
+  passes through.
+- **Tests:** +18 (mutex acquire/discard/preempt/release/guard, noise-gate threshold/
+  dominant-attenuation/floor/passthrough) — 170 passing.
+
+
+Two additions from the resilience blueprint. (§5's `LocalSemanticMemory` was again
+**not** re-added, and the recovery ledger was placed at the top level rather than
+the spec's `memory/ledger.py` — a `memory/` package would shadow `memory.py`.)
+- **Heartbeat + failover (`diagnostics/heartbeat.py`).** `HeartbeatMonitor` probes
+  fixed-IP audio satellites, flags a node unavailable after 3 missed cycles, and
+  reroutes audio to the first available adjacent speaker (then any available node,
+  then None). The probe defaults to a short TCP connect to the ESPHome API port but
+  is injectable; the failover state machine is pure and fully unit-tested. This is a
+  configured capability — construct it with your satellites' IPs/adjacency and drive
+  `run_once` from an interval; it is not auto-started.
+- **Write-ahead state ledger (`state_ledger.py`).** `StateLedger` durably appends a
+  device intent (fsync'd JSON-lines) before a high-stakes action fires and a
+  completion record after. On boot the integration reconciles any intent that never
+  completed against the device's current state, logging actions a crash or power loss
+  interrupted, then compacts the log. The intent router now records intent before
+  `secure_area` (cover/lock) via an injected, duck-typed ledger — the router stays
+  import-free and standalone-testable.
+- **Tests:** +20 (heartbeat miss-threshold/recovery/failover ladder/injected probe,
+  ledger record/complete/pending/reconcile/compact/torn-line tolerance) — 152 passing.
+
+
+Three additions from the resilience blueprint (the spec's `LocalSemanticMemory`
+was deliberately **not** re-added — it's the package that collided with `memory.py`;
+its fault-history role already lives in `diagnostics/fault_log.py`).
+- **Boot guard + alert queue (`boot_guard.py`).** `nova.speak` calls that arrive
+  before the integration finishes initialising — or during a config-entry reload —
+  are now buffered in a bounded in-memory queue and replayed in arrival order once
+  setup reports ready, instead of being dropped or fired into a half-built system.
+  Reload-safe (re-gates on each setup), drop-oldest overflow at 25, and the
+  15-minute audit holds until ready. The buffer logic is a stdlib-only `AlertBuffer`
+  so it's unit-tested directly.
+- **Root-cause diagnostic trees (`diagnostics/monitor.py`).** When the core network
+  switch drops offline, the triage engine now inspects its upstream power monitor
+  (`sensor.core_switch_power_watts`) and folds the deduction into the spoken verdict:
+  near-zero or unreachable power ⇒ "an upstream power loss on its utility circuit";
+  power still present ⇒ "a network or uplink fault rather than a power loss."
+- **Air-gapped fallback templates (`intent/templates.py`).** A curated set of
+  hardcoded status phrases (grounded in this property's entities — switch, freeze
+  sensor, sump pump, garage, storage, …) with keyword matching, for instant
+  informational responses when every model link is unreachable. A starting
+  scaffold, not 50 invented strings; extend `STATUS_TEMPLATES` as needed.
+- **Tests:** +15 (root-cause branches, boot-queue buffer/replay/reload/overflow,
+  template lookup/matching) — 132 passing.
+
+
+- **Follow-up to 6.10.2.** Removing `memory/` from the repo isn't enough if the
+  package still lingers in a deployed copy. Extracting a new release over an old
+  add-on folder adds files but never deletes ones that were removed, so a stale
+  `memory/` can survive in the source tree, ride into the rebuilt image, and get
+  copied to `/config/custom_components/nova/memory/` on every start — where it
+  again shadows `memory.py` and the Memory card reads "unavailable." `run.sh` now
+  defensively deletes any `memory/` directory at the destination whenever the
+  canonical `memory.py` is present, so a stale package cannot survive a deploy
+  regardless of what the source tree carried. No Python change (117 passing).
+
+
+- **Regression fix.** The `memory/` package added in 6.9.0 shadowed the existing
+  top-level `memory.py` (ChromaDB / FTS5 semantic memory). Because Python resolves
+  a package before a same-named module, `from .memory import get_memory_stats`
+  (and `search_memory`, `store_memory`, `get_conversation_context`) silently
+  imported the package — which only exported the fault store — so those calls hit
+  their `except` paths: the panel's Memory card read **Backend: unavailable /
+  Stored Memories: 0** and the conversation agent lost long-term recall. The
+  collision was latent until 6.10.1 (which first actually deployed the
+  subpackages) unmasked it.
+- **Fix:** removed the `memory/` package and relocated its rolling fault-history
+  store to **`diagnostics/fault_log.py`** as `FaultLog` (it was never semantic
+  memory — it's an infrastructure fault ledger, and belongs with diagnostics).
+  `proactive_audio` now imports `FaultLog` from `.diagnostics`; the audit's
+  "this has occurred before" recall is unchanged. The on-disk file moves from
+  `/config/nova/semantic_memory.json` to `/config/nova/fault_history.json`.
+  `from .memory import …` once again resolves to the real `memory.py`, restoring
+  `get_memory_stats`, `search_memory`, `store_memory`, and conversation context.
+  Tests relocated accordingly (117 passing).
+
+
+- **Critical install fix.** `run.sh` copied only the component's top-level
+  `*.py`/`*.json`/`*.yaml` (plus the `frontend/`, `translations/`, `blueprints/`
+  asset dirs) and never the Python subpackages. With `audio/`, `diagnostics/`,
+  `vision/`, `memory/`, `intent/`, and `automation/` absent from
+  `/config/custom_components/nova/`, `proactive_audio.py`'s top-level
+  `from .audio import ProsodyController` raised `ModuleNotFoundError` and the
+  whole integration failed to set up. The installer now copies every source
+  subdirectory that is a Python package (selected by `__init__.py`, so future
+  subpackages are picked up automatically), clearing previously-installed
+  packages first so renamed/removed modules don't linger. Asset dirs have no
+  `__init__.py` and are untouched. No Python changed (suite still 117 passing);
+  this is purely the install step.
+
+
+- **`intent/intent_router.py` — `LocalIntentRouter`:** local, cloud-free command
+  matching with ordered regex patterns (`secure the garage`, `turn off the
+  lights`, pronoun forms like `turn it off` / `close it`). Pronoun context
+  resolves to the active entity in the target area — a playing `media_player`
+  first, then an `on` `light` — and executes locally. Pure helpers
+  `match_intent()` / `is_affirmative()` are stdlib-only and unit-tested; hass-
+  touching code is lazily imported so the module loads standalone.
+- **Interactive feedback loop:** `nova.speak` gains `expect_response` and
+  `confirm_intent`; an actionable announcement opens a 10-second, wake-word-free
+  confirmation window (fires `nova_feedback_window` for the voice satellite
+  layer). New **`nova.process_intent`** service delivers a captured phrase — an
+  affirmative completes the pending action, otherwise the phrase routes as a
+  fresh command. One shared router per HA instance preserves the window between
+  the two calls.
+- **`automation/predictor.py` — `PredictiveHabitMatrix`:** time-bucketed habit
+  model over a bounded on-disk log (5000 events). `probability(key, at)` is the
+  share of distinct observed days the action recurred in that time bucket;
+  `due_preemptions(now, lead_minutes)` surfaces actions whose probability clears
+  90% in the window 5–10 minutes ahead. Wired into the 15-minute loop to sample
+  occupancy and log candidates — pre-emptive **execution is OFF by default**
+  (`PREDICTOR_AUTOEXECUTE`), in keeping with Nova earning autonomy.
+- **`nova.speak` `user_id`:** accepted and threaded through (logged), reserved
+  for per-user biometric/profile filtering.
+- **Tests:** new `test_intent_router.py` (intent matching, affirmatives, area-
+  scoped pronoun resolution) and `test_predictor.py` (probability moving average,
+  90% threshold, bucketing, lookahead, persistence, rolling cap, corrupt-file
+  tolerance), plus prosody/triage updates — **117 passing, 1 skipped**.
+
+
+- **`vision/spatial.py` — `SpatialContextEngine`:** fuses three per-area presence
+  signals into an occupancy-confidence score (`sensor.{area}_frigate_person_count`
+  >0 → +0.60, `binary_sensor.{area}_camera_gaze_detected` → +0.20,
+  `binary_sensor.{area}_mmwave_presence` → +0.35, clamped to [0,1]). When gaze AND
+  mmWave presence are both established it sets `skip_preamble`, and `nova.speak`
+  now feeds that into prosody.
+- **Prosody `skip_preamble`:** when the listener is demonstrably present and
+  attending, the speech rate eases by 0.05 so the terse, preamble-free status
+  reads clearly. The telemetry key `media_active` is now accepted (alongside the
+  legacy `media_playing`).
+- **`memory/vector_store.py` — `LocalSemanticMemory`:** a rolling on-disk JSON
+  buffer (last 1000 events) under `/config/nova/semantic_memory.json`, with
+  `commit_event(text, tags)` and `query_related_faults(keywords)`. The 15-minute
+  infrastructure audit now recalls prior occurrences of a fault (matched on the
+  triage finding tags), folds a short history clause into the spoken warning, and
+  commits each occurrence — all file I/O off the event loop. `InfrastructureTriage`
+  verdicts now carry a `tags` list for this recall.
+- **Tests:** 22 new unit tests for spatial fusion, the memory store (incl. rolling
+  cap, persistence, corrupt-file tolerance), and the new prosody behaviour
+  (81 passing total).
+
+
+- **Target resolution now goes through `audio_routing`** instead of a private
+  media_player enumeration. `nova.speak` resolves announcement speakers with
+  `audio_routing.speakers_in_area` (the same area→speaker routing, including
+  device-inherited areas and listen-only-satellite exclusion, used by briefings,
+  the sentinel, and doorbell announcements), falling back to the house broadcast
+  set (`announcement_speakers` panel override → configured `broadcast_group` →
+  all non-satellite speakers) so an announcement is never silently dropped.
+- Ambient light/noise telemetry now resolves area membership via the same
+  `audio_routing.entity_area` helper, and media-playing state is read from the
+  resolved target speakers — one area-resolution path instead of two.
+- Ducking now applies to the resolved targets (the speakers actually used),
+  restored in a `finally` block as before. Behaviour-equivalent for the common
+  case (speakers in the area), but now consistent with the rest of Nova and
+  correct for Cast-group and broadcast targets.
+
+
+- **New service `nova.speak`** (`message`, `target_area`, `critical`): a
+  context-aware spoken announcement. It resolves the target area's entities
+  (direct *and* device-inherited), measures ambient light, noise, and media
+  activity, and shapes delivery via a new `ProsodyController` — volume, speech
+  rate, and a named style (authoritative / whisper / subdued / projected /
+  neutral). Active media is ducked for the announcement and restored afterward
+  in a `finally` block, so a TTS error never leaves your music turned down.
+- **Infrastructure audit** (`InfrastructureTriage`): every 15 minutes Nova
+  checks root storage (warn >90%, critical >96%), RAM (>92%), and the
+  connectivity of the core network switch and basement freeze sensor, then
+  synthesises a single natural-language verdict and announces failures to the
+  office. Confirmed-offline is critical; unreadable/unavailable is a softer
+  visibility warning. A startup probe runs ~60s after load so issues surface
+  without waiting a full interval.
+- New package layout: `audio/prosody.py` and `diagnostics/monitor.py` (both
+  stdlib-only, no Home Assistant dependency), wired in through
+  `proactive_audio.py` via two hooks in `async_setup_entry`/`async_unload_entry`.
+- **Tests:** 23 new unit tests pin the prosody rule matrix and triage thresholds
+  (59 passing total).
+- **Config:** set your TTS entity (`proactive_tts_entity` in panel runtime config,
+  else `tts.piper`) and the audit's target area (`office` by default).
+
+## [6.7.3] — Safety-loop fix + regression test harness
+- **Fix (critical):** since v6.7.1 the cognitive safety tick had been throwing
+  `AttributeError` every cycle. `SafetyManager.tick` and `_check_intrusion` call
+  `self._residents_away()`, but that method was defined on `LockdownManager`, not
+  `SafetyManager` — so freeze, intrusion, and nighttime-lockdown checks were
+  silently dying inside the loop's exception handler. `_residents_away` has been
+  moved to `SafetyManager` where it is used; `LockdownManager` keeps the
+  `_anyone_home` predicate it actually calls. Behaviour of both is unchanged from
+  the v6.7.1 intent — they are now simply on the right classes.
+- **Tooling:** introduced a Home-Assistant-free **pytest harness** under `tests/`.
+  A `conftest.py` installs minimal `homeassistant.*` stubs into `sys.modules`
+  before collection and loads integration modules under a synthetic `jc` package;
+  hand-rolled fakes (`FakeHass`, `FakeProvider`) exercise `cognitive_core` and
+  `reasoning_loop` as near-pure functions. A thin `pytest-homeassistant-custom-
+  component` integration layer is scaffolded (skips cleanly until that dep is
+  installed). 36 tests now cover the safety predicates, freeze thresholds, and the
+  reasoning resilience cascade (cloud failure → breaker open → local floor). This
+  is the harness that caught the bug above.
+
+## [6.3.2] — Startup no longer blocked
+- **Fix:** the cognitive loop was created with `async_create_task`, which Home
+  Assistant tracks as part of config-entry setup — so HA's bootstrap waited the
+  full startup timeout on a loop that never returns, logging "Something is
+  blocking Home Assistant from wrapping up the start up phase." It now runs as a
+  proper **background task** (exempt from the startup wait), with a guarded
+  fallback for cores predating the helper.
+- The loop also yields before its first tick so startup settles before any
+  state-scanning work begins.
+
+## [6.3.1] — Two root-cause fixes
+- **Cognition:** `binary_sensor.backups_stale` was escalating as a
+  "safety/security trigger" because device_class `problem` was lumped with
+  smoke/CO/gas. `problem` now has its own moderate tier, and system-maintenance
+  entities (backup, update, snapshot, certificate, HACS, supervisor, firmware…)
+  are damped to informational so housekeeping never masquerades as a security
+  event. Life-safety classes remain at top salience.
+- **Doorbell backlog scanner:** device discovery now mirrors Home Assistant
+  core's own Nest enumeration (`async_loaded_entries → runtime_data.device_manager`),
+  fetches transcoded thumbnails for clip-preview events and image media for still
+  events, and rejects raw MP4 bytes that a vision model can't read. Failure
+  reporting is now stage-precise.
+
+## [6.3.0] — Local speech parity
+- All local speech now flows through one voice: the Local Mind's composer.
+  The learned-cache replay, the legacy templates, and the fallback path no longer
+  speak in three different vintages of phrasing.
+- Device-aware language (a window "is open," not "is on"; motion "has detected
+  motion"), safety-class phrasing ("is detecting smoke", "has cleared"), numeric
+  readings (battery "is at 18%"), and named safety alerts ("a smoke alert from
+  Kitchen Smoke Detector").
+
+## [6.2.0] — The Local Mind
+- An offline reasoning brain that replaces the crude fallback when the cloud is
+  unreachable. It replicates a frontier model's decision *procedure*:
+  self-awareness (duplicate + flap detection), historical grounding against
+  `patterns.db`, case-based memory from past cloud decisions, situational
+  judgment (urgency × novelty × presence × security), and persona verbalization.
+- Every decision logs its reasoning chain to the dashboard's `LOCAL` log filter.
+
+## [6.1.0] — Loosened reins (capability expansion)
+- **Automation suggestions surfaced** in the dashboard with confidence bars,
+  YAML reveal, and approve/dismiss — the pattern engine's intelligence is finally
+  visible. Thresholds loosened and made runtime-tunable.
+- **Visitor learning** — person events feed silent vision learning (training data
+  only, never spoken).
+- **Rich Reasoning** — optional cloud-first judgment for medium/high events.
+- **Ollama groundwork** — a Local LLM URL field flows through every provider path
+  for the upcoming GPU server.
+
+## [6.0.0] — Glassmorphism UI
+- A deep visual reskin: dark-cyan glassmorphism, Space Grotesk + JetBrains Mono,
+  a perspective-grid 3D house with a rotating radar sweep, glass panels, and a
+  status badge wired to lockdown state. No structural changes — pure aesthetics.
+
+## [5.9.50] — Doorbell Training UI
+- A Settings panel showing the analyzed doorbell dataset, with a backlog-scan
+  button and source-tagged event rows (live / event-media / backlog).
+
+## [5.9.49] — Package & mail detection
+- Porch-camera watching for packages and mail with a per-camera state machine,
+  15-minute sweeps, quiet-hours gating, and an on-demand `nova.check_packages`
+  service.
+
+## [5.9.48] — Doorbell-only analysis + backlog training
+- Camera auto-analysis narrowed to intentional doorbell presses, with a two-pass
+  live-clip / recorded-event approach and a JSONL training log.
+
+## [5.9.47] — Automatic camera event analysis
+- Doorbell and (optionally) motion events are now auto-analyzed as they happen,
+  not just cached.
+
+## [5.9.46] — Appliance profile loading fix
+- The appliance monitor now reads its saved profile directly from live runtime
+  config instead of falling back to legacy guessing.
+
+## [5.9.45] — Appliance row UI fix
+- Restructured appliance cards so delete buttons are no longer covered.
+
+## [5.9.44] — Per-room 3D occupancy glow
+- The isometric house lights rooms by occupancy: idle wireframe, occupied cyan
+  glow, dominant room pulsing.
+
+## [5.9.43] — Iron Man HUD radial gauges
+- Temperature, humidity, and lighting for the dominant room rendered as SVG donut
+  gauges.
+
+---
+
+Earlier releases (v5.7–v5.9.42) introduced the observer pipeline, the connectivity
+breaker, lockdown management, multi-frame camera vision, constrained appliance
+disaggregation, quiet-hours gating, and the reasoning cache.

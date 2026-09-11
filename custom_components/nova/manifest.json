@@ -1,0 +1,34 @@
+{
+  "domain": "nova",
+  "name": "Nova AI Assistant",
+  "after_dependencies": [
+    "conversation",
+    "tts",
+    "media_player",
+    "camera",
+    "mqtt",
+    "assist_pipeline",
+    "recorder",
+    "logbook"
+  ],
+  "codeowners": [
+    "@abz2much"
+  ],
+  "config_flow": true,
+  "dependencies": [
+    "http",
+    "frontend",
+    "panel_custom"
+  ],
+  "documentation": "https://github.com/abz2much/nova",
+  "integration_type": "service",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/abz2much/nova/issues",
+  "requirements": [
+    "groq>=0.9.0",
+    "openai>=1.0.0",
+    "anthropic>=0.39.0",
+    "pypdf>=4.0.0"
+  ],
+  "version": "7.85.5"
+}

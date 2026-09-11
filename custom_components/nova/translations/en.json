@@ -1,0 +1,113 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Nova Setup",
+        "description": "{note}",
+        "data": {
+          "api_key": "Cloud LLM API key (e.g. Groq)",
+          "llm_base_url": "Local LLM base URL — for Ollama use host homeassistant.local, port 11434, path /v1",
+          "model": "Conversation model",
+          "honorific": "Address me as"
+        }
+      }
+    },
+    "error": {
+      "need_llm": "Enter either a cloud API key or a local LLM URL.",
+      "cannot_connect": "Couldn't reach the LLM. Check the URL/endpoint is correct and the server (e.g. Ollama) is running.",
+      "invalid_auth": "The API key was rejected. Check the key and try again.",
+      "unknown": "Couldn't validate the LLM connection. Check the settings and try again."
+    },
+    "abort": {
+      "already_configured": "Nova is already configured.",
+      "import_failed": "Found a Nova config but no usable LLM (no API key and no local endpoint)."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Nova — Configure",
+        "menu_options": {
+          "core": "Core — persona, directive, conversation model",
+          "routing": "Routing — bedroom areas, broadcast group, notify service",
+          "observer": "Observer — proactive awareness (needs a Gemini key)",
+          "identity": "Identity — per-person recognition",
+          "email": "Email — read-only inbox (password via secrets.yaml)"
+        }
+      },
+      "core": {
+        "title": "Nova — Core",
+        "description": "Persona, directive, and conversation model.",
+        "data": {
+          "honorific": "Address me as",
+          "directive_preset": "Directive preset",
+          "directive": "Custom directive (optional, overrides preset)",
+          "model": "Conversation model",
+          "use_hass_api": "Enable home control (lights, climate, locks, etc.)"
+        }
+      },
+      "routing": {
+        "title": "Nova — Routing",
+        "description": "pick which HA areas are bedrooms (for sleep detection), which media_player group to use for broadcasts, and your phone notify service.",
+        "data": {
+          "bedroom_areas": "Bedroom areas (for sleep detection during quiet hours)",
+          "broadcast_group": "Broadcast speaker group (typically your home Cast group)",
+          "notify_service": "Phone notify service (e.g. notify.mobile_app_yourphone)"
+        },
+        "data_description": {
+          "bedroom_areas": "Any presence sensor in these areas fires sleep mode during quiet hours.",
+          "broadcast_group": "Used for critical and high-urgency announcements.",
+          "notify_service": "Used when you're away from home or asleep."
+        }
+      },
+      "observer": {
+        "title": "Nova — Observer Mode",
+        "description": "proactive awareness. Nova watches your home and speaks up when something's worth noting. Requires a Gemini API key (billing-enabled recommended).",
+        "data": {
+          "observer_enabled": "Enable observer mode",
+          "gemini_api_key": "Gemini API key",
+          "classifier_model": "Classifier model (Tier 1 — cheap)",
+          "reasoning_model": "Reasoning model (Tier 2 — main)",
+          "review_model": "Review model (Tier 3 — periodic)",
+          "observer_quiet_start": "Quiet hours start (HH:MM)",
+          "observer_quiet_end": "Quiet hours end (HH:MM)"
+        }
+      },
+      "identity": {
+        "title": "Nova — Identity",
+        "description": "per-person recognition, so Nova tailors itself to who's speaking. Works with no special hardware using presence and (if set up) camera face recognition. Voice fingerprinting is the most accurate but needs a local GPU, so it's off by default.",
+        "data": {
+          "identity_enabled": "Recognize who's speaking",
+          "identity_voice_fingerprint": "Voice fingerprinting (requires a local GPU)",
+          "identity_min_confidence": "Minimum confidence before committing to a person",
+          "voice_recognition_source": "Voice recognition source (entity from a speaker-recognition service, e.g. binary_sensor.*_voice)",
+          "voice_recognition_auto_enroll": "Auto-flag voices to enroll as people speak"
+        },
+        "data_description": {
+          "identity_enabled": "Uses who's home + recent camera face recognition. No GPU required.",
+          "identity_voice_fingerprint": "Leave off unless you have a GPU server running a voice-ID model.",
+          "identity_min_confidence": "Higher = more cautious; stays neutral when unsure."
+        }
+      },
+      "email": {
+        "title": "Nova — Email",
+        "description": "Read-only inbox access. The IMAP password is read from Home Assistant's secrets.yaml — add it there under the key below (default nova_imap_password); it is never stored in the panel config.",
+        "data": {
+          "imap_enabled": "Enable email reading",
+          "imap_host": "IMAP host (e.g. imap.gmail.com)",
+          "imap_port": "IMAP port (SSL: 993)",
+          "imap_user": "IMAP username / email address",
+          "imap_folder": "Mailbox folder (default INBOX)",
+          "imap_ssl": "Use SSL (recommended)",
+          "imap_secret_key": "secrets.yaml key holding the password"
+        }
+      }
+    }
+  },
+  "issues": {
+    "llm_unavailable": {
+      "title": "Nova reasoning backend unavailable",
+      "description": "Nova couldn't reach its reasoning model, so it's running in limited mode — device control, status, and scenes still work. Reason: {detail}\n\nOpen the Nova panel → Settings and check your provider, model, and API key. If your provider retired the model, re-select it from the list. This notice clears automatically once reasoning is working again."
+    }
+  }
+}
