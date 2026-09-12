@@ -210,6 +210,15 @@ def resolve_tts_for_context(
 
 # ─── The announce primitive ──────────────────────────────────────────────────
 
+# How long to wait for a speaker to visibly respond to play_media/announce
+# before assuming it silently no-op'd and falling back to tts.speak. Polled
+# rather than a single fixed delay so a fast local voice (Piper) still
+# resolves almost immediately, while a slower cloud voice-clone engine gets
+# the full budget before the fallback (which does not pin volume) fires.
+_ANNOUNCE_POLL_INTERVAL_S = 0.5
+_ANNOUNCE_POLL_ITERATIONS = 16   # 0.5s * 16 = 8s ceiling
+
+
 async def async_announce(
     hass: HomeAssistant,
     text: str,
@@ -329,17 +338,30 @@ async def async_announce(
                 target={"entity_id": spk}, blocking=False,
             )
             # v5.9.11 regression guard: that path can succeed silently on
-            # targets that don't honor `announce`. Give it a moment, then
-            # check something actually happened.
-            await asyncio.sleep(2)
-            st2 = hass.states.get(spk)
-            moved = st2 is not None and (before is None or st2.last_updated != before)
+            # targets that don't honor `announce`. Poll for the state to move
+            # instead of one fixed-delay check (v7.87.0): a cloud voice-clone
+            # engine (e.g. tts.jarvis_jarvis) can take several seconds to
+            # synthesize before the speaker's state moves at all, and a
+            # single check at 2s was firing the tts.speak fallback while the
+            # original play_media request was still in flight — so both ended
+            # up playing back to back, the fallback at the wrong, un-pinned
+            # volume. That's the exact regression this play_media rewrite
+            # exists to avoid, so give a slow synth up to ~8s, breaking out
+            # the moment it responds rather than waiting out the full budget.
+            moved = False
+            for _ in range(_ANNOUNCE_POLL_ITERATIONS):
+                await asyncio.sleep(_ANNOUNCE_POLL_INTERVAL_S)
+                st2 = hass.states.get(spk)
+                if st2 is not None and (before is None or st2.last_updated != before):
+                    moved = True
+                    break
             if moved:
                 ok = True
             else:
                 _LOGGER.info(
-                    "Nova TTS: %s didn't respond to play_media/announce — "
-                    "falling back to tts.speak (context=%s)", spk, context)
+                    "Nova TTS: %s didn't respond to play_media/announce within %.0fs — "
+                    "falling back to tts.speak (context=%s)",
+                    spk, _ANNOUNCE_POLL_ITERATIONS * _ANNOUNCE_POLL_INTERVAL_S, context)
                 ok = await _fallback_speak(spk)
         except Exception as exc:
             _LOGGER.warning(
