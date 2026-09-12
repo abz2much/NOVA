@@ -25,7 +25,28 @@ def test_convenience_stays_low(pol):
     assert pol.classify("light", "turn_on", "light.kitchen")[0] == "low"
     assert pol.classify("media_player", "media_play")[0] == "low"
     assert pol.classify("climate", "set_temperature")[0] == "low"
-    assert pol.classify("scene", "turn_on")[0] == "low"
+
+
+def test_indirection_domains_escalate_to_medium(pol):
+    """Fixed Sept 2026: scene/script/automation used to stay LOW ("just a
+    convenience action"), but any of them can itself unlock a door, disarm
+    the alarm, or open a cover — classify() can't see inside one, so it's
+    MEDIUM, not LOW. Domain-level, not a (domain, service) tuple: a script's
+    own dynamic per-object service (script.<object_id>) needs the same
+    treatment as script.turn_on, not just the one enumerated service name."""
+    assert pol.classify("scene", "turn_on")[0] == "medium"
+    assert pol.classify("script", "turn_on")[0] == "medium"
+    assert pol.classify("automation", "trigger")[0] == "medium"
+    assert pol.classify("script", "some_custom_script_object_id")[0] == "medium"
+
+
+def test_indirection_safe_ops_stay_low(pol):
+    # Reloading config or stopping/disabling something already running can't
+    # newly trigger whatever a scene/script/automation contains.
+    assert pol.classify("scene", "reload")[0] == "low"
+    assert pol.classify("script", "reload")[0] == "low"
+    assert pol.classify("script", "turn_off")[0] == "low"
+    assert pol.classify("automation", "turn_off")[0] == "low"
 
 
 def test_safe_security_direction_stays_low(pol):

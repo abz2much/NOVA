@@ -249,11 +249,19 @@ def evaluate_for_proactive(hass) -> Optional[dict]:
     defer = sheddable[0]  # highest-draw sheddable load
 
     if agency == AGENCY_AUTONOMOUS:
+        # NOTE (audit, Sept 2026): this used to say auto_act=True and claim
+        # "I'll ease the peak by holding X" — but appliance profiles only ever
+        # capture a power SENSOR per appliance (for wattage), never a
+        # controllable switch/entity to shed with. Nothing here has ever
+        # actually called a service; it just said it did. Being honest about
+        # that until appliance profiles capture a real controllable entity.
         return {
-            "type": "energy_shed", "urgency": "low", "auto_act": True,
+            "type": "energy_shed", "urgency": "low", "auto_act": False,
             "entity_id": defer["entity"],
-            "message": f"{names} are both running at {kw:.1f} kW. I'll ease the "
-                       f"peak by holding {defer['name']} for now.",
+            "message": f"{names} are both running at {kw:.1f} kW, over your "
+                       f"peak. I'd normally ease that by holding "
+                       f"{defer['name']}, but I don't have a way to actually "
+                       f"control it yet.",
             "energy": True,
         }
     if agency == AGENCY_OPT_IN:

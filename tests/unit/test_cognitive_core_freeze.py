@@ -1,8 +1,11 @@
 """Regression tests for SafetyManager pipe-freeze detection.
 
-Pins the temperature thresholds and de-duplication: critical at <=20°F (auto-act),
-a one-shot warning at <=35°F, silence above, and a 1-hour cooldown. Source is
-either a weather entity's temperature attribute or an outdoor temperature sensor.
+Pins the temperature thresholds and de-duplication: critical at <=20°F
+(alert-only — recommends a heat setpoint, does not itself adjust the
+thermostat; fixed Sept 2026, it used to claim auto_act=True with nothing
+behind it), a one-shot warning at <=35°F, silence above, and a 1-hour
+cooldown. Source is either a weather entity's temperature attribute or an
+outdoor temperature sensor.
 """
 import pytest
 
@@ -22,7 +25,8 @@ async def test_critical_below_20f_from_weather(safety, fake_hass):
     assert action is not None
     assert action["type"] == "freeze_critical"
     assert action["urgency"] == "critical"
-    assert action["auto_act"] is True
+    # Alert-only: Nova recommends a setpoint, it doesn't set one itself.
+    assert action["auto_act"] is False
 
 
 async def test_warning_below_35f_from_weather(safety, fake_hass):

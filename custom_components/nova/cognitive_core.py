@@ -17,8 +17,11 @@ Architecture:
 
 Philosophy:
   - Suggest, don't act (initially) — earn trust first
-  - Safety overrides: pipe freeze, intrusion → act immediately
-  - Nighttime lockdown: locks/doors → act automatically
+  - Pipe freeze, intrusion: alert immediately and recommend action — Nova
+    does not itself adjust the thermostat or otherwise act on these (fixed
+    Sept 2026: the code used to claim it did)
+  - Nighttime lockdown: locks/doors → act automatically (this one genuinely
+    does act, via LockdownManager)
   - Everything else: observe, learn, suggest
   - Approved suggestions become automations over time
 """
@@ -364,7 +367,12 @@ class SafetyManager:
                 "message": _notify_i18n().message(
                     "freeze_critical", lang, honorific=honorific.title(),
                     reading=reading, set_to=set_to),
-                "auto_act": True,  # Safety override — act without approval
+                # Alert-only (fixed Sept 2026): this said auto_act=True and
+                # "act without approval", but nothing has ever consulted
+                # auto_act to actually do anything — Nova has no thermostat/
+                # plumbing actuator tied to this. The message itself already
+                # phrases it as a recommendation, which is the truth.
+                "auto_act": False,
             }
         elif temp_f <= FREEZE_WARN_TEMP_F and not self._freeze_warned:
             self._freeze_warned = True

@@ -46,6 +46,18 @@ _MEDIUM = {
 # on them is escalated even when we haven't enumerated it, so a future service
 # (e.g. lock.unlatch) can't slip through as LOW convenience.
 _SECURITY_DOMAINS = {"lock", "alarm_control_panel"}
+
+# Domains whose *contents* are opaque to this gate: a scene/script/automation
+# can itself unlock a door, disarm the alarm, or open a cover, and there is no
+# cheap way to look inside one before it runs. This has to be domain-level,
+# not a (domain, service) tuple — HA auto-registers a dynamic per-object
+# service for every script (script.<object_id>) as an alternative to
+# script.turn_on, and enumerating tuples here would repeat the exact
+# cover.open_cover naming-gap bug this module was already patched for.
+_INDIRECTION_DOMAINS = {"scene", "script", "automation"}
+# Non-actuating / stopping calls on those domains carry no indirection risk —
+# they can't newly trigger whatever the scene/script/automation contains.
+_INDIRECTION_SAFE = {"reload", "turn_off", "stop"}
 # Actuating verbs (as substrings) that DROP a guard → the high end.
 _OPENING = ("unlock", "disarm", "open", "unlatch", "unbolt")
 # Known-safe actuating services on a security domain (raising a guard) stay
@@ -91,6 +103,12 @@ def classify(domain: str, service: str, entity_id: str = "") -> Tuple[str, str]:
             return "high", f"{dom}.{svc} opens a security device"
         if svc_l not in _SECURITY_SAFE:
             return "medium", f"unrecognized {dom} action on a security device"
+
+    # Capability net for indirection domains (scene/script/automation) — any
+    # actuating call, by any service name, including a script's own dynamic
+    # per-object service, not just turn_on.
+    if dom in _INDIRECTION_DOMAINS and svc_l not in _READ_ONLY and svc_l not in _INDIRECTION_SAFE:
+        return "medium", f"{dom}.{svc} activates a {dom} whose contents aren't visible to this gate"
 
     if key == ("switch", "turn_off"):
         if any(t in hay for t in _SECURITY_HINTS):

@@ -60,6 +60,16 @@ _SENSITIVE = {
     ("switch", "turn_off"),        # only when the switch is flagged security-ish
 }
 
+# Indirection domains (audit, Sept 2026): a scene/script/automation can itself
+# unlock, disarm, or open something, and there's no cheap way to inspect one
+# before running it. Domain-level, not a (domain, service) tuple in
+# _SENSITIVE — HA gives every script its own dynamic per-object service
+# (script.<object_id>) as an alternative to script.turn_on, so a tuple list
+# would repeat the exact cover.open_cover naming-gap this module already fixed
+# once. Keep this set and policy._INDIRECTION_DOMAINS in sync.
+_INDIRECTION_DOMAINS = {"scene", "script", "automation"}
+_INDIRECTION_SAFE = {"", "reload", "turn_off", "stop"}
+
 _YES = ["yes", "yeah", "yep", "do it", "confirm", "confirmed", "go ahead",
         "unlock it", "open it", "sure", "affirmative", "please do"]
 _NO = ["no", "nope", "cancel", "leave it", "stop", "don't", "negative",
@@ -109,6 +119,8 @@ def action_is_protected(hass, domain: str, service: str, entity_id: str = "") ->
     if (domain, service) == ("switch", "turn_off"):
         hay = entity_id.lower()
         return any(t in hay for t in ("alarm", "security", "camera", "lock"))
+    if domain in _INDIRECTION_DOMAINS and (service or "").lower() not in _INDIRECTION_SAFE:
+        return True
     return (domain, service) in _SENSITIVE
 
 

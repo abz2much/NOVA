@@ -155,11 +155,16 @@ def test_opt_in_proposes_action(energy, monkeypatch):
     assert offer.get("entity_id")            # names a specific load to hold
 
 
-def test_autonomous_auto_acts(energy, monkeypatch):
+def test_autonomous_tier_does_not_actually_act(energy, monkeypatch):
+    """Renamed + fixed Sept 2026: this used to assert auto_act is True, which
+    matched the code at the time but was itself the bug — appliance profiles
+    only ever capture a power SENSOR per appliance, never a controllable
+    switch, so nothing has ever actually been shed here. Nova now says so
+    instead of claiming an action it can't perform."""
     _over_peak_status(energy, monkeypatch, "autonomous")
     offer = energy.evaluate_for_proactive(_Hass())
     assert offer["type"] == "energy_shed"
-    assert offer["auto_act"] is True
+    assert offer["auto_act"] is False
 
 
 def test_no_offer_when_under_peak(energy, monkeypatch):
