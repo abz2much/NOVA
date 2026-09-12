@@ -104,3 +104,59 @@ async def test_turn_off_light_is_never_gated(load, monkeypatch):
     result = await le.try_local(h, "turn off the kitchen light", "sir")
     assert result is not None and result.handled
     assert any(c[:2] == ("light", "turn_off") for c in h.service_calls)
+
+
+# ── scene/script activation via the fast path (audit fix, local_engine.py) ──
+# The fast path's own scene-activation logic (the "activate X" pattern and the
+# goodnight shortcut) called hass.services.async_call directly with no gate at
+# all -- a scene/script can unlock a door or disarm the alarm just as easily
+# as any other actuation this file already gates. _needs_confirmation_domain
+# is the fix: same policy.requires_confirmation() check, for callers that
+# already have a (domain, service) pair rather than a fast-path action name.
+
+def _hass_with_scene(entity_id="scene.welcome", friendly="Welcome"):
+    h = FakeHass()
+    h.states.set(entity_id, "scening", friendly_name=friendly)
+    return h
+
+
+async def test_scene_activation_defers_when_protected(load, monkeypatch):
+    le = load("local_engine")
+    policy = load("policy")
+    monkeypatch.setattr(policy, "requires_confirmation", lambda hass, d, s, e="": True)
+    h = _hass_with_scene()
+    result = await le.try_local(h, "activate welcome scene", "sir")
+    assert result is None                          # deferred to the agent
+    assert h.service_calls == []                   # nothing actuated in the fast-path
+
+
+async def test_scene_activation_runs_when_not_protected(load, monkeypatch):
+    le = load("local_engine")
+    policy = load("policy")
+    monkeypatch.setattr(policy, "requires_confirmation", lambda hass, d, s, e="": False)
+    h = _hass_with_scene()
+    result = await le.try_local(h, "activate welcome scene", "sir")
+    assert result is not None and result.handled
+    assert ("scene", "turn_on", {"entity_id": "scene.welcome"}) in h.service_calls
+
+
+async def test_goodnight_shortcut_defers_when_protected(load, monkeypatch):
+    le = load("local_engine")
+    policy = load("policy")
+    monkeypatch.setattr(policy, "requires_confirmation", lambda hass, d, s, e="": True)
+    h = FakeHass()
+    h.states.set("scene.goodnight", "off", friendly_name="Goodnight")
+    result = await le.try_local(h, "goodnight", "sir")
+    assert result is None
+    assert h.service_calls == []
+
+
+async def test_goodnight_shortcut_runs_when_not_protected(load, monkeypatch):
+    le = load("local_engine")
+    policy = load("policy")
+    monkeypatch.setattr(policy, "requires_confirmation", lambda hass, d, s, e="": False)
+    h = FakeHass()
+    h.states.set("scene.goodnight", "off", friendly_name="Goodnight")
+    result = await le.try_local(h, "goodnight", "sir")
+    assert result is not None and result.handled
+    assert ("scene", "turn_on", {"entity_id": "scene.goodnight"}) in h.service_calls
