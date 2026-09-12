@@ -43,8 +43,8 @@ Two good options:
   current-speaker sensor, with `/train` and `/recognize` REST endpoints.
 
 Install and enroll a couple of voices per their instructions, then confirm the
-entity exists in **Developer Tools → States** (e.g. `binary_sensor.sam_voice`
-flips ON when Sam speaks, or `sensor.current_speaker` shows a name).
+entity exists in **Developer Tools → States** (e.g. `binary_sensor.username_voice`
+flips ON when Username speaks, or `sensor.current_speaker` shows a name).
 
 > GPU note: neither service *requires* a GPU (both default to CPU/ONNX). Your
 > Ollama GPU is free to keep serving the LLM. If you later want faster or
@@ -76,7 +76,7 @@ those signals but the voice service doesn't recognize the voice yet, it fires:
 
 ```
 event: nova_voice_enroll_candidate
-data:  { person: "sam", device_id: "…" }
+data:  { person: "username", device_id: "…" }
 ```
 
 Wire that to your service's enrollment so profiles build themselves from normal

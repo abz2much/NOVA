@@ -19,12 +19,12 @@ def pa(load):
 def test_time_routine_explanation(pa):
     out = pa.explain_suggestion(
         "time_routine",
-        {"hour": 18, "state": "on", "consistency": 0.87, "person": "Sam"}, 26)
+        {"hour": 18, "state": "on", "consistency": 0.87, "person": "Username"}, 26)
     assert "18:00" in out["headline"]
     joined = " ".join(out["evidence"]).lower()
     assert "26 times" in joined
     assert "87%" in joined
-    assert "sam" in joined
+    assert "username" in joined
 
 
 def test_repeated_command_explanation(pa):

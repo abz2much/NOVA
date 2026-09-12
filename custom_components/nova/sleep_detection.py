@@ -1,7 +1,7 @@
 """
 Nova — Sleep detection (v5.7.00, area-driven).
 
-Determines whether Sam is asleep or napping. Rules (simple and explainable):
+Determines whether Username is asleep or napping. Rules (simple and explainable):
 
   SLEEPING =
     (occupancy in any bedroom-flagged area) AND (in quiet hours)

@@ -40,8 +40,8 @@ async def test_untracked_resident_motion_is_not_intrusion(safety, fake_hass):
 async def test_tracked_away_motion_with_open_door_alerts_once(safety, fake_hass):
     # v6.33.0: corroborated motion when away fires ONE "investigating" alert,
     # then investigates silently (escalation only on confirmation).
-    fake_hass.states.set("person.sam", "not_home")
-    fake_hass.states.set("device_tracker.sam_phone", "not_home")
+    fake_hass.states.set("person.username", "not_home")
+    fake_hass.states.set("device_tracker.username_phone", "not_home")
     fake_hass.states.set("binary_sensor.front_door", "on", device_class="door")
     _motion(fake_hass)
     actions = await _tick(safety, fake_hass, anyone_home=False)
@@ -54,8 +54,8 @@ async def test_tracked_away_motion_with_open_door_alerts_once(safety, fake_hass)
 async def test_bare_motion_away_without_corroboration_is_suppressed(safety, fake_hass):
     # v6.32.0: bare motion when away — no armed alarm, no open door — is treated
     # as benign (pet / robot vacuum / blinds) and does NOT alert.
-    fake_hass.states.set("person.sam", "not_home")
-    fake_hass.states.set("device_tracker.sam_phone", "not_home")
+    fake_hass.states.set("person.username", "not_home")
+    fake_hass.states.set("device_tracker.username_phone", "not_home")
     _motion(fake_hass)
     actions = await _tick(safety, fake_hass, anyone_home=False)
     assert _intrusions(actions) == []
@@ -65,7 +65,7 @@ async def test_corroboration_can_be_disabled(cognitive_core, fake_hass):
     # Users who want the old behaviour can opt back in.
     safety = cognitive_core.SafetyManager(
         fake_hass, {"honorific": "sir", "intrusion_require_corroboration": False})
-    fake_hass.states.set("person.sam", "not_home")
+    fake_hass.states.set("person.username", "not_home")
     _motion(fake_hass)
     actions = await safety.tick(sleeping=False, anyone_home=False)
     fake_hass.close_pending()
@@ -74,7 +74,7 @@ async def test_corroboration_can_be_disabled(cognitive_core, fake_hass):
 
 async def test_person_home_suppresses_intrusion(safety, fake_hass):
     # Phone/person home wins outright even if motion is firing.
-    fake_hass.states.set("person.sam", "home")
+    fake_hass.states.set("person.username", "home")
     _motion(fake_hass)
     actions = await _tick(safety, fake_hass, anyone_home=True)
     assert _intrusions(actions) == []
@@ -88,13 +88,13 @@ async def test_armed_away_alarm_enables_intrusion_without_trackers(safety, fake_
 
 
 async def test_no_motion_no_intrusion_even_when_away(safety, fake_hass):
-    fake_hass.states.set("person.sam", "not_home")  # away, but nothing moving
+    fake_hass.states.set("person.username", "not_home")  # away, but nothing moving
     actions = await _tick(safety, fake_hass, anyone_home=False)
     assert _intrusions(actions) == []
 
 
 async def test_intrusion_debounced_within_window(safety, fake_hass):
-    fake_hass.states.set("person.sam", "not_home")
+    fake_hass.states.set("person.username", "not_home")
     fake_hass.states.set("binary_sensor.front_door", "on", device_class="door")  # corroboration
     _motion(fake_hass)
     first = await _tick(safety, fake_hass, anyone_home=False)

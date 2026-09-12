@@ -98,7 +98,7 @@ def _fresh(st, window: float = _RECENCY_WINDOW) -> bool:
 def _person_from_entity(st, pattern: str) -> str:
     """Derive a person id from a per-person voice sensor. Prefers the friendly
     name; falls back to the entity id with the domain and a trailing 'voice'/
-    'speaking' token stripped (binary_sensor.sam_voice -> sam)."""
+    'speaking' token stripped (binary_sensor.username_voice -> username)."""
     fname = st.attributes.get("friendly_name")
     if fname:
         cleaned = fname.lower()

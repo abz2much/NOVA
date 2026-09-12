@@ -49,18 +49,18 @@ def test_locked_and_closed(cc):
 
 
 def test_open_window_named_and_actionable(cc):
-    # Sam's case: nothing closeable, locks already locked, one window open.
-    msg = cc.build_lockdown_message("sir", [], [], ["Sam's Window 1"])
-    assert "Sam's Window 1 is open" in msg
+    # Username's case: nothing closeable, locks already locked, one window open.
+    msg = cc.build_lockdown_message("sir", [], [], ["Username's Window 1"])
+    assert "Username's Window 1 is open" in msg
     assert "close it" in msg
     assert "already secured" in msg
     assert "left as-is" not in msg and "1 opening already open" not in msg
 
 
 def test_closed_garage_but_window_open(cc):
-    msg = cc.build_lockdown_message("sir", [], ["the Garage Door"], ["Sam's Window 1"])
+    msg = cc.build_lockdown_message("sir", [], ["the Garage Door"], ["Username's Window 1"])
     assert "I closed the Garage Door" in msg
-    assert "Sam's Window 1 is open" in msg
+    assert "Username's Window 1 is open" in msg
     assert "close it" in msg
 
 

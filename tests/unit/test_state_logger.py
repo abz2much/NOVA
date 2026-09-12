@@ -27,13 +27,13 @@ def test_fresh_db_has_person_column(logger):
 
 
 def test_log_state_change_stores_person(logger):
-    logger.log_state_change("light.kitchen", "off", "on", person="Sam")
+    logger.log_state_change("light.kitchen", "off", "on", person="Username")
     with sqlite3.connect(logger._db_path) as conn:
         row = conn.execute(
             "SELECT person FROM state_changes WHERE entity_id = ?",
             ("light.kitchen",),
         ).fetchone()
-    assert row[0] == "Sam"
+    assert row[0] == "Username"
 
 
 def test_log_state_change_defaults_to_unknown(logger):
@@ -123,7 +123,7 @@ def test_listener_stamps_known_person_when_home(cc, core_state, load, monkeypatc
     identity = load("identity")
     monkeypatch.setattr(identity, "quick_identify",
                         lambda hass, area=None: identity.Identification(
-                            "Sam", 0.6, "sole_occupant", {"Sam": 0.6}))
+                            "Username", 0.6, "sole_occupant", {"Username": 0.6}))
 
     ev = _event(cc, "light.den", "off", "on")
     cc._on_state_changed(ev)
@@ -133,7 +133,7 @@ def test_listener_stamps_known_person_when_home(cc, core_state, load, monkeypatc
             "SELECT person, person_confidence FROM state_changes "
             "WHERE entity_id='light.den'"
         ).fetchone()
-    assert row is not None and row[0] == "Sam"
+    assert row is not None and row[0] == "Username"
     assert row[1] == pytest.approx(0.6)
 
 
@@ -145,7 +145,7 @@ def test_listener_records_probable_person_below_threshold(cc, core_state, load, 
     monkeypatch.setattr(identity, "quick_identify",
                         lambda hass, area=None: identity.Identification(
                             identity.UNKNOWN, 0.0, "low_confidence",
-                            {"Eliana": 0.42, "Sam": 0.10}))
+                            {"Eliana": 0.42, "Username": 0.10}))
 
     ev = _event(cc, "light.den", "off", "on")
     cc._on_state_changed(ev)
@@ -165,7 +165,7 @@ def test_listener_keeps_unknown_when_candidates_are_tied(cc, core_state, load, m
     monkeypatch.setattr(identity, "quick_identify",
                         lambda hass, area=None: identity.Identification(
                             identity.UNKNOWN, 0.0, "low_confidence",
-                            {"Eliana": 0.30, "Sam": 0.28}))
+                            {"Eliana": 0.30, "Username": 0.28}))
 
     ev = _event(cc, "light.den", "off", "on")
     cc._on_state_changed(ev)
@@ -184,7 +184,7 @@ def test_listener_records_clear_leader_as_best_guess(cc, core_state, load, monke
     monkeypatch.setattr(identity, "quick_identify",
                         lambda hass, area=None: identity.Identification(
                             identity.UNKNOWN, 0.0, "low_confidence",
-                            {"Sam": 0.30, "Eliana": 0.15}))
+                            {"Username": 0.30, "Eliana": 0.15}))
 
     ev = _event(cc, "light.den", "off", "on")
     cc._on_state_changed(ev)
@@ -194,7 +194,7 @@ def test_listener_records_clear_leader_as_best_guess(cc, core_state, load, monke
             "SELECT person, person_confidence FROM state_changes "
             "WHERE entity_id='light.den'"
         ).fetchone()
-    assert row[0] == "Sam"
+    assert row[0] == "Username"
     assert 0.0 < row[1] <= 0.44
 
 

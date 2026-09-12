@@ -85,11 +85,11 @@ Nova can now learn what your buttons and remotes do. When a press consistently p
 
 ## [7.78.0] — learned arrival / departure automations
 
-When something you do consistently lines up with leaving or coming home — the garage closing shortly after you drive off, the entry lights coming on when you get back — the suggestion is now built as a proper arrival/departure trigger instead of a raw state change. Home Assistant treats "leaves home" and "arrives home" as zone events, which handle the edges of your home zone correctly, so these suggestions read as "when person.sam leaves home, close the garage" and behave the way presence automations are meant to. This applies to people and phone/device trackers crossing your home zone; other triggers are unchanged, and it only appears when the pattern is consistent.
+When something you do consistently lines up with leaving or coming home — the garage closing shortly after you drive off, the entry lights coming on when you get back — the suggestion is now built as a proper arrival/departure trigger instead of a raw state change. Home Assistant treats "leaves home" and "arrives home" as zone events, which handle the edges of your home zone correctly, so these suggestions read as "when person.username leaves home, close the garage" and behave the way presence automations are meant to. This applies to people and phone/device trackers crossing your home zone; other triggers are unchanged, and it only appears when the pattern is consistent.
 
 ## [7.77.0] — time routines can be gated on their owner being home
 
-When a daily routine is one person's habit — "the porch light goes on around 7pm, and it's Sam who's home when it does" — the suggested automation now carries a presence condition, so it only runs when that person is actually home instead of firing on the clock regardless. A time trigger has no built-in sense of who's around, so this is a real guard: the evening routine won't run to an empty house. It only attaches when the routine clearly belongs to one person and that person maps to a Home Assistant person entity, and like every learned automation it's a suggestion you approve — so a routine you deliberately want to run while away (a security light, say) can simply be declined. Household-wide routines with no single owner are unchanged.
+When a daily routine is one person's habit — "the porch light goes on around 7pm, and it's Username who's home when it does" — the suggested automation now carries a presence condition, so it only runs when that person is actually home instead of firing on the clock regardless. A time trigger has no built-in sense of who's around, so this is a real guard: the evening routine won't run to an empty house. It only attaches when the routine clearly belongs to one person and that person maps to a Home Assistant person entity, and like every learned automation it's a suggestion you approve — so a routine you deliberately want to run while away (a security light, say) can simply be declined. Household-wide routines with no single owner are unchanged.
 
 ## [7.76.0] — learned automations can be gated on a sensor reading
 
@@ -1604,7 +1604,7 @@ Frigate-native identity added in 6.59.0 read a recognized name off the
 `sub_label` on the `frigate/events` topic — but modern Frigate (0.14+, HA
 integration 5.9.2+) doesn't reliably put it there. It publishes recognized
 faces to a dedicated MQTT topic, `frigate/tracked_object_update`, as
-`{"type":"face","name":"Sam","score":0.93,...}`, and exposes a
+`{"type":"face","name":"Username","score":0.93,...}`, and exposes a
 `sensor.<camera>_last_recognized_face` per camera. Nova was listening in the
 wrong place, so its recognition cache stayed empty and it truthfully reported
 that it couldn't see anyone.
@@ -1612,7 +1612,7 @@ that it couldn't see anyone.
 This wires up both correct channels. Nova now subscribes to
 `frigate/tracked_object_update` and handles `type: "face"` payloads in
 real time, AND reads the `last_recognized_face` sensors directly — so the
-conversation context ("Recent faces: Sam recognized at dining room ~91%") is
+conversation context ("Recent faces: Username recognized at dining room ~91%") is
 populated from whichever source has data, and a new `who_do_you_see` agent
 tool answers "who do you see / can you recognize me" on demand by checking the
 sensors live. Person detection and the older sub_label path still work; this
@@ -2430,7 +2430,7 @@ by the same listener that logs them for pattern learning (the full face/voice
 resolver is too costly to run on every light flip; that's reserved for the
 much lower-volume conversation path). When one person accounts for the clear
 majority of an entity's routine, or a repeated command, Nova now says so:
-"turns on around 7:00 most days when Sam is home" instead of a blanket
+"turns on around 7:00 most days when Username is home" instead of a blanket
 household statement — and attributes the learned fact to *that person's*
 knowledge subject, not the household's. Mixed or ambiguous patterns behave
 exactly as before.
@@ -2695,7 +2695,7 @@ And anything it can't secure is mentioned once, never on a loop.
     intentionally open and leaves it alone.
 
 So a typical engage now reads like "Sir, lockdown engaged — I locked the front
-door and closed the Garage Door, but Sam's Window 1 is open and I can't secure it
+door and closed the Garage Door, but Username's Window 1 is open and I can't secure it
 remotely — you'll want to close it," and you hear it once, not every few minutes.
 
 ## [6.30.1] — lockdown tells you what's actually open

@@ -34,23 +34,23 @@ def presence(load, monkeypatch):
 
 def test_identify_per_person_binary_sensor(vr, cfg, fake_hass):
     cfg["voice_recognition_source"] = "binary_sensor.*_voice"
-    fake_hass.states.set("binary_sensor.sam_voice", "on")
+    fake_hass.states.set("binary_sensor.username_voice", "on")
     fake_hass.states.set("binary_sensor.alex_voice", "off")
-    assert vr.identify(fake_hass) == {"sam": pytest.approx(0.85)}
+    assert vr.identify(fake_hass) == {"username": pytest.approx(0.85)}
 
 
 def test_identify_binary_sensor_uses_score_attr(vr, cfg, fake_hass):
     cfg["voice_recognition_source"] = "binary_sensor.*_voice"
-    fake_hass.states.set("binary_sensor.sam_voice", "on", confidence=0.93)
-    assert vr.identify(fake_hass) == {"sam": pytest.approx(0.93)}
+    fake_hass.states.set("binary_sensor.username_voice", "on", confidence=0.93)
+    assert vr.identify(fake_hass) == {"username": pytest.approx(0.93)}
 
 
 # ── identify: single current-speaker sensor ──────────────────────────────────
 
 def test_identify_current_speaker_sensor(vr, cfg, fake_hass):
     cfg["voice_recognition_source"] = "sensor.current_speaker"
-    fake_hass.states.set("sensor.current_speaker", "Sam", score=88)  # percent
-    assert vr.identify(fake_hass) == {"Sam": pytest.approx(0.88)}
+    fake_hass.states.set("sensor.current_speaker", "Username", score=88)  # percent
+    assert vr.identify(fake_hass) == {"Username": pytest.approx(0.88)}
 
 
 def test_identify_no_speaker_state_is_empty(vr, cfg, fake_hass):
@@ -60,7 +60,7 @@ def test_identify_no_speaker_state_is_empty(vr, cfg, fake_hass):
 
 
 def test_identify_no_source_configured(vr, cfg, fake_hass):
-    fake_hass.states.set("sensor.current_speaker", "Sam")
+    fake_hass.states.set("sensor.current_speaker", "Username")
     assert vr.identify(fake_hass) == {}
 
 
@@ -81,12 +81,12 @@ def test_register_wires_into_identity(vr, cfg, load, fake_hass):
     identity = load("identity")
     cfg["voice_recognition_source"] = "binary_sensor.*_voice"
     cfg["identity_voice_fingerprint"] = True
-    fake_hass.states.set("binary_sensor.sam_voice", "on")
+    fake_hass.states.set("binary_sensor.username_voice", "on")
     vr.register(fake_hass)
     try:
         assert identity.has_voice_provider() is True
         ident = identity.resolve(fake_hass)
-        assert ident.person == "sam" and "voice" in ident.method
+        assert ident.person == "username" and "voice" in ident.method
     finally:
         identity.register_voice_provider(None)
 
@@ -94,34 +94,34 @@ def test_register_wires_into_identity(vr, cfg, load, fake_hass):
 # ── enrollment (learn over time) ─────────────────────────────────────────────
 
 def test_enrollment_candidate_when_face_knows_but_voice_doesnt(vr, cfg, presence, fake_hass):
-    # Sole occupant Sam ⇒ identity is confident via presence, not voice; voice
-    # source has no one speaking ⇒ Sam is an enrollment opportunity.
+    # Sole occupant Username ⇒ identity is confident via presence, not voice; voice
+    # source has no one speaking ⇒ Username is an enrollment opportunity.
     cfg["voice_recognition_source"] = "binary_sensor.*_voice"   # nothing ON
-    presence["home"] = ["Sam"]
-    assert vr.enrollment_candidate(fake_hass) == "Sam"
+    presence["home"] = ["Username"]
+    assert vr.enrollment_candidate(fake_hass) == "Username"
 
 
 def test_no_enrollment_when_voice_already_knows(vr, cfg, presence, fake_hass):
     cfg["voice_recognition_source"] = "binary_sensor.*_voice"
     cfg["identity_voice_fingerprint"] = True
-    presence["home"] = ["Sam"]
-    fake_hass.states.set("binary_sensor.sam_voice", "on")   # voice recognizes Sam
+    presence["home"] = ["Username"]
+    fake_hass.states.set("binary_sensor.username_voice", "on")   # voice recognizes Username
     assert vr.enrollment_candidate(fake_hass) is None
 
 
 def test_no_enrollment_when_nobody_known(vr, cfg, presence, fake_hass):
     cfg["voice_recognition_source"] = "binary_sensor.*_voice"
-    presence["home"] = ["Sam", "Alex"]   # ambiguous → identity unknown
+    presence["home"] = ["Username", "Alex"]   # ambiguous → identity unknown
     assert vr.enrollment_candidate(fake_hass) is None
 
 
 async def test_maybe_fire_enrollment_fires_once_then_cooldown(vr, cfg, presence, fake_hass):
     cfg["voice_recognition_source"] = "binary_sensor.*_voice"
     cfg["identity_voice_fingerprint"] = True
-    presence["home"] = ["Sam"]
-    assert vr.maybe_fire_enrollment(fake_hass) == "Sam"
+    presence["home"] = ["Username"]
+    assert vr.maybe_fire_enrollment(fake_hass) == "Username"
     assert fake_hass.bus.fired[-1][0] == "nova_voice_enroll_candidate"
-    assert fake_hass.bus.fired[-1][1]["person"] == "Sam"
+    assert fake_hass.bus.fired[-1][1]["person"] == "Username"
     # immediate second call is rate-limited
     assert vr.maybe_fire_enrollment(fake_hass) is None
 
@@ -129,6 +129,6 @@ async def test_maybe_fire_enrollment_fires_once_then_cooldown(vr, cfg, presence,
 async def test_maybe_fire_enrollment_gated_by_flag(vr, cfg, presence, fake_hass):
     cfg["voice_recognition_source"] = "binary_sensor.*_voice"
     cfg["identity_voice_fingerprint"] = False   # voice tier off
-    presence["home"] = ["Sam"]
+    presence["home"] = ["Username"]
     assert vr.maybe_fire_enrollment(fake_hass) is None
     assert fake_hass.bus.fired == []

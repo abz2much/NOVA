@@ -101,7 +101,7 @@ def _voice_votes(hass: HomeAssistant, device_id: Optional[str]) -> dict:
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 def normalize(name: str) -> str:
-    """A stable subject id from a display name (e.g. 'Sam Smith' -> 'sam_smith')."""
+    """A stable subject id from a display name (e.g. 'Username Smith' -> 'username_smith')."""
     return "_".join((name or "").strip().lower().split())
 
 
@@ -324,7 +324,7 @@ def quick_identify(hass: HomeAssistant, area_id: Optional[str] = None) -> Identi
     """Room-aware identity WITH confidence and candidates (v6.77.0).
 
     Returns a full Identification so callers can store partial certainty
-    ("probably Sam, 0.62") instead of discarding everything short of certain.
+    ("probably Username, 0.62") instead of discarding everything short of certain.
     Deliberately skips the expensive voice tier — this runs on every state
     change — but does use presence, face, room, and proximity signals."""
     if not bool(_cfg("identity_enabled", True)):

@@ -11,7 +11,7 @@ Two independent identity sources, either or both:
 
 2. DoubleTake (optional): publishes MQTT messages to double-take/matches:
      {"id": "<id>", "camera": "front_door",
-      "match": {"name": "Sam", "confidence": 98.7, ...}, ...}
+      "match": {"name": "Username", "confidence": 98.7, ...}, ...}
    and creates HA sensors sensor.double_take_<name>. Still supported for setups
    that use it.
 
@@ -34,14 +34,14 @@ _LOGGER = logging.getLogger(__name__)
 MATCHES_TOPIC = "double-take/matches"
 CAMERAS_TOPIC = "double-take/cameras"
 # Modern Frigate (0.14+/HA integration 5.9.2+) publishes recognized faces here
-# as {"type": "face", "name": "Sam", "score": 0.93, "camera": "...", ...} and
+# as {"type": "face", "name": "Username", "score": 0.93, "camera": "...", ...} and
 # exposes a sensor.<camera>_last_recognized_face per camera. This is the
 # reliable channel for Frigate-native face recognition — the older sub_label on
 # frigate/events isn't always populated. (v6.66.0)
 TRACKED_OBJECT_TOPIC = "frigate/tracked_object_update"
 
 # Cache of recent recognitions keyed by camera entity
-# {camera_entity: {"name": "Sam", "confidence": 98.7, "ts": datetime, "unknown_count": int}}
+# {camera_entity: {"name": "Username", "confidence": 98.7, "ts": datetime, "unknown_count": int}}
 _RECOGNITION_CACHE: dict[str, dict] = {}
 # Cache of recent Frigate events keyed by camera entity for snapshot retrieval
 _RECENT_EVENTS: dict[str, dict] = {}
@@ -145,8 +145,8 @@ def _parse_sub_label(sub) -> tuple[str, float]:
     """Normalize Frigate's sub_label into (name, confidence_percent).
 
     Frigate represents a recognized face sub-label differently across versions:
-      - a bare string:            "Sam"
-      - a [name, score] pair:     ["Sam", 0.92]   (score 0..1)
+      - a bare string:            "Username"
+      - a [name, score] pair:     ["Username", 0.92]   (score 0..1)
     Returns ("", 0.0) when there's no usable name. Never raises.
     """
     try:
@@ -400,7 +400,7 @@ async def register_recognition_listener(hass: HomeAssistant) -> list:
         _LOGGER.debug("Nova: Frigate MQTT subscription skipped: %s", exc)
 
     # ── Frigate-native face recognition via tracked_object_update (v6.66.0) ──
-    # Modern Frigate publishes {"type":"face","name":"Sam","score":0.93,...} to
+    # Modern Frigate publishes {"type":"face","name":"Username","score":0.93,...} to
     # frigate/tracked_object_update. This is the RELIABLE identity channel — the
     # sub_label on frigate/events isn't always populated, which is why Nova
     # couldn't previously "see" a known person. Gated by recognition_source.

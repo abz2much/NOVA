@@ -2,7 +2,7 @@
 Nova — per-person routine store (v6.85.0).
 
 The dedicated home for the person_patterns table: the per-household-member
-routines the pattern analyzer detects ("Sam usually starts the coffee around
+routines the pattern analyzer detects ("Username usually starts the coffee around
 06:40"). The table has existed since v6.41 and been written by the analyzer and
 read by the Memory panel; this consolidates that scattered logic behind one
 clean API so anticipation and any future consumer read routines from one place.
@@ -10,7 +10,7 @@ clean API so anticipation and any future consumer read routines from one place.
 Every function takes an explicit db_path (default the shared patterns.db), is
 self-sufficient (ensures the schema on write), and never raises — a read returns
 [] and a write returns False on error. Person ids are normalized via identity so
-the store key matches everywhere ('Sam' -> 'sam').
+the store key matches everywhere ('Username' -> 'username').
 """
 from __future__ import annotations
 

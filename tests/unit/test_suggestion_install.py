@@ -46,8 +46,8 @@ def test_sequence_preserves_delay_action_item(pa):
 
 def test_presence_pattern_installable(pa):
     stored = json.dumps({
-        "alias": "Nova Learned: light.entry when person.sam home",
-        "trigger": {"platform": "state", "entity_id": "person.sam", "to": "home"},
+        "alias": "Nova Learned: light.entry when person.username home",
+        "trigger": {"platform": "state", "entity_id": "person.username", "to": "home"},
         "action": {"service": "light.turn_on", "entity_id": "light.entry"},
     })
     out = pa.normalize_suggestion_automation(stored)

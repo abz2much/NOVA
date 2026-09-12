@@ -13,8 +13,8 @@ def rec(load):
 # ── string form: "Name" (no score) ──────────────────────────────────────────
 
 def test_bare_string_name(rec):
-    name, conf = rec._parse_sub_label("Sam")
-    assert name == "Sam" and conf == 0.0
+    name, conf = rec._parse_sub_label("Username")
+    assert name == "Username" and conf == 0.0
 
 
 def test_string_is_trimmed(rec):
@@ -25,20 +25,20 @@ def test_string_is_trimmed(rec):
 # ── list form: ["Name", score] with score 0..1 ──────────────────────────────
 
 def test_list_name_and_fractional_score(rec):
-    name, conf = rec._parse_sub_label(["Sam", 0.92])
-    assert name == "Sam"
+    name, conf = rec._parse_sub_label(["Username", 0.92])
+    assert name == "Username"
     assert conf == 92.0                       # 0..1 → percent
 
 
 def test_list_score_already_percent(rec):
     # some setups may already emit a 0..100 value; don't double-scale
-    name, conf = rec._parse_sub_label(["Sam", 95.0])
-    assert name == "Sam" and conf == 95.0
+    name, conf = rec._parse_sub_label(["Username", 95.0])
+    assert name == "Username" and conf == 95.0
 
 
 def test_list_name_only(rec):
-    name, conf = rec._parse_sub_label(["Sam"])
-    assert name == "Sam" and conf == 0.0
+    name, conf = rec._parse_sub_label(["Username"])
+    assert name == "Username" and conf == 0.0
 
 
 # ── empty / malformed → no identity, never raises ────────────────────────────
@@ -56,7 +56,7 @@ def test_empty_list(rec):
 
 
 def test_garbage_score_does_not_raise(rec):
-    name, conf = rec._parse_sub_label(["Sam", "notanumber"])
+    name, conf = rec._parse_sub_label(["Username", "notanumber"])
     # falls back cleanly — name may be kept but confidence must be safe
     assert conf == 0.0
 
@@ -71,7 +71,7 @@ def test_none_name_in_list(rec):
 def test_confidence_threshold_boundary(rec):
     # sanity: the module's threshold is a plain percent number
     assert isinstance(rec.CONFIDENCE_THRESHOLD, (int, float))
-    _, conf = rec._parse_sub_label(["Sam", 0.61])
+    _, conf = rec._parse_sub_label(["Username", 0.61])
     assert conf >= rec.CONFIDENCE_THRESHOLD    # 61% clears a 60 threshold
 
 
@@ -127,13 +127,13 @@ class _Hass:
 
 def test_read_face_sensors_names_known_person(rec):
     hass = _Hass([
-        _St("sensor.dining_room_last_recognized_face", "Sam", score=0.91),
+        _St("sensor.dining_room_last_recognized_face", "Username", score=0.91),
         _St("sensor.backyard_last_recognized_face", "None"),
         _St("sensor.some_other_sensor", "42"),
     ])
     found = rec.read_frigate_face_sensors(hass)
     assert len(found) == 1
-    assert found[0]["name"] == "Sam"
+    assert found[0]["name"] == "Username"
     assert found[0]["camera"] == "dining_room"
     assert found[0]["camera_entity"] == "camera.dining_room"
     assert found[0]["confidence"] == 91.0
@@ -158,10 +158,10 @@ def test_read_face_sensors_never_raises_on_bad_state(rec):
 
 def test_who_do_you_see_from_sensor(rec):
     rec._RECOGNITION_CACHE.clear()
-    hass = _Hass([_St("sensor.front_last_recognized_face", "Sam", score=0.95)])
+    hass = _Hass([_St("sensor.front_last_recognized_face", "Username", score=0.95)])
     res = rec.who_do_you_see(hass)
     assert res["any"] is True
-    assert "Sam" in res["seen"]
+    assert "Username" in res["seen"]
     assert res["detail"][0]["source"] == "frigate_sensor"
 
 
@@ -175,9 +175,9 @@ def test_who_do_you_see_empty_when_nothing_recognized(rec):
 
 def test_context_string_includes_frigate_sensor(rec):
     rec._RECOGNITION_CACHE.clear()
-    hass = _Hass([_St("sensor.dining_room_last_recognized_face", "Sam", score=0.9)])
+    hass = _Hass([_St("sensor.dining_room_last_recognized_face", "Username", score=0.9)])
     s = rec.recognition_context_string(hass)
-    assert "Sam" in s
+    assert "Username" in s
     assert "dining room" in s
 
 
