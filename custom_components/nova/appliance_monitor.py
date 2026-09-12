@@ -614,9 +614,9 @@ def _discover_whole_home_meter(hass: HomeAssistant) -> Optional[_DeltaTracker]:
 
         # Look for whole-home indicators
         is_whole_home = False
-        for kw in ("electric consumption", "home energy", "total consumption",
-                    "main power", "whole house", "grid consumption",
-                    "mains power"):
+        for kw in ("electric consumption", "home consumption", "home energy",
+                    "total consumption", "main power", "whole house",
+                    "grid consumption", "mains power"):
             if kw in fname or kw.replace(" ", "_") in eid:
                 is_whole_home = True
                 break

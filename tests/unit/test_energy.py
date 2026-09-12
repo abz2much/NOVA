@@ -202,3 +202,30 @@ def test_energy_tool_registered(load):
     names = {t["function"]["name"] for t in agent.NOVA_TOOLS}
     assert "energy_status" in names
     assert "energy_status" in agent._TOOL_MAP
+
+
+# ── whole-home meter discovery (fallback path) ───────────────────────────────
+
+def test_fallback_meter_finds_powerocean_home_consumption(energy, fake_hass):
+    """Regression: EcoFlow PowerOcean names its whole-home sensor 'Home
+    Consumption' -- not previously in the recognised-phrase list, so a
+    correctly-tagged sensor (device_class=power, unit=W) was invisible to
+    Nova and power_status() reported 'no meter found' even with real data."""
+    fake_hass.states.set("sensor.solar_inverter_housepower", "512.3",
+                          unit_of_measurement="W", device_class="power",
+                          friendly_name="Home Consumption")
+    assert energy._fallback_meter(fake_hass) == "sensor.solar_inverter_housepower"
+
+
+def test_fallback_meter_still_finds_known_names(energy, fake_hass):
+    fake_hass.states.set("sensor.main_power_meter", "800",
+                          unit_of_measurement="W", device_class="power",
+                          friendly_name="Main Power")
+    assert energy._fallback_meter(fake_hass) == "sensor.main_power_meter"
+
+
+def test_fallback_meter_ignores_unrelated_power_sensors(energy, fake_hass):
+    fake_hass.states.set("sensor.washer_power", "1200",
+                          unit_of_measurement="W", device_class="power",
+                          friendly_name="Washer Power")
+    assert energy._fallback_meter(fake_hass) is None

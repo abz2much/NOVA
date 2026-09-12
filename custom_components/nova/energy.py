@@ -146,8 +146,9 @@ def _fallback_meter(hass) -> Optional[str]:
         fname = (state.attributes.get("friendly_name") or "").lower()
         if dc != "power" and unit not in ("w", "kw"):
             continue
-        for kw in ("electric consumption", "home energy", "total consumption",
-                   "main power", "whole house", "grid consumption", "mains power"):
+        for kw in ("electric consumption", "home consumption", "home energy",
+                   "total consumption", "main power", "whole house",
+                   "grid consumption", "mains power"):
             if kw in fname:
                 return state.entity_id
     return None
