@@ -17,6 +17,7 @@ from typing import Optional
 
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.util import dt as dt_util
 from datetime import timedelta
 
 from .presence import get_presence_summary
@@ -53,8 +54,19 @@ def _connect():
     return conn
 
 
+def _now_local() -> datetime:
+    """Naive local 'now', using Home Assistant's configured timezone rather
+    than the stdlib's bare datetime.now() (which reads the host/container
+    system timezone — often UTC on HAOS/Docker regardless of what timezone
+    the user actually configured). trigger_at is stored as a plain local ISO
+    string typed by the user or the agent (e.g. "2026-04-17T21:00:00", no
+    offset), so every comparison against it needs to use the same clock the
+    user meant, not whatever timezone the container happens to boot in."""
+    return dt_util.as_local(dt_util.utcnow()).replace(tzinfo=None)
+
+
 def _in_quiet_hours(now: Optional[datetime] = None) -> bool:
-    now = now or datetime.now()
+    now = now or _now_local()
     t = now.time()
     if QUIET_START < QUIET_END:
         return QUIET_START <= t <= QUIET_END
@@ -97,7 +109,7 @@ def acknowledge_reminder(reminder_id: int) -> bool:
 
 def get_due_reminders(now: Optional[datetime] = None) -> list[dict]:
     """Return all reminders whose trigger time has passed and not yet fired."""
-    now = now or datetime.now()
+    now = now or _now_local()
     try:
         with _connect() as conn:
             rows = conn.execute(
@@ -118,7 +130,7 @@ def mark_fired(reminder_id: int):
         with _connect() as conn:
             conn.execute(
                 "UPDATE reminders SET last_fired = ? WHERE id = ?",
-                (datetime.now().isoformat(), reminder_id),
+                (_now_local().isoformat(), reminder_id),
             )
     except Exception as exc:
         _LOGGER.debug("Nova: mark_fired error: %s", exc)
