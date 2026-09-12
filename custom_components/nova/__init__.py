@@ -707,7 +707,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     "sentinel_start", "sentinel_stop",
                     "database_purge", "database_stats",
                     "nap", "shush", "unshush",
-                    "observer_start", "observer_stop", "observer_status"):
+                    "observer_start", "observer_stop", "observer_status",
+                    "replay_policy", "create_automation", "diagnose_doorbell",
+                    "test_notify", "test_tts", "lockdown",
+                    "train_doorbell_backlog", "check_packages", "speak",
+                    "process_intent", "remember", "forget",
+                    "backup", "restore"):
         hass.services.async_remove(DOMAIN, service)
 
     ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
