@@ -1471,8 +1471,28 @@ async def _exec_run_scene_script(hass: HomeAssistant, args: dict) -> str:
     if domain not in ("scene", "script", "automation"):
         return json.dumps({"error": f"Not a scene/script/automation: {entity_id}"})
 
+    svc = "turn_on" if domain in ("scene", "script") else "trigger"
+
+    # Authorization gate (audit fix, Sept 2026): a scene/script/automation's
+    # contents are opaque to this tool — it could unlock a door, disarm the
+    # alarm, or open a cover just as easily as turn on a light. policy.py
+    # rates any actuating call on these domains MEDIUM by risk, and
+    # voice_confirm already treats them as protected the same way; this was
+    # the one call site that never actually consulted either, so the
+    # classification had no enforcement point. Same fail-closed gate as
+    # every other actuation path.
+    from . import policy
+    label = entity_id.split(".", 1)[-1].replace("_", " ").strip()
+    ok_gate, gate_note = await policy.confirm_gate(
+        hass, domain, svc, entity_id, f"activate {label}")
+    if not ok_gate:
+        return json.dumps({
+            "status": "awaiting_confirmation",
+            "entity_id": entity_id,
+            "message": gate_note or f"Confirmation required before activating {entity_id}.",
+        })
+
     try:
-        svc = "turn_on" if domain in ("scene", "script") else "trigger"
         await hass.services.async_call(domain, svc, {"entity_id": entity_id}, blocking=True)
         return json.dumps({"success": True, "entity_id": entity_id, "action": "activated"})
     except Exception as exc:

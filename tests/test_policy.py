@@ -117,3 +117,36 @@ def test_requires_confirmation_fails_closed_on_error(load, monkeypatch):
     assert policy.requires_confirmation(None, "lock", "unlock", "lock.front") is True
     # low risk -> allowed
     assert policy.requires_confirmation(None, "light", "turn_on", "light.kitchen") is False
+
+
+# ── indirection domains: scene/script/automation contents aren't visible ─────
+def test_classify_indirection_domains(load):
+    """A scene/script/automation can itself unlock/disarm/open something, and
+    classify() can't see inside one — so activating any of them is MEDIUM,
+    not LOW, regardless of the exact service name."""
+    policy = load("policy")
+    assert policy.classify("scene", "turn_on")[0] == "medium"
+    assert policy.classify("script", "turn_on")[0] == "medium"
+    assert policy.classify("automation", "trigger")[0] == "medium"
+
+
+def test_classify_indirection_dynamic_script_service(load):
+    """Regression guard: HA auto-registers a dynamic per-script service
+    (script.<object_id>) as an alternative to script.turn_on. A tuple-based
+    check would miss this exactly the way the original cover.open_cover gap
+    was missed — the check has to be domain-level."""
+    policy = load("policy")
+    assert policy.classify("script", "my_unlock_front_door_script")[0] == "medium"
+    assert policy.classify("script", "some_random_custom_script_id")[0] == "medium"
+
+
+def test_classify_indirection_safe_ops_stay_low(load):
+    """Reloading config or stopping/disabling something already running can't
+    newly trigger whatever a scene/script/automation contains, so these stay
+    LOW — no friction for the non-actuating direction."""
+    policy = load("policy")
+    assert policy.classify("scene", "reload")[0] == "low"
+    assert policy.classify("script", "reload")[0] == "low"
+    assert policy.classify("script", "turn_off")[0] == "low"
+    assert policy.classify("automation", "turn_off")[0] == "low"
+    assert policy.classify("automation", "reload")[0] == "low"

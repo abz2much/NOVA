@@ -103,6 +103,35 @@ async def async_run_routine(
                 domain, svc = service.split(".", 1)
                 data = step.get("data", {})
                 target = step.get("target") or None
+
+                # Authorization gate (audit fix, Sept 2026): a routine step can
+                # be just as sensitive as a direct control_device call (the
+                # default "goodmorning" routine opens covers; a custom routine
+                # could just as easily unlock or disarm, or activate a scene/
+                # script/automation whose contents this module can't inspect).
+                # Steps aren't always scoped to one entity_id (target can be an
+                # area/device_class), so this gates at the step level — one
+                # confirmation for whatever the step touches, using the first
+                # entity named in its data (if any) for the voice prompt.
+                step_entity = (data or {}).get("entity_id", "") if isinstance(data, dict) else ""
+                if isinstance(step_entity, list):
+                    step_entity = step_entity[0] if step_entity else ""
+                from . import policy
+                if policy.requires_confirmation(hass, domain, svc, step_entity):
+                    ok_gate, gate_note = await policy.confirm_gate(
+                        hass, domain, svc, step_entity, service.replace(".", " "))
+                    if not ok_gate:
+                        if step.get("optional"):
+                            _LOGGER.debug(
+                                "Nova: optional step '%s' needs confirmation, skipped: %s",
+                                service, gate_note)
+                        else:
+                            _LOGGER.warning(
+                                "Nova: step '%s' needs confirmation, not run: %s",
+                                service, gate_note)
+                            errors.append(f"{service}: {gate_note or 'confirmation required'}")
+                        continue
+
                 try:
                     await hass.services.async_call(domain, svc, data, target=target, blocking=True)
                     executed += 1
