@@ -27,6 +27,14 @@ Two delivery paths, chosen by `voice_confirm_mode`:
   - "auto"    — try native; if the satellite has no usable audio output
      configured, fall back to gated.
 
+When there is no assist_satellite at all (Abi's current setup — zero paired),
+`confirm()` falls back further still: it pushes an actionable Confirm/Deny
+notification to every phone with the HA companion app (notify.mobile_app_*),
+and waits up to `_NOTIFY_CONFIRM_TIMEOUT` for a tap from either household
+member — same "first response wins" pattern as Nova's other household-wide
+alerts. This is what actually lets a protected action complete right now,
+rather than being denied outright.
+
 Everything here is defensive and never raises to the caller — a failed
 confirmation is treated as "not confirmed" (fail safe: the protected action does
 NOT run).
@@ -35,7 +43,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from typing import Optional, Sequence
+
+from homeassistant.core import callback
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -43,9 +54,10 @@ _LOGGER = logging.getLogger(__name__)
 # (Only consulted when voice-confirm is enabled AND the action is protected.)
 _SENSITIVE = {
     ("lock", "unlock"),
-    ("cover", "open"),            # garage doors are covers
+    ("cover", "open"),             # some cover integrations use this name
+    ("cover", "open_cover"),       # the actual HA service name (garage doors are covers)
     ("alarm_control_panel", "alarm_disarm"),
-    ("switch", "turn_off"),       # only when the switch is flagged security-ish
+    ("switch", "turn_off"),        # only when the switch is flagged security-ish
 }
 
 _YES = ["yes", "yeah", "yep", "do it", "confirm", "confirmed", "go ahead",
@@ -56,6 +68,10 @@ _NO = ["no", "nope", "cancel", "leave it", "stop", "don't", "negative",
 # How long to wait for a spoken answer / playback, before giving up (fail-safe).
 _ANSWER_TIMEOUT = 30.0
 _PLAYBACK_TIMEOUT = 20.0
+# How long to wait for a phone tap when falling back to notification-based
+# confirmation (no assist_satellite paired) — longer than the spoken timeouts
+# since it depends on someone noticing and reaching their phone.
+_NOTIFY_CONFIRM_TIMEOUT = 120.0
 
 
 def _cfg(hass, key: str, default=None):
@@ -181,8 +197,9 @@ async def confirm(hass, question: str, *, entity_id: str = "",
     try:
         satellite = _satellite_for_entity(hass, entity_id)
         if not satellite:
-            _LOGGER.warning("voice_confirm: no assist_satellite available; cannot confirm")
-            return False
+            _LOGGER.info("voice_confirm: no assist_satellite available; "
+                        "falling back to phone confirmation")
+            return await _confirm_via_notification(hass, question)
         mode = _mode(hass)
         if mode == "native" or (mode == "auto" and _satellite_has_audio_out(hass, satellite)):
             ok = await _confirm_native(hass, satellite, question, timeout)
@@ -269,6 +286,73 @@ async def _confirm_gated(hass, satellite: str, question: str,
     # comes back as a normal conversation turn; the agent, seeing a pending
     # confirmation in context, completes the action then. (Fail-safe.)
     return False
+
+
+async def _confirm_via_notification(hass, question: str,
+                                    timeout: float = _NOTIFY_CONFIRM_TIMEOUT) -> bool:
+    """Fallback when no assist_satellite is available at all: push an
+    actionable notification (Confirm / Deny) to every registered phone —
+    every `notify.mobile_app_*` service, same enumeration Nova's other
+    household-wide alerts use — and act on whichever household member
+    answers first. Fail-safe: no tap within `timeout` → False (deny), same
+    guarantee as the voice paths above."""
+    req_id = uuid.uuid4().hex[:8]
+    confirm_action = f"NOVA_CONFIRM_{req_id}"
+    deny_action = f"NOVA_DENY_{req_id}"
+
+    sent = 0
+    try:
+        services = hass.services.async_services().get("notify", {})
+        for name in list(services):
+            if not name.startswith("mobile_app_"):
+                continue
+            try:
+                await hass.services.async_call(
+                    "notify", name,
+                    {
+                        "title": "Nova needs your OK",
+                        "message": question,
+                        "data": {
+                            "actions": [
+                                {"action": confirm_action, "title": "Confirm"},
+                                {"action": deny_action, "title": "Deny"},
+                            ],
+                            "push": {"interruption-level": "time-sensitive"},
+                        },
+                    },
+                    blocking=False,
+                )
+                sent += 1
+            except Exception as exc:
+                _LOGGER.debug("voice_confirm notify.%s failed: %s", name, exc)
+    except Exception as exc:
+        _LOGGER.warning("voice_confirm: enumerate notify services failed: %s", exc)
+
+    if sent == 0:
+        _LOGGER.warning("voice_confirm: no notify.mobile_app_* service found; cannot confirm")
+        return False
+
+    loop = asyncio.get_event_loop()
+    fut: asyncio.Future = loop.create_future()
+
+    @callback
+    def _on_action(event) -> None:
+        action = event.data.get("action")
+        if fut.done():
+            return
+        if action == confirm_action:
+            fut.set_result(True)
+        elif action == deny_action:
+            fut.set_result(False)
+
+    unsub = hass.bus.async_listen("mobile_app_notification_action", _on_action)
+    try:
+        return await asyncio.wait_for(fut, timeout=timeout)
+    except asyncio.TimeoutError:
+        _LOGGER.info("voice_confirm: no phone response within %.0fs; denying", timeout)
+        return False
+    finally:
+        unsub()
 
 
 async def _wait_for_playback(hass, speakers: Sequence[str],
