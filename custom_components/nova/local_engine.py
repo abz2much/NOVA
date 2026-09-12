@@ -558,6 +558,18 @@ def _needs_confirmation(hass, action, entity_id="") -> bool:
         return False
 
 
+def _needs_confirmation_domain(hass, domain, service, entity_id="") -> bool:
+    """Like _needs_confirmation, but for callers that already know the
+    (domain, service) pair rather than a fast-path action name — scene/script/
+    automation activation doesn't go through _service_for's action mapping, so
+    it needs its own entry point onto the same policy check."""
+    try:
+        from . import policy
+        return bool(policy.requires_confirmation(hass, domain, service, entity_id))
+    except Exception:
+        return False
+
+
 async def _execute_action(hass, action, entity_id, args):
     try:
         domain = entity_id.split(".")[0]
@@ -866,6 +878,15 @@ async def try_local(hass, text, honorific="sir", force=False):
         found = _find_scene_or_script(hass, name_frag)
         if found:
             eid, fname, dtype = found
+            # A scene/script's contents are opaque here (v5.9.06 fast-path was
+            # never brought under the same gate the single-entity and bulk
+            # paths below already use) — it could unlock a door or disarm the
+            # alarm just as easily as dim a light. Defer to the agent the same
+            # way a protected single-entity action does, rather than actuating
+            # it directly from the fast path.
+            if _needs_confirmation_domain(hass, dtype, "turn_on", eid):
+                _LOGGER.info("Local: scene/script '%s' needs confirmation — deferring to agent", eid)
+                return None   # protected activation → the agent runs the confirmation gate
             try:
                 await hass.services.async_call(dtype, "turn_on", {"entity_id": eid}, blocking=True)
                 _update_ctx(entity=eid, domain=dtype)
@@ -878,6 +899,9 @@ async def try_local(hass, text, honorific="sir", force=False):
         found = _find_scene_or_script(hass, "goodnight") or _find_scene_or_script(hass, "good night")
         if found:
             eid, fname, dtype = found
+            if _needs_confirmation_domain(hass, dtype, "turn_on", eid):
+                _LOGGER.info("Local: goodnight scene '%s' needs confirmation — deferring to agent", eid)
+                return None   # protected activation → the agent runs the confirmation gate
             try:
                 await hass.services.async_call(dtype, "turn_on", {"entity_id": eid}, blocking=True)
                 return LocalResult(text=f"Goodnight, {honorific}. {fname} activated. Rest well.", success=True)
