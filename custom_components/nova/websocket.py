@@ -2057,6 +2057,7 @@ async def ws_search_memory(
         connection.send_error(msg["id"], "search_failed", str(exc))
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/get_debug_log",
 })
@@ -2201,6 +2202,7 @@ def _snap_log(entity_id: str, msg: str) -> None:
     nova_log("CAMERA", f"{entity_id} snapshot: {msg}")
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/camera_snapshot",
     vol.Required("entity_id"): str,
