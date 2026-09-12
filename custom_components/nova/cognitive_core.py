@@ -2655,33 +2655,10 @@ async def _emit_action(hass, config, action, sleeping):
                     config.get("tts_premium_contexts") or [],
                 )
                 if tts_entity:
-                    # Snapshot + restore volume around the announcement. Some
-                    # targets (notably Sonos) raise their own volume for a
-                    # spoken announcement and don't reliably put it back on
-                    # their own, so Nova always brings it back explicitly
-                    # rather than leaving whatever level the announcement
-                    # left it at. Mirrors the duck/restore pattern already
-                    # used by nova.speak (proactive_audio._announce).
-                    from .proactive_audio import _set_volume, _estimate_duration, _as_float
-                    original_volumes: dict[str, float] = {}
-                    for eid in targets:
-                        st = hass.states.get(eid)
-                        if st is not None and (v := _as_float(
-                                st.attributes.get("volume_level"))) is not None:
-                            original_volumes[eid] = v
-                    try:
-                        await async_announce(
-                            hass, message, tts_entity, targets,
-                            context="sentinel",
-                        )
-                        await asyncio.sleep(_estimate_duration(message, 1.0))
-                    finally:
-                        for eid, level in original_volumes.items():
-                            try:
-                                await _set_volume(hass, eid, level)
-                            except Exception:  # noqa: BLE001
-                                _LOGGER.exception(
-                                    "Cognitive action: failed to restore volume for %s", eid)
+                    await async_announce(
+                        hass, message, tts_entity, targets,
+                        context="sentinel",
+                    )
 
             # Also push critical/high alerts to phones
             if urgency in ("critical", "high"):

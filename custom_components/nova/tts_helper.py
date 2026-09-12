@@ -16,7 +16,10 @@ When the premium engine isn't set at all, everything uses regular.
 """
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
+import urllib.parse
 from typing import Optional, Sequence
 
 from homeassistant.core import HomeAssistant
@@ -176,23 +179,28 @@ async def async_announce(
     route a reply here rely on this so a delivery failure doesn't turn into
     total silence.
 
-    Delivery (v5.9.12): uses the `tts.speak` service, which renders through the
-    named TTS entity and plays to the given media_players. This is the delivery
-    that reliably produces audio across Cast, Nest, Sonos and Wyoming-satellite
-    media_players.
+    Delivery (v7.86.0): `media_player.play_media` per speaker, with
+    `announce: true` and `extra: {volume: <that speaker's current volume>}`.
+    An announcement plays at whatever the speaker is already set to and never
+    changes it — the same pattern Abi's own `system_presence_based_announcement`
+    script already uses for Sonos. One call per speaker (not a single batched
+    call) because each speaker can have a different current volume.
 
-    (v5.9.11 attempted `media_player.play_media` with a media-source URL to force
-    the voice. That path succeeds *silently* on some targets — notably Cast
-    groups, which don't honor the `announce` flag — returning no error while
-    producing no sound. Because the conversation layer silences the satellite
-    whenever it routes a reply here, that silent success meant no audio at all.
-    Reverted to tts.speak, which is proven to play on these targets.)
+    v5.9.11 tried plain `media_player.play_media` (no pinned volume) and
+    reverted it: on some targets — notably Cast groups — `play_media` +
+    `announce` can succeed *silently*, with no error and no audio, because
+    those targets don't honor the `announce` flag. To guard against that
+    regression resurfacing here, each call is verified — if the target's
+    state hasn't moved within ~2 seconds, we fall back to the old `tts.speak`
+    delivery for that one speaker, which is proven to play everywhere. This
+    is a best-effort check (an unrelated state refresh could count as
+    "moved"), not a guarantee.
 
-    The nova voice is requested via the `voice` option. We deliberately do NOT
-    send a `language` field alongside it: with some Piper/Wyoming builds, a
-    language hint makes the engine fall back to a language-default voice instead
-    of honoring the explicit `voice`. The voice string already encodes its
-    language (en_GB), so Piper infers it correctly.
+    The nova voice is requested via `tts_options` on the media-source URL. We
+    deliberately do NOT send a `language` field alongside it: with some
+    Piper/Wyoming builds, a language hint makes the engine fall back to a
+    language-default voice instead of honoring the explicit `voice`. The voice
+    string already encodes its language (en_GB), so Piper infers it correctly.
 
     `context` is accepted for logging; callers resolve the entity beforehand.
     """
@@ -230,88 +238,91 @@ async def async_announce(
     except Exception:
         use_ha_voice = False
 
-    service_data = {
-        "media_player_entity_id": list(speakers),
-        "message": text,
-        "cache": True,
-    }
+    # Request the Nova Piper voice. If it isn't installed (VoiceNotFoundError),
+    # the fallback below retries without it, using the engine's default voice,
+    # so a missing custom voice is never fatal.
+    tts_options: dict | None = None
     if is_piper and not use_ha_voice:
-        # Request the Nova Piper voice. No `language`/`length_scale` keys: this
-        # Piper build rejects length_scale ("Invalid options found") before any
-        # audio plays. If the voice isn't installed (VoiceNotFoundError), the
-        # per-speaker fallback below retries without it and uses the engine's
-        # default voice, so a missing custom voice is never fatal.
-        service_data["options"] = {
-            "voice": "en_GB-nova-high",
+        tts_options = {"voice": "en_GB-nova-high"}
+
+    def _media_content_id(message: str) -> str:
+        params = {"message": message, "cache": "true"}
+        if tts_options:
+            params["tts_options"] = json.dumps(tts_options, separators=(",", ":"))
+        return f"media-source://tts/{tts_entity}?{urllib.parse.urlencode(params)}"
+
+    async def _fallback_speak(spk: str) -> bool:
+        """Old tts.speak delivery — proven to play everywhere, used when the
+        volume-pinned play_media delivery doesn't visibly do anything."""
+        for opts in ([tts_options, None] if tts_options is not None else [None]):
+            try:
+                one = {"media_player_entity_id": [spk], "message": text, "cache": True}
+                if opts:
+                    one["options"] = opts
+                await hass.services.async_call(
+                    "tts", "speak", one, target={"entity_id": tts_entity}, blocking=False,
+                )
+                return True
+            except Exception as sub:
+                last_err = sub
+        _LOGGER.warning("Nova TTS fallback failed on %s (%s): %s", spk, context, last_err)
+        return False
+
+    media_content_id = _media_content_id(text)
+    delivered, failed = 0, []
+    for spk in list(speakers):
+        st = hass.states.get(spk)
+        before = st.last_updated if st is not None else None
+        vol = st.attributes.get("volume_level") if st is not None else None
+        vol = float(vol) if isinstance(vol, (int, float)) else None
+
+        data = {
+            "media_content_id": media_content_id,
+            "media_content_type": "music",
+            "announce": True,
         }
+        if vol is not None:
+            data["extra"] = {"volume": vol}
+
+        ok = False
+        try:
+            await hass.services.async_call(
+                "media_player", "play_media", data,
+                target={"entity_id": spk}, blocking=False,
+            )
+            # v5.9.11 regression guard: that path can succeed silently on
+            # targets that don't honor `announce`. Give it a moment, then
+            # check something actually happened.
+            await asyncio.sleep(2)
+            st2 = hass.states.get(spk)
+            moved = st2 is not None and (before is None or st2.last_updated != before)
+            if moved:
+                ok = True
+            else:
+                _LOGGER.info(
+                    "Nova TTS: %s didn't respond to play_media/announce — "
+                    "falling back to tts.speak (context=%s)", spk, context)
+                ok = await _fallback_speak(spk)
+        except Exception as exc:
+            _LOGGER.warning(
+                "Nova TTS: play_media failed on %s (%s): %s — falling back to tts.speak",
+                spk, context, exc)
+            ok = await _fallback_speak(spk)
+
+        if ok:
+            delivered += 1
+        else:
+            failed.append(spk)
 
     try:
-        await hass.services.async_call(
-            "tts", "speak", service_data,
-            target={"entity_id": tts_entity}, blocking=False,
-        )
-        try:
-            from .diagnostics.service_health import record_usage
-            record_usage("tts", True)
-        except Exception:
-            pass
-        return True
-    except Exception as exc:
-        # One bad target must not silence everyone (v6.78.2). A single
-        # tts.speak carrying the whole speaker list fails as a unit, so a
-        # broadcast to every media_player in the house died entirely if one
-        # of them (an off TV, a stale Cast entity) rejected the call — while
-        # a room-routed reply to a single speaker worked fine. Retry
-        # per-speaker so the reachable ones still hear it.
-        #
-        # And crucially, retry each speaker WITHOUT the voice options as a last
-        # resort: a custom Piper voice removed or renamed by a Piper update
-        # (e.g. en_GB-nova-high) makes tts.speak reject the call, and because
-        # the conversation layer silences the satellite whenever it routes a
-        # reply here, that rejection meant total silence. Falling back to the
-        # engine's default voice keeps the reply audible.
-        _LOGGER.warning("Nova TTS batch failed (%s): %s — retrying per speaker",
-                        context, exc)
-        base_opts = service_data.get("options")
-        opt_variants = [base_opts, None] if base_opts is not None else [None]
-        delivered, failed = 0, []
-        for spk in list(speakers):
-            spk_ok = False
-            last_err = f"{spk}: unknown"
-            for opts in opt_variants:
-                try:
-                    one = {
-                        "media_player_entity_id": [spk],
-                        "message": text,
-                        "cache": True,
-                    }
-                    if opts:
-                        one["options"] = opts
-                    await hass.services.async_call(
-                        "tts", "speak", one,
-                        target={"entity_id": tts_entity}, blocking=False,
-                    )
-                    delivered += 1
-                    spk_ok = True
-                    if opts is None and base_opts is not None:
-                        _LOGGER.info(
-                            "Nova TTS: voice option failed on %s — used the "
-                            "engine's default voice so the reply is still heard", spk)
-                    break
-                except Exception as sub:
-                    last_err = f"{spk}: {str(sub)[:60]}"
-            if not spk_ok:
-                failed.append(last_err)
-        try:
-            from .diagnostics.service_health import record_usage
-            record_usage("tts", delivered > 0,
-                         None if delivered else str(exc)[:120])
-        except Exception:
-            pass
-        if delivered:
-            _LOGGER.info("Nova TTS delivered to %d/%d speaker(s); failed: %s",
-                         delivered, len(list(speakers)), failed or "none")
-        else:
-            _LOGGER.warning("Nova TTS failed on every speaker (%s): %s",
-                            context, failed)
-        return delivered > 0
+        from .diagnostics.service_health import record_usage
+        record_usage("tts", delivered > 0, None if delivered else "all speakers failed")
+    except Exception:
+        pass
+
+    if delivered:
+        _LOGGER.info("Nova TTS delivered to %d/%d speaker(s); failed: %s",
+                     delivered, len(list(speakers)), failed or "none")
+    else:
+        _LOGGER.warning("Nova TTS failed on every speaker (%s): %s", context, failed)
+    return delivered > 0

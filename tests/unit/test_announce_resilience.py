@@ -1,25 +1,32 @@
-"""Broadcast announcements must not be all-or-nothing (v6.78.2).
+"""Broadcast announcements must not be all-or-nothing (v6.78.2), and must
+never change a speaker's volume (v7.86.0).
 
-tts.speak is issued as ONE call carrying the whole speaker list, so a single
-bad target (an off TV, a stale Cast entity) failed the entire broadcast — the
-briefing died silently while a room-routed reply to one speaker worked fine.
-Two defences: unavailable targets are filtered out of the broadcast list, and a
-failed batch is retried per speaker so the reachable ones still hear it."""
+Delivery is one media_player.play_media (announce=true, extra.volume pinned
+to that speaker's current volume) call per speaker — not a single batched
+tts.speak call — so one bad target (an off TV, a stale Cast entity) can never
+take the rest of a broadcast down with it, and no speaker is ever left louder
+or quieter than it started. A speaker that doesn't visibly respond to
+play_media/announce (the historical v5.9.11 Cast-group silent-failure mode)
+falls back to plain tts.speak for that one speaker."""
 import pytest
 
 
 class _State:
-    def __init__(self, entity_id, state):
+    def __init__(self, entity_id, state, volume_level=None):
         self.entity_id, self.state = entity_id, state
-        self.attributes = {}
+        self.attributes = {} if volume_level is None else {"volume_level": volume_level}
+        self.last_updated = 0
 
 
 class _Hass:
-    def __init__(self, players, fail_on=None, fail_batch=False):
+    def __init__(self, players, fail_on=None, fail_batch=False, unresponsive=None,
+                 fail_play_media_on=None):
         self._players = players
-        self._fail_on = set(fail_on or [])
-        self._fail_batch = fail_batch
-        self.calls = []
+        self._fail_on = set(fail_on or [])                       # fails BOTH play_media and its tts.speak fallback
+        self._fail_play_media_on = set(fail_play_media_on or [])  # fails only play_media, fallback still works
+        self._fail_batch = fail_batch          # legacy tts.speak-batch scenarios
+        self._unresponsive = set(unresponsive or [])   # play_media that silently no-ops
+        self.calls = []                        # list of ("tts.speak"|"play_media", eid_or_targets, data)
         self.services = self
     def async_all(self, domain=None):
         return list(self._players.values())
@@ -31,13 +38,25 @@ class _Hass:
         s.async_all = lambda domain=None: list(self._players.values())
         return s
     async def async_call(self, domain, service, data, target=None, blocking=False):
-        targets = data.get("media_player_entity_id") or []
-        self.calls.append(list(targets))
-        if self._fail_batch and len(targets) > 1:
-            raise RuntimeError("batch rejected")
-        for t in targets:
-            if t in self._fail_on:
-                raise RuntimeError(f"{t} unavailable")
+        if domain == "tts" and service == "speak":
+            targets = data.get("media_player_entity_id") or []
+            self.calls.append(("tts.speak", list(targets), dict(data)))
+            if self._fail_batch and len(targets) > 1:
+                raise RuntimeError("batch rejected")
+            for t in targets:
+                if t in self._fail_on:
+                    raise RuntimeError(f"{t} unavailable")
+            return
+        if domain == "media_player" and service == "play_media":
+            eid = (target or {}).get("entity_id")
+            self.calls.append(("play_media", eid, dict(data)))
+            if eid in self._fail_on or eid in self._fail_play_media_on:
+                raise RuntimeError(f"{eid} unavailable")
+            st = self._players.get(eid)
+            if st is not None and eid not in self._unresponsive:
+                st.last_updated += 1   # simulate the device actually responding
+            return
+        raise AssertionError(f"unexpected service call: {domain}.{service}")
 
 
 @pytest.fixture
@@ -152,32 +171,73 @@ def test_speakers_in_area_excludes_tv_and_movie_player(routing, monkeypatch):
     assert routing.speakers_in_area(hass, "living_room") == ["media_player.living_room_speaker"]
 
 
-# ── per-speaker fallback ─────────────────────────────────────────────────────
+# ── per-speaker delivery: volume-pinned play_media, with tts.speak fallback ─
 
-async def test_batch_success_makes_one_call(tts):
-    hass = _Hass({})
+@pytest.fixture(autouse=True)
+def _no_real_sleep(tts, monkeypatch):
+    # async_announce waits briefly per speaker to check the target responded;
+    # tests don't need the real delay.
+    async def _instant(_seconds):
+        return None
+    monkeypatch.setattr(tts.asyncio, "sleep", _instant)
+
+
+async def test_announce_plays_via_play_media_pinned_to_current_volume(tts):
+    hass = _Hass({
+        "media_player.a": _State("media_player.a", "idle", volume_level=0.3),
+        "media_player.b": _State("media_player.b", "idle", volume_level=0.7),
+    })
     await tts.async_announce(hass, "hello", "tts.piper",
                              ["media_player.a", "media_player.b"])
-    assert len(hass.calls) == 1                      # single batch call
-    assert hass.calls[0] == ["media_player.a", "media_player.b"]
+    # One play_media call per speaker (no batching), each announcing at that
+    # speaker's own current volume — never a different level.
+    play_calls = [c for c in hass.calls if c[0] == "play_media"]
+    assert [c[1] for c in play_calls] == ["media_player.a", "media_player.b"]
+    assert play_calls[0][2]["announce"] is True
+    assert play_calls[0][2]["extra"] == {"volume": 0.3}
+    assert play_calls[1][2]["extra"] == {"volume": 0.7}
+    # No fallback needed — both speakers "responded".
+    assert not any(c[0] == "tts.speak" for c in hass.calls)
 
 
-async def test_batch_failure_retries_per_speaker(tts):
-    # the batch fails; each speaker is then tried individually
-    hass = _Hass({}, fail_batch=True)
-    await tts.async_announce(hass, "hello", "tts.piper",
-                             ["media_player.a", "media_player.b"])
-    assert hass.calls[0] == ["media_player.a", "media_player.b"]   # batch attempt
-    assert ["media_player.a"] in hass.calls
-    assert ["media_player.b"] in hass.calls
+async def test_unresponsive_speaker_falls_back_to_tts_speak(tts):
+    # v5.9.11 regression guard: play_media/announce can succeed silently on a
+    # target that doesn't honor the announce flag (e.g. a Cast group). If the
+    # target shows no sign of having done anything, fall back to tts.speak
+    # for that one speaker so the message still gets heard.
+    hass = _Hass({
+        "media_player.a": _State("media_player.a", "idle", volume_level=0.3),
+    }, unresponsive={"media_player.a"})
+    ok = await tts.async_announce(hass, "hello", "tts.piper", ["media_player.a"])
+    assert ok is True
+    assert ("play_media", "media_player.a") == (hass.calls[0][0], hass.calls[0][1])
+    assert hass.calls[1][0] == "tts.speak"
+    assert hass.calls[1][1] == ["media_player.a"]
+
+
+async def test_play_media_error_falls_back_to_tts_speak(tts):
+    hass = _Hass({
+        "media_player.a": _State("media_player.a", "idle", volume_level=0.3),
+    }, fail_play_media_on={"media_player.a"})
+    ok = await tts.async_announce(hass, "hello", "tts.piper", ["media_player.a"])
+    assert ok is True
+    assert hass.calls[0][0] == "play_media"
+    assert hass.calls[1][0] == "tts.speak" and hass.calls[1][1] == ["media_player.a"]
 
 
 async def test_one_bad_speaker_does_not_silence_the_rest(tts):
-    # the real bug: one dead target used to kill the whole broadcast
-    hass = _Hass({}, fail_on={"media_player.dead"}, fail_batch=True)
-    await tts.async_announce(hass, "briefing", "tts.piper",
+    # the real bug this guards against: one dead target used to kill the
+    # whole broadcast. Both play_media AND its tts.speak fallback fail for
+    # the dead speaker; the good speaker must still play.
+    hass = _Hass({
+        "media_player.dead": _State("media_player.dead", "idle", volume_level=0.5),
+        "media_player.good": _State("media_player.good", "idle", volume_level=0.5),
+    }, fail_on={"media_player.dead"})
+    ok = await tts.async_announce(hass, "briefing", "tts.piper",
                              ["media_player.dead", "media_player.good"])
-    assert ["media_player.good"] in hass.calls, "the working speaker must still play"
+    assert ok is True, "at least one speaker must still get the message"
+    good_calls = [c for c in hass.calls if c[1] == "media_player.good"]
+    assert good_calls, "the working speaker must still play"
 
 
 async def test_no_speakers_is_a_noop(tts):
