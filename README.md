@@ -177,7 +177,7 @@ Google's SDM API hands out **WebRTC/RTSP stream URLs that expire every ~5 minute
 ```yaml
 go2rtc:
   streams:
-    eliana_restream:
+    bedroom2_restream:
       - "nest:?client_id=CLIENT_ID&client_secret=CLIENT_SECRET&refresh_token=REFRESH_TOKEN&project_id=DEVICE_ACCESS_PROJECT_ID&device_id=DEVICE_ID"
     front_doorbell_restream:
       - "nest:?client_id=CLIENT_ID&client_secret=CLIENT_SECRET&refresh_token=REFRESH_TOKEN&project_id=DEVICE_ACCESS_PROJECT_ID&device_id=DOORBELL_DEVICE_ID"
@@ -195,13 +195,13 @@ go2rtc:
 ```json
 {
   "camera_overrides": {
-    "camera.eliana_s_camera": "camera.eliana_restream",
+    "camera.bedroom2_camera": "camera.bedroom2_restream",
     "camera.front_doorbell": "camera.front_doorbell_restream"
   }
 }
 ```
 
-This lives in `/config/nova/config.json` (merge it into the existing object — don't replace the file). Nova validates this on load, so a typo is sidelined with a notification rather than breaking the panel. Then open **Camera Watch → DIAG** on the camera: it should report `override → camera.eliana_restream` and a healthy full-size frame instead of a blank or black tile.
+This lives in `/config/nova/config.json` (merge it into the existing object — don't replace the file). Nova validates this on load, so a typo is sidelined with a notification rather than breaking the panel. Then open **Camera Watch → DIAG** on the camera: it should report `override → camera.bedroom2_restream` and a healthy full-size frame instead of a blank or black tile.
 
 > **Note:** go2rtc's Nest source is a third-party bridge and Google occasionally changes its auth behavior. If a restream ever drops, Nova automatically falls back to the original Nest entity — worst case is the pre-restream behavior, never worse.
 

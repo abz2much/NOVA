@@ -17,10 +17,10 @@ global.window = window; global.document = window.document;
 window.eval(fs.readFileSync(COMPONENT, "utf8"));
 
 // Light a representative spread so every window + all garage doors render lit:
-const active = new Set(["garage", "living room", "kitchen", "dining room", "guest room", "master bedroom", "eliana's room", "basement"]);
+const active = new Set(["garage", "living room", "kitchen", "dining room", "guest room", "master bedroom", "bedroom 2", "basement"]);
 const areas = [
   ["garage", "Garage"], ["living room", "Living Room"], ["kitchen", "Kitchen"], ["dining room", "Dining Room"],
-  ["guest room", "Guest Room"], ["master bedroom", "Master Bedroom"], ["eliana's room", "Eliana's Room"],
+  ["guest room", "Guest Room"], ["master bedroom", "Master Bedroom"], ["bedroom 2", "Bedroom 2"],
   ["bath", "Bath"], ["basement", "Basement"], ["backyard", "Backyard"],
 ].map(([id, name]) => ({ id, name, caps: [], active: active.has(id), bedroom: false, lights_on: 0, lights_total: 0 }));
 

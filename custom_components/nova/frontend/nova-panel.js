@@ -288,7 +288,7 @@ const NOVA3D = (function () {
       [44, 3, 4, 8, 'STAIRS', 'stairs']
     ],
     '2f': [
-      [31, 2, 15, 20, "ELIANA'S", "eliana's room"],
+      [31, 2, 15, 20, "BEDROOM 2", "bedroom 2"],
       [48, 2, 14, 20, 'MASTER', 'master bedroom'],
       [44, 16, 7, 8, 'BATH', 'bath'],
       [45, 11, 6, 5, 'U.HALL', 'upstairs hallway'],
@@ -984,10 +984,10 @@ const NOVA3D = (function () {
 
     // dormers — counts configurable; unset = the approved default layout
     if (SPEC.dormersFront == null) {
-      dormerFront(L, GL, XGH + 9, stOf("eliana's room"));
+      dormerFront(L, GL, XGH + 9, stOf("bedroom 2"));
       dormerFront(L, GL, XGH + 24, stOf('master bedroom'));
     } else {
-      var fKeys = ["eliana's room", 'master bedroom'], df;
+      var fKeys = ["bedroom 2", 'master bedroom'], df;
       for (df = 0; df < SPEC.dormersFront; df++)
         dormerFront(L, GL, XGH + HW * (df + 1) / (SPEC.dormersFront + 1), stOf(fKeys[df] || fKeys[fKeys.length - 1]));
     }
@@ -1630,7 +1630,7 @@ class NovaPanel extends HTMLElement {
         { name: "Entry",           meta: "sat · spkr · mmwave", active: false, bedroom: false },
         { name: "Master Bedroom",  meta: "sat · spkr · mmwave", active: false, bedroom: true },
         { name: "Guest Room",      meta: "sat · spkr · mmwave", active: false, bedroom: true },
-        { name: "Eliana's Room",   meta: "sat · spkr · mmwave", active: false, bedroom: true },
+        { name: "Bedroom 2",   meta: "sat · spkr · mmwave", active: false, bedroom: true },
         { name: "Garage",          meta: "sat · mmwave · cam",  active: true,  bedroom: false },
         { name: "Basement",        meta: "moisture · smoke",    active: false, bedroom: false },
         { name: "Outdoor",         meta: "3 cameras",           active: false, bedroom: false },
@@ -2521,7 +2521,7 @@ class NovaPanel extends HTMLElement {
       "2f": {
         label: "2nd Floor", viewBox: "0 0 320 140",
         rooms: [
-          {name:"Eliana's Room",x:50,y:25,w:95,h:80,type:"room"},
+          {name:"Bedroom 2",x:50,y:25,w:95,h:80,type:"room"},
           {name:"Bath",x:150,y:25,w:30,h:40,type:"bath"},
           {name:"Master Bedroom",x:185,y:25,w:85,h:80,type:"room"},
           {name:"Upstairs Hallway",x:150,y:70,w:30,h:35,type:"room"},

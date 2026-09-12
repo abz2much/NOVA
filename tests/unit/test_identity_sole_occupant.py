@@ -22,19 +22,19 @@ def test_sole_occupant_attributed_even_with_area(idm, monkeypatch, fake_hass):
 
 
 def test_room_resolution_wins_when_known(idm, monkeypatch, fake_hass):
-    known = idm.Identification("Alex", 0.9, "face", {"Alex": 0.9})
+    known = idm.Identification("Username2", 0.9, "face", {"Username2": 0.9})
     monkeypatch.setattr(idm, "resolve", lambda hass, area_id=None: known)
     monkeypatch.setattr(idm, "_cfg", lambda k, d: True)
-    assert idm.quick_identify(fake_hass, area_id="kitchen").person == "Alex"
+    assert idm.quick_identify(fake_hass, area_id="kitchen").person == "Username2"
 
 
 def test_multi_person_keeps_room_candidates(idm, monkeypatch, fake_hass):
-    cand = idm.Identification(idm.UNKNOWN, 0.4, "room", {"Username": 0.4, "Alex": 0.3})
+    cand = idm.Identification(idm.UNKNOWN, 0.4, "room", {"Username": 0.4, "Username2": 0.3})
     monkeypatch.setattr(idm, "resolve", lambda hass, area_id=None: cand)
-    monkeypatch.setattr(idm, "_home_people", lambda hass: ["Username", "Alex"])
+    monkeypatch.setattr(idm, "_home_people", lambda hass: ["Username", "Username2"])
     monkeypatch.setattr(idm, "_cfg", lambda k, d: True)
     ident = idm.quick_identify(fake_hass, area_id="kitchen")
-    assert ident.candidates == {"Username": 0.4, "Alex": 0.3}   # room candidates preserved
+    assert ident.candidates == {"Username": 0.4, "Username2": 0.3}   # room candidates preserved
 
 
 def test_disabled_returns_unknown(idm, monkeypatch, fake_hass):

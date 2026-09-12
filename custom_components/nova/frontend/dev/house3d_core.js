@@ -250,7 +250,7 @@
       [44, 3, 4, 8, 'STAIRS', 'stairs']
     ],
     '2f': [
-      [31, 2, 15, 20, "ELIANA'S", "eliana's room"],
+      [31, 2, 15, 20, "BEDROOM 2", "bedroom 2"],
       [48, 2, 14, 20, 'MASTER', 'master bedroom'],
       [44, 16, 7, 8, 'BATH', 'bath'],
       [45, 11, 6, 5, 'U.HALL', 'upstairs hallway'],
@@ -349,10 +349,10 @@
 
     // dormers — counts configurable; unset = the approved default layout
     if (SPEC.dormersFront == null) {
-      dormerFront(L, GL, XGH + 9, stOf("eliana's room"));
+      dormerFront(L, GL, XGH + 9, stOf("bedroom 2"));
       dormerFront(L, GL, XGH + 24, stOf('master bedroom'));
     } else {
-      var fKeys = ["eliana's room", 'master bedroom'], df;
+      var fKeys = ["bedroom 2", 'master bedroom'], df;
       for (df = 0; df < SPEC.dormersFront; df++)
         dormerFront(L, GL, XGH + HW * (df + 1) / (SPEC.dormersFront + 1), stOf(fKeys[df] || fKeys[fKeys.length - 1]));
     }
