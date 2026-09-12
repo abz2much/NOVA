@@ -3,7 +3,14 @@
 Default keeps the Nova voice; with tts_use_ha_voice on (read from
 runtime_config), Nova omits the `voice` option so the TTS entity uses its
 configured default (e.g. a French Piper voice), resolving issue #16.
+
+Delivery is media_player.play_media (v7.86.0): the requested voice travels
+as a `tts_options` query param on the media_content_id URL, not as a
+tts.speak `options` dict — so these tests inspect the play_media call.
 """
+import json
+import urllib.parse
+
 import pytest
 
 DOMAIN = "nova"
@@ -18,35 +25,46 @@ def _set_ha_voice(hass, on):
     hass.data.setdefault(DOMAIN, {})["e1"] = {"runtime_config": {"tts_use_ha_voice": on}}
 
 
-def _speak_call(hass):
-    calls = [c for c in hass.service_calls if c[0] == "tts" and c[1] == "speak"]
-    assert calls, "expected a tts.speak call"
+def _play_media_call(hass):
+    calls = [c for c in hass.service_calls if c[0] == "media_player" and c[1] == "play_media"]
+    assert calls, "expected a media_player.play_media call"
     return calls[-1][2]
+
+
+def _requested_voice(hass):
+    """The `voice` from the play_media call's tts_options query param, or
+    None if no tts_options were sent at all."""
+    content_id = _play_media_call(hass)["media_content_id"]
+    query = urllib.parse.urlparse(content_id).query
+    params = urllib.parse.parse_qs(query)
+    raw = params.get("tts_options")
+    if not raw:
+        return None
+    return json.loads(raw[0]).get("voice")
 
 
 async def test_default_requests_nova_voice_on_piper(tts, fake_hass):
     ok = await tts.async_announce(fake_hass, "hello", "tts.piper", ["media_player.x"])
     assert ok is True
-    assert _speak_call(fake_hass).get("options", {}).get("voice") == "en_GB-nova-high"
+    assert _requested_voice(fake_hass) == "en_GB-nova-high"
 
 
 async def test_ha_voice_mode_omits_voice(tts, fake_hass):
     _set_ha_voice(fake_hass, True)
     ok = await tts.async_announce(fake_hass, "bonjour", "tts.piper", ["media_player.x"])
     assert ok is True
-    data = _speak_call(fake_hass)
-    assert "options" not in data or "voice" not in data.get("options", {})
+    assert _requested_voice(fake_hass) is None
 
 
 async def test_ha_voice_off_keeps_nova_voice(tts, fake_hass):
     _set_ha_voice(fake_hass, False)
     await tts.async_announce(fake_hass, "hi", "tts.piper", ["media_player.x"])
-    assert _speak_call(fake_hass).get("options", {}).get("voice") == "en_GB-nova-high"
+    assert _requested_voice(fake_hass) == "en_GB-nova-high"
 
 
 async def test_non_piper_never_forces_voice(tts, fake_hass):
     await tts.async_announce(fake_hass, "hi", "tts.google_ai_tts", ["media_player.x"])
-    assert "options" not in _speak_call(fake_hass)
+    assert _requested_voice(fake_hass) is None
 
 
 # ─── resolve_tts_entity — routing to HA's configured Assist pipeline voice ───

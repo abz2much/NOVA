@@ -5,9 +5,10 @@ Delivery is one media_player.play_media (announce=true, extra.volume pinned
 to that speaker's current volume) call per speaker — not a single batched
 tts.speak call — so one bad target (an off TV, a stale Cast entity) can never
 take the rest of a broadcast down with it, and no speaker is ever left louder
-or quieter than it started. A speaker that doesn't visibly respond to
-play_media/announce (the historical v5.9.11 Cast-group silent-failure mode)
-falls back to plain tts.speak for that one speaker."""
+or quieter than it started. play_media/announce is trusted once the service
+call itself succeeds; only an actual exception from that call falls back to
+plain tts.speak for that one speaker (a "did it visibly respond" poll was
+tried and removed — see tts_helper.async_announce's docstring)."""
 import pytest
 
 
@@ -173,15 +174,6 @@ def test_speakers_in_area_excludes_tv_and_movie_player(routing, monkeypatch):
 
 # ── per-speaker delivery: volume-pinned play_media, with tts.speak fallback ─
 
-@pytest.fixture(autouse=True)
-def _no_real_sleep(tts, monkeypatch):
-    # async_announce waits briefly per speaker to check the target responded;
-    # tests don't need the real delay.
-    async def _instant(_seconds):
-        return None
-    monkeypatch.setattr(tts.asyncio, "sleep", _instant)
-
-
 async def test_announce_plays_via_play_media_pinned_to_current_volume(tts):
     hass = _Hass({
         "media_player.a": _State("media_player.a", "idle", volume_level=0.3),
@@ -200,19 +192,22 @@ async def test_announce_plays_via_play_media_pinned_to_current_volume(tts):
     assert not any(c[0] == "tts.speak" for c in hass.calls)
 
 
-async def test_unresponsive_speaker_falls_back_to_tts_speak(tts):
-    # v5.9.11 regression guard: play_media/announce can succeed silently on a
-    # target that doesn't honor the announce flag (e.g. a Cast group). If the
-    # target shows no sign of having done anything, fall back to tts.speak
-    # for that one speaker so the message still gets heard.
+async def test_unresponsive_speaker_is_trusted_not_double_announced(tts):
+    # v5.9.11 added a Cast-group silent-failure guard; v7.86.0-v7.87.0 tried
+    # polling for the target to "visibly respond" before trusting it, which
+    # is what caused the Sonos double-announcement/volume-jump bug (Sonos
+    # plays an announcement without reliably updating any state HA can see,
+    # so the poll always timed out and fired the un-pinned tts.speak fallback
+    # on top of the announcement that had already played correctly). That
+    # poll is gone: a play_media/announce call that doesn't raise is now
+    # trusted outright, even if the target never visibly reacts.
     hass = _Hass({
         "media_player.a": _State("media_player.a", "idle", volume_level=0.3),
     }, unresponsive={"media_player.a"})
     ok = await tts.async_announce(hass, "hello", "tts.piper", ["media_player.a"])
     assert ok is True
-    assert ("play_media", "media_player.a") == (hass.calls[0][0], hass.calls[0][1])
-    assert hass.calls[1][0] == "tts.speak"
-    assert hass.calls[1][1] == ["media_player.a"]
+    assert [c[0] for c in hass.calls] == ["play_media"]
+    assert hass.calls[0][1] == "media_player.a"
 
 
 async def test_play_media_error_falls_back_to_tts_speak(tts):

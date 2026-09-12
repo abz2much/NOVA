@@ -25,13 +25,6 @@ def tts(load):
     return load("tts_helper")
 
 
-@pytest.fixture(autouse=True)
-def _no_real_sleep(tts, monkeypatch):
-    async def _instant(_seconds):
-        return None
-    monkeypatch.setattr(tts.asyncio, "sleep", _instant)
-
-
 class _State:
     def __init__(self):
         self.last_updated = 0

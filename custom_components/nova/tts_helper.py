@@ -16,7 +16,6 @@ When the premium engine isn't set at all, everything uses regular.
 """
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import urllib.parse
@@ -210,14 +209,6 @@ def resolve_tts_for_context(
 
 # ─── The announce primitive ──────────────────────────────────────────────────
 
-# How long to wait for a speaker to visibly respond to play_media/announce
-# before assuming it silently no-op'd and falling back to tts.speak. Polled
-# rather than a single fixed delay so a fast local voice (Piper) still
-# resolves almost immediately, while a slower cloud voice-clone engine gets
-# the full budget before the fallback (which does not pin volume) fires.
-_ANNOUNCE_POLL_INTERVAL_S = 0.5
-_ANNOUNCE_POLL_ITERATIONS = 16   # 0.5s * 16 = 8s ceiling
-
 
 async def async_announce(
     hass: HomeAssistant,
@@ -245,12 +236,15 @@ async def async_announce(
     v5.9.11 tried plain `media_player.play_media` (no pinned volume) and
     reverted it: on some targets — notably Cast groups — `play_media` +
     `announce` can succeed *silently*, with no error and no audio, because
-    those targets don't honor the `announce` flag. To guard against that
-    regression resurfacing here, each call is verified — if the target's
-    state hasn't moved within ~2 seconds, we fall back to the old `tts.speak`
-    delivery for that one speaker, which is proven to play everywhere. This
-    is a best-effort check (an unrelated state refresh could count as
-    "moved"), not a guarantee.
+    those targets don't honor the `announce` flag. v7.86.0-v7.87.0 tried to
+    guard against that by polling the target's state and falling back to
+    `tts.speak` if it never visibly moved. Removed again here: the signal was
+    wrong, not just slow — Sonos plays an announcement correctly without
+    reliably touching any state Home Assistant can see, so the guard fired on
+    every Sonos announcement and played it a second time at the wrong,
+    un-pinned volume. We now trust `play_media`/`announce` the same way
+    `system_presence_based_announcement` already does for Sonos, and only
+    fall back to `tts.speak` if the service call itself raises.
 
     The nova voice is requested via `tts_options` on the media-source URL. We
     deliberately do NOT send a `language` field alongside it: with some
@@ -319,7 +313,6 @@ async def async_announce(
     delivered, failed = 0, []
     for spk in list(speakers):
         st = hass.states.get(spk)
-        before = st.last_updated if st is not None else None
         vol = st.attributes.get("volume_level") if st is not None else None
         vol = float(vol) if isinstance(vol, (int, float)) else None
 
@@ -331,38 +324,12 @@ async def async_announce(
         if vol is not None:
             data["extra"] = {"volume": vol}
 
-        ok = False
         try:
             await hass.services.async_call(
                 "media_player", "play_media", data,
                 target={"entity_id": spk}, blocking=False,
             )
-            # v5.9.11 regression guard: that path can succeed silently on
-            # targets that don't honor `announce`. Poll for the state to move
-            # instead of one fixed-delay check (v7.87.0): a cloud voice-clone
-            # engine (e.g. tts.jarvis_jarvis) can take several seconds to
-            # synthesize before the speaker's state moves at all, and a
-            # single check at 2s was firing the tts.speak fallback while the
-            # original play_media request was still in flight — so both ended
-            # up playing back to back, the fallback at the wrong, un-pinned
-            # volume. That's the exact regression this play_media rewrite
-            # exists to avoid, so give a slow synth up to ~8s, breaking out
-            # the moment it responds rather than waiting out the full budget.
-            moved = False
-            for _ in range(_ANNOUNCE_POLL_ITERATIONS):
-                await asyncio.sleep(_ANNOUNCE_POLL_INTERVAL_S)
-                st2 = hass.states.get(spk)
-                if st2 is not None and (before is None or st2.last_updated != before):
-                    moved = True
-                    break
-            if moved:
-                ok = True
-            else:
-                _LOGGER.info(
-                    "Nova TTS: %s didn't respond to play_media/announce within %.0fs — "
-                    "falling back to tts.speak (context=%s)",
-                    spk, _ANNOUNCE_POLL_ITERATIONS * _ANNOUNCE_POLL_INTERVAL_S, context)
-                ok = await _fallback_speak(spk)
+            ok = True
         except Exception as exc:
             _LOGGER.warning(
                 "Nova TTS: play_media failed on %s (%s): %s — falling back to tts.speak",
