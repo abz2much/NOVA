@@ -81,12 +81,59 @@ def find_premium_tts_entity(hass: HomeAssistant) -> str | None:
 find_piper_entity = find_best_tts_entity
 
 
+def tts_use_ha_voice(hass: HomeAssistant) -> bool:
+    """Whether the user has switched on "use Home Assistant's configured TTS
+    voice" in the panel (config key ``tts_use_ha_voice``, read from the live
+    runtime_config the same way :func:`async_announce` already did inline).
+    Shared by :func:`resolve_tts_entity` and :func:`async_announce` so both
+    agree on the same flag."""
+    try:
+        from .const import DOMAIN
+        for _ed in (hass.data.get(DOMAIN) or {}).values():
+            if isinstance(_ed, dict) and (
+                    _ed.get("runtime_config") or {}).get("tts_use_ha_voice"):
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _ha_pipeline_tts_entity(hass: HomeAssistant) -> str | None:
+    """The TTS entity configured on HA's preferred Assist pipeline (Settings
+    → Voice Assistants), e.g. ``tts.jarvis_jarvis`` on a cloud voice-clone
+    install. Returns None if assist_pipeline isn't available, has no
+    preferred pipeline, or that pipeline's TTS entity no longer exists —
+    any of which sends the caller back to the free/local auto-pick."""
+    try:
+        from homeassistant.components import assist_pipeline
+        pipeline = assist_pipeline.async_get_pipeline(hass)
+        engine = getattr(pipeline, "tts_engine", None) if pipeline else None
+        if engine and hass.states.get(engine):
+            return engine
+    except Exception:
+        pass
+    return None
+
+
 def resolve_tts_entity(hass: HomeAssistant, configured: str) -> str | None:
-    """Resolve the regular TTS entity. Preserved for backward compat."""
+    """Resolve the regular TTS entity. Preserved for backward compat.
+
+    Nova has no UI to set ``tts_engine`` explicitly (it's config-only), so in
+    practice ``configured`` is always "auto" here. Before falling back to the
+    free/local auto-pick — which always prefers a Piper entity, regardless of
+    what's actually configured for Assist — honour "use Home Assistant's
+    configured TTS voice" if that's on, so the toggle actually does what its
+    label says instead of only suppressing Nova's own Piper voice option.
+    """
     if configured and configured != "auto":
         if hass.states.get(configured):
             return configured
         _LOGGER.warning("Nova: TTS entity '%s' not found — falling back to auto", configured)
+    if tts_use_ha_voice(hass):
+        pipeline_entity = _ha_pipeline_tts_entity(hass)
+        if pipeline_entity:
+            _LOGGER.debug("Nova: auto TTS → HA's configured pipeline voice %s", pipeline_entity)
+            return pipeline_entity
     found = find_best_tts_entity(hass)
     if found:
         return found
@@ -227,16 +274,7 @@ async def async_announce(
     # Default off keeps the Nova voice for everyone who has it. Read from the
     # live runtime_config (seeded from config.json at setup, updated by the
     # panel) so we don't import nova_config on this path.
-    use_ha_voice = False
-    try:
-        from .const import DOMAIN
-        for _ed in (hass.data.get(DOMAIN) or {}).values():
-            if isinstance(_ed, dict) and (
-                    _ed.get("runtime_config") or {}).get("tts_use_ha_voice"):
-                use_ha_voice = True
-                break
-    except Exception:
-        use_ha_voice = False
+    use_ha_voice = tts_use_ha_voice(hass)
 
     # Request the Nova Piper voice. If it isn't installed (VoiceNotFoundError),
     # the fallback below retries without it, using the engine's default voice,
