@@ -994,6 +994,8 @@ class SafetyManager:
         for state in self.hass.states.async_all("lock"):
             if state.state == "unlocked":
                 eid = state.entity_id
+                if eid in _lockdown_exempt_locks():
+                    continue
                 fname = state.attributes.get("friendly_name", eid)
                 # Auto-lock
                 try:
@@ -2660,6 +2662,15 @@ async def _emit_action(hass, config, action, sleeping):
 
     except Exception as exc:
         _LOGGER.warning("Cognitive: action routing failed: %s", exc)
+
+
+def _lockdown_exempt_locks() -> set:
+    """Locks the nighttime sweep must never touch (thermostat child locks,
+    etc). Single source of truth is whatever LockdownManager loaded from
+    config, so this and the formal lockdown sweep never drift apart."""
+    if _CORE.lockdown_mgr is not None:
+        return _CORE.lockdown_mgr.exempt_locks
+    return LOCKDOWN_EXEMPT_LOCKS_DEFAULT
 
 
 def is_lockdown() -> bool:
