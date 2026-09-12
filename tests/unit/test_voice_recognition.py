@@ -35,7 +35,7 @@ def presence(load, monkeypatch):
 def test_identify_per_person_binary_sensor(vr, cfg, fake_hass):
     cfg["voice_recognition_source"] = "binary_sensor.*_voice"
     fake_hass.states.set("binary_sensor.username_voice", "on")
-    fake_hass.states.set("binary_sensor.alex_voice", "off")
+    fake_hass.states.set("binary_sensor.username2_voice", "off")
     assert vr.identify(fake_hass) == {"username": pytest.approx(0.85)}
 
 
@@ -111,7 +111,7 @@ def test_no_enrollment_when_voice_already_knows(vr, cfg, presence, fake_hass):
 
 def test_no_enrollment_when_nobody_known(vr, cfg, presence, fake_hass):
     cfg["voice_recognition_source"] = "binary_sensor.*_voice"
-    presence["home"] = ["Username", "Alex"]   # ambiguous → identity unknown
+    presence["home"] = ["Username", "Username2"]   # ambiguous → identity unknown
     assert vr.enrollment_candidate(fake_hass) is None
 
 

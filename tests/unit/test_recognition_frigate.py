@@ -18,8 +18,8 @@ def test_bare_string_name(rec):
 
 
 def test_string_is_trimmed(rec):
-    name, conf = rec._parse_sub_label("  Eliana  ")
-    assert name == "Eliana"
+    name, conf = rec._parse_sub_label("  Username3  ")
+    assert name == "Username3"
 
 
 # ── list form: ["Name", score] with score 0..1 ──────────────────────────────

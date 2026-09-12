@@ -181,7 +181,7 @@ const hass = {
     if (m.type === "nova/camera_location") {
       _locationCalls.push({ entity_id: m.entity_id, mode: m.mode });
       return { ok: true, cameras: [
-        { entity_id: "camera.front", name: "Eliana's Room", raw_name: "Front Door", outdoor: m.mode === "outdoor", location_mode: m.mode },
+        { entity_id: "camera.front", name: "Bedroom 2", raw_name: "Front Door", outdoor: m.mode === "outdoor", location_mode: m.mode },
         { entity_id: "camera.back", name: "Backyard", raw_name: "Backyard", outdoor: true, location_mode: "auto" },
       ] };
     }
@@ -480,14 +480,14 @@ setTimeout(async () => {
   );
 
   const nameInput = el.shadowRoot.querySelector('.camset-name[data-cam="camera.front"]');
-  nameInput.value = "Eliana's Room";
+  nameInput.value = "Bedroom 2";
   nameInput.dispatchEvent(new window.Event("blur"));
   await new Promise(r => setTimeout(r, 20));
   checks.push(
     ["rename WS called with entity + new name",
       _renameCalls.length === 1 && _renameCalls[0].entity_id === "camera.front"
-      && _renameCalls[0].name === "Eliana's Room"],
-    ["display name resolver picks up the rename", el._camName("camera.front") === "Eliana's Room"],
+      && _renameCalls[0].name === "Bedroom 2"],
+    ["display name resolver picks up the rename", el._camName("camera.front") === "Bedroom 2"],
   );
   nameInput.dispatchEvent(new window.Event("blur"));       // unchanged — must not re-call
   await new Promise(r => setTimeout(r, 10));
@@ -509,7 +509,7 @@ setTimeout(async () => {
   el._render();
   checks.push(
     ["strip on Command Center shows the Nova-only name",
-      /Eliana's Room/.test(el.shadowRoot.getElementById("cam-strip")?.textContent || "")],
+      /Bedroom 2/.test(el.shadowRoot.getElementById("cam-strip")?.textContent || "")],
   );
 
   // ── switch to Memory tab: person routines fetch + render ──

@@ -24,7 +24,7 @@
 
   <!-- chip row -->
   <g transform="translate(42,66)" font-family="'JetBrains Mono',monospace" font-size="9" letter-spacing="1">
-    <g><rect width="86" height="20" rx="3" fill="rgba(0,242,254,0.08)" stroke="#00f2fe" stroke-opacity="0.4"/><text x="43" y="14" fill="#00f2fe" text-anchor="middle">ELIANA'S ROOM</text></g>
+    <g><rect width="86" height="20" rx="3" fill="rgba(0,242,254,0.08)" stroke="#00f2fe" stroke-opacity="0.4"/><text x="43" y="14" fill="#00f2fe" text-anchor="middle">BEDROOM 2 ROOM</text></g>
     <g transform="translate(94,0)"><rect width="78" height="20" rx="3" fill="none" stroke="#00f2fe" stroke-opacity="0.15"/><text x="39" y="14" fill="#64748b" text-anchor="middle">DOORBELL</text></g>
     <g transform="translate(180,0)"><rect width="70" height="20" rx="3" fill="none" stroke="#00f2fe" stroke-opacity="0.15"/><text x="35" y="14" fill="#64748b" text-anchor="middle">BACKYARD</text></g>
     <g transform="translate(258,0)"><rect width="70" height="20" rx="3" fill="none" stroke="#00f2fe" stroke-opacity="0.15"/><text x="35" y="14" fill="#64748b" text-anchor="middle">DRIVEWAY</text></g>
@@ -35,10 +35,10 @@
 
   <!-- DIAG readout text -->
   <g transform="translate(58,120)" font-family="'JetBrains Mono',monospace" font-size="10.5">
-    <text fill="#64748b" font-size="9">┌ camera.eliana_s_camera</text>
+    <text fill="#64748b" font-size="9">┌ camera.bedroom2_camera</text>
     <text y="22" fill="#e2e8f0"><tspan fill="#00f2fe" font-weight="700">HA CAMERAS</tspan>  <tspan fill="#00f5a0">frigate×8</tspan>  <tspan fill="#00f5a0">nest×2</tspan></text>
-    <text y="44" fill="#94a3b8">camera.eliana_s_camera  state=<tspan fill="#00f5a0">streaming</tspan>  platform=nest</text>
-    <text y="66" fill="#94a3b8">  override: <tspan fill="#00f2fe">→ camera.eliana_restream</tspan> (go2rtc)</text>
+    <text y="44" fill="#94a3b8">camera.bedroom2_camera  state=<tspan fill="#00f5a0">streaming</tspan>  platform=nest</text>
+    <text y="66" fill="#94a3b8">  override: <tspan fill="#00f2fe">→ camera.bedroom2_restream</tspan> (go2rtc)</text>
     <text y="88" fill="#94a3b8">  backend:frigate: <tspan fill="#00f5a0">OK 47KB · lum μ84 σ38 960×540</tspan></text>
     <text y="118" fill="#00f2fe" font-size="11">frames available via go2rtc restream  (112ms)</text>
     <text y="150" fill="#64748b" font-size="9">tap DIAG again to close · verdict logged to the Logs tab</text>
@@ -46,7 +46,7 @@
 
   <!-- strip -->
   <g transform="translate(42,336)" font-family="'JetBrains Mono',monospace" font-size="10" letter-spacing="1">
-    <text x="0" y="12" fill="#64748b">SRC <tspan fill="#e2e8f0">Eliana's Room → eliana_restream</tspan></text>
+    <text x="0" y="12" fill="#64748b">SRC <tspan fill="#e2e8f0">Bedroom 2 → bedroom2_restream</tspan></text>
     <text x="496" y="12" fill="#64748b" text-anchor="end">MJPEG · TARGET <tspan fill="#00f5a0">STREAMING</tspan></text>
   </g>
 

@@ -10,7 +10,7 @@ def cam(load):
 
 def test_display_name_custom_wins(cam):
     assert cam.display_name("camera.x", "HA Name",
-                            {"camera.x": "Eliana's Room"}) == "Eliana's Room"
+                            {"camera.x": "Bedroom 2"}) == "Bedroom 2"
 
 
 def test_display_name_strips_whitespace(cam):

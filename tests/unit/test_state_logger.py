@@ -145,7 +145,7 @@ def test_listener_records_probable_person_below_threshold(cc, core_state, load, 
     monkeypatch.setattr(identity, "quick_identify",
                         lambda hass, area=None: identity.Identification(
                             identity.UNKNOWN, 0.0, "low_confidence",
-                            {"Eliana": 0.42, "Username": 0.10}))
+                            {"Username3": 0.42, "Username": 0.10}))
 
     ev = _event(cc, "light.den", "off", "on")
     cc._on_state_changed(ev)
@@ -155,7 +155,7 @@ def test_listener_records_probable_person_below_threshold(cc, core_state, load, 
             "SELECT person, person_confidence FROM state_changes "
             "WHERE entity_id='light.den'"
         ).fetchone()
-    assert row[0] == "Eliana"          # the clear front-runner is kept
+    assert row[0] == "Username3"          # the clear front-runner is kept
     assert 0 < row[1] < 0.45           # but flagged as uncertain
 
 
@@ -165,7 +165,7 @@ def test_listener_keeps_unknown_when_candidates_are_tied(cc, core_state, load, m
     monkeypatch.setattr(identity, "quick_identify",
                         lambda hass, area=None: identity.Identification(
                             identity.UNKNOWN, 0.0, "low_confidence",
-                            {"Eliana": 0.30, "Username": 0.28}))
+                            {"Username3": 0.30, "Username": 0.28}))
 
     ev = _event(cc, "light.den", "off", "on")
     cc._on_state_changed(ev)
@@ -184,7 +184,7 @@ def test_listener_records_clear_leader_as_best_guess(cc, core_state, load, monke
     monkeypatch.setattr(identity, "quick_identify",
                         lambda hass, area=None: identity.Identification(
                             identity.UNKNOWN, 0.0, "low_confidence",
-                            {"Username": 0.30, "Eliana": 0.15}))
+                            {"Username": 0.30, "Username3": 0.15}))
 
     ev = _event(cc, "light.den", "off", "on")
     cc._on_state_changed(ev)

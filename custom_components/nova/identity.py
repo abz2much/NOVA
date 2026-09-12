@@ -153,7 +153,7 @@ def _room_votes(hass: HomeAssistant, area_id: Optional[str], now: float) -> dict
     """Who is detected in THIS room right now → {name: weight} (v6.77.0).
 
     Uses camera face recognition mapped to areas: if the only person recently
-    recognised in the event's room is Eliana, a light change in that room is
+    recognised in the event's room is Username3, a light change in that room is
     almost certainly hers even if three people are home. This is what makes
     per-person attribution work in a multi-occupant house — sole-occupancy
     across the whole house is rare; sole-occupancy of a ROOM is common."""

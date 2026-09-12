@@ -2116,7 +2116,7 @@ camera exterior for the whole stack, and unpinning restores heuristics.
 ## [6.48.0] — call your cameras what you actually call them
 Cameras can now be renamed **inside Nova only** — HA entity names and
 Frigate stream names stay untouched. Useful now that restream twins exist:
-`eliana_restream` can just be "Eliana's Room" on the panel.
+`bedroom2_restream` can just be "Bedroom 2" on the panel.
 
 A **✎ NAME** button in the Camera Watch head opens an inline overlay for
 the active camera: type a name, Enter saves, Esc cancels, blank reverts to
@@ -2196,14 +2196,14 @@ Nova consume like any local camera.
 
 Nova now meets that halfway with one runtime key:
 
-    camera_overrides: { "camera.eliana_s_camera": "camera.eliana_restream" }
+    camera_overrides: { "camera.bedroom2_camera": "camera.bedroom2_restream" }
 
 The original entity keeps its identity everywhere — chips, names, doorbell
 events, Nest event metadata — while every FRAME transparently comes from
 the twin: the panel tile (stream URL, token, stills), the Nova snapshot
 tier, the package monitor, vision analysis, all via one server-side
 `resolve_camera_source()` mirrored client-side. The cam strip shows the
-mapping (`SRC eliana_s_camera → eliana_restream`), DIAG probes and labels
+mapping (`SRC bedroom2_camera → bedroom2_restream`), DIAG probes and labels
 the actual source, and a missing/typo'd target safely falls back to the
 original. 3 new smoke checks, 3 new unit tests.
 
@@ -3008,7 +3008,7 @@ door. It reads as a *home*, and it is still a fixed SVG that cannot rotate or zo
   green with a brighter halo, idle rooms stay dark — like a house at dusk with lights on
   where people are. Garage doors light when the garage is active; basement windows light
   for the basement.
-- **Window-to-room map:** dormers = Master Bedroom / Eliana's Room; first-floor windows =
+- **Window-to-room map:** dormers = Master Bedroom / Bedroom 2; first-floor windows =
   Living Room / Kitchen / Guest Room; garage doors = Garage; base windows = Basement.
 - **Floor tabs focus a level** by dimming the other floors' windows.
 - Property banner, sq-ft / bed-bath / style / occupied stats, and the systems callouts
@@ -3026,7 +3026,7 @@ every time — there is no rotation or zoom, so nothing can collapse to flat lin
 up and scatter the way the 3D model kept doing. This is the isometric look from earlier in
 the project, re-themed to the panel's cyan and wired to live data.
 - **Always-correct cutaway.** Basement, first floor (garage with doors, kitchen, dining,
-  living room, guest room, hallway), and the dormered second floor (master bed, Eliana's
+  living room, guest room, hallway), and the dormered second floor (master bed, Username3's
   room) drawn as a clean Iron-Man-HUD isometric.
 - **Live presence.** Occupied rooms light up; the dominant room is brightest with a
   pulsing node and a "◉ DOMINANT" tag; idle rooms stay dim — same data that drove the old

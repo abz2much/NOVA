@@ -41,7 +41,7 @@ def test_normalizes_person(pp, tmp_path):
 def test_read_filtered_by_person(pp, tmp_path):
     db = str(tmp_path / "p.db")
     pp.store("username", "time_routine", "a", db_path=db)
-    pp.store("alex", "time_routine", "b", db_path=db)
+    pp.store("username2", "time_routine", "b", db_path=db)
     assert {r["person"] for r in pp.read("username", db_path=db)} == {"username"}
     assert len(pp.read(db_path=db)) == 2
 

@@ -225,7 +225,7 @@ def test_time_routine_mixed_people_stays_household(analyzer, tmp_path):
     for d in range(1, 5):
         _add_state(conn, "light.hall_test", "on", d, 20, person="Username")
     for d in range(5, 9):
-        _add_state(conn, "light.hall_test", "on", d, 20, person="Alex")
+        _add_state(conn, "light.hall_test", "on", d, 20, person="Username2")
     conn.commit()
     pa = analyzer.PatternAnalyzer()
     found = pa._find_time_routines(conn)

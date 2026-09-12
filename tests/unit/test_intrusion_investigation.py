@@ -156,12 +156,12 @@ async def test_residents_return_stops_investigation(safety, fake_hass, clock):
 
 
 async def test_notify_all_devices_hits_every_mobile_app(cc, fake_hass):
-    fake_hass.services.register("notify", "mobile_app_sam")
-    fake_hass.services.register("notify", "mobile_app_alex")
+    fake_hass.services.register("notify", "mobile_app_username")
+    fake_hass.services.register("notify", "mobile_app_username2")
     fake_hass.services.register("notify", "slack")   # not a device target
     await cc._notify_all_devices(fake_hass, {}, "intrusion!", "intrusion_confirmed")
     names = {c[1] for c in fake_hass.service_calls if c[0] == "notify"}
-    assert names == {"mobile_app_sam", "mobile_app_alex"}
+    assert names == {"mobile_app_username", "mobile_app_username2"}
     assert any(c[0] == "persistent_notification" for c in fake_hass.service_calls)
 
 

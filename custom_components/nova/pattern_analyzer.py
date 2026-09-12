@@ -1173,7 +1173,7 @@ class PatternAnalyzer:
         missing the `person` column just falls back to household (None).
         """
         # v6.77.0: weight each event by how CONFIDENT the attribution was, so a
-        # room-scoped "probably Eliana (0.62)" contributes proportionally instead
+        # room-scoped "probably Username3 (0.62)" contributes proportionally instead
         # of being thrown away. Commands keep full weight — the conversation path
         # runs the full identity resolver, so those attributions are strong.
         try:
