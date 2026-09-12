@@ -8,7 +8,7 @@ Nova knows and can reason over — distinct from two stores that already exist:
   • patterns.db      high-volume behavioural telemetry ("what tends to happen")
 
 knowledge.py holds the low-volume, high-value middle: discrete facts a butler
-would simply *know* — "trash is Tuesday", "Sam runs cold at night", "Eliana's
+would simply *know* — "trash is Tuesday", "Username runs cold at night", "Eliana's
 pickup is 3 PM today". Each is attributed to a subject so per-person identity can
 slot in later untouched, carries a source + confidence so observed/inferred facts
 rank below stated ones, and can expire so ephemeral facts clean themselves up.

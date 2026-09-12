@@ -72,8 +72,8 @@ def test_calendar_empty_omitted(sit, fake_hass, load, monkeypatch):
 
 def test_presence_line(sit, fake_hass, load, monkeypatch):
     presence = load("presence")
-    monkeypatch.setattr(presence, "presence_context_string", lambda hass: "Sam is home.")
-    assert sit._presence(fake_hass) == "Presence: Sam is home."
+    monkeypatch.setattr(presence, "presence_context_string", lambda hass: "Username is home.")
+    assert sit._presence(fake_hass) == "Presence: Username is home."
 
 
 def test_presence_no_entities_omitted(sit, fake_hass, load, monkeypatch):
@@ -97,7 +97,7 @@ def test_activity_summarizes(sit, fake_hass, set_observer):
 
 def test_snapshot_composites(sit, fake_hass, load, monkeypatch, set_observer):
     presence = load("presence"); comms = load("comms"); energy = load("energy")
-    monkeypatch.setattr(presence, "presence_context_string", lambda hass: "Sam is home.")
+    monkeypatch.setattr(presence, "presence_context_string", lambda hass: "Username is home.")
     monkeypatch.setattr(comms, "agenda",
                         lambda hass, h=24: {"events": ["Dentist - 9 AM"], "conflicts": [], "count": 1})
     monkeypatch.setattr(energy, "power_status", lambda hass: {"kw": 1.2, "over_peak": False})
@@ -105,7 +105,7 @@ def test_snapshot_composites(sit, fake_hass, load, monkeypatch, set_observer):
     monkeypatch.setattr(fake_hass.states, "async_all", lambda d=None: [])
     out = sit.snapshot(fake_hass)
     assert out.startswith("Time:")                 # time leads
-    assert "Presence: Sam is home." in out
+    assert "Presence: Username is home." in out
     assert "Next up: Dentist - 9 AM" in out
     assert "Power: 1.2 kW" in out
 

@@ -18,7 +18,7 @@ def env(cog, load, monkeypatch):
     jc = load("nova_config")
     idm = load("identity")
     holder = {"list": []}
-    home = {"set": {"sam"}}
+    home = {"set": {"username"}}
     monkeypatch.setattr(pp, "read", lambda person=None, db_path=None: holder["list"])
     monkeypatch.setattr(idm, "_home_people", lambda hass: list(home["set"]))
     monkeypatch.setattr(idm, "normalize", lambda n: n.strip().lower().replace(" ", "_"))
@@ -27,7 +27,7 @@ def env(cog, load, monkeypatch):
     return holder, home, cfg
 
 
-def _routine(hour, person="sam", desc="start the coffee", conf=0.8):
+def _routine(hour, person="username", desc="start the coffee", conf=0.8):
     return {"id": 1, "person": person, "pattern_type": "time_routine",
             "description": desc, "data": json.dumps({"hour": hour}),
             "confidence": conf, "occurrences": 8}

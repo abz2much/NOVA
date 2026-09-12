@@ -31,8 +31,8 @@ async def test_engage_locks_and_closes_garage(cc, fake_hass):
     fake_hass.states.set("lock.front", "unlocked", friendly_name="Front Lock")
     fake_hass.states.set("cover.garage_door", "open", device_class="garage",
                          friendly_name="Garage Door")
-    fake_hass.states.set("binary_sensor.sams_window_1", "on", device_class="window",
-                         friendly_name="Sam's Window 1")
+    fake_hass.states.set("binary_sensor.usernames_window_1", "on", device_class="window",
+                         friendly_name="Username's Window 1")
     mgr = _mgr(cc, fake_hass)
 
     action = await mgr.engage("test")
@@ -43,8 +43,8 @@ async def test_engage_locks_and_closes_garage(cc, fake_hass):
     assert closes and closes[0][2].get("entity_id") == "cover.garage_door"
 
     # the window can't be closed → left open and alerted, never auto-closed
-    assert "binary_sensor.sams_window_1" in mgr.exempt_windows
-    assert action and "Sam's Window 1 is open" in action["message"]
+    assert "binary_sensor.usernames_window_1" in mgr.exempt_windows
+    assert action and "Username's Window 1 is open" in action["message"]
     assert "closed Garage Door" in action["message"]
 
 

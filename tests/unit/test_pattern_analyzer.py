@@ -210,20 +210,20 @@ def test_respect_stated_allows_observed_update(analyzer, knowledge, tmp_path, mo
 
 def test_time_routine_owned_by_dominant_person(analyzer, tmp_path):
     conn = _conn(tmp_path / "p.db")
-    for d in range(1, 9):  # Sam alone accounts for all 8 occurrences
-        _add_state(conn, "light.office_test", "on", d, 7, person="Sam")
+    for d in range(1, 9):  # Username alone accounts for all 8 occurrences
+        _add_state(conn, "light.office_test", "on", d, 7, person="Username")
     conn.commit()
     pa = analyzer.PatternAnalyzer()
     found = pa._find_time_routines(conn)
     match = [p for p in found if p.entity_ids == ["light.office_test"]]
-    assert match and match[0].details.get("person") == "Sam"
-    assert "Sam" in match[0].description
+    assert match and match[0].details.get("person") == "Username"
+    assert "Username" in match[0].description
 
 
 def test_time_routine_mixed_people_stays_household(analyzer, tmp_path):
     conn = _conn(tmp_path / "p.db")
     for d in range(1, 5):
-        _add_state(conn, "light.hall_test", "on", d, 20, person="Sam")
+        _add_state(conn, "light.hall_test", "on", d, 20, person="Username")
     for d in range(5, 9):
         _add_state(conn, "light.hall_test", "on", d, 20, person="Alex")
     conn.commit()
@@ -236,12 +236,12 @@ def test_time_routine_mixed_people_stays_household(analyzer, tmp_path):
 def test_repeated_command_owned_by_dominant_person(analyzer, tmp_path):
     conn = _conn(tmp_path / "p.db")
     for d in range(1, 7):
-        _add_command(conn, "play jazz", d, 21, person="Sam")
+        _add_command(conn, "play jazz", d, 21, person="Username")
     conn.commit()
     pa = analyzer.PatternAnalyzer()
     found = pa._find_repeated_commands(conn)
     match = [p for p in found if p.details.get("command") == "play jazz"]
-    assert match and match[0].details.get("person") == "Sam"
+    assert match and match[0].details.get("person") == "Username"
 
 
 def test_dominant_person_missing_column_is_safe(analyzer, tmp_path):
@@ -269,13 +269,13 @@ def test_promote_attributes_fact_to_person_subject(analyzer, knowledge, tmp_path
     p = analyzer.DetectedPattern(
         pattern_type="time_routine", description="x",
         entity_ids=["light.porch_test"], confidence=0.9, occurrences=8,
-        details={"hour": 18, "state": "on", "person": "Sam"})
+        details={"hour": 18, "state": "on", "person": "Username"})
     subject, _kind, _key, _value = pa._fact_for(p)
-    assert subject == "sam"
+    assert subject == "username"
     written = pa._promote_to_knowledge([p])
     assert written == 1
     facts = knowledge.all_facts()
-    assert facts[0]["subject"] == "sam"
+    assert facts[0]["subject"] == "username"
 
 
 def test_household_fact_unaffected_when_no_person(analyzer, knowledge, tmp_path, monkeypatch):
@@ -294,20 +294,20 @@ def test_store_person_pattern_upserts(analyzer, tmp_path):
     pa = analyzer.PatternAnalyzer()
     pa._db = str(db)
     p = analyzer.DetectedPattern(
-        pattern_type="time_routine", description="Sam's morning light",
+        pattern_type="time_routine", description="Username's morning light",
         entity_ids=["light.office_test"], confidence=0.8, occurrences=8,
-        details={"hour": 7, "state": "on", "person": "Sam"})
+        details={"hour": 7, "state": "on", "person": "Username"})
     assert pa._store_person_pattern(p) is True
-    rows = pa.get_person_patterns("sam")
-    assert len(rows) == 1 and rows[0]["person"] == "sam"
+    rows = pa.get_person_patterns("username")
+    assert len(rows) == 1 and rows[0]["person"] == "username"
 
     # re-store with higher confidence → upsert in place, not duplicated
     p2 = analyzer.DetectedPattern(
-        pattern_type="time_routine", description="Sam's morning light",
+        pattern_type="time_routine", description="Username's morning light",
         entity_ids=["light.office_test"], confidence=0.95, occurrences=10,
-        details={"hour": 7, "state": "on", "person": "Sam"})
+        details={"hour": 7, "state": "on", "person": "Username"})
     pa._store_person_pattern(p2)
-    rows = pa.get_person_patterns("sam")
+    rows = pa.get_person_patterns("username")
     assert len(rows) == 1
     assert rows[0]["occurrences"] == 10
 

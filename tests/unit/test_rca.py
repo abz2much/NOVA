@@ -51,7 +51,7 @@ def sc(db, ts, eid, old, new, *, area=None, hour=None, trig="system"):
                   (ts, eid, eid.split(".")[0], old, new, area, hour, 0, trig))
 
 
-def cmd(db, ts, text, person="sam"):
+def cmd(db, ts, text, person="username"):
     with sqlite3.connect(db) as c:
         c.execute("INSERT INTO commands (timestamp, text, person) VALUES (?,?,?)",
                   (ts, text, person))
@@ -92,11 +92,11 @@ def test_unavailable_cascade_by_shared_name(rca, dbs):
 
 def test_command_cause_names_person(rca, dbs):
     p, _ = dbs
-    cmd(p, "2026-07-12 02:59:00", "turn off the kitchen lights", person="sam")
+    cmd(p, "2026-07-12 02:59:00", "turn off the kitchen lights", person="username")
     sc(p, T0, "light.kitchen", "on", "off", hour=3)
     res = _analyze(rca, dbs, "light.kitchen")
     top = res["candidates"][0]
-    assert top["kind"] == "command" and "sam" in top["cause"]
+    assert top["kind"] == "command" and "username" in top["cause"]
 
 
 def test_command_outside_window_ignored(rca, dbs):

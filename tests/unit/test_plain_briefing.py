@@ -9,9 +9,9 @@ def b(load):
 
 def test_reads_the_gathered_facts(b):
     out = b._plain_briefing("Good morning", "sir",
-                            ["It is Monday.", "Weather: 45F.", "At home: Sam."])
+                            ["It is Monday.", "Weather: 45F.", "At home: Username."])
     assert out.startswith("Good morning, sir.")
-    assert "Weather: 45F." in out and "At home: Sam." in out
+    assert "Weather: 45F." in out and "At home: Username." in out
 
 
 def test_empty_context_says_nothing_notable(b):

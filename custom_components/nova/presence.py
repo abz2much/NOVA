@@ -53,8 +53,8 @@ def get_presence_summary(hass: HomeAssistant) -> dict:
         "total_people":  int,
         "home_count":    int,
         "away_count":    int,
-        "people":        [{"name": "Sam", "state": "home", ...}, ...],
-        "rooms":         {"kitchen": ["Sam"], "office": ["Alex"]},
+        "people":        [{"name": "Username", "state": "home", ...}, ...],
+        "rooms":         {"kitchen": ["Username"], "office": ["Alex"]},
         "anyone_home":   bool,
       }
     """
@@ -100,7 +100,7 @@ def get_presence_summary(hass: HomeAssistant) -> dict:
 def presence_context_string(hass: HomeAssistant) -> str:
     """
     One-line summary suitable for injecting into the LLM system prompt.
-    Example: "Sam is home. Alex is away. 3 presence sensors active: kitchen, office."
+    Example: "Username is home. Alex is away. 3 presence sensors active: kitchen, office."
     """
     data = get_presence_summary(hass)
     if not data["people"]:

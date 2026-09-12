@@ -32,7 +32,7 @@ def _conn(path):
     return conn
 
 
-def _seed_owned_routine(conn, owner="sam"):
+def _seed_owned_routine(conn, owner="username"):
     # light.porch turns on ~19:00 on many days, attributed to `owner`
     base = datetime.now() - timedelta(days=20)
     for d in range(15):
@@ -47,19 +47,19 @@ def _seed_owned_routine(conn, owner="sam"):
 
 def test_time_routine_gets_presence_condition(pa, tmp_path):
     conn = _conn(tmp_path / "r.db")
-    _seed_owned_routine(conn, owner="sam")
-    person_map = {"sam": "person.sam"}
+    _seed_owned_routine(conn, owner="username")
+    person_map = {"username": "person.username"}
     pats = pa.PatternAnalyzer()._find_time_routines(conn, person_map)
     m = [p for p in pats if p.entity_ids == ["light.porch"]]
     assert m, "expected the porch routine"
     cond = m[0].details.get("condition")
-    assert cond == {"condition": "state", "entity_id": "person.sam", "state": "home"}
-    assert m[0].details.get("person") == "sam"
+    assert cond == {"condition": "state", "entity_id": "person.username", "state": "home"}
+    assert m[0].details.get("person") == "username"
 
 
 def test_time_routine_no_condition_when_owner_unresolved(pa, tmp_path):
     conn = _conn(tmp_path / "r2.db")
-    _seed_owned_routine(conn, owner="sam")
+    _seed_owned_routine(conn, owner="username")
     # empty map → owner can't be resolved to a person entity → no condition,
     # but the routine is still detected.
     pats = pa.PatternAnalyzer()._find_time_routines(conn, {})
@@ -73,17 +73,17 @@ def test_generate_time_routine_emits_presence_condition(pa):
         entity_ids=["light.porch"], confidence=0.9, occurrences=15,
         details={"hour": 19, "state": "on",
                  "condition": {"condition": "state",
-                               "entity_id": "person.sam", "state": "home"}})
+                               "entity_id": "person.username", "state": "home"}})
     auto = json.loads(pa.PatternAnalyzer()._generate_automation(p))
     assert auto["trigger"]["platform"] == "time"
     assert auto["condition"] == [{"condition": "state",
-                                  "entity_id": "person.sam", "state": "home"}]
+                                  "entity_id": "person.username", "state": "home"}]
 
 
 def test_condition_phrase_state(pa):
     assert pa._condition_phrase(
-        {"condition": "state", "entity_id": "person.sam", "state": "home"}
-    ) == ", only when person.sam is home"
+        {"condition": "state", "entity_id": "person.username", "state": "home"}
+    ) == ", only when person.username is home"
 
 
 class _FakeState:
@@ -106,10 +106,10 @@ class _FakeHass:
 
 
 def test_person_entity_map_resolves_normalized_and_friendly(pa):
-    hass = _FakeHass([_FakeState("person.sam_smith", "Sam Smith")])
+    hass = _FakeHass([_FakeState("person.username_smith", "Username Smith")])
     m = pa.PatternAnalyzer()._person_entity_map(hass)
-    # a routine's owner may be recorded normalized ("sam_smith"), as the friendly
-    # name ("Sam Smith"), or as the entity id — all must resolve.
-    assert m["sam_smith"] == "person.sam_smith"
-    assert m["Sam Smith"] == "person.sam_smith"
-    assert m["person.sam_smith"] == "person.sam_smith"
+    # a routine's owner may be recorded normalized ("username_smith"), as the friendly
+    # name ("Username Smith"), or as the entity id — all must resolve.
+    assert m["username_smith"] == "person.username_smith"
+    assert m["Username Smith"] == "person.username_smith"
+    assert m["person.username_smith"] == "person.username_smith"

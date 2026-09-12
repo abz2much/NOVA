@@ -25,7 +25,7 @@ def safety(cc, fake_hass):
 
 
 def _away(hass):
-    hass.states.set("person.sam", "not_home")
+    hass.states.set("person.username", "not_home")
     hass.states.set("binary_sensor.front_door", "on", device_class="door")  # corroboration
 
 
@@ -148,7 +148,7 @@ async def test_residents_return_stops_investigation(safety, fake_hass, clock):
     _motion(fake_hass, "binary_sensor.living_motion")
     await _intr(safety, fake_hass)
     assert safety._investigation is not None
-    fake_hass.states.set("person.sam", "home")     # residents come home
+    fake_hass.states.set("person.username", "home")     # residents come home
     clock["now"] += 10
     await safety.tick(sleeping=False, anyone_home=True)
     fake_hass.close_pending()
@@ -201,7 +201,7 @@ async def test_outdoor_camera_person_does_not_confirm(safety, fake_hass, clock):
 
 
 async def test_open_yard_gate_is_not_a_breach(safety, fake_hass, clock):
-    fake_hass.states.set("person.sam", "not_home")
+    fake_hass.states.set("person.username", "not_home")
     fake_hass.states.set("cover.side_gate", "open", device_class="gate")
     _motion(fake_hass, "binary_sensor.living_motion")
     # gate open is property perimeter, not the house envelope → no corroboration
@@ -355,7 +355,7 @@ async def test_motion_lingering_at_breach_does_not_confirm(safety, fake_hass, cl
     import sys
     sys.modules.pop("jc.intrusion", None)
     _breach_with_hops(safety, monkeypatch, {"kitchen": 0})
-    fake_hass.states.set("person.sam", "not_home")
+    fake_hass.states.set("person.username", "not_home")
     fake_hass.states.set("binary_sensor.kitchen_window", "on", device_class="window")
     fake_hass.states.set("binary_sensor.kitchen_motion", "on", device_class="motion")
     await _intr(safety, fake_hass)                      # investigating
@@ -374,7 +374,7 @@ async def test_motion_progressing_inward_confirms(safety, fake_hass, clock, monk
     import sys
     sys.modules.pop("jc.intrusion", None)
     _breach_with_hops(safety, monkeypatch, {"kitchen": 0, "hall": 1, "living": 2})
-    fake_hass.states.set("person.sam", "not_home")
+    fake_hass.states.set("person.username", "not_home")
     fake_hass.states.set("binary_sensor.kitchen_window", "on", device_class="window")
     fake_hass.states.set("binary_sensor.kitchen_motion", "on", device_class="motion")
     await _intr(safety, fake_hass)                      # investigating at breach
@@ -398,7 +398,7 @@ async def test_inward_depth_is_configurable(safety, fake_hass, clock, monkeypatc
     sys.modules.pop("jc.intrusion", None)
     safety.config["intrusion_inward_depth"] = 1
     _breach_with_hops(safety, monkeypatch, {"kitchen": 0, "hall": 1})
-    fake_hass.states.set("person.sam", "not_home")
+    fake_hass.states.set("person.username", "not_home")
     fake_hass.states.set("binary_sensor.kitchen_window", "on", device_class="window")
     fake_hass.states.set("binary_sensor.kitchen_motion", "on", device_class="motion")
     await _intr(safety, fake_hass)
@@ -424,7 +424,7 @@ async def test_learned_damping_never_suppresses_confirmed(safety, fake_hass, clo
     monkeypatch.setattr(intr, "record_event", lambda *a, **k: {})
 
     _breach_with_hops(safety, monkeypatch, {"kitchen": 0, "hall": 1, "living": 2})
-    fake_hass.states.set("person.sam", "not_home")
+    fake_hass.states.set("person.username", "not_home")
     fake_hass.states.set("binary_sensor.kitchen_window", "on", device_class="window")
     fake_hass.states.set("binary_sensor.kitchen_motion", "on", device_class="motion")
     await _intr(safety, fake_hass)                    # initial ping (damped)
@@ -451,7 +451,7 @@ async def test_learned_damping_silences_initial_ping(safety, fake_hass, clock, m
     monkeypatch.setattr(intr, "record_event", lambda *a, **k: {})
 
     _breach_with_hops(safety, monkeypatch, {"kitchen": 0})
-    fake_hass.states.set("person.sam", "not_home")
+    fake_hass.states.set("person.username", "not_home")
     fake_hass.states.set("binary_sensor.kitchen_window", "on", device_class="window")
     fake_hass.states.set("binary_sensor.kitchen_motion", "on", device_class="motion")
     out = await _intr(safety, fake_hass)

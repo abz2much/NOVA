@@ -40,9 +40,9 @@ def _face(state, camera, name, confidence=0.9, age_seconds=5):
 # ── tier 1: presence ─────────────────────────────────────────────────────────
 
 def test_sole_occupant_resolves(identity, cfg, sigs, fake_hass):
-    sigs["home"] = ["Sam"]
+    sigs["home"] = ["Username"]
     ident = identity.resolve(fake_hass)
-    assert ident.person == "Sam" and ident.known
+    assert ident.person == "Username" and ident.known
     assert "sole_occupant" in ident.method
 
 
@@ -52,7 +52,7 @@ def test_nobody_home_no_signal_is_unknown(identity, cfg, sigs, fake_hass):
 
 
 def test_two_home_alone_is_ambiguous_unknown(identity, cfg, sigs, fake_hass):
-    sigs["home"] = ["Sam", "Alex"]   # a tie on weak priors → not confident
+    sigs["home"] = ["Username", "Alex"]   # a tie on weak priors → not confident
     ident = identity.resolve(fake_hass)
     assert ident.person == "unknown"
 
@@ -60,7 +60,7 @@ def test_two_home_alone_is_ambiguous_unknown(identity, cfg, sigs, fake_hass):
 # ── tier 2: face ─────────────────────────────────────────────────────────────
 
 def test_face_disambiguates_multi_home(identity, cfg, sigs, fake_hass):
-    sigs["home"] = ["Sam", "Alex"]
+    sigs["home"] = ["Username", "Alex"]
     _face(sigs, "camera.office", "Alex", confidence=0.95, age_seconds=3)
     ident = identity.resolve(fake_hass)
     assert ident.person == "Alex" and ident.known
@@ -68,17 +68,17 @@ def test_face_disambiguates_multi_home(identity, cfg, sigs, fake_hass):
 
 
 def test_stale_face_carries_no_weight(identity, cfg, sigs, fake_hass):
-    sigs["home"] = ["Sam", "Alex"]
+    sigs["home"] = ["Username", "Alex"]
     _face(sigs, "camera.office", "Alex", confidence=0.95, age_seconds=10_000)
     ident = identity.resolve(fake_hass)
     assert ident.person == "unknown"   # face too old → back to ambiguous
 
 
 def test_presence_and_face_agree_high_confidence(identity, cfg, sigs, fake_hass):
-    sigs["home"] = ["Sam"]
-    _face(sigs, "camera.kitchen", "Sam", confidence=0.95, age_seconds=2)
+    sigs["home"] = ["Username"]
+    _face(sigs, "camera.kitchen", "Username", confidence=0.95, age_seconds=2)
     ident = identity.resolve(fake_hass)
-    assert ident.person == "Sam"
+    assert ident.person == "Username"
     assert ident.confidence > 0.8
 
 
@@ -87,7 +87,7 @@ def test_presence_and_face_agree_high_confidence(identity, cfg, sigs, fake_hass)
 def test_voice_provider_ignored_when_flag_off(identity, cfg, sigs, fake_hass):
     cfg["identity_voice_fingerprint"] = False
     identity.register_voice_provider(lambda hass, dev: {"Alex": 1.0})
-    sigs["home"] = ["Sam", "Alex"]
+    sigs["home"] = ["Username", "Alex"]
     ident = identity.resolve(fake_hass)
     identity.register_voice_provider(None)
     assert ident.person == "unknown"   # flag off → voice not consulted
@@ -96,7 +96,7 @@ def test_voice_provider_ignored_when_flag_off(identity, cfg, sigs, fake_hass):
 def test_voice_provider_used_when_enabled(identity, cfg, sigs, fake_hass):
     cfg["identity_voice_fingerprint"] = True
     identity.register_voice_provider(lambda hass, dev: {"Alex": 1.0})
-    sigs["home"] = ["Sam", "Alex"]
+    sigs["home"] = ["Username", "Alex"]
     ident = identity.resolve(fake_hass)
     identity.register_voice_provider(None)
     assert ident.person == "Alex" and "voice" in ident.method
@@ -105,23 +105,23 @@ def test_voice_provider_used_when_enabled(identity, cfg, sigs, fake_hass):
 def test_no_voice_provider_is_safe(identity, cfg, sigs, fake_hass):
     cfg["identity_voice_fingerprint"] = True   # on, but nothing registered
     assert identity.has_voice_provider() is False
-    sigs["home"] = ["Sam"]
+    sigs["home"] = ["Username"]
     ident = identity.resolve(fake_hass)
-    assert ident.person == "Sam"               # falls through to presence
+    assert ident.person == "Username"               # falls through to presence
 
 
 # ── master switch + confidence gating ────────────────────────────────────────
 
 def test_disabled_returns_unknown(identity, cfg, sigs, fake_hass):
     cfg["identity_enabled"] = False
-    sigs["home"] = ["Sam"]
+    sigs["home"] = ["Username"]
     ident = identity.resolve(fake_hass)
     assert ident.person == "unknown" and ident.method == "disabled"
 
 
 def test_min_confidence_gate(identity, cfg, sigs, fake_hass):
     cfg["identity_min_confidence"] = 0.95      # very strict
-    sigs["home"] = ["Sam"]                       # sole occupant ≈0.6 confidence
+    sigs["home"] = ["Username"]                       # sole occupant ≈0.6 confidence
     ident = identity.resolve(fake_hass)
     assert ident.person == "unknown" and ident.method == "low_confidence"
 
@@ -129,21 +129,21 @@ def test_min_confidence_gate(identity, cfg, sigs, fake_hass):
 # ── subject mapping ──────────────────────────────────────────────────────────
 
 def test_subject_for_known_and_unknown(identity, cfg, sigs, fake_hass):
-    sigs["home"] = ["Sam Smith"]
+    sigs["home"] = ["Username Smith"]
     ident = identity.resolve(fake_hass)
-    assert identity.subject_for(ident) == "sam_smith"
+    assert identity.subject_for(ident) == "username_smith"
     assert identity.subject_for(identity.Identification()) == "primary"
 
 
 # ── quick_person: cheap sole-occupant lookup (v6.41.0) ───────────────────────
 
 def test_quick_person_sole_occupant(identity, cfg, sigs, fake_hass):
-    sigs["home"] = ["Sam"]
-    assert identity.quick_person(fake_hass) == "Sam"
+    sigs["home"] = ["Username"]
+    assert identity.quick_person(fake_hass) == "Username"
 
 
 def test_quick_person_multiple_home_is_unknown(identity, cfg, sigs, fake_hass):
-    sigs["home"] = ["Sam", "Alex"]
+    sigs["home"] = ["Username", "Alex"]
     assert identity.quick_person(fake_hass) == "unknown"
 
 
@@ -154,14 +154,14 @@ def test_quick_person_nobody_home_is_unknown(identity, cfg, sigs, fake_hass):
 def test_quick_person_ignores_face_and_voice(identity, cfg, sigs, fake_hass):
     # quick_person is presence-only by design — a face vote for a second
     # person must not disambiguate the way the full resolve() would.
-    sigs["home"] = ["Sam", "Alex"]
+    sigs["home"] = ["Username", "Alex"]
     _face(sigs, "camera.office", "Alex", confidence=0.95, age_seconds=3)
     assert identity.quick_person(fake_hass) == "unknown"
 
 
 def test_quick_person_disabled_is_unknown(identity, cfg, sigs, fake_hass):
     cfg["identity_enabled"] = False
-    sigs["home"] = ["Sam"]
+    sigs["home"] = ["Username"]
     assert identity.quick_person(fake_hass) == "unknown"
 
 
@@ -200,14 +200,14 @@ def test_room_votes_sole_person_in_room(identity, monkeypatch):
 
 
 def test_room_votes_ignore_other_rooms(identity, monkeypatch):
-    _stub_room(identity, monkeypatch, {"camera.kitchen": "Sam"},
+    _stub_room(identity, monkeypatch, {"camera.kitchen": "Username"},
                {"camera.kitchen": "kitchen"})
     # event happened in the bedroom; the kitchen sighting must not count
     assert identity._room_votes(None, "bedroom", __import__("time").time()) == {}
 
 
 def test_room_votes_expire(identity, monkeypatch):
-    _stub_room(identity, monkeypatch, {"camera.kitchen": "Sam"},
+    _stub_room(identity, monkeypatch, {"camera.kitchen": "Username"},
                {"camera.kitchen": "kitchen"},
                meta={"camera.kitchen": {"confidence": 0.9,
                                         "age_seconds": identity._ROOM_FRESH_SECS + 60}})
@@ -216,10 +216,10 @@ def test_room_votes_expire(identity, monkeypatch):
 
 def test_room_votes_multiple_people_weigh_less(identity, monkeypatch):
     _stub_room(identity, monkeypatch,
-               {"camera.a": "Sam", "camera.b": "Eliana"},
+               {"camera.a": "Username", "camera.b": "Eliana"},
                {"camera.a": "living", "camera.b": "living"})
     votes = identity._room_votes(None, "living", __import__("time").time())
-    assert set(votes) == {"Sam", "Eliana"}
+    assert set(votes) == {"Username", "Eliana"}
     assert max(votes.values()) < identity._W_ROOM_SOLE
 
 
@@ -228,22 +228,22 @@ def test_room_votes_no_area_is_empty(identity):
 
 
 def test_quick_identify_carries_confidence(identity, monkeypatch):
-    monkeypatch.setattr(identity, "_home_people", lambda h: ["Sam"])
+    monkeypatch.setattr(identity, "_home_people", lambda h: ["Username"])
     out = identity.quick_identify(None)
-    assert out.person == "Sam"
+    assert out.person == "Username"
     assert out.confidence > 0
-    assert "Sam" in out.candidates
+    assert "Username" in out.candidates
 
 
 def test_quick_identify_ambiguous_returns_candidates(identity, monkeypatch):
     # several people home, no room signal → unknown, but candidates preserved
-    monkeypatch.setattr(identity, "_home_people", lambda h: ["Sam", "Eliana"])
+    monkeypatch.setattr(identity, "_home_people", lambda h: ["Username", "Eliana"])
     out = identity.quick_identify(None)
     assert out.person == identity.UNKNOWN
-    assert set(out.candidates) == {"Sam", "Eliana"}
+    assert set(out.candidates) == {"Username", "Eliana"}
 
 
 def test_quick_person_still_returns_a_string(identity, monkeypatch):
     # back-compat: external callers of quick_person keep working
-    monkeypatch.setattr(identity, "_home_people", lambda h: ["Sam"])
-    assert identity.quick_person(None) == "Sam"
+    monkeypatch.setattr(identity, "_home_people", lambda h: ["Username"])
+    assert identity.quick_person(None) == "Username"

@@ -21,7 +21,7 @@ Routing rules:
     1. Get the satellite's area.
     2. Find a media_player in that same area → speak there.
     3. If no speaker in that area → speak through the satellite itself
-       (its own built-in speaker). Per Sam's directive: "if the satellite
+       (its own built-in speaker). Per Username's directive: "if the satellite
        is the only thing in earshot, it wins."
 
   OBSERVER (proactive announcement):

@@ -83,8 +83,8 @@ const hass = {
       { ts: "09:05", urgency: "high", tag: "SAFETY", msg: "garage door left open" },
     ] };
     if (m.type === "nova/get_cognitive_status") return { learning: { days_of_data: 48, state_changes: 217802, commands: 93, suggestions: 0 }, ignore_rules: 0 };
-    if (m.type === "nova/get_person_routines") return { routines: { sam: [
-      { id: 1, pattern_type: "time_routine", description: "office light turns on around 07:00 most days when Sam is home", confidence: 0.82, occurrences: 9, last_seen: "2026-07-13" },
+    if (m.type === "nova/get_person_routines") return { routines: { username: [
+      { id: 1, pattern_type: "time_routine", description: "office light turns on around 07:00 most days when Username is home", confidence: 0.82, occurrences: 9, last_seen: "2026-07-13" },
     ] } };
     if (m.type === "nova/get_knowledge") return { facts: [], stats: {} };
     if (m.type === "nova/camera_snapshot") return { image: "/9j/dGVzdGpwZWc=" };
@@ -519,7 +519,7 @@ setTimeout(async () => {
   const mem = el.shadowRoot;
   checks.push(
     ["Person Routines panel present", !!mem.getElementById("proutine-list")],
-    ["person group rendered (Sam)", /Sam/.test(mem.getElementById("proutine-list")?.textContent || "")],
+    ["person group rendered (Username)", /Username/.test(mem.getElementById("proutine-list")?.textContent || "")],
     ["routine description rendered", /office light turns on/.test(mem.getElementById("proutine-list")?.textContent || "")],
     ["confidence bar rendered (82%)", /82%/.test(mem.getElementById("proutine-list")?.textContent || "")],
   );
