@@ -182,7 +182,7 @@ async def async_announce(
     Delivery (v7.86.0): `media_player.play_media` per speaker, with
     `announce: true` and `extra: {volume: <that speaker's current volume>}`.
     An announcement plays at whatever the speaker is already set to and never
-    changes it — the same pattern Abi's own `system_presence_based_announcement`
+    changes it — the same pattern the `system_presence_based_announcement`
     script already uses for Sonos. One call per speaker (not a single batched
     call) because each speaker can have a different current volume.
 
