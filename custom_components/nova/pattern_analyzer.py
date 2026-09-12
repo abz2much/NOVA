@@ -556,6 +556,8 @@ class PatternAnalyzer:
             if not Path(self._db).exists():
                 return None
             conn = sqlite3.connect(self._db)
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=10000")
             conn.row_factory = sqlite3.Row
             return conn
         except Exception:
@@ -1325,6 +1327,8 @@ class PatternAnalyzer:
         """Store a pattern as a suggestion in the DB. Returns True if new."""
         try:
             conn = sqlite3.connect(self._db)
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=10000")
             # Check if similar suggestion already exists
             existing = conn.execute(
                 "SELECT id FROM suggestions WHERE description = ?",

@@ -1086,6 +1086,7 @@ def save_to_db(db_path: str) -> int:
     import sqlite3
     try:
         with sqlite3.connect(db_path, timeout=10) as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS cognition_model "
                 "(entity_id TEXT PRIMARY KEY, data TEXT, updated REAL)"
@@ -1110,6 +1111,7 @@ def load_from_db(db_path: str) -> int:
     n = 0
     try:
         with sqlite3.connect(db_path, timeout=10) as conn:
+            conn.execute("PRAGMA journal_mode=WAL")
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS cognition_model "
                 "(entity_id TEXT PRIMARY KEY, data TEXT, updated REAL)"
