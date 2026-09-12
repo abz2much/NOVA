@@ -729,7 +729,7 @@ NOVA_TOOLS = [
             "description": (
                 "Ask the Executive Assistant specialist (its own Claude Code "
                 "session, with Gmail and Calendar access) to check or act on "
-                "Abi's email or calendar beyond a simple agenda lookup — "
+                "the owner's email or calendar beyond a simple agenda lookup — "
                 "drafting or sending a reply, adding or changing an event. "
                 "This specialist can take real action, it is not read-only — "
                 "only call it with an objective you actually want carried out."
@@ -2113,7 +2113,7 @@ async def _exec_web_research(hass: HomeAssistant, args: dict) -> str:
 # webhook added alongside its existing Execute Workflow Trigger — nothing
 # about their internals changed. Auth is a shared secret header; the value
 # lives in secrets.yaml, never the plaintext panel config, per ha_secrets'
-# own rule (Abi sets it by hand, this module never writes it).
+# own rule (the owner sets it by hand, this module never writes it).
 N8N_WEBHOOK_SECRET_KEY = "nova_specialist_webhook_key"
 N8N_WEBHOOK_HEADER = "X-Nova-Key"
 _N8N_DEFAULT_BASE_URL = "http://10.0.4.111:5678/webhook"

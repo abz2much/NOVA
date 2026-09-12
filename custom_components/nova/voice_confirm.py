@@ -27,7 +27,7 @@ Two delivery paths, chosen by `voice_confirm_mode`:
   - "auto"    — try native; if the satellite has no usable audio output
      configured, fall back to gated.
 
-When there is no assist_satellite at all (Abi's current setup — zero paired),
+When there is no assist_satellite at all (the owner's current setup — zero paired),
 `confirm()` falls back further still: it pushes an actionable Confirm/Deny
 notification to every phone with the HA companion app (notify.mobile_app_*),
 and waits up to `_NOTIFY_CONFIRM_TIMEOUT` for a tap from either household
