@@ -19,20 +19,26 @@ AGENT = Path(__file__).resolve().parents[2] / "custom_components" / "nova" / "ag
 
 def _load_fn():
     # Load just the function's source region to avoid importing the whole agent
-    # (which needs HA). Exec the two module-level defs it depends on.
-    import types, re
+    # (which needs HA). Exec the module-level defs it depends on: _json_safe
+    # (the sentinel-stripping helper _ha_tools_to_openai_format calls) and
+    # _ha_tools_to_openai_format itself. Missing either one here doesn't error
+    # loudly - the function's own try/except swallows the resulting NameError
+    # and silently falls back to an empty schema, which made this harness pass
+    # even while under-testing the real function (fixed alongside adding
+    # test_agent_tool_schema.py, which exercises the sentinel-stripping path
+    # directly).
+    import types, ast, logging, json as json_mod
     src = AGENT.read_text()
-    # Extract _ha_tools_to_openai_format via ast
-    import ast
     tree = ast.parse(src)
-    fn = next(n for n in tree.body
-              if isinstance(n, ast.FunctionDef) and n.name == "_ha_tools_to_openai_format")
     mod = types.ModuleType("agent_stub")
-    import logging
     mod.__dict__["_LOGGER"] = logging.getLogger("stub")
     mod.__dict__["Sequence"] = list
-    code = ast.get_source_segment(src, fn)
-    exec(compile(code, "<agent_fn>", "exec"), mod.__dict__)
+    mod.__dict__["json"] = json_mod
+    wanted = {"_json_safe", "_ha_tools_to_openai_format"}
+    for n in tree.body:
+        if isinstance(n, ast.FunctionDef) and n.name in wanted:
+            code = ast.get_source_segment(src, n)
+            exec(compile(code, "<agent_fn>", "exec"), mod.__dict__)
     return mod.__dict__["_ha_tools_to_openai_format"]
 
 
