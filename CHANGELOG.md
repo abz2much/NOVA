@@ -1,3 +1,7 @@
+## [7.85.8] — full UI translations for the remaining 8 languages (all 18 complete)
+
+Danish, Norwegian Bokmål, Czech, Slovak, Finnish, Romanian, Turkish, and Ukrainian are now fully translated (302/302), joining the ten languages already complete (French, German, Spanish, Italian, Dutch, Portuguese, Russian, Polish, Brazilian Portuguese, Swedish). All 18 interface languages Nova supports are now fully covered in the panel UI.
+
 ## [7.85.5] — excluding an entity now silences already-learnt rules immediately
 
 Completes the exclusion behaviour: excluding an entity now takes effect for rules that were already active, not just new ones. A door/window/garage/lock that Sentinel had already picked up stops being reported the moment you exclude it (by entity, domain, or label) — e.g. an unlocked lock no longer repeats its reminder. Appliance cycle-complete announcements skip excluded entities the same way, even for a cycle already in progress. Nothing is erased or "unlearnt" — exclusion simply gates these at run time, so removing the exclusion brings the behaviour back.
