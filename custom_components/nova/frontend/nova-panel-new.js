@@ -2444,9 +2444,9 @@ class NovaCommandCenterNew extends HTMLElement {
       .settings-nav-btn{font-family:var(--font-body);font-size:11.5px;font-weight:600;padding:6px 12px;border-radius:20px;
         border:1px solid var(--line-soft);background:var(--surface);color:var(--ink-dim);cursor:pointer}
       .settings-nav-btn.active{background:var(--ember);border-color:var(--ember);color:#1e0d06}
-      .settings-grid{max-width:1100px;margin:0 auto;display:grid;grid-template-columns:1fr 1fr;gap:14px}
-      @media (max-width:720px){.settings-grid{grid-template-columns:1fr}}
-      .settings-card{align-self:start}
+      .settings-grid{max-width:1100px;margin:0 auto;column-count:2;column-gap:14px}
+      @media (max-width:720px){.settings-grid{column-count:1}}
+      .settings-card{break-inside:avoid;margin-bottom:14px;display:inline-block;width:100%}
       .stub-tag{font-family:var(--font-mono);font-size:9px;letter-spacing:.08em;color:var(--ink-faint);
         background:var(--surface-2);border:1px solid var(--line-soft);border-radius:20px;padding:2px 8px;margin-left:8px;vertical-align:middle}
       .stub-body{font-size:12.5px;color:var(--ink-dim);line-height:1.5}
