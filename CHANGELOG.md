@@ -1,3 +1,37 @@
+## [7.90.0] — one shared helper for prompt-injection fencing
+
+The three places that wrap untrusted stored text before it re-enters a conversation — cross-session memory reseed, long-term semantic recall, and curated facts/preferences — each grew their own copy of the same defence, with small wording drift between them. Consolidated into a single `prompt_fence.py` helper all three now call, so future memory stores get the same protection for free instead of a fourth hand-rolled copy. No behaviour change.
+
+## [7.89.0] — a new "remember" isn't trusted until you confirm it
+
+Closes the write-path half of the memory-injection work below: previously, anything the model decided to `remember` (a preference, a routine) was written straight to Nova's knowledge base as if you'd stated it yourself — including something Nova merely read aloud from an email or a web page that talked it into saving a false "fact." A new preference or routine is now staged as pending: Nova asks you to confirm it in the same conversation, and if you don't, it waits in the panel's Memory tab for you to approve, edit, or reject. Aliases (plain entity-name shortcuts) are unaffected and still save immediately.
+
+## [7.88.0] — curated facts fenced against prompt injection too
+
+Extends the memory-injection hardening below to a fourth store: facts saved via "remember that…" were already scoped correctly per person, but the text reaching the model's system prompt had no fencing at all. Now wrapped the same way as the other memory stores. Also added the "What's different from upstream" section to the README, tracking where Nova has genuinely diverged from jarvis-aio.
+
+## [7.87.0] — security hardening: memory injection, execute_plan allowlist, voice-unlock protection, biometric privacy
+
+A batch of fixes from a security review:
+- Cross-session conversation memory (both the short-term reseed and long-term semantic search) is now scoped to the right conversation instead of searched globally across every device in the house, and the retrieved text is fenced against prompt injection before it re-enters a live conversation.
+- `execute_plan` (multi-step device automation) is now restricted to an explicit allowlist of home-control domains, so a hallucinated or injected step can't reach a system-level service like `homeassistant.restart`.
+- Voice commands can lock a door instantly but can never unlock one or open a garage — that always requires a tap on your phone, so a spoofed or deepfaked voice can't grant physical access on its own.
+- Biometric/wellbeing data (heart rate, sleep stage) is now withheld entirely from cloud LLM calls — it only reaches the model when running a local Ollama provider.
+- Remaining stored-XSS spots in the panel (log errors, floor-plan room names) are fixed.
+- Voice model downloads are now checksum-verified before being installed.
+
+## [7.86.0] — sleep detection rework, TTS/announcement fixes, integration hardening
+
+Sleep state is now explicit (Auto / Awake / Asleep) instead of inferred purely from bedroom occupancy, and night-time intrusion alerts require an actual breach (a ground-floor door or window genuinely open) rather than firing on ordinary movement. Alongside that:
+- Fixed a double-announcement/volume-jump bug when the TTS voice was slow to respond, and made "use HA's configured TTS voice" actually route there.
+- Announcement volume is now pinned to the speaker's current level and restored afterwards, instead of being changed.
+- Reminders now use HA's configured timezone for due/quiet-hours checks, and every SQLite connection runs in WAL mode.
+- All 31 services are now deregistered on unload, not just 17 — a real resource leak on reload.
+- Debug log and camera snapshot websocket commands now require admin, and a stored XSS in the log panel is fixed.
+- Lockdown no longer skips its own thermostat-lock exemption list, and a scene/script/automation confirmation bypass is closed.
+- The database purge and expired-facts cleanup now run on an automatic schedule instead of manually.
+- The remaining 8 partially-translated languages are now fully complete (302/302, all 18 languages covered).
+
 ## [7.85.8] — full UI translations for the remaining 8 languages (all 18 complete)
 
 Danish, Norwegian Bokmål, Czech, Slovak, Finnish, Romanian, Turkish, and Ukrainian are now fully translated (302/302), joining the ten languages already complete (French, German, Spanish, Italian, Dutch, Portuguese, Russian, Polish, Brazilian Portuguese, Swedish). All 18 interface languages Nova supports are now fully covered in the panel UI.
