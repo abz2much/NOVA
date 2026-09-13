@@ -69,6 +69,7 @@ let _semanticEnabled = false;
 let _activeMode = "normal";
 let _energyAgency = "advisory";
 let _bioEnabled = false;
+let _pendingFacts = [{ id: 42, key: "bedtime", value: "10pm", subject: "primary" }];
 let _intrCalledOff = false;
 let _intrAck = false;
 const _intrSnap = { url: "/local/nova/intrusion/intrusion_dining_room_1730000000.jpg", camera: "camera.dining_room", ts: 1730000000, path: "/config/www/nova/intrusion/x.jpg" };
@@ -86,7 +87,16 @@ const hass = {
     if (m.type === "nova/get_person_routines") return { routines: { username: [
       { id: 1, pattern_type: "time_routine", description: "office light turns on around 07:00 most days when Username is home", confidence: 0.82, occurrences: 9, last_seen: "2026-07-13" },
     ] } };
-    if (m.type === "nova/get_knowledge") return { facts: [], stats: {} };
+    if (m.type === "nova/get_knowledge") return { facts: [], pending: _pendingFacts, stats: {} };
+    if (m.type === "nova/pending_fact_action") {
+      _pendingFacts = _pendingFacts.filter(f => f.id !== m.fact_id);
+      return { ok: true, facts: [], pending: _pendingFacts };
+    }
+    if (m.type === "nova/edit_pending_fact") {
+      const f = _pendingFacts.find(f => f.id === m.fact_id);
+      if (f) f.value = m.value;
+      return { ok: !!f, pending: _pendingFacts };
+    }
     if (m.type === "nova/camera_snapshot") return { image: "/9j/dGVzdGpwZWc=" };
     if (m.type === "nova/biometrics") {
       if (m.action === "enable") _bioEnabled = true;
@@ -545,6 +555,26 @@ setTimeout(async () => {
     ["person group rendered (Username)", /Username/.test(mem.getElementById("proutine-list")?.textContent || "")],
     ["routine description rendered", /office light turns on/.test(mem.getElementById("proutine-list")?.textContent || "")],
     ["confidence bar rendered (82%)", /82%/.test(mem.getElementById("proutine-list")?.textContent || "")],
+  );
+
+  // ── Pending facts (v7.88.0): a fact remember() staged, unconfirmed ──
+  await el._fetchKnowledge();
+  const pend1 = el.shadowRoot;
+  checks.push(
+    ["pending panel visible when a fact is waiting", pend1.getElementById("pending-facts-panel")?.hidden === false],
+    ["pending fact key/value rendered", /bedtime/.test(pend1.getElementById("pending-facts-list")?.textContent || "")],
+    ["pending fact has confirm/reject/edit controls",
+      !!pend1.querySelector(".pending-confirm") && !!pend1.querySelector(".pending-reject")
+      && !!pend1.querySelector(".pending-save-edit")],
+  );
+  pend1.querySelector(".pending-confirm")?.click();
+  await new Promise(r => setTimeout(r, 0));   // let the click handler's await settle
+  const pend2 = el.shadowRoot;
+  checks.push(
+    ["confirming a pending fact removes it from the list",
+      !/bedtime/.test(pend2.getElementById("pending-facts-list")?.textContent || "")],
+    ["pending panel hides itself once nothing is left waiting",
+      pend2.getElementById("pending-facts-panel")?.hidden === true],
   );
 
   // ── switch to Logs tab: category filter + text search ──

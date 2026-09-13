@@ -55,6 +55,8 @@ def async_register(hass: HomeAssistant) -> None:
         websocket_api.async_register_command(hass, ws_get_knowledge)
         websocket_api.async_register_command(hass, ws_add_knowledge)
         websocket_api.async_register_command(hass, ws_forget_knowledge)
+        websocket_api.async_register_command(hass, ws_pending_fact_action)
+        websocket_api.async_register_command(hass, ws_edit_pending_fact)
         websocket_api.async_register_command(hass, ws_root_cause)
         websocket_api.async_register_command(hass, ws_compute_camera_coverage)
         websocket_api.async_register_command(hass, ws_reload_appliances)
@@ -1645,13 +1647,23 @@ async def ws_get_knowledge(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Return the curated facts Nova knows, for the Memory panel."""
+    """Return the curated facts Nova knows, for the Memory panel.
+
+    `facts` is confirmed-only (v7.88.0) -- a fact agent.py's `remember` tool
+    staged as pending must not appear here as if it were already established;
+    `pending` carries those separately so the panel can show a distinct
+    review queue (confirm / reject / edit) instead of silently merging them
+    into the trusted list.
+    """
     try:
         from . import knowledge
         subject = msg.get("subject")
-        facts = await hass.async_add_executor_job(lambda: knowledge.all_facts(subject=subject))
+        facts = await hass.async_add_executor_job(
+            lambda: knowledge.all_facts(subject=subject, status="confirmed"))
+        pending = await hass.async_add_executor_job(
+            lambda: knowledge.pending_facts(subject=subject))
         kstats = await hass.async_add_executor_job(knowledge.stats)
-        connection.send_result(msg["id"], {"facts": facts, "stats": kstats})
+        connection.send_result(msg["id"], {"facts": facts, "pending": pending, "stats": kstats})
     except Exception as exc:
         _LOGGER.exception("get_knowledge failed: %s", exc)
         connection.send_error(msg["id"], "knowledge_failed", str(exc))
@@ -1715,6 +1727,62 @@ async def ws_forget_knowledge(
     except Exception as exc:
         _LOGGER.exception("forget_knowledge failed: %s", exc)
         connection.send_error(msg["id"], "forget_failed", str(exc))
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "nova/pending_fact_action",
+    vol.Required("fact_id"): int,
+    vol.Required("action"): vol.In(["confirm", "reject"]),
+})
+@websocket_api.async_response
+async def ws_pending_fact_action(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Confirm or reject a fact agent.py's `remember` tool staged as pending
+    (v7.88.0), from the Memory panel's review queue -- the fallback for when
+    the user didn't (or couldn't) confirm it inline in the conversation that
+    proposed it."""
+    try:
+        from . import knowledge
+        fid = msg["fact_id"]
+        if msg["action"] == "confirm":
+            ok = await hass.async_add_executor_job(knowledge.confirm_fact, fid)
+        else:
+            ok = bool(await hass.async_add_executor_job(lambda: knowledge.forget(fact_id=fid)))
+        facts = await hass.async_add_executor_job(lambda: knowledge.all_facts(status="confirmed"))
+        pending = await hass.async_add_executor_job(knowledge.pending_facts)
+        connection.send_result(msg["id"], {"ok": ok, "facts": facts, "pending": pending})
+    except Exception as exc:
+        _LOGGER.exception("pending_fact_action failed: %s", exc)
+        connection.send_error(msg["id"], "pending_fact_action_failed", str(exc))
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "nova/edit_pending_fact",
+    vol.Required("fact_id"): int,
+    vol.Required("value"): str,
+})
+@websocket_api.async_response
+async def ws_edit_pending_fact(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Correct a pending fact's value before confirming it (v7.88.0) — the
+    one capability the Memory panel didn't have for any fact before this."""
+    try:
+        from . import knowledge
+        updated = await hass.async_add_executor_job(
+            lambda: knowledge.edit_fact(msg["fact_id"], msg["value"]))
+        pending = await hass.async_add_executor_job(knowledge.pending_facts)
+        connection.send_result(msg["id"], {"ok": bool(updated), "pending": pending})
+    except Exception as exc:
+        _LOGGER.exception("edit_pending_fact failed: %s", exc)
+        connection.send_error(msg["id"], "edit_pending_fact_failed", str(exc))
 
 
 @websocket_api.websocket_command({

@@ -284,7 +284,10 @@ NOVA_TOOLS = [
             "description": (
                 "Learn and remember a user preference, entity alias, or command "
                 "pattern for future use. Use when the user teaches you something "
-                "new: device nicknames, routines, preferences."
+                "new: device nicknames, routines, preferences. A preference or "
+                "routine is saved as PENDING, not yet trusted — you must ask the "
+                "user to confirm it's correct before it takes effect, then call "
+                "confirm_pending_fact (or reject_pending_fact if they say no)."
             ),
             "parameters": {
                 "type": "object",
@@ -310,6 +313,47 @@ NOVA_TOOLS = [
                     },
                 },
                 "required": ["key", "name", "value"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "confirm_pending_fact",
+            "description": (
+                "Confirm a preference or routine that `remember` saved as pending, "
+                "once the user has actually said it's correct. Never call this "
+                "unless the user has genuinely confirmed it in this conversation."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "fact_id": {
+                        "type": "integer",
+                        "description": "The fact_id returned by the `remember` call being confirmed.",
+                    },
+                },
+                "required": ["fact_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "reject_pending_fact",
+            "description": (
+                "Discard a preference or routine that `remember` saved as pending, "
+                "when the user says it's wrong or doesn't confirm it."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "fact_id": {
+                        "type": "integer",
+                        "description": "The fact_id returned by the `remember` call being rejected.",
+                    },
+                },
+                "required": ["fact_id"],
             },
         },
     },
@@ -1761,7 +1805,28 @@ async def _exec_execute_plan(hass: HomeAssistant, args: dict, device_id: Optiona
 
 
 async def _exec_remember(hass: HomeAssistant, args: dict) -> str:
-    """Learn and persist a user preference or alias."""
+    """Learn and persist a user preference, routine, or alias.
+
+    Preferences/routines require human confirmation before going live
+    (v7.88.0, memory-write hardening). This tool is called by the MODEL,
+    mid-conversation, based on everything it's seen — including content Nova
+    merely read aloud (an email, a calendar event, a web result). Fencing
+    (already shipped) stops a stored fact from being read back as a live
+    instruction; it does nothing to stop a false fact from being written in
+    the first place and then trusted as if the user had actually said it.
+    So a new preference/routine is staged as status='pending' in the
+    knowledge store (invisible to prompt_block() until confirmed) rather than
+    taking effect immediately, and the model is told to ask the user to
+    confirm in its reply — the same conversation the fact came up in, whether
+    that's voice, the chat panel, or Telegram, all of which reach Nova
+    through this same tool-calling loop. If the user doesn't respond, the
+    fact just stays pending — visible in the panel's Memory tab for Abi to
+    confirm, reject, or edit later.
+
+    Aliases (an entity-name lookup for search_entities, not a "fact" the
+    model reasons over or that reaches a prompt) are unaffected — still
+    written immediately, as before.
+    """
     key = args.get("key", "")
     name = args.get("name", "").lower().strip()
     value = args.get("value", "")
@@ -1769,37 +1834,77 @@ async def _exec_remember(hass: HomeAssistant, args: dict) -> str:
     if key not in ("alias", "preference", "routine"):
         return json.dumps({"error": f"Unknown category: {key}"})
 
-    data = await hass.async_add_executor_job(_load_learned)
-    if key not in data:
-        data[key] = {}
-    data[key][name] = value
-    await hass.async_add_executor_job(_save_learned, data)
+    if key == "alias":
+        data = await hass.async_add_executor_job(_load_learned)
+        data.setdefault("alias", {})[name] = value
+        await hass.async_add_executor_job(_save_learned, data)
+        _LOGGER.info("Nova learned: alias['%s'] = '%s'", name, value)
+        return json.dumps({"success": True, "learned": f"alias: '{name}' → '{value}'"})
 
-    # v6.25.0: mirror preferences & routines into the curated knowledge store, so
-    # spoken "remember that …" shows up in the Memory panel and injects into
-    # future prompts. Aliases stay in the learned-entity map only.
-    # v6.29.0: attribute preferences to the resolved person (household for routines).
-    if key in ("preference", "routine"):
-        try:
-            from . import knowledge
-            if key == "preference":
-                from . import identity
-                k_subject = identity.resolve_subject(hass)  # this person, or "primary"
-                k_kind = "preference"
-            else:
-                k_subject = knowledge.DEFAULT_SUBJECT
-                k_kind = "fact"
-            await hass.async_add_executor_job(
-                lambda: knowledge.remember(name, value, subject=k_subject,
-                                           kind=k_kind, source="stated"))
-        except Exception as exc:
-            _LOGGER.debug("knowledge mirror failed: %s", exc)
+    # preference/routine: stage as pending in the knowledge store (the single
+    # source of truth for both — the old parallel _LEARN_FILE write for these
+    # two categories is gone; it was redundant with (and less safe than)
+    # knowledge.py's confirmed-only, fenced, subject-scoped prompt_block()).
+    try:
+        from . import knowledge
+        if key == "preference":
+            from . import identity
+            k_subject = identity.resolve_subject(hass)  # this person, or "primary"
+            k_kind = "preference"
+        else:
+            k_subject = knowledge.DEFAULT_SUBJECT
+            k_kind = "fact"
+        fact = await hass.async_add_executor_job(
+            lambda: knowledge.remember(name, value, subject=k_subject,
+                                       kind=k_kind, source="stated", status="pending"))
+    except Exception as exc:
+        _LOGGER.warning("Nova remember (pending) failed: %s", exc)
+        return json.dumps({"error": f"failed to save: {exc}"})
 
-    _LOGGER.info("Nova learned: %s['%s'] = '%s'", key, name, value)
+    if not fact:
+        return json.dumps({"error": "failed to stage fact for confirmation"})
+
+    _LOGGER.info("Nova staged pending %s: '%s' = '%s' (fact_id=%s)",
+                key, name, value, fact["id"])
     return json.dumps({
         "success": True,
-        "learned": f"{key}: '{name}' → '{value}'",
+        "status": "pending",
+        "fact_id": fact["id"],
+        "message": (
+            f"Saved '{name}: {value}' as PENDING, not yet trusted — ask the "
+            f"user to confirm this is actually correct before relying on it "
+            f"again. If they confirm, call confirm_pending_fact with "
+            f"fact_id={fact['id']}. If they say no or correct it, call "
+            f"reject_pending_fact with the same fact_id instead."
+        ),
     })
+
+
+async def _exec_confirm_pending_fact(hass: HomeAssistant, args: dict) -> str:
+    """Promote a pending fact (from `remember`) to confirmed, once the user
+    has actually approved it in conversation (v7.88.0)."""
+    try:
+        fact_id = int(args.get("fact_id"))
+    except (TypeError, ValueError):
+        return json.dumps({"error": "fact_id is required and must be an integer"})
+    from . import knowledge
+    ok = await hass.async_add_executor_job(knowledge.confirm_fact, fact_id)
+    if not ok:
+        return json.dumps({"error": f"no pending fact with id {fact_id} (already "
+                                    f"confirmed, rejected, or never existed)"})
+    return json.dumps({"success": True, "confirmed": fact_id})
+
+
+async def _exec_reject_pending_fact(hass: HomeAssistant, args: dict) -> str:
+    """Discard a pending fact (from `remember`) the user did not confirm, or
+    explicitly said was wrong (v7.88.0)."""
+    try:
+        fact_id = int(args.get("fact_id"))
+    except (TypeError, ValueError):
+        return json.dumps({"error": "fact_id is required and must be an integer"})
+    from . import knowledge
+    removed = await hass.async_add_executor_job(lambda: knowledge.forget(fact_id=fact_id))
+    return json.dumps({"success": bool(removed), "rejected": fact_id})
 
 
 async def _exec_ignore(hass: HomeAssistant, args: dict) -> str:
@@ -2623,6 +2728,8 @@ _TOOL_MAP = {
     "bulk_control":        _exec_bulk_control,
     "execute_plan":        _exec_execute_plan,
     "remember":            _exec_remember,
+    "confirm_pending_fact": _exec_confirm_pending_fact,
+    "reject_pending_fact": _exec_reject_pending_fact,
     "ignore_entity":       _exec_ignore,
     "unignore_entity":     _exec_unignore,
     "cognitive_status":    _exec_cognitive_status,
@@ -2781,10 +2888,12 @@ def _build_home_context(hass: HomeAssistant) -> str:
         alias_str = "; ".join(f"'{k}' = {v}" for k, v in list(aliases.items())[:20])
         parts.append(f"Learned aliases: {alias_str}")
 
-    preferences = learned.get("preference", {})
-    if preferences:
-        pref_str = "; ".join(f"{k}: {v}" for k, v in list(preferences.items())[:10])
-        parts.append(f"User preferences: {pref_str}")
+    # Preferences used to be dumped here too, raw and unfenced, straight from
+    # _LEARN_FILE. Removed (v7.88.0): redundant with (and less safe than)
+    # knowledge.py's prompt_block(), which conversation.py already injects
+    # separately — confirmed-only, fenced against prompt injection, and
+    # scoped to the actual person asking rather than every preference ever
+    # stated. _exec_remember no longer writes preferences here at all.
 
     return "\n".join(parts)
 

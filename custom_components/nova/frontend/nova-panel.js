@@ -1104,7 +1104,7 @@ class NovaPanel extends HTMLElement {
     this._activityData = null;   // populated by _fetchActivityLog()
     this._currentTab = "dashboard"; // "dashboard" or "settings"
     this._settingsSection = "general"; // active sub-section within Settings
-    this._knowledge = { facts: [], stats: {} }; // curated memory tab state
+    this._knowledge = { facts: [], pending: [], stats: {} }; // curated memory tab state
     this._knowledgeLoaded = false;
     this._logFilter = "all";       // log category filter
     this._logSearch = "";          // log text search (v7.88.0)
@@ -1451,12 +1451,13 @@ class NovaPanel extends HTMLElement {
     if (!this._hass) return;
     try {
       const res = await this._hass.callWS({ type: "nova/get_knowledge" });
-      this._knowledge = { facts: res?.facts || [], stats: res?.stats || {} };
+      this._knowledge = { facts: res?.facts || [], pending: res?.pending || [], stats: res?.stats || {} };
     } catch (err) {
-      this._knowledge = { facts: [], stats: {}, error: String(err) };
+      this._knowledge = { facts: [], pending: [], stats: {}, error: String(err) };
     }
     this._knowledgeLoaded = true;
     this._renderKnowledgeList();
+    this._renderPendingFacts();
   }
 
   async _fetchPersonRoutines() {
@@ -1571,7 +1572,7 @@ class NovaPanel extends HTMLElement {
         type: "nova/add_knowledge", key, value, subject,
         kind: subject === "primary" ? "preference" : "fact",
       });
-      this._knowledge = { facts: res?.facts || [], stats: this._knowledge.stats };
+      this._knowledge = { facts: res?.facts || [], pending: this._knowledge.pending, stats: this._knowledge.stats };
       if (keyEl) keyEl.value = "";
       if (valEl) valEl.value = "";
       if (keyEl) keyEl.focus();
@@ -1584,9 +1585,80 @@ class NovaPanel extends HTMLElement {
     if (!this._hass) return;
     try {
       const res = await this._hass.callWS({ type: "nova/forget_knowledge", fact_id: id });
-      this._knowledge = { facts: res?.facts || [], stats: this._knowledge.stats };
+      this._knowledge = { facts: res?.facts || [], pending: this._knowledge.pending, stats: this._knowledge.stats };
     } catch (err) { /* leave list as-is on error */ }
     this._renderKnowledgeList();
+  }
+
+  async _pendingFactAction(id, action) {
+    if (!this._hass) return;
+    try {
+      const res = await this._hass.callWS({ type: "nova/pending_fact_action", fact_id: id, action });
+      this._knowledge = { facts: res?.facts || this._knowledge.facts, pending: res?.pending || [], stats: this._knowledge.stats };
+      this._toast(action === "confirm" ? "✓ confirmed — Nova will use this now" : "✓ rejected", "ok");
+    } catch (err) {
+      this._toast(`✗ ${action} — ${err?.message || err}`, "err");
+    }
+    this._renderKnowledgeList();
+    this._renderPendingFacts();
+  }
+
+  async _editPendingFact(id, value) {
+    if (!this._hass || !value) return;
+    try {
+      const res = await this._hass.callWS({ type: "nova/edit_pending_fact", fact_id: id, value });
+      this._knowledge = { facts: this._knowledge.facts, pending: res?.pending || [], stats: this._knowledge.stats };
+    } catch (err) {
+      this._toast(`✗ edit — ${err?.message || err}`, "err");
+    }
+    this._renderPendingFacts();
+  }
+
+  _renderPendingFacts() {
+    const root = this.shadowRoot;
+    if (!root) return;
+    const panel = root.getElementById("pending-facts-panel");
+    const list = root.getElementById("pending-facts-list");
+    const countEl = root.getElementById("pending-count");
+    if (!panel || !list) return;
+    const esc = (s) => String(s == null ? "" : s)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    const pending = this._knowledge?.pending || [];
+    panel.hidden = pending.length === 0;
+    if (!pending.length) { list.innerHTML = ""; return; }
+    if (countEl) countEl.textContent = pending.length + (pending.length === 1 ? " WAITING" : " WAITING");
+    list.innerHTML = pending.map(f => `
+      <div class="mem-fact pending-fact" data-id="${f.id}">
+        <div class="mem-kv">
+          <span class="mem-key">${esc(f.key)}</span>
+          <input class="mem-input pending-edit-val" data-id="${f.id}" value="${esc(f.value)}" />
+        </div>
+        <div class="sug-actions">
+          <button class="sug-btn pending-confirm" data-id="${f.id}">✓ Confirm</button>
+          <button class="sug-btn pending-reject" data-id="${f.id}">✕ Reject</button>
+          <button class="sug-btn pending-save-edit" data-id="${f.id}">💾 Save edit</button>
+        </div>
+      </div>`).join("");
+    list.querySelectorAll(".pending-confirm").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        const id = parseInt(e.currentTarget.getAttribute("data-id"), 10);
+        if (!isNaN(id)) this._pendingFactAction(id, "confirm");
+      });
+    });
+    list.querySelectorAll(".pending-reject").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        const id = parseInt(e.currentTarget.getAttribute("data-id"), 10);
+        if (!isNaN(id)) this._pendingFactAction(id, "reject");
+      });
+    });
+    list.querySelectorAll(".pending-save-edit").forEach(btn => {
+      btn.addEventListener("click", (e) => {
+        const id = parseInt(e.currentTarget.getAttribute("data-id"), 10);
+        const input = list.querySelector(`.pending-edit-val[data-id="${id}"]`);
+        const value = (input?.value || "").trim();
+        if (!isNaN(id) && value) this._editPendingFact(id, value);
+      });
+    });
   }
 
   // ─── greeting/data helpers ──────────────────────────────────────────────
@@ -4935,6 +5007,15 @@ ${this._renderExcludedEntities(d)}
         <button id="mem-add" class="mem-btn">TEACH</button>
       </div>
       <div id="memory-list" class="mem-list"><div class="mem-empty">Loading…</div></div>
+    </div>
+
+    <div class="panel" id="pending-facts-panel" hidden>
+      <div class="head">
+        <span>Pending Confirmation</span>
+        <span class="side" id="pending-count">— WAITING</span>
+      </div>
+      <div class="mem-sub">Nova proposed these while talking with you — from "remember that…" — but nobody confirmed them yet, so they aren't trusted or used in conversation until you approve, edit, or reject them here.</div>
+      <div id="pending-facts-list" class="mem-list"></div>
     </div>
 
     <div class="panel">

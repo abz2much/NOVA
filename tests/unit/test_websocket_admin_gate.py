@@ -52,6 +52,8 @@ ADMIN_GATED_TYPES = [
     "documents",
     "camera_location",
     "goal_action",
+    "pending_fact_action",
+    "edit_pending_fact",
 ]
 
 

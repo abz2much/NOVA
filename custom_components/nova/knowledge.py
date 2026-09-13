@@ -72,6 +72,7 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
             source          TEXT NOT NULL DEFAULT 'stated',
             confidence      REAL NOT NULL DEFAULT 1.0,
             salience        REAL NOT NULL DEFAULT 1.0,
+            status          TEXT NOT NULL DEFAULT 'confirmed',
             created_at      REAL NOT NULL,
             updated_at      REAL NOT NULL,
             last_referenced REAL,
@@ -81,6 +82,12 @@ def _ensure_schema(conn: sqlite3.Connection) -> None:
         """
     )
     conn.execute("CREATE INDEX IF NOT EXISTS idx_facts_subject ON facts(subject)")
+    # v7.88.0: existing installs won't have the `status` column yet -- add it
+    # without disturbing any already-stored fact. New rows default via the
+    # CREATE TABLE above; this only matters for a DB that predates this change.
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(facts)")}
+    if "status" not in cols:
+        conn.execute("ALTER TABLE facts ADD COLUMN status TEXT NOT NULL DEFAULT 'confirmed'")
     conn.commit()
 
 
@@ -94,6 +101,7 @@ def _row_to_fact(row: sqlite3.Row) -> dict:
         "source": row["source"],
         "confidence": round(row["confidence"], 3),
         "salience": round(row["salience"], 3),
+        "status": row["status"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
         "last_referenced": row["last_referenced"],
@@ -119,6 +127,7 @@ def remember(
     salience: float = 1.0,
     ttl_seconds: Optional[float] = None,
     respect_stated: bool = False,
+    status: str = "confirmed",
     now: Optional[float] = None,
 ) -> Optional[dict]:
     """
@@ -130,6 +139,16 @@ def remember(
     explicitly stated — the stated fact is returned unchanged. This keeps machine
     inference from clobbering things the user told us directly.
 
+    status (v7.88.0): 'confirmed' by default — this covers every trusted write
+    path (the panel's own TEACH form, the `nova.remember` HA service, and
+    pattern_analyzer's observed facts all require their own pre-existing
+    authorization, so none of them need gating here). Pass status='pending' ONLY
+    from a path that isn't already trusted on its own — today, that's just
+    agent.py's `remember` tool, since the model decides on its own when to call
+    it based on everything it's seen in the conversation, including content it
+    merely read aloud. A pending fact is written but excluded from recall()/
+    all_facts()'s default (confirmed-only) view until confirm_fact() promotes it.
+
     Returns the stored fact, or None on failure. SYNC — call via executor.
     """
     key = (key or "").strip()
@@ -140,6 +159,8 @@ def remember(
         kind = "fact"
     if source not in SOURCES:
         source = "stated"
+    if status not in ("confirmed", "pending"):
+        status = "confirmed"
     now = now if now is not None else time.time()
     expires_at = (now + ttl_seconds) if ttl_seconds else None
     subject = (subject or DEFAULT_SUBJECT).strip() or DEFAULT_SUBJECT
@@ -161,10 +182,11 @@ def remember(
                 conn.execute(
                     """
                     UPDATE facts SET value = ?, kind = ?, source = ?, confidence = ?,
-                        salience = ?, updated_at = ?, expires_at = ?
+                        salience = ?, status = ?, updated_at = ?, expires_at = ?
                     WHERE id = ?
                     """,
-                    (value, kind, source, confidence, salience, now, expires_at, existing["id"]),
+                    (value, kind, source, confidence, salience, status,
+                     now, expires_at, existing["id"]),
                 )
                 fid = existing["id"]
             else:
@@ -172,18 +194,69 @@ def remember(
                     """
                     INSERT INTO facts
                         (kind, subject, key, value, source, confidence, salience,
-                         created_at, updated_at, last_referenced, expires_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         status, created_at, updated_at, last_referenced, expires_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (kind, subject, key, value, source, confidence, salience,
-                     now, now, None, expires_at),
+                     status, now, now, None, expires_at),
                 )
                 fid = cur.lastrowid
             row = conn.execute("SELECT * FROM facts WHERE id = ?", (fid,)).fetchone()
-        _LOGGER.info("knowledge: remembered [%s] %s/%s = %r", kind, subject, key, value)
+        _LOGGER.info("knowledge: remembered [%s] %s/%s = %r (status=%s)",
+                    kind, subject, key, value, status)
         return _row_to_fact(row)
     except Exception as exc:
         _LOGGER.warning("knowledge: remember failed: %s", exc)
+        return None
+    finally:
+        conn.close()
+
+
+def confirm_fact(fact_id: int) -> bool:
+    """Promote a pending fact to confirmed (v7.88.0) — the human-approval step
+    for agent.py's `remember` tool. Returns True if a row was actually
+    updated (False if fact_id doesn't exist or was already confirmed).
+    SYNC — call via executor."""
+    conn = _connect()
+    if conn is None:
+        return False
+    try:
+        with conn:
+            cur = conn.execute(
+                "UPDATE facts SET status = 'confirmed' WHERE id = ? AND status != 'confirmed'",
+                (fact_id,),
+            )
+            return cur.rowcount > 0
+    except Exception as exc:
+        _LOGGER.warning("knowledge: confirm_fact failed: %s", exc)
+        return False
+    finally:
+        conn.close()
+
+
+def edit_fact(fact_id: int, value: str, *, now: Optional[float] = None) -> Optional[dict]:
+    """Correct a fact's value in place, e.g. before confirming a pending one
+    (v7.88.0). Does not change status. Returns the updated fact, or None if
+    fact_id doesn't exist or value is empty. SYNC — call via executor."""
+    value = (value or "").strip()
+    if not value:
+        return None
+    now = now if now is not None else time.time()
+    conn = _connect()
+    if conn is None:
+        return None
+    try:
+        with conn:
+            cur = conn.execute(
+                "UPDATE facts SET value = ?, updated_at = ? WHERE id = ?",
+                (value, now, fact_id),
+            )
+            if cur.rowcount == 0:
+                return None
+            row = conn.execute("SELECT * FROM facts WHERE id = ?", (fact_id,)).fetchone()
+        return _row_to_fact(row)
+    except Exception as exc:
+        _LOGGER.warning("knowledge: edit_fact failed: %s", exc)
         return None
     finally:
         conn.close()
@@ -240,7 +313,7 @@ def purge_expired(now: Optional[float] = None) -> int:
 # ── read ─────────────────────────────────────────────────────────────────────
 
 def _live_rows(conn: sqlite3.Connection, subject: Optional[str], now: float,
-               subjects: Optional[list] = None) -> list:
+               subjects: Optional[list] = None, status: Optional[str] = None) -> list:
     sql = "SELECT * FROM facts WHERE (expires_at IS NULL OR expires_at >= ?)"
     params: list = [now]
     if subjects is not None:
@@ -250,18 +323,27 @@ def _live_rows(conn: sqlite3.Connection, subject: Optional[str], now: float,
     elif subject is not None:
         sql += " AND subject = ?"
         params.append(subject)
+    if status is not None:
+        sql += " AND status = ?"
+        params.append(status)
     return conn.execute(sql, params).fetchall()
 
 
 def all_facts(subject: Optional[str] = None, now: Optional[float] = None,
-               subjects: Optional[list] = None) -> list[dict]:
-    """All non-expired facts (optionally for one subject), newest first. SYNC."""
+               subjects: Optional[list] = None, status: Optional[str] = None) -> list[dict]:
+    """All non-expired facts (optionally for one subject), newest first. SYNC.
+
+    `status` (v7.88.0): None (default) returns every status, matching this
+    function's original behavior — callers that care about trust (recall(),
+    prompt_block()) pass status='confirmed' explicitly rather than relying on
+    a changed default here, so existing callers (the panel, the `nova.remember`
+    service, tests) keep seeing everything they always did."""
     now = now if now is not None else time.time()
     conn = _connect()
     if conn is None:
         return []
     try:
-        rows = _live_rows(conn, subject, now, subjects)
+        rows = _live_rows(conn, subject, now, subjects, status)
         facts = [_row_to_fact(r) for r in rows]
         facts.sort(key=lambda f: f["updated_at"], reverse=True)
         return facts
@@ -272,6 +354,13 @@ def all_facts(subject: Optional[str] = None, now: Optional[float] = None,
         conn.close()
 
 
+def pending_facts(subject: Optional[str] = None, now: Optional[float] = None,
+                  subjects: Optional[list] = None) -> list[dict]:
+    """Facts awaiting human confirmation (v7.88.0) — for the panel's Pending
+    view. Thin wrapper over all_facts(status='pending'). SYNC."""
+    return all_facts(subject=subject, now=now, subjects=subjects, status="pending")
+
+
 def recall(
     query: str = "",
     *,
@@ -280,19 +369,24 @@ def recall(
     now: Optional[float] = None,
     touch: bool = True,
     subjects: Optional[list] = None,
+    status: Optional[str] = None,
 ) -> list[dict]:
     """
     Retrieve the k most relevant facts. Scored by query-term overlap (key+value),
     then salience·confidence, then recency. Empty query → most salient/recent.
     Bumps last_referenced on returned facts so referenced knowledge stays warm.
     SYNC — call via executor.
+
+    `status` (v7.88.0): None (default) matches this function's original
+    behavior; prompt_block() passes status='confirmed' explicitly so a
+    pending, unconfirmed fact is never surfaced to the model.
     """
     now = now if now is not None else time.time()
     conn = _connect()
     if conn is None:
         return []
     try:
-        rows = _live_rows(conn, subject, now, subjects)
+        rows = _live_rows(conn, subject, now, subjects, status)
         if not rows:
             return []
         q_tokens = _tokens(query)
@@ -364,10 +458,14 @@ def prompt_block(query: str = "", *, subject: Optional[str] = None,
     A compact "what you know" block for the system prompt. If a query is given,
     the most relevant facts; otherwise the most salient. Returns "" when empty so
     callers can concatenate unconditionally. Fenced against prompt injection
-    (v7.87.0) — see _fence_facts.
+    (v7.87.0) — see _fence_facts. Confirmed facts only (v7.88.0) — a fact
+    agent.py's `remember` tool wrote as pending must never reach the model
+    until a human has approved it; see confirm_fact().
     """
-    facts = (recall(query, subject=subject, k=limit, now=now, touch=False, subjects=subjects)
-             if query else all_facts(subject=subject, now=now, subjects=subjects)[:limit])
+    facts = (recall(query, subject=subject, k=limit, now=now, touch=False,
+                    subjects=subjects, status="confirmed")
+             if query else all_facts(subject=subject, now=now, subjects=subjects,
+                                     status="confirmed")[:limit])
     if not facts:
         return ""
     by_subject: dict = {}
