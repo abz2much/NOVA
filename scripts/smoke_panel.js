@@ -1055,9 +1055,84 @@ setTimeout(async () => {
       /Observer/.test(newText) && /RUNNING/.test(newText)],
     ["new look renders the activity feed", /motion in kitchen/.test(newText)],
     ["new look renders areas", /Garage/.test(newText) || /Kitchen/.test(newText)],
+    ["new look shows a live dot only on occupied areas",
+      newRoot.querySelectorAll(".area-tile.active .live-dot").length === 2
+      && newRoot.querySelectorAll(".area-tile:not(.active) .live-dot").length === 0],
     ["new look's camera card is hidden with no cameras configured or shown with some",
       !!newRoot.getElementById("cameraPanel")],
   );
+
+  // ── New look: Settings tab (v7.94.0) ──
+  // Patching `global`, not `window`: the component code runs via
+  // window.eval() but this harness only copies specific globals once at
+  // startup (see the forEach a few lines up) rather than giving eval'd
+  // code true window scope, so a bare `cancelAnimationFrame(...)` call
+  // inside the component resolves through Node's `global`, not `window`
+  // (the same reason nova-panel.js's own reload code had to say
+  // window.location.reload() explicitly instead of the bare form).
+  let _cafCalls = 0;
+  const _realCaf = global.cancelAnimationFrame.bind(global);
+  global.cancelAnimationFrame = (h) => { _cafCalls++; return _realCaf(h); };
+
+  const settingsTabBtn = Array.from(newRoot.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === "settings");
+  settingsTabBtn.click();
+  await new Promise(r => setTimeout(r, 20));
+  let sRoot = elNew.shadowRoot;
+  checks.push(
+    ["settings tab renders the search box and group nav",
+      !!sRoot.getElementById("settingsSearch") && sRoot.querySelectorAll(".settings-nav-btn").length === 6],
+    ["settings tab has one card per Classic setting, General real",
+      sRoot.querySelectorAll(".settings-card").length === 26
+      && /Sleep state/.test(sRoot.innerHTML) && /Announcements/.test(sRoot.innerHTML)],
+    ["settings tab: Room Speakers card is real, not a stub",
+      (() => {
+        const rs = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Room Speakers/.test(c.querySelector(".panel-title")?.textContent || ""));
+        return !!rs && !rs.querySelector(".stub-tag") && rs.querySelectorAll(".new-room-speaker-select").length === 2;
+      })()],
+    ["settings tab: unbuilt cards are honestly labeled, not silently missing",
+      (() => {
+        const aiCard = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /AI Models/.test(c.querySelector(".panel-title")?.textContent || ""));
+        return !!aiCard && !!aiCard.querySelector(".stub-tag") && /Configure/.test(aiCard.textContent);
+      })()],
+    ["settings tab shows only the active group by default",
+      Array.from(sRoot.querySelectorAll('.settings-card[data-settings-group="general"]')).every(c => !c.hidden)
+      && Array.from(sRoot.querySelectorAll('.settings-card:not([data-settings-group="general"])')).every(c => c.hidden)],
+  );
+
+  // Toggling a real General setting saves through the same nova/update_config
+  // contract Classic uses.
+  const announceToggle = sRoot.querySelector('.toggle-btn[data-cfg-key="announcements_enabled"]');
+  announceToggle.click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab toggle saves via nova/update_config",
+    _updateConfigCalls.some(c => c.key === "announcements_enabled")]);
+  sRoot = elNew.shadowRoot;
+
+  // Search crosses group boundaries
+  const searchBox = sRoot.getElementById("settingsSearch");
+  searchBox.value = "camera";
+  searchBox.dispatchEvent(new Event("input"));
+  await new Promise(r => setTimeout(r, 5));
+  sRoot = elNew.shadowRoot;
+  checks.push(["settings search surfaces matches from other groups",
+    Array.from(sRoot.querySelectorAll(".settings-card")).some(c =>
+      !c.hidden && /Cameras/.test(c.querySelector(".panel-title")?.textContent || ""))]);
+
+  // Switching tabs back and forth must not leak the core's animation loop
+  // (a real bug caught before shipping — _render() tearing down the canvas
+  // without cancelling its requestAnimationFrame loop first). jsdom has no
+  // real canvas 2D context (getContext("2d") returns null), so _initCore()
+  // never actually reaches requestAnimationFrame here — inject a fake
+  // handle to exercise _render()'s cleanup guard directly instead of
+  // relying on canvas support this environment doesn't have.
+  elNew._animHandle = 999999;
+  const dashTabBtn = Array.from(sRoot.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === "dashboard");
+  dashTabBtn.click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["switching tabs cancels the previous core animation loop instead of leaking it",
+    _cafCalls >= 1]);
+  global.cancelAnimationFrame = _realCaf;
+
   const newLookSel = newRoot.getElementById("lookSelect");
   if (newLookSel) {
     newLookSel.value = "classic";

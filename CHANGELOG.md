@@ -1,3 +1,7 @@
+## [7.94.0] — the new look gets navigation and a real Settings tab
+
+The new Command Center now has a top navigation bar and a genuine Settings tab, reorganized around what you're trying to do rather than which part of Nova it touches — General, Voice & Speakers, Awareness & Safety, Learning & Memory, Cameras, and Home & Extras — plus a search box that finds a setting regardless of which group it's filed under. General and Room Speakers are fully working here; every other setting is clearly labeled as not yet built in the new look, with a pointer to where to find it in Classic or the Configure dialog, rather than being silently missing. Occupied rooms on the dashboard also get a proper pulsing "live" indicator now, matching Classic's.
+
 ## [7.93.3] — fix: switching panel look back could get stuck
 
 Since "Panel look" moved to the Configure dialog (7.93.1), changing it there had no way to reload an already-open Nova tab — so switching styles a second time in the same session could silently not take effect until you happened to hard-refresh. Nova now notices for itself: if the stored preference ever differs from what's actually showing, it reloads automatically within moments, from any of the three places that can change it.
