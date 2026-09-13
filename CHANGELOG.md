@@ -1,3 +1,7 @@
+## [7.93.2] — fix: the new Command Center look had no visible styling
+
+The new look's colors, backgrounds, borders, and fonts were declared under the wrong CSS selector for a shadow-DOM component (`:root` instead of `:host`), so none of them ever applied — it rendered as plain, unstyled text instead of the intended design. Fixed; layout, colors, and the stellar-core hero now render as designed.
+
 ## [7.93.1] — "Panel look" moved out of the busy Settings tab
 
 The switch to try the new Command Center look now lives in the Nova integration's own Configure dialog (Settings → Devices & Services → Nova → Configure → Core), not crammed into the panel's already-busy General settings — it's also no longer subject to the panel's own JS caching, so it's more reliable to find. The new look's own selector, and switching back from there, are unchanged.

@@ -1084,6 +1084,17 @@ setTimeout(async () => {
   checks.push(["look shell mounts Classic by default",
     shellEl.querySelector("nova-panel-classic") !== null]);
 
+  // v7.93.2 regression guard: a real live bug — the new look's custom
+  // properties were declared under `:root{}`, which matches NOTHING inside
+  // a shadow tree (unlike `:host{}`, the correct selector for a shadow
+  // root's own scoped tokens). Every var(--x) silently failed, stripping
+  // every background/border/font with no visible error — jsdom doesn't do
+  // real CSS layout, so no structural check here would ever have caught
+  // it; only reading the source text can.
+  const newLookSrc = fs.readFileSync(NEW_LOOK_COMPONENT, "utf8");
+  checks.push(["new look declares its CSS tokens on :host, not :root (shadow DOM)",
+    /:host\s*\{/.test(newLookSrc) && !/(^|[^-\w]):root\s*\{/.test(newLookSrc)]);
+
   let ok = true;
   for (const [n, p] of checks) { console.log((p ? "  PASS  " : "  FAIL  ") + n); if (!p) ok = false; }
   if (typeof el._stopIntervals === "function") el._stopIntervals();

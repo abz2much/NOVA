@@ -423,7 +423,7 @@ class NovaCommandCenterNew extends HTMLElement {
 
   _css() {
     return `
-      :root{
+      :host{
         --bg:#15110d; --surface:#1e1712; --surface-2:#2a2119; --line-soft:#33291f;
         --ink:#f3ece1; --ink-dim:#a89a89; --ink-faint:#7a6d5e;
         --ember:#e2542f; --gold:#f4b860; --gold-pale:#ffe3ad; --warn:#e8b23d;
