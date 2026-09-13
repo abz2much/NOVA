@@ -1750,6 +1750,19 @@ setTimeout(async () => {
   checks.push(["new look declares its CSS tokens on :host, not :root (shadow DOM)",
     /:host\s*\{/.test(newLookSrc) && !/(^|[^-\w]):root\s*\{/.test(newLookSrc)]);
 
+  // Real bug caught live (13 Sept 2026): giving .settings-card its own
+  // `display` (needed for the CSS multi-column masonry fix) made author
+  // CSS of equal specificity beat the browser's UA-stylesheet
+  // `[hidden]{display:none}` rule — origin beats specificity in the
+  // cascade, so EVERY card became visible regardless of group/search
+  // filtering, dumping every setting into whichever group was active.
+  // jsdom's cascade doesn't enforce origin precedence the way real
+  // browsers do, so the existing `.hidden` IDL-property assertions passed
+  // while the real rendering was broken — this checks the actual CSS
+  // text for the explicit override instead.
+  checks.push(["new look's .settings-card[hidden] explicitly forces display:none (overrides its own display rule)",
+    /\.settings-card\[hidden\]\s*\{\s*display\s*:\s*none\s*\}/.test(newLookSrc)]);
+
   let ok = true;
   for (const [n, p] of checks) { console.log((p ? "  PASS  " : "  FAIL  ") + n); if (!p) ok = false; }
   if (typeof el._stopIntervals === "function") el._stopIntervals();

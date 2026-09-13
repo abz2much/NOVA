@@ -1,3 +1,7 @@
+## [7.95.2] — fix: the 7.95.1 gap fix broke group/search filtering
+
+Giving `.settings-card` its own `display` (needed for the masonry fix) meant that rule — author CSS — beat the browser's built-in `[hidden]{display:none}` rule, since origin beats specificity in the cascade regardless of source order. Every card stayed visible no matter which group was selected or what was searched, dumping everything into whichever group happened to be active. Added an explicit `.settings-card[hidden]{display:none}` override, which — being more specific — correctly wins. This one should have been caught before shipping 7.95.1; it wasn't, because the test suite only checked the `hidden` property was being set correctly, not that it actually hid anything on screen — jsdom's CSS engine doesn't enforce cascade-origin precedence the way real browsers do. Added a source-text regression check for the override going forward.
+
 ## [7.95.1] — fix: huge dead gaps between Settings cards
 
 The Settings tab's two-column layout was plain CSS Grid, which sizes each row to its tallest card — a short card (e.g. General) sharing a grid row with a tall one (e.g. Residence/Home) left a large empty gap below the short card's border instead of the two just stacking naturally. Switched to a CSS multi-column (masonry-style) layout, where each column's height is independent, so cards now pack tightly regardless of how their heights compare to their neighbors.
