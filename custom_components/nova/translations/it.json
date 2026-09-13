@@ -51,11 +51,13 @@
         "description": "scegli quali aree HA sono camere da letto (per il rilevamento del sonno), quale gruppo media_player usare per i broadcast e il servizio di notifica del telefono.",
         "data": {
           "bedroom_areas": "Aree camera da letto (per il rilevamento del sonno nelle ore di silenzio)",
+          "ground_floor_areas": "Aree del piano terra (per gli avvisi di intrusione notturna)",
           "broadcast_group": "Gruppo di altoparlanti broadcast (di solito il tuo gruppo Cast di casa)",
           "notify_service": "Servizio di notifica telefono (es. notify.mobile_app_yourphone)"
         },
         "data_description": {
           "bedroom_areas": "Qualsiasi sensore di presenza in queste aree attiva la modalità sonno nelle ore di silenzio.",
+          "ground_floor_areas": "Durante il sonno, Nova avvisa in caso di movimento solo se una di queste aree mostra una porta o finestra esterna aperta — lasciare vuoto per controllare ogni piano.",
           "broadcast_group": "Usato per annunci critici e ad alta urgenza.",
           "notify_service": "Usato quando sei fuori casa o stai dormendo."
         }

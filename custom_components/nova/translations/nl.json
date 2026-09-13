@@ -51,11 +51,13 @@
         "description": "kies welke HA-gebieden slaapkamers zijn (voor slaapdetectie), welke media_player-groep voor omroepberichten en je telefoonmeldingsdienst.",
         "data": {
           "bedroom_areas": "Slaapkamergebieden (voor slaapdetectie tijdens stille uren)",
+          "ground_floor_areas": "Begane grond gebieden (voor nachtelijke inbraakmeldingen)",
           "broadcast_group": "Omroepluidsprekergroep (meestal je Cast-groep thuis)",
           "notify_service": "Telefoonmeldingsdienst (bijv. notify.mobile_app_yourphone)"
         },
         "data_description": {
           "bedroom_areas": "Elke aanwezigheidssensor in deze gebieden activeert de slaapstand tijdens stille uren.",
+          "ground_floor_areas": "Tijdens het slapen waarschuwt Nova alleen bij beweging als een van deze gebieden een open buitendeur of -raam laat zien — laat leeg om elke verdieping te controleren.",
           "broadcast_group": "Gebruikt voor kritieke en zeer dringende aankondigingen.",
           "notify_service": "Gebruikt wanneer je van huis of in slaap bent."
         }

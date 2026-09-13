@@ -51,11 +51,13 @@
         "description": "wähle, welche HA-Bereiche Schlafzimmer sind (für die Schlaferkennung), welche media_player-Gruppe für Broadcasts verwendet wird und deinen Telefon-Benachrichtigungsdienst.",
         "data": {
           "bedroom_areas": "Schlafzimmerbereiche (für die Schlaferkennung in Ruhezeiten)",
+          "ground_floor_areas": "Erdgeschossbereiche (für nächtliche Einbruchswarnungen)",
           "broadcast_group": "Broadcast-Lautsprechergruppe (typischerweise deine Heim-Cast-Gruppe)",
           "notify_service": "Telefon-Benachrichtigungsdienst (z. B. notify.mobile_app_yourphone)"
         },
         "data_description": {
           "bedroom_areas": "Jeder Anwesenheitssensor in diesen Bereichen löst den Schlafmodus in Ruhezeiten aus.",
+          "ground_floor_areas": "Während des Schlafs alarmiert Nova bei Bewegung nur, wenn eine dieser Zonen eine offene Außentür oder ein offenes Fenster zeigt — leer lassen, um jede Etage zu prüfen.",
           "broadcast_group": "Wird für kritische und sehr dringende Ansagen verwendet.",
           "notify_service": "Wird verwendet, wenn du unterwegs bist oder schläfst."
         }

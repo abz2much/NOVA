@@ -51,11 +51,13 @@
         "description": "choisissez quelles zones HA sont des chambres (pour la détection du sommeil), quel groupe media_player utiliser pour les diffusions, et votre service de notification téléphonique.",
         "data": {
           "bedroom_areas": "Zones de chambre (pour la détection du sommeil pendant les heures calmes)",
+          "ground_floor_areas": "Zones du rez-de-chaussée (pour les alertes d'intrusion nocturnes)",
           "broadcast_group": "Groupe d'enceintes de diffusion (généralement votre groupe Cast domestique)",
           "notify_service": "Service de notification téléphonique (ex. notify.mobile_app_yourphone)"
         },
         "data_description": {
           "bedroom_areas": "Tout capteur de présence dans ces zones déclenche le mode sommeil pendant les heures calmes.",
+          "ground_floor_areas": "Pendant le sommeil, Nova n'alerte en cas de mouvement que si l'une de ces zones affiche une porte ou fenêtre extérieure ouverte — laissez vide pour vérifier tous les étages.",
           "broadcast_group": "Utilisé pour les annonces critiques et très urgentes.",
           "notify_service": "Utilisé lorsque vous êtes absent ou endormi."
         }

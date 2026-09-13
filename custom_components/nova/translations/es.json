@@ -51,11 +51,13 @@
         "description": "elija qué áreas de HA son dormitorios (para la detección del sueño), qué grupo media_player usar para las difusiones y su servicio de notificación al teléfono.",
         "data": {
           "bedroom_areas": "Áreas de dormitorio (para detección del sueño en horas de silencio)",
+          "ground_floor_areas": "Áreas de planta baja (para alertas de intrusión nocturna)",
           "broadcast_group": "Grupo de altavoces de difusión (normalmente su grupo Cast del hogar)",
           "notify_service": "Servicio de notificación al teléfono (p. ej. notify.mobile_app_yourphone)"
         },
         "data_description": {
           "bedroom_areas": "Cualquier sensor de presencia en estas áreas activa el modo de sueño en horas de silencio.",
+          "ground_floor_areas": "Mientras se duerme, Nova solo alerta ante movimiento si una de estas áreas muestra una puerta o ventana exterior abierta; déjelo vacío para comprobar todas las plantas.",
           "broadcast_group": "Se usa para anuncios críticos y de alta urgencia.",
           "notify_service": "Se usa cuando está fuera de casa o durmiendo."
         }
