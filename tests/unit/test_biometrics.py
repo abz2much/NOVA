@@ -175,3 +175,49 @@ def test_wellbeing_tool_registered(load):
     names = {t["function"]["name"] for t in agent.NOVA_TOOLS}
     assert "wellbeing_context" in names
     assert "wellbeing_context" in agent._TOOL_MAP
+
+
+# ── biometric data never reaches a cloud LLM (v7.87.0, backlog #5) ───────────
+# wellbeing_context's OUTPUT re-enters the conversation as tool-call content,
+# which the configured LLM provider then sees — so the gate on whether
+# biometric data leaves the network belongs in the tool itself, not just in
+# biometrics.py (which has no idea what provider is asking).
+
+import asyncio
+
+
+class _FakeHass:
+    async def async_add_executor_job(self, func, *args):
+        return func(*args)
+
+
+def test_wellbeing_tool_withholds_data_for_cloud_provider(load, monkeypatch):
+    agent = load("agent")
+    jc_config = load("nova_config")
+    jc_bio = load("biometrics")
+
+    monkeypatch.setattr(jc_config, "get", _cfg_map({"llm_provider": "groq"}))
+
+    def _must_not_be_called(hass):
+        raise AssertionError("biometrics.wellbeing_context must not run for a cloud provider")
+    monkeypatch.setattr(jc_bio, "wellbeing_context", _must_not_be_called)
+
+    import json
+    out = json.loads(asyncio.run(agent._exec_wellbeing_context(_FakeHass(), {})))
+    assert out["available"] is False
+    assert "local" in out["summary"].lower() or "ollama" in out["summary"].lower()
+
+
+def test_wellbeing_tool_allows_local_ollama_provider(load, monkeypatch):
+    agent = load("agent")
+    jc_config = load("nova_config")
+    jc_bio = load("biometrics")
+
+    monkeypatch.setattr(jc_config, "get", _cfg_map({"llm_provider": "ollama"}))
+    monkeypatch.setattr(jc_bio, "wellbeing_context",
+                         lambda hass: {"available": True, "summary": "heart rate 58 bpm", "readings": {}})
+
+    import json
+    out = json.loads(asyncio.run(agent._exec_wellbeing_context(_FakeHass(), {})))
+    assert out["available"] is True
+    assert out["summary"] == "heart rate 58 bpm"

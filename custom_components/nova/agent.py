@@ -2240,9 +2240,22 @@ async def _exec_read_email(hass: HomeAssistant, args: dict) -> str:
 
 
 async def _exec_wellbeing_context(hass: HomeAssistant, args: dict) -> str:
-    """Read non-medical wellbeing context from a wearable (v6.63.0)."""
+    """Read non-medical wellbeing context from a wearable (v6.63.0).
+
+    Only reaches the model when the main agent's configured LLM provider is
+    local (Ollama) — v7.87.0. Biometric data (heart rate, sleep stage, etc.)
+    must never leave the network to a cloud provider; README previously
+    claimed this already, which wasn't true until this gate existed."""
     try:
-        from . import biometrics
+        from . import biometrics, nova_config
+        provider = await hass.async_add_executor_job(nova_config.get, "llm_provider", "groq")
+        if provider != "ollama":
+            return json.dumps({
+                "available": False,
+                "summary": "wellbeing context is only available with a local "
+                           "(Ollama) LLM provider, to keep biometric data off "
+                           "the network",
+            })
         res = await hass.async_add_executor_job(biometrics.wellbeing_context, hass)
         return json.dumps(res)
     except Exception as exc:
