@@ -284,7 +284,7 @@ Nova started as a fork of [jarvis-aio](https://github.com/sam3gp8/jarvis-aio) an
 - Voice commands can lock a door instantly, but can never unlock one or open a garage — that always requires a tap on your phone, so a spoofed or deepfaked voice can't grant physical access on its own.
 - The `execute_plan` tool (multi-step device automation from a single request) is restricted to an explicit allowlist of home-control domains, so a hallucinated or injected plan step can't reach a system-level service like `homeassistant.restart` or `shell_command`.
 - Biometric/wellbeing data (heart rate, sleep stage) is withheld entirely from cloud LLM calls — it only ever reaches the model when you're running a local Ollama provider.
-- Cross-session conversation memory and long-term semantic recall are both scoped to the conversation asking rather than searched globally, and content pulled back into a live conversation is wrapped against prompt injection rather than trusted verbatim.
+- Every memory store Nova has — cross-session conversation recall, long-term semantic search, and curated facts/preferences from "remember that…" — is scoped to the right conversation or person rather than searched globally, and anything pulled back into a live conversation is wrapped against prompt injection rather than trusted verbatim.
 - Voice model downloads are checksum-verified before being installed.
 
 **Smarter, less noisy home awareness**
