@@ -45,7 +45,11 @@ const PANEL = {
     { id: "banter", label: "Pick a personality level", hint: "wit", done: false },
     { id: "briefings", label: "Turn on daily briefings", hint: "briefings", done: false, jump: "Briefings" },
   ] },
-  config: { floor_plan_address: "123 Example St, Springfield IL", banter_level: 2, search_backend: "searxng", searxng_url: "http://sx.local:8080", calendar_tight_gap_min: 20, recognition_source: "frigate", voice_confirm_enabled: true, voice_confirm_mode: "gated", intrusion_response_timeout: 120, cameras: [{ entity_id: "camera.front", name: "Front Door", raw_name: "Front Door", outdoor: false, location_mode: "auto" }, { entity_id: "camera.back", name: "Backyard", raw_name: "Backyard", outdoor: true, location_mode: "auto" }], camera_names: {}, lockdown: { active: false } },
+  config: { floor_plan_address: "123 Example St, Springfield IL", banter_level: 2, search_backend: "searxng", searxng_url: "http://sx.local:8080", calendar_tight_gap_min: 20, recognition_source: "frigate", voice_confirm_enabled: true, voice_confirm_mode: "gated", intrusion_response_timeout: 120, cameras: [{ entity_id: "camera.front", name: "Front Door", raw_name: "Front Door", outdoor: false, location_mode: "auto" }, { entity_id: "camera.back", name: "Backyard", raw_name: "Backyard", outdoor: true, location_mode: "auto" }], camera_names: {}, lockdown: { active: false },
+    cast_devices: [{ entity_id: "media_player.living_room_speaker", name: "Living Room Speaker" }, { entity_id: "media_player.kitchen_speaker", name: "Kitchen Speaker" }],
+    speaker_areas: [{ area_id: "living_room", name: "Living Room" }, { area_id: "kitchen", name: "Kitchen" }],
+    room_speakers: { living_room: "media_player.living_room_speaker" },
+    general_speaker: "media_player.kitchen_speaker" },
   suggestions: [
     { id: 11, description: "Turn porch light on at 18:00 (6 days running)", confidence: 0.82, count: 6, yaml: "{}",
       pattern_type: "time_routine", entities: ["light.porch"],
@@ -838,6 +842,16 @@ setTimeout(async () => {
   );
   el._currentTab = "settings";
   el._render();
+
+  // ── Room Speakers panel (v7.92.0) ──
+  const roomSpeakerSelects = el.shadowRoot.querySelectorAll(".room-speaker-select");
+  const livingRoomSel = Array.from(roomSpeakerSelects).find(s => s.getAttribute("data-area-id") === "living_room");
+  const generalSel = el.shadowRoot.querySelector(".general-speaker-select");
+  checks.push(
+    ["room speakers card renders one dropdown per area", roomSpeakerSelects.length === 2],
+    ["room speaker dropdown reflects the assigned entity", livingRoomSel?.value === "media_player.living_room_speaker"],
+    ["general speaker dropdown reflects the configured fallback", generalSel?.value === "media_player.kitchen_speaker"],
+  );
 
   // ── Operational Mode panel (Directive Layer, v6.61.0) ──
   await el._fetchMode();

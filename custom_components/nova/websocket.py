@@ -555,6 +555,22 @@ def _all_areas_with_anything(hass: HomeAssistant) -> list[str]:
     return interesting
 
 
+def _get_speaker_assignable_areas(hass: HomeAssistant) -> list[dict]:
+    """Areas the Room Speakers card can assign a speaker to (v7.92.0) —
+    every area with a satellite, a speaker, or a presence sensor, same set
+    as _all_areas_with_anything, with display names attached."""
+    try:
+        from homeassistant.helpers import area_registry as ar
+        reg = ar.async_get(hass)
+        out = []
+        for area_id in _all_areas_with_anything(hass):
+            area = reg.async_get_area(area_id)
+            out.append({"area_id": area_id, "name": area.name if area else area_id})
+        return out
+    except Exception:
+        return []
+
+
 # ─── WebSocket command ───────────────────────────────────────────────────────
 
 @websocket_api.websocket_command({
@@ -782,6 +798,9 @@ async def ws_get_panel_data(
                 "camera_names": _get_camera_names(),
                 "satellite_pairings": _get_runtime_json(hass, entry, "satellite_pairings", {}),
                 "announcement_speakers": _get_runtime_json(hass, entry, "announcement_speakers", []),
+                "room_speakers": _get_runtime_json(hass, entry, "room_speakers", {}),
+                "general_speaker": str(_runtime_opt(hass, entry, "general_speaker", "") or ""),
+                "speaker_areas": _get_speaker_assignable_areas(hass),
                 "floor_plan_rooms": _get_runtime_json(hass, entry, "floor_plan_rooms", {}),
                 "floor_plan_bg": _get_runtime_json(hass, entry, "floor_plan_bg", {}),
                 "door_mapping": _get_runtime_json(hass, entry, "door_mapping", {}),
@@ -1317,6 +1336,8 @@ PANEL_WRITABLE_KEYS = {
     "disabled_sentinel_rules",   # JSON list of disabled rule IDs
     "satellite_pairings",        # JSON dict: {satellite_entity_id: cast_entity_id}
     "announcement_speakers",     # JSON list of cast entity IDs for announcements
+    "room_speakers",             # JSON dict: {area_id: media_player_entity_id} (v7.92.0)
+    "general_speaker",           # str: fallback speaker for rooms with no assignment (v7.92.0)
     "floor_plan_rooms",          # JSON: floor plan room positions per floor
     "floor_plan_bg",             # JSON: base64 background images per floor
     # Residence model (the 3D house on the Residence tab)

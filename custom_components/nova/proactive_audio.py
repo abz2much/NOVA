@@ -156,17 +156,20 @@ def _resolve_broadcast_speakers(hass: HomeAssistant) -> list[str]:
 def _resolve_targets(hass: HomeAssistant, area_id: str) -> tuple[list[str], str]:
     """Resolve announcement speakers through Nova's own routing.
 
-    Primary: the speakers in the requested area (audio_routing.speakers_in_area),
-    excluding listen-only satellites. If the area has none, fall back to the
-    house broadcast set so an announcement is never silently dropped. Returns
-    (targets, mode) where mode is 'area', 'broadcast', or 'none'.
+    Primary: the ONE speaker explicitly assigned to the requested area
+    (audio_routing.room_speaker) — replaced area auto-discovery (v7.92.0)
+    since it let a stray, untagged duplicate media_player (e.g. a Music
+    Assistant/AirPlay entity for a TV that wasn't tagged device_class 'tv')
+    slip through and get spoken to. Falls back to the general speaker, then
+    the house broadcast set, so an announcement is never silently dropped.
+    Returns (targets, mode) where mode is 'area', 'broadcast', or 'none'.
     """
-    area_speakers = [
-        s for s in audio_routing.speakers_in_area(hass, area_id)
-        if not s.startswith("assist_satellite.")
-    ]
-    if area_speakers:
-        return area_speakers, "area"
+    assigned = audio_routing.room_speaker(hass, area_id)
+    if assigned:
+        return [assigned], "area"
+    general = audio_routing.general_speaker_target(hass)
+    if general:
+        return [general], "area"
 
     broadcast = [
         s for s in _resolve_broadcast_speakers(hass)

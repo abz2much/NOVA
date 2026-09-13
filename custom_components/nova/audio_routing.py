@@ -1,28 +1,39 @@
 """
-Nova — Audio routing (v5.7.00, area-registry-driven).
+Nova — Audio routing (v7.92.0, explicit per-room speaker assignment).
 
-HA's area registry is the source of truth. Nova reads areas, the entities
-assigned to each, and routes audio based on what's physically where.
+HA's area registry still resolves WHICH area a satellite/event belongs to.
+But WHICH speaker plays there is no longer auto-discovered — that used to
+mean "any media_player HA happens to place in this area, minus ones tagged
+device_class 'tv'", a denylist that a stray, untagged duplicate entity can
+slip through (a real bug: Music Assistant/AirPlay/Cast integrations each
+register their own separate media_player for the same physical TV, and a
+user tagging most of them 'tv' can still miss one — see room_speaker()'s
+docstring). Room speakers are now an explicit allowlist: Nova only ever
+speaks through the ONE entity assigned to a room, plus one general
+fallback speaker for rooms with nothing assigned.
 
 What Nova recognizes per area:
   - SATELLITES:  entities with domain 'assist_satellite' (ears, never output)
-  - SPEAKERS:    entities with domain 'media_player' (mouths)
   - PRESENCE:    entities with domain 'binary_sensor', device_class 'occupancy'
                  (mmWave, motion, or any occupancy detector)
 
-The user's ONLY routing config is:
-  - bedroom_areas:  list of HA area_ids flagged for sleep detection
-  - broadcast_group: single media_player entity for critical/high urgency
-                     (typically the "home" Cast group)
+The user's routing config:
+  - bedroom_areas:    list of HA area_ids flagged for sleep detection
+  - room_speakers:    {area_id: media_player_entity_id} explicit assignment
+  - general_speaker:  single media_player entity, room-targeting fallback
+                       only (does not affect broadcast_group below)
+  - broadcast_group:  single media_player entity for critical/high urgency
+                       broadcasts (typically the "home" Cast group)
 
 Routing rules:
 
   REPLY (someone spoke to a satellite):
     1. Get the satellite's area.
-    2. Find a media_player in that same area → speak there.
-    3. If no speaker in that area → speak through the satellite itself
-       (its own built-in speaker). Per Username's directive: "if the satellite
-       is the only thing in earshot, it wins."
+    2. That area's assigned room speaker, if any → speak there.
+    3. Else the general speaker, if set → speak there.
+    4. Else speak through the satellite itself (its own built-in speaker).
+       Per Username's directive: "if the satellite is the only thing in
+       earshot, it wins."
 
   OBSERVER (proactive announcement):
     Urgency CRITICAL (smoke/leak/door forced):
@@ -30,16 +41,18 @@ Routing rules:
     Urgency HIGH (doorbell, security event):
       → broadcast_group if someone is home; else mobile notification
     Urgency MEDIUM:
-      → speaker in the room where presence is detected;
+      → the room speaker assigned to the room where presence is detected,
+         else the general speaker;
          fallback to broadcast_group if no presence detected and someone is home;
          fallback to mobile notification if nobody home
     Urgency LOW:
-      → speaker in the room where presence is detected;
+      → the room speaker assigned to the room where presence is detected,
+         else the general speaker;
          silent (queue) if no local presence — don't interrupt from another room
 
   BROADCAST (briefing, sentinel, doorbell — explicit group announcement):
-      → broadcast_group; if not set, fall back to all media_players across all
-         non-bedroom areas (aggregate).
+      → broadcast_group / announcement_speakers, unaffected by room_speakers
+         or general_speaker; silent until the user configures one.
 
 Routing always EXCLUDES voice satellites from being output targets, except
 the explicit "satellite fallback" case in REPLY above.
@@ -110,31 +123,43 @@ def satellites_in_area(hass: HomeAssistant, area_id: str) -> list[str]:
     ]
 
 
-def speakers_in_area(hass: HomeAssistant, area_id: str) -> list[str]:
-    """Audio-capable media_players in the area, for routing TTS / announcements.
+def room_speaker(hass: HomeAssistant, area_id: str) -> Optional[str]:
+    """The one speaker explicitly assigned to this room (v7.92.0), or None.
 
-    Excludes screens: any media_player with device_class 'tv', and the user's
-    designated movie player (``movie_media_player``). TTS is audio and must never
-    route to a television — otherwise a TV in the room picks up proactive/room
-    speech (e.g. a Samsung TV in the living room getting an observer comment).
-    A movie player still plays movies; it just isn't a speech target.
+    Replaces the old approach of auto-discovering every media_player HA
+    happens to place in an area and excluding TVs by device_class — a
+    denylist that a stray, untagged duplicate entity can slip through (a
+    real bug: Music Assistant/AirPlay/Cast each register their own
+    media_player for the same physical TV, and a user tagging most of them
+    'tv' can still miss one). An explicit per-room assignment is immune to
+    however many duplicate entities an integration creates, since nothing
+    is ever auto-discovered — Nova only ever considers the one entity
+    assigned here.
     """
     try:
         from . import nova_config
-        movie = nova_config.get("movie_media_player", "") or ""
+        assigned = (nova_config.get("room_speakers", {}) or {}).get(area_id)
     except Exception:
-        movie = ""
-    out = []
-    for e in _entities_by_domain(hass, "media_player"):
-        if entity_area(hass, e) != area_id:
-            continue
-        if e == movie:
-            continue
-        st = hass.states.get(e)
-        if st is not None and st.attributes.get("device_class") == "tv":
-            continue
-        out.append(e)
-    return out
+        assigned = None
+    if assigned and hass.states.get(assigned) is not None:
+        return assigned
+    return None
+
+
+def general_speaker_target(hass: HomeAssistant) -> Optional[str]:
+    """The one general-purpose fallback speaker (v7.92.0), used when Nova
+    needs to speak in a room that has no speaker explicitly assigned. Does
+    NOT affect whole-house broadcasts (briefing/sentinel/doorbell), which
+    already use the separate, already-explicit broadcast_group/
+    announcement_speakers settings."""
+    try:
+        from . import nova_config
+        eid = nova_config.get("general_speaker", "") or ""
+    except Exception:
+        eid = ""
+    if eid and hass.states.get(eid) is not None:
+        return eid
+    return None
 
 
 def _is_display_target(hass: HomeAssistant, entity_id: str, movie: str) -> bool:
@@ -285,66 +310,6 @@ def anyone_home(hass: HomeAssistant) -> bool:
 
 # ─── Routing: reply (direct speech) ──────────────────────────────────────────
 
-# Integration platforms we prefer for replies — these are "real" speakers
-# (Google Home, Nest, Chromecast, Alexa, Sonos) as opposed to the ESP32
-# satellite's built-in media_player. Ordering matters — earlier = higher priority.
-PREFERRED_SPEAKER_PLATFORMS = (
-    "cast",            # Google Home / Chromecast / Nest Audio
-    "google_assistant_sdk",
-    "nest",
-    "sonos",
-    "alexa_media",
-    "spotify",
-    "squeezebox",
-    "dlna_dmr",
-)
-
-
-def _satellite_device_ids_in_area(hass: HomeAssistant, area_id: str) -> set[str]:
-    """
-    Return the set of device_ids for all assist_satellite entities in this area.
-
-    Used to identify media_player entities that belong to the same physical
-    device as a satellite (e.g. the ESP32-S3-BOX-3's built-in speaker exposed
-    as `media_player.nova_speaker`). We want to EXCLUDE those from reply
-    routing because they're tinny — we want the Google Home in the room.
-    """
-    device_ids: set[str] = set()
-    try:
-        ent_reg = er.async_get(hass)
-        for sat_id in satellites_in_area(hass, area_id):
-            ent = ent_reg.async_get(sat_id)
-            if ent and ent.device_id:
-                device_ids.add(ent.device_id)
-    except Exception as exc:
-        _LOGGER.debug("_satellite_device_ids_in_area failed: %s", exc)
-    return device_ids
-
-
-def _mp_platform(hass: HomeAssistant, mp_entity_id: str) -> str:
-    """Return the integration platform name for a media_player ('cast', etc.)."""
-    try:
-        ent_reg = er.async_get(hass)
-        ent = ent_reg.async_get(mp_entity_id)
-        if ent:
-            return (ent.platform or "").lower()
-    except Exception:
-        pass
-    return ""
-
-
-def _mp_device_id(hass: HomeAssistant, mp_entity_id: str) -> Optional[str]:
-    """Return the device_id for a media_player entity."""
-    try:
-        ent_reg = er.async_get(hass)
-        ent = ent_reg.async_get(mp_entity_id)
-        if ent:
-            return ent.device_id
-    except Exception:
-        pass
-    return None
-
-
 def reply_target(
     hass: HomeAssistant,
     *,
@@ -355,12 +320,11 @@ def reply_target(
     """
     Pick ONE speaker for a direct reply.
 
-    Priority (v5.7+):
+    Priority (v7.92.0 — replaced area auto-discovery with explicit
+    assignment; see room_speaker()'s docstring for why):
       0. Explicit satellite_pairings override from panel Settings (if set).
-      1. A real speaker in the same area as the satellite — Google/Nest/Sonos
-         preferred over unknown platforms.
-      2. Any other media_player in the area that is NOT the satellite's own
-         built-in speaker (same device_id).
+      1. The room speaker explicitly assigned to the satellite's area.
+      2. The general fallback speaker.
       3. The satellite itself (its built-in speaker) if nothing else available.
       4. None — caller should handle silence.
 
@@ -404,7 +368,7 @@ def reply_target(
             return paired
         _LOGGER.debug(
             "reply_target: panel pairing %s → %s but entity unavailable, "
-            "falling through to area registry",
+            "falling through",
             sat_entity, paired,
         )
 
@@ -412,52 +376,25 @@ def reply_target(
         _LOGGER.debug("reply_target: could not resolve satellite area")
         return satellite_entity_id  # fall back: speak through satellite itself
 
-    all_mps = speakers_in_area(hass, sat_area)
-    if not all_mps:
+    assigned = room_speaker(hass, sat_area)
+    if assigned:
+        _LOGGER.debug("reply_target: using room speaker %s for area '%s'", assigned, sat_area)
+        return assigned
+
+    general = general_speaker_target(hass)
+    if general:
         _LOGGER.debug(
-            "reply_target: no media_player in area '%s', replying through satellite",
-            sat_area,
+            "reply_target: no room speaker for area '%s', using general speaker %s",
+            sat_area, general,
         )
-        return satellite_entity_id
+        return general
 
-    # Exclude satellite-bound media_players (ESP32 built-in speakers)
-    sat_device_ids = _satellite_device_ids_in_area(hass, sat_area)
-    real_mps = []
-    for mp in all_mps:
-        if mp.startswith("assist_satellite."):
-            continue
-        mp_dev = _mp_device_id(hass, mp)
-        if mp_dev and mp_dev in sat_device_ids:
-            _LOGGER.debug(
-                "reply_target: skipping %s (shares device_id with satellite)",
-                mp,
-            )
-            continue
-        real_mps.append(mp)
-
-    if not real_mps:
-        _LOGGER.debug(
-            "reply_target: area '%s' has only satellite-bound speakers, falling back",
-            sat_area,
-        )
-        return satellite_entity_id
-
-    # Prefer known-good speaker platforms (Cast/Nest/Sonos/etc.) in order
-    for preferred_platform in PREFERRED_SPEAKER_PLATFORMS:
-        for mp in real_mps:
-            if _mp_platform(hass, mp) == preferred_platform:
-                _LOGGER.debug(
-                    "reply_target: chose %s (platform=%s) in area '%s'",
-                    mp, preferred_platform, sat_area,
-                )
-                return mp
-
-    # No preferred platform matched — return any real media_player
     _LOGGER.debug(
-        "reply_target: no preferred-platform speaker, using %s in area '%s'",
-        real_mps[0], sat_area,
+        "reply_target: no room or general speaker configured for area '%s', "
+        "replying through satellite",
+        sat_area,
     )
-    return real_mps[0]
+    return satellite_entity_id
 
 
 def reply_targets(
@@ -548,13 +485,15 @@ def observer_speak_target(
         speakers = _broadcast_speakers()
         if speakers:
             return (speakers, "broadcast")
-        # no broadcast speakers at all: fall back to room speaker if possible
+        # no broadcast speakers at all: fall back to each occupied room's
+        # assigned speaker, then the general speaker (v7.92.0 — replaced
+        # area auto-discovery; see room_speaker()'s docstring for why)
         occupied = currently_occupied_areas(hass)
-        targets = []
-        for area in occupied:
-            for spk in speakers_in_area(hass, area):
-                if not spk.startswith("assist_satellite."):
-                    targets.append(spk)
+        targets = [t for a in occupied if (t := room_speaker(hass, a))]
+        if not targets:
+            general = general_speaker_target(hass)
+            if general:
+                targets = [general]
         return (targets, "broadcast") if targets else ([], "notify_only")
 
     # ─── MEDIUM ──────────────────────────────────────────────────────────────
@@ -564,15 +503,14 @@ def observer_speak_target(
         if not home:
             return ([], "notify_only")
         occupied = currently_occupied_areas(hass)
+        for area in occupied:
+            assigned = room_speaker(hass, area)
+            if assigned:
+                return ([assigned], "local")
         if occupied:
-            # Speak in the first occupied area with a speaker
-            for area in occupied:
-                speakers = [
-                    s for s in speakers_in_area(hass, area)
-                    if not s.startswith("assist_satellite.")
-                ]
-                if speakers:
-                    return ([speakers[0]], "local")
+            general = general_speaker_target(hass)
+            if general:
+                return ([general], "local")
         # Home but no room-level presence (could be shared state / person sensor)
         speakers = _broadcast_speakers()
         if speakers:
@@ -587,12 +525,12 @@ def observer_speak_target(
         if not occupied:
             return ([], "suppressed")
         for area in occupied:
-            speakers = [
-                s for s in speakers_in_area(hass, area)
-                if not s.startswith("assist_satellite.")
-            ]
-            if speakers:
-                return ([speakers[0]], "local")
+            assigned = room_speaker(hass, area)
+            if assigned:
+                return ([assigned], "local")
+        general = general_speaker_target(hass)
+        if general:
+            return ([general], "local")
         return ([], "suppressed")
 
     return ([], "suppressed")

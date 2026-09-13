@@ -1,3 +1,7 @@
+## [7.92.0] — assign one speaker per room; Nova no longer picks its own
+
+Replies and proactive comments used to pick from whatever media_player Home Assistant happened to place in a room, excluding anything tagged as a TV — but integrations like Music Assistant, AirPlay, and Cast can each register their own separate entity for the same physical device, and it only takes one untagged duplicate slipping through for Nova to start talking over your TV or through a speaker you didn't want used. Settings → Room Speakers now lets you explicitly assign the one speaker Nova is allowed to use in each room, plus one general fallback speaker for rooms with nothing assigned — Nova only ever uses what you've assigned, never anything it discovers on its own. Whole-house broadcasts (briefings, sentinel alerts, doorbell) are unaffected — those already used your explicit announcement-speaker settings.
+
 ## [7.91.1] — fix: Solar card could show the wrong grid direction
 
 The Solar card determined import vs. export from the sign of the grid power sensor, but that sign isn't standardised across inverter brands — on one real setup, positive meant exporting, not importing, so the card showed "importing" while the house was actually exporting. Direction now comes from which of your two cumulative grid totals (imported-so-far vs. exported-so-far) has moved most recently, which is unambiguous regardless of any inverter's sign convention.

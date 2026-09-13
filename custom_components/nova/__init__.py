@@ -1387,7 +1387,7 @@ def _register_services(
         from .audio_routing import (
             broadcast_target, reply_target, observer_speak_target,
             currently_occupied_areas, anyone_home, all_areas_with_satellite,
-            speakers_in_area, satellites_in_area,
+            room_speaker, satellites_in_area,
         )
         from .tts_helper import resolve_tts_entity, find_best_tts_entity
 
@@ -1438,9 +1438,9 @@ def _register_services(
         _LOGGER.warning("Areas with satellites: %s", sat_areas)
         for area_id in sat_areas:
             sats = satellites_in_area(hass, area_id)
-            spks = speakers_in_area(hass, area_id)
-            _LOGGER.warning("  Area '%s': sats=%s, speakers=%s",
-                            area_id, sats, spks)
+            assigned = room_speaker(hass, area_id)
+            _LOGGER.warning("  Area '%s': sats=%s, assigned room speaker=%s",
+                            area_id, sats, assigned)
             for sat in sats:
                 target = reply_target(
                     hass, satellite_entity_id=sat,

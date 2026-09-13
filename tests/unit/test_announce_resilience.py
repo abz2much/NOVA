@@ -154,22 +154,104 @@ def test_observer_critical_uses_announcement_speakers(routing):
     assert targets == ["media_player.kitchen"] and mode == "broadcast"
 
 
-def test_speakers_in_area_excludes_tv_and_movie_player(routing, monkeypatch):
-    # A living room with a real speaker, a TV (device_class tv), and a projector
-    # designated as the movie player. TTS routing must return only the speaker.
-    spk = _State("media_player.living_room_speaker", "idle")
-    tv = _State("media_player.samsung_tv", "on"); tv.attributes = {"device_class": "tv"}
-    proj = _State("media_player.projector", "idle")   # movie_media_player, no dc
-    players = {s.entity_id: s for s in (spk, tv, proj)}
-    hass = _Hass(players)
-    monkeypatch.setattr(routing, "_entities_by_domain", lambda h, d: list(players))
-    monkeypatch.setattr(routing, "entity_area", lambda h, e: "living_room")
+# ── explicit per-room speaker assignment (v7.92.0) ───────────────────────────
+# Replaced area auto-discovery (which excluded TVs by device_class — a
+# denylist a stray, untagged duplicate media_player could slip through; a
+# real bug: Music Assistant/AirPlay/Cast each register their own media_player
+# for the same physical TV, and tagging most of them 'tv' can still miss one)
+# with an explicit allowlist: room_speakers assigns ONE speaker per area,
+# general_speaker is the one fallback. Nothing is ever auto-discovered
+# anymore, so a stray duplicate can no longer be picked no matter how many
+# an integration creates.
+
+def _set_nova_config(routing, monkeypatch, mapping):
     import sys, types
     pkg = routing.__name__.rsplit(".", 1)[0]
-    jc = types.SimpleNamespace(
-        get=lambda k, d=None: "media_player.projector" if k == "movie_media_player" else d)
+    jc = types.SimpleNamespace(get=lambda k, d=None: mapping.get(k, d))
     monkeypatch.setitem(sys.modules, f"{pkg}.nova_config", jc)
-    assert routing.speakers_in_area(hass, "living_room") == ["media_player.living_room_speaker"]
+
+
+def test_reply_target_uses_assigned_room_speaker_ignoring_stray_duplicate(routing, monkeypatch):
+    # The exact bug shape: an untagged duplicate media_player (e.g. a Music
+    # Assistant/AirPlay entity for a TV that was never tagged device_class
+    # 'tv') sits in the same area as the assigned speaker. The assignment
+    # must win — the stray entity is never even considered.
+    hass = _Hass({
+        "media_player.assigned_speaker": _State("media_player.assigned_speaker", "idle"),
+        "media_player.living_room_samsung_cast": _State("media_player.living_room_samsung_cast", "on"),
+    })
+    monkeypatch.setattr(routing, "entity_area", lambda h, e: "living_room")
+    _set_nova_config(routing, monkeypatch, {
+        "room_speakers": {"living_room": "media_player.assigned_speaker"},
+    })
+    out = routing.reply_target(hass, satellite_entity_id="assist_satellite.living_room")
+    assert out == "media_player.assigned_speaker"
+
+
+def test_reply_target_falls_back_to_general_speaker(routing, monkeypatch):
+    hass = _Hass({"media_player.general": _State("media_player.general", "idle")})
+    monkeypatch.setattr(routing, "entity_area", lambda h, e: "living_room")
+    _set_nova_config(routing, monkeypatch, {
+        "room_speakers": {},
+        "general_speaker": "media_player.general",
+    })
+    out = routing.reply_target(hass, satellite_entity_id="assist_satellite.living_room")
+    assert out == "media_player.general"
+
+
+def test_reply_target_falls_back_to_satellite_when_nothing_configured(routing, monkeypatch):
+    hass = _Hass({})
+    monkeypatch.setattr(routing, "entity_area", lambda h, e: "living_room")
+    _set_nova_config(routing, monkeypatch, {})
+    out = routing.reply_target(hass, satellite_entity_id="assist_satellite.living_room")
+    assert out == "assist_satellite.living_room"
+
+
+def test_reply_target_satellite_pairings_wins_over_room_speaker(routing, monkeypatch):
+    hass = _Hass({
+        "media_player.paired": _State("media_player.paired", "idle"),
+        "media_player.assigned_speaker": _State("media_player.assigned_speaker", "idle"),
+    })
+    monkeypatch.setattr(routing, "entity_area", lambda h, e: "living_room")
+    _set_nova_config(routing, monkeypatch, {
+        "room_speakers": {"living_room": "media_player.assigned_speaker"},
+    })
+    out = routing.reply_target(
+        hass, satellite_entity_id="assist_satellite.living_room",
+        satellite_pairings={"assist_satellite.living_room": "media_player.paired"},
+    )
+    assert out == "media_player.paired"
+
+
+def test_observer_medium_uses_assigned_room_speaker(routing, monkeypatch):
+    hass = _Hass({"media_player.assigned_speaker": _State("media_player.assigned_speaker", "idle")})
+    monkeypatch.setattr(routing, "currently_occupied_areas", lambda h: ["living_room"])
+    monkeypatch.setattr(routing, "anyone_home", lambda h: True)
+    _set_nova_config(routing, monkeypatch, {
+        "room_speakers": {"living_room": "media_player.assigned_speaker"},
+    })
+    targets, mode = routing.observer_speak_target(hass, urgency="medium")
+    assert (targets, mode) == (["media_player.assigned_speaker"], "local")
+
+
+def test_observer_medium_falls_back_to_general_speaker(routing, monkeypatch):
+    hass = _Hass({"media_player.general": _State("media_player.general", "idle")})
+    monkeypatch.setattr(routing, "currently_occupied_areas", lambda h: ["living_room"])
+    monkeypatch.setattr(routing, "anyone_home", lambda h: True)
+    _set_nova_config(routing, monkeypatch, {
+        "room_speakers": {},
+        "general_speaker": "media_player.general",
+    })
+    targets, mode = routing.observer_speak_target(hass, urgency="medium")
+    assert (targets, mode) == (["media_player.general"], "local")
+
+
+def test_observer_low_suppressed_without_any_speaker_configured(routing, monkeypatch):
+    hass = _Hass({})
+    monkeypatch.setattr(routing, "currently_occupied_areas", lambda h: ["living_room"])
+    _set_nova_config(routing, monkeypatch, {})
+    targets, mode = routing.observer_speak_target(hass, urgency="low")
+    assert (targets, mode) == ([], "suppressed")
 
 
 # ── per-speaker delivery: volume-pinned play_media, with tts.speak fallback ─

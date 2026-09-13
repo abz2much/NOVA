@@ -156,7 +156,9 @@ def _satellite_for_entity(hass, entity_id: str) -> Optional[str]:
 
 def _speaker_for_satellite(hass, satellite: str) -> tuple[Optional[str], list]:
     """(tts_entity, [media_players]) to speak through for the gated path — the
-    speaker in the satellite's area (the Nest), via Nova's normal routing."""
+    speaker explicitly assigned to the satellite's area, else the general
+    speaker (v7.92.0 — replaced area auto-discovery; see
+    audio_routing.room_speaker's docstring for why)."""
     try:
         from . import audio_routing, tts_helper
         area = None
@@ -168,7 +170,10 @@ def _speaker_for_satellite(hass, satellite: str) -> tuple[Optional[str], list]:
                 area = ent.area_id
         except Exception:
             pass
-        speakers = audio_routing.speakers_in_area(hass, area) if area else []
+        assigned = audio_routing.room_speaker(hass, area) if area else None
+        if not assigned:
+            assigned = audio_routing.general_speaker_target(hass)
+        speakers = [assigned] if assigned else []
         # resolve the Nova TTS entity: prefer the configured one, else best
         configured = _cfg(hass, "tts_engine", "") or ""
         tts_entity = None

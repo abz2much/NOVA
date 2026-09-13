@@ -336,11 +336,17 @@ async def periodic_check(hass, honorific: str = "sir") -> dict:
             await cc._notify_all_devices(hass, cfg_obj, message, _ACTION[action_key])
         except Exception as exc:
             _LOGGER.debug("hazard: notify failed: %s", exc)
-        # also speak it, if announcements are on and speakers exist
+        # also speak it, if announcements are on and speakers exist — a
+        # whole-house broadcast (earthquakes/severe weather are relevant
+        # everywhere), same resolution sentinel.py uses for its own alerts
         try:
             from . import tts_helper, audio_routing
             tts = tts_helper.find_best_tts_entity(hass)
-            spk = audio_routing.speakers_in_area(hass, None)
+            spk = audio_routing.broadcast_target(
+                hass,
+                broadcast_group=_cfg("broadcast_group", "") or None,
+                announcement_speakers=_cfg("announcement_speakers", None),
+            )
             if tts and spk:
                 await tts_helper.async_announce(hass, message, tts, spk, context="hazard")
         except Exception:
