@@ -1,3 +1,7 @@
+## [7.93.1] — "Panel look" moved out of the busy Settings tab
+
+The switch to try the new Command Center look now lives in the Nova integration's own Configure dialog (Settings → Devices & Services → Nova → Configure → Core), not crammed into the panel's already-busy General settings — it's also no longer subject to the panel's own JS caching, so it's more reliable to find. The new look's own selector, and switching back from there, are unchanged.
+
 ## [7.93.0] — a new Command Center look (preview)
 
 There's now a second, optional dashboard look — an animated "stellar core" replacing the camera feed as the visual centerpiece (it brightens and quickens when something happens, dims to embers while everyone's asleep), restyled activity and area cards, and cameras tucked into a collapsed, optional card instead of front and center — since not every camera integration streams live into Home Assistant. Switch to it from Settings → General → "Panel look", or back to Classic from the new look's own top bar — nothing is deleted, Classic stays the default. This first version covers only the main dashboard; Settings, Logs, and the other tabs still open in Classic from there.

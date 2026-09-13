@@ -1013,20 +1013,12 @@ setTimeout(async () => {
   el._settingsSection = "general";
   el._applySettingsSections();
 
-  // ── Panel look switcher (v7.93.0) ──
-  // Not asserting location.reload() itself fires — jsdom's Location object
-  // doesn't allow safely stubbing that without risking unrelated breakage —
-  // just that choosing a new look actually persists the preference, which is
-  // the part a silent regression would most plausibly break.
-  const styleSel = el.shadowRoot.getElementById("ui-style-select");
-  checks.push(["panel look select reflects the configured style", styleSel?.value === "classic"]);
-  if (styleSel) {
-    styleSel.value = "new";
-    styleSel.dispatchEvent(new Event("change"));
-    await new Promise(r => setTimeout(r, 20));
-    checks.push(["choosing a new panel look saves ui_style",
-      _updateConfigCalls.some(c => c.key === "ui_style" && c.value === "new")]);
-  }
+  // Panel look (v7.93.0) is deliberately NOT in Classic's own Settings —
+  // it lives in the HA integration's Configure dialog (config_flow.py's
+  // Core step) instead, per Abi's feedback that Classic's General section
+  // was already busy. Classic's Settings should have no such control.
+  checks.push(["panel look control is not in Classic's Settings (moved to Configure)",
+    !el.shadowRoot.getElementById("ui-style-select")]);
 
   // v7.85.1: option builders must tolerate a stale/missing selected entity (a
   // removed entity still referenced in config). This threw and blanked the whole

@@ -43,7 +43,8 @@
           "directive_preset": "Directive preset",
           "directive": "Custom directive (optional, overrides preset)",
           "model": "Conversation model",
-          "use_hass_api": "Enable home control (lights, climate, locks, etc.)"
+          "use_hass_api": "Enable home control (lights, climate, locks, etc.)",
+          "ui_style": "Panel look (classic or new preview)"
         }
       },
       "routing": {

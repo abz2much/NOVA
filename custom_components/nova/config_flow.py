@@ -33,6 +33,7 @@ from .const import (
     CONF_DIRECTIVE,
     CONF_DIRECTIVE_PRESET,
     CONF_USE_HASS_API,
+    CONF_UI_STYLE,
     CONF_BEDROOM_AREAS,
     CONF_GROUND_FLOOR_AREAS,
     CONF_BROADCAST_GROUP,
@@ -260,6 +261,10 @@ class NovaOptionsFlow(OptionsFlow):
                 selector.TextSelector(),
             vol.Optional(CONF_USE_HASS_API, description=self._sv(CONF_USE_HASS_API, True)):
                 selector.BooleanSelector(),
+            vol.Optional(CONF_UI_STYLE, description=self._sv(CONF_UI_STYLE, "classic")):
+                selector.SelectSelector(selector.SelectSelectorConfig(
+                    options=["classic", "new"],
+                    mode=selector.SelectSelectorMode.DROPDOWN)),
         })
         return self.async_show_form(step_id="core", data_schema=schema)
 

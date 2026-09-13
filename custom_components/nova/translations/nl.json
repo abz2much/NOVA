@@ -43,7 +43,8 @@
           "directive_preset": "Richtlijn-voorinstelling",
           "directive": "Aangepaste richtlijn (optioneel, overschrijft voorinstelling)",
           "model": "Conversatiemodel",
-          "use_hass_api": "Huisbediening inschakelen (verlichting, klimaat, sloten, enz.)"
+          "use_hass_api": "Huisbediening inschakelen (verlichting, klimaat, sloten, enz.)",
+          "ui_style": "Paneelweergave (klassiek of nieuwe preview)"
         }
       },
       "routing": {

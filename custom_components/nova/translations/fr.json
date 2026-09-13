@@ -43,7 +43,8 @@
           "directive_preset": "Préréglage de directive",
           "directive": "Directive personnalisée (facultatif, remplace le préréglage)",
           "model": "Modèle de conversation",
-          "use_hass_api": "Activer le contrôle de la maison (lumières, climatisation, serrures, etc.)"
+          "use_hass_api": "Activer le contrôle de la maison (lumières, climatisation, serrures, etc.)",
+          "ui_style": "Apparence du panneau (classique ou nouvel aperçu)"
         }
       },
       "routing": {
