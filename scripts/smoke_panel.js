@@ -113,6 +113,13 @@ const hass = {
       ], advice: ["Heads up — Dryer and Oven are running at 9.2 kW, over your peak."] };
       if (m.action === "set_agency") { _energyAgency = m.agency; return { watts: 9200, kw: 9.2, over_peak: true, agency: m.agency, configured_agency: m.agency, running: [], advice: [] }; }
     }
+    if (m.type === "nova/solar") {
+      if (m.action === "status") return {
+        configured: true, solar_w: 3200, battery_w: -450, battery_pct: 82,
+        grid_w: -650, grid_direction: "export", self_sufficiency_pct: 100.0,
+        advice: ["Generating 3.2 kW of solar right now. Exporting 0.7 kW to the grid. Battery at 82%."],
+      };
+    }
     if (m.type === "nova/hazard") {
       if (m.action === "status") return { enabled: true, center: [40.77, -75.61], using_override: false,
         quake_radius_km: 300, quake_min_mag: 2.5, disaster_radius_km: 300,
@@ -816,6 +823,21 @@ setTimeout(async () => {
     ["energy panel shows advice", /over your peak/.test(energyBody)],
     ["energy agency chips present", el.shadowRoot.querySelectorAll("#energy-agency .mode-chip").length === 3],
   );
+
+  // ── Solar panel (v7.91.0) — lives on the Command Center (dashboard) tab ──
+  el._currentTab = "dashboard";
+  el._render();
+  await el._fetchSolar();
+  const solarSufficiency = el.shadowRoot.getElementById("solar-sufficiency")?.textContent || "";
+  const solarBody = el.shadowRoot.getElementById("solar-body")?.textContent || "";
+  checks.push(
+    ["solar panel shows self-sufficiency", /100(\.0)?% self-sufficient/.test(solarSufficiency)],
+    ["solar panel shows generation", /3\.20 kW/.test(solarBody)],
+    ["solar panel shows grid export direction", /Exporting/.test(solarBody)],
+    ["solar panel shows battery level", /82%/.test(solarBody)],
+  );
+  el._currentTab = "settings";
+  el._render();
 
   // ── Operational Mode panel (Directive Layer, v6.61.0) ──
   await el._fetchMode();

@@ -82,6 +82,7 @@ def async_register(hass: HomeAssistant) -> None:
         websocket_api.async_register_command(hass, ws_intrusion)
         websocket_api.async_register_command(hass, ws_mode)
         websocket_api.async_register_command(hass, ws_energy)
+        websocket_api.async_register_command(hass, ws_solar)
         websocket_api.async_register_command(hass, ws_hazard)
         websocket_api.async_register_command(hass, ws_biometrics)
     except Exception as exc:
@@ -2439,6 +2440,29 @@ async def ws_energy(
     except Exception as exc:
         _LOGGER.exception("ws_energy failed: %s", exc)
         connection.send_error(msg["id"], "energy_failed", str(exc))
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "nova/solar",
+    vol.Required("action"): vol.In(["status"]),
+})
+@websocket_api.async_response
+async def ws_solar(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict,
+) -> None:
+    """Solar/battery/grid picture for the panel (v7.91.0), read straight from
+    Home Assistant's own Energy dashboard config. Pure read, no mutating
+    action — left open like other read-only panel data (get_panel_data,
+    get_activity_log, etc.), not admin-gated."""
+    try:
+        from . import solar
+        res = await solar.solar_status(hass)
+        connection.send_result(msg["id"], res)
+    except Exception as exc:
+        _LOGGER.exception("ws_solar failed: %s", exc)
+        connection.send_error(msg["id"], "solar_failed", str(exc))
 
 
 @websocket_api.websocket_command({

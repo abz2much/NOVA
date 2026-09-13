@@ -1,3 +1,7 @@
+## [7.91.0] — solar/battery/grid visibility
+
+A new Solar card on the Command Center dashboard shows live solar generation, battery level and charge/discharge, grid import/export direction, and a self-sufficiency percentage — reading straight from Home Assistant's own Energy dashboard configuration, so anyone who's already set that up gets this with no separate setup. You can also just ask Nova ("how's our solar doing", "are we exporting or importing"). Reports honestly that no solar source is configured yet if you haven't set up the Energy dashboard.
+
 ## [7.90.0] — one shared helper for prompt-injection fencing
 
 The three places that wrap untrusted stored text before it re-enters a conversation — cross-session memory reseed, long-term semantic recall, and curated facts/preferences — each grew their own copy of the same defence, with small wording drift between them. Consolidated into a single `prompt_fence.py` helper all three now call, so future memory stores get the same protection for free instead of a fourth hand-rolled copy. No behaviour change.

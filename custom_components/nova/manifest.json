@@ -9,7 +9,8 @@
     "mqtt",
     "assist_pipeline",
     "recorder",
-    "logbook"
+    "logbook",
+    "energy"
   ],
   "codeowners": [
     "@abz2much"
@@ -30,5 +31,5 @@
     "anthropic>=0.39.0",
     "pypdf>=4.0.0"
   ],
-  "version": "7.90.0"
+  "version": "7.91.0"
 }
