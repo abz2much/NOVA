@@ -1441,7 +1441,7 @@ class NovaPanel extends HTMLElement {
       }
     } catch (err) {
       const c = this.shadowRoot?.getElementById("debug-log-entries");
-      if (c) c.innerHTML = '<div class="log-entry-error" style="padding:12px;">Error loading logs: ' + err + '</div>';
+      if (c) c.innerHTML = '<div class="log-entry-error" style="padding:12px;">Error loading logs: ' + this._esc(err) + '</div>';
     }
   }
 
@@ -3720,14 +3720,14 @@ class NovaPanel extends HTMLElement {
         let _zcx = 0, _zcy = 0; _zpts.forEach(p => { _zcx += p[0]; _zcy += p[1]; }); _zcx /= _zpts.length; _zcy /= _zpts.length;
         svg += '<g class="fp-zone" data-zone-idx="' + i + '">';
         svg += '<path class="fp-zone-path" data-zone-idx="' + i + '" d="' + this._propPathD(_zpts) + '" fill="' + c + '" fill-opacity="0.06" stroke="' + c + '" stroke-width="1"' + (_out ? ' stroke-dasharray="4 3"' : '') + ' style="cursor:move"/>';
-        svg += '<text x="' + _zcx.toFixed(1) + '" y="' + _zcy.toFixed(1) + '" text-anchor="middle" fill="' + c + '" font-size="' + fs + '" font-family="Orbitron, monospace" letter-spacing="0.3" pointer-events="none">' + rm.name.toUpperCase() + '</text>';
+        svg += '<text x="' + _zcx.toFixed(1) + '" y="' + _zcy.toFixed(1) + '" text-anchor="middle" fill="' + c + '" font-size="' + fs + '" font-family="Orbitron, monospace" letter-spacing="0.3" pointer-events="none">' + this._esc(rm.name.toUpperCase()) + '</text>';
         for (let _vi = 0; _vi < _zpts.length; _vi++) { const _a = _zpts[_vi], _b = _zpts[(_vi + 1) % _zpts.length]; svg += '<circle class="fp-zone-mid" data-zone-idx="' + i + '" data-edge="' + _vi + '" cx="' + ((_a[0] + _b[0]) / 2) + '" cy="' + ((_a[1] + _b[1]) / 2) + '" r="2" fill="none" stroke="' + c + '" stroke-width="0.6" opacity="0.5" style="cursor:copy"/>'; }
         for (let _vi = 0; _vi < _zpts.length; _vi++) { svg += '<circle class="fp-zone-vtx" data-zone-idx="' + i + '" data-vtx="' + _vi + '" cx="' + _zpts[_vi][0] + '" cy="' + _zpts[_vi][1] + '" r="2.8" fill="' + c + '" stroke="#0a0a0a" stroke-width="0.6" style="cursor:grab"/>'; }
         svg += '</g>';
       } else {
       svg += '<g class="fp-drag-room" data-idx="' + i + '" style="cursor:move">';
       svg += '<rect x="' + rm.x + '" y="' + rm.y + '" width="' + rm.w + '" height="' + rm.h + '" rx="2" fill="' + (_out ? 'rgba(0,245,160,0.04)' : 'rgba(0,242,254,0.06)') + '" stroke="' + c + '" stroke-width="1"' + (_out ? ' stroke-dasharray="4 3"' : '') + ' class="fp-drag-rect"/>';
-      svg += '<text x="' + (rm.x + rm.w/2) + '" y="' + (rm.y + rm.h/2 + 2) + '" text-anchor="middle" fill="' + c + '" font-size="' + fs + '" font-family="Orbitron, monospace" letter-spacing="0.3" pointer-events="none">' + rm.name.toUpperCase() + '</text>';
+      svg += '<text x="' + (rm.x + rm.w/2) + '" y="' + (rm.y + rm.h/2 + 2) + '" text-anchor="middle" fill="' + c + '" font-size="' + fs + '" font-family="Orbitron, monospace" letter-spacing="0.3" pointer-events="none">' + this._esc(rm.name.toUpperCase()) + '</text>';
       if (rm.w > 30 && rm.h > 24) svg += '<text x="' + (rm.x + rm.w/2) + '" y="' + (rm.y + rm.h/2 + fs + 2.5) + '" text-anchor="middle" fill="' + c + '" opacity="0.6" font-size="' + (fs*0.72).toFixed(1) + '" font-family="JetBrains Mono, monospace" pointer-events="none">' + this._fpDim(rm.w) + ' \u00d7 ' + this._fpDim(rm.h) + '</text>';
       svg += '<rect x="' + (rm.x + rm.w - 8) + '" y="' + (rm.y + rm.h - 8) + '" width="8" height="8" fill="' + c + '" opacity="0.3" rx="1" class="fp-resize-handle" data-idx="' + i + '" style="cursor:nwse-resize"/>';
       svg += '</g>';
@@ -3736,7 +3736,7 @@ class NovaPanel extends HTMLElement {
 
     // Labels
     for (const lbl of (floorData.labels || [])) {
-      svg += '<text x="' + lbl.x + '" y="' + lbl.y + '" text-anchor="middle" fill="#1a3040" font-size="4" font-family="JetBrains Mono, monospace">' + lbl.text + '</text>';
+      svg += '<text x="' + lbl.x + '" y="' + lbl.y + '" text-anchor="middle" fill="#1a3040" font-size="4" font-family="JetBrains Mono, monospace">' + this._esc(lbl.text) + '</text>';
     }
 
     // placed openings as wall markers (v7.86.0)
@@ -6166,7 +6166,7 @@ ${this._renderExcludedEntities(d)}
       const ist = 'width:54px;background:var(--bg);border:1px solid var(--line);color:var(--cyan);border-radius:4px;padding:2px 4px;font-family:var(--font-mono);font-size:11px;';
       if (idx !== _infoIdx) {
         _infoIdx = idx;
-        infoEl.innerHTML = '<b>' + rm.name.toUpperCase() + '</b> \u00b7 ' + rm.type + ' \u00b7 '
+        infoEl.innerHTML = '<b>' + self._esc(rm.name.toUpperCase()) + '</b> \u00b7 ' + self._esc(rm.type) + ' \u00b7 '
           + 'W <input class="fp-dim-in" data-dim="w" type="number" step="0.5" min="1" style="' + ist + '"> ' + uL
           + ' \u00d7 L <input class="fp-dim-in" data-dim="h" type="number" step="0.5" min="1" style="' + ist + '"> ' + uL
           + (rm.type !== 'outdoor' && !(rm.points && rm.points.length >= 3) ? ' <button class="ctrl fp-reshape-btn" style="padding:2px 8px;font-size:9px;margin-left:8px;">\u25c7 Reshape</button>' : '');

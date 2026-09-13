@@ -332,6 +332,29 @@ setTimeout(async () => {
     ["property banner reflects HA home location (not a hardcoded personal default)", !!r.querySelector(".res-banner") && /Springfield IL/.test(r.querySelector("#res-addr")?.textContent || "")],
     ["floor editor exposes export/import + units controls", (() => { const h = el._renderFloorPlanEditor(el._data()); return /id="fp-export"/.test(h) && /class="fp-import-layout"/.test(h) && /id="fp-units"/.test(h); })()],
     ["floor editor: place windows/exterior/cellar/interior openings", (() => { const h = el._renderOpenings("1f"); return /id="op-add-window"/.test(h) && /id="op-add-extdoor"/.test(h) && /id="op-add-cellar"/.test(h) && /id="op-add-intdoor"/.test(h); })()],
+  );
+
+  // ── stored XSS regression #3 (fixed 13 Sept 2026): the floor-plan EDITOR's
+  // SVG builds room-name <text> labels by string concatenation — a room name
+  // is user-entered, so a payload there must render as inert text in the
+  // returned markup, and (once inserted into the DOM the way the real editor
+  // canvas does) must never actually execute. ──
+  window.__xssFired3 = false;
+  const xssRoomName = '</text><image href=x onerror="window.__xssFired3=true"/><text>';
+  const fpXssSvg = el._renderEditableSVG(
+    { ground: { rooms: [{ name: xssRoomName, type: "room", x: 10, y: 10, w: 40, h: 30 }] } },
+    "ground",
+  );
+  const fpXssHost = document.createElement("div");
+  fpXssHost.innerHTML = fpXssSvg;   // same sink the real editor canvas uses
+  checks.push(
+    ["floor-plan room-name XSS payload is escaped in the returned SVG string",
+      // room names render UPPERCASED, so the escaped payload reads &lt;IMAGE...
+      /&lt;image/i.test(fpXssSvg) && !fpXssSvg.includes('<image href=x onerror=')],
+    ["floor-plan room-name XSS payload does not create a live <image> element",
+      !fpXssHost.querySelector("image")],
+    ["floor-plan room-name XSS payload's onerror handler never actually ran",
+      window.__xssFired3 === false],
     ["cased openings: add button + room-scoped no-sensor row", (() => { try { const h = el._renderOpenings("1f"); if (!/id="op-add-cased"/.test(h)) return false; const arr = el._elemsFor("1f"); const n0 = arr.length; arr.push({ id: 'ec', type: 'door', kind: 'cased', wall: 'front', room: '', pos: 0.5, w: 20 }); const h2 = el._renderOpenings("1f"); const entBefore = (h.match(/data-op="entity"/g) || []).length; const entAfter = (h2.match(/data-op="entity"/g) || []).length; arr.length = n0; return /CASED OPENING/.test(h2) && /open passage/.test(h2) && /data-op="room"/.test(h2) && entAfter === entBefore; } catch (e) { return false; } })()],
     ["camera FOV: add button + placement + cone", (() => { try { if (!/id="cam-add"/.test(el._renderCameras("1f"))) return false; const arr = el._camsFor("1f"); const n0 = arr.length; arr.push({ id: 'ct', x: 100, y: 80, angle: 270, fov: 90, range: 55, entity: '', indoor: true }); const h2 = el._renderCameras("1f"); const coneOk = /^M 100 80 L .* A 55 55 .* Z$/.test(el._coneD(arr[arr.length - 1])); const svg = el._renderEditableSVG({ '1f': { rooms: [{ name: 'Dining', x: 50, y: 50, w: 80, h: 60 }] } }, "1f"); arr.length = n0; return /CAM 1/.test(h2) && /INDOOR/.test(h2) && coneOk && /class="fp-cam"/.test(svg) && /fp-cam-cone/.test(svg) && /fp-cam-dot/.test(svg); } catch (e) { return false; } })()],
     ["camera coverage: LOS through openings, walls block", (() => { try { const sp = el._editingPlan, se = el._editingElements; el._editingPlan = { '1f': { rooms: [ { name: 'Dining', x: 0, y: 0, w: 40, h: 40, type: 'room' }, { name: 'Kitchen', x: 40, y: 0, w: 40, h: 40, type: 'room' } ] } }; el._editingElements = { '1f': [ { id: 'o1', type: 'door', kind: 'cased', room: 'Dining', wall: 'right', pos: 0.5, w: 20 } ] }; const cam = { x: 20, y: 20, angle: 0, fov: 170, range: 120, indoor: true }; const withOpen = el._computeCoverage('1f', cam); el._editingElements = { '1f': [] }; const noOpen = el._computeCoverage('1f', cam); el._editingPlan = sp; el._editingElements = se; return withOpen.Kitchen > 0 && !noOpen.Kitchen && withOpen.Dining > 0; } catch (e) { return false; } })()],
@@ -573,6 +596,28 @@ setTimeout(async () => {
     ["XSS payload renders as literal escaped text instead",
       /<img src=x onerror=/.test(logsXss.getElementById("debug-log-entries")?.textContent || "")],
     ["XSS payload's onerror handler never actually ran", window.__xssFired === false],
+  );
+
+  // ── stored XSS regression #2 (fixed 13 Sept 2026): the log FETCH ERROR path
+  // (a callWS rejection, not a returned entry) also built innerHTML by string-
+  // concatenating the raw error object — a different code path than the one
+  // above, so needs its own coverage. ──
+  hass.callWS = async (m) => {
+    if (m.type === "nova/get_debug_log") {
+      throw new Error('<img src=x onerror="window.__xssFired2=true">');
+    }
+    return _realCallWS(m);
+  };
+  window.__xssFired2 = false;
+  await el._fetchDebugLog();
+  hass.callWS = _realCallWS;
+  const logsErrXss = el.shadowRoot;
+  checks.push(
+    ["fetch-error XSS payload does not create a live <img> element",
+      !logsErrXss.querySelector("#debug-log-entries img")],
+    ["fetch-error XSS payload renders as literal escaped text instead",
+      /<img src=x onerror=/.test(logsErrXss.getElementById("debug-log-entries")?.textContent || "")],
+    ["fetch-error XSS payload's onerror handler never actually ran", window.__xssFired2 === false],
   );
 
   // ── pattern-engine suggestion: approve installs the automation (v6.52.0) ──
