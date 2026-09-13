@@ -1,3 +1,7 @@
+## [7.96.0] — the new look gets a Logs tab
+
+A third top-level tab alongside Command Center and Settings: the same System Log Classic has — search, ten category filter chips (CONV/LOCAL/AGENT/GATE/DEDUP/CLASSIFY/CAMERA/ROUTE/ERROR/ALL), and a live-updating entry list, reading from the same `nova/get_debug_log` call. Ported with the same care Classic's own version has: log content (timestamps, categories, messages) can carry entity names, states, or model output Nova doesn't fully control, so every field is escaped before it reaches the page — including on the fetch-error path, a real stored-XSS class of bug Classic fixed twice before. Residence, Intrusion, Suggestions, and Memory still open in Classic.
+
 ## [7.95.3] — a new logo, matching the new look's own branding
 
 Replaced the cyan sparkle icon (which matched Classic's old visual style) with a warm ember/gold "stellar core" mark — the same radial-gradient sphere already used as the new Command Center look's own brand mark. Shows in Settings → Devices & Services → Nova and anywhere else Home Assistant renders integration brand icons. Note: HACS's own download/update list has a known bug ([hacs/integration#5223](https://github.com/hacs/integration/issues/5223)) where it queries the old public brand CDN instead of the local inline-brand proxy custom integrations use since HA 2026.3, so it may still show "icon not available" specifically in that one list — that's a HACS-side issue, not something fixable from here.

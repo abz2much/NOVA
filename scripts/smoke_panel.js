@@ -1680,6 +1680,80 @@ setTimeout(async () => {
   checks.push(["settings tab: Document Library delete calls nova/documents delete (window.confirm stubbed to auto-confirm)",
     _docDeleteCalls.includes("furnace_manual.pdf")]);
 
+  // ── New look: Logs tab (ported from Classic's own System Log) ──
+  const logsTabBtn = Array.from(newRoot.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === "logs");
+  logsTabBtn.click();
+  await new Promise(r => setTimeout(r, 20));
+  sRoot = elNew.shadowRoot;
+  checks.push(
+    ["logs tab renders all mock entries with a count",
+      sRoot.querySelectorAll(".new-log-entry").length === 3
+      && /3 entries/.test(sRoot.getElementById("newLogCount")?.textContent || "")],
+    ["logs tab renders the category filter chips",
+      sRoot.querySelectorAll(".new-log-filter").length === 10],
+  );
+  const errFilterBtn = sRoot.querySelector('.new-log-filter[data-filter="ERROR"]');
+  errFilterBtn.click();
+  await new Promise(r => setTimeout(r, 10));
+  sRoot = elNew.shadowRoot;
+  checks.push(["logs tab: category filter narrows to matching entries and marks itself active",
+    sRoot.querySelectorAll(".new-log-entry").length === 1
+    && /camera\.front unavailable/.test(sRoot.getElementById("newLogEntries")?.textContent || "")
+    && sRoot.querySelector('.new-log-filter[data-filter="ERROR"]')?.classList.contains("mode-chip-on")
+    && !sRoot.querySelector('.new-log-filter[data-filter="all"]')?.classList.contains("mode-chip-on")]);
+  sRoot.querySelector('.new-log-filter[data-filter="all"]').click();
+  await new Promise(r => setTimeout(r, 10));
+
+  const logSearchInput = sRoot.getElementById("newLogSearch");
+  logSearchInput.value = "porch";
+  logSearchInput.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("input", { bubbles: true }));
+  await new Promise(r => setTimeout(r, 250)); // debounced 200ms, same as Classic
+  sRoot = elNew.shadowRoot;
+  checks.push(["logs tab: search narrows entries and updates the count",
+    sRoot.querySelectorAll(".new-log-entry").length === 2
+    && !/camera\.front unavailable/.test(sRoot.getElementById("newLogEntries")?.textContent || "")
+    && /2 of 3/.test(sRoot.getElementById("newLogCount")?.textContent || "")]);
+  logSearchInput.value = "xyz-nonsense-term";
+  logSearchInput.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("input", { bubbles: true }));
+  await new Promise(r => setTimeout(r, 250));
+  checks.push(["logs tab: no-match search shows an honest empty state",
+    /No entries match/.test(sRoot.getElementById("newLogEntries")?.textContent || "")]);
+  logSearchInput.value = "";
+  logSearchInput.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("input", { bubbles: true }));
+  await new Promise(r => setTimeout(r, 250));
+
+  // Stored-XSS regressions ported verbatim from Classic (fixed 11+13 Sept
+  // 2026 there) — log content (ts/cat/msg) is attacker/LLM-influenced, so
+  // it MUST go through this._esc() before innerHTML. Two paths: a
+  // malicious entry in a normal response, and a malicious error message
+  // on a failed fetch.
+  window.__xssFiredNew = false;
+  const originalCallWS = hass.callWS;
+  hass.callWS = async (m) => {
+    if (m.type === "nova/get_debug_log") {
+      return { entries: [{ ts: "09:00:00", cat: "CONV", msg: '<img src=x onerror="window.__xssFiredNew=true">' }] };
+    }
+    return originalCallWS(m);
+  };
+  await elNew._fetchDebugLog();
+  sRoot = elNew.shadowRoot;
+  checks.push(["logs tab: stored-XSS in a log entry is escaped, not executed",
+    !sRoot.getElementById("newLogEntries")?.querySelector("img")
+    && /onerror/.test(sRoot.getElementById("newLogEntries")?.textContent || "")
+    && window.__xssFiredNew === false]);
+
+  window.__xssFiredNew2 = false;
+  hass.callWS = async (m) => {
+    if (m.type === "nova/get_debug_log") throw new Error('<img src=x onerror="window.__xssFiredNew2=true">');
+    return originalCallWS(m);
+  };
+  await elNew._fetchDebugLog();
+  sRoot = elNew.shadowRoot;
+  checks.push(["logs tab: stored-XSS in a fetch-error message is escaped, not executed",
+    !sRoot.getElementById("newLogEntries")?.querySelector("img")
+    && window.__xssFiredNew2 === false]);
+  hass.callWS = originalCallWS;
+
   // Switching tabs back and forth must not leak the core's animation loop
   // (a real bug caught before shipping — _render() tearing down the canvas
   // without cancelling its requestAnimationFrame loop first). jsdom has no

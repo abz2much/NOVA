@@ -42,7 +42,9 @@ class NovaCommandCenterNew extends HTMLElement {
     this._particles = [];
     this._current = { speed: 0.20, count: 70, radiusMul: 1, glow: 0.55, hot: 0.35, flare: 0.05 };
     this._camOpen = false;
-    this._currentTab = "dashboard"; // "dashboard" | "settings"
+    this._currentTab = "dashboard"; // "dashboard" | "settings" | "logs"
+    this._logFilter = "all";
+    this._logSearch = "";
     this._settingsSection = "general";
     this._settingsSearch = "";
   }
@@ -108,6 +110,7 @@ class NovaCommandCenterNew extends HTMLElement {
     try {
       this._mode = await this._hass.callWS({ type: "nova/mode", action: "status" });
     } catch (_) { this._mode = null; }
+    if (this._currentTab === "logs") this._fetchDebugLog();
     this._detectFlare();
     this._renderData();
   }
@@ -174,12 +177,13 @@ class NovaCommandCenterNew extends HTMLElement {
             <div class="brand-mark"></div>
             <div>
               <div class="brand-name">Nova</div>
-              <div class="brand-tag">${tab === "settings" ? "Settings" : "Command Center"}</div>
+              <div class="brand-tag">${tab === "settings" ? "Settings" : tab === "logs" ? "Logs" : "Command Center"}</div>
             </div>
           </div>
           <nav class="top-nav">
             <button class="nav-tab${tab === "dashboard" ? " active" : ""}" data-tab="dashboard">Command Center</button>
             <button class="nav-tab${tab === "settings" ? " active" : ""}" data-tab="settings">Settings</button>
+            <button class="nav-tab${tab === "logs" ? " active" : ""}" data-tab="logs">Logs</button>
           </nav>
           <div class="top-controls">
             <div class="look-switch">
@@ -192,9 +196,9 @@ class NovaCommandCenterNew extends HTMLElement {
           </div>
         </div>
 
-        ${tab === "settings" ? this._htmlSettings() : this._htmlDashboard()}
+        ${tab === "settings" ? this._htmlSettings() : tab === "logs" ? this._htmlLogs() : this._htmlDashboard()}
 
-        <div class="footnote">NOVA — NEW LOOK · PREVIEW · RESIDENCE, INTRUSION, SUGGESTIONS, LOGS AND MEMORY STILL LIVE IN CLASSIC</div>
+        <div class="footnote">NOVA — NEW LOOK · PREVIEW · RESIDENCE, INTRUSION, SUGGESTIONS AND MEMORY STILL LIVE IN CLASSIC</div>
       </div>
     `;
   }
@@ -237,6 +241,133 @@ class NovaCommandCenterNew extends HTMLElement {
           </div>
         </div>
     `;
+  }
+
+  // ─── Logs ─────────────────────────────────────────────────────────────
+  // Ported from Classic's own _fetchDebugLog (nova-panel.js) — same single
+  // nova/get_debug_log call, same client-side category+search filtering,
+  // and the same escaping discipline: e.ts/e.cat/e.msg are log CONTENT
+  // (entity names, states, model output can end up in them), so they are
+  // attacker/LLM-influenced and go through this._esc() before innerHTML —
+  // this is a real fixed-XSS surface in Classic, not decorative caution.
+  static LOG_FILTERS = ["all", "CONV", "LOCAL", "AGENT", "GATE", "DEDUP", "CLASSIFY", "CAMERA", "ROUTE", "ERROR"];
+  static LOG_CATEGORIES = {
+    CONV: { color: "#5fd0e0", icon: "💬" },
+    LOCAL: { color: "#5fbf7a", icon: "⚡" },
+    AGENT: { color: "var(--gold)", icon: "🤖" },
+    ROUTE: { color: "var(--gold)", icon: "🔀" },
+    CLASSIFY: { color: "#9d8cff", icon: "🏷️" },
+    REASON: { color: "#c39dff", icon: "🧠" },
+    TTS: { color: "#5fd0e0", icon: "🔊" },
+    ERROR: { color: "#ff6b81", icon: "❌" },
+    GATE: { color: "var(--ink-faint)", icon: "🚧" },
+    DEDUP: { color: "var(--ink-faint)", icon: "🔇" },
+    CAMERA: { color: "#5fbf7a", icon: "📷" },
+  };
+
+  _htmlLogs() {
+    const filterChips = NovaCommandCenterNew.LOG_FILTERS.map(f =>
+      `<button class="mode-chip new-log-filter${(this._logFilter || "all") === f ? " mode-chip-on" : ""}" data-filter="${f}">${f.toUpperCase()}</button>`).join("");
+    return `
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">System Log</div>
+            <div class="panel-meta">Nova internal</div>
+          </div>
+          <div class="cfg-row">
+            <input id="newLogSearch" class="cfg-field" style="flex:1" type="text" placeholder="search…" autocomplete="off" value="${this._esc(this._logSearch || "")}">
+          </div>
+          <div class="mode-grid">${filterChips}</div>
+          <div class="toggle-desc" id="newLogCount" style="margin:8px 0"></div>
+          <div id="newLogEntries" class="new-log-entries">
+            <div class="stub-body">Loading…</div>
+          </div>
+        </div>
+    `;
+  }
+
+  async _fetchDebugLog() {
+    if (!this._hass) return;
+    try {
+      const result = await this._hass.callWS({ type: "nova/get_debug_log" });
+      const entries = result?.entries || [];
+      const container = this.shadowRoot?.getElementById("newLogEntries");
+      if (!container) return;
+      if (!entries.length) {
+        container.innerHTML = `<div class="stub-body">No entries yet. Talk to Nova to generate log entries.</div>`;
+        return;
+      }
+      const cc = NovaCommandCenterNew.LOG_CATEGORIES;
+      const activeFilter = this._logFilter || "all";
+      const categoryFiltered = activeFilter === "all" ? entries : entries.filter(e => e.cat === activeFilter);
+      const search = (this._logSearch || "").trim().toLowerCase();
+      const filtered = search
+        ? categoryFiltered.filter(e => (e.msg || "").toLowerCase().includes(search) || (e.cat || "").toLowerCase().includes(search))
+        : categoryFiltered;
+
+      const countEl = this.shadowRoot?.getElementById("newLogCount");
+      if (countEl) {
+        countEl.textContent = search || activeFilter !== "all"
+          ? `${filtered.length} of ${entries.length}`
+          : `${entries.length} entries`;
+      }
+
+      const ordered = filtered.slice().reverse();
+
+      // Skip the rebuild when nothing changed (same signature trick as
+      // Classic) — avoids flicker/scroll-jump on the shared 20s poll.
+      const first = ordered[0];
+      const last = ordered[ordered.length - 1];
+      const sig = ordered.length + "|" + (first ? first.ts + first.msg : "") + "|" + (last ? last.ts + last.msg : "");
+      if (sig === this._lastLogSig && activeFilter === this._lastLogFilter && search === this._lastLogSearch) {
+        return;
+      }
+      const filterChanged = activeFilter !== this._lastLogFilter || search !== this._lastLogSearch;
+      const nearTop = container.scrollTop < 40;
+      const prevTop = container.scrollTop;
+
+      container.innerHTML = ordered.length ? ordered.map(e => {
+        const cat = cc[e.cat] || { color: "var(--ink-dim)", icon: "•" };
+        const isError = e.cat === "ERROR" || (e.msg || "").toLowerCase().includes("error") || (e.msg || "").toLowerCase().includes("failed");
+        const safeCat = this._esc(e.cat);
+        return `<div class="new-log-entry${isError ? " new-log-entry-error" : ""}">
+          <span class="new-log-ts">${this._esc(e.ts)}</span>
+          <span class="new-log-cat" style="color:${cat.color}">${cat.icon} ${safeCat}</span>
+          <span class="new-log-msg">${this._esc(e.msg)}</span>
+        </div>`;
+      }).join("") : `<div class="stub-body">No entries match${search ? ` "${this._esc(search)}"` : ""}${activeFilter !== "all" ? ` in ${activeFilter}` : ""}.</div>`;
+
+      this._lastLogSig = sig;
+      this._lastLogFilter = activeFilter;
+      this._lastLogSearch = search;
+
+      container.scrollTop = (filterChanged || nearTop) ? 0 : prevTop;
+    } catch (err) {
+      const c = this.shadowRoot?.getElementById("newLogEntries");
+      if (c) c.innerHTML = `<div class="new-log-entry-error" style="padding:12px">Error loading logs: ${this._esc(err)}</div>`;
+    }
+  }
+
+  _wireLogs() {
+    const root = this.shadowRoot;
+    root.querySelectorAll(".new-log-filter").forEach(btn => {
+      btn.addEventListener("click", () => {
+        this._logFilter = btn.getAttribute("data-filter");
+        root.querySelectorAll(".new-log-filter").forEach(b => b.classList.toggle("mode-chip-on", b === btn));
+        this._fetchDebugLog();
+      });
+    });
+    const logSearch = root.getElementById("newLogSearch");
+    if (logSearch) {
+      logSearch.addEventListener("input", (e) => {
+        clearTimeout(this._logSearchDebounce);
+        const val = e.currentTarget.value;
+        this._logSearchDebounce = setTimeout(() => {
+          this._logSearch = val;
+          this._fetchDebugLog();
+        }, 200);
+      });
+    }
   }
 
   // ─── Settings ─────────────────────────────────────────────────────────
@@ -1857,6 +1988,7 @@ class NovaCommandCenterNew extends HTMLElement {
     });
 
     if (this._currentTab === "settings") this._wireSettings();
+    if (this._currentTab === "logs") { this._wireLogs(); this._fetchDebugLog(); }
   }
 
   _wireSettings() {
@@ -2427,6 +2559,14 @@ class NovaCommandCenterNew extends HTMLElement {
       .camera-slot{aspect-ratio:16/10;border-radius:9px;background:var(--surface-2);border:1px solid var(--line-soft);
         display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:10px;color:var(--ink-faint);text-align:center;padding:6px}
       .footnote{max-width:1100px;margin:20px auto 0;text-align:center;font-family:var(--font-mono);font-size:10px;color:var(--ink-faint);letter-spacing:.05em}
+      .new-log-entries{max-height:65vh;overflow-y:auto;display:flex;flex-direction:column;gap:1px;margin-top:8px}
+      .new-log-entry{display:grid;grid-template-columns:70px 110px 1fr;gap:10px;padding:7px 8px;
+        font-family:var(--font-mono);font-size:11px;border-bottom:1px solid var(--line-soft);align-items:baseline}
+      .new-log-entry-error{background:#ff5a5a14}
+      .new-log-ts{color:var(--ink-faint)}
+      .new-log-cat{white-space:nowrap;font-weight:600}
+      .new-log-msg{color:var(--ink-dim);word-break:break-word}
+      @media (max-width:560px){.new-log-entry{grid-template-columns:1fr;gap:2px}}
 
       /* Top nav (v7.94.0) */
       .top-nav{display:flex;gap:4px;background:var(--surface);border:1px solid var(--line-soft);border-radius:11px;padding:4px}
