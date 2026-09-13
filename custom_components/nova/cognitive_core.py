@@ -106,6 +106,19 @@ def _persona():
     from . import persona
     return persona
 
+
+def _live_honorific(hass) -> str:
+    """Presence-aware honorific (Phase C), resolved fresh every call — never
+    cache this on a long-lived object, since who's home changes over time.
+    Every call site below already fetched honorific fresh from self.config
+    on each tick/event (just not presence-aware), so swapping to this here
+    is a straight replacement, not a new staleness risk."""
+    try:
+        from . import honorific as honorific_mod
+        return honorific_mod.effective_honorific(hass)
+    except Exception:
+        return "sir"
+
 # ── Proactive intelligence (v5.9.07) ────────────────────────────────────────
 PROACTIVE_CHECK_INTERVAL = 120   # 2 min between comfort/efficiency scans
 PROACTIVE_OFFER_COOLDOWN = 1800  # 30 min before re-offering the same thing
@@ -364,7 +377,7 @@ class SafetyManager:
 
         temp_f = _temp_to_f(outdoor_temp, unit)
         reading = _fmt_temp(outdoor_temp, unit)
-        honorific = self.config.get("honorific", "sir")
+        honorific = _live_honorific(self.hass)  # Phase C: presence-aware
         lang = _hass_lang(self.hass)
 
         if temp_f <= FREEZE_CRITICAL_TEMP_F:
@@ -674,7 +687,7 @@ class SafetyManager:
         if not motion:
             return None
         eid, where = motion[0]
-        honorific = self.config.get("honorific", "sir")
+        honorific = _live_honorific(self.hass)  # Phase C: presence-aware
 
         if away:
             armed = False
@@ -732,7 +745,7 @@ class SafetyManager:
             return None
         try:
             from .camera import async_analyze_camera, _FakeCall
-            honorific = self.config.get("honorific", "sir")
+            honorific = _live_honorific(self.hass)  # Phase C: presence-aware
             prompt = (
                 "Security check. Look at this indoor camera frame. Is there a "
                 "PERSON (a human being) actually present in the frame right now? "
@@ -938,7 +951,7 @@ class SafetyManager:
         # motion with no real route through the house (v6.74.0).
         if not inv["escalated"] and confirmed:
             inv["escalated"] = True
-            honorific = self.config.get("honorific", "sir")
+            honorific = _live_honorific(self.hass)  # Phase C: presence-aware
             snap = None
             if cam_entity:
                 try:
@@ -987,7 +1000,7 @@ class SafetyManager:
             # Unanswered, still some motion, but NO confirming inward route.
             # Don't cry "intrusion confirmed" — send a soft check-in instead.
             inv["escalated"] = True            # don't repeat this either
-            honorific = self.config.get("honorific", "sir")
+            honorific = _live_honorific(self.hass)  # Phase C: presence-aware
             # Learned damping applies here too: this is a LOW-CONFIDENCE alert
             # (nothing was confirmed), so a pattern repeatedly labelled a false
             # alarm stays quiet (v6.76.0).
@@ -1058,7 +1071,7 @@ class SafetyManager:
     async def _nighttime_lockdown(self) -> list[dict]:
         """Check and secure all locks and doors during sleep."""
         actions = []
-        honorific = self.config.get("honorific", "sir")
+        honorific = _live_honorific(self.hass)  # Phase C: presence-aware
 
         # Check locks
         unlocked = []
@@ -1403,7 +1416,7 @@ class LockdownManager:
         self._secured_by_us = set()
         self._alerted = set()
         self._last_breach_alert = 0.0
-        honorific = self.config.get("honorific", "sir")
+        honorific = _live_honorific(self.hass)  # Phase C: presence-aware
 
         # 1) Lock every closed-but-unlocked lock.
         locked = await self._lock_all()
@@ -1463,7 +1476,7 @@ class LockdownManager:
         self.exempt_windows = set()
         self._secured_by_us = set()
         self._alerted = set()
-        honorific = self.config.get("honorific", "sir")
+        honorific = _live_honorific(self.hass)  # Phase C: presence-aware
         _LOGGER.warning("Lockdown DISENGAGED (%s, manual=%s, auto_suppressed=%s)",
                         reason, manual, self._auto_suppressed)
         await self._persist()
@@ -1498,7 +1511,7 @@ class LockdownManager:
         if old is not None and not self._is_secure(dom, old.state):
             return None  # was already unsecure — not a fresh transition
         name = new.attributes.get("friendly_name", eid)
-        honorific = self.config.get("honorific", "sir")
+        honorific = _live_honorific(self.hass)  # Phase C: presence-aware
 
         if not self._can_secure(dom, dc):
             # Nothing Nova can do about a contact sensor → assume intentional.
@@ -1549,7 +1562,7 @@ class LockdownManager:
             if eid in self._alerted:
                 return
             self._alerted.add(eid)
-            honorific = self.config.get("honorific", "sir")
+            honorific = _live_honorific(self.hass)  # Phase C: presence-aware
             await _emit_action(self.hass, self.config, {
                 "type": "lockdown_breach", "urgency": "critical", "auto_act": True,
                 "message": _persona().lead_in(honorific,
@@ -1692,7 +1705,7 @@ class ProactiveManager:
             # Cooldown is marked by the tick only when this offer is actually
             # delivered (see _tick), so deferred offers re-surface naturally.
 
-            honorific = self.config.get("honorific", "sir")
+            honorific = _live_honorific(self.hass)  # Phase C: presence-aware
             area_name = self._area_name(area_id)
             return {
                 "type": "proactive_lights",
@@ -1739,7 +1752,7 @@ class ProactiveManager:
             if self._on_cooldown(key):
                 return None
 
-            honorific = self.config.get("honorific", "sir")
+            honorific = _live_honorific(self.hass)  # Phase C: presence-aware
             name = s.attributes.get("friendly_name", s.entity_id)
             area_name = self._area_name(area_id)
             return {
@@ -1771,7 +1784,7 @@ class ProactiveManager:
             if self._on_cooldown(key):
                 return None
 
-            honorific = self.config.get("honorific", "sir")
+            honorific = _live_honorific(self.hass)  # Phase C: presence-aware
             name = s.attributes.get("friendly_name", s.entity_id)
             return {
                 "type": "proactive_hvac",
@@ -2632,7 +2645,7 @@ def _make_followup_runner(hass, config):
             model = config.get(CONF_MODEL, DEFAULT_MODEL)
         except Exception:
             model = config.get("model", "")
-        honorific = config.get("honorific", "sir")
+        honorific = _live_honorific(hass)  # Phase C: presence-aware
         report_to = f"to {honorific} " if honorific else ""
         persona = (
             f"You are Nova. You scheduled this follow-up yourself earlier and "

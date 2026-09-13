@@ -102,8 +102,15 @@ def _as_float(value: object) -> float | None:
 
 
 def _resolve_honorific(hass: HomeAssistant, entry: ConfigEntry) -> str:
-    from . import nova_config
-    return nova_config.runtime_get(hass, entry, CONF_HONORIFIC, DEFAULT_HONORIFIC)
+    """Presence-aware honorific (Phase C) — resolved fresh on every call, not
+    cached, so a caller in a recurring callback (like _run_audit below) must
+    call this again each time rather than reusing a value captured once."""
+    try:
+        from . import honorific as honorific_mod
+        return honorific_mod.effective_honorific(hass)
+    except Exception:
+        from . import nova_config
+        return nova_config.runtime_get(hass, entry, CONF_HONORIFIC, DEFAULT_HONORIFIC)
 
 
 def _resolve_tts_entity(hass: HomeAssistant) -> str:
@@ -550,7 +557,6 @@ async def async_setup_proactive_audio(hass: HomeAssistant, entry: ConfigEntry) -
     # Boot guard: gate nova.speak until this setup completes (reload-safe).
     _boot_begin(hass)
 
-    honorific = _resolve_honorific(hass, entry)
     fault_log = FaultLog()
     predictor = PredictiveHabitMatrix()
 
@@ -561,6 +567,10 @@ async def async_setup_proactive_audio(hass: HomeAssistant, entry: ConfigEntry) -
         if entry_data.get("_audit_running"):
             return  # don't overlap a slow announcement with the next tick
         entry_data["_audit_running"] = True
+        # Resolved fresh every tick, not once at setup (Phase C) — this
+        # runs on a recurring timer for as long as HA is up, and who's
+        # actually home changes over that time.
+        honorific = _resolve_honorific(hass, entry)
         try:
             verdict = InfrastructureTriage(hass, honorific=honorific).evaluate()
             if verdict["alert_required"]:

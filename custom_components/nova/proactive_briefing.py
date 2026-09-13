@@ -214,7 +214,11 @@ async def _trigger_briefing(
         return
 
     _STATE.last_briefing_time = now
-    honorific = config.get("honorific", "sir")
+    try:
+        from . import honorific as honorific_mod
+        honorific = honorific_mod.effective_honorific(hass)  # Phase C: presence-aware
+    except Exception:
+        honorific = config.get("honorific", "sir")
 
     # Gather camera snapshot summary
     snap_summary = get_snapshot_summary(hours=4)

@@ -80,7 +80,7 @@ class NovaSentinel:
     ) -> None:
         self.hass        = hass
         self._groq       = groq_client
-        self._honorific  = honorific
+        self._honorific  = honorific  # constructor-time fallback only — see _live_honorific()
         self._rules      = rules or DEFAULT_RULES
         self._entry      = entry
         self._active     = False
@@ -242,6 +242,21 @@ class NovaSentinel:
 
     # ── Announcement ──────────────────────────────────────────────────────────
 
+    def _live_honorific(self) -> str:
+        """Presence-aware honorific, resolved fresh on every alert (Phase C).
+
+        NovaSentinel is a long-lived object built once in async_setup_entry —
+        self._honorific is whatever was configured at boot and would never
+        reflect who's actually home by the time a rule fires hours later.
+        This looks it up live each time instead; self._honorific stays only
+        as the fallback if the live lookup itself fails.
+        """
+        try:
+            from . import honorific as honorific_mod
+            return honorific_mod.effective_honorific(self.hass)
+        except Exception:
+            return self._honorific
+
     async def _announce_rule(self, entity_id: str, rule: dict, minutes: int) -> None:
         # Excluded entities take no part in Sentinel rules — this also silences an
         # already-learnt entity the moment it's excluded, without purging state.
@@ -290,6 +305,7 @@ class NovaSentinel:
 
         state = self.hass.states.get(entity_id)
         friendly_name = state.attributes.get("friendly_name", entity_id) if state else entity_id
+        honorific = self._live_honorific()
 
         if "message" in rule:
             # honorific may be "" once nobody specific is home to address
@@ -305,15 +321,15 @@ class NovaSentinel:
             if tmpl.startswith(prefix):
                 body = tmpl[len(prefix):].format(
                     friendly_name=friendly_name, minutes=minutes)
-                if self._honorific:
-                    text = f"{self._honorific}, {body}"
+                if honorific:
+                    text = f"{honorific}, {body}"
                 else:
                     text = body[0].upper() + body[1:] if body else body
             else:
                 text = tmpl.format(
                     friendly_name=friendly_name,
                     minutes=minutes,
-                    honorific=self._honorific,
+                    honorific=honorific,
                 )
         else:
             text = await self._groq_line(entity_id, friendly_name, rule, minutes)
@@ -353,10 +369,11 @@ class NovaSentinel:
         self, entity_id: str, friendly_name: str, rule: dict, minutes: int
     ) -> str:
         """Generate a Nova-voiced alert via Groq."""
+        honorific = self._live_honorific()
         # honorific may be "" once nobody specific is home to address (see
         # honorific.py) — fall back to a household-level phrasing rather
         # than an empty subject ("telling  that").
-        who = self._honorific or "the household"
+        who = honorific or "the household"
         prompt = (
             f"Generate one concise Nova alert (under 25 words) telling "
             f"{who} that '{friendly_name}' has been "
@@ -369,7 +386,7 @@ class NovaSentinel:
                 "Your prime directive guides what deserves flagging — protect, steward, "
                 "anticipate. Deliver the alert directly, no preamble."
             )
-            system = build_system_prompt(self.hass, self._honorific, task)
+            system = build_system_prompt(self.hass, honorific, task)
             result = await self.hass.async_add_executor_job(
                 lambda: self._groq.chat(
                     messages=[
@@ -382,8 +399,8 @@ class NovaSentinel:
             return result["text"].strip()
         except Exception as exc:  # pylint: disable=broad-except
             _LOGGER.warning("Nova Sentinel LLM error: %s", exc)
-            if self._honorific:
-                return f"{self._honorific}, {friendly_name} requires your attention."
+            if honorific:
+                return f"{honorific}, {friendly_name} requires your attention."
             return f"{friendly_name} requires your attention."
 
     # ── Entity helpers ────────────────────────────────────────────────────────

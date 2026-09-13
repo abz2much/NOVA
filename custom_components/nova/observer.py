@@ -34,7 +34,7 @@ from homeassistant.util import dt as dt_util
 
 from . import audio_routing, classifier, output_gate, reasoning_loop, sleep_detection
 from .const import (
-    CONF_HONORIFIC, CONF_NOTIFY_SERVICE,
+    CONF_NOTIFY_SERVICE,
     DEFAULT_OBSERVER_QUIET_END, DEFAULT_OBSERVER_QUIET_START,
 )
 from .llm_provider import create_tier_provider
@@ -166,6 +166,16 @@ class _ObserverState:
 
 
 _STATE = _ObserverState()
+
+
+def _live_honorific(hass: HomeAssistant) -> str:
+    """Presence-aware honorific (Phase C), resolved fresh on every event —
+    see honorific.py."""
+    try:
+        from . import honorific as honorific_mod
+        return honorific_mod.effective_honorific(hass)
+    except Exception:
+        return "sir"
 
 
 # ─── Pre-filter ──────────────────────────────────────────────────────────────
@@ -631,7 +641,7 @@ async def _process_event(event: Event) -> None:
         decision = await reasoning_loop.decide(
             _STATE.hass,
             _STATE.reasoning_provider,
-            honorific=_STATE.config.get(CONF_HONORIFIC, "sir"),
+            honorific=_live_honorific(_STATE.hass),  # Phase C: presence-aware
             event_summary=(
                 f"{friendly_name} ({entity_id})"
                 f"{' in ' + entity_area_id if entity_area_id else ''} "

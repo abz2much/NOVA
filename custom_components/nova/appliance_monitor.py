@@ -995,7 +995,11 @@ async def _announce_done(sensor: _SensorState, appliance_label: str) -> None:
         )
         return
 
-    honorific = config.get("honorific", "sir")
+    try:
+        from . import honorific as honorific_mod
+        honorific = honorific_mod.effective_honorific(hass)  # Phase C: presence-aware
+    except Exception:
+        honorific = config.get("honorific", "sir")
     nice_name = appliance_label.replace("_", " ").title()
     friendly = sensor.friendly_name or nice_name
 

@@ -75,6 +75,22 @@ def _prewarm_persisted_state() -> None:
     except Exception:
         pass
 
+
+def _live_honorific(hass: HomeAssistant) -> str:
+    """Presence-aware honorific (Phase C), resolved fresh on every call.
+    Every call site below already re-fetched entry.options/data on each
+    event/service-call/tick (never cached across them), so this is a
+    straight replacement — solo occupant gets their own honorific (or the
+    global default), nobody/multiple home gets none at all. See
+    honorific.py. Falls back to DEFAULT_HONORIFIC only if the lookup
+    itself errors."""
+    try:
+        from . import honorific as honorific_mod
+        return honorific_mod.effective_honorific(hass)
+    except Exception:
+        return DEFAULT_HONORIFIC
+
+
 PLATFORMS = ["conversation"]
 # Config-entry only (v6.45.0): warns users who still have `nova:` in YAML.
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -175,7 +191,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         return default
 
     def _auto_fire(entity_id: str, reason: str, ctx: str, doorbell: bool = False) -> None:
-        honorific = entry.options.get(CONF_HONORIFIC, entry.data.get(CONF_HONORIFIC, DEFAULT_HONORIFIC))
+        honorific = _live_honorific(hass)  # Phase C: presence-aware
         tts = _get_tts(hass, entry, context=ctx)
         spk = _get_speakers(hass, entry)
         hass.async_create_task(
@@ -206,7 +222,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     if now - _auto_cd.get(entity_id, float("-inf")) < 180.0:
                         return
                     _auto_cd[entity_id] = now
-                    honorific = entry.options.get(CONF_HONORIFIC, entry.data.get(CONF_HONORIFIC, DEFAULT_HONORIFIC))
+                    honorific = _live_honorific(hass)  # Phase C: presence-aware
                     from .camera import async_visitor_observation
                     hass.async_create_task(
                         async_visitor_observation(hass, llm_client, honorific, entity_id)
@@ -274,7 +290,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             return
         try:
             from . import package_monitor
-            honorific = entry.options.get(CONF_HONORIFIC, entry.data.get(CONF_HONORIFIC, DEFAULT_HONORIFIC))
+            honorific = _live_honorific(hass)  # Phase C: presence-aware
             tts = _get_tts(hass, entry, context="package")
             spk = _get_speakers(hass, entry)
             report = await package_monitor.periodic_check(
@@ -313,7 +329,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async def _hazard_tick(_now) -> None:
         try:
             from . import hazard_monitor
-            honorific = entry.options.get(CONF_HONORIFIC, entry.data.get(CONF_HONORIFIC, DEFAULT_HONORIFIC))
+            honorific = _live_honorific(hass)  # Phase C: presence-aware
             res = await hazard_monitor.periodic_check(hass, honorific)
             if res.get("fired"):
                 _LOGGER.debug("Nova hazard sweep: %s", res)
@@ -480,9 +496,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Reminder watcher — checks every 30 seconds for due reminders
     reminder_watcher = ReminderWatcher(
         hass,
-        honorific_getter=lambda: entry.options.get(
-            CONF_HONORIFIC, entry.data.get(CONF_HONORIFIC, DEFAULT_HONORIFIC)
-        ),
+        honorific_getter=lambda: _live_honorific(hass),  # Phase C: presence-aware
         tts_getter=lambda: _get_tts(hass, entry, context="reminder"),
         speakers_getter=lambda: _get_speakers(hass, entry),
     )
@@ -824,7 +838,7 @@ def _register_services(
     """Register all Nova services. Called once per entry setup."""
 
     async def _camera(call: ServiceCall) -> None:
-        honorific = entry.options.get(CONF_HONORIFIC, entry.data.get(CONF_HONORIFIC, DEFAULT_HONORIFIC))
+        honorific = _live_honorific(hass)  # Phase C: presence-aware
         tts = _get_tts(hass, entry, context="camera")
         spk = _get_speakers(hass, entry)
         await async_analyze_camera(hass, call, groq_client, honorific, tts, spk)
@@ -840,7 +854,7 @@ def _register_services(
 
     async def _analyze_on_event(call: ServiceCall) -> None:
         """Push-triggered analyze — intended for doorbell/motion automations."""
-        honorific = entry.options.get(CONF_HONORIFIC, entry.data.get(CONF_HONORIFIC, DEFAULT_HONORIFIC))
+        honorific = _live_honorific(hass)  # Phase C: presence-aware
         tts = _get_tts(hass, entry, context="doorbell")
         spk = _get_speakers(hass, entry)
         entity_id = call.data["entity_id"]
@@ -861,7 +875,7 @@ def _register_services(
     async def _train_backlog(call: ServiceCall) -> None:
         """Analyse the Nest doorbell's recorded event history into the training
         log. Best-effort; reports how many events it managed to analyse."""
-        honorific = entry.options.get(CONF_HONORIFIC, entry.data.get(CONF_HONORIFIC, DEFAULT_HONORIFIC))
+        honorific = _live_honorific(hass)  # Phase C: presence-aware
         limit = int(call.data.get("limit", 40) or 40)
         from . import doorbell_training
         from .camera import async_analyze_camera, _FakeCall, active_cameras, active_camera_states
@@ -914,7 +928,7 @@ def _register_services(
 
     # ── Package / mail — on-demand check ───────────────────────────────────────
     async def _check_packages(call: ServiceCall) -> None:
-        honorific = entry.options.get(CONF_HONORIFIC, entry.data.get(CONF_HONORIFIC, DEFAULT_HONORIFIC))
+        honorific = _live_honorific(hass)  # Phase C: presence-aware
         tts = _get_tts(hass, entry, context="package")
         spk = _get_speakers(hass, entry)
         from . import package_monitor
@@ -933,7 +947,7 @@ def _register_services(
 
     # ── Briefing ──────────────────────────────────────────────────────────────
     async def _briefing(call: ServiceCall) -> None:
-        honorific = entry.options.get(CONF_HONORIFIC, entry.data.get(CONF_HONORIFIC, DEFAULT_HONORIFIC))
+        honorific = _live_honorific(hass)  # Phase C: presence-aware
         tts = _get_tts(hass, entry, context="briefing")
         spk = _get_speakers(hass, entry)
         await async_briefing(hass, call, groq_client, honorific, tts, spk)
@@ -982,7 +996,7 @@ def _register_services(
 
     # ── Scene by intent ───────────────────────────────────────────────────────
     async def _scene_intent(call: ServiceCall) -> None:
-        honorific = entry.options.get(CONF_HONORIFIC, entry.data.get(CONF_HONORIFIC, DEFAULT_HONORIFIC))
+        honorific = _live_honorific(hass)  # Phase C: presence-aware
         tts = _get_tts(hass, entry, context="chat")
         spk = _get_speakers(hass, entry)
         await async_activate_by_intent(hass, call, groq_client, honorific, tts, spk)
@@ -997,7 +1011,7 @@ def _register_services(
 
     # ── Routine ───────────────────────────────────────────────────────────────
     async def _routine(call: ServiceCall) -> None:
-        honorific = entry.options.get(CONF_HONORIFIC, entry.data.get(CONF_HONORIFIC, DEFAULT_HONORIFIC))
+        honorific = _live_honorific(hass)  # Phase C: presence-aware
         tts = _get_tts(hass, entry, context="routine")
         spk = _get_speakers(hass, entry)
         await async_run_routine(hass, call, honorific, tts, spk)
@@ -1011,7 +1025,7 @@ def _register_services(
 
     # ── Add reminder ──────────────────────────────────────────────────────────
     async def _add_reminder(call: ServiceCall) -> None:
-        honorific = entry.options.get(CONF_HONORIFIC, entry.data.get(CONF_HONORIFIC, DEFAULT_HONORIFIC))
+        honorific = _live_honorific(hass)  # Phase C: presence-aware
         tts = _get_tts(hass, entry, context="reminder")
         spk = _get_speakers(hass, entry)
         await async_add_reminder_service(hass, call, honorific, tts, spk)
@@ -1028,7 +1042,7 @@ def _register_services(
     )
 
     async def _summary(call: ServiceCall) -> None:
-        honorific = entry.options.get(CONF_HONORIFIC, entry.data.get(CONF_HONORIFIC, DEFAULT_HONORIFIC))
+        honorific = _live_honorific(hass)  # Phase C: presence-aware
         tts = _get_tts(hass, entry, context="summary")
         spk = _get_speakers(hass, entry)
         await async_summarise(hass, call, groq_client, honorific, tts, spk)

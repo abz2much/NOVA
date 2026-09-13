@@ -2682,8 +2682,8 @@ async def _exec_look_at_camera(hass: HomeAssistant, args: dict) -> str:
     if not entity_id or not question:
         return json.dumps({"error": "entity_id and question are required"})
     try:
-        from . import nova_config
-        honorific = nova_config.get("honorific", "sir") or "sir"
+        from . import honorific as honorific_mod
+        honorific = honorific_mod.effective_honorific(hass)  # Phase C: presence-aware
         prompt = (
             f"Answer this question about what you see, concisely and factually: "
             f"{question} If the thing asked about is present, say so and briefly "
@@ -3709,7 +3709,8 @@ async def run_agent(
     except Exception:
         try:
             from . import persona
-            hon = (config.get("honorific", "sir") if isinstance(config, dict) else "sir")
+            from . import honorific as honorific_mod
+            hon = honorific_mod.effective_honorific(hass)  # Phase C: presence-aware
             return persona.completed(hon)
         except Exception:
             return "I've completed the requested actions, sir."
