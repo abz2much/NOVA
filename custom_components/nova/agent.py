@@ -1211,7 +1211,7 @@ NOVA_TOOLS = [
 
 # ── Tool execution ──────────────────────────────────────────────────────────
 
-async def _exec_control_device(hass: HomeAssistant, args: dict) -> str:
+async def _exec_control_device(hass: HomeAssistant, args: dict, device_id: Optional[str] = None) -> str:
     """Execute a device control action."""
     entity_id = args.get("entity_id", "")
     action = args.get("action", "")
@@ -1257,7 +1257,8 @@ async def _exec_control_device(hass: HomeAssistant, args: dict) -> str:
             # does NOT run (previously it fell through and executed unconfirmed).
             from . import policy
             ok, note = await policy.confirm_gate(
-                hass, svc_domain, svc_name, entity_id, action.replace("_", " "))
+                hass, svc_domain, svc_name, entity_id, action.replace("_", " "),
+                device_id=device_id or "")
             if not ok:
                 return json.dumps({
                     "status": "awaiting_confirmation",
@@ -1561,7 +1562,7 @@ async def _exec_home_summary(hass: HomeAssistant, args: dict) -> str:
     return json.dumps(summary)
 
 
-async def _exec_bulk_control(hass: HomeAssistant, args: dict) -> str:
+async def _exec_bulk_control(hass: HomeAssistant, args: dict, device_id: Optional[str] = None) -> str:
     """Control multiple devices in a domain/area."""
     domain = args.get("domain", "")
     action = args.get("action", "")
@@ -1604,7 +1605,7 @@ async def _exec_bulk_control(hass: HomeAssistant, args: dict) -> str:
                 # Protected actions are not run in bulk — a batch can't be
                 # meaningfully voice-confirmed per device. Skip and report so
                 # the agent confirms each one via control_device instead.
-                if policy.requires_confirmation(hass, sd, sn, eid):
+                if policy.requires_confirmation(hass, sd, sn, eid, device_id=device_id or ""):
                     blocked += 1
                     continue
                 await hass.services.async_call(sd, sn, {"entity_id": eid}, blocking=False)
@@ -1652,7 +1653,7 @@ def _save_learned(data: dict) -> None:
         _LOGGER.warning("Failed to save learned data: %s", exc)
 
 
-async def _exec_execute_plan(hass: HomeAssistant, args: dict) -> str:
+async def _exec_execute_plan(hass: HomeAssistant, args: dict, device_id: Optional[str] = None) -> str:
     """
     Execute a multi-step plan (v5.9.07).
 
@@ -1690,7 +1691,8 @@ async def _exec_execute_plan(hass: HomeAssistant, args: dict) -> str:
         # runs, and fails closed if confirmation errors.
         from . import policy
         ok_gate, gate_note = await policy.confirm_gate(
-            hass, domain, service, entity_id, service.replace("_", " "))
+            hass, domain, service, entity_id, service.replace("_", " "),
+            device_id=device_id or "")
         if not ok_gate:
             results.append({"step": i + 1, "description": desc,
                             "ok": False, "error": gate_note or "confirmation required"})
@@ -2642,7 +2644,19 @@ async def _execute_tool(
     # Custom Nova tools
     if tool_name in _TOOL_MAP:
         try:
-            return await _TOOL_MAP[tool_name](hass, tool_args)
+            fn = _TOOL_MAP[tool_name]
+            # Most tools don't need to know the request's device_id; only pass
+            # it to the handful that actuate locks/covers (v7.87.0's
+            # voice-blocked-opening gate needs it) so nothing else changes.
+            import inspect
+            try:
+                accepts_device_id = "device_id" in inspect.signature(fn).parameters
+            except (TypeError, ValueError):
+                accepts_device_id = False
+            if accepts_device_id:
+                device_id = getattr(user_input, "device_id", None)
+                return await fn(hass, tool_args, device_id=device_id)
+            return await fn(hass, tool_args)
         except Exception as exc:
             return json.dumps({"error": str(exc)})
 

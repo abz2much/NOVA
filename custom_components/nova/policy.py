@@ -69,6 +69,33 @@ _READ_ONLY = {"", "update", "reload"}
 # Substrings that make an otherwise-neutral switch security-relevant.
 _SECURITY_HINTS = ("alarm", "security", "camera", "lock", "garage", "gate", "door")
 
+# Actions that grant physical access and must never be authorized by voice
+# alone (v7.87.0): a spoken "unlock the front door" could be a deepfake of
+# the owner's voice. Independent of voice_confirm_enabled — this always
+# applies when the request came from a voice satellite, and always requires
+# a PHONE tap, never a spoken confirmation (which would repeat the exact
+# weakness this exists to close). Locking/closing carries no such risk and
+# stays frictionless, matching _SECURITY_SAFE above. Known gap: a scene or
+# script that itself unlocks a door bypasses this — its contents are opaque
+# to this gate (see _INDIRECTION_DOMAINS); not solved here.
+_VOICE_BLOCKED_OPENING = {
+    ("lock", "unlock"),
+    ("cover", "open"),
+    ("cover", "open_cover"),
+}
+
+
+def _voice_satellite_request(hass, device_id: str) -> bool:
+    if not device_id:
+        return False
+    try:
+        from . import voice_confirm
+        return bool(voice_confirm.is_voice_satellite_device(hass, device_id))
+    except Exception as exc:
+        _LOGGER.warning("policy: voice-satellite check failed (%s); treating as voice "
+                        "for safety", exc)
+        return True  # fail closed: an unknown answer is treated as "could be voice"
+
 
 def classify(domain: str, service: str, entity_id: str = "") -> Tuple[str, str]:
     """Return ``(risk, reason)`` for an action.
@@ -116,14 +143,23 @@ def classify(domain: str, service: str, entity_id: str = "") -> Tuple[str, str]:
     return "low", ""
 
 
-def requires_confirmation(hass, domain: str, service: str, entity_id: str = "") -> bool:
+def requires_confirmation(hass, domain: str, service: str, entity_id: str = "",
+                          device_id: str = "") -> bool:
     """Whether this action must be confirmed before it runs.
 
     Delegates to ``voice_confirm.action_is_protected`` (which honours the
     ``voice_confirm_enabled`` opt-in and the per-entity override list). If the
     confirmation module can't be consulted, fail closed for anything above LOW
     risk and allow LOW-risk convenience through.
+
+    Independent of that opt-in: a voice-blocked-opening action (v7.87.0)
+    requested from a voice satellite always needs confirmation, so a caller
+    like bulk_control (which can't meaningfully confirm per-device and just
+    skips protected actions) skips it too — not just when the general
+    confirmation toggle happens to be on.
     """
+    if (domain, service) in _VOICE_BLOCKED_OPENING and _voice_satellite_request(hass, device_id):
+        return True
     try:
         from . import voice_confirm
         return bool(voice_confirm.action_is_protected(hass, domain, service, entity_id))
@@ -143,6 +179,7 @@ async def confirm_gate(
     service: str,
     entity_id: str = "",
     action_label: str = "",
+    device_id: str = "",
 ) -> Tuple[bool, str]:
     """May this action proceed now? Returns ``(allowed, note)``.
 
@@ -154,7 +191,29 @@ async def confirm_gate(
 
     The final case is the fail-closed guarantee: an error anywhere in the
     confirmation subsystem can never let a protected action through.
+
+    ``device_id`` (v7.87.0): when given and it's a voice satellite, an
+    unlock/open action is ALWAYS gated behind a phone tap — never a spoken
+    confirmation — regardless of ``voice_confirm_enabled``. See
+    _VOICE_BLOCKED_OPENING above for why.
     """
+    label = (action_label or service.replace("_", " ")).strip()
+    ent = entity_id.split(".")[-1].replace("_", " ").strip() if entity_id else ""
+    if (domain, service) in _VOICE_BLOCKED_OPENING and _voice_satellite_request(hass, device_id):
+        try:
+            from . import voice_confirm
+            question = (f"{label} {ent} was requested by voice — confirm on your phone "
+                       f"to proceed. Voice alone can't unlock or open this.").strip()
+            confirmed = await voice_confirm.confirm_via_phone_only(hass, question)
+        except Exception as exc:
+            _LOGGER.warning("policy: voice-unlock phone-confirm failed for %s.%s (%s); denying",
+                            domain, service, exc)
+            return False, "phone confirmation unavailable — action denied for safety"
+        if confirmed:
+            return True, ""
+        return False, (f"{label} {ent} was requested by voice; voice alone can't authorize "
+                       f"this, and phone confirmation wasn't received")
+
     # Resolve the confirmation module. If it's missing, LOW-risk proceeds and
     # anything higher is denied (fail closed for authority).
     try:
@@ -182,8 +241,6 @@ async def confirm_gate(
         return True, ""
 
     # Confirmation required — ask. ANY failure here denies (fail closed).
-    label = (action_label or service.replace("_", " ")).strip()
-    ent = entity_id.split(".")[-1].replace("_", " ").strip() if entity_id else ""
     question = (f"{label} {ent} — are you sure?").strip()
     try:
         confirmed = await voice_confirm.confirm(hass, question, entity_id=entity_id)

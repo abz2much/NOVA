@@ -224,6 +224,39 @@ async def confirm(hass, question: str, *, entity_id: str = "",
         return False
 
 
+def is_voice_satellite_device(hass, device_id: str) -> bool:
+    """True if device_id belongs to a device with a paired assist_satellite
+    entity (v7.87.0) — Nova's signal that a request was spoken, not typed.
+    Used to require a non-voice (phone) confirmation for actions where a
+    spoken confirmation would be exactly as spoofable as the spoken request
+    itself (unlock/open — see policy.py's voice-blocked-opening gate)."""
+    if not device_id:
+        return False
+    try:
+        from homeassistant.helpers import entity_registry as er
+        reg = er.async_get(hass)
+        for st in hass.states.async_all("assist_satellite"):
+            ent = reg.async_get(st.entity_id)
+            if ent and ent.device_id == device_id:
+                return True
+    except Exception as exc:
+        _LOGGER.debug("voice_confirm.is_voice_satellite_device check failed: %s", exc)
+    return False
+
+
+async def confirm_via_phone_only(hass, question: str, *,
+                                 timeout: float = _NOTIFY_CONFIRM_TIMEOUT) -> bool:
+    """Like confirm(), but NEVER uses a voice channel — always the phone
+    push-notification tier, even when a satellite is available (v7.87.0).
+    For actions where asking "did you say yes" by voice again would just
+    repeat the exact weakness a non-voice confirmation exists to close."""
+    try:
+        return await _confirm_via_notification(hass, question, timeout)
+    except Exception as exc:
+        _LOGGER.warning("voice_confirm.confirm_via_phone_only failed (treating as no): %s", exc)
+        return False
+
+
 async def _confirm_native(hass, satellite: str, question: str,
                           timeout: float) -> Optional[bool]:
     """Use assist_satellite.ask_question with yes/no sentence sets. Returns
