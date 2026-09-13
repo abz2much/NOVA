@@ -36,8 +36,29 @@ _LOGGER = logging.getLogger(__name__)
 
 SUPERVISOR = "http://supervisor"
 PIPER_DIR = Path("/share/piper")
-HF_BASE = "https://huggingface.co/jgkawell/nova/resolve/main/en/en_GB/nova"
+# "main" is a moving branch ref, not a pinned artifact — anyone who can push to
+# (or compromise) that HF repo can silently swap the model any time an install
+# re-downloads it. Pin this to a specific commit SHA once one is captured (see
+# EXPECTED_SHA256 below for how); "main" stays the safe fallback until then so
+# a fresh install never breaks on a missing pin.
+HF_REVISION = "main"
+HF_BASE = f"https://huggingface.co/jgkawell/nova/resolve/{HF_REVISION}/en/en_GB/nova"
 MIN_ONNX_SIZE = 1_000_000  # smaller ⇒ corrupt download
+# SHA-256 of each voice file, keyed by its local filename. Empty until someone
+# with real network access to huggingface.co (this sandbox is blocked from it)
+# runs, once per quality:
+#   curl -sL "https://huggingface.co/jgkawell/nova/resolve/main/en/en_GB/nova/<quality>/en_GB-nova-<quality>.onnx" | shasum -a 256
+#   curl -sL "https://huggingface.co/jgkawell/nova/resolve/main/en/en_GB/nova/<quality>/en_GB-nova-<quality>.onnx.json" | shasum -a 256
+# and records the current commit SHA (huggingface.co/jgkawell/nova -> Files ->
+# History) as HF_REVISION above. Until filled in, downloads verify size only
+# (MIN_ONNX_SIZE), same as before — this dict makes the missing check visible
+# and ready, it doesn't silently claim protection that isn't there yet.
+EXPECTED_SHA256: dict[str, str] = {
+    # "en_GB-nova-high.onnx": "...",
+    # "en_GB-nova-high.onnx.json": "...",
+    # "en_GB-nova-medium.onnx": "...",
+    # "en_GB-nova-medium.onnx.json": "...",
+}
 MARKER_PATH = Path("/config/nova/.bootstrap_done")
 
 REQUIRED_ADDONS = {
@@ -132,14 +153,37 @@ async def _ensure_addon(hass: HomeAssistant, slug: str, friendly: str) -> bool:
 
 # ── Voice model download ─────────────────────────────────────────────────────
 
+def _sha256(data: bytes) -> str:
+    import hashlib
+    return hashlib.sha256(data).hexdigest()
+
+
 async def _download_file(hass: HomeAssistant, url: str, dest: Path) -> int:
-    """Download a file to dest (file I/O off-loop). Returns bytes written (0 on fail)."""
+    """Download a file to dest (file I/O off-loop). Returns bytes written (0 on
+    fail, INCLUDING a checksum mismatch — a corrupt or tampered file must be
+    treated exactly like a failed download, never partially trusted)."""
     session = async_get_clientsession(hass)
     try:
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=180)) as resp:
             if resp.status != 200:
                 return 0
             data = await resp.read()
+        expected = EXPECTED_SHA256.get(dest.name)
+        if expected is not None:
+            actual = await hass.async_add_executor_job(_sha256, data)
+            if actual.lower() != expected.lower():
+                _LOGGER.error(
+                    "Nova bootstrap: checksum mismatch for %s — expected %s, got %s. "
+                    "Refusing to install (possible tampering or an upstream file "
+                    "change not yet reflected in EXPECTED_SHA256).",
+                    dest.name, expected, actual,
+                )
+                return 0
+        else:
+            _LOGGER.debug(
+                "Nova bootstrap: no pinned checksum for %s — verifying size only",
+                dest.name,
+            )
         await hass.async_add_executor_job(dest.write_bytes, data)
         return len(data)
     except Exception as exc:

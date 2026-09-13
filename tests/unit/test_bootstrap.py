@@ -73,6 +73,72 @@ def test_voice_present_detects_existing(bootstrap):
     assert bootstrap._voice_present("high") is False  # only medium present
 
 
+# ── voice download checksum verification (v7.87.0) ───────────────────────────
+
+class _FakeResp:
+    def __init__(self, status: int, body: bytes):
+        self.status = status
+        self._body = body
+
+    async def read(self) -> bytes:
+        return self._body
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+class _FakeSession:
+    def __init__(self, body: bytes, status: int = 200):
+        self._body = body
+        self._status = status
+
+    def get(self, url, timeout=None):
+        return _FakeResp(self._status, self._body)
+
+
+def test_download_accepts_matching_checksum(bootstrap, fake_hass, monkeypatch, tmp_path):
+    body = b"totally real onnx bytes"
+    digest = bootstrap._sha256(body)
+    monkeypatch.setattr(bootstrap, "async_get_clientsession", lambda hass: _FakeSession(body))
+    monkeypatch.setattr(bootstrap, "EXPECTED_SHA256", {"voice.onnx": digest})
+    dest = tmp_path / "voice.onnx"
+
+    import asyncio
+    n = asyncio.run(bootstrap._download_file(fake_hass, "https://example/voice.onnx", dest))
+    assert n == len(body)
+    assert dest.read_bytes() == body
+
+
+def test_download_rejects_checksum_mismatch(bootstrap, fake_hass, monkeypatch, tmp_path):
+    body = b"tampered or wrong-revision bytes"
+    monkeypatch.setattr(bootstrap, "async_get_clientsession", lambda hass: _FakeSession(body))
+    monkeypatch.setattr(bootstrap, "EXPECTED_SHA256", {"voice.onnx": "0" * 64})
+    dest = tmp_path / "voice.onnx"
+
+    import asyncio
+    n = asyncio.run(bootstrap._download_file(fake_hass, "https://example/voice.onnx", dest))
+    assert n == 0
+    assert not dest.exists()  # never written, not partially trusted
+
+
+def test_download_without_pinned_checksum_still_succeeds(bootstrap, fake_hass, monkeypatch, tmp_path):
+    """Backward compatibility: EXPECTED_SHA256 is empty until real hashes are
+    captured (this sandbox can't reach huggingface.co to compute them) — a
+    fresh install must still work, verified by size alone same as before."""
+    body = b"some voice bytes, unpinned"
+    monkeypatch.setattr(bootstrap, "async_get_clientsession", lambda hass: _FakeSession(body))
+    monkeypatch.setattr(bootstrap, "EXPECTED_SHA256", {})
+    dest = tmp_path / "voice.onnx"
+
+    import asyncio
+    n = asyncio.run(bootstrap._download_file(fake_hass, "https://example/voice.onnx", dest))
+    assert n == len(body)
+    assert dest.read_bytes() == body
+
+
 # ── async_run_bootstrap guards (the safety gates) ────────────────────────────
 
 @pytest.mark.asyncio
