@@ -1,3 +1,7 @@
+## [7.93.3] — fix: switching panel look back could get stuck
+
+Since "Panel look" moved to the Configure dialog (7.93.1), changing it there had no way to reload an already-open Nova tab — so switching styles a second time in the same session could silently not take effect until you happened to hard-refresh. Nova now notices for itself: if the stored preference ever differs from what's actually showing, it reloads automatically within moments, from any of the three places that can change it.
+
 ## [7.93.2] — fix: the new Command Center look had no visible styling
 
 The new look's colors, backgrounds, borders, and fonts were declared under the wrong CSS selector for a shadow-DOM component (`:root` instead of `:host`), so none of them ever applied — it rendered as plain, unstyled text instead of the intended design. Fixed; layout, colors, and the stellar-core hero now render as designed.

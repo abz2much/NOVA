@@ -1074,8 +1074,9 @@ setTimeout(async () => {
   // "new" path's dynamic import() of a real URL isn't something jsdom can
   // resolve without a live server, so that direction is a live-instance
   // check (see the plan's verification section), not a unit-level one.
+  let _shellStyle = "classic";
   const shellHass = Object.assign({}, hass, {
-    callWS: async (m) => (m.type === "nova/get_panel_data" ? { config: { ui_style: "classic" } } : {}),
+    callWS: async (m) => (m.type === "nova/get_panel_data" ? { config: { ui_style: _shellStyle } } : {}),
   });
   const shellEl = window.document.createElement("nova-panel");
   window.document.body.appendChild(shellEl);
@@ -1083,6 +1084,23 @@ setTimeout(async () => {
   await new Promise(r => setTimeout(r, 20));
   checks.push(["look shell mounts Classic by default",
     shellEl.querySelector("nova-panel-classic") !== null]);
+
+  // v7.93.3 regression guard: a real live bug — the panel-look preference
+  // can change from three places (Classic's Configure dialog, either
+  // look's own switcher), and Configure isn't the Nova panel's own page,
+  // so saving it there had no way to reload an already-open Nova tab. A
+  // real user hit this exactly ("switched back and it wouldn't change").
+  // The shell now notices for itself on its own poll — simulate the
+  // preference changing elsewhere, then invoke that poll's check directly
+  // (real interval is 20s; not waiting for it here).
+  // Not intercepting window.location.reload() itself — jsdom's Location
+  // doesn't reliably allow stubbing it — _checkForStyleChange reports its
+  // own decision (and still calls reload as a real side effect, safely a
+  // no-op stub under jsdom, same as elsewhere in this suite).
+  _shellStyle = "new";
+  const _shouldReload = await shellEl._checkForStyleChange();
+  checks.push(["look shell detects ui_style changed elsewhere while open",
+    _shouldReload === true]);
 
   // v7.93.2 regression guard: a real live bug — the new look's custom
   // properties were declared under `:root{}`, which matches NOTHING inside
