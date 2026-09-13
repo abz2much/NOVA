@@ -16,6 +16,8 @@ An autonomous AI butler for Home Assistant: voice, vision, and a reasoning core 
 
 Nova installs as a Home Assistant custom integration through HACS and runs entirely inside HA, with no separate container and no cloud account required to start. Its design principle is simple: suggest, don't act. Nova starts conservative, tells you what it notices, and only takes on more autonomy as you let it.
 
+> **Active development.** Nova is a solo-maintained project under heavy, ongoing change — expect frequent releases, including breaking changes between versions, while things settle. It's genuinely usable today, but not a "set it up once and forget it" integration yet. Check `CHANGELOG.md` before updating if you want to know what changed.
+
 ## Quick start (5 minutes, no cameras required)
 
 Nova looks elaborate, but the floor is low. You can be talking to it in five minutes with nothing but Home Assistant and one free API key. Cameras, voice hardware, and local GPU inference are all optional upgrades you add later.
