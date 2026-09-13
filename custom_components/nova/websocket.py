@@ -801,6 +801,7 @@ async def ws_get_panel_data(
                 "room_speakers": _get_runtime_json(hass, entry, "room_speakers", {}),
                 "general_speaker": str(_runtime_opt(hass, entry, "general_speaker", "") or ""),
                 "speaker_areas": _get_speaker_assignable_areas(hass),
+                "ui_style": str(_runtime_opt(hass, entry, "ui_style", "classic") or "classic"),
                 "floor_plan_rooms": _get_runtime_json(hass, entry, "floor_plan_rooms", {}),
                 "floor_plan_bg": _get_runtime_json(hass, entry, "floor_plan_bg", {}),
                 "door_mapping": _get_runtime_json(hass, entry, "door_mapping", {}),
@@ -1338,6 +1339,7 @@ PANEL_WRITABLE_KEYS = {
     "announcement_speakers",     # JSON list of cast entity IDs for announcements
     "room_speakers",             # JSON dict: {area_id: media_player_entity_id} (v7.92.0)
     "general_speaker",           # str: fallback speaker for rooms with no assignment (v7.92.0)
+    "ui_style",                  # str: "classic" (default) or "new" — which panel look to mount (v7.93.0)
     "floor_plan_rooms",          # JSON: floor plan room positions per floor
     "floor_plan_bg",             # JSON: base64 background images per floor
     # Residence model (the 3D house on the Residence tab)

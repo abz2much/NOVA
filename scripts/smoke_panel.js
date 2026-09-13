@@ -14,12 +14,14 @@ const fs = require("fs");
 const path = require("path");
 
 const COMPONENT = path.resolve(__dirname, "..", "custom_components", "nova", "frontend", "nova-panel.js");
+const NEW_LOOK_COMPONENT = path.resolve(__dirname, "..", "custom_components", "nova", "frontend", "nova-panel-new.js");
 const dom = new JSDOM("<!DOCTYPE html><body></body>", { url: "http://localhost/", pretendToBeVisual: true });
 const { window } = dom;
 global.window = window; global.document = window.document;
 ["HTMLElement", "customElements", "Node", "Event", "CustomEvent", "requestAnimationFrame", "cancelAnimationFrame"].forEach(k => { if (window[k]) global[k] = window[k]; });
 
 window.eval(fs.readFileSync(COMPONENT, "utf8"));
+window.eval(fs.readFileSync(NEW_LOOK_COMPONENT, "utf8"));
 
 // Raw get_panel_data contract: status.*, meta.*, dominant, areas[], config.cameras
 const PANEL = {
@@ -49,7 +51,7 @@ const PANEL = {
     cast_devices: [{ entity_id: "media_player.living_room_speaker", name: "Living Room Speaker" }, { entity_id: "media_player.kitchen_speaker", name: "Kitchen Speaker" }],
     speaker_areas: [{ area_id: "living_room", name: "Living Room" }, { area_id: "kitchen", name: "Kitchen" }],
     room_speakers: { living_room: "media_player.living_room_speaker" },
-    general_speaker: "media_player.kitchen_speaker" },
+    general_speaker: "media_player.kitchen_speaker", ui_style: "classic" },
   suggestions: [
     { id: 11, description: "Turn porch light on at 18:00 (6 days running)", confidence: 0.82, count: 6, yaml: "{}",
       pattern_type: "time_routine", entities: ["light.porch"],
@@ -77,10 +79,12 @@ let _pendingFacts = [{ id: 42, key: "bedtime", value: "10pm", subject: "primary"
 let _intrCalledOff = false;
 let _intrAck = false;
 const _intrSnap = { url: "/local/nova/intrusion/intrusion_dining_room_1730000000.jpg", camera: "camera.dining_room", ts: 1730000000, path: "/config/www/nova/intrusion/x.jpg" };
+const _updateConfigCalls = [];
 const hass = {
   config: { location_name: "Springfield IL", latitude: 39.78, longitude: -89.65 },
   states: { "assist_satellite.a": { state: "idle", attributes: {} }, "camera.front": { attributes: { access_token: "tok123" } }, "camera.back": { attributes: { access_token: "tok456" } } },
   callWS: async (m) => {
+    if (m.type === "nova/update_config") { _updateConfigCalls.push({ key: m.key, value: m.value }); return {}; }
     if (m.type === "nova/get_panel_data") return PANEL;
     if (m.type === "nova/get_activity_log") return { entries: [
       { ts: "08:59", urgency: "low", tag: "OBS", msg: "motion in kitchen" },
@@ -249,7 +253,12 @@ const hass = {
   callService: async () => {},
 };
 
-const el = window.document.createElement("nova-panel");
+// v7.93.0: "nova-panel" is now a thin shell that picks between Classic and
+// the new look at runtime (see NovaPanelShell in nova-panel.js). This suite
+// tests Classic's own internals directly, so it creates "nova-panel-classic"
+// — the tag Classic is registered under — bypassing the shell entirely. The
+// shell itself gets its own small check further down.
+const el = window.document.createElement("nova-panel-classic");
 window.document.body.appendChild(el);
 el.hass = hass;
 
@@ -1004,6 +1013,21 @@ setTimeout(async () => {
   el._settingsSection = "general";
   el._applySettingsSections();
 
+  // ── Panel look switcher (v7.93.0) ──
+  // Not asserting location.reload() itself fires — jsdom's Location object
+  // doesn't allow safely stubbing that without risking unrelated breakage —
+  // just that choosing a new look actually persists the preference, which is
+  // the part a silent regression would most plausibly break.
+  const styleSel = el.shadowRoot.getElementById("ui-style-select");
+  checks.push(["panel look select reflects the configured style", styleSel?.value === "classic"]);
+  if (styleSel) {
+    styleSel.value = "new";
+    styleSel.dispatchEvent(new Event("change"));
+    await new Promise(r => setTimeout(r, 20));
+    checks.push(["choosing a new panel look saves ui_style",
+      _updateConfigCalls.some(c => c.key === "ui_style" && c.value === "new")]);
+  }
+
   // v7.85.1: option builders must tolerate a stale/missing selected entity (a
   // removed entity still referenced in config). This threw and blanked the whole
   // panel — _travelSensorOptions('sensor.gone') reading undefined.attributes.
@@ -1025,6 +1049,48 @@ setTimeout(async () => {
     ["excluded-entities card maps to the Learning section",
       !!_exclCard && _exclCard.dataset.section === "learning"],
   );
+
+  // ── New Command Center look (v7.93.0) — genuinely separate component ──
+  const elNew = window.document.createElement("nova-panel-new");
+  window.document.body.appendChild(elNew);
+  elNew.hass = hass;
+  await new Promise(r => setTimeout(r, 60));
+  const newRoot = elNew.shadowRoot;
+  const newText = newRoot.innerHTML;
+  checks.push(
+    ["new look renders the brand + hero", /Nova/.test(newText) && !!newRoot.getElementById("core")],
+    ["new look shows status chips from real panel data",
+      /Observer/.test(newText) && /RUNNING/.test(newText)],
+    ["new look renders the activity feed", /motion in kitchen/.test(newText)],
+    ["new look renders areas", /Garage/.test(newText) || /Kitchen/.test(newText)],
+    ["new look's camera card is hidden with no cameras configured or shown with some",
+      !!newRoot.getElementById("cameraPanel")],
+  );
+  const newLookSel = newRoot.getElementById("lookSelect");
+  if (newLookSel) {
+    newLookSel.value = "classic";
+    newLookSel.dispatchEvent(new Event("change"));
+    await new Promise(r => setTimeout(r, 20));
+    checks.push(["new look's own switcher saves ui_style back to classic",
+      _updateConfigCalls.some(c => c.key === "ui_style" && c.value === "classic")]);
+  }
+  if (elNew._fetchInterval) clearInterval(elNew._fetchInterval);
+  if (elNew._animHandle) cancelAnimationFrame(elNew._animHandle);
+
+  // ── Look shell (v7.93.0) — fail-closed default path ──
+  // Only the "classic" (default/fail-closed) path is exercised here — the
+  // "new" path's dynamic import() of a real URL isn't something jsdom can
+  // resolve without a live server, so that direction is a live-instance
+  // check (see the plan's verification section), not a unit-level one.
+  const shellHass = Object.assign({}, hass, {
+    callWS: async (m) => (m.type === "nova/get_panel_data" ? { config: { ui_style: "classic" } } : {}),
+  });
+  const shellEl = window.document.createElement("nova-panel");
+  window.document.body.appendChild(shellEl);
+  shellEl.hass = shellHass;
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["look shell mounts Classic by default",
+    shellEl.querySelector("nova-panel-classic") !== null]);
 
   let ok = true;
   for (const [n, p] of checks) { console.log((p ? "  PASS  " : "  FAIL  ") + n); if (!p) ok = false; }

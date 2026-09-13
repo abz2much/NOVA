@@ -297,6 +297,7 @@ Nova started as a fork of [jarvis-aio](https://github.com/sam3gp8/jarvis-aio) an
 
 **New capabilities**
 - Solar/battery/grid visibility: a dashboard card showing live solar generation, battery level, grid import/export direction, and self-sufficiency, plus a voice/chat tool ("how's our solar doing"). Reads straight from Home Assistant's own Energy dashboard configuration, so any install that's already set that up needs no separate setup for this.
+- A second, optional Command Center look (Settings → General → "Panel look") — an animated "stellar core" centerpiece instead of a camera feed, so it looks and feels the same whether you have zero cameras or twelve. Classic stays the default; nothing is deleted.
 
 This list grows as real fixes ship — see `CHANGELOG.md` for the full history.
 

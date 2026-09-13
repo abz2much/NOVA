@@ -1,3 +1,7 @@
+## [7.93.0] — a new Command Center look (preview)
+
+There's now a second, optional dashboard look — an animated "stellar core" replacing the camera feed as the visual centerpiece (it brightens and quickens when something happens, dims to embers while everyone's asleep), restyled activity and area cards, and cameras tucked into a collapsed, optional card instead of front and center — since not every camera integration streams live into Home Assistant. Switch to it from Settings → General → "Panel look", or back to Classic from the new look's own top bar — nothing is deleted, Classic stays the default. This first version covers only the main dashboard; Settings, Logs, and the other tabs still open in Classic from there.
+
 ## [7.92.1] — fix: Room Speakers card was landing in the wrong Settings tab
 
 The new Room Speakers card (7.92.0) wasn't added to the Settings sub-navigation's section list, so it silently fell back to the General tab instead of Voice & Audio where it belongs, alongside the other speaker-routing cards. It was never invisible — just in an unexpected place.
