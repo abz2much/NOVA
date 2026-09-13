@@ -623,9 +623,13 @@ async def _execute_action(hass, action, entity_id, args):
 # ── Response generation ──────────────────────────────────────────────────────
 
 def _resp(action, fname, success, args=None, h="sir"):
+    # h may be "" once nobody specific is home to address (see honorific.py)
+    # — addr collapses the trailing ", {h}" to nothing rather than a
+    # dangling comma.
+    addr = f", {h}" if h else ""
     if not success:
         # Nova reports failure calmly and precisely, no hand-wringing.
-        return (f"I wasn't able to {action.replace('_', ' ')} {fname}, {h} — "
+        return (f"I wasn't able to {action.replace('_', ' ')} {fname}{addr} — "
                 f"there may be a connectivity issue.")
 
     # Understated lead-ins, MCU style. Varied so confirmations never sound
@@ -638,71 +642,73 @@ def _resp(action, fname, success, args=None, h="sir"):
     vol = (args or {}).get('volume_level', '?')
 
     r = {
-        "turn_on":        f"{ack}, {h}. {fname} is on.",
-        "turn_off":       f"{ack}, {h}. {fname} is off.",
-        "toggle":         f"{ack}, {h}. {fname} toggled.",
-        "lock":           f"{sec}, {h}. {fname} is locked.",
-        "unlock":         f"{ack}, {h}. {fname} is unlocked.",
-        "open":           f"Opening {fname} now, {h}.",
-        "close":          f"Closing {fname} now, {h}.",
-        "dim":            f"{ack}, {h}. {fname} at {bp}%.",
-        "brighten":       f"{ack}, {h}. {fname} at full brightness.",
-        "set_temp":       f"{ack}, {h}. Temperature set to {temp}°.",
-        "set_temp_named": f"{ack}, {h}. {fname} set to {temp}°.",
-        "media_pause":    f"Paused, {h}.",
-        "media_play":     f"Playing now, {h}.",
-        "media_next":     f"Next track, {h}.",
-        "volume_up":      f"Volume up, {h}.",
-        "volume_down":    f"Volume down, {h}.",
-        "volume_set":     f"Volume at {vol}%, {h}.",
-        "mute":           f"Muted, {h}.",
-        "unmute":         f"Unmuted, {h}.",
+        "turn_on":        f"{ack}{addr}. {fname} is on.",
+        "turn_off":       f"{ack}{addr}. {fname} is off.",
+        "toggle":         f"{ack}{addr}. {fname} toggled.",
+        "lock":           f"{sec}{addr}. {fname} is locked.",
+        "unlock":         f"{ack}{addr}. {fname} is unlocked.",
+        "open":           f"Opening {fname} now{addr}.",
+        "close":          f"Closing {fname} now{addr}.",
+        "dim":            f"{ack}{addr}. {fname} at {bp}%.",
+        "brighten":       f"{ack}{addr}. {fname} at full brightness.",
+        "set_temp":       f"{ack}{addr}. Temperature set to {temp}°.",
+        "set_temp_named": f"{ack}{addr}. {fname} set to {temp}°.",
+        "media_pause":    f"Paused{addr}.",
+        "media_play":     f"Playing now{addr}.",
+        "media_next":     f"Next track{addr}.",
+        "volume_up":      f"Volume up{addr}.",
+        "volume_down":    f"Volume down{addr}.",
+        "volume_set":     f"Volume at {vol}%{addr}.",
+        "mute":           f"Muted{addr}.",
+        "unmute":         f"Unmuted{addr}.",
     }
-    return r.get(action, f"{ack}, {h}. {action} applied to {fname}.")
+    return r.get(action, f"{ack}{addr}. {action} applied to {fname}.")
 
 
 def _query_resp(hass, action, entity_id, fname, h="sir"):
+    addr = f", {h}" if h else ""
     if action == "query_time":
         from homeassistant.util import dt as dt_util
-        return f"It's currently {dt_util.now().strftime('%I:%M %p')}, {h}."
+        return f"It's currently {dt_util.now().strftime('%I:%M %p')}{addr}."
     if action == "query_date":
         from homeassistant.util import dt as dt_util
-        return f"Today is {dt_util.now().strftime('%A, %B %d, %Y')}, {h}."
+        return f"Today is {dt_util.now().strftime('%A, %B %d, %Y')}{addr}."
     if action == "greeting":
         from homeassistant.util import dt as dt_util
         hour = dt_util.now().hour
         g = "Good morning" if hour < 12 else ("Good afternoon" if hour < 18 else "Good evening")
-        tail = _pick([f"{g}, {h}.",
-                      f"{g}, {h}. What can I do for you?",
-                      f"{g}, {h}. At your disposal."])
+        tail = _pick([f"{g}{addr}.",
+                      f"{g}{addr}. What can I do for you?",
+                      f"{g}{addr}. At your disposal."])
         return tail
     if action == "thanks":
-        return _pick([f"Of course, {h}.",
-                      f"My pleasure, {h}.",
-                      f"Anytime, {h}."])
+        return _pick([f"Of course{addr}.",
+                      f"My pleasure{addr}.",
+                      f"Anytime{addr}."])
     if action == "query_temp":
         state = hass.states.get(entity_id)
         if state:
             unit = state.attributes.get("unit_of_measurement", "°")
-            return f"The temperature in {fname} is currently {state.state}{unit}, {h}."
-        return f"I'm unable to read the temperature for {fname} at the moment, {h}."
+            return f"The temperature in {fname} is currently {state.state}{unit}{addr}."
+        return f"I'm unable to read the temperature for {fname} at the moment{addr}."
     if action == "query_state":
         state = hass.states.get(entity_id)
         if state:
-            return f"{fname} is currently {state.state}, {h}."
-        return f"I'm unable to determine the status of {fname} at the moment, {h}."
+            return f"{fname} is currently {state.state}{addr}."
+        return f"I'm unable to determine the status of {fname} at the moment{addr}."
     if action == "status":
         return _home_status(hass, h)
     return ""
 
 
 def _home_status(hass, h="sir"):
+    addr = f", {h}" if h else ""
     lights_on = sum(1 for s in hass.states.async_all("light") if s.state == "on")
     locks_ul = sum(1 for s in hass.states.async_all("lock") if s.state == "unlocked")
     doors_open = sum(1 for s in hass.states.async_all("binary_sensor")
                      if s.attributes.get("device_class") == "door" and s.state == "on")
     people = sum(1 for s in hass.states.async_all("person") if s.state == "home")
-    parts = [f"All systems nominal, {h}."]
+    parts = [f"All systems nominal{addr}."]
     parts.append(f"{lights_on} light{'s' if lights_on != 1 else ''} on.")
     parts.append("All locks secured." if not locks_ul else
                  f"{locks_ul} lock{'s' if locks_ul != 1 else ''} unlocked.")
@@ -715,14 +721,15 @@ def _home_status(hass, h="sir"):
 # ── Contextual queries ──────────────────────────────────────────────────────
 
 def _ctx_query(hass, qtype, h="sir", area_match=""):
+    addr = f", {h}" if h else ""
     if qtype == "who_home":
         ppl = [s.attributes.get("friendly_name", s.entity_id)
                for s in hass.states.async_all("person") if s.state == "home"]
         if not ppl:
-            return f"No one appears to be home at the moment, {h}."
+            return f"No one appears to be home at the moment{addr}."
         if len(ppl) == 1:
-            return f"{ppl[0]} is currently home, {h}."
-        return f"{', '.join(ppl[:-1])} and {ppl[-1]} are currently home, {h}."
+            return f"{ppl[0]} is currently home{addr}."
+        return f"{', '.join(ppl[:-1])} and {ppl[-1]} are currently home{addr}."
 
     if qtype == "what_open":
         items = []
@@ -737,14 +744,14 @@ def _ctx_query(hass, qtype, h="sir", area_match=""):
             if s.state == "unlocked":
                 items.append(s.attributes.get("friendly_name", s.entity_id) + " (unlocked)")
         if not items:
-            return f"Everything is closed and secured, {h}."
+            return f"Everything is closed and secured{addr}."
         return f"Currently open or unlocked: {', '.join(items)}."
 
     if qtype == "lights_on":
         on = [s.attributes.get("friendly_name", s.entity_id)
               for s in hass.states.async_all("light") if s.state == "on"]
         if not on:
-            return f"All lights are off, {h}."
+            return f"All lights are off{addr}."
         c = len(on)
         listing = ", ".join(on[:5])
         return f"{c} light{'s' if c != 1 else ''} on: {listing}{'...' if c > 5 else ''}."
@@ -753,21 +760,21 @@ def _ctx_query(hass, qtype, h="sir", area_match=""):
         for s in hass.states.async_all("sensor"):
             if s.attributes.get("device_class") == "power" and "total" in s.entity_id.lower():
                 unit = s.attributes.get("unit_of_measurement", "W")
-                return f"Current power consumption is {s.state} {unit}, {h}."
-        return f"I don't have a total power sensor configured, {h}."
+                return f"Current power consumption is {s.state} {unit}{addr}."
+        return f"I don't have a total power sensor configured{addr}."
 
     if qtype == "weather":
         for s in hass.states.async_all("weather"):
             temp = s.attributes.get("temperature", "—")
             humidity = s.attributes.get("humidity", "—")
             condition = s.state.replace("_", " ")
-            return f"Currently {condition} outside, {h}. Temperature is {temp}° with {humidity}% humidity."
+            return f"Currently {condition} outside{addr}. Temperature is {temp}° with {humidity}% humidity."
         for s in hass.states.async_all("sensor"):
             if ("outdoor" in s.entity_id.lower() or "outside" in s.entity_id.lower()):
                 if s.attributes.get("device_class") == "temperature":
                     unit = s.attributes.get("unit_of_measurement", "°")
-                    return f"The outdoor temperature is {s.state}{unit}, {h}."
-        return f"I don't have weather data available at the moment, {h}."
+                    return f"The outdoor temperature is {s.state}{unit}{addr}."
+        return f"I don't have weather data available at the moment{addr}."
 
     if qtype == "area_devices" and area_match:
         try:
@@ -782,7 +789,7 @@ def _ctx_query(hass, qtype, h="sir", area_match=""):
                     target = area
                     break
             if not target:
-                return f"I couldn't find an area matching '{area_match}', {h}."
+                return f"I couldn't find an area matching '{area_match}'{addr}."
             devs = []
             for entry in ent_reg.entities.values():
                 in_area = entry.area_id == target.id
@@ -794,7 +801,7 @@ def _ctx_query(hass, qtype, h="sir", area_match=""):
                     if state:
                         devs.append(f"{state.attributes.get('friendly_name', entry.entity_id)} ({state.state})")
             if not devs:
-                return f"No devices found in {target.name}, {h}."
+                return f"No devices found in {target.name}{addr}."
             listing = ", ".join(devs[:10])
             more = f" and {len(devs) - 10} more" if len(devs) > 10 else ""
             return f"{target.name} has {len(devs)} device{'s' if len(devs) != 1 else ''}: {listing}{more}."
@@ -816,6 +823,10 @@ async def try_local(hass, text, honorific="sir", force=False):
     have no local handler still return None — the caller supplies an honest
     offline response.
     """
+    # honorific may be "" once nobody specific is home to address (see
+    # honorific.py) — addr collapses the trailing ", {honorific}" to
+    # nothing rather than a dangling comma.
+    addr = f", {honorific}" if honorific else ""
     normalized = _normalize(text)
     complexity = score_complexity(text)
 
@@ -851,7 +862,7 @@ async def try_local(hass, text, honorific="sir", force=False):
                 for eid, fn in ents:
                     if await _execute_action(hass, "turn_off", eid, {}):
                         total += 1
-            return LocalResult(text=f"Done, {honorific}. {total} device{'s' if total != 1 else ''} turned off.", success=True)
+            return LocalResult(text=f"Done{addr}. {total} device{'s' if total != 1 else ''} turned off.", success=True)
         entities = _find_entities_in_area(hass, area_name, domain) if area_name else [
             (s.entity_id, s.attributes.get("friendly_name", s.entity_id))
             for s in hass.states.async_all(domain)]
@@ -863,7 +874,7 @@ async def try_local(hass, text, honorific="sir", force=False):
                 ok += 1
         area_str = f" in {area_name}" if area_name else ""
         verb = action.replace("_", " ")
-        return LocalResult(text=f"Done, {honorific}. {ok} {domain}{'s' if ok != 1 else ''}{area_str} {verb}.", success=ok > 0)
+        return LocalResult(text=f"Done{addr}. {ok} {domain}{'s' if ok != 1 else ''}{area_str} {verb}.", success=ok > 0)
 
     # Scene/script (check before single-entity to catch "activate X")
     for pattern, action, _ in _INTENT_PATTERNS:
@@ -890,9 +901,9 @@ async def try_local(hass, text, honorific="sir", force=False):
             try:
                 await hass.services.async_call(dtype, "turn_on", {"entity_id": eid}, blocking=True)
                 _update_ctx(entity=eid, domain=dtype)
-                return LocalResult(text=f"Activating {fname} now, {honorific}.", success=True)
+                return LocalResult(text=f"Activating {fname} now{addr}.", success=True)
             except Exception as exc:
-                return LocalResult(text=f"I wasn't able to activate {fname}, {honorific}. {exc}", success=False)
+                return LocalResult(text=f"I wasn't able to activate {fname}{addr}. {exc}", success=False)
 
     # Goodnight shortcut
     if re.search(r"^good\s*night(?:\s+nova)?$", normalized):
@@ -904,7 +915,7 @@ async def try_local(hass, text, honorific="sir", force=False):
                 return None   # protected activation → the agent runs the confirmation gate
             try:
                 await hass.services.async_call(dtype, "turn_on", {"entity_id": eid}, blocking=True)
-                return LocalResult(text=f"Goodnight, {honorific}. {fname} activated. Rest well.", success=True)
+                return LocalResult(text=f"Goodnight{addr}. {fname} activated. Rest well.", success=True)
             except Exception:
                 pass
         off_count = 0
@@ -921,7 +932,7 @@ async def try_local(hass, text, honorific="sir", force=False):
                     await hass.services.async_call("lock", "lock", {"entity_id": s.entity_id}, blocking=False)
                 except Exception:
                     pass
-        return LocalResult(text=f"Goodnight, {honorific}. {off_count} lights off, all locks secured. Rest well.", success=True)
+        return LocalResult(text=f"Goodnight{addr}. {off_count} lights off, all locks secured. Rest well.", success=True)
 
     # Single-entity patterns
     _last_failed_name = None  # Track for end-of-loop error
@@ -985,8 +996,8 @@ async def try_local(hass, text, honorific="sir", force=False):
         if force:
             return LocalResult(
                 text=(
-                    f"I couldn't find a device matching '{_last_failed_name}', "
-                    f"{honorific}, and I'm offline so I can't do a deeper search "
+                    f"I couldn't find a device matching '{_last_failed_name}'"
+                    f"{addr}, and I'm offline so I can't do a deeper search "
                     f"right now. Try the exact device name."
                 ),
                 success=False,
@@ -1017,7 +1028,7 @@ async def try_local(hass, text, honorific="sir", force=False):
                 if tracking:
                     return LocalResult(
                         text=(
-                            f"Already on it, {honorific}. I'm monitoring "
+                            f"Already on it{addr}. I'm monitoring "
                             f"{', '.join(tracking)}. I'll announce when "
                             f"the cycle completes."
                         ),
@@ -1025,7 +1036,7 @@ async def try_local(hass, text, honorific="sir", force=False):
                     )
                 return LocalResult(
                     text=(
-                        f"I'm monitoring for appliance cycles, {honorific}, "
+                        f"I'm monitoring for appliance cycles{addr}, "
                         f"but I haven't found any power sensors matching "
                         f"your appliances yet. Make sure the power monitoring "
                         f"sensor has 'washer', 'dryer', or 'dishwasher' "
@@ -1036,8 +1047,8 @@ async def try_local(hass, text, honorific="sir", force=False):
             else:
                 return LocalResult(
                     text=(
-                        f"The appliance monitor isn't running at the moment, "
-                        f"{honorific}. It starts automatically with the "
+                        f"The appliance monitor isn't running at the moment"
+                        f"{addr}. It starts automatically with the "
                         f"observer. Check if the observer is enabled."
                     ),
                     success=True,
@@ -1045,7 +1056,7 @@ async def try_local(hass, text, honorific="sir", force=False):
         except Exception:
             return LocalResult(
                 text=(
-                    f"I'll keep an eye on it, {honorific}. If I have a "
+                    f"I'll keep an eye on it{addr}. If I have a "
                     f"power sensor for that appliance, I'll announce when "
                     f"the cycle finishes."
                 ),
@@ -1071,7 +1082,7 @@ async def try_local(hass, text, honorific="sir", force=False):
             entity_id, fname = resolved
             state = hass.states.get(entity_id)
             if state:
-                return LocalResult(text=f"{fname} is currently {state.state}, {honorific}.", success=True)
+                return LocalResult(text=f"{fname} is currently {state.state}{addr}.", success=True)
 
     _LOGGER.debug("Local: no match for '%s' (complexity=%d) — LLM", text[:60], complexity)
     return None

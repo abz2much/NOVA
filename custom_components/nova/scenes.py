@@ -45,10 +45,14 @@ async def async_activate_by_intent(
     """
     intent: str = call.data["intent"]
     announce = call.data.get("announce", True)
+    # honorific may be "" once nobody specific is home to address (see
+    # honorific.py) — addr collapses the trailing ", {honorific}" to
+    # nothing rather than a dangling comma.
+    addr = f", {honorific}" if honorific else ""
 
     scenes = _list_scenes(hass)
     if not scenes:
-        msg = f"No scenes are defined, {honorific}. I have nothing to choose from."
+        msg = f"No scenes are defined{addr}. I have nothing to choose from."
         if announce:
             await async_announce(hass, msg, tts_entity, speakers)
         return {"success": False, "error": "no_scenes"}
@@ -92,7 +96,7 @@ async def async_activate_by_intent(
         # Sometimes LLM returns extra whitespace or quotes — try to recover
         pick_clean = pick.strip('\'".,` ').split()[0] if pick else ""
         if pick_clean not in valid_ids:
-            msg = f"Nothing quite matches that intent, {honorific}."
+            msg = f"Nothing quite matches that intent{addr}."
             if announce:
                 await async_announce(hass, msg, tts_entity, speakers)
             return {"success": False, "error": "no_match", "pick": pick}
@@ -108,7 +112,7 @@ async def async_activate_by_intent(
         return {"success": False, "error": str(exc)}
 
     scene_name = next((s["name"] for s in scenes if s["entity_id"] == pick), pick)
-    msg = f"Activating {scene_name}, {honorific}."
+    msg = f"Activating {scene_name}{addr}."
     if announce:
         await async_announce(hass, msg, tts_entity, speakers)
 

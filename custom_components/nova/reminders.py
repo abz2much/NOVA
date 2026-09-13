@@ -212,7 +212,15 @@ class ReminderWatcher:
                 _LOGGER.debug("Nova reminder '%s' deferred (nobody home)", reminder["label"])
                 continue
 
-            text = f"{honorific}, reminder: {reminder['label']}."
+            # honorific may be "" once nobody specific is home to address (see
+            # honorific.py) — kept as a plain lead-in (not persona.lead_in(),
+            # which titlecases the honorific and would change this site's
+            # existing casing) with "Reminder" capitalized only when it's
+            # opening the sentence on its own.
+            if honorific:
+                text = f"{honorific}, reminder: {reminder['label']}."
+            else:
+                text = f"Reminder: {reminder['label']}."
             await async_announce(self.hass, text, tts_entity, speakers)
             await self.hass.async_add_executor_job(mark_fired, reminder["id"])
             await self.hass.async_add_executor_job(_advance_repeating, reminder)
@@ -245,9 +253,13 @@ async def async_add_reminder_service(
     if rid < 0:
         return {"success": False, "error": "db_error"}
 
+    # honorific may be "" once nobody specific is home to address (see
+    # honorific.py) — addr collapses the trailing ", {honorific}" to
+    # nothing rather than a dangling comma.
+    addr = f", {honorific}" if honorific else ""
     await async_announce(
         hass,
-        f"Reminder saved, {honorific}. I'll let you know.",
+        f"Reminder saved{addr}. I'll let you know.",
         tts_entity, speakers,
     )
     return {"success": True, "reminder_id": rid}

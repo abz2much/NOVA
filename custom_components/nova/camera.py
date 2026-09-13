@@ -894,10 +894,15 @@ async def async_analyze_camera(
         frame_bytes = [one] if one else []
 
     if not frame_bytes:
-        msg = (
-            f"{honorific}, I could not get a usable image from {camera_name}. "
-            f"This camera may use WebRTC (no snapshot support) or be offline."
-        )
+        # honorific may be "" once nobody specific is home to address (see
+        # honorific.py) — kept as a plain lead-in (not persona.lead_in(),
+        # which titlecases the honorific and would change this file's
+        # existing, untitled casing).
+        sentence = ("I could not get a usable image from "
+                    f"{camera_name}. This camera may use WebRTC "
+                    "(no snapshot support) or be offline.")
+        msg = f"{honorific}, {sentence}" if honorific else \
+            sentence[0].upper() + sentence[1:]
         _LOGGER.error("Nova: no usable image for %s", entity_id)
         try:
             from .websocket import nova_log
@@ -1278,10 +1283,14 @@ async def _analyze_doorbell_press(
     notability) and logged for training. Neither pass announces on its own; the
     announcement is issued once, here, for the chosen result.
     """
+    # honorific may be "" once nobody specific is home to address (see
+    # honorific.py) — fall back to a household-level phrasing rather than an
+    # empty subject ("what would want to know").
+    who = honorific or "the household"
     prompt = (
         f"{reason}. Someone is at the door. Identify who is there and what they "
         f"are doing — appearance, clothing, whether they carry a package or wait, "
-        f"any vehicle behind them. Focus on what {honorific} would want to know."
+        f"any vehicle behind them. Focus on what {who} would want to know."
     )
 
     # Pass 1 — live clip (announce suppressed; we decide below)
@@ -1415,13 +1424,14 @@ async def async_auto_analyze_on_event(
         )
         return
 
+    who = honorific or "the household"
     call = _FakeCall({
         "entity_id": entity_id,
         "prompt": (
             f"{reason}. Describe what you see clearly. "
             f"If there is a person, describe their appearance and what they're doing. "
             f"If there is a vehicle or package, note it. "
-            f"Focus on what {honorific} would want to know."
+            f"Focus on what {who} would want to know."
         ),
         "announce": True,
         "frames": 3,

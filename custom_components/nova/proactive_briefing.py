@@ -265,9 +265,18 @@ async def _trigger_briefing(
         context = "\n".join(context_lines)
         greeting = _time_greeting()
 
+        # honorific may be "" once nobody specific is home to address (see
+        # honorific.py) — instruct the model accordingly instead of leaving a
+        # blank subject or a dangling "Begin with 'Good morning, .'"
+        if honorific:
+            to_whom = f"to {honorific}"
+            begin_with = f"Begin with '{greeting}, {honorific}.'"
+        else:
+            to_whom = "to the household"
+            begin_with = f"Begin with '{greeting}.'"
         task = (
-            f"You are delivering a proactive briefing ({reason}) to {honorific}. "
-            f"Begin with '{greeting}, {honorific}.' "
+            f"You are delivering a proactive briefing ({reason}) {to_whom}. "
+            f"{begin_with} "
             f"Cover only the important items. Under 100 words. Be direct."
         )
         system = build_system_prompt(hass, honorific, task)

@@ -217,7 +217,6 @@ class InfrastructureTriage:
                 )
 
     def _compose(self, findings: list[Finding], critical: bool) -> str:
-        honorific = self.honorific.title()
         clauses = [f.phrase for f in findings]
 
         if len(clauses) == 1:
@@ -227,10 +226,16 @@ class InfrastructureTriage:
         else:
             body = ", ".join(clauses[:-1]) + f", and {clauses[-1]}"
 
-        if critical:
-            lead = f"{honorific}, infrastructure attention is required."
+        # honorific may be "" once nobody specific is home to address (see
+        # honorific.py). No relative import of persona.lead_in here — this
+        # module is loaded standalone (no package context) by its own tests,
+        # see tests/unit/test_infrastructure_triage.py.
+        h = (self.honorific or "").strip()
+        if h:
+            note = "infrastructure attention is required." if critical else "a minor infrastructure note."
+            lead = f"{h.title()}, {note}"
         else:
-            lead = f"{honorific}, a minor infrastructure note."
+            lead = "Infrastructure attention is required." if critical else "A minor infrastructure note."
         # Capitalise the first clause for a clean sentence.
         body = body[0].upper() + body[1:] if body else body
         return f"{lead} {body}."

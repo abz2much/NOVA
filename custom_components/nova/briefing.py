@@ -136,9 +136,13 @@ def _plain_briefing(greeting: str, honorific: str, context_lines: list[str]) -> 
     the language model returns nothing so the briefing still happens instead of
     silently skipping."""
     facts = [ln.strip() for ln in (context_lines or []) if ln and ln.strip()]
+    # honorific may be "" once nobody specific is home to address (see
+    # honorific.py) — drop the trailing ", {honorific}" rather than leave a
+    # dangling comma.
+    lead = f"{greeting}, {honorific}." if honorific else f"{greeting}."
     if not facts:
-        return f"{greeting}, {honorific}. Nothing notable to report."
-    return f"{greeting}, {honorific}. " + " ".join(facts)
+        return f"{lead} Nothing notable to report."
+    return f"{lead} " + " ".join(facts)
 
 
 async def async_briefing(
@@ -236,9 +240,18 @@ async def async_briefing(
 
     # Ask Groq to compose the briefing
     greeting = _time_greeting()
+    # honorific may be "" once nobody specific is home to address (see
+    # honorific.py) — instruct the model accordingly instead of leaving a
+    # blank subject or a dangling "Begin with 'Good morning, .'"
+    if honorific:
+        to_whom = f"to {honorific}"
+        begin_with = f"Begin with '{greeting}, {honorific}.'"
+    else:
+        to_whom = "to the household"
+        begin_with = f"Begin with '{greeting}.'"
     task = (
-        f"You are delivering a spoken briefing to {honorific}. "
-        f"Begin with '{greeting}, {honorific}.' Then concisely cover the important items. "
+        f"You are delivering a spoken briefing {to_whom}. "
+        f"{begin_with} Then concisely cover the important items. "
         f"Under 120 words. Be efficient — do not list trivia. "
         f"If nothing is noteworthy, say so briefly. "
         f"Your prime directive should inform what you surface — protect, steward, "

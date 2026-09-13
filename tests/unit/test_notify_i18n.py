@@ -46,6 +46,27 @@ def test_intrusion_ctx_fragments(i18n):
     assert i18n.message("intrusion_ctx_armed", "es") == " (alarma armada)"
 
 
+def test_empty_honorific_capitalizes_instead_of_stray_comma(i18n):
+    # Nobody specifically home to address (see honorific.py) -> no leading
+    # "X, " at all, but the sentence must still open with a capital letter.
+    msg = i18n.message("freeze_critical", "en", honorific="",
+                        reading="18.0°F", set_to="55°F")
+    assert msg == "Outdoor temperature has dropped to 18.0°F. Pipe freeze risk is severe. I recommend opening cabinet doors near exterior walls and confirming heat is set to at least 55°F."
+    assert not msg.startswith(",")
+
+
+def test_empty_honorific_leaves_fragment_keys_untouched(i18n):
+    # Fragment keys (no honorific lead-in to begin with) are unaffected by
+    # the honorific param either way.
+    assert i18n.message("intrusion_ctx_open", "fr", honorific="",
+                        name="Front Door") == " (Front Door ouvert)"
+
+
+def test_default_honorific_is_sir_when_omitted(i18n):
+    assert i18n.message("freeze_warning", "en", reading="2°C") \
+        .startswith("Sir, outdoor temperature")
+
+
 def test_all_message_keys_cover_all_title_languages(i18n):
     # every message/title present in English must at least exist; spot-check the
     # 7-language coverage is symmetric so nothing silently misses a language

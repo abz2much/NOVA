@@ -292,11 +292,29 @@ class NovaSentinel:
         friendly_name = state.attributes.get("friendly_name", entity_id) if state else entity_id
 
         if "message" in rule:
-            text = rule["message"].format(
-                friendly_name=friendly_name,
-                minutes=minutes,
-                honorific=self._honorific,
-            )
+            # honorific may be "" once nobody specific is home to address
+            # (see honorific.py). Every DEFAULT_RULES message opens with the
+            # literal "{honorific}, " lead-in — stripped and re-added here
+            # (kept as a plain, untitled lead-in to match this file's
+            # existing casing) so an empty honorific capitalizes the
+            # sentence instead of leaving a leading ", ". A custom rule from
+            # sentinel_rules config that doesn't use that exact prefix falls
+            # back to the original blind .format(), unchanged.
+            tmpl = rule["message"]
+            prefix = "{honorific}, "
+            if tmpl.startswith(prefix):
+                body = tmpl[len(prefix):].format(
+                    friendly_name=friendly_name, minutes=minutes)
+                if self._honorific:
+                    text = f"{self._honorific}, {body}"
+                else:
+                    text = body[0].upper() + body[1:] if body else body
+            else:
+                text = tmpl.format(
+                    friendly_name=friendly_name,
+                    minutes=minutes,
+                    honorific=self._honorific,
+                )
         else:
             text = await self._groq_line(entity_id, friendly_name, rule, minutes)
 
@@ -335,9 +353,13 @@ class NovaSentinel:
         self, entity_id: str, friendly_name: str, rule: dict, minutes: int
     ) -> str:
         """Generate a Nova-voiced alert via Groq."""
+        # honorific may be "" once nobody specific is home to address (see
+        # honorific.py) — fall back to a household-level phrasing rather
+        # than an empty subject ("telling  that").
+        who = self._honorific or "the household"
         prompt = (
             f"Generate one concise Nova alert (under 25 words) telling "
-            f"{self._honorific} that '{friendly_name}' has been "
+            f"{who} that '{friendly_name}' has been "
             f"'{rule.get('state', 'unknown')}' for {minutes} minutes. "
             f"Speak as Nova — calm, precise, one dry remark if warranted."
         )
@@ -360,7 +382,9 @@ class NovaSentinel:
             return result["text"].strip()
         except Exception as exc:  # pylint: disable=broad-except
             _LOGGER.warning("Nova Sentinel LLM error: %s", exc)
-            return f"{self._honorific}, {friendly_name} requires your attention."
+            if self._honorific:
+                return f"{self._honorific}, {friendly_name} requires your attention."
+            return f"{friendly_name} requires your attention."
 
     # ── Entity helpers ────────────────────────────────────────────────────────
 

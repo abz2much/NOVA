@@ -80,7 +80,11 @@ async def async_run_routine(
 
     if name not in routines:
         _LOGGER.warning("Nova: unknown routine '%s'", name)
-        msg = f"I don't know a routine called {name}, {honorific}."
+        # honorific may be "" once nobody specific is home to address (see
+        # honorific.py) — addr collapses the trailing ", {honorific}" to
+        # nothing rather than a dangling comma.
+        addr = f", {honorific}" if honorific else ""
+        msg = f"I don't know a routine called {name}{addr}."
         await async_announce(hass, msg, tts_entity, speakers)
         return {"success": False, "error": "unknown_routine"}
 
@@ -94,7 +98,8 @@ async def async_run_routine(
             # Announce, if present
             announce_text = step.get("announce")
             if announce_text:
-                text = announce_text.format(honorific=honorific)
+                from .directive_helper import fill_honorific
+                text = fill_honorific(announce_text, honorific)
                 await async_announce(hass, text, tts_entity, speakers)
 
             # Service call, if present

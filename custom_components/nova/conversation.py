@@ -501,7 +501,8 @@ class NovaAgent(conversation.ConversationEntity):
             _LOGGER.debug("Nova: home state summary error: %s", exc)
 
         context_block = "\n\n## Current context (live data)\n" + "\n".join(ctx_parts)
-        return (base + context_block).replace("{honorific}", self._honorific())
+        from .directive_helper import fill_honorific
+        return fill_honorific(base + context_block, self._honorific())
 
     # ── Conversation history ──────────────────────────────────────────────────
 
@@ -866,6 +867,10 @@ class NovaAgent(conversation.ConversationEntity):
         reopen_device: str | None = None    # the wake/voice satellite's device_id
 
         # v5.9.07: Proactive offer yes/no — resolved before main pipeline.
+        # honorific may be "" once nobody specific is home to address (see
+        # honorific.py) — addr collapses the trailing ", {honorific}" to
+        # nothing rather than leaving a dangling comma.
+        addr = f", {honorific}" if honorific else ""
         offer_reply = None
         try:
             from . import cognitive_core
@@ -882,24 +887,24 @@ class NovaAgent(conversation.ConversationEntity):
                     res = await cognitive_core.accept_pending_offer()
                     if res.get("now_autonomous"):
                         offer_reply = (
-                            f"Done, {honorific}. I've noticed you consistently "
+                            f"Done{addr}. I've noticed you consistently "
                             f"want this — I'll handle it automatically from now on. "
                             f"Say 'stop doing that on your own' to revoke."
                         )
                     elif res.get("ok"):
                         left = max(0, 3 - res.get("approvals", 0))
-                        offer_reply = f"Done, {honorific}."
+                        offer_reply = f"Done{addr}."
                         if 0 < left <= 2:
                             offer_reply += (
                                 " (A couple more times and I'll handle this "
                                 "automatically.)"
                             )
                     else:
-                        offer_reply = f"I wasn't able to complete that, {honorific}."
+                        offer_reply = f"I wasn't able to complete that{addr}."
                     nova_log("OFFER", f"accepted: {offer_reply[:60]}")
                 elif deny:
                     cognitive_core.decline_pending_offer()
-                    offer_reply = f"Understood, {honorific}. I'll leave it."
+                    offer_reply = f"Understood{addr}. I'll leave it."
                     nova_log("OFFER", "declined")
                 else:
                     cognitive_core.decline_pending_offer()
@@ -954,7 +959,7 @@ class NovaAgent(conversation.ConversationEntity):
                         _LOGGER.info("Nova offline-salvage: %s", response_text[:100])
                     else:
                         response_text = (
-                            f"I'm offline at the moment, {honorific}, so I can't "
+                            f"I'm offline at the moment{addr}, so I can't "
                             f"handle that request — it needs my reasoning systems. "
                             f"I can still control your devices, report status, and "
                             f"run scenes. I'll be back to full capability once "
@@ -1030,11 +1035,12 @@ class NovaAgent(conversation.ConversationEntity):
                             response_text = salvage.text
                         else:
                             response_text = (
-                                f"I've lost connection to my reasoning systems, "
-                                f"{honorific}. I can still control devices and "
+                                f"I've lost connection to my reasoning systems"
+                                f"{addr}. I can still control devices and "
                                 f"report status while I reconnect."
                             )
-            response_text = response_text.replace("{honorific}", honorific)
+            from .directive_helper import fill_honorific
+            response_text = fill_honorific(response_text, honorific)
 
             # v5.7.01: Record the winning response so duplicate pipelines
             # arriving slightly later will get caught by dedup
@@ -1195,8 +1201,9 @@ class NovaAgent(conversation.ConversationEntity):
                 "Nova API error (%s): %s | model=%s",
                 type(exc).__name__, exc, self._model(),
             )
-            response_text = _FALLBACKS[self._fallback_idx % len(_FALLBACKS)].format(
-                honorific=honorific
+            from .directive_helper import fill_honorific
+            response_text = fill_honorific(
+                _FALLBACKS[self._fallback_idx % len(_FALLBACKS)], honorific
             )
             self._fallback_idx += 1
             if history and history[-1]["role"] == "user":

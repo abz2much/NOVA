@@ -290,14 +290,19 @@ async def _check_disasters(hass, lat: float, lon: float) -> list[dict]:
 # ── message formatting ───────────────────────────────────────────────────────
 
 def _fmt_quake(q: dict, honorific: str) -> str:
+    # honorific may be "" once nobody specific is home to address (see
+    # honorific.py) — addr collapses the trailing ", {honorific}" to
+    # nothing rather than a dangling comma.
+    addr = f", {honorific}" if honorific else ""
     mag = q.get("mag")
     magtxt = f"magnitude {mag:.1f}" if isinstance(mag, (int, float)) else "an earthquake"
-    return (f"Seismic alert, {honorific}. A {magtxt} earthquake was just "
+    return (f"Seismic alert{addr}. A {magtxt} earthquake was just "
             f"recorded {q['dist_km']} km away — {q['place']}.")
 
 
 def _fmt_weather(w: dict, honorific: str) -> str:
-    base = f"{w['severity']} weather alert, {honorific}: {w['event']}"
+    addr = f", {honorific}" if honorific else ""
+    base = f"{w['severity']} weather alert{addr}: {w['event']}"
     if w.get("area"):
         base += f" for {w['area']}"
     base += "."
@@ -307,7 +312,8 @@ def _fmt_weather(w: dict, honorific: str) -> str:
 
 
 def _fmt_disaster(d: dict, honorific: str) -> str:
-    return (f"Natural hazard nearby, {honorific}: {d['title']} ({d['category']}), "
+    addr = f", {honorific}" if honorific else ""
+    return (f"Natural hazard nearby{addr}: {d['title']} ({d['category']}), "
             f"about {d['dist_km']} km away.")
 
 

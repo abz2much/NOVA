@@ -104,8 +104,9 @@ def _local_fallback(urgency: str, friendly_name: str, to_state: str,
             msg = local_mind.compose_announcement(
                 honorific, friendly_name, "", to_state, escalated=True)
         except Exception:
+            from . import persona
             name = friendly_name or "A device"
-            msg = f"{honorific.title()}, attention required: {name}."
+            msg = persona.lead_in(honorific, f"attention required: {name}.")
         return {
             "speak": True, "message": msg, "urgency": urgency,
             "reason": "local fallback (cloud unavailable)",
@@ -124,7 +125,8 @@ def _lm_compose(honorific, friendly_name, *, device_class="", to_state="",
             honorific, friendly_name, "", to_state, device_class,
             away=away, escalated=escalated)
     except Exception:
-        return f"{honorific.title()}, {friendly_name or 'a device'} requires attention."
+        from . import persona
+        return persona.lead_in(honorific, f"{friendly_name or 'a device'} requires attention.")
 
 
 def _try_local_reasoning(
@@ -142,6 +144,7 @@ def _try_local_reasoning(
 
     Returns a decision dict or None (fall through to LLM).
     """
+    from . import persona
     evt = event_summary.lower()
 
     # Don't repeat recent announcements
@@ -166,7 +169,7 @@ def _try_local_reasoning(
             src = f" from {dev}" if dev else ""
             return {
                 "speak": True,
-                "message": f"{honorific.title()}, a {kw.replace('_', ' ')} alert{src} — immediate attention required.",
+                "message": persona.lead_in(honorific, f"a {kw.replace('_', ' ')} alert{src} — immediate attention required."),
                 "urgency": "critical",
             }
 
@@ -180,7 +183,7 @@ def _try_local_reasoning(
                     "reason": "security event but a registered user is home — normal"}
         return {
             "speak": True,
-            "message": f"{honorific.title()}, a security alert has been triggered. Immediate attention required.",
+            "message": persona.lead_in(honorific, f"a security alert has been triggered. Immediate attention required."),
             "urgency": "critical",
         }
 
@@ -193,7 +196,7 @@ def _try_local_reasoning(
             name = nm.group(1).replace("_", " ").title()
         return {
             "speak": True,
-            "message": f"{honorific.title()}, {name} has arrived home.",
+            "message": persona.lead_in(honorific, f"{name} has arrived home."),
             "urgency": "medium",
         }
 
@@ -205,7 +208,7 @@ def _try_local_reasoning(
             name = nm.group(1).replace("_", " ").title()
         return {
             "speak": True,
-            "message": f"{honorific.title()}, {name} has left the premises.",
+            "message": persona.lead_in(honorific, f"{name} has left the premises."),
             "urgency": "low",
         }
 
@@ -283,7 +286,7 @@ def _try_local_reasoning(
         if "open" in evt:
             return {
                 "speak": True,
-                "message": f"{honorific.title()}, the garage door has been opened.",
+                "message": persona.lead_in(honorific, f"the garage door has been opened."),
                 "urgency": urgency if urgency != "low" else "medium",
             }
         if "close" in evt or "closing" in evt:
@@ -295,7 +298,7 @@ def _try_local_reasoning(
         dev_name = m_dev.group(1).strip().title() if m_dev else "A device"
         return {
             "speak": True,
-            "message": f"{honorific.title()}, {dev_name}'s battery is running low.",
+            "message": persona.lead_in(honorific, f"{dev_name}'s battery is running low."),
             "urgency": "low",
         }
 
@@ -306,7 +309,7 @@ def _try_local_reasoning(
             nice = appliance.replace("_", " ").title()
             return {
                 "speak": True,
-                "message": f"{honorific.title()}, the {nice} cycle appears to be complete.",
+                "message": persona.lead_in(honorific, f"the {nice} cycle appears to be complete."),
                 "urgency": "medium",
             }
 
@@ -320,13 +323,13 @@ def _try_local_reasoning(
                 if temp > 90:
                     return {
                         "speak": True,
-                        "message": f"{honorific.title()}, indoor temperature has reached {temp}°. You may want to check the climate control.",
+                        "message": persona.lead_in(honorific, f"indoor temperature has reached {temp}°. You may want to check the climate control."),
                         "urgency": "medium",
                     }
                 if temp < 55:
                     return {
                         "speak": True,
-                        "message": f"{honorific.title()}, indoor temperature has dropped to {temp}°. Heating may need attention.",
+                        "message": persona.lead_in(honorific, f"indoor temperature has dropped to {temp}°. Heating may need attention."),
                         "urgency": "medium",
                     }
         except (ValueError, TypeError):

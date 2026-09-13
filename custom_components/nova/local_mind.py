@@ -295,8 +295,12 @@ def _compose(honorific: str, friendly_name: str, entity_id: str, to_state: str,
         register = persona.register_for(urgency) if urgency else ("urgent" if escalated else "neutral")
         opener = persona.announce_opener(honorific, register)
     except Exception:
-        opener = f"{honorific.title()},"
-    return f"{opener} {core}{tail}."
+        # honorific may be "" once nobody specific is home to address (see
+        # honorific.py) — an empty opener skips the leading address entirely
+        # rather than emitting a bare ",".
+        opener = f"{honorific.title()}," if honorific else ""
+    sep = " " if opener else ""
+    return f"{opener}{sep}{core}{tail}."
 
 
 def compose_announcement(honorific: str, friendly_name: str, entity_id: str = "",

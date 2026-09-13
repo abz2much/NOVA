@@ -21,6 +21,9 @@ Public API:
     greeting(honorific, hour)          — time-aware ("Good evening, sir.")
     announce_opener(honorific, reg)    — leads a household announcement
     register_for(urgency)              — map an urgency to a voice register
+    lead_in(honorific, sentence)       — fold an honorific onto any sentence,
+                                          or just capitalize it when there
+                                          isn't one to use (see honorific.py)
 """
 
 from __future__ import annotations
@@ -111,27 +114,41 @@ _GREET = {
     "morning": [
         "Good morning, {h}.", "Morning, {h}.", "A good morning to you, {h}.",
         "Good morning. I trust you slept well, {h}.",
+        "Good morning.",
     ],
-    "afternoon": ["Good afternoon, {h}.", "Afternoon, {h}.", "Good afternoon to you, {h}."],
-    "evening": ["Good evening, {h}.", "Evening, {h}.", "Good evening to you, {h}."],
+    "afternoon": [
+        "Good afternoon, {h}.", "Afternoon, {h}.", "Good afternoon to you, {h}.",
+        "Good afternoon.",
+    ],
+    "evening": [
+        "Good evening, {h}.", "Evening, {h}.", "Good evening to you, {h}.",
+        "Good evening.",
+    ],
     "night": [
         "Working late, {h}?", "Good evening, {h}.", "Burning the midnight oil, {h}?",
         "Still up, {h}? Good evening.",
+        "Burning the midnight oil?",
     ],
 }
 
-# Announcement openers, by register. 'grave' stays plain on purpose.
+# Announcement openers, by register. 'grave' stays plain on purpose. Every
+# register keeps at least one honorific-free variant (used when nobody's
+# home alone to address — see honorific.py) — without one, _pick() would
+# have nothing safe to fall back to and the announcement could open with a
+# stray ", " or "." on its own.
 _OPENER = {
     "neutral": [
         "{H},", "For your awareness, {h} —", "A small matter, {h} —",
         "If I may, {h} —", "Just so you know, {h} —", "A note, {h} —",
         "Worth mentioning, {h} —",
+        "For your awareness —", "Worth mentioning —", "A quick note —",
     ],
     "urgent": [
         "{H}, your attention —", "{H}, you should know —", "{H}, if I may —",
         "{H}, a moment —", "{H} —",
+        "Your attention, please —", "A moment, please —",
     ],
-    "grave": ["{H}.", "{H} —"],
+    "grave": ["{H}.", "{H} —", "Attention.", "Listen."],
 }
 
 _WORKING = {
@@ -148,6 +165,8 @@ _UNABLE = {
         "I'm not able to manage that just yet, {h}.",
         "Regrettably, {h}, that's outside what I can do.",
         "I wish I could, {h}, but that's not within my reach.",
+        "I'm afraid I can't do that.",
+        "That's beyond me at the moment.",
     ],
 }
 
@@ -188,24 +207,40 @@ _recent: dict[str, deque] = {}
 
 
 def _fill(template: str, honorific: str) -> str:
-    h = (honorific or "sir").strip() or "sir"
+    h = (honorific or "").strip()
+    if not h:
+        # No one specific person to address (see honorific.py) — the template
+        # picked for us is already guaranteed honorific-free by _pick, so this
+        # is just a safety net, not the normal path.
+        return template.replace("{H}", "").replace("{h}", "")
     return template.replace("{H}", h[:1].upper() + h[1:]).replace("{h}", h)
 
 
 def _pick(pool: list, key: str, honorific: str) -> str:
     if not pool:
         return ""
+    # An empty honorific means nobody specific is home to address (see
+    # honorific.py) — restrict to variants that don't reference {H}/{h} so we
+    # never speak a fragment like ", the door's open." Keyed separately in
+    # the anti-repeat memory since it's a different (usually shorter) list.
+    has_honorific = bool((honorific or "").strip())
+    candidates = pool
+    if not has_honorific:
+        bare = [t for t in pool if "{H}" not in t and "{h}" not in t]
+        if bare:
+            candidates = bare
+    dq_key = key if candidates is pool else f"{key}:bare"
     if not _VARIETY:
-        return _fill(pool[0], honorific)
+        return _fill(candidates[0], honorific)
     # Avoid the last few choices for this category so nothing repeats back-to-back.
-    span = min(3, max(1, len(pool) - 1))
-    dq = _recent.setdefault(key, deque(maxlen=span))
-    choices = [i for i in range(len(pool)) if i not in dq]
+    span = min(3, max(1, len(candidates) - 1))
+    dq = _recent.setdefault(dq_key, deque(maxlen=span))
+    choices = [i for i in range(len(candidates)) if i not in dq]
     if not choices:
-        choices = list(range(len(pool)))
+        choices = list(range(len(candidates)))
     i = random.choice(choices)
     dq.append(i)
-    return _fill(pool[i], honorific)
+    return _fill(candidates[i], honorific)
 
 
 def _reg(pools: dict, register: str) -> list:
@@ -278,3 +313,19 @@ def greeting(honorific: str = "sir", hour: Optional[int] = None) -> str:
 
 def announce_opener(honorific: str = "sir", register: str = "neutral") -> str:
     return _pick(_reg(_OPENER, register), f"open:{register}", honorific)
+
+
+def lead_in(honorific: str, sentence: str) -> str:
+    """Fold an honorific onto the front of a sentence the way ~25 modules
+    used to hand-roll it inline (f"{honorific.title()}, {sentence}").
+
+    An empty honorific means nobody specific is home to address (see
+    honorific.py) — in that case there's no lead-in at all, just the
+    sentence itself, capitalized since it's no longer following a comma.
+    """
+    if not sentence:
+        return sentence
+    h = (honorific or "").strip()
+    if h:
+        return f"{h.title()}, {sentence}"
+    return sentence[0].upper() + sentence[1:]

@@ -335,9 +335,12 @@ def _history_phrase(matches: list[dict], honorific: str) -> str:
     count = len(matches)
     if count <= 0:
         return ""
+    # honorific may be "" once nobody specific is home to address (see
+    # honorific.py) — addr collapses to a single comma instead of two.
+    addr = f", {honorific.title()}" if honorific else ""
     if count == 1:
-        return f" For context, {honorific.title()}, this has occurred once before."
-    return f" For context, {honorific.title()}, this has occurred {count} times before."
+        return f" For context{addr}, this has occurred once before."
+    return f" For context{addr}, this has occurred {count} times before."
 
 
 async def _run_predictor(hass: HomeAssistant, predictor: PredictiveHabitMatrix) -> None:

@@ -226,21 +226,48 @@ def title(key: str, lang: str | None) -> str:
     return table.get(_norm(lang)) or table.get(_FALLBACK) or "Nova"
 
 
+# Every full-sentence template above opens with this literal lead-in
+# (verified: only ever the first 13 characters, at no other position, across
+# all ~70 such template strings in all 7 languages) — stripped here and
+# re-added via persona.lead_in() so an empty honorific (nobody specifically
+# home to address; see honorific.py) produces a properly capitalized
+# sentence instead of a stray leading ", ". A few keys are mid-sentence
+# fragments (e.g. "intrusion_ctx_open") rather than full sentences and never
+# had this prefix — those pass through untouched, same as before.
+_HONORIFIC_LEAD_IN = "{honorific}, "
+
+
+def _strip_honorific_lead_in(tmpl: str) -> tuple[str, bool]:
+    if tmpl.startswith(_HONORIFIC_LEAD_IN):
+        return tmpl[len(_HONORIFIC_LEAD_IN):], True
+    return tmpl, False
+
+
 def message(key: str, lang: str | None, **params) -> str:
     """Localized, parameter-filled message for ``key`` (English fallback).
+
+    ``honorific`` (default "sir") is pulled out of ``params`` rather than
+    passed through ``.format()`` — see ``_strip_honorific_lead_in``.
 
     Never raises: an unknown key or a formatting problem yields the English
     template (or an empty string) rather than propagating.
     """
+    honorific = params.pop("honorific", "sir")
     table = MESSAGES.get(key, {})
     tmpl = table.get(_norm(lang)) or table.get(_FALLBACK) or ""
+    body, had_lead_in = _strip_honorific_lead_in(tmpl)
     try:
-        return tmpl.format(**params)
+        filled = body.format(**params)
     except Exception:
         try:
-            return (table.get(_FALLBACK, "") or "").format(**params)
+            body, had_lead_in = _strip_honorific_lead_in(table.get(_FALLBACK, "") or "")
+            filled = body.format(**params)
         except Exception:
             return table.get(_FALLBACK, "") or ""
+    if not had_lead_in:
+        return filled
+    from . import persona
+    return persona.lead_in(honorific, filled)
 
 
 # Coordinating conjunction per language, for natural-language device lists.

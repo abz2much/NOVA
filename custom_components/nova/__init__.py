@@ -877,10 +877,14 @@ def _register_services(
             doorbell_entity = cams[0] if cams else "camera.front_doorbell"
 
         async def _analyze_image(image_bytes, label):
+            # honorific may be "" once nobody specific is home to address (see
+            # honorific.py) — fall back to a household-level phrasing rather
+            # than an empty subject ("what would want to know").
+            who = honorific or "the household"
             prompt = (
                 f"Recorded doorbell event ({label}). Identify who is at the door — "
                 f"appearance, clothing, packages, vehicles. "
-                f"Focus on what {honorific} would want to know."
+                f"Focus on what {who} would want to know."
             )
             fc = _FakeCall({"entity_id": doorbell_entity, "prompt": prompt, "announce": False})
             return await async_analyze_camera(

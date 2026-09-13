@@ -76,4 +76,9 @@ def test_many_open_summarised(cc):
 
 def test_honorific_applied(cc):
     assert cc.build_lockdown_message("madam", [], [], []).startswith("Madam, lockdown engaged")
-    assert cc.build_lockdown_message("", [], [], []).startswith("Sir, lockdown engaged")
+
+
+def test_empty_honorific_capitalizes_instead_of_defaulting(cc):
+    # Nobody specifically home to address (see honorific.py) -> no longer
+    # silently coerced to "sir"; the sentence is just capitalized on its own.
+    assert cc.build_lockdown_message("", [], [], []).startswith("Lockdown engaged")

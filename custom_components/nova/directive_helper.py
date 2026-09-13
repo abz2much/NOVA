@@ -43,6 +43,28 @@ def get_entry(hass: HomeAssistant) -> ConfigEntry | None:
         return None
 
 
+def fill_honorific(text: str, honorific: str) -> str:
+    """Substitute every {honorific} placeholder in NOVA_PERSONA-derived text.
+
+    When honorific is "" (nobody specific home to address — see
+    honorific.py), a blind blank substitution would leave the persona
+    instructions reading "Address your owner as  — naturally" and
+    "Right away, ." — so the one NOVA_PERSONA line that directly instructs
+    on addressing gets an honorific-free rewrite, and every other
+    "{honorific}" instance (all of them trailing, ", {honorific}") is
+    dropped cleanly instead of left blank.
+    """
+    if honorific:
+        return text.replace("{honorific}", honorific)
+    text = text.replace(
+        "Address your owner as {honorific} — naturally, never robotically",
+        "Address the room in general — no honorific, since no one specific "
+        "is home to address right now",
+    )
+    text = text.replace(", {honorific}", "")
+    return text.replace("{honorific}", "")
+
+
 def build_system_prompt(
     hass: HomeAssistant,
     honorific: str,
@@ -54,7 +76,8 @@ def build_system_prompt(
       2. Nova persona (character + style)
       3. Task-specific context/instructions
 
-    honorific is substituted into all {honorific} placeholders.
+    honorific is substituted into all {honorific} placeholders — see
+    fill_honorific().
     task_context is the additional task-specific instruction (camera prompt,
     briefing instructions, sentinel prompt, etc.).
     """
@@ -66,4 +89,4 @@ def build_system_prompt(
     if task_context:
         combined = f"{combined}\n\n---\n\n{task_context.strip()}"
 
-    return combined.replace("{honorific}", honorific)
+    return fill_honorific(combined, honorific)

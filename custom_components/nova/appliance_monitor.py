@@ -999,19 +999,20 @@ async def _announce_done(sensor: _SensorState, appliance_label: str) -> None:
     nice_name = appliance_label.replace("_", " ").title()
     friendly = sensor.friendly_name or nice_name
 
+    from . import persona
     # Build the announcement message
     if appliance_label.lower() in friendly.lower():
-        message = f"{honorific.title()}, the {nice_name} cycle is complete."
+        message = persona.lead_in(honorific, f"the {nice_name} cycle is complete.")
     elif "fingerprint" in sensor.discovery_method:
         # Auto-identified — mention what we think it is
-        message = (
-            f"{honorific.title()}, {friendly} appears to have finished "
+        message = persona.lead_in(honorific,
+            f"{friendly} appears to have finished "
             f"a cycle. Based on its power profile, it looks like a "
             f"{nice_name}."
         )
     else:
-        message = (
-            f"{honorific.title()}, {friendly} has finished its cycle. "
+        message = persona.lead_in(honorific,
+            f"{friendly} has finished its cycle. "
             f"The {nice_name} is done."
         )
 

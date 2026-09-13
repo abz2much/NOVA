@@ -32,10 +32,15 @@ def test_fill_capitalizes_and_lowercases():
     assert persona._fill("{H}, {h}!", "sir") == "Sir, sir!"
 
 
-def test_fill_empty_honorific_defaults_to_sir():
-    assert persona._fill("{h}", "") == "sir"
-    assert persona._fill("{h}", "   ") == "sir"
-    assert persona._fill("{h}", None) == "sir"
+def test_fill_empty_honorific_strips_placeholders():
+    # An empty honorific means nobody specific is home to address (see
+    # honorific.py) — {H}/{h} placeholders resolve to nothing rather than
+    # silently falling back to "sir". In practice _pick() only ever hands
+    # _fill() an honorific-free template in this case, so this exercises the
+    # safety net directly.
+    assert persona._fill("{h}", "") == ""
+    assert persona._fill("{h}", "   ") == ""
+    assert persona._fill("{h}", None) == ""
 
 
 def test_fill_multichar_honorific():
@@ -66,6 +71,31 @@ def test_pick_exhausts_choices_branch_with_singleton_pool():
     pool = ["only {h}"]
     assert persona._pick(pool, "solo", "sir") == "only sir"
     assert persona._pick(pool, "solo", "sir") == "only sir"
+
+
+def test_pick_empty_honorific_restricts_to_bare_variants():
+    pool = ["with {h}", "also {H}", "bare one", "bare two"]
+    for _ in range(20):
+        out = persona._pick(pool, "mixed", "")
+        assert out in ("bare one", "bare two")
+
+
+def test_pick_empty_honorific_falls_back_to_full_pool_if_no_bare_variant():
+    pool = ["with {h}", "also {H}"]
+    out = persona._pick(pool, "no-bare", "")
+    assert out in ("with ", "also ")
+
+
+def test_pick_bare_and_honorific_variants_dont_share_anti_repeat_state():
+    # Regression: filtering to a shorter "bare" sub-list for an empty
+    # honorific must not corrupt the anti-repeat memory used when a real
+    # honorific is passed for the same pool/key afterwards — e.g. an index
+    # excluded in the 1-item bare list should not wrongly exclude an index
+    # in the unrelated, differently-sized full-pool list.
+    pool = ["with {h}", "bare one"]
+    persona._pick(pool, "shared", "")
+    seen = {persona._pick(pool, "shared", "sir") for _ in range(20)}
+    assert "with sir" in seen
 
 
 # ── _reg ─────────────────────────────────────────────────────────────────────
@@ -117,9 +147,9 @@ def test_announce_opener_registers_and_grave_is_plain():
     for reg in ("neutral", "urgent", "grave"):
         out = persona.announce_opener("sir", reg)
         assert out and "{" not in out
-    # grave openers should be short/plain (no flourish words)
+    # grave openers should be short/plain — no comma-joined flourish clauses
     graves = {persona.announce_opener("sir", "grave") for _ in range(8)}
-    assert all(len(g) <= 6 for g in graves)
+    assert all(len(g) <= 12 and "," not in g for g in graves)
 
 
 # ── greeting (every hour bucket + default) ───────────────────────────────────
@@ -155,3 +185,27 @@ def test_set_variety_toggle():
     assert persona._VARIETY is False
     persona.set_variety(True)
     assert persona._VARIETY is True
+
+
+# ── lead_in ──────────────────────────────────────────────────────────────────
+
+def test_lead_in_with_honorific_matches_old_inline_pattern():
+    assert persona.lead_in("sir", "the garage door is open.") == \
+        "Sir, the garage door is open."
+
+
+def test_lead_in_titlecases_multichar_honorific():
+    assert persona.lead_in("boss", "dinner's ready.") == "Boss, dinner's ready."
+
+
+def test_lead_in_empty_honorific_just_capitalizes_sentence():
+    assert persona.lead_in("", "the garage door is open.") == \
+        "The garage door is open."
+    assert persona.lead_in(None, "the garage door is open.") == \
+        "The garage door is open."
+    assert persona.lead_in("   ", "the garage door is open.") == \
+        "The garage door is open."
+
+
+def test_lead_in_empty_honorific_empty_sentence_is_safe():
+    assert persona.lead_in("", "") == ""

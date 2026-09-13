@@ -97,6 +97,15 @@ def _notify_i18n():
     from . import notify_i18n
     return notify_i18n
 
+
+def _persona():
+    """Lazy import of the persona voice module (same reasoning as _notify_i18n).
+    A local variable named `persona` exists elsewhere in this file (an agent
+    prompt field, unrelated) — routing through this helper avoids any
+    ambiguity with a top-level import."""
+    from . import persona
+    return persona
+
 # ── Proactive intelligence (v5.9.07) ────────────────────────────────────────
 PROACTIVE_CHECK_INTERVAL = 120   # 2 min between comfort/efficiency scans
 PROACTIVE_OFFER_COOLDOWN = 1800  # 30 min before re-offering the same thing
@@ -938,7 +947,8 @@ class SafetyManager:
                 except Exception:
                     snap = None
             snap_note = " A snapshot is available." if snap else ""
-            msg = (f"{honorific.title()}, intrusion confirmed — {reason}.{snap_note} "
+            msg = _persona().lead_in(honorific,
+                   f"intrusion confirmed — {reason}.{snap_note} "
                    f"Alerting the house and every device. Say 'it's a false alarm' "
                    f"to call it off.")
             action = {
@@ -1013,7 +1023,8 @@ class SafetyManager:
                 return None
             snap_note = " A snapshot is available." if snap else ""
             where = inv.get("breach_name") or "the point of entry"
-            msg = (f"{honorific.title()}, I flagged possible activity near {where} "
+            msg = _persona().lead_in(honorific,
+                   f"I flagged possible activity near {where} "
                    f"and couldn't reach you, but I have not confirmed anyone moving "
                    f"through the house.{snap_note} Please check when you can — say "
                    f"'it's a false alarm' to clear it.")
@@ -1156,7 +1167,10 @@ def build_lockdown_message(honorific: str, locked: list, closed: list,
     their language. Device/area names pass through untranslated.
     """
     i18n = _notify_i18n()
-    h = (honorific or "sir").title()
+    # Not coerced to "sir" here — an empty honorific means nobody specifically
+    # home to address (see honorific.py), and i18n.message() already handles
+    # that by capitalizing the sentence instead of prefixing it.
+    h = (honorific or "").title()
 
     actions = []
     if locked:
@@ -1503,7 +1517,8 @@ class LockdownManager:
             self._alerted.add(eid)
             return {
                 "type": "lockdown_breach", "urgency": "high", "auto_act": True,
-                "message": f"{honorific.title()}, {name} reopened after I secured it — I'll leave it open.",
+                "message": _persona().lead_in(honorific,
+                    f"{name} reopened after I secured it — I'll leave it open."),
             }
 
         _LOGGER.warning("Lockdown: securing %s after it opened", eid)
@@ -1518,7 +1533,8 @@ class LockdownManager:
         self._alerted.add(eid)
         return {
             "type": "lockdown_breach", "urgency": "critical", "auto_act": True,
-            "message": f"{honorific.title()}, {name} opened during lockdown and I couldn't secure it.",
+            "message": _persona().lead_in(honorific,
+                f"{name} opened during lockdown and I couldn't secure it."),
         }
 
     async def _verify_secured(self, eid: str, dom: str, name: str) -> None:
@@ -1536,7 +1552,8 @@ class LockdownManager:
             honorific = self.config.get("honorific", "sir")
             await _emit_action(self.hass, self.config, {
                 "type": "lockdown_breach", "urgency": "critical", "auto_act": True,
-                "message": f"{honorific.title()}, I tried to secure {name} during lockdown but it's still open.",
+                "message": _persona().lead_in(honorific,
+                    f"I tried to secure {name} during lockdown but it's still open."),
             }, False)
         except Exception as exc:
             _LOGGER.debug("lockdown secure-verify error: %s", exc)
@@ -1682,8 +1699,8 @@ class ProactiveManager:
                 "urgency": "low",
                 "offer": True,
                 "offer_key": key,
-                "message": (
-                    f"{honorific.title()}, it's quite dark in the {area_name} "
+                "message": _persona().lead_in(honorific,
+                    f"it's quite dark in the {area_name} "
                     f"and someone's in there. Shall I turn the lights on?"
                 ),
                 "action_data": {"domain": "light", "service": "turn_on",
@@ -1730,8 +1747,8 @@ class ProactiveManager:
                 "urgency": "low",
                 "offer": True,
                 "offer_key": key,
-                "message": (
-                    f"{honorific.title()}, the {name} has been on for "
+                "message": _persona().lead_in(honorific,
+                    f"the {name} has been on for "
                     f"{int(mins_on)} minutes in the {area_name}, which appears "
                     f"empty. Shall I turn it off?"
                 ),
@@ -1761,8 +1778,8 @@ class ProactiveManager:
                 "urgency": "low",
                 "offer": True,
                 "offer_key": key,
-                "message": (
-                    f"{honorific.title()}, the {name} is {action} but no one's "
+                "message": _persona().lead_in(honorific,
+                    f"the {name} is {action} but no one's "
                     f"home. Would you like me to set it back to save energy?"
                 ),
                 "action_data": {"domain": "climate", "service": "set_preset_mode",
@@ -2616,10 +2633,11 @@ def _make_followup_runner(hass, config):
         except Exception:
             model = config.get("model", "")
         honorific = config.get("honorific", "sir")
+        report_to = f"to {honorific} " if honorific else ""
         persona = (
             f"You are Nova. You scheduled this follow-up yourself earlier and "
             f"it is now due. Carry it out with your tools (check states, act if "
-            f"needed, verify), then report the outcome to {honorific} in one or "
+            f"needed, verify), then report the outcome {report_to}in one or "
             f"two spoken-style sentences. If everything is fine, say so briefly."
             + (f"\nContext you saved with it: {context}" if context else "")
         )

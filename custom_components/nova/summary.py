@@ -37,8 +37,12 @@ async def async_summarise(
     )
 
     if not messages:
+        # honorific may be "" once nobody specific is home to address (see
+        # honorific.py) — addr collapses the trailing ", {honorific}" to
+        # nothing rather than a dangling comma.
+        addr = f", {honorific}" if honorific else ""
         summary = (
-            f"Nothing to report, {honorific}. "
+            f"Nothing to report{addr}. "
             f"The last {_period(hours)} appear to have been remarkably quiet."
         )
         if announce:
@@ -53,10 +57,14 @@ async def async_summarise(
         lines.append(f"[{ts}] {speaker}: {m['content']}")
     transcript = "\n".join(lines)
 
+    # honorific may be "" once nobody specific is home to address (see
+    # honorific.py) — instruct the model accordingly instead of a dangling
+    # "briefing to ."
+    to_whom = f"to {honorific}" if honorific else "to the household"
     task = (
         f"Summarise the following conversation transcript from the past {_period(hours)}. "
         f"3–5 sentences maximum. Highlight anything notable, unusual, or actionable. "
-        f"Speak as Nova giving a briefing to {honorific}. "
+        f"Speak as Nova giving a briefing {to_whom}. "
         f"Extract the essence — do not list every exchange."
     )
     system = build_system_prompt(hass, honorific, task)

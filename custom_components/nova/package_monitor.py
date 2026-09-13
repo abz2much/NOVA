@@ -263,12 +263,23 @@ async def evaluate(hass, groq_client, honorific, tts_entity, speakers,
     loc = "the front door"
     spoke = False
 
+    # honorific may be "" once nobody specific is home to address (see
+    # honorific.py) — kept as a plain lead-in (not persona.lead_in(), which
+    # titlecases the honorific and would change this file's existing,
+    # untitled casing) with the sentence itself capitalized when it's
+    # opening on its own.
+    def _lead(sentence: str) -> str:
+        if honorific:
+            return f"{honorific}, {sentence}"
+        return sentence[0].upper() + sentence[1:]
+
     # Package arrival
     if det.get("package") and not prev.get("package"):
         n = det.get("count", 1)
-        msg = (f"{honorific}, {n} packages have been delivered to {loc}."
-               if n and n > 1 else
-               f"{honorific}, a package has been delivered to {loc}.")
+        msg = _lead(
+              f"{n} packages have been delivered to {loc}."
+              if n and n > 1 else
+              f"a package has been delivered to {loc}.")
         _log(hass, entity_id, "delivered", det, source)
         if can_speak:
             await async_announce(hass, msg, tts_entity, speakers, context="package")
@@ -280,7 +291,7 @@ async def evaluate(hass, groq_client, honorific, tts_entity, speakers,
         if away and can_speak:
             await async_announce(
                 hass,
-                f"{honorific}, a package was just removed from {loc} while no one is home.",
+                _lead(f"a package was just removed from {loc} while no one is home."),
                 tts_entity, speakers, context="package",
             )
             spoke = True
@@ -290,7 +301,7 @@ async def evaluate(hass, groq_client, honorific, tts_entity, speakers,
         _log(hass, entity_id, "mail", det, source)
         if can_speak:
             await async_announce(
-                hass, f"{honorific}, mail has arrived at {loc}.",
+                hass, _lead(f"mail has arrived at {loc}."),
                 tts_entity, speakers, context="package",
             )
             spoke = True
