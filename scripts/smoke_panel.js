@@ -19,6 +19,9 @@ const dom = new JSDOM("<!DOCTYPE html><body></body>", { url: "http://localhost/"
 const { window } = dom;
 global.window = window; global.document = window.document;
 ["HTMLElement", "customElements", "Node", "Event", "CustomEvent", "requestAnimationFrame", "cancelAnimationFrame"].forEach(k => { if (window[k]) global[k] = window[k]; });
+// jsdom doesn't implement window.confirm (always undefined/falsy) — both
+// panels' document-delete flows gate on it, so stub it to auto-confirm.
+window.confirm = () => true;
 
 window.eval(fs.readFileSync(COMPONENT, "utf8"));
 window.eval(fs.readFileSync(NEW_LOOK_COMPONENT, "utf8"));
@@ -104,6 +107,7 @@ let _semanticEnabled = false;
 let _activeMode = "normal";
 const _modeSetCalls = [];
 const _serviceCalls = [];
+const _docDeleteCalls = [];
 let _energyAgency = "advisory";
 let _bioEnabled = false;
 let _pendingFacts = [{ id: 42, key: "bedtime", value: "10pm", subject: "primary" }];
@@ -224,7 +228,7 @@ const hass = {
       if (m.action === "search") return { results: [{ text: "The furnace filter size is 16x25x1 MERV 11.", source: "furnace_manual.pdf", chunk: 4, score: 0.88 }] };
       if (m.action === "upload") return { ok: true, filename: m.filename || "uploaded.pdf", chunks: 12, embedded: 12 };
       if (m.action === "scan_watch") return { ok: true, watched: 1, new_files: 2 };
-      if (m.action === "delete") return { ok: true, filename: m.filename };
+      if (m.action === "delete") { _docDeleteCalls.push(m.filename); return { ok: true, filename: m.filename }; }
     }
     if (m.type === "nova/mmwave_overview") return {
       rooms: [
@@ -1151,6 +1155,11 @@ setTimeout(async () => {
       })()],
     ["settings tab: unbuilt cards are honestly labeled, not silently missing",
       (() => {
+        // Floor Plan Editor stays a stub permanently (a full SVG drag-and-
+        // drop editor tied to Classic's Residence 3D view, out of scope for
+        // the same reason that tab is Classic-only) — a durable pointer,
+        // unlike the temporary ones this check used while other cards were
+        // still being built out.
         const fpeCard = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Floor Plan Editor/.test(c.querySelector(".panel-title")?.textContent || ""));
         return !!fpeCard && !!fpeCard.querySelector(".stub-tag") && /Configure/.test(fpeCard.textContent);
       })()],
@@ -1593,6 +1602,83 @@ setTimeout(async () => {
   await new Promise(r => setTimeout(r, 20));
   checks.push(["settings tab: Doorbell Training scan button calls nova.train_doorbell_backlog",
     _serviceCalls.some(c => c.domain === "nova" && c.service === "train_doorbell_backlog" && c.data?.limit === 40)]);
+
+  // Wellbeing Context: switch to Home & Extras group, fetched once (like
+  // Diagnostics/Hazard/Energy). NOTE: Classic's own "wellbeing enable
+  // button" test earlier already clicked bio-toggle and left the shared
+  // _bioEnabled mock flag ON (no cleanup) — so this section starts from
+  // ON/2-sensors, and the toggle click below turns it back OFF.
+  const homeNavBtn = Array.from(sRoot.querySelectorAll(".settings-nav-btn")).find(b => b.textContent === "Home & Extras");
+  homeNavBtn.click();
+  await new Promise(r => setTimeout(r, 30));
+  sRoot = elNew.shadowRoot;
+  checks.push(
+    ["settings tab: Wellbeing Context card is real and lists wearable entities",
+      (() => {
+        const wc = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Wellbeing Context/.test(c.querySelector(".panel-title")?.textContent || ""));
+        return !!wc && !wc.querySelector(".stub-tag") && !!wc.querySelector("#newBioToggle")
+          && /ON · 2 sensors/.test(wc.textContent) && /heart rate/.test(wc.textContent);
+      })()],
+  );
+  sRoot.getElementById("newBioToggle").click();
+  await new Promise(r => setTimeout(r, 20));
+  sRoot = elNew.shadowRoot;
+  checks.push(["settings tab: Wellbeing Context toggle disables via nova/biometrics",
+    (() => {
+      const wc = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Wellbeing Context/.test(c.querySelector(".panel-title")?.textContent || ""));
+      return !!wc && /OFF/.test(wc.textContent);
+    })()]);
+
+  // Nova Character & Research: fully generic .cfg-field card, same as
+  // Anticipation & Memory — banter level, search backend, SearXNG URL.
+  checks.push(
+    ["settings tab: Nova Character & Research card is real with its three fields",
+      (() => {
+        const crc = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Nova Character & Research/.test(c.querySelector(".panel-title")?.textContent || ""));
+        return !!crc && !crc.querySelector(".stub-tag")
+          && !!crc.querySelector('select[data-cfg-key="banter_level"]')
+          && !!crc.querySelector('select[data-cfg-key="search_backend"]')
+          && !!crc.querySelector('input[data-cfg-key="searxng_url"]')
+          && crc.querySelector('input[data-cfg-key="searxng_url"]').value === "http://sx.local:8080";
+      })()],
+  );
+  const banterSel = sRoot.querySelector('select[data-cfg-key="banter_level"]');
+  banterSel.value = "2";
+  banterSel.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: Nova Character & Research select autosaves via nova/update_config",
+    _updateConfigCalls.some(c => c.key === "banter_level" && c.value === "2")]);
+  sRoot = elNew.shadowRoot;
+
+  // Document Library: fetched once (status + vector backend), ingest and
+  // search both hit the same nova/documents contract Classic uses, delete
+  // is gated on window.confirm (stubbed to auto-confirm above).
+  await new Promise(r => setTimeout(r, 30));
+  sRoot = elNew.shadowRoot;
+  checks.push(
+    ["settings tab: Document Library card is real with sources + semantic-search hint",
+      (() => {
+        const dl = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Document Library/.test(c.querySelector(".panel-title")?.textContent || ""));
+        return !!dl && !dl.querySelector(".stub-tag")
+          && /furnace_manual\.pdf/.test(dl.textContent) && /VECTOR/.test(dl.textContent)
+          && !!dl.querySelector("#newDoclibIngest") && !!dl.querySelector("#newVecbkToggle");
+      })()],
+  );
+  const doclibSearch = sRoot.getElementById("newDoclibSearch");
+  doclibSearch.value = "furnace filter size";
+  doclibSearch.dispatchEvent(new sRoot.ownerDocument.defaultView.KeyboardEvent("keydown", { key: "Enter" }));
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: Document Library search renders hit excerpts",
+    /16x25x1 MERV 11/.test(sRoot.getElementById("newDoclibBody")?.textContent || "")]);
+  sRoot.getElementById("newDoclibIngest").click();
+  await new Promise(r => setTimeout(r, 20));
+  sRoot = elNew.shadowRoot;
+  checks.push(["settings tab: Document Library ingest re-fetches status and restores the source list",
+    /furnace_manual\.pdf/.test(sRoot.getElementById("newDoclibBody")?.textContent || "")]);
+  sRoot.querySelector(".new-doclib-del").click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: Document Library delete calls nova/documents delete (window.confirm stubbed to auto-confirm)",
+    _docDeleteCalls.includes("furnace_manual.pdf")]);
 
   // Switching tabs back and forth must not leak the core's animation loop
   // (a real bug caught before shipping — _render() tearing down the canvas

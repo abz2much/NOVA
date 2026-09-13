@@ -1,5 +1,5 @@
 /*
- * Nova — new Command Center look (v7.93.0).
+ * Nova — new Command Center look (v7.95.0).
  *
  * A genuinely separate implementation from nova-panel.js's Classic UI, per
  * Abi's explicit choice — full creative freedom over ongoing maintenance
@@ -7,15 +7,15 @@
  * into ui_style="new" (see NovaPanelShell at the bottom of nova-panel.js,
  * which dynamically imports this file).
  *
- * Scope (v7.94.0): Command Center + Settings, reorganized around what
+ * Scope (v7.95.0): Command Center + Settings, reorganized around what
  * you're trying to do rather than which subsystem it touches (General,
  * Voice & Speakers, Awareness & Safety, Learning & Memory, Cameras, Home
  * & Extras), plus a search box across every setting. Residence, Intrusion,
  * Suggestions, Logs, and Memory still live in Classic — the "Look"
- * selector is the way back. Settings is being filled in card-by-card, not
- * all at once: General and Room Speakers are real here; everything else
- * is a clearly-labeled stub pointing at Classic/Configure until it gets
- * its own pass, rather than silently missing.
+ * selector is the way back. 25 of 26 Settings cards are real here, filled
+ * in group by group; only Floor Plan Editor stays a stub — a full SVG
+ * drag-and-drop editor tied to Classic's Residence 3D view, out of scope
+ * for the same reason that tab is Classic-only.
  *
  * Design: an animated "stellar core" (Nova = a star's sudden brightening)
  * replaces a camera feed as the dashboard's visual anchor — it works
@@ -243,8 +243,11 @@ class NovaCommandCenterNew extends HTMLElement {
   // Reorganized around what you're trying to do rather than which Nova
   // subsystem it touches — the split Classic has (System Diagnostics
   // under General, a separate Diagnostics under Cameras) is merged here
-  // into one place. "real:true" cards are fully built; everything else is
-  // a stub naming exactly where to find it today rather than being
+  // into one place. "real:true" cards are fully built (25 of 26, filled in
+  // group by group); only Floor Plan Editor stays a stub — it's a full SVG
+  // drag-and-drop editor tied to Classic's Residence 3D view, the same
+  // reason that tab stays Classic-only in V1. Every stub is a card naming
+  // exactly where to find it today rather than being
   // silently missing, filled in card-by-card in later passes.
   static SETTINGS_GROUPS = [
     { id: "general", label: "General" },
@@ -301,12 +304,12 @@ class NovaCommandCenterNew extends HTMLElement {
     { id: "doorbell_training", group: "cameras", title: "Doorbell Training", real: true,
       desc: "Teach Nova to recognize regular visitors at the door." },
     { id: "floor_plan_editor", group: "home", title: "Floor Plan Editor",
-      desc: "Drag-and-drop room layout for the Residence 3D view and floor plan cards." },
-    { id: "wellbeing_context", group: "home", title: "Wellbeing Context",
+      desc: "A full SVG drag-and-drop editor tied to Classic's Residence 3D view — same reason that tab itself stays Classic-only in V1, not a smaller lift than the rest of this list." },
+    { id: "wellbeing_context", group: "home", title: "Wellbeing Context", real: true,
       desc: "Whether wearable heart-rate/sleep data reaches Nova, and which providers." },
-    { id: "character_research", group: "home", title: "Nova Character & Research",
+    { id: "character_research", group: "home", title: "Nova Character & Research", real: true,
       desc: "Banter level and the web-research backend (DuckDuckGo or self-hosted SearXNG)." },
-    { id: "document_library", group: "home", title: "Document Library",
+    { id: "document_library", group: "home", title: "Document Library", real: true,
       desc: "Manuals and receipts Nova can search and cite from." },
   ];
 
@@ -348,6 +351,9 @@ class NovaCommandCenterNew extends HTMLElement {
         : c.id === "excluded_entities" ? this._excludedEntitiesCardBody()
         : c.id === "cameras" ? this._camerasCardBody()
         : c.id === "doorbell_training" ? this._doorbellTrainingCardBody()
+        : c.id === "wellbeing_context" ? this._wellbeingContextCardBody()
+        : c.id === "character_research" ? this._characterResearchCardBody()
+        : c.id === "document_library" ? this._documentLibraryCardBody()
         : "")
       : `<div class="stub-body">${this._esc(c.desc)}<br><span class="stub-where">Not built here yet — use Classic, or Settings → Devices &amp; Services → Nova → Configure.</span></div>`;
     return `
@@ -1438,6 +1444,293 @@ class NovaCommandCenterNew extends HTMLElement {
       ${rows}`;
   }
 
+  // Wellbeing status is fetched once per element lifetime (same on-demand
+  // pattern as Diagnostics/Hazard/Energy).
+  async _fetchBio() {
+    if (!this._hass) return;
+    try {
+      this._bio = await this._hass.callWS({ type: "nova/biometrics", action: "status" });
+    } catch (_) { this._bio = { error: true }; }
+    if (this._currentTab === "settings") this._render();
+  }
+
+  _wellbeingContextCardBody() {
+    const b = this._bio || {};
+    if (b.error) {
+      return `<div class="stub-body">Couldn't load — restart Home Assistant after updating.</div>`;
+    }
+    const status = b.enabled
+      ? `<span class="diag-ok">ON · ${b.found || 0} sensor${b.found === 1 ? "" : "s"}</span>`
+      : `<span class="diag-off">OFF</span>`;
+    const ents = b.entities || [];
+    let body;
+    if (!b.enabled) {
+      body = `<div class="stub-body">Off — enable to let Nova use wearable context. Health readings are never diagnosed or alarmed on.</div>`;
+    } else if (!ents.length) {
+      body = `<div class="stub-body">No wearable entities found. Connect a wearable integration (Withings, Google Fit, Oura, etc.) to Home Assistant.</div>`;
+    } else {
+      body = ents.map(e =>
+        `<div class="cfg-row"><label>${this._esc((e.kind || "").replace(/_/g, " "))}</label><span>${this._esc(e.value)}${e.unit ? " " + this._esc(e.unit) : ""}</span></div>`).join("");
+    }
+    return `
+      <div class="stub-body">Lets Nova read a connected wearable (heart rate, sleep, steps) so it can be quieter when you're resting. Context only — not medical. Off by default; health data stays private.</div>
+      <div class="cfg-row">
+        <label>Status</label>
+        <div style="display:flex;align-items:center;gap:8px">${status}<button class="mode-chip" id="newBioToggle">${b.enabled ? "✕ DISABLE" : "◉ ENABLE"}</button></div>
+      </div>
+      ${body}`;
+  }
+
+  _characterResearchCardBody() {
+    const cfg = this._data()?.config || {};
+    return `
+      <div class="cfg-row">
+        <label>Banter level</label>
+        <select class="cfg-field" data-cfg-key="banter_level">
+          ${this._optSelect([["0", "Plain — no wit"], ["1", "Dry — occasional wit (default)"], ["2", "Full — MCU Nova"]], String(cfg.banter_level ?? "1"))}
+        </select>
+      </div>
+      <div class="cfg-row">
+        <label>Web research backend</label>
+        <select class="cfg-field" data-cfg-key="search_backend">
+          ${this._optSelect([["duckduckgo", "DuckDuckGo (no key, default)"], ["searxng", "SearXNG (self-hosted)"]], cfg.search_backend || "duckduckgo")}
+        </select>
+      </div>
+      <div class="cfg-row">
+        <label>SearXNG URL</label>
+        <input class="cfg-field" type="text" data-cfg-key="searxng_url" value="${this._esc(cfg.searxng_url || "")}" placeholder="http://searxng.local:8080" autocomplete="off">
+      </div>`;
+  }
+
+  // Document Library (RAG) — fetched once per element lifetime, like the
+  // other on-demand cards (Diagnostics/Hazard/Energy/Wellbeing).
+  async _fetchDocLibrary() {
+    if (!this._hass) return;
+    try {
+      this._docLib = await this._hass.callWS({ type: "nova/documents", action: "status" });
+    } catch (_) { this._docLib = { error: true }; }
+    if (this._currentTab === "settings") this._render();
+  }
+
+  async _fetchVectorBackend() {
+    if (!this._hass) return;
+    try {
+      this._vecbk = await this._hass.callWS({ type: "nova/semantic_search", action: "status" });
+    } catch (_) { this._vecbk = { error: true }; }
+    if (this._currentTab === "settings") this._render();
+  }
+
+  _renderDocLibraryList() {
+    const d = this._docLib || {};
+    if (d.error) return `<div class="stub-body">Couldn't reach the library — restart Home Assistant after updating, then reopen.</div>`;
+    const sources = d.sources || [];
+    if (!sources.length) {
+      return `<div class="stub-body">No documents ingested yet. Add PDF/.txt/.md files to <code>/config/nova/documents</code> and press Ingest.${d.chroma ? "" : " (Vector search needs ChromaDB; keyword fallback is active.)"}</div>`;
+    }
+    return sources.map(s => `
+      <div class="cfg-row">
+        <label>${this._esc(s.source)}</label>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="toggle-desc">${s.chunks} chunks</span>
+          <button class="new-doclib-del" data-src="${this._esc(s.source)}" title="Remove document">✕</button>
+        </div>
+      </div>`).join("");
+  }
+
+  _renderDocSearchResults(hits) {
+    if (!hits || !hits.length) return `<div class="stub-body">No matches. Try different words, or ingest more documents.</div>`;
+    return hits.map(h => {
+      const score = (h.score != null) ? ` · ${Math.round(h.score * 100)}%` : "";
+      const excerpt = (h.text || "").slice(0, 220);
+      return `<div class="stub-body"><b>${this._esc(h.source || "?")}${score}</b><br>${this._esc(excerpt)}${h.text && h.text.length > 220 ? "…" : ""}</div>`;
+    }).join("");
+  }
+
+  _renderVectorBackendBody() {
+    const v = this._vecbk || {};
+    if (v.error) return "";
+    if (v.enabled) {
+      return `
+        <div class="cfg-row"><label>Search</label><span class="diag-ok">◉ SEMANTIC (Ollama)</span></div>
+        <div class="stub-body">Meaning-based matching via Ollama ${this._esc(v.model || "nomic-embed-text")}${v.vector_count ? ` · ${v.vector_count} vectors` : " · re-ingest to embed your documents"}.</div>
+        <div class="cfg-row"><button class="mode-chip" id="newVecbkToggle" data-mode="disable">✕ DISABLE SEMANTIC SEARCH</button></div>`;
+    }
+    if (!v.ollama_configured) {
+      return `
+        <div class="cfg-row"><label>Search</label><span class="diag-off">KEYWORD (FTS)</span></div>
+        <div class="stub-body">Works everywhere with no setup. Semantic search needs an Ollama host — set the LLM base URL to your Ollama server and pull an embed model (ollama pull nomic-embed-text).</div>`;
+    }
+    return `
+      <div class="cfg-row"><label>Search</label><span class="diag-off">KEYWORD (FTS)</span></div>
+      <div class="stub-body">Enable semantic search to match on meaning, using your Ollama server (${this._esc(v.model || "nomic-embed-text")}). No install, no ChromaDB. Re-ingest afterward to embed existing docs.</div>
+      <div class="cfg-row"><button class="mode-chip" id="newVecbkToggle" data-mode="enable">⬆ ENABLE SEMANTIC SEARCH</button></div>`;
+  }
+
+  _documentLibraryCardBody() {
+    const d = this._docLib || {};
+    const backend = d.chroma ? "VECTOR" : d.fts ? "KEYWORD" : "NONE";
+    return `
+      <div class="stub-body">Drop manuals &amp; receipts (PDF, .txt, .md) into <code>/config/nova/documents</code> or upload below, then ingest. Ask Nova "what's the furnace filter size?" and it answers from your paperwork.</div>
+      <div class="cfg-row"><label>Backend</label><span>${this._esc(backend)} · ${d.chunk_count || 0} chunks</span></div>
+      ${this._renderVectorBackendBody()}
+      <div class="mode-bind-head">Library</div>
+      <div class="cfg-row">
+        <button class="mode-chip" id="newDoclibUpload">⬆ UPLOAD FILE</button>
+        <input type="file" id="newDoclibFile" accept=".pdf,.txt,.md" style="display:none">
+        <button class="mode-chip" id="newDoclibIngest">⟳ INGEST FOLDER</button>
+      </div>
+      <div class="cfg-row">
+        <input id="newDoclibSearch" class="cfg-field" style="flex:1" type="text" placeholder="test a search — e.g. furnace filter size" autocomplete="off">
+      </div>
+      <div id="newDoclibBody">${this._renderDocLibraryList()}</div>
+      <div class="mode-bind-head">Watch folders <span class="toggle-desc">one per line/comma, e.g. /media/downloads</span></div>
+      <div class="cfg-row">
+        <input id="newDoclibWatch" class="cfg-field" style="flex:1" type="text" value="${this._esc(this._docLibWatchValue())}" autocomplete="off">
+        <button class="mode-chip" id="newDoclibScan">⟳ SCAN WATCH</button>
+      </div>`;
+  }
+
+  _docLibWatchValue() {
+    const wf = this._data()?.config?.document_watch_folders;
+    if (!wf) return "";
+    return Array.isArray(wf) ? wf.join("\n") : wf;
+  }
+
+  _rerenderDocLibraryBody() {
+    const host = this.shadowRoot?.getElementById("newDoclibBody");
+    if (!host) return;
+    host.innerHTML = this._renderDocLibraryList();
+    this._wireDocLibraryDeletes();
+  }
+
+  _wireDocLibraryDeletes() {
+    this.shadowRoot?.querySelectorAll(".new-doclib-del").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const src = btn.getAttribute("data-src");
+        if (!src || !this._hass) return;
+        if (!window.confirm(`Remove "${src}" from the library? This deletes the file and its indexed chunks.`)) return;
+        try {
+          await this._hass.callWS({ type: "nova/documents", action: "delete", filename: src });
+          await this._fetchDocLibrary(); // triggers a full _render() when in the settings tab
+        } catch (err) { console.error("Nova (new look): document delete failed", err); }
+      });
+    });
+  }
+
+  _wireDocLibrary() {
+    const root = this.shadowRoot;
+    this._wireDocLibraryDeletes();
+
+    const ingestBtn = root.getElementById("newDoclibIngest");
+    if (ingestBtn) {
+      ingestBtn.addEventListener("click", async () => {
+        if (!this._hass) return;
+        ingestBtn.disabled = true;
+        const orig = ingestBtn.textContent;
+        ingestBtn.textContent = "⟳ INGESTING…";
+        try {
+          await this._hass.callWS({ type: "nova/documents", action: "ingest" });
+          await this._fetchDocLibrary();
+        } catch (err) {
+          console.error("Nova (new look): ingest failed", err);
+        } finally {
+          ingestBtn.disabled = false;
+          ingestBtn.textContent = orig;
+        }
+      });
+    }
+
+    const q = root.getElementById("newDoclibSearch");
+    if (q) {
+      q.addEventListener("keydown", async (ev) => {
+        if (ev.key !== "Enter") return;
+        ev.preventDefault();
+        const query = q.value.trim();
+        if (!query || !this._hass) { this._rerenderDocLibraryBody(); return; }
+        try {
+          const res = await this._hass.callWS({ type: "nova/documents", action: "search", query });
+          const host = root.getElementById("newDoclibBody");
+          if (host) host.innerHTML = this._renderDocSearchResults(res?.results || []);
+        } catch (err) { console.error("Nova (new look): document search failed", err); }
+      });
+    }
+
+    const upBtn = root.getElementById("newDoclibUpload");
+    const fileInput = root.getElementById("newDoclibFile");
+    if (upBtn && fileInput) {
+      upBtn.addEventListener("click", () => fileInput.click());
+      fileInput.addEventListener("change", async () => {
+        const file = fileInput.files && fileInput.files[0];
+        if (!file || !this._hass) return;
+        if (file.size > 25 * 1024 * 1024) { fileInput.value = ""; return; }
+        upBtn.disabled = true;
+        const orig = upBtn.textContent;
+        upBtn.textContent = "⬆ UPLOADING…";
+        try {
+          const b64 = await new Promise((resolve, reject) => {
+            const r = new FileReader();
+            r.onload = () => resolve(String(r.result).split(",")[1] || "");
+            r.onerror = () => reject(new Error("read failed"));
+            r.readAsDataURL(file);
+          });
+          const res = await this._hass.callWS({ type: "nova/documents", action: "upload", filename: file.name, content: b64 });
+          if (res.ok) {
+            await this._fetchDocLibrary();
+          }
+        } catch (err) {
+          console.error("Nova (new look): document upload failed", err);
+        } finally {
+          upBtn.disabled = false;
+          upBtn.textContent = orig;
+          fileInput.value = "";
+        }
+      });
+    }
+
+    const watchField = root.getElementById("newDoclibWatch");
+    const saveWatch = async () => {
+      if (!this._hass || !watchField) return;
+      try { await this._hass.callWS({ type: "nova/update_config", key: "document_watch_folders", value: watchField.value.trim() }); } catch (_) {}
+    };
+    if (watchField) watchField.addEventListener("blur", saveWatch);
+
+    const scanBtn = root.getElementById("newDoclibScan");
+    if (scanBtn) {
+      scanBtn.addEventListener("click", async () => {
+        if (!this._hass) return;
+        await saveWatch();
+        scanBtn.disabled = true;
+        const orig = scanBtn.textContent;
+        scanBtn.textContent = "⟳ SCANNING…";
+        try {
+          const res = await this._hass.callWS({ type: "nova/documents", action: "scan_watch" });
+          if (res.watched > 0) {
+            await this._fetchDocLibrary();
+          }
+        } catch (err) {
+          console.error("Nova (new look): watch scan failed", err);
+        } finally {
+          scanBtn.disabled = false;
+          scanBtn.textContent = orig;
+        }
+      });
+    }
+
+    const vecbkToggle = root.getElementById("newVecbkToggle");
+    if (vecbkToggle) {
+      vecbkToggle.addEventListener("click", async () => {
+        if (!this._hass) return;
+        const mode = vecbkToggle.getAttribute("data-mode") || "enable";
+        try {
+          await this._hass.callWS({ type: "nova/semantic_search", action: mode });
+        } catch (err) {
+          console.error("Nova (new look): semantic search toggle failed", err);
+        }
+        await this._fetchVectorBackend();
+      });
+    }
+  }
+
   _mediaPlayerOptions(selected) {
     const states = this._hass?.states || {};
     const eids = Object.keys(states).filter(e => e.startsWith("media_player.")).sort();
@@ -1838,6 +2131,30 @@ class NovaCommandCenterNew extends HTMLElement {
     if (!this._energyFetchedOnce) {
       this._energyFetchedOnce = true;
       this._fetchEnergyStatus();
+    }
+    if (!this._bioFetchedOnce) {
+      this._bioFetchedOnce = true;
+      this._fetchBio();
+    }
+    if (!this._docLibFetchedOnce) {
+      this._docLibFetchedOnce = true;
+      this._fetchDocLibrary();
+      this._fetchVectorBackend();
+    }
+    this._wireDocLibrary();
+    const bioToggle = root.getElementById("newBioToggle");
+    if (bioToggle) {
+      bioToggle.addEventListener("click", async () => {
+        if (!this._hass) return;
+        const enabling = !(this._bio && this._bio.enabled);
+        bioToggle.disabled = true;
+        try {
+          await this._hass.callWS({ type: "nova/biometrics", action: enabling ? "enable" : "disable" });
+        } catch (err) {
+          console.error("Nova (new look): wellbeing toggle failed", err);
+        }
+        await this._fetchBio();
+      });
     }
     root.querySelectorAll("#newEnergyAgency .mode-chip[data-agency]").forEach(btn => {
       btn.addEventListener("click", async () => {
