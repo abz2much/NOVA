@@ -55,3 +55,11 @@ def test_reseed_scoped_to_the_conversation_not_global():
     # could leak into another's session. Must pass this conversation's own
     # cid through to load_recent, not call it with no scope.
     assert "memory_thread.load_recent(self.hass, hours, limit, device_id=cid)" in src
+
+
+def test_semantic_memory_context_scoped_to_the_conversation_not_global():
+    src = SRC.read_text()
+    # Fixed v7.87.0 (backlog #1 follow-up): get_conversation_context() (a
+    # SEPARATE semantic-memory subsystem from the reseed above) also used to
+    # search globally -- must pass cid through as the third positional arg.
+    assert "get_conversation_context, user_input.text, 3, cid," in src

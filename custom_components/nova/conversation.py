@@ -830,9 +830,12 @@ class NovaAgent(conversation.ConversationEntity):
                 lambda: store_memory(user_input.text, role="user",
                     device_id=user_input.device_id or "", conversation_id=cid)
             )
-            # Retrieve relevant past context and inject into persona
+            # Retrieve relevant past context and inject into persona. Scoped
+            # to this conversation's own history (v7.87.0, backlog #1
+            # follow-up) — used to search every household member's stored
+            # turns regardless of who was asking.
             mem_context = await self.hass.async_add_executor_job(
-                get_conversation_context, user_input.text, 3,
+                get_conversation_context, user_input.text, 3, cid,
             )
             if mem_context:
                 persona = persona + "\n\n" + mem_context
