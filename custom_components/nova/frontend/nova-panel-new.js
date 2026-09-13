@@ -42,7 +42,7 @@ class NovaCommandCenterNew extends HTMLElement {
     this._particles = [];
     this._current = { speed: 0.20, count: 70, radiusMul: 1, glow: 0.55, hot: 0.35, flare: 0.05 };
     this._camOpen = false;
-    this._currentTab = "dashboard"; // "dashboard" | "settings" | "logs" | "memory"
+    this._currentTab = "dashboard"; // "dashboard" | "settings" | "logs" | "memory" | "intrusion" | "suggestions"
     this._logFilter = "all";
     this._logSearch = "";
     this._settingsSection = "general";
@@ -162,6 +162,7 @@ class NovaCommandCenterNew extends HTMLElement {
       occupied: (live.areas || []).filter(a => a.active).length,
       config: live.config || {},
       doorbellTraining: live.doorbell_training || {},
+      suggestions: live.suggestions || [],
     };
   }
 
@@ -197,11 +198,13 @@ class NovaCommandCenterNew extends HTMLElement {
             <div class="brand-mark"></div>
             <div>
               <div class="brand-name">Nova</div>
-              <div class="brand-tag">${tab === "settings" ? "Settings" : tab === "logs" ? "Logs" : tab === "memory" ? "Memory" : "Command Center"}</div>
+              <div class="brand-tag">${tab === "settings" ? "Settings" : tab === "logs" ? "Logs" : tab === "memory" ? "Memory" : tab === "intrusion" ? "Intrusion" : tab === "suggestions" ? "Suggestions" : "Command Center"}</div>
             </div>
           </div>
           <nav class="top-nav">
             <button class="nav-tab${tab === "dashboard" ? " active" : ""}" data-tab="dashboard">Command Center</button>
+            <button class="nav-tab${tab === "intrusion" ? " active" : ""}" data-tab="intrusion">Intrusion</button>
+            <button class="nav-tab${tab === "suggestions" ? " active" : ""}" data-tab="suggestions">Suggestions</button>
             <button class="nav-tab${tab === "settings" ? " active" : ""}" data-tab="settings">Settings</button>
             <button class="nav-tab${tab === "logs" ? " active" : ""}" data-tab="logs">Logs</button>
             <button class="nav-tab${tab === "memory" ? " active" : ""}" data-tab="memory">Memory</button>
@@ -217,9 +220,9 @@ class NovaCommandCenterNew extends HTMLElement {
           </div>
         </div>
 
-        ${tab === "settings" ? this._htmlSettings() : tab === "logs" ? this._htmlLogs() : tab === "memory" ? this._htmlMemory() : this._htmlDashboard()}
+        ${tab === "settings" ? this._htmlSettings() : tab === "logs" ? this._htmlLogs() : tab === "memory" ? this._htmlMemory() : tab === "intrusion" ? this._htmlIntrusion() : tab === "suggestions" ? this._htmlSuggestions() : this._htmlDashboard()}
 
-        <div class="footnote">NOVA — NEW LOOK · PREVIEW · RESIDENCE, INTRUSION AND SUGGESTIONS STILL LIVE IN CLASSIC</div>
+        <div class="footnote">NOVA — NEW LOOK · PREVIEW · RESIDENCE (3D VIEW) STILL LIVES IN CLASSIC</div>
       </div>
     `;
   }
@@ -669,6 +672,291 @@ class NovaCommandCenterNew extends HTMLElement {
     this._renderKnowledgeList();
     this._renderPendingFacts();
     this._renderPersonRoutines();
+  }
+
+  // ─── Intrusion ────────────────────────────────────────────────────────
+  // Ported from Classic's own Intrusion tab (nova-panel.js). Safety-relevant
+  // (call-off/acknowledge affect real escalation), so this is a straight
+  // port of Classic's exact websocket calls and semantics — no new
+  // behavior invented here. The timeout select and vision-confirm toggle
+  // reuse the generic .cfg-field/.toggle-btn autosave already wired for
+  // Settings (see _saveSetting's dashboard-only render guard above).
+  _htmlIntrusion() {
+    return `
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">Intrusion</div>
+            <div class="panel-meta" id="newIntrStatus">—</div>
+          </div>
+          <div class="stub-body">Last intrusion snapshot and false-alarm call-off. When Nova confirms an intruder on camera it grabs a still; if it's not real, call it off here or say "it's a false alarm".</div>
+          <div id="newIntrBody"><div class="stub-body">Loading…</div></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">Intrusion Log</div>
+            <div class="panel-meta" id="newIlogLearn">—</div>
+          </div>
+          <div class="stub-body">Every intrusion event with its snapshot. Mark each one <b>real</b> or <b>false alarm</b> — Nova learns from your labels and stops firing the low-confidence alerts for patterns you keep calling false. A confirmed intrusion always alerts, no matter what it has learned.</div>
+          <div class="cfg-row"><button class="mode-chip" id="newIlogRefresh">⟳ REFRESH</button></div>
+          <div id="newIlogBody"><div class="stub-body">Loading…</div></div>
+        </div>
+    `;
+  }
+
+  async _fetchIntrusion() {
+    if (!this._hass) return;
+    try {
+      const cfg = this._liveData?.config || {};
+      if (cfg.intrusion_response_timeout != null) this._intrTimeout = cfg.intrusion_response_timeout;
+    } catch (_) {}
+    try {
+      this._intr = await this._hass.callWS({ type: "nova/intrusion", action: "status" });
+    } catch (_) {
+      this._intr = { error: true };
+    }
+    this._renderIntrusionStatus();
+  }
+
+  _renderIntrusionStatus() {
+    const root = this.shadowRoot;
+    const body = root?.getElementById("newIntrBody");
+    const statusEl = root?.getElementById("newIntrStatus");
+    if (!body) return;
+    const s = this._intr || {};
+    if (s.error) {
+      body.innerHTML = `<div class="stub-body">Couldn't load — restart Home Assistant after updating.</div>`;
+      if (statusEl) statusEl.textContent = "—";
+      return;
+    }
+    if (statusEl) {
+      statusEl.innerHTML = s.called_off
+        ? `<span class="diag-warn">CALLED OFF · ${s.suppressed_for}s</span>`
+        : `<span class="diag-ok">ARMED</span>`;
+    }
+    const snap = s.last_snapshot;
+    let html = "";
+    if (snap && snap.url) {
+      const when = snap.ts ? new Date(snap.ts * 1000).toLocaleString() : "";
+      html += `<div class="intr-snap">
+        <img src="${this._esc(snap.url)}" alt="intrusion snapshot" class="intr-img">
+        <div class="toggle-desc">${this._esc((snap.camera || "").replace("camera.", "").replace(/_/g, " "))} · ${this._esc(when)}</div>
+      </div>`;
+    } else {
+      html += `<div class="stub-body">No intrusion snapshots captured. This stays empty unless Nova confirms an intruder on camera.</div>`;
+    }
+    if (s.false_alarms_24h) {
+      html += `<div class="stub-body">${s.false_alarms_24h} false alarm${s.false_alarms_24h === 1 ? "" : "s"} called off in the last 24h</div>`;
+    }
+    if (s.acknowledged) {
+      html += `<div class="stub-body">✓ Acknowledged — automatic escalation held (you're handling it)</div>`;
+    }
+    html += `
+      <div class="cfg-row">
+        <label>Auto-escalate if no response after</label>
+        <select class="cfg-field" data-cfg-key="intrusion_response_timeout">${this._optSelect([["60", "1 min"], ["120", "2 min"], ["180", "3 min"], ["300", "5 min"], ["600", "10 min"]], String(this._intrTimeout || 120))}</select>
+      </div>
+      <div class="cfg-row">
+        <label>Confirm Frigate person with Nova vision before alarming</label>
+        <button class="toggle-btn ${this._liveData?.config?.intrusion_vision_confirm !== false ? "on" : "off"}" data-cfg-key="intrusion_vision_confirm" data-cfg-val="${this._liveData?.config?.intrusion_vision_confirm !== false ? "false" : "true"}">${this._liveData?.config?.intrusion_vision_confirm !== false ? "ON" : "OFF"}</button>
+      </div>
+      <div class="mode-grid">
+        <button class="mode-chip new-intr-ack">✓ I'M LOOKING (HOLD)</button>
+        <button class="mode-chip new-intr-dismiss">✕ CALL OFF (FALSE ALARM)</button>
+      </div>`;
+    body.innerHTML = html;
+    body.querySelectorAll(".toggle-btn[data-cfg-key], select.cfg-field[data-cfg-key]").forEach(el => {
+      if (el.tagName === "BUTTON") {
+        el.addEventListener("click", () => this._saveSetting(el.getAttribute("data-cfg-key"), el.getAttribute("data-cfg-val") === "true"));
+      } else {
+        el.addEventListener("change", () => this._saveSetting(el.getAttribute("data-cfg-key"), el.value));
+      }
+    });
+    const dismissBtn = body.querySelector(".new-intr-dismiss");
+    dismissBtn?.addEventListener("click", async () => {
+      if (!this._hass) return;
+      dismissBtn.disabled = true;
+      try {
+        await this._hass.callWS({ type: "nova/intrusion", action: "dismiss", reason: "panel" });
+        await this._fetchIntrusion();
+      } catch (err) {
+        console.error("Nova (new look): intrusion dismiss failed", err);
+        dismissBtn.disabled = false;
+      }
+    });
+    const ackBtn = body.querySelector(".new-intr-ack");
+    ackBtn?.addEventListener("click", async () => {
+      if (!this._hass) return;
+      ackBtn.disabled = true;
+      try {
+        await this._hass.callWS({ type: "nova/intrusion", action: "acknowledge", reason: "panel" });
+        await this._fetchIntrusion();
+      } catch (err) {
+        console.error("Nova (new look): intrusion acknowledge failed", err);
+        ackBtn.disabled = false;
+      }
+    });
+  }
+
+  async _fetchIntrusionLog() {
+    const root = this.shadowRoot;
+    const body = root?.getElementById("newIlogBody");
+    const side = root?.getElementById("newIlogLearn");
+    if (!this._hass || !body) return;
+    try {
+      const res = await this._hass.callWS({ type: "nova/intrusion", action: "log", limit: 40 });
+      this._ilog = res;
+      const L = res?.learning || {};
+      if (side) side.textContent = `${L.labeled || 0}/${L.events || 0} labelled`;
+      body.innerHTML = this._renderIntrusionLogHtml(res);
+      this._wireIntrusionLabels();
+    } catch (err) {
+      body.innerHTML = `<div class="stub-body">Could not load the log.</div>`;
+    }
+  }
+
+  _renderIntrusionLogHtml(res) {
+    const evs = (res && res.events) || [];
+    if (!evs.length) {
+      return `<div class="stub-body">No intrusion events recorded yet.</div>`;
+    }
+    const damped = ((res.learning || {}).damped_patterns || []).length;
+    let html = "";
+    if (damped) {
+      html += `<div class="stub-body">Nova has learned ${damped} benign pattern${damped === 1 ? "" : "s"} — low-confidence alerts for these stay quiet.</div>`;
+    }
+    for (const e of evs) {
+      const when = new Date((e.ts || 0) * 1000).toLocaleString();
+      const kindCls = { confirmed: "diag-down", unresolved: "diag-warn", investigating: "diag-off" }[e.kind] || "diag-off";
+      const label = e.label || "";
+      html += `<div class="new-ilog-item" data-ev="${this._esc(e.id)}">
+        <div class="cfg-row">
+          <span class="${kindCls}">${this._esc((e.kind || "").toUpperCase())}</span>
+          <span class="toggle-desc">${this._esc(when)}</span>
+        </div>
+        <div class="toggle-desc">${this._esc(e.breach || e.camera || "activity")}${e.reason ? " — " + this._esc(e.reason) : ""}</div>
+        ${e.snapshot_url ? `<img class="intr-img" src="${this._esc(e.snapshot_url)}" alt="snapshot">` : ""}
+        <div class="mode-grid">
+          <button class="mode-chip new-ilog-btn${label === "real" ? " mode-chip-on" : ""}" data-label="real">REAL</button>
+          <button class="mode-chip new-ilog-btn${label === "false" ? " mode-chip-on" : ""}" data-label="false">FALSE ALARM</button>
+          ${label ? `<button class="mode-chip new-ilog-btn" data-label="">CLEAR</button>` : ""}
+        </div>
+      </div>`;
+    }
+    return html;
+  }
+
+  _wireIntrusionLabels() {
+    const body = this.shadowRoot?.getElementById("newIlogBody");
+    body?.querySelectorAll(".new-ilog-btn").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const item = btn.closest(".new-ilog-item");
+        const id = item?.getAttribute("data-ev");
+        if (!id || !this._hass) return;
+        try {
+          await this._hass.callWS({ type: "nova/intrusion", action: "label", event_id: id, label: btn.getAttribute("data-label") });
+          await this._fetchIntrusionLog();
+        } catch (err) { console.error("Nova (new look): intrusion label failed", err); }
+      });
+    });
+  }
+
+  _wireIntrusion() {
+    const root = this.shadowRoot;
+    this._fetchIntrusion();
+    const refreshBtn = root.getElementById("newIlogRefresh");
+    if (refreshBtn) {
+      refreshBtn.addEventListener("click", async () => {
+        refreshBtn.disabled = true;
+        const orig = refreshBtn.textContent;
+        refreshBtn.textContent = "⟳ LOADING…";
+        try { await this._fetchIntrusionLog(); }
+        finally { refreshBtn.disabled = false; refreshBtn.textContent = orig; }
+      });
+    } else {
+      this._fetchIntrusionLog();
+    }
+  }
+
+  // ─── Suggestions ──────────────────────────────────────────────────────
+  // Ported from Classic's own Suggestions tab. Data rides on the same
+  // nova/get_panel_data payload the dashboard already polls (d.suggestions)
+  // — no separate fetch. Approve/dismiss dim the card in place rather than
+  // removing it or re-fetching, matching Classic's own lightweight pattern.
+  static SUGGESTION_TYPE_LABEL = {
+    time_routine: "Daily routine", sequence: "Action sequence",
+    repeated_command: "Repeated command", temp_pref: "Temperature",
+    presence: "Presence", numeric_trigger: "Sensor threshold",
+  };
+
+  _htmlSuggestions() {
+    const sugs = this._data()?.suggestions || [];
+    if (!sugs.length) {
+      return `
+        <div class="panel">
+          <div class="panel-head"><div class="panel-title">What Nova Has Learned</div></div>
+          <div class="stub-body">No suggestions right now. Nova proposes automations as it notices routines repeat — a light you turn on each evening, a scene after a button press, the heat when it's cold. As patterns build up, they'll appear here for you to review and approve. Nothing is ever created without your say-so.</div>
+        </div>`;
+    }
+    const rows = sugs.map(s => {
+      const pct = Math.round((s.confidence || 0) * 100);
+      const confColor = pct >= 80 ? "#5fbf7a" : pct >= 55 ? "var(--warn)" : "var(--ink-faint)";
+      const label = NovaCommandCenterNew.SUGGESTION_TYPE_LABEL[s.pattern_type] || "Learned pattern";
+      const evidence = (s.evidence || []).map(e => `<li>${this._esc(e)}</li>`).join("");
+      const entities = (s.entities || []).length
+        ? `<div class="mode-grid">${(s.entities || []).map(e => `<span class="area-cap" style="width:auto;padding:3px 8px;font-family:var(--font-mono);font-size:10px">${this._esc(e)}</span>`).join("")}</div>`
+        : "";
+      return `
+        <div class="panel new-sug" data-sug-id="${s.id}">
+          <div class="panel-head">
+            <div class="panel-title">${this._esc(label)}</div>
+            <div class="panel-meta" style="color:${confColor}">${pct}% confident</div>
+          </div>
+          ${s.why_headline ? `<div class="stub-body"><b>${this._esc(s.why_headline)}</b></div>` : ""}
+          <div class="stub-body">${this._esc(s.description)}</div>
+          ${evidence ? `<div class="mode-bind-head">What Nova observed</div><ul style="margin:0 0 10px;padding-left:18px;font-size:12px;color:var(--ink-dim);line-height:1.6">${evidence}</ul>` : ""}
+          ${entities}
+          <div class="cfg-row"><span class="toggle-desc">seen ${s.count || "?"}× in 30 days</span></div>
+          <div class="mode-grid">
+            <button class="mode-chip new-sug-approve">✓ Create automation</button>
+            <button class="mode-chip new-sug-dismiss">✕ Dismiss</button>
+            <button class="mode-chip new-sug-yaml-btn">⌄ See the automation</button>
+          </div>
+          <pre class="new-sug-yaml" hidden style="white-space:pre-wrap;font-family:var(--font-mono);font-size:10.5px;color:var(--ink-dim);background:var(--surface-2);border:1px solid var(--line-soft);border-radius:8px;padding:10px;margin-top:8px">${this._esc(s.yaml || "")}</pre>
+        </div>`;
+    }).join("");
+    return `
+      <div class="panel">
+        <div class="panel-head">
+          <div class="panel-title">What Nova Has Learned</div>
+          <div class="panel-meta">${sugs.length} suggestion${sugs.length === 1 ? "" : "s"} to review</div>
+        </div>
+        <div class="stub-body">Automations Nova has learned from watching your routines. Review each — approve to create it in Home Assistant, or dismiss it. Nothing runs until you approve, and you can see the exact automation before deciding.</div>
+      </div>
+      ${rows}`;
+  }
+
+  _wireSuggestions() {
+    const root = this.shadowRoot;
+    root.querySelectorAll(".new-sug").forEach(card => {
+      const sid = parseInt(card.getAttribute("data-sug-id"), 10);
+      const act = async (action) => {
+        if (!this._hass || isNaN(sid)) return;
+        try {
+          await this._hass.callWS({ type: "nova/suggestion_action", suggestion_id: sid, action });
+          card.style.opacity = "0.35";
+          card.querySelectorAll("button").forEach(b => b.disabled = true);
+        } catch (err) {
+          console.error(`Nova (new look): suggestion ${action} failed`, err);
+        }
+      };
+      card.querySelector(".new-sug-approve")?.addEventListener("click", () => act("approve"));
+      card.querySelector(".new-sug-dismiss")?.addEventListener("click", () => act("dismiss"));
+      card.querySelector(".new-sug-yaml-btn")?.addEventListener("click", () => {
+        const pre = card.querySelector(".new-sug-yaml");
+        if (pre) pre.hidden = !pre.hidden;
+      });
+    });
   }
 
   // ─── Settings ─────────────────────────────────────────────────────────
@@ -2363,6 +2651,8 @@ class NovaCommandCenterNew extends HTMLElement {
     if (this._currentTab === "settings") this._wireSettings();
     if (this._currentTab === "logs") { this._wireLogs(); this._fetchDebugLog(); }
     if (this._currentTab === "memory") { this._wireMemory(); this._fetchKnowledge(); this._fetchPersonRoutines(); }
+    if (this._currentTab === "intrusion") this._wireIntrusion();
+    if (this._currentTab === "suggestions") this._wireSuggestions();
   }
 
   _wireSettings() {
@@ -2735,7 +3025,12 @@ class NovaCommandCenterNew extends HTMLElement {
       console.error(`Nova (new look): failed to save ${key}`, err);
     }
     await this._fetchLiveData();
-    if (this._currentTab === "settings") this._render();
+    // Re-render on any tab except the dashboard — a full _render() there
+    // would tear down and restart the stellar-core canvas animation for no
+    // reason, since the dashboard never calls this helper anyway. Broadened
+    // from "settings" only so Intrusion's own cfg-field/toggle-btn fields
+    // (which reuse this same generic autosave) actually refresh.
+    if (this._currentTab !== "dashboard") this._render();
   }
 
   _applySettingsFilter() {
@@ -2952,6 +3247,10 @@ class NovaCommandCenterNew extends HTMLElement {
         display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:10px;color:var(--ink-faint);text-align:center;padding:6px}
       .footnote{max-width:1100px;margin:20px auto 0;text-align:center;font-family:var(--font-mono);font-size:10px;color:var(--ink-faint);letter-spacing:.05em}
       .new-log-entries{max-height:65vh;overflow-y:auto;display:flex;flex-direction:column;gap:1px;margin-top:8px}
+      .intr-snap{margin-bottom:10px}
+      .intr-img{width:100%;max-width:320px;border-radius:10px;border:1px solid var(--line-soft);display:block;margin-bottom:6px}
+      .new-ilog-item{padding:10px 0;border-top:1px solid var(--line-soft)}
+      .new-ilog-item:first-of-type{border-top:none}
       .new-log-entry{display:grid;grid-template-columns:70px 110px 1fr;gap:10px;padding:7px 8px;
         font-family:var(--font-mono);font-size:11px;border-bottom:1px solid var(--line-soft);align-items:baseline}
       .new-log-entry-error{background:#ff5a5a14}

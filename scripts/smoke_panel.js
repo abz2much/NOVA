@@ -118,6 +118,7 @@ let _activeMode = "normal";
 const _modeSetCalls = [];
 const _serviceCalls = [];
 const _docDeleteCalls = [];
+const _intrLabelCalls = [];
 let _energyAgency = "advisory";
 let _bioEnabled = false;
 let _pendingFacts = [{ id: 42, key: "bedtime", value: "10pm", subject: "primary" }];
@@ -217,8 +218,8 @@ const hass = {
         { id: "evt_2", ts: 1785999000, kind: "unresolved", reason: "no response",
           breach: "kitchen window", breach_area: "kitchen", snapshot_url: "", label: "false" },
       ], learning: { events: 2, labeled: 1, patterns: {}, damped_patterns: ["kitchen|4"], min_false_to_damp: 3 } };
-      if (m.action === "label") return { ok: true, id: m.event_id, label: m.label,
-        learning: { events: 2, labeled: 2, patterns: {}, damped_patterns: [], min_false_to_damp: 3 } };
+      if (m.action === "label") { _intrLabelCalls.push({ event_id: m.event_id, label: m.label }); return { ok: true, id: m.event_id, label: m.label,
+        learning: { events: 2, labeled: 2, patterns: {}, damped_patterns: [], min_false_to_damp: 3 } }; }
       if (m.action === "learning") return { events: 2, labeled: 1, patterns: {}, damped_patterns: [], min_false_to_damp: 3 };
       if (m.action === "dismiss") { _intrCalledOff = true; return { ok: true, last_snapshot: _intrSnap, called_off: true, suppressed_for: 600, false_alarms_24h: 1 }; }
       if (m.action === "acknowledge") { _intrAck = true; return { ok: true, last_snapshot: _intrSnap, called_off: _intrCalledOff, acknowledged: true, suppressed_for: 0, false_alarms_24h: 0 }; }
@@ -1924,6 +1925,100 @@ setTimeout(async () => {
   checks.push(["memory tab: confirming a pending fact hides the panel again",
     sRoot.getElementById("newPendingPanel")?.hidden === true]);
   hass.callWS = memoryCallWS;
+
+  // ── New look: Intrusion tab (ported from Classic's own Intrusion tab) ──
+  // Safety-relevant (call-off/acknowledge affect real escalation), so this
+  // is a straight port of Classic's exact websocket calls, not new
+  // behavior. NOTE: Classic's own "intrusion call-off" test (earlier in
+  // this file) already dismissed the shared _intrCalledOff/_intrAck mock
+  // flags and left them true — same class of shared-fixture gotcha as
+  // pattern_include_entities/_bioEnabled/_pendingFacts above — so a fresh
+  // override is used here for a clean, deterministic ARMED starting state
+  // rather than asserting against whatever Classic's test left behind.
+  const intrusionTabBtn = Array.from(newRoot.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === "intrusion");
+  intrusionTabBtn.click();
+  await new Promise(r => setTimeout(r, 20));
+  sRoot = elNew.shadowRoot;
+  const intrusionCallWS = hass.callWS;
+  let _fakeCalledOff = false;
+  hass.callWS = async (m) => {
+    if (m.type === "nova/intrusion") {
+      if (m.action === "dismiss") { _fakeCalledOff = true; return { ok: true, last_snapshot: _intrSnap, called_off: true, suppressed_for: 600, false_alarms_24h: 1 }; }
+      if (m.action === "acknowledge") return { ok: true, last_snapshot: _intrSnap, called_off: _fakeCalledOff, acknowledged: true, suppressed_for: 0, false_alarms_24h: 0 };
+      return { last_snapshot: _intrSnap, called_off: _fakeCalledOff, acknowledged: false, suppressed_for: 0, false_alarms_24h: 0 };
+    }
+    return intrusionCallWS(m);
+  };
+  await elNew._fetchIntrusion();
+  sRoot = elNew.shadowRoot;
+  checks.push(
+    ["intrusion tab: real card shows ARMED with the last snapshot and controls",
+      /ARMED/.test(sRoot.getElementById("newIntrStatus")?.textContent || "")
+      && !!sRoot.querySelector(".intr-img")
+      && !!sRoot.querySelector('select[data-cfg-key="intrusion_response_timeout"]')
+      && !!sRoot.querySelector('button[data-cfg-key="intrusion_vision_confirm"]')
+      && !!sRoot.querySelector(".new-intr-ack") && !!sRoot.querySelector(".new-intr-dismiss")],
+  );
+  // Reused generic autosave, but on a non-Settings tab for the first time —
+  // confirms the _saveSetting render-guard broadening actually works here.
+  const visionToggle = sRoot.querySelector('button[data-cfg-key="intrusion_vision_confirm"]');
+  visionToggle.click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["intrusion tab: vision-confirm toggle autosaves via the shared generic handler",
+    _updateConfigCalls.some(c => c.key === "intrusion_vision_confirm" && c.value === false)]);
+  sRoot.querySelector(".new-intr-dismiss").click();
+  await new Promise(r => setTimeout(r, 20));
+  sRoot = elNew.shadowRoot;
+  checks.push(["intrusion tab: CALL OFF calls nova/intrusion dismiss and updates the status",
+    /CALLED OFF/.test(sRoot.getElementById("newIntrStatus")?.textContent || "")]);
+  hass.callWS = intrusionCallWS;
+
+  await elNew._fetchIntrusionLog();
+  sRoot = elNew.shadowRoot;
+  checks.push(
+    ["intrusion log: real card lists events with kind, snapshot, and label controls",
+      sRoot.querySelectorAll(".new-ilog-item").length === 2
+      && /CONFIRMED/.test(sRoot.getElementById("newIlogBody")?.textContent || "")
+      && !!sRoot.querySelector(".intr-img")
+      && /1\/2 labelled/.test(sRoot.getElementById("newIlogLearn")?.textContent || "")],
+    ["intrusion log: an already-labelled event shows its CLEAR option, marks the right button active",
+      (() => {
+        const item2 = sRoot.querySelector('.new-ilog-item[data-ev="evt_2"]');
+        return !!item2 && !!item2.querySelector('.new-ilog-btn[data-label=""]')
+          && item2.querySelector('.new-ilog-btn[data-label="false"]')?.classList.contains("mode-chip-on");
+      })()],
+  );
+  sRoot.querySelector('.new-ilog-item[data-ev="evt_1"] .new-ilog-btn[data-label="real"]').click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["intrusion log: labelling an event calls nova/intrusion label with the right event/label",
+    _intrLabelCalls.some(c => c.event_id === "evt_1" && c.label === "real")]);
+
+  // ── New look: Suggestions tab (ported from Classic's own Suggestions tab) ──
+  // Data rides on the same nova/get_panel_data payload already polled for
+  // the dashboard (d.suggestions) — no separate fetch to wire up.
+  const suggestionsTabBtn = Array.from(newRoot.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === "suggestions");
+  suggestionsTabBtn.click();
+  await new Promise(r => setTimeout(r, 20));
+  sRoot = elNew.shadowRoot;
+  checks.push(
+    ["suggestions tab: real card shows the pattern type, confidence, and evidence",
+      (() => {
+        const card = sRoot.querySelector(".new-sug");
+        return !!card && /Daily routine/.test(card.textContent) && /82% confident/.test(card.textContent)
+          && /Turn porch light on/.test(card.textContent) && /light\.porch/.test(card.textContent)
+          && /seen 6× in 30 days/.test(card.textContent);
+      })()],
+    ["suggestions tab: YAML is hidden until toggled", sRoot.querySelector(".new-sug-yaml")?.hidden === true],
+  );
+  sRoot.querySelector(".new-sug-yaml-btn").click();
+  checks.push(["suggestions tab: 'See the automation' reveals the YAML", sRoot.querySelector(".new-sug-yaml")?.hidden === false]);
+  sRoot.querySelector(".new-sug-approve").click();
+  await new Promise(r => setTimeout(r, 20));
+  sRoot = elNew.shadowRoot;
+  checks.push(["suggestions tab: approve calls nova/suggestion_action and dims the card in place",
+    _sugCalls.some(c => c.id === 11 && c.action === "approve")
+    && sRoot.querySelector(".new-sug")?.style.opacity === "0.35"
+    && Array.from(sRoot.querySelectorAll(".new-sug button")).every(b => b.disabled)]);
 
   // Switching tabs back and forth must not leak the core's animation loop
   // (a real bug caught before shipping — _render() tearing down the canvas
