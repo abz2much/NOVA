@@ -1,3 +1,7 @@
+## [7.92.1] — fix: Room Speakers card was landing in the wrong Settings tab
+
+The new Room Speakers card (7.92.0) wasn't added to the Settings sub-navigation's section list, so it silently fell back to the General tab instead of Voice & Audio where it belongs, alongside the other speaker-routing cards. It was never invisible — just in an unexpected place.
+
 ## [7.92.0] — assign one speaker per room; Nova no longer picks its own
 
 Replies and proactive comments used to pick from whatever media_player Home Assistant happened to place in a room, excluding anything tagged as a TV — but integrations like Music Assistant, AirPlay, and Cast can each register their own separate entity for the same physical device, and it only takes one untagged duplicate slipping through for Nova to start talking over your TV or through a speaker you didn't want used. Settings → Room Speakers now lets you explicitly assign the one speaker Nova is allowed to use in each room, plus one general fallback speaker for rooms with nothing assigned — Nova only ever uses what you've assigned, never anything it discovers on its own. Whole-house broadcasts (briefings, sentinel alerts, doorbell) are unaffected — those already used your explicit announcement-speaker settings.

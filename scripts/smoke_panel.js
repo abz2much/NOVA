@@ -989,6 +989,21 @@ setTimeout(async () => {
   el._settingsSection = "general";
   el._applySettingsSections();
 
+  // v7.92.1 regression guard: every Settings card must be in the heading→
+  // section MAP, or it silently strands in "general" instead of its logical
+  // section (exactly what happened to "Room Speakers" when it first shipped —
+  // caught only by a live user report, not by this suite, since an unmapped
+  // card still renders fine, just in the wrong tab).
+  const _roomSpk = _card("Room Speakers");
+  el._settingsSection = "voice";
+  el._applySettingsSections();
+  checks.push(
+    ["Room Speakers card is mapped to its section, not stranded in General",
+      !!_roomSpk && _roomSpk.dataset.section === "voice" && _roomSpk.style.display !== "none"],
+  );
+  el._settingsSection = "general";
+  el._applySettingsSections();
+
   // v7.85.1: option builders must tolerate a stale/missing selected entity (a
   // removed entity still referenced in config). This threw and blanked the whole
   // panel — _travelSensorOptions('sensor.gone') reading undefined.attributes.
