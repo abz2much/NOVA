@@ -25,11 +25,21 @@ if [[ "$OLD" == "$NEW" ]]; then
 fi
 echo "Bumping $OLD → $NEW"
 
-# Plain X.Y.Z in the manifest.
-sed -i "s/\b${OLD//./\\.}\b/${NEW}/g" "$COMP/manifest.json"
+# Plain X.Y.Z in the manifest, and vX.Y.Z in the dashboard footer/masthead.
+# Done via python3 (already a hard dependency here) rather than `sed -i`,
+# whose in-place flag and \b word-boundary support both differ between BSD
+# sed (macOS) and GNU sed (Linux, what CI runs) — this way works on both.
+python3 - "$OLD" "$NEW" "$COMP/manifest.json" "$PANEL" <<'PYEOF'
+import re, sys
+old, new, manifest_path, panel_path = sys.argv[1:5]
 
-# vX.Y.Z in the dashboard footer/masthead.
-sed -i "s/v${OLD//./\\.}\b/v${NEW}/g" "$PANEL"
+def replace(path, pattern, replacement):
+    text = open(path, encoding="utf-8").read()
+    open(path, "w", encoding="utf-8").write(pattern.sub(replacement, text))
+
+replace(manifest_path, re.compile(r"\b" + re.escape(old) + r"\b"), new)
+replace(panel_path, re.compile(r"v" + re.escape(old) + r"\b"), f"v{new}")
+PYEOF
 
 echo "Updated:"
 echo "  manifest.json   -> $(python3 -c "import json;print(json.load(open('$COMP/manifest.json'))['version'])")"
