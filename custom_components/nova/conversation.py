@@ -518,7 +518,12 @@ class NovaAgent(conversation.ConversationEntity):
         instead of only ever catching up once (fixed 11 Sept 2026; see
         memory_thread.should_reseed). A reseed REPLACES this thread's window
         with the fresh pull rather than prepending onto it, so a thread that
-        keeps resuming after gaps can't accumulate duplicate history."""
+        keeps resuming after gaps can't accumulate duplicate history.
+
+        Scoped to this conversation's own history (v7.87.0, backlog #1) — the
+        reseed used to pull globally across every device/conversation in the
+        house, so one household member's exchange could leak into another's
+        session on reseed."""
         from . import memory_thread
         enabled, hours, limit = memory_thread.config()
         now = time.time()
@@ -526,7 +531,7 @@ class NovaAgent(conversation.ConversationEntity):
         self._last_seen[cid] = now
         if not enabled or not memory_thread.should_reseed(last_seen, now, hours):
             return
-        seeded = await memory_thread.load_recent(self.hass, hours, limit)
+        seeded = await memory_thread.load_recent(self.hass, hours, limit, device_id=cid)
         if seeded:
             # Wrapped as one 'system' note, not raw turns — see
             # memory_thread.format_seed_message for why: raw turns read as

@@ -46,3 +46,12 @@ def test_reseed_wraps_seed_in_format_seed_message():
     # must be wrapped as a single system-role note instead — see
     # memory_thread.format_seed_message.
     assert "memory_thread.format_seed_message(" in src
+
+
+def test_reseed_scoped_to_the_conversation_not_global():
+    src = SRC.read_text()
+    # Fixed v7.87.0 (backlog #1): reseed used to pull globally across every
+    # device/conversation in the house -- one household member's exchange
+    # could leak into another's session. Must pass this conversation's own
+    # cid through to load_recent, not call it with no scope.
+    assert "memory_thread.load_recent(self.hass, hours, limit, device_id=cid)" in src
