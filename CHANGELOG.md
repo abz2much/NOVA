@@ -1,3 +1,7 @@
+## [7.91.1] — fix: Solar card could show the wrong grid direction
+
+The Solar card determined import vs. export from the sign of the grid power sensor, but that sign isn't standardised across inverter brands — on one real setup, positive meant exporting, not importing, so the card showed "importing" while the house was actually exporting. Direction now comes from which of your two cumulative grid totals (imported-so-far vs. exported-so-far) has moved most recently, which is unambiguous regardless of any inverter's sign convention.
+
 ## [7.91.0] — solar/battery/grid visibility
 
 A new Solar card on the Command Center dashboard shows live solar generation, battery level and charge/discharge, grid import/export direction, and a self-sufficiency percentage — reading straight from Home Assistant's own Energy dashboard configuration, so anyone who's already set that up gets this with no separate setup. You can also just ask Nova ("how's our solar doing", "are we exporting or importing"). Reports honestly that no solar source is configured yet if you haven't set up the Energy dashboard.

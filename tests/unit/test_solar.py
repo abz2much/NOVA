@@ -16,9 +16,10 @@ def solar(load):
 
 
 class _State:
-    def __init__(self, state, unit="W"):
+    def __init__(self, state, unit="W", last_changed=None):
         self.state = state
         self.attributes = {"unit_of_measurement": unit}
+        self.last_changed = last_changed
 
 
 class _Hass:
@@ -110,6 +111,63 @@ def test_small_grid_reading_is_balanced(solar, monkeypatch):
     })
     out = asyncio.run(solar.solar_status(hass))
     assert out["grid_direction"] == "balanced"
+
+
+# ── grid direction: cumulative-total freshness beats rate sign ──────────────
+# Live bug (13 Sept 2026): a real inverter reports its grid rate POSITIVE
+# while EXPORTING — the opposite of a "positive = importing" guess. Direction
+# must come from which cumulative total (imported-so-far vs exported-so-far)
+# just changed, not from the rate sensor's sign.
+
+def test_grid_direction_uses_total_freshness_not_rate_sign(solar, monkeypatch):
+    _stub_prefs(solar, monkeypatch, _prefs([
+        {"type": "solar", "stat_rate": "sensor.solar_power"},
+        {"type": "grid", "stat_rate": "sensor.grid_power",
+         "stat_energy_from": "sensor.grid_import_total", "stat_energy_to": "sensor.grid_export_total"},
+    ]))
+    hass = _Hass({
+        "sensor.solar_power": _State("1286"),
+        # This inverter's rate sensor is POSITIVE while exporting — the
+        # opposite of the naive sign guess. The two totals are the ground
+        # truth: export just ticked, import is stale.
+        "sensor.grid_power": _State("755"),
+        "sensor.grid_import_total": _State("1425.236", unit="kWh", last_changed=10),
+        "sensor.grid_export_total": _State("2783.764", unit="kWh", last_changed=20),
+    })
+    out = asyncio.run(solar.solar_status(hass))
+    assert out["grid_direction"] == "export"
+    assert out["self_sufficiency_pct"] == 100.0
+
+
+def test_grid_direction_totals_show_import(solar, monkeypatch):
+    _stub_prefs(solar, monkeypatch, _prefs([
+        {"type": "solar", "stat_rate": "sensor.solar_power"},
+        {"type": "grid", "stat_rate": "sensor.grid_power",
+         "stat_energy_from": "sensor.grid_import_total", "stat_energy_to": "sensor.grid_export_total"},
+    ]))
+    hass = _Hass({
+        "sensor.solar_power": _State("500"),
+        "sensor.grid_power": _State("300"),
+        "sensor.grid_import_total": _State("100", unit="kWh", last_changed=20),
+        "sensor.grid_export_total": _State("50", unit="kWh", last_changed=10),
+    })
+    out = asyncio.run(solar.solar_status(hass))
+    assert out["grid_direction"] == "import"
+
+
+def test_grid_direction_falls_back_to_rate_sign_without_totals(solar, monkeypatch):
+    # No stat_energy_from/to configured — same shape as the other grid
+    # tests above, which rely on this fallback already.
+    _stub_prefs(solar, monkeypatch, _prefs([
+        {"type": "solar", "stat_rate": "sensor.solar_power"},
+        {"type": "grid", "stat_rate": "sensor.grid_power"},
+    ]))
+    hass = _Hass({
+        "sensor.solar_power": _State("500"),
+        "sensor.grid_power": _State("-300"),
+    })
+    out = asyncio.run(solar.solar_status(hass))
+    assert out["grid_direction"] == "export"
 
 
 # ── multiple solar sources summed ────────────────────────────────────────────

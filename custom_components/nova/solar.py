@@ -90,6 +90,42 @@ def _sum_rate(hass, sources: list[dict]) -> Optional[float]:
     return total if seen else None
 
 
+def _grid_direction(hass, grid: dict, grid_w: Optional[float]) -> Optional[str]:
+    """Which way power is currently flowing on the grid connection.
+
+    A live-caught bug (13 Sept 2026): a real install's grid rate sensor
+    reports POSITIVE while EXPORTING — the opposite of what a "positive =
+    drawing from the grid" guess would assume. Sign convention on stat_rate
+    isn't standardised across inverter integrations, so it's used only for
+    magnitude here, never for direction.
+
+    Direction instead compares which of the two cumulative energy totals
+    (stat_energy_from = imported-so-far, stat_energy_to = exported-so-far)
+    moved MORE RECENTLY. A state_class: total sensor only changes state
+    when it actually accumulates, so whichever one just ticked is the
+    direction currently active — true regardless of any inverter's rate-
+    sensor sign convention. Falls back to the (unreliable) rate sign only
+    when one or both totals aren't configured/available."""
+    from_eid = grid.get("stat_energy_from")
+    to_eid = grid.get("stat_energy_to")
+    from_st = hass.states.get(from_eid) if from_eid else None
+    to_st = hass.states.get(to_eid) if to_eid else None
+    if from_st is not None and to_st is not None:
+        try:
+            if to_st.last_changed > from_st.last_changed:
+                return "export"
+            if from_st.last_changed > to_st.last_changed:
+                return "import"
+        except TypeError:
+            pass  # non-comparable last_changed values (e.g. test fakes) — fall through
+
+    if grid_w is None:
+        return None
+    if abs(grid_w) < 1.0:
+        return "balanced"
+    return "import" if grid_w > 0 else "export"
+
+
 async def solar_status(hass) -> dict:
     """The current solar/battery/grid picture for the panel/agent. Never
     raises. `configured: False` when the Energy dashboard has no solar
@@ -131,17 +167,7 @@ async def solar_status(hass) -> dict:
     if grid_sources:
         grid = grid_sources[0]
         grid_w = _live_watts(hass, grid.get("stat_rate"))
-        if grid_w is not None:
-            # Convention varies by integration: some report a signed rate
-            # (negative = exporting), others only ever report a positive
-            # magnitude for whichever direction is active. Treat a small
-            # reading as balanced rather than forcing it into either bucket.
-            if abs(grid_w) < 1.0:
-                grid_direction = "balanced"
-            elif grid_w < 0:
-                grid_direction = "export"
-            else:
-                grid_direction = "import"
+        grid_direction = _grid_direction(hass, grid, grid_w)
 
     self_sufficiency_pct = None
     if solar_w is not None:
