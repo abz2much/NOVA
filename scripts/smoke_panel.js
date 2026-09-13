@@ -64,6 +64,8 @@ const PANEL = {
     cast_devices: [{ entity_id: "media_player.living_room_speaker", name: "Living Room Speaker" }, { entity_id: "media_player.kitchen_speaker", name: "Kitchen Speaker" }],
     speaker_areas: [{ area_id: "living_room", name: "Living Room" }, { area_id: "kitchen", name: "Kitchen" }],
     room_speakers: { living_room: "media_player.living_room_speaker" },
+    all_people: [{ entity_id: "person.abi", name: "Abi" }, { entity_id: "person.rachel", name: "Rachel" }],
+    person_honorifics: { "person.rachel": "boss", "person.abi": "captain" },
     general_speaker: "media_player.kitchen_speaker", ui_style: "classic",
     satellites: [{ entity_id: "assist_satellite.basement_nova", name: "Basement Nova", area: "Basement" }],
     satellite_pairings: { "assist_satellite.basement_nova": "media_player.living_room_speaker" },
@@ -1199,12 +1201,27 @@ setTimeout(async () => {
     ["settings tab renders the search box and group nav",
       !!sRoot.getElementById("settingsSearch") && sRoot.querySelectorAll(".settings-nav-btn").length === 6],
     ["settings tab has one card per Classic setting, General real",
-      sRoot.querySelectorAll(".settings-card").length === 26
+      sRoot.querySelectorAll(".settings-card").length === 27
       && /Sleep state/.test(sRoot.innerHTML) && /Announcements/.test(sRoot.innerHTML)],
     ["settings tab: Room Speakers card is real, not a stub",
       (() => {
         const rs = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Room Speakers/.test(c.querySelector(".panel-title")?.textContent || ""));
         return !!rs && !rs.querySelector(".stub-tag") && rs.querySelectorAll(".new-room-speaker-select").length === 2;
+      })()],
+    ["settings tab: Person Honorifics card lists every person, preset vs custom rendered correctly",
+      (() => {
+        const ph = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Person Honorifics/.test(c.querySelector(".panel-title")?.textContent || ""));
+        if (!ph || ph.querySelector(".stub-tag")) return false;
+        const rows = ph.querySelectorAll(".person-honorific-row");
+        if (rows.length !== 2) return false;
+        // person.rachel -> "boss", a preset option, selected directly, custom input hidden
+        const rachelSel = ph.querySelector('select[data-person-id="person.rachel"]');
+        const rachelCustom = ph.querySelector('input[data-person-id="person.rachel"]');
+        if (!rachelSel || rachelSel.value !== "boss" || !rachelCustom.hidden) return false;
+        // person.abi -> "captain", not a preset -> select shows "__custom__", input visible & prefilled
+        const abiSel = ph.querySelector('select[data-person-id="person.abi"]');
+        const abiCustom = ph.querySelector('input[data-person-id="person.abi"]');
+        return abiSel && abiSel.value === "__custom__" && !abiCustom.hidden && abiCustom.value === "captain";
       })()],
     ["settings tab: Residence / Home card is real, not a stub",
       (() => {
@@ -1243,6 +1260,36 @@ setTimeout(async () => {
       Array.from(sRoot.querySelectorAll('.settings-card[data-settings-group="general"]')).every(c => !c.hidden)
       && Array.from(sRoot.querySelectorAll('.settings-card:not([data-settings-group="general"])')).every(c => c.hidden)],
   );
+
+  // Person Honorifics: picking "Custom…" reveals the text input without saving
+  // yet (nothing to save), then typing+blurring the custom input saves it.
+  const rachelSel = sRoot.querySelector('select[data-person-id="person.rachel"]');
+  const priorPersonHonorificSaves = _updateConfigCalls.filter(c => c.key === "person_honorifics").length;
+  rachelSel.value = "__custom__";
+  rachelSel.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+  // No `await` here on purpose: revealing the custom input is synchronous
+  // (no save, so nothing to wait on) — waiting risks a still-in-flight
+  // re-render from an earlier test's save landing here and clobbering this
+  // synchronous DOM mutation before it's asserted.
+  const rachelCustomAfterPick = sRoot.querySelector('input[data-person-id="person.rachel"]');
+  checks.push(["settings tab: Person Honorifics — picking Custom… reveals the input without an unwanted save",
+    !rachelCustomAfterPick.hidden
+    && _updateConfigCalls.filter(c => c.key === "person_honorifics").length === priorPersonHonorificSaves]);
+  rachelCustomAfterPick.value = "boss lady";
+  rachelCustomAfterPick.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: Person Honorifics — custom text input autosaves into the per-person JSON dict",
+    _updateConfigCalls.some(c => c.key === "person_honorifics"
+      && JSON.parse(c.value)["person.rachel"] === "boss lady"
+      && JSON.parse(c.value)["person.abi"] === "captain")]);  // Abi's existing override untouched
+  sRoot = elNew.shadowRoot;
+  const abiSelForDefault = sRoot.querySelector('select[data-person-id="person.abi"]');
+  abiSelForDefault.value = "";
+  abiSelForDefault.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: Person Honorifics — picking “— use default —” removes that person's override entirely",
+    _updateConfigCalls.some(c => c.key === "person_honorifics" && !("person.abi" in JSON.parse(c.value)))]);
+  sRoot = elNew.shadowRoot;
 
   // Diagnostics card: fetched once on entering Settings (async), so give it
   // a beat to land and re-render before asserting on its content.

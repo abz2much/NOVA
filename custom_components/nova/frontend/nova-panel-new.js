@@ -969,6 +969,10 @@ class NovaCommandCenterNew extends HTMLElement {
   // reason that tab stays Classic-only in V1. Every stub is a card naming
   // exactly where to find it today rather than being
   // silently missing, filled in card-by-card in later passes.
+  // Mirrors const.py's HONORIFIC_OPTIONS — kept in sync by hand, same as
+  // AREA_CAP_ORDER/AREA_CAP_ICON below mirror their own backend source.
+  static HONORIFIC_OPTIONS = ["sir", "ma'am", "boss", "friend"];
+
   static SETTINGS_GROUPS = [
     { id: "general", label: "General" },
     { id: "voice", label: "Voice & Speakers" },
@@ -981,6 +985,8 @@ class NovaCommandCenterNew extends HTMLElement {
   static SETTINGS_CARDS = [
     { id: "general", group: "general", title: "General", real: true,
       desc: "Language, sleep state, and the core proactive-speech switches." },
+    { id: "person_honorifics", group: "general", title: "Person Honorifics", real: true,
+      desc: "What Nova calls each person when they're home alone. Drops the address entirely the moment more than one person — or nobody — is home." },
     { id: "residence_home", group: "general", title: "Residence / Home", real: true,
       desc: "Home style, stories, and layout counts that feed Classic's Residence 3D view." },
     { id: "operational_mode", group: "general", title: "Operational Mode", real: true,
@@ -1050,6 +1056,7 @@ class NovaCommandCenterNew extends HTMLElement {
   _settingsCardHtml(c) {
     const body = c.real
       ? (c.id === "general" ? this._generalCardBody()
+        : c.id === "person_honorifics" ? this._personHonorificsCardBody()
         : c.id === "room_speakers" ? this._roomSpeakersCardBody()
         : c.id === "residence_home" ? this._residenceHomeCardBody()
         : c.id === "operational_mode" ? this._operationalModeCardBody()
@@ -1107,6 +1114,35 @@ class NovaCommandCenterNew extends HTMLElement {
         ${onOff("sentinel_enabled", "Sentinel", "Door/garage/lock-left-open alerts")}
         ${onOff("observer_enabled", "Observer", "AI event awareness (uses API)")}
       </div>`;
+  }
+
+  _personHonorificsCardBody() {
+    const cfg = this._data()?.config || {};
+    const people = cfg.all_people || [];
+    const overrides = cfg.person_honorifics || {};
+    const opts = NovaCommandCenterNew.HONORIFIC_OPTIONS;
+    if (!people.length) {
+      return `<div class="stub-body">No <code>person.*</code> entities found yet — add one in Home Assistant to set a personal address here.</div>`;
+    }
+    const rows = people.map(p => {
+      const current = overrides[p.entity_id] || "";
+      const isCustom = current && !opts.includes(current);
+      return `
+        <div class="pairing-row person-honorific-row">
+          <span class="pairing-label">${this._esc(p.name)}</span>
+          <select class="person-honorific-select" data-person-id="${this._esc(p.entity_id)}">
+            <option value="">— use default —</option>
+            ${opts.map(o => `<option value="${this._esc(o)}"${!isCustom && o === current ? " selected" : ""}>${this._esc(o[0].toUpperCase() + o.slice(1))}</option>`).join("")}
+            <option value="__custom__"${isCustom ? " selected" : ""}>Custom…</option>
+          </select>
+          <input type="text" class="person-honorific-custom" data-person-id="${this._esc(p.entity_id)}"
+                 placeholder="Custom address" value="${isCustom ? this._esc(current) : ""}"
+                 ${isCustom ? "" : "hidden"}>
+        </div>`;
+    }).join("");
+    return `
+      <div class="pairing-list">${rows}</div>
+      <div class="camera-note">Only applies while that person is home alone. With nobody home, or more than one person home, Nova doesn't guess — it drops the address entirely. Anyone without an override here uses the global "Address me as" setting (Settings → Devices &amp; Services → Nova → Configure).</div>`;
   }
 
   _roomSpeakersCardBody() {
@@ -2700,6 +2736,31 @@ class NovaCommandCenterNew extends HTMLElement {
       });
     });
 
+    root.querySelectorAll(".person-honorific-select").forEach(sel => {
+      sel.addEventListener("change", async () => {
+        const customInput = sel.closest(".person-honorific-row")?.querySelector(".person-honorific-custom");
+        if (sel.value === "__custom__") {
+          if (customInput) { customInput.hidden = false; customInput.focus(); }
+          return;  // wait for an actual value before saving anything
+        }
+        if (customInput) { customInput.hidden = true; customInput.value = ""; }
+        const personId = sel.getAttribute("data-person-id");
+        const cfg = this._data()?.config || {};
+        const overrides = { ...(cfg.person_honorifics || {}) };
+        if (sel.value) overrides[personId] = sel.value; else delete overrides[personId];
+        await this._saveSetting("person_honorifics", JSON.stringify(overrides));
+      });
+    });
+    root.querySelectorAll(".person-honorific-custom").forEach(inp => {
+      inp.addEventListener("change", async () => {
+        const personId = inp.getAttribute("data-person-id");
+        const cfg = this._data()?.config || {};
+        const overrides = { ...(cfg.person_honorifics || {}) };
+        const val = inp.value.trim();
+        if (val) overrides[personId] = val; else delete overrides[personId];
+        await this._saveSetting("person_honorifics", JSON.stringify(overrides));
+      });
+    });
     root.querySelectorAll(".new-room-speaker-select").forEach(sel => {
       sel.addEventListener("change", async () => {
         const cfg = this._data()?.config || {};
@@ -3339,6 +3400,9 @@ class NovaCommandCenterNew extends HTMLElement {
       .pairing-label{font-size:12.5px;color:var(--ink-dim)}
       .pairing-row select{background:var(--surface-2);border:1px solid var(--line-soft);color:var(--ink);
         font-family:var(--font-body);font-size:12px;padding:6px 9px;border-radius:8px;max-width:56%}
+      .person-honorific-row{flex-wrap:wrap}
+      .person-honorific-custom{background:var(--surface-2);border:1px solid var(--line-soft);color:var(--ink);
+        font-family:var(--font-body);font-size:12px;padding:6px 9px;border-radius:8px;width:100%;margin-top:6px}
     `;
   }
 }

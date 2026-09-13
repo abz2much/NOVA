@@ -54,6 +54,7 @@ from .const import (
     DEFAULT_OBSERVER_QUIET_START,
     DEFAULT_OBSERVER_QUIET_END,
     DIRECTIVE_PRESETS,
+    HONORIFIC_OPTIONS,
     DOMAIN,
 )
 
@@ -141,7 +142,10 @@ class NovaConfigFlow(ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_API_KEY, default=""): str,
                 vol.Optional("llm_base_url", default=""): str,
                 vol.Optional(CONF_MODEL, default=DEFAULT_MODEL): str,
-                vol.Optional(CONF_HONORIFIC, default=DEFAULT_HONORIFIC): str,
+                vol.Optional(CONF_HONORIFIC, default=DEFAULT_HONORIFIC):
+                    selector.SelectSelector(selector.SelectSelectorConfig(
+                        options=HONORIFIC_OPTIONS, custom_value=True,
+                        mode=selector.SelectSelectorMode.DROPDOWN)),
             }),
             errors=errors,
             description_placeholders={
@@ -249,7 +253,9 @@ class NovaOptionsFlow(OptionsFlow):
             return await self._save_section(user_input)
         schema = vol.Schema({
             vol.Optional(CONF_HONORIFIC, description=self._sv(CONF_HONORIFIC, DEFAULT_HONORIFIC)):
-                selector.TextSelector(),
+                selector.SelectSelector(selector.SelectSelectorConfig(
+                    options=HONORIFIC_OPTIONS, custom_value=True,
+                    mode=selector.SelectSelectorMode.DROPDOWN)),
             vol.Optional(CONF_DIRECTIVE_PRESET,
                          description=self._sv(CONF_DIRECTIVE_PRESET, DEFAULT_DIRECTIVE_PRESET)):
                 selector.SelectSelector(selector.SelectSelectorConfig(
