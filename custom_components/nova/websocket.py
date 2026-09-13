@@ -24,6 +24,7 @@ from homeassistant.core import HomeAssistant, callback
 from . import audio_routing, sleep_detection
 from .const import (
     CONF_BEDROOM_AREAS,
+    CONF_GROUND_FLOOR_AREAS,
     CONF_BROADCAST_GROUP,
     CONF_GEMINI_API_KEY,
     CONF_NOTIFY_SERVICE,
@@ -750,6 +751,10 @@ async def ws_get_panel_data(
                 "adaptive_suggestion_threshold": bool(_runtime_opt(hass, entry, "adaptive_suggestion_threshold", False)),
                 "tts_use_ha_voice": bool(_runtime_opt(hass, entry, "tts_use_ha_voice", False)),
                 "pattern_learn_motion": bool(_runtime_opt(hass, entry, "pattern_learn_motion", False)),
+                "sleep_override": str(_runtime_opt(hass, entry, "sleep_override", "auto") or "auto"),
+                "sleep_prompt_enabled": bool(_runtime_opt(hass, entry, "sleep_prompt_enabled", True)),
+                "sleep_prompt_time": str(_runtime_opt(hass, entry, "sleep_prompt_time", "23:00") or "23:00"),
+                "ground_floor_areas": _runtime_opt(hass, entry, CONF_GROUND_FLOOR_AREAS, []) or [],
                 "operational_mode_auto": bool(_runtime_opt(hass, entry, "operational_mode_auto", True)),
                 "lab_areas": _runtime_opt(hass, entry, "lab_areas", []) or [],
                 "movie_area": str(_runtime_opt(hass, entry, "movie_area", "") or ""),
@@ -1423,6 +1428,10 @@ PANEL_WRITABLE_KEYS = {
     "appliance_power_guessing",     # bool: announce fingerprint/auto-discovered guesses
     "identity_min_confidence",      # float: face-match threshold below which a person is 'unknown'
     "ollama_num_ctx",               # int: Ollama context window for local models
+    # Sleep state (v7.86.0)
+    "sleep_override",               # str: "auto" | "awake" | "asleep" — panel dropdown
+    "sleep_prompt_enabled",         # bool: send the nightly "Heading to bed?" prompt
+    "sleep_prompt_time",            # str: HH:MM — earliest the prompt may fire
 }
 
 # ── Debug log ring buffer ────────────────────────────────────────────────────
@@ -1814,6 +1823,20 @@ async def ws_update_config(
             await hass.async_add_executor_job(nova_config.set, key, value)
         except Exception as exc:
             _LOGGER.debug("Config persist note: %s", exc)
+
+        # sleep_override needs its expiry computed too (a plain nova_config.set
+        # above would otherwise leave the override permanently inert — see
+        # sleep_detection.set_override, which is what actually schedules the
+        # revert to Auto at the next quiet-hours end).
+        if key == "sleep_override":
+            try:
+                from . import nova_config
+                quiet_end = await hass.async_add_executor_job(
+                    nova_config.get, "observer_quiet_end", "07:00")
+                await hass.async_add_executor_job(
+                    sleep_detection.set_override, value, quiet_end)
+            except Exception as exc:
+                _LOGGER.warning("sleep_override apply failed: %s", exc)
 
         # If toggling observer, start/stop immediately
         if key == "observer_enabled":

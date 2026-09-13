@@ -34,6 +34,7 @@ from .const import (
     CONF_DIRECTIVE_PRESET,
     CONF_USE_HASS_API,
     CONF_BEDROOM_AREAS,
+    CONF_GROUND_FLOOR_AREAS,
     CONF_BROADCAST_GROUP,
     CONF_NOTIFY_SERVICE,
     CONF_OBSERVER_ENABLED,
@@ -268,6 +269,12 @@ class NovaOptionsFlow(OptionsFlow):
             return await self._save_section(user_input)
         schema = vol.Schema({
             vol.Optional(CONF_BEDROOM_AREAS, description=self._sv(CONF_BEDROOM_AREAS, [])):
+                selector.AreaSelector(selector.AreaSelectorConfig(multiple=True)),
+            # Scopes the sleeping-household intrusion check to a real breach
+            # (an exterior door/window on these floors) instead of any indoor
+            # motion — leave empty to fall back to checking every exterior
+            # door/window, same as when Nova is away.
+            vol.Optional(CONF_GROUND_FLOOR_AREAS, description=self._sv(CONF_GROUND_FLOOR_AREAS, [])):
                 selector.AreaSelector(selector.AreaSelectorConfig(multiple=True)),
             vol.Optional(CONF_BROADCAST_GROUP, description=self._sv(CONF_BROADCAST_GROUP, "")):
                 selector.EntitySelector(selector.EntitySelectorConfig(domain="media_player")),

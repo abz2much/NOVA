@@ -51,11 +51,13 @@
         "description": "pick which HA areas are bedrooms (for sleep detection), which media_player group to use for broadcasts, and your phone notify service.",
         "data": {
           "bedroom_areas": "Bedroom areas (for sleep detection during quiet hours)",
+          "ground_floor_areas": "Ground-floor areas (for night-time intrusion alerts)",
           "broadcast_group": "Broadcast speaker group (typically your home Cast group)",
           "notify_service": "Phone notify service (e.g. notify.mobile_app_yourphone)"
         },
         "data_description": {
           "bedroom_areas": "Any presence sensor in these areas fires sleep mode during quiet hours.",
+          "ground_floor_areas": "While asleep, Nova only alerts on motion if one of these areas shows an open exterior door/window — leave empty to check every floor.",
           "broadcast_group": "Used for critical and high-urgency announcements.",
           "notify_service": "Used when you're away from home or asleep."
         }

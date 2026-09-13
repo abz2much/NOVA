@@ -67,9 +67,15 @@ def _install_ha_stubs() -> None:
 
     er = types.ModuleType("homeassistant.helpers.entity_registry")
     dr = types.ModuleType("homeassistant.helpers.device_registry")
+    ar = types.ModuleType("homeassistant.helpers.area_registry")
     er.async_get = lambda hass: types.SimpleNamespace(
         entities={}, async_get=lambda eid: None)
     dr.async_get = lambda hass: types.SimpleNamespace(devices={})
+    # audio_routing.py / residence_graph.py import this at module level; empty
+    # registry is fine — tests that care about area resolution monkeypatch the
+    # specific helper functions that call into it (e.g. _breach_area, _motion_key).
+    ar.async_get = lambda hass: types.SimpleNamespace(
+        async_get_area=lambda area_id: None, async_list_areas=lambda: [])
     ac = types.ModuleType("homeassistant.helpers.aiohttp_client")
     ac.async_get_clientsession = lambda hass: None
     net = types.ModuleType("homeassistant.helpers.network")
@@ -86,6 +92,7 @@ def _install_ha_stubs() -> None:
     helpers = types.ModuleType("homeassistant.helpers")
     helpers.entity_registry = er
     helpers.device_registry = dr
+    helpers.area_registry = ar
     helpers.aiohttp_client = ac
     helpers.network = net
 
@@ -123,6 +130,7 @@ def _install_ha_stubs() -> None:
         "homeassistant.helpers": helpers,
         "homeassistant.helpers.entity_registry": er,
         "homeassistant.helpers.device_registry": dr,
+        "homeassistant.helpers.area_registry": ar,
         "homeassistant.helpers.aiohttp_client": ac,
         "homeassistant.helpers.network": net,
         "homeassistant.helpers.llm": llm_mod,

@@ -34,7 +34,7 @@ import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Iterable, Optional
 
 from homeassistant.core import HomeAssistant, Event, callback
 from homeassistant.util import dt as dt_util
@@ -402,14 +402,20 @@ class SafetyManager:
         st = self.hass.states.get(eid)
         return ((st.attributes.get("friendly_name") if st else None) or eid)
 
-    def _open_entry(self) -> Optional[str]:
+    def _open_entry(self, areas: Optional[Iterable[str]] = None) -> Optional[str]:
         """The entity_id of an exterior door/window that's currently open — the
         breach point a real entry would come through. None if all are shut.
         Property-perimeter openings (a driveway or side gate, a shed door) are
         excluded: they aren't the house envelope, and an open yard gate must not
         turn a curtain-flutter into a corroborated intrusion. The garage IS
-        envelope, so anything garage-named stays in."""
+        envelope, so anything garage-named stays in.
+
+        `areas`, when given, restricts qualifying entries to that set of HA
+        area_ids (used to scope the sleeping-household check to the ground
+        floor — see `_ground_floor_open_entry`)."""
         from . import outdoor
+
+        area_filter = set(areas) if areas else None
 
         def _envelope(st) -> bool:
             fname = st.attributes.get("friendly_name") or ""
@@ -417,15 +423,29 @@ class SafetyManager:
                 return True
             return not outdoor.is_outdoor(self.hass, st.entity_id, fname)
 
+        def _in_scope(st) -> bool:
+            return area_filter is None or self._breach_area(st.entity_id) in area_filter
+
         for st in self.hass.states.async_all("binary_sensor"):
             if (st.attributes.get("device_class") in ("door", "window", "garage_door", "opening")
-                    and st.state == "on" and _envelope(st)):
+                    and st.state == "on" and _envelope(st) and _in_scope(st)):
                 return st.entity_id
         for st in self.hass.states.async_all("cover"):
             if (st.attributes.get("device_class") in ("door", "garage", "garage_door", "gate")
-                    and st.state in ("open", "opening") and _envelope(st)):
+                    and st.state in ("open", "opening") and _envelope(st) and _in_scope(st)):
                 return st.entity_id
         return None
+
+    def _ground_floor_open_entry(self) -> tuple[Optional[str], bool]:
+        """Open exterior door/window, scoped to `ground_floor_areas` when the
+        user has configured any (v7.86.0). Returns (entity_id_or_None,
+        configured) — `configured` is False when ground_floor_areas is empty,
+        in which case every exterior door/window on every floor qualifies.
+        Unconfigured must never mean LESS protection than before."""
+        ground_areas = self.config.get("ground_floor_areas") or []
+        if not ground_areas:
+            return self._open_entry(), False
+        return self._open_entry(areas=ground_areas), True
 
     def _breach_area(self, entry_eid: Optional[str]) -> Optional[str]:
         """The HA area of the breach entity — where the intruder would enter."""
@@ -522,6 +542,101 @@ class SafetyManager:
             return cam        # best-effort handle even if not yet resolvable
         return None
 
+    def _begin_investigation(self, *, now: float, trigger: str, presence: str,
+                              breach: Optional[str], breach_name: Optional[str],
+                              armed: bool, eid: str, where: str, honorific: str,
+                              reason: str) -> Optional[dict]:
+        """Shared investigation kickoff for both the away and sleeping
+        triggers (v7.86.0): computes breach adjacency/depth, seeds
+        self._investigation, logs the decision + intrusion event (with
+        learned damping), and returns the 'investigating' action — or None
+        if this exact location/time pattern is learned-benign."""
+        breach_area = self._breach_area(breach)
+        # Anchor the search at the breach: the intruder enters there, so the
+        # breach room and the rooms adjacent to it are where a real entry
+        # first shows up. Motion elsewhere is still investigated, but not
+        # concluded to be an intrusion on its own — that discernment is what
+        # avoids false alarms.
+        connected = {breach_area} if breach_area else set()
+        hops = {}
+        try:
+            from . import residence_graph
+            connected |= residence_graph.adjacent_areas(
+                self.hass, self.config, breach_area)
+            # Depth of every room from the breach, so we can tell inward
+            # (entry → deeper) motion from motion that lingers at the entry.
+            hops = residence_graph.hops_from_breach(
+                self.hass, self.config, breach_area)
+        except Exception:
+            pass
+        connected.discard(None)
+        start_zone = self._motion_key(eid)
+        # deepest room motion has reached so far (breach itself = 0)
+        start_depth = hops.get(start_zone, 0) if hops else 0
+        self._investigation = {
+            "start": now, "last_motion": now,
+            "zones": {start_zone}, "path": [start_zone], "escalated": False,
+            "breach_area": breach_area, "breach_name": breach_name,
+            "connected": connected,
+            "hops": hops, "max_depth": start_depth,
+            "trigger": trigger,
+        }
+        _i18n = _notify_i18n()
+        _lang = _hass_lang(self.hass)
+        if breach_name:
+            ctx = _i18n.message("intrusion_ctx_open", _lang, name=breach_name)
+        elif armed:
+            ctx = _i18n.message("intrusion_ctx_armed", _lang)
+        else:
+            ctx = ""
+        msg_key = "intrusion_alert" if trigger == "away" else "intrusion_alert_sleep"
+        msg = _i18n.message(
+            msg_key, _lang, honorific=honorific.title(),
+            where=where, ctx=ctx)
+        # Decision Record (v7.39.0): log the proactive intrusion judgement. Best-effort;
+        # a logging failure must never affect the alert.
+        try:
+            from . import decision_record
+            _rid = decision_record.record(
+                "intrusion",
+                observation={"location": where, "breach": breach_name,
+                             "alarm_armed": armed, "presence": presence},
+                interpretation={"assessment": "possible intrusion — investigating from the point of entry"},
+                decision="raise initial intrusion alert and investigate silently",
+                reason=reason,
+            )
+            try:  # so a later call-off attaches to this exact record
+                from . import intrusion as _intr_rec
+                _intr_rec.set_last_decision_id(_rid)
+            except Exception:
+                pass
+        except Exception:
+            pass
+        # Learned damping (v6.76.0): if this location/time pattern has been
+        # repeatedly labelled a false alarm, stay QUIET on this initial
+        # low-confidence ping. The investigation still runs underneath, so a
+        # real inward route still confirms and alarms — learning can only
+        # silence the weak alert, never a confirmed intrusion.
+        damped = False
+        try:
+            from . import intrusion as _intr
+            damped = _intr.should_damp_weak_alert(breach_area, None)
+            _intr.record_event(
+                "investigating", reason=("damped (learned benign)" if damped
+                                         else reason),
+                breach=breach_name, breach_area=breach_area,
+                zones=[start_zone], max_depth=start_depth)
+        except Exception:
+            pass
+        if damped:
+            _LOGGER.info("intrusion: initial alert damped for learned-benign "
+                         "pattern at %s (still investigating)", breach_area)
+            return None
+        return {
+            "type": "intrusion_investigating", "urgency": "high",
+            "message": msg, "auto_act": True, "entity_id": eid,
+        }
+
     async def _check_intrusion(self, anyone_home: bool,
                                 sleeping: bool) -> Optional[dict]:
         """Detect unauthorized entry when away or asleep. Fires ONE alert, then
@@ -561,101 +676,32 @@ class SafetyManager:
                 if not (armed or entry):
                     return None
             breach_name = self._friendly(entry) if entry else None
-            breach_area = self._breach_area(entry)
-            # Anchor the search at the breach: the intruder enters there, so the
-            # breach room and the rooms adjacent to it are where a real entry
-            # first shows up. Motion elsewhere is still investigated, but not
-            # concluded to be an intrusion on its own — that discernment is what
-            # avoids false alarms.
-            connected = {breach_area} if breach_area else set()
-            hops = {}
-            try:
-                from . import residence_graph
-                connected |= residence_graph.adjacent_areas(
-                    self.hass, self.config, breach_area)
-                # Depth of every room from the breach, so we can tell inward
-                # (entry → deeper) motion from motion that lingers at the entry.
-                hops = residence_graph.hops_from_breach(
-                    self.hass, self.config, breach_area)
-            except Exception:
-                pass
-            connected.discard(None)
-            # ONE alert, then investigate. An intentionally-open window is still
-            # a valid entry point — alert once and watch, rather than ignore it.
             self._last_intrusion_alert = now
-            start_zone = self._motion_key(eid)
-            # deepest room motion has reached so far (breach itself = 0)
-            start_depth = hops.get(start_zone, 0) if hops else 0
-            self._investigation = {
-                "start": now, "last_motion": now,
-                "zones": {start_zone}, "path": [start_zone], "escalated": False,
-                "breach_area": breach_area, "breach_name": breach_name,
-                "connected": connected,
-                "hops": hops, "max_depth": start_depth,
-            }
-            _i18n = _notify_i18n()
-            _lang = _hass_lang(self.hass)
-            if breach_name:
-                ctx = _i18n.message("intrusion_ctx_open", _lang, name=breach_name)
-            elif armed:
-                ctx = _i18n.message("intrusion_ctx_armed", _lang)
-            else:
-                ctx = ""
-            msg = _i18n.message(
-                "intrusion_alert", _lang, honorific=honorific.title(),
-                where=where, ctx=ctx)
-            # Decision Record (v7.39.0): log the proactive intrusion judgement. Best-effort;
-            # a logging failure must never affect the alert.
-            try:
-                from . import decision_record
-                _rid = decision_record.record(
-                    "intrusion",
-                    observation={"location": where, "breach": breach_name,
-                                 "alarm_armed": armed, "presence": "away"},
-                    interpretation={"assessment": "possible intrusion — investigating from the point of entry"},
-                    decision="raise initial intrusion alert and investigate silently",
-                    reason="motion while away with corroborating breach (open entry or armed alarm)",
-                )
-                try:  # so a later call-off attaches to this exact record
-                    from . import intrusion as _intr_rec
-                    _intr_rec.set_last_decision_id(_rid)
-                except Exception:
-                    pass
-            except Exception:
-                pass
-            # Learned damping (v6.76.0): if this location/time pattern has been
-            # repeatedly labelled a false alarm, stay QUIET on this initial
-            # low-confidence ping. The investigation still runs underneath, so a
-            # real inward route still confirms and alarms — learning can only
-            # silence the weak alert, never a confirmed intrusion.
-            damped = False
-            try:
-                from . import intrusion as _intr
-                damped = _intr.should_damp_weak_alert(breach_area, None)
-                _intr.record_event(
-                    "investigating", reason=("damped (learned benign)" if damped
-                                             else "motion while away"),
-                    breach=breach_name, breach_area=breach_area,
-                    zones=[start_zone], max_depth=start_depth)
-            except Exception:
-                pass
-            if damped:
-                _LOGGER.info("intrusion: initial alert damped for learned-benign "
-                             "pattern at %s (still investigating)", breach_area)
-                return None
-            return {
-                "type": "intrusion_investigating", "urgency": "high",
-                "message": msg, "auto_act": True, "entity_id": eid,
-            }
+            return self._begin_investigation(
+                now=now, trigger="away", presence="away",
+                breach=entry, breach_name=breach_name, armed=armed,
+                eid=eid, where=where, honorific=honorific,
+                reason="motion while away with corroborating breach (open entry or armed alarm)",
+            )
 
         if sleeping:
+            # Require an actual breach — a ground-floor exterior door/window
+            # actually open — before alerting at all (v7.86.0). Plain
+            # movement in a sleeping household (someone up for water, the
+            # loo, a pet) is normal and produces zero notifications; only a
+            # real entry point being open starts the same silent, room-by-room
+            # investigation the away-branch already uses.
+            entry, _ = self._ground_floor_open_entry()
+            if not entry:
+                return None
+            breach_name = self._friendly(entry)
             self._last_intrusion_alert = now
-            msg = (f"{honorific.title()}, motion detected at {where} "
-                   f"while the household is asleep. Investigating.")
-            return {
-                "type": "intrusion_sleep", "urgency": "high",
-                "message": msg, "auto_act": True, "entity_id": eid,
-            }
+            return self._begin_investigation(
+                now=now, trigger="sleeping", presence="asleep",
+                breach=entry, breach_name=breach_name, armed=False,
+                eid=eid, where=where, honorific=honorific,
+                reason="motion while asleep with a corroborating ground-floor breach",
+            )
 
         return None
 
@@ -730,8 +776,14 @@ class SafetyManager:
         Returns an escalation action only on confirmation (once)."""
         inv = self._investigation
 
-        # Residents came home / no longer away → stand down.
-        if not away:
+        # Stand down once the situation that started this investigation no
+        # longer holds: residents came home (away-triggered), or the
+        # household woke up (sleeping-triggered, v7.86.0). Older investigation
+        # dicts have no "trigger" key — default to "away" so pre-existing
+        # away-branch behaviour is unchanged.
+        trigger = inv.get("trigger", "away")
+        situation_active = away if trigger == "away" else sleeping
+        if not situation_active:
             self._investigation = None
             return None
 

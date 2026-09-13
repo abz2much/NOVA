@@ -345,6 +345,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.info("Nova: document auto-ingest active (scan every %s min)",
                      int(DOCS_SCAN_INTERVAL.total_seconds() // 60))
 
+    # Nightly "Heading to bed?" sleep-state prompt (v7.86.0). Checked every 10
+    # min; the function itself no-ops until it's actually time (past
+    # sleep_prompt_time, TV off, not already asked/overridden tonight) — see
+    # sleep_detection.maybe_prompt_sleep.
+    SLEEP_PROMPT_INTERVAL = timedelta(minutes=10)
+
+    async def _sleep_prompt_tick(_now) -> None:
+        try:
+            from . import sleep_detection as sd, nova_config as _jc2
+            rc = hass.data.get(DOMAIN, {}).get(
+                entry.entry_id, {}).get("runtime_config", {})
+            cfg = await hass.async_add_executor_job(
+                _jc2.effective_config_with_runtime, entry, rc)
+            await sd.maybe_prompt_sleep(hass, cfg)
+        except Exception as exc:
+            _LOGGER.debug("Nova sleep-prompt tick error: %s", exc)
+
+    if sched.add("sleep_prompt", SLEEP_PROMPT_INTERVAL, _sleep_prompt_tick):
+        _LOGGER.info("Nova: nightly sleep-state prompt active (checked every %s min)",
+                     int(SLEEP_PROMPT_INTERVAL.total_seconds() // 60))
+
     # Automatic database purge (Nova Unification item 3, 11 Sept 2026). Both
     # nova.database_purge and knowledge.purge_expired() already existed but
     # nothing ever called them automatically — cleanup was manual-only, so a

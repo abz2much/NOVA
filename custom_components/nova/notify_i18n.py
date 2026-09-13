@@ -95,6 +95,15 @@ MESSAGES: dict[str, dict[str, str]] = {
         "nl": "{honorific}, beweging bij {where} terwijl er niemand thuis is{ctx}. Ik onderzoek het vanaf het toegangspunt — ik waarschuw het huis en alle apparaten alleen als het een echte inbraak is.",
         "pt": "{honorific}, movimento em {where} enquanto não está ninguém em casa{ctx}. Estou a investigar a partir do ponto de entrada — só alertarei a casa e todos os dispositivos se for uma intrusão real.",
     },
+    "intrusion_alert_sleep": {
+        "en": "{honorific}, motion at {where} while the household is asleep{ctx}. Investigating from the point of entry — I'll alert the house and every device only if it's a real intrusion.",
+        "fr": "{honorific}, mouvement détecté à {where} pendant que le foyer dort{ctx}. J'enquête depuis le point d'entrée — je n'alerterai la maison et tous les appareils que s'il s'agit d'une véritable intrusion.",
+        "de": "{honorific}, Bewegung bei {where}, während der Haushalt schläft{ctx}. Ich untersuche vom Eintrittspunkt aus — ich alarmiere das Haus und alle Geräte nur bei einem echten Einbruch.",
+        "es": "{honorific}, movimiento en {where} mientras la casa duerme{ctx}. Estoy investigando desde el punto de entrada; solo alertaré a la casa y a todos los dispositivos si es una intrusión real.",
+        "it": "{honorific}, movimento a {where} mentre la casa dorme{ctx}. Sto indagando dal punto di ingresso — avviserò la casa e tutti i dispositivi solo se si tratta di una vera intrusione.",
+        "nl": "{honorific}, beweging bij {where} terwijl het huishouden slaapt{ctx}. Ik onderzoek het vanaf het toegangspunt — ik waarschuw het huis en alle apparaten alleen als het een echte inbraak is.",
+        "pt": "{honorific}, movimento em {where} enquanto a casa dorme{ctx}. Estou a investigar a partir do ponto de entrada — só alertarei a casa e todos os dispositivos se for uma intrusão real.",
+    },
     "intrusion_ctx_open": {
         "en": " ({name} open)", "fr": " ({name} ouvert)", "de": " ({name} offen)",
         "es": " ({name} abierto)", "it": " ({name} aperto)",

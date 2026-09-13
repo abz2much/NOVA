@@ -51,6 +51,7 @@
         "description": "Bedroom areas (for sleep detection), broadcast media_player group, and your phone notify service.",
         "data": {
           "bedroom_areas": "Bedroom areas (for sleep detection during quiet hours)",
+          "ground_floor_areas": "Ground-floor areas (for night-time intrusion alerts)",
           "broadcast_group": "Broadcast speaker group (typically your home Cast group)",
           "notify_service": "Phone notify service (e.g. notify.mobile_app_yourphone)"
         }

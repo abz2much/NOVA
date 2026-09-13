@@ -37,6 +37,11 @@ CONF_OBSERVER_QUIET_START     = "observer_quiet_start"     # e.g. "22:00"
 CONF_OBSERVER_QUIET_END       = "observer_quiet_end"       # e.g. "07:00"
 CONF_BEDROOM_AREAS            = "bedroom_areas"            # list of area_ids
 CONF_BROADCAST_GROUP          = "broadcast_group"          # media_player entity (the Cast group)
+# v7.86.0 — ground-floor areas, for scoping the sleeping-household intrusion
+# check to a real breach (an actual exterior door/window) instead of any
+# indoor motion. Empty by default: falls back to checking every exterior
+# door/window, same as the away-branch's existing corroboration check.
+CONF_GROUND_FLOOR_AREAS       = "ground_floor_areas"       # list of area_ids
 
 # Per-tier LLM provider selection. Each tier can use a different provider.
 CONF_GEMINI_API_KEY           = "gemini_api_key"

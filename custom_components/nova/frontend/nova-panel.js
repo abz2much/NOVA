@@ -4160,6 +4160,13 @@ class NovaPanel extends HTMLElement {
             <label>Language</label>
             <select id="ui-lang-select" class="cfg-field" data-cfg-key="ui_language">${this._optsLabeled([['auto','Auto (Home Assistant)'],['en','English'],['fr','Français'],['de','Deutsch'],['es','Español'],['it','Italiano'],['pt','Português'],['nl','Nederlands']], d.config?.ui_language || 'auto')}</select>
           </div>
+          <div class="cfg-row">
+            <label>Sleep state</label>
+            <select class="cfg-field" data-cfg-key="sleep_override">${this._optsLabeled([['auto','Auto (occupancy + quiet hours)'],['awake','Awake'],['asleep','Asleep']], d.config?.sleep_override || 'auto')}</select>
+          </div>
+          ${(!d.config?.ground_floor_areas || !d.config.ground_floor_areas.length) ? `
+          <div class="home-cfg-hint">Ground floor not configured — night-time motion alerts check every floor. Set it under Settings → Devices &amp; Services → Nova → Configure → Routing for more precise alerts.</div>
+          ` : ``}
         </div>
         <div class="toggle-list">
           <div class="toggle-row">
