@@ -80,6 +80,13 @@ const PANEL = {
       why_headline: "A daily routine around 18:00",
       evidence: ["Observed turning on near 18:00", "Happened 6 times in the last 30 days", "Consistent on about 82% of days"] },
   ],
+  doorbell_training: {
+    stats: { total: 18, notable: 3, by_source: { nest: 14, frigate: 4 } },
+    recent: [
+      { ts: "2026-07-13T18:22:00Z", image_source: "nest", category: "package", summary: "Amazon box left at the door", notable: true },
+      { ts: "2026-07-13T09:05:00Z", image_source: "frigate", category: "", summary: "Mail carrier, routine delivery", notable: false },
+    ],
+  },
   goals: [
     { id: 1, title: "Guest prep", outcome: "House ready for guests by Saturday", status: "active",
       steps_done: 2, steps_total: 4, steps: [], next_check_ts: "2026-07-13T20:00:00", deadline_ts: null,
@@ -1144,8 +1151,8 @@ setTimeout(async () => {
       })()],
     ["settings tab: unbuilt cards are honestly labeled, not silently missing",
       (() => {
-        const dbtCard = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Doorbell Training/.test(c.querySelector(".panel-title")?.textContent || ""));
-        return !!dbtCard && !!dbtCard.querySelector(".stub-tag") && /Configure/.test(dbtCard.textContent);
+        const fpeCard = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Floor Plan Editor/.test(c.querySelector(".panel-title")?.textContent || ""));
+        return !!fpeCard && !!fpeCard.querySelector(".stub-tag") && /Configure/.test(fpeCard.textContent);
       })()],
     ["settings tab shows only the active group by default",
       Array.from(sRoot.querySelectorAll('.settings-card[data-settings-group="general"]')).every(c => !c.hidden)
@@ -1532,6 +1539,60 @@ setTimeout(async () => {
   checks.push(["settings tab: Excluded Entities chip removal saves excluded_entities",
     _updateConfigCalls.some(c => c.key === "excluded_entities" && c.value === JSON.stringify([]))]);
   sRoot = elNew.shadowRoot;
+
+  // Cameras: switch to the Cameras group, confirm the per-camera enable/
+  // rename/location controls are real, and that they deliberately do NOT
+  // route through the generic _saveSetting/_render round-trip (only the
+  // #newCamsetBody sub-tree patches, matching Classic's #camset-body).
+  const camerasNavBtn = Array.from(sRoot.querySelectorAll(".settings-nav-btn")).find(b => b.textContent === "Cameras");
+  camerasNavBtn.click();
+  await new Promise(r => setTimeout(r, 10));
+  sRoot = elNew.shadowRoot;
+  checks.push(
+    ["settings tab: Cameras card is real with two camera rows",
+      (() => {
+        const cc = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /^Cameras$/.test(c.querySelector(".panel-title")?.textContent?.trim() || ""));
+        return !!cc && !cc.querySelector(".stub-tag") && cc.querySelectorAll(".new-camset-row").length === 2
+          && !!cc.querySelector("#newCamEnableAll");
+      })()],
+  );
+  const camToggle = sRoot.querySelector('.new-cam-enable-toggle[data-cam="camera.front"]');
+  camToggle.click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: Cameras disable toggle saves disabled_cameras and re-renders just the camera list",
+    _updateConfigCalls.some(c => c.key === "disabled_cameras" && c.value === JSON.stringify(["camera.front"]))
+    && sRoot.querySelector('.new-cam-enable-toggle[data-cam="camera.front"]')?.classList.contains("off")]);
+  sRoot = elNew.shadowRoot;
+  const outdoorChip = sRoot.querySelector('.new-cam-loc-chip[data-cam="camera.front"][data-loc="outdoor"]');
+  outdoorChip.click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: Cameras location chip calls nova/camera_location and reflects the result",
+    _locationCalls.some(c => c.entity_id === "camera.front" && c.mode === "outdoor")
+    && sRoot.querySelector('.new-cam-loc-chip[data-cam="camera.front"][data-loc="outdoor"]')?.classList.contains("mode-chip-on")]);
+  const newCamNameInput = sRoot.querySelector('.new-camset-name[data-cam="camera.back"]');
+  newCamNameInput.value = "Driveway";
+  newCamNameInput.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("blur", { bubbles: true }));
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: Cameras rename input calls nova/rename_camera on blur",
+    _renameCalls.some(c => c.entity_id === "camera.back" && c.name === "Driveway")]);
+  sRoot = elNew.shadowRoot;
+
+  // Doorbell Training: real card, analysed-event stats + rows, and the
+  // backlog-scan button calls the nova.train_doorbell_backlog service.
+  checks.push(
+    ["settings tab: Doorbell Training card is real with stats and event rows",
+      (() => {
+        const dc = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Doorbell Training/.test(c.querySelector(".panel-title")?.textContent || ""));
+        return !!dc && !dc.querySelector(".stub-tag")
+          && /18 analysed/.test(dc.textContent) && /3 notable/.test(dc.textContent)
+          && /Amazon box left at the door/.test(dc.textContent)
+          && !!dc.querySelector("#newDbtScan");
+      })()],
+  );
+  sRoot.getElementById("newDbtScan").click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: Doorbell Training scan button calls nova.train_doorbell_backlog",
+    _serviceCalls.some(c => c.domain === "nova" && c.service === "train_doorbell_backlog" && c.data?.limit === 40)]);
 
   // Switching tabs back and forth must not leak the core's animation loop
   // (a real bug caught before shipping — _render() tearing down the canvas

@@ -138,6 +138,7 @@ class NovaCommandCenterNew extends HTMLElement {
       areasMonitored: live.meta?.areas_monitored ?? "—",
       occupied: (live.areas || []).filter(a => a.active).length,
       config: live.config || {},
+      doorbellTraining: live.doorbell_training || {},
     };
   }
 
@@ -295,9 +296,9 @@ class NovaCommandCenterNew extends HTMLElement {
       desc: "What Nova is allowed to learn from — doors, presence, button presses." },
     { id: "excluded_entities", group: "learning", title: "Excluded Entities", real: true,
       desc: "Entities, domains, or labels Nova should ignore entirely." },
-    { id: "cameras", group: "cameras", title: "Cameras",
+    { id: "cameras", group: "cameras", title: "Cameras", real: true,
       desc: "Camera names, indoor/outdoor designation, and location overrides." },
-    { id: "doorbell_training", group: "cameras", title: "Doorbell Training",
+    { id: "doorbell_training", group: "cameras", title: "Doorbell Training", real: true,
       desc: "Teach Nova to recognize regular visitors at the door." },
     { id: "floor_plan_editor", group: "home", title: "Floor Plan Editor",
       desc: "Drag-and-drop room layout for the Residence 3D view and floor plan cards." },
@@ -345,6 +346,8 @@ class NovaCommandCenterNew extends HTMLElement {
         : c.id === "observer_tuning" ? this._observerTuningCardBody()
         : c.id === "routine_learning" ? this._routineLearningCardBody()
         : c.id === "excluded_entities" ? this._excludedEntitiesCardBody()
+        : c.id === "cameras" ? this._camerasCardBody()
+        : c.id === "doorbell_training" ? this._doorbellTrainingCardBody()
         : "")
       : `<div class="stub-body">${this._esc(c.desc)}<br><span class="stub-where">Not built here yet — use Classic, or Settings → Devices &amp; Services → Nova → Configure.</span></div>`;
     return `
@@ -1267,6 +1270,174 @@ class NovaCommandCenterNew extends HTMLElement {
       <div class="mode-grid" id="newExclLabChips">${chipRow(labs, "new-excl-lab-del")}</div>`;
   }
 
+  // Cameras — enable/rename/location settings deliberately avoid the
+  // generic _saveSetting/_render round-trip (see Classic's own
+  // _rerenderCameraSettings comment): a full re-render would blow away
+  // whatever a user is mid-typing in the rename input, so only the
+  // #newCamsetBody sub-tree is patched, matching Classic's #camset-body.
+  _renderCameraSettingsRows() {
+    const cfg = this._data()?.config || {};
+    const cams = cfg.cameras || [];
+    if (!cams.length) return `<div class="stub-body">No camera entities in Home Assistant.</div>`;
+    const names = cfg.camera_names || {};
+    const nOn = cams.filter(c => c.enabled !== false).length;
+    const head = `
+      <div class="cfg-row">
+        <label>${nOn} of ${cams.length} cameras in use</label>
+        <div style="display:flex;gap:6px">
+          <button class="mode-chip" id="newCamEnableAll">Enable all</button>
+          <button class="mode-chip" id="newCamDisableAll">Disable all</button>
+        </div>
+      </div>`;
+    const rows = cams.map(c => {
+      const enabled = c.enabled !== false;
+      const custom = names[c.entity_id] || "";
+      const mode = c.location_mode || "auto";
+      const resolved = c.outdoor ? "outdoor" : "indoor";
+      const chip = (m, label) => `<button class="mode-chip new-cam-loc-chip ${mode === m ? "mode-chip-on" : ""}" data-loc="${m}" data-cam="${this._esc(c.entity_id)}">${label}</button>`;
+      return `
+        <div class="new-camset-row" data-cam="${this._esc(c.entity_id)}">
+          <div class="cfg-row">
+            <label>${this._esc(c.entity_id)}</label>
+            <button class="toggle-btn ${enabled ? "on" : "off"} new-cam-enable-toggle" data-cam="${this._esc(c.entity_id)}">${enabled ? "ON" : "OFF"}</button>
+          </div>
+          <div class="cfg-row">
+            <input class="cfg-field new-camset-name" style="flex:1" type="text" data-cam="${this._esc(c.entity_id)}" value="${this._esc(custom)}" placeholder="${this._esc(c.raw_name || c.entity_id)}" autocomplete="off">
+          </div>
+          <div class="mode-grid">
+            ${chip("auto", `AUTO (${resolved})`)}
+            ${chip("indoor", "⌂ INDOOR")}
+            ${chip("outdoor", "▲ OUTDOOR")}
+          </div>
+        </div>`;
+    }).join("");
+    return head + rows;
+  }
+
+  _camerasCardBody() {
+    const cfg = this._data()?.config || {};
+    return `
+      <div class="stub-body">Names are Nova-only (HA untouched; blank reverts). Location governs intrusion + outdoor-event filtering — AUTO shows what the heuristics resolve.</div>
+      <div class="cfg-row">
+        <label>Face recognition source</label>
+        <select class="cfg-field" data-cfg-key="recognition_source">${this._optSelect([["both", "Both (Double Take + Frigate)"], ["frigate", "Frigate only (sub_label)"], ["doubletake", "Double Take only"]], cfg.recognition_source || "both")}</select>
+      </div>
+      <div class="cfg-row">
+        <label>Recognition confidence</label>
+        <input class="cfg-field cfg-num" type="number" min="0" max="1" step="0.05" data-cfg-key="identity_min_confidence" value="${cfg.identity_min_confidence ?? ""}" placeholder="0.45">
+      </div>
+      <div id="newCamsetBody">${this._renderCameraSettingsRows()}</div>`;
+  }
+
+  _rerenderCameraSettings() {
+    const host = this.shadowRoot?.getElementById("newCamsetBody");
+    if (!host) return;
+    host.innerHTML = this._renderCameraSettingsRows();
+    this._wireCameraSettings();
+  }
+
+  _wireCameraSettings() {
+    const root = this.shadowRoot;
+    const applyDisabled = async (next) => {
+      try {
+        await this._hass.callWS({ type: "nova/update_config", key: "disabled_cameras", value: JSON.stringify(next) });
+        if (this._liveData?.config) {
+          this._liveData.config.disabled_cameras = next;
+          const off = new Set(next);
+          (this._liveData.config.cameras || []).forEach(c => { c.enabled = !off.has(c.entity_id); });
+        }
+        this._rerenderCameraSettings();
+      } catch (err) { console.error("Nova (new look): camera enable/disable failed", err); }
+    };
+    const curDisabled = () => {
+      const v = (this._data()?.config || {}).disabled_cameras;
+      return Array.isArray(v) ? v.slice() : [];
+    };
+    root.querySelectorAll(".new-cam-enable-toggle[data-cam]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const cam = btn.getAttribute("data-cam"), cur = curDisabled(), isOff = cur.includes(cam);
+        applyDisabled(isOff ? cur.filter(c => c !== cam) : [...cur, cam]);
+      });
+    });
+    const enAll = root.getElementById("newCamEnableAll");
+    if (enAll) enAll.addEventListener("click", () => applyDisabled([]));
+    const disAll = root.getElementById("newCamDisableAll");
+    if (disAll) disAll.addEventListener("click", () => applyDisabled(((this._data()?.config || {}).cameras || []).map(c => c.entity_id)));
+
+    root.querySelectorAll(".new-camset-name").forEach(input => {
+      input.dataset.saved = input.value;
+      const save = async () => {
+        const entity = input.getAttribute("data-cam");
+        const name = input.value;
+        if (name === input.dataset.saved) return;
+        try {
+          const res = await this._hass.callWS({ type: "nova/rename_camera", entity_id: entity, name });
+          input.dataset.saved = name;
+          if (this._liveData?.config) {
+            this._liveData.config.camera_names = res?.camera_names || {};
+            if (Array.isArray(res?.cameras)) this._liveData.config.cameras = res.cameras;
+          }
+        } catch (err) { console.error("Nova (new look): camera rename failed", err); }
+      };
+      input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); input.blur(); } });
+      input.addEventListener("blur", save);
+    });
+
+    root.querySelectorAll(".new-cam-loc-chip").forEach(chipEl => {
+      chipEl.addEventListener("click", async () => {
+        const entity = chipEl.getAttribute("data-cam");
+        const m = chipEl.getAttribute("data-loc");
+        chipEl.disabled = true;
+        try {
+          const res = await this._hass.callWS({ type: "nova/camera_location", entity_id: entity, mode: m });
+          if (Array.isArray(res?.cameras) && this._liveData?.config) this._liveData.config.cameras = res.cameras;
+          this._rerenderCameraSettings();
+        } catch (err) {
+          console.error("Nova (new look): camera location failed", err);
+          chipEl.disabled = false;
+        }
+      });
+    });
+  }
+
+  _dbTrainRow(e) {
+    const ts = String(e.ts || "").replace("T", " ").replace("Z", "").slice(5, 16);
+    const src = String(e.image_source || "?");
+    const cat = e.category || "";
+    const desc = this._esc(e.summary || e.analysis || "");
+    return `
+      <div class="cfg-row"${e.notable ? ' style="color:var(--gold)"' : ""}>
+        <label>${this._esc(ts)} · ${this._esc(src)}${cat ? " · " + this._esc(cat) : ""}</label>
+        <span class="toggle-desc">${desc}</span>
+      </div>`;
+  }
+
+  _doorbellTrainingCardBody() {
+    const t = this._data()?.doorbellTraining || {};
+    const stats = t.stats || {};
+    const events = t.recent || [];
+    const total = stats.total || 0;
+    const notable = stats.notable || 0;
+    const bySource = stats.by_source || {};
+    const srcLine = Object.keys(bySource).length
+      ? Object.entries(bySource).map(([k, v]) => `${k} ${v}`).join(" · ")
+      : "none yet";
+    const rows = events.length
+      ? events.slice().reverse().map(e => this._dbTrainRow(e)).join("")
+      : `<div class="stub-body">No analysed doorbell events yet. Run a backlog scan, or wait for the next doorbell press.</div>`;
+    return `
+      <div class="stub-body">Analysed doorbell events — Nova's visitor training data. Each press is logged automatically; run a backlog scan to mine the recorded-event history into the dataset.</div>
+      <div class="cfg-row">
+        <label>Scan limit</label>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input id="newDbtLimit" class="cfg-field cfg-num" type="number" min="1" max="500" value="40" title="Max events to analyse">
+          <button class="mode-chip" id="newDbtScan">Scan backlog</button>
+        </div>
+      </div>
+      <div class="stub-body">${total} analysed · ${notable} notable · ${this._esc(srcLine)}</div>
+      ${rows}`;
+  }
+
   _mediaPlayerOptions(selected) {
     const states = this._hass?.states || {};
     const eids = Object.keys(states).filter(e => e.startsWith("media_player.")).sort();
@@ -1513,6 +1684,23 @@ class NovaCommandCenterNew extends HTMLElement {
 
     this._wireAiModels();
     this._wireAppliances();
+    this._wireCameraSettings();
+
+    const dbtScan = root.getElementById("newDbtScan");
+    if (dbtScan) {
+      dbtScan.addEventListener("click", async () => {
+        if (!this._hass) return;
+        const limInput = root.getElementById("newDbtLimit");
+        let limit = limInput ? parseInt(limInput.value, 10) : 40;
+        if (isNaN(limit) || limit < 1) limit = 40;
+        try {
+          await this._hass.callService("nova", "train_doorbell_backlog", { limit });
+          setTimeout(() => this._fetchLiveData(), 4000);
+        } catch (err) {
+          console.error("Nova (new look): doorbell backlog scan failed", err);
+        }
+      });
+    }
 
     const plAddBtn = root.getElementById("newPlAddEntity");
     if (plAddBtn) {
@@ -1984,6 +2172,8 @@ class NovaCommandCenterNew extends HTMLElement {
         padding:5px 8px;border-radius:8px;border:1px solid var(--line-soft);background:var(--surface-2);color:var(--ink-dim)}
       .new-pl-del,.new-excl-ent-del,.new-excl-dom-del,.new-excl-lab-del{background:none;border:none;color:var(--ink-faint);cursor:pointer;font-size:12px;padding:0}
       .new-pl-del:hover,.new-excl-ent-del:hover,.new-excl-dom-del:hover,.new-excl-lab-del:hover{color:#ff5a5a}
+      .new-camset-row{padding:10px 0;border-top:1px solid var(--line-soft)}
+      .new-camset-row:first-of-type{border-top:none}
       .toggle-list{display:flex;flex-direction:column;gap:2px}
       .toggle-row{display:grid;grid-template-columns:1fr auto;grid-template-rows:auto auto;gap:2px 10px;
         padding:9px 0;border-top:1px solid var(--line-soft)}
