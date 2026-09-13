@@ -1,3 +1,7 @@
+## [7.96.1] — fix: "LEARN" and 9 other real log categories had no filter chip
+
+Abi spotted it live: anticipation log entries ("Rachel is heading home…") showed up tagged `LEARN`, with a plain bullet instead of an icon and no way to filter for them — in both Classic and the new look. The category filter chips and color map had drifted from the real set of categories the backend actually logs under; `LEARN` plus 9 others (`AUTO`, `BIO`, `CONFIG`, `ENERGY`, `MODE`, `OFFER`, `REPLY`, `SAFETY`, `WARNING`) were missing entirely, while `ROUTE`, `REASON`, and `TTS` sat there as dead chips nothing has logged under in a long time. Rebuilt both lists from every literal category string actually passed to `nova_log()` in the backend, with a distinct icon and color for each of the 19 real categories.
+
 ## [7.96.0] — the new look gets a Logs tab
 
 A third top-level tab alongside Command Center and Settings: the same System Log Classic has — search, ten category filter chips (CONV/LOCAL/AGENT/GATE/DEDUP/CLASSIFY/CAMERA/ROUTE/ERROR/ALL), and a live-updating entry list, reading from the same `nova/get_debug_log` call. Ported with the same care Classic's own version has: log content (timestamps, categories, messages) can carry entity names, states, or model output Nova doesn't fully control, so every field is escaped before it reaches the page — including on the fetch-error path, a real stored-XSS class of bug Classic fixed twice before. Residence, Intrusion, Suggestions, and Memory still open in Classic.

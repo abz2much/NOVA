@@ -647,7 +647,29 @@ setTimeout(async () => {
     ["log search box present", !!logs1.getElementById("log-search")],
     ["all 3 log entries render initially", logs1.querySelectorAll(".log-entry").length === 3],
     ["log count shows total", /3 entries/.test(logs1.getElementById("log-count")?.textContent || "")],
+    ["log filter chips cover every real backend category, not the stale ROUTE/REASON/TTS set",
+      logs1.querySelectorAll(".log-filter").length === 20
+      && !!logs1.querySelector('.log-filter[data-filter="LEARN"]')
+      && !logs1.querySelector('.log-filter[data-filter="ROUTE"]')],
   );
+
+  // Real gap Abi caught live (13 Sept 2026): a genuine "LEARN" category
+  // (anticipation entries) rendered with a bare "•" bullet and had no
+  // filter chip — the cc map + filter list had drifted from nova_log()'s
+  // real category set.
+  const learnCallWS = hass.callWS;
+  hass.callWS = async (m) => (m.type === "nova/get_debug_log"
+    ? { entries: [{ ts: "15:44:58", cat: "LEARN", msg: "anticipation: Rachel is heading home — about 0.8 km out." }] }
+    : learnCallWS(m));
+  await el._fetchDebugLog();
+  checks.push(["LEARN entries get their own icon/color, not a bare bullet",
+    (() => {
+      const catEl = el.shadowRoot.querySelector(".log-entry .log-cat");
+      return !!catEl && /🧠/.test(catEl.textContent) && !/^•/.test(catEl.textContent.trim());
+    })()]);
+  hass.callWS = learnCallWS;
+  el._logSearch = "";
+  await el._fetchDebugLog();
 
   el._logSearch = "porch";
   await el._fetchDebugLog();
@@ -1689,9 +1711,37 @@ setTimeout(async () => {
     ["logs tab renders all mock entries with a count",
       sRoot.querySelectorAll(".new-log-entry").length === 3
       && /3 entries/.test(sRoot.getElementById("newLogCount")?.textContent || "")],
-    ["logs tab renders the category filter chips",
-      sRoot.querySelectorAll(".new-log-filter").length === 10],
+    ["logs tab renders every real backend log category as a filter chip",
+      sRoot.querySelectorAll(".new-log-filter").length === 20
+      && !!sRoot.querySelector('.new-log-filter[data-filter="LEARN"]')
+      && !sRoot.querySelector('.new-log-filter[data-filter="ROUTE"]')], // dead category, dropped
   );
+
+  // Real gap Abi caught live from a screenshot: a genuine "LEARN" category
+  // (anticipation entries) appeared in the log with a bare "•" bullet and
+  // no way to filter for it — neither the filter-chip list nor the color
+  // map had ever been updated to match nova_log()'s real category set.
+  const originalCallWSForLearn = hass.callWS;
+  hass.callWS = async (m) => (m.type === "nova/get_debug_log"
+    ? { entries: [{ ts: "15:44:58", cat: "LEARN", msg: "anticipation: Rachel is heading home — about 0.8 km out." }] }
+    : originalCallWSForLearn(m));
+  await elNew._fetchDebugLog();
+  sRoot = elNew.shadowRoot;
+  checks.push(["logs tab: a LEARN entry gets its own icon/color, not a bare bullet",
+    (() => {
+      const catEl = sRoot.querySelector(".new-log-entry .new-log-cat");
+      return !!catEl && /🧠/.test(catEl.textContent) && !/^•/.test(catEl.textContent.trim());
+    })()]);
+  const learnFilterBtn = sRoot.querySelector('.new-log-filter[data-filter="LEARN"]');
+  learnFilterBtn.click();
+  await new Promise(r => setTimeout(r, 10));
+  sRoot = elNew.shadowRoot;
+  checks.push(["logs tab: LEARN filter chip actually isolates LEARN entries",
+    sRoot.querySelectorAll(".new-log-entry").length === 1
+    && sRoot.querySelector('.new-log-filter[data-filter="LEARN"]')?.classList.contains("mode-chip-on")]);
+  hass.callWS = originalCallWSForLearn;
+  elNew._logFilter = "all";
+  await elNew._fetchDebugLog();
   const errFilterBtn = sRoot.querySelector('.new-log-filter[data-filter="ERROR"]');
   errFilterBtn.click();
   await new Promise(r => setTimeout(r, 10));

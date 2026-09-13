@@ -250,19 +250,35 @@ class NovaCommandCenterNew extends HTMLElement {
   // (entity names, states, model output can end up in them), so they are
   // attacker/LLM-influenced and go through this._esc() before innerHTML —
   // this is a real fixed-XSS surface in Classic, not decorative caution.
-  static LOG_FILTERS = ["all", "CONV", "LOCAL", "AGENT", "GATE", "DEDUP", "CLASSIFY", "CAMERA", "ROUTE", "ERROR"];
+  // Kept in sync with every literal category string passed to nova_log()
+  // across the backend (grep `nova_log("` to re-verify). ROUTE/REASON/TTS
+  // removed 13 Sept 2026: nothing in the backend logs under those
+  // categories any more, so their chips could never match a real entry —
+  // caught live when a real "LEARN" entry (used, but missing from both
+  // this list and the color map) fell through to a bare "•" bullet with
+  // no way to filter for it.
+  static LOG_FILTERS = ["all", "CONV", "REPLY", "LOCAL", "LEARN", "AGENT", "AUTO", "MODE", "CONFIG",
+    "CLASSIFY", "CAMERA", "ENERGY", "BIO", "OFFER", "SAFETY", "ERROR", "WARNING", "GATE", "DEDUP", "OFFLINE"];
   static LOG_CATEGORIES = {
     CONV: { color: "#5fd0e0", icon: "💬" },
+    REPLY: { color: "#4fb8ff", icon: "💭" },
     LOCAL: { color: "#5fbf7a", icon: "⚡" },
+    LEARN: { color: "#8fd15c", icon: "🧠" },
     AGENT: { color: "var(--gold)", icon: "🤖" },
-    ROUTE: { color: "var(--gold)", icon: "🔀" },
+    AUTO: { color: "#ffb454", icon: "🔁" },
+    MODE: { color: "#c9a0ff", icon: "🎚️" },
+    CONFIG: { color: "#9d8cff", icon: "⚙️" },
     CLASSIFY: { color: "#9d8cff", icon: "🏷️" },
-    REASON: { color: "#c39dff", icon: "🧠" },
-    TTS: { color: "#5fd0e0", icon: "🔊" },
+    CAMERA: { color: "#5fbf7a", icon: "📷" },
+    ENERGY: { color: "#ffcf6a", icon: "🔌" },
+    BIO: { color: "#ff8fc7", icon: "💓" },
+    OFFER: { color: "#ffd27a", icon: "🙋" },
+    SAFETY: { color: "#ff8a8a", icon: "🛡️" },
     ERROR: { color: "#ff6b81", icon: "❌" },
+    WARNING: { color: "var(--warn)", icon: "⚠️" },
     GATE: { color: "var(--ink-faint)", icon: "🚧" },
     DEDUP: { color: "var(--ink-faint)", icon: "🔇" },
-    CAMERA: { color: "#5fbf7a", icon: "📷" },
+    OFFLINE: { color: "var(--ink-faint)", icon: "📴" },
   };
 
   _htmlLogs() {
