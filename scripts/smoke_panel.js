@@ -42,6 +42,16 @@ const PANEL = {
       temp: null, humidity: null, temp_entity: null, humidity_entity: null, last_motion: null },
     { id: "kitchen", name: "Kitchen", caps: ["sat", "spkr"], active: false, bedroom: false, lights_on: 0, lights_total: 0,
       temp: "71°F", humidity: null, temp_entity: "sensor.kitchen_temp", humidity_entity: null, last_motion: "12m" },
+    { id: "master_bedroom", name: "Master Bedroom", caps: ["mmwave", "switch", "lock"], active: false, bedroom: true, lights_on: 0, lights_total: 6,
+      temp: "72°F", humidity: "48%", temp_entity: "sensor.mb_temp", humidity_entity: "sensor.mb_humidity", last_motion: "1h" },
+    { id: "attic", name: "Attic", caps: ["light"], active: false, bedroom: false, lights_on: 0, lights_total: 2,
+      temp: null, humidity: null, temp_entity: null, humidity_entity: null, last_motion: null },
+    { id: "entry", name: "Entry", caps: ["light", "door"], active: false, bedroom: false, lights_on: 0, lights_total: 3,
+      temp: null, humidity: null, temp_entity: null, humidity_entity: null, last_motion: null },
+    { id: "network_room", name: "Network Room", caps: ["light", "switch", "alarm", "leak", "climate", "cam"], active: false, bedroom: false, lights_on: 0, lights_total: 1,
+      temp: "84°F", humidity: "33%", temp_entity: "sensor.nr_temp", humidity_entity: "sensor.nr_humidity", last_motion: null },
+    { id: "roam", name: "Roam", caps: ["spkr", "mmwave", "cam"], active: false, bedroom: false, lights_on: 0, lights_total: 0,
+      temp: null, humidity: null, temp_entity: null, humidity_entity: null, last_motion: null },
   ],
   onboarding: { dismissed: false, show: true, done_count: 1, total: 5, steps: [
     { id: "notify", label: "Set an alert destination", hint: "phone", done: true, jump: "Notifications" },
@@ -304,7 +314,7 @@ const hass = {
       return () => {};
     },
   },
-  callService: async (domain, service, data) => { _serviceCalls.push({ domain, service, data }); },
+  callService: async (domain, service, data, target) => { _serviceCalls.push({ domain, service, data, target }); },
 };
 
 // v7.93.0: "nova-panel" is now a thin shell that picks between Classic and
@@ -1138,6 +1148,36 @@ setTimeout(async () => {
       !!newRoot.getElementById("cameraPanel")],
   );
 
+  // Real gap Abi caught live: the Areas grid hard-capped at 6 tiles, so 8 of
+  // his 14 real areas never rendered at all. Also covers the redesign that
+  // shipped alongside the fix: capability icons (canonical order, capped at
+  // 5 per Classic's own convention), sparkline trends, and a light toggle.
+  checks.push(
+    ["new look: Areas grid has no hard cap — all 8 fixture areas render",
+      newRoot.querySelectorAll(".area-tile").length === 8],
+    ["new look: area capability icons follow canonical order and cap at 5",
+      (() => {
+        const nrTile = Array.from(newRoot.querySelectorAll(".area-tile")).find(t => /Network Room/.test(t.textContent));
+        const icons = nrTile ? Array.from(nrTile.querySelectorAll(".area-cap")).map(c => c.getAttribute("title")) : [];
+        return icons.length === 5 && icons.join(",") === "cam,light,switch,climate,leak";
+      })()],
+    ["new look: a room with no temp/humidity sensor renders no climate row or accent bar",
+      (() => {
+        const atticTile = Array.from(newRoot.querySelectorAll(".area-tile")).find(t => /Attic/.test(t.textContent));
+        return !!atticTile && atticTile.classList.contains("no-temp") && !atticTile.querySelector(".area-climate");
+      })()],
+    ["new look: a room with a temp sensor renders its sparkline trend",
+      (() => {
+        const garageTile = Array.from(newRoot.querySelectorAll(".area-tile")).find(t => /Garage/.test(t.textContent));
+        return !!garageTile && !!garageTile.querySelector(".area-climate svg polyline");
+      })()],
+  );
+  const garageLightToggle = Array.from(newRoot.querySelectorAll(".area-light-toggle")).find(b => b.getAttribute("data-area-name") === "Garage");
+  garageLightToggle.click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["new look: area light toggle calls light.turn_off targeted at the area",
+    _serviceCalls.some(c => c.domain === "light" && c.service === "turn_off" && c.target?.area_id === "garage")]);
+
   // ── New look: Settings tab (v7.94.0) ──
   // Patching `global`, not `window`: the component code runs via
   // window.eval() but this harness only copies specific globals once at
@@ -1909,6 +1949,7 @@ setTimeout(async () => {
       _updateConfigCalls.some(c => c.key === "ui_style" && c.value === "classic")]);
   }
   if (elNew._fetchInterval) clearInterval(elNew._fetchInterval);
+  if (elNew._sparklineInterval) clearInterval(elNew._sparklineInterval);
   if (elNew._animHandle) cancelAnimationFrame(elNew._animHandle);
 
   // ── Look shell (v7.93.0) — fail-closed default path ──

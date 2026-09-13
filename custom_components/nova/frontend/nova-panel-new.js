@@ -79,6 +79,7 @@ class NovaCommandCenterNew extends HTMLElement {
 
   disconnectedCallback() {
     if (this._fetchInterval) clearInterval(this._fetchInterval);
+    if (this._sparklineInterval) clearInterval(this._sparklineInterval);
     if (this._animHandle) cancelAnimationFrame(this._animHandle);
     if (this._resizeListener) window.removeEventListener("resize", this._resizeListener);
   }
@@ -88,6 +89,25 @@ class NovaCommandCenterNew extends HTMLElement {
     if (!this._fetchInterval) {
       this._fetchInterval = setInterval(() => this._fetchLiveData(), 20000);
     }
+    this._fetchAreaSparklines();
+    if (!this._sparklineInterval) {
+      // Trend history changes slowly — matches Classic's own 5-minute cadence
+      // (nova-panel.js's _fetchAreaSparklines), no need to poll as often as
+      // the main dashboard data.
+      this._sparklineInterval = setInterval(() => this._fetchAreaSparklines(), 300000);
+    }
+  }
+
+  async _fetchAreaSparklines() {
+    if (!this._hass) return;
+    try {
+      const res = await this._hass.callWS({ type: "nova/get_area_sparklines" });
+      this._sparklines = res?.sparklines || {};
+    } catch (err) {
+      console.warn("Nova (new look): sparkline fetch failed", err);
+      return;
+    }
+    this._renderData();
   }
 
   // ─── Data ────────────────────────────────────────────────────────────────
@@ -2212,12 +2232,17 @@ class NovaCommandCenterNew extends HTMLElement {
     // areas
     const areasGridEl = root.getElementById("areasGrid");
     if (areasGridEl) {
-      areasGridEl.innerHTML = (d.areas || []).slice(0, 6).map(a => `
-        <div class="area-tile${a.active ? " active" : ""}">
-          <div class="area-name">${this._esc(a.name)}${a.active ? '<span class="live-dot" title="Occupied now"></span>' : ""}</div>
-          <div class="area-stat"><span>lights</span><span>${a.lights_on ?? 0}/${a.lights_total ?? 0}</span></div>
-          ${a.temp ? `<div class="area-stat"><span>temp</span><span>${this._esc(a.temp)}</span></div>` : ""}
-        </div>`).join("");
+      areasGridEl.innerHTML = (d.areas || []).map(a => this._areaTileHtml(a)).join("");
+      // Re-wire on every patch — innerHTML above just replaced these nodes,
+      // so any listeners from a previous _renderData() are already gone.
+      areasGridEl.querySelectorAll(".area-light-toggle[data-light-area]").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const areaId = btn.getAttribute("data-light-area");
+          const name = btn.getAttribute("data-area-name") || "Area";
+          const isOn = btn.classList.contains("on");
+          this._toggleAreaLights(areaId, name, isOn);
+        });
+      });
     }
     const areasMeta = root.getElementById("areasMeta");
     if (areasMeta) areasMeta.textContent = `${d.occupied} OCCUPIED · ${d.areasMonitored} MONITORED`;
@@ -2232,6 +2257,73 @@ class NovaCommandCenterNew extends HTMLElement {
       if (camToggle) camToggle.textContent = this._camOpen ? "HIDE CAMERAS ▴" : `SHOW ${cams.length} CAMERA${cams.length === 1 ? "" : "S"} ▾`;
       camStrip.classList.toggle("open", this._camOpen);
       camStrip.innerHTML = cams.map(c => `<div class="camera-slot">${this._esc(c.name || c.entity_id)}</div>`).join("");
+    }
+  }
+
+  // Canonical order + icon per capability, matching the backend's own
+  // ordering (websocket.py's area-caps builder) so a room with many
+  // capabilities always shows them in the same, sensible sequence.
+  static AREA_CAP_ORDER = ["sat", "spkr", "mmwave", "cam", "light", "switch", "lock", "climate", "door", "leak", "alarm"];
+  static AREA_CAP_ICON = {
+    sat: "🛰️", spkr: "🔊", mmwave: "📡", cam: "📷", light: "💡", switch: "🔌",
+    lock: "🔒", climate: "🌡️", door: "🚪", leak: "💧", alarm: "🔔",
+  };
+
+  _areaSparklineSvg(values, color) {
+    if (!values || values.length < 2) return "";
+    const w = 60, h = 16, pad = 1;
+    const min = Math.min(...values), max = Math.max(...values), range = (max - min) || 1;
+    const step = (w - pad * 2) / (values.length - 1);
+    const pts = values.map((v, i) => {
+      const x = pad + i * step;
+      const y = h - pad - ((v - min) / range) * (h - pad * 2);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(" ");
+    return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+  }
+
+  _areaTileHtml(a) {
+    const caps = (a.caps || []).slice().sort((x, y) =>
+      NovaCommandCenterNew.AREA_CAP_ORDER.indexOf(x) - NovaCommandCenterNew.AREA_CAP_ORDER.indexOf(y)).slice(0, 5);
+    const capsRow = caps.length
+      ? `<div class="area-caps">${caps.map(c => `<div class="area-cap" title="${this._esc(c)}">${NovaCommandCenterNew.AREA_CAP_ICON[c] || "•"}</div>`).join("")}</div>`
+      : "";
+    const spark = this._sparklines?.[a.id] || {};
+    const tempSpark = spark.temp ? this._areaSparklineSvg(spark.temp, "var(--gold)") : "";
+    const humSpark = spark.humidity ? this._areaSparklineSvg(spark.humidity, "#6ea8ff") : "";
+    const climateRow = (a.temp || a.humidity) ? `
+      <div class="area-climate">
+        ${a.temp ? `<div class="area-climate-item"><div class="area-climate-num">${this._esc(a.temp)}</div>${tempSpark}</div>` : ""}
+        ${a.humidity ? `<div class="area-climate-item"><div class="area-climate-num">${this._esc(a.humidity)}</div>${humSpark}</div>` : ""}
+      </div>` : "";
+    const hasLights = (a.lights_total || 0) > 0;
+    const lit = hasLights && (a.lights_on || 0) > 0;
+    const ctlOn = (this._liveData?.config?.light_control_enabled) !== false;
+    const lightCtl = hasLights
+      ? `<button class="area-light-toggle${lit ? " on" : ""}"${ctlOn ? ` data-light-area="${this._esc(a.id || "")}" data-area-name="${this._esc(a.name)}"` : " disabled"} title="${a.lights_on}/${a.lights_total} lights on${ctlOn ? " — tap to toggle" : ""}">${lit ? "ON" : "OFF"}</button>`
+      : "";
+    return `
+      <div class="area-tile${a.active ? " active" : ""}${(a.temp || a.humidity) ? "" : " no-temp"}">
+        <div class="area-top">
+          <div class="area-name">${this._esc(a.name)}${a.active ? '<span class="live-dot" title="Occupied now"></span>' : ""}</div>
+        </div>
+        ${capsRow}
+        ${climateRow}
+        <div class="area-bottom">
+          <div class="area-stat">lights <b>${a.lights_on ?? 0}/${a.lights_total ?? 0}</b></div>
+          ${lightCtl}
+        </div>
+      </div>`;
+  }
+
+  async _toggleAreaLights(areaId, roomName, isOn) {
+    if (!this._hass || !areaId) return;
+    const turnOn = !isOn;
+    try {
+      await this._hass.callService("light", turnOn ? "turn_on" : "turn_off", {}, { area_id: areaId });
+      setTimeout(() => { try { this._fetchLiveData(); } catch (_) {} }, 500);
+    } catch (err) {
+      console.error(`Nova (new look): ${roomName} lights toggle failed`, err);
     }
   }
 
@@ -2821,16 +2913,34 @@ class NovaCommandCenterNew extends HTMLElement {
       .feed-text{font-size:12.8px;line-height:1.4}
       .feed-text .dim{color:var(--ink-dim)}
       .feed-time{font-family:var(--font-mono);font-size:10px;color:var(--ink-faint);white-space:nowrap}
-      .areas-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-      .area-tile{background:var(--surface-2);border:1px solid var(--line-soft);border-radius:11px;padding:10px 11px;
-        transition:border-color .25s,box-shadow .25s}
+      .areas-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px}
+      .area-tile{position:relative;background:var(--surface-2);border:1px solid var(--line-soft);border-radius:13px;
+        padding:12px 12px 10px;overflow:hidden;transition:border-color .25s,box-shadow .25s}
+      .area-tile::before{content:"";position:absolute;top:0;left:0;right:0;height:2px;
+        background:linear-gradient(90deg,#6ea8ff,var(--gold) 55%,var(--ember));opacity:.55}
+      .area-tile.no-temp::before{display:none}
       .area-tile.active{border-color:#e2542f70;box-shadow:inset 0 0 14px #e2542f14,0 0 14px #e2542f12}
-      .area-name{font-size:12.5px;font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:6px}
-      .live-dot{width:7px;height:7px;border-radius:50%;background:#5fbf7a;box-shadow:0 0 7px 1px #5fbf7a99;
+      .area-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+      .area-name{font-family:var(--font-display);font-size:14.5px;font-weight:600;display:flex;align-items:center;gap:6px}
+      .live-dot{width:6px;height:6px;border-radius:50%;background:#5fbf7a;box-shadow:0 0 6px 1px #5fbf7a99;
         animation:novaLivePulse 2.4s ease-in-out infinite;flex:none}
       @keyframes novaLivePulse{0%,100%{opacity:1}50%{opacity:.45}}
       @media (prefers-reduced-motion: reduce){.live-dot{animation:none}}
-      .area-stat{font-family:var(--font-mono);font-size:10px;color:var(--ink-faint);display:flex;justify-content:space-between}
+      .area-caps{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:9px;min-height:20px}
+      .area-cap{width:21px;height:21px;border-radius:6px;background:var(--surface);border:1px solid var(--line-soft);
+        display:flex;align-items:center;justify-content:center;font-size:10.5px;opacity:.85}
+      .area-climate{display:flex;gap:10px;margin-bottom:9px}
+      .area-climate-item{flex:1;min-width:0}
+      .area-climate-num{font-family:var(--font-mono);font-size:12.5px;font-weight:500;display:flex;align-items:baseline;gap:3px}
+      .area-climate-num .unit{font-size:9px;color:var(--ink-faint)}
+      .area-climate svg{display:block;width:100%;height:16px;margin-top:2px}
+      .area-bottom{display:flex;align-items:center;justify-content:space-between;padding-top:8px;border-top:1px solid var(--line-soft)}
+      .area-stat{font-family:var(--font-mono);font-size:10px;color:var(--ink-dim)}
+      .area-stat b{color:var(--ink);font-weight:600}
+      .area-light-toggle{font-family:var(--font-mono);font-size:9px;font-weight:600;letter-spacing:.05em;
+        padding:3px 9px;border-radius:7px;border:1px solid var(--line-soft);background:var(--surface);
+        color:var(--ink-faint);cursor:pointer}
+      .area-light-toggle.on{background:#f4b8602a;border-color:#f4b86070;color:var(--gold-pale)}
       .camera-panel{grid-column:1/-1}
       .camera-head-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
       .camera-note{font-size:11.5px;color:var(--ink-dim);max-width:46ch}
