@@ -1,3 +1,7 @@
+## [7.97.0] — the new look gets a Memory tab
+
+A fourth top-level tab: Classic's own Memory tab, ported over — "What Nova Knows" (curated facts, grouped by household/about-me, teach a new one or forget any with ✕), a Pending Confirmation queue for facts staged via "remember that…" but not yet approved (confirm, reject, or edit before it's trusted), and Person Routines (habits confidently attributed to one person from weeks of sole-occupant activity). Same websocket calls as Classic throughout (`nova/get_knowledge`, `nova/add_knowledge`, `nova/forget_knowledge`, `nova/pending_fact_action`, `nova/edit_pending_fact`, `nova/get_person_routines`) — no new backend. Residence, Intrusion, and Suggestions are the only tabs still Classic-only now.
+
 ## [7.96.1] — fix: "LEARN" and 9 other real log categories had no filter chip
 
 Abi spotted it live: anticipation log entries ("Rachel is heading home…") showed up tagged `LEARN`, with a plain bullet instead of an icon and no way to filter for them — in both Classic and the new look. The category filter chips and color map had drifted from the real set of categories the backend actually logs under; `LEARN` plus 9 others (`AUTO`, `BIO`, `CONFIG`, `ENERGY`, `MODE`, `OFFER`, `REPLY`, `SAFETY`, `WARNING`) were missing entirely, while `ROUTE`, `REASON`, and `TTS` sat there as dead chips nothing has logged under in a long time. Rebuilt both lists from every literal category string actually passed to `nova_log()` in the backend, with a distinct icon and color for each of the 19 real categories.

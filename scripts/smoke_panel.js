@@ -111,6 +111,10 @@ const _docDeleteCalls = [];
 let _energyAgency = "advisory";
 let _bioEnabled = false;
 let _pendingFacts = [{ id: 42, key: "bedtime", value: "10pm", subject: "primary" }];
+let _knownFacts = [
+  { id: 1, key: "trash day", value: "Tuesday", subject: "household", source: "stated", confidence: 1 },
+  { id: 2, key: "favorite tea", value: "Earl Grey", subject: "primary", source: "inferred", confidence: 0.7 },
+];
 let _intrCalledOff = false;
 let _intrAck = false;
 const _intrSnap = { url: "/local/nova/intrusion/intrusion_dining_room_1730000000.jpg", camera: "camera.dining_room", ts: 1730000000, path: "/config/www/nova/intrusion/x.jpg" };
@@ -131,7 +135,16 @@ const hass = {
     if (m.type === "nova/get_person_routines") return { routines: { username: [
       { id: 1, pattern_type: "time_routine", description: "office light turns on around 07:00 most days when Username is home", confidence: 0.82, occurrences: 9, last_seen: "2026-07-13" },
     ] } };
-    if (m.type === "nova/get_knowledge") return { facts: [], pending: _pendingFacts, stats: {} };
+    if (m.type === "nova/get_knowledge") return { facts: _knownFacts, pending: _pendingFacts, stats: {} };
+    if (m.type === "nova/add_knowledge") {
+      const id = Math.max(0, ..._knownFacts.map(f => f.id)) + 1;
+      _knownFacts = [..._knownFacts, { id, key: m.key, value: m.value, subject: m.subject, source: "stated", confidence: 1 }];
+      return { ok: true, facts: _knownFacts };
+    }
+    if (m.type === "nova/forget_knowledge") {
+      _knownFacts = _knownFacts.filter(f => f.id !== m.fact_id);
+      return { ok: true, facts: _knownFacts };
+    }
     if (m.type === "nova/pending_fact_action") {
       _pendingFacts = _pendingFacts.filter(f => f.id !== m.fact_id);
       return { ok: true, facts: [], pending: _pendingFacts };
@@ -1803,6 +1816,74 @@ setTimeout(async () => {
     !sRoot.getElementById("newLogEntries")?.querySelector("img")
     && window.__xssFiredNew2 === false]);
   hass.callWS = originalCallWS;
+
+  // ── New look: Memory tab (ported from Classic's own Memory tab) ──
+  const memoryTabBtn = Array.from(newRoot.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === "memory");
+  memoryTabBtn.click();
+  await new Promise(r => setTimeout(r, 20));
+  sRoot = elNew.shadowRoot;
+  checks.push(
+    ["memory tab renders known facts grouped by subject, with the fact count",
+      /trash day/.test(sRoot.getElementById("newMemList")?.textContent || "")
+      && /favorite tea/.test(sRoot.getElementById("newMemList")?.textContent || "")
+      && /Household/.test(sRoot.getElementById("newMemList")?.textContent || "")
+      && /About me/.test(sRoot.getElementById("newMemList")?.textContent || "")
+      && /2 facts/.test(sRoot.getElementById("newMemCount")?.textContent || "")],
+    ["memory tab renders person routines with a confidence percentage",
+      /Username/.test(sRoot.getElementById("newProutineList")?.textContent || "")
+      && /office light turns on/.test(sRoot.getElementById("newProutineList")?.textContent || "")
+      && /82%/.test(sRoot.getElementById("newProutineList")?.textContent || "")],
+    // Classic's own Memory-tab test (earlier in this file) already confirmed
+    // the one seed pending fact ("bedtime"), consuming the shared
+    // _pendingFacts fixture — same class of shared-fixture gotcha as
+    // pattern_include_entities/_bioEnabled above. Assert the real
+    // now-empty state rather than the fixture's original value.
+    ["memory tab hides the pending-confirmation panel once nothing is waiting",
+      sRoot.getElementById("newPendingPanel")?.hidden === true],
+  );
+
+  // Teach a new fact — exercises nova/add_knowledge and confirms the
+  // inputs clear on success (so the form is obviously ready for the next one).
+  sRoot.getElementById("newMemKey").value = "wifi password hint";
+  sRoot.getElementById("newMemVal").value = "ask the router";
+  sRoot.getElementById("newMemAdd").click();
+  await new Promise(r => setTimeout(r, 20));
+  sRoot = elNew.shadowRoot;
+  checks.push(["memory tab: TEACH adds a fact via nova/add_knowledge and clears the form",
+    /wifi password hint/.test(sRoot.getElementById("newMemList")?.textContent || "")
+    && sRoot.getElementById("newMemKey")?.value === ""
+    && sRoot.getElementById("newMemVal")?.value === ""]);
+
+  const forgetBtn = sRoot.querySelector('.new-mem-forget[data-id="1"]');
+  forgetBtn.click();
+  await new Promise(r => setTimeout(r, 20));
+  sRoot = elNew.shadowRoot;
+  checks.push(["memory tab: forgetting a fact removes it via nova/forget_knowledge",
+    !/trash day/.test(sRoot.getElementById("newMemList")?.textContent || "")]);
+
+  // Pending Confirmation: inject a fresh pending fact (the shared fixture's
+  // seed one is already consumed) to exercise confirm/reject/edit for real.
+  const memoryCallWS = hass.callWS;
+  hass.callWS = async (m) => (m.type === "nova/get_knowledge"
+    ? { facts: _knownFacts, pending: [{ id: 99, key: "quiet hours", value: "10pm-7am", subject: "household" }], stats: {} }
+    : memoryCallWS(m));
+  await elNew._fetchKnowledge();
+  sRoot = elNew.shadowRoot;
+  checks.push(["memory tab: a pending fact shows the panel with confirm/reject/edit controls",
+    sRoot.getElementById("newPendingPanel")?.hidden === false
+    && /quiet hours/.test(sRoot.getElementById("newPendingList")?.textContent || "")
+    && !!sRoot.querySelector(".new-pending-confirm") && !!sRoot.querySelector(".new-pending-reject")
+    && !!sRoot.querySelector(".new-pending-save-edit")]);
+
+  hass.callWS = async (m) => (m.type === "nova/pending_fact_action"
+    ? { ok: true, facts: _knownFacts, pending: [] }
+    : memoryCallWS(m));
+  sRoot.querySelector(".new-pending-confirm").click();
+  await new Promise(r => setTimeout(r, 20));
+  sRoot = elNew.shadowRoot;
+  checks.push(["memory tab: confirming a pending fact hides the panel again",
+    sRoot.getElementById("newPendingPanel")?.hidden === true]);
+  hass.callWS = memoryCallWS;
 
   // Switching tabs back and forth must not leak the core's animation loop
   // (a real bug caught before shipping — _render() tearing down the canvas
