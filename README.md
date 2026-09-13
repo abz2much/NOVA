@@ -276,6 +276,23 @@ What's stored, and where:
 
 What leaves your network is only what you choose: requests to whichever LLM provider (Groq, OpenAI, Anthropic) and vision model you configure, or nothing at all if you run everything locally through Ollama. Swap any provider for a local model to keep the whole pipeline on premises. Sensitive integration credentials are held by Home Assistant, not Nova.
 
+## What's different from upstream
+
+Nova started as a fork of [jarvis-aio](https://github.com/sam3gp8/jarvis-aio) and shares most of its architecture — jarvis-aio is itself actively developed, not a frozen base. This section tracks where Nova has genuinely diverged, updated as real changes ship rather than left to go stale.
+
+**Security hardening**
+- Voice commands can lock a door instantly, but can never unlock one or open a garage — that always requires a tap on your phone, so a spoofed or deepfaked voice can't grant physical access on its own.
+- The `execute_plan` tool (multi-step device automation from a single request) is restricted to an explicit allowlist of home-control domains, so a hallucinated or injected plan step can't reach a system-level service like `homeassistant.restart` or `shell_command`.
+- Biometric/wellbeing data (heart rate, sleep stage) is withheld entirely from cloud LLM calls — it only ever reaches the model when you're running a local Ollama provider.
+- Cross-session conversation memory and long-term semantic recall are both scoped to the conversation asking rather than searched globally, and content pulled back into a live conversation is wrapped against prompt injection rather than trusted verbatim.
+- Voice model downloads are checksum-verified before being installed.
+
+**Smarter, less noisy home awareness**
+- Sleep state is explicit (Auto / Awake / Asleep), not inferred purely from bedroom occupancy — one person going to bed no longer marks the whole house "asleep" while someone else is still up.
+- Night-time intrusion alerts require an actual breach (a ground-floor door or window genuinely open), not just ordinary movement — a trip to the bathroom no longer triggers a security alert, while a real breach still escalates exactly as before.
+
+This list grows as real fixes ship — see `CHANGELOG.md` for the full history.
+
 ## Credit
 
 Nova is a fork of [jarvis-aio](https://github.com/sam3gp8/jarvis-aio) by sam3gp8, renamed and extended with its own set of features. Full credit to the original project for the base it's built on. This repo is public: issues and pull requests are welcome.
