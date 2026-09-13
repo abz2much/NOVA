@@ -1653,6 +1653,28 @@ def _save_learned(data: dict) -> None:
         _LOGGER.warning("Failed to save learned data: %s", exc)
 
 
+# Domains execute_plan may target (v7.87.0, backlog #3). Unlike
+# control_device/bulk_control — which can only ever reach a small hardcoded
+# action_map (turn_on/lock/open/etc.) and so are structurally incapable of
+# calling anything else — execute_plan takes domain/service straight from the
+# LLM's own plan JSON with nothing constraining it. The tool's own schema
+# description already scopes it to "a device action" (light, climate, lock,
+# media_player, cover, switch, ...); this makes that scoping an actual gate
+# instead of just a hint. The old "does the entity_id exist" check caught
+# almost nothing here: a domain-level service like homeassistant.restart or
+# shell_command.* ignores its entity_id argument entirely, so any real
+# entity_id in the house would satisfy that check while doing something the
+# tool was never meant to do.
+_EXECUTE_PLAN_ALLOWED_DOMAINS = {
+    "light", "switch", "climate", "cover", "lock", "media_player", "fan",
+    "humidifier", "vacuum", "alarm_control_panel", "scene", "script",
+    "automation", "input_boolean", "input_number", "input_select",
+    "input_text", "input_datetime", "input_button", "water_heater", "valve",
+    "siren", "number", "select", "button", "lawn_mower", "remote", "notify",
+    "timer", "todo",
+}
+
+
 async def _exec_execute_plan(hass: HomeAssistant, args: dict, device_id: Optional[str] = None) -> str:
     """
     Execute a multi-step plan (v5.9.07).
@@ -1661,6 +1683,11 @@ async def _exec_execute_plan(hass: HomeAssistant, args: dict, device_id: Optiona
     agent can report what succeeded and what didn't. This turns a high-level
     goal into one coordinated, inspectable operation rather than many
     independent tool round-trips.
+
+    Restricted to _EXECUTE_PLAN_ALLOWED_DOMAINS (v7.87.0) — a domain outside
+    that set is rejected before the entity/confirmation checks even run, so a
+    plan can't reach system-level services (restart, shell_command, backup,
+    etc.) no matter what entity_id it names.
     """
     goal = args.get("goal", "the requested plan")
     steps = args.get("steps", [])
@@ -1679,6 +1706,20 @@ async def _exec_execute_plan(hass: HomeAssistant, args: dict, device_id: Optiona
         if not domain or not service or not entity_id:
             results.append({"step": i + 1, "description": desc,
                             "ok": False, "error": "missing domain/service/entity_id"})
+            continue
+
+        # Domain allowlist (v7.87.0) — checked before entity existence on
+        # purpose: a domain-level service (homeassistant.restart,
+        # shell_command.*, backup.create, ...) ignores its entity_id anyway,
+        # so an existing-but-irrelevant entity_id must never be enough to
+        # reach it.
+        if domain not in _EXECUTE_PLAN_ALLOWED_DOMAINS:
+            results.append({"step": i + 1, "description": desc, "ok": False,
+                            "error": f"domain '{domain}' is not allowed in a plan "
+                                     f"— execute_plan is for device actions "
+                                     f"(lights, climate, locks, covers, media, "
+                                     f"switches, and similar), not system-level "
+                                     f"services"})
             continue
 
         # Verify entity exists before acting
