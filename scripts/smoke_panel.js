@@ -51,7 +51,29 @@ const PANEL = {
     cast_devices: [{ entity_id: "media_player.living_room_speaker", name: "Living Room Speaker" }, { entity_id: "media_player.kitchen_speaker", name: "Kitchen Speaker" }],
     speaker_areas: [{ area_id: "living_room", name: "Living Room" }, { area_id: "kitchen", name: "Kitchen" }],
     room_speakers: { living_room: "media_player.living_room_speaker" },
-    general_speaker: "media_player.kitchen_speaker", ui_style: "classic" },
+    general_speaker: "media_player.kitchen_speaker", ui_style: "classic",
+    satellites: [{ entity_id: "assist_satellite.basement_nova", name: "Basement Nova", area: "Basement" }],
+    satellite_pairings: { "assist_satellite.basement_nova": "media_player.living_room_speaker" },
+    notify_services_available: ["notify.mobile_app_abi_phone", "notify.mobile_app_spouse_phone"],
+    notify_service: "notify.mobile_app_abi_phone",
+    sentinel_rules: [
+      { id: "door_left_open", desc: "A door has been open for a while" },
+      { id: "garage_left_open", desc: "The garage has been open overnight" },
+    ],
+    disabled_sentinel_rules: ["garage_left_open"],
+    appliance_profile: [{ name: "Dryer", type: "dryer", entity: "", watts: 4200 }],
+    appliance_announce_unknown: false,
+    memory_stats: { backend: "sqlite-vec", total_memories: 214 },
+    observer_stats: {
+      running: true, calls_last_hour: 4, rate_limit: 30, events_24h: 112, flagged_24h: 9,
+      spoken_24h: 3, cognition_enabled: true, cog_entities: 88, cog_predictable: 61,
+      cog_routines: 14, cog_presence: 2, presence: [{ name: "Abi", zone: "home", gps: true, distance_km: 0 }],
+      cog_escalated: 1, local_rate: 92, local_decisions: 103, cloud_calls: 9,
+      learned_patterns: 14, llm_breaker: "closed",
+    },
+    pattern_include_entities: ["binary_sensor.garage_bay_occupied"],
+    excluded_entities: ["light.spare_bedroom"], excluded_domains: [], excluded_labels: [] },
+  available_labels: [{ name: "guest_visible" }, { name: "noisy" }],
   suggestions: [
     { id: 11, description: "Turn porch light on at 18:00 (6 days running)", confidence: 0.82, count: 6, yaml: "{}",
       pattern_type: "time_routine", entities: ["light.porch"],
@@ -73,6 +95,8 @@ const _locationCalls = [];
 const _sugCalls = [];
 let _semanticEnabled = false;
 let _activeMode = "normal";
+const _modeSetCalls = [];
+const _serviceCalls = [];
 let _energyAgency = "advisory";
 let _bioEnabled = false;
 let _pendingFacts = [{ id: 42, key: "bedtime", value: "10pm", subject: "primary" }];
@@ -82,7 +106,8 @@ const _intrSnap = { url: "/local/nova/intrusion/intrusion_dining_room_1730000000
 const _updateConfigCalls = [];
 const hass = {
   config: { location_name: "Springfield IL", latitude: 39.78, longitude: -89.65 },
-  states: { "assist_satellite.a": { state: "idle", attributes: {} }, "camera.front": { attributes: { access_token: "tok123" } }, "camera.back": { attributes: { access_token: "tok456" } } },
+  states: { "assist_satellite.a": { state: "idle", attributes: {} }, "camera.front": { attributes: { access_token: "tok123" } }, "camera.back": { attributes: { access_token: "tok456" } },
+    "binary_sensor.mailbox": { state: "off", attributes: { friendly_name: "Mailbox" } } },
   callWS: async (m) => {
     if (m.type === "nova/update_config") { _updateConfigCalls.push({ key: m.key, value: m.value }); return {}; }
     if (m.type === "nova/get_panel_data") return PANEL;
@@ -115,7 +140,7 @@ const hass = {
       ] : [] };
     }
     if (m.type === "nova/energy") {
-      if (m.action === "status") return { watts: 9200, kw: 9.2, meter: "sensor.home_power", peak_watts: 8000, over_peak: true, agency: "advisory", configured_agency: "advisory", running: [
+      if (m.action === "status") return { watts: 9200, kw: 9.2, meter: "sensor.home_power", peak_watts: 8000, over_peak: true, agency: _energyAgency, configured_agency: _energyAgency, running: [
         { name: "Dryer", entity: "switch.dryer", watts: 4200, shed_ok: true },
         { name: "Refrigerator", entity: "sensor.fridge", watts: 200, shed_ok: false },
       ], advice: ["Heads up — Dryer and Oven are running at 9.2 kW, over your peak."] };
@@ -145,7 +170,7 @@ const hass = {
         { name: "movie", description: "Near-silent." },
         { name: "away", description: "Household away." },
       ]};
-      if (m.action === "set") { _activeMode = m.mode; return { ok: true, mode: m.mode, active: m.mode, description: "switched", available: [
+      if (m.action === "set") { _activeMode = m.mode; _modeSetCalls.push({ mode: m.mode }); return { ok: true, mode: m.mode, active: m.mode, description: "switched", available: [
         { name: "normal", description: "Default operation." },
         { name: "party", description: "Guests over." },
       ]}; }
@@ -166,6 +191,11 @@ const hass = {
       return { last_snapshot: _intrSnap, called_off: _intrCalledOff, acknowledged: _intrAck, suppressed_for: _intrCalledOff ? 600 : 0, false_alarms_24h: _intrCalledOff ? 1 : 0 };
     }
     if (m.type === "nova/voice_confirm_test") return { ok: true, satellite: "assist_satellite.basement_nova", note: "Announce fired." };
+    if (m.type === "nova/list_models") return {
+      models: m.provider === "groq"
+        ? ["llama-3.3-70b-versatile", "moonshotai/kimi-k2-instruct", "meta-llama/llama-4-scout-17b"]
+        : ["gpt-4o", "gpt-4o-mini"],
+    };
     if (m.type === "nova/diagnostics") return {
       overall: "warn", summary: "3/4 core services healthy",
       services: [
@@ -250,7 +280,7 @@ const hass = {
       return () => {};
     },
   },
-  callService: async () => {},
+  callService: async (domain, service, data) => { _serviceCalls.push({ domain, service, data }); },
 };
 
 // v7.93.0: "nova-panel" is now a thin shell that picks between Classic and
@@ -1089,15 +1119,61 @@ setTimeout(async () => {
         const rs = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Room Speakers/.test(c.querySelector(".panel-title")?.textContent || ""));
         return !!rs && !rs.querySelector(".stub-tag") && rs.querySelectorAll(".new-room-speaker-select").length === 2;
       })()],
+    ["settings tab: Residence / Home card is real, not a stub",
+      (() => {
+        const rh = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Residence \/ Home/.test(c.querySelector(".panel-title")?.textContent || ""));
+        return !!rh && !rh.querySelector(".stub-tag")
+          && rh.querySelector('select[data-cfg-key="residence_style"]')
+          && rh.querySelector('input[data-cfg-key="home_bedrooms"]')
+          && rh.querySelector('button[data-cfg-key="has_basement"]');
+      })()],
+    ["settings tab: numeric Residence field autosaves as a Number, matching Classic",
+      (() => {
+        const sqftInput = sRoot.querySelector('input[data-cfg-key="floor_plan_sqft"]');
+        sqftInput.value = "2200";
+        sqftInput.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+        const call = _updateConfigCalls.find(c => c.key === "floor_plan_sqft");
+        return !!call && call.value === 2200;
+      })()],
+    ["settings tab: Operational Mode card is real and shows the active mode",
+      (() => {
+        const om = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Operational Mode/.test(c.querySelector(".panel-title")?.textContent || ""));
+        return !!om && !om.querySelector(".stub-tag")
+          && om.querySelectorAll(".mode-chip[data-mode]").length >= 2
+          && om.querySelectorAll(".mode-chip-on").length === 1;
+      })()],
     ["settings tab: unbuilt cards are honestly labeled, not silently missing",
       (() => {
-        const aiCard = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /AI Models/.test(c.querySelector(".panel-title")?.textContent || ""));
-        return !!aiCard && !!aiCard.querySelector(".stub-tag") && /Configure/.test(aiCard.textContent);
+        const dbtCard = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Doorbell Training/.test(c.querySelector(".panel-title")?.textContent || ""));
+        return !!dbtCard && !!dbtCard.querySelector(".stub-tag") && /Configure/.test(dbtCard.textContent);
       })()],
     ["settings tab shows only the active group by default",
       Array.from(sRoot.querySelectorAll('.settings-card[data-settings-group="general"]')).every(c => !c.hidden)
       && Array.from(sRoot.querySelectorAll('.settings-card:not([data-settings-group="general"])')).every(c => c.hidden)],
   );
+
+  // Diagnostics card: fetched once on entering Settings (async), so give it
+  // a beat to land and re-render before asserting on its content.
+  await new Promise(r => setTimeout(r, 20));
+  sRoot = elNew.shadowRoot;
+  checks.push(
+    ["settings tab: Diagnostics card is real and merges Classic's two diagnostics cards",
+      (() => {
+        const diagCard = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /^Diagnostics$/.test(c.querySelector(".panel-title")?.textContent?.trim() || ""));
+        return !!diagCard && !diagCard.querySelector(".stub-tag")
+          && /LLM/.test(diagCard.textContent) && /TTS — Nova voice test/.test(diagCard.textContent)
+          && !!diagCard.querySelector('[data-svc="nova.test_tts"]');
+      })()],
+    ["settings tab: Diagnostics service-test button calls the HA service",
+      (() => {
+        const ttsBtn = sRoot.querySelector('[data-svc="nova.test_tts"]');
+        ttsBtn.click();
+        return true; // assert the resulting call below, after the microtask settles
+      })()],
+  );
+  await new Promise(r => setTimeout(r, 10));
+  checks.push(["settings tab: Diagnostics service call reached hass.callService",
+    _serviceCalls.some(c => c.domain === "nova" && c.service === "test_tts")]);
 
   // Toggling a real General setting saves through the same nova/update_config
   // contract Classic uses.
@@ -1106,6 +1182,15 @@ setTimeout(async () => {
   await new Promise(r => setTimeout(r, 20));
   checks.push(["settings tab toggle saves via nova/update_config",
     _updateConfigCalls.some(c => c.key === "announcements_enabled")]);
+  sRoot = elNew.shadowRoot;
+
+  // Clicking a mode chip calls nova/mode (not nova/update_config — a
+  // separate, pre-existing websocket contract Classic's own mode-grid uses).
+  const newPartyChip = Array.from(sRoot.querySelectorAll(".mode-chip[data-mode]")).find(b => b.getAttribute("data-mode") === "party");
+  newPartyChip.click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: mode chip click calls nova/mode set",
+    _modeSetCalls.some(c => c.mode === "party")]);
   sRoot = elNew.shadowRoot;
 
   // Search crosses group boundaries
@@ -1117,6 +1202,336 @@ setTimeout(async () => {
   checks.push(["settings search surfaces matches from other groups",
     Array.from(sRoot.querySelectorAll(".settings-card")).some(c =>
       !c.hidden && /Cameras/.test(c.querySelector(".panel-title")?.textContent || ""))]);
+
+  // AI Models: switch to its group, confirm it's real (not a stub) with all
+  // six roles rendered, live models loaded from nova/list_models, and the
+  // vision-role hint present — then exercise the provider-change flow
+  // (self-heal + llm_base_url clear), which deliberately does NOT go
+  // through _saveSetting/_render (see _wireAiModels's own comment).
+  const voiceNavBtn = Array.from(sRoot.querySelectorAll(".settings-nav-btn")).find(b => b.textContent === "Voice & Speakers");
+  voiceNavBtn.click();
+  await new Promise(r => setTimeout(r, 30));
+  sRoot = elNew.shadowRoot;
+  checks.push(
+    ["settings tab: AI Models card is real with all six roles and live models loaded",
+      (() => {
+        const aiCard = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /AI Models/.test(c.querySelector(".panel-title")?.textContent || ""));
+        if (!aiCard || aiCard.querySelector(".stub-tag")) return false;
+        const rows = aiCard.querySelectorAll(".new-model-row");
+        const llmRow = aiCard.querySelector('.new-model-row[data-role="llm"] .new-model-select');
+        return rows.length === 6
+          && !!llmRow && /llama-3\.3-70b-versatile/.test(llmRow.innerHTML)
+          && /image-capable model/.test(aiCard.querySelector('.new-model-row[data-role="vision"]')?.textContent || "");
+      })()],
+  );
+  const llmProvSel = sRoot.querySelector('.new-model-row[data-role="llm"] .new-prov-select');
+  llmProvSel.value = "openai";
+  llmProvSel.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: AI Models provider change saves provider, clears base_url, and reloads its own model list",
+    _updateConfigCalls.some(c => c.key === "llm_provider" && c.value === "openai")
+    && _updateConfigCalls.some(c => c.key === "llm_base_url" && c.value === "")
+    && /gpt-4o/.test(sRoot.querySelector('.new-model-row[data-role="llm"] .new-model-select')?.innerHTML || "")]);
+
+  // Briefings: real card, schedule fields + include-feed chips autosave
+  // through the same generic .cfg-field/.mode-chip[data-cfg-key] contract
+  // everything else in this tab uses.
+  checks.push(
+    ["settings tab: Briefings card is real with schedule fields and include chips",
+      (() => {
+        const bc = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Briefings/.test(c.querySelector(".panel-title")?.textContent || ""));
+        return !!bc && !bc.querySelector(".stub-tag")
+          && !!bc.querySelector('input[data-cfg-key="briefing_morning_time"]')
+          && !!bc.querySelector('.mode-chip[data-cfg-key="briefing_include_weather"]')
+          && !!bc.querySelector("#newBriefNow");
+      })()],
+  );
+  const weatherChip = sRoot.querySelector('.mode-chip[data-cfg-key="briefing_include_weather"]');
+  weatherChip.click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: Briefings include-chip autosaves via nova/update_config",
+    _updateConfigCalls.some(c => c.key === "briefing_include_weather" && c.value === false)]);
+  sRoot = elNew.shadowRoot;
+
+  // Voice Confirmation: real card, mode select + test button call the same
+  // nova/voice_confirm_test contract Classic's own test button uses.
+  checks.push(
+    ["settings tab: Voice Confirmation card is real with mode select and test button",
+      (() => {
+        const vc = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Voice Confirmation/.test(c.querySelector(".panel-title")?.textContent || ""));
+        return !!vc && !vc.querySelector(".stub-tag")
+          && !!vc.querySelector('select[data-cfg-key="voice_confirm_mode"]')
+          && !!vc.querySelector("#newVcTest");
+      })()],
+  );
+  const vcTestBtn = sRoot.getElementById("newVcTest");
+  vcTestBtn.click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: Voice Confirmation test button reports the result",
+    /assist_satellite\.basement_nova/.test(sRoot.getElementById("newVcTestResult")?.innerHTML || "")]);
+
+  // Satellite → Speaker: real card, one row per satellite, same
+  // satellite_pairings JSON-string contract as Classic and Room Speakers.
+  checks.push(
+    ["settings tab: Satellite → Speaker card is real with one row per satellite",
+      (() => {
+        const sc = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Satellite/.test(c.querySelector(".panel-title")?.textContent || ""));
+        return !!sc && !sc.querySelector(".stub-tag") && sc.querySelectorAll(".new-sat-pair-select").length === 1;
+      })()],
+  );
+  const satSel = sRoot.querySelector(".new-sat-pair-select");
+  satSel.value = "media_player.kitchen_speaker";
+  satSel.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: Satellite → Speaker pairing autosaves as a JSON string",
+    _updateConfigCalls.some(c => c.key === "satellite_pairings"
+      && c.value === JSON.stringify({ "assist_satellite.basement_nova": "media_player.kitchen_speaker" }))]);
+  sRoot = elNew.shadowRoot;
+
+  // Announcement Speakers: real card, one toggle per Cast device.
+  checks.push(
+    ["settings tab: Announcement Speakers card is real with one toggle per Cast device",
+      (() => {
+        const ac = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Announcement Speakers/.test(c.querySelector(".panel-title")?.textContent || ""));
+        return !!ac && !ac.querySelector(".stub-tag") && ac.querySelectorAll(".new-ann-speaker-toggle").length === 2;
+      })()],
+  );
+  const annToggle = sRoot.querySelector('.new-ann-speaker-toggle[data-speaker-id="media_player.living_room_speaker"]');
+  annToggle.click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: Announcement Speakers toggle autosaves as a JSON array",
+    _updateConfigCalls.some(c => c.key === "announcement_speakers" && c.value === JSON.stringify(["media_player.living_room_speaker"]))]);
+  sRoot = elNew.shadowRoot;
+
+  // Notifications: switch to the Awareness & Safety group, confirm it's
+  // real with the notify-service select populated, and that it saves
+  // through the same generic .cfg-field contract as everything else.
+  const safetyNavBtn = Array.from(sRoot.querySelectorAll(".settings-nav-btn")).find(b => b.textContent === "Awareness & Safety");
+  safetyNavBtn.click();
+  await new Promise(r => setTimeout(r, 10));
+  sRoot = elNew.shadowRoot;
+  checks.push(
+    ["settings tab: Notifications card is real with the notify-service select populated",
+      (() => {
+        const nc = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /^Notifications$/.test(c.querySelector(".panel-title")?.textContent?.trim() || ""));
+        const sel = nc?.querySelector('select[data-cfg-key="notify_service"]');
+        return !!nc && !nc.querySelector(".stub-tag") && !!sel && /mobile_app_abi_phone/.test(sel.innerHTML);
+      })()],
+  );
+  const notifySel = sRoot.querySelector('select[data-cfg-key="notify_service"]');
+  notifySel.value = "notify.mobile_app_spouse_phone";
+  notifySel.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: Notifications select autosaves via nova/update_config",
+    _updateConfigCalls.some(c => c.key === "notify_service" && c.value === "notify.mobile_app_spouse_phone")]);
+  sRoot = elNew.shadowRoot;
+
+  // Sentinel Rules: real card, one toggle per rule, already-disabled rule
+  // reflected as OFF, toggling re-enables it via disabled_sentinel_rules.
+  checks.push(
+    ["settings tab: Sentinel Rules card is real with per-rule toggles",
+      (() => {
+        const sc = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Sentinel Rules/.test(c.querySelector(".panel-title")?.textContent || ""));
+        const offBtn = sc?.querySelector('.new-rule-toggle[data-rule-id="garage_left_open"]');
+        return !!sc && !sc.querySelector(".stub-tag")
+          && sc.querySelectorAll(".new-rule-toggle").length === 2
+          && !!offBtn && offBtn.classList.contains("off") && offBtn.textContent.trim() === "OFF";
+      })()],
+  );
+  const garageRuleBtn = sRoot.querySelector('.new-rule-toggle[data-rule-id="garage_left_open"]');
+  garageRuleBtn.click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: Sentinel Rules toggle re-enables a disabled rule",
+    _updateConfigCalls.some(c => c.key === "disabled_sentinel_rules" && c.value === JSON.stringify([]))]);
+  sRoot = elNew.shadowRoot;
+
+  // Hazard Monitor: status fetched once on entering Settings (async, like
+  // Diagnostics), SCAN NOW re-checks USGS/NWS/EONET via nova/hazard.
+  await new Promise(r => setTimeout(r, 20));
+  sRoot = elNew.shadowRoot;
+  checks.push(
+    ["settings tab: Hazard Monitor card is real and shows the resolved location",
+      (() => {
+        const hc = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Hazard Monitor/.test(c.querySelector(".panel-title")?.textContent || ""));
+        return !!hc && !hc.querySelector(".stub-tag")
+          && /40\.77, -75\.61/.test(hc.textContent)
+          && !!hc.querySelector("#newHazScan");
+      })()],
+  );
+  const newHazScanBtn = sRoot.getElementById("newHazScan");
+  newHazScanBtn.click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: Hazard Monitor scan renders quake + weather + disaster results",
+    (() => {
+      const body = sRoot.getElementById("newHazBody");
+      const t = body?.textContent || "";
+      return /12km N of town/.test(t) && /Tornado Warning/.test(t) && /Wildfire/.test(t);
+    })()]);
+
+  // Energy Management: status fetched once (like Diagnostics/Hazard), shows
+  // current draw + running loads, and set_agency round-trips through
+  // nova/energy (not update_config — a separate, pre-existing contract).
+  await new Promise(r => setTimeout(r, 20));
+  sRoot = elNew.shadowRoot;
+  checks.push(
+    ["settings tab: Energy Management card is real and shows current draw + running loads",
+      (() => {
+        const ec = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Energy Management/.test(c.querySelector(".panel-title")?.textContent || ""));
+        return !!ec && !ec.querySelector(".stub-tag")
+          && /9\.2 kW/.test(ec.textContent) && /OVER PEAK/.test(ec.textContent)
+          && /Dryer/.test(ec.textContent) && /Refrigerator/.test(ec.textContent)
+          && ec.querySelectorAll('#newEnergyAgency .mode-chip[data-agency]').length === 3
+          && ec.querySelector('.mode-chip[data-agency="advisory"]').classList.contains("mode-chip-on");
+      })()],
+  );
+  const autonomousChip = sRoot.querySelector('.mode-chip[data-agency="autonomous"]');
+  autonomousChip.click();
+  await new Promise(r => setTimeout(r, 20));
+  sRoot = elNew.shadowRoot;
+  checks.push(["settings tab: Energy Management agency change reflects live via nova/energy",
+    sRoot.querySelector('.mode-chip[data-agency="autonomous"]')?.classList.contains("mode-chip-on")]);
+
+  // Appliances: batch-edit-then-save, like Classic and AI Models — add a
+  // row, fill it in, Save persists the WHOLE list as one JSON array plus a
+  // nova/reload_appliances call, without wiping the row mid-edit (the
+  // reason this card deliberately avoids _saveSetting's auto-render).
+  checks.push(
+    ["settings tab: Appliances card is real with the declared row present",
+      (() => {
+        const ac = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Appliances/.test(c.querySelector(".panel-title")?.textContent || ""));
+        return !!ac && !ac.querySelector(".stub-tag")
+          && ac.querySelectorAll(".new-appliance-row").length === 1
+          && ac.querySelector(".new-appliance-name")?.value === "Dryer";
+      })()],
+  );
+  const applianceAddBtn = sRoot.getElementById("newApplianceAdd");
+  applianceAddBtn.click();
+  const newRows = sRoot.querySelectorAll(".new-appliance-row");
+  checks.push(["settings tab: Appliances + Add appliance inserts a new row without wiping the existing one",
+    newRows.length === 2 && newRows[0].querySelector(".new-appliance-name").value === "Dryer"]);
+  newRows[1].querySelector(".new-appliance-name").value = "Oven";
+  newRows[1].querySelector(".new-appliance-watts").value = "3000";
+  const applianceSaveBtn = sRoot.getElementById("newApplianceSave");
+  applianceSaveBtn.click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: Appliances Save persists the whole list as one JSON array",
+    _updateConfigCalls.some(c => c.key === "appliance_profile"
+      && c.value === JSON.stringify([{ name: "Dryer", type: "dryer", entity: "", watts: 4200 }, { name: "Oven", type: "appliance", entity: "", watts: 3000 }]))]);
+  sRoot = elNew.shadowRoot;
+
+  // Anticipation & Memory: switch to Learning & Memory group, confirm it's
+  // real and fully generic (toggles + number fields autosave the same way
+  // as every other generically-wired card).
+  const learningNavBtn = Array.from(sRoot.querySelectorAll(".settings-nav-btn")).find(b => b.textContent === "Learning & Memory");
+  learningNavBtn.click();
+  await new Promise(r => setTimeout(r, 10));
+  sRoot = elNew.shadowRoot;
+  checks.push(
+    ["settings tab: Anticipation & Memory card is real with its toggles and number fields",
+      (() => {
+        const amCard = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Anticipation & Memory/.test(c.querySelector(".panel-title")?.textContent || ""));
+        return !!amCard && !amCard.querySelector(".stub-tag")
+          && !!amCard.querySelector('button[data-cfg-key="continued_conversation_enabled"]')
+          && !!amCard.querySelector('input[data-cfg-key="memory_threading_hours"]');
+      })()],
+  );
+  const memHoursInput = sRoot.querySelector('input[data-cfg-key="memory_threading_hours"]');
+  memHoursInput.value = "72";
+  memHoursInput.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: Anticipation & Memory number field autosaves as a Number",
+    _updateConfigCalls.some(c => c.key === "memory_threading_hours" && c.value === 72)]);
+  sRoot = elNew.shadowRoot;
+
+  // Memory: the small stats card Classic's own Settings tab actually has —
+  // full review/edit is a separate Classic-only tab, out of scope here.
+  checks.push(
+    ["settings tab: Memory card is real and shows backend + stored count",
+      (() => {
+        const mc = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => (c.querySelector(".panel-title")?.childNodes[0]?.textContent || "").trim() === "Memory");
+        return !!mc && !mc.querySelector(".stub-tag") && /sqlite-vec/.test(mc.textContent) && /214/.test(mc.textContent);
+      })()],
+  );
+
+  // Observer Tuning: real stats readout + the one editable field (hourly
+  // cap), which saves to a DIFFERENT key (classifier_rate_limit) than it
+  // reads (rate_limit) — a deliberate Classic asymmetry preserved here.
+  checks.push(
+    ["settings tab: Observer Tuning card is real with stats and the rate-limit input",
+      (() => {
+        const oc = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Observer Tuning/.test(c.querySelector(".panel-title")?.textContent || ""));
+        return !!oc && !oc.querySelector(".stub-tag")
+          && /RUNNING/.test(oc.textContent) && /ONLINE/.test(oc.textContent)
+          && !!oc.querySelector("#newObserverRateLimit");
+      })()],
+  );
+  const rateLimitInput = sRoot.getElementById("newObserverRateLimit");
+  rateLimitInput.value = "60";
+  rateLimitInput.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: Observer Tuning hourly cap saves to classifier_rate_limit as a Number",
+    _updateConfigCalls.some(c => c.key === "classifier_rate_limit" && c.value === 60)]);
+  sRoot = elNew.shadowRoot;
+
+  // Routine Learning: real card with the doors/presence/buttons toggles and
+  // the add-entity control. NOTE: Classic's own "routine-learning card" test
+  // (above) sets `cfg.pattern_include_entities` and then `delete`s it again
+  // as cleanup on the SAME shared PANEL.config object this section reuses —
+  // so by here the key is gone and the chip list starts genuinely empty;
+  // assert against that real state rather than the fixture's original value.
+  checks.push(
+    ["settings tab: Routine Learning card is real with the add-entity control",
+      (() => {
+        const rc = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Routine Learning/.test(c.querySelector(".panel-title")?.textContent || ""));
+        return !!rc && !rc.querySelector(".stub-tag")
+          && !!rc.querySelector('button[data-cfg-key="pattern_learn_doors"]')
+          && !!rc.querySelector("#newPlAddEntity") && !!rc.querySelector("#newPlEntityInput");
+      })()],
+  );
+  const plInput = sRoot.getElementById("newPlEntityInput");
+  plInput.value = "binary_sensor.mailbox";
+  sRoot.getElementById("newPlAddEntity").click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: Routine Learning + Add appends the entity to pattern_include_entities",
+    _updateConfigCalls.some(c => c.key === "pattern_include_entities" && c.value === JSON.stringify(["binary_sensor.mailbox"]))]);
+  sRoot = elNew.shadowRoot;
+  const plDelBtn = sRoot.querySelector(".new-pl-del");
+  checks.push(["settings tab: Routine Learning shows the newly-added chip with a remove button",
+    !!plDelBtn]);
+  if (plDelBtn) {
+    plDelBtn.click();
+    await new Promise(r => setTimeout(r, 20));
+    checks.push(["settings tab: Routine Learning chip removal updates pattern_include_entities",
+      _updateConfigCalls.some(c => c.key === "pattern_include_entities" && c.value === JSON.stringify([]))]);
+  }
+  sRoot = elNew.shadowRoot;
+
+  // Excluded Entities: three chip pickers (entities/domains/labels), each
+  // using the same _exclSave pattern as Routine Learning's fix above
+  // (write the array onto _liveData.config before the round-trip).
+  checks.push(
+    ["settings tab: Excluded Entities card is real with three pickers and the existing entity chip",
+      (() => {
+        const ec = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Excluded Entities/.test(c.querySelector(".panel-title")?.textContent || ""));
+        return !!ec && !ec.querySelector(".stub-tag")
+          && !!ec.querySelector("#newExclEntAdd") && !!ec.querySelector("#newExclDomAdd") && !!ec.querySelector("#newExclLabAdd")
+          && /light\.spare_bedroom/.test(ec.textContent);
+      })()],
+  );
+  sRoot.getElementById("newExclDomInput").value = "switch";
+  sRoot.getElementById("newExclDomAdd").click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: Excluded Entities + Add domain saves excluded_domains",
+    _updateConfigCalls.some(c => c.key === "excluded_domains" && c.value === JSON.stringify(["switch"]))]);
+  sRoot = elNew.shadowRoot;
+  const exclEntDelBtn = sRoot.querySelector(".new-excl-ent-del");
+  checks.push(["settings tab: Excluded Entities re-renders the domain chip after adding",
+    /switch/.test(sRoot.getElementById("newExclDomChips")?.textContent || "") && !!exclEntDelBtn]);
+  exclEntDelBtn.click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: Excluded Entities chip removal saves excluded_entities",
+    _updateConfigCalls.some(c => c.key === "excluded_entities" && c.value === JSON.stringify([]))]);
+  sRoot = elNew.shadowRoot;
 
   // Switching tabs back and forth must not leak the core's animation loop
   // (a real bug caught before shipping — _render() tearing down the canvas

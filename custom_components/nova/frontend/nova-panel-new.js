@@ -105,6 +105,9 @@ class NovaCommandCenterNew extends HTMLElement {
     try {
       this._solar = await this._hass.callWS({ type: "nova/solar", action: "status" });
     } catch (_) { this._solar = null; }
+    try {
+      this._mode = await this._hass.callWS({ type: "nova/mode", action: "status" });
+    } catch (_) { this._mode = null; }
     this._detectFlare();
     this._renderData();
   }
@@ -254,43 +257,43 @@ class NovaCommandCenterNew extends HTMLElement {
   static SETTINGS_CARDS = [
     { id: "general", group: "general", title: "General", real: true,
       desc: "Language, sleep state, and the core proactive-speech switches." },
-    { id: "residence_home", group: "general", title: "Residence / Home",
-      desc: "Address, home style, and square footage for the Residence 3D view." },
-    { id: "operational_mode", group: "general", title: "Operational Mode",
+    { id: "residence_home", group: "general", title: "Residence / Home", real: true,
+      desc: "Home style, stories, and layout counts that feed Classic's Residence 3D view." },
+    { id: "operational_mode", group: "general", title: "Operational Mode", real: true,
       desc: "Party/movie/away modes and what each one changes while active." },
-    { id: "diagnostics", group: "general", title: "Diagnostics",
+    { id: "diagnostics", group: "general", title: "Diagnostics", real: true,
       desc: "Service health checks and system status (merged from Classic's two separate diagnostics cards)." },
     { id: "room_speakers", group: "voice", title: "Room Speakers", real: true,
       desc: "Assign the one speaker Nova may use per room, plus a general fallback." },
-    { id: "ai_models", group: "voice", title: "AI Models",
+    { id: "ai_models", group: "voice", title: "AI Models", real: true,
       desc: "Provider and model per tier — main agent, classifier, reasoning, review, vision." },
-    { id: "briefings", group: "voice", title: "Briefings",
+    { id: "briefings", group: "voice", title: "Briefings", real: true,
       desc: "Daily briefing schedule, content, and delivery speakers." },
-    { id: "voice_confirmation", group: "voice", title: "Voice Confirmation",
+    { id: "voice_confirmation", group: "voice", title: "Voice Confirmation", real: true,
       desc: "Whether risky actions need a spoken or phone confirmation before Nova acts." },
-    { id: "satellite_speaker", group: "voice", title: "Satellite → Speaker",
+    { id: "satellite_speaker", group: "voice", title: "Satellite → Speaker", real: true,
       desc: "Per-satellite override, for a specific satellite that shouldn't use its room's assigned speaker." },
-    { id: "announcement_speakers", group: "voice", title: "Announcement Speakers",
+    { id: "announcement_speakers", group: "voice", title: "Announcement Speakers", real: true,
       desc: "Which speakers whole-house broadcasts (briefings, sentinel alerts) use." },
-    { id: "notifications", group: "safety", title: "Notifications",
+    { id: "notifications", group: "safety", title: "Notifications", real: true,
       desc: "Your phone's notify service, for alerts when nobody's home to hear a speaker." },
-    { id: "sentinel_rules", group: "safety", title: "Sentinel Rules",
+    { id: "sentinel_rules", group: "safety", title: "Sentinel Rules", real: true,
       desc: "Enable or disable individual door/lock/garage anomaly rules." },
-    { id: "hazard_monitor", group: "safety", title: "Hazard Monitor",
+    { id: "hazard_monitor", group: "safety", title: "Hazard Monitor", real: true,
       desc: "Earthquake, severe weather, and disaster feeds near your home." },
-    { id: "energy_management", group: "safety", title: "Energy Management",
+    { id: "energy_management", group: "safety", title: "Energy Management", real: true,
       desc: "Peak-draw threshold and how much say Nova has over high-draw appliances." },
-    { id: "appliances", group: "safety", title: "Appliances",
+    { id: "appliances", group: "safety", title: "Appliances", real: true,
       desc: "Declared appliance profiles Nova fingerprints by wattage." },
-    { id: "anticipation_memory", group: "learning", title: "Anticipation & Memory",
+    { id: "anticipation_memory", group: "learning", title: "Anticipation & Memory", real: true,
       desc: "Cross-session memory window, continued conversation, and multi-satellite follow." },
-    { id: "memory_curated", group: "learning", title: "Memory",
-      desc: "Curated facts Nova has learned — review, edit, or forget them." },
-    { id: "observer_tuning", group: "learning", title: "Observer Tuning",
+    { id: "memory_curated", group: "learning", title: "Memory", real: true,
+      desc: "Memory backend and how many memories are stored. Full review/edit stays on Classic's own Memory tab for now." },
+    { id: "observer_tuning", group: "learning", title: "Observer Tuning", real: true,
       desc: "How cautious or talkative the proactive Observer is." },
-    { id: "routine_learning", group: "learning", title: "Routine Learning",
+    { id: "routine_learning", group: "learning", title: "Routine Learning", real: true,
       desc: "What Nova is allowed to learn from — doors, presence, button presses." },
-    { id: "excluded_entities", group: "learning", title: "Excluded Entities",
+    { id: "excluded_entities", group: "learning", title: "Excluded Entities", real: true,
       desc: "Entities, domains, or labels Nova should ignore entirely." },
     { id: "cameras", group: "cameras", title: "Cameras",
       desc: "Camera names, indoor/outdoor designation, and location overrides." },
@@ -322,7 +325,27 @@ class NovaCommandCenterNew extends HTMLElement {
 
   _settingsCardHtml(c) {
     const body = c.real
-      ? (c.id === "general" ? this._generalCardBody() : c.id === "room_speakers" ? this._roomSpeakersCardBody() : "")
+      ? (c.id === "general" ? this._generalCardBody()
+        : c.id === "room_speakers" ? this._roomSpeakersCardBody()
+        : c.id === "residence_home" ? this._residenceHomeCardBody()
+        : c.id === "operational_mode" ? this._operationalModeCardBody()
+        : c.id === "diagnostics" ? this._diagnosticsCardBody()
+        : c.id === "ai_models" ? this._aiModelsCardBody()
+        : c.id === "briefings" ? this._briefingsCardBody()
+        : c.id === "voice_confirmation" ? this._voiceConfirmationCardBody()
+        : c.id === "satellite_speaker" ? this._satelliteSpeakerCardBody()
+        : c.id === "announcement_speakers" ? this._announcementSpeakersCardBody()
+        : c.id === "notifications" ? this._notificationsCardBody()
+        : c.id === "sentinel_rules" ? this._sentinelRulesCardBody()
+        : c.id === "hazard_monitor" ? this._hazardMonitorCardBody()
+        : c.id === "energy_management" ? this._energyManagementCardBody()
+        : c.id === "appliances" ? this._appliancesCardBody()
+        : c.id === "anticipation_memory" ? this._anticipationMemoryCardBody()
+        : c.id === "memory_curated" ? this._memoryCardBody()
+        : c.id === "observer_tuning" ? this._observerTuningCardBody()
+        : c.id === "routine_learning" ? this._routineLearningCardBody()
+        : c.id === "excluded_entities" ? this._excludedEntitiesCardBody()
+        : "")
       : `<div class="stub-body">${this._esc(c.desc)}<br><span class="stub-where">Not built here yet — use Classic, or Settings → Devices &amp; Services → Nova → Configure.</span></div>`;
     return `
       <div class="panel settings-card" data-settings-group="${c.group}" data-search="${this._esc((c.title + " " + c.desc).toLowerCase())}">
@@ -381,6 +404,878 @@ class NovaCommandCenterNew extends HTMLElement {
           ${castDevs.map(cd => `<option value="${this._esc(cd.entity_id)}"${cd.entity_id === cfg.general_speaker ? " selected" : ""}>${this._esc(cd.name)}</option>`).join("")}
         </select>
       </div>`;
+  }
+
+  _residenceHomeCardBody() {
+    const cfg = this._data()?.config || {};
+    const styles = {
+      cape_cod: "Cape Cod", colonial: "Colonial", dutch_colonial: "Dutch Colonial",
+      ranch: "Ranch", two_story: "Two-Story", craftsman: "Craftsman",
+      modern: "Modern", townhouse: "Townhouse", apartment: "Apartment", cabin: "Cabin",
+    };
+    return `
+      <div class="cfg-row">
+        <label>Home type</label>
+        <select class="cfg-field" data-cfg-key="residence_style">
+          ${this._optSelect(Object.entries(styles), cfg.residence_style || "cape_cod")}
+        </select>
+      </div>
+      <div class="cfg-row">
+        <label>Stories</label>
+        <select class="cfg-field" data-cfg-key="home_stories">
+          ${this._optSelect(["1", "1.5", "2", "3"].map(v => [v, v]), String(cfg.home_stories ?? "1.5"))}
+        </select>
+      </div>
+      <div class="cfg-row">
+        <label>Garage bays</label>
+        <select class="cfg-field" data-cfg-key="garage_bays">
+          ${this._optSelect(["0", "1", "2", "3", "4"].map(v => [v, v]), String(cfg.garage_bays ?? "3"))}
+        </select>
+      </div>
+      <div class="cfg-row">
+        <label>Front dormers</label>
+        <select class="cfg-field" data-cfg-key="dormers_front">
+          ${this._optSelect(["0", "1", "2", "3"].map(v => [v, v]), String(cfg.dormers_front ?? "2"))}
+        </select>
+      </div>
+      <div class="cfg-row">
+        <label>Rear dormers</label>
+        <select class="cfg-field" data-cfg-key="dormers_rear">
+          ${this._optSelect(["0", "1", "2"].map(v => [v, v]), String(cfg.dormers_rear ?? "1"))}
+        </select>
+      </div>
+      <div class="cfg-row">
+        <label>Chimney</label>
+        <select class="cfg-field" data-cfg-key="chimney_side">
+          ${this._optSelect([["right", "East / right"], ["left", "West / left"], ["none", "None"]], cfg.chimney_side || "right")}
+        </select>
+      </div>
+      <div class="cfg-row">
+        <label>Basement</label>
+        <button class="toggle-btn ${(cfg.has_basement !== false) ? "on" : "off"}" data-cfg-key="has_basement" data-cfg-val="${(cfg.has_basement !== false) ? "false" : "true"}">
+          ${(cfg.has_basement !== false) ? "YES" : "NO"}
+        </button>
+      </div>
+      <div class="cfg-row">
+        <label>Bedrooms</label>
+        <input class="cfg-field cfg-num" type="number" min="0" max="12" data-cfg-key="home_bedrooms" value="${cfg.home_bedrooms ?? ""}" placeholder="3">
+      </div>
+      <div class="cfg-row">
+        <label>Bathrooms</label>
+        <input class="cfg-field cfg-num" type="number" min="0" max="12" step="0.5" data-cfg-key="home_bathrooms" value="${cfg.home_bathrooms ?? ""}" placeholder="2">
+      </div>
+      <div class="cfg-row">
+        <label>Square feet</label>
+        <input class="cfg-field cfg-num" type="number" min="0" max="20000" step="50" data-cfg-key="floor_plan_sqft" value="${cfg.floor_plan_sqft ?? ""}" placeholder="1800">
+      </div>
+      <div class="stub-body">Detailed room layout is edited in the Floor Plan Editor. This feeds Classic's Residence 3D view.</div>`;
+  }
+
+  _operationalModeCardBody() {
+    const cfg = this._data()?.config || {};
+    const areas = this._data()?.areas || [];
+    const m = this._mode || {};
+    const active = m.active || "normal";
+    const avail = m.available || [];
+    const modeChips = avail.length
+      ? avail.map(mo => `<button class="mode-chip ${mo.name === active ? "mode-chip-on" : ""}" data-mode="${this._esc(mo.name)}" title="${this._esc(mo.description || "")}">${this._esc(mo.name)}</button>`).join("")
+      : `<div class="stub-body">Couldn't load modes — restart Home Assistant after updating.</div>`;
+    const labAreas = Array.isArray(cfg.lab_areas) ? cfg.lab_areas : [];
+    const labChips = areas.length
+      ? areas.map(a => `<button class="mode-chip ${labAreas.includes(a.id) ? "mode-chip-on" : ""}" data-lab-area="${this._esc(a.id)}">${this._esc(a.name)}</button>`).join("")
+      : `<span class="stub-body">No rooms detected yet.</span>`;
+    const areaOpts = [["", "— none —"], ...areas.map(a => [a.id, a.name])];
+    const mpOpts = this._mediaPlayerOptions(cfg.movie_media_player || "");
+    return `
+      <div class="cfg-row">
+        <label>Auto (follow occupancy)</label>
+        <button class="toggle-btn ${cfg.operational_mode_auto !== false ? "on" : "off"}" data-cfg-key="operational_mode_auto" data-cfg-val="${cfg.operational_mode_auto !== false ? "false" : "true"}">
+          ${cfg.operational_mode_auto !== false ? "ON" : "OFF"}
+        </button>
+      </div>
+      <div class="stub-body">Active: <strong>${this._esc(active.toUpperCase())}</strong>${m.description ? " — " + this._esc(m.description) : ""}. Safety always stays active.</div>
+      <div class="mode-grid">${modeChips}</div>
+      <div class="mode-bind-head">Mode bindings — scope Lab &amp; Movie to specific rooms</div>
+      <div class="cfg-row"><label>Lab rooms (quiet only here)</label></div>
+      <div class="mode-grid">${labChips}</div>
+      <div class="cfg-row">
+        <label>Movie room</label>
+        <select class="cfg-field" data-cfg-key="movie_area">${this._optSelect(areaOpts, cfg.movie_area || "")}</select>
+      </div>
+      <div class="cfg-row">
+        <label>Movie player <span class="toggle-desc">optional</span></label>
+        <select class="cfg-field" data-cfg-key="movie_media_player">${this._optSelect(mpOpts, cfg.movie_media_player || "")}</select>
+      </div>
+      <div class="cfg-row">
+        <label>Movie dim %</label>
+        <input class="cfg-field cfg-num" type="number" min="0" max="100" step="5" data-cfg-key="movie_dim_pct" value="${cfg.movie_dim_pct ?? ""}" placeholder="15">
+      </div>`;
+  }
+
+  // Merged from Classic's two separate diagnostics cards ("System
+  // Diagnostics" under General, a per-service "Diagnostics" test panel
+  // under Cameras) into the one place this section's own docstring already
+  // says it should live. Fetched once per element lifetime (not on the 20s
+  // live-data poll, and not on every settings re-render) — the health check
+  // makes a real, if lightweight, LLM/TTS connectivity probe, matching
+  // Classic's own on-demand-only behaviour.
+  async _fetchDiagnosticsData() {
+    if (!this._hass) return;
+    try {
+      this._diag = await this._hass.callWS({ type: "nova/diagnostics" });
+    } catch (_) { this._diag = { error: true }; }
+    try {
+      this._calib = await this._hass.callWS({ type: "nova/get_calibration" });
+    } catch (_) { this._calib = null; }
+    if (this._currentTab === "settings") this._render();
+  }
+
+  _diagStatusCls(st) {
+    return { ok: "diag-ok", warn: "diag-warn", idle: "diag-idle", down: "diag-down", off: "diag-off" }[st] || "diag-off";
+  }
+  _diagStatusLabel(st) {
+    return { ok: "OK", warn: "WARN", idle: "IDLE", down: "DOWN", off: "OFF" }[st] || "?";
+  }
+
+  _diagnosticsCardBody() {
+    const cfg = this._data()?.config || {};
+    const diag = this._diag || {};
+    if (diag.error) {
+      return `<div class="stub-body">Couldn't run diagnostics — restart Home Assistant after updating.</div>`;
+    }
+    const svcs = diag.services || [];
+    const overall = svcs.length
+      ? `<span class="${this._diagStatusCls(diag.overall)}">${this._esc((diag.summary || diag.overall || "").toUpperCase())}</span>`
+      : "—";
+    const rows = svcs.length
+      ? svcs.map(s => `
+        <div class="cfg-row">
+          <label>${this._esc(s.name)} <span class="${this._diagStatusCls(s.status)}">${this._diagStatusLabel(s.status)}</span></label>
+        </div>
+        <div class="stub-body" style="margin:-6px 0 8px">${this._esc(s.detail || "")}</div>`).join("")
+      : `<div class="stub-body">Loading…</div>`;
+    const svcTest = (svc, label) => `
+      <div class="cfg-row">
+        <label>${this._esc(label)}</label>
+        <button class="mode-chip" data-svc="${this._esc(svc)}">RUN</button>
+      </div>`;
+    const camOpts = (cfg.cameras || []).filter(c => c.enabled !== false).map(c => [c.entity_id, c.name]);
+    return `
+      <div class="cfg-row"><label>Core services</label>${overall}</div>
+      ${rows}
+      <div class="cfg-row"><button class="mode-chip" id="newDiagRefresh">⟳ RUN CHECK</button></div>
+      <div class="mode-bind-head">Service tests</div>
+      ${svcTest("nova.test_tts", "TTS — Nova voice test")}
+      ${svcTest("nova.observer_status", "Observer — fire status event")}
+      ${svcTest("nova.briefing", "Briefing — manual trigger")}
+      ${svcTest("nova.diagnose_doorbell", "Doorbell — run diagnostics")}
+      ${svcTest("nova.test_notify", "Notification — test phone push")}
+      ${svcTest("nova.test_routing", "Routing — dump routing state to log")}
+      <div class="cfg-row">
+        <label>Camera — analyze now</label>
+        <select class="cfg-field" id="newDiagCameraSelect">${camOpts.length ? this._optSelect(camOpts, camOpts[0][0]) : '<option value="">— no cameras —</option>'}</select>
+      </div>
+      <div class="cfg-row"><button class="mode-chip" id="newDiagCameraRun">RUN</button></div>`;
+  }
+
+  // ── AI Models — ported near-verbatim from Classic (see nova-panel.js's
+  // own _modelRoles/_loadModelsFor/_pickHealModel). Deliberately NOT wired
+  // through the generic .cfg-field autosave or _saveSetting: those trigger
+  // a full _render(), which would wipe the just-populated live model
+  // dropdown before the user ever sees it — the exact reason Classic's own
+  // wiring comment gives for avoiding that here. ──
+  _modelRoles() {
+    return [
+      { role: "llm", label: "Main Agent", provKey: "llm_provider", modelKey: "model" },
+      { role: "classifier", label: "Classifier", provKey: "classifier_provider", modelKey: "classifier_model" },
+      { role: "reasoning", label: "Reasoning", provKey: "reasoning_provider", modelKey: "reasoning_model" },
+      { role: "review", label: "Review", provKey: "review_provider", modelKey: "review_model" },
+      { role: "vision", label: "Vision", provKey: "vision_provider", modelKey: "vision_model" },
+      { role: "camrsn", label: "Camera Rsn", provKey: "camera_reasoning_provider", modelKey: "camera_reasoning_model" },
+    ];
+  }
+
+  _aiModelsCardBody() {
+    const cfg = this._data()?.config || {};
+    const PROVIDERS = ["groq", "openai", "gemini", "ollama", "anthropic", "custom"];
+    const rows = this._modelRoles().map(r => {
+      const curProv = cfg[r.provKey] || "groq";
+      const curModel = cfg[r.modelKey] || "";
+      const modelOpts =
+        (curModel ? `<option value="${this._esc(curModel)}" selected>${this._esc(curModel)}</option>` : "") +
+        `<option value="" disabled>loading…</option><option value="__custom__">✎ Custom…</option>`;
+      return `
+        <div class="new-model-row" data-role="${this._esc(r.role)}">
+          <span class="model-label">${this._esc(r.label)}</span>
+          <select class="new-prov-select" data-role="${this._esc(r.role)}" data-cfg-key="${r.provKey}">
+            ${this._optSelect(PROVIDERS.map(p => [p, p]), curProv)}
+          </select>
+          <select class="new-model-select" data-role="${this._esc(r.role)}" data-cfg-key="${r.modelKey}" data-current="${this._esc(curModel)}">${modelOpts}</select>
+          <input class="new-model-custom" data-role="${this._esc(r.role)}" data-cfg-key="${r.modelKey}"
+                 type="text" placeholder="enter model id" value="${this._esc(curModel)}" style="display:none">
+          ${r.role === "vision" ? `<div class="stub-body">Needs an image-capable model — e.g. moondream on Ollama, or a Groq vision model. Text-only models will fail on camera analysis.</div>` : ""}
+        </div>`;
+    }).join("");
+    return `<div class="new-model-list">${rows}</div>`;
+  }
+
+  _pickHealModel(models, cfgKey) {
+    if (/vision/.test(cfgKey || "")) {
+      return models.find(m => /vision|vl|scout|maverick|llama-4|gpt-4o|multimodal|qwen3\.\d|gemini/i.test(m)) || null;
+    }
+    return models[0] || null;
+  }
+
+  async _loadModelsFor(provider, selectEl) {
+    if (!this._hass || !selectEl) return;
+    const cur = selectEl.getAttribute("data-current") || "";
+    try {
+      const res = await this._hass.callWS({ type: "nova/list_models", provider });
+      const models = (res && res.models) || [];
+      let opts = "";
+      if (models.length) {
+        if (cur && !models.includes(cur)) {
+          const cfgKey = selectEl.getAttribute("data-cfg-key");
+          const heal = this._pickHealModel(models, cfgKey);
+          if (heal && cfgKey) {
+            await this._rawSaveConfig(cfgKey, heal);
+            selectEl.setAttribute("data-current", heal);
+            opts += models.map(m => `<option value="${this._esc(m)}"${m === heal ? " selected" : ""}>${this._esc(m)}</option>`).join("");
+          } else {
+            opts += `<option value="${this._esc(cur)}" selected>${this._esc(cur)} — unavailable, pick one</option>`;
+            opts += models.map(m => `<option value="${this._esc(m)}">${this._esc(m)}</option>`).join("");
+          }
+        } else {
+          opts += models.map(m => `<option value="${this._esc(m)}"${m === cur ? " selected" : ""}>${this._esc(m)}</option>`).join("");
+        }
+      } else {
+        const err = res && res.error ? ` — ${String(res.error).slice(0, 48)}` : "";
+        opts += (cur ? `<option value="${this._esc(cur)}" selected>${this._esc(cur)}</option>` : "");
+        opts += `<option value="" disabled>no models found${this._esc(err)}</option>`;
+      }
+      opts += `<option value="__custom__">✎ Custom…</option>`;
+      selectEl.innerHTML = opts;
+    } catch (_) { /* leave current options in place on error */ }
+  }
+
+  async _rawSaveConfig(key, value) {
+    if (!this._hass || !key) return;
+    try {
+      await this._hass.callWS({ type: "nova/update_config", key, value });
+    } catch (err) {
+      console.error(`Nova (new look): failed to save ${key}`, err);
+    }
+  }
+
+  _wireAiModels() {
+    const root = this.shadowRoot;
+    root.querySelectorAll(".new-model-row").forEach(row => {
+      const provSel = row.querySelector(".new-prov-select");
+      const modelSel = row.querySelector(".new-model-select");
+      const customInput = row.querySelector(".new-model-custom");
+      if (!provSel || !modelSel) return;
+      this._loadModelsFor(provSel.value, modelSel);
+      provSel.addEventListener("change", async (e) => {
+        const provider = e.target.value;
+        const provKey = provSel.getAttribute("data-cfg-key");
+        await this._rawSaveConfig(provKey, provider);
+        if (provKey === "llm_provider" && ["groq", "openai", "gemini", "anthropic"].includes(provider)) {
+          await this._rawSaveConfig("llm_base_url", "");
+        }
+        modelSel.setAttribute("data-current", "");
+        if (customInput) customInput.style.display = "none";
+        await this._loadModelsFor(provider, modelSel);
+        const newModel = modelSel.value;
+        if (newModel && newModel !== "__custom__" && newModel !== "") {
+          await this._rawSaveConfig(modelSel.getAttribute("data-cfg-key"), newModel);
+          modelSel.setAttribute("data-current", newModel);
+        }
+      });
+      modelSel.addEventListener("change", async (e) => {
+        if (e.target.value === "__custom__") {
+          if (customInput) { customInput.style.display = ""; customInput.focus(); }
+          return;
+        }
+        if (customInput) customInput.style.display = "none";
+        await this._rawSaveConfig(modelSel.getAttribute("data-cfg-key"), e.target.value);
+        modelSel.setAttribute("data-current", e.target.value);
+      });
+      if (customInput) {
+        customInput.addEventListener("change", async (e) => {
+          const v = (e.target.value || "").trim();
+          if (v) {
+            await this._rawSaveConfig(customInput.getAttribute("data-cfg-key"), v);
+            modelSel.setAttribute("data-current", v);
+          }
+        });
+      }
+    });
+  }
+
+  _briefingsCardBody() {
+    const cfg = this._data()?.config || {};
+    const onOff = (key, onLabel, offLabel, defaultOn) => {
+      const on = defaultOn ? cfg[key] !== false : !!cfg[key];
+      return `<button class="toggle-btn ${on ? "on" : "off"}" data-cfg-key="${key}" data-cfg-val="${on ? "false" : "true"}">${on ? onLabel : offLabel}</button>`;
+    };
+    const feedChip = (key, label) => {
+      const on = cfg[key] !== false;
+      return `<button class="mode-chip ${on ? "mode-chip-on" : ""}" data-cfg-key="${key}" data-cfg-val="${on ? "false" : "true"}">${label}</button>`;
+    };
+    return `
+      <div class="stub-body">Nova speaks a summary at the times you set — weather and forecast, your calendar, what happened overnight, power draw, and any active hazards nearby.</div>
+      <div class="cfg-row">
+        <label>Morning</label>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input class="cfg-field cfg-num" style="width:64px;text-align:center" type="text" data-cfg-key="briefing_morning_time" value="${this._esc(cfg.briefing_morning_time || "07:30")}" placeholder="07:30">
+          ${onOff("briefing_morning_enabled", "ON", "OFF", false)}
+        </div>
+      </div>
+      <div class="cfg-row">
+        <label>Evening</label>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input class="cfg-field cfg-num" style="width:64px;text-align:center" type="text" data-cfg-key="briefing_evening_time" value="${this._esc(cfg.briefing_evening_time || "19:30")}" placeholder="19:30">
+          ${onOff("briefing_evening_enabled", "ON", "OFF", false)}
+        </div>
+      </div>
+      <div class="cfg-row">
+        <label>Only when someone's home</label>
+        ${onOff("briefing_require_home", "YES", "NO", true)}
+      </div>
+      <div class="mode-bind-head">Include</div>
+      <div class="mode-grid">
+        ${feedChip("briefing_include_weather", "Weather")}
+        ${feedChip("briefing_include_calendar", "Calendar")}
+        ${feedChip("briefing_include_events", "Overnight")}
+        ${feedChip("briefing_include_energy", "Energy")}
+        ${feedChip("briefing_include_hazards", "Hazards")}
+      </div>
+      <div class="cfg-row"><button class="mode-chip" id="newBriefNow">▶ BRIEF ME NOW</button></div>`;
+  }
+
+  _voiceConfirmationCardBody() {
+    const cfg = this._data()?.config || {};
+    const on = !!cfg.voice_confirm_enabled;
+    return `
+      <div class="stub-body">Ask out loud before sensitive actions (unlock, garage, disarm) and listen for a spoken yes/no. Native mode uses the satellite's own audio; gated mode speaks through the room speaker — run the test to see which your setup supports.</div>
+      <div class="cfg-row">
+        <label>Voice confirmation</label>
+        <button class="toggle-btn ${on ? "on" : "off"}" data-cfg-key="voice_confirm_enabled" data-cfg-val="${on ? "false" : "true"}">${on ? "ON" : "OFF"}</button>
+      </div>
+      <div class="cfg-row">
+        <label>Mode</label>
+        <select class="cfg-field" data-cfg-key="voice_confirm_mode">
+          ${this._optSelect([["auto", "Auto (try native, fall back)"], ["native", "Native (satellite audio)"], ["gated", "Gated (room speaker)"]], cfg.voice_confirm_mode || "auto")}
+        </select>
+      </div>
+      <div class="cfg-row"><button class="mode-chip" id="newVcTest">▶ TEST SATELLITE AUDIO</button></div>
+      <div class="stub-body" id="newVcTestResult"></div>`;
+  }
+
+  _satelliteSpeakerCardBody() {
+    const cfg = this._data()?.config || {};
+    const satellites = cfg.satellites || [];
+    const castDevs = cfg.cast_devices || [];
+    const pairings = cfg.satellite_pairings || {};
+    if (!satellites.length) return `<div class="stub-body">No satellites found.</div>`;
+    const rows = satellites.map(sat => {
+      const paired = pairings[sat.entity_id] || "";
+      const label = sat.area || sat.name;
+      return `
+        <div class="pairing-row">
+          <span class="pairing-label">${this._esc(label)}</span>
+          <select class="new-sat-pair-select" data-sat-id="${this._esc(sat.entity_id)}">
+            <option value="">— none —</option>
+            ${castDevs.map(cd => `<option value="${this._esc(cd.entity_id)}"${cd.entity_id === paired ? " selected" : ""}>${this._esc(cd.name)}</option>`).join("")}
+          </select>
+        </div>`;
+    }).join("");
+    return `<div class="pairing-list">${rows}</div>`;
+  }
+
+  _announcementSpeakersCardBody() {
+    const cfg = this._data()?.config || {};
+    const castDevs = cfg.cast_devices || [];
+    const selected = cfg.announcement_speakers || [];
+    if (!castDevs.length) return `<div class="stub-body">No Cast devices found.</div>`;
+    const rows = castDevs.map(cd => {
+      const on = selected.includes(cd.entity_id);
+      return `
+        <div class="toggle-row">
+          <span class="toggle-label">${this._esc(cd.name)}</span>
+          <span class="toggle-desc">${this._esc(cd.entity_id)}</span>
+          <button class="toggle-btn ${on ? "on" : "off"} new-ann-speaker-toggle" data-speaker-id="${this._esc(cd.entity_id)}">${on ? "ON" : "OFF"}</button>
+        </div>`;
+    }).join("");
+    return `<div class="toggle-list">${rows}</div>`;
+  }
+
+  _notificationsCardBody() {
+    const cfg = this._data()?.config || {};
+    const svcs = cfg.notify_services_available || [];
+    const opts = [["", "— none —"], ...svcs.map(s => [s, s.replace("notify.", "")])];
+    return `
+      <div class="toggle-row">
+        <span class="toggle-label">Notify Device</span>
+        <span class="toggle-desc">Phone push for high/critical alerts</span>
+        <select class="cfg-field" data-cfg-key="notify_service">${this._optSelect(opts, cfg.notify_service || "")}</select>
+      </div>`;
+  }
+
+  _sentinelRulesCardBody() {
+    const cfg = this._data()?.config || {};
+    const rules = cfg.sentinel_rules || [];
+    const disabled = cfg.disabled_sentinel_rules || [];
+    if (!rules.length) return `<div class="stub-body">No sentinel rules found.</div>`;
+    const rows = rules.map(r => {
+      const isOff = disabled.includes(r.id);
+      const name = r.id.replace(/_/g, " ");
+      const desc = (r.desc || "").slice(0, 60);
+      return `
+        <div class="toggle-row">
+          <span class="toggle-label">${this._esc(name)}</span>
+          <span class="toggle-desc">${this._esc(desc)}</span>
+          <button class="toggle-btn ${isOff ? "off" : "on"} new-rule-toggle" data-rule-id="${this._esc(r.id)}">${isOff ? "OFF" : "ON"}</button>
+        </div>`;
+    }).join("");
+    return `<div class="toggle-list">${rows}</div>`;
+  }
+
+  // Hazard status is fetched once per element lifetime (same on-demand
+  // pattern as Diagnostics) — a manual SCAN NOW re-checks USGS/NWS/EONET.
+  async _fetchHazardStatus() {
+    if (!this._hass) return;
+    try {
+      this._hazard = await this._hass.callWS({ type: "nova/hazard", action: "status" });
+    } catch (_) { this._hazard = null; }
+    if (this._currentTab === "settings") this._render();
+  }
+
+  _hazardMonitorCardBody() {
+    const cfg = this._data()?.config || {};
+    const hz = this._hazard || {};
+    const loc = hz.center
+      ? (hz.using_override ? `Location: override ${hz.center[0]}, ${hz.center[1]}.` : `Location: home ${hz.center[0]}, ${hz.center[1]}.`)
+      : "Location: using home coordinates.";
+    const feedChip = (key, label) => {
+      const on = cfg[key] !== false;
+      return `<button class="mode-chip ${on ? "mode-chip-on" : ""}" data-cfg-key="${key}" data-cfg-val="${on ? "false" : "true"}">${label}</button>`;
+    };
+    return `
+      <div class="stub-body">Real-time nearby earthquakes (USGS), severe-weather warnings (NWS), and natural disasters like wildfires (NASA EONET). Alerts speak and push like any Nova alert.</div>
+      <div class="cfg-row">
+        <label>Monitor</label>
+        <button class="toggle-btn ${cfg.hazard_monitor_enabled ? "on" : "off"}" data-cfg-key="hazard_monitor_enabled" data-cfg-val="${cfg.hazard_monitor_enabled ? "false" : "true"}">${cfg.hazard_monitor_enabled ? "ON" : "OFF"}</button>
+      </div>
+      <div class="mode-grid">
+        ${feedChip("hazard_quakes_on", "Earthquakes")}
+        ${feedChip("hazard_weather_on", "Weather")}
+        ${feedChip("hazard_disasters_on", "Disasters")}
+      </div>
+      <div class="stub-body" style="font-family:var(--font-mono);font-size:10.5px">${this._esc(loc)}</div>
+      <div class="cfg-row">
+        <label>Override lat / lon <span class="toggle-desc">optional</span></label>
+        <div style="display:flex;gap:6px">
+          <input class="cfg-field cfg-num" style="width:76px" type="text" inputmode="decimal" data-cfg-key="hazard_lat" value="${this._esc(cfg.hazard_lat || "")}" placeholder="lat">
+          <input class="cfg-field cfg-num" style="width:76px" type="text" inputmode="decimal" data-cfg-key="hazard_lon" value="${this._esc(cfg.hazard_lon || "")}" placeholder="lon">
+        </div>
+      </div>
+      <div class="cfg-row">
+        <label>Quake radius (km) / min mag</label>
+        <div style="display:flex;gap:6px">
+          <input class="cfg-field cfg-num" style="width:56px" type="text" inputmode="numeric" data-cfg-key="hazard_quake_radius_km" value="${this._esc(cfg.hazard_quake_radius_km ?? 300)}">
+          <input class="cfg-field cfg-num" style="width:56px" type="text" inputmode="decimal" data-cfg-key="hazard_quake_min_mag" value="${this._esc(cfg.hazard_quake_min_mag ?? 2.5)}">
+        </div>
+      </div>
+      <div class="cfg-row"><button class="mode-chip" id="newHazScan">⟳ SCAN NOW</button></div>
+      <div id="newHazBody" class="stub-body"></div>`;
+  }
+
+  _renderHazardScan(res) {
+    if (!res || res.ok === false) {
+      return `<div class="stub-body">${this._esc(res?.error || "No location configured.")}</div>`;
+    }
+    const q = res.earthquakes || [], w = res.weather || [], d = res.disasters || [];
+    if (!q.length && !w.length && !d.length) {
+      return `<div class="stub-body">✓ All clear near ${res.center ? res.center[0] + ", " + res.center[1] : "home"} — no active earthquakes, severe weather, or disasters.</div>`;
+    }
+    let html = "";
+    for (const e of q) {
+      const mag = (typeof e.mag === "number") ? `M${e.mag.toFixed(1)}` : "M?";
+      html += `<div class="stub-body"><b class="diag-warn">${mag}</b> ${this._esc(e.place)} — ${e.dist_km} km away</div>`;
+    }
+    for (const e of w) {
+      html += `<div class="stub-body"><b class="diag-down">${this._esc(e.severity)}</b> ${this._esc(e.event)}${e.area ? " — " + this._esc(e.area) : ""}</div>`;
+    }
+    for (const e of d) {
+      html += `<div class="stub-body"><b class="diag-warn">${this._esc(e.category)}</b> ${this._esc(e.title)} — ${e.dist_km} km away</div>`;
+    }
+    return html;
+  }
+
+  // Energy status is fetched once per element lifetime (same on-demand
+  // pattern as Diagnostics/Hazard) — set_agency re-fetches immediately after.
+  async _fetchEnergyStatus() {
+    if (!this._hass) return;
+    try {
+      this._energy = await this._hass.callWS({ type: "nova/energy", action: "status" });
+    } catch (_) { this._energy = { error: true }; }
+    if (this._currentTab === "settings") this._render();
+  }
+
+  _energyManagementCardBody() {
+    const e = this._energy || {};
+    if (e.error) {
+      return `<div class="stub-body">Couldn't load energy data — restart Home Assistant after updating.</div>`;
+    }
+    const draw = e.kw == null
+      ? `<span class="diag-off">NO METER</span>`
+      : `<span class="${e.over_peak ? "diag-warn" : "diag-ok"}">${e.kw} kW${e.over_peak ? " · OVER PEAK" : ""}</span>`;
+    const agencies = ["advisory", "opt_in", "autonomous"];
+    const agencyChips = agencies.map(a =>
+      `<button class="mode-chip ${a === e.configured_agency ? "mode-chip-on" : ""}" data-agency="${a}">${a.replace("_", "-")}</button>`).join("");
+    const advice = (e.advice || []).map(a => `<div class="stub-body">${this._esc(a)}</div>`).join("");
+    const running = e.running || [];
+    const runRows = running.length
+      ? `<div class="mode-bind-head">Running now</div>` + running.map(r =>
+          `<div class="cfg-row"><label>${this._esc(r.name || r.entity)}</label><span class="${r.shed_ok ? "" : "diag-warn"}">${r.watts} W${r.shed_ok ? "" : " · protected"}</span></div>`).join("")
+      : "";
+    return `
+      <div class="stub-body">Whole-home power, peak awareness, and load advice. Pick how much Nova may act — it never sheds critical loads (fridge, medical, network).</div>
+      <div class="cfg-row"><label>Current draw</label>${draw}</div>
+      <div class="mode-grid" id="newEnergyAgency">${agencyChips}</div>
+      ${advice}
+      ${runRows}`;
+  }
+
+  // Appliances — batch-edit-then-save, like Classic (see nova-panel.js's own
+  // #appliance-save comment): rows are added/removed/edited locally and only
+  // written on "Save appliances", so this deliberately does NOT go through
+  // _saveSetting/_render on every keystroke — that would wipe an unsaved,
+  // just-added row.
+  _applianceTypes() {
+    return ["washer", "dryer", "dishwasher", "oven", "microwave", "appliance"];
+  }
+
+  _applianceEntityOptions(selected) {
+    const states = this._hass?.states || {};
+    const cands = [];
+    Object.keys(states).forEach(eid => {
+      const s = states[eid];
+      const dom = eid.split(".")[0];
+      const dc = (s.attributes && s.attributes.device_class) || "";
+      const unit = ((s.attributes && s.attributes.unit_of_measurement) || "").toLowerCase();
+      const isPower = dc === "power" || dc === "energy" || unit === "w" || unit === "kw";
+      const isStatus = (dom === "binary_sensor" || dom === "sensor") &&
+        /(washer|dryer|dishwash|laundry|appliance|run_complete|cycle_complete|job_state|machine_state)/i.test(eid);
+      if (isPower || isStatus) cands.push(eid);
+    });
+    cands.sort();
+    if (selected && !cands.includes(selected)) cands.unshift(selected);
+    return [["", "— no entity (use watts) —"], ...cands.map(eid => {
+      const fn = (states[eid] && states[eid].attributes && states[eid].attributes.friendly_name) || eid;
+      return [eid, fn];
+    })];
+  }
+
+  _applianceRowHtml(a) {
+    const t = a.type || "appliance";
+    return `
+      <div class="new-appliance-row">
+        <input class="new-appliance-name cfg-field" type="text" placeholder="Name (e.g. Washer)" value="${this._esc(a.name || "")}">
+        <select class="new-appliance-type cfg-field">${this._optSelect(this._applianceTypes().map(x => [x, x]), t)}</select>
+        <select class="new-appliance-entity cfg-field">${this._optSelect(this._applianceEntityOptions(a.entity || ""), a.entity || "")}</select>
+        <input class="new-appliance-watts cfg-field cfg-num" type="number" min="0" step="10" placeholder="watts" value="${a.watts || ""}">
+        <button class="new-appliance-remove mode-chip" title="Remove appliance" aria-label="Remove appliance">✕</button>
+      </div>`;
+  }
+
+  _appliancesCardBody() {
+    const cfg = this._data()?.config || {};
+    const prof = cfg.appliance_profile || [];
+    const rows = prof.map(a => this._applianceRowHtml(a)).join("")
+      || `<div class="stub-body">No appliances declared yet — Nova falls back to generic power guesses until you add some.</div>`;
+    return `
+      <div class="stub-body">Tell Nova which appliances exist so it names cycles correctly instead of guessing from the whole-home meter. Map a dedicated power or status entity when one exists; otherwise set typical running watts.</div>
+      <div class="new-appliance-list" id="newApplianceList">${rows}</div>
+      <div class="mode-grid">
+        <button class="mode-chip" id="newApplianceAdd">+ Add appliance</button>
+        <button class="mode-chip mode-chip-on" id="newApplianceSave">Save appliances</button>
+      </div>
+      <div class="cfg-row" style="margin-top:12px">
+        <label>Announce unidentified loads <span class="toggle-desc">loads matching no declared appliance</span></label>
+        <button class="toggle-btn ${cfg.appliance_announce_unknown ? "on" : "off"}" id="newApplianceUnknown">${cfg.appliance_announce_unknown ? "ON" : "OFF"}</button>
+      </div>`;
+  }
+
+  _wireAppliances() {
+    const root = this.shadowRoot;
+    const apList = root.getElementById("newApplianceList");
+    const apAdd = root.getElementById("newApplianceAdd");
+    const apSave = root.getElementById("newApplianceSave");
+    const apUnknown = root.getElementById("newApplianceUnknown");
+    if (apAdd && apList) {
+      apAdd.addEventListener("click", () => {
+        const empty = apList.querySelector(".stub-body");
+        if (empty) empty.remove();
+        const tmp = document.createElement("div");
+        tmp.innerHTML = this._applianceRowHtml({ name: "", type: "appliance", entity: "", watts: "" });
+        const row = tmp.firstElementChild;
+        if (row) apList.appendChild(row);
+      });
+    }
+    if (apList) {
+      apList.addEventListener("click", (e) => {
+        const rm = e.target.closest(".new-appliance-remove");
+        if (rm) {
+          e.preventDefault();
+          rm.closest(".new-appliance-row")?.remove();
+        }
+      });
+    }
+    if (apSave) {
+      apSave.addEventListener("click", async () => {
+        const rows = Array.from(root.querySelectorAll(".new-appliance-row"));
+        const out = [];
+        rows.forEach(r => {
+          const name = (r.querySelector(".new-appliance-name")?.value || "").trim();
+          if (!name) return;
+          out.push({
+            name,
+            type: r.querySelector(".new-appliance-type")?.value || "appliance",
+            entity: r.querySelector(".new-appliance-entity")?.value || "",
+            watts: parseFloat(r.querySelector(".new-appliance-watts")?.value || "0") || 0,
+          });
+        });
+        await this._rawSaveConfig("appliance_profile", JSON.stringify(out));
+        try { await this._hass.callWS({ type: "nova/reload_appliances" }); } catch (err) { console.error("Nova (new look): appliance reload failed", err); }
+        await this._fetchLiveData();
+        if (this._currentTab === "settings") this._render();
+      });
+    }
+    if (apUnknown) {
+      apUnknown.addEventListener("click", async () => {
+        const newVal = !apUnknown.classList.contains("on");
+        await this._rawSaveConfig("appliance_announce_unknown", newVal);
+        try { await this._hass.callWS({ type: "nova/reload_appliances" }); } catch (_) {}
+        await this._fetchLiveData();
+        if (this._currentTab === "settings") this._render();
+      });
+    }
+  }
+
+  _entName(eid) {
+    const st = (this._hass && this._hass.states) ? this._hass.states[eid] : null;
+    return (st && st.attributes && st.attributes.friendly_name) || eid;
+  }
+
+  _trackerOptions(selected) {
+    const states = this._hass?.states || {};
+    const cands = Object.keys(states).filter(eid => { const dom = eid.split(".")[0]; return dom === "person" || dom === "device_tracker"; }).sort();
+    if (selected && !cands.includes(selected)) cands.unshift(selected);
+    return [["", "— none —"], ...cands.map(eid => [eid, this._entName(eid)])];
+  }
+
+  _travelSensorOptions(selected) {
+    const states = this._hass?.states || {};
+    const cands = Object.keys(states).filter(eid => {
+      const dom = eid.split(".")[0]; if (dom !== "sensor") return false;
+      const a = states[eid].attributes || {}, dc = a.device_class || "", unit = a.unit_of_measurement || "";
+      return dc === "duration" || /^(min|minutes|h|hr|hrs|hours)$/i.test(unit) || /travel|commute|duration|eta|route|waze|maps|traffic|drive_time|driving|to_work|to_home/i.test(eid);
+    }).sort();
+    if (selected && !cands.includes(selected)) cands.unshift(selected);
+    return [["", "— none —"], ...cands.map(eid => [eid, this._entName(eid)])];
+  }
+
+  _anticipationMemoryCardBody() {
+    const cfg = this._data()?.config || {};
+    const onOff = (key, defaultOn, hint) => {
+      const on = defaultOn ? cfg[key] !== false : !!cfg[key];
+      return `
+        <div class="cfg-row">
+          <label>${hint.label}${hint.sub ? `<span class="toggle-desc"> — ${this._esc(hint.sub)}</span>` : ""}</label>
+          <button class="toggle-btn ${on ? "on" : "off"}" data-cfg-key="${key}" data-cfg-val="${on ? "false" : "true"}">${on ? "ON" : "OFF"}</button>
+        </div>`;
+    };
+    const num = (key, label, placeholder, min, max, step) => `
+      <div class="cfg-row">
+        <label>${this._esc(label)}</label>
+        <input class="cfg-field cfg-num" type="number" min="${min}" max="${max}" step="${step}" data-cfg-key="${key}" value="${cfg[key] ?? ""}" placeholder="${placeholder}">
+      </div>`;
+    return `
+      ${onOff("departure_alerts_enabled", false, { label: "Departure alerts" })}
+      ${onOff("routine_alerts_enabled", false, { label: "Routine alerts" })}
+      ${onOff("memory_threading_enabled", false, { label: "Memory threading" })}
+      ${onOff("pattern_learn_motion", false, { label: "Learn motion/presence triggers" })}
+      ${num("observer_group_debounce", "Sibling-burst coalescing (sec)", "90", 0, 600, 10)}
+      ${onOff("continued_conversation_enabled", false, { label: "Continued conversation" })}
+      ${onOff("continued_conversation_multi_satellite", false, { label: "Follow me between rooms", sub: "reopen the mic where you moved to (needs 2+ satellites)" })}
+      ${onOff("continued_conversation_speaker_reopen", true, { label: "Follow-up mic reopen (speaker-aware)" })}
+      ${onOff("tts_use_ha_voice", false, { label: "Use Home Assistant default voice" })}
+      ${num("departure_lead_minutes", "Departure lead (min)", "30", 0, 240, 5)}
+      ${num("memory_threading_hours", "Memory window (hrs)", "48", 1, 336, 1)}
+      ${num("memory_threading_max", "Memory max turns", "12", 1, 50, 1)}
+      <div class="cfg-row">
+        <label>Origin tracker</label>
+        <select class="cfg-field" data-cfg-key="departure_origin_entity">${this._optSelect(this._trackerOptions(cfg.departure_origin_entity || ""), cfg.departure_origin_entity || "")}</select>
+      </div>
+      <div class="cfg-row">
+        <label>OSRM URL</label>
+        <input class="cfg-field" type="text" data-cfg-key="departure_osrm_url" value="${this._esc(cfg.departure_osrm_url || "")}" placeholder="self-host (optional)">
+      </div>
+      <div class="cfg-row">
+        <label>Travel sensor</label>
+        <select class="cfg-field" data-cfg-key="departure_travel_sensor">${this._optSelect(this._travelSensorOptions(cfg.departure_travel_sensor || ""), cfg.departure_travel_sensor || "")}</select>
+      </div>
+      <div class="stub-body">Departure warns when to leave for calendar events using your device location + open-source routing. Routine alerts learn per-person timing over about a week. Continued conversation keeps the mic open after a question.</div>`;
+  }
+
+  _memoryCardBody() {
+    const cfg = this._data()?.config || {};
+    const stats = cfg.memory_stats || {};
+    return `
+      <div class="cfg-row"><label>Backend</label><span>${this._esc(stats.backend || "—")}</span></div>
+      <div class="cfg-row"><label>Stored Memories</label><span>${this._esc(stats.total_memories ?? 0)}</span></div>
+      <div class="stub-body">Full review, edit, and forget lives on Classic's own Memory tab for now.</div>`;
+  }
+
+  _observerTuningCardBody() {
+    const s = this._data()?.config?.observer_stats || {};
+    const row = (label, value, cls) => `<div class="cfg-row"><label>${this._esc(label)}</label><span class="${cls || ""}">${value}</span></div>`;
+    const rateLimit = s.rate_limit ?? 30;
+    const presenceRows = (s.presence || []).map(p =>
+      row(`${p.name}${p.gps ? " 📍" : ""}`, `${this._esc(p.zone)}${p.distance_km != null ? " · " + p.distance_km + " km" : ""}`)).join("");
+    const llmLabel = s.llm_breaker === "open" ? "LOCAL-ONLY" : s.llm_breaker === "half_open" ? "PROBING" : "ONLINE";
+    const llmCls = s.llm_breaker === "open" ? "diag-down" : s.llm_breaker === "half_open" ? "diag-warn" : "diag-ok";
+    return `
+      ${row("Status", s.running ? "RUNNING" : "STOPPED", s.running ? "diag-ok" : "diag-off")}
+      ${row("Calls / Hour", `${s.calls_last_hour || 0} / ${rateLimit <= 0 ? "∞" : rateLimit}`)}
+      <div class="cfg-row">
+        <label>Hourly Cap <span class="toggle-desc">0 = unlimited</span></label>
+        <input class="cfg-field cfg-num" type="number" min="0" step="1" id="newObserverRateLimit" value="${rateLimit}">
+      </div>
+      ${row("Events 24h", s.events_24h || 0)}
+      ${row("Flagged 24h", s.flagged_24h || 0)}
+      ${row("Spoken 24h", s.spoken_24h || 0)}
+      ${row("Cognition", s.cognition_enabled ? "ACTIVE" : "OFF", s.cognition_enabled ? "diag-ok" : "diag-off")}
+      ${row("Tracked Entities", s.cog_entities || 0)}
+      ${row("Predictable", s.cog_predictable || 0)}
+      ${row("Routines Learned", s.cog_routines || 0)}
+      ${row("Presence Routines", s.cog_presence || 0)}
+      ${presenceRows}
+      ${row("Cog Escalated", s.cog_escalated || 0)}
+      ${row("Local Decisions", `${s.local_rate || 0}% (${s.local_decisions || 0} local / ${s.cloud_calls || 0} cloud)`)}
+      ${row("Learned Patterns", s.learned_patterns || 0)}
+      ${row("LLM Link", llmLabel, llmCls)}`;
+  }
+
+  _optInEntityDatalist() {
+    const states = this._hass?.states || {};
+    return Object.keys(states).filter(eid => {
+      const dom = eid.split(".")[0];
+      return dom === "binary_sensor" || dom === "device_tracker" || dom === "person" || dom === "sensor";
+    }).sort().map(eid => `<option value="${this._esc(eid)}">${this._esc(this._entName(eid))}</option>`).join("");
+  }
+
+  _plList() {
+    let incl = this._data()?.config?.pattern_include_entities || [];
+    if (!Array.isArray(incl)) { try { incl = JSON.parse(incl) || []; } catch (_) { incl = []; } }
+    return incl;
+  }
+
+  _routineLearningCardBody() {
+    const cfg = this._data()?.config || {};
+    const onOff = (key, label, desc) => `
+      <div class="toggle-row">
+        <span class="toggle-label">${this._esc(label)}</span>
+        <span class="toggle-desc">${this._esc(desc)}</span>
+        <button class="toggle-btn ${cfg[key] ? "on" : "off"}" data-cfg-key="${key}" data-cfg-val="${cfg[key] ? "false" : "true"}">${cfg[key] ? "ON" : "OFF"}</button>
+      </div>`;
+    const incl = this._plList();
+    const chips = incl.length
+      ? incl.map((e, i) => `<span class="new-pl-chip">${this._esc(e)}<button class="new-pl-del" data-i="${i}" title="Remove">×</button></span>`).join("")
+      : `<span class="toggle-desc">No specific entities added.</span>`;
+    return `
+      <div class="stub-body">Nova learns routines from device activity (lights, locks, thermostats…) and skips noisy door/window and presence signals by default. Opt them in to build routines from them.</div>
+      <div class="toggle-list">
+        ${onOff("pattern_learn_doors", "Learn doors & windows", "Door, window and garage contact sensors")}
+        ${onOff("pattern_learn_presence", "Learn presence & arrivals", "People and device trackers (home / away)")}
+        ${onOff("pattern_learn_buttons", "Learn button & remote presses", "Suggest “press → scene / action” automations")}
+      </div>
+      <div class="mode-bind-head">Also learn specific entities <span class="toggle-desc">e.g. a bay occupancy sensor</span></div>
+      <div class="cfg-row">
+        <input id="newPlEntityInput" list="newPlEntityList" class="cfg-field" style="flex:1" placeholder="type to find an entity…" autocomplete="off">
+        <datalist id="newPlEntityList">${this._optInEntityDatalist()}</datalist>
+        <button class="mode-chip" id="newPlAddEntity">+ Add</button>
+      </div>
+      <div class="mode-grid" id="newPlChips">${chips}</div>`;
+  }
+
+  _exclArr(v) {
+    if (!v) return [];
+    if (Array.isArray(v)) return v;
+    try { const j = JSON.parse(v); return Array.isArray(j) ? j : []; } catch (_) { return []; }
+  }
+  _allEntityDatalist() {
+    const states = this._hass?.states || {};
+    return Object.keys(states).sort().map(eid => `<option value="${this._esc(eid)}">${this._esc(this._entName(eid))}</option>`).join("");
+  }
+  _domainDatalist() {
+    const states = this._hass?.states || {};
+    const doms = [...new Set(Object.keys(states).map(e => e.split(".")[0]))].sort();
+    return doms.map(dm => `<option value="${this._esc(dm)}">${this._esc(dm)}</option>`).join("");
+  }
+  _labelDatalist() {
+    const labels = this._data()?.available_labels || [];
+    return labels.map(l => `<option value="${this._esc(l.name)}">${this._esc(l.name)}</option>`).join("");
+  }
+  async _exclSave(key, arr) {
+    if (this._liveData && this._liveData.config) this._liveData.config[key] = arr;
+    await this._saveSetting(key, JSON.stringify(arr));
+  }
+
+  _excludedEntitiesCardBody() {
+    const cfg = this._data()?.config || {};
+    const ents = this._exclArr(cfg.excluded_entities);
+    const doms = this._exclArr(cfg.excluded_domains);
+    const labs = this._exclArr(cfg.excluded_labels);
+    const chipRow = (arr, cls) => arr.length
+      ? arr.map((e, i) => `<span class="new-pl-chip">${this._esc(e)}<button class="${cls}" data-i="${i}" title="Remove">×</button></span>`).join("")
+      : `<span class="toggle-desc">None.</span>`;
+    return `
+      <div class="stub-body">Entities you exclude are removed from Nova's awareness — presence detection, room routing, the observer and routine learning all skip them. Home Assistant still has the entity, and Nova can still control it if you ask by name.</div>
+      <div class="mode-bind-head">Exclude specific entities</div>
+      <div class="cfg-row">
+        <input id="newExclEntInput" list="newExclEntList" class="cfg-field" style="flex:1" placeholder="type to find an entity…" autocomplete="off">
+        <datalist id="newExclEntList">${this._allEntityDatalist()}</datalist>
+        <button class="mode-chip" id="newExclEntAdd">+ Add</button>
+      </div>
+      <div class="mode-grid" id="newExclEntChips">${chipRow(ents, "new-excl-ent-del")}</div>
+      <div class="mode-bind-head">Exclude whole domains <span class="toggle-desc">e.g. light, switch — every entity in the domain</span></div>
+      <div class="cfg-row">
+        <input id="newExclDomInput" list="newExclDomList" class="cfg-field" style="flex:1" placeholder="type a domain…" autocomplete="off">
+        <datalist id="newExclDomList">${this._domainDatalist()}</datalist>
+        <button class="mode-chip" id="newExclDomAdd">+ Add</button>
+      </div>
+      <div class="mode-grid" id="newExclDomChips">${chipRow(doms, "new-excl-dom-del")}</div>
+      <div class="mode-bind-head">Exclude by label <span class="toggle-desc">every entity carrying a Home Assistant label</span></div>
+      <div class="cfg-row">
+        <input id="newExclLabInput" list="newExclLabList" class="cfg-field" style="flex:1" placeholder="type a label…" autocomplete="off">
+        <datalist id="newExclLabList">${this._labelDatalist()}</datalist>
+        <button class="mode-chip" id="newExclLabAdd">+ Add</button>
+      </div>
+      <div class="mode-grid" id="newExclLabChips">${chipRow(labs, "new-excl-lab-del")}</div>`;
+  }
+
+  _mediaPlayerOptions(selected) {
+    const states = this._hass?.states || {};
+    const eids = Object.keys(states).filter(e => e.startsWith("media_player.")).sort();
+    if (selected && !eids.includes(selected)) eids.unshift(selected);
+    return [["", "— none —"], ...eids.map(e => {
+      const st = states[e];
+      const fn = (st && st.attributes && st.attributes.friendly_name) || e;
+      return [e, fn];
+    })];
   }
 
   _optSelect(pairs, current) {
@@ -526,7 +1421,7 @@ class NovaCommandCenterNew extends HTMLElement {
     // Generic settings autosave — same shape as Classic's own .cfg-field
     // handler: any toggle/select tagged data-cfg-key writes straight
     // through nova/update_config, then a live re-fetch refreshes state.
-    root.querySelectorAll(".toggle-btn[data-cfg-key]").forEach(btn => {
+    root.querySelectorAll(".toggle-btn[data-cfg-key], .mode-chip[data-cfg-key]").forEach(btn => {
       btn.addEventListener("click", async () => {
         await this._saveSetting(btn.getAttribute("data-cfg-key"), btn.getAttribute("data-cfg-val") === "true");
       });
@@ -534,6 +1429,14 @@ class NovaCommandCenterNew extends HTMLElement {
     root.querySelectorAll("select.cfg-field[data-cfg-key]").forEach(sel => {
       sel.addEventListener("change", async () => {
         await this._saveSetting(sel.getAttribute("data-cfg-key"), sel.value);
+      });
+    });
+    root.querySelectorAll("input.cfg-field[data-cfg-key]").forEach(inp => {
+      inp.addEventListener("change", async () => {
+        const key = inp.getAttribute("data-cfg-key");
+        let value = inp.value;
+        if (inp.type === "number") value = (value === "" ? null : Number(value));
+        await this._saveSetting(key, value);
       });
     });
 
@@ -546,10 +1449,267 @@ class NovaCommandCenterNew extends HTMLElement {
         await this._saveSetting("room_speakers", JSON.stringify(assigned));
       });
     });
+    root.querySelectorAll(".new-sat-pair-select").forEach(sel => {
+      sel.addEventListener("change", async () => {
+        const cfg = this._data()?.config || {};
+        const pairings = { ...(cfg.satellite_pairings || {}) };
+        const satId = sel.getAttribute("data-sat-id");
+        if (sel.value) pairings[satId] = sel.value; else delete pairings[satId];
+        await this._saveSetting("satellite_pairings", JSON.stringify(pairings));
+      });
+    });
+    root.querySelectorAll(".new-rule-toggle").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const ruleId = btn.getAttribute("data-rule-id");
+        if (!ruleId) return;
+        const current = this._data()?.config?.disabled_sentinel_rules || [];
+        const isDisabled = current.includes(ruleId);
+        const updated = isDisabled ? current.filter(id => id !== ruleId) : [...current, ruleId];
+        await this._saveSetting("disabled_sentinel_rules", JSON.stringify(updated));
+      });
+    });
+    root.querySelectorAll(".new-ann-speaker-toggle").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const spkId = btn.getAttribute("data-speaker-id");
+        if (!spkId) return;
+        const current = this._data()?.config?.announcement_speakers || [];
+        const isOn = current.includes(spkId);
+        const updated = isOn ? current.filter(id => id !== spkId) : [...current, spkId];
+        await this._saveSetting("announcement_speakers", JSON.stringify(updated));
+      });
+    });
     const generalSpeakerSel = root.querySelector(".new-general-speaker-select");
     if (generalSpeakerSel) {
       generalSpeakerSel.addEventListener("change", async () => {
         await this._saveSetting("general_speaker", generalSpeakerSel.value);
+      });
+    }
+
+    // Operational Mode: mode chips call nova/mode directly (not update_config —
+    // same websocket contract Classic's own mode-grid already uses).
+    root.querySelectorAll(".mode-grid .mode-chip[data-mode]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const mode = btn.getAttribute("data-mode");
+        if (!this._hass || !mode || btn.classList.contains("mode-chip-on")) return;
+        try {
+          await this._hass.callWS({ type: "nova/mode", action: "set", mode });
+        } catch (err) {
+          console.error("Nova (new look): failed to set mode", err);
+        }
+        await this._fetchLiveData();
+        if (this._currentTab === "settings") this._render();
+      });
+    });
+    root.querySelectorAll(".mode-grid [data-lab-area]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const id = btn.getAttribute("data-lab-area");
+        let cur = this._data()?.config?.lab_areas;
+        cur = Array.isArray(cur) ? cur.slice() : [];
+        const i = cur.indexOf(id);
+        if (i >= 0) cur.splice(i, 1); else cur.push(id);
+        await this._saveSetting("lab_areas", cur);
+      });
+    });
+
+    this._wireAiModels();
+    this._wireAppliances();
+
+    const plAddBtn = root.getElementById("newPlAddEntity");
+    if (plAddBtn) {
+      plAddBtn.addEventListener("click", async () => {
+        const inp = root.getElementById("newPlEntityInput");
+        const eid = inp && inp.value.trim();
+        if (!eid) return;
+        if (this._hass && this._hass.states && this._hass.states[eid]) {
+          const arr = this._plList();
+          if (!arr.includes(eid)) {
+            arr.push(eid);
+            // Mirror Classic's own _plSave: write the array onto _liveData
+            // directly, not just to the backend — otherwise the re-render
+            // right after this still shows the pre-save list, since the
+            // live-data refetch has no way to know the write landed.
+            if (this._liveData && this._liveData.config) this._liveData.config.pattern_include_entities = arr;
+            await this._saveSetting("pattern_include_entities", JSON.stringify(arr));
+          }
+        } else {
+          console.warn(`Nova (new look): "${eid}" is not a known entity id`);
+        }
+      });
+    }
+    root.querySelectorAll(".new-pl-del").forEach(b => {
+      b.addEventListener("click", async () => {
+        const arr = this._plList();
+        arr.splice(parseInt(b.getAttribute("data-i"), 10), 1);
+        if (this._liveData && this._liveData.config) this._liveData.config.pattern_include_entities = arr;
+        await this._saveSetting("pattern_include_entities", JSON.stringify(arr));
+      });
+    });
+
+    const exclAdd = (addId, inpId, key, validate) => {
+      const btn = root.getElementById(addId);
+      if (!btn) return;
+      btn.addEventListener("click", async () => {
+        const inp = root.getElementById(inpId);
+        const val = inp && inp.value.trim();
+        if (!val) return;
+        if (validate && !validate(val)) return;
+        const arr = this._exclArr((this._data()?.config || {})[key]);
+        if (!arr.includes(val)) { arr.push(val); await this._exclSave(key, arr); }
+      });
+    };
+    exclAdd("newExclEntAdd", "newExclEntInput", "excluded_entities", (v) => {
+      if (this._hass && this._hass.states && this._hass.states[v]) return true;
+      console.warn(`Nova (new look): "${v}" is not a known entity id`);
+      return false;
+    });
+    exclAdd("newExclDomAdd", "newExclDomInput", "excluded_domains", null);
+    exclAdd("newExclLabAdd", "newExclLabInput", "excluded_labels", null);
+    const exclDel = (cls, key) => root.querySelectorAll("." + cls).forEach(b => {
+      b.addEventListener("click", async () => {
+        const arr = this._exclArr((this._data()?.config || {})[key]);
+        arr.splice(parseInt(b.getAttribute("data-i"), 10), 1);
+        await this._exclSave(key, arr);
+      });
+    });
+    exclDel("new-excl-ent-del", "excluded_entities");
+    exclDel("new-excl-dom-del", "excluded_domains");
+    exclDel("new-excl-lab-del", "excluded_labels");
+
+    const rateLimitInput = root.getElementById("newObserverRateLimit");
+    if (rateLimitInput) {
+      rateLimitInput.addEventListener("change", async () => {
+        let v = parseInt(rateLimitInput.value, 10);
+        if (isNaN(v) || v < 0) v = 0;
+        rateLimitInput.value = v;
+        await this._rawSaveConfig("classifier_rate_limit", v);
+        await this._fetchLiveData();
+        if (this._currentTab === "settings") this._render();
+      });
+    }
+
+    const vcTest = root.getElementById("newVcTest");
+    if (vcTest) {
+      vcTest.addEventListener("click", async () => {
+        if (!this._hass) return;
+        const out = root.getElementById("newVcTestResult");
+        vcTest.disabled = true;
+        const orig = vcTest.textContent;
+        vcTest.textContent = "▶ PLAYING…";
+        if (out) out.textContent = "Firing announce to your satellite — listen for it…";
+        try {
+          const res = await this._hass.callWS({ type: "nova/voice_confirm_test" });
+          if (out) out.innerHTML = res.ok
+            ? `<span class="diag-ok">✓</span> ${this._esc(res.note || "Announce fired.")} (${this._esc(res.satellite || "")})`
+            : `<span class="diag-down">✕</span> ${this._esc(res.note || res.error || "Test failed.")}`;
+        } catch (err) {
+          if (out) out.innerHTML = `<span class="diag-down">✕</span> ${this._esc(err?.message || String(err))}`;
+        } finally {
+          vcTest.disabled = false;
+          vcTest.textContent = orig;
+        }
+      });
+    }
+
+    const briefNow = root.getElementById("newBriefNow");
+    if (briefNow) {
+      briefNow.addEventListener("click", async () => {
+        if (!this._hass) return;
+        const cfg = this._data()?.config || {};
+        const spk = cfg.announcement_speakers;
+        const hasTargets = (Array.isArray(spk) && spk.length > 0) || !!cfg.broadcast_group;
+        if (!hasTargets) {
+          console.warn("Nova (new look): no announcement speakers set — choose them in Settings → Announcement Speakers");
+          return;
+        }
+        briefNow.disabled = true;
+        const orig = briefNow.textContent;
+        briefNow.textContent = "▶ BRIEFING…";
+        try {
+          await this._hass.callService("nova", "briefing", { announce: true });
+        } catch (err) {
+          console.error("Nova (new look): briefing failed", err);
+        } finally {
+          briefNow.disabled = false;
+          briefNow.textContent = orig;
+        }
+      });
+    }
+
+    // Diagnostics: fetch once per element lifetime (see _fetchDiagnosticsData
+    // for why this isn't on the live-data poll), then RUN CHECK re-fetches
+    // on demand and service-test buttons call the same HA services Classic's
+    // own Diagnostics card does.
+    if (!this._diagFetchedOnce) {
+      this._diagFetchedOnce = true;
+      this._fetchDiagnosticsData();
+    }
+    if (!this._hazFetchedOnce) {
+      this._hazFetchedOnce = true;
+      this._fetchHazardStatus();
+    }
+    if (!this._energyFetchedOnce) {
+      this._energyFetchedOnce = true;
+      this._fetchEnergyStatus();
+    }
+    root.querySelectorAll("#newEnergyAgency .mode-chip[data-agency]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        if (!this._hass) return;
+        const agency = btn.getAttribute("data-agency");
+        try {
+          await this._hass.callWS({ type: "nova/energy", action: "set_agency", agency });
+        } catch (err) {
+          console.error("Nova (new look): failed to set energy agency", err);
+        }
+        await this._fetchEnergyStatus();
+      });
+    });
+    const hazScan = root.getElementById("newHazScan");
+    if (hazScan) {
+      hazScan.addEventListener("click", async () => {
+        if (!this._hass) return;
+        const body = root.getElementById("newHazBody");
+        hazScan.disabled = true;
+        const orig = hazScan.textContent;
+        hazScan.textContent = "⟳ SCANNING…";
+        if (body) body.innerHTML = `<div class="stub-body">Checking USGS, NWS, and NASA EONET…</div>`;
+        try {
+          const res = await this._hass.callWS({ type: "nova/hazard", action: "scan" });
+          if (body) body.innerHTML = this._renderHazardScan(res);
+        } catch (err) {
+          if (body) body.innerHTML = `<div class="stub-body">Scan failed: ${this._esc(err?.message || String(err))}</div>`;
+        } finally {
+          hazScan.disabled = false;
+          hazScan.textContent = orig;
+        }
+      });
+    }
+    const diagRefresh = root.getElementById("newDiagRefresh");
+    if (diagRefresh) {
+      diagRefresh.addEventListener("click", () => this._fetchDiagnosticsData());
+    }
+    root.querySelectorAll(".settings-card [data-svc]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const svcAttr = btn.getAttribute("data-svc");
+        if (!svcAttr || !this._hass) return;
+        const [domain, service] = svcAttr.split(".");
+        try {
+          await this._hass.callService(domain, service, {});
+        } catch (err) {
+          console.error(`Nova (new look): service ${svcAttr} failed`, err);
+        }
+      });
+    });
+    const camRun = root.getElementById("newDiagCameraRun");
+    if (camRun) {
+      camRun.addEventListener("click", async () => {
+        const sel = root.getElementById("newDiagCameraSelect");
+        const entity_id = sel ? sel.value : "";
+        if (!entity_id || !this._hass) return;
+        try {
+          await this._hass.callService("nova", "analyze_camera", { entity_id, announce: true });
+        } catch (err) {
+          console.error("Nova (new look): camera analyze failed", err);
+        }
       });
     }
 
@@ -788,8 +1948,42 @@ class NovaCommandCenterNew extends HTMLElement {
       .stub-where{display:block;margin-top:6px;font-family:var(--font-mono);font-size:10.5px;color:var(--ink-faint)}
       .cfg-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
       .cfg-row label{font-size:12.5px;color:var(--ink-dim)}
-      select.cfg-field{background:var(--surface-2);border:1px solid var(--line-soft);color:var(--ink);
+      select.cfg-field,input.cfg-field{background:var(--surface-2);border:1px solid var(--line-soft);color:var(--ink);
         font-family:var(--font-body);font-size:12px;padding:6px 9px;border-radius:8px}
+      input.cfg-field:hover,input.cfg-field:focus,select.cfg-field:hover,select.cfg-field:focus{border-color:var(--gold);outline:none}
+      .cfg-num{width:84px;min-width:0;text-align:right}
+      .mode-grid{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+      .mode-chip{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.04em;
+        padding:6px 12px;border-radius:8px;border:1px solid var(--line-soft);background:var(--surface-2);color:var(--ink-dim);cursor:pointer}
+      .mode-chip:hover{border-color:var(--gold)}
+      .mode-chip-on{background:var(--ember);border-color:var(--ember);color:var(--gold-pale)}
+      .mode-bind-head{font-family:var(--font-mono);font-size:10.5px;color:var(--ink-faint);letter-spacing:.05em;
+        text-transform:uppercase;margin:12px 0 8px;padding-top:12px;border-top:1px solid var(--line-soft)}
+      .diag-ok{color:#5fbf7a} .diag-warn{color:var(--warn)} .diag-idle{color:var(--ink-dim)}
+      .diag-down{color:#ff6b81} .diag-off{color:var(--ink-faint)}
+      .new-model-list{display:flex;flex-direction:column;gap:10px}
+      .new-model-row{display:grid;grid-template-columns:88px 1fr 1.3fr;gap:6px;align-items:center}
+      .model-label{font-family:var(--font-mono);font-size:10px;letter-spacing:.1em;color:var(--ink-faint);text-transform:uppercase}
+      .new-model-row .new-prov-select,.new-model-row .new-model-select{width:100%;min-width:0;
+        background:var(--surface-2);border:1px solid var(--line-soft);color:var(--ink);
+        font-family:var(--font-body);font-size:11.5px;padding:6px 8px;border-radius:8px}
+      .new-model-custom{grid-column:2/4;width:100%;box-sizing:border-box;padding:6px 9px;
+        background:var(--surface-2);border:1px solid var(--line-soft);color:var(--gold);
+        font-family:var(--font-mono);font-size:11px;border-radius:8px}
+      .new-model-custom:focus{outline:none;border-color:var(--gold)}
+      .new-model-row .stub-body{grid-column:1/-1;font-size:10.5px;margin-top:2px}
+      .new-appliance-list{display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
+      .new-appliance-row{display:grid;grid-template-columns:1.1fr .9fr 1.3fr 64px 28px;gap:6px;align-items:center}
+      .new-appliance-row input,.new-appliance-row select{background:var(--surface-2);border:1px solid var(--line-soft);
+        color:var(--ink);font-family:var(--font-body);font-size:11px;padding:5px 7px;border-radius:7px;min-width:0;width:100%;box-sizing:border-box}
+      .new-appliance-row input:focus,.new-appliance-row select:focus{outline:none;border-color:var(--gold)}
+      .new-appliance-remove{flex:none;width:26px;height:26px;padding:0;font-size:11px;color:#ff8a8a;
+        border:1px solid #ff5a5a4d;background:transparent;border-radius:7px;cursor:pointer}
+      .new-appliance-remove:hover{border-color:#ff5a5a;background:#ff5a5a14}
+      .new-pl-chip{display:inline-flex;align-items:center;gap:5px;font-family:var(--font-mono);font-size:10.5px;
+        padding:5px 8px;border-radius:8px;border:1px solid var(--line-soft);background:var(--surface-2);color:var(--ink-dim)}
+      .new-pl-del,.new-excl-ent-del,.new-excl-dom-del,.new-excl-lab-del{background:none;border:none;color:var(--ink-faint);cursor:pointer;font-size:12px;padding:0}
+      .new-pl-del:hover,.new-excl-ent-del:hover,.new-excl-dom-del:hover,.new-excl-lab-del:hover{color:#ff5a5a}
       .toggle-list{display:flex;flex-direction:column;gap:2px}
       .toggle-row{display:grid;grid-template-columns:1fr auto;grid-template-rows:auto auto;gap:2px 10px;
         padding:9px 0;border-top:1px solid var(--line-soft)}
@@ -800,6 +1994,7 @@ class NovaCommandCenterNew extends HTMLElement {
         letter-spacing:.05em;padding:6px 12px;border-radius:8px;border:1px solid var(--line-soft);background:var(--surface-2);
         color:var(--ink-faint);cursor:pointer;min-width:44px}
       .toggle-btn.on{background:#5fbf7a2a;border-color:#5fbf7a70;color:#8fdba8}
+      .toggle-row select.cfg-field{grid-column:2;grid-row:1/3;align-self:center}
       .pairing-list{display:flex;flex-direction:column;gap:8px;margin-bottom:8px}
       .pairing-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
       .pairing-label{font-size:12.5px;color:var(--ink-dim)}
