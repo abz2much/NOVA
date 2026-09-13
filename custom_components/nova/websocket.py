@@ -555,6 +555,17 @@ def _all_areas_with_anything(hass: HomeAssistant) -> list[str]:
     return interesting
 
 
+def _get_all_people(hass: HomeAssistant) -> list[dict]:
+    """Every known person.* entity, home or not — for the Person Honorifics
+    card to list every household member, not just whoever's home right now
+    when the panel happens to load (v7.99.0)."""
+    try:
+        from . import honorific
+        return honorific.all_people(hass)
+    except Exception:
+        return []
+
+
 def _get_speaker_assignable_areas(hass: HomeAssistant) -> list[dict]:
     """Areas the Room Speakers card can assign a speaker to (v7.92.0) —
     every area with a satellite, a speaker, or a presence sensor, same set
@@ -801,6 +812,8 @@ async def ws_get_panel_data(
                 "room_speakers": _get_runtime_json(hass, entry, "room_speakers", {}),
                 "general_speaker": str(_runtime_opt(hass, entry, "general_speaker", "") or ""),
                 "speaker_areas": _get_speaker_assignable_areas(hass),
+                "person_honorifics": _get_runtime_json(hass, entry, "person_honorifics", {}),
+                "all_people": _get_all_people(hass),
                 "ui_style": str(_runtime_opt(hass, entry, "ui_style", "classic") or "classic"),
                 "floor_plan_rooms": _get_runtime_json(hass, entry, "floor_plan_rooms", {}),
                 "floor_plan_bg": _get_runtime_json(hass, entry, "floor_plan_bg", {}),
@@ -1339,6 +1352,8 @@ PANEL_WRITABLE_KEYS = {
     "announcement_speakers",     # JSON list of cast entity IDs for announcements
     "room_speakers",             # JSON dict: {area_id: media_player_entity_id} (v7.92.0)
     "general_speaker",           # str: fallback speaker for rooms with no assignment (v7.92.0)
+    "person_honorifics",         # JSON dict: {person_entity_id: honorific} — used only when
+                                  # that person is home alone; see honorific.py (v7.99.0)
     "ui_style",                  # str: "classic" (default) or "new" — which panel look to mount (v7.93.0)
     "floor_plan_rooms",          # JSON: floor plan room positions per floor
     "floor_plan_bg",             # JSON: base64 background images per floor
