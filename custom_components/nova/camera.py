@@ -1305,14 +1305,16 @@ async def _analyze_doorbell_press(
     notability) and logged for training. Neither pass announces on its own; the
     announcement is issued once, here, for the chosen result.
     """
-    # honorific may be "" once nobody specific is home to address (see
-    # honorific.py) — fall back to a household-level phrasing rather than an
-    # empty subject ("what would want to know").
-    who = honorific or "the household"
+    # Deliberately no honorific here: "Focus on what {honorific} would want to
+    # know" reads as a third-person subject ("Sir would want...") and the
+    # model echoed it back as one ("Sir has a visitor at the door, sir") —
+    # correct only by accident at the trailing vocative. The persona system
+    # prompt (build_system_prompt) already owns correct addressing; this task
+    # instruction just needs to stay a plain third party, never the honorific.
     prompt = (
         f"{reason}. Someone is at the door. Identify who is there and what they "
         f"are doing — appearance, clothing, whether they carry a package or wait, "
-        f"any vehicle behind them. Focus on what {who} would want to know."
+        f"any vehicle behind them. Focus on what the resident would want to know."
     )
 
     # Pass 1 — live clip (announce suppressed; we decide below)
@@ -1449,14 +1451,16 @@ async def async_auto_analyze_on_event(
         )
         return
 
-    who = honorific or "the household"
+    # No honorific in the task instruction itself — see _analyze_doorbell_press's
+    # comment for why "what {honorific} would want to know" leaks into the
+    # model's own third-person phrasing.
     call = _FakeCall({
         "entity_id": entity_id,
         "prompt": (
             f"{reason}. Describe what you see clearly. "
             f"If there is a person, describe their appearance and what they're doing. "
             f"If there is a vehicle or package, note it. "
-            f"Focus on what {who} would want to know."
+            f"Focus on what the resident would want to know."
         ),
         "announce": True,
         "frames": 3,

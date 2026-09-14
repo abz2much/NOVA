@@ -1,3 +1,7 @@
+## [7.101.7] — fix: doorbell/camera prompts echoed the honorific as a third-person subject
+
+Caught live on the first real doorbell press with the Eufy rebuild: Nova said "Sir has a visitor at the door, sir" instead of "You have a visitor, sir." Root cause was the task prompt itself — three call sites told the vision model to "Focus on what {honorific} would want to know," which primes a third-person subject ("what Sir would want") that the model then echoed back as the sentence's main clause, only correctly using the honorific as a vocative in the trailing ", sir." The persona system prompt already owns correct addressing (`build_system_prompt`); these task instructions never needed the honorific at all. Fixed in `_analyze_doorbell_press`, `async_auto_analyze_on_event`'s motion path, and the doorbell backlog scanner — all three now say "the resident" instead. Added a regression test asserting the honorific string never reappears in these task prompts.
+
 ## [7.101.6] — Camera Watch and Visitor Learning toggles ported to the new look
 
 Real parity gap Abi caught live testing the Eufy rebuild: `camera_auto_analyze` ("Camera Watch," gates doorbell/motion auto-analysis) and `visitor_learning` (silent stranger logging) only ever existed in Classic's Settings — someone on the new look had no way to turn Camera Watch on at all, meaning a doorbell press could never fire regardless of how correctly the Eufy pipeline itself was wired. Both toggles now render in the new look's Settings → Cameras card via the existing generic autosave (no new wiring needed).
