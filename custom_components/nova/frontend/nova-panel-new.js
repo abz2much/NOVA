@@ -224,7 +224,7 @@ class NovaCommandCenterNew extends HTMLElement {
 
         ${tab === "settings" ? this._htmlSettings() : tab === "logs" ? this._htmlLogs() : tab === "memory" ? this._htmlMemory() : tab === "intrusion" ? this._htmlIntrusion() : tab === "suggestions" ? this._htmlSuggestions() : tab === "residence" ? this._htmlResidence() : this._htmlDashboard()}
 
-        <div class="footnote">NOVA — NEW LOOK · PREVIEW · RESIDENCE (3D VIEW) STILL LIVES IN CLASSIC</div>
+        <div class="footnote">NOVA — NEW LOOK · PREVIEW</div>
       </div>
     `;
   }

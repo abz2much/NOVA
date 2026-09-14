@@ -1,3 +1,7 @@
+## [7.101.25] — fix: stale "Residence still lives in Classic" footnote
+
+Caught live testing 7.101.24: Command Center's footer still claimed "RESIDENCE (3D VIEW) STILL LIVES IN CLASSIC," left over from before that tab existed there. Removed the stale claim.
+
 ## [7.101.24] — Residence 3D Phase A: Command Center gets a live 3D house view
 
 Command Center ("New Look") gets a new "Residence" tab reusing Classic's `NOVA3D` isometric-projection engine directly (exported as `window.NOVA3D`) rather than re-deriving the ~1000 lines of house geometry. Home style selector, floor tabs (all/1F/2F/basement), FRONT/RIGHT/REAR/LEFT/ISO view presets with drag-to-rotate, live room lighting from area occupancy and mmWave presence, garage/door open-closed state from mapped entities, a stats panel (sqft/bed-bath/style/occupied), and door-slot → entity mapping — all built from the same `floor_plan_rooms`/`floor_plan_elements` data the Floor Plan Editor already writes, so a plan drawn in Command Center now also renders in 3D there.
