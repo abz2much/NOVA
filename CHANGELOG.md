@@ -1,3 +1,9 @@
+## [7.101.24] — Residence 3D Phase A: Command Center gets a live 3D house view
+
+Command Center ("New Look") gets a new "Residence" tab reusing Classic's `NOVA3D` isometric-projection engine directly (exported as `window.NOVA3D`) rather than re-deriving the ~1000 lines of house geometry. Home style selector, floor tabs (all/1F/2F/basement), FRONT/RIGHT/REAR/LEFT/ISO view presets with drag-to-rotate, live room lighting from area occupancy and mmWave presence, garage/door open-closed state from mapped entities, a stats panel (sqft/bed-bath/style/occupied), and door-slot → entity mapping — all built from the same `floor_plan_rooms`/`floor_plan_elements` data the Floor Plan Editor already writes, so a plan drawn in Command Center now also renders in 3D there.
+
+This is Phase A: static render, rotation, live presence/door state, and settings all work and are tested. Not yet ported: drag-to-place door/garage entities in the 3D view itself (Classic doesn't have that either — it's config-driven), and the leader-line room callouts Classic retired in 7.101.23 stay retired here too.
+
 ## [7.101.23] — fix: openings/camera rows still overflowed after 7.101.22's flex-wrap-only fix
 
 7.101.22's `flex-wrap` fix wasn't enough — Abi caught it still overflowing live. Root cause: a native `<input type="range">`/`<select>` has no intrinsic width limit, so two of them are already wider than a settings-card's column before wrapping even has a reason to trigger. Gave every control in the openings/camera rows an explicit width cap (range sliders 70px, number inputs 44px, selects capped at 110px) so the row actually has narrow-enough pieces to wrap onto multiple lines within its column.

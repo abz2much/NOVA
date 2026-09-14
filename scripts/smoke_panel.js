@@ -1424,6 +1424,71 @@ setTimeout(async () => {
     fpeCardNow.querySelectorAll(".fpn-op-marker").length === 0]);
   sRoot = elNew.shadowRoot;
 
+  // ── New look: Residence tab (v7.101.24) — reuses Classic's NOVA3D engine
+  // via window.NOVA3D rather than re-deriving the 3D geometry ──
+  hass.states["cover.test_front_door"] = { state: "closed", attributes: { friendly_name: "Front Door Cover" } };
+  const residenceTabBtn = Array.from(newRoot.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === "residence");
+  residenceTabBtn.click();
+  await new Promise(r => setTimeout(r, 20));
+  let resRoot = elNew.shadowRoot;
+  checks.push(
+    ["residence tab: nav tab switch marks it active and updates the brand tag",
+      resRoot.querySelector('.nav-tab[data-tab="residence"]')?.classList.contains("active")
+      && /Residence/.test(resRoot.querySelector(".brand-tag")?.textContent || "")],
+    ["residence tab: renders the home-style selector, floor tabs, and view-preset buttons",
+      !!resRoot.querySelector('select[data-cfg-key="residence_style"]')
+      && resRoot.querySelectorAll(".res-floor-tab").length >= 2
+      && resRoot.querySelectorAll(".res-view-btn").length === 5],
+    ["residence tab: 3D scene mount renders a real SVG from window.NOVA3D",
+      (() => { const svg = resRoot.querySelector("#resIso svg"); return !!svg && svg.outerHTML.length > 100; })()],
+    ["residence tab: stats panel shows style/occupied from live data",
+      /Cape Cod/.test(resRoot.getElementById("resStyleTag")?.textContent || "")
+      && /\//.test(resRoot.getElementById("resOcc")?.textContent || "")],
+    ["residence tab: door mapping renders one select per door slot",
+      resRoot.querySelectorAll(".door-map-sel-new").length === elNew._doorSlots().length],
+  );
+
+  await elNew._fetchMmwaveNew();
+  resRoot = elNew.shadowRoot;
+  checks.push(["residence tab: mmWave list renders live per-room presence after fetch",
+    /Kitchen/.test(resRoot.getElementById("resMmwaveList")?.textContent || "")
+    && /OCCUPIED/.test(resRoot.getElementById("resMmwaveSummary")?.textContent || "")]);
+
+  const priorSceneHtml = resRoot.getElementById("resIso")?.innerHTML || "";
+  const view90Btn = Array.from(resRoot.querySelectorAll(".res-view-btn")).find(b => b.getAttribute("data-res-theta") === "90");
+  view90Btn.click();
+  checks.push(["residence tab: clicking a view-preset button rotates the model without a full re-render",
+    elNew._house3dTheta === 90 && resRoot.getElementById("resIso")?.innerHTML !== priorSceneHtml]);
+
+  const floor1fBtn = resRoot.querySelector('.res-floor-tab[data-res-floor="1f"]');
+  floor1fBtn.click();
+  checks.push(["residence tab: switching floor tabs updates the active floor",
+    elNew._currentFloor === "1f" && floor1fBtn.classList.contains("active")]);
+
+  const doorMapSel = resRoot.querySelector('.door-map-sel-new[data-slot="front"]');
+  const priorDoorMappingSaves = _updateConfigCalls.filter(c => c.key === "door_mapping").length;
+  doorMapSel.value = "cover.test_front_door";
+  doorMapSel.dispatchEvent(new resRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["residence tab: mapping a door slot to an entity saves door_mapping",
+    _updateConfigCalls.some(c => c.key === "door_mapping" && c.value === JSON.stringify({ front: "cover.test_front_door" }))]);
+
+  const styleSel = elNew.shadowRoot.querySelector('select[data-cfg-key="residence_style"]');
+  styleSel.value = "ranch";
+  styleSel.dispatchEvent(new elNew.shadowRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["residence tab: changing home style autosaves residence_style via nova/update_config",
+    _updateConfigCalls.some(c => c.key === "residence_style" && c.value === "ranch")]);
+  checks.push(["residence tab: post-save re-render lands back on the residence tab with a live scene",
+    !!elNew.shadowRoot.getElementById("resIso")?.querySelector("svg")]);
+  delete hass.states["cover.test_front_door"];
+
+  // Back to settings for the tests that follow.
+  const backToSettingsBtn = Array.from(elNew.shadowRoot.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === "settings");
+  backToSettingsBtn.click();
+  await new Promise(r => setTimeout(r, 20));
+  sRoot = elNew.shadowRoot;
+
   // Person Honorifics: picking "Custom…" reveals the text input without saving
   // yet (nothing to save), then typing+blurring the custom input saves it.
   const rachelSel = sRoot.querySelector('select[data-person-id="person.rachel"]');
