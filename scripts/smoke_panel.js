@@ -1266,10 +1266,12 @@ setTimeout(async () => {
         return !!fpeCard && !fpeCard.querySelector(".stub-tag") && !!fpeCard.querySelector("#fpnSvg")
           && !!fpeCard.querySelector(".fpn-drag-room");
       })()],
-    ["settings tab: Floor Plan Editor bridges its not-yet-ported advanced features to Classic",
+    ["settings tab: Floor Plan Editor has no Classic bridge left — openings/cameras/property/zones are all real here now",
       (() => {
         const fpeCard = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Floor Plan Editor/.test(c.querySelector(".panel-title")?.textContent || ""));
-        return !!fpeCard && !!fpeCard.querySelector("#fpnGoClassic") && /Classic/.test(fpeCard.textContent);
+        return !!fpeCard && !fpeCard.querySelector("#fpnGoClassic")
+          && !!fpeCard.querySelector("#opAddWindow") && !!fpeCard.querySelector("#fpnCamAdd")
+          && !!fpeCard.querySelector("#fpnAddZone") && !!fpeCard.querySelector("#fpnAddProperty");
       })()],
     ["settings tab shows only the active group by default",
       Array.from(sRoot.querySelectorAll('.settings-card[data-settings-group="general"]')).every(c => !c.hidden)
@@ -1396,6 +1398,30 @@ setTimeout(async () => {
   fpeCardNow = sRoot.getElementById("settings-card-floor_plan_editor");
   checks.push(["floor plan editor: removing a camera clears its pin from the canvas",
     fpeCardNow.querySelectorAll(".fpn-cam").length === 0]);
+  sRoot = elNew.shadowRoot;
+
+  // Windows/doors/dormers (Phase 3c): add a window, see its wall marker,
+  // save it, remove it.
+  fpeCardNow = sRoot.getElementById("settings-card-floor_plan_editor");
+  fpeCardNow.querySelector("#opAddWindow").click();
+  fpeCardNow = sRoot.getElementById("settings-card-floor_plan_editor");
+  checks.push(["floor plan editor: Add Window places a wall marker with wall/position/size controls",
+    fpeCardNow.querySelectorAll(".fpn-op-marker").length === 1
+    && !!fpeCardNow.querySelector('.op-field-new[data-op="wall"]')
+    && !!fpeCardNow.querySelector('.op-field-new[data-op="pos"]')
+    && /WINDOW/.test(fpeCardNow.textContent)]);
+
+  fpeCardNow.querySelector("#fpnSave").click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["floor plan editor: Save writes floor_plan_elements",
+    _updateConfigCalls.some(c => c.key === "floor_plan_elements" && /"type":"window"/.test(c.value))]);
+
+  sRoot = elNew.shadowRoot;
+  fpeCardNow = sRoot.getElementById("settings-card-floor_plan_editor");
+  fpeCardNow.querySelector(".op-del-new").click();
+  fpeCardNow = sRoot.getElementById("settings-card-floor_plan_editor");
+  checks.push(["floor plan editor: removing an opening clears its wall marker",
+    fpeCardNow.querySelectorAll(".fpn-op-marker").length === 0]);
   sRoot = elNew.shadowRoot;
 
   // Person Honorifics: picking "Custom…" reveals the text input without saving

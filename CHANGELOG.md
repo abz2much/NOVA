@@ -1,3 +1,9 @@
+## [7.101.21] — Floor Plan Editor Phase 3c: windows/doors/dormers — Command Center now at full parity
+
+Ported Classic's window/door/dormer placement ("openings") into Command Center: same `floor_plan_elements` config, same wall-relative and room-relative positioning, same window/exterior-door/cellar-door/interior-door/cased-opening/dormer types with an open/closed sensor binding per opening. This also feeds `_planGeometry`'s wall gaps, so AI camera-coverage (Phase 3b) now correctly accounts for doorways instead of treating every wall as solid — the "same-room-only lower bound" caveat from 7.101.20 no longer applies.
+
+**Floor Plan Editor is now at full feature parity with Classic** — the "Edit advanced layout in Classic" bridge button is gone; there's nothing left to bridge. New tests cover adding/saving/removing a window. Residence 3D view is the only piece of the panel still fully Classic-only.
+
 ## [7.101.20] — Floor Plan Editor Phase 3b: cameras + AI camera-coverage in Command Center
 
 Ported Classic's camera placement and AI camera-coverage estimation into Command Center — same `floor_plan_cameras` config, same coverage geometry (`_planGeometry`/`_computeCoverage`/`_clippedCone`, wall line-of-sight via ray casting). "+ Camera" drops a pin with aim/FOV/range controls and an indoor/outdoor toggle; "Compute coverage" calls the same `nova/compute_camera_coverage` LLM-backed judgment Classic uses, showing which rooms each camera confirms and why.

@@ -3591,11 +3591,47 @@ class NovaCommandCenterNew extends HTMLElement {
     return sqFt >= 43560 ? (sqFt / 43560).toFixed(2) + " acres" : Math.round(sqFt).toLocaleString() + " sq ft";
   }
 
-  // Cameras + AI coverage (Phase 3b) — same config/geometry as Classic,
-  // simplified: window/door placement ("openings") isn't ported here yet,
-  // so wall line-of-sight has no gaps to pass through. Coverage is
-  // therefore a same-room-only lower bound — accurate away from doorways,
-  // pessimistic right at one, until openings are ported too.
+  // Windows/doors/dormers ("openings", Phase 3c) — same floor_plan_elements
+  // config and geometry as Classic. Feeds _planGeometry's wall gaps below,
+  // so AI camera-coverage now accounts for doorways instead of treating
+  // every wall as solid.
+  _getFloorElements() {
+    const raw = this._data()?.config?.floor_plan_elements;
+    let el = {};
+    try { el = typeof raw === "string" ? (raw ? JSON.parse(raw) : {}) : (raw || {}); } catch (_) { el = {}; }
+    return el || {};
+  }
+  _getEditingElements() {
+    if (this._editingElements) return this._editingElements;
+    this._editingElements = JSON.parse(JSON.stringify(this._getFloorElements()));
+    return this._editingElements;
+  }
+  _elemsFor(floor) {
+    const el = this._getEditingElements();
+    if (!Array.isArray(el[floor])) el[floor] = [];
+    return el[floor];
+  }
+  _doorEntityOptions(selected) {
+    const states = this._hass?.states || {};
+    const cands = [];
+    const OPEN_DC = ["door", "window", "garage_door", "opening"];
+    const OPEN_RE = /door|garage|gate|cellar|bulkhead|hatch|window|contact|entry|slider|sash|casement|patio|french|skylight|opening|sliding/i;
+    Object.keys(states).forEach(eid => {
+      const dom = eid.split(".")[0];
+      const at = states[eid].attributes || {};
+      const dc = at.device_class || "";
+      const fn = at.friendly_name || "";
+      const ok = dom === "cover" || dom === "lock"
+        || (dom === "binary_sensor" && (OPEN_DC.includes(dc) || OPEN_RE.test(eid) || OPEN_RE.test(fn)));
+      if (ok) cands.push(eid);
+    });
+    cands.sort();
+    if (selected && !cands.includes(selected)) cands.unshift(selected);
+    const opts = cands.map(eid => `<option value="${this._esc(eid)}"${eid === selected ? " selected" : ""}>${this._esc(this._entName(eid))}</option>`).join("");
+    return `<option value=""${selected ? "" : " selected"}>— auto-detect —</option>${opts}`;
+  }
+
+  // Cameras + AI coverage (Phase 3b) — same config/geometry as Classic.
   _getFloorCameras() {
     const raw = this._data()?.config?.floor_plan_cameras;
     let c = {};
@@ -3634,13 +3670,36 @@ class NovaCommandCenterNew extends HTMLElement {
   _planGeometry(floor) {
     const plan = this._getEditingPlan()[floor];
     const rooms = (plan && plan.rooms) || [];
-    const walls = [];
+    const walls = [], gaps = [];
     rooms.forEach(r => {
       if (r.type === "stairs" || r.type === "door" || r.type === "outdoor") return;
       const rp = this._zonePoints(r);
       for (let wi = 0; wi < rp.length; wi++) { const a = rp[wi], b = rp[(wi + 1) % rp.length]; walls.push({ x0: a[0], y0: a[1], x1: b[0], y1: b[1] }); }
     });
-    return { walls, gaps: [] };   // no ported opening data yet — see class comment above
+    let fb = null;
+    if (rooms.length) {
+      let mnx = 1e9, mny = 1e9, mxx = -1e9, mxy = -1e9;
+      rooms.forEach(r => { mnx = Math.min(mnx, r.x); mny = Math.min(mny, r.y); mxx = Math.max(mxx, r.x + r.w); mxy = Math.max(mxy, r.y + r.h); });
+      fb = { x0: mnx, y0: mny, x1: mxx, y1: mxy };
+    }
+    (this._elemsFor(floor) || []).forEach(e => {
+      if (e.type !== "door" && e.type !== "window") return;
+      const ow = e.w || 20;
+      let bb = fb;
+      if ((e.kind === "interior" || e.kind === "cased") && e.room) {
+        const rr = rooms.filter(r => r.name === e.room)[0];
+        if (rr) bb = { x0: rr.x, y0: rr.y, x1: rr.x + rr.w, y1: rr.y + rr.h };
+      }
+      if (!bb) return;
+      const p = e.pos != null ? e.pos : 0.5;
+      let gx0, gy0, gx1, gy1;
+      if (e.wall === "front") { const c = bb.x0 + p * (bb.x1 - bb.x0); gx0 = c - ow / 2; gx1 = c + ow / 2; gy0 = gy1 = bb.y0; }
+      else if (e.wall === "back") { const c = bb.x0 + p * (bb.x1 - bb.x0); gx0 = c - ow / 2; gx1 = c + ow / 2; gy0 = gy1 = bb.y1; }
+      else if (e.wall === "left") { const c = bb.y0 + p * (bb.y1 - bb.y0); gy0 = c - ow / 2; gy1 = c + ow / 2; gx0 = gx1 = bb.x0; }
+      else { const c = bb.y0 + p * (bb.y1 - bb.y0); gy0 = c - ow / 2; gy1 = c + ow / 2; gx0 = gx1 = bb.x1; }
+      gaps.push({ x0: gx0, y0: gy0, x1: gx1, y1: gy1 });
+    });
+    return { walls, gaps };
   }
   _inGap(x, y, gaps) {
     const tol = 2.5;
@@ -3752,8 +3811,12 @@ class NovaCommandCenterNew extends HTMLElement {
     return best || "the area";
   }
   _openingDescriptions(floor) {
-    // No ported window/door placement here yet — only the stairs signal survives.
     const out = [];
+    (this._elemsFor(floor) || []).forEach(e => {
+      if (e.type === "door" && (e.kind === "cased" || e.kind === "interior") && e.room) {
+        out.push((e.kind === "cased" ? "cased opening at " : "interior door at ") + e.room);
+      }
+    });
     const rooms = ((this._getEditingPlan()[floor] || {}).rooms) || [];
     if (rooms.some(r => r.type === "stairs")) out.push("open staircase");
     return out;
@@ -3779,14 +3842,12 @@ class NovaCommandCenterNew extends HTMLElement {
       </div>
       <div class="fpn-hint">Drag to move · bottom-right handle to resize · right-click to delete · double-click an edge to add a corner · scroll to zoom · drag empty space to pan</div>
       <div class="fpn-canvas" id="fpnCanvas">${this._renderFloorPlanSVG(plan, floor)}</div>
+      ${this._renderOpeningsNew(floor)}
       ${this._renderCamerasNew(floor)}
       ${this._renderPlanEntitiesNew(floor)}
       <div class="fpn-actions">
         <button class="mode-chip" id="fpnSave">Save Layout</button>
         <button class="mode-chip" id="fpnReset">Reset Default</button>
-      </div>
-      <div class="camera-note">Window/door placement isn't ported here yet, so camera coverage doesn't account for doorway gaps — it reads as a floor, not exact, until that's ported too.
-        <button class="mode-chip" id="fpnGoClassic">Edit advanced layout in Classic</button>
       </div>`;
   }
 
@@ -3823,6 +3884,42 @@ class NovaCommandCenterNew extends HTMLElement {
         <input id="fpnBgOp" type="range" min="0" max="1" step="0.05" value="${op}">
         <span id="fpnBgOpVal">${Math.round(op * 100)}%</span>
       </div>`;
+  }
+
+  _renderOpeningsNew(floor) {
+    const els = this._elemsFor(floor), uL = this._fpUnitLabel();
+    const rooms = ((this._getEditingPlan()[floor] || {}).rooms) || [];
+    const walls = [["front", "Front"], ["back", "Back"], ["left", "Left"], ["right", "Right"]];
+    const wsel = (e, i) => `<select class="op-field-new" data-op="wall" data-i="${i}">${walls.map(w => `<option value="${w[0]}"${e.wall === w[0] ? " selected" : ""}>${w[1]}</option>`).join("")}</select>`;
+    const rsel = (e, i) => `<select class="op-field-new" data-op="room" data-i="${i}"><option value="">— room —</option>${rooms.filter(r => r.type !== "outdoor").map(r => `<option value="${this._esc(r.name)}"${e.room === r.name ? " selected" : ""}>${this._esc(r.name)}</option>`).join("")}</select>`;
+    const rows = els.map((e, i) => {
+      const isD = e.type === "dormer";
+      const t = isD ? (e.slope === "rear" ? "REAR DORMER" : "FRONT DORMER") : (e.type === "window" ? "WINDOW" : (e.kind === "interior" ? "INT DOOR" : (e.kind === "cellar" ? "CELLAR" : (e.kind === "cased" ? "CASED OPENING" : "EXT DOOR"))));
+      const place = isD
+        ? `<select class="op-field-new" data-op="slope" data-i="${i}"><option value="front"${e.slope !== "rear" ? " selected" : ""}>Front slope</option><option value="rear"${e.slope === "rear" ? " selected" : ""}>Rear slope</option></select>`
+        : ((e.kind === "interior" || e.kind === "cased") ? (rsel(e, i) + " " + wsel(e, i)) : wsel(e, i));
+      return `
+        <div class="cfg-row op-row-new" data-i="${i}">
+          <span class="new-pl-chip">${t}</span>
+          ${place}
+          <input class="op-field-new" data-op="pos" data-i="${i}" type="range" min="0" max="1" step="0.02" value="${e.pos != null ? e.pos : 0.5}" title="position along the wall">
+          ${isD ? "" : `<input class="op-field-new op-num-new" data-op="w" data-i="${i}" type="number" min="1" step="0.5" value="${this._fpToReal(e.w || 20)}" style="width:56px"> ${uL}`}
+          ${e.kind === "cased" ? `<span class="toggle-desc">open passage · no sensor</span>` : `<select class="op-field-new op-ent-new" data-op="entity" data-i="${i}">${this._doorEntityOptions(e.entity || "")}</select>`}
+          <button class="fpn-ent-del op-del-new" data-i="${i}" title="Remove">×</button>
+        </div>`;
+    }).join("");
+    const dBtns = floor === "2f" ? `<button class="mode-chip" id="opAddFdormer">+ Front Dormer</button><button class="mode-chip" id="opAddRdormer">+ Rear Dormer</button>` : "";
+    return `
+      <div class="mode-bind-head">Windows, doors &amp; dormers <span class="toggle-desc">interior doors &amp; cased openings attach to a room · a cased opening is a doorway with no door · dormers on the 2nd floor</span></div>
+      <div class="cfg-row">
+        <button class="mode-chip" id="opAddWindow">+ Window</button>
+        <button class="mode-chip" id="opAddExtdoor">+ Exterior Door</button>
+        <button class="mode-chip" id="opAddCellar">+ Cellar Door</button>
+        <button class="mode-chip" id="opAddIntdoor">+ Interior Door</button>
+        <button class="mode-chip" id="opAddCased">+ Cased Opening</button>
+        ${dBtns}
+      </div>
+      ${rows || `<div class="toggle-desc">No openings placed on this floor yet — add one above.</div>`}`;
   }
 
   _renderCamerasNew(floor) {
@@ -3926,6 +4023,34 @@ class NovaCommandCenterNew extends HTMLElement {
     }
     for (const lbl of (floorData.labels || [])) {
       svg += `<text x="${lbl.x}" y="${lbl.y}" text-anchor="middle" fill="var(--ink-faint)" font-size="4" font-family="var(--font-mono)">${this._esc(lbl.text)}</text>`;
+    }
+
+    // Placed openings as wall markers.
+    const els = this._elemsFor(floor) || [];
+    if (els.length && floorData.rooms && floorData.rooms.length) {
+      let mnx = 1e9, mny = 1e9, mxx = -1e9, mxy = -1e9;
+      floorData.rooms.forEach(r => { if (r.type === "outdoor") return; mnx = Math.min(mnx, r.x); mny = Math.min(mny, r.y); mxx = Math.max(mxx, r.x + r.w); mxy = Math.max(mxy, r.y + r.h); });
+      els.forEach((e, i) => {
+        if (e.type === "dormer") {
+          const dp = e.pos != null ? e.pos : 0.5, dcx = mnx + dp * (mxx - mnx), dcy = e.slope === "rear" ? mxy : mny;
+          svg += `<rect class="fpn-op-marker" data-op-marker="${i}" x="${dcx - 4}" y="${dcy - 3}" width="8" height="6" fill="#b06aff" opacity="0.9" rx="1.5" pointer-events="none"/>`;
+          return;
+        }
+        const w = e.w || 20, p = e.pos != null ? e.pos : 0.5, horiz = (e.wall === "front" || e.wall === "back");
+        let bx0 = mnx, by0 = mny, bx1 = mxx, by1 = mxy;
+        if ((e.kind === "interior" || e.kind === "cased") && e.room) {
+          const rr = floorData.rooms.filter(r => r.name === e.room)[0];
+          if (rr) { bx0 = rr.x; by0 = rr.y; bx1 = rr.x + rr.w; by1 = rr.y + rr.h; }
+        }
+        let cx, cy;
+        if (e.wall === "front") { cx = bx0 + p * (bx1 - bx0); cy = by0; }
+        else if (e.wall === "back") { cx = bx0 + p * (bx1 - bx0); cy = by1; }
+        else if (e.wall === "left") { cx = bx0; cy = by0 + p * (by1 - by0); }
+        else { cx = bx1; cy = by0 + p * (by1 - by0); }
+        const col = e.type === "window" ? "var(--gold)" : (e.kind === "interior" ? "#5a7a8a" : (e.kind === "cellar" ? "#c98a2a" : (e.kind === "cased" ? "#78b9d7" : "var(--warn)")));
+        const ex = horiz ? cx - w / 2 : cx - 2, ey = horiz ? cy - 2 : cy - w / 2, ew = horiz ? w : 4, eh = horiz ? 4 : w;
+        svg += `<rect class="fpn-op-marker" data-op-marker="${i}" x="${ex}" y="${ey}" width="${ew}" height="${eh}" fill="${col}" opacity="0.9" rx="1" pointer-events="none"/>`;
+      });
     }
 
     // Cameras — icon + FOV cone, clipped to walls.
@@ -4043,6 +4168,56 @@ class NovaCommandCenterNew extends HTMLElement {
       this._rerenderFloorPlanCard();
     });
 
+    const addElem = (type, kind) => {
+      const floor = this._editorFloor;
+      this._elemsFor(floor).push({ id: "e" + Date.now().toString(36), type, kind, wall: "front", pos: 0.5, w: 20, entity: "" });
+      this._rerenderFloorPlanCard();
+    };
+    const opAddWindow = root.getElementById("opAddWindow"); if (opAddWindow) opAddWindow.addEventListener("click", () => addElem("window", null));
+    const opAddExtdoor = root.getElementById("opAddExtdoor"); if (opAddExtdoor) opAddExtdoor.addEventListener("click", () => addElem("door", "exterior"));
+    const opAddCellar = root.getElementById("opAddCellar"); if (opAddCellar) opAddCellar.addEventListener("click", () => addElem("door", "cellar"));
+    const opAddIntdoor = root.getElementById("opAddIntdoor"); if (opAddIntdoor) opAddIntdoor.addEventListener("click", () => addElem("door", "interior"));
+    const opAddCased = root.getElementById("opAddCased"); if (opAddCased) opAddCased.addEventListener("click", () => addElem("door", "cased"));
+    const opAddFdormer = root.getElementById("opAddFdormer");
+    if (opAddFdormer) opAddFdormer.addEventListener("click", () => {
+      this._elemsFor(this._editorFloor).push({ id: "e" + Date.now().toString(36), type: "dormer", slope: "front", pos: 0.5, entity: "" });
+      this._rerenderFloorPlanCard();
+    });
+    const opAddRdormer = root.getElementById("opAddRdormer");
+    if (opAddRdormer) opAddRdormer.addEventListener("click", () => {
+      this._elemsFor(this._editorFloor).push({ id: "e" + Date.now().toString(36), type: "dormer", slope: "rear", pos: 0.5, entity: "" });
+      this._rerenderFloorPlanCard();
+    });
+    root.querySelectorAll(".op-field-new").forEach(f => {
+      f.addEventListener("change", () => {
+        const arr = this._elemsFor(this._editorFloor), e = arr[parseInt(f.getAttribute("data-i"))];
+        if (!e) return;
+        const op = f.getAttribute("data-op");
+        if (op === "w") e.w = this._fpFromReal(parseFloat(f.value) || 4);
+        else if (op === "pos") e.pos = parseFloat(f.value);
+        else e[op] = f.value;
+        this._rerenderFloorPlanCard();
+      });
+    });
+    root.querySelectorAll(".op-del-new").forEach(b => b.addEventListener("click", () => {
+      this._elemsFor(this._editorFloor).splice(parseInt(b.getAttribute("data-i")), 1);
+      this._rerenderFloorPlanCard();
+    }));
+    const glowMarker = (i, on) => {
+      const m = root.querySelector(`.fpn-op-marker[data-op-marker="${i}"]`);
+      if (m) m.classList.toggle("op-glow", on);
+    };
+    root.querySelectorAll(".op-row-new").forEach(row => {
+      const i = row.getAttribute("data-i");
+      row.addEventListener("mouseenter", () => glowMarker(i, true));
+      row.addEventListener("mouseleave", () => glowMarker(i, false));
+      const ent = row.querySelector(".op-ent-new");
+      if (ent) {
+        ent.addEventListener("focus", () => glowMarker(i, true));
+        ent.addEventListener("blur", () => glowMarker(i, false));
+      }
+    });
+
     const camAdd = root.getElementById("fpnCamAdd");
     if (camAdd) camAdd.addEventListener("click", () => {
       const floor = this._editorFloor;
@@ -4100,23 +4275,26 @@ class NovaCommandCenterNew extends HTMLElement {
     const save = root.getElementById("fpnSave");
     if (save) save.addEventListener("click", async () => {
       const hasProperty = this._editingProperty !== null && this._editingProperty !== undefined;
-      if (!this._editingPlan && !this._editingEntities && !this._editingCameras && !hasProperty) return;
+      if (!this._editingPlan && !this._editingEntities && !this._editingCameras && !this._editingElements && !hasProperty) return;
       const savedPlan = this._editingPlan, savedEnts = this._editingEntities,
-        savedCams = this._editingCameras, savedProp = this._editingProperty;
+        savedCams = this._editingCameras, savedEls = this._editingElements, savedProp = this._editingProperty;
       try {
         if (savedPlan) await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_rooms", value: JSON.stringify(savedPlan) });
         if (savedEnts) await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_entities", value: JSON.stringify(savedEnts) });
         if (savedCams) await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_cameras", value: JSON.stringify(savedCams) });
+        if (savedEls) await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_elements", value: JSON.stringify(savedEls) });
         if (hasProperty) await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_property", value: JSON.stringify({ points: savedProp }) });
         if (this._liveData?.config) {
           if (savedPlan) this._liveData.config.floor_plan_rooms = savedPlan;
           if (savedEnts) this._liveData.config.floor_plan_entities = savedEnts;
           if (savedCams) this._liveData.config.floor_plan_cameras = savedCams;
+          if (savedEls) this._liveData.config.floor_plan_elements = savedEls;
           if (hasProperty) this._liveData.config.floor_plan_property = { points: savedProp };
         }
         this._editingPlan = null;
         this._editingEntities = null;
         this._editingCameras = null;
+        this._editingElements = null;
         this._editingProperty = null;
       } catch (err) { console.error("Nova (new look): floor plan save failed", err); }
     });
@@ -4170,9 +4348,6 @@ class NovaCommandCenterNew extends HTMLElement {
         } catch (err) { console.error("Nova (new look): floor plan bg opacity save failed", err); }
       });
     }
-
-    const goClassic = root.getElementById("fpnGoClassic");
-    if (goClassic) goClassic.addEventListener("click", () => this._saveSetting("ui_style", "classic"));
 
     this._wireFloorPlanDrag();
   }
@@ -4684,6 +4859,7 @@ class NovaCommandCenterNew extends HTMLElement {
       .fpn-hint{font-size:10px;color:var(--ink-faint);font-family:var(--font-mono);letter-spacing:0.04em;margin-bottom:6px}
       .fpn-canvas{min-height:520px;margin-bottom:10px}
       .fpn-actions{margin-top:4px}
+      .fpn-op-marker.op-glow{opacity:1;stroke:var(--ink);stroke-width:2.5;filter:drop-shadow(0 0 6px var(--gold-pale))}
     `;
   }
 }
