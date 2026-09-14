@@ -1072,7 +1072,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v7.101.31
+ * v7.101.32
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1137,7 +1137,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v7.101.31 ",
+      console.log("%c Nova Panel %c v7.101.32 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -6174,7 +6174,7 @@ class NovaPanel extends HTMLElement {
       .wrap{background:var(--bg);color:var(--ink);font-family:var(--font-body);
         padding:20px 16px 40px;min-height:100vh;
         background-image:radial-gradient(ellipse 900px 500px at 50% -8%, #2a1c1180 0%, transparent 60%);}
-      .topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:22px;flex-wrap:wrap;max-width:1100px;margin-inline:auto}
+      .topbar{display:flex;align-items:center;justify-content:flex-start;gap:24px;margin-bottom:22px;flex-wrap:wrap;max-width:1100px;margin-inline:auto}
       .brand{display:flex;align-items:center;gap:11px}
       .brand-mark{width:26px;height:26px;border-radius:50%;flex:none;
         background:radial-gradient(circle at 34% 30%, var(--gold-pale), var(--gold) 42%, var(--ember) 78%, #7a2513 100%);

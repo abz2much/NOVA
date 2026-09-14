@@ -1,3 +1,7 @@
+## [7.101.32] — fix: header layout broke when the Look selector was removed
+
+Caught live by Abi right after updating: the top bar looked "off" — the nav moved and the logo read as smaller. Real cause: `.topbar` used `justify-content:space-between` across three children (brand, nav, the "Look" selector); deleting the selector's wrapper div in 7.101.30 left only two children, which `space-between` then stretched to opposite edges of the 1100px-wide bar instead of grouping them together like before. Changed to `justify-content:flex-start` with an explicit gap so brand and nav sit together on the left again. Verified visually (rendered the actual component and screenshotted it) before shipping, not just reasoned about the CSS.
+
 ## [7.101.31] — Floor Plan Editor: JSON export/import ported to Command Center
 
 The one capability flagged as lost in 7.101.30's Classic deletion — a manual backup/restore of a floor plan layout as a JSON file — is now in Command Center too: an Export button downloads the current layout, an Import button loads one back in for review before Save. Ported straight from Classic's own implementation (same JSON shape, same "review then Save to apply" flow).
