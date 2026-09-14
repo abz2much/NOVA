@@ -1738,12 +1738,22 @@ class NovaCommandCenterNew extends HTMLElement {
       ? `<div class="mode-bind-head">Running now</div>` + running.map(r =>
           `<div class="cfg-row"><label>${this._esc(r.name || r.entity)}</label><span class="${r.shed_ok ? "" : "diag-warn"}">${r.watts} W${r.shed_ok ? "" : " · protected"}</span></div>`).join("")
       : "";
+    const cfg = this._data()?.config || {};
     return `
       <div class="stub-body">Whole-home power, peak awareness, and load advice. Pick how much Nova may act — it never sheds critical loads (fridge, medical, network).</div>
       <div class="cfg-row"><label>Current draw</label>${draw}</div>
       <div class="mode-grid" id="newEnergyAgency">${agencyChips}</div>
       ${advice}
-      ${runRows}`;
+      ${runRows}
+      <div class="stub-body">Daily solar report cost (optional): if you already track exact electricity cost, point Nova at your own sensor instead of its price × kWh estimate.</div>
+      <div class="cfg-row">
+        <label>Cost today entity</label>
+        <input class="cfg-field" type="text" data-cfg-key="energy_cost_today_entity" value="${this._esc(cfg.energy_cost_today_entity || "")}" placeholder="sensor.electricity_cost_today">
+      </div>
+      <div class="cfg-row">
+        <label>Net cost today entity (optional)</label>
+        <input class="cfg-field" type="text" data-cfg-key="energy_cost_net_entity" value="${this._esc(cfg.energy_cost_net_entity || "")}" placeholder="sensor.net_electricity_cost_today">
+      </div>`;
   }
 
   // Appliances — batch-edit-then-save, like Classic (see nova-panel.js's own

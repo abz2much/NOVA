@@ -1588,6 +1588,13 @@ setTimeout(async () => {
   sRoot = elNew.shadowRoot;
   checks.push(["settings tab: Energy Management agency change reflects live via nova/energy",
     sRoot.querySelector('.mode-chip[data-agency="autonomous"]')?.classList.contains("mode-chip-on")]);
+  const costEntityInput = sRoot.querySelector('input[data-cfg-key="energy_cost_today_entity"]');
+  costEntityInput.value = "sensor.electricity_cost_today";
+  costEntityInput.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: Energy Management cost-entity field autosaves via the generic cfg-field handler",
+    _updateConfigCalls.some(c => c.key === "energy_cost_today_entity" && c.value === "sensor.electricity_cost_today")]);
+  sRoot = elNew.shadowRoot;
 
   // Appliances: batch-edit-then-save, like Classic and AI Models — add a
   // row, fill it in, Save persists the WHOLE list as one JSON array plus a

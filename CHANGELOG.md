@@ -1,3 +1,7 @@
+## [7.101.17] — fix: energy cost-entity fields missing from New Look
+
+7.101.15 added the cost-entity settings fields to Classic's Energy Management card only — missed New Look's own copy of that card entirely, so anyone using New Look (the intended eventual default) had no way to set them at all. Added the same two fields there, using the existing generic `cfg-field` autosave, no new wiring needed.
+
 ## [7.101.16] — Floor Plan Editor ported to Command Center (Phase 1: rooms)
 
 New Look's Floor Plan Editor card was a stub since V1 ("a full SVG drag-and-drop editor... not a smaller lift than the rest of this list"). Phase 1 replaces the stub with a real, working editor: floor tabs, drag-to-move, resize handle, add/remove room, save/reset, pan/zoom — same `floor_plan_rooms` config Classic uses, same working-copy pattern, ported straight from Classic's `_renderFloorPlanEditor`/`_wireFloorPlanDrag` rather than reimagined. Property-line boundary, outdoor zones, camera placement, and the AI camera-coverage feature stay Classic-only for now — the card links straight to Classic ("Edit advanced layout") for those, so nothing is lost, just not yet ported (a separate, larger piece of work — see the plan in the project notes). New tests cover floor switching, add-room, save, and the units toggle; drag/resize itself needs a live browser to verify (jsdom has no `createSVGPoint`/`getScreenCTM`), same as Classic's identical code was never jsdom-tested either.
