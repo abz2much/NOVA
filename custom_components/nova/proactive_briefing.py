@@ -114,6 +114,12 @@ class _ProactiveState:
     last_briefing_time: float = 0.0
     last_arrival_briefing: float = 0.0
     running: bool = False
+    # Presence (GPS/zone) says someone's home, but the welcome briefing waits
+    # for the configured front door to actually open (v7.101.9) — otherwise
+    # it fires while they're still in the driveway/car, before they've
+    # actually walked in. Cleared on a matching door-open or once stale.
+    pending_arrival_person: str = ""
+    pending_arrival_ts: float = 0.0
 
 _STATE = _ProactiveState()
 
@@ -121,6 +127,7 @@ _STATE = _ProactiveState()
 BRIEFING_COOLDOWN = 30
 ARRIVAL_COOLDOWN = 60  # Don't re-brief on every presence toggle
 SECURITY_THRESHOLD = 3  # events in 30 min to trigger security briefing
+ARRIVAL_DOOR_WINDOW_S = 600  # give up waiting for the door after 10 min
 
 
 # ── Arrival detection ───────────────────────────────────────────────────────
@@ -137,6 +144,17 @@ def _anyone_home(hass) -> bool:
     return False
 
 
+def _configured_front_door() -> str:
+    """The binary_sensor gating the arrival-briefing trigger, or "" if unset
+    (Settings -> General -> Arrival). Unset means stay silent on arrival
+    entirely — see the person-arrived branch below."""
+    try:
+        from . import nova_config
+        return str(nova_config.get("arrival_front_door_entity", "") or "")
+    except Exception:
+        return ""
+
+
 @callback
 def _on_state_changed(event: Event) -> None:
     """Watch for person arrivals and security event accumulation."""
@@ -149,22 +167,53 @@ def _on_state_changed(event: Event) -> None:
     if not new_state:
         return
 
-    # ── Person arrived home ─────────────────────────────────────────
+    # ── Person arrived home (GPS/zone) ───────────────────────────────
+    # This only marks a PENDING arrival (v7.101.9) — GPS/zone presence can
+    # flip to "home" while someone's still in the driveway or car, well
+    # before they've actually walked in. The welcome briefing itself fires
+    # below, once the configured front door actually opens. No front door
+    # configured means no way to know when they're actually inside, so stay
+    # silent entirely rather than fall back to the old premature trigger.
     if entity_id.startswith("person."):
         old_val = old_state.state if old_state else "unknown"
         new_val = new_state.state
         if old_val != "home" and new_val == "home":
-            now = time.time()
-            if (now - _STATE.last_arrival_briefing) > ARRIVAL_COOLDOWN * 60:
-                _STATE.last_arrival_briefing = now
-                person_name = new_state.attributes.get(
-                    "friendly_name", entity_id.split(".")[-1].title()
-                )
-                _LOGGER.info("Proactive: %s arrived home — triggering welcome briefing", person_name)
-                _STATE.hass.async_create_task(
-                    _trigger_briefing("arrival", person_name=person_name)
-                )
-            return
+            door_entity = _configured_front_door()
+            if not door_entity:
+                return
+            _STATE.pending_arrival_person = new_state.attributes.get(
+                "friendly_name", entity_id.split(".")[-1].title()
+            )
+            _STATE.pending_arrival_ts = time.time()
+            _LOGGER.info(
+                "Proactive: %s is home (presence) — waiting for %s to open before announcing",
+                _STATE.pending_arrival_person, door_entity,
+            )
+        return
+
+    # ── Configured front door opened: consume a pending arrival ──────
+    door_entity = _configured_front_door()
+    if door_entity and entity_id == door_entity and new_state.state == "on":
+        if _STATE.pending_arrival_person:
+            person_name = _STATE.pending_arrival_person
+            fresh = (time.time() - _STATE.pending_arrival_ts) <= ARRIVAL_DOOR_WINDOW_S
+            _STATE.pending_arrival_person = ""
+            if fresh:
+                now = time.time()
+                if (now - _STATE.last_arrival_briefing) > ARRIVAL_COOLDOWN * 60:
+                    _STATE.last_arrival_briefing = now
+                    _LOGGER.info(
+                        "Proactive: %s opened the front door — triggering welcome briefing",
+                        person_name,
+                    )
+                    _STATE.hass.async_create_task(
+                        _trigger_briefing("arrival", person_name=person_name)
+                    )
+            # else: stale (>10 min since presence flipped home) — drop it
+            # silently rather than announce a late/wrong-context arrival.
+        # No pending arrival — an ordinary door open with someone already
+        # home; fall through to the security-accumulation check below (it
+        # already no-ops whenever anyone_home is true).
 
     # ── Security event accumulation ─────────────────────────────────
     # Watch for doors opening, locks unlocking, motion at unusual times

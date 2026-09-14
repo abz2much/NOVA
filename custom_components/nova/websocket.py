@@ -818,6 +818,7 @@ async def ws_get_panel_data(
                 "floor_plan_rooms": _get_runtime_json(hass, entry, "floor_plan_rooms", {}),
                 "floor_plan_bg": _get_runtime_json(hass, entry, "floor_plan_bg", {}),
                 "door_mapping": _get_runtime_json(hass, entry, "door_mapping", {}),
+                "arrival_front_door_entity": str(_runtime_opt(hass, entry, "arrival_front_door_entity", "") or ""),
                 # AI model selection (provider + model per role) — for the
                 # Settings "AI Models" section's live-fetched dropdowns.
                 "llm_provider":        str(_runtime_opt(hass, entry, "llm_provider", "groq") or "groq"),
@@ -1382,6 +1383,7 @@ PANEL_WRITABLE_KEYS = {
     "home_bedrooms",             # int: bedroom count (Residence stats)
     "home_bathrooms",            # int: bathroom count (Residence stats)
     "door_mapping",              # JSON: {model door slot -> entity_id}
+    "arrival_front_door_entity", # str: binary_sensor gating the arrival-briefing trigger
     # Outdoor classification (feeds the intrusion false-alarm guards)
     "outdoor_areas",             # JSON list: extra area names treated as outdoor
     "outdoor_entities",          # JSON list: entity globs forced outdoor

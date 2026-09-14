@@ -1541,6 +1541,12 @@ class NovaCommandCenterNew extends HTMLElement {
         ${feedChip("briefing_include_energy", "Energy")}
         ${feedChip("briefing_include_hazards", "Hazards")}
       </div>
+      <div class="mode-bind-head">Arrival</div>
+      <div class="stub-body">A welcome briefing fires when someone gets home — but only once this door actually opens, not the moment their phone shows them nearby (still in the driveway or car). Leave unset to keep arrival briefings off entirely.</div>
+      <div class="cfg-row">
+        <label>Front door</label>
+        <select class="cfg-field" data-cfg-key="arrival_front_door_entity">${this._optSelect(this._frontDoorOptions(cfg.arrival_front_door_entity || ""), cfg.arrival_front_door_entity || "")}</select>
+      </div>
       <div class="cfg-row"><button class="mode-chip" id="newBriefNow">▶ BRIEF ME NOW</button></div>`;
   }
 
@@ -1865,6 +1871,19 @@ class NovaCommandCenterNew extends HTMLElement {
     const cands = Object.keys(states).filter(eid => { const dom = eid.split(".")[0]; return dom === "person" || dom === "device_tracker"; }).sort();
     if (selected && !cands.includes(selected)) cands.unshift(selected);
     return [["", "— none —"], ...cands.map(eid => [eid, this._entName(eid)])];
+  }
+
+  _frontDoorOptions(selected) {
+    const states = this._hass?.states || {};
+    const OPEN_DC = ["door", "garage_door", "opening"];
+    const OPEN_RE = /door|entry|front|contact/i;
+    const cands = Object.keys(states).filter(eid => {
+      if (eid.split(".")[0] !== "binary_sensor") return false;
+      const a = states[eid].attributes || {};
+      return OPEN_DC.includes(a.device_class || "") || OPEN_RE.test(eid) || OPEN_RE.test(a.friendly_name || "");
+    }).sort();
+    if (selected && !cands.includes(selected)) cands.unshift(selected);
+    return [["", "— none (arrival briefing stays off) —"], ...cands.map(eid => [eid, this._entName(eid)])];
   }
 
   _travelSensorOptions(selected) {

@@ -1392,6 +1392,21 @@ setTimeout(async () => {
     _updateConfigCalls.some(c => c.key === "briefing_include_weather" && c.value === false)]);
   sRoot = elNew.shadowRoot;
 
+  // Arrival front-door picker (v7.101.9) -- gates the welcome briefing on the
+  // door actually opening, not just GPS/zone presence. Same convention as
+  // Classic's own "openings entity list includes window sensors" check:
+  // inject a fixture entity, verify the pure options-builder picks it up.
+  checks.push(["settings tab: Briefings card has the arrival front-door picker",
+    !!sRoot.querySelector('select[data-cfg-key="arrival_front_door_entity"]')]);
+  checks.push(["settings tab: arrival front-door picker lists door-like binary_sensors",
+    (() => {
+      const st = elNew._hass.states;
+      st["binary_sensor.test_entry_front_door"] = { state: "off", attributes: { device_class: "door", friendly_name: "Front Door" } };
+      const html = elNew._frontDoorOptions("");
+      delete st["binary_sensor.test_entry_front_door"];
+      return html.some(([eid]) => eid === "binary_sensor.test_entry_front_door");
+    })()]);
+
   // Voice Confirmation: real card, mode select + test button call the same
   // nova/voice_confirm_test contract Classic's own test button uses.
   checks.push(
