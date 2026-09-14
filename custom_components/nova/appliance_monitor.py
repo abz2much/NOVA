@@ -249,6 +249,7 @@ class _NativeAppliance:
     trigger_states: frozenset  # State values (lowercase) that mean "done"
     last_state: str = ""
     announced: bool = False
+    seeded: bool = False       # True once a real post-startup transition has been seen
 
 
 # Native status patterns: (keyword_in_entity, {done-state values, lowercased}, type)
@@ -762,7 +763,22 @@ def _on_state_changed(event: Event) -> None:
         new_l = (new_state.state or "").lower()
         native.last_state = new_l
 
-        if (new_l in native.trigger_states
+        # The first state_changed event a native appliance receives after the
+        # monitor starts isn't a real transition — `old_l` only ever came from
+        # a startup-time hass.states.get() snapshot, which can itself be a
+        # retained "finish" from hours before the restart (if the device
+        # hadn't reported yet at discovery time, it's "unavailable"/"unknown"
+        # instead, but either way it's not evidence of a fresh completion).
+        # Treating it as one is what caused "dishwasher finished" on every
+        # restart. Absorb it silently, just seeding `announced` so a later
+        # REAL completion still fires normally.
+        first_event = not native.seeded
+        native.seeded = True
+
+        if first_event:
+            if new_l in native.trigger_states:
+                native.announced = True
+        elif (new_l in native.trigger_states
                 and old_l not in native.trigger_states
                 and not native.announced):
             native.announced = True

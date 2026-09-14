@@ -1,3 +1,7 @@
+## [7.101.28] — fix: appliance monitor announced completion on every HA restart
+
+Reported live: "every time we restart Nova keeps saying the dishwasher has finished once it comes back on." A native appliance's `last_state` is seeded from whatever `hass.states.get()` returns when the monitor starts — if the device hadn't reported yet that's "unavailable"/"unknown", but even a normally-restored value could be a "finish" retained from hours before the restart. Either way, the first real `state_changed` event afterward isn't evidence of a fresh completion, but the old→trigger-state transition check treated it as one every time. The first post-startup event is now absorbed silently (seeding `announced` so a later real cycle still fires normally). Added regression tests covering the false-positive path and confirming genuine completions still announce.
+
 ## [7.101.27] — Residence 3D: scroll-to-zoom, corrected living room window placement
 
 Caught live: the Residence 3D scene only supported drag-to-rotate, so trying to zoom in for a closer look just spun the house instead. Added scroll-to-zoom (mouse wheel), matching the Floor Plan Editor's own zoom convention — clamped 0.5x–4x, centered on the current view. Also moved the living room's two windows from the side wall to the front wall (street-facing, alongside the front door), correcting an earlier placement guess.
