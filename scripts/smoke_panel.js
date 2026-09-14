@@ -17,7 +17,7 @@ const COMPONENT = path.resolve(__dirname, "..", "custom_components", "nova", "fr
 const dom = new JSDOM("<!DOCTYPE html><body></body>", { url: "http://localhost/", pretendToBeVisual: true });
 const { window } = dom;
 global.window = window; global.document = window.document;
-["HTMLElement", "customElements", "Node", "Event", "CustomEvent", "requestAnimationFrame", "cancelAnimationFrame"].forEach(k => { if (window[k]) global[k] = window[k]; });
+["HTMLElement", "customElements", "Node", "Event", "CustomEvent", "requestAnimationFrame", "cancelAnimationFrame", "FileReader"].forEach(k => { if (window[k]) global[k] = window[k]; });
 // jsdom doesn't implement window.confirm (always undefined/falsy) — both
 // panels' document-delete flows gate on it, so stub it to auto-confirm.
 window.confirm = () => true;
@@ -499,6 +499,27 @@ setTimeout(async () => {
   checks.push(["floor plan editor: Units toggle saves floor_plan_units",
     _updateConfigCalls.some(c => c.key === "floor_plan_units" && c.value === "metric")]);
   sRoot = elNew.shadowRoot;
+
+  // Export/Import (ported from Classic — a manual layout backup/restore).
+  // jsdom has no URL.createObjectURL, so Export can only be confirmed not
+  // to throw (the real download itself needs a live browser); Import's
+  // FileReader path jsdom does support fully, so that gets a real test.
+  fpeCardNow = sRoot.getElementById("settings-card-floor_plan_editor");
+  let _exportThrew = false;
+  try { fpeCardNow.querySelector("#fpnExport").click(); } catch (_e) { _exportThrew = true; }
+  checks.push(["floor plan editor: Export button exists and doesn't throw",
+    !_exportThrew]);
+
+  const importFile = fpeCardNow.querySelector("#fpnImportFile");
+  const fakeLayout = { "1f": { label: "1st Floor", viewBox: "0 0 320 150", rooms: [{ name: "Imported Room", x: 5, y: 5, w: 40, h: 30, type: "room" }] } };
+  const fakeFile = new window.File([JSON.stringify(fakeLayout)], "nova-floor-plan.json", { type: "application/json" });
+  Object.defineProperty(importFile, "files", { value: [fakeFile], configurable: true });
+  importFile.dispatchEvent(new window.Event("change"));
+  await new Promise(r => setTimeout(r, 20));
+  sRoot = elNew.shadowRoot;
+  fpeCardNow = sRoot.getElementById("settings-card-floor_plan_editor");
+  checks.push(["floor plan editor: Import loads a layout file into the working copy",
+    /IMPORTED ROOM/.test(fpeCardNow.textContent)]);
 
   // Devices on plan (jarvis-aio port, Phase 2): add a device, see its pin,
   // save it, remove it, and confirm the opacity slider persists.

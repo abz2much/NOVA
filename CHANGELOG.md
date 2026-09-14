@@ -1,3 +1,9 @@
+## [7.101.31] — Floor Plan Editor: JSON export/import ported to Command Center
+
+The one capability flagged as lost in 7.101.30's Classic deletion — a manual backup/restore of a floor plan layout as a JSON file — is now in Command Center too: an Export button downloads the current layout, an Import button loads one back in for review before Save. Ported straight from Classic's own implementation (same JSON shape, same "review then Save to apply" flow).
+
+Along the way, found and fixed a real gap in `scripts/smoke_panel.js`'s own test harness: `FileReader` wasn't in the list of globals exposed to `window.eval`'d code (only `prompt`/`confirm` were, per an existing documented jsdom quirk) — so any test that actually *dispatched* a real file-input change event, rather than just checking a button exists, would have silently hit `ReferenceError: FileReader is not defined`. This was latent for the background-image upload (7.101.29) and Document Library upload too; nothing had exercised the real event-dispatch path for either until this Import test tried to. No production impact — real browsers always have `FileReader` as a true global — but the test suite couldn't have caught a real regression in any of those three upload flows until now.
+
 ## [7.101.30] — Classic dashboard deleted; Command Center is now Nova's only panel
 
 Command Center reached full feature parity with Classic (Floor Plan Editor in 7.101.21, Residence 3D in 7.101.24, the background-image upload gap in 7.101.29) — Abi's stated goal since starting the Command Center work was to delete Classic once nothing was left behind, rather than maintain two dashboards indefinitely. Deleted it.

@@ -1072,7 +1072,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v7.101.30
+ * v7.101.31
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1137,7 +1137,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v7.101.30 ",
+      console.log("%c Nova Panel %c v7.101.31 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -5268,6 +5268,9 @@ class NovaPanel extends HTMLElement {
       <div class="fpn-actions">
         <button class="mode-chip" id="fpnSave">Save Layout</button>
         <button class="mode-chip" id="fpnReset">Reset Default</button>
+        <button class="mode-chip" id="fpnExport">⬇ Export</button>
+        <button class="mode-chip" id="fpnImport">⬆ Import</button>
+        <input type="file" id="fpnImportFile" accept=".json,application/json" style="display:none">
       </div>`;
   }
 
@@ -5731,6 +5734,42 @@ class NovaPanel extends HTMLElement {
       this._editorFloor = null;
       this._rerenderFloorPlanCard();
     });
+
+    // Export/Import the floor plan layout as JSON — a manual backup/restore,
+    // or a way to copy a layout between installs.
+    const fpExport = root.getElementById("fpnExport");
+    if (fpExport) fpExport.addEventListener("click", () => {
+      try {
+        const data = JSON.stringify(this._getEditingPlan(), null, 2);
+        const blob = new Blob([data], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = "nova-floor-plan.json";
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      } catch (err) { console.error("Nova: floor plan export failed", err); }
+    });
+    const fpImportBtn = root.getElementById("fpnImport");
+    const fpImportFile = root.getElementById("fpnImportFile");
+    if (fpImportBtn && fpImportFile) {
+      fpImportBtn.addEventListener("click", () => fpImportFile.click());
+      fpImportFile.addEventListener("change", () => {
+        const file = fpImportFile.files && fpImportFile.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          try {
+            const parsed = JSON.parse(ev.target.result);
+            if (!parsed || typeof parsed !== "object" || !Object.keys(parsed).length) throw new Error("empty");
+            this._editingPlan = parsed;
+            if (!this._editingPlan[this._editorFloor]) this._editorFloor = Object.keys(parsed)[0];
+            this._rerenderFloorPlanCard();
+          } catch (err) { console.error("Nova: floor plan import — invalid layout file", err); }
+        };
+        reader.readAsText(file);
+        fpImportFile.value = "";
+      });
+    }
 
     const entAdd = root.getElementById("fpnEntAdd");
     if (entAdd) entAdd.addEventListener("click", () => {
