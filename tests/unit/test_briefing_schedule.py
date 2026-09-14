@@ -60,15 +60,17 @@ def test_briefing_keys_are_surfaced_for_read_back():
 
 
 def test_panel_briefing_toggles_are_wired():
-    # every briefing toggle must carry data-cfg-val or it's inert
+    # every briefing toggle must be passed to a data-cfg-key/data-cfg-val
+    # helper (onOff/feedChip) or it's inert — the panel builds these via a
+    # shared parameterized helper rather than one literal button per key,
+    # so the wiring evidence is the call site, not a literal attribute.
     for k in ("briefing_morning_enabled", "briefing_evening_enabled",
               "briefing_require_home", "briefing_include_hazards"):
-        m = re.search(r'data-cfg-key="' + k + r'"[^>]*data-cfg-val', PANEL)
-        assert m, f"{k} toggle is not wired"
+        assert re.search(r'(onOff|feedChip)\("' + k + r'"', PANEL), f"{k} toggle is not wired"
 
 
 def test_panel_has_manual_trigger():
-    assert "brief-now" in PANEL and "_wireBriefings" in PANEL
+    assert "newBriefNow" in PANEL
 
 
 # ── v6.78.1 regression guards ────────────────────────────────────────────────

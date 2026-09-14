@@ -93,7 +93,7 @@ def test_panel_renders_evidence():
     panel = (COMP / "frontend" / "nova-panel.js").read_text()
     assert "why_headline" in panel
     assert "What Nova observed" in panel
-    assert "sug-ev" in panel
+    assert "s.evidence" in panel and "<li>" in panel
     assert "Create automation" in panel
 
 
