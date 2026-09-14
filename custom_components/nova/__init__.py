@@ -297,7 +297,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         _eufy_roles = _eufy.all_camera_roles(hass)
         _eufy_reverse: dict[str, tuple[str, str]] = {}
-        _EUFY_WATCHED_ROLES = ("ringing", "stranger", "person",
+        _EUFY_WATCHED_ROLES = ("ringing", "stranger", "person", "vehicle",
                                "package_delivered", "package_stranded", "package_taken")
         for _cam, _roles in _eufy_roles.items():
             for _role in _EUFY_WATCHED_ROLES:
@@ -381,6 +381,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         except Exception as exc:
                             _LOGGER.debug("Nova eufy: known-visitor log failed: %s", exc)
                     hass.async_create_task(_log_known_visitor())
+                    return
+
+                if role == "vehicle":
+                    # Direct announcement, no vision call — Eufy's own
+                    # vehicle_detected sensor is the signal, same cost
+                    # reasoning as the package/known-visitor paths.
+                    if now - _auto_cd.get(f"{entity_id}:vehicle", float("-inf")) < 300.0:
+                        return
+                    _auto_cd[f"{entity_id}:vehicle"] = now
+                    async def _announce_vehicle() -> None:
+                        try:
+                            from .camera import _camera_friendly_name
+                            from .tts_helper import async_announce
+                            from . import persona
+                            honorific = _live_honorific(hass)
+                            tts = _get_tts(hass, entry, context="camera")
+                            spk = _get_speakers(hass, entry)
+                            name = _camera_friendly_name(hass, entity_id)
+                            await async_announce(
+                                hass,
+                                persona.lead_in(honorific, f"a vehicle was detected at {name}."),
+                                tts, spk, context="camera",
+                            )
+                        except Exception as exc:
+                            _LOGGER.debug("Nova eufy: vehicle announce failed: %s", exc)
+                    hass.async_create_task(_announce_vehicle())
                     return
 
             camera_unsubs.append(async_track_state_change_event(

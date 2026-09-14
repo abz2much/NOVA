@@ -84,6 +84,7 @@ def _set_registry(eufy_mod, entries):
     ("packageStranded", "package_stranded"),
     ("packageTaken", "package_taken"),
     ("snooze", "snooze"),
+    ("vehicleDetected", "vehicle"),
 ])
 def test_role_for_unique_id_matches_every_known_suffix(eufy, suffix, expected):
     assert eufy._role_for_unique_id(_uid(suffix)) == expected
@@ -186,3 +187,19 @@ def test_discover_roles_survives_a_rename(eufy, fake_hass):
     _set_registry(eufy, renamed)
     roles = eufy.discover_roles(fake_hass, "camera.porch_cam")
     assert roles["ringing"] == "binary_sensor.porch_cam_ringing"
+
+
+def test_discover_roles_picks_up_vehicle_on_a_driveway_style_camera(eufy, fake_hass):
+    # Real-world case: an outdoor camera with no doorbell/package hardware but
+    # with vehicle_detected (verified live against an actual eufy_security
+    # driveway camera, unique_id "..._device_vehicleDetected").
+    driveway = [
+        _Entry("camera.driveway", "eufy_security", DEVICE, _uid("camera")),
+        _Entry("binary_sensor.driveway_person_detected", "eufy_security", DEVICE, _uid("personDetected")),
+        _Entry("binary_sensor.driveway_vehicle_detected", "eufy_security", DEVICE, _uid("vehicleDetected")),
+    ]
+    _set_registry(eufy, driveway)
+    roles = eufy.discover_roles(fake_hass, "camera.driveway")
+    assert roles["vehicle"] == "binary_sensor.driveway_vehicle_detected"
+    assert "ringing" not in roles
+    assert "package_delivered" not in roles

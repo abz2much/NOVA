@@ -54,6 +54,7 @@ _ROLE_SUFFIXES = {
     "packageStranded": "package_stranded",
     "packageTaken": "package_taken",
     "snooze": "snooze",
+    "vehicleDetected": "vehicle",
 }
 # Longest-suffix-first so an exact match always wins over a shorter one that
 # happens to also be a suffix of it (defensive; today no role is a suffix of
