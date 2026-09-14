@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 580 440" font-family="'Manrope',system-ui,-apple-system,'Segoe UI',sans-serif">
+  <defs>
+    <radialGradient id="g" cx="50%" cy="0%" r="90%">
+      <stop offset="0%" stop-color="#2a1c11" stop-opacity="0.4"/>
+      <stop offset="60%" stop-color="#15110d" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="core" cx="34%" cy="30%" r="75%">
+      <stop offset="0%" stop-color="#ffe3ad"/>
+      <stop offset="42%" stop-color="#f4b860"/>
+      <stop offset="78%" stop-color="#e2542f"/>
+      <stop offset="100%" stop-color="#7a2513"/>
+    </radialGradient>
+  </defs>
+  <rect width="580" height="440" fill="#15110d"/>
+  <rect width="580" height="440" fill="url(#g)"/>
+
+  <!-- search bar -->
+  <rect x="20" y="20" width="540" height="30" rx="8" fill="#1e1712" stroke="#33291f"/>
+  <text x="34" y="39" fill="#7a6d5e" font-size="11.5">Search settings &#8212; try &#8220;camera&#8221; or &#8220;sleep&#8221;&#8230;</text>
+
+  <!-- group nav pills -->
+  <g font-family="'Manrope',system-ui,sans-serif" font-size="10.5">
+    <rect x="20" y="58" width="58" height="22" rx="11" fill="#e2542f"/>
+    <text x="49" y="72" fill="#fff" text-anchor="middle">General</text>
+    <rect x="84" y="58" width="108" height="22" rx="11" fill="#1e1712" stroke="#33291f"/>
+    <text x="138" y="72" fill="#a89a89" text-anchor="middle">Voice &amp; Speakers</text>
+    <rect x="198" y="58" width="118" height="22" rx="11" fill="#1e1712" stroke="#33291f"/>
+    <text x="257" y="72" fill="#a89a89" text-anchor="middle">Awareness &amp; Safety</text>
+    <rect x="322" y="58" width="118" height="22" rx="11" fill="#1e1712" stroke="#33291f"/>
+    <text x="381" y="72" fill="#a89a89" text-anchor="middle">Learning &amp; Memory</text>
+    <rect x="446" y="58" width="114" height="22" rx="11" fill="#1e1712" stroke="#33291f"/>
+    <text x="503" y="72" fill="#a89a89" text-anchor="middle">Home &amp; Extras</text>
+  </g>
+
+  <!-- Person Honorifics card -->
+  <g transform="translate(20,96)">
+    <rect width="540" height="324" rx="16" fill="#1e1712" stroke="#33291f"/>
+    <text x="22" y="34" fill="#f3ece1" font-family="'Fraunces',ui-serif,Georgia,serif" font-size="15" font-weight="600">Person Honorifics</text>
+    <text x="22" y="54" fill="#7a6d5e" font-size="11" width="490">What Nova calls each person when they&#8217;re home alone.</text>
+    <line x1="22" y1="66" x2="518" y2="66" stroke="#33291f"/>
+
+    <!-- row: Abi -->
+    <g transform="translate(22,84)">
+      <text y="18" fill="#a89a89" font-size="12.5">Abi</text>
+      <rect x="340" y="0" width="156" height="30" rx="8" fill="#2a2119" stroke="#33291f"/>
+      <text x="352" y="20" fill="#f3ece1" font-size="11.5">Boss</text>
+      <path d="M478 12 L484 18 L490 12" fill="none" stroke="#a89a89" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+
+    <!-- row: Rachel -->
+    <g transform="translate(22,132)">
+      <text y="18" fill="#a89a89" font-size="12.5">Rachel</text>
+      <rect x="340" y="0" width="156" height="30" rx="8" fill="#2a2119" stroke="#33291f"/>
+      <text x="352" y="20" fill="#f3ece1" font-size="11.5">Custom&#8230;</text>
+      <path d="M478 12 L484 18 L490 12" fill="none" stroke="#a89a89" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      <rect x="340" y="38" width="156" height="26" rx="7" fill="#15110d" stroke="#e2542f" stroke-opacity="0.5"/>
+      <text x="352" y="55" fill="#ffe3ad" font-size="11">&#8220;ma&#8217;am&#8221;</text>
+    </g>
+
+    <!-- row: Lien -->
+    <g transform="translate(22,220)">
+      <text y="18" fill="#a89a89" font-size="12.5">Lien</text>
+      <rect x="340" y="0" width="156" height="30" rx="8" fill="#2a2119" stroke="#33291f"/>
+      <text x="352" y="20" fill="#7a6d5e" font-size="11.5">&#8212; use default &#8212;</text>
+      <path d="M478 12 L484 18 L490 12" fill="none" stroke="#a89a89" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+
+    <line x1="22" y1="270" x2="518" y2="270" stroke="#33291f"/>
+    <text x="22" y="292" fill="#7a6d5e" font-size="10.5">Only applies while that person is home alone.</text>
+    <text x="22" y="308" fill="#7a6d5e" font-size="10.5">More than one person home, or nobody &#8212; Nova drops the address entirely.</text>
+  </g>
+</svg>

@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 380" font-family="'Fraunces',ui-serif,Georgia,serif">
+  <defs>
+    <radialGradient id="bgGlow" cx="50%" cy="-8%" r="70%">
+      <stop offset="0%" stop-color="#2a1c11" stop-opacity="0.55"/>
+      <stop offset="60%" stop-color="#15110d" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="core" cx="34%" cy="30%" r="75%">
+      <stop offset="0%" stop-color="#ffe3ad"/>
+      <stop offset="42%" stop-color="#f4b860"/>
+      <stop offset="78%" stop-color="#e2542f"/>
+      <stop offset="100%" stop-color="#7a2513"/>
+    </radialGradient>
+    <filter id="glow" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="14" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="softGlow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="4"/>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="380" fill="#15110d"/>
+  <rect width="1200" height="380" fill="url(#bgGlow)"/>
+
+  <!-- brand mark + name, top left -->
+  <g transform="translate(56,46)">
+    <circle cx="13" cy="13" r="13" fill="url(#core)"/>
+    <text x="36" y="19" fill="#f3ece1" font-size="19" font-weight="600">Nova</text>
+    <text x="36" y="34" fill="#7a6d5e" font-family="'IBM Plex Mono',ui-monospace,monospace" font-size="9.5" letter-spacing="1.5">COMMAND CENTER</text>
+  </g>
+
+  <!-- stellar core hero, centered -->
+  <g transform="translate(600,168)">
+    <circle r="86" fill="#e2542f" opacity="0.18" filter="url(#softGlow)"/>
+    <circle r="62" fill="url(#core)" filter="url(#glow)"/>
+    <circle r="62" fill="none" stroke="#ffe3ad" stroke-opacity="0.25" stroke-width="1"/>
+  </g>
+
+  <!-- state line -->
+  <text x="600" y="292" fill="#f3ece1" font-size="22" font-weight="500" text-anchor="middle">All quiet. Nothing needs your attention.</text>
+  <text x="600" y="314" fill="#7a6d5e" font-family="'IBM Plex Mono',ui-monospace,monospace" font-size="10.5" letter-spacing="1" text-anchor="middle">OBSERVER ACTIVE &#183; LAST EVENT 3 MIN AGO</text>
+
+  <!-- status chips -->
+  <line x1="360" y1="336" x2="840" y2="336" stroke="#33291f" stroke-width="1"/>
+  <g font-family="'IBM Plex Mono',ui-monospace,monospace" font-size="10.5" letter-spacing="0.5">
+    <g transform="translate(429,350)">
+      <rect width="98" height="24" rx="12" fill="#2a2119" stroke="#33291f"/>
+      <circle cx="14" cy="12" r="3" fill="#6fbf8a"/>
+      <text x="24" y="16" fill="#a89a89">Observer</text>
+    </g>
+    <g transform="translate(539,350)">
+      <rect width="90" height="24" rx="12" fill="#2a2119" stroke="#33291f"/>
+      <circle cx="14" cy="12" r="3" fill="#6fbf8a"/>
+      <text x="24" y="16" fill="#a89a89">Sentinel</text>
+    </g>
+    <g transform="translate(641,350)">
+      <rect width="130" height="24" rx="12" fill="#2a2119" stroke="#33291f"/>
+      <circle cx="14" cy="12" r="3" fill="#f4b860"/>
+      <text x="24" y="16" fill="#a89a89">3 satellites</text>
+    </g>
+  </g>
+</svg>

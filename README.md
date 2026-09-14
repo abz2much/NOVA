@@ -4,7 +4,7 @@
 
 An autonomous AI butler for Home Assistant: voice, vision, and a reasoning core that learns your home and watches over it.
 
-<img src="docs/media/hero-hud.svg" alt="Nova Iron Man HUD command center" width="100%">
+<img src="docs/media/hero-stellar-core.svg" alt="Nova Command Center — animated stellar-core dashboard" width="100%">
 
 [![HACS Integration](https://img.shields.io/badge/HACS-Integration-41BDF5?logo=home-assistant&logoColor=white)](https://github.com/abz2much/NOVA)
 [![Release](https://img.shields.io/github/v/release/abz2much/NOVA?color=00d9ff)](https://github.com/abz2much/NOVA/releases)
@@ -26,7 +26,7 @@ Nova looks elaborate, but the floor is low. You can be talking to it in five min
 2. **Add the integration.** Go to *Settings → Devices & Services → Add Integration → Nova*. Paste a cloud API key from [Groq](https://console.groq.com), Anthropic, OpenAI, or Gemini; Nova detects which provider it belongs to from the key itself, no picker needed. Or leave it blank and point it at a local Ollama URL to run with no cloud account at all. Groq has a free tier if you want to try it without paying anything.
 3. **That's it.** Nova registers its conversation agent and appears in your sidebar. Ask it about your home, your calendar, or the outside world.
 
-Everything past this point (vision, doorbell analysis, the Iron Man HUD's live floor plan, proactive safety) layers on top as you connect cameras and voice. None of it is required to start. Jump to [Installation](#installation) for the full walkthrough.
+Everything past this point (vision, doorbell analysis, Classic's live 3D floor plan, proactive safety) layers on top as you connect cameras and voice. None of it is required to start. Jump to [Installation](#installation) for the full walkthrough.
 
 ## What it does
 
@@ -62,19 +62,21 @@ When the cloud is unreachable, Nova doesn't go dumb. An offline reasoning brain 
 
 Proactive monitoring for freezing pipes, smoke, CO, water, unauthorized entry, and nighttime lockdown. Enforcement is occupancy-gated, so it only kicks in when it should.
 
-### An Iron Man HUD dashboard
+### Two dashboard looks, your choice
 
-A dark-cyan glassmorphism control panel with a live isometric 3D house, per-room occupancy glow, radial telemetry gauges, an event feed, a doorbell-training view, and surfaced automation suggestions.
+**Command Center** trades the dark-cyan glassmorphism look for a warm ember/gold "stellar core" centerpiece — an animated particle core whose state (idle, reasoning, asleep) reflects what Nova is actually doing, so the dashboard looks and feels the same whether you have zero cameras or twelve. Areas show live capability icons, temperature/humidity sparklines, and a light toggle per room; Settings is reorganized around what you're doing rather than which subsystem it touches, right down to a per-person "who does Nova call whom" card. Turn it on from *Settings → Devices & Services → Nova → Configure → "Panel look"* — only the 3D Residence view stays on Classic for now.
+
+**Classic** is still the default: the original dashboard with a live isometric 3D house, per-room occupancy glow, radial telemetry gauges, an event feed, a doorbell-training view. Switch between the two anytime; nothing is deleted.
 
 <div align="center">
 <table border="0">
 <tr>
-<td width="50%"><img src="docs/media/feed-card.svg" alt="Cognitive Core activity feed with urgency classification" width="100%"></td>
-<td width="50%"><img src="docs/media/camera-diag.svg" alt="Camera Watch with end-to-end frame-source diagnostics" width="100%"></td>
+<td width="50%"><img src="docs/media/areas-card.svg" alt="Command Center Areas card with capability icons, sparklines, and a light toggle" width="100%"></td>
+<td width="50%"><img src="docs/media/settings-card.svg" alt="Command Center Settings tab, showing the per-person Honorifics card" width="100%"></td>
 </tr>
 <tr>
-<td align="center"><em>The Cognitive Core classifies every event by urgency, escalating the anomalous and muting the routine.</em></td>
-<td align="center"><em>Camera intelligence: per-camera diagnostics, go2rtc restream override, rename &amp; indoor/outdoor designation.</em></td>
+<td align="center"><em>Every monitored room, its live capability icons, a temperature/humidity trend, and a one-tap light toggle.</em></td>
+<td align="center"><em>Settings reorganized by task, not subsystem — down to what Nova calls each person when they're home alone.</em></td>
 </tr>
 </table>
 
