@@ -3549,6 +3549,48 @@ class NovaCommandCenterNew extends HTMLElement {
     return (isFinite(op) && op >= 0 && op <= 1) ? op : 0.2;
   }
 
+  // Property line + outdoor zones (Phase 3a) — same geometry helpers as
+  // Classic, same floor_plan_property config, same zone-as-polygon-room
+  // representation in floor_plan_rooms.
+  _zonePoints(r) {
+    if (r && Array.isArray(r.points) && r.points.length >= 3) return r.points;
+    const x = r.x || 0, y = r.y || 0, w = r.w || 40, h = r.h || 40;
+    return [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
+  }
+  _ensureZonePoints(rm) {
+    if (!Array.isArray(rm.points) || rm.points.length < 3) rm.points = this._zonePoints(rm).map(p => [p[0], p[1]]);
+    return rm.points;
+  }
+  _syncRoomBBox(rm) {
+    if (!rm || !Array.isArray(rm.points) || rm.points.length < 3) return;
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    rm.points.forEach(p => { x0 = Math.min(x0, p[0]); y0 = Math.min(y0, p[1]); x1 = Math.max(x1, p[0]); y1 = Math.max(y1, p[1]); });
+    rm.x = Math.round(x0); rm.y = Math.round(y0); rm.w = Math.round(x1 - x0); rm.h = Math.round(y1 - y0);
+  }
+  _propPathD(pts) { return pts.map((p, k) => (k ? "L" : "M") + p[0] + " " + p[1]).join(" ") + " Z"; }
+  _getProperty() {
+    const raw = this._data()?.config?.floor_plan_property;
+    let p = null;
+    try { p = typeof raw === "string" ? (raw ? JSON.parse(raw) : null) : (raw || null); } catch (_) { p = null; }
+    return (p && Array.isArray(p.points)) ? p.points : [];
+  }
+  _propertyPts() {
+    if (!this._editingProperty) this._editingProperty = JSON.parse(JSON.stringify(this._getProperty()));
+    return this._editingProperty;
+  }
+  _setProperty(pts) { this._editingProperty = pts; }
+  _propertyArea(pts) {
+    if (!pts || pts.length < 3) return "";
+    let a = 0;
+    for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length]; a += p[0] * q[1] - q[0] * p[1]; }
+    const sqFt = Math.abs(a) / 2 * 0.04;
+    if (this._fpUnits() === "metric") {
+      const sqM = sqFt * 0.092903;
+      return sqM >= 10000 ? (sqM / 10000).toFixed(2) + " ha" : Math.round(sqM).toLocaleString() + " m²";
+    }
+    return sqFt >= 43560 ? (sqFt / 43560).toFixed(2) + " acres" : Math.round(sqFt).toLocaleString() + " sq ft";
+  }
+
   _floorPlanEditorCardBody() {
     const plan = this._getEditingPlan();
     const floors = Object.keys(plan);
@@ -3561,20 +3603,29 @@ class NovaCommandCenterNew extends HTMLElement {
         </div>
         <div class="fpn-actions">
           <button class="mode-chip" id="fpnAddRoom">+ Add Room</button>
+          <button class="mode-chip" id="fpnAddZone">+ Outdoor Zone</button>
+          ${this._fpnAddPropertyButton()}
           <button class="mode-chip" id="fpnUnits">Units: ${this._fpUnits() === "metric" ? "Metric" : "Imperial"}</button>
           <button class="mode-chip" id="fpnZoomFit">⤢ Fit</button>
         </div>
       </div>
-      <div class="fpn-hint">Drag to move · bottom-right handle to resize · right-click to delete · scroll to zoom · drag empty space to pan</div>
+      <div class="fpn-hint">Drag to move · bottom-right handle to resize · right-click to delete · double-click an edge to add a corner · scroll to zoom · drag empty space to pan</div>
       <div class="fpn-canvas" id="fpnCanvas">${this._renderFloorPlanSVG(plan, floor)}</div>
       ${this._renderPlanEntitiesNew(floor)}
       <div class="fpn-actions">
         <button class="mode-chip" id="fpnSave">Save Layout</button>
         <button class="mode-chip" id="fpnReset">Reset Default</button>
       </div>
-      <div class="camera-note">Property line, outdoor zones, camera placement, and AI camera-coverage aren't ported here yet.
+      <div class="camera-note">Camera placement and AI camera-coverage aren't ported here yet.
         <button class="mode-chip" id="fpnGoClassic">Edit advanced layout in Classic</button>
       </div>`;
+  }
+
+  _fpnAddPropertyButton() {
+    const pp = this._propertyPts();
+    const has = pp.length >= 3;
+    return `<button class="mode-chip" id="fpnAddProperty">${has ? "Clear Property" : "+ Property Line"}</button>`
+      + (has ? `<span class="toggle-desc">Lot: ${this._propertyArea(pp)}</span>` : "");
   }
 
   _renderPlanEntitiesNew(floor) {
@@ -3631,19 +3682,43 @@ class NovaCommandCenterNew extends HTMLElement {
       } catch (_) {}
     }
 
+    // Property boundary (the lot) — draw behind rooms; vertices are draggable.
+    let prop = [];
+    try { prop = this._propertyPts() || []; } catch (_) { prop = []; }
+    if (prop.length >= 2) {
+      svg += `<path class="fpn-prop-path" d="${this._propPathD(prop)}" fill="rgba(244,184,96,0.03)" stroke="var(--gold)" stroke-width="1" stroke-dasharray="6 4" pointer-events="none"/>`;
+      for (let vi = 0; vi < prop.length; vi++) {
+        const a = prop[vi], b = prop[(vi + 1) % prop.length];
+        svg += `<circle class="fpn-prop-mid" data-prop-edge="${vi}" cx="${(a[0] + b[0]) / 2}" cy="${(a[1] + b[1]) / 2}" r="2.2" fill="none" stroke="var(--gold)" stroke-width="0.7" opacity="0.5" style="cursor:copy"/>`;
+      }
+      for (let pi = 0; pi < prop.length; pi++) {
+        svg += `<circle class="fpn-prop-vtx" data-prop-vtx="${pi}" cx="${prop[pi][0]}" cy="${prop[pi][1]}" r="3" fill="var(--gold)" stroke="var(--bg)" stroke-width="0.7" style="cursor:grab"/>`;
+      }
+    }
+
     for (let i = 0; i < (floorData.rooms || []).length; i++) {
       const rm = floorData.rooms[i];
-      if (rm.points && rm.points.length >= 3) continue;   // zone/reshaped rooms: edit in Classic for now
       const colors = { room: "var(--gold)", bath: "var(--ink-faint)", stairs: "var(--ember)", door: "var(--warn)", outdoor: "#8fdba8" };
       const c = colors[rm.type] || "var(--gold)";
       const out = rm.type === "outdoor";
       const fs = rm.w > 80 ? 7 : (rm.w > 50 ? 5.5 : (rm.w > 25 ? 4 : 3));
-      svg += `<g class="fpn-drag-room" data-idx="${i}" style="cursor:move">`;
-      svg += `<rect x="${rm.x}" y="${rm.y}" width="${rm.w}" height="${rm.h}" rx="2" fill="${out ? "rgba(143,219,168,0.06)" : "rgba(244,184,96,0.08)"}" stroke="${c}" stroke-width="1" class="fpn-drag-rect"/>`;
-      svg += `<text x="${rm.x + rm.w / 2}" y="${rm.y + rm.h / 2}" text-anchor="middle" fill="${c}" font-size="${fs}" font-family="var(--font-display)" letter-spacing="0.3" pointer-events="none">${this._esc((rm.name || "").toUpperCase())}</text>`;
-      if (rm.w > 30 && rm.h > 24) svg += `<text x="${rm.x + rm.w / 2}" y="${rm.y + rm.h / 2 + fs + 2.5}" text-anchor="middle" fill="${c}" opacity="0.6" font-size="${(fs * 0.72).toFixed(1)}" font-family="var(--font-mono)" pointer-events="none">${this._fpDim(rm.w)} × ${this._fpDim(rm.h)}</text>`;
-      svg += `<rect x="${rm.x + rm.w - 8}" y="${rm.y + rm.h - 8}" width="8" height="8" fill="${c}" opacity="0.35" rx="1" class="fpn-resize-handle" data-idx="${i}" style="cursor:nwse-resize"/>`;
-      svg += "</g>";
+      if (out || (rm.points && rm.points.length >= 3)) {
+        const zpts = this._zonePoints(rm);
+        let zcx = 0, zcy = 0; zpts.forEach(p => { zcx += p[0]; zcy += p[1]; }); zcx /= zpts.length; zcy /= zpts.length;
+        svg += `<g class="fpn-zone" data-zone-idx="${i}">`;
+        svg += `<path class="fpn-zone-path" data-zone-idx="${i}" d="${this._propPathD(zpts)}" fill="${c}" fill-opacity="0.06" stroke="${c}" stroke-width="1"${out ? ' stroke-dasharray="4 3"' : ""} style="cursor:move"/>`;
+        svg += `<text x="${zcx.toFixed(1)}" y="${zcy.toFixed(1)}" text-anchor="middle" fill="${c}" font-size="${fs}" font-family="var(--font-display)" letter-spacing="0.3" pointer-events="none">${this._esc((rm.name || "").toUpperCase())}</text>`;
+        for (let vi = 0; vi < zpts.length; vi++) { const a = zpts[vi], b = zpts[(vi + 1) % zpts.length]; svg += `<circle class="fpn-zone-mid" data-zone-idx="${i}" data-edge="${vi}" cx="${(a[0] + b[0]) / 2}" cy="${(a[1] + b[1]) / 2}" r="2" fill="none" stroke="${c}" stroke-width="0.6" opacity="0.5" style="cursor:copy"/>`; }
+        for (let vi = 0; vi < zpts.length; vi++) { svg += `<circle class="fpn-zone-vtx" data-zone-idx="${i}" data-vtx="${vi}" cx="${zpts[vi][0]}" cy="${zpts[vi][1]}" r="2.8" fill="${c}" stroke="var(--bg)" stroke-width="0.6" style="cursor:grab"/>`; }
+        svg += "</g>";
+      } else {
+        svg += `<g class="fpn-drag-room" data-idx="${i}" style="cursor:move">`;
+        svg += `<rect x="${rm.x}" y="${rm.y}" width="${rm.w}" height="${rm.h}" rx="2" fill="${out ? "rgba(143,219,168,0.06)" : "rgba(244,184,96,0.08)"}" stroke="${c}" stroke-width="1" class="fpn-drag-rect"/>`;
+        svg += `<text x="${rm.x + rm.w / 2}" y="${rm.y + rm.h / 2}" text-anchor="middle" fill="${c}" font-size="${fs}" font-family="var(--font-display)" letter-spacing="0.3" pointer-events="none">${this._esc((rm.name || "").toUpperCase())}</text>`;
+        if (rm.w > 30 && rm.h > 24) svg += `<text x="${rm.x + rm.w / 2}" y="${rm.y + rm.h / 2 + fs + 2.5}" text-anchor="middle" fill="${c}" opacity="0.6" font-size="${(fs * 0.72).toFixed(1)}" font-family="var(--font-mono)" pointer-events="none">${this._fpDim(rm.w)} × ${this._fpDim(rm.h)}</text>`;
+        svg += `<rect x="${rm.x + rm.w - 8}" y="${rm.y + rm.h - 8}" width="8" height="8" fill="${c}" opacity="0.35" rx="1" class="fpn-resize-handle" data-idx="${i}" style="cursor:nwse-resize"/>`;
+        svg += "</g>";
+      }
     }
     for (const lbl of (floorData.labels || [])) {
       svg += `<text x="${lbl.x}" y="${lbl.y}" text-anchor="middle" fill="var(--ink-faint)" font-size="4" font-family="var(--font-mono)">${this._esc(lbl.text)}</text>`;
@@ -3716,19 +3791,59 @@ class NovaCommandCenterNew extends HTMLElement {
       this._rerenderFloorPlanCard();
     });
 
+    const addZone = root.getElementById("fpnAddZone");
+    if (addZone) addZone.addEventListener("click", () => {
+      const plan = this._getEditingPlan();
+      const floor = this._editorFloor;
+      if (!plan[floor]) return;
+      const name = window.prompt("Outdoor zone name (e.g. Front Yard, Driveway, Backyard):");
+      if (!name) return;
+      plan[floor].rooms = plan[floor].rooms || [];
+      const house = plan[floor].rooms.filter(r => r.type !== "outdoor");
+      let zx = 40, zy = 40, zw = 90, zh = 70;
+      if (house.length) {
+        let hx0 = 1e9, hx1 = -1e9, hy1 = -1e9;
+        house.forEach(r => { hx0 = Math.min(hx0, r.x); hx1 = Math.max(hx1, r.x + r.w); hy1 = Math.max(hy1, r.y + r.h); });
+        zx = Math.round(hx0); zy = Math.round(hy1 + 25); zw = Math.round(Math.max(hx1 - hx0, 90));
+      }
+      plan[floor].rooms.push({ name, x: zx, y: zy, w: zw, h: zh, type: "outdoor", points: [[zx, zy], [zx + zw, zy], [zx + zw, zy + zh], [zx, zy + zh]] });
+      this._rerenderFloorPlanCard();
+    });
+
+    const addProperty = root.getElementById("fpnAddProperty");
+    if (addProperty) addProperty.addEventListener("click", () => {
+      const cur = this._propertyPts();
+      if (cur.length >= 3) {
+        if (window.confirm("Remove the property boundary?")) { this._setProperty([]); this._rerenderFloorPlanCard(); }
+        return;
+      }
+      const floor = this._editorFloor;
+      const rooms = ((this._getEditingPlan()[floor] || {}).rooms) || [];
+      let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+      rooms.forEach(r => { x0 = Math.min(x0, r.x); y0 = Math.min(y0, r.y); x1 = Math.max(x1, r.x + r.w); y1 = Math.max(y1, r.y + r.h); });
+      if (!isFinite(x0)) { x0 = 20; y0 = 20; x1 = 220; y1 = 170; }
+      const m = Math.max(150, Math.max(x1 - x0, y1 - y0) * 0.7);
+      this._setProperty([[Math.round(x0 - m), Math.round(y0 - m)], [Math.round(x1 + m), Math.round(y0 - m)], [Math.round(x1 + m), Math.round(y1 + m)], [Math.round(x0 - m), Math.round(y1 + m)]]);
+      this._rerenderFloorPlanCard();
+    });
+
     const save = root.getElementById("fpnSave");
     if (save) save.addEventListener("click", async () => {
-      if (!this._editingPlan && !this._editingEntities) return;
-      const savedPlan = this._editingPlan, savedEnts = this._editingEntities;
+      const hasProperty = this._editingProperty !== null && this._editingProperty !== undefined;
+      if (!this._editingPlan && !this._editingEntities && !hasProperty) return;
+      const savedPlan = this._editingPlan, savedEnts = this._editingEntities, savedProp = this._editingProperty;
       try {
         if (savedPlan) await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_rooms", value: JSON.stringify(savedPlan) });
         if (savedEnts) await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_entities", value: JSON.stringify(savedEnts) });
+        if (hasProperty) await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_property", value: JSON.stringify({ points: savedProp }) });
         if (this._liveData?.config) {
           if (savedPlan) this._liveData.config.floor_plan_rooms = savedPlan;
           if (savedEnts) this._liveData.config.floor_plan_entities = savedEnts;
+          if (hasProperty) this._liveData.config.floor_plan_property = { points: savedProp };
         }
         this._editingPlan = null;
         this._editingEntities = null;
+        this._editingProperty = null;
       } catch (err) { console.error("Nova (new look): floor plan save failed", err); }
     });
 
@@ -3855,6 +3970,82 @@ class NovaCommandCenterNew extends HTMLElement {
       });
     });
 
+    // Outdoor zone polygons: drag body (move), drag corner (reshape), add/remove corners
+    svgEl.querySelectorAll(".fpn-zone-path").forEach(pth => {
+      pth.addEventListener("mousedown", (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault(); e.stopPropagation();
+        const zi = parseInt(pth.getAttribute("data-zone-idx"));
+        const rm = rooms[zi]; if (!rm) return;
+        self._ensureZonePoints(rm);
+        const pt = svgPoint(e);
+        dragging = { zoneBody: true, zi, startX: pt.x, startY: pt.y, ddx: 0, ddy: 0 };
+      });
+    });
+    svgEl.querySelectorAll(".fpn-zone-vtx").forEach(v => {
+      v.addEventListener("mousedown", (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault(); e.stopPropagation();
+        const zi = parseInt(v.getAttribute("data-zone-idx")), vi = parseInt(v.getAttribute("data-vtx"));
+        const rm = rooms[zi]; if (!rm) return;
+        const pts = self._ensureZonePoints(rm); const p = pts[vi]; if (!p) return;
+        const pt = svgPoint(e);
+        dragging = { zoneVtx: true, zi, vi, startX: pt.x, startY: pt.y, origX: p[0], origY: p[1] };
+      });
+      v.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        const zi = parseInt(v.getAttribute("data-zone-idx")), vi = parseInt(v.getAttribute("data-vtx"));
+        const rm = rooms[zi]; if (!rm) return;
+        const pts = self._ensureZonePoints(rm);
+        if (pts.length <= 3) return;
+        pts.splice(vi, 1); self._syncRoomBBox(rm); self._rerenderFloorPlanCard();
+      });
+    });
+    svgEl.querySelectorAll(".fpn-zone-mid").forEach(m => {
+      m.addEventListener("mousedown", (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault(); e.stopPropagation();
+        const zi = parseInt(m.getAttribute("data-zone-idx")), ei = parseInt(m.getAttribute("data-edge"));
+        const rm = rooms[zi]; if (!rm) return;
+        const pts = self._ensureZonePoints(rm);
+        const a = pts[ei], b = pts[(ei + 1) % pts.length]; if (!a || !b) return;
+        pts.splice(ei + 1, 0, [Math.round((a[0] + b[0]) / 2), Math.round((a[1] + b[1]) / 2)]);
+        self._rerenderFloorPlanCard();
+      });
+    });
+
+    // Property boundary: drag a corner, add a corner (edge midpoint), remove (right-click)
+    svgEl.querySelectorAll(".fpn-prop-vtx").forEach(v => {
+      v.addEventListener("mousedown", (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault(); e.stopPropagation();
+        const pi = parseInt(v.getAttribute("data-prop-vtx"));
+        const p = (self._propertyPts() || [])[pi];
+        if (!p) return;
+        const pt = svgPoint(e);
+        dragging = { propVtx: pi, startX: pt.x, startY: pt.y, origX: p[0], origY: p[1], property: true };
+      });
+      v.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        const pi = parseInt(v.getAttribute("data-prop-vtx"));
+        const pts = self._propertyPts();
+        if (pts.length <= 3) return;
+        pts.splice(pi, 1); self._rerenderFloorPlanCard();
+      });
+    });
+    svgEl.querySelectorAll(".fpn-prop-mid").forEach(m => {
+      m.addEventListener("mousedown", (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault(); e.stopPropagation();
+        const ei = parseInt(m.getAttribute("data-prop-edge"));
+        const pts = self._propertyPts();
+        const a = pts[ei], b = pts[(ei + 1) % pts.length];
+        if (!a || !b) return;
+        pts.splice(ei + 1, 0, [Math.round((a[0] + b[0]) / 2), Math.round((a[1] + b[1]) / 2)]);
+        self._rerenderFloorPlanCard();
+      });
+    });
+
     // Device pins — drag to move (saved with the plan); a tap with no drag
     // opens the entity's controls; right-click removes it.
     svgEl.querySelectorAll(".fpn-ent").forEach(g => {
@@ -3888,6 +4079,35 @@ class NovaCommandCenterNew extends HTMLElement {
       }
       if (!dragging) return;
       const pt = svgPoint(e);
+      if (dragging.zoneVtx) {
+        const rm = rooms[dragging.zi]; if (!rm || !rm.points) return;
+        const p = rm.points[dragging.vi]; if (!p) return;
+        p[0] = Math.round(dragging.origX + (pt.x - dragging.startX));
+        p[1] = Math.round(dragging.origY + (pt.y - dragging.startY));
+        const g = svgEl.querySelector(`.fpn-zone[data-zone-idx="${dragging.zi}"]`);
+        if (g) {
+          const path = g.querySelector(".fpn-zone-path"); if (path) path.setAttribute("d", self._propPathD(rm.points));
+          const dot = g.querySelector(`.fpn-zone-vtx[data-vtx="${dragging.vi}"]`); if (dot) { dot.setAttribute("cx", p[0]); dot.setAttribute("cy", p[1]); }
+        }
+        return;
+      }
+      if (dragging.zoneBody) {
+        dragging.ddx = Math.round(pt.x - dragging.startX); dragging.ddy = Math.round(pt.y - dragging.startY);
+        const g = svgEl.querySelector(`.fpn-zone[data-zone-idx="${dragging.zi}"]`);
+        if (g) g.setAttribute("transform", `translate(${dragging.ddx},${dragging.ddy})`);
+        return;
+      }
+      if (dragging.property) {
+        const p = (self._propertyPts() || [])[dragging.propVtx];
+        if (!p) return;
+        p[0] = Math.round(dragging.origX + (pt.x - dragging.startX));
+        p[1] = Math.round(dragging.origY + (pt.y - dragging.startY));
+        const dot = svgEl.querySelector(`.fpn-prop-vtx[data-prop-vtx="${dragging.propVtx}"]`);
+        if (dot) { dot.setAttribute("cx", p[0]); dot.setAttribute("cy", p[1]); }
+        const path = svgEl.querySelector(".fpn-prop-path");
+        if (path) path.setAttribute("d", self._propPathD(self._propertyPts()));
+        return;
+      }
       if (dragging.entity) {
         const ent = (self._entsFor(floor) || [])[dragging.entIdx];
         if (!ent) return;
@@ -3926,12 +4146,18 @@ class NovaCommandCenterNew extends HTMLElement {
     const endDrag = () => {
       if (panning) { panning = null; return; }
       if (!dragging) return;
+      if (dragging.zoneBody) {
+        const rm = rooms[dragging.zi];
+        if (rm && rm.points && (dragging.ddx || dragging.ddy)) rm.points.forEach(p => { p[0] += dragging.ddx; p[1] += dragging.ddy; });
+      }
+      if ((dragging.zoneVtx || dragging.zoneBody) && rooms[dragging.zi]) self._syncRoomBBox(rooms[dragging.zi]);
       // A device pin clicked without dragging → open its HA more-info controls.
       if (dragging.entity && !dragging.moved && dragging.entId) {
         self.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId: dragging.entId }, bubbles: true, composed: true }));
       }
+      const heavy = dragging.property || dragging.zoneVtx || dragging.zoneBody;
       dragging = null;
-      redraw();
+      if (heavy) self._rerenderFloorPlanCard(); else redraw();
     };
     svgEl.addEventListener("mouseup", endDrag);
     svgEl.addEventListener("mouseleave", endDrag);
@@ -3950,7 +4176,7 @@ class NovaCommandCenterNew extends HTMLElement {
     svgEl.addEventListener("mousedown", (e) => {
       if (dragging) return;
       const mid = e.button === 1;
-      const bg = e.button === 0 && !e.target.closest(".fpn-drag-room, .fpn-resize-handle");
+      const bg = e.button === 0 && !e.target.closest(".fpn-drag-room, .fpn-resize-handle, .fpn-zone, .fpn-zone-vtx, .fpn-zone-mid, .fpn-zone-path, .fpn-prop-vtx, .fpn-prop-mid, .fpn-ent");
       if (!mid && !bg) return;
       e.preventDefault();
       const v = self._editVB || vbFromAttr();

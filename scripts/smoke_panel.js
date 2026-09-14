@@ -1335,6 +1335,36 @@ setTimeout(async () => {
     _updateConfigCalls.some(c => c.key === "floor_plan_bg_opacity" && c.value === "0.5")]);
   sRoot = elNew.shadowRoot;
 
+  // Outdoor zone + property line (Phase 3a): added as a polygon room / a
+  // separate property config, rendered as draggable-vertex canvas elements.
+  global.__promptQueue = ["Side Yard"];
+  fpeCardNow = sRoot.getElementById("settings-card-floor_plan_editor");
+  fpeCardNow.querySelector("#fpnAddZone").click();
+  fpeCardNow = sRoot.getElementById("settings-card-floor_plan_editor");
+  checks.push(["floor plan editor: Add Outdoor Zone places a draggable-vertex polygon",
+    fpeCardNow.querySelectorAll(".fpn-zone").length === 1
+    && fpeCardNow.querySelectorAll(".fpn-zone-vtx").length === 4
+    && /SIDE YARD/.test(fpeCardNow.textContent)]);
+
+  fpeCardNow.querySelector("#fpnAddProperty").click();
+  fpeCardNow = sRoot.getElementById("settings-card-floor_plan_editor");
+  checks.push(["floor plan editor: Add Property Line draws a 4-corner boundary and shows lot size",
+    fpeCardNow.querySelectorAll(".fpn-prop-vtx").length === 4
+    && /Lot:/.test(fpeCardNow.textContent)]);
+
+  fpeCardNow.querySelector("#fpnSave").click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["floor plan editor: Save writes floor_plan_property alongside rooms/entities",
+    _updateConfigCalls.some(c => c.key === "floor_plan_property" && /points/.test(c.value))]);
+
+  sRoot = elNew.shadowRoot;
+  fpeCardNow = sRoot.getElementById("settings-card-floor_plan_editor");
+  fpeCardNow.querySelector("#fpnAddProperty").click();   // toggles to "Clear Property" once >=3 points exist
+  fpeCardNow = sRoot.getElementById("settings-card-floor_plan_editor");
+  checks.push(["floor plan editor: clicking Property again clears the boundary (window.confirm stubbed true)",
+    fpeCardNow.querySelectorAll(".fpn-prop-vtx").length === 0]);
+  sRoot = elNew.shadowRoot;
+
   // Person Honorifics: picking "Custom…" reveals the text input without saving
   // yet (nothing to save), then typing+blurring the custom input saves it.
   const rachelSel = sRoot.querySelector('select[data-person-id="person.rachel"]');
