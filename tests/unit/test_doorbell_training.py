@@ -17,6 +17,10 @@ import pytest
 @pytest.fixture
 def dbt(load, tmp_path, monkeypatch):
     mod = load("doorbell_training")
+    # LOG_DIR is a separate constant (log_event calls os.makedirs(LOG_DIR, ...))
+    # -- patch both, or log_event would try to create the real /config/nova
+    # on whatever machine runs the tests.
+    monkeypatch.setattr(mod, "LOG_DIR", str(tmp_path))
     monkeypatch.setattr(mod, "LOG_PATH", str(tmp_path / "doorbell_log.jsonl"))
     return mod
 
@@ -39,6 +43,40 @@ def _ago(days: int, hour: int, minute: int = 0) -> str:
 def _event(ts, camera="camera.front_door", category="delivery", notable=True):
     return {"ts": ts, "camera": camera, "entity_id": camera, "image_source": "live",
             "summary": "", "analysis": "", "category": category, "notable": notable}
+
+
+# ── log_event: speak field (v7.101.8) ───────────────────────────────────────
+# Caught live: with announcements_enabled off, the LLM-generated "speak" line
+# was computed but never persisted anywhere, so there was no way to see after
+# the fact what a notable event would have sounded like.
+
+def test_log_event_persists_speak(dbt):
+    dbt.log_event("Front Door", "camera.front_door_bell", "live", {
+        "summary": "A man approached.", "analysis": "...", "category": "person",
+        "notable": True, "speak": "Sir, you have a visitor at the door.",
+    })
+    events = dbt.load_events()
+    assert len(events) == 1
+    assert events[0]["speak"] == "Sir, you have a visitor at the door."
+
+
+def test_log_event_speak_defaults_to_empty_string(dbt):
+    # A known-resident / no-vision-call log (source="eufy") never had a
+    # "speak" value at all — must not store None or crash.
+    dbt.log_event("Front Door", "camera.front_door_bell", "eufy", {
+        "summary": "", "analysis": "", "category": "known_resident", "notable": False,
+    })
+    events = dbt.load_events()
+    assert events[0]["speak"] == ""
+
+
+def test_log_event_speak_none_becomes_empty_string(dbt):
+    dbt.log_event("Front Door", "camera.front_door_bell", "live", {
+        "summary": "Empty porch.", "analysis": "...", "category": "person",
+        "notable": True, "speak": None,
+    })
+    events = dbt.load_events()
+    assert events[0]["speak"] == ""
 
 
 def test_no_events_returns_empty(dbt):

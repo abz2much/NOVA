@@ -51,6 +51,11 @@ def log_event(camera: str, entity_id: str, source: str, result: dict) -> None:
             "analysis": (result or {}).get("analysis", ""),
             "category": (result or {}).get("category", ""),
             "notable": bool((result or {}).get("notable", False)),
+            # What Nova would say aloud for this event, regardless of whether
+            # announcements_enabled actually let it speak — otherwise there's
+            # no way to see after the fact what a notable event would have
+            # sounded like (v7.101.8; caught live testing with announcements off).
+            "speak": (result or {}).get("speak") or "",
         }
         os.makedirs(LOG_DIR, exist_ok=True)
         with open(LOG_PATH, "a", encoding="utf-8") as fh:

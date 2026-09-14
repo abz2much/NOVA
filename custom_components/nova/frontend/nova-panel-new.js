@@ -2201,11 +2201,17 @@ class NovaCommandCenterNew extends HTMLElement {
     const src = String(e.image_source || "?");
     const cat = e.category || "";
     const desc = this._esc(e.summary || e.analysis || "");
+    // "speak" is what Nova would actually say aloud for this event — logged
+    // regardless of whether announcements_enabled let it through, so you can
+    // see after the fact what a notable event would have sounded like.
+    const speak = (e.speak || "").trim();
+    const speakLine = speak ? `<div class="toggle-desc" style="margin-top:2px"><i>"${this._esc(speak)}"</i></div>` : "";
     return `
       <div class="cfg-row"${e.notable ? ' style="color:var(--gold)"' : ""}>
         <label>${this._esc(ts)} · ${this._esc(src)}${cat ? " · " + this._esc(cat) : ""}</label>
         <span class="toggle-desc">${desc}</span>
-      </div>`;
+      </div>
+      ${speakLine}`;
   }
 
   _doorbellTrainingCardBody() {
