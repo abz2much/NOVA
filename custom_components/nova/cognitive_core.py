@@ -82,6 +82,48 @@ def _fmt_temp(value: float, unit: str, decimals: int = 1) -> str:
     return f"{value:.{decimals}f}{unit or '°'}"
 
 
+def discover_outdoor_temp(hass) -> Optional[tuple[float, str]]:
+    """(value, unit) of the outdoor temperature: a weather.* entity if one
+    exists, else a sensor whose entity_id/name says "outdoor"/"outside".
+    None if nothing is found. Never raises. Shared by the freeze-risk check
+    below and Sentinel's door/window-left-open temperature gate."""
+    try:
+        default_unit = hass.config.units.temperature_unit
+    except Exception:
+        default_unit = "°F"
+
+    value = None
+    unit = default_unit
+    for state in hass.states.async_all("weather"):
+        temp = state.attributes.get("temperature")
+        if temp is not None:
+            try:
+                value = float(temp)
+            except (ValueError, TypeError):
+                continue
+            unit = state.attributes.get("temperature_unit") or default_unit
+            break
+
+    if value is None:
+        for state in hass.states.async_all("sensor"):
+            if state.attributes.get("device_class") != "temperature":
+                continue
+            eid = state.entity_id.lower()
+            fname = (state.attributes.get("friendly_name") or "").lower()
+            if "outdoor" in eid or "outside" in eid or "outdoor" in fname:
+                try:
+                    value = float(state.state)
+                except (ValueError, TypeError):
+                    pass
+                else:
+                    unit = state.attributes.get("unit_of_measurement") or default_unit
+                break
+
+    if value is None:
+        return None
+    return value, unit
+
+
 def _hass_lang(hass) -> str:
     """Home Assistant's configured language ('en' fallback), for localized
     safety notifications."""
@@ -338,42 +380,10 @@ class SafetyManager:
         if (now - self._last_freeze_alert) < 3600:  # 1hr cooldown
             return None
 
-        try:
-            default_unit = self.hass.config.units.temperature_unit
-        except Exception:
-            default_unit = "°F"
-
-        outdoor_temp = None
-        unit = default_unit
-        # Check weather entity
-        for state in self.hass.states.async_all("weather"):
-            temp = state.attributes.get("temperature")
-            if temp is not None:
-                try:
-                    outdoor_temp = float(temp)
-                except (ValueError, TypeError):
-                    continue
-                unit = state.attributes.get("temperature_unit") or default_unit
-                break
-
-        # Check outdoor temp sensors
-        if outdoor_temp is None:
-            for state in self.hass.states.async_all("sensor"):
-                if state.attributes.get("device_class") != "temperature":
-                    continue
-                eid = state.entity_id.lower()
-                fname = (state.attributes.get("friendly_name") or "").lower()
-                if "outdoor" in eid or "outside" in eid or "outdoor" in fname:
-                    try:
-                        outdoor_temp = float(state.state)
-                    except (ValueError, TypeError):
-                        pass
-                    else:
-                        unit = state.attributes.get("unit_of_measurement") or default_unit
-                    break
-
-        if outdoor_temp is None:
+        found = discover_outdoor_temp(self.hass)
+        if found is None:
             return None
+        outdoor_temp, unit = found
 
         temp_f = _temp_to_f(outdoor_temp, unit)
         reading = _fmt_temp(outdoor_temp, unit)

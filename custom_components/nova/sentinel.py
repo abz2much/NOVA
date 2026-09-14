@@ -35,6 +35,8 @@ DEFAULT_RULES = [
         "device_class": "door",
         "state": "on",
         "for_minutes": 10,
+        "skip_if_outdoor_above_c": 10,  # mild out -- an open door isn't an
+                                        # urgent heat-loss concern, no noise
         "message": "{honorific}, {friendly_name} has been open for {minutes} minutes.",
     },
     {
@@ -43,6 +45,7 @@ DEFAULT_RULES = [
         "device_class": "window",
         "state": "on",
         "for_minutes": 30,
+        "skip_if_outdoor_above_c": 10,
         "message": "{honorific}, {friendly_name} has been open for {minutes} minutes.",
     },
     {
@@ -85,6 +88,7 @@ class NovaSentinel:
         self._entry      = entry
         self._active     = False
         self._state_start: dict[str, datetime] = {}
+        self._last_announced: dict[str, datetime] = {}
         self._unsubs: list = []
         self._entity_cache: list[str] = []
 
@@ -213,19 +217,48 @@ class NovaSentinel:
                         )
             else:
                 self._state_start.pop(key, None)
+                self._last_announced.pop(key, None)
 
     @callback
     def _check_durations(self, now) -> None:  # noqa: ARG002
-        """Called every 60 s — check duration-based rules."""
+        """Called every 60 s — check duration-based rules.
+
+        Re-announces every `for_minutes` while the condition persists,
+        reporting the TRUE total time open each time. Live-caught bug: this
+        used to reset `_state_start` (the original open time) on every
+        announce, so a door open 40 minutes kept saying "10 minutes" forever
+        instead of escalating to 20, 30, 40 — the baseline never advanced,
+        so `elapsed` measured from the fake reset was always ~= threshold.
+        `_last_announced` now tracks re-fire timing separately, leaving
+        `_state_start` untouched.
+
+        A rule with `skip_if_outdoor_above_c` is skipped entirely while
+        outdoor temperature is above that value (mild weather — no urgency
+        about heat loss, so no noise) — checked once per tick, not once per
+        entity, since it's the same reading for every entity a rule covers.
+        """
         try:
             from .entity_filter import is_excluded as _excl
         except Exception:
             _excl = lambda _h, _e: False
+
         utcnow = dt_util.utcnow().replace(tzinfo=None)
+        outdoor_c = None
+        outdoor_checked = False
+
         for rule in self._rules:
             threshold = rule.get("for_minutes")
             if not threshold:
                 continue
+
+            temp_gate = rule.get("skip_if_outdoor_above_c")
+            if temp_gate is not None:
+                if not outdoor_checked:
+                    outdoor_checked = True
+                    outdoor_c = self._outdoor_temp_c()
+                if outdoor_c is not None and outdoor_c > temp_gate:
+                    continue  # mild out — skip this rule's checks this tick
+
             for entity_id in self._entity_cache:
                 if _excl(self.hass, entity_id):
                     continue
@@ -233,12 +266,30 @@ class NovaSentinel:
                 started = self._state_start.get(key)
                 if started is None:
                     continue
-                elapsed = (utcnow - started).total_seconds() / 60
-                if elapsed >= threshold:
+                since_open = (utcnow - started).total_seconds() / 60
+                if since_open < threshold:
+                    continue
+                last = self._last_announced.get(key)
+                since_last = (utcnow - last).total_seconds() / 60 if last else since_open
+                if since_last >= threshold:
                     self.hass.async_create_task(
-                        self._announce_rule(entity_id, rule, minutes=int(elapsed))
+                        self._announce_rule(entity_id, rule, minutes=int(since_open))
                     )
-                    self._state_start[key] = utcnow  # reset to avoid spam
+                    self._last_announced[key] = utcnow
+
+    def _outdoor_temp_c(self) -> float | None:
+        """Outdoor temperature in Celsius, or None if no source is found.
+        Shares discovery with cognitive_core's freeze-risk check rather than
+        re-implementing it."""
+        try:
+            from .cognitive_core import discover_outdoor_temp
+            found = discover_outdoor_temp(self.hass)
+        except Exception:
+            return None
+        if found is None:
+            return None
+        value, unit = found
+        return (value - 32.0) * 5.0 / 9.0 if unit and "F" in unit.upper() else value
 
     # ── Announcement ──────────────────────────────────────────────────────────
 
