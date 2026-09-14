@@ -3937,7 +3937,7 @@ class NovaCommandCenterNew extends HTMLElement {
         ? `<div class="toggle-desc">${(cvg.covered && cvg.covered.length) ? `✓ confirms ${cvg.covered.map(r => this._esc(r)).join(", ")} — ` : ""}${this._esc(cvg.reason)}</div>`
         : "";
       return `
-        <div class="cfg-row" data-ci="${i}">
+        <div class="cfg-row cam-row-new" data-ci="${i}">
           <span class="new-pl-chip">CAM ${i + 1}</span>
           <select class="cam-field-new" data-cam="entity" data-ci="${i}">${this._cameraEntityOptions(c.entity || "")}</select>
           <label>aim <input class="cam-field-new" data-cam="angle" data-ci="${i}" type="range" min="0" max="359" step="1" value="${c.angle != null ? c.angle : 270}"></label>
@@ -4860,6 +4860,13 @@ class NovaCommandCenterNew extends HTMLElement {
       .fpn-canvas{min-height:520px;margin-bottom:10px}
       .fpn-actions{margin-top:4px}
       .fpn-op-marker.op-glow{opacity:1;stroke:var(--ink);stroke-width:2.5;filter:drop-shadow(0 0 6px var(--gold-pale))}
+      /* Openings/cameras rows pack more controls than a plain cfg-row (chip,
+         wall/room select, slider, size, entity select, delete) -- let them
+         wrap instead of forcing one line and overflowing the settings-card's
+         column (the settings-grid uses CSS columns, which don't clip
+         horizontal overflow, so it visually bleeds into the next card). */
+      .op-row-new,.cam-row-new{flex-wrap:wrap;row-gap:6px}
+      .op-row-new select,.op-row-new input,.cam-row-new select,.cam-row-new input{flex:0 0 auto}
     `;
   }
 }

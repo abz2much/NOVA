@@ -1,3 +1,7 @@
+## [7.101.22] — fix: openings/camera rows overflowed into the next settings column
+
+Caught live testing 7.101.21: the openings row (type chip, wall/room select, position slider, size input, entity select, delete) and the camera row (aim/FOV/range/entity/toggle/delete) pack more controls than a plain `cfg-row` and didn't wrap — `.settings-grid` uses CSS columns, which don't clip horizontal overflow, so a too-wide row visually bled into the next card over. Both rows now wrap onto multiple lines instead.
+
 ## [7.101.21] — Floor Plan Editor Phase 3c: windows/doors/dormers — Command Center now at full parity
 
 Ported Classic's window/door/dormer placement ("openings") into Command Center: same `floor_plan_elements` config, same wall-relative and room-relative positioning, same window/exterior-door/cellar-door/interior-door/cased-opening/dormer types with an open/closed sensor binding per opening. This also feeds `_planGeometry`'s wall gaps, so AI camera-coverage (Phase 3b) now correctly accounts for doorways instead of treating every wall as solid — the "same-room-only lower bound" caveat from 7.101.20 no longer applies.
