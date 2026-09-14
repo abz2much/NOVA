@@ -801,6 +801,8 @@ async def ws_get_panel_data(
                 "appliances": _get_appliance_status(),
                 "appliance_profile": _get_runtime_json(hass, entry, "appliance_profile", []),
                 "appliance_announce_unknown": _runtime_opt(hass, entry, "appliance_announce_unknown", False),
+                "energy_cost_today_entity": str(_runtime_opt(hass, entry, "energy_cost_today_entity", "") or ""),
+                "energy_cost_net_entity": str(_runtime_opt(hass, entry, "energy_cost_net_entity", "") or ""),
                 "memory_stats": _get_memory_stats(),
                 "satellites": _get_satellites(hass),
                 "cast_devices": _get_cast_devices(hass),

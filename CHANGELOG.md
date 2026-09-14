@@ -1,3 +1,7 @@
+## [7.101.15] — daily-report cost entities now settable from the panel
+
+The two settings added in 7.101.13 (`energy_cost_today_entity` / `energy_cost_net_entity`) were only ever backend-writable — no actual field existed in the panel, so setting them meant an API call on my end, not something any install could do themselves. Added two text fields to the Energy Management settings card (Settings → Safety → Energy Management) using the existing generic autosave — point Nova at your own cost sensor there instead of its price × kWh estimate. No new JS wiring needed, just markup + exposing the two values in get_panel_data.
+
 ## [7.101.14] — fix: door/window left-open nag never escalated, plus a mild-weather quiet gate
 
 Caught live: "door open 10 minutes" repeated every 10 minutes forever instead of escalating to 20, 30, 40 — `_check_durations` reset the original open-time on every re-announce, so elapsed time measured from that fake reset was always ~= the threshold. A new `_last_announced` tracker now handles re-fire timing separately, leaving the true open-time untouched, so the reported minutes actually climbs. Also added: door/window-left-open rules now skip entirely while outdoor temperature is above 10°C (new `skip_if_outdoor_above_c` rule field) — mild weather isn't a heat-loss concern, so no noise. Outdoor-temperature discovery is shared with the existing freeze-risk check (extracted into `discover_outdoor_temp`) rather than duplicated.
