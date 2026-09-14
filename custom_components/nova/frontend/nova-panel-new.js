@@ -3940,9 +3940,9 @@ class NovaCommandCenterNew extends HTMLElement {
         <div class="cfg-row cam-row-new" data-ci="${i}">
           <span class="new-pl-chip">CAM ${i + 1}</span>
           <select class="cam-field-new" data-cam="entity" data-ci="${i}">${this._cameraEntityOptions(c.entity || "")}</select>
-          <label>aim <input class="cam-field-new" data-cam="angle" data-ci="${i}" type="range" min="0" max="359" step="1" value="${c.angle != null ? c.angle : 270}"></label>
-          <label>FOV <input class="cam-field-new" data-cam="fov" data-ci="${i}" type="range" min="20" max="170" step="5" value="${c.fov != null ? c.fov : 90}"></label>
-          <label>range <input class="cam-field-new cam-num-new" data-cam="range" data-ci="${i}" type="number" min="5" step="5" value="${this._fpToReal(c.range != null ? c.range : 55)}"> ${uL}</label>
+          <label class="fpn-inline-lbl">aim <input class="cam-field-new" data-cam="angle" data-ci="${i}" type="range" min="0" max="359" step="1" value="${c.angle != null ? c.angle : 270}"></label>
+          <label class="fpn-inline-lbl">FOV <input class="cam-field-new" data-cam="fov" data-ci="${i}" type="range" min="20" max="170" step="5" value="${c.fov != null ? c.fov : 90}"></label>
+          <label class="fpn-inline-lbl">range <input class="cam-field-new cam-num-new" data-cam="range" data-ci="${i}" type="number" min="5" step="5" value="${this._fpToReal(c.range != null ? c.range : 55)}"> ${uL}</label>
           <button class="mode-chip cam-io-new" data-ci="${i}" title="indoor = bounded by walls, outdoor = by range">${c.indoor === false ? "OUTDOOR" : "INDOOR"}</button>
           <button class="fpn-ent-del cam-del-new" data-ci="${i}" title="Remove">×</button>
         </div>
@@ -4861,12 +4861,19 @@ class NovaCommandCenterNew extends HTMLElement {
       .fpn-actions{margin-top:4px}
       .fpn-op-marker.op-glow{opacity:1;stroke:var(--ink);stroke-width:2.5;filter:drop-shadow(0 0 6px var(--gold-pale))}
       /* Openings/cameras rows pack more controls than a plain cfg-row (chip,
-         wall/room select, slider, size, entity select, delete) -- let them
-         wrap instead of forcing one line and overflowing the settings-card's
-         column (the settings-grid uses CSS columns, which don't clip
-         horizontal overflow, so it visually bleeds into the next card). */
-      .op-row-new,.cam-row-new{flex-wrap:wrap;row-gap:6px}
-      .op-row-new select,.op-row-new input,.cam-row-new select,.cam-row-new input{flex:0 0 auto}
+         wall/room select, slider, size, entity select, delete). flex-wrap
+         alone isn't enough: a native <input type=range>/<select> has no
+         intrinsic width limit, so two of them can already be wider than a
+         settings-card's column before wrapping even has a reason to kick
+         in -- the settings-grid uses CSS columns, which don't clip
+         horizontal overflow, so a too-wide row bleeds into the next card
+         over instead of being clipped. Give every control in these rows an
+         explicit cap so the row actually has narrow enough pieces to wrap. */
+      .op-row-new,.cam-row-new{flex-wrap:wrap;row-gap:6px;max-width:100%}
+      .op-row-new select,.cam-row-new select{flex:0 1 auto;max-width:110px}
+      .op-row-new input[type="range"],.cam-row-new input[type="range"]{flex:0 0 auto;width:70px}
+      .op-row-new input[type="number"],.cam-row-new input[type="number"]{flex:0 0 auto;width:44px}
+      .fpn-inline-lbl{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--ink-dim)}
     `;
   }
 }

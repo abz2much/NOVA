@@ -1,3 +1,7 @@
+## [7.101.23] — fix: openings/camera rows still overflowed after 7.101.22's flex-wrap-only fix
+
+7.101.22's `flex-wrap` fix wasn't enough — Abi caught it still overflowing live. Root cause: a native `<input type="range">`/`<select>` has no intrinsic width limit, so two of them are already wider than a settings-card's column before wrapping even has a reason to trigger. Gave every control in the openings/camera rows an explicit width cap (range sliders 70px, number inputs 44px, selects capped at 110px) so the row actually has narrow-enough pieces to wrap onto multiple lines within its column.
+
 ## [7.101.22] — fix: openings/camera rows overflowed into the next settings column
 
 Caught live testing 7.101.21: the openings row (type chip, wall/room select, position slider, size input, entity select, delete) and the camera row (aim/FOV/range/entity/toggle/delete) pack more controls than a plain `cfg-row` and didn't wrap — `.settings-grid` uses CSS columns, which don't clip horizontal overflow, so a too-wide row visually bled into the next card over. Both rows now wrap onto multiple lines instead.
