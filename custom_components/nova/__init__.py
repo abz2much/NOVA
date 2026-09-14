@@ -308,8 +308,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if _eufy_reverse:
             @callback
             def _auto_eufy(event) -> None:
-                if not _auto_flag("camera_auto_analyze", True):
-                    return
+                # camera_auto_analyze ("Camera Watch") gates ringing/stranger/
+                # person the same way it already gates the Nest path above —
+                # but NOT package roles: the pre-existing periodic vision-sweep
+                # this replaces for Eufy cameras was always independently
+                # gated on package_detection alone, never on Camera Watch, so
+                # a house with Camera Watch off but Package Watch on (a real,
+                # supported combination) must keep working exactly as before.
                 new_state = event.data.get("new_state")
                 if new_state is None or new_state.state != "on":
                     return
@@ -318,6 +323,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     return
                 entity_id, role = hit
                 now = _auto_time.monotonic()
+
+                if role.startswith("package_"):
+                    if not _auto_flag("package_detection", True):
+                        return
+                    honorific = _live_honorific(hass)
+                    tts = _get_tts(hass, entry, context="package")
+                    spk = _get_speakers(hass, entry)
+                    from . import package_monitor
+                    hass.async_create_task(
+                        package_monitor.note_from_eufy(hass, honorific, tts, spk, entity_id, role)
+                    )
+                    return
+
+                if not _auto_flag("camera_auto_analyze", True):
+                    return
 
                 if role == "ringing":
                     if now - _chime_cd.get(entity_id, float("-inf")) < 12.0:
@@ -362,17 +382,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                             _LOGGER.debug("Nova eufy: known-visitor log failed: %s", exc)
                     hass.async_create_task(_log_known_visitor())
                     return
-
-                if role.startswith("package_"):
-                    if not _auto_flag("package_detection", True):
-                        return
-                    honorific = _live_honorific(hass)
-                    tts = _get_tts(hass, entry, context="package")
-                    spk = _get_speakers(hass, entry)
-                    from . import package_monitor
-                    hass.async_create_task(
-                        package_monitor.note_from_eufy(hass, honorific, tts, spk, entity_id, role)
-                    )
 
             camera_unsubs.append(async_track_state_change_event(
                 hass, list(_eufy_reverse.keys()), _auto_eufy))

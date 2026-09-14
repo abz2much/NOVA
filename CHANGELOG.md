@@ -1,3 +1,7 @@
+## [7.101.5] — fix: Eufy package detection was wrongly gated on Camera Watch
+
+Caught before it bit anyone real: the new Eufy listener (v7.101.4) checked `camera_auto_analyze` ("Camera Watch") before dispatching *any* role, including package delivered/stranded/taken. The periodic vision-sweep it replaces for Eufy cameras never had that dependency — it only ever checked `package_detection` ("Package Watch") — so a house with Camera Watch off and Package Watch on (a real, supported combination; this is this install's own default) would have seen package events silently swallowed. Package roles now check `package_detection` only, matching the pre-existing behavior exactly; ringing/stranger/person still require Camera Watch, unchanged.
+
 ## [7.101.4] — doorbell/package pipeline rebuilt around Eufy Security
 
 Nova's entire doorbell-press and visitor-detection pipeline was built for Nest/Frigate, which fire a custom HA bus event (`nest_event`/`frigate_event`) Nova subscribes to once. A Eufy doorbell fires no such event — it only changes entity states — so on a Eufy-only install (like this one) the pipeline had never triggered a single time; `doorbell_training`'s log sat at 0 events since the integration was installed. This release adds a real Eufy path instead of assuming Nest:
