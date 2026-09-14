@@ -1688,6 +1688,17 @@ setTimeout(async () => {
           && !!cc.querySelector("#newCamEnableAll");
       })()],
   );
+  // Camera Watch / Visitor Learning (v7.101.5) — previously Classic-only,
+  // parity gap Abi caught: he's on the new look and had no way to flip
+  // camera_auto_analyze from his actual settings screen.
+  checks.push(["settings tab: Camera Watch and Visitor Learning toggles are real, not stubs",
+    !!sRoot.querySelector('.toggle-btn[data-cfg-key="camera_auto_analyze"]')
+    && !!sRoot.querySelector('.toggle-btn[data-cfg-key="visitor_learning"]')]);
+  const camWatchBtn = sRoot.querySelector('.toggle-btn[data-cfg-key="camera_auto_analyze"]');
+  camWatchBtn.click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: Camera Watch toggle autosaves via nova/update_config",
+    _updateConfigCalls.some(c => c.key === "camera_auto_analyze" && c.value === false)]);
   const camToggle = sRoot.querySelector('.new-cam-enable-toggle[data-cam="camera.front"]');
   camToggle.click();
   await new Promise(r => setTimeout(r, 20));

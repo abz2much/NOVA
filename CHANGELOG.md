@@ -1,3 +1,7 @@
+## [7.101.6] — Camera Watch and Visitor Learning toggles ported to the new look
+
+Real parity gap Abi caught live testing the Eufy rebuild: `camera_auto_analyze` ("Camera Watch," gates doorbell/motion auto-analysis) and `visitor_learning` (silent stranger logging) only ever existed in Classic's Settings — someone on the new look had no way to turn Camera Watch on at all, meaning a doorbell press could never fire regardless of how correctly the Eufy pipeline itself was wired. Both toggles now render in the new look's Settings → Cameras card via the existing generic autosave (no new wiring needed).
+
 ## [7.101.5] — fix: Eufy package detection was wrongly gated on Camera Watch
 
 Caught before it bit anyone real: the new Eufy listener (v7.101.4) checked `camera_auto_analyze` ("Camera Watch") before dispatching *any* role, including package delivered/stranded/taken. The periodic vision-sweep it replaces for Eufy cameras never had that dependency — it only ever checked `package_detection` ("Package Watch") — so a house with Camera Watch off and Package Watch on (a real, supported combination; this is this install's own default) would have seen package events silently swallowed. Package roles now check `package_detection` only, matching the pre-existing behavior exactly; ringing/stranger/person still require Camera Watch, unchanged.
