@@ -987,6 +987,24 @@ NOVA_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "energy_report",
+            "description": (
+                "Report today's solar/energy totals — how much solar was "
+                "generated today, how much more is forecast today and "
+                "tomorrow, how it was used (self-consumed vs. exported vs. "
+                "drawn from the grid), whole-home consumption today, and "
+                "today's cost. Use when asked 'how much solar did we make "
+                "today', 'how much more is expected', 'how was it used', "
+                "'how much power did we use today', or 'what did it cost'. "
+                "Distinct from solar_status/energy_status, which are live-"
+                "instant readings, not daily totals."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "hazard_report",
             "description": (
                 "Report real-time natural-hazard and severe-weather activity "
@@ -2450,6 +2468,18 @@ async def _exec_solar_status(hass: HomeAssistant, args: dict) -> str:
         return json.dumps({"error": str(exc)})
 
 
+async def _exec_energy_report(hass: HomeAssistant, args: dict) -> str:
+    """Report today's solar/energy totals, forecast remaining, and cost
+    (v7.101.13). Async, awaited directly — solar.daily_report needs the
+    event loop for EnergyManager and the recorder executor internally."""
+    try:
+        from . import solar
+        res = await solar.daily_report(hass)
+        return json.dumps(res)
+    except Exception as exc:
+        return json.dumps({"error": str(exc)})
+
+
 async def _exec_hazard_report(hass: HomeAssistant, args: dict) -> str:
     """Live nearby hazard scan — earthquakes, severe weather, disasters (v6.71.0)."""
     try:
@@ -2785,6 +2815,7 @@ _TOOL_MAP = {
     "set_mode":            _exec_set_mode,
     "energy_status":       _exec_energy_status,
     "solar_status":        _exec_solar_status,
+    "energy_report":       _exec_energy_report,
     "hazard_report":       _exec_hazard_report,
     "activity_history":    _exec_activity_history,
     "weather_forecast":    _exec_weather_forecast,
@@ -3168,7 +3199,7 @@ CAPABILITY_GROUPS: dict = {
     "home_state":  {"get_entity_state", "search_entities", "get_area_devices",
                     "get_home_summary", "activity_history"},
     "diagnostics": {"system_diagnostics", "cognitive_status", "connectivity_status",
-                    "energy_status", "solar_status", "activity_history",
+                    "energy_status", "solar_status", "energy_report", "activity_history",
                     "get_entity_state", "root_cause"},
     "research":    {"web_research", "search_documents", "search_entities"},
     "environment": {"weather_forecast", "hazard_report"},

@@ -1476,6 +1476,10 @@ PANEL_WRITABLE_KEYS = {
     "pattern_confidence",           # float: pattern engine confidence threshold
     "light_control_enabled",        # bool: allow toggling lights from the dashboard
     "appliance_power_guessing",     # bool: announce fingerprint/auto-discovered guesses
+    "energy_cost_today_entity",     # str: entity_id of an install's own "cost today" sensor,
+                                     # preferred over solar.py's generic price x kWh estimate
+    "energy_cost_net_entity",       # str: entity_id of an install's own "net cost today" sensor
+                                     # (post export-credit); optional, paired with the above
     "identity_min_confidence",      # float: face-match threshold below which a person is 'unknown'
     "ollama_num_ctx",               # int: Ollama context window for local models
     # Sleep state (v7.86.0)
