@@ -384,9 +384,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     return
 
                 if role == "vehicle":
-                    # Direct announcement, no vision call — Eufy's own
-                    # vehicle_detected sensor is the signal, same cost
-                    # reasoning as the package/known-visitor paths.
+                    # Direct announcement, no vision call — same cost
+                    # reasoning as the package/known-visitor paths. Signal is
+                    # the motionDetectionTypeVehicle switch, not the
+                    # vehicleDetected binary_sensor (see eufy.py's role map
+                    # comment for why: the binary_sensor ships disabled and
+                    # unproven, the switch already had a working automation).
                     if now - _auto_cd.get(f"{entity_id}:vehicle", float("-inf")) < 300.0:
                         return
                     _auto_cd[f"{entity_id}:vehicle"] = now

@@ -84,7 +84,7 @@ def _set_registry(eufy_mod, entries):
     ("packageStranded", "package_stranded"),
     ("packageTaken", "package_taken"),
     ("snooze", "snooze"),
-    ("vehicleDetected", "vehicle"),
+    ("motionDetectionTypeVehicle", "vehicle"),
 ])
 def test_role_for_unique_id_matches_every_known_suffix(eufy, suffix, expected):
     assert eufy._role_for_unique_id(_uid(suffix)) == expected
@@ -94,6 +94,14 @@ def test_role_for_unique_id_unrecognised_suffix_is_none(eufy):
     assert eufy._role_for_unique_id(_uid("someFutureFeature")) is None
     assert eufy._role_for_unique_id("") is None
     assert eufy._role_for_unique_id(None) is None
+
+
+def test_vehicle_detected_binary_sensor_is_deliberately_not_mapped(eufy):
+    # The "clean" binary_sensor exists on real hardware but ships disabled by
+    # the integration and unproven — "vehicle" maps to the
+    # motionDetectionTypeVehicle switch instead (see eufy.py's comment). This
+    # locks in that choice against an accidental re-add of the other mapping.
+    assert eufy._role_for_unique_id(_uid("vehicleDetected")) is None
 
 
 def test_stranger_does_not_also_match_plain_person_role(eufy):
@@ -191,15 +199,32 @@ def test_discover_roles_survives_a_rename(eufy, fake_hass):
 
 def test_discover_roles_picks_up_vehicle_on_a_driveway_style_camera(eufy, fake_hass):
     # Real-world case: an outdoor camera with no doorbell/package hardware but
-    # with vehicle_detected (verified live against an actual eufy_security
-    # driveway camera, unique_id "..._device_vehicleDetected").
+    # with vehicle detection — via the motionDetectionTypeVehicle switch, not
+    # the vehicleDetected binary_sensor (verified live: both exist on Abi's
+    # actual driveway camera, but the binary_sensor ships disabled and
+    # unproven, while the switch is what his own working automation already
+    # used as an event trigger).
     driveway = [
         _Entry("camera.driveway", "eufy_security", DEVICE, _uid("camera")),
         _Entry("binary_sensor.driveway_person_detected", "eufy_security", DEVICE, _uid("personDetected")),
-        _Entry("binary_sensor.driveway_vehicle_detected", "eufy_security", DEVICE, _uid("vehicleDetected")),
+        _Entry("switch.driveway_motion_detection_type_vehicle", "eufy_security", DEVICE, _uid("motionDetectionTypeVehicle")),
     ]
     _set_registry(eufy, driveway)
     roles = eufy.discover_roles(fake_hass, "camera.driveway")
-    assert roles["vehicle"] == "binary_sensor.driveway_vehicle_detected"
+    assert roles["vehicle"] == "switch.driveway_motion_detection_type_vehicle"
     assert "ringing" not in roles
     assert "package_delivered" not in roles
+
+
+def test_discover_roles_ignores_the_unmapped_vehicle_binary_sensor_even_when_present(eufy, fake_hass):
+    # Both the switch AND the disabled binary_sensor exist on the same real
+    # device (confirmed live). Only the switch may win "vehicle" — mapping
+    # both would make it nondeterministic which entity gets watched.
+    driveway = [
+        _Entry("camera.driveway", "eufy_security", DEVICE, _uid("camera")),
+        _Entry("binary_sensor.driveway_vehicle_detected", "eufy_security", DEVICE, _uid("vehicleDetected")),
+        _Entry("switch.driveway_motion_detection_type_vehicle", "eufy_security", DEVICE, _uid("motionDetectionTypeVehicle")),
+    ]
+    _set_registry(eufy, driveway)
+    roles = eufy.discover_roles(fake_hass, "camera.driveway")
+    assert roles["vehicle"] == "switch.driveway_motion_detection_type_vehicle"

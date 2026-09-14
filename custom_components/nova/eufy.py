@@ -54,7 +54,15 @@ _ROLE_SUFFIXES = {
     "packageStranded": "package_stranded",
     "packageTaken": "package_taken",
     "snooze": "snooze",
-    "vehicleDetected": "vehicle",
+    # NOT "vehicleDetected" — that binary_sensor exists on this install but
+    # ships disabled by the integration and is unproven. "vehicle" maps to
+    # the switch instead: Abi's own pre-existing automation already uses
+    # switch.*_motion_detection_type_vehicle (a config-shaped entity that, in
+    # this eufy_security build, pulses on/off per detection rather than
+    # staying static) as an event trigger, with a real track record. Only one
+    # of the two is mapped here on purpose — both exist on the same device,
+    # and mapping both would make which one wins nondeterministic.
+    "motionDetectionTypeVehicle": "vehicle",
 }
 # Longest-suffix-first so an exact match always wins over a shorter one that
 # happens to also be a suffix of it (defensive; today no role is a suffix of

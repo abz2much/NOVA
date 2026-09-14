@@ -1,3 +1,7 @@
+## [7.101.11] — fix: vehicle detection now uses Abi's proven entity, not the untested one
+
+Follow-up to 7.101.10: switched the "vehicle" role from the `vehicleDetected` binary_sensor (ships disabled by the integration, no track record) to the `motionDetectionTypeVehicle` switch — the entity Abi's own pre-existing "Announce Car In Driveway" automation already used successfully as an event trigger. Both entities exist on the same physical device; only one is mapped to "vehicle" now, deterministically, so there's no ambiguity about which one Nova watches. New test locks this in (both present, only the switch wins) against an accidental future re-add of the other mapping.
+
 ## [7.101.10] — Eufy vehicle detection wired up and announced
 
 New `vehicle` role in `eufy.py`'s discovery map (unique_id suffix `_device_vehicleDetected`, verified live) and a new direct-announce branch in the Eufy state-change listener — no vision call, same cost reasoning as the package/known-visitor paths. A car detected at any Eufy camera with the sensor (currently Driveway and Backyard) gets a spoken "a vehicle was detected at {camera name}" with a 5-minute per-camera cooldown. **Note:** Eufy ships `vehicle_detected` disabled by default on both this install's cameras (`disabled_by: "integration"`) — it needs enabling in Home Assistant's entity settings before this does anything; the code alone can't turn it on.
