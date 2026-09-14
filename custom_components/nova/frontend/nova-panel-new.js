@@ -3591,6 +3591,174 @@ class NovaCommandCenterNew extends HTMLElement {
     return sqFt >= 43560 ? (sqFt / 43560).toFixed(2) + " acres" : Math.round(sqFt).toLocaleString() + " sq ft";
   }
 
+  // Cameras + AI coverage (Phase 3b) — same config/geometry as Classic,
+  // simplified: window/door placement ("openings") isn't ported here yet,
+  // so wall line-of-sight has no gaps to pass through. Coverage is
+  // therefore a same-room-only lower bound — accurate away from doorways,
+  // pessimistic right at one, until openings are ported too.
+  _getFloorCameras() {
+    const raw = this._data()?.config?.floor_plan_cameras;
+    let c = {};
+    try { c = typeof raw === "string" ? (raw ? JSON.parse(raw) : {}) : (raw || {}); } catch (_) { c = {}; }
+    return c || {};
+  }
+  _getEditingCameras() {
+    if (this._editingCameras) return this._editingCameras;
+    this._editingCameras = JSON.parse(JSON.stringify(this._getFloorCameras()));
+    return this._editingCameras;
+  }
+  _camsFor(floor) {
+    const c = this._getEditingCameras();
+    if (!Array.isArray(c[floor])) c[floor] = [];
+    return c[floor];
+  }
+  _cameraEntityOptions(selected) {
+    const states = this._hass?.states || {};
+    const eids = Object.keys(states).filter(e => e.startsWith("camera.")).sort();
+    if (selected && !eids.includes(selected)) eids.unshift(selected);
+    const opts = eids.map(e => {
+      const st = states[e];
+      const fn = (st && st.attributes && st.attributes.friendly_name) || e;
+      return `<option value="${this._esc(e)}"${e === selected ? " selected" : ""}>${this._esc(fn)}</option>`;
+    }).join("");
+    return `<option value="">— camera —</option>${opts}`;
+  }
+  _segIntersect(x1, y1, x2, y2, x3, y3, x4, y4) {
+    const den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+    if (Math.abs(den) < 1e-9) return null;
+    const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / den;
+    const u = ((x1 - x3) * (y1 - y2) - (y1 - y3) * (x1 - x2)) / den;
+    if (t < 0 || t > 1 || u < 0 || u > 1) return null;
+    return { x: x1 + t * (x2 - x1), y: y1 + t * (y2 - y1) };
+  }
+  _planGeometry(floor) {
+    const plan = this._getEditingPlan()[floor];
+    const rooms = (plan && plan.rooms) || [];
+    const walls = [];
+    rooms.forEach(r => {
+      if (r.type === "stairs" || r.type === "door" || r.type === "outdoor") return;
+      const rp = this._zonePoints(r);
+      for (let wi = 0; wi < rp.length; wi++) { const a = rp[wi], b = rp[(wi + 1) % rp.length]; walls.push({ x0: a[0], y0: a[1], x1: b[0], y1: b[1] }); }
+    });
+    return { walls, gaps: [] };   // no ported opening data yet — see class comment above
+  }
+  _inGap(x, y, gaps) {
+    const tol = 2.5;
+    for (let i = 0; i < gaps.length; i++) {
+      const g = gaps[i];
+      if (x >= Math.min(g.x0, g.x1) - tol && x <= Math.max(g.x0, g.x1) + tol
+        && y >= Math.min(g.y0, g.y1) - tol && y <= Math.max(g.y0, g.y1) + tol) return true;
+    }
+    return false;
+  }
+  _losClear(x1, y1, x2, y2, geo) {
+    for (let i = 0; i < geo.walls.length; i++) {
+      const w = geo.walls[i];
+      const ip = this._segIntersect(x1, y1, x2, y2, w.x0, w.y0, w.x1, w.y1);
+      if (ip && !this._inGap(ip.x, ip.y, geo.gaps)) return false;
+    }
+    return true;
+  }
+  _pointCovered(px, py, cx, cy, ang, half, rng, geo) {
+    const dx = px - cx, dy = py - cy;
+    if (Math.hypot(dx, dy) > rng) return false;
+    const a = Math.atan2(dy, dx) * 180 / Math.PI;
+    if (Math.abs(((a - ang + 540) % 360) - 180) > half) return false;
+    return this._losClear(cx, cy, px, py, geo);
+  }
+  _computeCoverage(floor, cam, geo) {
+    const plan = this._getEditingPlan()[floor];
+    if (!plan || !plan.rooms || !plan.rooms.length) return {};
+    geo = geo || this._planGeometry(floor);
+    const cx = cam.x, cy = cam.y, ang = cam.angle != null ? cam.angle : 270,
+      fov = cam.fov != null ? cam.fov : 90, rng = Math.max(cam.range != null ? cam.range : 55, 5), half = fov / 2;
+    const cov = {};
+    plan.rooms.forEach(r => {
+      if (r.type === "door" || r.type === "stairs") return;
+      let hit = 0, tot = 0;
+      if (r.type === "outdoor" || (r.points && r.points.length >= 3)) {
+        const pts = this._zonePoints(r);
+        let bx0 = 1e9, by0 = 1e9, bx1 = -1e9, by1 = -1e9;
+        pts.forEach(p => { bx0 = Math.min(bx0, p[0]); by0 = Math.min(by0, p[1]); bx1 = Math.max(bx1, p[0]); by1 = Math.max(by1, p[1]); });
+        const nx = 6, ny = 6;
+        for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) {
+          const px = bx0 + (i + 0.5) / nx * (bx1 - bx0), py = by0 + (j + 0.5) / ny * (by1 - by0);
+          if (!this._pointInPoly(px, py, pts)) continue;
+          tot++;
+          if (this._pointCovered(px, py, cx, cy, ang, half, rng, geo)) hit++;
+        }
+      } else {
+        const nx = 4, ny = 4;
+        for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) {
+          const px = r.x + (i + 0.5) / nx * r.w, py = r.y + (j + 0.5) / ny * r.h;
+          tot++;
+          if (this._pointCovered(px, py, cx, cy, ang, half, rng, geo)) hit++;
+        }
+      }
+      if (hit > 0 && tot > 0) cov[r.name] = Math.round(hit / tot * 100) / 100;
+    });
+    return cov;
+  }
+  _pointInPoly(x, y, pts) {
+    let inside = false;
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      const xi = pts[i][0], yi = pts[i][1], xj = pts[j][0], yj = pts[j][1];
+      if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) inside = !inside;
+    }
+    return inside;
+  }
+  _coneD(cam) {
+    const cx = cam.x, cy = cam.y, ang = cam.angle != null ? cam.angle : 270,
+      fov = cam.fov != null ? cam.fov : 90, rng = Math.max(cam.range != null ? cam.range : 55, 5);
+    const a1 = (ang - fov / 2) * Math.PI / 180, a2 = (ang + fov / 2) * Math.PI / 180;
+    const x1 = cx + rng * Math.cos(a1), y1 = cy + rng * Math.sin(a1);
+    const x2 = cx + rng * Math.cos(a2), y2 = cy + rng * Math.sin(a2);
+    const large = fov > 180 ? 1 : 0;
+    return `M ${cx} ${cy} L ${x1.toFixed(1)} ${y1.toFixed(1)} A ${rng} ${rng} 0 ${large} 1 ${x2.toFixed(1)} ${y2.toFixed(1)} Z`;
+  }
+  _rayCast(cx, cy, ang, range, geo) {
+    const ex = cx + range * Math.cos(ang), ey = cy + range * Math.sin(ang);
+    let best = range;
+    for (let i = 0; i < geo.walls.length; i++) {
+      const w = geo.walls[i];
+      const ip = this._segIntersect(cx, cy, ex, ey, w.x0, w.y0, w.x1, w.y1);
+      if (!ip || this._inGap(ip.x, ip.y, geo.gaps)) continue;
+      const d = Math.hypot(ip.x - cx, ip.y - cy);
+      if (d < best) best = d;
+    }
+    return best;
+  }
+  _clippedCone(cam, geo) {
+    if (!geo || !geo.walls || !geo.walls.length) return this._coneD(cam);
+    const cx = cam.x, cy = cam.y, ang = cam.angle != null ? cam.angle : 270,
+      fov = cam.fov != null ? cam.fov : 90, rng = Math.max(cam.range != null ? cam.range : 55, 5);
+    const N = Math.max(24, Math.round(fov / 3)), a0 = (ang - fov / 2) * Math.PI / 180, step = (fov * Math.PI / 180) / N;
+    let d = `M ${cx} ${cy}`;
+    for (let i = 0; i <= N; i++) {
+      const a = a0 + i * step, dist = this._rayCast(cx, cy, a, rng, geo);
+      d += ` L ${(cx + dist * Math.cos(a)).toFixed(1)} ${(cy + dist * Math.sin(a)).toFixed(1)}`;
+    }
+    return d + " Z";
+  }
+  _roomAt(floor, x, y) {
+    const rooms = ((this._getEditingPlan()[floor] || {}).rooms) || [];
+    for (let i = 0; i < rooms.length; i++) {
+      const r = rooms[i];
+      if (r.type === "stairs" || r.type === "door") continue;
+      if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return r.name;
+    }
+    let best = null, bd = 1e18;
+    rooms.forEach(r => { const cx = r.x + r.w / 2, cy = r.y + r.h / 2, d = (cx - x) * (cx - x) + (cy - y) * (cy - y); if (d < bd) { bd = d; best = r.name; } });
+    return best || "the area";
+  }
+  _openingDescriptions(floor) {
+    // No ported window/door placement here yet — only the stairs signal survives.
+    const out = [];
+    const rooms = ((this._getEditingPlan()[floor] || {}).rooms) || [];
+    if (rooms.some(r => r.type === "stairs")) out.push("open staircase");
+    return out;
+  }
+
   _floorPlanEditorCardBody() {
     const plan = this._getEditingPlan();
     const floors = Object.keys(plan);
@@ -3611,12 +3779,13 @@ class NovaCommandCenterNew extends HTMLElement {
       </div>
       <div class="fpn-hint">Drag to move · bottom-right handle to resize · right-click to delete · double-click an edge to add a corner · scroll to zoom · drag empty space to pan</div>
       <div class="fpn-canvas" id="fpnCanvas">${this._renderFloorPlanSVG(plan, floor)}</div>
+      ${this._renderCamerasNew(floor)}
       ${this._renderPlanEntitiesNew(floor)}
       <div class="fpn-actions">
         <button class="mode-chip" id="fpnSave">Save Layout</button>
         <button class="mode-chip" id="fpnReset">Reset Default</button>
       </div>
-      <div class="camera-note">Camera placement and AI camera-coverage aren't ported here yet.
+      <div class="camera-note">Window/door placement isn't ported here yet, so camera coverage doesn't account for doorway gaps — it reads as a floor, not exact, until that's ported too.
         <button class="mode-chip" id="fpnGoClassic">Edit advanced layout in Classic</button>
       </div>`;
   }
@@ -3654,6 +3823,41 @@ class NovaCommandCenterNew extends HTMLElement {
         <input id="fpnBgOp" type="range" min="0" max="1" step="0.05" value="${op}">
         <span id="fpnBgOpVal">${Math.round(op * 100)}%</span>
       </div>`;
+  }
+
+  _renderCamerasNew(floor) {
+    const cams = this._camsFor(floor), uL = this._fpUnitLabel();
+    const geo = cams.length ? this._planGeometry(floor) : null;
+    const zoneNames = new Set((((this._getEditingPlan()[floor] || {}).rooms) || []).filter(r => r.type === "outdoor").map(r => r.name));
+    const rows = cams.map((c, i) => {
+      const cov = geo ? this._computeCoverage(floor, c, geo) : {};
+      const order = Object.keys(cov).sort((a, b) => cov[b] - cov[a]);
+      const covLine = order.length
+        ? `<div class="toggle-desc">sees: ${order.map(rn => `${this._esc(rn)} ${Math.round(cov[rn] * 100)}%${zoneNames.has(rn) ? " (zone)" : ""}`).join(" · ")}</div>`
+        : `<div class="toggle-desc">nothing in view — aim it, widen the FOV, or extend the range</div>`;
+      const cvg = c.coverage;
+      const llmLine = (cvg && cvg.reason)
+        ? `<div class="toggle-desc">${(cvg.covered && cvg.covered.length) ? `✓ confirms ${cvg.covered.map(r => this._esc(r)).join(", ")} — ` : ""}${this._esc(cvg.reason)}</div>`
+        : "";
+      return `
+        <div class="cfg-row" data-ci="${i}">
+          <span class="new-pl-chip">CAM ${i + 1}</span>
+          <select class="cam-field-new" data-cam="entity" data-ci="${i}">${this._cameraEntityOptions(c.entity || "")}</select>
+          <label>aim <input class="cam-field-new" data-cam="angle" data-ci="${i}" type="range" min="0" max="359" step="1" value="${c.angle != null ? c.angle : 270}"></label>
+          <label>FOV <input class="cam-field-new" data-cam="fov" data-ci="${i}" type="range" min="20" max="170" step="5" value="${c.fov != null ? c.fov : 90}"></label>
+          <label>range <input class="cam-field-new cam-num-new" data-cam="range" data-ci="${i}" type="number" min="5" step="5" value="${this._fpToReal(c.range != null ? c.range : 55)}"> ${uL}</label>
+          <button class="mode-chip cam-io-new" data-ci="${i}" title="indoor = bounded by walls, outdoor = by range">${c.indoor === false ? "OUTDOOR" : "INDOOR"}</button>
+          <button class="fpn-ent-del cam-del-new" data-ci="${i}" title="Remove">×</button>
+        </div>
+        ${covLine}${llmLine}`;
+    }).join("");
+    return `
+      <div class="mode-bind-head">Cameras · field of view <span class="toggle-desc">drop a camera, bind its entity, aim it — drag the dot on the plan to move, right-click to delete</span></div>
+      <div class="cfg-row">
+        <button class="mode-chip" id="fpnCamAdd">+ Camera</button>
+        ${cams.length ? `<button class="mode-chip" id="fpnCamCompute" title="AI: judge what each camera can confirm">Compute coverage</button>` : ""}
+      </div>
+      ${rows || `<div class="toggle-desc">No cameras placed on this floor yet — add one above.</div>`}`;
   }
 
   _renderFloorPlanSVG(plan, floor) {
@@ -3722,6 +3926,18 @@ class NovaCommandCenterNew extends HTMLElement {
     }
     for (const lbl of (floorData.labels || [])) {
       svg += `<text x="${lbl.x}" y="${lbl.y}" text-anchor="middle" fill="var(--ink-faint)" font-size="4" font-family="var(--font-mono)">${this._esc(lbl.text)}</text>`;
+    }
+
+    // Cameras — icon + FOV cone, clipped to walls.
+    const cams = this._camsFor(floor);
+    const camGeo = cams.length ? this._planGeometry(floor) : null;
+    for (let ci = 0; ci < cams.length; ci++) {
+      const cam = cams[ci], out = cam.indoor === false;
+      svg += `<g class="fpn-cam" data-cam-idx="${ci}">`
+        + `<path class="fpn-cam-cone" d="${this._clippedCone(cam, camGeo)}" fill="${out ? "rgba(232,178,61,0.10)" : "rgba(226,84,47,0.10)"}" stroke="${out ? "rgba(232,178,61,0.6)" : "rgba(226,84,47,0.6)"}" stroke-width="0.7" pointer-events="none"/>`
+        + `<circle class="fpn-cam-dot" cx="${cam.x}" cy="${cam.y}" r="3.2" fill="${out ? "var(--warn)" : "var(--ember)"}" stroke="var(--ink)" stroke-width="0.7" style="cursor:grab"/>`
+        + `<text x="${cam.x}" y="${cam.y - 5}" text-anchor="middle" fill="${out ? "var(--warn)" : "var(--ember)"}" font-size="5" font-family="var(--font-mono)" pointer-events="none">${ci + 1}</text>`
+        + "</g>";
     }
 
     const ents = this._entsFor(floor);
@@ -3827,22 +4043,80 @@ class NovaCommandCenterNew extends HTMLElement {
       this._rerenderFloorPlanCard();
     });
 
+    const camAdd = root.getElementById("fpnCamAdd");
+    if (camAdd) camAdd.addEventListener("click", () => {
+      const floor = this._editorFloor;
+      const rooms = ((this._getEditingPlan()[floor] || {}).rooms) || [];
+      let ccx = 100, ccy = 80;
+      if (rooms.length) {
+        let mnx = 1e9, mny = 1e9, mxx = -1e9, mxy = -1e9;
+        rooms.forEach(r => { mnx = Math.min(mnx, r.x); mny = Math.min(mny, r.y); mxx = Math.max(mxx, r.x + r.w); mxy = Math.max(mxy, r.y + r.h); });
+        ccx = Math.round((mnx + mxx) / 2); ccy = Math.round((mny + mxy) / 2);
+      }
+      this._camsFor(floor).push({ id: "c" + Date.now().toString(36), x: ccx, y: ccy, angle: 270, fov: 90, range: 55, entity: "", indoor: true });
+      this._rerenderFloorPlanCard();
+    });
+    const setCamField = (f) => {
+      const cam = this._camsFor(this._editorFloor)[parseInt(f.getAttribute("data-ci"))];
+      if (!cam) return null;
+      const k = f.getAttribute("data-cam");
+      if (k === "range") cam.range = this._fpFromReal(parseFloat(f.value) || 10);
+      else if (k === "angle" || k === "fov") cam[k] = parseFloat(f.value);
+      else cam[k] = f.value;
+      return cam;
+    };
+    root.querySelectorAll(".cam-field-new").forEach(f => {
+      f.addEventListener("input", () => {
+        const cam = setCamField(f);
+        if (!cam || f.getAttribute("data-cam") === "entity") return;
+        const g = root.querySelector(`.fpn-cam[data-cam-idx="${f.getAttribute("data-ci")}"]`);
+        if (g) { const cone = g.querySelector(".fpn-cam-cone"); if (cone) cone.setAttribute("d", this._clippedCone(cam, this._planGeometry(this._editorFloor))); }
+      });
+      f.addEventListener("change", () => { setCamField(f); this._rerenderFloorPlanCard(); });
+    });
+    root.querySelectorAll(".cam-io-new").forEach(b => b.addEventListener("click", () => {
+      const cam = this._camsFor(this._editorFloor)[parseInt(b.getAttribute("data-ci"))];
+      if (!cam) return; cam.indoor = (cam.indoor === false); this._rerenderFloorPlanCard();
+    }));
+    root.querySelectorAll(".cam-del-new").forEach(b => b.addEventListener("click", () => {
+      this._camsFor(this._editorFloor).splice(parseInt(b.getAttribute("data-ci")), 1);
+      this._rerenderFloorPlanCard();
+    }));
+    const camCompute = root.getElementById("fpnCamCompute");
+    if (camCompute) camCompute.addEventListener("click", async () => {
+      const floor = this._editorFloor;
+      const cams = this._camsFor(floor);
+      if (!cams.length) return;
+      camCompute.disabled = true;
+      const geo = this._planGeometry(floor), openings = this._openingDescriptions(floor);
+      for (const cam of cams) {
+        const cand = this._computeCoverage(floor, cam, geo);
+        const ctx = { entity: cam.entity || "", room: this._roomAt(floor, cam.x, cam.y), fov: cam.fov || 90, range_ft: this._fpToReal(cam.range || 55), indoor: cam.indoor !== false, candidates: cand, openings };
+        try { cam.coverage = await this._hass.callWS({ type: "nova/compute_camera_coverage", camera: ctx }); } catch (err) { /* keep going */ }
+      }
+      this._rerenderFloorPlanCard();
+    });
+
     const save = root.getElementById("fpnSave");
     if (save) save.addEventListener("click", async () => {
       const hasProperty = this._editingProperty !== null && this._editingProperty !== undefined;
-      if (!this._editingPlan && !this._editingEntities && !hasProperty) return;
-      const savedPlan = this._editingPlan, savedEnts = this._editingEntities, savedProp = this._editingProperty;
+      if (!this._editingPlan && !this._editingEntities && !this._editingCameras && !hasProperty) return;
+      const savedPlan = this._editingPlan, savedEnts = this._editingEntities,
+        savedCams = this._editingCameras, savedProp = this._editingProperty;
       try {
         if (savedPlan) await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_rooms", value: JSON.stringify(savedPlan) });
         if (savedEnts) await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_entities", value: JSON.stringify(savedEnts) });
+        if (savedCams) await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_cameras", value: JSON.stringify(savedCams) });
         if (hasProperty) await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_property", value: JSON.stringify({ points: savedProp }) });
         if (this._liveData?.config) {
           if (savedPlan) this._liveData.config.floor_plan_rooms = savedPlan;
           if (savedEnts) this._liveData.config.floor_plan_entities = savedEnts;
+          if (savedCams) this._liveData.config.floor_plan_cameras = savedCams;
           if (hasProperty) this._liveData.config.floor_plan_property = { points: savedProp };
         }
         this._editingPlan = null;
         this._editingEntities = null;
+        this._editingCameras = null;
         this._editingProperty = null;
       } catch (err) { console.error("Nova (new look): floor plan save failed", err); }
     });
@@ -4046,6 +4320,26 @@ class NovaCommandCenterNew extends HTMLElement {
       });
     });
 
+    // Camera drag + right-click delete
+    svgEl.querySelectorAll(".fpn-cam").forEach(g => {
+      const dot = g.querySelector(".fpn-cam-dot");
+      if (dot) dot.addEventListener("mousedown", (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault(); e.stopPropagation();
+        const ci = parseInt(g.getAttribute("data-cam-idx"));
+        const cam = (self._camsFor(floor) || [])[ci];
+        if (!cam) return;
+        const pt = svgPoint(e);
+        dragging = { camIdx: ci, startX: pt.x, startY: pt.y, origX: cam.x, origY: cam.y, camera: true, geo: self._planGeometry(floor) };
+      });
+      g.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        const ci = parseInt(g.getAttribute("data-cam-idx"));
+        const arr = self._camsFor(floor);
+        if (arr[ci] && window.confirm("Delete this camera?")) { arr.splice(ci, 1); redraw(); }
+      });
+    });
+
     // Device pins — drag to move (saved with the plan); a tap with no drag
     // opens the entity's controls; right-click removes it.
     svgEl.querySelectorAll(".fpn-ent").forEach(g => {
@@ -4108,6 +4402,19 @@ class NovaCommandCenterNew extends HTMLElement {
         if (path) path.setAttribute("d", self._propPathD(self._propertyPts()));
         return;
       }
+      if (dragging.camera) {
+        const cam = (self._camsFor(floor) || [])[dragging.camIdx];
+        if (!cam) return;
+        cam.x = Math.round(dragging.origX + (pt.x - dragging.startX));
+        cam.y = Math.round(dragging.origY + (pt.y - dragging.startY));
+        const gc = svgEl.querySelector(`.fpn-cam[data-cam-idx="${dragging.camIdx}"]`);
+        if (gc) {
+          const dot = gc.querySelector(".fpn-cam-dot"); if (dot) { dot.setAttribute("cx", cam.x); dot.setAttribute("cy", cam.y); }
+          const cone = gc.querySelector(".fpn-cam-cone"); if (cone) cone.setAttribute("d", self._clippedCone(cam, dragging.geo));
+          const tx = gc.querySelector("text"); if (tx) { tx.setAttribute("x", cam.x); tx.setAttribute("y", cam.y - 5); }
+        }
+        return;
+      }
       if (dragging.entity) {
         const ent = (self._entsFor(floor) || [])[dragging.entIdx];
         if (!ent) return;
@@ -4155,7 +4462,7 @@ class NovaCommandCenterNew extends HTMLElement {
       if (dragging.entity && !dragging.moved && dragging.entId) {
         self.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId: dragging.entId }, bubbles: true, composed: true }));
       }
-      const heavy = dragging.property || dragging.zoneVtx || dragging.zoneBody;
+      const heavy = dragging.camera || dragging.property || dragging.zoneVtx || dragging.zoneBody;
       dragging = null;
       if (heavy) self._rerenderFloorPlanCard(); else redraw();
     };
@@ -4176,7 +4483,7 @@ class NovaCommandCenterNew extends HTMLElement {
     svgEl.addEventListener("mousedown", (e) => {
       if (dragging) return;
       const mid = e.button === 1;
-      const bg = e.button === 0 && !e.target.closest(".fpn-drag-room, .fpn-resize-handle, .fpn-zone, .fpn-zone-vtx, .fpn-zone-mid, .fpn-zone-path, .fpn-prop-vtx, .fpn-prop-mid, .fpn-ent");
+      const bg = e.button === 0 && !e.target.closest(".fpn-drag-room, .fpn-resize-handle, .fpn-zone, .fpn-zone-vtx, .fpn-zone-mid, .fpn-zone-path, .fpn-prop-vtx, .fpn-prop-mid, .fpn-cam, .fpn-ent");
       if (!mid && !bg) return;
       e.preventDefault();
       const v = self._editVB || vbFromAttr();

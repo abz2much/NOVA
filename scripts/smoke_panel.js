@@ -142,6 +142,7 @@ let _intrCalledOff = false;
 let _intrAck = false;
 const _intrSnap = { url: "/local/nova/intrusion/intrusion_dining_room_1730000000.jpg", camera: "camera.dining_room", ts: 1730000000, path: "/config/www/nova/intrusion/x.jpg" };
 const _updateConfigCalls = [];
+const _coverageCalls = [];
 const hass = {
   config: { location_name: "Springfield IL", latitude: 39.78, longitude: -89.65 },
   states: { "assist_satellite.a": { state: "idle", attributes: {} }, "camera.front": { attributes: { access_token: "tok123" } }, "camera.back": { attributes: { access_token: "tok456" } },
@@ -178,6 +179,7 @@ const hass = {
       return { ok: !!f, pending: _pendingFacts };
     }
     if (m.type === "nova/camera_snapshot") return { image: "/9j/dGVzdGpwZWc=" };
+    if (m.type === "nova/compute_camera_coverage") { _coverageCalls.push(m.camera); return { reason: "faces the front walk", covered: ["Front Yard"] }; }
     if (m.type === "nova/biometrics") {
       if (m.action === "enable") _bioEnabled = true;
       if (m.action === "disable") _bioEnabled = false;
@@ -1363,6 +1365,37 @@ setTimeout(async () => {
   fpeCardNow = sRoot.getElementById("settings-card-floor_plan_editor");
   checks.push(["floor plan editor: clicking Property again clears the boundary (window.confirm stubbed true)",
     fpeCardNow.querySelectorAll(".fpn-prop-vtx").length === 0]);
+  sRoot = elNew.shadowRoot;
+
+  // Cameras + AI coverage (Phase 3b): add a camera, aim it, compute coverage,
+  // save, then remove it.
+  fpeCardNow = sRoot.getElementById("settings-card-floor_plan_editor");
+  fpeCardNow.querySelector("#fpnCamAdd").click();
+  fpeCardNow = sRoot.getElementById("settings-card-floor_plan_editor");
+  checks.push(["floor plan editor: Add Camera places a pin with aim/FOV/range controls",
+    fpeCardNow.querySelectorAll(".fpn-cam").length === 1
+    && !!fpeCardNow.querySelector('.cam-field-new[data-cam="angle"]')
+    && !!fpeCardNow.querySelector(".cam-io-new")
+    && /INDOOR/.test(fpeCardNow.textContent)]);
+
+  fpeCardNow.querySelector("#fpnCamCompute").click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["floor plan editor: Compute coverage calls nova/compute_camera_coverage",
+    _coverageCalls.length === 1]);
+
+  sRoot = elNew.shadowRoot;
+  fpeCardNow = sRoot.getElementById("settings-card-floor_plan_editor");
+  fpeCardNow.querySelector("#fpnSave").click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["floor plan editor: Save writes floor_plan_cameras",
+    _updateConfigCalls.some(c => c.key === "floor_plan_cameras" && /"indoor":true/.test(c.value))]);
+
+  sRoot = elNew.shadowRoot;
+  fpeCardNow = sRoot.getElementById("settings-card-floor_plan_editor");
+  fpeCardNow.querySelector(".cam-del-new").click();
+  fpeCardNow = sRoot.getElementById("settings-card-floor_plan_editor");
+  checks.push(["floor plan editor: removing a camera clears its pin from the canvas",
+    fpeCardNow.querySelectorAll(".fpn-cam").length === 0]);
   sRoot = elNew.shadowRoot;
 
   // Person Honorifics: picking "Custom…" reveals the text input without saving

@@ -1,3 +1,11 @@
+## [7.101.20] — Floor Plan Editor Phase 3b: cameras + AI camera-coverage in Command Center
+
+Ported Classic's camera placement and AI camera-coverage estimation into Command Center — same `floor_plan_cameras` config, same coverage geometry (`_planGeometry`/`_computeCoverage`/`_clippedCone`, wall line-of-sight via ray casting). "+ Camera" drops a pin with aim/FOV/range controls and an indoor/outdoor toggle; "Compute coverage" calls the same `nova/compute_camera_coverage` LLM-backed judgment Classic uses, showing which rooms each camera confirms and why.
+
+**Known simplification, called out on the card itself**: window/door placement ("openings") isn't ported to Command Center yet, so wall line-of-sight here has no door/window gaps to pass through — coverage reads as a same-room-only lower bound, accurate away from doorways but pessimistic right at one, until openings are ported too. That's now the only Floor Plan Editor sub-feature still Classic-only (alongside the separate Residence 3D view).
+
+New tests cover placing/removing a camera, the compute-coverage call, and saving `floor_plan_cameras`.
+
 ## [7.101.19] — Floor Plan Editor Phase 3a: property line + outdoor zones ported to Command Center
 
 Ported Classic's property-line boundary and outdoor-zone editing into the new Command Center Floor Plan Editor — straight port, same `floor_plan_property` config and polygon-room representation, same geometry helpers (`_zonePoints`/`_ensureZonePoints`/`_syncRoomBBox`/`_propertyArea`). "+ Outdoor Zone" adds a draggable 4-corner polygon; "+ Property Line" draws a boundary around existing rooms and shows lot size, with drag-to-reshape corners, click-an-edge-midpoint to add a corner, right-click a corner to remove it, and a second click to clear it. New tests cover placing a zone, placing/saving/clearing a property line. Only camera placement and the AI camera-coverage feature remain Classic-only now — updated the card's bridge note accordingly.
