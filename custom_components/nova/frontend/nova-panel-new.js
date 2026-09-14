@@ -4249,8 +4249,10 @@ class NovaCommandCenterNew extends HTMLElement {
         <button class="mode-chip" id="fpnEntAdd">+ Add</button>
       </div>
       <div class="mode-grid">${chips}</div>
-      <div class="mode-bind-head">Imported plan <span class="toggle-desc">${hasBg ? "opacity of the uploaded floor-plan image behind the rooms" : "upload a floor-plan image on Classic, then set its opacity here"}</span></div>
+      <div class="mode-bind-head">Imported plan <span class="toggle-desc">${hasBg ? "opacity of the uploaded floor-plan image behind the rooms" : "upload a real floor-plan image to trace rooms over"}</span></div>
       <div class="cfg-row">
+        <button class="mode-chip" id="fpnBgUpload">⬆ ${hasBg ? "Replace" : "Upload"} Image</button>
+        <input type="file" id="fpnBgFile" accept="image/*" style="display:none">
         <label>opacity</label>
         <input id="fpnBgOp" type="range" min="0" max="1" step="0.05" value="${op}">
         <span id="fpnBgOpVal">${Math.round(op * 100)}%</span>
@@ -4703,6 +4705,38 @@ class NovaCommandCenterNew extends HTMLElement {
       this._entsFor(this._editorFloor).splice(parseInt(b.getAttribute("data-ei")), 1);
       this._rerenderFloorPlanCard();
     }));
+    const bgUpBtn = root.getElementById("fpnBgUpload");
+    const bgFileInput = root.getElementById("fpnBgFile");
+    if (bgUpBtn && bgFileInput) {
+      bgUpBtn.addEventListener("click", () => bgFileInput.click());
+      bgFileInput.addEventListener("change", async () => {
+        const file = bgFileInput.files && bgFileInput.files[0];
+        if (!file) return;
+        const floor = this._editorFloor;
+        try {
+          const dataUrl = await new Promise((resolve, reject) => {
+            const r = new FileReader();
+            r.onload = () => resolve(String(r.result));
+            r.onerror = () => reject(new Error("read failed"));
+            r.readAsDataURL(file);
+          });
+          let bgs = {};
+          try {
+            const raw = this._data()?.config?.floor_plan_bg;
+            if (raw) bgs = typeof raw === "string" ? JSON.parse(raw) : raw;
+          } catch (_) {}
+          bgs[floor] = dataUrl;
+          await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_bg", value: JSON.stringify(bgs) });
+          if (this._liveData?.config) this._liveData.config.floor_plan_bg = JSON.stringify(bgs);
+          this._rerenderFloorPlanCard();
+        } catch (err) {
+          console.error("Nova (new look): floor plan background upload failed", err);
+        } finally {
+          bgFileInput.value = "";
+        }
+      });
+    }
+
     const bgOp = root.getElementById("fpnBgOp");
     if (bgOp) {
       const bgVal = root.getElementById("fpnBgOpVal");
