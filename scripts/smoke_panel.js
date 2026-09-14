@@ -432,6 +432,37 @@ setTimeout(async () => {
     ["home-type roof is applied (gable/hip/flat/gambrel by style)", (() => { const sp = el._houseSpec(); return ["gable","hip","flat","gambrel"].includes(sp.roof) && sp.stories != null; })()],
     ["Dutch Colonial maps to a gambrel roof", el._styleDefaults('dutch_colonial').roof === 'gambrel' && el._resStyles().dutch_colonial.roof === 'gambrel' && el._resStyles().dutch_colonial.label === 'Dutch Colonial'],
     ["gambrel exterior renders without error", (() => { try { const s = el._liveData && el._liveData.config; const prev = s ? el._liveData.config.residence_style : null; if (s) el._liveData.config.residence_style = 'dutch_colonial'; const svg = el._renderEditorPreview(); if (s) el._liveData.config.residence_style = prev; return typeof svg === 'string' && svg.length > 100; } catch (e) { return false; } })()],
+    // Regression (v7.101.26): a fully-interior stairs room (nothing else covering
+    // that slice of the footprint) used to read as a notch cut into the house
+    // outline, since _footprintMasses/extWallsPoly dropped "stairs" rooms from the
+    // enclosed footprint entirely -- fragmenting one rectangular house into several
+    // offset gable masses (stacked, jagged rooflines) instead of one clean ridge.
+    // Caught live on a real 2-story floor plan with a mid-house stairwell.
+    ["a fully-interior stairs room doesn't fragment the roof into multiple masses",
+      (() => {
+        const FT = 0.2;
+        const toFeet = rooms => rooms.map(r => ({ name: r.name.toLowerCase(), x: r.x * FT, y: r.y * FT, w: r.w * FT, d: r.h * FT, type: r.type }));
+        const plan = {
+          "1f": toFeet([
+            { name: "Living Room", x: 0, y: 0, w: 65, h: 80, type: "room" },
+            { name: "Utility", x: 65, y: 0, w: 30, h: 25, type: "room" },
+            { name: "WC", x: 65, y: 25, w: 15, h: 20, type: "bath" },
+            { name: "Stairs", x: 80, y: 25, w: 15, h: 20, type: "stairs" },
+            { name: "Hall", x: 65, y: 45, w: 30, h: 35, type: "room" },
+            { name: "Kitchen", x: 95, y: 0, w: 45, h: 50, type: "room" },
+            { name: "Dining Room", x: 95, y: 50, w: 45, h: 30, type: "room" },
+          ]),
+          "2f": toFeet([{ name: "Master Bedroom", x: 0, y: 0, w: 140, h: 80, type: "room" }]),
+        };
+        const spec = { roof: "gable", stories: 2, pitch: 0.65, dormersFront: 0, dormersRear: 0 };
+        const built = window.NOVA3D.build({ theta: 35, floor: "all", lit: {}, doors: {}, spec, plan, elements: {}, garage: [] });
+        let maxz = -1e9;
+        built.faces.forEach(f => f.p.forEach(p => { if (p[2] > maxz) maxz = p[2]; }));
+        // A single full-span gable over this 28x16ft footprint at pitch 0.65 peaks
+        // at eave(13.8) + 16/2*0.9*0.65 = 18.48ft. Fragmented into masses by the
+        // notch, the tallest piece topped out at ~15.85ft -- well short of a real ridge.
+        return maxz > 18;
+      })()],
     ["operational mode has AUTO occupancy toggle", (() => { try { const prev = el._currentTab; el._currentTab = 'settings'; const h = el._html(); el._currentTab = prev; return /data-cfg-key="operational_mode_auto"/.test(h) && /mode-auto-row/.test(h); } catch (e) { return false; } })()],
     ["openings entity list includes window sensors", (() => { const st = el._hass.states; st['binary_sensor.test_kitchen_window'] = { state: 'off', attributes: { device_class: 'window', friendly_name: 'Kitchen Window' } }; const html = el._doorEntityOptions(''); delete st['binary_sensor.test_kitchen_window']; return /test_kitchen_window/.test(html); })()],
     ["mode bindings: lab rooms + movie room/player/dim", (() => { try { const prev = el._currentTab; el._currentTab = 'settings'; const h = el._html(); el._currentTab = prev; return /class="mode-bindings"/.test(h) && /data-lab-area/.test(h) && /data-cfg-key="movie_area"/.test(h) && /data-cfg-key="movie_media_player"/.test(h) && /data-cfg-key="movie_dim_pct"/.test(h); } catch (e) { return false; } })()],

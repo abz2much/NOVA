@@ -1,3 +1,7 @@
+## [7.101.26] — fix: interior stairs fragmented the exterior roof into stacked, jagged masses
+
+Caught live on a real 2-story floor plan: a stairs room sitting fully inside the house footprint, with nothing else covering that slice, was excluded from the enclosed-footprint calculation used by `_footprintMasses`/`extWallsPoly` — reading as a notch cut into the outline. For a rectangular house that notch fragmented the roof-mass decomposition into several offset gable pieces instead of one clean ridge, and (for houses with an attached garage) could also flip the `houseRect` check to "not rectangular" for the same reason — this is also why the model looked shorter/smaller than expected: the roof mass being measured was the largest fragment, not the whole house. Stairs now stay in the enclosed footprint for these calculations (only outdoor zones and doors are excluded); they're still excluded from getting their own room-box walls elsewhere, since a stairwell is an open floor void, not a walled room. Added a regression test reproducing the exact scenario.
+
 ## [7.101.25] — fix: stale "Residence still lives in Classic" footnote
 
 Caught live testing 7.101.24: Command Center's footer still claimed "RESIDENCE (3D VIEW) STILL LIVES IN CLASSIC," left over from before that tab existed there. Removed the stale claim.
