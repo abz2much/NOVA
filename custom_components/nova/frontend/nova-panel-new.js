@@ -118,7 +118,7 @@ class NovaCommandCenterNew extends HTMLElement {
       const result = await this._hass.callWS({ type: "nova/get_panel_data" });
       this._liveData = result;
       try {
-        const log = await this._hass.callWS({ type: "nova/get_activity_log", hours: 2, limit: 8 });
+        const log = await this._hass.callWS({ type: "nova/get_activity_log", hours: 24, limit: 60 });
         this._activityData = log?.entries || [];
       } catch (_) { this._activityData = []; }
     } catch (err) {
@@ -245,14 +245,6 @@ class NovaCommandCenterNew extends HTMLElement {
             <div class="feed" id="feed"></div>
           </div>
 
-          <div class="panel">
-            <div class="panel-head">
-              <div class="panel-title">Areas</div>
-              <div class="panel-meta" id="areasMeta">—</div>
-            </div>
-            <div class="areas-grid" id="areasGrid"></div>
-          </div>
-
           <div class="panel camera-panel" id="cameraPanel" hidden>
             <div class="camera-head-row">
               <div>
@@ -263,6 +255,38 @@ class NovaCommandCenterNew extends HTMLElement {
             </div>
             <div class="camera-strip" id="camStrip"></div>
           </div>
+        </div>
+
+        <div class="panel" style="max-width:1100px;margin:16px auto 0">
+          <div class="panel-head">
+            <div class="panel-title">Areas</div>
+            <div class="panel-meta" id="areasMeta">—</div>
+          </div>
+          <div class="areas-grid" id="areasGrid"></div>
+        </div>
+
+        <div class="panel" id="solarPanel" style="max-width:1100px;margin:16px auto 0">
+          <div class="panel-head">
+            <div class="panel-title">Solar</div>
+            <div class="panel-meta" id="solarSufficiency">—</div>
+          </div>
+          <div id="solarBody" class="stub-body">Loading…</div>
+        </div>
+
+        <div class="panel" style="max-width:1100px;margin:16px auto 0">
+          <div class="panel-head">
+            <div class="panel-title">Quick Actions</div>
+            <div class="panel-meta">CMD</div>
+          </div>
+          <div class="mode-grid">
+            <button class="mode-chip" data-svc="nova.briefing">Briefing</button>
+            <button class="mode-chip" data-svc="nova.nap" data-svc-data='{"duration_minutes":30}'>Nap 30m</button>
+            <button class="mode-chip" data-svc="nova.nap" data-svc-data='{"duration_minutes":60}'>Nap 60m</button>
+            <button class="mode-chip" data-svc="nova.unshush">Unshush All</button>
+            <button class="mode-chip" data-svc="nova.observer_status">Status Dump</button>
+            <button class="mode-chip" id="qaRunAnalysis">Analyze Now</button>
+          </div>
+          <div class="toggle-desc" id="qaAnalysisResult" style="margin-top:8px"></div>
         </div>
     `;
   }
@@ -896,6 +920,8 @@ class NovaCommandCenterNew extends HTMLElement {
         <div class="panel">
           <div class="panel-head"><div class="panel-title">What Nova Has Learned</div></div>
           <div class="stub-body">No suggestions right now. Nova proposes automations as it notices routines repeat — a light you turn on each evening, a scene after a button press, the heat when it's cold. As patterns build up, they'll appear here for you to review and approve. Nothing is ever created without your say-so.</div>
+          <div class="mode-grid"><button class="mode-chip" id="sugRunAnalysis">Analyze Now</button></div>
+          <div class="toggle-desc" id="sugAnalysisResult" style="margin-top:8px">See why nothing has qualified yet, or force a fresh pass over your history.</div>
         </div>`;
     }
     const rows = sugs.map(s => {
@@ -2544,14 +2570,14 @@ class NovaCommandCenterNew extends HTMLElement {
       : [{ ts: "--:--", tag: "SYSTEM", msg: "No activity yet." }];
     const feedEl = root.getElementById("feed");
     if (feedEl) {
-      feedEl.innerHTML = entries.slice(0, 6).map(e => `
+      feedEl.innerHTML = entries.map(e => `
         <div class="feed-row">
           <div class="feed-text"><b>${this._esc(e.tag || "")}</b> · <span class="dim">${this._esc(e.msg || "")}</span></div>
           <div class="feed-time">${this._esc(e.ts || "")}</div>
         </div>`).join("");
     }
     const feedMeta = root.getElementById("feedMeta");
-    if (feedMeta) feedMeta.textContent = `LAST ${Math.min(entries.length, 6)}`;
+    if (feedMeta) feedMeta.textContent = `LAST ${entries.length}`;
 
     // areas
     const areasGridEl = root.getElementById("areasGrid");
@@ -2570,6 +2596,8 @@ class NovaCommandCenterNew extends HTMLElement {
     }
     const areasMeta = root.getElementById("areasMeta");
     if (areasMeta) areasMeta.textContent = `${d.occupied} OCCUPIED · ${d.areasMonitored} MONITORED`;
+
+    this._renderSolarPanel();
 
     // camera — collapsed, optional, honest
     const camPanel = root.getElementById("cameraPanel");
@@ -2640,6 +2668,105 @@ class NovaCommandCenterNew extends HTMLElement {
       </div>`;
   }
 
+  // Solar (ported from Classic's own Solar card — data was already fetched
+  // into this._solar by _fetchLiveData but never rendered anywhere; the new
+  // look never actually showed it despite pulling the data every poll).
+  _renderSolarPanel() {
+    const root = this.shadowRoot;
+    const body = root.getElementById("solarBody");
+    const sufficiencyEl = root.getElementById("solarSufficiency");
+    if (!body) return;
+    const s = this._solar || {};
+    if (!s || s.error) {
+      body.innerHTML = `<div class="stub-body">Couldn't load solar data — restart Home Assistant after updating.</div>`;
+      if (sufficiencyEl) sufficiencyEl.textContent = "—";
+      return;
+    }
+    if (!s.configured) {
+      body.innerHTML = `<div class="stub-body">${this._esc((s.advice || [])[0] || "No solar source configured yet.")}</div>`;
+      if (sufficiencyEl) sufficiencyEl.textContent = "—";
+      return;
+    }
+    if (sufficiencyEl) {
+      sufficiencyEl.textContent = s.self_sufficiency_pct != null
+        ? `${s.self_sufficiency_pct}% self-sufficient` : "—";
+    }
+    const rows = [];
+    if (s.solar_w != null) {
+      rows.push(`<div class="feed-row"><span class="feed-text">Solar</span><span class="feed-time">${(s.solar_w / 1000).toFixed(2)} kW</span></div>`);
+    }
+    if (s.grid_w != null) {
+      const dirLabel = s.grid_direction === "export" ? "Exporting" : s.grid_direction === "import" ? "Importing" : "Balanced";
+      rows.push(`<div class="feed-row"><span class="feed-text">Grid</span><span class="feed-time">${dirLabel} ${(Math.abs(s.grid_w) / 1000).toFixed(2)} kW</span></div>`);
+    }
+    if (s.battery_w != null || s.battery_pct != null) {
+      const pct = s.battery_pct != null ? `${s.battery_pct}%` : "no % available";
+      rows.push(`<div class="feed-row"><span class="feed-text">Battery</span><span class="feed-time">${pct}${s.battery_w != null ? ` · ${(s.battery_w / 1000).toFixed(2)} kW` : ""}</span></div>`);
+    }
+    const advice = (s.advice || []).map(a => `<div class="toggle-desc" style="margin-bottom:6px">${this._esc(a)}</div>`).join("");
+    body.innerHTML = advice + rows.join("");
+  }
+
+  // Shared by the dashboard's Quick Actions card and the Suggestions tab's
+  // empty state — same "Analyze Now" behavior Classic exposes, wired to
+  // whichever button/result-div ids the caller passes.
+  _wireAnalyzeButton(btnId, resultId) {
+    const root = this.shadowRoot;
+    const btn = root.getElementById(btnId);
+    if (!btn || btn._wired) return;
+    btn._wired = true;
+    btn.addEventListener("click", async () => {
+      if (!this._hass) return;
+      const out = root.getElementById(resultId);
+      btn.disabled = true;
+      const orig = btn.textContent;
+      btn.textContent = "Analyzing…";
+      if (out) out.textContent = "Running pattern analysis over your history…";
+      try {
+        const res = await this._hass.callWS({ type: "nova/run_analysis" });
+        const bf = res.backfill || {};
+        const bfNote = bf.imported ? `<br>Imported ${bf.imported} past event${bf.imported === 1 ? "" : "s"} from history for ${bf.entities} new entit${bf.entities === 1 ? "y" : "ies"}.` : "";
+        if (out) {
+          if (res.ran) {
+            const nf = res.patterns_found ?? 0;
+            const ns = res.new_suggestions ?? 0;
+            let msg = `✓ Found ${nf} pattern${nf === 1 ? "" : "s"}, ${ns} new suggestion${ns === 1 ? "" : "s"}.`;
+            if (ns > 0) {
+              msg += ` Check Suggestions.`;
+            } else {
+              msg += ` Nothing cleared the confidence bar this pass.`;
+              const dg = res.diagnostic || {};
+              const cand = (dg.candidates || [])[0];
+              if (cand) {
+                const hr = String(cand.hour).padStart(2, "0");
+                msg += `<br>Closest routine: <b>${this._esc(cand.entity_id)}</b> → ${this._esc(cand.state)} ~${hr}:00, seen ${cand.days}/${dg.total_days} days (needs ${dg.min_days}).`;
+              }
+              const src = (dg.top_sources || [])[0];
+              if (src) msg += `<br>Busiest source: ${this._esc(src.entity_id)} (${src.changes} changes).`;
+            }
+            const nm = Array.isArray(res.near_misses) ? res.near_misses : [];
+            if (nm.length) {
+              msg += `<br>Building toward suggestions:`;
+              msg += nm.slice(0, 5).map(m => {
+                const prog = m.needed ? ` (${m.occurrences}/${m.needed})` : ` (${m.occurrences}×)`;
+                return `<br>• ${this._esc(m.description || m.type)}${prog}`;
+              }).join("");
+            }
+            out.innerHTML = msg + bfNote;
+          } else {
+            out.innerHTML = `✕ ${this._esc(res.reason || res.error || "Analysis did not run.")}` + bfNote;
+          }
+        }
+        try { await this._fetchLiveData(); } catch (_) {}
+      } catch (err) {
+        if (out) out.innerHTML = `✕ ${this._esc(err?.message || String(err))}`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = orig;
+      }
+    });
+  }
+
   async _toggleAreaLights(areaId, roomName, isOn) {
     if (!this._hass || !areaId) return;
     const turnOn = !isOn;
@@ -2688,7 +2815,29 @@ class NovaCommandCenterNew extends HTMLElement {
     if (this._currentTab === "logs") { this._wireLogs(); this._fetchDebugLog(); }
     if (this._currentTab === "memory") { this._wireMemory(); this._fetchKnowledge(); this._fetchPersonRoutines(); }
     if (this._currentTab === "intrusion") this._wireIntrusion();
-    if (this._currentTab === "suggestions") this._wireSuggestions();
+    if (this._currentTab === "suggestions") { this._wireSuggestions(); this._wireAnalyzeButton("sugRunAnalysis", "sugAnalysisResult"); }
+    if (this._currentTab === "dashboard") {
+      this._wireAnalyzeButton("qaRunAnalysis", "qaAnalysisResult");
+      root.querySelectorAll(".panel [data-svc]").forEach(btn => {
+        if (btn._wired) return;
+        btn._wired = true;
+        btn.addEventListener("click", async () => {
+          const svcAttr = btn.getAttribute("data-svc");
+          if (!svcAttr || !this._hass) return;
+          const [domain, service] = svcAttr.split(".");
+          let data = {};
+          const dataAttr = btn.getAttribute("data-svc-data");
+          if (dataAttr) {
+            try { data = JSON.parse(dataAttr); } catch (_) { data = {}; }
+          }
+          try {
+            await this._hass.callService(domain, service, data);
+          } catch (err) {
+            console.error(`Nova (new look): service ${svcAttr} failed`, err);
+          }
+        });
+      });
+    }
   }
 
   _wireSettings() {
@@ -3258,18 +3407,23 @@ class NovaCommandCenterNew extends HTMLElement {
       .chip .dot{width:6px;height:6px;border-radius:50%;background:#6fbf8a}
       .chip.warn .dot{background:var(--warn)}
       .chip b{color:var(--ink);font-weight:600}
-      .grid{max-width:1100px;margin:16px auto 0;display:grid;grid-template-columns:1.15fr 1fr;gap:16px}
-      @media (max-width:720px){.grid{grid-template-columns:1fr}}
+      .grid{max-width:1100px;margin:16px auto 0;display:grid;grid-template-columns:1fr;gap:16px}
       .panel{background:var(--surface);border:1px solid var(--line-soft);border-radius:16px;padding:16px 16px 14px}
       .panel-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px}
       .panel-title{font-family:var(--font-display);font-size:15px;font-weight:600}
       .panel-meta{font-family:var(--font-mono);font-size:10px;color:var(--ink-faint);letter-spacing:.05em}
+      .feed{max-height:420px;overflow-y:auto}
+      .feed::-webkit-scrollbar{width:3px}
+      .feed::-webkit-scrollbar-track{background:var(--surface-2)}
+      .feed::-webkit-scrollbar-thumb{background:var(--line-soft);border-radius:3px}
       .feed-row{padding:9px 0;border-bottom:1px solid var(--line-soft);display:flex;justify-content:space-between;gap:10px}
       .feed-row:last-child{border-bottom:none}
       .feed-text{font-size:12.8px;line-height:1.4}
       .feed-text .dim{color:var(--ink-dim)}
       .feed-time{font-family:var(--font-mono);font-size:10px;color:var(--ink-faint);white-space:nowrap}
-      .areas-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:10px}
+      .areas-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:10px}
+      @media (max-width:1100px){.areas-grid{grid-template-columns:repeat(4,1fr)}}
+      @media (max-width:560px){.areas-grid{grid-template-columns:repeat(2,1fr)}}
       .area-tile{position:relative;background:var(--surface-2);border:1px solid var(--line-soft);border-radius:13px;
         padding:12px 12px 10px;overflow:hidden;transition:border-color .25s,box-shadow .25s}
       .area-tile::before{content:"";position:absolute;top:0;left:0;right:0;height:2px;
