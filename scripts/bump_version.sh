@@ -29,16 +29,26 @@ echo "Bumping $OLD → $NEW"
 # Done via python3 (already a hard dependency here) rather than `sed -i`,
 # whose in-place flag and \b word-boundary support both differ between BSD
 # sed (macOS) and GNU sed (Linux, what CI runs) — this way works on both.
+#
+# The two panel replacements are anchored on the fixed text surrounding each
+# real version display, not a bare `vOLD` match — nova-panel.js also has
+# dozens of comments like "(v7.101.28)" noting when unrelated code was
+# written, and a bare match silently rewrote all of those on every past
+# release, making them lie about when that code was actually added.
 python3 - "$OLD" "$NEW" "$COMP/manifest.json" "$PANEL" <<'PYEOF'
 import re, sys
 old, new, manifest_path, panel_path = sys.argv[1:5]
 
-def replace(path, pattern, replacement):
+def replace(path, pattern, replacement, expected=1):
     text = open(path, encoding="utf-8").read()
-    open(path, "w", encoding="utf-8").write(pattern.sub(replacement, text))
+    new_text, count = pattern.subn(replacement, text)
+    if count != expected:
+        sys.exit(f"bump_version.sh: expected {expected} match(es) for {pattern.pattern!r} in {path}, found {count}")
+    open(path, "w", encoding="utf-8").write(new_text)
 
 replace(manifest_path, re.compile(r"\b" + re.escape(old) + r"\b"), new)
-replace(panel_path, re.compile(r"v" + re.escape(old) + r"\b"), f"v{new}")
+replace(panel_path, re.compile(re.escape(f"* v{old} (session 2")), f"* v{new} (session 2")
+replace(panel_path, re.compile(re.escape(f"%c v{old} ")), f"%c v{new} ")
 PYEOF
 
 echo "Updated:"
