@@ -72,6 +72,14 @@ _KEYWORDS = {
     "microwave": ApplianceType.MICROWAVE,
 }
 
+# Longest-keyword-first so a specific match (e.g. "dishwasher") wins over a
+# shorter one it happens to contain (e.g. "washer") — live-caught, Sept 2026:
+# "washer" being both a key and a substring of "dishwasher" meant every
+# dishwasher was silently classified (and run/idle-thresholded) as a washer.
+_KEYWORDS_BY_SPECIFICITY = sorted(
+    _KEYWORDS.items(), key=lambda kv: -len(kv[0]),
+)
+
 # Area keywords that hint at appliance zones
 _AREA_HINTS = {
     "laundry": ApplianceType.WASHER,
@@ -93,7 +101,7 @@ _POWER_FINGERPRINTS = [
 def _classify_appliance(entity_id: str, friendly_name: str) -> Optional[ApplianceType]:
     """Identify appliance type from entity_id or friendly_name."""
     search = (entity_id + " " + friendly_name).lower()
-    for keyword, atype in _KEYWORDS.items():
+    for keyword, atype in _KEYWORDS_BY_SPECIFICITY:
         if keyword in search:
             return atype
     return None
@@ -121,7 +129,7 @@ def _fingerprint_from_power(peak_watts: float) -> Optional[tuple[ApplianceType, 
 
 def _type_to_appliance(type_str: str) -> ApplianceType:
     t = (type_str or "").strip().lower()
-    for kw, atype in _KEYWORDS.items():
+    for kw, atype in _KEYWORDS_BY_SPECIFICITY:
         if kw == t or kw in t:
             return atype
     for atype in ApplianceType:
@@ -252,8 +260,11 @@ _NATIVE_PATTERNS = [
     ("dry_completed",    {"on"},                                       None),
     ("run_complete",     {"on"},                                       None),
     ("cycle_complete",   {"on"},                                       None),
-    ("run_state",        {"end", "finished", "complete", "completed"}, None),  # LG ThinQ run state
-    ("job_state",        {"finished", "end", "complete", "completed"}, None),  # LG ThinQ
+    ("run_state",        {"end", "finished", "finish", "complete", "completed"}, None),  # LG ThinQ run state
+    ("job_state",        {"finished", "finish", "end", "complete", "completed"}, None),  # LG ThinQ:
+                          # dryer job_state uses "finished", washer/dishwasher use "finish" —
+                          # both spellings accepted (live-caught, Sept 2026: washer/dishwasher
+                          # completion was never detected because only "finished" was matched)
     ("washer_job_state", {"finished", "end"},                          ApplianceType.WASHER),
     ("dryer_job_state",  {"finished", "end"},                          ApplianceType.DRYER),
     ("dishwasher_job",   {"finished", "end"},                          ApplianceType.DISHWASHER),

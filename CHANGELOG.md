@@ -1,3 +1,7 @@
+## [7.101.12] — fix: appliance job_state detection missed "finish" spelling and misclassified dishwashers as washers
+
+Two bugs caught live diagnosing a dryer false-alert. First: LG ThinQ dryers report `job_state` "finished" on completion, but washers/dishwashers report "finish" (no "ed") — Nova's native-completion matcher only ever recognized "finished", so washer/dishwasher completion via `job_state` was silently never detected at all. Both spellings are now accepted. Second: `_classify_appliance`/`_type_to_appliance` matched keywords in dict-insertion order, and "washer" is both a key and a substring of "dishwasher" — so every dishwasher was classified (and threshold-tuned) as a washer. Keywords are now matched longest-first so a specific match always wins over one it happens to contain. New tests lock in both.
+
 ## [7.101.11] — fix: vehicle detection now uses Abi's proven entity, not the untested one
 
 Follow-up to 7.101.10: switched the "vehicle" role from the `vehicleDetected` binary_sensor (ships disabled by the integration, no track record) to the `motionDetectionTypeVehicle` switch — the entity Abi's own pre-existing "Announce Car In Driveway" automation already used successfully as an event trigger. Both entities exist on the same physical device; only one is mapped to "vehicle" now, deterministically, so there's no ambiguity about which one Nova watches. New test locks this in (both present, only the switch wins) against an accidental future re-add of the other mapping.
