@@ -1,3 +1,7 @@
+## [7.101.18] — Floor Plan Editor Phase 2: device pins + background opacity (from jarvis-aio)
+
+Ported jarvis-aio's two Floor Plan Editor enhancements (found in the upstream comparison) into Classic and the new Command Center port alike: place any Home Assistant device on the plan as a pin showing its live state (lights, doors/windows, locks, motion, presence, sensor readings, climate) — drag to reposition, tap to open its full HA controls, right-click to remove. The imported floor-plan background image now has an opacity slider instead of a fixed 20%. New config keys `floor_plan_entities` and `floor_plan_bg_opacity`, saved the same way as the rest of the floor plan. New tests cover placing/removing a pin and saving the opacity slider in Command Center; the pin's drag-vs-tap distinction (same jsdom limitation as Phase 1's room drag) needs a live browser to verify.
+
 ## [7.101.17] — fix: energy cost-entity fields missing from New Look
 
 7.101.15 added the cost-entity settings fields to Classic's Energy Management card only — missed New Look's own copy of that card entirely, so anyone using New Look (the intended eventual default) had no way to set them at all. Added the same two fields there, using the existing generic `cfg-field` autosave, no new wiring needed.

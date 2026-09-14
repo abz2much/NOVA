@@ -3501,6 +3501,54 @@ class NovaCommandCenterNew extends HTMLElement {
   }
   _fpDim(u) { return this._fpToReal(u) + (this._fpUnits() === "metric" ? "m" : "'"); }
 
+  // Devices pinned on the floor plan (ported from jarvis-aio v7.86.0, same as
+  // Classic) — live-state markers, drag to move, tap to open HA's more-info.
+  _getFloorEntities() {
+    const raw = this._data()?.config?.floor_plan_entities;
+    let e = {};
+    try { e = typeof raw === "string" ? (raw ? JSON.parse(raw) : {}) : (raw || {}); } catch (_) { e = {}; }
+    return e || {};
+  }
+  _getEditingEntities() {
+    if (this._editingEntities) return this._editingEntities;
+    this._editingEntities = JSON.parse(JSON.stringify(this._getFloorEntities()));
+    return this._editingEntities;
+  }
+  _entsFor(floor) {
+    const e = this._getEditingEntities();
+    if (!Array.isArray(e[floor])) e[floor] = [];
+    return e[floor];
+  }
+  _entMarkerStyle(eid) {
+    const st = this._hass && this._hass.states ? this._hass.states[eid] : null;
+    const dom = (eid.split(".")[0] || "");
+    const dim = "var(--ink-faint)";
+    if (!st) return { color: dim, name: (eid.split(".")[1] || eid), val: "—" };
+    const s = st.state, dc = (st.attributes && st.attributes.device_class) || "";
+    const name = (st.attributes && st.attributes.friendly_name) || eid;
+    let color = dim, val = s;
+    const offish = ["off", "unavailable", "unknown", "idle", "standby", "none"];
+    if (dom === "sensor") {
+      const u = (st.attributes && st.attributes.unit_of_measurement) || "";
+      val = (s === "unknown" || s === "unavailable") ? "—" : (s + u);
+      color = "var(--gold)";
+    } else if (dom === "binary_sensor") {
+      const on = s === "on";
+      if (["door", "window", "garage_door", "opening"].indexOf(dc) >= 0) { color = on ? "var(--warn)" : dim; val = on ? "OPEN" : "SHUT"; }
+      else if (["motion", "occupancy", "presence"].indexOf(dc) >= 0) { color = on ? "var(--gold)" : dim; val = on ? "DET" : "—"; }
+      else { color = on ? "var(--gold)" : dim; val = on ? "ON" : "OFF"; }
+    } else if (dom === "lock") { const locked = s === "locked"; color = locked ? dim : "#ff5a5a"; val = locked ? "LOCK" : "OPEN"; }
+    else if (dom === "cover") { const open = s === "open" || s === "opening"; color = open ? "var(--warn)" : dim; val = open ? "OPEN" : "SHUT"; }
+    else if (dom === "person" || dom === "device_tracker") { const home = s === "home"; color = home ? "var(--gold)" : dim; val = home ? "HOME" : "AWAY"; }
+    else if (dom === "climate") { color = "var(--gold)"; const t = st.attributes && st.attributes.current_temperature; val = (t != null) ? (t + "°") : s; }
+    else { const on = offish.indexOf(s) < 0; color = on ? "var(--gold)" : dim; val = on ? "ON" : "OFF"; }
+    return { color, name, val };
+  }
+  _fpBgOpacity() {
+    const op = parseFloat(this._data()?.config?.floor_plan_bg_opacity);
+    return (isFinite(op) && op >= 0 && op <= 1) ? op : 0.2;
+  }
+
   _floorPlanEditorCardBody() {
     const plan = this._getEditingPlan();
     const floors = Object.keys(plan);
@@ -3519,12 +3567,41 @@ class NovaCommandCenterNew extends HTMLElement {
       </div>
       <div class="fpn-hint">Drag to move · bottom-right handle to resize · right-click to delete · scroll to zoom · drag empty space to pan</div>
       <div class="fpn-canvas" id="fpnCanvas">${this._renderFloorPlanSVG(plan, floor)}</div>
+      ${this._renderPlanEntitiesNew(floor)}
       <div class="fpn-actions">
         <button class="mode-chip" id="fpnSave">Save Layout</button>
         <button class="mode-chip" id="fpnReset">Reset Default</button>
       </div>
       <div class="camera-note">Property line, outdoor zones, camera placement, and AI camera-coverage aren't ported here yet.
         <button class="mode-chip" id="fpnGoClassic">Edit advanced layout in Classic</button>
+      </div>`;
+  }
+
+  _renderPlanEntitiesNew(floor) {
+    const ents = this._entsFor(floor);
+    const op = this._fpBgOpacity();
+    let hasBg = false;
+    try {
+      const b = this._data()?.config?.floor_plan_bg;
+      const bd = typeof b === "string" ? JSON.parse(b || "{}") : (b || {});
+      hasBg = !!bd[floor];
+    } catch (_) {}
+    const chips = ents.length
+      ? ents.map((e, i) => `<span class="new-pl-chip">${this._esc(this._entMarkerStyle(e.e).name)}<button class="fpn-ent-del" data-ei="${i}" title="Remove">×</button></span>`).join("")
+      : `<span class="toggle-desc">No devices placed on this floor yet.</span>`;
+    return `
+      <div class="mode-bind-head">Devices on plan <span class="toggle-desc">add a device, drag its pin on the canvas, tap it to open controls</span></div>
+      <div class="cfg-row">
+        <input id="fpnEntInput" list="fpnEntList" class="cfg-field" style="flex:1" placeholder="type to find an entity…" autocomplete="off">
+        <datalist id="fpnEntList">${this._allEntityDatalist()}</datalist>
+        <button class="mode-chip" id="fpnEntAdd">+ Add</button>
+      </div>
+      <div class="mode-grid">${chips}</div>
+      <div class="mode-bind-head">Imported plan <span class="toggle-desc">${hasBg ? "opacity of the uploaded floor-plan image behind the rooms" : "upload a floor-plan image on Classic, then set its opacity here"}</span></div>
+      <div class="cfg-row">
+        <label>opacity</label>
+        <input id="fpnBgOp" type="range" min="0" max="1" step="0.05" value="${op}">
+        <span id="fpnBgOpVal">${Math.round(op * 100)}%</span>
       </div>`;
   }
 
@@ -3549,7 +3626,7 @@ class NovaCommandCenterNew extends HTMLElement {
       try {
         const bgData = typeof bgs === "string" ? JSON.parse(bgs) : bgs;
         if (bgData && bgData[floor]) {
-          svg += `<image href="${bgData[floor]}" x="0" y="0" width="100%" height="100%" opacity="0.2" preserveAspectRatio="xMidYMid meet"/>`;
+          svg += `<image href="${bgData[floor]}" x="0" y="0" width="100%" height="100%" opacity="${this._fpBgOpacity()}" preserveAspectRatio="xMidYMid meet"/>`;
         }
       } catch (_) {}
     }
@@ -3571,6 +3648,20 @@ class NovaCommandCenterNew extends HTMLElement {
     for (const lbl of (floorData.labels || [])) {
       svg += `<text x="${lbl.x}" y="${lbl.y}" text-anchor="middle" fill="var(--ink-faint)" font-size="4" font-family="var(--font-mono)">${this._esc(lbl.text)}</text>`;
     }
+
+    const ents = this._entsFor(floor);
+    for (let ei = 0; ei < ents.length; ei++) {
+      const ent = ents[ei];
+      if (!ent || !ent.e) continue;
+      const ms = this._entMarkerStyle(ent.e);
+      const nm = ms.name.length > 16 ? (ms.name.slice(0, 15) + "…") : ms.name;
+      svg += `<g class="fpn-ent" data-ent-idx="${ei}" data-ent-id="${this._esc(ent.e)}" style="cursor:pointer">`
+        + `<circle class="fpn-ent-dot" cx="${ent.x}" cy="${ent.y}" r="3" fill="${ms.color}" stroke="var(--bg)" stroke-width="0.7"/>`
+        + `<text class="fpn-ent-nm" x="${ent.x}" y="${ent.y - 4}" text-anchor="middle" fill="${ms.color}" font-size="3.4" font-family="var(--font-mono)" pointer-events="none">${this._esc(nm)}</text>`
+        + `<text class="fpn-ent-val" x="${ent.x}" y="${ent.y + 6.5}" text-anchor="middle" fill="var(--ink-dim)" font-size="3" font-family="var(--font-mono)" pointer-events="none">${this._esc(ms.val)}</text>`
+        + "</g>";
+    }
+
     svg += "</svg>";
     return svg;
   }
@@ -3627,11 +3718,17 @@ class NovaCommandCenterNew extends HTMLElement {
 
     const save = root.getElementById("fpnSave");
     if (save) save.addEventListener("click", async () => {
-      if (!this._editingPlan) return;
+      if (!this._editingPlan && !this._editingEntities) return;
+      const savedPlan = this._editingPlan, savedEnts = this._editingEntities;
       try {
-        await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_rooms", value: JSON.stringify(this._editingPlan) });
-        if (this._liveData?.config) this._liveData.config.floor_plan_rooms = this._editingPlan;
+        if (savedPlan) await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_rooms", value: JSON.stringify(savedPlan) });
+        if (savedEnts) await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_entities", value: JSON.stringify(savedEnts) });
+        if (this._liveData?.config) {
+          if (savedPlan) this._liveData.config.floor_plan_rooms = savedPlan;
+          if (savedEnts) this._liveData.config.floor_plan_entities = savedEnts;
+        }
         this._editingPlan = null;
+        this._editingEntities = null;
       } catch (err) { console.error("Nova (new look): floor plan save failed", err); }
     });
 
@@ -3645,6 +3742,45 @@ class NovaCommandCenterNew extends HTMLElement {
       this._editorFloor = null;
       this._rerenderFloorPlanCard();
     });
+
+    const entAdd = root.getElementById("fpnEntAdd");
+    if (entAdd) entAdd.addEventListener("click", () => {
+      const inp = root.getElementById("fpnEntInput");
+      const val = inp && inp.value.trim();
+      if (!val) return;
+      if (!(this._hass && this._hass.states && this._hass.states[val])) return;
+      const floor = this._editorFloor;
+      if (this._entsFor(floor).some(x => x.e === val)) return;
+      const rooms = ((this._getEditingPlan()[floor] || {}).rooms) || [];
+      let ecx = 100, ecy = 80;
+      if (rooms.length) {
+        let mnx = 1e9, mny = 1e9, mxx = -1e9, mxy = -1e9;
+        rooms.forEach(r => { mnx = Math.min(mnx, r.x); mny = Math.min(mny, r.y); mxx = Math.max(mxx, r.x + r.w); mxy = Math.max(mxy, r.y + r.h); });
+        ecx = Math.round((mnx + mxx) / 2); ecy = Math.round((mny + mxy) / 2);
+      }
+      this._entsFor(floor).push({ e: val, x: ecx, y: ecy });
+      this._rerenderFloorPlanCard();
+    });
+    root.querySelectorAll(".fpn-ent-del").forEach(b => b.addEventListener("click", () => {
+      this._entsFor(this._editorFloor).splice(parseInt(b.getAttribute("data-ei")), 1);
+      this._rerenderFloorPlanCard();
+    }));
+    const bgOp = root.getElementById("fpnBgOp");
+    if (bgOp) {
+      const bgVal = root.getElementById("fpnBgOpVal");
+      bgOp.addEventListener("input", () => {
+        if (bgVal) bgVal.textContent = Math.round(parseFloat(bgOp.value) * 100) + "%";
+        const img = root.querySelector("#fpnSvg image");
+        if (img) img.setAttribute("opacity", bgOp.value);
+      });
+      bgOp.addEventListener("change", async () => {
+        const v = String(parseFloat(bgOp.value));
+        try {
+          await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_bg_opacity", value: v });
+          if (this._liveData?.config) this._liveData.config.floor_plan_bg_opacity = v;
+        } catch (err) { console.error("Nova (new look): floor plan bg opacity save failed", err); }
+      });
+    }
 
     const goClassic = root.getElementById("fpnGoClassic");
     if (goClassic) goClassic.addEventListener("click", () => this._saveSetting("ui_style", "classic"));
@@ -3719,6 +3855,26 @@ class NovaCommandCenterNew extends HTMLElement {
       });
     });
 
+    // Device pins — drag to move (saved with the plan); a tap with no drag
+    // opens the entity's controls; right-click removes it.
+    svgEl.querySelectorAll(".fpn-ent").forEach(g => {
+      g.addEventListener("mousedown", (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault(); e.stopPropagation();
+        const ei = parseInt(g.getAttribute("data-ent-idx"));
+        const ent = (self._entsFor(floor) || [])[ei];
+        if (!ent) return;
+        const pt = svgPoint(e);
+        dragging = { entIdx: ei, startX: pt.x, startY: pt.y, origX: ent.x, origY: ent.y, entity: true, moved: false, entId: g.getAttribute("data-ent-id") };
+      });
+      g.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        const ei = parseInt(g.getAttribute("data-ent-idx"));
+        const arr = self._entsFor(floor);
+        if (arr[ei] && window.confirm("Remove this device from the plan?")) { arr.splice(ei, 1); redraw(); }
+      });
+    });
+
     svgEl.addEventListener("mousemove", (e) => {
       if (panning) {
         const rect = svgEl.getBoundingClientRect();
@@ -3732,6 +3888,21 @@ class NovaCommandCenterNew extends HTMLElement {
       }
       if (!dragging) return;
       const pt = svgPoint(e);
+      if (dragging.entity) {
+        const ent = (self._entsFor(floor) || [])[dragging.entIdx];
+        if (!ent) return;
+        const nx = Math.round(dragging.origX + (pt.x - dragging.startX));
+        const ny = Math.round(dragging.origY + (pt.y - dragging.startY));
+        if (Math.abs(nx - dragging.origX) > 1 || Math.abs(ny - dragging.origY) > 1) dragging.moved = true;
+        ent.x = nx; ent.y = ny;
+        const ge = svgEl.querySelector(`.fpn-ent[data-ent-idx="${dragging.entIdx}"]`);
+        if (ge) {
+          const dot = ge.querySelector(".fpn-ent-dot"); if (dot) { dot.setAttribute("cx", nx); dot.setAttribute("cy", ny); }
+          const nm = ge.querySelector(".fpn-ent-nm"); if (nm) { nm.setAttribute("x", nx); nm.setAttribute("y", ny - 4); }
+          const vl = ge.querySelector(".fpn-ent-val"); if (vl) { vl.setAttribute("x", nx); vl.setAttribute("y", ny + 6.5); }
+        }
+        return;
+      }
       const rm = rooms[dragging.idx];
       if (!rm) return;
       if (dragging.resize) {
@@ -3755,6 +3926,10 @@ class NovaCommandCenterNew extends HTMLElement {
     const endDrag = () => {
       if (panning) { panning = null; return; }
       if (!dragging) return;
+      // A device pin clicked without dragging → open its HA more-info controls.
+      if (dragging.entity && !dragging.moved && dragging.entId) {
+        self.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId: dragging.entId }, bubbles: true, composed: true }));
+      }
       dragging = null;
       redraw();
     };

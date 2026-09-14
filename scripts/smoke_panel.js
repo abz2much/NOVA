@@ -1305,6 +1305,36 @@ setTimeout(async () => {
     _updateConfigCalls.some(c => c.key === "floor_plan_units" && c.value === "metric")]);
   sRoot = elNew.shadowRoot;
 
+  // Devices on plan (jarvis-aio port, Phase 2): add a device, see its pin,
+  // save it, remove it, and confirm the opacity slider persists.
+  fpeCardNow = sRoot.getElementById("settings-card-floor_plan_editor");
+  fpeCardNow.querySelector("#fpnEntInput").value = "camera.front";
+  fpeCardNow.querySelector("#fpnEntAdd").click();
+  fpeCardNow = sRoot.getElementById("settings-card-floor_plan_editor");
+  checks.push(["floor plan editor: Add device places a live-state pin on the plan",
+    fpeCardNow.querySelectorAll(".fpn-ent").length === 1
+    && /front/i.test(fpeCardNow.textContent)]);
+
+  fpeCardNow.querySelector("#fpnSave").click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["floor plan editor: Save writes floor_plan_entities alongside the rooms",
+    _updateConfigCalls.some(c => c.key === "floor_plan_entities" && /camera\.front/.test(c.value))]);
+
+  sRoot = elNew.shadowRoot;
+  fpeCardNow = sRoot.getElementById("settings-card-floor_plan_editor");
+  fpeCardNow.querySelector(".fpn-ent-del").click();
+  fpeCardNow = sRoot.getElementById("settings-card-floor_plan_editor");
+  checks.push(["floor plan editor: removing a device chip clears its pin from the canvas",
+    fpeCardNow.querySelectorAll(".fpn-ent").length === 0]);
+
+  const fpnBgOp = fpeCardNow.querySelector("#fpnBgOp");
+  fpnBgOp.value = "0.5";
+  fpnBgOp.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["floor plan editor: background opacity slider saves floor_plan_bg_opacity",
+    _updateConfigCalls.some(c => c.key === "floor_plan_bg_opacity" && c.value === "0.5")]);
+  sRoot = elNew.shadowRoot;
+
   // Person Honorifics: picking "Custom…" reveals the text input without saving
   // yet (nothing to save), then typing+blurring the custom input saves it.
   const rachelSel = sRoot.querySelector('select[data-person-id="person.rachel"]');
