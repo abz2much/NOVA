@@ -1496,6 +1496,21 @@ setTimeout(async () => {
   checks.push(["residence tab: switching floor tabs updates the active floor",
     elNew._currentFloor === "1f" && floor1fBtn.classList.contains("active")]);
 
+  // Scroll-to-zoom on the 3D scene (v7.101.27) — Abi caught trying to zoom in on
+  // the model and finding only rotate was wired, so any drag just spun the house.
+  const priorZoomSceneHtml = resRoot.getElementById("resIso")?.innerHTML || "";
+  const zoomInEvt = new resRoot.ownerDocument.defaultView.WheelEvent("wheel", { deltaY: -100, bubbles: true, cancelable: true });
+  resRoot.getElementById("resScene").dispatchEvent(zoomInEvt);
+  await new Promise(r => setTimeout(r, 30));
+  checks.push(["residence tab: scrolling up on the 3D scene zooms in",
+    elNew._house3dZoom > 1 && resRoot.getElementById("resIso")?.innerHTML !== priorZoomSceneHtml]);
+  const priorZoom = elNew._house3dZoom;
+  const zoomOutEvt = new resRoot.ownerDocument.defaultView.WheelEvent("wheel", { deltaY: 100, bubbles: true, cancelable: true });
+  resRoot.getElementById("resScene").dispatchEvent(zoomOutEvt);
+  await new Promise(r => setTimeout(r, 30));
+  checks.push(["residence tab: scrolling down on the 3D scene zooms back out",
+    elNew._house3dZoom < priorZoom]);
+
   const doorMapSel = resRoot.querySelector('.door-map-sel-new[data-slot="front"]');
   const priorDoorMappingSaves = _updateConfigCalls.filter(c => c.key === "door_mapping").length;
   doorMapSel.value = "cover.test_front_door";

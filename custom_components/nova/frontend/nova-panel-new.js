@@ -1234,8 +1234,12 @@ class NovaCommandCenterNew extends HTMLElement {
       this._house3dBox = window.NOVA3D.fixedBox({ floor, spec, plan, elements, garage });
       this._house3dBoxKey = key;
     }
+    const base = this._house3dBox, zoom = this._house3dZoom || 1;
+    const cx = base[0] + base[2] / 2, cy = base[1] + base[3] / 2;
+    const w = base[2] / zoom, h = base[3] / zoom;
+    const box = [cx - w / 2, cy - h / 2, w, h];
     mount.innerHTML = window.NOVA3D.renderSVG({
-      theta: this._house3dTheta || 35, floor, lit: this._house3dLit(), doors: this._house3dDoors(), box: this._house3dBox, spec, plan, elements, garage,
+      theta: this._house3dTheta || 35, floor, lit: this._house3dLit(), doors: this._house3dDoors(), box, spec, plan, elements, garage,
     });
   }
   _buildResidenceAnnotationsNew() {
@@ -1308,6 +1312,12 @@ class NovaCommandCenterNew extends HTMLElement {
     };
     scene.addEventListener("mousedown", (e) => { down(e); e.preventDefault(); });
     scene.addEventListener("touchstart", (e) => down(e), { passive: true });
+    scene.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+      this._house3dZoom = Math.max(0.5, Math.min(4, (this._house3dZoom || 1) * factor));
+      schedule();
+    }, { passive: false });
   }
   async _fetchMmwaveNew() {
     if (!this._hass) return;
@@ -1402,7 +1412,7 @@ class NovaCommandCenterNew extends HTMLElement {
               ${[["FRONT", 0], ["RIGHT", 90], ["REAR", 180], ["LEFT", 270], ["ISO", 35]].map(([lbl, th]) => `<button class="mode-chip res-view-btn" data-res-theta="${th}">${lbl}</button>`).join("")}
             </div>
           </div>
-          <div class="fpn-hint">Drag to rotate</div>
+          <div class="fpn-hint">Drag to rotate · scroll to zoom</div>
           <div class="res-scene-new" id="resScene"><div id="resIso"></div></div>
           <div class="mode-grid res-stats-new">
             <div class="cfg-row"><label>Est. sq ft</label><b id="resSqft">—</b></div>
