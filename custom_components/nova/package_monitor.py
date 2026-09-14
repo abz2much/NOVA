@@ -215,16 +215,25 @@ def _anyone_home(hass) -> bool:
 
 
 def watched_cameras(hass, configured=None) -> list[str]:
-    """Resolve which cameras to inspect for deliveries."""
+    """Resolve which cameras to inspect for deliveries with the VISION sweep.
+
+    A camera with native Eufy package sensors (delivered/stranded/taken) is
+    excluded here — note_from_eufy() covers it directly off those sensors, at
+    zero vision cost and more reliably than a photo guess, so re-checking it
+    with the vision sweep too would just be a wasted, redundant LLM call.
+    """
     if configured:
         if isinstance(configured, str):
             return [configured] if hass.states.get(configured) else []
         return [c for c in configured if hass.states.get(c)]
     out = []
     from .camera import active_camera_states
+    from . import eufy
     for st in active_camera_states(hass):
         e = st.entity_id
         if any(k in e for k in ("doorbell", "front_door", "porch", "front")):
+            if eufy.is_eufy_camera(hass, e) and "package_delivered" in eufy.discover_roles(hass, e):
+                continue
             out.append(e)
     return out
 
@@ -245,9 +254,10 @@ def _log(hass, entity_id: str, kind: str, det: dict, source: str) -> None:
             "delivered": "A package was delivered",
             "mail": "Mail arrived",
             "removed": "A package was removed",
+            "stranded": "A package hasn't been picked up yet",
         }.get(kind, kind)
         observer.record_camera_event(entity_id, note, "delivery",
-                                     notable=(kind in ("delivered", "removed", "mail")))
+                                     notable=(kind in ("delivered", "removed", "mail", "stranded")))
     except Exception:
         pass
 
@@ -373,6 +383,48 @@ async def note_from_doorbell(hass, groq_client, honorific, tts_entity, speakers,
             return
     await evaluate(hass, groq_client, honorific, tts_entity, speakers,
                    entity_id, det, source="doorbell")
+
+
+async def note_from_eufy(hass, honorific, tts_entity, speakers,
+                         entity_id: str, role: str) -> None:
+    """
+    Hook for Eufy's own native package sensors (delivered/stranded/taken) —
+    zero vision cost, Eufy's dedicated model rather than an LLM guessing from
+    a photo. `role` is one of "package_delivered" / "package_stranded" /
+    "package_taken" (see eufy.py's role vocabulary).
+
+    delivered/taken feed the SAME state machine (`evaluate`) the vision path
+    uses, so behavior (announce once, "removed while away" phrasing, panel
+    status) stays identical regardless of which source detected it. stranded
+    isn't a presence toggle Eufy already flags "still sitting there, at risk"
+    itself — it doesn't have a package/mail boolean to compare against, so
+    it's a direct one-shot announcement instead of going through `evaluate`.
+    """
+    from .tts_helper import async_announce
+
+    if role == "package_delivered":
+        prev = _STATE.get(entity_id, {"package": False, "mail": False, "count": 0})
+        det = {"package": True, "mail": prev.get("mail", False),
+               "count": max(1, int(prev.get("count") or 0)), "description": "(Eufy) package delivered"}
+        await evaluate(hass, None, honorific, tts_entity, speakers, entity_id, det, source="eufy")
+        return
+
+    if role == "package_taken":
+        prev = _STATE.get(entity_id, {"package": False, "mail": False, "count": 0})
+        det = {"package": False, "mail": prev.get("mail", False), "count": 0,
+               "description": "(Eufy) package taken"}
+        await evaluate(hass, None, honorific, tts_entity, speakers, entity_id, det, source="eufy")
+        return
+
+    if role == "package_stranded":
+        det = {"package": True, "mail": False, "count": 1}
+        if _in_quiet_hours(hass) or not _announcements_on(hass):
+            _log(hass, entity_id, "stranded", det, "eufy")
+            return
+        msg = (f"{honorific}, a package at the front door hasn't been picked up yet."
+               if honorific else "A package at the front door hasn't been picked up yet.")
+        await async_announce(hass, msg, tts_entity, speakers, context="package")
+        _log(hass, entity_id, "stranded", det, "eufy")
 
 
 def status() -> dict:

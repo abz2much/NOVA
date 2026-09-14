@@ -278,6 +278,111 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     except Exception as exc:
         _LOGGER.debug("Nova: auto-analyze listener registration failed: %s", exc)
 
+    # ── Eufy Security — native sensors, no bus event to listen for ──────────
+    # Nest/Frigate fire a custom bus event Nova can subscribe to once. Eufy
+    # doesn't — every signal is a plain entity state change on one of the
+    # sibling sensors eufy.py discovers per camera (unique_id-based, survives
+    # renames). Ringing gets the same full analysis path as a Nest chime.
+    # stranger_person_detected is the only "unfamiliar person" case worth a
+    # vision call; plain person_detected (a known/regular face) just logs for
+    # free — no LLM call, per the same cost reasoning that already governs
+    # the once-per-camera cooldowns below. Package delivered/taken feed
+    # package_monitor's existing state machine directly; stranded is its own
+    # one-shot nag. This block re-resolves the camera->role map at setup only
+    # — a camera added after startup needs a reload to be picked up, same as
+    # every other camera-discovery path in this integration.
+    try:
+        from homeassistant.helpers.event import async_track_state_change_event
+        from . import eufy as _eufy
+
+        _eufy_roles = _eufy.all_camera_roles(hass)
+        _eufy_reverse: dict[str, tuple[str, str]] = {}
+        _EUFY_WATCHED_ROLES = ("ringing", "stranger", "person",
+                               "package_delivered", "package_stranded", "package_taken")
+        for _cam, _roles in _eufy_roles.items():
+            for _role in _EUFY_WATCHED_ROLES:
+                _ent = _roles.get(_role)
+                if _ent:
+                    _eufy_reverse[_ent] = (_cam, _role)
+
+        if _eufy_reverse:
+            @callback
+            def _auto_eufy(event) -> None:
+                if not _auto_flag("camera_auto_analyze", True):
+                    return
+                new_state = event.data.get("new_state")
+                if new_state is None or new_state.state != "on":
+                    return
+                hit = _eufy_reverse.get(event.data.get("entity_id"))
+                if not hit:
+                    return
+                entity_id, role = hit
+                now = _auto_time.monotonic()
+
+                if role == "ringing":
+                    if now - _chime_cd.get(entity_id, float("-inf")) < 12.0:
+                        return  # collapse a rapid double-press
+                    _chime_cd[entity_id] = now
+                    _auto_fire(entity_id, "Someone is ringing the doorbell", "doorbell", doorbell=True)
+                    return
+
+                if role == "stranger":
+                    if not _auto_flag("visitor_learning", True):
+                        return
+                    if now - _auto_cd.get(entity_id, float("-inf")) < 180.0:
+                        return
+                    _auto_cd[entity_id] = now
+                    honorific = _live_honorific(hass)
+                    from .camera import async_visitor_observation
+                    hass.async_create_task(
+                        async_visitor_observation(hass, llm_client, honorific, entity_id)
+                    )
+                    return
+
+                if role == "person":
+                    # A known/regular face — worth logging for the pattern
+                    # engine, not worth an LLM vision call (stranger_person_
+                    # detected already covers the case that IS worth one).
+                    if not _auto_flag("visitor_learning", True):
+                        return
+                    if now - _auto_cd.get(f"{entity_id}:known", float("-inf")) < 180.0:
+                        return
+                    _auto_cd[f"{entity_id}:known"] = now
+                    async def _log_known_visitor() -> None:
+                        try:
+                            from . import doorbell_training
+                            from .camera import _camera_friendly_name
+                            name = _camera_friendly_name(hass, entity_id)
+                            await hass.async_add_executor_job(
+                                doorbell_training.log_event, name, entity_id, "eufy",
+                                {"summary": "", "analysis": "", "category": "known_resident",
+                                 "notable": False},
+                            )
+                        except Exception as exc:
+                            _LOGGER.debug("Nova eufy: known-visitor log failed: %s", exc)
+                    hass.async_create_task(_log_known_visitor())
+                    return
+
+                if role.startswith("package_"):
+                    if not _auto_flag("package_detection", True):
+                        return
+                    honorific = _live_honorific(hass)
+                    tts = _get_tts(hass, entry, context="package")
+                    spk = _get_speakers(hass, entry)
+                    from . import package_monitor
+                    hass.async_create_task(
+                        package_monitor.note_from_eufy(hass, honorific, tts, spk, entity_id, role)
+                    )
+
+            camera_unsubs.append(async_track_state_change_event(
+                hass, list(_eufy_reverse.keys()), _auto_eufy))
+            _LOGGER.info(
+                "Nova: Eufy native-sensor watch active (%d camera(s), %d sensor(s))",
+                len(_eufy_roles), len(_eufy_reverse),
+            )
+    except Exception as exc:
+        _LOGGER.debug("Nova: Eufy listener registration failed: %s", exc)
+
     # ── Package & mail detection — periodic porch check ─────────────────────
     # Deliveries often don't ring the bell (carrier drops and leaves), so a low-
     # frequency vision sweep of the doorbell/porch camera catches them. Per-camera

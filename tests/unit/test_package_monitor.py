@@ -127,6 +127,119 @@ async def test_periodic_announces_once_on_confirmed_arrival(pm, load, fake_hass,
     assert len(spoken) == 1 and "package has been delivered" in spoken[0]
 
 
+# ── note_from_eufy: native sensors feed the same state machine, no vision ───
+
+async def test_eufy_delivered_announces_and_sets_state(pm, load, fake_hass, monkeypatch):
+    tts = load("tts_helper")
+    spoken = []
+
+    async def _announce(hass, msg, *a, **k):
+        spoken.append(msg)
+    monkeypatch.setattr(tts, "async_announce", _announce)
+    monkeypatch.setattr(pm, "_in_quiet_hours", lambda h: False)
+    monkeypatch.setattr(pm, "_announcements_on", lambda h: True)
+    pm._STATE.clear()
+
+    await pm.note_from_eufy(fake_hass, "Sir", "tts.x", ["media_player.y"],
+                            "camera.front_door_bell", "package_delivered")
+    assert len(spoken) == 1 and "package has been delivered" in spoken[0]
+    assert pm._STATE["camera.front_door_bell"]["package"] is True
+
+
+async def test_eufy_taken_while_home_updates_state_silently(pm, load, fake_hass, monkeypatch):
+    # A normal pickup with someone home isn't theft — evaluate()'s existing
+    # "removed" branch only speaks when nobody's home, unchanged by source.
+    tts = load("tts_helper")
+    spoken = []
+    monkeypatch.setattr(tts, "async_announce", lambda *a, **k: spoken.append(a))
+    monkeypatch.setattr(pm, "_in_quiet_hours", lambda h: False)
+    monkeypatch.setattr(pm, "_announcements_on", lambda h: True)
+    pm._STATE.clear()
+    pm._STATE["camera.front_door_bell"] = {"package": True, "mail": False, "count": 1}
+    fake_hass.states.set("person.abi", "home")
+
+    await pm.note_from_eufy(fake_hass, "Sir", "tts.x", ["media_player.y"],
+                            "camera.front_door_bell", "package_taken")
+    assert spoken == []
+    assert pm._STATE["camera.front_door_bell"]["package"] is False
+
+
+async def test_eufy_taken_while_away_announces_concern(pm, load, fake_hass, monkeypatch):
+    tts = load("tts_helper")
+    spoken = []
+
+    async def _announce(hass, msg, *a, **k):
+        spoken.append(msg)
+    monkeypatch.setattr(tts, "async_announce", _announce)
+    monkeypatch.setattr(pm, "_in_quiet_hours", lambda h: False)
+    monkeypatch.setattr(pm, "_announcements_on", lambda h: True)
+    pm._STATE.clear()
+    pm._STATE["camera.front_door_bell"] = {"package": True, "mail": False, "count": 1}
+    fake_hass.states.set("person.abi", "not_home")
+
+    await pm.note_from_eufy(fake_hass, "Sir", "tts.x", ["media_player.y"],
+                            "camera.front_door_bell", "package_taken")
+    assert len(spoken) == 1 and "no one is home" in spoken[0]
+
+
+async def test_eufy_stranded_announces_nag_message(pm, load, fake_hass, monkeypatch):
+    tts = load("tts_helper")
+    spoken = []
+
+    async def _announce(hass, msg, *a, **k):
+        spoken.append(msg)
+    monkeypatch.setattr(tts, "async_announce", _announce)
+    monkeypatch.setattr(pm, "_in_quiet_hours", lambda h: False)
+    monkeypatch.setattr(pm, "_announcements_on", lambda h: True)
+
+    await pm.note_from_eufy(fake_hass, "Sir", "tts.x", ["media_player.y"],
+                            "camera.front_door_bell", "package_stranded")
+    assert len(spoken) == 1 and "hasn't been picked up" in spoken[0]
+
+
+async def test_eufy_stranded_respects_quiet_hours(pm, load, fake_hass, monkeypatch):
+    tts = load("tts_helper")
+    spoken = []
+    monkeypatch.setattr(tts, "async_announce", lambda *a, **k: spoken.append(a))
+    monkeypatch.setattr(pm, "_in_quiet_hours", lambda h: True)
+    monkeypatch.setattr(pm, "_announcements_on", lambda h: True)
+
+    await pm.note_from_eufy(fake_hass, "Sir", "tts.x", ["media_player.y"],
+                            "camera.front_door_bell", "package_stranded")
+    assert spoken == []
+
+
+def test_eufy_delivered_does_not_call_vision(pm, fake_hass, monkeypatch):
+    # note_from_eufy must never touch the vision pipeline — that's the whole
+    # point of using Eufy's own sensors instead of guessing from a photo.
+    import asyncio
+    called = {"vision": False}
+    monkeypatch.setattr(pm, "detect_on_camera",
+                        lambda *a, **k: called.__setitem__("vision", True))
+    monkeypatch.setattr(pm, "_in_quiet_hours", lambda h: False)
+    monkeypatch.setattr(pm, "_announcements_on", lambda h: False)
+    pm._STATE.clear()
+    asyncio.run(pm.note_from_eufy(fake_hass, "Sir", "tts.x", ["media_player.y"],
+                                  "camera.front_door_bell", "package_delivered"))
+    assert called["vision"] is False
+
+
+# ── watched_cameras: skip the vision sweep where Eufy already covers it ─────
+
+def test_watched_cameras_excludes_eufy_native_package_camera(pm, load, fake_hass, monkeypatch):
+    eufy_mod = load("eufy")
+    fake_hass.states.set("camera.front_door_bell", "idle")
+    fake_hass.states.set("camera.porch_no_native", "idle")
+    monkeypatch.setattr(eufy_mod, "is_eufy_camera",
+                        lambda h, e: e == "camera.front_door_bell")
+    monkeypatch.setattr(eufy_mod, "discover_roles",
+                        lambda h, e: {"package_delivered": "binary_sensor.x"}
+                        if e == "camera.front_door_bell" else {})
+    out = pm.watched_cameras(fake_hass)
+    assert "camera.front_door_bell" not in out
+    assert "camera.porch_no_native" in out
+
+
 async def test_periodic_hallucination_single_frame_stays_quiet(pm, load, fake_hass, monkeypatch):
     tts = load("tts_helper")
     spoken = []

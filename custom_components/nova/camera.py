@@ -260,8 +260,8 @@ def camera_enabled(entity_id) -> bool:
 
 def _camera_integration(hass: HomeAssistant, entity_id: str) -> str:
     """
-    Return 'frigate', 'nest', or 'other' based on which integration owns the
-    camera entity.
+    Return 'frigate', 'nest', 'eufy', or 'other' based on which integration
+    owns the camera entity.
     """
     reg = er.async_get(hass)
     entry = reg.async_get(entity_id)
@@ -271,7 +271,29 @@ def _camera_integration(hass: HomeAssistant, entity_id: str) -> str:
         return "frigate"
     if entry.platform == "nest":
         return "nest"
+    if entry.platform == "eufy_security":
+        return "eufy"
     return "other"
+
+
+async def _fetch_event_media_image(hass: HomeAssistant, entity_id: str) -> Optional[bytes]:
+    """
+    The 'frame frozen at the moment of the event' for whichever backend owns
+    this camera — Nest's recorded event media, or Eufy's image.*_event_image
+    entity. Neither Frigate nor a generic camera has an equivalent here (a
+    generic camera's live snapshot is already tried by the caller before this
+    fallback is reached). Never raises.
+    """
+    integration = _camera_integration(hass, entity_id)
+    if integration == "nest":
+        return await _fetch_nest_event_image(hass, entity_id)
+    if integration == "eufy":
+        from . import eufy
+        roles = eufy.discover_roles(hass, entity_id)
+        image_entity = roles.get("event_image")
+        if image_entity:
+            return await eufy.async_fetch_event_image(hass, image_entity)
+    return None
 
 
 def _camera_friendly_name(hass: HomeAssistant, entity_id: str) -> str:
@@ -1305,7 +1327,7 @@ async def _analyze_doorbell_press(
 
     # Pass 2 — recorded event media fallback when the live clip caught no subject
     if not (res.get("success") and _scene_has_subject(res.get("analysis", ""))):
-        ev = await _fetch_nest_event_image(hass, entity_id)
+        ev = await _fetch_event_media_image(hass, entity_id)
         if ev:
             ev = _downscale_jpeg(ev)
             ev_call = _FakeCall({
@@ -1366,11 +1388,14 @@ async def async_visitor_observation(
     training dataset and the cognitive record — never spoken, never pushed.
     Doorbell-press announcements remain the only voiced camera events; this just
     lets Nova quietly learn who comes and goes (couriers' patterns, regulars,
-    strangers) now that vision calls cost effectively nothing.
+    strangers). Callers should reserve this for events actually worth a vision
+    call (e.g. Eufy's stranger_person_detected) — a known/regular face has a
+    cheaper path that logs directly without one; see __init__.py's Eufy
+    dispatch.
     Prefers the recorded event media (it froze the person), falls back to live.
     """
     await asyncio.sleep(2)
-    img = await _fetch_nest_event_image(hass, entity_id)
+    img = await _fetch_event_media_image(hass, entity_id)
     if not img:
         img = await _get_best_image(hass, entity_id)
     if not img:

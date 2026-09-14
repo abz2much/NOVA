@@ -6,6 +6,7 @@
     "tts",
     "media_player",
     "camera",
+    "image",
     "mqtt",
     "assist_pipeline",
     "recorder",
@@ -31,5 +32,5 @@
     "anthropic>=0.39.0",
     "pypdf>=4.0.0"
   ],
-  "version": "7.101.3"
+  "version": "7.101.4"
 }
