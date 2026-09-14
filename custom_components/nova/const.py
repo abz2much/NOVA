@@ -17,7 +17,6 @@ CONF_TTS_ENGINE           = "tts_engine"
 CONF_TTS_PREMIUM_ENGINE   = "tts_premium_engine"
 CONF_TTS_PREMIUM_CONTEXTS = "tts_premium_contexts"
 CONF_USE_HASS_API         = "use_hass_api"
-CONF_UI_STYLE             = "ui_style"      # "classic" (default) or "new" — which panel look to mount (v7.93.0)
 CONF_CAST_ANNOUNCE        = "cast_announce"
 CONF_DIRECTIVE            = "directive"
 CONF_DIRECTIVE_PRESET     = "directive_preset"

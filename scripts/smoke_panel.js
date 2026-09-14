@@ -14,7 +14,6 @@ const fs = require("fs");
 const path = require("path");
 
 const COMPONENT = path.resolve(__dirname, "..", "custom_components", "nova", "frontend", "nova-panel.js");
-const NEW_LOOK_COMPONENT = path.resolve(__dirname, "..", "custom_components", "nova", "frontend", "nova-panel-new.js");
 const dom = new JSDOM("<!DOCTYPE html><body></body>", { url: "http://localhost/", pretendToBeVisual: true });
 const { window } = dom;
 global.window = window; global.document = window.document;
@@ -34,7 +33,6 @@ global.__promptQueue = [];
 window.prompt = () => (global.__promptQueue.length ? global.__promptQueue.shift() : null);
 
 window.eval(fs.readFileSync(COMPONENT, "utf8"));
-window.eval(fs.readFileSync(NEW_LOOK_COMPONENT, "utf8"));
 
 // Raw get_panel_data contract: status.*, meta.*, dominant, areas[], config.cameras
 const PANEL = {
@@ -76,7 +74,7 @@ const PANEL = {
     room_speakers: { living_room: "media_player.living_room_speaker" },
     all_people: [{ entity_id: "person.abi", name: "Abi" }, { entity_id: "person.rachel", name: "Rachel" }],
     person_honorifics: { "person.rachel": "boss", "person.abi": "captain" },
-    general_speaker: "media_player.kitchen_speaker", ui_style: "classic",
+    general_speaker: "media_player.kitchen_speaker",
     satellites: [{ entity_id: "assist_satellite.basement_nova", name: "Basement Nova", area: "Basement" }],
     satellite_pairings: { "assist_satellite.basement_nova": "media_player.living_room_speaker" },
     notify_services_available: ["notify.mobile_app_abi_phone", "notify.mobile_app_spouse_phone"],
@@ -331,851 +329,13 @@ const hass = {
   },
   callService: async (domain, service, data, target) => { _serviceCalls.push({ domain, service, data, target }); },
 };
-
-// v7.93.0: "nova-panel" is now a thin shell that picks between Classic and
-// the new look at runtime (see NovaPanelShell in nova-panel.js). This suite
-// tests Classic's own internals directly, so it creates "nova-panel-classic"
-// — the tag Classic is registered under — bypassing the shell entirely. The
-// shell itself gets its own small check further down.
-const el = window.document.createElement("nova-panel-classic");
-window.document.body.appendChild(el);
-el.hass = hass;
-
+// Command Center is Nova's one dashboard now (Classic was deleted in
+// v7.101.30 once this reached feature parity). Tests below drive the
+// single "nova-panel" element directly.
 setTimeout(async () => {
-  const sr = el.shadowRoot, html = sr.innerHTML;
-  const checks = [
-    // ── Command Center tab (default) ──
-    ["stylesheet injected", html.includes("<style>") && html.includes("--cyan:") && html.includes("#00f2fe")],
-    ["dashboard grid present", !!sr.querySelector(".grid")],
-    ["onboarding welcome card shows for new users", !!sr.querySelector(".onboarding-card")],
-    ["onboarding shows step progress + checklist",
-      /1\/5 done/.test(sr.querySelector(".ob-progress")?.textContent || "") && sr.querySelectorAll(".ob-step").length === 5],
-    ["onboarding surfaces the proactive briefings step",
-      /Turn on daily briefings/.test(sr.querySelector(".ob-steps")?.textContent || "")],
-    ["onboarding marks done steps", !!sr.querySelector(".ob-step.ob-done")],
-    ["onboarding has dismiss + settings-jump", !!sr.querySelector("#ob-dismiss") && !!sr.querySelector(".ob-go[data-tab-jump]")],
-    ["onboarding steps have per-step jump buttons", sr.querySelectorAll(".ob-step-go[data-ob-jump]").length >= 3],
-    ["Residence tab button present", !!sr.querySelector('[data-tab="residence"]')],
-    ["Camera Watch module present", !!sr.querySelector(".c-camera") && !!sr.querySelector("#cam-feed")],
-    ["camera owns center (residence moved out of dashboard)", !sr.querySelector("#house3d-scene")],
-    ["camera chips from config.cameras (2)", sr.querySelectorAll(".camchip[data-cam]").length === 2],
-    ['camera auto-selected (no "NO CAMERA")', !/NO CAMERA SELECTED/.test(sr.querySelector("#cam-feed")?.innerHTML || "NO CAMERA SELECTED")],
-    ["live MJPEG src wired with token", !!(sr.querySelector("#cam-feed img") && /camera_proxy_stream\/camera\.front\?token=tok123/.test(sr.querySelector("#cam-feed img").src))],
-    ["camera native aspect (height:auto, no object-fit)", /\.cam-feed img\s*\{[^}]*height:\s*auto/.test(html) && !/\.cam-feed img\s*\{[^}]*object-fit/.test(html)],
-    ["system status rows live (RUNNING)", /RUNNING/.test(html)],
-    ["Goals panel present", !!sr.querySelector(".goal-list")],
-    ["both goals rendered", sr.querySelectorAll(".goal").length === 2],
-    ["active goal has cancel button, done goal doesn't",
-      !!sr.querySelector('.goal-active .goal-cancel') && !sr.querySelector('.goal-done .goal-cancel')],
-    ["done goal has a delete button (tidy the list)",
-      !!sr.querySelector('.goal-done .goal-delete')],
-    ["new-goal input present (write a goal in)",
-      !!sr.querySelector('.goal-new-input') && !!sr.querySelector('.goal-new-btn')],
-    ["done goal shows status badge", /DONE/.test(sr.querySelector(".goal-done .goal-status-badge")?.textContent || "")],
-    ["active goal shows step progress (2/4)", /2\/4/.test(sr.querySelector(".goal-active .goal-steps-pct")?.textContent || "")],
-    ["real-time state_changed subscription wired", _subscribedEvents.includes("state_changed")],
-    ["camera event subscriptions still wired", _subscribedEvents.includes("nova_camera_event")],
-    ["area tile shows temp reading", /68°F/.test(sr.querySelector('.area[data-area-id="garage"] .area-reading')?.textContent || "")],
-    ["area tile sparkline rendered for garage", !!sr.querySelector('.area[data-area-id="garage"] .spark')],
-    ["area tile without sensor has no readings row", !sr.querySelector('.area[data-area-id="backyard"] .area-readings')],
-    ["area tiles are keyboard-focusable (drill-down affordance)", sr.querySelector('.area[data-area-id="garage"]')?.getAttribute('tabindex') === '0'],
-    ["activity search box present", !!sr.getElementById("activity-search")],
-    ["activity feed renders all mock entries", sr.querySelectorAll("#activity-feed .evt").length === 3],
-    ["activity feed rows carry category icons", sr.querySelectorAll("#activity-feed .evt .evt-icon").length === 3],
-  ];
-
-  // ── activity feed search: narrow, count, empty state, live-patch respect ──
-  el._activitySearch = "garage";
-  el._updateActivityFeed();
-  checks.push(
-    ["activity search narrows feed", el.shadowRoot.querySelectorAll("#activity-feed .evt").length === 1],
-    ["activity count shows filtered/total", /1 OF 3/.test(el.shadowRoot.getElementById("activity-count")?.textContent || "")],
-  );
-  el._patchLiveDom(PANEL);  // a poll/real-time refresh must keep the filter applied
-  checks.push(
-    ["live patch keeps activity filter applied", el.shadowRoot.querySelectorAll("#activity-feed .evt").length === 1],
-  );
-  el._activitySearch = "zzz-no-match";
-  el._updateActivityFeed();
-  checks.push(
-    ["activity search empty state shown", /No events match/.test(el.shadowRoot.getElementById("activity-feed")?.textContent || "")],
-  );
-  el._activitySearch = "";
-  el._updateActivityFeed();
-  checks.push(
-    ["clearing activity search restores all entries", el.shadowRoot.querySelectorAll("#activity-feed .evt").length === 3
-      && /LAST 3/.test(el.shadowRoot.getElementById("activity-count")?.textContent || "")],
-  );
-
-  // ── click the Garage tile: entity-card drill-down should open ──
-  sr.querySelector('.area[data-area-id="garage"]')?.click();
-  const detail = el.shadowRoot;
-  checks.push(
-    ["area detail overlay opens on tile click", !!detail.getElementById("area-detail-overlay")],
-    ["area detail shows the right area name", /Garage/.test(detail.querySelector(".area-detail-title")?.textContent || "")],
-    ["area detail shows temp value + sparkline", /68°F/.test(detail.querySelector(".ads-value")?.textContent || "") && !!detail.querySelector(".ads-spark .spark")],
-  );
-  detail.querySelector(".area-detail-close")?.click();
-  checks.push(
-    ["area detail overlay closes on ✕", !el.shadowRoot.getElementById("area-detail-overlay")],
-  );
-
-  // ── switch to Residence tab and re-check ──
-  el._currentTab = "residence";
-  el._render();
-  const r = el.shadowRoot, rhtml = r.innerHTML;
-  checks.push(
-    ["residence tab renders iso scene", !!r.querySelector("#house3d-scene")],
-    ["2D isometric SVG rendered", !!r.querySelector("#res-iso svg")],
-    ["solid house drawn (svg polygons)", r.querySelectorAll("#res-iso svg polygon").length >= 15],
-    ["3D house is data-driven from editor rooms (feet)", (() => { const p = el._house3dPlan(); return !!(p && p["1f"] && p["1f"].length && p["1f"].some(rm => rm.w > 0 && rm.d > 0 && rm.name)); })()],
-    ["home-type roof is applied (gable/hip/flat/gambrel by style)", (() => { const sp = el._houseSpec(); return ["gable","hip","flat","gambrel"].includes(sp.roof) && sp.stories != null; })()],
-    ["Dutch Colonial maps to a gambrel roof", el._styleDefaults('dutch_colonial').roof === 'gambrel' && el._resStyles().dutch_colonial.roof === 'gambrel' && el._resStyles().dutch_colonial.label === 'Dutch Colonial'],
-    ["gambrel exterior renders without error", (() => { try { const s = el._liveData && el._liveData.config; const prev = s ? el._liveData.config.residence_style : null; if (s) el._liveData.config.residence_style = 'dutch_colonial'; const svg = el._renderEditorPreview(); if (s) el._liveData.config.residence_style = prev; return typeof svg === 'string' && svg.length > 100; } catch (e) { return false; } })()],
-    // Regression (v7.101.26): a fully-interior stairs room (nothing else covering
-    // that slice of the footprint) used to read as a notch cut into the house
-    // outline, since _footprintMasses/extWallsPoly dropped "stairs" rooms from the
-    // enclosed footprint entirely -- fragmenting one rectangular house into several
-    // offset gable masses (stacked, jagged rooflines) instead of one clean ridge.
-    // Caught live on a real 2-story floor plan with a mid-house stairwell.
-    ["a fully-interior stairs room doesn't fragment the roof into multiple masses",
-      (() => {
-        const FT = 0.2;
-        const toFeet = rooms => rooms.map(r => ({ name: r.name.toLowerCase(), x: r.x * FT, y: r.y * FT, w: r.w * FT, d: r.h * FT, type: r.type }));
-        const plan = {
-          "1f": toFeet([
-            { name: "Living Room", x: 0, y: 0, w: 65, h: 80, type: "room" },
-            { name: "Utility", x: 65, y: 0, w: 30, h: 25, type: "room" },
-            { name: "WC", x: 65, y: 25, w: 15, h: 20, type: "bath" },
-            { name: "Stairs", x: 80, y: 25, w: 15, h: 20, type: "stairs" },
-            { name: "Hall", x: 65, y: 45, w: 30, h: 35, type: "room" },
-            { name: "Kitchen", x: 95, y: 0, w: 45, h: 50, type: "room" },
-            { name: "Dining Room", x: 95, y: 50, w: 45, h: 30, type: "room" },
-          ]),
-          "2f": toFeet([{ name: "Master Bedroom", x: 0, y: 0, w: 140, h: 80, type: "room" }]),
-        };
-        const spec = { roof: "gable", stories: 2, pitch: 0.65, dormersFront: 0, dormersRear: 0 };
-        const built = window.NOVA3D.build({ theta: 35, floor: "all", lit: {}, doors: {}, spec, plan, elements: {}, garage: [] });
-        let maxz = -1e9;
-        built.faces.forEach(f => f.p.forEach(p => { if (p[2] > maxz) maxz = p[2]; }));
-        // A single full-span gable over this 28x16ft footprint at pitch 0.65 peaks
-        // at eave(13.8) + 16/2*0.9*0.65 = 18.48ft. Fragmented into masses by the
-        // notch, the tallest piece topped out at ~15.85ft -- well short of a real ridge.
-        return maxz > 18;
-      })()],
-    ["operational mode has AUTO occupancy toggle", (() => { try { const prev = el._currentTab; el._currentTab = 'settings'; const h = el._html(); el._currentTab = prev; return /data-cfg-key="operational_mode_auto"/.test(h) && /mode-auto-row/.test(h); } catch (e) { return false; } })()],
-    ["openings entity list includes window sensors", (() => { const st = el._hass.states; st['binary_sensor.test_kitchen_window'] = { state: 'off', attributes: { device_class: 'window', friendly_name: 'Kitchen Window' } }; const html = el._doorEntityOptions(''); delete st['binary_sensor.test_kitchen_window']; return /test_kitchen_window/.test(html); })()],
-    ["mode bindings: lab rooms + movie room/player/dim", (() => { try { const prev = el._currentTab; el._currentTab = 'settings'; const h = el._html(); el._currentTab = prev; return /class="mode-bindings"/.test(h) && /data-lab-area/.test(h) && /data-cfg-key="movie_area"/.test(h) && /data-cfg-key="movie_media_player"/.test(h) && /data-cfg-key="movie_dim_pct"/.test(h); } catch (e) { return false; } })()],
-    ["exterior All view draws lit windows + garage doors (clean shell)", (() => { const s = el._build3DHouse ? "" : ""; const svg = r.querySelector("#res-iso")?.innerHTML || ""; return /class="gdoor"/.test(svg) || /gdoor/.test(svg); })()],
-    ["occupied stat wired (n / total)", /\d+\s*\/\s*\d+/.test((r.getElementById("res-occ") || {}).textContent || "")],
-    ["home-style selector with options", !!r.querySelector("#res-style-sel") && r.querySelectorAll("#res-style-sel option").length >= 6],
-    ["property banner reflects HA home location (not a hardcoded personal default)", !!r.querySelector(".res-banner") && /Springfield IL/.test(r.querySelector("#res-addr")?.textContent || "")],
-    ["floor editor exposes export/import + units controls", (() => { const h = el._renderFloorPlanEditor(el._data()); return /id="fp-export"/.test(h) && /class="fp-import-layout"/.test(h) && /id="fp-units"/.test(h); })()],
-    ["floor editor: place windows/exterior/cellar/interior openings", (() => { const h = el._renderOpenings("1f"); return /id="op-add-window"/.test(h) && /id="op-add-extdoor"/.test(h) && /id="op-add-cellar"/.test(h) && /id="op-add-intdoor"/.test(h); })()],
-  );
-
-  // ── stored XSS regression #3 (fixed 13 Sept 2026): the floor-plan EDITOR's
-  // SVG builds room-name <text> labels by string concatenation — a room name
-  // is user-entered, so a payload there must render as inert text in the
-  // returned markup, and (once inserted into the DOM the way the real editor
-  // canvas does) must never actually execute. ──
-  window.__xssFired3 = false;
-  const xssRoomName = '</text><image href=x onerror="window.__xssFired3=true"/><text>';
-  const fpXssSvg = el._renderEditableSVG(
-    { ground: { rooms: [{ name: xssRoomName, type: "room", x: 10, y: 10, w: 40, h: 30 }] } },
-    "ground",
-  );
-  const fpXssHost = document.createElement("div");
-  fpXssHost.innerHTML = fpXssSvg;   // same sink the real editor canvas uses
-  checks.push(
-    ["floor-plan room-name XSS payload is escaped in the returned SVG string",
-      // room names render UPPERCASED, so the escaped payload reads &lt;IMAGE...
-      /&lt;image/i.test(fpXssSvg) && !fpXssSvg.includes('<image href=x onerror=')],
-    ["floor-plan room-name XSS payload does not create a live <image> element",
-      !fpXssHost.querySelector("image")],
-    ["floor-plan room-name XSS payload's onerror handler never actually ran",
-      window.__xssFired3 === false],
-    ["cased openings: add button + room-scoped no-sensor row", (() => { try { const h = el._renderOpenings("1f"); if (!/id="op-add-cased"/.test(h)) return false; const arr = el._elemsFor("1f"); const n0 = arr.length; arr.push({ id: 'ec', type: 'door', kind: 'cased', wall: 'front', room: '', pos: 0.5, w: 20 }); const h2 = el._renderOpenings("1f"); const entBefore = (h.match(/data-op="entity"/g) || []).length; const entAfter = (h2.match(/data-op="entity"/g) || []).length; arr.length = n0; return /CASED OPENING/.test(h2) && /open passage/.test(h2) && /data-op="room"/.test(h2) && entAfter === entBefore; } catch (e) { return false; } })()],
-    ["camera FOV: add button + placement + cone", (() => { try { if (!/id="cam-add"/.test(el._renderCameras("1f"))) return false; const arr = el._camsFor("1f"); const n0 = arr.length; arr.push({ id: 'ct', x: 100, y: 80, angle: 270, fov: 90, range: 55, entity: '', indoor: true }); const h2 = el._renderCameras("1f"); const coneOk = /^M 100 80 L .* A 55 55 .* Z$/.test(el._coneD(arr[arr.length - 1])); const svg = el._renderEditableSVG({ '1f': { rooms: [{ name: 'Dining', x: 50, y: 50, w: 80, h: 60 }] } }, "1f"); arr.length = n0; return /CAM 1/.test(h2) && /INDOOR/.test(h2) && coneOk && /class="fp-cam"/.test(svg) && /fp-cam-cone/.test(svg) && /fp-cam-dot/.test(svg); } catch (e) { return false; } })()],
-    ["camera coverage: LOS through openings, walls block", (() => { try { const sp = el._editingPlan, se = el._editingElements; el._editingPlan = { '1f': { rooms: [ { name: 'Dining', x: 0, y: 0, w: 40, h: 40, type: 'room' }, { name: 'Kitchen', x: 40, y: 0, w: 40, h: 40, type: 'room' } ] } }; el._editingElements = { '1f': [ { id: 'o1', type: 'door', kind: 'cased', room: 'Dining', wall: 'right', pos: 0.5, w: 20 } ] }; const cam = { x: 20, y: 20, angle: 0, fov: 170, range: 120, indoor: true }; const withOpen = el._computeCoverage('1f', cam); el._editingElements = { '1f': [] }; const noOpen = el._computeCoverage('1f', cam); el._editingPlan = sp; el._editingElements = se; return withOpen.Kitchen > 0 && !noOpen.Kitchen && withOpen.Dining > 0; } catch (e) { return false; } })()],
-    ["editor zoom/pan: viewBox override + grid follows + live apply", (() => { try { const sp = el._editingPlan, sv = el._editVB; el._editingPlan = { '1f': { rooms: [ { name: 'House', x: 0, y: 0, w: 200, h: 150, type: 'room' } ] } }; el._editVB = { x: 50, y: 50, w: 100, h: 80 }; const svg = el._renderEditableSVG({ '1f': { rooms: el._editingPlan['1f'].rooms } }, '1f'); const mock = { _a: {}, setAttribute: (k, v) => mock._a[k] = v, querySelectorAll: () => [] }; el._applyEditVB(mock); el._editingPlan = sp; el._editVB = sv; return /viewBox="50 50 100 80"/.test(svg) && /class="fp-grid-rect" x="50" y="50"/.test(svg) && mock._a.viewBox === '50 50 100 80'; } catch (e) { return false; } })()],
-    ["3D wall snap: nearly-touching rooms align in feet plan (seamless walls)", (() => { try { const sp = el._editingPlan; el._editingPlan = { '1f': { rooms: [ { name: 'A', type: 'room', x: 0, y: 0, w: 50, h: 40 }, { name: 'B', type: 'room', x: 52.5, y: 0, w: 50, h: 40 } ] } }; const feet = el._planToFeet(el._getEditingPlan()); const a = feet['1f'][0], b = feet['1f'][1]; const closed = Math.abs((a.x + a.w) - b.x) < 0.001; el._editingPlan = { '1f': { rooms: [ { name: 'A', type: 'room', x: 0, y: 0, w: 50, h: 40 }, { name: 'C', type: 'room', x: 110, y: 0, w: 50, h: 40 } ] } }; const f2 = el._planToFeet(el._getEditingPlan()); const apart = Math.abs((f2['1f'][0].x + f2['1f'][0].w) - f2['1f'][1].x) > 5; el._editingPlan = sp; return closed && apart; } catch (e) { return false; } })()],
-    ["i18n swap: translates standalone labels, leaves mixed/dynamic strings", (() => { try { const save = el._uiStrings; el._uiStrings = { "General": "Général", "Settings": "Paramètres", "Satellite → Speaker": "Satellite → Enceinte" }; const div = document.createElement("div"); div.innerHTML = '<span>General</span><button>Settings</button><span>Satellite → Speaker</span><span>Occupied 5/14</span>'; el._localizeDOM(div); const sp = div.querySelectorAll("span"); const ok = sp[0].textContent === "Général" && div.querySelector("button").textContent === "Paramètres" && sp[1].textContent === "Satellite → Enceinte" && sp[2].textContent === "Occupied 5/14"; el._uiStrings = save; return ok; } catch (e) { return false; } })()],
-    ["floor-below ghost: 2f editor shows 1f footprint outline (red), zones excluded", (() => { try { const sp = el._editingPlan; el._editingPlan = { '1f': { rooms: [ { name: 'Living', type: 'room', x: 0, y: 0, w: 120, h: 80 }, { name: 'Garage', type: 'room', x: 120, y: 0, w: 60, h: 80 }, { name: 'Yard', type: 'outdoor', x: 0, y: 100, w: 180, h: 100 } ] }, '2f': { rooms: [ { name: 'Master', type: 'room', x: 10, y: 10, w: 80, h: 60 } ] } }; const svg = el._renderEditableSVG({ '2f': el._editingPlan['2f'] }, '2f'); const ghosts = (svg.match(/stroke="rgba\(255,90,90,0\.45\)"/g) || []).length; const fb = el._floorBelow('2f') === '1f' && el._floorBelow('bsmt') === null; el._editingPlan = sp; return ghosts === 2 && /1F BELOW/.test(svg) && fb; } catch (e) { return false; } })()],
-    ["3b-1 polygon room in 3D: points carried to feet + preview renders", (() => { try { const sp = el._editingPlan; el._editingPlan = { '1f': { rooms: [ { name: 'LRoom', type: 'room', x: 0, y: 0, w: 60, h: 60, points: [[0, 0], [60, 0], [60, 30], [30, 30], [30, 60], [0, 60]] } ] } }; const feet = el._planToFeet(el._getEditingPlan()); const r = feet['1f'][0]; const carried = Array.isArray(r.points) && r.points.length === 6 && r.points[1][0] === 12; const svg = el._renderEditorPreview(); el._editingPlan = sp; return carried && svg.length > 100; } catch (e) { return false; } })()],
-    ["polygon rooms (3a): reshape materializes points + renders polygon + bbox syncs", (() => { try { const sp = el._editingPlan; el._editingPlan = { '1f': { rooms: [ { name: 'Den', type: 'room', x: 10, y: 20, w: 40, h: 30 } ] } }; const rm = el._editingPlan['1f'].rooms[0]; el._ensureZonePoints(rm); const mat = rm.points.length === 4; rm.points[2] = [80, 80]; el._syncRoomBBox(rm); const bbox = rm.x === 10 && rm.y === 20 && rm.w === 70 && rm.h === 60; const svg = el._renderEditableSVG({ '1f': { rooms: el._editingPlan['1f'].rooms } }, '1f'); const poly = /class="fp-zone-path"/.test(svg) && (svg.match(/fp-zone-vtx/g) || []).length === 4; el._editingPlan = sp; return mat && bbox && poly; } catch (e) { return false; } })()],
-    ["polygonal outdoor zones: render, point-in-poly, coverage", (() => { try { const sp = el._editingPlan; el._editingPlan = { '1f': { rooms: [ { name: 'House', x: 0, y: 0, w: 100, h: 80, type: 'room' }, { name: 'Yard', type: 'outdoor', points: [[0, 100], [200, 100], [200, 200], [100, 200], [100, 300], [0, 300]] } ] } }; const svg = el._renderEditableSVG({ '1f': { rooms: el._editingPlan['1f'].rooms } }, '1f'); const polyOk = /class="fp-zone-path"/.test(svg) && (svg.match(/fp-zone-vtx/g) || []).length === 6; const pipOk = el._pointInPoly(50, 150, el._editingPlan['1f'].rooms[1].points) && !el._pointInPoly(150, 250, el._editingPlan['1f'].rooms[1].points); const cov = el._computeCoverage('1f', { x: 50, y: 150, angle: 90, fov: 170, range: 300, indoor: false }); const ez = el._ensureZonePoints({ x: 10, y: 10, w: 20, h: 20, type: 'outdoor' }); el._editingPlan = sp; return polyOk && pipOk && (cov.Yard || 0) > 0 && ez.length === 4; } catch (e) { return false; } })()],
-    ["objects place anywhere: field + grid include left/above home (neg coords)", (() => { try { const sp = el._editingPlan; el._editingPlan = { '1f': { rooms: [ { name: 'House', x: 0, y: 0, w: 150, h: 120, type: 'room' }, { name: 'Front Yard', x: 20, y: -160, w: 200, h: 130, type: 'outdoor' }, { name: 'Side Yard', x: -140, y: 0, w: 120, h: 120, type: 'outdoor' } ] } }; const svg = el._renderEditableSVG({ '1f': { rooms: el._editingPlan['1f'].rooms } }, '1f'); const vb = svg.match(/viewBox="([^"]+)"/)[1].split(' ').map(Number); const g = svg.match(/<rect class="fp-grid-rect" x="(-?\d+)" y="(-?\d+)"[^>]*fill="url\(#fp-grid-sm\)"/); el._editingPlan = sp; return vb[1] <= -160 && vb[0] <= -140 && g && parseInt(g[1]) <= -140 && parseInt(g[2]) <= -160; } catch (e) { return false; } })()],
-    ["editor grid covers negative coords (front/side yard space)", (() => { try { const sp = el._editingPlan, spr = el._editingProperty; el._editingPlan = { '1f': { rooms: [ { name: 'House', x: 100, y: 100, w: 200, h: 120, type: 'room' } ] } }; el._setProperty([[-150, -150], [550, -150], [550, 450], [-150, 450]]); const svg = el._renderEditableSVG({ '1f': { rooms: el._editingPlan['1f'].rooms } }, '1f'); el._editingPlan = sp; el._editingProperty = spr; const g = svg.match(/<rect class="fp-grid-rect" x="(-?\d+)" y="(-?\d+)"[^>]*fill="url\(#fp-grid-sm\)"/); return g && parseInt(g[1]) < 0 && parseInt(g[2]) < 0; } catch (e) { return false; } })()],
-    ["property boundary: renders, computes area, viewBox frames lot", (() => { try { const sp = el._editingPlan, spr = el._editingProperty; el._editingPlan = { '1f': { rooms: [ { name: 'Living', x: 100, y: 100, w: 100, h: 80, type: 'room' } ] } }; el._setProperty([[0, 0], [500, 0], [500, 500], [0, 500]]); const area = el._propertyArea(el._propertyPts()); const svg = el._renderEditableSVG({ '1f': { rooms: el._editingPlan['1f'].rooms } }, '1f'); const m = svg.match(/viewBox="([^"]+)"/); const vb = m ? m[1].split(' ').map(Number) : [0, 0, 0, 0]; el._editingPlan = sp; el._editingProperty = spr; return /class="fp-prop-path"/.test(svg) && (svg.match(/fp-prop-vtx/g) || []).length === 4 && /sq ft|acres/.test(area) && vb[0] <= 0 && (vb[0] + vb[2]) >= 500; } catch (e) { return false; } })()],
-    ["exterior openings snap to house, not outdoor zones", (() => { try { const sp = el._editingPlan, se = el._editingElements; el._editingPlan = { '1f': { rooms: [ { name: 'Living', x: 0, y: 0, w: 100, h: 60, type: 'room' }, { name: 'Backyard', x: 0, y: 80, w: 200, h: 150, type: 'outdoor' } ] } }; el._editingElements = { '1f': [ { id: 'd', type: 'door', kind: 'exterior', wall: 'back', pos: 0.5, w: 4 } ] }; const svg = el._renderEditableSVG({ '1f': { rooms: el._editingPlan['1f'].rooms } }, '1f'); const m = svg.match(/class="op-marker"[^>]*y="([\d.]+)"[^>]*fill="#ffaa28"/); el._editingPlan = sp; el._editingElements = se; return m && parseFloat(m[1]) < 100; } catch (e) { return false; } })()],
-    ["outdoor zone: covered by camera, excluded from 3D shell", (() => { try { const sp = el._editingPlan; el._editingPlan = { '1f': { rooms: [ { name: 'Living Room', x: 0, y: 0, w: 40, h: 40, type: 'room' }, { name: 'Front Yard', x: -10, y: -55, w: 60, h: 50, type: 'outdoor' } ] } }; const cov = el._computeCoverage('1f', { x: 20, y: -30, angle: 270, fov: 150, range: 80, indoor: false }); const p3d = el._planToFeet(el._getEditingPlan()); const names = (p3d['1f'] || []).map(r => r.name); el._editingPlan = sp; return cov['Front Yard'] > 0 && names.includes('living room') && !names.includes('front yard'); } catch (e) { return false; } })()],
-    ["camera cone clips to walls, bleeds through openings", (() => { try { const sp = el._editingPlan, se = el._editingElements; el._editingPlan = { '1f': { rooms: [ { name: 'A', x: 0, y: 0, w: 40, h: 40, type: 'room' }, { name: 'B', x: 40, y: 0, w: 40, h: 40, type: 'room' } ] } }; el._editingElements = { '1f': [] }; let geo = el._planGeometry('1f'); const noOpen = el._rayCast(20, 20, 0, 200, geo); el._editingElements = { '1f': [ { id: 'o', type: 'door', kind: 'cased', room: 'A', wall: 'right', pos: 0.5, w: 24 } ] }; geo = el._planGeometry('1f'); const withOpen = el._rayCast(20, 20, 0, 200, geo); const d = el._clippedCone({ x: 20, y: 20, angle: 0, fov: 120, range: 200, indoor: true }, geo); el._editingPlan = sp; el._editingElements = se; return Math.abs(noOpen - 20) < 2 && withOpen > 50 && !/ A /.test(d) && (d.match(/ L /g) || []).length > 10; } catch (e) { return false; } })()],
-    ["cased opening not drawn as an exterior door in the shell", (() => { try { const sp = el._editingPlan, se = el._editingElements; el._editingPlan = { '1f': { rooms: [ { name: 'Kitchen', x: 0, y: 0, w: 40, h: 40, type: 'room' }, { name: 'Living', x: 0, y: 40, w: 40, h: 40, type: 'room' } ] } }; el._editingElements = { '1f': [ { id: 'o1', type: 'door', kind: 'cased', room: 'Kitchen', wall: 'back', pos: 0.5, w: 24 } ] }; const svgCased = el._renderEditorPreview(); el._editingElements = { '1f': [ { id: 'd1', type: 'door', kind: 'exterior', wall: 'back', pos: 0.5, w: 4 } ] }; const svgExt = el._renderEditorPreview(); el._editingPlan = sp; el._editingElements = se; const dCased = (svgCased.match(/class="door/g) || []).length; const dExt = (svgExt.match(/class="door/g) || []).length; return dCased === 0 && dExt >= 1; } catch (e) { return false; } })()],
-    ["camera coverage LLM: compute button + confirms/reason + roomAt", (() => { try { const sp = el._editingPlan, se = el._editingElements, sc = el._editingCameras; el._editingPlan = { '1f': { rooms: [ { name: 'Dining', x: 0, y: 0, w: 40, h: 40, type: 'room' }, { name: 'Living', x: 0, y: 40, w: 80, h: 50, type: 'room' } ] } }; el._editingElements = { '1f': [ { id: 'o1', type: 'door', kind: 'cased', room: 'Dining', wall: 'back', pos: 0.5, w: 24 } ] }; el._editingCameras = { '1f': [ { id: 'c1', x: 20, y: 20, angle: 90, fov: 150, range: 120, entity: '', indoor: true, coverage: { covered: ['Dining', 'Living'], reason: 'via the open staircase', source: 'llm' } } ] }; const h = el._renderCameras('1f'); const ra = el._roomAt('1f', 20, 20); const od = el._openingDescriptions('1f'); el._editingPlan = sp; el._editingElements = se; el._editingCameras = sc; return /id="cam-compute"/.test(h) && /confirms Dining, Living/.test(h) && /open staircase/.test(h) && ra === 'Dining' && od.length > 0; } catch (e) { return false; } })()],
-    ["3D view presets render + set the angle", (() => { const bar = el._viewPresetBar('editor'); const before = el._editorTheta; el._setView('editor', 90); const ok = /data-vtheta="90"/.test(bar) && /FRONT/.test(bar) && /ISO/.test(bar) && el._editorTheta === 90; el._editorTheta = before; return ok; })()],
-    ["editor viewBox auto-fits to rooms with padding", (() => { const plan = { '1f': { rooms: [{ x: 100, y: 100, w: 80, h: 60, name: 'Test' }] } }; const svg = el._renderEditableSVG(plan, '1f'); const m = svg.match(/viewBox=\"([^\"]+)\"/); if (!m) return false; const p = m[1].split(' ').map(Number); return p[0] < 100 && p[1] < 100 && p[2] >= 80 && p[3] >= 140; })()],
-    ["settings: routine-learning card (datalist picker + doors/presence + chip renders)", (() => { const cfg = el._liveData.config; cfg.pattern_include_entities = ["binary_sensor.zzz_test"]; const h = el._renderRoutineLearning(el._data()); delete cfg.pattern_include_entities; return /data-cfg-key="pattern_learn_doors"/.test(h) && /data-cfg-key="pattern_learn_presence"/.test(h) && /list="pl-entity-list"/.test(h) && /binary_sensor\.zzz_test/.test(h); })()],
-    ["model self-heal picks vision-capable model for the vision role", (() => { const v = el._pickHealModel(["openai/gpt-oss-120b","qwen/qwen3.6-27b"], "vision_model"); const t = el._pickHealModel(["openai/gpt-oss-120b","qwen/qwen3.6-27b"], "model"); return v === "qwen/qwen3.6-27b" && t === "openai/gpt-oss-120b"; })()],
-    ["floor editor has a live 3D preview", (() => { const h = el._renderFloorPlanEditor(el._data()); return /id="fp-3d-preview"/.test(h) && typeof el._renderEditorPreview === "function"; })()],
-    ["floor editor: dormers placeable on the 2nd floor", (() => { const h = el._renderOpenings("2f"); const h1 = el._renderOpenings("1f"); return /id="op-add-fdormer"/.test(h) && /id="op-add-rdormer"/.test(h) && !/op-add-fdormer/.test(h1); })()],
-    ["garage bay open/closed resolves per-bay from its sensor", (() => { const cfg = el._liveData.config; el._hass.states["binary_sensor._g1"] = { state: "open", attributes: {} }; cfg.garage_bays = 2; cfg.door_mapping = { garage_1: "binary_sensor._g1" }; const g = el._house3dGarage(); const ok = !!(g.length === 2 && g[0].open === true && g[1].open === false); delete cfg.garage_bays; delete cfg.door_mapping; delete el._hass.states["binary_sensor._g1"]; return ok; })()],
-    ["placed door resolves open/closed from its sensor", (() => { const cfg = el._liveData.config; el._hass.states["binary_sensor._t"] = { state: "on", attributes: {} }; cfg.floor_plan_elements = { "1f": [{ type: "door", kind: "exterior", wall: "front", pos: 0.5, w: 12, entity: "binary_sensor._t" }] }; const e = el._house3dElements()["1f"][0]; const ok = !!(e && e.open === true && e.type === "door" && e.w > 0); delete cfg.floor_plan_elements; delete el._hass.states["binary_sensor._t"]; return ok; })()],
-    ["banner stats populated (sqft + bed/bath)", /\d/.test(r.querySelector("#res-sqft")?.textContent || "") && /\d/.test(r.querySelector("#res-bb")?.textContent || "")],
-    ["sqft estimate sane (<= 5000)", (() => { const m = (r.querySelector("#res-sqft")?.textContent || "").replace(/[^\d]/g, ""); return m && Number(m) <= 5000; })()],
-    ["style tag reflects template", /CAPE COD/.test(r.querySelector("#res-style-tag")?.textContent || "")],
-    ["3D residence is rotatable (drag wired)", r.querySelector("#house3d-scene")?._house3dWired === true]
-  );
-
-  // ── switch to 1st-floor isolation: model should draw labeled rooms ──
-  el._currentFloor = "1f";
-  el._render();
-  checks.push(
-    ["floor isolation draws labeled rooms (1F)", el.shadowRoot.querySelectorAll("#res-iso svg text").length >= 6],
-    ["floor isolation keeps garage room", /GARAGE/.test(el.shadowRoot.querySelector("#res-iso svg")?.textContent || "")]
-  );
-
-  // ── camera fallback chain: stream → still → Nova WS snapshot ──
-  el._currentTab = "dashboard";   // the floor-plan section above leaves us on residence
-  el._render();
-  const camImg = el.shadowRoot.querySelector("#cam-feed img");
-  camImg.dispatchEvent(new window.Event("error"));       // MJPEG failed
-  checks.push(
-    ["cam error #1 falls back to proxy stills", el._camMode === "still"
-      && /camera_proxy\/camera\.front/.test(camImg.src)],
-  );
-  camImg.dispatchEvent(new window.Event("error"));       // stills failed too
-  await new Promise(r => setTimeout(r, 20));             // let the WS shot resolve
-  checks.push(
-    ["cam error #2 escalates to Nova snapshot tier", el._camMode === "nova"],
-    ["Nova tier renders the WS frame as a data URL", /^data:image\/jpeg;base64,/.test(camImg.src)],
-    ["resolved tier remembered per entity", el._camModeByEntity["camera.front"] === "nova"],
-  );
-
-  // ── watchdog: proxies that HANG (no error event) still escalate ──
-  el._camMode = "stream";
-  delete el._camModeByEntity["camera.front"];
-  el._armCamWatchdog("camera.front", camImg, "stream", 5);
-  await new Promise(r => setTimeout(r, 25));
-  checks.push(
-    ["hung stream (no pixels, no error) watchdogs into stills", el._camMode === "still"],
-  );
-  el._armCamWatchdog("camera.front", camImg, "still", 5);
-  await new Promise(r => setTimeout(r, 25));
-  checks.push(
-    ["hung stills watchdog into Nova tier", el._camMode === "nova"],
-  );
-
-  // ── WS failure (e.g. HA not restarted) surfaces a hint, not silence ──
-  const realCallWS = hass.callWS;
-  hass.callWS = async (m) => {
-    if (m.type === "nova/camera_snapshot") throw new Error("unknown command nova/camera_snapshot");
-    return realCallWS(m);
-  };
-  el._camWsTimer && clearInterval(el._camWsTimer); el._camWsTimer = null;
-  el._camNovaFallback("camera.front");
-  await new Promise(r => setTimeout(r, 20));
-  hass.callWS = realCallWS;
-  checks.push(
-    ["WS-unavailable shows restart hint instead of blank", /restart Home Assistant/i.test(
-      el.shadowRoot.querySelector("#cam-feed .cam-none")?.textContent || "")],
-  );
-
-  // ── camera diagnostics: DIAG button probes and renders verdicts ──
-  el.shadowRoot.getElementById("cam-diag-btn")?.click();
-  await new Promise(r => setTimeout(r, 20));
-  const diag = el.shadowRoot.querySelector("#cam-feed .cam-diag");
-  const diagText = diag?.textContent || "";
-  checks.push(
-    ["DIAG button present in Camera Watch head", !!el.shadowRoot.getElementById("cam-diag-btn")],
-    ["DIAG overlay renders platform histogram", /nest×1/.test(diagText) && /frigate×1/.test(diagText)],
-    ["DIAG shows per-tier verdicts", /backend:nest/.test(diagText) && /wake-retry/.test(diagText)],
-    ["DIAG surfaces the actionable Nest verdict", /Pub\/Sub/.test(diagText)],
-    ["DIAG TILE line reports client-side render state", /TILE/.test(diagText) && /no decoded pixels/.test(diagText)],
-  );
-  el.shadowRoot.getElementById("cam-diag-btn")?.click();   // toggle off
-  checks.push(
-    ["DIAG toggles closed on second tap", !el.shadowRoot.querySelector("#cam-feed .cam-diag")],
-  );
-
-  // ── camera_overrides: frames reroute to the restream twin ──
-  el._liveData.config.camera_overrides = { "camera.front": "camera.back" };
-  el._camMode = "stream"; delete el._camModeByEntity["camera.front"];
-  if (el._camWsTimer) { clearInterval(el._camWsTimer); el._camWsTimer = null; }
-  el._lastCamKey = "";
-  el._renderCameraFeed();
-  const ovImg = el.shadowRoot.querySelector("#cam-feed img");
-  checks.push(
-    ["override reroutes stream URL to the twin", /camera_proxy_stream\/camera\.back/.test(ovImg?.src || "")],
-    ["override uses the twin's token", /tok456/.test(ovImg?.src || "")],
-        ["camera settings expose enable/disable toggles (choose all/some/none)", (() => { const h = el._renderCameraSettings(el._data()); return /cam-enable-toggle/.test(h) && /id="cam-disable-all"/.test(h) && /cameras in use/.test(h); })()],
-    ["strip shows the override mapping", /Front Door → back/.test(el.shadowRoot.getElementById("cam-strip")?.textContent || "")],
-  );
-  delete el._liveData.config.camera_overrides;
-  el._lastCamKey = ""; el._renderCameraFeed();   // restore for anything downstream
-
-  // ── Settings tab: camera names + location designation (v6.50.0 home) ──
-  el._currentTab = "settings";
-  el._render();
-  const camsetRows = el.shadowRoot.querySelectorAll(".camset-row");
-  checks.push(
-    ["✎ button removed from Command Center (decluttered)",
-      !el.shadowRoot.getElementById("cam-rename-btn")],
-    ["Settings renders a row per camera", camsetRows.length === 2],
-    ["Nova Character panel renders banter + web-research controls",
-      !!el.shadowRoot.querySelector('[data-cfg-key="banter_level"]')
-      && !!el.shadowRoot.querySelector('[data-cfg-key="search_backend"]')
-      && !!el.shadowRoot.querySelector('[data-cfg-key="calendar_tight_gap_min"]')],
-    ["banter select reflects the SAVED value (not reset to default)",
-      el.shadowRoot.querySelector('[data-cfg-key="banter_level"]')?.value === "2"],
-    ["web-research backend reflects saved value",
-      el.shadowRoot.querySelector('[data-cfg-key="search_backend"]')?.value === "searxng"],
-    ["recognition source selector present and reflects saved value",
-      el.shadowRoot.querySelector('[data-cfg-key="recognition_source"]')?.value === "frigate"],
-    ["voice-confirm toggle + mode reflect saved values",
-      el.shadowRoot.querySelector('[data-cfg-key="voice_confirm_enabled"]')?.classList.contains("on")
-      && el.shadowRoot.querySelector('[data-cfg-key="voice_confirm_mode"]')?.value === "gated"],
-    ["voice-confirm test button present", !!el.shadowRoot.getElementById("vc-test")],
-    ["name input placeholder is the HA name",
-      el.shadowRoot.querySelector('.camset-name[data-cam="camera.front"]')?.getAttribute("placeholder") === "Front Door"],
-    ["location chips render with resolved AUTO label",
-      /AUTO \(indoor\)/.test(el.shadowRoot.querySelector('.camset-row[data-cam="camera.front"]')?.textContent || "")],
-  );
-
-  const nameInput = el.shadowRoot.querySelector('.camset-name[data-cam="camera.front"]');
-  nameInput.value = "Bedroom 2";
-  nameInput.dispatchEvent(new window.Event("blur"));
-  await new Promise(r => setTimeout(r, 20));
-  checks.push(
-    ["rename WS called with entity + new name",
-      _renameCalls.length === 1 && _renameCalls[0].entity_id === "camera.front"
-      && _renameCalls[0].name === "Bedroom 2"],
-    ["display name resolver picks up the rename", el._camName("camera.front") === "Bedroom 2"],
-  );
-  nameInput.dispatchEvent(new window.Event("blur"));       // unchanged — must not re-call
-  await new Promise(r => setTimeout(r, 10));
-  checks.push(
-    ["unchanged blur does not re-save", _renameCalls.length === 1],
-  );
-
-  el.shadowRoot.querySelector('.camset-row[data-cam="camera.front"] .cam-loc-chip[data-loc="outdoor"]')?.click();
-  await new Promise(r => setTimeout(r, 20));
-  checks.push(
-    ["location WS called with entity + mode", _locationCalls.length === 1
-      && _locationCalls[0].entity_id === "camera.front" && _locationCalls[0].mode === "outdoor"],
-    ["OUTDOOR chip becomes active in the row",
-      el.shadowRoot.querySelector('.camset-row[data-cam="camera.front"] .cam-loc-chip[data-loc="outdoor"]')?.classList.contains("active") === true],
-    ["camera metadata refreshed from response",
-      (el._cams.find(c => c.entity_id === "camera.front") || {}).location_mode === "outdoor"],
-  );
-  el._currentTab = "dashboard";
-  el._render();
-  checks.push(
-    ["strip on Command Center shows the Nova-only name",
-      /Bedroom 2/.test(el.shadowRoot.getElementById("cam-strip")?.textContent || "")],
-  );
-
-  // ── switch to Memory tab: person routines fetch + render ──
-  el._currentTab = "memory";
-  el._render();
-  await el._fetchPersonRoutines();
-  const mem = el.shadowRoot;
-  checks.push(
-    ["Person Routines panel present", !!mem.getElementById("proutine-list")],
-    ["person group rendered (Username)", /Username/.test(mem.getElementById("proutine-list")?.textContent || "")],
-    ["routine description rendered", /office light turns on/.test(mem.getElementById("proutine-list")?.textContent || "")],
-    ["confidence bar rendered (82%)", /82%/.test(mem.getElementById("proutine-list")?.textContent || "")],
-  );
-
-  // ── Pending facts (v7.88.0): a fact remember() staged, unconfirmed ──
-  await el._fetchKnowledge();
-  const pend1 = el.shadowRoot;
-  checks.push(
-    ["pending panel visible when a fact is waiting", pend1.getElementById("pending-facts-panel")?.hidden === false],
-    ["pending fact key/value rendered", /bedtime/.test(pend1.getElementById("pending-facts-list")?.textContent || "")],
-    ["pending fact has confirm/reject/edit controls",
-      !!pend1.querySelector(".pending-confirm") && !!pend1.querySelector(".pending-reject")
-      && !!pend1.querySelector(".pending-save-edit")],
-  );
-  pend1.querySelector(".pending-confirm")?.click();
-  await new Promise(r => setTimeout(r, 0));   // let the click handler's await settle
-  const pend2 = el.shadowRoot;
-  checks.push(
-    ["confirming a pending fact removes it from the list",
-      !/bedtime/.test(pend2.getElementById("pending-facts-list")?.textContent || "")],
-    ["pending panel hides itself once nothing is left waiting",
-      pend2.getElementById("pending-facts-panel")?.hidden === true],
-  );
-
-  // ── switch to Logs tab: category filter + text search ──
-  el._currentTab = "logs";
-  el._render();
-  await el._fetchDebugLog();
-  const logs1 = el.shadowRoot;
-  checks.push(
-    ["log search box present", !!logs1.getElementById("log-search")],
-    ["all 3 log entries render initially", logs1.querySelectorAll(".log-entry").length === 3],
-    ["log count shows total", /3 entries/.test(logs1.getElementById("log-count")?.textContent || "")],
-    ["log filter chips cover every real backend category, not the stale ROUTE/REASON/TTS set",
-      logs1.querySelectorAll(".log-filter").length === 20
-      && !!logs1.querySelector('.log-filter[data-filter="LEARN"]')
-      && !logs1.querySelector('.log-filter[data-filter="ROUTE"]')],
-  );
-
-  // Real gap Abi caught live (13 Sept 2026): a genuine "LEARN" category
-  // (anticipation entries) rendered with a bare "•" bullet and had no
-  // filter chip — the cc map + filter list had drifted from nova_log()'s
-  // real category set.
-  const learnCallWS = hass.callWS;
-  hass.callWS = async (m) => (m.type === "nova/get_debug_log"
-    ? { entries: [{ ts: "15:44:58", cat: "LEARN", msg: "anticipation: Rachel is heading home — about 0.8 km out." }] }
-    : learnCallWS(m));
-  await el._fetchDebugLog();
-  checks.push(["LEARN entries get their own icon/color, not a bare bullet",
-    (() => {
-      const catEl = el.shadowRoot.querySelector(".log-entry .log-cat");
-      return !!catEl && /🧠/.test(catEl.textContent) && !/^•/.test(catEl.textContent.trim());
-    })()]);
-  hass.callWS = learnCallWS;
-  el._logSearch = "";
-  await el._fetchDebugLog();
-
-  el._logSearch = "porch";
-  await el._fetchDebugLog();
-  const logs2 = el.shadowRoot;
-  checks.push(
-    ["search narrows to matching entries", logs2.querySelectorAll(".log-entry").length === 2],
-    ["search excludes non-matching entry", !/camera\.front unavailable/.test(logs2.getElementById("debug-log-entries")?.textContent || "")],
-    ["log count reflects filtered/total", /2 of 3/.test(logs2.getElementById("log-count")?.textContent || "")],
-  );
-
-  el._logSearch = "nonexistent-term-xyz";
-  await el._fetchDebugLog();
-  checks.push(
-    ["search with no matches shows empty state, not a blank pane",
-      /No entries match/.test(el.shadowRoot.getElementById("debug-log-entries")?.textContent || "")],
-  );
-
-  // ── stored XSS regression (fixed 11 Sept 2026): log entries are built with
-  // innerHTML from e.msg/e.cat/e.ts, which can carry entity names, states, or
-  // model output — content Nova doesn't fully control. A malicious payload in
-  // any of those fields must render as inert text, never as a real element. ──
-  el._logSearch = "";
-  const _realCallWS = hass.callWS;
-  hass.callWS = async (m) => {
-    if (m.type === "nova/get_debug_log") return { entries: [
-      { ts: "09:02:00", cat: "AGENT", msg: '<img src=x onerror="window.__xssFired=true">' },
-    ] };
-    return _realCallWS(m);
-  };
-  window.__xssFired = false;
-  await el._fetchDebugLog();
-  hass.callWS = _realCallWS;
-  const logsXss = el.shadowRoot;
-  checks.push(
-    ["XSS payload in log msg does not create a live <img> element",
-      !logsXss.querySelector("#debug-log-entries img")],
-    ["XSS payload renders as literal escaped text instead",
-      /<img src=x onerror=/.test(logsXss.getElementById("debug-log-entries")?.textContent || "")],
-    ["XSS payload's onerror handler never actually ran", window.__xssFired === false],
-  );
-
-  // ── stored XSS regression #2 (fixed 13 Sept 2026): the log FETCH ERROR path
-  // (a callWS rejection, not a returned entry) also built innerHTML by string-
-  // concatenating the raw error object — a different code path than the one
-  // above, so needs its own coverage. ──
-  hass.callWS = async (m) => {
-    if (m.type === "nova/get_debug_log") {
-      throw new Error('<img src=x onerror="window.__xssFired2=true">');
-    }
-    return _realCallWS(m);
-  };
-  window.__xssFired2 = false;
-  await el._fetchDebugLog();
-  hass.callWS = _realCallWS;
-  const logsErrXss = el.shadowRoot;
-  checks.push(
-    ["fetch-error XSS payload does not create a live <img> element",
-      !logsErrXss.querySelector("#debug-log-entries img")],
-    ["fetch-error XSS payload renders as literal escaped text instead",
-      /<img src=x onerror=/.test(logsErrXss.getElementById("debug-log-entries")?.textContent || "")],
-    ["fetch-error XSS payload's onerror handler never actually ran", window.__xssFired2 === false],
-  );
-
-  // ── pattern-engine suggestion: approve installs the automation (v6.52.0) ──
-  // v7.81.0: suggestions live on their own tab now, not the dashboard.
-  el._currentTab = "suggestions";
-  el._render();
-  const sugCard = el.shadowRoot.querySelector('.sug[data-sug-id="11"]');
-  checks.push(
-    ["suggestion card renders with approve button",
-      !!sugCard && !!sugCard.querySelector(".sug-approve")],
-    ["suggestion shows the why headline",
-      !!sugCard && /A daily routine around 18:00/.test(sugCard.textContent)],
-    ["suggestion shows observed evidence",
-      !!sugCard && /What Nova observed/.test(sugCard.textContent)
-        && /Happened 6 times/.test(sugCard.textContent)],
-    ["suggestion shows a typed pattern chip",
-      !!sugCard && !!sugCard.querySelector(".sug-type")],
-    ["suggestion shows the entity involved",
-      !!sugCard && /light\.porch/.test(sugCard.textContent)],
-  );
-  sugCard?.querySelector(".sug-approve")?.click();
-  await new Promise(r => setTimeout(r, 20));
-  const toastEl = el.shadowRoot.querySelector(".toast, #toast, .nova-toast");
-  checks.push(
-    ["approve sends suggestion_action", _sugCalls.length === 1
-      && _sugCalls[0].id === 11 && _sugCalls[0].action === "approve"],
-    ["approved card is visually retired", sugCard?.style.opacity === "0.35"],
-  );
-
-  // v7.81.0: Suggestions is its own tab, with an empty state.
-  checks.push(
-    ["Suggestions tab button present", /data-tab="suggestions"/.test(el._html())],
-    ["suggestions empty state renders when none",
-      /sug-empty-title/.test(el._renderSuggestions({ suggestions: [] }))],
-    ["numeric_trigger has a typed label",
-      /SENSOR THRESHOLD/.test(el._renderSuggestions({ suggestions: [
-        { id: 99, pattern_type: "numeric_trigger", description: "x",
-          confidence: 0.8, count: 9, entities: [], evidence: [] }] }))],
-  );
-
-  // ── mmWave presence overview on the residence tab (v6.53.0) ──
-  el._currentTab = "residence";
-  el._render();
-  await el._fetchMmwave();
-  const mmList = el.shadowRoot.getElementById("mmwave-list");
-  const mmText = mmList?.textContent || "";
-  const mmSummary = el.shadowRoot.getElementById("mmwave-summary")?.textContent || "";
-  checks.push(
-    ["mmWave panel renders a row per sensor-equipped room",
-      mmList?.querySelectorAll(".mmwave-room").length === 3],
-    ["occupied room is marked live", !!mmList?.querySelector(".mmwave-room.live .mmwave-dot.on")],
-    ["occupied room shows OCCUPIED + now", /Kitchen/.test(mmText) && /OCCUPIED/.test(mmText)],
-    ["clear room shows freshness age", /Office/.test(mmText) && /12m/.test(mmText)],
-    ["outdoor room tagged", /Patio/.test(mmText) && /OUT/.test(mmText)],
-    ["summary reflects detecting/total", /1\/3 OCCUPIED/.test(mmSummary)],
-  );
-
-  // ── mmWave glow feeds the floor plan itself (v6.54.0) ──
-  // Kitchen is detecting in the mock; _house3dLit must mark it 'mmwave', a
-  // distinct state from plain area-occupancy, so the plan glows accordingly.
-  const litMap = el._house3dLit();
-  checks.push(
-    ["detecting room enters floor-plan lit map as 'mmwave'",
-      litMap["kitchen"] === "mmwave"],
-    ["non-detecting sensor room is not force-lit by mmwave",
-      litMap["office"] !== "mmwave"],
-  );
-
-  // ── Document Library (RAG) panel on Settings (v6.55.0) ──
-  el._currentTab = "settings";
-  el._render();
-  await el._fetchDocLibrary();
-  const docBody = el.shadowRoot.getElementById("doclib-body");
-  const docStatus = el.shadowRoot.getElementById("doclib-status");
-  checks.push(
-    ["doc library shows backend + chunk count", /VECTOR/.test(docStatus?.textContent || "") && /42/.test(docStatus?.textContent || "")],
-    ["doc library lists ingested sources",
-      /furnace_manual\.pdf/.test(docBody?.textContent || "") && /dishwasher_receipt\.txt/.test(docBody?.textContent || "")],
-  );
-  // ingest button
-  el.shadowRoot.getElementById("doclib-ingest")?.click();
-  await new Promise(r => setTimeout(r, 20));
-  checks.push(
-    ["doc ingest button present + wired", !!el.shadowRoot.getElementById("doclib-ingest")],
-  );
-  // test-search
-  const dq = el.shadowRoot.getElementById("doclib-q");
-  if (dq) {
-    dq.value = "furnace filter size";
-    dq.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    await new Promise(r => setTimeout(r, 20));
-  }
-  checks.push(
-    ["doc search renders excerpt with source + score",
-      /16x25x1/.test(el.shadowRoot.getElementById("doclib-body")?.textContent || "")
-      && /furnace_manual\.pdf/.test(el.shadowRoot.getElementById("doclib-body")?.textContent || "")],
-  );
-
-  // ── semantic search banner (Ollama embeddings, v6.57.0) ──
-  await el._fetchVectorBackend();
-  const vbState = el.shadowRoot.getElementById("vecbk-state")?.textContent || "";
-  const vbBtn = el.shadowRoot.getElementById("vecbk-toggle");
-  checks.push(
-    ["semantic banner shows KEYWORD when not enabled", /KEYWORD/.test(vbState)],
-    ["enable button offered when Ollama configured",
-      vbBtn && vbBtn.style.display !== "none" && /ENABLE/.test(vbBtn.textContent)],
-  );
-  // enabling flips to SEMANTIC and offers a disable toggle
-  vbBtn?.click();
-  await new Promise(r => setTimeout(r, 20));
-  const vbState2 = el.shadowRoot.getElementById("vecbk-state")?.textContent || "";
-  const vbBtn2 = el.shadowRoot.getElementById("vecbk-toggle");
-  checks.push(
-    ["after enable the banner reflects SEMANTIC (Ollama)", /SEMANTIC/.test(vbState2)],
-    ["disable toggle offered once semantic active",
-      vbBtn2 && /DISABLE/.test(vbBtn2.textContent)],
-  );
-
-  // ── Intrusion / Security panel (own tab, v7.73.0) ──
-  el._currentTab = "intrusion";
-  el._render();
-  await el._fetchIntrusion();
-  const intrBody = el.shadowRoot.getElementById("intr-body")?.innerHTML || "";
-  const intrStatus = el.shadowRoot.getElementById("intr-status")?.textContent || "";
-  checks.push(
-    ["intrusion panel shows ARMED status", /ARMED/.test(intrStatus)],
-    ["intrusion panel renders the last snapshot image", /intrusion_dining_room/.test(intrBody) && /intr-img/.test(intrBody)],
-    ["intrusion call-off button present", !!el.shadowRoot.querySelector(".intr-dismiss")],
-    ["intrusion acknowledge button present", !!el.shadowRoot.querySelector(".intr-ack-btn")],
-    ["intrusion response-timeout selector present", !!el.shadowRoot.querySelector('[data-cfg-key="intrusion_response_timeout"]')],
-  );
-  el.shadowRoot.querySelector(".intr-dismiss")?.click();
-  await new Promise(r => setTimeout(r, 20));
-  checks.push(
-    ["calling off intrusion flips status to CALLED OFF",
-      /CALLED OFF/.test(el.shadowRoot.getElementById("intr-status")?.textContent || "")],
-  );
-
-  // ── Wellbeing Context panel (v6.63.0) ──
-  el._currentTab = "settings";
-  el._render();
-  await el._fetchBio();
-  const bioStatus = el.shadowRoot.getElementById("bio-status")?.textContent || "";
-  checks.push(
-    ["wellbeing panel shows OFF by default", /OFF/.test(bioStatus)],
-    ["wellbeing enable button present", !!el.shadowRoot.getElementById("bio-toggle")],
-  );
-  // enabling reveals discovered wearable entities
-  el.shadowRoot.getElementById("bio-toggle")?.click();
-  await new Promise(r => setTimeout(r, 20));
-  const bioBody2 = el.shadowRoot.getElementById("bio-body")?.textContent || "";
-  const bioStatus2 = el.shadowRoot.getElementById("bio-status")?.textContent || "";
-  checks.push(
-    ["enabling wellbeing turns status ON", /ON/.test(bioStatus2)],
-    ["wellbeing lists discovered biometric readings", /heart rate/i.test(bioBody2) && /62/.test(bioBody2)],
-  );
-
-  // ── Energy Management panel (v6.62.0) ──
-  await el._fetchEnergy();
-  const energyDraw = el.shadowRoot.getElementById("energy-draw")?.textContent || "";
-  const energyBody = el.shadowRoot.getElementById("energy-body")?.textContent || "";
-  checks.push(
-    ["energy panel shows draw + over-peak", /9\.2 kW/.test(energyDraw) && /OVER PEAK/.test(energyDraw)],
-    ["energy panel lists running loads", /Dryer/.test(energyBody) && /Refrigerator/.test(energyBody)],
-    ["energy panel marks protected loads", /protected/.test(energyBody)],
-    ["energy panel shows advice", /over your peak/.test(energyBody)],
-    ["energy agency chips present", el.shadowRoot.querySelectorAll("#energy-agency .mode-chip").length === 3],
-  );
-
-  // ── Solar panel (v7.91.0) — lives on the Command Center (dashboard) tab ──
-  el._currentTab = "dashboard";
-  el._render();
-  await el._fetchSolar();
-  const solarSufficiency = el.shadowRoot.getElementById("solar-sufficiency")?.textContent || "";
-  const solarBody = el.shadowRoot.getElementById("solar-body")?.textContent || "";
-  checks.push(
-    ["solar panel shows self-sufficiency", /100(\.0)?% self-sufficient/.test(solarSufficiency)],
-    ["solar panel shows generation", /3\.20 kW/.test(solarBody)],
-    ["solar panel shows grid export direction", /Exporting/.test(solarBody)],
-    ["solar panel shows battery level", /82%/.test(solarBody)],
-  );
-  el._currentTab = "settings";
-  el._render();
-
-  // ── Room Speakers panel (v7.92.0) ──
-  const roomSpeakerSelects = el.shadowRoot.querySelectorAll(".room-speaker-select");
-  const livingRoomSel = Array.from(roomSpeakerSelects).find(s => s.getAttribute("data-area-id") === "living_room");
-  const generalSel = el.shadowRoot.querySelector(".general-speaker-select");
-  checks.push(
-    ["room speakers card renders one dropdown per area", roomSpeakerSelects.length === 2],
-    ["room speaker dropdown reflects the assigned entity", livingRoomSel?.value === "media_player.living_room_speaker"],
-    ["general speaker dropdown reflects the configured fallback", generalSel?.value === "media_player.kitchen_speaker"],
-  );
-
-  // ── Operational Mode panel (Directive Layer, v6.61.0) ──
-  await el._fetchMode();
-  const modeActive = el.shadowRoot.getElementById("mode-active")?.textContent || "";
-  const modeGrid = el.shadowRoot.getElementById("mode-grid")?.textContent || "";
-  checks.push(
-    ["mode panel shows active mode", /NORMAL/.test(modeActive)],
-    ["mode panel lists selectable modes", /party/.test(modeGrid) && /movie/.test(modeGrid) && /away/.test(modeGrid)],
-  );
-  // switching mode updates the active tag
-  const partyChip = [...el.shadowRoot.querySelectorAll(".mode-chip")].find(b => b.dataset.mode === "party");
-  if (partyChip) { partyChip.click(); await new Promise(r => setTimeout(r, 20)); }
-  checks.push(
-    ["selecting a mode updates active",
-      /PARTY/.test(el.shadowRoot.getElementById("mode-active")?.textContent || "")],
-  );
-
-  // ── System Diagnostics panel (v6.60.0) ──
-  await el._fetchDiagnostics();
-  const diagBody = el.shadowRoot.getElementById("diag-body")?.textContent || "";
-  const diagOverall = el.shadowRoot.getElementById("diag-overall")?.textContent || "";
-  checks.push(
-    ["diagnostics lists all four core services",
-      /LLM/.test(diagBody) && /Embeddings/.test(diagBody) && /TTS/.test(diagBody) && /STT/.test(diagBody)],
-    ["diagnostics shows per-service detail", /reachable/.test(diagBody)],
-    ["diagnostics overall summary rendered", /HEALTHY|WARN|DOWN/i.test(diagOverall)],
-    ["diagnostics run-check button present", !!el.shadowRoot.getElementById("diag-refresh")],
-  );
-
-  // ── every config toggle must be WIRED, not just rendered (v6.76.1) ──
-  // A button with data-cfg-key but no data-cfg-val is inert: the click handler
-  // scopes to [data-cfg-key][data-cfg-val], so it renders fine and does nothing.
-  const inertToggles = [...el.shadowRoot.querySelectorAll("button[data-cfg-key]")]
-    .filter(b => !b.hasAttribute("data-cfg-val"))
-    .map(b => b.getAttribute("data-cfg-key"));
-  checks.push(
-    ["no inert config toggles (every button has data-cfg-val)",
-      inertToggles.length === 0 || `inert: ${inertToggles.join(", ")}`],
-    ["hazard master toggle is wired",
-      !!el.shadowRoot.querySelector('button[data-cfg-key="hazard_monitor_enabled"][data-cfg-val]')],
-    ["hazard feed toggles are wired",
-      !!el.shadowRoot.querySelector('button[data-cfg-key="hazard_quakes_on"][data-cfg-val]') &&
-      !!el.shadowRoot.querySelector('button[data-cfg-key="hazard_weather_on"][data-cfg-val]') &&
-      !!el.shadowRoot.querySelector('button[data-cfg-key="hazard_disasters_on"][data-cfg-val]')],
-  );
-
-  // ── Intrusion Log + training (v6.76.0) ──
-  el._currentTab = "intrusion";
-  el._render();
-  await el._wireIntrusionLog();
-  const ilogBody = el.shadowRoot.getElementById("ilog-body")?.textContent || "";
-  const ilogSide = el.shadowRoot.getElementById("ilog-learn")?.textContent || "";
-  checks.push(
-    ["intrusion log card present", !!el.shadowRoot.getElementById("ilog-body")],
-    ["intrusion log renders events", /kitchen window/.test(ilogBody)],
-    ["intrusion log shows event kinds", !!el.shadowRoot.querySelector(".ilog-confirmed") && !!el.shadowRoot.querySelector(".ilog-unresolved")],
-    ["intrusion log shows snapshot image", !!el.shadowRoot.querySelector(".ilog-snap")],
-    ["intrusion log has real/false label buttons",
-      !!el.shadowRoot.querySelector(".ilog-real") && !!el.shadowRoot.querySelector(".ilog-false")],
-    ["existing label is reflected", !!el.shadowRoot.querySelector(".ilog-false.ilog-on")],
-    ["learned-benign summary surfaces", /learned 1 benign pattern/i.test(ilogBody)],
-    ["label counter in header", /1\/2 LABELLED/.test(ilogSide)],
-  );
-
-  // ── Multi-Hazard Monitor panel (v6.71.0) ──
-  el._currentTab = "settings";
-  el._render();
-  await el._wireHazard();
-  const hazLoc = el.shadowRoot.getElementById("haz-loc")?.textContent || "";
-  const hazOverall = el.shadowRoot.getElementById("hazard-overall")?.textContent || "";
-  checks.push(
-    ["hazard card present with enable toggle", !!el.shadowRoot.querySelector('[data-cfg-key="hazard_monitor_enabled"]')],
-    ["vision model row carries the image-capable hint",
-      (() => { const row = el.shadowRoot.querySelector('.model-row[data-role="vision"]');
-        return !!row && /image-capable/.test(row.textContent) && !!row.querySelector('.model-hint'); })()],
-    ["non-vision model rows have no hint",
-      !el.shadowRoot.querySelector('.model-row[data-role="reasoning"] .model-hint')],
-    ["anticipation & memory card present", !!el.shadowRoot.querySelector('[data-cfg-key="departure_alerts_enabled"]')],
-    ["anticipation exposes memory + continued-conv toggles",
-      !!el.shadowRoot.querySelector('[data-cfg-key="memory_threading_enabled"]') &&
-      !!el.shadowRoot.querySelector('[data-cfg-key="continued_conversation_enabled"]')],
-    ["multi-satellite follow toggle present",
-      !!el.shadowRoot.querySelector('[data-cfg-key="continued_conversation_multi_satellite"][data-cfg-val]')],
-    ["button-learning toggle present",
-      !!el.shadowRoot.querySelector('[data-cfg-key="pattern_learn_buttons"][data-cfg-val]')],
-    ["anticipation numeric config wired", !!el.shadowRoot.querySelector('[data-cfg-key="departure_lead_minutes"]')],
-    ["anticipation toggles carry data-cfg-val", !!el.shadowRoot.querySelector('[data-cfg-key="routine_alerts_enabled"][data-cfg-val]')],
-    ["hazard card has three feed toggles",
-      !!el.shadowRoot.querySelector('[data-cfg-key="hazard_quakes_on"]') &&
-      !!el.shadowRoot.querySelector('[data-cfg-key="hazard_weather_on"]') &&
-      !!el.shadowRoot.querySelector('[data-cfg-key="hazard_disasters_on"]')],
-    ["hazard card has location override inputs",
-      !!el.shadowRoot.querySelector('[data-cfg-key="hazard_lat"]') &&
-      !!el.shadowRoot.querySelector('[data-cfg-key="hazard_lon"]')],
-    ["hazard status resolves the monitoring center", /40\.77/.test(hazLoc)],
-    ["hazard overall reflects enabled state", /ON|OFF/.test(hazOverall)],
-    ["hazard scan-now button present", !!el.shadowRoot.getElementById("haz-scan")],
-  );
-  // exercise a live scan render
-  const hazScanBtn = el.shadowRoot.getElementById("haz-scan");
-  if (hazScanBtn) {
-    hazScanBtn.click();
-    await new Promise(r => setTimeout(r, 30));
-    const hazBody = el.shadowRoot.getElementById("haz-body")?.textContent || "";
-    checks.push(["hazard scan renders quake + weather + disaster",
-      /M3\.4/.test(hazBody) && /Tornado/.test(hazBody) && /Wildfire/.test(hazBody)]);
-  }
-
-  // v7.84.0: Settings sub-navigation groups cards into sections.
-  const _card = (title) => [...el.shadowRoot.querySelectorAll(".settings-grid > .panel")]
-    .find(p => (p.querySelector(".head span")?.textContent || "").trim() === title);
-  const _subnav = el.shadowRoot.querySelectorAll(".settings-subnav-btn");
-  el._settingsSection = "safety";
-  el._applySettingsSections();
-  const _haz = _card("Hazard Monitor");
-  const _gen = _card("General");
-  checks.push(
-    ["settings sub-nav renders section buttons", _subnav.length >= 5],
-    ["sub-nav shows the active section's cards", !!_haz && _haz.style.display !== "none"],
-    ["sub-nav hides other sections' cards", !!_gen && _gen.style.display === "none"],
-  );
-  // v7.84.2 regression guard: sub-nav must survive UI localization. _localizeDOM
-  // rewrites heading text AFTER render, so sections are stamped (data-section)
-  // from the English heading at render time. Simulate a translated heading and
-  // confirm the card still resolves to its section instead of stranding in
-  // "general" (which left every non-General sub-tab empty for non-English users).
-  const _hazSpan = _haz && _haz.querySelector(".head span");
-  if (_hazSpan) _hazSpan.textContent = "Surveillance des dangers"; // FR; not in MAP
-  el._settingsSection = "safety";
-  el._applySettingsSections();
-  checks.push(
-    ["sub-nav section survives a translated heading (localized UI)",
-      !!_haz && _haz.dataset.section === "safety" && _haz.style.display !== "none"],
-  );
-  el._settingsSection = "general";
-  el._applySettingsSections();
-
-  // v7.92.1 regression guard: every Settings card must be in the heading→
-  // section MAP, or it silently strands in "general" instead of its logical
-  // section (exactly what happened to "Room Speakers" when it first shipped —
-  // caught only by a live user report, not by this suite, since an unmapped
-  // card still renders fine, just in the wrong tab).
-  const _roomSpk = _card("Room Speakers");
-  el._settingsSection = "voice";
-  el._applySettingsSections();
-  checks.push(
-    ["Room Speakers card is mapped to its section, not stranded in General",
-      !!_roomSpk && _roomSpk.dataset.section === "voice" && _roomSpk.style.display !== "none"],
-  );
-  el._settingsSection = "general";
-  el._applySettingsSections();
-
-  // Panel look (v7.93.0) is deliberately NOT in Classic's own Settings —
-  // it lives in the HA integration's Configure dialog (config_flow.py's
-  // Core step) instead, per Abi's feedback that Classic's General section
-  // was already busy. Classic's Settings should have no such control.
-  checks.push(["panel look control is not in Classic's Settings (moved to Configure)",
-    !el.shadowRoot.getElementById("ui-style-select")]);
-
-  // v7.85.1: option builders must tolerate a stale/missing selected entity (a
-  // removed entity still referenced in config). This threw and blanked the whole
-  // panel — _travelSensorOptions('sensor.gone') reading undefined.attributes.
-  let _builderSafe = true;
-  try {
-    el._travelSensorOptions("sensor.does_not_exist_xyz");
-    el._trackerOptions("person.does_not_exist_xyz");
-    el._doorEntityOptions("binary_sensor.does_not_exist_xyz");
-  } catch (_e) { _builderSafe = false; }
-  checks.push(["entity option builders tolerate a stale selected entity", _builderSafe]);
-
-  // v7.85.0: Excluded entities card — three chip pickers + maps to Learning.
-  const _exclCard = _card("Excluded Entities");
-  checks.push(
-    ["excluded-entities card renders three pickers",
-      !!el.shadowRoot.querySelector("#excl-ent-add")
-      && !!el.shadowRoot.querySelector("#excl-dom-add")
-      && !!el.shadowRoot.querySelector("#excl-lab-add")],
-    ["excluded-entities card maps to the Learning section",
-      !!_exclCard && _exclCard.dataset.section === "learning"],
-  );
-
-  // ── New Command Center look (v7.93.0) — genuinely separate component ──
-  const elNew = window.document.createElement("nova-panel-new");
+  const checks = [];
+  // ── Nova Command Center ──
+  const elNew = window.document.createElement("nova-panel");
   window.document.body.appendChild(elNew);
   elNew.hass = hass;
   await new Promise(r => setTimeout(r, 60));
@@ -1909,11 +1069,10 @@ setTimeout(async () => {
   sRoot = elNew.shadowRoot;
 
   // Routine Learning: real card with the doors/presence/buttons toggles and
-  // the add-entity control. NOTE: Classic's own "routine-learning card" test
-  // (above) sets `cfg.pattern_include_entities` and then `delete`s it again
-  // as cleanup on the SAME shared PANEL.config object this section reuses —
-  // so by here the key is gone and the chip list starts genuinely empty;
-  // assert against that real state rather than the fixture's original value.
+  // the add-entity control. Force a clean, empty starting chip list rather
+  // than asserting against the fixture's original seed value, so this
+  // section's outcome doesn't depend on what ran before it.
+  delete PANEL.config.pattern_include_entities;
   checks.push(
     ["settings tab: Routine Learning card is real with the add-entity control",
       (() => {
@@ -2033,13 +1192,16 @@ setTimeout(async () => {
   checks.push(["settings tab: Doorbell Training scan button calls nova.train_doorbell_backlog",
     _serviceCalls.some(c => c.domain === "nova" && c.service === "train_doorbell_backlog" && c.data?.limit === 40)]);
 
-  // Wellbeing Context: switch to Home & Extras group, fetched once (like
-  // Diagnostics/Hazard/Energy). NOTE: Classic's own "wellbeing enable
-  // button" test earlier already clicked bio-toggle and left the shared
-  // _bioEnabled mock flag ON (no cleanup) — so this section starts from
-  // ON/2-sensors, and the toggle click below turns it back OFF.
+  // Wellbeing Context: switch to Home & Extras group. The status fetch
+  // itself is guarded by a once-per-lifetime flag fired the first time
+  // settings wired at all (already consumed earlier in this run), so
+  // force a fresh fetch directly with the ON/2-sensors starting state
+  // explicit rather than depending on what ran before; the toggle click
+  // below turns it back OFF.
+  _bioEnabled = true;
   const homeNavBtn = Array.from(sRoot.querySelectorAll(".settings-nav-btn")).find(b => b.textContent === "Home & Extras");
   homeNavBtn.click();
+  await elNew._fetchBio();
   await new Promise(r => setTimeout(r, 30));
   sRoot = elNew.shadowRoot;
   checks.push(
@@ -2213,6 +1375,10 @@ setTimeout(async () => {
   hass.callWS = originalCallWS;
 
   // ── New look: Memory tab (ported from Classic's own Memory tab) ──
+  // Force an empty pending-facts queue explicitly, rather than asserting
+  // against the fixture's original seed fact, so this section's outcome
+  // doesn't depend on what ran before it.
+  _pendingFacts = [];
   const memoryTabBtn = Array.from(newRoot.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === "memory");
   memoryTabBtn.click();
   await new Promise(r => setTimeout(r, 20));
@@ -2228,11 +1394,7 @@ setTimeout(async () => {
       /Username/.test(sRoot.getElementById("newProutineList")?.textContent || "")
       && /office light turns on/.test(sRoot.getElementById("newProutineList")?.textContent || "")
       && /82%/.test(sRoot.getElementById("newProutineList")?.textContent || "")],
-    // Classic's own Memory-tab test (earlier in this file) already confirmed
-    // the one seed pending fact ("bedtime"), consuming the shared
-    // _pendingFacts fixture — same class of shared-fixture gotcha as
-    // pattern_include_entities/_bioEnabled above. Assert the real
-    // now-empty state rather than the fixture's original value.
+    // _pendingFacts was forced empty above, so the panel should be hidden.
     ["memory tab hides the pending-confirmation panel once nothing is waiting",
       sRoot.getElementById("newPendingPanel")?.hidden === true],
   );
@@ -2256,8 +1418,9 @@ setTimeout(async () => {
   checks.push(["memory tab: forgetting a fact removes it via nova/forget_knowledge",
     !/trash day/.test(sRoot.getElementById("newMemList")?.textContent || "")]);
 
-  // Pending Confirmation: inject a fresh pending fact (the shared fixture's
-  // seed one is already consumed) to exercise confirm/reject/edit for real.
+  // Pending Confirmation: inject a fresh pending fact directly (independent
+  // of the _pendingFacts fixture, which was forced empty above) to
+  // exercise confirm/reject/edit for real.
   const memoryCallWS = hass.callWS;
   hass.callWS = async (m) => (m.type === "nova/get_knowledge"
     ? { facts: _knownFacts, pending: [{ id: 99, key: "quiet hours", value: "10pm-7am", subject: "household" }], stats: {} }
@@ -2282,13 +1445,10 @@ setTimeout(async () => {
 
   // ── New look: Intrusion tab (ported from Classic's own Intrusion tab) ──
   // Safety-relevant (call-off/acknowledge affect real escalation), so this
-  // is a straight port of Classic's exact websocket calls, not new
-  // behavior. NOTE: Classic's own "intrusion call-off" test (earlier in
-  // this file) already dismissed the shared _intrCalledOff/_intrAck mock
-  // flags and left them true — same class of shared-fixture gotcha as
-  // pattern_include_entities/_bioEnabled/_pendingFacts above — so a fresh
-  // override is used here for a clean, deterministic ARMED starting state
-  // rather than asserting against whatever Classic's test left behind.
+  // is a straight port of Classic's original exact websocket calls, not
+  // new behavior. A fresh callWS override is used here for a clean,
+  // deterministic ARMED starting state rather than depending on any
+  // earlier section's mock state.
   const intrusionTabBtn = Array.from(newRoot.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === "intrusion");
   intrusionTabBtn.click();
   await new Promise(r => setTimeout(r, 20));
@@ -2389,50 +1549,9 @@ setTimeout(async () => {
     _cafCalls >= 1]);
   global.cancelAnimationFrame = _realCaf;
 
-  const newLookSel = newRoot.getElementById("lookSelect");
-  if (newLookSel) {
-    newLookSel.value = "classic";
-    newLookSel.dispatchEvent(new Event("change"));
-    await new Promise(r => setTimeout(r, 20));
-    checks.push(["new look's own switcher saves ui_style back to classic",
-      _updateConfigCalls.some(c => c.key === "ui_style" && c.value === "classic")]);
-  }
   if (elNew._fetchInterval) clearInterval(elNew._fetchInterval);
   if (elNew._sparklineInterval) clearInterval(elNew._sparklineInterval);
   if (elNew._animHandle) cancelAnimationFrame(elNew._animHandle);
-
-  // ── Look shell (v7.93.0) — fail-closed default path ──
-  // Only the "classic" (default/fail-closed) path is exercised here — the
-  // "new" path's dynamic import() of a real URL isn't something jsdom can
-  // resolve without a live server, so that direction is a live-instance
-  // check (see the plan's verification section), not a unit-level one.
-  let _shellStyle = "classic";
-  const shellHass = Object.assign({}, hass, {
-    callWS: async (m) => (m.type === "nova/get_panel_data" ? { config: { ui_style: _shellStyle } } : {}),
-  });
-  const shellEl = window.document.createElement("nova-panel");
-  window.document.body.appendChild(shellEl);
-  shellEl.hass = shellHass;
-  await new Promise(r => setTimeout(r, 20));
-  checks.push(["look shell mounts Classic by default",
-    shellEl.querySelector("nova-panel-classic") !== null]);
-
-  // v7.93.3 regression guard: a real live bug — the panel-look preference
-  // can change from three places (Classic's Configure dialog, either
-  // look's own switcher), and Configure isn't the Nova panel's own page,
-  // so saving it there had no way to reload an already-open Nova tab. A
-  // real user hit this exactly ("switched back and it wouldn't change").
-  // The shell now notices for itself on its own poll — simulate the
-  // preference changing elsewhere, then invoke that poll's check directly
-  // (real interval is 20s; not waiting for it here).
-  // Not intercepting window.location.reload() itself — jsdom's Location
-  // doesn't reliably allow stubbing it — _checkForStyleChange reports its
-  // own decision (and still calls reload as a real side effect, safely a
-  // no-op stub under jsdom, same as elsewhere in this suite).
-  _shellStyle = "new";
-  const _shouldReload = await shellEl._checkForStyleChange();
-  checks.push(["look shell detects ui_style changed elsewhere while open",
-    _shouldReload === true]);
 
   // v7.93.2 regression guard: a real live bug — the new look's custom
   // properties were declared under `:root{}`, which matches NOTHING inside
@@ -2441,9 +1560,9 @@ setTimeout(async () => {
   // every background/border/font with no visible error — jsdom doesn't do
   // real CSS layout, so no structural check here would ever have caught
   // it; only reading the source text can.
-  const newLookSrc = fs.readFileSync(NEW_LOOK_COMPONENT, "utf8");
+  const panelSrc = fs.readFileSync(COMPONENT, "utf8");
   checks.push(["new look declares its CSS tokens on :host, not :root (shadow DOM)",
-    /:host\s*\{/.test(newLookSrc) && !/(^|[^-\w]):root\s*\{/.test(newLookSrc)]);
+    /:host\s*\{/.test(panelSrc) && !/(^|[^-\w]):root\s*\{/.test(panelSrc)]);
 
   // Real bug caught live (13 Sept 2026): giving .settings-card its own
   // `display` (needed for the CSS multi-column masonry fix) made author
@@ -2456,11 +1575,10 @@ setTimeout(async () => {
   // while the real rendering was broken — this checks the actual CSS
   // text for the explicit override instead.
   checks.push(["new look's .settings-card[hidden] explicitly forces display:none (overrides its own display rule)",
-    /\.settings-card\[hidden\]\s*\{\s*display\s*:\s*none\s*\}/.test(newLookSrc)]);
+    /\.settings-card\[hidden\]\s*\{\s*display\s*:\s*none\s*\}/.test(panelSrc)]);
 
   let ok = true;
   for (const [n, p] of checks) { console.log((p ? "  PASS  " : "  FAIL  ") + n); if (!p) ok = false; }
-  if (typeof el._stopIntervals === "function") el._stopIntervals();
   console.log(ok ? "\nSMOKE TEST CLEAN" : "\nSMOKE TEST FAILED");
   process.exit(ok ? 0 : 1);
 }, 350);

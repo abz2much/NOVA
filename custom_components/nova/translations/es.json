@@ -43,8 +43,7 @@
           "directive_preset": "Preajuste de directiva",
           "directive": "Directiva personalizada (opcional, anula el preajuste)",
           "model": "Modelo de conversación",
-          "use_hass_api": "Activar el control del hogar (luces, clima, cerraduras, etc.)",
-          "ui_style": "Aspecto del panel (clásico o nueva vista previa)"
+          "use_hass_api": "Activar el control del hogar (luces, clima, cerraduras, etc.)"
         }
       },
       "routing": {

@@ -43,8 +43,7 @@
           "directive_preset": "Direktiven-Vorlage",
           "directive": "Eigene Direktive (optional, überschreibt Vorlage)",
           "model": "Konversationsmodell",
-          "use_hass_api": "Haussteuerung aktivieren (Licht, Klima, Schlösser usw.)",
-          "ui_style": "Panel-Look (klassisch oder neue Vorschau)"
+          "use_hass_api": "Haussteuerung aktivieren (Licht, Klima, Schlösser usw.)"
         }
       },
       "routing": {

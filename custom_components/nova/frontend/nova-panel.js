@@ -1,41 +1,9 @@
-/**
- * Nova Command Center Panel
- * v7.101.29 (session 2 · audio routing fix, areas with icons+codes)
- *
- * Registered as a custom element via panel_custom. Home Assistant sets:
- *   - this.hass   — the hass object (live state, services, connection)
- *   - this.panel  — panel config from registration
- *   - this.narrow — true when viewport is narrow (mobile)
- *   - this.route  — route object
- *
- * This session: visual port of the HTML mockup. Live clock, mock data
- * elsewhere. Real HA data wiring comes in session 2.
- */
-
 /* ===================================================================
  * NOVA3D — rotatable axonometric 3D residence model (SVG).
  * Self-contained, no build/CDN. The DEFAULT HOUSE spec (dimensions,
  * room layout, garage doors, dormers) lives at the top of this IIFE;
  * edit it for a different home. Occupancy is data-driven from HA areas.
  * =================================================================== */
-/* Nova Residence — 3D house core (v3 rebuild)
- * Real dimensions from the architect's ApexSketch; labels/layout from the Nova editor.
- * Pure-geometry axonometric projection rendered to SVG so it is (a) rotatable in the
- * browser and (b) rasterizable here via cairosvg for verification. Same math both places.
- * Works under Node (module.exports) and in the browser (window.NOVA3D).
- */
-/* Nova Residence — 3D house core (v3 rebuild)
- * Real dimensions from the architect's ApexSketch; labels/layout from the Nova editor.
- * Pure-geometry axonometric projection rendered to SVG so it is (a) rotatable in the
- * browser and (b) rasterizable here via cairosvg for verification. Same math both places.
- * Works under Node (module.exports) and in the browser (window.NOVA3D).
- */
-/* Nova Residence — 3D house core (v3 rebuild)
- * Real dimensions from the architect's ApexSketch; labels/layout from the Nova editor.
- * Pure-geometry axonometric projection rendered to SVG so it is (a) rotatable in the
- * browser and (b) rasterizable here via cairosvg for verification. Same math both places.
- * Works under Node (module.exports) and in the browser (window.NOVA3D).
- */
 /* Nova Residence — 3D house core (v3 rebuild)
  * Real dimensions from the architect's ApexSketch; labels/layout from the Nova editor.
  * Pure-geometry axonometric projection rendered to SVG so it is (a) rotatable in the
@@ -1097,162 +1065,114 @@ const NOVA3D = (function () {
   return { build: build, renderSVG: renderSVG, fixedBox: fixedBox, project: project, dims: { GW: GW, HW: HW, D: D, WALL: WALL, RIDGE: RIDGE } };
 })();
 
-// Actually fulfil the doc comment above: nova-panel.js is a classic script,
-// so NOVA3D's `const` binding lives in this script's own scope and isn't
-// reachable from nova-panel-new.js, which loads as an ES module via dynamic
-// import() — modules don't see a classic script's lexical bindings, only
-// genuine globals. This makes it one, so Command Center's Residence tab can
-// reuse the same engine instead of re-deriving 1000+ lines of 3D geometry.
+// window.NOVA3D lets the code below (this panel's own Residence 3D tab)
+// reuse this engine as a plain global instead of re-deriving 1000+ lines
+// of 3D geometry.
 if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
+/*
+ * Nova Command Center Panel.
+ * v7.101.30
+ *
+ * Started life as "Command Center" — a genuinely separate implementation
+ * from the original Classic UI, built with full creative freedom over
+ * ongoing maintenance cost. Classic reached feature parity and was
+ * deleted in v7.101.30; this is now Nova's one and only dashboard,
+ * registered directly as "nova-panel" via panel_custom (no more style
+ * switcher, no more dynamic import — this file loads on its own).
+ *
+ * Layout: Command Center + Settings, reorganized around what you're
+ * trying to do rather than which subsystem it touches (General, Voice &
+ * Speakers, Awareness & Safety, Learning & Memory, Cameras, Home &
+ * Extras), plus a search box across every setting. All 27 Settings cards
+ * are real. Residence, Intrusion, Suggestions, Logs, and Memory are all
+ * full nav tabs here.
+ *
+ * Design: an animated "stellar core" (Nova = a star's sudden brightening)
+ * replaces a camera feed as the dashboard's visual anchor — it works
+ * identically whether someone has zero cameras or twelve, and doesn't
+ * repeat the cyan sci-fi-HUD look this project's name already evokes.
+ * Camera Watch becomes an optional, collapsed card instead, since not
+ * every camera integration (e.g. Eufy) streams live into Home Assistant.
+ * Approved from a static mockup (nova-command-center-mockup.html) before
+ * this real, live-data build.
+ */
 class NovaPanel extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: "open" });
     this._hass = null;
     this._narrow = false;
-    this._roomRotationIdx = 0;
-    this._clockInterval = null;
-    this._rotationInterval = null;
-    this._fetchInterval = null;
+    this._liveData = null;
+    this._activityData = null;
     this._renderedOnce = false;
-    this._liveData = null;       // populated by _fetchLiveData()
-    this._liveDataErr = null;    // last fetch error (for status display)
-    this._activityData = null;   // populated by _fetchActivityLog()
-    this._currentTab = "dashboard"; // "dashboard" or "settings"
-    this._settingsSection = "general"; // active sub-section within Settings
-    this._knowledge = { facts: [], pending: [], stats: {} }; // curated memory tab state
-    this._knowledgeLoaded = false;
-    this._logFilter = "all";       // log category filter
-    this._logSearch = "";          // log text search (v7.101.28)
-    this._lastLogSearch = null;
-    this._activitySearch = "";     // dashboard activity feed search (v6.43.x)
-    this._currentFloor = "all";     // floor plan tab — 3D default shows all
-    this._editorFloor = "1f";      // floor plan editor tab
-    this._dragState = null;        // floor plan drag state
-    this._editingPlan = null;      // working copy for editor
-    this._editingElements = null; // working copy of placed windows/doors (v7.101.28)
-    this._rot3dY = 22;             // 3D house rotation Y (near-front hero, like the approved view)
-    this._house3dTheta = 35;       // NOVA3D azimuth (deg) — approved hero angle
-    this._editorTheta = 22;        // editor 3D-preview azimuth (deg), rotatable + presets
-    this._house3dBox = null;       // cached fixed viewBox for the current floor+spec
-    this._house3dBoxKey = null;    // cache key (floor + spec signature)
-    this._rot3dX = -18;            // 3D house rotation X (gentle, so the gable reads as a mass)
-    this._zoom3d = 1;              // 3D house zoom level
-    this._zoomAuto = true;         // auto-fit house to column until user zooms
-    this._pendingRender = false;   // owed full render deferred during editing
-    this._lastLogSig = null;       // signature of currently-rendered log
-    this._lastLogFilter = null;    // filter the log was last rendered under
-    // Camera Watch — live feed, selectable, event auto-focus
-    this._cams = [];
-    this._activeCam = null;        // entity currently shown
-    this._manualCam = null;        // last user-picked entity (revert target)
-    this._camFocus = null;         // {entity,label,conf} when an event grabs focus
-    this._camFocusTimer = null;
-    this._camStillTimer = null;
-    this._camSubs = [];
-    this._lastCamKey = "";         // entity|token of the attached stream
-    this._camMode = "stream";      // stream → still → nova (v7.101.28 fallback chain)
-    this._camModeByEntity = {};    // remembered resolved mode, skips re-escalation
-    this._camWatchdog = null;      // no-frame watchdog: hangs don't fire error events
-    this._camWsTimer = null;       // WS-snapshot poll for cams both proxies fail on
-    // Real-time entity subscriptions (v7.101.28) — a native state_changed feed
-    // that triggers a fast, throttled refresh instead of waiting on the poll.
-    this._stateSubs = [];
-    this._lastRealtimeFetch = 0;
-    this._realtimeTrailing = null;
-    // Sparklines (v7.101.28) — slow-polled separately from live data since
-    // recorder history queries are heavier than the rest of the payload.
-    this._sparklines = {};
-    this._sparklineInterval = null;
-    // Area drill-down (v7.101.28) — id of the area currently expanded, or null.
-    this._expandedArea = null;
+    this._fetchInterval = null;
+    this._lastActivitySig = null;
+    this._flareUntil = 0;
+    this._animHandle = null;
+    this._particles = [];
+    this._current = { speed: 0.20, count: 70, radiusMul: 1, glow: 0.55, hot: 0.35, flare: 0.05 };
+    this._camOpen = false;
+    this._currentTab = "dashboard"; // "dashboard" | "settings" | "logs" | "memory" | "intrusion" | "suggestions"
+    this._logFilter = "all";
+    this._logSearch = "";
+    this._settingsSection = "general";
+    this._settingsSearch = "";
   }
 
-  // ─── HA property setters ─────────────────────────────────────────────────
-
+  // ─── HA property contract — same shape as Classic's, see nova-panel.js ──
   set hass(hass) {
     const first = this._hass === null;
     this._hass = hass;
     if (first) {
-      this._loadUiStrings();
       this._render();
       this._startIntervals();
-    } else {
-      this._updateLiveValues();
     }
   }
   get hass() { return this._hass; }
-
   set panel(panel) { this._config = panel?.config || {}; }
-  set narrow(narrow) {
-    if (narrow !== this._narrow) {
-      this._narrow = narrow;
-      if (this._renderedOnce) this._render();
-    }
-  }
+  set narrow(narrow) { this._narrow = narrow; }
   set route(route) { this._route = route; }
 
   connectedCallback() {
-    // v6 aesthetic: load the panel's typefaces at document level (shadow DOM
-    // can't reliably pull remote @font-face). Graceful: if offline, the
-    // font-family fallbacks render and nothing breaks.
-    if (!document.getElementById("nova-fonts-v6")) {
+    if (!window.__novaBannerLogged) {
+      window.__novaBannerLogged = true;
+      console.log("%c Nova Panel %c v7.101.30 ",
+        "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
+        "color: #e2542f; background: #050403; padding: 2px 6px;");
+    }
+    if (!document.getElementById("nova-new-fonts")) {
       const l = document.createElement("link");
-      l.id = "nova-fonts-v6";
+      l.id = "nova-new-fonts";
       l.rel = "stylesheet";
-      l.href = "https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;700&family=JetBrains+Mono:wght@300;400;500&display=swap";
+      l.href = "https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Manrope:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap";
       document.head.appendChild(l);
     }
-    if (this._hass) {
+    if (this._hass && !this._renderedOnce) {
       this._render();
       this._startIntervals();
     }
   }
 
   disconnectedCallback() {
-    this._stopIntervals();
+    if (this._fetchInterval) clearInterval(this._fetchInterval);
+    if (this._sparklineInterval) clearInterval(this._sparklineInterval);
+    if (this._animHandle) cancelAnimationFrame(this._animHandle);
+    if (this._resizeListener) window.removeEventListener("resize", this._resizeListener);
   }
-
-  // ─── Lifecycle ───────────────────────────────────────────────────────────
 
   _startIntervals() {
-    if (!this._clockInterval) {
-      this._clockInterval = setInterval(() => this._updateClock(), 1000);
-    }
-    // Demo rotation kept as fallback — stops once live data arrives
-    if (!this._rotationInterval) {
-      this._rotationInterval = setInterval(() => this._rotateDominantRoom(), 6000);
-    }
-    // Live data polling — a slower safety net now that state_changed
-    // subscriptions (below) cover the common case within ~2s. Kept as a
-    // backstop in case an event is dropped or the subscription fails.
+    this._fetchLiveData();
     if (!this._fetchInterval) {
-      this._fetchLiveData();  // immediate first call
       this._fetchInterval = setInterval(() => this._fetchLiveData(), 20000);
     }
-    this._subscribeCameraEvents();
-    this._subscribeStateEvents();
+    this._fetchAreaSparklines();
     if (!this._sparklineInterval) {
-      this._fetchAreaSparklines();  // immediate first call
+      // Trend history changes slowly — matches Classic's own 5-minute cadence
+      // (nova-panel.js's _fetchAreaSparklines), no need to poll as often as
+      // the main dashboard data.
       this._sparklineInterval = setInterval(() => this._fetchAreaSparklines(), 300000);
     }
-  }
-
-  _stopIntervals() {
-    if (this._clockInterval)    { clearInterval(this._clockInterval);    this._clockInterval = null; }
-    if (this._rotationInterval) { clearInterval(this._rotationInterval); this._rotationInterval = null; }
-    if (this._fetchInterval)    { clearInterval(this._fetchInterval);    this._fetchInterval = null; }
-    if (this._camFocusTimer)    { clearTimeout(this._camFocusTimer);     this._camFocusTimer = null; }
-    if (this._camStillTimer)    { clearInterval(this._camStillTimer);    this._camStillTimer = null; }
-    if (this._camWsTimer)       { clearInterval(this._camWsTimer);       this._camWsTimer = null; }
-    if (this._camWatchdog)      { clearTimeout(this._camWatchdog);       this._camWatchdog = null; }
-    if (this._realtimeTrailing) { clearTimeout(this._realtimeTrailing);  this._realtimeTrailing = null; }
-    if (this._sparklineInterval) { clearInterval(this._sparklineInterval); this._sparklineInterval = null; }
-    this._camSubs.forEach(u => { try { u && u(); } catch (_) {} });
-    this._camSubs = [];
-    this._stateSubs.forEach(u => { try { u && u(); } catch (_) {} });
-    this._stateSubs = [];
   }
 
   async _fetchAreaSparklines() {
@@ -1261,106 +1181,243 @@ class NovaPanel extends HTMLElement {
       const res = await this._hass.callWS({ type: "nova/get_area_sparklines" });
       this._sparklines = res?.sparklines || {};
     } catch (err) {
-      // Non-critical — tiles just render without a trend line this cycle.
       console.warn("Nova: sparkline fetch failed", err);
       return;
     }
-    // Only the dashboard tab shows sparklines; avoid disrupting other tabs.
-    if (this._currentTab === "dashboard" && this._renderedOnce) this._render();
+    this._renderData();
   }
+
+  // ─── Data ────────────────────────────────────────────────────────────────
 
   async _fetchLiveData() {
     if (!this._hass) return;
     try {
       const result = await this._hass.callWS({ type: "nova/get_panel_data" });
-      const prev = this._liveData;
       this._liveData = result;
-      this._liveDataErr = null;
-      if (this._rotationInterval) {
-        clearInterval(this._rotationInterval);
-        this._rotationInterval = null;
-      }
-      // Also fetch activity log from DB
       try {
-        const logResult = await this._hass.callWS({
-          type: "nova/get_activity_log", hours: 2, limit: 30
-        });
-        this._activityData = logResult?.entries || [];
-      } catch (_) { /* no entries yet — fine */ }
-
-      // Auto-refresh logs tab if active
-      if (this._currentTab === 'logs') {
-        this._fetchDebugLog();
-      }
-
-      // Fetch cognitive core stats for dashboard
-      try {
-        const cogEl = this.shadowRoot?.querySelector("#cognitive-stats .loading-cog");
-        if (cogEl) {
-          // We embed the status as a WebSocket call — the agent's
-          // cognitive_status tool is for conversation, this is direct
-          const cogData = await this._hass.callWS({ type: "nova/get_cognitive_status" });
-          if (cogData) {
-            const days = cogData.learning?.days_of_data || 0;
-            const changes = cogData.learning?.state_changes || 0;
-            const cmds = cogData.learning?.commands || 0;
-            const pending = cogData.learning?.suggestions || 0;
-            const ignores = cogData.ignore_rules || 0;
-            const la = cogData.last_analysis || {};
-            let laLine;
-            if (la.ts) {
-              const agoMin = Math.max(0, Math.round((Date.now() / 1000 - la.ts) / 60));
-              const agoStr = agoMin < 60 ? `${agoMin}m ago`
-                : agoMin < 1440 ? `${Math.round(agoMin / 60)}h ago`
-                : `${Math.round(agoMin / 1440)}d ago`;
-              laLine = `Last analysis: <span>${agoStr}</span> · ` +
-                `${la.patterns_found ?? 0} found, ${la.new_suggestions ?? 0} stored`;
-            } else {
-              laLine = `Last analysis: <span>not yet this session</span>`;
-            }
-            cogEl.innerHTML =
-              `Data: <span>${days}d</span> · ` +
-              `States: <span>${changes}</span> · ` +
-              `Cmds: <span>${cmds}</span><br>` +
-              `Suggestions: <span>${pending}</span> · ` +
-              `Ignores: <span>${ignores}</span><br>` +
-              laLine;
-          }
-        }
-      } catch (_) {}
-
-      // A full DOM rebuild is only warranted when the STRUCTURE changes —
-      // i.e. the number of area tiles differs (an HA area was added/removed).
-      // The dominant area changing is handled entirely in place by
-      // _patchLiveDom (it updates #dom-name, the stats, the 3D house, etc.),
-      // so it must NOT trigger a teardown. Previously a dominant-area change
-      // rebuilt the whole shadow DOM — and since the dominant area flips with
-      // every motion event, that rebuilt the panel every few seconds, wiping
-      // in-progress settings edits and yanking the log scroll. Never rebuild
-      // while the user is on the settings or logs tab; defer until they return.
-      const structuralChange = !prev ||
-        prev.areas?.length !== result.areas?.length;
-      const interacting = this._currentTab === "settings" || this._currentTab === "logs"
-        || this._currentTab === "memory" || this._currentTab === "suggestions";
-      if (structuralChange && !interacting) {
-        this._render();
-      } else {
-        if (structuralChange) this._pendingRender = true; // owed once they leave
-        this._patchLiveDom(result);
-      }
+        const log = await this._hass.callWS({ type: "nova/get_activity_log", hours: 24, limit: 60 });
+        this._activityData = log?.entries || [];
+      } catch (_) { this._activityData = []; }
     } catch (err) {
-      this._liveDataErr = err?.message || String(err);
-      console.warn("Nova: live data fetch failed", err);
+      console.warn("Nova: panel data fetch failed", err);
     }
+    try {
+      this._solar = await this._hass.callWS({ type: "nova/solar", action: "status" });
+    } catch (_) { this._solar = null; }
+    try {
+      this._mode = await this._hass.callWS({ type: "nova/mode", action: "status" });
+    } catch (_) { this._mode = null; }
+    if (this._currentTab === "logs") this._fetchDebugLog();
+    this._detectFlare();
+    this._renderData();
   }
 
-  async _fetchAndRender() {
-    // Used by toggle/dropdown handlers: fetch fresh data then force
-    // a full re-render so button states update immediately. Unlike
-    // _fetchLiveData which skips re-render on the settings tab (to
-    // keep dropdowns stable during auto-refresh), this always renders.
-    await this._fetchLiveData();
-    this._render();
+  _detectFlare() {
+    const top = (this._activityData || [])[0];
+    const sig = top ? `${top.ts}|${top.tag}|${top.msg}` : null;
+    if (sig && this._lastActivitySig && sig !== this._lastActivitySig) {
+      this._flareUntil = Date.now() + 4000; // a real event just landed — brief flare
+    }
+    this._lastActivitySig = sig;
+  }
+
+  _coreState() {
+    const sleepState = String(this._liveData?.status?.sleep?.state || "").toUpperCase();
+    if (sleepState === "ASLEEP") return "asleep";
+    if (Date.now() < this._flareUntil) return "reasoning";
+    return "idle";
+  }
+
+  _data() {
+    const live = this._liveData;
+    if (!live) return null;
+    return {
+      status: live.status || {},
+      areas: live.areas || [],
+      doors: live.doors || {},
+      cameras: live.config?.cameras || [],
+      areasMonitored: live.meta?.areas_monitored ?? "—",
+      occupied: (live.areas || []).filter(a => a.active).length,
+      config: live.config || {},
+      doorbellTraining: live.doorbell_training || {},
+      suggestions: live.suggestions || [],
+    };
+  }
+
+  // ─── Render (structure once, patch data after) ──────────────────────────
+
+  _render() {
+    // Tearing down and rebuilding the DOM (now happening on every tab
+    // switch, not just once) orphans the previous canvas — its
+    // requestAnimationFrame loop and resize listener would otherwise keep
+    // running forever on a detached, invisible canvas, compounding every
+    // time someone switches tabs. Stop it before _initCore() starts a
+    // fresh one.
+    if (this._animHandle) { cancelAnimationFrame(this._animHandle); this._animHandle = null; }
+    if (this._resizeListener) { window.removeEventListener("resize", this._resizeListener); this._resizeListener = null; }
+    this._ctx = null;
+    this._canvas = null;
+
+    const root = this.shadowRoot;
+    root.innerHTML = this._html();
+    this._renderedOnce = true;
+    this._wire();
+    this._initCore();
+    this._renderData();
+  }
+
+  _html() {
+    const tab = this._currentTab;
+    return `
+      <style>${this._css()}</style>
+      <div class="wrap">
+        <div class="topbar">
+          <div class="brand">
+            <div class="brand-mark"></div>
+            <div>
+              <div class="brand-name">Nova</div>
+              <div class="brand-tag">${tab === "settings" ? "Settings" : tab === "logs" ? "Logs" : tab === "memory" ? "Memory" : tab === "intrusion" ? "Intrusion" : tab === "suggestions" ? "Suggestions" : tab === "residence" ? "Residence" : "Command Center"}</div>
+            </div>
+          </div>
+          <nav class="top-nav">
+            <button class="nav-tab${tab === "dashboard" ? " active" : ""}" data-tab="dashboard">Command Center</button>
+            <button class="nav-tab${tab === "residence" ? " active" : ""}" data-tab="residence">Residence</button>
+            <button class="nav-tab${tab === "intrusion" ? " active" : ""}" data-tab="intrusion">Intrusion</button>
+            <button class="nav-tab${tab === "suggestions" ? " active" : ""}" data-tab="suggestions">Suggestions</button>
+            <button class="nav-tab${tab === "settings" ? " active" : ""}" data-tab="settings">Settings</button>
+            <button class="nav-tab${tab === "logs" ? " active" : ""}" data-tab="logs">Logs</button>
+            <button class="nav-tab${tab === "memory" ? " active" : ""}" data-tab="memory">Memory</button>
+          </nav>
+        </div>
+
+        ${tab === "settings" ? this._htmlSettings() : tab === "logs" ? this._htmlLogs() : tab === "memory" ? this._htmlMemory() : tab === "intrusion" ? this._htmlIntrusion() : tab === "suggestions" ? this._htmlSuggestions() : tab === "residence" ? this._htmlResidence() : this._htmlDashboard()}
+
+        <div class="footnote">NOVA COMMAND CENTER</div>
+      </div>
+    `;
+  }
+
+  _htmlDashboard() {
+    return `
+        <div class="hero">
+          <div class="core-wrap"><canvas class="core" id="core"></canvas></div>
+          <div class="state-line" id="stateLine">Watching over the house.</div>
+          <div class="state-sub" id="stateSub">—</div>
+          <div class="chips" id="chips"></div>
+        </div>
+
+        <div class="grid">
+          <div class="panel">
+            <div class="panel-head">
+              <div class="panel-title">Activity</div>
+              <div class="panel-meta" id="feedMeta">—</div>
+            </div>
+            <div class="feed" id="feed"></div>
+          </div>
+        </div>
+
+        <div class="panel" style="max-width:1100px;margin:16px auto 0">
+          <div class="panel-head">
+            <div class="panel-title">Areas</div>
+            <div class="panel-meta" id="areasMeta">—</div>
+          </div>
+          <div class="areas-grid" id="areasGrid"></div>
+        </div>
+
+        <div class="panel" id="solarPanel" style="max-width:1100px;margin:16px auto 0">
+          <div class="panel-head">
+            <div class="panel-title">Solar</div>
+            <div class="panel-meta" id="solarSufficiency">—</div>
+          </div>
+          <div id="solarBody" class="stub-body">Loading…</div>
+        </div>
+
+        <div class="panel" style="max-width:1100px;margin:16px auto 0">
+          <div class="panel-head">
+            <div class="panel-title">Quick Actions</div>
+            <div class="panel-meta">CMD</div>
+          </div>
+          <div class="mode-grid">
+            <button class="mode-chip" data-svc="nova.briefing">Briefing</button>
+            <button class="mode-chip" data-svc="nova.nap" data-svc-data='{"duration_minutes":30}'>Nap 30m</button>
+            <button class="mode-chip" data-svc="nova.nap" data-svc-data='{"duration_minutes":60}'>Nap 60m</button>
+            <button class="mode-chip" data-svc="nova.unshush">Unshush All</button>
+            <button class="mode-chip" data-svc="nova.observer_status">Status Dump</button>
+            <button class="mode-chip" id="qaRunAnalysis">Analyze Now</button>
+          </div>
+          <div class="toggle-desc" id="qaAnalysisResult" style="margin-top:8px"></div>
+        </div>
+
+        <div class="panel camera-panel" id="cameraPanel" style="max-width:1100px;margin:16px auto 0" hidden>
+          <div class="camera-head-row">
+            <div>
+              <div class="panel-title" style="margin-bottom:5px">Camera Watch</div>
+              <div class="camera-note">Optional — only shown for cameras that actually stream live into Home Assistant.</div>
+            </div>
+            <button class="camera-toggle" id="camToggle">SHOW CAMERAS ▾</button>
+          </div>
+          <div class="camera-strip" id="camStrip"></div>
+        </div>
+    `;
+  }
+
+  // ─── Logs ─────────────────────────────────────────────────────────────
+  // Ported from Classic's own _fetchDebugLog (nova-panel.js) — same single
+  // nova/get_debug_log call, same client-side category+search filtering,
+  // and the same escaping discipline: e.ts/e.cat/e.msg are log CONTENT
+  // (entity names, states, model output can end up in them), so they are
+  // attacker/LLM-influenced and go through this._esc() before innerHTML —
+  // this is a real fixed-XSS surface in Classic, not decorative caution.
+  // Kept in sync with every literal category string passed to nova_log()
+  // across the backend (grep `nova_log("` to re-verify). ROUTE/REASON/TTS
+  // removed 13 Sept 2026: nothing in the backend logs under those
+  // categories any more, so their chips could never match a real entry —
+  // caught live when a real "LEARN" entry (used, but missing from both
+  // this list and the color map) fell through to a bare "•" bullet with
+  // no way to filter for it.
+  static LOG_FILTERS = ["all", "CONV", "REPLY", "LOCAL", "LEARN", "AGENT", "AUTO", "MODE", "CONFIG",
+    "CLASSIFY", "CAMERA", "ENERGY", "BIO", "OFFER", "SAFETY", "ERROR", "WARNING", "GATE", "DEDUP", "OFFLINE"];
+  static LOG_CATEGORIES = {
+    CONV: { color: "#5fd0e0", icon: "💬" },
+    REPLY: { color: "#4fb8ff", icon: "💭" },
+    LOCAL: { color: "#5fbf7a", icon: "⚡" },
+    LEARN: { color: "#8fd15c", icon: "🧠" },
+    AGENT: { color: "var(--gold)", icon: "🤖" },
+    AUTO: { color: "#ffb454", icon: "🔁" },
+    MODE: { color: "#c9a0ff", icon: "🎚️" },
+    CONFIG: { color: "#9d8cff", icon: "⚙️" },
+    CLASSIFY: { color: "#9d8cff", icon: "🏷️" },
+    CAMERA: { color: "#5fbf7a", icon: "📷" },
+    ENERGY: { color: "#ffcf6a", icon: "🔌" },
+    BIO: { color: "#ff8fc7", icon: "💓" },
+    OFFER: { color: "#ffd27a", icon: "🙋" },
+    SAFETY: { color: "#ff8a8a", icon: "🛡️" },
+    ERROR: { color: "#ff6b81", icon: "❌" },
+    WARNING: { color: "var(--warn)", icon: "⚠️" },
+    GATE: { color: "var(--ink-faint)", icon: "🚧" },
+    DEDUP: { color: "var(--ink-faint)", icon: "🔇" },
+    OFFLINE: { color: "var(--ink-faint)", icon: "📴" },
+  };
+
+  _htmlLogs() {
+    const filterChips = NovaPanel.LOG_FILTERS.map(f =>
+      `<button class="mode-chip new-log-filter${(this._logFilter || "all") === f ? " mode-chip-on" : ""}" data-filter="${f}">${f.toUpperCase()}</button>`).join("");
+    return `
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">System Log</div>
+            <div class="panel-meta">Nova internal</div>
+          </div>
+          <div class="cfg-row">
+            <input id="newLogSearch" class="cfg-field" style="flex:1" type="text" placeholder="search…" autocomplete="off" value="${this._esc(this._logSearch || "")}">
+          </div>
+          <div class="mode-grid">${filterChips}</div>
+          <div class="toggle-desc" id="newLogCount" style="margin:8px 0"></div>
+          <div id="newLogEntries" class="new-log-entries">
+            <div class="stub-body">Loading…</div>
+          </div>
+        </div>
+    `;
   }
 
   async _fetchDebugLog() {
@@ -1368,114 +1425,133 @@ class NovaPanel extends HTMLElement {
     try {
       const result = await this._hass.callWS({ type: "nova/get_debug_log" });
       const entries = result?.entries || [];
-      const container = this.shadowRoot?.getElementById("debug-log-entries");
+      const container = this.shadowRoot?.getElementById("newLogEntries");
       if (!container) return;
       if (!entries.length) {
-        container.innerHTML = '<div class="log-loading">No entries yet. Talk to Nova to generate log entries.</div>';
+        container.innerHTML = `<div class="stub-body">No entries yet. Talk to Nova to generate log entries.</div>`;
         return;
       }
-      // Category map — kept in sync with every literal category string
-      // passed to nova_log() across the backend (grep `nova_log("` to
-      // re-verify). ROUTE/REASON/TTS were removed 13 Sept 2026: nothing in
-      // the backend has logged under those categories in a long time, so
-      // their filter chips could never match a real entry.
-      const cc = {
-        CONV:     { color: '#0ff',    icon: '💬', label: 'Conversation' },
-        REPLY:    { color: '#4fb8ff', icon: '💭', label: 'Reply' },
-        LOCAL:    { color: '#00f5a0', icon: '⚡', label: 'Local Engine' },
-        LEARN:    { color: '#8fd15c', icon: '🧠', label: 'Learned' },
-        AGENT:    { color: '#ff9d2e', icon: '🤖', label: 'Agent LLM' },
-        AUTO:     { color: '#ffb454', icon: '🔁', label: 'Automation' },
-        MODE:     { color: '#c9a0ff', icon: '🎚️', label: 'Operational Mode' },
-        CONFIG:   { color: '#88f',    icon: '⚙️', label: 'Config' },
-        CLASSIFY: { color: '#88f',    icon: '🏷️', label: 'Classifier' },
-        CAMERA:   { color: '#00f5a0', icon: '📷', label: 'Camera' },
-        ENERGY:   { color: '#ffcf6a', icon: '🔌', label: 'Energy' },
-        BIO:      { color: '#ff8fc7', icon: '💓', label: 'Wellbeing' },
-        OFFER:    { color: '#ffd27a', icon: '🙋', label: 'Offer' },
-        SAFETY:   { color: '#ff8a8a', icon: '🛡️', label: 'Safety' },
-        ERROR:    { color: '#ff3b3b', icon: '❌', label: 'Error' },
-        WARNING:  { color: '#e8b23d', icon: '⚠️', label: 'Warning' },
-        GATE:     { color: '#567685', icon: '🚧', label: 'Presence Gate' },
-        DEDUP:    { color: '#567685', icon: '🔇', label: 'Dedup' },
-        OFFLINE:  { color: '#567685', icon: '📴', label: 'Offline' },
-      };
-      // Get active filter
-      const activeFilter = this._logFilter || 'all';
-      const categoryFiltered = activeFilter === 'all'
-        ? entries
-        : entries.filter(e => e.cat === activeFilter);
-      const search = (this._logSearch || '').trim().toLowerCase();
+      const cc = NovaPanel.LOG_CATEGORIES;
+      const activeFilter = this._logFilter || "all";
+      const categoryFiltered = activeFilter === "all" ? entries : entries.filter(e => e.cat === activeFilter);
+      const search = (this._logSearch || "").trim().toLowerCase();
       const filtered = search
-        ? categoryFiltered.filter(e =>
-            (e.msg || '').toLowerCase().includes(search) ||
-            (e.cat || '').toLowerCase().includes(search))
+        ? categoryFiltered.filter(e => (e.msg || "").toLowerCase().includes(search) || (e.cat || "").toLowerCase().includes(search))
         : categoryFiltered;
 
-      const countEl = this.shadowRoot?.getElementById("log-count");
+      const countEl = this.shadowRoot?.getElementById("newLogCount");
       if (countEl) {
-        countEl.textContent = search || activeFilter !== 'all'
+        countEl.textContent = search || activeFilter !== "all"
           ? `${filtered.length} of ${entries.length}`
           : `${entries.length} entries`;
       }
 
-      // Newest-first for display (deque is oldest→newest; reverse it).
       const ordered = filtered.slice().reverse();
 
-      // Skip the DOM rebuild entirely when nothing changed — the common case
-      // on the 5s poll. Rebuilding unconditionally is what made the log flicker
-      // and jump every few seconds. Signature = count + first/last identity.
+      // Skip the rebuild when nothing changed (same signature trick as
+      // Classic) — avoids flicker/scroll-jump on the shared 20s poll.
       const first = ordered[0];
       const last = ordered[ordered.length - 1];
-      const sig = ordered.length + "|" +
-        (first ? first.ts + first.msg : "") + "|" +
-        (last ? last.ts + last.msg : "");
+      const sig = ordered.length + "|" + (first ? first.ts + first.msg : "") + "|" + (last ? last.ts + last.msg : "");
       if (sig === this._lastLogSig && activeFilter === this._lastLogFilter && search === this._lastLogSearch) {
-        return; // unchanged — leave the DOM and the user's scroll position alone
+        return;
       }
       const filterChanged = activeFilter !== this._lastLogFilter || search !== this._lastLogSearch;
-
-      // Preserve scroll: capture where the user is BEFORE touching the DOM.
-      // Newest entries are at the TOP, so "near top" means they're reading the
-      // latest; keep them pinned there. Otherwise leave them where they were.
       const nearTop = container.scrollTop < 40;
       const prevTop = container.scrollTop;
 
-      // Fixed 11 Sept 2026 (stored XSS): e.msg/e.cat/e.ts are log content —
-      // entity names, states, and model output can end up in them, so they
-      // are attacker/LLM-influenced. Escape with the same this._esc() used
-      // everywhere else in this file before they go into innerHTML.
       container.innerHTML = ordered.length ? ordered.map(e => {
-        const cat = cc[e.cat] || { color: 'var(--text)', icon: '•', label: e.cat };
-        const isError = e.cat === 'ERROR' || e.msg.toLowerCase().includes('error') || e.msg.toLowerCase().includes('failed');
-        const bgClass = isError ? 'log-entry-error' : '';
+        const cat = cc[e.cat] || { color: "var(--ink-dim)", icon: "•" };
+        const isError = e.cat === "ERROR" || (e.msg || "").toLowerCase().includes("error") || (e.msg || "").toLowerCase().includes("failed");
         const safeCat = this._esc(e.cat);
-        return `<div class="log-entry ${bgClass}" data-cat="${safeCat}">
-          <span class="log-ts">${this._esc(e.ts)}</span>
-          <span class="log-cat" style="color:${cat.color}">${cat.icon} ${safeCat}</span>
-          <span class="log-msg">${this._esc(e.msg)}</span>
+        return `<div class="new-log-entry${isError ? " new-log-entry-error" : ""}">
+          <span class="new-log-ts">${this._esc(e.ts)}</span>
+          <span class="new-log-cat" style="color:${cat.color}">${cat.icon} ${safeCat}</span>
+          <span class="new-log-msg">${this._esc(e.msg)}</span>
         </div>`;
-      }).join('') : `<div class="log-loading">No entries match${search ? ` "${this._esc(search)}"` : ''}${activeFilter !== 'all' ? ` in ${activeFilter}` : ''}.</div>`;
+      }).join("") : `<div class="stub-body">No entries match${search ? ` "${this._esc(search)}"` : ""}${activeFilter !== "all" ? ` in ${activeFilter}` : ""}.</div>`;
 
       this._lastLogSig = sig;
       this._lastLogFilter = activeFilter;
       this._lastLogSearch = search;
 
-      // Restore scroll. On a deliberate filter change, or when the user was
-      // already viewing the latest, show the newest (top). Otherwise keep
-      // their position so reading older history isn't interrupted.
-      if (filterChanged || nearTop) {
-        container.scrollTop = 0;
-      } else {
-        container.scrollTop = prevTop;
-      }
+      container.scrollTop = (filterChanged || nearTop) ? 0 : prevTop;
     } catch (err) {
-      const c = this.shadowRoot?.getElementById("debug-log-entries");
-      if (c) c.innerHTML = '<div class="log-entry-error" style="padding:12px;">Error loading logs: ' + this._esc(err) + '</div>';
+      const c = this.shadowRoot?.getElementById("newLogEntries");
+      if (c) c.innerHTML = `<div class="new-log-entry-error" style="padding:12px">Error loading logs: ${this._esc(err)}</div>`;
     }
   }
 
-  // ─── Data (mock for session 1; live HA hookup session 2) ────────────────
+  _wireLogs() {
+    const root = this.shadowRoot;
+    root.querySelectorAll(".new-log-filter").forEach(btn => {
+      btn.addEventListener("click", () => {
+        this._logFilter = btn.getAttribute("data-filter");
+        root.querySelectorAll(".new-log-filter").forEach(b => b.classList.toggle("mode-chip-on", b === btn));
+        this._fetchDebugLog();
+      });
+    });
+    const logSearch = root.getElementById("newLogSearch");
+    if (logSearch) {
+      logSearch.addEventListener("input", (e) => {
+        clearTimeout(this._logSearchDebounce);
+        const val = e.currentTarget.value;
+        this._logSearchDebounce = setTimeout(() => {
+          this._logSearch = val;
+          this._fetchDebugLog();
+        }, 200);
+      });
+    }
+  }
+
+  // ─── Memory ───────────────────────────────────────────────────────────
+  // Ported from Classic's own Memory tab (nova-panel.js): curated facts
+  // ("What Nova Knows" + TEACH form), a Pending Confirmation queue for
+  // facts staged via "remember that…" but not yet approved, and Person
+  // Routines (habits confidently attributed to one person). Each section
+  // patches its own container after a fetch/action rather than doing a
+  // full _render() — the TEACH inputs are free text the user may be
+  // mid-typing, and a full re-render would wipe them the same way it
+  // would for AI Models/Cameras/Appliances.
+  _htmlMemory() {
+    return `
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">What Nova Knows</div>
+            <div class="panel-meta" id="newMemCount">—</div>
+          </div>
+          <div class="stub-body">Durable facts &amp; preferences Nova recalls in conversation. Teach it something, or forget anything with ✕.</div>
+          <div class="cfg-row">
+            <input id="newMemKey" class="cfg-field" style="flex:1" placeholder="what (e.g. trash day)" autocomplete="off">
+            <input id="newMemVal" class="cfg-field" style="flex:1" placeholder="is (e.g. Tuesday)" autocomplete="off">
+            <select id="newMemSubject" class="cfg-field">
+              <option value="household">Household</option>
+              <option value="primary">About me</option>
+            </select>
+            <button class="mode-chip" id="newMemAdd">TEACH</button>
+          </div>
+          <div id="newMemList" class="mem-body"><div class="stub-body">Loading…</div></div>
+        </div>
+
+        <div class="panel" id="newPendingPanel" hidden>
+          <div class="panel-head">
+            <div class="panel-title">Pending Confirmation</div>
+            <div class="panel-meta" id="newPendingCount">—</div>
+          </div>
+          <div class="stub-body">Nova proposed these while talking with you — from "remember that…" — but nobody confirmed them yet, so they aren't trusted or used in conversation until you approve, edit, or reject them here.</div>
+          <div id="newPendingList" class="mem-body"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">Person Routines</div>
+            <div class="panel-meta">Learned</div>
+          </div>
+          <div class="stub-body">Habits Nova has confidently attributed to one person, from 30 days of sole-occupant activity — separate from household-wide facts above.</div>
+          <div id="newProutineList" class="mem-body"><div class="stub-body">Loading…</div></div>
+        </div>
+    `;
+  }
 
   async _fetchKnowledge() {
     if (!this._hass) return;
@@ -1503,22 +1579,18 @@ class NovaPanel extends HTMLElement {
   }
 
   _renderPersonRoutines() {
-    const root = this.shadowRoot;
-    if (!root) return;
-    const list = root.getElementById("proutine-list");
+    const list = this.shadowRoot?.getElementById("newProutineList");
     if (!list) return;
-    const esc = (s) => String(s == null ? "" : s)
-      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
     const groups = this._personRoutines?.groups || {};
     const people = Object.keys(groups).sort();
     if (this._personRoutines?.error) {
-      list.innerHTML = `<div class="mem-empty">Couldn't load routines — ${esc(this._personRoutines.error)}</div>`;
+      list.innerHTML = `<div class="stub-body">Couldn't load routines — ${this._esc(this._personRoutines.error)}</div>`;
       return;
     }
     if (!people.length) {
       list.innerHTML = this._personRoutinesLoaded
-        ? `<div class="mem-empty">Nothing person-specific learned yet — Nova needs a few weeks of sole-occupant data before routines are confidently individual.</div>`
-        : `<div class="mem-empty">Loading…</div>`;
+        ? `<div class="stub-body">Nothing person-specific learned yet — Nova needs a few weeks of sole-occupant data before routines are confidently individual.</div>`
+        : `<div class="stub-body">Loading…</div>`;
       return;
     }
     list.innerHTML = people.map(person => {
@@ -1526,60 +1598,58 @@ class NovaPanel extends HTMLElement {
         .slice().sort((a, b) => (b.confidence || 0) - (a.confidence || 0))
         .map(r => {
           const pct = Math.round((r.confidence || 0) * 100);
-          return `<div class="proutine-item">
-            <div class="proutine-desc">${esc(r.description)}</div>
-            <div class="proutine-meta">
-              <span class="sug-conf"><i style="width:${pct}%"></i></span>
-              <span class="sug-pct">${pct}% · ×${r.occurrences || '?'}</span>
-            </div>
-          </div>`;
+          return `
+            <div class="cfg-row">
+              <label>${this._esc(r.description)}</label>
+              <span class="toggle-desc">${pct}% · ×${r.occurrences || "?"}</span>
+            </div>`;
         }).join("");
-      const label = esc(person.replace(/_/g, " ")).replace(/\b\w/g, c => c.toUpperCase());
-      return `<div class="mem-group"><div class="mem-group-head">${label}</div>${items}</div>`;
+      const label = this._esc(person.replace(/_/g, " ")).replace(/\b\w/g, c => c.toUpperCase());
+      return `<div class="mode-bind-head">${label}</div>${items}`;
     }).join("");
   }
 
   _renderKnowledgeList() {
-    const root = this.shadowRoot;
-    if (!root) return;
-    const list = root.getElementById("memory-list");
+    const list = this.shadowRoot?.getElementById("newMemList");
     if (!list) return;
-    const esc = (s) => String(s == null ? "" : s)
-      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
     const facts = this._knowledge?.facts || [];
-    const count = root.getElementById("mem-count");
-    if (count) count.textContent = facts.length + (facts.length === 1 ? " FACT" : " FACTS");
+    const count = this.shadowRoot?.getElementById("newMemCount");
+    if (count) count.textContent = facts.length + (facts.length === 1 ? " fact" : " facts");
     if (this._knowledge?.error) {
-      list.innerHTML = `<div class="mem-empty">Couldn't load memory — ${esc(this._knowledge.error)}</div>`;
+      list.innerHTML = `<div class="stub-body">Couldn't load memory — ${this._esc(this._knowledge.error)}</div>`;
       return;
     }
     if (!facts.length) {
       list.innerHTML = this._knowledgeLoaded
-        ? `<div class="mem-empty">Nothing yet. Say "remember that…" to Nova, or teach it above.</div>`
-        : `<div class="mem-empty">Loading…</div>`;
+        ? `<div class="stub-body">Nothing yet. Say "remember that…" to Nova, or teach it above.</div>`
+        : `<div class="stub-body">Loading…</div>`;
       return;
     }
     const groups = {};
     facts.forEach(f => { (groups[f.subject] = groups[f.subject] || []).push(f); });
-    const labels = { household: "HOUSEHOLD", primary: "ABOUT ME" };
+    const labels = { household: "Household", primary: "About me" };
     const order = Object.keys(groups).sort(
       (a, b) => (a === "household" ? -1 : b === "household" ? 1 : a.localeCompare(b)));
     list.innerHTML = order.map(subj => {
       const items = groups[subj].map(f => {
         const soft = (f.source !== "stated" || (f.confidence ?? 1) < 0.9);
         const hedge = soft
-          ? `<span class="mem-hedge" title="${esc(f.source)} · ${Math.round((f.confidence ?? 1) * 100)}% sure">~</span>`
+          ? `<span title="${this._esc(f.source)} · ${Math.round((f.confidence ?? 1) * 100)}% sure">~</span>`
           : "";
-        const exp = f.expires_at ? `<span class="mem-exp" title="expires">⌛</span>` : "";
-        return `<div class="mem-fact" data-id="${f.id}">
-          <div class="mem-kv"><span class="mem-key">${esc(f.key)}</span><span class="mem-val">${esc(f.value)}${hedge}${exp}</span></div>
-          <button class="mem-forget" data-id="${f.id}" title="Forget this" aria-label="Forget">✕</button>
-        </div>`;
+        const exp = f.expires_at ? `<span title="expires">⌛</span>` : "";
+        return `
+          <div class="cfg-row" data-id="${f.id}">
+            <label>${this._esc(f.key)}</label>
+            <div style="display:flex;align-items:center;gap:6px">
+              <span class="toggle-desc">${this._esc(f.value)}${hedge}${exp}</span>
+              <button class="new-mem-forget" data-id="${f.id}" title="Forget this" aria-label="Forget">✕</button>
+            </div>
+          </div>`;
       }).join("");
-      const label = labels[subj] || esc(subj.replace(/_/g, " ").toUpperCase());
-      return `<div class="mem-group"><div class="mem-group-head">${label}</div>${items}</div>`;
+      const label = labels[subj] || this._esc(subj.replace(/_/g, " "));
+      return `<div class="mode-bind-head">${label}</div>${items}`;
     }).join("");
-    list.querySelectorAll(".mem-forget").forEach(btn => {
+    list.querySelectorAll(".new-mem-forget").forEach(btn => {
       btn.addEventListener("click", (e) => {
         const id = parseInt(e.currentTarget.getAttribute("data-id"), 10);
         if (!isNaN(id)) this._forgetKnowledge(id);
@@ -1590,9 +1660,9 @@ class NovaPanel extends HTMLElement {
   async _teachKnowledge() {
     const root = this.shadowRoot;
     if (!root || !this._hass) return;
-    const keyEl = root.getElementById("mem-key");
-    const valEl = root.getElementById("mem-val");
-    const subjEl = root.getElementById("mem-subject");
+    const keyEl = root.getElementById("newMemKey");
+    const valEl = root.getElementById("newMemVal");
+    const subjEl = root.getElementById("newMemSubject");
     const key = (keyEl?.value || "").trim();
     const value = (valEl?.value || "").trim();
     const subject = subjEl?.value || "household";
@@ -1606,7 +1676,7 @@ class NovaPanel extends HTMLElement {
       if (keyEl) keyEl.value = "";
       if (valEl) valEl.value = "";
       if (keyEl) keyEl.focus();
-    } catch (err) { /* keep inputs; nothing intrusive */ }
+    } catch (err) { console.error("Nova: teach failed", err); }
     this._knowledgeLoaded = true;
     this._renderKnowledgeList();
   }
@@ -1616,7 +1686,7 @@ class NovaPanel extends HTMLElement {
     try {
       const res = await this._hass.callWS({ type: "nova/forget_knowledge", fact_id: id });
       this._knowledge = { facts: res?.facts || [], pending: this._knowledge.pending, stats: this._knowledge.stats };
-    } catch (err) { /* leave list as-is on error */ }
+    } catch (err) { console.error("Nova: forget failed", err); }
     this._renderKnowledgeList();
   }
 
@@ -1625,10 +1695,7 @@ class NovaPanel extends HTMLElement {
     try {
       const res = await this._hass.callWS({ type: "nova/pending_fact_action", fact_id: id, action });
       this._knowledge = { facts: res?.facts || this._knowledge.facts, pending: res?.pending || [], stats: this._knowledge.stats };
-      this._toast(action === "confirm" ? "✓ confirmed — Nova will use this now" : "✓ rejected", "ok");
-    } catch (err) {
-      this._toast(`✗ ${action} — ${err?.message || err}`, "err");
-    }
+    } catch (err) { console.error(`Nova: ${action} failed`, err); }
     this._renderKnowledgeList();
     this._renderPendingFacts();
   }
@@ -1638,579 +1705,1143 @@ class NovaPanel extends HTMLElement {
     try {
       const res = await this._hass.callWS({ type: "nova/edit_pending_fact", fact_id: id, value });
       this._knowledge = { facts: this._knowledge.facts, pending: res?.pending || [], stats: this._knowledge.stats };
-    } catch (err) {
-      this._toast(`✗ edit — ${err?.message || err}`, "err");
-    }
+    } catch (err) { console.error("Nova: edit pending fact failed", err); }
     this._renderPendingFacts();
   }
 
   _renderPendingFacts() {
     const root = this.shadowRoot;
-    if (!root) return;
-    const panel = root.getElementById("pending-facts-panel");
-    const list = root.getElementById("pending-facts-list");
-    const countEl = root.getElementById("pending-count");
+    const panel = root?.getElementById("newPendingPanel");
+    const list = root?.getElementById("newPendingList");
+    const countEl = root?.getElementById("newPendingCount");
     if (!panel || !list) return;
-    const esc = (s) => String(s == null ? "" : s)
-      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
     const pending = this._knowledge?.pending || [];
     panel.hidden = pending.length === 0;
     if (!pending.length) { list.innerHTML = ""; return; }
-    if (countEl) countEl.textContent = pending.length + (pending.length === 1 ? " WAITING" : " WAITING");
+    if (countEl) countEl.textContent = pending.length + (pending.length === 1 ? " waiting" : " waiting");
     list.innerHTML = pending.map(f => `
-      <div class="mem-fact pending-fact" data-id="${f.id}">
-        <div class="mem-kv">
-          <span class="mem-key">${esc(f.key)}</span>
-          <input class="mem-input pending-edit-val" data-id="${f.id}" value="${esc(f.value)}" />
-        </div>
-        <div class="sug-actions">
-          <button class="sug-btn pending-confirm" data-id="${f.id}">✓ Confirm</button>
-          <button class="sug-btn pending-reject" data-id="${f.id}">✕ Reject</button>
-          <button class="sug-btn pending-save-edit" data-id="${f.id}">💾 Save edit</button>
-        </div>
+      <div class="cfg-row" data-id="${f.id}">
+        <label>${this._esc(f.key)}</label>
+        <input class="cfg-field new-pending-edit-val" style="flex:1" data-id="${f.id}" value="${this._esc(f.value)}">
+      </div>
+      <div class="mode-grid" style="margin-bottom:10px">
+        <button class="mode-chip new-pending-confirm" data-id="${f.id}">✓ Confirm</button>
+        <button class="mode-chip new-pending-reject" data-id="${f.id}">✕ Reject</button>
+        <button class="mode-chip new-pending-save-edit" data-id="${f.id}">💾 Save edit</button>
       </div>`).join("");
-    list.querySelectorAll(".pending-confirm").forEach(btn => {
+    list.querySelectorAll(".new-pending-confirm").forEach(btn => {
       btn.addEventListener("click", (e) => {
         const id = parseInt(e.currentTarget.getAttribute("data-id"), 10);
         if (!isNaN(id)) this._pendingFactAction(id, "confirm");
       });
     });
-    list.querySelectorAll(".pending-reject").forEach(btn => {
+    list.querySelectorAll(".new-pending-reject").forEach(btn => {
       btn.addEventListener("click", (e) => {
         const id = parseInt(e.currentTarget.getAttribute("data-id"), 10);
         if (!isNaN(id)) this._pendingFactAction(id, "reject");
       });
     });
-    list.querySelectorAll(".pending-save-edit").forEach(btn => {
+    list.querySelectorAll(".new-pending-save-edit").forEach(btn => {
       btn.addEventListener("click", (e) => {
         const id = parseInt(e.currentTarget.getAttribute("data-id"), 10);
-        const input = list.querySelector(`.pending-edit-val[data-id="${id}"]`);
+        const input = list.querySelector(`.new-pending-edit-val[data-id="${id}"]`);
         const value = (input?.value || "").trim();
         if (!isNaN(id) && value) this._editPendingFact(id, value);
       });
     });
   }
 
-  // ─── greeting/data helpers ──────────────────────────────────────────────
-
-  _greeting() {
-    const h = new Date().getHours();
-    if (h < 5)  return "Good evening";
-    if (h < 12) return "Good morning";
-    if (h < 18) return "Good afternoon";
-    return "Good evening";
-  }
-
-  _mockData() {
-    return {
-      observer:   { state: "RUNNING", level: "live" },
-      sleep:      { state: "AWAKE",   level: "live" },
-      gemini:     { state: "READY",   level: "live" },
-      broadcast:  { state: "ONLINE",  level: "live" },
-      notify:     { state: "UNSET",   level: "warn" },
-      satellites: { state: "8 / 8",   level: "live" },
-      bedrooms: 3,
-      areas: 11,
-      announcements_today: 14,
-      est_cost: "$0.03",
-      uptime: "2d 14h",
-      dominantRoom: {
-        name: "Kitchen",
-        subtitle: "Occupied · 14m",
-        coord: "#02 · Second Floor",
-        temp: "72°",
-        humidity: "44%",
-        lights: "ON",
-        satellite: "ES-E3E534",
-        lastMotion: "00:08",
-      },
-      areasGrid: [
-        { name: "Kitchen",         meta: "sat · spkr · mmwave", active: true,  bedroom: false },
-        { name: "Office",          meta: "sat · spkr · mmwave", active: true,  bedroom: false },
-        { name: "Great Room",      meta: "sat · spkr · mmwave", active: false, bedroom: false },
-        { name: "Dining Room",     meta: "sat · spkr",           active: false, bedroom: false },
-        { name: "Entry",           meta: "sat · spkr · mmwave", active: false, bedroom: false },
-        { name: "Master Bedroom",  meta: "sat · spkr · mmwave", active: false, bedroom: true },
-        { name: "Guest Room",      meta: "sat · spkr · mmwave", active: false, bedroom: true },
-        { name: "Bedroom 2",   meta: "sat · spkr · mmwave", active: false, bedroom: true },
-        { name: "Garage",          meta: "sat · mmwave · cam",  active: true,  bedroom: false },
-        { name: "Basement",        meta: "moisture · smoke",    active: false, bedroom: false },
-        { name: "Outdoor",         meta: "3 cameras",           active: false, bedroom: false },
-      ],
-      activity: [
-        { ts:"14:31", urgency:"medium",   tag:"KITCHEN",        msg:"motion detected, routing reply here" },
-        { ts:"14:18", urgency:"low",      tag:"WASHER",         msg:"cycle complete — announcement suppressed, existing automation handles this" },
-        { ts:"14:03", urgency:"medium",   tag:"FRONT DOOR",     msg:"opened — Username home" },
-        { ts:"13:47", urgency:"high",     tag:"DOORBELL",       msg:"rang — no one recognized, broadcast sent" },
-        { ts:"13:41", urgency:"muted",    tag:"shush",          msg:"laundry room muted until reset" },
-        { ts:"13:22", urgency:"medium",   tag:"BRIEFING",       msg:"requested, delivered to home group" },
-        { ts:"12:58", urgency:"low",      tag:"GARAGE",         msg:"door closed" },
-        { ts:"12:14", urgency:"medium",   tag:"OFFICE",         msg:"Username entered, switching observer context" },
-        { ts:"11:30", urgency:"low",      tag:"OBSERVER",       msg:"quiet interval — 23 events classified, 0 spoken" },
-        { ts:"09:12", urgency:"critical", tag:"LEAK",           msg:"moisture detected in basement — broadcast override fired" },
-        { ts:"08:45", urgency:"medium",   tag:"GOOD MORNING",   msg:"briefing delivered on schedule" },
-        { ts:"08:03", urgency:"low",      tag:"MASTER BEDROOM", msg:"motion, sleep mode cleared" },
-      ],
-      roomRotation: [
-        { name: "Kitchen", subtitle: "Occupied · 14m", coord: "#02 · Second Floor", temp: "72°", humidity: "44%", lights: "ON"  },
-        { name: "Office",  subtitle: "Occupied · 3m",  coord: "#05 · Second Floor", temp: "70°", humidity: "41%", lights: "ON"  },
-        { name: "Garage",  subtitle: "Occupied · 1m",  coord: "#09 · Ground Floor", temp: "66°", humidity: "52%", lights: "OFF" },
-      ],
-    };
-  }
-
-  /**
-   * Return the data used for rendering. Prefers live WS data; falls back to
-   * mock if WS hasn't responded yet. Shapes returned to match _mockData().
-   */
-  _data() {
-    if (!this._liveData) return this._mockData();
-    const live = this._liveData;
-    return {
-      observer:   live.status.observer,
-      sleep:      live.status.sleep,
-      gemini:     live.status.gemini,
-      broadcast:  live.status.broadcast,
-      notify:     live.status.notify,
-      satellites: live.status.satellites,
-      bedrooms:            live.meta.bedrooms,
-      areas:               live.meta.areas_monitored,
-      announcements_today: live.meta.announcements_today,
-      est_cost:            live.meta.est_cost,
-      uptime:              live.meta.uptime,
-      dominantRoom: {
-        name:       live.dominant.name,
-        subtitle:   live.dominant.subtitle,
-        coord:      live.dominant.coord,
-        temp:       live.dominant.temp,
-        humidity:   live.dominant.humidity,
-        lights:     live.dominant.lights,
-        satellite:  live.dominant.satellite,
-        lastMotion: live.dominant.last_motion,
-      },
-      areasGrid: live.areas.map(a => ({
-        id: a.id,
-        name: a.name,
-        caps: a.caps || [],
-        active: a.active,
-        bedroom: a.bedroom,
-        lights_on: a.lights_on || 0,
-        lights_total: a.lights_total || 0,
-        temp: a.temp || null,
-        humidity: a.humidity || null,
-        temp_entity: a.temp_entity || null,
-        humidity_entity: a.humidity_entity || null,
-        last_motion: a.last_motion || null,
-      })),
-      activity: this._activityData && this._activityData.length > 0
-        ? this._activityData
-        : [{ ts: "--:--", urgency: "low", tag: "SYSTEM", msg: "No activity yet. Enable announcements or observer to see events here." }],
-      config: live.config || {},
-      onboarding: live.onboarding || null,
-      doors: live.doors || {},
-      // v7.101.28: goals card. Also fixes suggestions, which _data() never
-      // carried through from the raw payload — _renderSuggestions(d) has
-      // been reading undefined since it was added.
-      suggestions: live.suggestions || [],
-      goals: live.goals || [],
-    };
-  }
-
-  /**
-   * Patch only the fields that change frequently, without tearing down the
-   * whole DOM. Called on every 5s WS refresh when shape is unchanged.
-   */
-  // Keep the masthead lockdown switch + status badge in sync with the real
-  // backend state on every poll — whether engaged from the toggle or
-  // auto-engaged by the alarm arming. Runs before the settings/logs early
-  // returns below, since the masthead is shared across all tabs.
-  _patchLockdown(live) {
+  _wireMemory() {
     const root = this.shadowRoot;
-    if (!root) return;
-    const active = !!(live && live.lockdown && live.lockdown.active);
-    const btn = root.getElementById("lockdown-btn");
-    if (btn) {
-      btn.classList.toggle("on", active);
-      btn.setAttribute("aria-checked", active ? "true" : "false");
-      btn.setAttribute("title", active ? "Lockdown engaged — tap to lift" : "Tap to engage lockdown");
-      const state = btn.querySelector(".ld-state");
-      if (state) state.textContent = active ? "ARMED" : "OFF";
-    }
-    const badge = root.querySelector(".status-badge");
-    if (badge) {
-      badge.classList.toggle("alert", active);
-      badge.textContent = `[ STATUS: ${active ? "LOCKDOWN" : "NOMINAL"} ]`;
-    }
-  }
-
-  _patchLiveDom(live) {
-    const root = this.shadowRoot;
-    if (!root) return;
-    this._patchLockdown(live);
-    // On settings tab, DON'T re-render automatically — it destroys
-    // open dropdown menus and resets user interaction state. Settings
-    // data only updates when user clicks a toggle/dropdown (which
-    // calls _fetchLiveData → _render explicitly after the WS call).
-    if (this._currentTab === "settings") {
-      return;
-    }
-    if (this._currentTab === "logs") {
-      this._fetchDebugLog();
-      return;
-    }
-    // Status rows — scoped to dashboard's .c-status panel only
-    const statusPanel = root.querySelector(".c-status");
-    if (statusPanel) {
-      const rows = statusPanel.querySelectorAll(".status-row");
-      const statusKeys = ["observer", "sleep", "gemini", "broadcast", "notify", "satellites"];
-      rows.forEach((row, i) => {
-        const key = statusKeys[i];
-        const st = live.status[key];
-        if (!st) return;
-        row.className = `status-row ${st.level}`;
-        const dot = row.querySelector(".dot");
-        if (dot) dot.className = `dot ${st.level}`;
-        const v = row.querySelector(".v");
-        if (v) v.textContent = st.state;
-      });
-    }
-    // Meta block — scoped to .meta inside .c-status
-    const metaEl = statusPanel ? statusPanel.querySelector(".meta") : null;
-    if (metaEl) {
-      const metaSpans = metaEl.querySelectorAll("span");
-      if (metaSpans.length >= 4) {
-        metaSpans[0].textContent = live.meta.bedrooms;
-        metaSpans[1].textContent = live.meta.areas_monitored;
-        metaSpans[2].textContent = live.meta.announcements_today;
-        metaSpans[3].textContent = live.meta.uptime;
-      }
-    }
-    // Dominant room
-    const nameEl  = root.querySelector("#dom-name");
-    const subEl   = root.querySelector("#dom-sub");
-    const coordEl = root.querySelector("#dom-coord");
-    const footSpans = root.querySelectorAll(".anchor-foot span");
-    if (nameEl)  nameEl.textContent  = live.dominant.name;
-    if (subEl)   subEl.textContent   = live.dominant.subtitle;
-    if (coordEl) coordEl.textContent = live.dominant.coord;
-    this._updateDomGauges(live.dominant);
-    if (footSpans.length >= 2) {
-      footSpans[footSpans.length - 2].textContent = live.dominant.last_motion;
-      footSpans[footSpans.length - 1].textContent = live.dominant.satellite;
-    }
-    // Area tiles — patch active state only (names don't change)
-    const areaEls = root.querySelectorAll(".area");
-    areaEls.forEach((el, i) => {
-      const a = live.areas[i];
-      if (!a) return;
-      el.classList.toggle("active", !!a.active);
-    });
-
-    // Activity feed — rebuild rows in place (v6.43.x: previously the feed
-    // only refreshed on a full structural re-render, so it silently went
-    // stale). Respects the active search filter; the input keeps focus.
-    this._updateActivityFeed();
-
-    // Floor plan — rebuild with fresh presence. _fetchMmwave rebuilds the
-    // house after mmWave data lands, so the plan reflects live detection.
-    if (this._currentTab === 'residence') {
-      this._fetchMmwave();
-    }
-  }
-
-  // ─── Rendering ───────────────────────────────────────────────────────────
-
-  // ── UI localization (v7.101.28) ── post-render text swap. The panel renders in
-  // English, then any standalone label whose exact text matches a key in the loaded
-  // language file is swapped. Strings fused with dynamic values (counts, entity/model
-  // names) never exact-match, so technical values stay unchanged. Language files live
-  // at /nova_panel_static/i18n/<lang>.json, keyed by the English string.
-  _resolveUiLang() {
-    try {
-      const ov = this._data && this._data() && this._data().config && this._data().config.ui_language;
-      if (ov && ov !== "auto") return String(ov);
-    } catch (_) {}
-    return (this._hass && this._hass.language) || "en";
-  }
-  _loadUiStrings() {
-    const full = (this._resolveUiLang() || "en").toLowerCase();
-    const base = full.split("-")[0];
-    if (this._uiLangLoaded === full) return;   // already handled this language
-    this._uiLangLoaded = full;
-    if (base === "en") { this._uiStrings = null; return; }
-    // Try the full tag first (e.g. pt-br.json, zh-hans.json), then fall back to the base
-    // language (pt.json, zh.json), so region variants can be added without code changes.
-    const grab = (lang) => fetch("/nova_panel_static/i18n/" + lang + ".json").then((r) => (r.ok ? r.json() : null));
-    grab(full)
-      .then((d) => (d || (full !== base ? grab(base) : null)))
-      .then((dict) => { this._uiStrings = dict || null; if (this._hass && this.shadowRoot) this._render(); })
-      .catch(() => { this._uiStrings = null; });
-  }
-  _localizeDOM(root) {
-    const dict = this._uiStrings;
-    if (!dict || !root) return;
-    try {
-      const walker = document.createTreeWalker(root, 4, null);   // 4 = NodeFilter.SHOW_TEXT (avoid global dep)
-      const swaps = [];
-      let n;
-      while ((n = walker.nextNode())) {
-        const raw = n.nodeValue;
-        if (!raw) continue;
-        const key = raw.trim();
-        if (key && dict[key]) swaps.push([n, raw.replace(key, dict[key])]);
-      }
-      for (const s of swaps) s[0].nodeValue = s[1];
-      root.querySelectorAll("[title],[placeholder]").forEach((el) => {
-        ["title", "placeholder"].forEach((attr) => {
-          const v = el.getAttribute(attr);
-          if (v && dict[v.trim()]) el.setAttribute(attr, v.replace(v.trim(), dict[v.trim()]));
+    const memAdd = root.getElementById("newMemAdd");
+    if (memAdd) {
+      memAdd.addEventListener("click", () => this._teachKnowledge());
+      ["newMemKey", "newMemVal"].forEach(id => {
+        const el = root.getElementById(id);
+        if (el) el.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") { e.preventDefault(); this._teachKnowledge(); }
         });
       });
+    }
+    this._renderKnowledgeList();
+    this._renderPendingFacts();
+    this._renderPersonRoutines();
+  }
+
+  // ─── Intrusion ────────────────────────────────────────────────────────
+  // Ported from Classic's own Intrusion tab (nova-panel.js). Safety-relevant
+  // (call-off/acknowledge affect real escalation), so this is a straight
+  // port of Classic's exact websocket calls and semantics — no new
+  // behavior invented here. The timeout select and vision-confirm toggle
+  // reuse the generic .cfg-field/.toggle-btn autosave already wired for
+  // Settings (see _saveSetting's dashboard-only render guard above).
+  _htmlIntrusion() {
+    return `
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">Intrusion</div>
+            <div class="panel-meta" id="newIntrStatus">—</div>
+          </div>
+          <div class="stub-body">Last intrusion snapshot and false-alarm call-off. When Nova confirms an intruder on camera it grabs a still; if it's not real, call it off here or say "it's a false alarm".</div>
+          <div id="newIntrBody"><div class="stub-body">Loading…</div></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">Intrusion Log</div>
+            <div class="panel-meta" id="newIlogLearn">—</div>
+          </div>
+          <div class="stub-body">Every intrusion event with its snapshot. Mark each one <b>real</b> or <b>false alarm</b> — Nova learns from your labels and stops firing the low-confidence alerts for patterns you keep calling false. A confirmed intrusion always alerts, no matter what it has learned.</div>
+          <div class="cfg-row"><button class="mode-chip" id="newIlogRefresh">⟳ REFRESH</button></div>
+          <div id="newIlogBody"><div class="stub-body">Loading…</div></div>
+        </div>
+    `;
+  }
+
+  async _fetchIntrusion() {
+    if (!this._hass) return;
+    try {
+      const cfg = this._liveData?.config || {};
+      if (cfg.intrusion_response_timeout != null) this._intrTimeout = cfg.intrusion_response_timeout;
     } catch (_) {}
-  }
-  _render() {
-    let body;
     try {
-      body = this._html();
-    } catch (err) {
-      console.error("Nova panel: render failed", err);
-      body = '<div class="panel"><div class="head"><span>Panel error</span></div>'
-        + '<div class="appliance-intro">Nova hit an error while drawing this page \u2014 usually a stale entity still referenced in configuration. The details are in your browser console (F12). Reloading often clears it; if not, please report the console error.</div></div>';
+      this._intr = await this._hass.callWS({ type: "nova/intrusion", action: "status" });
+    } catch (_) {
+      this._intr = { error: true };
     }
-    this.shadowRoot.innerHTML = this._styles() + body;
-    // Stamp each Settings card with its section BEFORE localization rewrites the
-    // heading text — otherwise a translated UI can't be matched back to a section.
+    this._renderIntrusionStatus();
+  }
+
+  _renderIntrusionStatus() {
+    const root = this.shadowRoot;
+    const body = root?.getElementById("newIntrBody");
+    const statusEl = root?.getElementById("newIntrStatus");
+    if (!body) return;
+    const s = this._intr || {};
+    if (s.error) {
+      body.innerHTML = `<div class="stub-body">Couldn't load — restart Home Assistant after updating.</div>`;
+      if (statusEl) statusEl.textContent = "—";
+      return;
+    }
+    if (statusEl) {
+      statusEl.innerHTML = s.called_off
+        ? `<span class="diag-warn">CALLED OFF · ${s.suppressed_for}s</span>`
+        : `<span class="diag-ok">ARMED</span>`;
+    }
+    const snap = s.last_snapshot;
+    let html = "";
+    if (snap && snap.url) {
+      const when = snap.ts ? new Date(snap.ts * 1000).toLocaleString() : "";
+      html += `<div class="intr-snap">
+        <img src="${this._esc(snap.url)}" alt="intrusion snapshot" class="intr-img">
+        <div class="toggle-desc">${this._esc((snap.camera || "").replace("camera.", "").replace(/_/g, " "))} · ${this._esc(when)}</div>
+      </div>`;
+    } else {
+      html += `<div class="stub-body">No intrusion snapshots captured. This stays empty unless Nova confirms an intruder on camera.</div>`;
+    }
+    if (s.false_alarms_24h) {
+      html += `<div class="stub-body">${s.false_alarms_24h} false alarm${s.false_alarms_24h === 1 ? "" : "s"} called off in the last 24h</div>`;
+    }
+    if (s.acknowledged) {
+      html += `<div class="stub-body">✓ Acknowledged — automatic escalation held (you're handling it)</div>`;
+    }
+    html += `
+      <div class="cfg-row">
+        <label>Auto-escalate if no response after</label>
+        <select class="cfg-field" data-cfg-key="intrusion_response_timeout">${this._optSelect([["60", "1 min"], ["120", "2 min"], ["180", "3 min"], ["300", "5 min"], ["600", "10 min"]], String(this._intrTimeout || 120))}</select>
+      </div>
+      <div class="cfg-row">
+        <label>Confirm Frigate person with Nova vision before alarming</label>
+        <button class="toggle-btn ${this._liveData?.config?.intrusion_vision_confirm !== false ? "on" : "off"}" data-cfg-key="intrusion_vision_confirm" data-cfg-val="${this._liveData?.config?.intrusion_vision_confirm !== false ? "false" : "true"}">${this._liveData?.config?.intrusion_vision_confirm !== false ? "ON" : "OFF"}</button>
+      </div>
+      <div class="mode-grid">
+        <button class="mode-chip new-intr-ack">✓ I'M LOOKING (HOLD)</button>
+        <button class="mode-chip new-intr-dismiss">✕ CALL OFF (FALSE ALARM)</button>
+      </div>`;
+    body.innerHTML = html;
+    body.querySelectorAll(".toggle-btn[data-cfg-key], select.cfg-field[data-cfg-key]").forEach(el => {
+      if (el.tagName === "BUTTON") {
+        el.addEventListener("click", () => this._saveSetting(el.getAttribute("data-cfg-key"), el.getAttribute("data-cfg-val") === "true"));
+      } else {
+        el.addEventListener("change", () => this._saveSetting(el.getAttribute("data-cfg-key"), el.value));
+      }
+    });
+    const dismissBtn = body.querySelector(".new-intr-dismiss");
+    dismissBtn?.addEventListener("click", async () => {
+      if (!this._hass) return;
+      dismissBtn.disabled = true;
+      try {
+        await this._hass.callWS({ type: "nova/intrusion", action: "dismiss", reason: "panel" });
+        await this._fetchIntrusion();
+      } catch (err) {
+        console.error("Nova: intrusion dismiss failed", err);
+        dismissBtn.disabled = false;
+      }
+    });
+    const ackBtn = body.querySelector(".new-intr-ack");
+    ackBtn?.addEventListener("click", async () => {
+      if (!this._hass) return;
+      ackBtn.disabled = true;
+      try {
+        await this._hass.callWS({ type: "nova/intrusion", action: "acknowledge", reason: "panel" });
+        await this._fetchIntrusion();
+      } catch (err) {
+        console.error("Nova: intrusion acknowledge failed", err);
+        ackBtn.disabled = false;
+      }
+    });
+  }
+
+  async _fetchIntrusionLog() {
+    const root = this.shadowRoot;
+    const body = root?.getElementById("newIlogBody");
+    const side = root?.getElementById("newIlogLearn");
+    if (!this._hass || !body) return;
     try {
-      this._stampSettingsSections();
-      this._localizeDOM(this.shadowRoot);
-      this._wire();
+      const res = await this._hass.callWS({ type: "nova/intrusion", action: "log", limit: 40 });
+      this._ilog = res;
+      const L = res?.learning || {};
+      if (side) side.textContent = `${L.labeled || 0}/${L.events || 0} labelled`;
+      body.innerHTML = this._renderIntrusionLogHtml(res);
+      this._wireIntrusionLabels();
     } catch (err) {
-      console.error("Nova panel: post-render wiring failed", err);
-    }
-    this._renderedOnce = true;
-    this._pendingRender = false;
-  }
-
-  _updateLiveValues() {
-    this._updateClock();
-  }
-
-  _updateClock() {
-    const timeEl = this.shadowRoot.querySelector("#clock-time");
-    const dateEl = this.shadowRoot.querySelector("#clock-date");
-    const greetEl = this.shadowRoot.querySelector("#greeting-text");
-    if (!timeEl) return;
-    const now = new Date();
-    const hh = String(now.getHours()).padStart(2, "0");
-    const mm = String(now.getMinutes()).padStart(2, "0");
-    const ss = String(now.getSeconds()).padStart(2, "0");
-    timeEl.textContent = `${hh}:${mm}:${ss}`;
-
-    const days = ["SUN","MON","TUE","WED","THU","FRI","SAT"];
-    const mons = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
-    dateEl.textContent = `${days[now.getDay()]} · ${String(now.getDate()).padStart(2,"0")} · ${mons[now.getMonth()]} · ${now.getFullYear()}`;
-
-    if (greetEl) greetEl.textContent = this._greeting();
-  }
-
-  _rotateDominantRoom() {
-    // Only runs as pre-live-data demo; stops once WS returns data
-    if (this._liveData) return;
-    const data = this._mockData();
-    this._roomRotationIdx = (this._roomRotationIdx + 1) % data.roomRotation.length;
-    const r = data.roomRotation[this._roomRotationIdx];
-    const nameEl  = this.shadowRoot.querySelector("#dom-name");
-    const subEl   = this.shadowRoot.querySelector("#dom-sub");
-    const coordEl = this.shadowRoot.querySelector("#dom-coord");
-    if (!nameEl) return;
-    nameEl.style.opacity = 0;
-    setTimeout(() => {
-      nameEl.textContent = r.name;
-      subEl.textContent  = r.subtitle;
-      if (coordEl) coordEl.textContent = r.coord;
-      this._updateDomGauges(r);
-      nameEl.style.opacity = 1;
-    }, 250);
-  }
-
-  // ─── HTML helpers (avoid nested template literals) ─────────────────────────
-
-  // Radial (donut) gauge — used for the dominant-room environment readout.
-  _radialGauge(id, frac, display, label, hue, dim) {
-    const R = 26, C = 2 * Math.PI * R;
-    const f = Math.max(0, Math.min(1, frac || 0));
-    const off = C * (1 - f);
-    return `<div class="rgauge${dim ? ' dim' : ''}">
-      <svg viewBox="0 0 64 64" class="rgauge-svg" aria-hidden="true">
-        <circle class="rgauge-track" cx="32" cy="32" r="${R}"></circle>
-        <circle class="rgauge-fill" id="${id}-arc" cx="32" cy="32" r="${R}"
-          style="stroke:hsl(${hue},90%,62%);stroke-dasharray:${C.toFixed(1)};stroke-dashoffset:${off.toFixed(1)};"></circle>
-      </svg>
-      <div class="rgauge-val" id="${id}-val">${display}</div>
-      <div class="rgauge-lbl">${label}</div>
-    </div>`;
-  }
-
-  _tempFrac(t) { return isFinite(t) ? (t - 50) / 40 : 0; }      // 50–90°F → 0–1
-  _tempHue(t) {
-    const f = Math.max(0, Math.min(1, this._tempFrac(t)));
-    return Math.round(210 - f * 190);                          // cool blue → warm orange
-  }
-
-  _domGauges(dr) {
-    const t = parseFloat(String(dr.temp));
-    const h = parseFloat(String(dr.humidity));
-    const lon = /on|^[1-9]/i.test(String(dr.lights || ""));
-    return (
-      this._radialGauge("g-temp", this._tempFrac(t), dr.temp ?? "—", "Temp", this._tempHue(t), false) +
-      this._radialGauge("g-hum", (isFinite(h) ? h / 100 : 0), dr.humidity ?? "—", "Humidity", 190, false) +
-      this._radialGauge("g-lite", lon ? 1 : 0.04, lon ? "ON" : "OFF", "Lights", lon ? 48 : 205, !lon)
-    );
-  }
-
-  _setGauge(id, frac, display, hue, dim) {
-    const arc = this.shadowRoot.querySelector(`#${id}-arc`);
-    const val = this.shadowRoot.querySelector(`#${id}-val`);
-    if (arc) {
-      const R = 26, C = 2 * Math.PI * R;
-      const f = Math.max(0, Math.min(1, frac || 0));
-      arc.style.strokeDashoffset = (C * (1 - f)).toFixed(1);
-      if (hue != null) arc.style.stroke = `hsl(${hue},90%,62%)`;
-    }
-    if (val) {
-      val.textContent = display;
-      const g = val.closest(".rgauge");
-      if (g) g.classList.toggle("dim", !!dim);
+      body.innerHTML = `<div class="stub-body">Could not load the log.</div>`;
     }
   }
 
-  _updateDomGauges(dr) {
-    const t = parseFloat(String(dr.temp));
-    const h = parseFloat(String(dr.humidity));
-    const lon = /on|^[1-9]/i.test(String(dr.lights || ""));
-    this._setGauge("g-temp", this._tempFrac(t), dr.temp ?? "—", this._tempHue(t), false);
-    this._setGauge("g-hum", (isFinite(h) ? h / 100 : 0), dr.humidity ?? "—", 190, false);
-    this._setGauge("g-lite", lon ? 1 : 0.04, lon ? "ON" : "OFF", lon ? 48 : 205, !lon);
+  _renderIntrusionLogHtml(res) {
+    const evs = (res && res.events) || [];
+    if (!evs.length) {
+      return `<div class="stub-body">No intrusion events recorded yet.</div>`;
+    }
+    const damped = ((res.learning || {}).damped_patterns || []).length;
+    let html = "";
+    if (damped) {
+      html += `<div class="stub-body">Nova has learned ${damped} benign pattern${damped === 1 ? "" : "s"} — low-confidence alerts for these stay quiet.</div>`;
+    }
+    for (const e of evs) {
+      const when = new Date((e.ts || 0) * 1000).toLocaleString();
+      const kindCls = { confirmed: "diag-down", unresolved: "diag-warn", investigating: "diag-off" }[e.kind] || "diag-off";
+      const label = e.label || "";
+      html += `<div class="new-ilog-item" data-ev="${this._esc(e.id)}">
+        <div class="cfg-row">
+          <span class="${kindCls}">${this._esc((e.kind || "").toUpperCase())}</span>
+          <span class="toggle-desc">${this._esc(when)}</span>
+        </div>
+        <div class="toggle-desc">${this._esc(e.breach || e.camera || "activity")}${e.reason ? " — " + this._esc(e.reason) : ""}</div>
+        ${e.snapshot_url ? `<img class="intr-img" src="${this._esc(e.snapshot_url)}" alt="snapshot">` : ""}
+        <div class="mode-grid">
+          <button class="mode-chip new-ilog-btn${label === "real" ? " mode-chip-on" : ""}" data-label="real">REAL</button>
+          <button class="mode-chip new-ilog-btn${label === "false" ? " mode-chip-on" : ""}" data-label="false">FALSE ALARM</button>
+          ${label ? `<button class="mode-chip new-ilog-btn" data-label="">CLEAR</button>` : ""}
+        </div>
+      </div>`;
+    }
+    return html;
   }
 
-  // ─── AI Models (Settings) ───────────────────────────────────────────────
+  _wireIntrusionLabels() {
+    const body = this.shadowRoot?.getElementById("newIlogBody");
+    body?.querySelectorAll(".new-ilog-btn").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const item = btn.closest(".new-ilog-item");
+        const id = item?.getAttribute("data-ev");
+        if (!id || !this._hass) return;
+        try {
+          await this._hass.callWS({ type: "nova/intrusion", action: "label", event_id: id, label: btn.getAttribute("data-label") });
+          await this._fetchIntrusionLog();
+        } catch (err) { console.error("Nova: intrusion label failed", err); }
+      });
+    });
+  }
+
+  _wireIntrusion() {
+    const root = this.shadowRoot;
+    this._fetchIntrusion();
+    const refreshBtn = root.getElementById("newIlogRefresh");
+    if (refreshBtn) {
+      refreshBtn.addEventListener("click", async () => {
+        refreshBtn.disabled = true;
+        const orig = refreshBtn.textContent;
+        refreshBtn.textContent = "⟳ LOADING…";
+        try { await this._fetchIntrusionLog(); }
+        finally { refreshBtn.disabled = false; refreshBtn.textContent = orig; }
+      });
+    } else {
+      this._fetchIntrusionLog();
+    }
+  }
+
+  // ─── Suggestions ──────────────────────────────────────────────────────
+  // Ported from Classic's own Suggestions tab. Data rides on the same
+  // nova/get_panel_data payload the dashboard already polls (d.suggestions)
+  // — no separate fetch. Approve/dismiss dim the card in place rather than
+  // removing it or re-fetching, matching Classic's own lightweight pattern.
+  static SUGGESTION_TYPE_LABEL = {
+    time_routine: "Daily routine", sequence: "Action sequence",
+    repeated_command: "Repeated command", temp_pref: "Temperature",
+    presence: "Presence", numeric_trigger: "Sensor threshold",
+  };
+
+  _htmlSuggestions() {
+    const sugs = this._data()?.suggestions || [];
+    if (!sugs.length) {
+      return `
+        <div class="panel">
+          <div class="panel-head"><div class="panel-title">What Nova Has Learned</div></div>
+          <div class="stub-body">No suggestions right now. Nova proposes automations as it notices routines repeat — a light you turn on each evening, a scene after a button press, the heat when it's cold. As patterns build up, they'll appear here for you to review and approve. Nothing is ever created without your say-so.</div>
+          <div class="mode-grid"><button class="mode-chip" id="sugRunAnalysis">Analyze Now</button></div>
+          <div class="toggle-desc" id="sugAnalysisResult" style="margin-top:8px">See why nothing has qualified yet, or force a fresh pass over your history.</div>
+        </div>`;
+    }
+    const rows = sugs.map(s => {
+      const pct = Math.round((s.confidence || 0) * 100);
+      const confColor = pct >= 80 ? "#5fbf7a" : pct >= 55 ? "var(--warn)" : "var(--ink-faint)";
+      const label = NovaPanel.SUGGESTION_TYPE_LABEL[s.pattern_type] || "Learned pattern";
+      const evidence = (s.evidence || []).map(e => `<li>${this._esc(e)}</li>`).join("");
+      const entities = (s.entities || []).length
+        ? `<div class="mode-grid">${(s.entities || []).map(e => `<span class="area-cap" style="width:auto;padding:3px 8px;font-family:var(--font-mono);font-size:10px">${this._esc(e)}</span>`).join("")}</div>`
+        : "";
+      return `
+        <div class="panel new-sug" data-sug-id="${s.id}">
+          <div class="panel-head">
+            <div class="panel-title">${this._esc(label)}</div>
+            <div class="panel-meta" style="color:${confColor}">${pct}% confident</div>
+          </div>
+          ${s.why_headline ? `<div class="stub-body"><b>${this._esc(s.why_headline)}</b></div>` : ""}
+          <div class="stub-body">${this._esc(s.description)}</div>
+          ${evidence ? `<div class="mode-bind-head">What Nova observed</div><ul style="margin:0 0 10px;padding-left:18px;font-size:12px;color:var(--ink-dim);line-height:1.6">${evidence}</ul>` : ""}
+          ${entities}
+          <div class="cfg-row"><span class="toggle-desc">seen ${s.count || "?"}× in 30 days</span></div>
+          <div class="mode-grid">
+            <button class="mode-chip new-sug-approve">✓ Create automation</button>
+            <button class="mode-chip new-sug-dismiss">✕ Dismiss</button>
+            <button class="mode-chip new-sug-yaml-btn">⌄ See the automation</button>
+          </div>
+          <pre class="new-sug-yaml" hidden style="white-space:pre-wrap;font-family:var(--font-mono);font-size:10.5px;color:var(--ink-dim);background:var(--surface-2);border:1px solid var(--line-soft);border-radius:8px;padding:10px;margin-top:8px">${this._esc(s.yaml || "")}</pre>
+        </div>`;
+    }).join("");
+    return `
+      <div class="panel">
+        <div class="panel-head">
+          <div class="panel-title">What Nova Has Learned</div>
+          <div class="panel-meta">${sugs.length} suggestion${sugs.length === 1 ? "" : "s"} to review</div>
+        </div>
+        <div class="stub-body">Automations Nova has learned from watching your routines. Review each — approve to create it in Home Assistant, or dismiss it. Nothing runs until you approve, and you can see the exact automation before deciding.</div>
+      </div>
+      ${rows}`;
+  }
+
+  _wireSuggestions() {
+    const root = this.shadowRoot;
+    root.querySelectorAll(".new-sug").forEach(card => {
+      const sid = parseInt(card.getAttribute("data-sug-id"), 10);
+      const act = async (action) => {
+        if (!this._hass || isNaN(sid)) return;
+        try {
+          await this._hass.callWS({ type: "nova/suggestion_action", suggestion_id: sid, action });
+          card.style.opacity = "0.35";
+          card.querySelectorAll("button").forEach(b => b.disabled = true);
+        } catch (err) {
+          console.error(`Nova: suggestion ${action} failed`, err);
+        }
+      };
+      card.querySelector(".new-sug-approve")?.addEventListener("click", () => act("approve"));
+      card.querySelector(".new-sug-dismiss")?.addEventListener("click", () => act("dismiss"));
+      card.querySelector(".new-sug-yaml-btn")?.addEventListener("click", () => {
+        const pre = card.querySelector(".new-sug-yaml");
+        if (pre) pre.hidden = !pre.hidden;
+      });
+    });
+  }
+
+  // ─── Settings ─────────────────────────────────────────────────────────
+  // Reorganized around what you're trying to do rather than which Nova
+  // subsystem it touches — the old Classic split (System Diagnostics
+  // under General, a separate Diagnostics under Cameras) is merged here
+  // into one place. Every card is "real:true" — nothing here is a stub.
+  // Mirrors const.py's HONORIFIC_OPTIONS — kept in sync by hand, same as
+  // AREA_CAP_ORDER/AREA_CAP_ICON below mirror their own backend source.
+  static HONORIFIC_OPTIONS = ["sir", "ma'am", "boss", "friend"];
+
+  static SETTINGS_GROUPS = [
+    { id: "general", label: "General" },
+    { id: "voice", label: "Voice & Speakers" },
+    { id: "safety", label: "Awareness & Safety" },
+    { id: "learning", label: "Learning & Memory" },
+    { id: "cameras", label: "Cameras" },
+    { id: "home", label: "Home & Extras" },
+  ];
+
+  static SETTINGS_CARDS = [
+    { id: "general", group: "general", title: "General", real: true,
+      desc: "Language, sleep state, and the core proactive-speech switches." },
+    { id: "person_honorifics", group: "general", title: "Person Honorifics", real: true,
+      desc: "What Nova calls each person when they're home alone. Drops the address entirely the moment more than one person — or nobody — is home." },
+    { id: "residence_home", group: "general", title: "Residence / Home", real: true,
+      desc: "Home style, stories, and layout counts that feed the Residence 3D view." },
+    { id: "operational_mode", group: "general", title: "Operational Mode", real: true,
+      desc: "Party/movie/away modes and what each one changes while active." },
+    { id: "diagnostics", group: "general", title: "Diagnostics", real: true,
+      desc: "Service health checks and system status (merged from Classic's two separate diagnostics cards)." },
+    { id: "room_speakers", group: "voice", title: "Room Speakers", real: true,
+      desc: "Assign the one speaker Nova may use per room, plus a general fallback." },
+    { id: "ai_models", group: "voice", title: "AI Models", real: true,
+      desc: "Provider and model per tier — main agent, classifier, reasoning, review, vision." },
+    { id: "briefings", group: "voice", title: "Briefings", real: true,
+      desc: "Daily briefing schedule, content, and delivery speakers." },
+    { id: "voice_confirmation", group: "voice", title: "Voice Confirmation", real: true,
+      desc: "Whether risky actions need a spoken or phone confirmation before Nova acts." },
+    { id: "satellite_speaker", group: "voice", title: "Satellite → Speaker", real: true,
+      desc: "Per-satellite override, for a specific satellite that shouldn't use its room's assigned speaker." },
+    { id: "announcement_speakers", group: "voice", title: "Announcement Speakers", real: true,
+      desc: "Which speakers whole-house broadcasts (briefings, sentinel alerts) use." },
+    { id: "notifications", group: "safety", title: "Notifications", real: true,
+      desc: "Your phone's notify service, for alerts when nobody's home to hear a speaker." },
+    { id: "sentinel_rules", group: "safety", title: "Sentinel Rules", real: true,
+      desc: "Enable or disable individual door/lock/garage anomaly rules." },
+    { id: "hazard_monitor", group: "safety", title: "Hazard Monitor", real: true,
+      desc: "Earthquake, severe weather, and disaster feeds near your home." },
+    { id: "energy_management", group: "safety", title: "Energy Management", real: true,
+      desc: "Peak-draw threshold and how much say Nova has over high-draw appliances." },
+    { id: "appliances", group: "safety", title: "Appliances", real: true,
+      desc: "Declared appliance profiles Nova fingerprints by wattage." },
+    { id: "anticipation_memory", group: "learning", title: "Anticipation & Memory", real: true,
+      desc: "Cross-session memory window, continued conversation, and multi-satellite follow." },
+    { id: "memory_curated", group: "learning", title: "Memory", real: true,
+      desc: "Memory backend and how many memories are stored. Full review/edit lives on the Memory tab." },
+    { id: "observer_tuning", group: "learning", title: "Observer Tuning", real: true,
+      desc: "How cautious or talkative the proactive Observer is." },
+    { id: "routine_learning", group: "learning", title: "Routine Learning", real: true,
+      desc: "What Nova is allowed to learn from — doors, presence, button presses." },
+    { id: "excluded_entities", group: "learning", title: "Excluded Entities", real: true,
+      desc: "Entities, domains, or labels Nova should ignore entirely." },
+    { id: "cameras", group: "cameras", title: "Cameras", real: true,
+      desc: "Camera names, indoor/outdoor designation, and location overrides." },
+    { id: "doorbell_training", group: "cameras", title: "Doorbell Training", real: true,
+      desc: "Teach Nova to recognize regular visitors at the door." },
+    { id: "floor_plan_editor", group: "home", title: "Floor Plan Editor", real: true,
+      desc: "Rooms, outdoor zones, property line, windows/doors/dormers, camera placement, a background image, and AI camera-coverage estimation." },
+    { id: "wellbeing_context", group: "home", title: "Wellbeing Context", real: true,
+      desc: "Whether wearable heart-rate/sleep data reaches Nova, and which providers." },
+    { id: "character_research", group: "home", title: "Nova Character & Research", real: true,
+      desc: "Banter level and the web-research backend (DuckDuckGo or self-hosted SearXNG)." },
+    { id: "document_library", group: "home", title: "Document Library", real: true,
+      desc: "Manuals and receipts Nova can search and cite from." },
+  ];
+
+  // ─── Residence 3D (Phase A) ──────────────────────────────────────────────
+  // Reuses the NOVA3D engine defined at the top of this file (window.NOVA3D)
+  // rather than re-deriving the ~1000 lines of isometric-projection geometry
+  // — this tab only shapes the small options object (spec/plan/elements/
+  // garage/lit/doors/theta) NOVA3D expects, using the same floor_plan_rooms/
+  // floor_plan_elements data this panel already reads for its own Floor
+  // Plan Editor.
+  _resStyles() {
+    return {
+      cape_cod: { label: "Cape Cod", roof: "gable", pitch: 1.0 },
+      colonial: { label: "Colonial", roof: "gable", pitch: 0.7 },
+      dutch_colonial: { label: "Dutch Colonial", roof: "gambrel", pitch: 0.6 },
+      ranch: { label: "Ranch", roof: "hip", pitch: 0.5 },
+      two_story: { label: "Two-Story", roof: "gable", pitch: 0.65 },
+      craftsman: { label: "Craftsman", roof: "hip", pitch: 0.6 },
+      modern: { label: "Modern", roof: "flat", pitch: 0 },
+      townhouse: { label: "Townhouse", roof: "gable", pitch: 0.85 },
+      apartment: { label: "Apartment", roof: "flat", pitch: 0 },
+      cabin: { label: "Cabin", roof: "gable", pitch: 1.25 },
+    };
+  }
+  _residenceStyleOptions(d) {
+    const styles = this._resStyles();
+    const cur = (d.config && d.config.residence_style) || "cape_cod";
+    return Object.keys(styles).map(k => `<option value="${k}"${k === cur ? " selected" : ""}>${styles[k].label}</option>`).join("");
+  }
+  _styleDefaults(style) {
+    const T = {
+      cape_cod: { roof: "gable", pitch: 1.0, dormersFront: 2, dormersRear: 1 },
+      colonial: { roof: "gable", pitch: 0.7, dormersFront: 0, dormersRear: 0 },
+      dutch_colonial: { roof: "gambrel", pitch: 0.6, dormersFront: 2, dormersRear: 1 },
+      ranch: { roof: "hip", pitch: 0.5, dormersFront: 0, dormersRear: 0 },
+      two_story: { roof: "gable", pitch: 0.65, dormersFront: 0, dormersRear: 0 },
+      craftsman: { roof: "hip", pitch: 0.6, dormersFront: 1, dormersRear: 0 },
+      modern: { roof: "flat", pitch: 0.12, dormersFront: 0, dormersRear: 0 },
+      townhouse: { roof: "gable", pitch: 0.85, dormersFront: 0, dormersRear: 0 },
+      apartment: { roof: "flat", pitch: 0.12, dormersFront: 0, dormersRear: 0 },
+      cabin: { roof: "gable", pitch: 1.25, dormersFront: 2, dormersRear: 1 },
+    };
+    return T[style] || T.cape_cod;
+  }
+  _houseSpec() {
+    const c = this._data()?.config || {};
+    const style = c.residence_style || "cape_cod";
+    const sd = this._styleDefaults(style);
+    const num = v => (v === "" || v == null ? null : Number(v));
+    const fEx = num(c.dormers_front), rEx = num(c.dormers_rear);
+    const spec = {};
+    spec.roof = sd.roof || "gable";
+    spec.stories = num(c.home_stories) != null ? num(c.home_stories) : 1.5;
+    if (sd.pitch != null) spec.pitch = sd.pitch;
+    spec.dormersFront = fEx != null ? fEx : sd.dormersFront;
+    spec.dormersRear = rEx != null ? rEx : sd.dormersRear;
+    if (num(c.garage_bays) != null) spec.garageBays = num(c.garage_bays);
+    if (c.chimney_side) spec.chimney = c.chimney_side;
+    return spec;
+  }
+  // Panel floor key -> model floor key; convert editor rooms (SVG units) to
+  // the model's real feet (FT_PER_UNIT = 0.2), same as Classic.
+  _planToFeet(plan) {
+    const FT = 0.2, out = {};
+    Object.keys(plan || {}).forEach(fk => {
+      out[fk] = (((plan[fk] || {}).rooms) || []).filter(r => r.type !== "outdoor").map(r => ({
+        name: (r.name || "").toLowerCase(),
+        label: (r.name || "").toUpperCase(),
+        x: (r.x || 0) * FT, y: (r.y || 0) * FT, w: (r.w || 0) * FT, d: (r.h || 0) * FT,
+        type: r.type,
+        points: (Array.isArray(r.points) && r.points.length >= 3) ? r.points.map(p => [p[0] * FT, p[1] * FT]) : undefined,
+      }));
+    });
+    return this._snapFeet(out);
+  }
+  _snapMap(vals, tol) {
+    const s = vals.slice().sort((a, b) => a - b), reps = [];
+    let cur = null;
+    s.forEach(v => { if (cur && v - cur.start <= tol) { cur.vals.push(v); } else { cur = { vals: [v], start: v }; reps.push(cur); } });
+    const means = reps.map(g => g.vals.reduce((a, b) => a + b, 0) / g.vals.length);
+    return v => { let best = v, bd = tol + 1e-6; means.forEach(m => { const dd = Math.abs(v - m); if (dd < bd) { bd = dd; best = m; } }); return best; };
+  }
+  _snapFeet(out) {
+    const TOL = 1.0;
+    Object.keys(out || {}).forEach(fk => {
+      const rooms = out[fk] || [];
+      if (rooms.length < 2) return;
+      const xs = [], ys = [];
+      rooms.forEach(r => { xs.push(r.x, r.x + r.w); ys.push(r.y, r.y + r.d); if (r.points) r.points.forEach(p => { xs.push(p[0]); ys.push(p[1]); }); });
+      const sx = this._snapMap(xs, TOL), sy = this._snapMap(ys, TOL);
+      rooms.forEach(r => {
+        const x0 = sx(r.x), x1 = sx(r.x + r.w), y0 = sy(r.y), y1 = sy(r.y + r.d);
+        r.x = x0; r.w = x1 - x0; r.y = y0; r.d = y1 - y0;
+        if (r.points) r.points = r.points.map(p => [sx(p[0]), sy(p[1])]);
+      });
+    });
+    return out;
+  }
+  _house3dPlan() { return this._planToFeet(this._getFloorPlan()); }
+  _elementsToFeet(raw) {
+    const FT = 0.2, states = this._hass?.states || {}, out = {};
+    Object.keys(raw || {}).forEach(fk => {
+      out[fk] = (raw[fk] || []).map(e => {
+        let open = false;
+        if (e.entity && states[e.entity]) { const s = states[e.entity].state; open = (s === "on" || s === "open"); }
+        return { type: e.type, kind: e.kind, wall: e.wall, room: e.room, slope: e.slope, pos: (e.pos != null ? e.pos : 0.5), w: (e.w || 20) * FT, open };
+      });
+    });
+    return out;
+  }
+  _house3dElements() { return this._elementsToFeet(this._getFloorElements()); }
+  _house3dGarage() {
+    const cfg = this._data()?.config || {};
+    const map = cfg.door_mapping || {};
+    const bays = Math.max(0, Math.min(Number(cfg.garage_bays) || 0, 8));
+    const states = this._hass?.states || {};
+    const out = [];
+    for (let i = 1; i <= bays; i++) {
+      const eid = map["garage_" + i] || (i === 1 ? (map.garage || "") : "");
+      let open = false;
+      if (eid && states[eid]) { const s = states[eid].state; open = (s === "on" || s === "open"); }
+      out.push({ open });
+    }
+    return out;
+  }
+  _house3dFloor() {
+    const f = this._currentFloor || "all";
+    return f === "bsmt" ? "b" : f;
+  }
+  _house3dLit() {
+    const d = this._data() || {};
+    const lit = {};
+    (d.areas || []).forEach(a => { if (a.active) lit[String(a.name).toLowerCase()] = "on"; });
+    const mm = this._mmwave && this._mmwave.rooms;
+    if (Array.isArray(mm)) mm.forEach(r => { if (r.detecting_count > 0) lit[String(r.name).toLowerCase()] = "mmwave"; });
+    return lit;
+  }
+  _house3dDoors() {
+    const d = this._data() || {};
+    return d.doors || {};
+  }
+  _doorSlots() {
+    const bays = Math.max(0, Math.min(Number((this._data()?.config || {}).garage_bays) || 0, 8));
+    const garage = [];
+    for (let i = 1; i <= bays; i++) garage.push(["garage_" + i, "Garage Door " + i]);
+    if (!bays) garage.push(["garage", "Garage Door"]);
+    return [["front", "Front Door"], ...garage, ["garage_rear", "Garage Side / Rear"], ["kitchen_garage", "Kitchen ↔ Garage"], ["cellar", "Cellar / Bulkhead"], ["basement", "Basement"]];
+  }
+  _renderDoorMappingNew(d) {
+    const map = (d.config && d.config.door_mapping) || {};
+    const rows = this._doorSlots().map(([slot, label]) => `
+      <div class="cfg-row">
+        <label>${label}</label>
+        <select class="door-map-sel-new" id="resDoorMap-${slot}" data-slot="${slot}">${this._doorEntityOptions(map[slot] || "")}</select>
+      </div>`).join("");
+    return rows;
+  }
+  _renderHouse3dNew() {
+    const mount = this.shadowRoot?.getElementById("resIso");
+    if (!mount || typeof window.NOVA3D === "undefined") return;
+    const floor = this._house3dFloor();
+    const spec = this._houseSpec();
+    const plan = this._house3dPlan();
+    const elements = this._house3dElements();
+    const garage = this._house3dGarage();
+    const key = floor + "|" + JSON.stringify(spec) + "|" + JSON.stringify(plan) + "|" + JSON.stringify(elements) + "|" + JSON.stringify(garage);
+    if (this._house3dBoxKey !== key) {
+      this._house3dBox = window.NOVA3D.fixedBox({ floor, spec, plan, elements, garage });
+      this._house3dBoxKey = key;
+    }
+    const base = this._house3dBox, zoom = this._house3dZoom || 1;
+    const cx = base[0] + base[2] / 2, cy = base[1] + base[3] / 2;
+    const w = base[2] / zoom, h = base[3] / zoom;
+    const box = [cx - w / 2, cy - h / 2, w, h];
+    mount.innerHTML = window.NOVA3D.renderSVG({
+      theta: this._house3dTheta || 35, floor, lit: this._house3dLit(), doors: this._house3dDoors(), box, spec, plan, elements, garage,
+    });
+  }
+  _buildResidenceAnnotationsNew() {
+    const d = this._data() || {};
+    const cfg = d.config || {};
+    const areas = d.areas || [];
+    const cfgBeds = cfg.home_bedrooms, cfgBaths = cfg.home_bathrooms;
+    const beds = (cfgBeds != null && cfgBeds !== "") ? Number(cfgBeds) : (areas.filter(a => a.bedroom).length || 0);
+    const baths = (cfgBaths != null && cfgBaths !== "") ? Number(cfgBaths) : areas.filter(a => /bath/i.test(a.name || "")).length;
+    const bbEl = this.shadowRoot?.getElementById("resBb");
+    if (bbEl) bbEl.textContent = beds + " / " + (baths || "—");
+    const sqEl = this.shadowRoot?.getElementById("resSqft");
+    if (sqEl) {
+      let sqft = cfg.floor_plan_sqft;
+      if (!sqft) {
+        const plan = this._getFloorPlan();
+        let u = 0;
+        Object.keys(plan).forEach(fk => (plan[fk] && plan[fk].rooms || []).forEach(r => {
+          if (r.type === "door" || r.type === "stairs") return;
+          u += (r.w || 0) * (r.h || 0);
+        }));
+        sqft = Math.min(5000, Math.max(600, Math.round(u * 0.032 / 50) * 50));
+      }
+      sqEl.textContent = sqft ? "~" + Number(sqft).toLocaleString() : "—";
+    }
+    const styleTag = this.shadowRoot?.getElementById("resStyleTag");
+    if (styleTag) {
+      const rs = this._resStyles()[(cfg.residence_style || "cape_cod")];
+      styleTag.textContent = rs ? rs.label : "—";
+    }
+    const occEl = this.shadowRoot?.getElementById("resOcc");
+    if (occEl) {
+      const occ = areas.filter(a => a.active).length;
+      occEl.textContent = occ + " / " + (areas.length || 0);
+    }
+  }
+  _build3DHouseNew() {
+    const mount = this.shadowRoot?.getElementById("resIso");
+    if (!mount) return;
+    this._renderHouse3dNew();
+    this._buildResidenceAnnotationsNew();
+    this._wire3DDragNew();
+  }
+  _wire3DDragNew() {
+    const scene = this.shadowRoot?.getElementById("resScene");
+    if (!scene || scene._house3dWired) return;
+    scene._house3dWired = true;
+    let dragging = false, lastX = 0, raf = null;
+    const schedule = () => { if (!raf) raf = requestAnimationFrame(() => { raf = null; this._renderHouse3dNew(); }); };
+    const pt = e => (e.touches && e.touches[0] ? e.touches[0] : e);
+    const move = (e) => {
+      if (!dragging) return;
+      const p = pt(e);
+      if (e.cancelable) e.preventDefault();
+      this._house3dTheta = (this._house3dTheta || 35) + (p.clientX - lastX) * 0.5;
+      lastX = p.clientX;
+      schedule();
+    };
+    const up = () => {
+      dragging = false; scene.classList.remove("dragging");
+      window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up);
+      window.removeEventListener("touchmove", move); window.removeEventListener("touchend", up);
+    };
+    const down = (e) => {
+      const p = pt(e);
+      dragging = true; lastX = p.clientX;
+      scene.classList.add("dragging");
+      window.addEventListener("mousemove", move); window.addEventListener("mouseup", up);
+      window.addEventListener("touchmove", move, { passive: false }); window.addEventListener("touchend", up);
+    };
+    scene.addEventListener("mousedown", (e) => { down(e); e.preventDefault(); });
+    scene.addEventListener("touchstart", (e) => down(e), { passive: true });
+    scene.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+      this._house3dZoom = Math.max(0.5, Math.min(4, (this._house3dZoom || 1) * factor));
+      schedule();
+    }, { passive: false });
+  }
+  async _fetchMmwaveNew() {
+    if (!this._hass) return;
+    try {
+      const res = await this._hass.callWS({ type: "nova/mmwave_overview" });
+      this._mmwave = res || { rooms: [], summary: {} };
+    } catch (_) {
+      this._mmwave = { rooms: [], summary: {}, error: true };
+    }
+    this._renderMmwaveNew();
+    if (this._currentTab === "residence") this._renderHouse3dNew();
+  }
+  _renderMmwaveNew() {
+    const list = this.shadowRoot?.getElementById("resMmwaveList");
+    const sumEl = this.shadowRoot?.getElementById("resMmwaveSummary");
+    if (!list) return;
+    const data = this._mmwave || { rooms: [], summary: {} };
+    const s = data.summary || {};
+    if (sumEl) sumEl.textContent = s.rooms_with_mmwave ? `◉ ${s.rooms_detecting || 0}/${s.rooms_with_mmwave} OCCUPIED` : "◉ NONE";
+    if (data.error) { list.innerHTML = `<div class="toggle-desc">Couldn't read sensors — restart Home Assistant after updating, then reopen.</div>`; return; }
+    const rooms = data.rooms || [];
+    if (!rooms.length) { list.innerHTML = `<div class="toggle-desc">No presence, motion, or mmWave sensors found. Assign occupancy sensors to areas in Home Assistant and they'll appear here.</div>`; return; }
+    list.innerHTML = rooms.map(r => {
+      const on = r.detecting_count > 0;
+      const sensorLine = r.sensor_count > 1 ? `${r.detecting_count}/${r.sensor_count} sensors` : `${r.sensor_count} sensor`;
+      return `<div class="cfg-row">
+        <label>${this._esc(r.name)}${r.outdoor ? " ▲" : ""}</label>
+        <span class="toggle-desc">${on ? "OCCUPIED" : "clear"} · ${sensorLine} · ${on ? "now" : this._esc(r.freshest)}</span>
+      </div>`;
+    }).join("");
+  }
+  _wireResidenceControlsNew() {
+    const root = this.shadowRoot;
+    // Not part of the Settings tab, so it can't ride _wireSettings()'s
+    // generic .cfg-field autosave (only wired while that tab is current) —
+    // wire this select directly, same as Intrusion's own cfg-field controls.
+    const styleSel = root.querySelector('select.cfg-field[data-cfg-key="residence_style"]');
+    if (styleSel && !styleSel._wired) {
+      styleSel._wired = true;
+      styleSel.addEventListener("change", () => this._saveSetting("residence_style", styleSel.value));
+    }
+    root.querySelectorAll(".res-floor-tab").forEach(btn => {
+      btn.addEventListener("click", () => {
+        this._currentFloor = btn.getAttribute("data-res-floor");
+        this._house3dBoxKey = null;
+        root.querySelectorAll(".res-floor-tab").forEach(b => b.classList.toggle("active", b === btn));
+        this._renderHouse3dNew();
+      });
+    });
+    root.querySelectorAll(".res-view-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        this._house3dTheta = parseFloat(btn.getAttribute("data-res-theta"));
+        this._renderHouse3dNew();
+      });
+    });
+    this._doorSlots().forEach(([slot]) => {
+      const ds = root.getElementById("resDoorMap-" + slot);
+      if (ds && !ds._wired) {
+        ds._wired = true;
+        ds.addEventListener("change", async () => {
+          const cfg = this._data()?.config || {};
+          const map = { ...(cfg.door_mapping || {}) };
+          if (ds.value) map[slot] = ds.value; else delete map[slot];
+          if (this._liveData?.config) this._liveData.config.door_mapping = map;
+          this._house3dBoxKey = null;
+          this._renderHouse3dNew();
+          try { await this._hass.callWS({ type: "nova/update_config", key: "door_mapping", value: JSON.stringify(map) }); } catch (_) {}
+        });
+      }
+    });
+  }
+
+  _htmlResidence() {
+    const d = this._data() || {};
+    const cfg = d.config || {};
+    if (!this._currentFloor) this._currentFloor = "all";
+    const floors = [["all", "All"], ["1f", "1st Floor"]];
+    if (String(cfg.home_stories ?? "1.5") !== "1") floors.push(["2f", "2nd Floor"]);
+    if (cfg.has_basement !== false) floors.push(["bsmt", "Basement"]);
+    return `
+      <div class="res-tab-new">
+        <div class="res-main-new">
+          <div class="cfg-row">
+            <label>Home style</label>
+            <select class="cfg-field" data-cfg-key="residence_style">${this._residenceStyleOptions(d)}</select>
+          </div>
+          <div class="fpn-toolbar">
+            <div class="fpn-floor-tabs">
+              ${floors.map(([fk, lbl]) => `<button class="mode-chip res-floor-tab${this._currentFloor === fk ? " active" : ""}" data-res-floor="${fk}">${lbl}</button>`).join("")}
+            </div>
+            <div class="fpn-actions">
+              ${[["FRONT", 0], ["RIGHT", 90], ["REAR", 180], ["LEFT", 270], ["ISO", 35]].map(([lbl, th]) => `<button class="mode-chip res-view-btn" data-res-theta="${th}">${lbl}</button>`).join("")}
+            </div>
+          </div>
+          <div class="fpn-hint">Drag to rotate · scroll to zoom</div>
+          <div class="res-scene-new" id="resScene"><div id="resIso"></div></div>
+          <div class="mode-grid res-stats-new">
+            <div class="cfg-row"><label>Est. sq ft</label><b id="resSqft">—</b></div>
+            <div class="cfg-row"><label>Bed / Bath</label><b id="resBb">—</b></div>
+            <div class="cfg-row"><label>Style</label><b id="resStyleTag">—</b></div>
+            <div class="cfg-row"><label>Occupied</label><b id="resOcc">—</b></div>
+          </div>
+          <div class="mode-bind-head">Doors <span class="toggle-desc">map to your entities — blank = auto-detect by name</span></div>
+          ${this._renderDoorMappingNew(d)}
+        </div>
+        <div class="res-side-new">
+          <div class="mode-bind-head">mmWave Presence <span class="toggle-desc" id="resMmwaveSummary">◉ scan</span></div>
+          <div class="toggle-desc">Live occupancy per room from presence/motion/mmWave sensors.</div>
+          <div id="resMmwaveList"><div class="toggle-desc">Reading sensors…</div></div>
+        </div>
+      </div>`;
+  }
+
+  _htmlSettings() {
+    const groupsNav = NovaPanel.SETTINGS_GROUPS.map(g =>
+      `<button class="settings-nav-btn${this._settingsSection === g.id ? " active" : ""}" data-settings-section="${g.id}">${this._esc(g.label)}</button>`
+    ).join("");
+    const cards = NovaPanel.SETTINGS_CARDS.map(c => this._settingsCardHtml(c)).join("");
+    return `
+        <div class="settings-toolbar">
+          <input type="search" id="settingsSearch" class="settings-search" placeholder="Search settings — try “camera” or “sleep”…" value="${this._esc(this._settingsSearch)}">
+          <nav class="settings-nav">${groupsNav}</nav>
+        </div>
+        <div class="settings-grid" id="settingsGrid">${cards}</div>
+    `;
+  }
+
+  _settingsCardHtml(c) {
+    const body = c.real
+      ? (c.id === "general" ? this._generalCardBody()
+        : c.id === "person_honorifics" ? this._personHonorificsCardBody()
+        : c.id === "room_speakers" ? this._roomSpeakersCardBody()
+        : c.id === "residence_home" ? this._residenceHomeCardBody()
+        : c.id === "operational_mode" ? this._operationalModeCardBody()
+        : c.id === "diagnostics" ? this._diagnosticsCardBody()
+        : c.id === "ai_models" ? this._aiModelsCardBody()
+        : c.id === "briefings" ? this._briefingsCardBody()
+        : c.id === "voice_confirmation" ? this._voiceConfirmationCardBody()
+        : c.id === "satellite_speaker" ? this._satelliteSpeakerCardBody()
+        : c.id === "announcement_speakers" ? this._announcementSpeakersCardBody()
+        : c.id === "notifications" ? this._notificationsCardBody()
+        : c.id === "sentinel_rules" ? this._sentinelRulesCardBody()
+        : c.id === "hazard_monitor" ? this._hazardMonitorCardBody()
+        : c.id === "energy_management" ? this._energyManagementCardBody()
+        : c.id === "appliances" ? this._appliancesCardBody()
+        : c.id === "anticipation_memory" ? this._anticipationMemoryCardBody()
+        : c.id === "memory_curated" ? this._memoryCardBody()
+        : c.id === "observer_tuning" ? this._observerTuningCardBody()
+        : c.id === "routine_learning" ? this._routineLearningCardBody()
+        : c.id === "excluded_entities" ? this._excludedEntitiesCardBody()
+        : c.id === "cameras" ? this._camerasCardBody()
+        : c.id === "doorbell_training" ? this._doorbellTrainingCardBody()
+        : c.id === "floor_plan_editor" ? this._floorPlanEditorCardBody()
+        : c.id === "wellbeing_context" ? this._wellbeingContextCardBody()
+        : c.id === "character_research" ? this._characterResearchCardBody()
+        : c.id === "document_library" ? this._documentLibraryCardBody()
+        : "")
+      : `<div class="stub-body">${this._esc(c.desc)}<br><span class="stub-where">Not built here yet — see Settings → Devices &amp; Services → Nova → Configure.</span></div>`;
+    return `
+      <div class="panel settings-card" id="settings-card-${c.id}" data-settings-group="${c.group}" data-search="${this._esc((c.title + " " + c.desc).toLowerCase())}">
+        <div class="panel-head">
+          <div class="panel-title">${this._esc(c.title)}${c.real ? "" : '<span class="stub-tag">SOON</span>'}</div>
+        </div>
+        ${body}
+      </div>`;
+  }
+
+  _generalCardBody() {
+    const cfg = this._data()?.config || {};
+    const onOff = (key, label, desc) => `
+      <div class="toggle-row">
+        <span class="toggle-label">${this._esc(label)}</span>
+        <span class="toggle-desc">${this._esc(desc)}</span>
+        <button class="toggle-btn ${cfg[key] ? "on" : "off"}" data-cfg-key="${key}" data-cfg-val="${cfg[key] ? "false" : "true"}">
+          ${cfg[key] ? "ON" : "OFF"}
+        </button>
+      </div>`;
+    return `
+      <div class="cfg-row">
+        <label>Sleep state</label>
+        <select class="cfg-field" data-cfg-key="sleep_override">
+          ${this._optSelect([["auto", "Auto (occupancy + quiet hours)"], ["awake", "Awake"], ["asleep", "Asleep"]], cfg.sleep_override || "auto")}
+        </select>
+      </div>
+      <div class="toggle-list">
+        ${onOff("announcements_enabled", "Announcements", "Master switch — all proactive speech")}
+        ${onOff("sentinel_enabled", "Sentinel", "Door/garage/lock-left-open alerts")}
+        ${onOff("observer_enabled", "Observer", "AI event awareness (uses API)")}
+      </div>`;
+  }
+
+  _personHonorificsCardBody() {
+    const cfg = this._data()?.config || {};
+    const people = cfg.all_people || [];
+    const overrides = cfg.person_honorifics || {};
+    const opts = NovaPanel.HONORIFIC_OPTIONS;
+    if (!people.length) {
+      return `<div class="stub-body">No <code>person.*</code> entities found yet — add one in Home Assistant to set a personal address here.</div>`;
+    }
+    const rows = people.map(p => {
+      const current = overrides[p.entity_id] || "";
+      const isCustom = current && !opts.includes(current);
+      return `
+        <div class="pairing-row person-honorific-row">
+          <span class="pairing-label">${this._esc(p.name)}</span>
+          <select class="person-honorific-select" data-person-id="${this._esc(p.entity_id)}">
+            <option value="">— use default —</option>
+            ${opts.map(o => `<option value="${this._esc(o)}"${!isCustom && o === current ? " selected" : ""}>${this._esc(o[0].toUpperCase() + o.slice(1))}</option>`).join("")}
+            <option value="__custom__"${isCustom ? " selected" : ""}>Custom…</option>
+          </select>
+          <input type="text" class="person-honorific-custom" data-person-id="${this._esc(p.entity_id)}"
+                 placeholder="Custom address" value="${isCustom ? this._esc(current) : ""}"
+                 ${isCustom ? "" : "hidden"}>
+        </div>`;
+    }).join("");
+    return `
+      <div class="pairing-list">${rows}</div>
+      <div class="camera-note">Only applies while that person is home alone. With nobody home, or more than one person home, Nova doesn't guess — it drops the address entirely. Anyone without an override here uses the global "Address me as" setting (Settings → Devices &amp; Services → Nova → Configure).</div>`;
+  }
+
+  _roomSpeakersCardBody() {
+    const cfg = this._data()?.config || {};
+    const areas = cfg.speaker_areas || [];
+    const castDevs = cfg.cast_devices || [];
+    const assigned = cfg.room_speakers || {};
+    const rows = areas.length
+      ? areas.map(a => `
+        <div class="pairing-row">
+          <span class="pairing-label">${this._esc(a.name)}</span>
+          <select class="new-room-speaker-select" data-area-id="${this._esc(a.area_id)}">
+            <option value="">— none —</option>
+            ${castDevs.map(cd => `<option value="${this._esc(cd.entity_id)}"${cd.entity_id === assigned[a.area_id] ? " selected" : ""}>${this._esc(cd.name)}</option>`).join("")}
+          </select>
+        </div>`).join("")
+      : `<div class="stub-body">No rooms found yet.</div>`;
+    return `
+      <div class="pairing-list">${rows}</div>
+      <div class="pairing-row">
+        <span class="pairing-label">General speaker (fallback)</span>
+        <select class="new-general-speaker-select">
+          <option value="">— none —</option>
+          ${castDevs.map(cd => `<option value="${this._esc(cd.entity_id)}"${cd.entity_id === cfg.general_speaker ? " selected" : ""}>${this._esc(cd.name)}</option>`).join("")}
+        </select>
+      </div>`;
+  }
+
+  _residenceHomeCardBody() {
+    const cfg = this._data()?.config || {};
+    const styles = {
+      cape_cod: "Cape Cod", colonial: "Colonial", dutch_colonial: "Dutch Colonial",
+      ranch: "Ranch", two_story: "Two-Story", craftsman: "Craftsman",
+      modern: "Modern", townhouse: "Townhouse", apartment: "Apartment", cabin: "Cabin",
+    };
+    return `
+      <div class="cfg-row">
+        <label>Home type</label>
+        <select class="cfg-field" data-cfg-key="residence_style">
+          ${this._optSelect(Object.entries(styles), cfg.residence_style || "cape_cod")}
+        </select>
+      </div>
+      <div class="cfg-row">
+        <label>Stories</label>
+        <select class="cfg-field" data-cfg-key="home_stories">
+          ${this._optSelect(["1", "1.5", "2", "3"].map(v => [v, v]), String(cfg.home_stories ?? "1.5"))}
+        </select>
+      </div>
+      <div class="cfg-row">
+        <label>Garage bays</label>
+        <select class="cfg-field" data-cfg-key="garage_bays">
+          ${this._optSelect(["0", "1", "2", "3", "4"].map(v => [v, v]), String(cfg.garage_bays ?? "3"))}
+        </select>
+      </div>
+      <div class="cfg-row">
+        <label>Front dormers</label>
+        <select class="cfg-field" data-cfg-key="dormers_front">
+          ${this._optSelect(["0", "1", "2", "3"].map(v => [v, v]), String(cfg.dormers_front ?? "2"))}
+        </select>
+      </div>
+      <div class="cfg-row">
+        <label>Rear dormers</label>
+        <select class="cfg-field" data-cfg-key="dormers_rear">
+          ${this._optSelect(["0", "1", "2"].map(v => [v, v]), String(cfg.dormers_rear ?? "1"))}
+        </select>
+      </div>
+      <div class="cfg-row">
+        <label>Chimney</label>
+        <select class="cfg-field" data-cfg-key="chimney_side">
+          ${this._optSelect([["right", "East / right"], ["left", "West / left"], ["none", "None"]], cfg.chimney_side || "right")}
+        </select>
+      </div>
+      <div class="cfg-row">
+        <label>Basement</label>
+        <button class="toggle-btn ${(cfg.has_basement !== false) ? "on" : "off"}" data-cfg-key="has_basement" data-cfg-val="${(cfg.has_basement !== false) ? "false" : "true"}">
+          ${(cfg.has_basement !== false) ? "YES" : "NO"}
+        </button>
+      </div>
+      <div class="cfg-row">
+        <label>Bedrooms</label>
+        <input class="cfg-field cfg-num" type="number" min="0" max="12" data-cfg-key="home_bedrooms" value="${cfg.home_bedrooms ?? ""}" placeholder="3">
+      </div>
+      <div class="cfg-row">
+        <label>Bathrooms</label>
+        <input class="cfg-field cfg-num" type="number" min="0" max="12" step="0.5" data-cfg-key="home_bathrooms" value="${cfg.home_bathrooms ?? ""}" placeholder="2">
+      </div>
+      <div class="cfg-row">
+        <label>Square feet</label>
+        <input class="cfg-field cfg-num" type="number" min="0" max="20000" step="50" data-cfg-key="floor_plan_sqft" value="${cfg.floor_plan_sqft ?? ""}" placeholder="1800">
+      </div>
+      <div class="stub-body">Detailed room layout is edited in the Floor Plan Editor. This feeds the Residence 3D view.</div>`;
+  }
+
+  _operationalModeCardBody() {
+    const cfg = this._data()?.config || {};
+    const areas = this._data()?.areas || [];
+    const m = this._mode || {};
+    const active = m.active || "normal";
+    const avail = m.available || [];
+    const modeChips = avail.length
+      ? avail.map(mo => `<button class="mode-chip ${mo.name === active ? "mode-chip-on" : ""}" data-mode="${this._esc(mo.name)}" title="${this._esc(mo.description || "")}">${this._esc(mo.name)}</button>`).join("")
+      : `<div class="stub-body">Couldn't load modes — restart Home Assistant after updating.</div>`;
+    const labAreas = Array.isArray(cfg.lab_areas) ? cfg.lab_areas : [];
+    const labChips = areas.length
+      ? areas.map(a => `<button class="mode-chip ${labAreas.includes(a.id) ? "mode-chip-on" : ""}" data-lab-area="${this._esc(a.id)}">${this._esc(a.name)}</button>`).join("")
+      : `<span class="stub-body">No rooms detected yet.</span>`;
+    const areaOpts = [["", "— none —"], ...areas.map(a => [a.id, a.name])];
+    const mpOpts = this._mediaPlayerOptions(cfg.movie_media_player || "");
+    return `
+      <div class="cfg-row">
+        <label>Auto (follow occupancy)</label>
+        <button class="toggle-btn ${cfg.operational_mode_auto !== false ? "on" : "off"}" data-cfg-key="operational_mode_auto" data-cfg-val="${cfg.operational_mode_auto !== false ? "false" : "true"}">
+          ${cfg.operational_mode_auto !== false ? "ON" : "OFF"}
+        </button>
+      </div>
+      <div class="stub-body">Active: <strong>${this._esc(active.toUpperCase())}</strong>${m.description ? " — " + this._esc(m.description) : ""}. Safety always stays active.</div>
+      <div class="mode-grid">${modeChips}</div>
+      <div class="mode-bind-head">Mode bindings — scope Lab &amp; Movie to specific rooms</div>
+      <div class="cfg-row"><label>Lab rooms (quiet only here)</label></div>
+      <div class="mode-grid">${labChips}</div>
+      <div class="cfg-row">
+        <label>Movie room</label>
+        <select class="cfg-field" data-cfg-key="movie_area">${this._optSelect(areaOpts, cfg.movie_area || "")}</select>
+      </div>
+      <div class="cfg-row">
+        <label>Movie player <span class="toggle-desc">optional</span></label>
+        <select class="cfg-field" data-cfg-key="movie_media_player">${this._optSelect(mpOpts, cfg.movie_media_player || "")}</select>
+      </div>
+      <div class="cfg-row">
+        <label>Movie dim %</label>
+        <input class="cfg-field cfg-num" type="number" min="0" max="100" step="5" data-cfg-key="movie_dim_pct" value="${cfg.movie_dim_pct ?? ""}" placeholder="15">
+      </div>`;
+  }
+
+  // Merged from Classic's two separate diagnostics cards ("System
+  // Diagnostics" under General, a per-service "Diagnostics" test panel
+  // under Cameras) into the one place this section's own docstring already
+  // says it should live. Fetched once per element lifetime (not on the 20s
+  // live-data poll, and not on every settings re-render) — the health check
+  // makes a real, if lightweight, LLM/TTS connectivity probe, matching
+  // Classic's own on-demand-only behaviour.
+  async _fetchDiagnosticsData() {
+    if (!this._hass) return;
+    try {
+      this._diag = await this._hass.callWS({ type: "nova/diagnostics" });
+    } catch (_) { this._diag = { error: true }; }
+    try {
+      this._calib = await this._hass.callWS({ type: "nova/get_calibration" });
+    } catch (_) { this._calib = null; }
+    if (this._currentTab === "settings") this._render();
+  }
+
+  _diagStatusCls(st) {
+    return { ok: "diag-ok", warn: "diag-warn", idle: "diag-idle", down: "diag-down", off: "diag-off" }[st] || "diag-off";
+  }
+  _diagStatusLabel(st) {
+    return { ok: "OK", warn: "WARN", idle: "IDLE", down: "DOWN", off: "OFF" }[st] || "?";
+  }
+
+  _diagnosticsCardBody() {
+    const cfg = this._data()?.config || {};
+    const diag = this._diag || {};
+    if (diag.error) {
+      return `<div class="stub-body">Couldn't run diagnostics — restart Home Assistant after updating.</div>`;
+    }
+    const svcs = diag.services || [];
+    const overall = svcs.length
+      ? `<span class="${this._diagStatusCls(diag.overall)}">${this._esc((diag.summary || diag.overall || "").toUpperCase())}</span>`
+      : "—";
+    const rows = svcs.length
+      ? svcs.map(s => `
+        <div class="cfg-row">
+          <label>${this._esc(s.name)} <span class="${this._diagStatusCls(s.status)}">${this._diagStatusLabel(s.status)}</span></label>
+        </div>
+        <div class="stub-body" style="margin:-6px 0 8px">${this._esc(s.detail || "")}</div>`).join("")
+      : `<div class="stub-body">Loading…</div>`;
+    const svcTest = (svc, label) => `
+      <div class="cfg-row">
+        <label>${this._esc(label)}</label>
+        <button class="mode-chip" data-svc="${this._esc(svc)}">RUN</button>
+      </div>`;
+    const camOpts = (cfg.cameras || []).filter(c => c.enabled !== false).map(c => [c.entity_id, c.name]);
+    return `
+      <div class="cfg-row"><label>Core services</label>${overall}</div>
+      ${rows}
+      <div class="cfg-row"><button class="mode-chip" id="newDiagRefresh">⟳ RUN CHECK</button></div>
+      <div class="mode-bind-head">Service tests</div>
+      ${svcTest("nova.test_tts", "TTS — Nova voice test")}
+      ${svcTest("nova.observer_status", "Observer — fire status event")}
+      ${svcTest("nova.briefing", "Briefing — manual trigger")}
+      ${svcTest("nova.diagnose_doorbell", "Doorbell — run diagnostics")}
+      ${svcTest("nova.test_notify", "Notification — test phone push")}
+      ${svcTest("nova.test_routing", "Routing — dump routing state to log")}
+      <div class="cfg-row">
+        <label>Camera — analyze now</label>
+        <select class="cfg-field" id="newDiagCameraSelect">${camOpts.length ? this._optSelect(camOpts, camOpts[0][0]) : '<option value="">— no cameras —</option>'}</select>
+      </div>
+      <div class="cfg-row"><button class="mode-chip" id="newDiagCameraRun">RUN</button></div>`;
+  }
+
+  // ── AI Models — ported near-verbatim from Classic (see nova-panel.js's
+  // own _modelRoles/_loadModelsFor/_pickHealModel). Deliberately NOT wired
+  // through the generic .cfg-field autosave or _saveSetting: those trigger
+  // a full _render(), which would wipe the just-populated live model
+  // dropdown before the user ever sees it — the exact reason Classic's own
+  // wiring comment gives for avoiding that here. ──
   _modelRoles() {
     return [
-      { role: 'llm',        label: 'Main Agent', provKey: 'llm_provider',        modelKey: 'model' },
-      { role: 'classifier', label: 'Classifier', provKey: 'classifier_provider', modelKey: 'classifier_model' },
-      { role: 'reasoning',  label: 'Reasoning',  provKey: 'reasoning_provider',  modelKey: 'reasoning_model' },
-      { role: 'review',     label: 'Review',     provKey: 'review_provider',     modelKey: 'review_model' },
-      { role: 'vision',     label: 'Vision',     provKey: 'vision_provider',     modelKey: 'vision_model' },
-      { role: 'camrsn',     label: 'Camera Rsn', provKey: 'camera_reasoning_provider', modelKey: 'camera_reasoning_model' },
+      { role: "llm", label: "Main Agent", provKey: "llm_provider", modelKey: "model" },
+      { role: "classifier", label: "Classifier", provKey: "classifier_provider", modelKey: "classifier_model" },
+      { role: "reasoning", label: "Reasoning", provKey: "reasoning_provider", modelKey: "reasoning_model" },
+      { role: "review", label: "Review", provKey: "review_provider", modelKey: "review_model" },
+      { role: "vision", label: "Vision", provKey: "vision_provider", modelKey: "vision_model" },
+      { role: "camrsn", label: "Camera Rsn", provKey: "camera_reasoning_provider", modelKey: "camera_reasoning_model" },
     ];
   }
 
-  _renderModelRoles(d) {
-    const PROVIDERS = ['groq', 'openai', 'gemini', 'ollama', 'anthropic', 'custom'];
-    const cfg = d.config || {};
-    return this._modelRoles().map(r => {
-      const curProv = cfg[r.provKey] || 'groq';
-      const curModel = cfg[r.modelKey] || '';
-      const provOpts = PROVIDERS.map(p =>
-        `<option value="${p}"${p === curProv ? ' selected' : ''}>${p}</option>`).join('');
-      // Model select starts with the current value + a loading hint; it's
-      // repopulated live from the provider via _loadModelsFor().
+  _aiModelsCardBody() {
+    const cfg = this._data()?.config || {};
+    const PROVIDERS = ["groq", "openai", "gemini", "ollama", "anthropic", "custom"];
+    const rows = this._modelRoles().map(r => {
+      const curProv = cfg[r.provKey] || "groq";
+      const curModel = cfg[r.modelKey] || "";
       const modelOpts =
-        (curModel ? `<option value="${this._esc(curModel)}" selected>${this._esc(curModel)}</option>` : '') +
-        `<option value="" disabled>loading…</option>` +
-        `<option value="__custom__">✎ Custom…</option>`;
+        (curModel ? `<option value="${this._esc(curModel)}" selected>${this._esc(curModel)}</option>` : "") +
+        `<option value="" disabled>loading…</option><option value="__custom__">✎ Custom…</option>`;
       return `
-        <div class="model-row" data-role="${r.role}">
-          <span class="model-label">${r.label}</span>
-          <select class="notify-select prov-select" data-role="${r.role}" data-cfg-key="${r.provKey}">${provOpts}</select>
-          <select class="notify-select model-select" data-role="${r.role}" data-cfg-key="${r.modelKey}" data-current="${this._esc(curModel)}">${modelOpts}</select>
-          <input class="model-custom" data-role="${r.role}" data-cfg-key="${r.modelKey}"
-                 type="text" placeholder="enter model id" value="${this._esc(curModel)}" />
-          ${r.role === 'vision' ? `<div class="model-hint">Needs an image-capable model — e.g. moondream on Ollama, or a Groq vision model. Text-only models (like gpt-oss) will fail on camera analysis.</div>` : ''}
+        <div class="new-model-row" data-role="${this._esc(r.role)}">
+          <span class="model-label">${this._esc(r.label)}</span>
+          <select class="new-prov-select" data-role="${this._esc(r.role)}" data-cfg-key="${r.provKey}">
+            ${this._optSelect(PROVIDERS.map(p => [p, p]), curProv)}
+          </select>
+          <select class="new-model-select" data-role="${this._esc(r.role)}" data-cfg-key="${r.modelKey}" data-current="${this._esc(curModel)}">${modelOpts}</select>
+          <input class="new-model-custom" data-role="${this._esc(r.role)}" data-cfg-key="${r.modelKey}"
+                 type="text" placeholder="enter model id" value="${this._esc(curModel)}" style="display:none">
+          ${r.role === "vision" ? `<div class="stub-body">Needs an image-capable model — e.g. moondream on Ollama, or a Groq vision model. Text-only models will fail on camera analysis.</div>` : ""}
         </div>`;
-    }).join('');
+    }).join("");
+    return `<div class="new-model-list">${rows}</div>`;
   }
 
-  _esc(s) {
-    return String(s == null ? '' : s)
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
-  }
-
-  async _saveConfig(key, value) {
-    if (!this._hass || !key) return;
-    try {
-      await this._hass.callWS({ type: 'nova/update_config', key, value });
-      this._toast(`✓ ${key} → ${value}`, 'ok');
-    } catch (err) {
-      this._toast(`✗ ${key} — ${err?.message || err}`, 'err');
-    }
-  }
-
-  _applianceTypes() {
-    return ['washer', 'dryer', 'dishwasher', 'oven', 'microwave', 'appliance'];
-  }
-
-  _renderApplianceEntityOptions(selected) {
-    const states = this._hass?.states || {};
-    const cands = [];
-    Object.keys(states).forEach(eid => {
-      const s = states[eid];
-      const dom = eid.split('.')[0];
-      const dc = (s.attributes && s.attributes.device_class) || '';
-      const unit = ((s.attributes && s.attributes.unit_of_measurement) || '').toLowerCase();
-      const isPower = dc === 'power' || dc === 'energy' || unit === 'w' || unit === 'kw';
-      const isStatus = (dom === 'binary_sensor' || dom === 'sensor') &&
-        /(washer|dryer|dishwash|laundry|appliance|run_complete|cycle_complete|job_state|machine_state)/i.test(eid);
-      if (isPower || isStatus) cands.push(eid);
-    });
-    cands.sort();
-    if (selected && !cands.includes(selected)) cands.unshift(selected);
-    return cands.map(eid => {
-      const fn = (states[eid] && states[eid].attributes && states[eid].attributes.friendly_name) || eid;
-      return `<option value="${this._esc(eid)}"${eid === selected ? ' selected' : ''}>${this._esc(fn)}</option>`;
-    }).join('');
-  }
-
-  _applianceRow(a, learnedW) {
-    const types = this._applianceTypes();
-    const t = a.type || 'appliance';
-    const learnedTxt = (learnedW && a.watts && Math.abs(learnedW - a.watts) > 5)
-      ? `learned ~${Math.round(learnedW)}W` : '';
-    return `<div class="appliance-row">
-      <div class="ar-line1">
-        <input class="appliance-name" type="text" placeholder="Name (e.g. Washer)" value="${this._esc(a.name || '')}"/>
-        <button class="appliance-remove" title="Remove appliance" aria-label="Remove appliance">✕</button>
-      </div>
-      <div class="ar-line2">
-        <select class="appliance-type">
-          ${types.map(x => `<option value="${x}"${x === t ? ' selected' : ''}>${x}</option>`).join('')}
-        </select>
-        <select class="appliance-entity">
-          <option value="">— no entity (use watts) —</option>
-          ${this._renderApplianceEntityOptions(a.entity || '')}
-        </select>
-        <input class="appliance-watts" type="number" min="0" step="10" placeholder="watts" value="${a.watts || ''}"/>
-      </div>
-      ${learnedTxt ? `<div class="appliance-learned">${learnedTxt}</div>` : ''}
-    </div>`;
-  }
-
-  _renderAppliances(d) {
-    const prof = (d.config && d.config.appliance_profile) || [];
-    const learned = {};
-    (((d.config && d.config.appliances) || {}).profile || []).forEach(p => { learned[p.name] = p.learned_w; });
-    if (!prof.length) {
-      return `<div class="appliance-empty">No appliances declared yet — Nova falls back to generic power guesses until you add some.</div>`;
-    }
-    return prof.map(a => this._applianceRow(a, learned[a.name])).join('');
-  }
-
-  // Pick a replacement when the saved model is no longer offered by the provider.
-  // Vision roles must stay multimodal, so only heal them to a vision-capable id;
-  // any model works for text roles, so take the first.
   _pickHealModel(models, cfgKey) {
-    if (/vision/.test(cfgKey || '')) {
+    if (/vision/.test(cfgKey || "")) {
       return models.find(m => /vision|vl|scout|maverick|llama-4|gpt-4o|multimodal|qwen3\.\d|gemini/i.test(m)) || null;
     }
     return models[0] || null;
@@ -2218,520 +2849,2084 @@ class NovaPanel extends HTMLElement {
 
   async _loadModelsFor(provider, selectEl) {
     if (!this._hass || !selectEl) return;
-    const cur = selectEl.getAttribute('data-current') || '';
+    const cur = selectEl.getAttribute("data-current") || "";
     try {
-      const res = await this._hass.callWS({ type: 'nova/list_models', provider });
+      const res = await this._hass.callWS({ type: "nova/list_models", provider });
       const models = (res && res.models) || [];
-      let opts = '';
+      let opts = "";
       if (models.length) {
-        // Self-heal: if the saved model isn't in the provider's live list anymore
-        // (e.g. Groq rotated it out), switch to an available one and persist it —
-        // so a stale/deprecated default can't silently break the connection.
         if (cur && !models.includes(cur)) {
-          const cfgKey = selectEl.getAttribute('data-cfg-key');
+          const cfgKey = selectEl.getAttribute("data-cfg-key");
           const heal = this._pickHealModel(models, cfgKey);
           if (heal && cfgKey) {
-            this._saveConfig(cfgKey, heal);
-            selectEl.setAttribute('data-current', heal);
-            this._toast(`Model set to ${heal} \u2014 the previous one is no longer offered by ${provider}`, 'ok');
-            opts += models.map(m =>
-              `<option value="${this._esc(m)}"${m === heal ? ' selected' : ''}>${this._esc(m)}</option>`).join('');
+            await this._rawSaveConfig(cfgKey, heal);
+            selectEl.setAttribute("data-current", heal);
+            opts += models.map(m => `<option value="${this._esc(m)}"${m === heal ? " selected" : ""}>${this._esc(m)}</option>`).join("");
           } else {
-            // no suitable replacement (e.g. no multimodal model available) — keep
-            // the current value but flag it so the user picks one.
-            opts += `<option value="${this._esc(cur)}" selected>${this._esc(cur)} \u2014 unavailable, pick one</option>`;
-            opts += models.map(m =>
-              `<option value="${this._esc(m)}">${this._esc(m)}</option>`).join('');
+            opts += `<option value="${this._esc(cur)}" selected>${this._esc(cur)} — unavailable, pick one</option>`;
+            opts += models.map(m => `<option value="${this._esc(m)}">${this._esc(m)}</option>`).join("");
           }
         } else {
-          opts += models.map(m =>
-            `<option value="${this._esc(m)}"${m === cur ? ' selected' : ''}>${this._esc(m)}</option>`).join('');
+          opts += models.map(m => `<option value="${this._esc(m)}"${m === cur ? " selected" : ""}>${this._esc(m)}</option>`).join("");
         }
       } else {
-        const err = res && res.error ? ` — ${String(res.error).slice(0, 48)}` : '';
-        opts += (cur ? `<option value="${this._esc(cur)}" selected>${this._esc(cur)}</option>` : '');
+        const err = res && res.error ? ` — ${String(res.error).slice(0, 48)}` : "";
+        opts += (cur ? `<option value="${this._esc(cur)}" selected>${this._esc(cur)}</option>` : "");
         opts += `<option value="" disabled>no models found${this._esc(err)}</option>`;
       }
       opts += `<option value="__custom__">✎ Custom…</option>`;
       selectEl.innerHTML = opts;
-    } catch (_) {
-      /* leave current options in place on error */
+    } catch (_) { /* leave current options in place on error */ }
+  }
+
+  async _rawSaveConfig(key, value) {
+    if (!this._hass || !key) return;
+    try {
+      await this._hass.callWS({ type: "nova/update_config", key, value });
+    } catch (err) {
+      console.error(`Nova: failed to save ${key}`, err);
     }
   }
 
-  _renderCameraOptions(d) {
-    const cams = ((d.config && d.config.cameras) || []).filter(c => c.enabled !== false);
-    if (!cams.length) return '<option value="">— no cameras —</option>';
-    return cams.map(c =>
-      `<option value="${this._esc(c.entity_id)}">${this._esc(c.name)}</option>`).join('');
+  _wireAiModels() {
+    const root = this.shadowRoot;
+    root.querySelectorAll(".new-model-row").forEach(row => {
+      const provSel = row.querySelector(".new-prov-select");
+      const modelSel = row.querySelector(".new-model-select");
+      const customInput = row.querySelector(".new-model-custom");
+      if (!provSel || !modelSel) return;
+      this._loadModelsFor(provSel.value, modelSel);
+      provSel.addEventListener("change", async (e) => {
+        const provider = e.target.value;
+        const provKey = provSel.getAttribute("data-cfg-key");
+        await this._rawSaveConfig(provKey, provider);
+        if (provKey === "llm_provider" && ["groq", "openai", "gemini", "anthropic"].includes(provider)) {
+          await this._rawSaveConfig("llm_base_url", "");
+        }
+        modelSel.setAttribute("data-current", "");
+        if (customInput) customInput.style.display = "none";
+        await this._loadModelsFor(provider, modelSel);
+        const newModel = modelSel.value;
+        if (newModel && newModel !== "__custom__" && newModel !== "") {
+          await this._rawSaveConfig(modelSel.getAttribute("data-cfg-key"), newModel);
+          modelSel.setAttribute("data-current", newModel);
+        }
+      });
+      modelSel.addEventListener("change", async (e) => {
+        if (e.target.value === "__custom__") {
+          if (customInput) { customInput.style.display = ""; customInput.focus(); }
+          return;
+        }
+        if (customInput) customInput.style.display = "none";
+        await this._rawSaveConfig(modelSel.getAttribute("data-cfg-key"), e.target.value);
+        modelSel.setAttribute("data-current", e.target.value);
+      });
+      if (customInput) {
+        customInput.addEventListener("change", async (e) => {
+          const v = (e.target.value || "").trim();
+          if (v) {
+            await this._rawSaveConfig(customInput.getAttribute("data-cfg-key"), v);
+            modelSel.setAttribute("data-current", v);
+          }
+        });
+      }
+    });
   }
 
-  _sparklineSvg(values, colorVar) {
-    if (!values || values.length < 2) return '';
-    const w = 44, h = 14, pad = 1;
-    const min = Math.min(...values), max = Math.max(...values);
-    const range = (max - min) || 1;
+  _briefingsCardBody() {
+    const cfg = this._data()?.config || {};
+    const onOff = (key, onLabel, offLabel, defaultOn) => {
+      const on = defaultOn ? cfg[key] !== false : !!cfg[key];
+      return `<button class="toggle-btn ${on ? "on" : "off"}" data-cfg-key="${key}" data-cfg-val="${on ? "false" : "true"}">${on ? onLabel : offLabel}</button>`;
+    };
+    const feedChip = (key, label) => {
+      const on = cfg[key] !== false;
+      return `<button class="mode-chip ${on ? "mode-chip-on" : ""}" data-cfg-key="${key}" data-cfg-val="${on ? "false" : "true"}">${label}</button>`;
+    };
+    return `
+      <div class="stub-body">Nova speaks a summary at the times you set — weather and forecast, your calendar, what happened overnight, power draw, and any active hazards nearby.</div>
+      <div class="cfg-row">
+        <label>Morning</label>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input class="cfg-field cfg-num" style="width:64px;text-align:center" type="text" data-cfg-key="briefing_morning_time" value="${this._esc(cfg.briefing_morning_time || "07:30")}" placeholder="07:30">
+          ${onOff("briefing_morning_enabled", "ON", "OFF", false)}
+        </div>
+      </div>
+      <div class="cfg-row">
+        <label>Evening</label>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input class="cfg-field cfg-num" style="width:64px;text-align:center" type="text" data-cfg-key="briefing_evening_time" value="${this._esc(cfg.briefing_evening_time || "19:30")}" placeholder="19:30">
+          ${onOff("briefing_evening_enabled", "ON", "OFF", false)}
+        </div>
+      </div>
+      <div class="cfg-row">
+        <label>Only when someone's home</label>
+        ${onOff("briefing_require_home", "YES", "NO", true)}
+      </div>
+      <div class="mode-bind-head">Include</div>
+      <div class="mode-grid">
+        ${feedChip("briefing_include_weather", "Weather")}
+        ${feedChip("briefing_include_calendar", "Calendar")}
+        ${feedChip("briefing_include_events", "Overnight")}
+        ${feedChip("briefing_include_energy", "Energy")}
+        ${feedChip("briefing_include_hazards", "Hazards")}
+      </div>
+      <div class="mode-bind-head">Arrival</div>
+      <div class="stub-body">A welcome briefing fires when someone gets home — but only once this door actually opens, not the moment their phone shows them nearby (still in the driveway or car). Leave unset to keep arrival briefings off entirely.</div>
+      <div class="cfg-row">
+        <label>Front door</label>
+        <select class="cfg-field" data-cfg-key="arrival_front_door_entity">${this._optSelect(this._frontDoorOptions(cfg.arrival_front_door_entity || ""), cfg.arrival_front_door_entity || "")}</select>
+      </div>
+      <div class="cfg-row"><button class="mode-chip" id="newBriefNow">▶ BRIEF ME NOW</button></div>`;
+  }
+
+  _voiceConfirmationCardBody() {
+    const cfg = this._data()?.config || {};
+    const on = !!cfg.voice_confirm_enabled;
+    return `
+      <div class="stub-body">Ask out loud before sensitive actions (unlock, garage, disarm) and listen for a spoken yes/no. Native mode uses the satellite's own audio; gated mode speaks through the room speaker — run the test to see which your setup supports.</div>
+      <div class="cfg-row">
+        <label>Voice confirmation</label>
+        <button class="toggle-btn ${on ? "on" : "off"}" data-cfg-key="voice_confirm_enabled" data-cfg-val="${on ? "false" : "true"}">${on ? "ON" : "OFF"}</button>
+      </div>
+      <div class="cfg-row">
+        <label>Mode</label>
+        <select class="cfg-field" data-cfg-key="voice_confirm_mode">
+          ${this._optSelect([["auto", "Auto (try native, fall back)"], ["native", "Native (satellite audio)"], ["gated", "Gated (room speaker)"]], cfg.voice_confirm_mode || "auto")}
+        </select>
+      </div>
+      <div class="cfg-row"><button class="mode-chip" id="newVcTest">▶ TEST SATELLITE AUDIO</button></div>
+      <div class="stub-body" id="newVcTestResult"></div>`;
+  }
+
+  _satelliteSpeakerCardBody() {
+    const cfg = this._data()?.config || {};
+    const satellites = cfg.satellites || [];
+    const castDevs = cfg.cast_devices || [];
+    const pairings = cfg.satellite_pairings || {};
+    if (!satellites.length) return `<div class="stub-body">No satellites found.</div>`;
+    const rows = satellites.map(sat => {
+      const paired = pairings[sat.entity_id] || "";
+      const label = sat.area || sat.name;
+      return `
+        <div class="pairing-row">
+          <span class="pairing-label">${this._esc(label)}</span>
+          <select class="new-sat-pair-select" data-sat-id="${this._esc(sat.entity_id)}">
+            <option value="">— none —</option>
+            ${castDevs.map(cd => `<option value="${this._esc(cd.entity_id)}"${cd.entity_id === paired ? " selected" : ""}>${this._esc(cd.name)}</option>`).join("")}
+          </select>
+        </div>`;
+    }).join("");
+    return `<div class="pairing-list">${rows}</div>`;
+  }
+
+  _announcementSpeakersCardBody() {
+    const cfg = this._data()?.config || {};
+    const castDevs = cfg.cast_devices || [];
+    const selected = cfg.announcement_speakers || [];
+    if (!castDevs.length) return `<div class="stub-body">No Cast devices found.</div>`;
+    const rows = castDevs.map(cd => {
+      const on = selected.includes(cd.entity_id);
+      return `
+        <div class="toggle-row">
+          <span class="toggle-label">${this._esc(cd.name)}</span>
+          <span class="toggle-desc">${this._esc(cd.entity_id)}</span>
+          <button class="toggle-btn ${on ? "on" : "off"} new-ann-speaker-toggle" data-speaker-id="${this._esc(cd.entity_id)}">${on ? "ON" : "OFF"}</button>
+        </div>`;
+    }).join("");
+    return `<div class="toggle-list">${rows}</div>`;
+  }
+
+  _notificationsCardBody() {
+    const cfg = this._data()?.config || {};
+    const svcs = cfg.notify_services_available || [];
+    const opts = [["", "— none —"], ...svcs.map(s => [s, s.replace("notify.", "")])];
+    return `
+      <div class="toggle-row">
+        <span class="toggle-label">Notify Device</span>
+        <span class="toggle-desc">Phone push for high/critical alerts</span>
+        <select class="cfg-field" data-cfg-key="notify_service">${this._optSelect(opts, cfg.notify_service || "")}</select>
+      </div>`;
+  }
+
+  _sentinelRulesCardBody() {
+    const cfg = this._data()?.config || {};
+    const rules = cfg.sentinel_rules || [];
+    const disabled = cfg.disabled_sentinel_rules || [];
+    if (!rules.length) return `<div class="stub-body">No sentinel rules found.</div>`;
+    const rows = rules.map(r => {
+      const isOff = disabled.includes(r.id);
+      const name = r.id.replace(/_/g, " ");
+      const desc = (r.desc || "").slice(0, 60);
+      return `
+        <div class="toggle-row">
+          <span class="toggle-label">${this._esc(name)}</span>
+          <span class="toggle-desc">${this._esc(desc)}</span>
+          <button class="toggle-btn ${isOff ? "off" : "on"} new-rule-toggle" data-rule-id="${this._esc(r.id)}">${isOff ? "OFF" : "ON"}</button>
+        </div>`;
+    }).join("");
+    return `<div class="toggle-list">${rows}</div>`;
+  }
+
+  // Hazard status is fetched once per element lifetime (same on-demand
+  // pattern as Diagnostics) — a manual SCAN NOW re-checks USGS/NWS/EONET.
+  async _fetchHazardStatus() {
+    if (!this._hass) return;
+    try {
+      this._hazard = await this._hass.callWS({ type: "nova/hazard", action: "status" });
+    } catch (_) { this._hazard = null; }
+    if (this._currentTab === "settings") this._render();
+  }
+
+  _hazardMonitorCardBody() {
+    const cfg = this._data()?.config || {};
+    const hz = this._hazard || {};
+    const loc = hz.center
+      ? (hz.using_override ? `Location: override ${hz.center[0]}, ${hz.center[1]}.` : `Location: home ${hz.center[0]}, ${hz.center[1]}.`)
+      : "Location: using home coordinates.";
+    const feedChip = (key, label) => {
+      const on = cfg[key] !== false;
+      return `<button class="mode-chip ${on ? "mode-chip-on" : ""}" data-cfg-key="${key}" data-cfg-val="${on ? "false" : "true"}">${label}</button>`;
+    };
+    return `
+      <div class="stub-body">Real-time nearby earthquakes (USGS), severe-weather warnings (NWS), and natural disasters like wildfires (NASA EONET). Alerts speak and push like any Nova alert.</div>
+      <div class="cfg-row">
+        <label>Monitor</label>
+        <button class="toggle-btn ${cfg.hazard_monitor_enabled ? "on" : "off"}" data-cfg-key="hazard_monitor_enabled" data-cfg-val="${cfg.hazard_monitor_enabled ? "false" : "true"}">${cfg.hazard_monitor_enabled ? "ON" : "OFF"}</button>
+      </div>
+      <div class="mode-grid">
+        ${feedChip("hazard_quakes_on", "Earthquakes")}
+        ${feedChip("hazard_weather_on", "Weather")}
+        ${feedChip("hazard_disasters_on", "Disasters")}
+      </div>
+      <div class="stub-body" style="font-family:var(--font-mono);font-size:10.5px">${this._esc(loc)}</div>
+      <div class="cfg-row">
+        <label>Override lat / lon <span class="toggle-desc">optional</span></label>
+        <div style="display:flex;gap:6px">
+          <input class="cfg-field cfg-num" style="width:76px" type="text" inputmode="decimal" data-cfg-key="hazard_lat" value="${this._esc(cfg.hazard_lat || "")}" placeholder="lat">
+          <input class="cfg-field cfg-num" style="width:76px" type="text" inputmode="decimal" data-cfg-key="hazard_lon" value="${this._esc(cfg.hazard_lon || "")}" placeholder="lon">
+        </div>
+      </div>
+      <div class="cfg-row">
+        <label>Quake radius (km) / min mag</label>
+        <div style="display:flex;gap:6px">
+          <input class="cfg-field cfg-num" style="width:56px" type="text" inputmode="numeric" data-cfg-key="hazard_quake_radius_km" value="${this._esc(cfg.hazard_quake_radius_km ?? 300)}">
+          <input class="cfg-field cfg-num" style="width:56px" type="text" inputmode="decimal" data-cfg-key="hazard_quake_min_mag" value="${this._esc(cfg.hazard_quake_min_mag ?? 2.5)}">
+        </div>
+      </div>
+      <div class="cfg-row"><button class="mode-chip" id="newHazScan">⟳ SCAN NOW</button></div>
+      <div id="newHazBody" class="stub-body"></div>`;
+  }
+
+  _renderHazardScan(res) {
+    if (!res || res.ok === false) {
+      return `<div class="stub-body">${this._esc(res?.error || "No location configured.")}</div>`;
+    }
+    const q = res.earthquakes || [], w = res.weather || [], d = res.disasters || [];
+    if (!q.length && !w.length && !d.length) {
+      return `<div class="stub-body">✓ All clear near ${res.center ? res.center[0] + ", " + res.center[1] : "home"} — no active earthquakes, severe weather, or disasters.</div>`;
+    }
+    let html = "";
+    for (const e of q) {
+      const mag = (typeof e.mag === "number") ? `M${e.mag.toFixed(1)}` : "M?";
+      html += `<div class="stub-body"><b class="diag-warn">${mag}</b> ${this._esc(e.place)} — ${e.dist_km} km away</div>`;
+    }
+    for (const e of w) {
+      html += `<div class="stub-body"><b class="diag-down">${this._esc(e.severity)}</b> ${this._esc(e.event)}${e.area ? " — " + this._esc(e.area) : ""}</div>`;
+    }
+    for (const e of d) {
+      html += `<div class="stub-body"><b class="diag-warn">${this._esc(e.category)}</b> ${this._esc(e.title)} — ${e.dist_km} km away</div>`;
+    }
+    return html;
+  }
+
+  // Energy status is fetched once per element lifetime (same on-demand
+  // pattern as Diagnostics/Hazard) — set_agency re-fetches immediately after.
+  async _fetchEnergyStatus() {
+    if (!this._hass) return;
+    try {
+      this._energy = await this._hass.callWS({ type: "nova/energy", action: "status" });
+    } catch (_) { this._energy = { error: true }; }
+    if (this._currentTab === "settings") this._render();
+  }
+
+  _energyManagementCardBody() {
+    const e = this._energy || {};
+    if (e.error) {
+      return `<div class="stub-body">Couldn't load energy data — restart Home Assistant after updating.</div>`;
+    }
+    const draw = e.kw == null
+      ? `<span class="diag-off">NO METER</span>`
+      : `<span class="${e.over_peak ? "diag-warn" : "diag-ok"}">${e.kw} kW${e.over_peak ? " · OVER PEAK" : ""}</span>`;
+    const agencies = ["advisory", "opt_in", "autonomous"];
+    const agencyChips = agencies.map(a =>
+      `<button class="mode-chip ${a === e.configured_agency ? "mode-chip-on" : ""}" data-agency="${a}">${a.replace("_", "-")}</button>`).join("");
+    const advice = (e.advice || []).map(a => `<div class="stub-body">${this._esc(a)}</div>`).join("");
+    const running = e.running || [];
+    const runRows = running.length
+      ? `<div class="mode-bind-head">Running now</div>` + running.map(r =>
+          `<div class="cfg-row"><label>${this._esc(r.name || r.entity)}</label><span class="${r.shed_ok ? "" : "diag-warn"}">${r.watts} W${r.shed_ok ? "" : " · protected"}</span></div>`).join("")
+      : "";
+    const cfg = this._data()?.config || {};
+    return `
+      <div class="stub-body">Whole-home power, peak awareness, and load advice. Pick how much Nova may act — it never sheds critical loads (fridge, medical, network).</div>
+      <div class="cfg-row"><label>Current draw</label>${draw}</div>
+      <div class="mode-grid" id="newEnergyAgency">${agencyChips}</div>
+      ${advice}
+      ${runRows}
+      <div class="stub-body">Daily solar report cost (optional): if you already track exact electricity cost, point Nova at your own sensor instead of its price × kWh estimate.</div>
+      <div class="cfg-row">
+        <label>Cost today entity</label>
+        <input class="cfg-field" type="text" data-cfg-key="energy_cost_today_entity" value="${this._esc(cfg.energy_cost_today_entity || "")}" placeholder="sensor.electricity_cost_today">
+      </div>
+      <div class="cfg-row">
+        <label>Net cost today entity (optional)</label>
+        <input class="cfg-field" type="text" data-cfg-key="energy_cost_net_entity" value="${this._esc(cfg.energy_cost_net_entity || "")}" placeholder="sensor.net_electricity_cost_today">
+      </div>`;
+  }
+
+  // Appliances — batch-edit-then-save, like Classic (see nova-panel.js's own
+  // #appliance-save comment): rows are added/removed/edited locally and only
+  // written on "Save appliances", so this deliberately does NOT go through
+  // _saveSetting/_render on every keystroke — that would wipe an unsaved,
+  // just-added row.
+  _applianceTypes() {
+    return ["washer", "dryer", "dishwasher", "oven", "microwave", "appliance"];
+  }
+
+  _applianceEntityOptions(selected) {
+    const states = this._hass?.states || {};
+    const cands = [];
+    Object.keys(states).forEach(eid => {
+      const s = states[eid];
+      const dom = eid.split(".")[0];
+      const dc = (s.attributes && s.attributes.device_class) || "";
+      const unit = ((s.attributes && s.attributes.unit_of_measurement) || "").toLowerCase();
+      const isPower = dc === "power" || dc === "energy" || unit === "w" || unit === "kw";
+      const isStatus = (dom === "binary_sensor" || dom === "sensor") &&
+        /(washer|dryer|dishwash|laundry|appliance|run_complete|cycle_complete|job_state|machine_state)/i.test(eid);
+      if (isPower || isStatus) cands.push(eid);
+    });
+    cands.sort();
+    if (selected && !cands.includes(selected)) cands.unshift(selected);
+    return [["", "— no entity (use watts) —"], ...cands.map(eid => {
+      const fn = (states[eid] && states[eid].attributes && states[eid].attributes.friendly_name) || eid;
+      return [eid, fn];
+    })];
+  }
+
+  _applianceRowHtml(a) {
+    const t = a.type || "appliance";
+    return `
+      <div class="new-appliance-row">
+        <input class="new-appliance-name cfg-field" type="text" placeholder="Name (e.g. Washer)" value="${this._esc(a.name || "")}">
+        <select class="new-appliance-type cfg-field">${this._optSelect(this._applianceTypes().map(x => [x, x]), t)}</select>
+        <select class="new-appliance-entity cfg-field">${this._optSelect(this._applianceEntityOptions(a.entity || ""), a.entity || "")}</select>
+        <input class="new-appliance-watts cfg-field cfg-num" type="number" min="0" step="10" placeholder="watts" value="${a.watts || ""}">
+        <button class="new-appliance-remove mode-chip" title="Remove appliance" aria-label="Remove appliance">✕</button>
+      </div>`;
+  }
+
+  _appliancesCardBody() {
+    const cfg = this._data()?.config || {};
+    const prof = cfg.appliance_profile || [];
+    const rows = prof.map(a => this._applianceRowHtml(a)).join("")
+      || `<div class="stub-body">No appliances declared yet — Nova falls back to generic power guesses until you add some.</div>`;
+    return `
+      <div class="stub-body">Tell Nova which appliances exist so it names cycles correctly instead of guessing from the whole-home meter. Map a dedicated power or status entity when one exists; otherwise set typical running watts.</div>
+      <div class="new-appliance-list" id="newApplianceList">${rows}</div>
+      <div class="mode-grid">
+        <button class="mode-chip" id="newApplianceAdd">+ Add appliance</button>
+        <button class="mode-chip mode-chip-on" id="newApplianceSave">Save appliances</button>
+      </div>
+      <div class="cfg-row" style="margin-top:12px">
+        <label>Announce unidentified loads <span class="toggle-desc">loads matching no declared appliance</span></label>
+        <button class="toggle-btn ${cfg.appliance_announce_unknown ? "on" : "off"}" id="newApplianceUnknown">${cfg.appliance_announce_unknown ? "ON" : "OFF"}</button>
+      </div>`;
+  }
+
+  _wireAppliances() {
+    const root = this.shadowRoot;
+    const apList = root.getElementById("newApplianceList");
+    const apAdd = root.getElementById("newApplianceAdd");
+    const apSave = root.getElementById("newApplianceSave");
+    const apUnknown = root.getElementById("newApplianceUnknown");
+    if (apAdd && apList) {
+      apAdd.addEventListener("click", () => {
+        const empty = apList.querySelector(".stub-body");
+        if (empty) empty.remove();
+        const tmp = document.createElement("div");
+        tmp.innerHTML = this._applianceRowHtml({ name: "", type: "appliance", entity: "", watts: "" });
+        const row = tmp.firstElementChild;
+        if (row) apList.appendChild(row);
+      });
+    }
+    if (apList) {
+      apList.addEventListener("click", (e) => {
+        const rm = e.target.closest(".new-appliance-remove");
+        if (rm) {
+          e.preventDefault();
+          rm.closest(".new-appliance-row")?.remove();
+        }
+      });
+    }
+    if (apSave) {
+      apSave.addEventListener("click", async () => {
+        const rows = Array.from(root.querySelectorAll(".new-appliance-row"));
+        const out = [];
+        rows.forEach(r => {
+          const name = (r.querySelector(".new-appliance-name")?.value || "").trim();
+          if (!name) return;
+          out.push({
+            name,
+            type: r.querySelector(".new-appliance-type")?.value || "appliance",
+            entity: r.querySelector(".new-appliance-entity")?.value || "",
+            watts: parseFloat(r.querySelector(".new-appliance-watts")?.value || "0") || 0,
+          });
+        });
+        await this._rawSaveConfig("appliance_profile", JSON.stringify(out));
+        try { await this._hass.callWS({ type: "nova/reload_appliances" }); } catch (err) { console.error("Nova: appliance reload failed", err); }
+        await this._fetchLiveData();
+        if (this._currentTab === "settings") this._render();
+      });
+    }
+    if (apUnknown) {
+      apUnknown.addEventListener("click", async () => {
+        const newVal = !apUnknown.classList.contains("on");
+        await this._rawSaveConfig("appliance_announce_unknown", newVal);
+        try { await this._hass.callWS({ type: "nova/reload_appliances" }); } catch (_) {}
+        await this._fetchLiveData();
+        if (this._currentTab === "settings") this._render();
+      });
+    }
+  }
+
+  _entName(eid) {
+    const st = (this._hass && this._hass.states) ? this._hass.states[eid] : null;
+    return (st && st.attributes && st.attributes.friendly_name) || eid;
+  }
+
+  _trackerOptions(selected) {
+    const states = this._hass?.states || {};
+    const cands = Object.keys(states).filter(eid => { const dom = eid.split(".")[0]; return dom === "person" || dom === "device_tracker"; }).sort();
+    if (selected && !cands.includes(selected)) cands.unshift(selected);
+    return [["", "— none —"], ...cands.map(eid => [eid, this._entName(eid)])];
+  }
+
+  _frontDoorOptions(selected) {
+    const states = this._hass?.states || {};
+    const OPEN_DC = ["door", "garage_door", "opening"];
+    const OPEN_RE = /door|entry|front|contact/i;
+    const cands = Object.keys(states).filter(eid => {
+      if (eid.split(".")[0] !== "binary_sensor") return false;
+      const a = states[eid].attributes || {};
+      return OPEN_DC.includes(a.device_class || "") || OPEN_RE.test(eid) || OPEN_RE.test(a.friendly_name || "");
+    }).sort();
+    if (selected && !cands.includes(selected)) cands.unshift(selected);
+    return [["", "— none (arrival briefing stays off) —"], ...cands.map(eid => [eid, this._entName(eid)])];
+  }
+
+  _travelSensorOptions(selected) {
+    const states = this._hass?.states || {};
+    const cands = Object.keys(states).filter(eid => {
+      const dom = eid.split(".")[0]; if (dom !== "sensor") return false;
+      const a = states[eid].attributes || {}, dc = a.device_class || "", unit = a.unit_of_measurement || "";
+      return dc === "duration" || /^(min|minutes|h|hr|hrs|hours)$/i.test(unit) || /travel|commute|duration|eta|route|waze|maps|traffic|drive_time|driving|to_work|to_home/i.test(eid);
+    }).sort();
+    if (selected && !cands.includes(selected)) cands.unshift(selected);
+    return [["", "— none —"], ...cands.map(eid => [eid, this._entName(eid)])];
+  }
+
+  _anticipationMemoryCardBody() {
+    const cfg = this._data()?.config || {};
+    const onOff = (key, defaultOn, hint) => {
+      const on = defaultOn ? cfg[key] !== false : !!cfg[key];
+      return `
+        <div class="cfg-row">
+          <label>${hint.label}${hint.sub ? `<span class="toggle-desc"> — ${this._esc(hint.sub)}</span>` : ""}</label>
+          <button class="toggle-btn ${on ? "on" : "off"}" data-cfg-key="${key}" data-cfg-val="${on ? "false" : "true"}">${on ? "ON" : "OFF"}</button>
+        </div>`;
+    };
+    const num = (key, label, placeholder, min, max, step) => `
+      <div class="cfg-row">
+        <label>${this._esc(label)}</label>
+        <input class="cfg-field cfg-num" type="number" min="${min}" max="${max}" step="${step}" data-cfg-key="${key}" value="${cfg[key] ?? ""}" placeholder="${placeholder}">
+      </div>`;
+    return `
+      ${onOff("departure_alerts_enabled", false, { label: "Departure alerts" })}
+      ${onOff("routine_alerts_enabled", false, { label: "Routine alerts" })}
+      ${onOff("memory_threading_enabled", false, { label: "Memory threading" })}
+      ${onOff("pattern_learn_motion", false, { label: "Learn motion/presence triggers" })}
+      ${num("observer_group_debounce", "Sibling-burst coalescing (sec)", "90", 0, 600, 10)}
+      ${onOff("continued_conversation_enabled", false, { label: "Continued conversation" })}
+      ${onOff("continued_conversation_multi_satellite", false, { label: "Follow me between rooms", sub: "reopen the mic where you moved to (needs 2+ satellites)" })}
+      ${onOff("continued_conversation_speaker_reopen", true, { label: "Follow-up mic reopen (speaker-aware)" })}
+      ${onOff("tts_use_ha_voice", false, { label: "Use Home Assistant default voice" })}
+      ${num("departure_lead_minutes", "Departure lead (min)", "30", 0, 240, 5)}
+      ${num("memory_threading_hours", "Memory window (hrs)", "48", 1, 336, 1)}
+      ${num("memory_threading_max", "Memory max turns", "12", 1, 50, 1)}
+      <div class="cfg-row">
+        <label>Origin tracker</label>
+        <select class="cfg-field" data-cfg-key="departure_origin_entity">${this._optSelect(this._trackerOptions(cfg.departure_origin_entity || ""), cfg.departure_origin_entity || "")}</select>
+      </div>
+      <div class="cfg-row">
+        <label>OSRM URL</label>
+        <input class="cfg-field" type="text" data-cfg-key="departure_osrm_url" value="${this._esc(cfg.departure_osrm_url || "")}" placeholder="self-host (optional)">
+      </div>
+      <div class="cfg-row">
+        <label>Travel sensor</label>
+        <select class="cfg-field" data-cfg-key="departure_travel_sensor">${this._optSelect(this._travelSensorOptions(cfg.departure_travel_sensor || ""), cfg.departure_travel_sensor || "")}</select>
+      </div>
+      <div class="stub-body">Departure warns when to leave for calendar events using your device location + open-source routing. Routine alerts learn per-person timing over about a week. Continued conversation keeps the mic open after a question.</div>`;
+  }
+
+  _memoryCardBody() {
+    const cfg = this._data()?.config || {};
+    const stats = cfg.memory_stats || {};
+    return `
+      <div class="cfg-row"><label>Backend</label><span>${this._esc(stats.backend || "—")}</span></div>
+      <div class="cfg-row"><label>Stored Memories</label><span>${this._esc(stats.total_memories ?? 0)}</span></div>
+      <div class="stub-body">Full review, edit, and forget lives on the Memory tab.</div>`;
+  }
+
+  _observerTuningCardBody() {
+    const s = this._data()?.config?.observer_stats || {};
+    const row = (label, value, cls) => `<div class="cfg-row"><label>${this._esc(label)}</label><span class="${cls || ""}">${value}</span></div>`;
+    const rateLimit = s.rate_limit ?? 30;
+    const presenceRows = (s.presence || []).map(p =>
+      row(`${p.name}${p.gps ? " 📍" : ""}`, `${this._esc(p.zone)}${p.distance_km != null ? " · " + p.distance_km + " km" : ""}`)).join("");
+    const llmLabel = s.llm_breaker === "open" ? "LOCAL-ONLY" : s.llm_breaker === "half_open" ? "PROBING" : "ONLINE";
+    const llmCls = s.llm_breaker === "open" ? "diag-down" : s.llm_breaker === "half_open" ? "diag-warn" : "diag-ok";
+    return `
+      ${row("Status", s.running ? "RUNNING" : "STOPPED", s.running ? "diag-ok" : "diag-off")}
+      ${row("Calls / Hour", `${s.calls_last_hour || 0} / ${rateLimit <= 0 ? "∞" : rateLimit}`)}
+      <div class="cfg-row">
+        <label>Hourly Cap <span class="toggle-desc">0 = unlimited</span></label>
+        <input class="cfg-field cfg-num" type="number" min="0" step="1" id="newObserverRateLimit" value="${rateLimit}">
+      </div>
+      ${row("Events 24h", s.events_24h || 0)}
+      ${row("Flagged 24h", s.flagged_24h || 0)}
+      ${row("Spoken 24h", s.spoken_24h || 0)}
+      ${row("Cognition", s.cognition_enabled ? "ACTIVE" : "OFF", s.cognition_enabled ? "diag-ok" : "diag-off")}
+      ${row("Tracked Entities", s.cog_entities || 0)}
+      ${row("Predictable", s.cog_predictable || 0)}
+      ${row("Routines Learned", s.cog_routines || 0)}
+      ${row("Presence Routines", s.cog_presence || 0)}
+      ${presenceRows}
+      ${row("Cog Escalated", s.cog_escalated || 0)}
+      ${row("Local Decisions", `${s.local_rate || 0}% (${s.local_decisions || 0} local / ${s.cloud_calls || 0} cloud)`)}
+      ${row("Learned Patterns", s.learned_patterns || 0)}
+      ${row("LLM Link", llmLabel, llmCls)}`;
+  }
+
+  _optInEntityDatalist() {
+    const states = this._hass?.states || {};
+    return Object.keys(states).filter(eid => {
+      const dom = eid.split(".")[0];
+      return dom === "binary_sensor" || dom === "device_tracker" || dom === "person" || dom === "sensor";
+    }).sort().map(eid => `<option value="${this._esc(eid)}">${this._esc(this._entName(eid))}</option>`).join("");
+  }
+
+  _plList() {
+    let incl = this._data()?.config?.pattern_include_entities || [];
+    if (!Array.isArray(incl)) { try { incl = JSON.parse(incl) || []; } catch (_) { incl = []; } }
+    return incl;
+  }
+
+  _routineLearningCardBody() {
+    const cfg = this._data()?.config || {};
+    const onOff = (key, label, desc) => `
+      <div class="toggle-row">
+        <span class="toggle-label">${this._esc(label)}</span>
+        <span class="toggle-desc">${this._esc(desc)}</span>
+        <button class="toggle-btn ${cfg[key] ? "on" : "off"}" data-cfg-key="${key}" data-cfg-val="${cfg[key] ? "false" : "true"}">${cfg[key] ? "ON" : "OFF"}</button>
+      </div>`;
+    const incl = this._plList();
+    const chips = incl.length
+      ? incl.map((e, i) => `<span class="new-pl-chip">${this._esc(e)}<button class="new-pl-del" data-i="${i}" title="Remove">×</button></span>`).join("")
+      : `<span class="toggle-desc">No specific entities added.</span>`;
+    return `
+      <div class="stub-body">Nova learns routines from device activity (lights, locks, thermostats…) and skips noisy door/window and presence signals by default. Opt them in to build routines from them.</div>
+      <div class="toggle-list">
+        ${onOff("pattern_learn_doors", "Learn doors & windows", "Door, window and garage contact sensors")}
+        ${onOff("pattern_learn_presence", "Learn presence & arrivals", "People and device trackers (home / away)")}
+        ${onOff("pattern_learn_buttons", "Learn button & remote presses", "Suggest “press → scene / action” automations")}
+      </div>
+      <div class="mode-bind-head">Also learn specific entities <span class="toggle-desc">e.g. a bay occupancy sensor</span></div>
+      <div class="cfg-row">
+        <input id="newPlEntityInput" list="newPlEntityList" class="cfg-field" style="flex:1" placeholder="type to find an entity…" autocomplete="off">
+        <datalist id="newPlEntityList">${this._optInEntityDatalist()}</datalist>
+        <button class="mode-chip" id="newPlAddEntity">+ Add</button>
+      </div>
+      <div class="mode-grid" id="newPlChips">${chips}</div>`;
+  }
+
+  _exclArr(v) {
+    if (!v) return [];
+    if (Array.isArray(v)) return v;
+    try { const j = JSON.parse(v); return Array.isArray(j) ? j : []; } catch (_) { return []; }
+  }
+  _allEntityDatalist() {
+    const states = this._hass?.states || {};
+    return Object.keys(states).sort().map(eid => `<option value="${this._esc(eid)}">${this._esc(this._entName(eid))}</option>`).join("");
+  }
+  _domainDatalist() {
+    const states = this._hass?.states || {};
+    const doms = [...new Set(Object.keys(states).map(e => e.split(".")[0]))].sort();
+    return doms.map(dm => `<option value="${this._esc(dm)}">${this._esc(dm)}</option>`).join("");
+  }
+  _labelDatalist() {
+    const labels = this._data()?.available_labels || [];
+    return labels.map(l => `<option value="${this._esc(l.name)}">${this._esc(l.name)}</option>`).join("");
+  }
+  async _exclSave(key, arr) {
+    if (this._liveData && this._liveData.config) this._liveData.config[key] = arr;
+    await this._saveSetting(key, JSON.stringify(arr));
+  }
+
+  _excludedEntitiesCardBody() {
+    const cfg = this._data()?.config || {};
+    const ents = this._exclArr(cfg.excluded_entities);
+    const doms = this._exclArr(cfg.excluded_domains);
+    const labs = this._exclArr(cfg.excluded_labels);
+    const chipRow = (arr, cls) => arr.length
+      ? arr.map((e, i) => `<span class="new-pl-chip">${this._esc(e)}<button class="${cls}" data-i="${i}" title="Remove">×</button></span>`).join("")
+      : `<span class="toggle-desc">None.</span>`;
+    return `
+      <div class="stub-body">Entities you exclude are removed from Nova's awareness — presence detection, room routing, the observer and routine learning all skip them. Home Assistant still has the entity, and Nova can still control it if you ask by name.</div>
+      <div class="mode-bind-head">Exclude specific entities</div>
+      <div class="cfg-row">
+        <input id="newExclEntInput" list="newExclEntList" class="cfg-field" style="flex:1" placeholder="type to find an entity…" autocomplete="off">
+        <datalist id="newExclEntList">${this._allEntityDatalist()}</datalist>
+        <button class="mode-chip" id="newExclEntAdd">+ Add</button>
+      </div>
+      <div class="mode-grid" id="newExclEntChips">${chipRow(ents, "new-excl-ent-del")}</div>
+      <div class="mode-bind-head">Exclude whole domains <span class="toggle-desc">e.g. light, switch — every entity in the domain</span></div>
+      <div class="cfg-row">
+        <input id="newExclDomInput" list="newExclDomList" class="cfg-field" style="flex:1" placeholder="type a domain…" autocomplete="off">
+        <datalist id="newExclDomList">${this._domainDatalist()}</datalist>
+        <button class="mode-chip" id="newExclDomAdd">+ Add</button>
+      </div>
+      <div class="mode-grid" id="newExclDomChips">${chipRow(doms, "new-excl-dom-del")}</div>
+      <div class="mode-bind-head">Exclude by label <span class="toggle-desc">every entity carrying a Home Assistant label</span></div>
+      <div class="cfg-row">
+        <input id="newExclLabInput" list="newExclLabList" class="cfg-field" style="flex:1" placeholder="type a label…" autocomplete="off">
+        <datalist id="newExclLabList">${this._labelDatalist()}</datalist>
+        <button class="mode-chip" id="newExclLabAdd">+ Add</button>
+      </div>
+      <div class="mode-grid" id="newExclLabChips">${chipRow(labs, "new-excl-lab-del")}</div>`;
+  }
+
+  // Cameras — enable/rename/location settings deliberately avoid the
+  // generic _saveSetting/_render round-trip (see Classic's own
+  // _rerenderCameraSettings comment): a full re-render would blow away
+  // whatever a user is mid-typing in the rename input, so only the
+  // #newCamsetBody sub-tree is patched, matching Classic's #camset-body.
+  _renderCameraSettingsRows() {
+    const cfg = this._data()?.config || {};
+    const cams = cfg.cameras || [];
+    if (!cams.length) return `<div class="stub-body">No camera entities in Home Assistant.</div>`;
+    const names = cfg.camera_names || {};
+    const nOn = cams.filter(c => c.enabled !== false).length;
+    const head = `
+      <div class="cfg-row">
+        <label>${nOn} of ${cams.length} cameras in use</label>
+        <div style="display:flex;gap:6px">
+          <button class="mode-chip" id="newCamEnableAll">Enable all</button>
+          <button class="mode-chip" id="newCamDisableAll">Disable all</button>
+        </div>
+      </div>`;
+    const rows = cams.map(c => {
+      const enabled = c.enabled !== false;
+      const custom = names[c.entity_id] || "";
+      const mode = c.location_mode || "auto";
+      const resolved = c.outdoor ? "outdoor" : "indoor";
+      const chip = (m, label) => `<button class="mode-chip new-cam-loc-chip ${mode === m ? "mode-chip-on" : ""}" data-loc="${m}" data-cam="${this._esc(c.entity_id)}">${label}</button>`;
+      return `
+        <div class="new-camset-row" data-cam="${this._esc(c.entity_id)}">
+          <div class="cfg-row">
+            <label>${this._esc(c.entity_id)}</label>
+            <button class="toggle-btn ${enabled ? "on" : "off"} new-cam-enable-toggle" data-cam="${this._esc(c.entity_id)}">${enabled ? "ON" : "OFF"}</button>
+          </div>
+          <div class="cfg-row">
+            <input class="cfg-field new-camset-name" style="flex:1" type="text" data-cam="${this._esc(c.entity_id)}" value="${this._esc(custom)}" placeholder="${this._esc(c.raw_name || c.entity_id)}" autocomplete="off">
+          </div>
+          <div class="mode-grid">
+            ${chip("auto", `AUTO (${resolved})`)}
+            ${chip("indoor", "⌂ INDOOR")}
+            ${chip("outdoor", "▲ OUTDOOR")}
+          </div>
+        </div>`;
+    }).join("");
+    return head + rows;
+  }
+
+  _camerasCardBody() {
+    const cfg = this._data()?.config || {};
+    return `
+      <div class="stub-body">Names are Nova-only (HA untouched; blank reverts). Location governs intrusion + outdoor-event filtering — AUTO shows what the heuristics resolve.</div>
+      <div class="cfg-row">
+        <label>Camera Watch — auto-analyze doorbell/motion events</label>
+        <button class="toggle-btn ${cfg.camera_auto_analyze !== false ? "on" : "off"}" data-cfg-key="camera_auto_analyze" data-cfg-val="${cfg.camera_auto_analyze !== false ? "false" : "true"}">${cfg.camera_auto_analyze !== false ? "ON" : "OFF"}</button>
+      </div>
+      <div class="cfg-row">
+        <label>Visitor Learning — silently log strangers seen at the door</label>
+        <button class="toggle-btn ${cfg.visitor_learning !== false ? "on" : "off"}" data-cfg-key="visitor_learning" data-cfg-val="${cfg.visitor_learning !== false ? "false" : "true"}">${cfg.visitor_learning !== false ? "ON" : "OFF"}</button>
+      </div>
+      <div class="cfg-row">
+        <label>Face recognition source</label>
+        <select class="cfg-field" data-cfg-key="recognition_source">${this._optSelect([["both", "Both (Double Take + Frigate)"], ["frigate", "Frigate only (sub_label)"], ["doubletake", "Double Take only"]], cfg.recognition_source || "both")}</select>
+      </div>
+      <div class="cfg-row">
+        <label>Recognition confidence</label>
+        <input class="cfg-field cfg-num" type="number" min="0" max="1" step="0.05" data-cfg-key="identity_min_confidence" value="${cfg.identity_min_confidence ?? ""}" placeholder="0.45">
+      </div>
+      <div id="newCamsetBody">${this._renderCameraSettingsRows()}</div>`;
+  }
+
+  _rerenderCameraSettings() {
+    const host = this.shadowRoot?.getElementById("newCamsetBody");
+    if (!host) return;
+    host.innerHTML = this._renderCameraSettingsRows();
+    this._wireCameraSettings();
+  }
+
+  _wireCameraSettings() {
+    const root = this.shadowRoot;
+    const applyDisabled = async (next) => {
+      try {
+        await this._hass.callWS({ type: "nova/update_config", key: "disabled_cameras", value: JSON.stringify(next) });
+        if (this._liveData?.config) {
+          this._liveData.config.disabled_cameras = next;
+          const off = new Set(next);
+          (this._liveData.config.cameras || []).forEach(c => { c.enabled = !off.has(c.entity_id); });
+        }
+        this._rerenderCameraSettings();
+      } catch (err) { console.error("Nova: camera enable/disable failed", err); }
+    };
+    const curDisabled = () => {
+      const v = (this._data()?.config || {}).disabled_cameras;
+      return Array.isArray(v) ? v.slice() : [];
+    };
+    root.querySelectorAll(".new-cam-enable-toggle[data-cam]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const cam = btn.getAttribute("data-cam"), cur = curDisabled(), isOff = cur.includes(cam);
+        applyDisabled(isOff ? cur.filter(c => c !== cam) : [...cur, cam]);
+      });
+    });
+    const enAll = root.getElementById("newCamEnableAll");
+    if (enAll) enAll.addEventListener("click", () => applyDisabled([]));
+    const disAll = root.getElementById("newCamDisableAll");
+    if (disAll) disAll.addEventListener("click", () => applyDisabled(((this._data()?.config || {}).cameras || []).map(c => c.entity_id)));
+
+    root.querySelectorAll(".new-camset-name").forEach(input => {
+      input.dataset.saved = input.value;
+      const save = async () => {
+        const entity = input.getAttribute("data-cam");
+        const name = input.value;
+        if (name === input.dataset.saved) return;
+        try {
+          const res = await this._hass.callWS({ type: "nova/rename_camera", entity_id: entity, name });
+          input.dataset.saved = name;
+          if (this._liveData?.config) {
+            this._liveData.config.camera_names = res?.camera_names || {};
+            if (Array.isArray(res?.cameras)) this._liveData.config.cameras = res.cameras;
+          }
+        } catch (err) { console.error("Nova: camera rename failed", err); }
+      };
+      input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); input.blur(); } });
+      input.addEventListener("blur", save);
+    });
+
+    root.querySelectorAll(".new-cam-loc-chip").forEach(chipEl => {
+      chipEl.addEventListener("click", async () => {
+        const entity = chipEl.getAttribute("data-cam");
+        const m = chipEl.getAttribute("data-loc");
+        chipEl.disabled = true;
+        try {
+          const res = await this._hass.callWS({ type: "nova/camera_location", entity_id: entity, mode: m });
+          if (Array.isArray(res?.cameras) && this._liveData?.config) this._liveData.config.cameras = res.cameras;
+          this._rerenderCameraSettings();
+        } catch (err) {
+          console.error("Nova: camera location failed", err);
+          chipEl.disabled = false;
+        }
+      });
+    });
+  }
+
+  _dbTrainRow(e) {
+    const ts = String(e.ts || "").replace("T", " ").replace("Z", "").slice(5, 16);
+    const src = String(e.image_source || "?");
+    const cat = e.category || "";
+    const desc = this._esc(e.summary || e.analysis || "");
+    // "speak" is what Nova would actually say aloud for this event — logged
+    // regardless of whether announcements_enabled let it through, so you can
+    // see after the fact what a notable event would have sounded like.
+    const speak = (e.speak || "").trim();
+    const speakLine = speak ? `<div class="toggle-desc" style="margin-top:2px"><i>"${this._esc(speak)}"</i></div>` : "";
+    return `
+      <div class="cfg-row"${e.notable ? ' style="color:var(--gold)"' : ""}>
+        <label>${this._esc(ts)} · ${this._esc(src)}${cat ? " · " + this._esc(cat) : ""}</label>
+        <span class="toggle-desc">${desc}</span>
+      </div>
+      ${speakLine}`;
+  }
+
+  _doorbellTrainingCardBody() {
+    const t = this._data()?.doorbellTraining || {};
+    const stats = t.stats || {};
+    const events = t.recent || [];
+    const patterns = t.patterns || [];
+    const total = stats.total || 0;
+    const notable = stats.notable || 0;
+    const bySource = stats.by_source || {};
+    const srcLine = Object.keys(bySource).length
+      ? Object.entries(bySource).map(([k, v]) => `${k} ${v}`).join(" · ")
+      : "none yet";
+    const rows = events.length
+      ? events.slice().reverse().map(e => this._dbTrainRow(e)).join("")
+      : `<div class="stub-body">No analysed doorbell events yet. Run a backlog scan, or wait for the next doorbell press.</div>`;
+    // Patterns are timing-only — no names, no face matching. Nova has no
+    // local face model; that needs Frigate or DoubleTake (recognition.py),
+    // neither configured here. This just clusters the vision model's own
+    // category label (delivery/mail/person/...) by camera and time of day.
+    const patternsBlock = patterns.length
+      ? `<div class="mode-bind-head">Recurring patterns (timing only — not face recognition)</div>
+         <ul style="margin:0 0 10px;padding-left:18px;font-size:12px;color:var(--ink-dim);line-height:1.7">
+           ${patterns.map(p => `<li>${this._esc(p.description)}</li>`).join("")}
+         </ul>`
+      : `<div class="stub-body">No recurring patterns yet — needs a few more days of data, or nothing repeats at a consistent time yet.</div>`;
+    return `
+      <div class="stub-body">Analysed doorbell events — Nova's visitor training data. Each press is logged automatically; run a backlog scan to mine the recorded-event history into the dataset.</div>
+      <div class="cfg-row">
+        <label>Scan limit</label>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input id="newDbtLimit" class="cfg-field cfg-num" type="number" min="1" max="500" value="40" title="Max events to analyse">
+          <button class="mode-chip" id="newDbtScan">Scan backlog</button>
+        </div>
+      </div>
+      <div class="stub-body">${total} analysed · ${notable} notable · ${this._esc(srcLine)}</div>
+      ${patternsBlock}
+      ${rows}`;
+  }
+
+  // Wellbeing status is fetched once per element lifetime (same on-demand
+  // pattern as Diagnostics/Hazard/Energy).
+  async _fetchBio() {
+    if (!this._hass) return;
+    try {
+      this._bio = await this._hass.callWS({ type: "nova/biometrics", action: "status" });
+    } catch (_) { this._bio = { error: true }; }
+    if (this._currentTab === "settings") this._render();
+  }
+
+  _wellbeingContextCardBody() {
+    const b = this._bio || {};
+    if (b.error) {
+      return `<div class="stub-body">Couldn't load — restart Home Assistant after updating.</div>`;
+    }
+    const status = b.enabled
+      ? `<span class="diag-ok">ON · ${b.found || 0} sensor${b.found === 1 ? "" : "s"}</span>`
+      : `<span class="diag-off">OFF</span>`;
+    const ents = b.entities || [];
+    let body;
+    if (!b.enabled) {
+      body = `<div class="stub-body">Off — enable to let Nova use wearable context. Health readings are never diagnosed or alarmed on.</div>`;
+    } else if (!ents.length) {
+      body = `<div class="stub-body">No wearable entities found. Connect a wearable integration (Withings, Google Fit, Oura, etc.) to Home Assistant.</div>`;
+    } else {
+      body = ents.map(e =>
+        `<div class="cfg-row"><label>${this._esc((e.kind || "").replace(/_/g, " "))}</label><span>${this._esc(e.value)}${e.unit ? " " + this._esc(e.unit) : ""}</span></div>`).join("");
+    }
+    return `
+      <div class="stub-body">Lets Nova read a connected wearable (heart rate, sleep, steps) so it can be quieter when you're resting. Context only — not medical. Off by default; health data stays private.</div>
+      <div class="cfg-row">
+        <label>Status</label>
+        <div style="display:flex;align-items:center;gap:8px">${status}<button class="mode-chip" id="newBioToggle">${b.enabled ? "✕ DISABLE" : "◉ ENABLE"}</button></div>
+      </div>
+      ${body}`;
+  }
+
+  _characterResearchCardBody() {
+    const cfg = this._data()?.config || {};
+    return `
+      <div class="cfg-row">
+        <label>Banter level</label>
+        <select class="cfg-field" data-cfg-key="banter_level">
+          ${this._optSelect([["0", "Plain — no wit"], ["1", "Dry — occasional wit (default)"], ["2", "Full — MCU Nova"]], String(cfg.banter_level ?? "1"))}
+        </select>
+      </div>
+      <div class="cfg-row">
+        <label>Web research backend</label>
+        <select class="cfg-field" data-cfg-key="search_backend">
+          ${this._optSelect([["duckduckgo", "DuckDuckGo (no key, default)"], ["searxng", "SearXNG (self-hosted)"]], cfg.search_backend || "duckduckgo")}
+        </select>
+      </div>
+      <div class="cfg-row">
+        <label>SearXNG URL</label>
+        <input class="cfg-field" type="text" data-cfg-key="searxng_url" value="${this._esc(cfg.searxng_url || "")}" placeholder="http://searxng.local:8080" autocomplete="off">
+      </div>`;
+  }
+
+  // Document Library (RAG) — fetched once per element lifetime, like the
+  // other on-demand cards (Diagnostics/Hazard/Energy/Wellbeing).
+  async _fetchDocLibrary() {
+    if (!this._hass) return;
+    try {
+      this._docLib = await this._hass.callWS({ type: "nova/documents", action: "status" });
+    } catch (_) { this._docLib = { error: true }; }
+    if (this._currentTab === "settings") this._render();
+  }
+
+  async _fetchVectorBackend() {
+    if (!this._hass) return;
+    try {
+      this._vecbk = await this._hass.callWS({ type: "nova/semantic_search", action: "status" });
+    } catch (_) { this._vecbk = { error: true }; }
+    if (this._currentTab === "settings") this._render();
+  }
+
+  _renderDocLibraryList() {
+    const d = this._docLib || {};
+    if (d.error) return `<div class="stub-body">Couldn't reach the library — restart Home Assistant after updating, then reopen.</div>`;
+    const sources = d.sources || [];
+    if (!sources.length) {
+      return `<div class="stub-body">No documents ingested yet. Add PDF/.txt/.md files to <code>/config/nova/documents</code> and press Ingest.${d.chroma ? "" : " (Vector search needs ChromaDB; keyword fallback is active.)"}</div>`;
+    }
+    return sources.map(s => `
+      <div class="cfg-row">
+        <label>${this._esc(s.source)}</label>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span class="toggle-desc">${s.chunks} chunks</span>
+          <button class="new-doclib-del" data-src="${this._esc(s.source)}" title="Remove document">✕</button>
+        </div>
+      </div>`).join("");
+  }
+
+  _renderDocSearchResults(hits) {
+    if (!hits || !hits.length) return `<div class="stub-body">No matches. Try different words, or ingest more documents.</div>`;
+    return hits.map(h => {
+      const score = (h.score != null) ? ` · ${Math.round(h.score * 100)}%` : "";
+      const excerpt = (h.text || "").slice(0, 220);
+      return `<div class="stub-body"><b>${this._esc(h.source || "?")}${score}</b><br>${this._esc(excerpt)}${h.text && h.text.length > 220 ? "…" : ""}</div>`;
+    }).join("");
+  }
+
+  _renderVectorBackendBody() {
+    const v = this._vecbk || {};
+    if (v.error) return "";
+    if (v.enabled) {
+      return `
+        <div class="cfg-row"><label>Search</label><span class="diag-ok">◉ SEMANTIC (Ollama)</span></div>
+        <div class="stub-body">Meaning-based matching via Ollama ${this._esc(v.model || "nomic-embed-text")}${v.vector_count ? ` · ${v.vector_count} vectors` : " · re-ingest to embed your documents"}.</div>
+        <div class="cfg-row"><button class="mode-chip" id="newVecbkToggle" data-mode="disable">✕ DISABLE SEMANTIC SEARCH</button></div>`;
+    }
+    if (!v.ollama_configured) {
+      return `
+        <div class="cfg-row"><label>Search</label><span class="diag-off">KEYWORD (FTS)</span></div>
+        <div class="stub-body">Works everywhere with no setup. Semantic search needs an Ollama host — set the LLM base URL to your Ollama server and pull an embed model (ollama pull nomic-embed-text).</div>`;
+    }
+    return `
+      <div class="cfg-row"><label>Search</label><span class="diag-off">KEYWORD (FTS)</span></div>
+      <div class="stub-body">Enable semantic search to match on meaning, using your Ollama server (${this._esc(v.model || "nomic-embed-text")}). No install, no ChromaDB. Re-ingest afterward to embed existing docs.</div>
+      <div class="cfg-row"><button class="mode-chip" id="newVecbkToggle" data-mode="enable">⬆ ENABLE SEMANTIC SEARCH</button></div>`;
+  }
+
+  _documentLibraryCardBody() {
+    const d = this._docLib || {};
+    const backend = d.chroma ? "VECTOR" : d.fts ? "KEYWORD" : "NONE";
+    return `
+      <div class="stub-body">Drop manuals &amp; receipts (PDF, .txt, .md) into <code>/config/nova/documents</code> or upload below, then ingest. Ask Nova "what's the furnace filter size?" and it answers from your paperwork.</div>
+      <div class="cfg-row"><label>Backend</label><span>${this._esc(backend)} · ${d.chunk_count || 0} chunks</span></div>
+      ${this._renderVectorBackendBody()}
+      <div class="mode-bind-head">Library</div>
+      <div class="cfg-row">
+        <button class="mode-chip" id="newDoclibUpload">⬆ UPLOAD FILE</button>
+        <input type="file" id="newDoclibFile" accept=".pdf,.txt,.md" style="display:none">
+        <button class="mode-chip" id="newDoclibIngest">⟳ INGEST FOLDER</button>
+      </div>
+      <div class="cfg-row">
+        <input id="newDoclibSearch" class="cfg-field" style="flex:1" type="text" placeholder="test a search — e.g. furnace filter size" autocomplete="off">
+      </div>
+      <div id="newDoclibBody">${this._renderDocLibraryList()}</div>
+      <div class="mode-bind-head">Watch folders <span class="toggle-desc">one per line/comma, e.g. /media/downloads</span></div>
+      <div class="cfg-row">
+        <input id="newDoclibWatch" class="cfg-field" style="flex:1" type="text" value="${this._esc(this._docLibWatchValue())}" autocomplete="off">
+        <button class="mode-chip" id="newDoclibScan">⟳ SCAN WATCH</button>
+      </div>`;
+  }
+
+  _docLibWatchValue() {
+    const wf = this._data()?.config?.document_watch_folders;
+    if (!wf) return "";
+    return Array.isArray(wf) ? wf.join("\n") : wf;
+  }
+
+  _rerenderDocLibraryBody() {
+    const host = this.shadowRoot?.getElementById("newDoclibBody");
+    if (!host) return;
+    host.innerHTML = this._renderDocLibraryList();
+    this._wireDocLibraryDeletes();
+  }
+
+  _wireDocLibraryDeletes() {
+    this.shadowRoot?.querySelectorAll(".new-doclib-del").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const src = btn.getAttribute("data-src");
+        if (!src || !this._hass) return;
+        if (!window.confirm(`Remove "${src}" from the library? This deletes the file and its indexed chunks.`)) return;
+        try {
+          await this._hass.callWS({ type: "nova/documents", action: "delete", filename: src });
+          await this._fetchDocLibrary(); // triggers a full _render() when in the settings tab
+        } catch (err) { console.error("Nova: document delete failed", err); }
+      });
+    });
+  }
+
+  _wireDocLibrary() {
+    const root = this.shadowRoot;
+    this._wireDocLibraryDeletes();
+
+    const ingestBtn = root.getElementById("newDoclibIngest");
+    if (ingestBtn) {
+      ingestBtn.addEventListener("click", async () => {
+        if (!this._hass) return;
+        ingestBtn.disabled = true;
+        const orig = ingestBtn.textContent;
+        ingestBtn.textContent = "⟳ INGESTING…";
+        try {
+          await this._hass.callWS({ type: "nova/documents", action: "ingest" });
+          await this._fetchDocLibrary();
+        } catch (err) {
+          console.error("Nova: ingest failed", err);
+        } finally {
+          ingestBtn.disabled = false;
+          ingestBtn.textContent = orig;
+        }
+      });
+    }
+
+    const q = root.getElementById("newDoclibSearch");
+    if (q) {
+      q.addEventListener("keydown", async (ev) => {
+        if (ev.key !== "Enter") return;
+        ev.preventDefault();
+        const query = q.value.trim();
+        if (!query || !this._hass) { this._rerenderDocLibraryBody(); return; }
+        try {
+          const res = await this._hass.callWS({ type: "nova/documents", action: "search", query });
+          const host = root.getElementById("newDoclibBody");
+          if (host) host.innerHTML = this._renderDocSearchResults(res?.results || []);
+        } catch (err) { console.error("Nova: document search failed", err); }
+      });
+    }
+
+    const upBtn = root.getElementById("newDoclibUpload");
+    const fileInput = root.getElementById("newDoclibFile");
+    if (upBtn && fileInput) {
+      upBtn.addEventListener("click", () => fileInput.click());
+      fileInput.addEventListener("change", async () => {
+        const file = fileInput.files && fileInput.files[0];
+        if (!file || !this._hass) return;
+        if (file.size > 25 * 1024 * 1024) { fileInput.value = ""; return; }
+        upBtn.disabled = true;
+        const orig = upBtn.textContent;
+        upBtn.textContent = "⬆ UPLOADING…";
+        try {
+          const b64 = await new Promise((resolve, reject) => {
+            const r = new FileReader();
+            r.onload = () => resolve(String(r.result).split(",")[1] || "");
+            r.onerror = () => reject(new Error("read failed"));
+            r.readAsDataURL(file);
+          });
+          const res = await this._hass.callWS({ type: "nova/documents", action: "upload", filename: file.name, content: b64 });
+          if (res.ok) {
+            await this._fetchDocLibrary();
+          }
+        } catch (err) {
+          console.error("Nova: document upload failed", err);
+        } finally {
+          upBtn.disabled = false;
+          upBtn.textContent = orig;
+          fileInput.value = "";
+        }
+      });
+    }
+
+    const watchField = root.getElementById("newDoclibWatch");
+    const saveWatch = async () => {
+      if (!this._hass || !watchField) return;
+      try { await this._hass.callWS({ type: "nova/update_config", key: "document_watch_folders", value: watchField.value.trim() }); } catch (_) {}
+    };
+    if (watchField) watchField.addEventListener("blur", saveWatch);
+
+    const scanBtn = root.getElementById("newDoclibScan");
+    if (scanBtn) {
+      scanBtn.addEventListener("click", async () => {
+        if (!this._hass) return;
+        await saveWatch();
+        scanBtn.disabled = true;
+        const orig = scanBtn.textContent;
+        scanBtn.textContent = "⟳ SCANNING…";
+        try {
+          const res = await this._hass.callWS({ type: "nova/documents", action: "scan_watch" });
+          if (res.watched > 0) {
+            await this._fetchDocLibrary();
+          }
+        } catch (err) {
+          console.error("Nova: watch scan failed", err);
+        } finally {
+          scanBtn.disabled = false;
+          scanBtn.textContent = orig;
+        }
+      });
+    }
+
+    const vecbkToggle = root.getElementById("newVecbkToggle");
+    if (vecbkToggle) {
+      vecbkToggle.addEventListener("click", async () => {
+        if (!this._hass) return;
+        const mode = vecbkToggle.getAttribute("data-mode") || "enable";
+        try {
+          await this._hass.callWS({ type: "nova/semantic_search", action: mode });
+        } catch (err) {
+          console.error("Nova: semantic search toggle failed", err);
+        }
+        await this._fetchVectorBackend();
+      });
+    }
+  }
+
+  _mediaPlayerOptions(selected) {
+    const states = this._hass?.states || {};
+    const eids = Object.keys(states).filter(e => e.startsWith("media_player.")).sort();
+    if (selected && !eids.includes(selected)) eids.unshift(selected);
+    return [["", "— none —"], ...eids.map(e => {
+      const st = states[e];
+      const fn = (st && st.attributes && st.attributes.friendly_name) || e;
+      return [e, fn];
+    })];
+  }
+
+  _optSelect(pairs, current) {
+    return pairs.map(([v, label]) => `<option value="${this._esc(v)}"${v === current ? " selected" : ""}>${this._esc(label)}</option>`).join("");
+  }
+
+  _esc(s) {
+    return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  _renderData() {
+    if (!this._renderedOnce) return;
+    const d = this._data();
+    const root = this.shadowRoot;
+    if (!d) return;
+
+    // hero state line
+    const state = this._coreState();
+    const lineEl = root.getElementById("stateLine");
+    const subEl = root.getElementById("stateSub");
+    const lines = {
+      idle: ["Watching over the house.", "ALL QUIET · NOTHING NEEDS YOU RIGHT NOW"],
+      reasoning: ["Something just happened.", "CHECK THE ACTIVITY FEED BELOW"],
+      asleep: ["Everyone's asleep. Staying quiet.", "A GROUND-FLOOR BREACH WOULD STILL WAKE ME"],
+    };
+    if (lineEl) lineEl.textContent = lines[state][0];
+    if (subEl) subEl.textContent = lines[state][1];
+    this._targetCoreState(state);
+
+    // status chips
+    const chipDefs = [
+      ["Observer", d.status.observer], ["Sleep", d.status.sleep], ["Broadcast", d.status.broadcast],
+      ["Notify", d.status.notify], ["Satellites", d.status.satellites],
+    ];
+    const chipsEl = root.getElementById("chips");
+    if (chipsEl) {
+      chipsEl.innerHTML = chipDefs.map(([label, s]) => {
+        const warn = (s?.level === "warn") ? " warn" : "";
+        return `<div class="chip${warn}"><span class="dot"></span> ${this._esc(label)} <b>${this._esc(s?.state ?? "—")}</b></div>`;
+      }).join("");
+    }
+
+    // activity feed
+    const entries = (this._activityData && this._activityData.length)
+      ? this._activityData
+      : [{ ts: "--:--", tag: "SYSTEM", msg: "No activity yet." }];
+    const feedEl = root.getElementById("feed");
+    if (feedEl) {
+      feedEl.innerHTML = entries.map(e => `
+        <div class="feed-row">
+          <div class="feed-text"><b>${this._esc(e.tag || "")}</b> · <span class="dim">${this._esc(e.msg || "")}</span></div>
+          <div class="feed-time">${this._esc(e.ts || "")}</div>
+        </div>`).join("");
+    }
+    const feedMeta = root.getElementById("feedMeta");
+    if (feedMeta) feedMeta.textContent = `LAST ${entries.length}`;
+
+    // areas
+    const areasGridEl = root.getElementById("areasGrid");
+    if (areasGridEl) {
+      areasGridEl.innerHTML = (d.areas || []).map(a => this._areaTileHtml(a)).join("");
+      // Re-wire on every patch — innerHTML above just replaced these nodes,
+      // so any listeners from a previous _renderData() are already gone.
+      areasGridEl.querySelectorAll(".area-light-toggle[data-light-area]").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const areaId = btn.getAttribute("data-light-area");
+          const name = btn.getAttribute("data-area-name") || "Area";
+          const isOn = btn.classList.contains("on");
+          this._toggleAreaLights(areaId, name, isOn);
+        });
+      });
+    }
+    const areasMeta = root.getElementById("areasMeta");
+    if (areasMeta) areasMeta.textContent = `${d.occupied} OCCUPIED · ${d.areasMonitored} MONITORED`;
+
+    this._renderSolarPanel();
+
+    // camera — collapsed, optional, honest
+    const camPanel = root.getElementById("cameraPanel");
+    const camStrip = root.getElementById("camStrip");
+    if (camPanel && camStrip) {
+      const cams = d.cameras || [];
+      camPanel.hidden = cams.length === 0;
+      const camToggle = root.getElementById("camToggle");
+      if (camToggle) camToggle.textContent = this._camOpen ? "HIDE CAMERAS ▴" : `SHOW ${cams.length} CAMERA${cams.length === 1 ? "" : "S"} ▾`;
+      camStrip.classList.toggle("open", this._camOpen);
+      camStrip.innerHTML = cams.map(c => `<div class="camera-slot">${this._esc(c.name || c.entity_id)}</div>`).join("");
+    }
+  }
+
+  // Canonical order + icon per capability, matching the backend's own
+  // ordering (websocket.py's area-caps builder) so a room with many
+  // capabilities always shows them in the same, sensible sequence.
+  static AREA_CAP_ORDER = ["sat", "spkr", "mmwave", "cam", "light", "switch", "lock", "climate", "door", "leak", "alarm"];
+  static AREA_CAP_ICON = {
+    sat: "🛰️", spkr: "🔊", mmwave: "📡", cam: "📷", light: "💡", switch: "🔌",
+    lock: "🔒", climate: "🌡️", door: "🚪", leak: "💧", alarm: "🔔",
+  };
+
+  _areaSparklineSvg(values, color) {
+    if (!values || values.length < 2) return "";
+    const w = 60, h = 16, pad = 1;
+    const min = Math.min(...values), max = Math.max(...values), range = (max - min) || 1;
     const step = (w - pad * 2) / (values.length - 1);
     const pts = values.map((v, i) => {
       const x = pad + i * step;
       const y = h - pad - ((v - min) / range) * (h - pad * 2);
       return `${x.toFixed(1)},${y.toFixed(1)}`;
-    }).join(' ');
-    return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
-      <polyline points="${pts}" fill="none" stroke="${colorVar}" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round"/>
-    </svg>`;
+    }).join(" ");
+    return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.4" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
   }
 
-  _evtIcon(tag) {
-    const t = (tag || "").toUpperCase();
-    const S = (p) => `<svg class="evt-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
-    if (/MOTION|OBSERV|PRESENCE|OCCUP/.test(t)) return S('<circle cx="12" cy="13" r="2.5"/><path d="M6.5 13a5.5 5.5 0 0 1 11 0"/><path d="M3 13a9 9 0 0 1 18 0"/>');
-    if (/DOOR|GARAGE|WINDOW|COVER|GATE/.test(t)) return S('<rect x="6" y="3" width="12" height="18" rx="1"/><circle cx="14.5" cy="12" r="1"/>');
-    if (/ALARM|INTRU|SECUR|LOCK|BREACH/.test(t)) return S('<path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/>');
-    if (/PACKAGE|MAIL|DELIV|PARCEL/.test(t)) return S('<path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/>');
-    if (/ENERGY|POWER|WATT|LOAD/.test(t)) return S('<path d="M13 2L4 14h7l-1 8 9-12h-7z"/>');
-    if (/WEATHER|HAZARD|QUAKE|STORM|FIRE|FLOOD/.test(t)) return S('<path d="M12 2v3"/><path d="M4.2 10a5 5 0 0 1 9.6-1.5A4 4 0 1 1 15 18H7a4.5 4.5 0 0 1-2.8-8z"/>');
-    if (/CAMERA|DOORBELL|VISION|FACE/.test(t)) return S('<path d="M3 7h4l2-2h6l2 2h4v12H3z"/><circle cx="12" cy="13" r="3.5"/>');
-    if (/BRIEF|MORNING|EVENING|AGENDA|CALENDAR/.test(t)) return S('<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2"/>');
-    if (/LEAVE|DEPART|TRAVEL|ROUTINE/.test(t)) return S('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>');
-    return S('<circle cx="12" cy="12" r="2.5"/>');
-  }
-
-  _evtRowHtml(e) {
-    return `
-      <div class="evt ${this._esc(e.urgency || '')}">
-        <div class="ts">${this._esc(e.ts || '')}</div>
-        ${this._evtIcon(e.tag)}
-        <div class="msg"><b>${this._esc(e.tag || '')}</b> · ${this._esc(e.msg || '')}</div>
-      </div>`;
-  }
-
-  _activityFiltered() {
-    const entries = (this._activityData && this._activityData.length > 0)
-      ? this._activityData
-      : [{ ts: "--:--", urgency: "low", tag: "SYSTEM", msg: "No activity yet. Enable announcements or observer to see events here." }];
-    const q = (this._activitySearch || '').trim().toLowerCase();
-    if (!q) return { rows: entries, total: entries.length };
-    return {
-      rows: entries.filter(e =>
-        (e.msg || '').toLowerCase().includes(q) ||
-        (e.tag || '').toLowerCase().includes(q)),
-      total: entries.length,
-    };
-  }
-
-  _updateActivityFeed() {
-    // Rebuilds ONLY the feed rows + count — the search input keeps focus.
-    const feed = this.shadowRoot?.getElementById('activity-feed');
-    if (!feed) return;
-    const { rows, total } = this._activityFiltered();
-    const q = (this._activitySearch || '').trim();
-    feed.innerHTML = rows.length
-      ? rows.map(e => this._evtRowHtml(e)).join('')
-      : `<div class="evt low"><div class="msg" style="grid-column:1/-1;">No events match "${this._esc(q)}".</div></div>`;
-    const count = this.shadowRoot?.getElementById('activity-count');
-    if (count) count.textContent = q ? `${rows.length} OF ${total}` : `LAST ${total}`;
-  }
-
-  _relTime(iso) {
-    if (!iso) return '';
-    const t = new Date(String(iso).replace(' ', 'T')).getTime();
-    if (isNaN(t)) return '';
-    const diffMin = Math.round((t - Date.now()) / 60000);
-    const abs = Math.abs(diffMin);
-    const unit = abs < 60 ? `${abs}m` : abs < 1440 ? `${Math.round(abs / 60)}h` : `${Math.round(abs / 1440)}d`;
-    return diffMin >= 0 ? `in ${unit}` : `${unit} ago`;
-  }
-
-  _renderAreaDetail(d) {
-    if (!this._expandedArea) return '';
-    const a = (d.areasGrid || []).find(x => x.id === this._expandedArea);
-    if (!a) return '';
+  _areaTileHtml(a) {
+    const caps = (a.caps || []).slice().sort((x, y) =>
+      NovaPanel.AREA_CAP_ORDER.indexOf(x) - NovaPanel.AREA_CAP_ORDER.indexOf(y)).slice(0, 5);
+    const capsRow = caps.length
+      ? `<div class="area-caps">${caps.map(c => `<div class="area-cap" title="${this._esc(c)}">${NovaPanel.AREA_CAP_ICON[c] || "•"}</div>`).join("")}</div>`
+      : "";
     const spark = this._sparklines?.[a.id] || {};
-    const tempSpark = spark.temp ? this._sparklineSvg(spark.temp, 'var(--cyan-dim)') : '';
-    const humSpark = spark.humidity ? this._sparklineSvg(spark.humidity, 'var(--green)') : '';
+    const tempSpark = spark.temp ? this._areaSparklineSvg(spark.temp, "var(--gold)") : "";
+    const humSpark = spark.humidity ? this._areaSparklineSvg(spark.humidity, "#6ea8ff") : "";
+    const climateRow = (a.temp || a.humidity) ? `
+      <div class="area-climate">
+        ${a.temp ? `<div class="area-climate-item"><div class="area-climate-num">${this._esc(a.temp)}</div>${tempSpark}</div>` : ""}
+        ${a.humidity ? `<div class="area-climate-item"><div class="area-climate-num">${this._esc(a.humidity)}</div>${humSpark}</div>` : ""}
+      </div>` : "";
     const hasLights = (a.lights_total || 0) > 0;
     const lit = hasLights && (a.lights_on || 0) > 0;
-    const ctlOn = (this._liveData && this._liveData.config && this._liveData.config.light_control_enabled) !== false;
-    const caps = a.caps || [];
+    const ctlOn = (this._liveData?.config?.light_control_enabled) !== false;
+    const lightCtl = hasLights
+      ? `<button class="area-light-toggle${lit ? " on" : ""}"${ctlOn ? ` data-light-area="${this._esc(a.id || "")}" data-area-name="${this._esc(a.name)}"` : " disabled"} title="${a.lights_on}/${a.lights_total} lights on${ctlOn ? " — tap to toggle" : ""}">${lit ? "ON" : "OFF"}</button>`
+      : "";
     return `
-      <div class="area-detail-overlay" id="area-detail-overlay">
-        <div class="area-detail-card">
-          <div class="area-detail-head">
-            <span class="area-detail-title">${this._esc(a.name)}</span>
-            <span class="area-detail-status ${a.active ? 'active' : ''}">${a.active ? '◉ OCCUPIED' : '○ VACANT'}</span>
-            <button class="area-detail-close" aria-label="Close">✕</button>
-          </div>
-          <div class="area-detail-grid">
-            ${a.temp ? `<div class="area-detail-stat">
-              <div class="ads-label">Temperature</div>
-              <div class="ads-value">${this._esc(a.temp)}</div>
-              <div class="ads-spark">${tempSpark}</div>
-            </div>` : ''}
-            ${a.humidity ? `<div class="area-detail-stat">
-              <div class="ads-label">Humidity</div>
-              <div class="ads-value">${this._esc(a.humidity)}</div>
-              <div class="ads-spark">${humSpark}</div>
-            </div>` : ''}
-          </div>
-          <div class="area-detail-meta">
-            ${hasLights ? `<div class="adm-row"><span>Lights</span>
-              <button class="area-light adl ${lit ? 'on' : ''} ${ctlOn ? '' : 'static'}" data-light-area="${this._esc(a.id)}" data-area-name="${this._esc(a.name)}">
-                <span class="al-dot"></span>${a.lights_on}/${a.lights_total} ${lit ? 'ON' : 'OFF'}
-              </button></div>` : ''}
-            ${a.last_motion ? `<div class="adm-row"><span>Last motion</span><span>${this._esc(a.last_motion)}</span></div>` : ''}
-            <div class="adm-row"><span>Capabilities</span><span>${caps.length ? caps.map(c => this._esc(c)).join(', ') : '—'}</span></div>
-          </div>
+      <div class="area-tile${a.active ? " active" : ""}${(a.temp || a.humidity) ? "" : " no-temp"}">
+        <div class="area-top">
+          <div class="area-name">${this._esc(a.name)}${a.active ? '<span class="live-dot" title="Occupied now"></span>' : ""}</div>
+        </div>
+        ${capsRow}
+        ${climateRow}
+        <div class="area-bottom">
+          <div class="area-stat">lights <b>${a.lights_on ?? 0}/${a.lights_total ?? 0}</b></div>
+          ${lightCtl}
         </div>
       </div>`;
   }
 
-  _renderGoals(d) {
-    const goals = d.goals || [];
-    const STATUS_LABEL = { active: 'ACTIVE', done: 'DONE', failed: 'FAILED', cancelled: 'CANCELLED' };
-    const rows = goals.map(g => {
-      const pct = g.steps_total ? Math.round((g.steps_done / g.steps_total) * 100) : 0;
-      const isActive = g.status === 'active';
-      const when = isActive
-        ? (g.deadline_ts
-            ? `deadline ${this._relTime(g.deadline_ts)}`
-            : `next check ${this._relTime(g.next_check_ts)}`)
-        : this._esc(g.last_result || '');
-      return `<div class="goal goal-${g.status}" data-goal-id="${g.id}">
-        <div class="goal-top">
-          <span class="goal-status-badge">${STATUS_LABEL[g.status] || g.status.toUpperCase()}</span>
-          <span class="goal-title">${this._esc(g.title)}</span>
-          ${isActive
-            ? `<button class="goal-cancel" title="Cancel this goal">✕</button>`
-            : `<button class="goal-delete" title="Delete this goal">🗑</button>`}
-        </div>
-        <div class="goal-outcome">${this._esc(g.outcome)}</div>
-        ${g.steps_total ? `
-        <div class="goal-meta">
-          <span class="goal-steps-bar"><i style="width:${pct}%"></i></span>
-          <span class="goal-steps-pct">${g.steps_done}/${g.steps_total} steps</span>
-        </div>` : ''}
-        ${when ? `<div class="goal-when">${when}</div>` : ''}
-      </div>`;
-    }).join('');
-    const activeCount = goals.filter(g => g.status === 'active').length;
-    return `
-      <div class="panel">
-        <div class="head">
-          <span>Goals</span>
-          <span class="side">${activeCount} ACTIVE</span>
-        </div>
-        <div class="goal-new">
-          <input class="goal-new-input" type="text" placeholder="Give Nova a goal to work toward…" maxlength="240" />
-          <button class="goal-new-btn" title="Add goal">+ ADD</button>
-        </div>
-        <div class="goal-list">${rows || '<div class="goal-empty">No goals yet. Add one above, or ask Nova to set one.</div>'}</div>
-      </div>`;
+  // Solar (ported from Classic's own Solar card — data was already fetched
+  // into this._solar by _fetchLiveData but never rendered anywhere; the new
+  // look never actually showed it despite pulling the data every poll).
+  _renderSolarPanel() {
+    const root = this.shadowRoot;
+    const body = root.getElementById("solarBody");
+    const sufficiencyEl = root.getElementById("solarSufficiency");
+    if (!body) return;
+    const s = this._solar || {};
+    if (!s || s.error) {
+      body.innerHTML = `<div class="stub-body">Couldn't load solar data — restart Home Assistant after updating.</div>`;
+      if (sufficiencyEl) sufficiencyEl.textContent = "—";
+      return;
+    }
+    if (!s.configured) {
+      body.innerHTML = `<div class="stub-body">${this._esc((s.advice || [])[0] || "No solar source configured yet.")}</div>`;
+      if (sufficiencyEl) sufficiencyEl.textContent = "—";
+      return;
+    }
+    if (sufficiencyEl) {
+      sufficiencyEl.textContent = s.self_sufficiency_pct != null
+        ? `${s.self_sufficiency_pct}% self-sufficient` : "—";
+    }
+    const rows = [];
+    if (s.solar_w != null) {
+      rows.push(`<div class="feed-row"><span class="feed-text">Solar</span><span class="feed-time">${(s.solar_w / 1000).toFixed(2)} kW</span></div>`);
+    }
+    if (s.grid_w != null) {
+      const dirLabel = s.grid_direction === "export" ? "Exporting" : s.grid_direction === "import" ? "Importing" : "Balanced";
+      rows.push(`<div class="feed-row"><span class="feed-text">Grid</span><span class="feed-time">${dirLabel} ${(Math.abs(s.grid_w) / 1000).toFixed(2)} kW</span></div>`);
+    }
+    if (s.battery_w != null || s.battery_pct != null) {
+      const pct = s.battery_pct != null ? `${s.battery_pct}%` : "no % available";
+      rows.push(`<div class="feed-row"><span class="feed-text">Battery</span><span class="feed-time">${pct}${s.battery_w != null ? ` · ${(s.battery_w / 1000).toFixed(2)} kW` : ""}</span></div>`);
+    }
+    const advice = (s.advice || []).map(a => `<div class="toggle-desc" style="margin-bottom:6px">${this._esc(a)}</div>`).join("");
+    body.innerHTML = advice + rows.join("");
   }
 
-  _renderSuggestions(d) {
-    const sugs = d.suggestions || [];
-    const TYPE_LABEL = {
-      time_routine: 'DAILY ROUTINE', sequence: 'ACTION SEQUENCE',
-      repeated_command: 'REPEATED COMMAND', temp_pref: 'TEMPERATURE',
-      presence: 'PRESENCE', numeric_trigger: 'SENSOR THRESHOLD',
+  // Shared by the dashboard's Quick Actions card and the Suggestions tab's
+  // empty state — same "Analyze Now" behavior Classic exposes, wired to
+  // whichever button/result-div ids the caller passes.
+  _wireAnalyzeButton(btnId, resultId) {
+    const root = this.shadowRoot;
+    const btn = root.getElementById(btnId);
+    if (!btn || btn._wired) return;
+    btn._wired = true;
+    btn.addEventListener("click", async () => {
+      if (!this._hass) return;
+      const out = root.getElementById(resultId);
+      btn.disabled = true;
+      const orig = btn.textContent;
+      btn.textContent = "Analyzing…";
+      if (out) out.textContent = "Running pattern analysis over your history…";
+      try {
+        const res = await this._hass.callWS({ type: "nova/run_analysis" });
+        const bf = res.backfill || {};
+        const bfNote = bf.imported ? `<br>Imported ${bf.imported} past event${bf.imported === 1 ? "" : "s"} from history for ${bf.entities} new entit${bf.entities === 1 ? "y" : "ies"}.` : "";
+        if (out) {
+          if (res.ran) {
+            const nf = res.patterns_found ?? 0;
+            const ns = res.new_suggestions ?? 0;
+            let msg = `✓ Found ${nf} pattern${nf === 1 ? "" : "s"}, ${ns} new suggestion${ns === 1 ? "" : "s"}.`;
+            if (ns > 0) {
+              msg += ` Check Suggestions.`;
+            } else {
+              msg += ` Nothing cleared the confidence bar this pass.`;
+              const dg = res.diagnostic || {};
+              const cand = (dg.candidates || [])[0];
+              if (cand) {
+                const hr = String(cand.hour).padStart(2, "0");
+                msg += `<br>Closest routine: <b>${this._esc(cand.entity_id)}</b> → ${this._esc(cand.state)} ~${hr}:00, seen ${cand.days}/${dg.total_days} days (needs ${dg.min_days}).`;
+              }
+              const src = (dg.top_sources || [])[0];
+              if (src) msg += `<br>Busiest source: ${this._esc(src.entity_id)} (${src.changes} changes).`;
+            }
+            const nm = Array.isArray(res.near_misses) ? res.near_misses : [];
+            if (nm.length) {
+              msg += `<br>Building toward suggestions:`;
+              msg += nm.slice(0, 5).map(m => {
+                const prog = m.needed ? ` (${m.occurrences}/${m.needed})` : ` (${m.occurrences}×)`;
+                return `<br>• ${this._esc(m.description || m.type)}${prog}`;
+              }).join("");
+            }
+            out.innerHTML = msg + bfNote;
+          } else {
+            out.innerHTML = `✕ ${this._esc(res.reason || res.error || "Analysis did not run.")}` + bfNote;
+          }
+        }
+        try { await this._fetchLiveData(); } catch (_) {}
+      } catch (err) {
+        if (out) out.innerHTML = `✕ ${this._esc(err?.message || String(err))}`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = orig;
+      }
+    });
+  }
+
+  async _toggleAreaLights(areaId, roomName, isOn) {
+    if (!this._hass || !areaId) return;
+    const turnOn = !isOn;
+    try {
+      await this._hass.callService("light", turnOn ? "turn_on" : "turn_off", {}, { area_id: areaId });
+      setTimeout(() => { try { this._fetchLiveData(); } catch (_) {} }, 500);
+    } catch (err) {
+      console.error(`Nova: ${roomName} lights toggle failed`, err);
+    }
+  }
+
+  _wire() {
+    const root = this.shadowRoot;
+    const camToggle = root.getElementById("camToggle");
+    if (camToggle) {
+      camToggle.addEventListener("click", () => {
+        this._camOpen = !this._camOpen;
+        this._renderData();
+      });
+    }
+    // Top nav: Command Center / Settings
+    root.querySelectorAll(".nav-tab").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const tab = btn.getAttribute("data-tab");
+        if (tab === this._currentTab) return;
+        this._currentTab = tab;
+        this._render();
+      });
+    });
+
+    if (this._currentTab === "settings") this._wireSettings();
+    if (this._currentTab === "logs") { this._wireLogs(); this._fetchDebugLog(); }
+    if (this._currentTab === "memory") { this._wireMemory(); this._fetchKnowledge(); this._fetchPersonRoutines(); }
+    if (this._currentTab === "intrusion") this._wireIntrusion();
+    if (this._currentTab === "residence") {
+      this._build3DHouseNew();
+      this._wireResidenceControlsNew();
+      this._fetchMmwaveNew();
+    }
+    if (this._currentTab === "suggestions") { this._wireSuggestions(); this._wireAnalyzeButton("sugRunAnalysis", "sugAnalysisResult"); }
+    if (this._currentTab === "dashboard") {
+      this._wireAnalyzeButton("qaRunAnalysis", "qaAnalysisResult");
+      root.querySelectorAll(".panel [data-svc]").forEach(btn => {
+        if (btn._wired) return;
+        btn._wired = true;
+        btn.addEventListener("click", async () => {
+          const svcAttr = btn.getAttribute("data-svc");
+          if (!svcAttr || !this._hass) return;
+          const [domain, service] = svcAttr.split(".");
+          let data = {};
+          const dataAttr = btn.getAttribute("data-svc-data");
+          if (dataAttr) {
+            try { data = JSON.parse(dataAttr); } catch (_) { data = {}; }
+          }
+          try {
+            await this._hass.callService(domain, service, data);
+          } catch (err) {
+            console.error(`Nova: service ${svcAttr} failed`, err);
+          }
+        });
+      });
+    }
+  }
+
+  _wireSettings() {
+    const root = this.shadowRoot;
+
+    root.querySelectorAll(".settings-nav-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        this._settingsSection = btn.getAttribute("data-settings-section");
+        this._settingsSearch = "";
+        this._applySettingsFilter();
+        root.querySelectorAll(".settings-nav-btn").forEach(b =>
+          b.classList.toggle("active", b === btn));
+        const search = root.getElementById("settingsSearch");
+        if (search) search.value = "";
+      });
+    });
+
+    const search = root.getElementById("settingsSearch");
+    if (search) {
+      search.addEventListener("input", (e) => {
+        this._settingsSearch = e.target.value;
+        this._applySettingsFilter();
+      });
+    }
+
+    // Generic settings autosave — same shape as Classic's own .cfg-field
+    // handler: any toggle/select tagged data-cfg-key writes straight
+    // through nova/update_config, then a live re-fetch refreshes state.
+    root.querySelectorAll(".toggle-btn[data-cfg-key], .mode-chip[data-cfg-key]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        await this._saveSetting(btn.getAttribute("data-cfg-key"), btn.getAttribute("data-cfg-val") === "true");
+      });
+    });
+    root.querySelectorAll("select.cfg-field[data-cfg-key]").forEach(sel => {
+      sel.addEventListener("change", async () => {
+        await this._saveSetting(sel.getAttribute("data-cfg-key"), sel.value);
+      });
+    });
+    root.querySelectorAll("input.cfg-field[data-cfg-key]").forEach(inp => {
+      inp.addEventListener("change", async () => {
+        const key = inp.getAttribute("data-cfg-key");
+        let value = inp.value;
+        if (inp.type === "number") value = (value === "" ? null : Number(value));
+        await this._saveSetting(key, value);
+      });
+    });
+
+    root.querySelectorAll(".person-honorific-select").forEach(sel => {
+      sel.addEventListener("change", async () => {
+        const customInput = sel.closest(".person-honorific-row")?.querySelector(".person-honorific-custom");
+        if (sel.value === "__custom__") {
+          if (customInput) { customInput.hidden = false; customInput.focus(); }
+          return;  // wait for an actual value before saving anything
+        }
+        if (customInput) { customInput.hidden = true; customInput.value = ""; }
+        const personId = sel.getAttribute("data-person-id");
+        const cfg = this._data()?.config || {};
+        const overrides = { ...(cfg.person_honorifics || {}) };
+        if (sel.value) overrides[personId] = sel.value; else delete overrides[personId];
+        await this._saveSetting("person_honorifics", JSON.stringify(overrides));
+      });
+    });
+    root.querySelectorAll(".person-honorific-custom").forEach(inp => {
+      inp.addEventListener("change", async () => {
+        const personId = inp.getAttribute("data-person-id");
+        const cfg = this._data()?.config || {};
+        const overrides = { ...(cfg.person_honorifics || {}) };
+        const val = inp.value.trim();
+        if (val) overrides[personId] = val; else delete overrides[personId];
+        await this._saveSetting("person_honorifics", JSON.stringify(overrides));
+      });
+    });
+    this._wireFloorPlanEditor();
+
+    root.querySelectorAll(".new-room-speaker-select").forEach(sel => {
+      sel.addEventListener("change", async () => {
+        const cfg = this._data()?.config || {};
+        const assigned = { ...(cfg.room_speakers || {}) };
+        const areaId = sel.getAttribute("data-area-id");
+        if (sel.value) assigned[areaId] = sel.value; else delete assigned[areaId];
+        await this._saveSetting("room_speakers", JSON.stringify(assigned));
+      });
+    });
+    root.querySelectorAll(".new-sat-pair-select").forEach(sel => {
+      sel.addEventListener("change", async () => {
+        const cfg = this._data()?.config || {};
+        const pairings = { ...(cfg.satellite_pairings || {}) };
+        const satId = sel.getAttribute("data-sat-id");
+        if (sel.value) pairings[satId] = sel.value; else delete pairings[satId];
+        await this._saveSetting("satellite_pairings", JSON.stringify(pairings));
+      });
+    });
+    root.querySelectorAll(".new-rule-toggle").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const ruleId = btn.getAttribute("data-rule-id");
+        if (!ruleId) return;
+        const current = this._data()?.config?.disabled_sentinel_rules || [];
+        const isDisabled = current.includes(ruleId);
+        const updated = isDisabled ? current.filter(id => id !== ruleId) : [...current, ruleId];
+        await this._saveSetting("disabled_sentinel_rules", JSON.stringify(updated));
+      });
+    });
+    root.querySelectorAll(".new-ann-speaker-toggle").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const spkId = btn.getAttribute("data-speaker-id");
+        if (!spkId) return;
+        const current = this._data()?.config?.announcement_speakers || [];
+        const isOn = current.includes(spkId);
+        const updated = isOn ? current.filter(id => id !== spkId) : [...current, spkId];
+        await this._saveSetting("announcement_speakers", JSON.stringify(updated));
+      });
+    });
+    const generalSpeakerSel = root.querySelector(".new-general-speaker-select");
+    if (generalSpeakerSel) {
+      generalSpeakerSel.addEventListener("change", async () => {
+        await this._saveSetting("general_speaker", generalSpeakerSel.value);
+      });
+    }
+
+    // Operational Mode: mode chips call nova/mode directly (not update_config —
+    // same websocket contract Classic's own mode-grid already uses).
+    root.querySelectorAll(".mode-grid .mode-chip[data-mode]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const mode = btn.getAttribute("data-mode");
+        if (!this._hass || !mode || btn.classList.contains("mode-chip-on")) return;
+        try {
+          await this._hass.callWS({ type: "nova/mode", action: "set", mode });
+        } catch (err) {
+          console.error("Nova: failed to set mode", err);
+        }
+        await this._fetchLiveData();
+        if (this._currentTab === "settings") this._render();
+      });
+    });
+    root.querySelectorAll(".mode-grid [data-lab-area]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const id = btn.getAttribute("data-lab-area");
+        let cur = this._data()?.config?.lab_areas;
+        cur = Array.isArray(cur) ? cur.slice() : [];
+        const i = cur.indexOf(id);
+        if (i >= 0) cur.splice(i, 1); else cur.push(id);
+        await this._saveSetting("lab_areas", cur);
+      });
+    });
+
+    this._wireAiModels();
+    this._wireAppliances();
+    this._wireCameraSettings();
+
+    const dbtScan = root.getElementById("newDbtScan");
+    if (dbtScan) {
+      dbtScan.addEventListener("click", async () => {
+        if (!this._hass) return;
+        const limInput = root.getElementById("newDbtLimit");
+        let limit = limInput ? parseInt(limInput.value, 10) : 40;
+        if (isNaN(limit) || limit < 1) limit = 40;
+        try {
+          await this._hass.callService("nova", "train_doorbell_backlog", { limit });
+          setTimeout(() => this._fetchLiveData(), 4000);
+        } catch (err) {
+          console.error("Nova: doorbell backlog scan failed", err);
+        }
+      });
+    }
+
+    const plAddBtn = root.getElementById("newPlAddEntity");
+    if (plAddBtn) {
+      plAddBtn.addEventListener("click", async () => {
+        const inp = root.getElementById("newPlEntityInput");
+        const eid = inp && inp.value.trim();
+        if (!eid) return;
+        if (this._hass && this._hass.states && this._hass.states[eid]) {
+          const arr = this._plList();
+          if (!arr.includes(eid)) {
+            arr.push(eid);
+            // Mirror Classic's own _plSave: write the array onto _liveData
+            // directly, not just to the backend — otherwise the re-render
+            // right after this still shows the pre-save list, since the
+            // live-data refetch has no way to know the write landed.
+            if (this._liveData && this._liveData.config) this._liveData.config.pattern_include_entities = arr;
+            await this._saveSetting("pattern_include_entities", JSON.stringify(arr));
+          }
+        } else {
+          console.warn(`Nova: "${eid}" is not a known entity id`);
+        }
+      });
+    }
+    root.querySelectorAll(".new-pl-del").forEach(b => {
+      b.addEventListener("click", async () => {
+        const arr = this._plList();
+        arr.splice(parseInt(b.getAttribute("data-i"), 10), 1);
+        if (this._liveData && this._liveData.config) this._liveData.config.pattern_include_entities = arr;
+        await this._saveSetting("pattern_include_entities", JSON.stringify(arr));
+      });
+    });
+
+    const exclAdd = (addId, inpId, key, validate) => {
+      const btn = root.getElementById(addId);
+      if (!btn) return;
+      btn.addEventListener("click", async () => {
+        const inp = root.getElementById(inpId);
+        const val = inp && inp.value.trim();
+        if (!val) return;
+        if (validate && !validate(val)) return;
+        const arr = this._exclArr((this._data()?.config || {})[key]);
+        if (!arr.includes(val)) { arr.push(val); await this._exclSave(key, arr); }
+      });
     };
-    if (!sugs.length) {
-      return `
-        <div class="meta sug-wrap sug-empty">
-          <div class="sug-header">
-            <span class="sug-header-title">WHAT Nova HAS LEARNED</span>
-          </div>
-          <div class="sug-empty-body">
-            <div class="sug-empty-icon">◇</div>
-            <div class="sug-empty-title">No suggestions right now</div>
-            <div class="sug-empty-sub">Nova proposes automations as it notices
-              routines repeat — a light you turn on each evening, a scene after a
-              button press, the heat when it's cold. As patterns build up, they'll
-              appear here for you to review and approve. Nothing is ever created
-              without your say-so.</div>
-          </div>
-        </div>`;
+    exclAdd("newExclEntAdd", "newExclEntInput", "excluded_entities", (v) => {
+      if (this._hass && this._hass.states && this._hass.states[v]) return true;
+      console.warn(`Nova: "${v}" is not a known entity id`);
+      return false;
+    });
+    exclAdd("newExclDomAdd", "newExclDomInput", "excluded_domains", null);
+    exclAdd("newExclLabAdd", "newExclLabInput", "excluded_labels", null);
+    const exclDel = (cls, key) => root.querySelectorAll("." + cls).forEach(b => {
+      b.addEventListener("click", async () => {
+        const arr = this._exclArr((this._data()?.config || {})[key]);
+        arr.splice(parseInt(b.getAttribute("data-i"), 10), 1);
+        await this._exclSave(key, arr);
+      });
+    });
+    exclDel("new-excl-ent-del", "excluded_entities");
+    exclDel("new-excl-dom-del", "excluded_domains");
+    exclDel("new-excl-lab-del", "excluded_labels");
+
+    const rateLimitInput = root.getElementById("newObserverRateLimit");
+    if (rateLimitInput) {
+      rateLimitInput.addEventListener("change", async () => {
+        let v = parseInt(rateLimitInput.value, 10);
+        if (isNaN(v) || v < 0) v = 0;
+        rateLimitInput.value = v;
+        await this._rawSaveConfig("classifier_rate_limit", v);
+        await this._fetchLiveData();
+        if (this._currentTab === "settings") this._render();
+      });
     }
-    const rows = sugs.map(s => {
-      const pct = Math.round((s.confidence || 0) * 100);
-      const conf = pct >= 80 ? 'sug-hi' : pct >= 55 ? 'sug-mid' : 'sug-lo';
-      const label = TYPE_LABEL[s.pattern_type] || 'LEARNED PATTERN';
-      const evidence = (s.evidence || []).map(e =>
-        `<li>${this._esc(e)}</li>`).join('');
-      const entities = (s.entities || []).length
-        ? `<div class="sug-ents">${(s.entities || []).map(e =>
-            `<span class="sug-ent">${this._esc(e)}</span>`).join('')}</div>`
-        : '';
-      return `<div class="sug" data-sug-id="${s.id}">
-        <div class="sug-head">
-          <span class="sug-type sug-type-${this._esc(s.pattern_type || 'x')}">${label}</span>
-          <span class="sug-pct-txt ${conf}">${pct}% confident</span>
-        </div>
-        ${s.why_headline ? `<div class="sug-why">${this._esc(s.why_headline)}</div>` : ''}
-        <div class="sug-desc">${this._esc(s.description)}</div>
-        ${evidence ? `<div class="sug-ev-label">What Nova observed</div>
-          <ul class="sug-ev">${evidence}</ul>` : ''}
-        ${entities}
-        <div class="sug-conf-row">
-          <span class="sug-conf ${conf}"><i style="width:${pct}%"></i></span>
-          <span class="sug-seen">seen ${s.count || '?'}× in 30 days</span>
-        </div>
-        <div class="sug-actions">
-          <button class="sug-btn sug-approve">✓ Create automation</button>
-          <button class="sug-btn sug-dismiss">✕ Dismiss</button>
-          <button class="sug-btn sug-yaml-btn">⌄ See the automation</button>
-        </div>
-        <pre class="sug-yaml" hidden>${this._esc(s.yaml || '')}</pre>
-      </div>`;
-    }).join('');
-    return `
-      <div class="meta sug-wrap" style="margin-top:8px;border-top:1px solid var(--line);padding-top:10px;">
-        <div class="sug-header">
-          <span class="sug-header-title">WHAT Nova HAS LEARNED</span>
-          <span class="sug-header-sub">${sugs.length} suggestion${sugs.length === 1 ? '' : 's'} to review</span>
-        </div>
-        <div class="sug-list">${rows}</div>
-      </div>`;
-  }
 
-  _renderDoorbellTraining(d) {
-    const t = d.doorbell_training || {};
-    const stats = t.stats || {};
-    const events = t.recent || [];
-    const total = stats.total || 0;
-    const notable = stats.notable || 0;
-    const bySource = stats.by_source || {};
-    const srcLine = Object.keys(bySource).length
-      ? Object.entries(bySource).map(([k, v]) => `${k} ${v}`).join(' · ')
-      : 'none yet';
-    const rows = events.length
-      ? events.slice().reverse().map(e => this._dbTrainRow(e)).join('')
-      : `<div class="dbt-empty">No analysed doorbell events yet. Run a backlog scan, or wait for the next doorbell press.</div>`;
-    return `
-      <div class="dbt-controls">
-        <button class="btn dbt-scan">Scan backlog</button>
-        <input class="dbt-limit" type="number" min="1" max="500" value="40" title="Max events to analyse"/>
-        <span class="dbt-stat">${total} analysed · ${notable} notable · ${srcLine}</span>
-      </div>
-      <div class="dbt-list">${rows}</div>
-    `;
-  }
-
-  _dbTrainRow(e) {
-    const ts = String(e.ts || '').replace('T', ' ').replace('Z', '').slice(5, 16);
-    const src = String(e.image_source || '?');
-    const srcCls = src.replace(/[^a-z]/gi, '').toLowerCase();
-    const cat = e.category || '';
-    const desc = this._esc(e.summary || e.analysis || '');
-    return `<div class="dbt-row${e.notable ? ' dbt-notable' : ''}">
-      <span class="dbt-ts">${this._esc(ts)}</span>
-      <span class="dbt-src dbt-src-${srcCls}">${this._esc(src)}</span>
-      ${cat ? `<span class="dbt-cat">${this._esc(cat)}</span>` : ''}
-      <span class="dbt-desc">${desc}</span>
-    </div>`;
-  }
-
-  _renderNotifyOptions(d) {
-    const svcs = d.config?.notify_services_available || [];
-    const current = d.config?.notify_service || '';
-    let html = '<option value="">— none —</option>';
-    for (const svc of svcs) {
-      const sel = svc === current ? ' selected' : '';
-      const label = svc.replace('notify.', '');
-      html += '<option value="' + svc + '"' + sel + '>' + label + '</option>';
+    const vcTest = root.getElementById("newVcTest");
+    if (vcTest) {
+      vcTest.addEventListener("click", async () => {
+        if (!this._hass) return;
+        const out = root.getElementById("newVcTestResult");
+        vcTest.disabled = true;
+        const orig = vcTest.textContent;
+        vcTest.textContent = "▶ PLAYING…";
+        if (out) out.textContent = "Firing announce to your satellite — listen for it…";
+        try {
+          const res = await this._hass.callWS({ type: "nova/voice_confirm_test" });
+          if (out) out.innerHTML = res.ok
+            ? `<span class="diag-ok">✓</span> ${this._esc(res.note || "Announce fired.")} (${this._esc(res.satellite || "")})`
+            : `<span class="diag-down">✕</span> ${this._esc(res.note || res.error || "Test failed.")}`;
+        } catch (err) {
+          if (out) out.innerHTML = `<span class="diag-down">✕</span> ${this._esc(err?.message || String(err))}`;
+        } finally {
+          vcTest.disabled = false;
+          vcTest.textContent = orig;
+        }
+      });
     }
-    return html;
-  }
 
-  _renderSentinelRules(d) {
-    const rules = d.config?.sentinel_rules || [];
-    const disabled = d.config?.disabled_sentinel_rules || [];
-    let html = '';
-    for (const r of rules) {
-      const isOff = disabled.includes(r.id);
-      const cls = isOff ? 'off' : 'on';
-      const label = isOff ? 'OFF' : 'ON';
-      const name = r.id.replace(/_/g, ' ');
-      const desc = (r.desc || '').slice(0, 60);
-      html += '<div class="rule-row">'
-        + '<span class="rule-name">' + name + '</span>'
-        + '<span class="rule-desc">' + desc + '</span>'
-        + '<button class="toggle-btn ' + cls + ' rule-toggle" data-rule-id="' + r.id + '">' + label + '</button>'
-        + '</div>';
+    const briefNow = root.getElementById("newBriefNow");
+    if (briefNow) {
+      briefNow.addEventListener("click", async () => {
+        if (!this._hass) return;
+        const cfg = this._data()?.config || {};
+        const spk = cfg.announcement_speakers;
+        const hasTargets = (Array.isArray(spk) && spk.length > 0) || !!cfg.broadcast_group;
+        if (!hasTargets) {
+          console.warn("Nova: no announcement speakers set — choose them in Settings → Announcement Speakers");
+          return;
+        }
+        briefNow.disabled = true;
+        const orig = briefNow.textContent;
+        briefNow.textContent = "▶ BRIEFING…";
+        try {
+          await this._hass.callService("nova", "briefing", { announce: true });
+        } catch (err) {
+          console.error("Nova: briefing failed", err);
+        } finally {
+          briefNow.disabled = false;
+          briefNow.textContent = orig;
+        }
+      });
     }
-    return html;
-  }
 
-  _renderSatellitePairings(d) {
-    const satellites = d.config?.satellites || [];
-    const castDevs = d.config?.cast_devices || [];
-    const pairings = d.config?.satellite_pairings || {};
-    if (!satellites.length) return '<div class="toggle-desc" style="padding:10px">No satellites found</div>';
-    let html = '';
-    for (const sat of satellites) {
-      const paired = pairings[sat.entity_id] || '';
-      const label = sat.area ? (sat.area) : sat.name;
-      html += '<div class="pairing-row">'
-        + '<span class="pairing-label">' + label + '</span>'
-        + '<select class="notify-select sat-pair-select" data-sat-id="' + sat.entity_id + '">'
-        + '<option value="">— none —</option>';
-      for (const cd of castDevs) {
-        const sel = cd.entity_id === paired ? ' selected' : '';
-        html += '<option value="' + cd.entity_id + '"' + sel + '>' + cd.name + '</option>';
-      }
-      html += '</select></div>';
+    // Diagnostics: fetch once per element lifetime (see _fetchDiagnosticsData
+    // for why this isn't on the live-data poll), then RUN CHECK re-fetches
+    // on demand and service-test buttons call the same HA services Classic's
+    // own Diagnostics card does.
+    if (!this._diagFetchedOnce) {
+      this._diagFetchedOnce = true;
+      this._fetchDiagnosticsData();
     }
-    return html;
-  }
-
-  _renderRoomSpeakers(d) {
-    const areas = d.config?.speaker_areas || [];
-    const castDevs = d.config?.cast_devices || [];
-    const assigned = d.config?.room_speakers || {};
-    if (!areas.length) return '<div class="toggle-desc" style="padding:10px">No rooms found</div>';
-    let html = '';
-    for (const area of areas) {
-      const current = assigned[area.area_id] || '';
-      html += '<div class="pairing-row">'
-        + '<span class="pairing-label">' + this._esc(area.name) + '</span>'
-        + '<select class="notify-select room-speaker-select" data-area-id="' + area.area_id + '">'
-        + '<option value="">— none —</option>';
-      for (const cd of castDevs) {
-        const sel = cd.entity_id === current ? ' selected' : '';
-        html += '<option value="' + cd.entity_id + '"' + sel + '>' + this._esc(cd.name) + '</option>';
-      }
-      html += '</select></div>';
+    if (!this._hazFetchedOnce) {
+      this._hazFetchedOnce = true;
+      this._fetchHazardStatus();
     }
-    return html;
-  }
-
-  _renderGeneralSpeakerSelect(d) {
-    const castDevs = d.config?.cast_devices || [];
-    const current = d.config?.general_speaker || '';
-    let html = '<select class="notify-select general-speaker-select">'
-      + '<option value="">— none —</option>';
-    for (const cd of castDevs) {
-      const sel = cd.entity_id === current ? ' selected' : '';
-      html += '<option value="' + cd.entity_id + '"' + sel + '>' + this._esc(cd.name) + '</option>';
+    if (!this._energyFetchedOnce) {
+      this._energyFetchedOnce = true;
+      this._fetchEnergyStatus();
     }
-    html += '</select>';
-    return html;
-  }
-
-  _renderAnnouncementSpeakers(d) {
-    const castDevs = d.config?.cast_devices || [];
-    const selected = d.config?.announcement_speakers || [];
-    if (!castDevs.length) return '<div class="toggle-desc" style="padding:10px">No Cast devices found</div>';
-    let html = '';
-    for (const cd of castDevs) {
-      const isOn = selected.includes(cd.entity_id);
-      html += '<div class="rule-row">'
-        + '<span class="rule-name">' + cd.name + '</span>'
-        + '<span class="rule-desc">' + cd.entity_id + '</span>'
-        + '<button class="toggle-btn ' + (isOn ? 'on' : 'off') + ' ann-speaker-toggle" data-speaker-id="' + cd.entity_id + '">'
-        + (isOn ? 'ON' : 'OFF') + '</button>'
-        + '</div>';
+    if (!this._bioFetchedOnce) {
+      this._bioFetchedOnce = true;
+      this._fetchBio();
     }
-    return html;
+    if (!this._docLibFetchedOnce) {
+      this._docLibFetchedOnce = true;
+      this._fetchDocLibrary();
+      this._fetchVectorBackend();
+    }
+    this._wireDocLibrary();
+    const bioToggle = root.getElementById("newBioToggle");
+    if (bioToggle) {
+      bioToggle.addEventListener("click", async () => {
+        if (!this._hass) return;
+        const enabling = !(this._bio && this._bio.enabled);
+        bioToggle.disabled = true;
+        try {
+          await this._hass.callWS({ type: "nova/biometrics", action: enabling ? "enable" : "disable" });
+        } catch (err) {
+          console.error("Nova: wellbeing toggle failed", err);
+        }
+        await this._fetchBio();
+      });
+    }
+    root.querySelectorAll("#newEnergyAgency .mode-chip[data-agency]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        if (!this._hass) return;
+        const agency = btn.getAttribute("data-agency");
+        try {
+          await this._hass.callWS({ type: "nova/energy", action: "set_agency", agency });
+        } catch (err) {
+          console.error("Nova: failed to set energy agency", err);
+        }
+        await this._fetchEnergyStatus();
+      });
+    });
+    const hazScan = root.getElementById("newHazScan");
+    if (hazScan) {
+      hazScan.addEventListener("click", async () => {
+        if (!this._hass) return;
+        const body = root.getElementById("newHazBody");
+        hazScan.disabled = true;
+        const orig = hazScan.textContent;
+        hazScan.textContent = "⟳ SCANNING…";
+        if (body) body.innerHTML = `<div class="stub-body">Checking USGS, NWS, and NASA EONET…</div>`;
+        try {
+          const res = await this._hass.callWS({ type: "nova/hazard", action: "scan" });
+          if (body) body.innerHTML = this._renderHazardScan(res);
+        } catch (err) {
+          if (body) body.innerHTML = `<div class="stub-body">Scan failed: ${this._esc(err?.message || String(err))}</div>`;
+        } finally {
+          hazScan.disabled = false;
+          hazScan.textContent = orig;
+        }
+      });
+    }
+    const diagRefresh = root.getElementById("newDiagRefresh");
+    if (diagRefresh) {
+      diagRefresh.addEventListener("click", () => this._fetchDiagnosticsData());
+    }
+    root.querySelectorAll(".settings-card [data-svc]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const svcAttr = btn.getAttribute("data-svc");
+        if (!svcAttr || !this._hass) return;
+        const [domain, service] = svcAttr.split(".");
+        try {
+          await this._hass.callService(domain, service, {});
+        } catch (err) {
+          console.error(`Nova: service ${svcAttr} failed`, err);
+        }
+      });
+    });
+    const camRun = root.getElementById("newDiagCameraRun");
+    if (camRun) {
+      camRun.addEventListener("click", async () => {
+        const sel = root.getElementById("newDiagCameraSelect");
+        const entity_id = sel ? sel.value : "";
+        if (!entity_id || !this._hass) return;
+        try {
+          await this._hass.callService("nova", "analyze_camera", { entity_id, announce: true });
+        } catch (err) {
+          console.error("Nova: camera analyze failed", err);
+        }
+      });
+    }
+
+    this._applySettingsFilter();
   }
 
-  // ─── Floor plan: data-driven with config editor ────────────────────────
+  async _saveSetting(key, value) {
+    if (!this._hass || !key) return;
+    try {
+      await this._hass.callWS({ type: "nova/update_config", key, value });
+    } catch (err) {
+      console.error(`Nova: failed to save ${key}`, err);
+    }
+    await this._fetchLiveData();
+    // Re-render on any tab except the dashboard — a full _render() there
+    // would tear down and restart the stellar-core canvas animation for no
+    // reason, since the dashboard never calls this helper anyway. Broadened
+    // from "settings" only so Intrusion's own cfg-field/toggle-btn fields
+    // (which reuse this same generic autosave) actually refresh.
+    if (this._currentTab !== "dashboard") this._render();
+  }
+
+  _applySettingsFilter() {
+    const root = this.shadowRoot;
+    const q = (this._settingsSearch || "").trim().toLowerCase();
+    root.querySelectorAll(".settings-card").forEach(card => {
+      const matchesGroup = !q && card.getAttribute("data-settings-group") === this._settingsSection;
+      const matchesSearch = q && (card.getAttribute("data-search") || "").includes(q);
+      card.hidden = !(matchesGroup || matchesSearch);
+    });
+  }
+
+  // ─── Stellar core animation (from the approved mockup) ──────────────────
+
+  _initCore() {
+    const canvas = this.shadowRoot.getElementById("core");
+    if (!canvas) return;
+    this._canvas = canvas;
+    // Defensive, not just a test accommodation: canvas 2D context creation
+    // can fail (exotic embedded webviews, jsdom in tests) and matchMedia
+    // isn't universally present — both degrade to a static hero instead of
+    // throwing and blanking the whole dashboard.
+    try { this._ctx = canvas.getContext("2d"); } catch (_) { this._ctx = null; }
+    if (!this._ctx) return;
+    this._reduceMotion = (typeof window.matchMedia === "function")
+      && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    this._makeParticles(this._current.count);
+    this._resizeCore();
+    if (!this._resizeListener) {
+      this._resizeListener = () => this._resizeCore();
+      window.addEventListener("resize", this._resizeListener);
+    }
+    this._t0 = performance.now();
+    this._flareT = 0;
+    const loop = (now) => {
+      this._coreFrame(now);
+      if (!this._reduceMotion) this._animHandle = requestAnimationFrame(loop);
+    };
+    this._animHandle = requestAnimationFrame(loop);
+  }
+
+  _resizeCore() {
+    if (!this._canvas) return;
+    const rect = this._canvas.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this._canvas.width = rect.width * dpr;
+    this._canvas.height = rect.height * dpr;
+    this._ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this._coreW = rect.width; this._coreH = rect.height;
+  }
+
+  _makeParticles(n) {
+    const particles = [];
+    for (let i = 0; i < n; i++) {
+      particles.push({
+        a: Math.random() * Math.PI * 2, r: 0.30 + Math.random() * 0.62,
+        speedMul: 0.6 + Math.random() * 0.8, size: 0.9 + Math.random() * 1.8,
+        phase: Math.random() * Math.PI * 2,
+      });
+    }
+    this._particles = particles;
+  }
+
+  _targetCoreState(state) {
+    const STATES = {
+      idle: { speed: 0.20, count: 70, radiusMul: 1.00, glow: 0.55, hot: 0.35, flare: 0.05 },
+      reasoning: { speed: 0.62, count: 110, radiusMul: 1.12, glow: 0.95, hot: 0.85, flare: 0.55 },
+      asleep: { speed: 0.07, count: 40, radiusMul: 0.78, glow: 0.30, hot: 0.10, flare: 0.0 },
+    };
+    this._targetState = STATES[state] || STATES.idle;
+    if (this._particles.length !== this._targetState.count) this._makeParticles(this._targetState.count);
+  }
+
+  _lerp(a, b, t) { return a + (b - a) * t; }
+
+  _colorForHeat(t) {
+    const stops = [[126, 36, 18], [226, 84, 47], [244, 184, 96], [255, 231, 189]];
+    const seg = t * (stops.length - 1);
+    const i = Math.min(stops.length - 2, Math.floor(seg));
+    const f = seg - i;
+    const c0 = stops[i], c1 = stops[i + 1];
+    return [Math.round(this._lerp(c0[0], c1[0], f)), Math.round(this._lerp(c0[1], c1[1], f)), Math.round(this._lerp(c0[2], c1[2], f))];
+  }
+
+  _coreFrame(now) {
+    if (!this._ctx || !this._targetState) return;
+    const dt = Math.min(0.05, (now - (this._t0 || now)) / 1000);
+    this._t0 = now;
+    const c = this._current, t = this._targetState;
+    c.speed = this._lerp(c.speed, t.speed, dt * 1.4);
+    c.radiusMul = this._lerp(c.radiusMul, t.radiusMul, dt * 1.4);
+    c.glow = this._lerp(c.glow, t.glow, dt * 1.4);
+    c.hot = this._lerp(c.hot, t.hot, dt * 1.4);
+    c.flare = this._lerp(c.flare, t.flare, dt * 1.4);
+
+    const ctx = this._ctx, W = this._coreW, H = this._coreH;
+    if (!W || !H) { this._resizeCore(); return; }
+    ctx.clearRect(0, 0, W, H);
+    const cx = W / 2, cy = H / 2;
+    const baseR = Math.min(W, H) * 0.30 * c.radiusMul;
+
+    this._flareT += dt;
+    const flareBoost = c.flare > 0.01 ? (0.5 + 0.5 * Math.sin(this._flareT * 3.1)) * c.flare : 0;
+
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, baseR * 1.9);
+    const hc = this._colorForHeat(Math.min(1, c.hot + flareBoost * 0.4));
+    grad.addColorStop(0, `rgba(${hc[0]},${hc[1]},${hc[2]},${0.85 * c.glow + 0.15})`);
+    grad.addColorStop(0.35, `rgba(${hc[0]},${hc[1]},${hc[2]},${0.35 * c.glow})`);
+    grad.addColorStop(1, "rgba(20,12,8,0)");
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(cx, cy, baseR * 1.9, 0, Math.PI * 2); ctx.fill();
+
+    ctx.globalCompositeOperation = "lighter";
+    for (const p of this._particles) {
+      p.a += c.speed * p.speedMul * dt;
+      const wobble = Math.sin(now / 1000 * 1.3 + p.phase) * 0.06;
+      const rr = (p.r + wobble) * baseR * 1.55;
+      const x = cx + Math.cos(p.a) * rr, y = cy + Math.sin(p.a) * rr * 0.86;
+      const heat = Math.min(1, c.hot * 0.7 + p.r * 0.5 + flareBoost * 0.5);
+      const pc = this._colorForHeat(heat);
+      const alpha = 0.35 + 0.5 * c.glow;
+      ctx.beginPath();
+      ctx.fillStyle = `rgba(${pc[0]},${pc[1]},${pc[2]},${alpha})`;
+      ctx.arc(x, y, p.size * (0.8 + 0.5 * c.glow), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  // ─── Floor Plan Editor: rooms only (v7.101.16) ──────────────────────────
+  // Ported from Classic's _renderFloorPlanEditor/_renderEditableSVG/
+  // _wireFloorPlanDrag — same floor_plan_rooms config, same working-copy
+  // pattern, room drag/resize/add/remove/save/reset. Property line, outdoor
+  // zones, camera placement, and the AI camera-coverage feature stay
+  // Classic-only for now ("Edit advanced layout in Classic" below) — ported
+  // separately later if it turns out to matter.
 
   _defaultFloorPlan() {
     return {
       "1f": {
         label: "1st Floor", viewBox: "0 0 320 150",
         rooms: [
-          {name:"Garage",x:5,y:5,w:100,h:88,type:"room"},
-          {name:"Kitchen",x:115,y:5,w:65,h:40,type:"room"},
-          {name:"Bath",x:185,y:5,w:28,h:22,type:"bath"},
-          {name:"Guest Room",x:218,y:5,w:95,h:40,type:"room"},
-          {name:"Dining Room",x:115,y:50,w:65,h:38,type:"room"},
-          {name:"Stairs",x:185,y:32,w:28,h:32,type:"stairs"},
-          {name:"Living Room",x:218,y:50,w:95,h:38,type:"room"},
-          {name:"Downstairs Hallway",x:115,y:93,w:198,h:20,type:"room"},
-          {name:"Front Door",x:185,y:117,w:50,h:12,type:"door"},
+          { name: "Garage", x: 5, y: 5, w: 100, h: 88, type: "room" },
+          { name: "Kitchen", x: 115, y: 5, w: 65, h: 40, type: "room" },
+          { name: "Bath", x: 185, y: 5, w: 28, h: 22, type: "bath" },
+          { name: "Guest Room", x: 218, y: 5, w: 95, h: 40, type: "room" },
+          { name: "Dining Room", x: 115, y: 50, w: 65, h: 38, type: "room" },
+          { name: "Stairs", x: 185, y: 32, w: 28, h: 32, type: "stairs" },
+          { name: "Living Room", x: 218, y: 50, w: 95, h: 38, type: "room" },
+          { name: "Downstairs Hallway", x: 115, y: 93, w: 198, h: 20, type: "room" },
+          { name: "Front Door", x: 185, y: 117, w: 50, h: 12, type: "door" },
         ],
       },
       "2f": {
         label: "2nd Floor", viewBox: "0 0 320 140",
         rooms: [
-          {name:"Bedroom 2",x:50,y:25,w:95,h:80,type:"room"},
-          {name:"Bath",x:150,y:25,w:30,h:40,type:"bath"},
-          {name:"Master Bedroom",x:185,y:25,w:85,h:80,type:"room"},
-          {name:"Upstairs Hallway",x:150,y:70,w:30,h:35,type:"room"},
-          {name:"Stairs",x:150,y:108,w:25,h:20,type:"stairs"},
+          { name: "Bedroom 2", x: 50, y: 25, w: 95, h: 80, type: "room" },
+          { name: "Bath", x: 150, y: 25, w: 30, h: 40, type: "bath" },
+          { name: "Master Bedroom", x: 185, y: 25, w: 85, h: 80, type: "room" },
+          { name: "Upstairs Hallway", x: 150, y: 70, w: 30, h: 35, type: "room" },
+          { name: "Stairs", x: 150, y: 108, w: 25, h: 20, type: "stairs" },
         ],
       },
       "bsmt": {
         label: "Basement", viewBox: "0 0 320 130",
         rooms: [
-          {name:"Basement",x:50,y:10,w:220,h:90,type:"room"},
-          {name:"Stairs",x:120,y:20,w:28,h:35,type:"stairs"},
+          { name: "Basement", x: 50, y: 10, w: 220, h: 90, type: "room" },
+          { name: "Stairs", x: 120, y: 20, w: 28, h: 35, type: "stairs" },
         ],
         labels: [
-          {text:"SUMP PUMP",x:95,y:55},{text:"DEHUMIDIFIER",x:95,y:75},
-          {text:"HOME ENERGY",x:235,y:55},{text:"WASHER",x:235,y:75},
+          { text: "SUMP PUMP", x: 95, y: 55 }, { text: "DEHUMIDIFIER", x: 95, y: 75 },
+          { text: "HOME ENERGY", x: 235, y: 55 }, { text: "WASHER", x: 235, y: 75 },
         ],
       },
     };
   }
 
   _getFloorPlan() {
-    // Dashboard view: always reads from saved config (NOT _editingPlan)
-    const d = this._data();
     try {
-      const raw = d.config?.floor_plan_rooms;
+      const raw = this._data()?.config?.floor_plan_rooms;
       if (raw) {
-        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-        if (parsed && typeof parsed === 'object' && Object.keys(parsed).length) {
-          return parsed;
-        }
+        const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+        if (parsed && typeof parsed === "object" && Object.keys(parsed).length) return parsed;
       }
     } catch (_) {}
     return this._defaultFloorPlan();
   }
 
-  // Placed openings (windows/doors) — v7.101.28. Parallel to the room plan.
-  _getFloorElements() {
-    const raw = this._data().config?.floor_plan_elements;
-    let el = {};
-    try { el = typeof raw === 'string' ? (raw ? JSON.parse(raw) : {}) : (raw || {}); } catch (_) { el = {}; }
-    return el || {};
+  _getEditingPlan() {
+    if (this._editingPlan) return this._editingPlan;
+    this._editingPlan = JSON.parse(JSON.stringify(this._getFloorPlan()));
+    return this._editingPlan;
   }
-  _getEditingElements() {
-    if (this._editingElements) return this._editingElements;
-    this._editingElements = JSON.parse(JSON.stringify(this._getFloorElements()));
-    return this._editingElements;
+
+  _fpUnits() { return (this._data()?.config?.floor_plan_units === "metric") ? "metric" : "imperial"; }
+  _fpUnitLabel() { return this._fpUnits() === "metric" ? "m" : "ft"; }
+  _fpToReal(u) {
+    const ft = (u || 0) * 0.2;
+    return this._fpUnits() === "metric" ? Math.round(ft * 0.3048 * 10) / 10 : Math.round(ft * 10) / 10;
   }
-  _elemsFor(floor) {
-    const el = this._getEditingElements();
-    if (!Array.isArray(el[floor])) el[floor] = [];
-    return el[floor];
-  }
-  _getFloorCameras() {
-    const raw = this._data().config?.floor_plan_cameras;
-    let c = {};
-    try { c = typeof raw === 'string' ? (raw ? JSON.parse(raw) : {}) : (raw || {}); } catch (_) { c = {}; }
-    return c || {};
-  }
-  _getEditingCameras() {
-    if (this._editingCameras) return this._editingCameras;
-    this._editingCameras = JSON.parse(JSON.stringify(this._getFloorCameras()));
-    return this._editingCameras;
-  }
-  _camsFor(floor) {
-    const c = this._getEditingCameras();
-    if (!Array.isArray(c[floor])) c[floor] = [];
-    return c[floor];
-  }
-  // Devices pinned on the floor plan (ported from jarvis-aio v7.86.0) —
-  // live-state markers, drag to move, tap to open HA's more-info controls.
+  _fpDim(u) { return this._fpToReal(u) + (this._fpUnits() === "metric" ? "m" : "'"); }
+
+  // Devices pinned on the floor plan (ported from jarvis-aio v7.86.0, same as
+  // Classic) — live-state markers, drag to move, tap to open HA's more-info.
   _getFloorEntities() {
-    const raw = this._data().config?.floor_plan_entities;
+    const raw = this._data()?.config?.floor_plan_entities;
     let e = {};
-    try { e = typeof raw === 'string' ? (raw ? JSON.parse(raw) : {}) : (raw || {}); } catch (_) { e = {}; }
+    try { e = typeof raw === "string" ? (raw ? JSON.parse(raw) : {}) : (raw || {}); } catch (_) { e = {}; }
     return e || {};
   }
   _getEditingEntities() {
@@ -2745,56 +4940,41 @@ class NovaPanel extends HTMLElement {
     return e[floor];
   }
   _entMarkerStyle(eid) {
-    // Live-state pin styling: colour + short value from the entity's current state.
     const st = this._hass && this._hass.states ? this._hass.states[eid] : null;
-    const dom = (eid.split('.')[0] || '');
-    const dim = '#567685';
-    if (!st) return { color: dim, name: (eid.split('.')[1] || eid), val: '—' };
-    const s = st.state, dc = (st.attributes && st.attributes.device_class) || '';
+    const dom = (eid.split(".")[0] || "");
+    const dim = "var(--ink-faint)";
+    if (!st) return { color: dim, name: (eid.split(".")[1] || eid), val: "—" };
+    const s = st.state, dc = (st.attributes && st.attributes.device_class) || "";
     const name = (st.attributes && st.attributes.friendly_name) || eid;
     let color = dim, val = s;
-    const offish = ['off', 'unavailable', 'unknown', 'idle', 'standby', 'none'];
-    if (dom === 'sensor') {
-      const u = (st.attributes && st.attributes.unit_of_measurement) || '';
-      val = (s === 'unknown' || s === 'unavailable') ? '—' : (s + u);
-      color = '#00cfe8';
-    } else if (dom === 'binary_sensor') {
-      const on = s === 'on';
-      if (['door', 'window', 'garage_door', 'opening'].indexOf(dc) >= 0) { color = on ? '#ff9d2e' : dim; val = on ? 'OPEN' : 'SHUT'; }
-      else if (['motion', 'occupancy', 'presence'].indexOf(dc) >= 0) { color = on ? '#00f2fe' : dim; val = on ? 'DET' : '—'; }
-      else { color = on ? '#00f2fe' : dim; val = on ? 'ON' : 'OFF'; }
-    } else if (dom === 'lock') { const locked = s === 'locked'; color = locked ? dim : '#ff5a5a'; val = locked ? 'LOCK' : 'OPEN'; }
-    else if (dom === 'cover') { const open = s === 'open' || s === 'opening'; color = open ? '#ff9d2e' : dim; val = open ? 'OPEN' : 'SHUT'; }
-    else if (dom === 'person' || dom === 'device_tracker') { const home = s === 'home'; color = home ? '#00f2fe' : dim; val = home ? 'HOME' : 'AWAY'; }
-    else if (dom === 'climate') { color = '#00cfe8'; const t = st.attributes && st.attributes.current_temperature; val = (t != null) ? (t + '°') : s; }
-    else { const on = offish.indexOf(s) < 0; color = on ? '#00f2fe' : dim; val = on ? 'ON' : 'OFF'; }
+    const offish = ["off", "unavailable", "unknown", "idle", "standby", "none"];
+    if (dom === "sensor") {
+      const u = (st.attributes && st.attributes.unit_of_measurement) || "";
+      val = (s === "unknown" || s === "unavailable") ? "—" : (s + u);
+      color = "var(--gold)";
+    } else if (dom === "binary_sensor") {
+      const on = s === "on";
+      if (["door", "window", "garage_door", "opening"].indexOf(dc) >= 0) { color = on ? "var(--warn)" : dim; val = on ? "OPEN" : "SHUT"; }
+      else if (["motion", "occupancy", "presence"].indexOf(dc) >= 0) { color = on ? "var(--gold)" : dim; val = on ? "DET" : "—"; }
+      else { color = on ? "var(--gold)" : dim; val = on ? "ON" : "OFF"; }
+    } else if (dom === "lock") { const locked = s === "locked"; color = locked ? dim : "#ff5a5a"; val = locked ? "LOCK" : "OPEN"; }
+    else if (dom === "cover") { const open = s === "open" || s === "opening"; color = open ? "var(--warn)" : dim; val = open ? "OPEN" : "SHUT"; }
+    else if (dom === "person" || dom === "device_tracker") { const home = s === "home"; color = home ? "var(--gold)" : dim; val = home ? "HOME" : "AWAY"; }
+    else if (dom === "climate") { color = "var(--gold)"; const t = st.attributes && st.attributes.current_temperature; val = (t != null) ? (t + "°") : s; }
+    else { const on = offish.indexOf(s) < 0; color = on ? "var(--gold)" : dim; val = on ? "ON" : "OFF"; }
     return { color, name, val };
   }
   _fpBgOpacity() {
-    let op = parseFloat(this._data().config?.floor_plan_bg_opacity);
+    const op = parseFloat(this._data()?.config?.floor_plan_bg_opacity);
     return (isFinite(op) && op >= 0 && op <= 1) ? op : 0.2;
   }
-  _getProperty() {
-    const raw = this._data().config?.floor_plan_property;
-    let p = null;
-    try { p = typeof raw === 'string' ? (raw ? JSON.parse(raw) : null) : (raw || null); } catch (_) { p = null; }
-    return (p && Array.isArray(p.points)) ? p.points : [];
-  }
-  _propertyPts() {
-    if (!this._editingProperty) this._editingProperty = JSON.parse(JSON.stringify(this._getProperty()));
-    return this._editingProperty;
-  }
-  _setProperty(pts) { this._editingProperty = pts; }
-  _propPathD(pts) { return pts.map((p, k) => (k ? 'L' : 'M') + p[0] + ' ' + p[1]).join(' ') + ' Z'; }
-  _floorBelow(floor) { return ({ '2f': '1f', '1f': 'bsmt' })[floor] || null; }
-  _applyEditVB(svgEl) {
-    const v = this._editVB; if (!v || !svgEl) return;
-    svgEl.setAttribute('viewBox', v.x + ' ' + v.y + ' ' + v.w + ' ' + v.h);
-    svgEl.querySelectorAll('.fp-grid-rect').forEach(r => { r.setAttribute('x', v.x); r.setAttribute('y', v.y); r.setAttribute('width', v.w); r.setAttribute('height', v.h); });
-  }
+
+  // Property line + outdoor zones (Phase 3a) — same geometry helpers as
+  // Classic, same floor_plan_property config, same zone-as-polygon-room
+  // representation in floor_plan_rooms.
   _zonePoints(r) {
     if (r && Array.isArray(r.points) && r.points.length >= 3) return r.points;
-    const x = r.x || 0, y = r.y || 0, w = r.w || 40, h = r.h || 40;   // legacy rect -> 4 corners
+    const x = r.x || 0, y = r.y || 0, w = r.w || 40, h = r.h || 40;
     return [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
   }
   _ensureZonePoints(rm) {
@@ -2807,33 +4987,98 @@ class NovaPanel extends HTMLElement {
     rm.points.forEach(p => { x0 = Math.min(x0, p[0]); y0 = Math.min(y0, p[1]); x1 = Math.max(x1, p[0]); y1 = Math.max(y1, p[1]); });
     rm.x = Math.round(x0); rm.y = Math.round(y0); rm.w = Math.round(x1 - x0); rm.h = Math.round(y1 - y0);
   }
-  _pointInPoly(x, y, pts) {
-    let inside = false;
-    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
-      const xi = pts[i][0], yi = pts[i][1], xj = pts[j][0], yj = pts[j][1];
-      if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) inside = !inside;
-    }
-    return inside;
+  _propPathD(pts) { return pts.map((p, k) => (k ? "L" : "M") + p[0] + " " + p[1]).join(" ") + " Z"; }
+  _getProperty() {
+    const raw = this._data()?.config?.floor_plan_property;
+    let p = null;
+    try { p = typeof raw === "string" ? (raw ? JSON.parse(raw) : null) : (raw || null); } catch (_) { p = null; }
+    return (p && Array.isArray(p.points)) ? p.points : [];
   }
-  _pointCovered(px, py, cx, cy, ang, half, rng, geo) {
-    const dx = px - cx, dy = py - cy;
-    if (Math.hypot(dx, dy) > rng) return false;
-    const a = Math.atan2(dy, dx) * 180 / Math.PI;
-    if (Math.abs(((a - ang + 540) % 360) - 180) > half) return false;
-    return this._losClear(cx, cy, px, py, geo);
+  _propertyPts() {
+    if (!this._editingProperty) this._editingProperty = JSON.parse(JSON.stringify(this._getProperty()));
+    return this._editingProperty;
   }
+  _setProperty(pts) { this._editingProperty = pts; }
   _propertyArea(pts) {
-    if (!pts || pts.length < 3) return '';
+    if (!pts || pts.length < 3) return "";
     let a = 0;
     for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length]; a += p[0] * q[1] - q[0] * p[1]; }
-    const sqFt = Math.abs(a) / 2 * 0.04;   // editor units^2 -> sq ft (1 unit = 0.2 ft)
-    if (this._fpUnits() === 'metric') {
+    const sqFt = Math.abs(a) / 2 * 0.04;
+    if (this._fpUnits() === "metric") {
       const sqM = sqFt * 0.092903;
-      return sqM >= 10000 ? (sqM / 10000).toFixed(2) + ' ha' : Math.round(sqM).toLocaleString() + ' m\u00b2';
+      return sqM >= 10000 ? (sqM / 10000).toFixed(2) + " ha" : Math.round(sqM).toLocaleString() + " m²";
     }
-    return sqFt >= 43560 ? (sqFt / 43560).toFixed(2) + ' acres' : Math.round(sqFt).toLocaleString() + ' sq ft';
+    return sqFt >= 43560 ? (sqFt / 43560).toFixed(2) + " acres" : Math.round(sqFt).toLocaleString() + " sq ft";
   }
-  // ---- camera coverage geometry (Phase 2a) ----
+
+  // Windows/doors/dormers ("openings", Phase 3c) — same floor_plan_elements
+  // config and geometry as Classic. Feeds _planGeometry's wall gaps below,
+  // so AI camera-coverage now accounts for doorways instead of treating
+  // every wall as solid.
+  _getFloorElements() {
+    const raw = this._data()?.config?.floor_plan_elements;
+    let el = {};
+    try { el = typeof raw === "string" ? (raw ? JSON.parse(raw) : {}) : (raw || {}); } catch (_) { el = {}; }
+    return el || {};
+  }
+  _getEditingElements() {
+    if (this._editingElements) return this._editingElements;
+    this._editingElements = JSON.parse(JSON.stringify(this._getFloorElements()));
+    return this._editingElements;
+  }
+  _elemsFor(floor) {
+    const el = this._getEditingElements();
+    if (!Array.isArray(el[floor])) el[floor] = [];
+    return el[floor];
+  }
+  _doorEntityOptions(selected) {
+    const states = this._hass?.states || {};
+    const cands = [];
+    const OPEN_DC = ["door", "window", "garage_door", "opening"];
+    const OPEN_RE = /door|garage|gate|cellar|bulkhead|hatch|window|contact|entry|slider|sash|casement|patio|french|skylight|opening|sliding/i;
+    Object.keys(states).forEach(eid => {
+      const dom = eid.split(".")[0];
+      const at = states[eid].attributes || {};
+      const dc = at.device_class || "";
+      const fn = at.friendly_name || "";
+      const ok = dom === "cover" || dom === "lock"
+        || (dom === "binary_sensor" && (OPEN_DC.includes(dc) || OPEN_RE.test(eid) || OPEN_RE.test(fn)));
+      if (ok) cands.push(eid);
+    });
+    cands.sort();
+    if (selected && !cands.includes(selected)) cands.unshift(selected);
+    const opts = cands.map(eid => `<option value="${this._esc(eid)}"${eid === selected ? " selected" : ""}>${this._esc(this._entName(eid))}</option>`).join("");
+    return `<option value=""${selected ? "" : " selected"}>— auto-detect —</option>${opts}`;
+  }
+
+  // Cameras + AI coverage (Phase 3b) — same config/geometry as Classic.
+  _getFloorCameras() {
+    const raw = this._data()?.config?.floor_plan_cameras;
+    let c = {};
+    try { c = typeof raw === "string" ? (raw ? JSON.parse(raw) : {}) : (raw || {}); } catch (_) { c = {}; }
+    return c || {};
+  }
+  _getEditingCameras() {
+    if (this._editingCameras) return this._editingCameras;
+    this._editingCameras = JSON.parse(JSON.stringify(this._getFloorCameras()));
+    return this._editingCameras;
+  }
+  _camsFor(floor) {
+    const c = this._getEditingCameras();
+    if (!Array.isArray(c[floor])) c[floor] = [];
+    return c[floor];
+  }
+  _cameraEntityOptions(selected) {
+    const states = this._hass?.states || {};
+    const eids = Object.keys(states).filter(e => e.startsWith("camera.")).sort();
+    if (selected && !eids.includes(selected)) eids.unshift(selected);
+    const opts = eids.map(e => {
+      const st = states[e];
+      const fn = (st && st.attributes && st.attributes.friendly_name) || e;
+      return `<option value="${this._esc(e)}"${e === selected ? " selected" : ""}>${this._esc(fn)}</option>`;
+    }).join("");
+    return `<option value="">— camera —</option>${opts}`;
+  }
   _segIntersect(x1, y1, x2, y2, x3, y3, x4, y4) {
     const den = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
     if (Math.abs(den) < 1e-9) return null;
@@ -2847,27 +5092,31 @@ class NovaPanel extends HTMLElement {
     const rooms = (plan && plan.rooms) || [];
     const walls = [], gaps = [];
     rooms.forEach(r => {
-      if (r.type === 'stairs' || r.type === 'door' || r.type === 'outdoor') return;   // open — no blocking walls
-      const _rp = this._zonePoints(r);   // polygon edges block LOS (= the 4 rect sides for a plain room)
-      for (let _wi = 0; _wi < _rp.length; _wi++) { const _a = _rp[_wi], _b = _rp[(_wi + 1) % _rp.length]; walls.push({ x0: _a[0], y0: _a[1], x1: _b[0], y1: _b[1] }); }
+      if (r.type === "stairs" || r.type === "door" || r.type === "outdoor") return;
+      const rp = this._zonePoints(r);
+      for (let wi = 0; wi < rp.length; wi++) { const a = rp[wi], b = rp[(wi + 1) % rp.length]; walls.push({ x0: a[0], y0: a[1], x1: b[0], y1: b[1] }); }
     });
     let fb = null;
-    if (rooms.length) { let mnx=1e9,mny=1e9,mxx=-1e9,mxy=-1e9; rooms.forEach(r=>{mnx=Math.min(mnx,r.x);mny=Math.min(mny,r.y);mxx=Math.max(mxx,r.x+r.w);mxy=Math.max(mxy,r.y+r.h);}); fb={x0:mnx,y0:mny,x1:mxx,y1:mxy}; }
+    if (rooms.length) {
+      let mnx = 1e9, mny = 1e9, mxx = -1e9, mxy = -1e9;
+      rooms.forEach(r => { mnx = Math.min(mnx, r.x); mny = Math.min(mny, r.y); mxx = Math.max(mxx, r.x + r.w); mxy = Math.max(mxy, r.y + r.h); });
+      fb = { x0: mnx, y0: mny, x1: mxx, y1: mxy };
+    }
     (this._elemsFor(floor) || []).forEach(e => {
-      if (e.type !== 'door' && e.type !== 'window') return;
+      if (e.type !== "door" && e.type !== "window") return;
       const ow = e.w || 20;
       let bb = fb;
-      if ((e.kind === 'interior' || e.kind === 'cased') && e.room) {
+      if ((e.kind === "interior" || e.kind === "cased") && e.room) {
         const rr = rooms.filter(r => r.name === e.room)[0];
         if (rr) bb = { x0: rr.x, y0: rr.y, x1: rr.x + rr.w, y1: rr.y + rr.h };
       }
       if (!bb) return;
       const p = e.pos != null ? e.pos : 0.5;
       let gx0, gy0, gx1, gy1;
-      if (e.wall === 'front') { const c = bb.x0 + p*(bb.x1-bb.x0); gx0=c-ow/2; gx1=c+ow/2; gy0=gy1=bb.y0; }
-      else if (e.wall === 'back') { const c = bb.x0 + p*(bb.x1-bb.x0); gx0=c-ow/2; gx1=c+ow/2; gy0=gy1=bb.y1; }
-      else if (e.wall === 'left') { const c = bb.y0 + p*(bb.y1-bb.y0); gy0=c-ow/2; gy1=c+ow/2; gx0=gx1=bb.x0; }
-      else { const c = bb.y0 + p*(bb.y1-bb.y0); gy0=c-ow/2; gy1=c+ow/2; gx0=gx1=bb.x1; }
+      if (e.wall === "front") { const c = bb.x0 + p * (bb.x1 - bb.x0); gx0 = c - ow / 2; gx1 = c + ow / 2; gy0 = gy1 = bb.y0; }
+      else if (e.wall === "back") { const c = bb.x0 + p * (bb.x1 - bb.x0); gx0 = c - ow / 2; gx1 = c + ow / 2; gy0 = gy1 = bb.y1; }
+      else if (e.wall === "left") { const c = bb.y0 + p * (bb.y1 - bb.y0); gy0 = c - ow / 2; gy1 = c + ow / 2; gx0 = gx1 = bb.x0; }
+      else { const c = bb.y0 + p * (bb.y1 - bb.y0); gy0 = c - ow / 2; gy1 = c + ow / 2; gx0 = gx1 = bb.x1; }
       gaps.push({ x0: gx0, y0: gy0, x1: gx1, y1: gy1 });
     });
     return { walls, gaps };
@@ -2876,8 +5125,8 @@ class NovaPanel extends HTMLElement {
     const tol = 2.5;
     for (let i = 0; i < gaps.length; i++) {
       const g = gaps[i];
-      if (x >= Math.min(g.x0,g.x1)-tol && x <= Math.max(g.x0,g.x1)+tol &&
-          y >= Math.min(g.y0,g.y1)-tol && y <= Math.max(g.y0,g.y1)+tol) return true;
+      if (x >= Math.min(g.x0, g.x1) - tol && x <= Math.max(g.x0, g.x1) + tol
+        && y >= Math.min(g.y0, g.y1) - tol && y <= Math.max(g.y0, g.y1) + tol) return true;
     }
     return false;
   }
@@ -2889,17 +5138,24 @@ class NovaPanel extends HTMLElement {
     }
     return true;
   }
+  _pointCovered(px, py, cx, cy, ang, half, rng, geo) {
+    const dx = px - cx, dy = py - cy;
+    if (Math.hypot(dx, dy) > rng) return false;
+    const a = Math.atan2(dy, dx) * 180 / Math.PI;
+    if (Math.abs(((a - ang + 540) % 360) - 180) > half) return false;
+    return this._losClear(cx, cy, px, py, geo);
+  }
   _computeCoverage(floor, cam, geo) {
     const plan = this._getEditingPlan()[floor];
     if (!plan || !plan.rooms || !plan.rooms.length) return {};
     geo = geo || this._planGeometry(floor);
     const cx = cam.x, cy = cam.y, ang = cam.angle != null ? cam.angle : 270,
-          fov = cam.fov != null ? cam.fov : 90, rng = Math.max(cam.range != null ? cam.range : 55, 5), half = fov/2;
+      fov = cam.fov != null ? cam.fov : 90, rng = Math.max(cam.range != null ? cam.range : 55, 5), half = fov / 2;
     const cov = {};
     plan.rooms.forEach(r => {
-      if (r.type === 'door' || r.type === 'stairs') return;
+      if (r.type === "door" || r.type === "stairs") return;
       let hit = 0, tot = 0;
-      if (r.type === 'outdoor' || (r.points && r.points.length >= 3)) {
+      if (r.type === "outdoor" || (r.points && r.points.length >= 3)) {
         const pts = this._zonePoints(r);
         let bx0 = 1e9, by0 = 1e9, bx1 = -1e9, by1 = -1e9;
         pts.forEach(p => { bx0 = Math.min(bx0, p[0]); by0 = Math.min(by0, p[1]); bx1 = Math.max(bx1, p[0]); by1 = Math.max(by1, p[1]); });
@@ -2922,19 +5178,24 @@ class NovaPanel extends HTMLElement {
     });
     return cov;
   }
+  _pointInPoly(x, y, pts) {
+    let inside = false;
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      const xi = pts[i][0], yi = pts[i][1], xj = pts[j][0], yj = pts[j][1];
+      if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) inside = !inside;
+    }
+    return inside;
+  }
   _coneD(cam) {
     const cx = cam.x, cy = cam.y, ang = cam.angle != null ? cam.angle : 270,
-          fov = cam.fov != null ? cam.fov : 90, rng = Math.max(cam.range != null ? cam.range : 55, 5);
+      fov = cam.fov != null ? cam.fov : 90, rng = Math.max(cam.range != null ? cam.range : 55, 5);
     const a1 = (ang - fov / 2) * Math.PI / 180, a2 = (ang + fov / 2) * Math.PI / 180;
     const x1 = cx + rng * Math.cos(a1), y1 = cy + rng * Math.sin(a1);
     const x2 = cx + rng * Math.cos(a2), y2 = cy + rng * Math.sin(a2);
     const large = fov > 180 ? 1 : 0;
-    return 'M ' + cx + ' ' + cy + ' L ' + x1.toFixed(1) + ' ' + y1.toFixed(1) +
-           ' A ' + rng + ' ' + rng + ' 0 ' + large + ' 1 ' + x2.toFixed(1) + ' ' + y2.toFixed(1) + ' Z';
+    return `M ${cx} ${cy} L ${x1.toFixed(1)} ${y1.toFixed(1)} A ${rng} ${rng} 0 ${large} 1 ${x2.toFixed(1)} ${y2.toFixed(1)} Z`;
   }
   _rayCast(cx, cy, ang, range, geo) {
-    // distance from (cx,cy) along ang to the first blocking wall — passing through
-    // openings (gaps) — else the full range.
     const ex = cx + range * Math.cos(ang), ey = cy + range * Math.sin(ang);
     let best = range;
     for (let i = 0; i < geo.walls.length; i++) {
@@ -2947,3584 +5208,614 @@ class NovaPanel extends HTMLElement {
     return best;
   }
   _clippedCone(cam, geo) {
-    if (!geo || !geo.walls || !geo.walls.length) return this._coneD(cam);   // no walls → raw cone
+    if (!geo || !geo.walls || !geo.walls.length) return this._coneD(cam);
     const cx = cam.x, cy = cam.y, ang = cam.angle != null ? cam.angle : 270,
-          fov = cam.fov != null ? cam.fov : 90, rng = Math.max(cam.range != null ? cam.range : 55, 5);
+      fov = cam.fov != null ? cam.fov : 90, rng = Math.max(cam.range != null ? cam.range : 55, 5);
     const N = Math.max(24, Math.round(fov / 3)), a0 = (ang - fov / 2) * Math.PI / 180, step = (fov * Math.PI / 180) / N;
-    let d = 'M ' + cx + ' ' + cy;
+    let d = `M ${cx} ${cy}`;
     for (let i = 0; i <= N; i++) {
       const a = a0 + i * step, dist = this._rayCast(cx, cy, a, rng, geo);
-      d += ' L ' + (cx + dist * Math.cos(a)).toFixed(1) + ' ' + (cy + dist * Math.sin(a)).toFixed(1);
+      d += ` L ${(cx + dist * Math.cos(a)).toFixed(1)} ${(cy + dist * Math.sin(a)).toFixed(1)}`;
     }
-    return d + ' Z';
-  }
-  _cameraEntityOptions(selected) {
-    const states = this._hass?.states || {};
-    const eids = Object.keys(states).filter(e => e.startsWith('camera.')).sort();
-    if (selected && !eids.includes(selected)) eids.unshift(selected);
-    const opts = eids.map(e => {
-      const st = states[e];
-      const fn = (st && st.attributes && st.attributes.friendly_name) || e;
-      return '<option value="' + this._esc(e) + '"' + (e === selected ? ' selected' : '') + '>' + this._esc(fn) + '</option>';
-    }).join('');
-    return '<option value="">\u2014 camera \u2014</option>' + opts;
-  }
-
-  _getEditingPlan() {
-    // Editor view: maintains a working copy for drag operations
-    if (this._editingPlan) return this._editingPlan;
-    // Initialize from saved config or defaults
-    this._editingPlan = JSON.parse(JSON.stringify(this._getFloorPlan()));
-    return this._editingPlan;
-  }
-
-  _renderFloorPlan(d, floor) {
-    // Legacy — no longer used for dashboard, kept for editor
-    const plan = this._getFloorPlan();
-    const floorData = plan[floor];
-    if (!floorData) return '<div style="color:var(--text-dim);padding:20px;text-align:center;">No floor data</div>';
-
-    const areaMap = {};
-    (d.areasGrid || []).forEach(a => { areaMap[a.name.toLowerCase()] = a.active; });
-    const isOcc = (name) => !!areaMap[name.toLowerCase()];
-
-    let svg = '<svg viewBox="' + (floorData.viewBox || '0 0 320 140') + '" class="fp-svg"><defs><filter id="glow-fp"><feGaussianBlur stdDeviation="3" result="g"/><feMerge><feMergeNode in="g"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>';
-
-    for (const rm of (floorData.rooms || [])) {
-      const {name, x, y, w, h, type} = rm;
-      if (type === 'bath') { svg += '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" rx="2" fill="rgba(10,13,18,0.6)" stroke="#0f2029" stroke-width="0.5"/><text x="'+(x+w/2)+'" y="'+(y+h/2+2)+'" text-anchor="middle" fill="#2a3b47" font-size="5" font-family="JetBrains Mono, monospace">BATH</text>'; continue; }
-      if (type === 'stairs') { svg += '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" rx="1" fill="rgba(10,20,30,0.4)" stroke="#0a7d94" stroke-width="0.5" stroke-dasharray="2,2"/>'; continue; }
-      if (type === 'door') { const occ=isOcc(name); svg += '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" rx="2" fill="'+(occ?'rgba(255,157,46,0.1)':'rgba(10,13,18,0.4)')+'" stroke="'+(occ?'#ff9d2e':'#0f2029')+'" stroke-width="0.5"/><text x="'+(x+w/2)+'" y="'+(y+h/2+2)+'" text-anchor="middle" fill="'+(occ?'#ff9d2e':'#2a3b47')+'" font-size="4" font-family="JetBrains Mono, monospace">'+name.toUpperCase()+'</text>'; continue; }
-      const occ = isOcc(name); const fill = occ ? 'rgba(0,242,254,0.12)' : 'rgba(10,13,18,0.6)'; const stroke = occ ? '#00f2fe' : '#0f2029';
-      svg += '<g class="fp-room"><rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" rx="2" fill="'+fill+'" stroke="'+stroke+'" stroke-width="'+(occ?1.5:0.8)+'"/><text x="'+(x+w/2)+'" y="'+(y+h/2)+'" text-anchor="middle" fill="'+(occ?'#00f2fe':'#567685')+'" font-size="'+(w>80?7:5)+'" font-family="Orbitron, monospace">'+name.toUpperCase()+'</text></g>';
-    }
-    svg += '</svg>';
-    return svg;
-  }
-
-  async _toggleAreaLights(areaId, roomName, isOn) {
-    if (!this._hass || !areaId) return;
-    const turnOn = !isOn;
-    try {
-      await this._hass.callService('light', turnOn ? 'turn_on' : 'turn_off',
-        {}, { area_id: areaId });
-      this._toast((turnOn ? '◯ ' : '● ') + roomName + ' lights ' + (turnOn ? 'on' : 'off'), 'ok');
-      // Reflect the new state quickly rather than waiting for the 5s poll.
-      setTimeout(() => { try { this._fetchLiveData(); } catch (e) {} }, 500);
-    } catch (err) {
-      this._toast('✗ ' + roomName + ' lights — ' + (err && err.message || err), 'err');
-    }
-  }
-
-  _build3DHouse() {
-    const mount = this.shadowRoot?.querySelector('#res-iso');
-    if (!mount) return;
-    this._renderHouse3d();
-    this._buildResidenceAnnotations();
-    this._wire3DDrag();
-  }
-
-  // Panel floor key -> model floor key ('bsmt' is 'b' in the model).
-  // Convert the editor's rooms (SVG units) to the 3D model's real feet, so the
-  // house geometry is built from the floor plan (FT_PER_UNIT = 0.2) (v7.101.28).
-  _planToFeet(plan) {
-    const FT = 0.2, out = {};
-    Object.keys(plan || {}).forEach(fk => {
-      out[fk] = (((plan[fk] || {}).rooms) || []).filter(r => r.type !== 'outdoor').map(r => ({
-        name: (r.name || '').toLowerCase(),
-        label: (r.name || '').toUpperCase(),
-        x: (r.x || 0) * FT, y: (r.y || 0) * FT, w: (r.w || 0) * FT, d: (r.h || 0) * FT,
-        type: r.type,
-        points: (Array.isArray(r.points) && r.points.length >= 3) ? r.points.map(p => [p[0] * FT, p[1] * FT]) : undefined,
-      }));
-    });
-    return this._snapFeet(out);
-  }
-  // Map a coordinate to its cluster representative (groups values within `tol`).
-  _snapMap(vals, tol) {
-    const s = vals.slice().sort((a, b) => a - b), reps = [];
-    let cur = null;
-    s.forEach(v => { if (cur && v - cur.start <= tol) { cur.vals.push(v); } else { cur = { vals: [v], start: v }; reps.push(cur); } });
-    const means = reps.map(g => g.vals.reduce((a, b) => a + b, 0) / g.vals.length);
-    return v => { let best = v, bd = tol + 1e-6; means.forEach(m => { const d = Math.abs(v - m); if (d < bd) { bd = d; best = m; } }); return best; };
-  }
-  // Align nearly-touching room edges (3D only) so exterior walls render seamless (v7.101.28).
-  _snapFeet(out) {
-    const TOL = 1.0;   // feet
-    Object.keys(out || {}).forEach(fk => {
-      const rooms = out[fk] || [];
-      if (rooms.length < 2) return;
-      const xs = [], ys = [];
-      rooms.forEach(r => { xs.push(r.x, r.x + r.w); ys.push(r.y, r.y + r.d); if (r.points) r.points.forEach(p => { xs.push(p[0]); ys.push(p[1]); }); });
-      const sx = this._snapMap(xs, TOL), sy = this._snapMap(ys, TOL);
-      rooms.forEach(r => {
-        const x0 = sx(r.x), x1 = sx(r.x + r.w), y0 = sy(r.y), y1 = sy(r.y + r.d);
-        r.x = x0; r.w = x1 - x0; r.y = y0; r.d = y1 - y0;
-        if (r.points) r.points = r.points.map(p => [sx(p[0]), sy(p[1])]);
-      });
-    });
-    return out;
-  }
-  _house3dPlan() { return this._planToFeet(this._getFloorPlan()); }
-
-  // Placed openings -> feet, with open/closed resolved from each mapped sensor (v7.101.28).
-  _elementsToFeet(raw) {
-    const FT = 0.2, states = this._hass?.states || {}, out = {};
-    Object.keys(raw || {}).forEach(fk => {
-      out[fk] = (raw[fk] || []).map(e => {
-        let open = false;
-        if (e.entity && states[e.entity]) { const s = states[e.entity].state; open = (s === 'on' || s === 'open'); }
-        return { type: e.type, kind: e.kind, wall: e.wall, room: e.room, slope: e.slope, pos: (e.pos != null ? e.pos : 0.5), w: (e.w || 20) * FT, open };
-      });
-    });
-    return out;
-  }
-  _house3dElements() { return this._elementsToFeet(this._getFloorElements()); }
-
-  // Live 3D preview for the editor — built from the working copies so it updates
-  // as you edit, before saving (v7.101.28).
-  _viewPresetBar(scope) {
-    const views = [['FRONT', 0], ['RIGHT', 90], ['REAR', 180], ['LEFT', 270], ['ISO', 35]];
-    return '<div class="view-presets">' + views.map(v =>
-      '<button class="view-btn" data-vscope="' + scope + '" data-vtheta="' + v[1] + '">' + v[0] + '</button>').join('') +
-      '<span class="view-hint">drag to rotate</span></div>';
-  }
-  _setView(scope, theta) {
-    if (scope === 'editor') { this._editorTheta = theta; this._refreshEditorPreview(); }
-    else { this._house3dTheta = theta; this._renderHouse3d(); }
-  }
-  _wireEditorPreviewDrag() {
-    const el = this.shadowRoot && this.shadowRoot.querySelector('#fp-3d-preview');
-    if (!el || el._dragWired) return;
-    el._dragWired = true;
-    let dragging = false, lastX = 0, raf = null;
-    const schedule = () => { if (!raf) raf = requestAnimationFrame(() => { raf = null; this._refreshEditorPreview(); }); };
-    const move = (e) => { if (!dragging) return; const p = (e.touches && e.touches[0]) ? e.touches[0] : e; if (e.cancelable) e.preventDefault(); this._editorTheta += (p.clientX - lastX) * 0.6; lastX = p.clientX; schedule(); };
-    const up = () => { dragging = false; el.classList.remove('dragging'); window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); window.removeEventListener('touchmove', move); window.removeEventListener('touchend', up); };
-    const down = (e) => { dragging = true; lastX = ((e.touches && e.touches[0]) ? e.touches[0] : e).clientX; el.classList.add('dragging'); window.addEventListener('mousemove', move); window.addEventListener('mouseup', up); window.addEventListener('touchmove', move, { passive: false }); window.addEventListener('touchend', up); };
-    el.addEventListener('mousedown', down); el.addEventListener('touchstart', down, { passive: true });
-  }
-
-  _renderEditorPreview() {
-    try {
-      const plan = this._planToFeet(this._getEditingPlan());
-      const elements = this._elementsToFeet(this._getEditingElements());
-      const spec = this._houseSpec();
-      const garage = this._house3dGarage();
-      const box = NOVA3D.fixedBox({ floor: 'all', spec, plan, elements, garage });
-      return NOVA3D.renderSVG({ theta: this._editorTheta, floor: 'all', lit: this._house3dLit(), spec, plan, elements, garage, box });
-    } catch (e) { return '<div class="fp-3d-empty">3D preview</div>'; }
-  }
-  _refreshEditorPreview() {
-    const el = this.shadowRoot && this.shadowRoot.querySelector('#fp-3d-preview');
-    if (el) el.innerHTML = this._renderEditorPreview();
-  }
-
-  // Per-bay garage door open/closed from the split door_mapping slots (v7.101.28).
-  _house3dGarage() {
-    const cfg = this._data().config || {};
-    const map = cfg.door_mapping || {};
-    const bays = Math.max(0, Math.min(Number(cfg.garage_bays) || 0, 8));
-    const states = this._hass?.states || {};
-    const out = [];
-    for (let i = 1; i <= bays; i++) {
-      const eid = map['garage_' + i] || (i === 1 ? (map['garage'] || '') : '');
-      let open = false;
-      if (eid && states[eid]) { const s = states[eid].state; open = (s === 'on' || s === 'open'); }
-      out.push({ open });
-    }
-    return out;
-  }
-
-  _house3dFloor() {
-    const f = this._currentFloor || 'all';
-    return f === 'bsmt' ? 'b' : f;
-  }
-
-  // Live presence -> per-room lit state for the model.
-  // States: 'on' (area occupied), 'mmwave' (a presence/mmWave sensor is
-  // actively detecting — stronger signal than a bare area flag), 'dom'
-  // (dominant room). mmWave overlays on top of plain occupancy (v7.101.28).
-  _house3dLit() {
-    const d = this._data();
-    const lit = {};
-    (d.areasGrid || []).forEach(a => { if (a.active) lit[String(a.name).toLowerCase()] = 'on'; });
-    // Overlay genuine mmWave detection from the overview feed, when present.
-    const mm = this._mmwave && this._mmwave.rooms;
-    if (Array.isArray(mm)) {
-      mm.forEach(r => {
-        if (r.detecting_count > 0) lit[String(r.name).toLowerCase()] = 'mmwave';
-      });
-    }
-    const dom = d.dominantRoom && d.dominantRoom.name;
-    if (dom) lit[String(dom).toLowerCase()] = 'dom';   // dominant still wins
-    return lit;
-  }
-
-  // mmWave presence overview (v7.101.28): live per-room sensor state, fetched
-  // when the residence tab is shown and refreshed on the poll while it's open.
-  async _fetchMmwave() {
-    if (!this._hass) return;
-    try {
-      const res = await this._hass.callWS({ type: "nova/mmwave_overview" });
-      this._mmwave = res || { rooms: [], summary: {} };
-    } catch (_) {
-      this._mmwave = { rooms: [], summary: {}, error: true };
-    }
-    this._renderMmwave();
-    // Fresh mmWave state feeds the floor-plan glow too (v7.101.28) — rebuild it
-    // so a room actively detected lights up on the house, not just the list.
-    if (this._currentTab === 'residence') this._build3DHouse();
-  }
-
-  _renderMmwave() {
-    const list = this.shadowRoot?.getElementById("mmwave-list");
-    const sumEl = this.shadowRoot?.getElementById("mmwave-summary");
-    if (!list) return;
-    const data = this._mmwave || { rooms: [], summary: {} };
-    const s = data.summary || {};
-    if (sumEl) {
-      sumEl.textContent = s.rooms_with_mmwave
-        ? `◉ ${s.rooms_detecting || 0}/${s.rooms_with_mmwave} OCCUPIED`
-        : "◉ NONE";
-    }
-    if (data.error) {
-      list.innerHTML = `<div class="mmwave-empty">Couldn't read sensors — restart Home Assistant after updating, then reopen.</div>`;
-      return;
-    }
-    const rooms = data.rooms || [];
-    if (!rooms.length) {
-      list.innerHTML = `<div class="mmwave-empty">No presence, motion, or mmWave sensors found. Assign occupancy sensors to areas in Home Assistant and they'll appear here.</div>`;
-      return;
-    }
-    list.innerHTML = rooms.map(r => {
-      const on = r.detecting_count > 0;
-      const sensorLine = r.sensor_count > 1
-        ? `${r.detecting_count}/${r.sensor_count} sensors`
-        : `${r.sensor_count} sensor`;
-      const tag = r.outdoor ? `<span class="mmwave-out">▲ OUT</span>` : "";
-      return `<div class="mmwave-room ${on ? 'live' : ''}">
-        <div class="mmwave-dot ${on ? 'on' : ''}"></div>
-        <div class="mmwave-body">
-          <div class="mmwave-name">${this._esc(r.name)} ${tag}</div>
-          <div class="mmwave-meta">${on ? 'OCCUPIED' : 'clear'} · ${sensorLine} · ${on ? 'now' : this._esc(r.freshest)}</div>
-        </div>
-      </div>`;
-    }).join("");
-  }
-  // Live door open/closed state, keyed to the model's doors (from the backend).
-  _house3dDoors() {
-    const d = this._data();
-    return (d && d.doors) || {};
-  }
-
-  // Home spec from config (type/specs). Only fields the user configured are set, so the
-  // model falls back to its approved default layout otherwise. Roof pitch + sensible dormer
-  // counts come from the home type unless explicitly overridden.
-  _styleDefaults(style) {
-    const T = {
-      cape_cod:  { roof: 'gable', pitch: 1.0,  dormersFront: 2, dormersRear: 1 },
-      colonial:  { roof: 'gable', pitch: 0.7,  dormersFront: 0, dormersRear: 0 },
-      dutch_colonial: { roof: 'gambrel', pitch: 0.6, dormersFront: 2, dormersRear: 1 },
-      ranch:     { roof: 'hip',   pitch: 0.5,  dormersFront: 0, dormersRear: 0 },
-      two_story: { roof: 'gable', pitch: 0.65, dormersFront: 0, dormersRear: 0 },
-      craftsman: { roof: 'hip',   pitch: 0.6,  dormersFront: 1, dormersRear: 0 },
-      modern:    { roof: 'flat',  pitch: 0.12, dormersFront: 0, dormersRear: 0 },
-      townhouse: { roof: 'gable', pitch: 0.85, dormersFront: 0, dormersRear: 0 },
-      apartment: { roof: 'flat',  pitch: 0.12, dormersFront: 0, dormersRear: 0 },
-      cabin:     { roof: 'gable', pitch: 1.25, dormersFront: 2, dormersRear: 1 },
-    };
-    return T[style] || T.cape_cod;
-  }
-  _houseSpec() {
-    const c = this._data().config || {};
-    const style = c.residence_style || 'cape_cod';
-    const sd = this._styleDefaults(style);
-    const num = (v) => (v === '' || v == null ? null : Number(v));
-    const fEx = num(c.dormers_front), rEx = num(c.dormers_rear);
-    const spec = {};
-    spec.roof = sd.roof || 'gable';
-    spec.stories = num(c.home_stories) != null ? num(c.home_stories) : 1.5;
-    if (sd.pitch != null) spec.pitch = sd.pitch;
-    // Cape Cod with default dormers => let the model render its exact approved layout.
-    spec.dormersFront = fEx != null ? fEx : sd.dormersFront;
-    spec.dormersRear = rEx != null ? rEx : sd.dormersRear;
-    if (num(c.garage_bays) != null) spec.garageBays = num(c.garage_bays);
-    if (c.chimney_side) spec.chimney = c.chimney_side;
-    return spec;
-  }
-
-  // Draw (or redraw) just the SVG — cheap enough to call on every drag frame.
-  _renderHouse3d() {
-    const mount = this.shadowRoot?.querySelector('#res-iso');
-    if (!mount || typeof NOVA3D === 'undefined') return;
-    const floor = this._house3dFloor();
-    const spec = this._houseSpec();
-    const plan = this._house3dPlan();
-    const elements = this._house3dElements();
-    const garage = this._house3dGarage();
-    const key = floor + '|' + JSON.stringify(spec) + '|' + JSON.stringify(plan) + '|' + JSON.stringify(elements) + '|' + JSON.stringify(garage);
-    if (this._house3dBoxKey !== key) {
-      this._house3dBox = NOVA3D.fixedBox({ floor, spec, plan, elements, garage });
-      this._house3dBoxKey = key;
-    }
-    mount.innerHTML = NOVA3D.renderSVG({
-      theta: this._house3dTheta, floor, lit: this._house3dLit(), doors: this._house3dDoors(), box: this._house3dBox, spec, plan, elements, garage
-    });
-    const d = this._data();
-    const occ = (d.areasGrid || []).filter(a => a.active).length;
-    const tot = (d.areasGrid || []).length || 14;
-    const occEl = this.shadowRoot.getElementById('res-occ');
-    if (occEl) occEl.textContent = occ + ' / ' + tot;
-  }
-
-  _buildResidenceAnnotations() {
-    const d = this._data();
-    const areas = d.areasGrid || [];
-    const addrEl = this.shadowRoot.querySelector('#res-addr');
-    if (addrEl) {
-      const hc = this._hass && this._hass.config;
-      addrEl.textContent = (hc && hc.location_name) ||
-        (hc && hc.latitude != null ? (Number(hc.latitude).toFixed(4) + ', ' + Number(hc.longitude).toFixed(4)) : 'LOCATION NOT SET');
-    }
-    const cfgBeds = d.config && d.config.home_bedrooms, cfgBaths = d.config && d.config.home_bathrooms;
-    const beds = (cfgBeds != null && cfgBeds !== '') ? Number(cfgBeds) : (areas.filter(a => a.bedroom).length || d.bedrooms || 0);
-    const baths = (cfgBaths != null && cfgBaths !== '') ? Number(cfgBaths) : areas.filter(a => /bath/i.test(a.name || '')).length;
-    const bbEl = this.shadowRoot.querySelector('#res-bb');
-    if (bbEl) bbEl.textContent = beds + ' / ' + (baths || '—');
-    const sqEl = this.shadowRoot.querySelector('#res-sqft');
-    if (sqEl) {
-      let sqft = d.config && d.config.floor_plan_sqft;
-      if (!sqft) {
-        const plan = this._getFloorPlan();
-        let u = 0;
-        Object.keys(plan).forEach(fk => (plan[fk] && plan[fk].rooms || []).forEach(r => {
-          if (r.type === 'door' || r.type === 'stairs') return;
-          u += (r.w || 0) * (r.h || 0);
-        }));
-        // Clamp so a mis-scaled editor plan can never print an absurd number.
-        sqft = Math.min(5000, Math.max(600, Math.round(u * 0.032 / 50) * 50));
-      }
-      sqEl.textContent = sqft ? '~' + Number(sqft).toLocaleString() : '—';
-    }
-    const styleTag = this.shadowRoot.querySelector('#res-style-tag');
-    if (styleTag) {
-      const rs = this._resStyles()[this._residenceStyle()];
-      styleTag.textContent = (rs && rs.label) ? rs.label.toUpperCase() : '—';
-    }
-
-    // Leader-line callouts retired: the rotatable 3D model can't anchor fixed leader
-    // lines, and presence now reads directly off lit windows (all view) and labeled
-    // rooms (floor views). Clear any stale callouts.
-    const co = this.shadowRoot.querySelector('#res-callouts');
-    if (co) co.innerHTML = '';
-  }
-
-  // Home-style templates: the massing/roof shell that floors + rooms populate.
-  _resStyles() {
-    return {
-      cape_cod:  { label: 'Cape Cod',   roof: 'gable', pitch: 1.0 },
-      colonial:  { label: 'Colonial',   roof: 'gable', pitch: 0.7 },
-      dutch_colonial: { label: 'Dutch Colonial', roof: 'gambrel', pitch: 0.6 },
-      ranch:     { label: 'Ranch',      roof: 'hip',   pitch: 0.5 },
-      two_story: { label: 'Two-Story',  roof: 'gable', pitch: 0.65 },
-      craftsman: { label: 'Craftsman',  roof: 'hip',   pitch: 0.6 },
-      modern:    { label: 'Modern',     roof: 'flat',  pitch: 0 },
-      townhouse: { label: 'Townhouse',  roof: 'gable', pitch: 0.85 },
-      apartment: { label: 'Apartment',  roof: 'flat',  pitch: 0 },
-      cabin:     { label: 'Cabin',      roof: 'gable', pitch: 1.25 },
-    };
-  }
-
-  _residenceStyle() {
-    const d = this._data();
-    const s = (d.config && d.config.residence_style) || 'cape_cod';
-    return this._resStyles()[s] ? s : 'cape_cod';
-  }
-
-  _residenceStyleOptions(d) {
-    const styles = this._resStyles();
-    const cur = (d.config && d.config.residence_style) || 'cape_cod';
-    return Object.keys(styles).map(k =>
-      '<option value="' + k + '"' + (k === cur ? ' selected' : '') + '>' + styles[k].label + '</option>'
-    ).join('');
-  }
-
-  // <option> builders for the Residence/Home config selects.
-  _opts(values, current) {
-    return values.map(v => '<option value="' + v + '"' + (String(v) === String(current) ? ' selected' : '') + '>' + this._esc(v) + '</option>').join('');
-  }
-  _optsLabeled(pairs, current) {
-    return pairs.map(([v, label]) => '<option value="' + v + '"' + (String(v) === String(current) ? ' selected' : '') + '>' + this._esc(label) + '</option>').join('');
-  }
-
-  _wireResidenceControls() {
-    const sel = this.shadowRoot.getElementById('res-style-sel');
-    if (sel && !sel._wired) {
-      sel._wired = true;
-      sel.addEventListener('change', async () => {
-        const val = sel.value;
-        this._zoomAuto = true;  // refit massing for the new style
-        if (this._liveData && this._liveData.config) this._liveData.config.residence_style = val;
-        this._build3DHouse();
-        const rs = this._resStyles()[val];
-        this._toast('◉ Home style → ' + (rs ? rs.label : val), 'ok');
-        try { await this._saveConfig('residence_style', val); } catch (_) {}
-      });
-    }
-    // Door slot → entity mapping selects (explicit overrides auto-detect).
-    this._doorSlots().forEach(([slot]) => {
-      const ds = this.shadowRoot.getElementById('door-map-' + slot);
-      if (ds && !ds._wired) {
-        ds._wired = true;
-        ds.addEventListener('change', async () => {
-          const cfg = (this._liveData && this._liveData.config) || {};
-          const map = Object.assign({}, cfg.door_mapping || {});
-          if (ds.value) map[slot] = ds.value; else delete map[slot];
-          if (this._liveData && this._liveData.config) this._liveData.config.door_mapping = map;
-          this._build3DHouse();
-          this._toast('◉ Door mapping updated', 'ok');
-          try { await this._saveConfig('door_mapping', JSON.stringify(map)); } catch (_) {}
-        });
-      }
-    });
-  }
-
-  // Residence model door slots → friendly labels.
-  _doorSlots() {
-    const bays = Math.max(0, Math.min(Number((this._data().config || {}).garage_bays) || 0, 8));
-    const garage = [];
-    for (let i = 1; i <= bays; i++) garage.push(['garage_' + i, 'Garage Door ' + i]);
-    if (!bays) garage.push(['garage', 'Garage Door']);   // no bay count set -> single slot
-    return [
-      ['front', 'Front Door'],
-      ...garage,
-      ['garage_rear', 'Garage Side / Rear'],
-      ['kitchen_garage', 'Kitchen ↔ Garage'],
-      ['cellar', 'Cellar / Bulkhead'],
-      ['basement', 'Basement'],
-    ];
-  }
-
-  // Door-like entities for the mapping dropdowns (covers, locks, door sensors).
-  _entName(eid) {
-    // Safe entity display name: never throws if the entity is missing from
-    // hass.states (e.g. a stale entity_id still referenced in config).
-    const st = (this._hass && this._hass.states) ? this._hass.states[eid] : null;
-    return (st && st.attributes && st.attributes.friendly_name) || eid;
-  }
-  _trackerOptions(selected) {
-    const states = this._hass?.states || {};
-    const cands = Object.keys(states).filter(eid => { const dom = eid.split('.')[0]; return dom === 'person' || dom === 'device_tracker'; }).sort();
-    if (selected && !cands.includes(selected)) cands.unshift(selected);
-    const opts = cands.map(eid => `<option value="${this._esc(eid)}"${eid === selected ? ' selected' : ''}>${this._esc(this._entName(eid))}</option>`).join('');
-    return `<option value=""${selected ? '' : ' selected'}>\u2014 none \u2014</option>` + opts;
-  }
-  _travelSensorOptions(selected) {
-    const states = this._hass?.states || {};
-    const cands = Object.keys(states).filter(eid => {
-      const dom = eid.split('.')[0]; if (dom !== 'sensor') return false;
-      const a = states[eid].attributes || {}, dc = a.device_class || '', unit = a.unit_of_measurement || '';
-      return dc === 'duration' || /^(min|minutes|h|hr|hrs|hours)$/i.test(unit) || /travel|commute|duration|eta|route|waze|maps|traffic|drive_time|driving|to_work|to_home/i.test(eid);
-    }).sort();
-    if (selected && !cands.includes(selected)) cands.unshift(selected);
-    const opts = cands.map(eid => `<option value="${this._esc(eid)}"${eid === selected ? ' selected' : ''}>${this._esc(this._entName(eid))}</option>`).join('');
-    return `<option value=""${selected ? '' : ' selected'}>\u2014 none \u2014</option>` + opts;
-  }
-
-  _doorEntityOptions(selected) {
-    const states = this._hass?.states || {};
-    const cands = [];
-    // Openings map to an open/closed source: any cover or lock, plus contact-type
-    // binary_sensors. Match window sensors (device_class 'window') and loosely-named
-    // contacts by name too, so the full set of a user's openings is assignable.
-    const OPEN_DC = ['door', 'window', 'garage_door', 'opening'];
-    const OPEN_RE = /door|garage|gate|cellar|bulkhead|hatch|window|contact|entry|slider|sash|casement|patio|french|skylight|opening|sliding/i;
-    Object.keys(states).forEach(eid => {
-      const dom = eid.split('.')[0];
-      const at = states[eid].attributes || {};
-      const dc = at.device_class || '';
-      const fn = at.friendly_name || '';
-      const ok = dom === 'cover' || dom === 'lock' ||
-        (dom === 'binary_sensor' && (OPEN_DC.includes(dc) || OPEN_RE.test(eid) || OPEN_RE.test(fn)));
-      if (ok) cands.push(eid);
-    });
-    cands.sort();
-    if (selected && !cands.includes(selected)) cands.unshift(selected);
-    const opts = cands.map(eid => {
-      const fn = this._entName(eid);
-      return `<option value="${this._esc(eid)}"${eid === selected ? ' selected' : ''}>${this._esc(fn)}</option>`;
-    }).join('');
-    return `<option value=""${selected ? '' : ' selected'}>— auto-detect —</option>` + opts;
-  }
-
-  _renderDoorMapping(d) {
-    const map = (d.config && d.config.door_mapping) || {};
-    const rows = this._doorSlots().map(([slot, label]) =>
-      `<div class="door-map-row"><label>${label}</label><select class="door-map-sel" id="door-map-${slot}" data-slot="${slot}">${this._doorEntityOptions(map[slot] || '')}</select></div>`
-    ).join('');
-    return `<div class="door-map"><div class="door-map-head">DOORS · map to your entities <span class="door-map-hint">(blank = auto-detect by name)</span></div><div class="door-map-grid">${rows}</div></div>`;
-  }
-
-  _update3DTransform() { /* 2D isometric — no transform to apply */ }
-
-
-  _wire3DDrag() {
-    const scene = this.shadowRoot?.querySelector('#house3d-scene');
-    if (!scene || scene._house3dWired) return;
-    scene._house3dWired = true;
-    let dragging = false, lastX = 0, startX = 0, startY = 0, axis = null, raf = null;
-    const schedule = () => { if (!raf) raf = requestAnimationFrame(() => { raf = null; this._renderHouse3d(); }); };
-    const pt = (e) => (e.touches && e.touches[0] ? e.touches[0] : e);
-    const move = (e) => {
-      if (!dragging) return;
-      const p = pt(e);
-      // On touch, decide the gesture's axis once: horizontal rotates the model,
-      // vertical is a page scroll — so dragging up/down the phone never fights
-      // the model, and a sideways drag never scrolls the page mid-rotation.
-      if (axis === null) {
-        const dx = Math.abs(p.clientX - startX), dy = Math.abs(p.clientY - startY);
-        if (dx < 6 && dy < 6) return;          // too small to classify yet
-        axis = dx >= dy ? 'x' : 'y';
-        if (axis === 'y') { dragging = false; return; }  // release to the page scroller
-      }
-      if (e.cancelable) e.preventDefault();    // horizontal → keep the page from scrolling
-      this._house3dTheta += (p.clientX - lastX) * 0.5;
-      lastX = p.clientX;
-      schedule();
-    };
-    const up = () => {
-      dragging = false; axis = null; scene.classList.remove('dragging');
-      window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up);
-      window.removeEventListener('touchmove', move); window.removeEventListener('touchend', up);
-    };
-    const down = (e) => {
-      const p = pt(e);
-      dragging = true; axis = null; startX = lastX = p.clientX; startY = p.clientY;
-      scene.classList.add('dragging');
-      window.addEventListener('mousemove', move); window.addEventListener('mouseup', up);
-      window.addEventListener('touchmove', move, { passive: false });   // non-passive: rotation can block scroll
-      window.addEventListener('touchend', up);
-    };
-    scene.addEventListener('mousedown', (e) => { down(e); e.preventDefault(); });
-    scene.addEventListener('touchstart', (e) => down(e), { passive: true });
-  }
-
-  // ---- Floor-plan real dimensions (v7.101.28) ----
-  // Editor grid: a 50-unit major gridline = 10 ft, so 0.2 ft per unit. These
-  // real per-room dimensions are the source the 3D structure is built from.
-  _fpUnits() { return (this._data().config?.floor_plan_units === 'metric') ? 'metric' : 'imperial'; }
-  _fpUnitLabel() { return this._fpUnits() === 'metric' ? 'm' : 'ft'; }
-  _fpToReal(u) {
-    const ft = (u || 0) * 0.2;
-    return this._fpUnits() === 'metric' ? Math.round(ft * 0.3048 * 10) / 10 : Math.round(ft * 10) / 10;
-  }
-  _fpFromReal(v) {
-    const ft = this._fpUnits() === 'metric' ? (v / 0.3048) : v;
-    return Math.max(8, Math.round(ft / 0.2));
-  }
-  _fpDim(u) { return this._fpToReal(u) + (this._fpUnits() === 'metric' ? 'm' : "'"); }
-
-  _renderFloorPlanEditor(d) {
-    const plan = this._getEditingPlan();
-    const floor = this._editorFloor || '1f';
-    const floorData = plan[floor];
-    if (!floorData) return '';
-
-    let html = '';
-
-    // Floor selector + address
-    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">';
-    html += '<div class="floor-tabs">';
-    for (const fk of Object.keys(plan)) {
-      html += '<button class="floor-tab fp-ed-floor ' + (fk === floor ? 'active' : '') + '" data-ed-floor="' + fk + '">' + plan[fk].label + '</button>';
-    }
-    html += '</div>';
-    html += '<div style="display:flex;gap:6px;align-items:center;">';
-    html += '<label class="ctrl" style="padding:5px 10px;font-size:9px;cursor:pointer;">Import BG <input type="file" accept="image/*" class="fp-import-img" style="display:none"/></label>';
-    html += '<button class="ctrl" id="fp-export" style="padding:5px 10px;font-size:9px;">Export</button>';
-    html += '<label class="ctrl" style="padding:5px 10px;font-size:9px;cursor:pointer;">Import <input type="file" accept=".json,application/json" class="fp-import-layout" style="display:none"/></label>';
-    html += '<button class="ctrl" id="fp-add-room" style="padding:5px 10px;font-size:9px;">+ Add Room</button>';
-    html += '<button class="ctrl" id="fp-add-zone" style="padding:5px 10px;font-size:9px;margin-left:6px;">+ Outdoor Zone</button>';
-    { const _pp = this._propertyPts(); const _has = _pp.length >= 3;
-      html += '<button class="ctrl" id="fp-add-property" style="padding:5px 10px;font-size:9px;margin-left:6px;">' + (_has ? 'Clear Property' : '+ Property Line') + '</button>';
-      if (_has) html += '<span class="fp-land-size" style="margin-left:8px;font-family:var(--font-mono);font-size:9px;color:#ffb85a;">Lot: ' + this._propertyArea(_pp) + '</span>'; }
-    html += '<button class="ctrl" id="fp-units" style="padding:5px 10px;font-size:9px;">Units: ' + (this._fpUnits() === 'metric' ? 'Metric' : 'Imperial') + '</button>';
-    html += '</div>';
-    html += '</div>';
-
-    // Instructions
-    html += '<div style="font-size:9px;color:var(--text-dim);font-family:var(--font-mono);letter-spacing:0.06em;margin-bottom:6px;">DRAG to move · Bottom-right handle to resize · Right-click to delete · Click to select</div>';
-
-    // Floor plan canvas (full width)
-    html += this._viewPresetBar('editor');
-    html += '<div class="fp-3d-preview" id="fp-3d-preview">' + this._renderEditorPreview() + '</div>';
-    html += '<div class="fp-zoom-bar" style="display:flex;align-items:center;gap:8px;margin:4px 0 6px;">'
-      + '<button class="ctrl" id="fp-zoom-fit" style="padding:4px 10px;font-size:9px;">\u2922 Fit</button>'
-      + '<span style="font-size:9px;color:var(--text-faint);font-family:var(--font-mono);">scroll to zoom \u00b7 middle-drag or drag empty space to pan</span></div>';
-    html += '<div class="fp-editor-canvas" id="fp-editor-canvas" style="min-height:820px;">';
-    html += this._renderEditableSVG(plan, floor);
-    html += '</div>';
-    html += this._renderOpenings(floor);
-    html += this._renderCameras(floor);
-    html += this._renderPlanEntities(floor);
-
-    // Selected room info
-    html += '<div id="fp-selected-info" style="font-family:var(--font-mono);font-size:11px;color:var(--cyan);padding:8px 0;min-height:22px;letter-spacing:0.08em;"></div>';
-
-    // Actions
-    html += '<div style="display:flex;gap:8px;">';
-    html += '<button class="ctrl primary" id="fp-save">Save Layout</button>';
-    html += '<button class="ctrl" id="fp-reset">Reset Default</button>';
-    html += '</div>';
-    return html;
-  }
-
-  _optInEntityDatalist() {
-    const states = this._hass?.states || {};
-    return Object.keys(states).filter(eid => {
-      const dom = eid.split('.')[0];
-      return dom === 'binary_sensor' || dom === 'device_tracker' || dom === 'person' || dom === 'sensor';
-    }).sort().map(eid =>
-      `<option value="${this._esc(eid)}">${this._esc(this._entName(eid))}</option>`).join('');
-  }
-  _plList() {
-    let incl = (this._data().config && this._data().config.pattern_include_entities) || [];
-    if (!Array.isArray(incl)) { try { incl = JSON.parse(incl) || []; } catch (_) { incl = []; } }
-    return incl;
-  }
-  async _plSave(incl) {
-    await this._saveConfig('pattern_include_entities', JSON.stringify(incl));
-    if (this._liveData && this._liveData.config) this._liveData.config.pattern_include_entities = incl;
-    await this._fetchAndRender();   // re-fetch from backend + full re-render (matches toggles)
-  }
-  _exclArr(v) {
-    if (!v) return [];
-    if (Array.isArray(v)) return v;
-    try { const j = JSON.parse(v); return Array.isArray(j) ? j : []; } catch (_) { return []; }
-  }
-  _allEntityDatalist() {
-    const states = this._hass?.states || {};
-    return Object.keys(states).sort().map(eid =>
-      `<option value="${this._esc(eid)}">${this._esc(this._entName(eid))}</option>`).join('');
-  }
-  _domainDatalist() {
-    const states = this._hass?.states || {};
-    const doms = [...new Set(Object.keys(states).map(e => e.split('.')[0]))].sort();
-    return doms.map(dm => `<option value="${this._esc(dm)}">${this._esc(dm)}</option>`).join('');
-  }
-  _labelDatalist() {
-    const labels = (this._data() && this._data().available_labels) || [];
-    return labels.map(l => `<option value="${this._esc(l.name)}">${this._esc(l.name)}</option>`).join('');
-  }
-  async _exclSave(key, arr) {
-    await this._saveConfig(key, JSON.stringify(arr));
-    if (this._liveData && this._liveData.config) this._liveData.config[key] = arr;
-    await this._fetchAndRender();
-  }
-  _renderExcludedEntities(d) {
-    const cfg = d.config || {};
-    const ents = this._exclArr(cfg.excluded_entities);
-    const doms = this._exclArr(cfg.excluded_domains);
-    const labs = this._exclArr(cfg.excluded_labels);
-    const chipRow = (arr, cls) => arr.length
-      ? arr.map((e, i) => `<span class="pl-chip">${this._esc(e)}<button class="${cls}" data-i="${i}" title="Remove">\u00d7</button></span>`).join('')
-      : '<span class="pl-empty">None.</span>';
-    return `
-      <div class="panel">
-        <div class="head"><span>Excluded Entities</span><span class="side">SCOPE</span></div>
-        <div class="appliance-intro">Entities you exclude are removed from Nova's awareness \u2014 presence detection, room routing, the observer and routine learning all skip them. Home Assistant still has the entity, and Nova can still control it if you ask for it by name. Use this to silence noise such as a virtual occupancy sensor another integration exposes, or lights and switches you don't want Nova reacting to.</div>
-        <div class="pl-entities">
-          <div class="pl-ehead">Exclude specific entities</div>
-          <div class="pl-add"><input id="excl-ent-input" list="excl-ent-list" class="op-field pl-input" placeholder="type to find an entity\u2026" autocomplete="off"><datalist id="excl-ent-list">${this._allEntityDatalist()}</datalist><button class="ctrl" id="excl-ent-add">+ Add</button></div>
-          <div class="pl-chips" id="excl-ent-chips">${chipRow(ents, 'excl-ent-del')}</div>
-        </div>
-        <div class="pl-entities">
-          <div class="pl-ehead">Exclude whole domains <span class="pl-hint">e.g. light, switch \u2014 every entity in the domain</span></div>
-          <div class="pl-add"><input id="excl-dom-input" list="excl-dom-list" class="op-field pl-input" placeholder="type a domain\u2026" autocomplete="off"><datalist id="excl-dom-list">${this._domainDatalist()}</datalist><button class="ctrl" id="excl-dom-add">+ Add</button></div>
-          <div class="pl-chips" id="excl-dom-chips">${chipRow(doms, 'excl-dom-del')}</div>
-        </div>
-        <div class="pl-entities">
-          <div class="pl-ehead">Exclude by label <span class="pl-hint">every entity carrying a Home Assistant label</span></div>
-          <div class="pl-add"><input id="excl-lab-input" list="excl-lab-list" class="op-field pl-input" placeholder="type a label\u2026" autocomplete="off"><datalist id="excl-lab-list">${this._labelDatalist()}</datalist><button class="ctrl" id="excl-lab-add">+ Add</button></div>
-          <div class="pl-chips" id="excl-lab-chips">${chipRow(labs, 'excl-lab-del')}</div>
-        </div>
-      </div>
-`;
+    return d + " Z";
   }
   _roomAt(floor, x, y) {
     const rooms = ((this._getEditingPlan()[floor] || {}).rooms) || [];
     for (let i = 0; i < rooms.length; i++) {
       const r = rooms[i];
-      if (r.type === 'stairs' || r.type === 'door') continue;
+      if (r.type === "stairs" || r.type === "door") continue;
       if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return r.name;
     }
     let best = null, bd = 1e18;
     rooms.forEach(r => { const cx = r.x + r.w / 2, cy = r.y + r.h / 2, d = (cx - x) * (cx - x) + (cy - y) * (cy - y); if (d < bd) { bd = d; best = r.name; } });
-    return best || 'the area';
+    return best || "the area";
   }
   _openingDescriptions(floor) {
     const out = [];
     (this._elemsFor(floor) || []).forEach(e => {
-      if (e.type === 'door' && (e.kind === 'cased' || e.kind === 'interior') && e.room) {
-        out.push((e.kind === 'cased' ? 'cased opening at ' : 'interior door at ') + e.room);
+      if (e.type === "door" && (e.kind === "cased" || e.kind === "interior") && e.room) {
+        out.push((e.kind === "cased" ? "cased opening at " : "interior door at ") + e.room);
       }
     });
     const rooms = ((this._getEditingPlan()[floor] || {}).rooms) || [];
-    if (rooms.some(r => r.type === 'stairs')) out.push('open staircase');
+    if (rooms.some(r => r.type === "stairs")) out.push("open staircase");
     return out;
   }
-  _renderCameras(floor) {
-    const cams = this._camsFor(floor), uL = this._fpUnitLabel();
-    const geo = cams.length ? this._planGeometry(floor) : null;
-    const zoneNames = new Set((((this._getEditingPlan()[floor] || {}).rooms) || []).filter(r => r.type === 'outdoor').map(r => r.name));
-    const rows = cams.map((c, i) => {
-      const cov = geo ? this._computeCoverage(floor, c, geo) : {};
-      const order = Object.keys(cov).sort((a, b) => cov[b] - cov[a]);
-      const covLine = order.length
-        ? '<div class="cam-cov">sees: ' + order.map(rn => '<span class="cam-cov-room' + (cov[rn] >= 0.7 ? ' full' : '') + (zoneNames.has(rn) ? ' zone' : '') + '">' + this._esc(rn) + ' ' + Math.round(cov[rn] * 100) + '%</span>').join(' \u00b7 ') + '</div>'
-        : '<div class="cam-cov cam-cov-none">nothing in view \u2014 aim it, widen the FOV, or extend the range</div>';
-      const row = '<div class="cam-row" data-ci="' + i + '">'
-        + '<span class="cam-tag ' + (c.indoor === false ? 'out' : 'in') + '">CAM ' + (i + 1) + '</span>'
-        + ' <select class="cam-field" data-cam="entity" data-ci="' + i + '" title="camera entity">' + this._cameraEntityOptions(c.entity || '') + '</select>'
-        + ' <label class="cam-lbl">aim <input class="cam-field" data-cam="angle" data-ci="' + i + '" type="range" min="0" max="359" step="1" value="' + (c.angle != null ? c.angle : 270) + '" title="facing direction"></label>'
-        + ' <label class="cam-lbl">FOV <input class="cam-field" data-cam="fov" data-ci="' + i + '" type="range" min="20" max="170" step="5" value="' + (c.fov != null ? c.fov : 90) + '" title="field-of-view width"></label>'
-        + ' <label class="cam-lbl">range <input class="cam-field cam-num" data-cam="range" data-ci="' + i + '" type="number" min="5" step="5" value="' + this._fpToReal(c.range != null ? c.range : 55) + '" title="how far it sees (outdoor)"> ' + uL + '</label>'
-        + ' <button class="cam-io ' + (c.indoor === false ? 'out' : 'in') + '" data-ci="' + i + '" title="indoor = bounded by walls, outdoor = by range">' + (c.indoor === false ? 'OUTDOOR' : 'INDOOR') + '</button>'
-        + ' <button class="op-del cam-del" data-ci="' + i + '" title="Remove">\u00d7</button>'
-        + '</div>';
-      const cvg = c.coverage;
-      const llmLine = (cvg && cvg.reason)
-        ? '<div class="cam-cov-llm">' + ((cvg.covered && cvg.covered.length) ? '<span class="cam-cov-conf">\u2713 confirms ' + cvg.covered.map(r => this._esc(r)).join(', ') + '</span> \u2014 ' : '') + '<span class="cam-cov-reason">' + this._esc(cvg.reason) + '</span></div>'
-        : '';
-      return '<div class="cam-item">' + row + covLine + llmLine + '</div>';
-    }).join('');
-    return '<div class="fp-cameras">'
-      + '<div class="op-headr">CAMERAS \u00b7 field of view <span class="op-hint">drop a camera, bind its entity, aim it \u00b7 drag the dot on the plan to move \u00b7 indoor sees until walls, outdoor by range \u00b7 right-click a dot to delete</span></div>'
-      + '<div class="op-add"><button class="ctrl" id="cam-add">+ Camera</button>' + (cams.length ? '<button class="ctrl" id="cam-compute" title="AI: judge what each camera can confirm + describe it">Compute coverage</button>' : '') + '</div>'
-      + (rows || '<div class="op-empty">No cameras placed on this floor yet \u2014 add one above.</div>')
-      + '</div>';
+
+  _floorPlanEditorCardBody() {
+    const plan = this._getEditingPlan();
+    const floors = Object.keys(plan);
+    if (!this._editorFloor || !plan[this._editorFloor]) this._editorFloor = floors[0] || "1f";
+    const floor = this._editorFloor;
+    return `
+      <div class="fpn-toolbar">
+        <div class="fpn-floor-tabs">
+          ${floors.map(fk => `<button class="mode-chip fpn-floor-tab${fk === floor ? " active" : ""}" data-fpn-floor="${fk}">${this._esc(plan[fk].label || fk)}</button>`).join("")}
+        </div>
+        <div class="fpn-actions">
+          <button class="mode-chip" id="fpnAddRoom">+ Add Room</button>
+          <button class="mode-chip" id="fpnAddZone">+ Outdoor Zone</button>
+          ${this._fpnAddPropertyButton()}
+          <button class="mode-chip" id="fpnUnits">Units: ${this._fpUnits() === "metric" ? "Metric" : "Imperial"}</button>
+          <button class="mode-chip" id="fpnZoomFit">⤢ Fit</button>
+        </div>
+      </div>
+      <div class="fpn-hint">Drag to move · bottom-right handle to resize · right-click to delete · double-click an edge to add a corner · scroll to zoom · drag empty space to pan</div>
+      <div class="fpn-canvas" id="fpnCanvas">${this._renderFloorPlanSVG(plan, floor)}</div>
+      ${this._renderOpeningsNew(floor)}
+      ${this._renderCamerasNew(floor)}
+      ${this._renderPlanEntitiesNew(floor)}
+      <div class="fpn-actions">
+        <button class="mode-chip" id="fpnSave">Save Layout</button>
+        <button class="mode-chip" id="fpnReset">Reset Default</button>
+      </div>`;
   }
-  _renderPlanEntities(floor) {
+
+  _fpnAddPropertyButton() {
+    const pp = this._propertyPts();
+    const has = pp.length >= 3;
+    return `<button class="mode-chip" id="fpnAddProperty">${has ? "Clear Property" : "+ Property Line"}</button>`
+      + (has ? `<span class="toggle-desc">Lot: ${this._propertyArea(pp)}</span>` : "");
+  }
+
+  _renderPlanEntitiesNew(floor) {
     const ents = this._entsFor(floor);
     const op = this._fpBgOpacity();
     let hasBg = false;
     try {
-      const b = this._data().config?.floor_plan_bg;
-      const bd = typeof b === 'string' ? JSON.parse(b || '{}') : (b || {});
+      const b = this._data()?.config?.floor_plan_bg;
+      const bd = typeof b === "string" ? JSON.parse(b || "{}") : (b || {});
       hasBg = !!bd[floor];
     } catch (_) {}
     const chips = ents.length
-      ? ents.map((e, i) => '<span class="pl-chip">' + this._esc(this._entMarkerStyle(e.e).name) + '<button class="ent-del" data-ei="' + i + '" title="Remove">\u00d7</button></span>').join('')
-      : '<span class="pl-empty">No devices placed on this floor yet.</span>';
-    return '<div class="fp-entities">'
-      + '<div class="op-headr">DEVICES ON PLAN <span class="op-hint">add a device, then drag its pin on the plan \u00b7 tap a pin to open its controls</span></div>'
-      + '<div class="pl-add"><input id="fp-ent-input" list="fp-ent-list" class="op-field pl-input" placeholder="type to find an entity\u2026" autocomplete="off"><datalist id="fp-ent-list">' + this._allEntityDatalist() + '</datalist><button class="ctrl" id="ent-add">+ Add</button></div>'
-      + '<div class="pl-chips">' + chips + '</div>'
-      + '<div class="op-headr" style="margin-top:10px;">IMPORTED PLAN <span class="op-hint">' + (hasBg ? 'opacity of the uploaded floor-plan image behind the rooms' : 'upload a floor-plan image above, then set its opacity here') + '</span></div>'
-      + '<label class="cam-lbl">opacity <input id="fp-bg-op" type="range" min="0" max="1" step="0.05" value="' + op + '"> <span id="fp-bg-op-val">' + Math.round(op * 100) + '%</span></label>'
-      + '</div>';
-  }
-  _mediaPlayerOptions(selected) {
-    const states = this._hass?.states || {};
-    const eids = Object.keys(states).filter(e => e.startsWith('media_player.')).sort();
-    if (selected && !eids.includes(selected)) eids.unshift(selected);
-    const opts = eids.map(e => {
-      const st = states[e];
-      const fn = (st && st.attributes && st.attributes.friendly_name) || e;
-      return '<option value="' + this._esc(e) + '"' + (e === selected ? ' selected' : '') + '>' + this._esc(fn) + '</option>';
-    }).join('');
-    return '<option value="">\u2014 none \u2014</option>' + opts;
-  }
-  _renderModeBindings(d) {
-    const areas = d.areasGrid || [];
-    const labAreas = Array.isArray(d.config?.lab_areas) ? d.config.lab_areas : [];
-    const movieArea = d.config?.movie_area || '';
-    const chips = areas.length
-      ? areas.map(a => '<button class="area-chip ' + (labAreas.includes(a.id) ? 'on' : '') + '" data-lab-area="' + this._esc(a.id) + '">' + this._esc(a.name) + '</button>').join('')
-      : '<span class="mode-bind-empty">No rooms detected yet.</span>';
-    const areaOpts = '<option value="">\u2014 none \u2014</option>' +
-      areas.map(a => '<option value="' + this._esc(a.id) + '"' + (a.id === movieArea ? ' selected' : '') + '>' + this._esc(a.name) + '</option>').join('');
-    return '<div class="mode-bindings">' +
-      '<div class="mode-bind-head">MODE BINDINGS \u00b7 scope Lab &amp; Movie to specific rooms</div>' +
-      '<div class="mode-bind-row"><label>Lab rooms <span class="mode-bind-sub">quiet only here</span></label><div class="area-chips" id="lab-area-chips">' + chips + '</div></div>' +
-      '<div class="mode-bind-row"><label>Movie room</label><select class="cfg-field" data-cfg-key="movie_area">' + areaOpts + '</select></div>' +
-      '<div class="mode-bind-row"><label>Movie player <span class="mode-bind-sub">optional</span></label><select class="cfg-field" data-cfg-key="movie_media_player">' + this._mediaPlayerOptions(d.config?.movie_media_player || '') + '</select></div>' +
-      '<div class="mode-bind-row"><label>Movie dim %</label><input class="cfg-field cfg-num" type="number" min="0" max="100" step="5" data-cfg-key="movie_dim_pct" value="' + (d.config?.movie_dim_pct ?? '') + '" placeholder="15"></div>' +
-      '</div>';
-  }
-
-  _renderRoutineLearning(d) {
-    const doorsOn = !!(d.config && d.config.pattern_learn_doors);
-    const presOn = !!(d.config && d.config.pattern_learn_presence);
-    const btnsOn = !!(d.config && d.config.pattern_learn_buttons);
-    let incl = (d.config && d.config.pattern_include_entities) || [];
-    if (!Array.isArray(incl)) { try { incl = JSON.parse(incl) || []; } catch (_) { incl = []; } }
-    const chips = incl.length
-      ? incl.map((e, i) => `<span class="pl-chip">${this._esc(e)}<button class="pl-del" data-i="${i}" title="Remove">\u00d7</button></span>`).join('')
-      : '<span class="pl-empty">No specific entities added.</span>';
+      ? ents.map((e, i) => `<span class="new-pl-chip">${this._esc(this._entMarkerStyle(e.e).name)}<button class="fpn-ent-del" data-ei="${i}" title="Remove">×</button></span>`).join("")
+      : `<span class="toggle-desc">No devices placed on this floor yet.</span>`;
     return `
-      <div class="panel">
-        <div class="head"><span>Routine Learning</span><span class="side">PATTERNS</span></div>
-        <div class="appliance-intro">Nova learns routines from device activity (lights, locks, thermostats\u2026) and skips noisy door/window and presence signals by default. Opt them in to build routines from them \u2014 for example, closing a garage door once a car is parked in its bay.</div>
-        <div class="toggle-list">
-          <div class="toggle-row">
-            <span class="toggle-label">Learn doors &amp; windows</span>
-            <span class="toggle-desc">Door, window and garage contact sensors</span>
-            <button class="toggle-btn ${doorsOn ? 'on' : 'off'}" data-cfg-key="pattern_learn_doors" data-cfg-val="${doorsOn ? 'false' : 'true'}">${doorsOn ? 'ON' : 'OFF'}</button>
-          </div>
-          <div class="toggle-row">
-            <span class="toggle-label">Learn presence &amp; arrivals</span>
-            <span class="toggle-desc">People and device trackers (home / away)</span>
-            <button class="toggle-btn ${presOn ? 'on' : 'off'}" data-cfg-key="pattern_learn_presence" data-cfg-val="${presOn ? 'false' : 'true'}">${presOn ? 'ON' : 'OFF'}</button>
-          </div>
-          <div class="toggle-row">
-            <span class="toggle-label">Learn button &amp; remote presses</span>
-            <span class="toggle-desc">Suggest "press &rarr; scene / action" automations</span>
-            <button class="toggle-btn ${btnsOn ? 'on' : 'off'}" data-cfg-key="pattern_learn_buttons" data-cfg-val="${btnsOn ? 'false' : 'true'}">${btnsOn ? 'ON' : 'OFF'}</button>
-          </div>
-        </div>
-        <div class="pl-entities">
-          <div class="pl-ehead">Also learn specific entities <span class="pl-hint">for a skipped-domain entity you want as a routine trigger \u2014 e.g. a bay occupancy sensor</span></div>
-          <div class="pl-add"><input id="pl-entity-input" list="pl-entity-list" class="op-field pl-input" placeholder="type to find an entity\u2026" autocomplete="off"><datalist id="pl-entity-list">${this._optInEntityDatalist()}</datalist><button class="ctrl" id="pl-add-entity">+ Add</button></div>
-          <div class="pl-chips" id="pl-chips">${chips}</div>
-        </div>
+      <div class="mode-bind-head">Devices on plan <span class="toggle-desc">add a device, drag its pin on the canvas, tap it to open controls</span></div>
+      <div class="cfg-row">
+        <input id="fpnEntInput" list="fpnEntList" class="cfg-field" style="flex:1" placeholder="type to find an entity…" autocomplete="off">
+        <datalist id="fpnEntList">${this._allEntityDatalist()}</datalist>
+        <button class="mode-chip" id="fpnEntAdd">+ Add</button>
       </div>
-`;
+      <div class="mode-grid">${chips}</div>
+      <div class="mode-bind-head">Imported plan <span class="toggle-desc">${hasBg ? "opacity of the uploaded floor-plan image behind the rooms" : "upload a real floor-plan image to trace rooms over"}</span></div>
+      <div class="cfg-row">
+        <button class="mode-chip" id="fpnBgUpload">⬆ ${hasBg ? "Replace" : "Upload"} Image</button>
+        <input type="file" id="fpnBgFile" accept="image/*" style="display:none">
+        <label>opacity</label>
+        <input id="fpnBgOp" type="range" min="0" max="1" step="0.05" value="${op}">
+        <span id="fpnBgOpVal">${Math.round(op * 100)}%</span>
+      </div>`;
   }
 
-  _renderOpenings(floor) {
+  _renderOpeningsNew(floor) {
     const els = this._elemsFor(floor), uL = this._fpUnitLabel();
     const rooms = ((this._getEditingPlan()[floor] || {}).rooms) || [];
-    const walls = [['front','Front'],['back','Back'],['left','Left'],['right','Right']];
-    const wsel = (e, i) => '<select class="op-field" data-op="wall" data-i="' + i + '" title="wall">' + walls.map(w => '<option value="' + w[0] + '"' + (e.wall === w[0] ? ' selected' : '') + '>' + w[1] + '</option>').join('') + '</select>';
-    const rsel = (e, i) => '<select class="op-field op-room" data-op="room" data-i="' + i + '" title="room"><option value="">\u2014 room \u2014</option>' + rooms.filter(r => r.type !== 'outdoor').map(r => '<option value="' + this._esc(r.name) + '"' + (e.room === r.name ? ' selected' : '') + '>' + this._esc(r.name) + '</option>').join('') + '</select>';
+    const walls = [["front", "Front"], ["back", "Back"], ["left", "Left"], ["right", "Right"]];
+    const wsel = (e, i) => `<select class="op-field-new" data-op="wall" data-i="${i}">${walls.map(w => `<option value="${w[0]}"${e.wall === w[0] ? " selected" : ""}>${w[1]}</option>`).join("")}</select>`;
+    const rsel = (e, i) => `<select class="op-field-new" data-op="room" data-i="${i}"><option value="">— room —</option>${rooms.filter(r => r.type !== "outdoor").map(r => `<option value="${this._esc(r.name)}"${e.room === r.name ? " selected" : ""}>${this._esc(r.name)}</option>`).join("")}</select>`;
     const rows = els.map((e, i) => {
-      const isD = e.type === 'dormer';
-      const t = isD ? (e.slope === 'rear' ? 'REAR DORMER' : 'FRONT DORMER') : (e.type === 'window' ? 'WINDOW' : (e.kind === 'interior' ? 'INT DOOR' : (e.kind === 'cellar' ? 'CELLAR' : (e.kind === 'cased' ? 'CASED OPENING' : 'EXT DOOR'))));
+      const isD = e.type === "dormer";
+      const t = isD ? (e.slope === "rear" ? "REAR DORMER" : "FRONT DORMER") : (e.type === "window" ? "WINDOW" : (e.kind === "interior" ? "INT DOOR" : (e.kind === "cellar" ? "CELLAR" : (e.kind === "cased" ? "CASED OPENING" : "EXT DOOR"))));
       const place = isD
-        ? ('<select class="op-field" data-op="slope" data-i="' + i + '" title="roof slope"><option value="front"' + (e.slope !== 'rear' ? ' selected' : '') + '>Front slope</option><option value="rear"' + (e.slope === 'rear' ? ' selected' : '') + '>Rear slope</option></select>')
-        : ((e.kind === 'interior' || e.kind === 'cased') ? (rsel(e, i) + ' ' + wsel(e, i)) : wsel(e, i));
-      const kc = isD ? ' op-dormer' : (e.kind === 'interior' ? ' op-int' : (e.kind === 'cellar' ? ' op-cellar' : (e.kind === 'cased' ? ' op-cased' : '')));
-      return '<div class="op-row" data-i="' + i + '">'
-        + '<span class="op-type op-' + (isD ? 'dormer' : e.type) + kc + '">' + t + '</span>'
-        + place
-        + ' <input class="op-field op-pos" data-op="pos" data-i="' + i + '" type="range" min="0" max="1" step="0.02" value="' + (e.pos != null ? e.pos : 0.5) + '" title="position along the wall">'
-        + (isD ? '' : ' <input class="op-field" data-op="w" data-i="' + i + '" type="number" min="1" step="0.5" value="' + this._fpToReal(e.w || 20) + '" style="width:46px"> ' + uL)
-        + (e.kind === 'cased' ? ' <span class="op-cased-tag">open passage \u00b7 no sensor</span>' : ' <select class="op-field op-ent" data-op="entity" data-i="' + i + '" title="open/closed sensor">' + this._doorEntityOptions(e.entity || '') + '</select>')
-        + ' <button class="op-del" data-i="' + i + '" title="Remove">\u00d7</button>'
-        + '</div>';
-    }).join('');
-    const dBtns = floor === '2f' ? '<button class="ctrl" id="op-add-fdormer">+ Front Dormer</button><button class="ctrl" id="op-add-rdormer">+ Rear Dormer</button>' : '';
-    return '<div class="fp-openings">'
-      + '<div class="op-headr">OPENINGS \u00b7 windows, doors &amp; dormers <span class="op-hint">interior doors &amp; cased openings attach to a room \u00b7 a cased opening is a doorway with no door (open passage, no sensor) \u00b7 dormers on the 2nd floor</span></div>'
-      + '<div class="op-add"><button class="ctrl" id="op-add-window">+ Window</button><button class="ctrl" id="op-add-extdoor">+ Exterior Door</button><button class="ctrl" id="op-add-cellar">+ Cellar Door</button><button class="ctrl" id="op-add-intdoor">+ Interior Door</button><button class="ctrl" id="op-add-cased">+ Cased Opening</button>' + dBtns + '</div>'
-      + (rows || '<div class="op-empty">No openings placed on this floor yet \u2014 add one above.</div>')
-      + '</div>';
+        ? `<select class="op-field-new" data-op="slope" data-i="${i}"><option value="front"${e.slope !== "rear" ? " selected" : ""}>Front slope</option><option value="rear"${e.slope === "rear" ? " selected" : ""}>Rear slope</option></select>`
+        : ((e.kind === "interior" || e.kind === "cased") ? (rsel(e, i) + " " + wsel(e, i)) : wsel(e, i));
+      return `
+        <div class="cfg-row op-row-new" data-i="${i}">
+          <span class="new-pl-chip">${t}</span>
+          ${place}
+          <input class="op-field-new" data-op="pos" data-i="${i}" type="range" min="0" max="1" step="0.02" value="${e.pos != null ? e.pos : 0.5}" title="position along the wall">
+          ${isD ? "" : `<input class="op-field-new op-num-new" data-op="w" data-i="${i}" type="number" min="1" step="0.5" value="${this._fpToReal(e.w || 20)}" style="width:56px"> ${uL}`}
+          ${e.kind === "cased" ? `<span class="toggle-desc">open passage · no sensor</span>` : `<select class="op-field-new op-ent-new" data-op="entity" data-i="${i}">${this._doorEntityOptions(e.entity || "")}</select>`}
+          <button class="fpn-ent-del op-del-new" data-i="${i}" title="Remove">×</button>
+        </div>`;
+    }).join("");
+    const dBtns = floor === "2f" ? `<button class="mode-chip" id="opAddFdormer">+ Front Dormer</button><button class="mode-chip" id="opAddRdormer">+ Rear Dormer</button>` : "";
+    return `
+      <div class="mode-bind-head">Windows, doors &amp; dormers <span class="toggle-desc">interior doors &amp; cased openings attach to a room · a cased opening is a doorway with no door · dormers on the 2nd floor</span></div>
+      <div class="cfg-row">
+        <button class="mode-chip" id="opAddWindow">+ Window</button>
+        <button class="mode-chip" id="opAddExtdoor">+ Exterior Door</button>
+        <button class="mode-chip" id="opAddCellar">+ Cellar Door</button>
+        <button class="mode-chip" id="opAddIntdoor">+ Interior Door</button>
+        <button class="mode-chip" id="opAddCased">+ Cased Opening</button>
+        ${dBtns}
+      </div>
+      ${rows || `<div class="toggle-desc">No openings placed on this floor yet — add one above.</div>`}`;
   }
 
-  _renderEditableSVG(plan, floor) {
+  _renderCamerasNew(floor) {
+    const cams = this._camsFor(floor), uL = this._fpUnitLabel();
+    const geo = cams.length ? this._planGeometry(floor) : null;
+    const zoneNames = new Set((((this._getEditingPlan()[floor] || {}).rooms) || []).filter(r => r.type === "outdoor").map(r => r.name));
+    const rows = cams.map((c, i) => {
+      const cov = geo ? this._computeCoverage(floor, c, geo) : {};
+      const order = Object.keys(cov).sort((a, b) => cov[b] - cov[a]);
+      const covLine = order.length
+        ? `<div class="toggle-desc">sees: ${order.map(rn => `${this._esc(rn)} ${Math.round(cov[rn] * 100)}%${zoneNames.has(rn) ? " (zone)" : ""}`).join(" · ")}</div>`
+        : `<div class="toggle-desc">nothing in view — aim it, widen the FOV, or extend the range</div>`;
+      const cvg = c.coverage;
+      const llmLine = (cvg && cvg.reason)
+        ? `<div class="toggle-desc">${(cvg.covered && cvg.covered.length) ? `✓ confirms ${cvg.covered.map(r => this._esc(r)).join(", ")} — ` : ""}${this._esc(cvg.reason)}</div>`
+        : "";
+      return `
+        <div class="cfg-row cam-row-new" data-ci="${i}">
+          <span class="new-pl-chip">CAM ${i + 1}</span>
+          <select class="cam-field-new" data-cam="entity" data-ci="${i}">${this._cameraEntityOptions(c.entity || "")}</select>
+          <label class="fpn-inline-lbl">aim <input class="cam-field-new" data-cam="angle" data-ci="${i}" type="range" min="0" max="359" step="1" value="${c.angle != null ? c.angle : 270}"></label>
+          <label class="fpn-inline-lbl">FOV <input class="cam-field-new" data-cam="fov" data-ci="${i}" type="range" min="20" max="170" step="5" value="${c.fov != null ? c.fov : 90}"></label>
+          <label class="fpn-inline-lbl">range <input class="cam-field-new cam-num-new" data-cam="range" data-ci="${i}" type="number" min="5" step="5" value="${this._fpToReal(c.range != null ? c.range : 55)}"> ${uL}</label>
+          <button class="mode-chip cam-io-new" data-ci="${i}" title="indoor = bounded by walls, outdoor = by range">${c.indoor === false ? "OUTDOOR" : "INDOOR"}</button>
+          <button class="fpn-ent-del cam-del-new" data-ci="${i}" title="Remove">×</button>
+        </div>
+        ${covLine}${llmLine}`;
+    }).join("");
+    return `
+      <div class="mode-bind-head">Cameras · field of view <span class="toggle-desc">drop a camera, bind its entity, aim it — drag the dot on the plan to move, right-click to delete</span></div>
+      <div class="cfg-row">
+        <button class="mode-chip" id="fpnCamAdd">+ Camera</button>
+        ${cams.length ? `<button class="mode-chip" id="fpnCamCompute" title="AI: judge what each camera can confirm">Compute coverage</button>` : ""}
+      </div>
+      ${rows || `<div class="toggle-desc">No cameras placed on this floor yet — add one above.</div>`}`;
+  }
+
+  _renderFloorPlanSVG(plan, floor) {
     const floorData = plan[floor];
-    if (!floorData) return '';
-    // Auto-fit the viewBox to the actual rooms (+ padding for edge window markers
-    // and protruding dormers) so larger properties and edge elements aren't
-    // clipped (v7.101.28). Drag uses getScreenCTM so it adapts to any viewBox.
-    let vb = floorData.viewBox || '0 0 320 140';
-    const _rms = floorData.rooms || [];
-    if (_rms.length) {
-      let ax0 = Infinity, ay0 = Infinity, ax1 = -Infinity, ay1 = -Infinity;
-      _rms.forEach(r => {
-        ax0 = Math.min(ax0, r.x); ay0 = Math.min(ay0, r.y);
-        ax1 = Math.max(ax1, r.x + (r.w || 0)); ay1 = Math.max(ay1, r.y + (r.h || r.d || 0));
-      });
-      let _pp = []; try { _pp = this._propertyPts() || []; } catch (_) { _pp = []; }
-      _pp.forEach(p => { ax0 = Math.min(ax0, p[0]); ay0 = Math.min(ay0, p[1]); ax1 = Math.max(ax1, p[0]); ay1 = Math.max(ay1, p[1]); });
-      if (isFinite(ax0) && isFinite(ax1)) {
-        // With a property boundary, the lot IS the workspace — frame it tightly so the
-        // whole property (front/back/sides) is visible and zones drop anywhere on it.
-        // Without one, keep a generous margin around the house to place zones.
-        const pad = Math.max(120, Math.max(ax1 - ax0, ay1 - ay0) * 0.25);
-        ax0 -= pad; ay0 -= pad; ax1 += pad; ay1 += pad;
-        vb = ax0.toFixed(0) + ' ' + ay0.toFixed(0) + ' ' +
-             Math.max(ax1 - ax0, 200).toFixed(0) + ' ' + Math.max(ay1 - ay0, 140).toFixed(0);
-      }
-    }
+    if (!floorData) return "";
+    const vb = this._editVB
+      ? `${this._editVB.x} ${this._editVB.y} ${this._editVB.w} ${this._editVB.h}`
+      : (floorData.viewBox || "0 0 320 150");
+    let svg = `<svg viewBox="${vb}" class="fpn-svg" id="fpnSvg" style="width:100%;height:100%;min-height:520px;background:var(--bg);border:1px solid var(--line-soft);border-radius:10px;cursor:crosshair;">`;
+    svg += '<defs>'
+      + '<pattern id="fpn-grid-sm" width="10" height="10" patternUnits="userSpaceOnUse"><path d="M 10 0 L 0 0 0 10" fill="none" stroke="rgba(244,184,96,0.05)" stroke-width="0.2"/></pattern>'
+      + '<pattern id="fpn-grid-lg" width="50" height="50" patternUnits="userSpaceOnUse"><path d="M 50 0 L 0 0 0 50" fill="none" stroke="rgba(244,184,96,0.12)" stroke-width="0.3"/></pattern>'
+      + '</defs>';
+    const vbp = vb.split(" ").map(Number);
+    const gx = vbp[0], gy = vbp[1], gw = vbp[2], gh = vbp[3];
+    svg += `<rect class="fpn-grid-rect" x="${gx}" y="${gy}" width="${gw}" height="${gh}" fill="url(#fpn-grid-sm)"/>`;
+    svg += `<rect class="fpn-grid-rect" x="${gx}" y="${gy}" width="${gw}" height="${gh}" fill="url(#fpn-grid-lg)"/>`;
 
-    if (this._editVB) { const _v = this._editVB; vb = _v.x + ' ' + _v.y + ' ' + _v.w + ' ' + _v.h; }   // user zoom/pan overrides auto-fit
-    let svg = '<svg viewBox="' + vb + '" class="fp-svg fp-editor-svg" id="fp-editor-svg" style="width:100%;height:100%;min-height:760px;background:rgba(0,5,10,0.9);border:1px solid var(--line);border-radius:var(--radius);cursor:crosshair;">';
-
-    // Grid — 10px with 50px major lines
-    svg += '<defs>';
-    svg += '<pattern id="fp-grid-sm" width="10" height="10" patternUnits="userSpaceOnUse"><path d="M 10 0 L 0 0 0 10" fill="none" stroke="rgba(0,242,254,0.04)" stroke-width="0.2"/></pattern>';
-    svg += '<pattern id="fp-grid-lg" width="50" height="50" patternUnits="userSpaceOnUse"><path d="M 50 0 L 0 0 0 50" fill="none" stroke="rgba(0,242,254,0.1)" stroke-width="0.3"/></pattern>';
-    svg += '</defs>';
-    // Grid spans the ACTUAL viewBox (negative coords included) so the front yard and
-    // the yard beside the garage — which live at x<0 / y<0 — are on the grid too.
-    const _vbp = vb.split(' ').map(Number);
-    const _gx = _vbp[0], _gy = _vbp[1], _gw = _vbp[2], _gh = _vbp[3];
-    svg += '<rect class="fp-grid-rect" x="' + _gx + '" y="' + _gy + '" width="' + _gw + '" height="' + _gh + '" fill="url(#fp-grid-sm)"/>';
-    svg += '<rect class="fp-grid-rect" x="' + _gx + '" y="' + _gy + '" width="' + _gw + '" height="' + _gh + '" fill="url(#fp-grid-lg)"/>';
-
-    // Axis labels across the whole viewBox
-    for (let x = Math.ceil(_gx / 50) * 50; x < _gx + _gw; x += 50) {
-      svg += '<text x="' + x + '" y="' + (_gy + 8) + '" fill="rgba(0,242,254,0.15)" font-size="3" font-family="JetBrains Mono">' + x + '</text>';
-    }
-    for (let y = Math.ceil(_gy / 50) * 50; y < _gy + _gh; y += 50) {
-      svg += '<text x="' + (_gx + 2) + '" y="' + y + '" fill="rgba(0,242,254,0.15)" font-size="3" font-family="JetBrains Mono">' + y + '</text>';
-    }
-
-    // Background image
-    const bgs = this._data().config?.floor_plan_bg;
+    const bgs = this._data()?.config?.floor_plan_bg;
     if (bgs) {
       try {
-        const bgData = typeof bgs === 'string' ? JSON.parse(bgs) : bgs;
-        if (bgData[floor]) {
-          svg += '<image href="' + bgData[floor] + '" x="0" y="0" width="100%" height="100%" opacity="' + this._fpBgOpacity() + '" preserveAspectRatio="xMidYMid meet"/>';
+        const bgData = typeof bgs === "string" ? JSON.parse(bgs) : bgs;
+        if (bgData && bgData[floor]) {
+          svg += `<image href="${bgData[floor]}" x="0" y="0" width="100%" height="100%" opacity="${this._fpBgOpacity()}" preserveAspectRatio="xMidYMid meet"/>`;
         }
       } catch (_) {}
     }
 
     // Property boundary (the lot) — draw behind rooms; vertices are draggable.
-    var _prop = [];
-    try { _prop = this._propertyPts() || []; } catch (_) { _prop = []; }
-    if (_prop.length >= 2) {
-      var _ppath = _prop.map(function (p, k) { return (k ? 'L' : 'M') + p[0] + ' ' + p[1]; }).join(' ') + ' Z';
-      svg += '<path class="fp-prop-path" d="' + _ppath + '" fill="rgba(255,180,90,0.03)" stroke="#ffb85a" stroke-width="1" stroke-dasharray="6 4" pointer-events="none"/>';
-      for (var _vi = 0; _vi < _prop.length; _vi++) {
-        var _a = _prop[_vi], _b = _prop[(_vi + 1) % _prop.length];
-        svg += '<circle class="fp-prop-mid" data-prop-edge="' + _vi + '" cx="' + ((_a[0] + _b[0]) / 2) + '" cy="' + ((_a[1] + _b[1]) / 2) + '" r="2.2" fill="none" stroke="#ffb85a" stroke-width="0.7" opacity="0.5" style="cursor:copy"/>';
+    let prop = [];
+    try { prop = this._propertyPts() || []; } catch (_) { prop = []; }
+    if (prop.length >= 2) {
+      svg += `<path class="fpn-prop-path" d="${this._propPathD(prop)}" fill="rgba(244,184,96,0.03)" stroke="var(--gold)" stroke-width="1" stroke-dasharray="6 4" pointer-events="none"/>`;
+      for (let vi = 0; vi < prop.length; vi++) {
+        const a = prop[vi], b = prop[(vi + 1) % prop.length];
+        svg += `<circle class="fpn-prop-mid" data-prop-edge="${vi}" cx="${(a[0] + b[0]) / 2}" cy="${(a[1] + b[1]) / 2}" r="2.2" fill="none" stroke="var(--gold)" stroke-width="0.7" opacity="0.5" style="cursor:copy"/>`;
       }
-      for (var _pi = 0; _pi < _prop.length; _pi++) {
-        svg += '<circle class="fp-prop-vtx" data-prop-vtx="' + _pi + '" cx="' + _prop[_pi][0] + '" cy="' + _prop[_pi][1] + '" r="3" fill="#ffb85a" stroke="#0a0a0a" stroke-width="0.7" style="cursor:grab"/>';
+      for (let pi = 0; pi < prop.length; pi++) {
+        svg += `<circle class="fpn-prop-vtx" data-prop-vtx="${pi}" cx="${prop[pi][0]}" cy="${prop[pi][1]}" r="3" fill="var(--gold)" stroke="var(--bg)" stroke-width="0.7" style="cursor:grab"/>`;
       }
     }
 
-    // Ghost of the floor directly below — a red footprint reference so this floor's
-    // rooms can be kept within it (v7.101.28). Enclosed rooms only (not outdoor zones).
-    var _below = this._floorBelow(floor), _belowRooms = [];
-    if (_below) { try { _belowRooms = ((this._getEditingPlan()[_below] || {}).rooms || []).filter(function (r) { return r.type !== 'outdoor'; }); } catch (_) { _belowRooms = []; } }
-    if (_belowRooms.length) {
-      var _gbx = 1e9, _gby = 1e9;
-      _belowRooms.forEach(function (r) {
-        var gp = (r.points && r.points.length >= 3) ? r.points : [[r.x, r.y], [r.x + r.w, r.y], [r.x + r.w, r.y + r.h], [r.x, r.y + r.h]];
-        gp.forEach(function (p) { if (p[0] < _gbx) _gbx = p[0]; if (p[1] < _gby) _gby = p[1]; });
-        svg += '<path d="' + gp.map(function (p, k) { return (k ? 'L' : 'M') + p[0] + ' ' + p[1]; }).join(' ') + ' Z" fill="none" stroke="rgba(255,90,90,0.45)" stroke-width="1" stroke-dasharray="4 3" pointer-events="none"/>';
-      });
-      svg += '<text x="' + _gbx.toFixed(1) + '" y="' + (_gby - 3).toFixed(1) + '" fill="rgba(255,120,120,0.85)" font-size="5" font-family="JetBrains Mono, monospace" pointer-events="none">\u2193 ' + _below.toUpperCase() + ' BELOW (stay within)</text>';
-    }
-
-    // Rooms
     for (let i = 0; i < (floorData.rooms || []).length; i++) {
       const rm = floorData.rooms[i];
-      const colors = {room:'#00f2fe',bath:'#567685',stairs:'#0a7d94',door:'#ff9d2e',outdoor:'#00f5a0'};
-      const c = colors[rm.type] || '#00f2fe';
-      const _out = rm.type === 'outdoor';
+      const colors = { room: "var(--gold)", bath: "var(--ink-faint)", stairs: "var(--ember)", door: "var(--warn)", outdoor: "#8fdba8" };
+      const c = colors[rm.type] || "var(--gold)";
+      const out = rm.type === "outdoor";
       const fs = rm.w > 80 ? 7 : (rm.w > 50 ? 5.5 : (rm.w > 25 ? 4 : 3));
-      if (_out || (rm.points && rm.points.length >= 3)) {
-        const _zpts = this._zonePoints(rm);
-        let _zcx = 0, _zcy = 0; _zpts.forEach(p => { _zcx += p[0]; _zcy += p[1]; }); _zcx /= _zpts.length; _zcy /= _zpts.length;
-        svg += '<g class="fp-zone" data-zone-idx="' + i + '">';
-        svg += '<path class="fp-zone-path" data-zone-idx="' + i + '" d="' + this._propPathD(_zpts) + '" fill="' + c + '" fill-opacity="0.06" stroke="' + c + '" stroke-width="1"' + (_out ? ' stroke-dasharray="4 3"' : '') + ' style="cursor:move"/>';
-        svg += '<text x="' + _zcx.toFixed(1) + '" y="' + _zcy.toFixed(1) + '" text-anchor="middle" fill="' + c + '" font-size="' + fs + '" font-family="Orbitron, monospace" letter-spacing="0.3" pointer-events="none">' + this._esc(rm.name.toUpperCase()) + '</text>';
-        for (let _vi = 0; _vi < _zpts.length; _vi++) { const _a = _zpts[_vi], _b = _zpts[(_vi + 1) % _zpts.length]; svg += '<circle class="fp-zone-mid" data-zone-idx="' + i + '" data-edge="' + _vi + '" cx="' + ((_a[0] + _b[0]) / 2) + '" cy="' + ((_a[1] + _b[1]) / 2) + '" r="2" fill="none" stroke="' + c + '" stroke-width="0.6" opacity="0.5" style="cursor:copy"/>'; }
-        for (let _vi = 0; _vi < _zpts.length; _vi++) { svg += '<circle class="fp-zone-vtx" data-zone-idx="' + i + '" data-vtx="' + _vi + '" cx="' + _zpts[_vi][0] + '" cy="' + _zpts[_vi][1] + '" r="2.8" fill="' + c + '" stroke="#0a0a0a" stroke-width="0.6" style="cursor:grab"/>'; }
-        svg += '</g>';
+      if (out || (rm.points && rm.points.length >= 3)) {
+        const zpts = this._zonePoints(rm);
+        let zcx = 0, zcy = 0; zpts.forEach(p => { zcx += p[0]; zcy += p[1]; }); zcx /= zpts.length; zcy /= zpts.length;
+        svg += `<g class="fpn-zone" data-zone-idx="${i}">`;
+        svg += `<path class="fpn-zone-path" data-zone-idx="${i}" d="${this._propPathD(zpts)}" fill="${c}" fill-opacity="0.06" stroke="${c}" stroke-width="1"${out ? ' stroke-dasharray="4 3"' : ""} style="cursor:move"/>`;
+        svg += `<text x="${zcx.toFixed(1)}" y="${zcy.toFixed(1)}" text-anchor="middle" fill="${c}" font-size="${fs}" font-family="var(--font-display)" letter-spacing="0.3" pointer-events="none">${this._esc((rm.name || "").toUpperCase())}</text>`;
+        for (let vi = 0; vi < zpts.length; vi++) { const a = zpts[vi], b = zpts[(vi + 1) % zpts.length]; svg += `<circle class="fpn-zone-mid" data-zone-idx="${i}" data-edge="${vi}" cx="${(a[0] + b[0]) / 2}" cy="${(a[1] + b[1]) / 2}" r="2" fill="none" stroke="${c}" stroke-width="0.6" opacity="0.5" style="cursor:copy"/>`; }
+        for (let vi = 0; vi < zpts.length; vi++) { svg += `<circle class="fpn-zone-vtx" data-zone-idx="${i}" data-vtx="${vi}" cx="${zpts[vi][0]}" cy="${zpts[vi][1]}" r="2.8" fill="${c}" stroke="var(--bg)" stroke-width="0.6" style="cursor:grab"/>`; }
+        svg += "</g>";
       } else {
-      svg += '<g class="fp-drag-room" data-idx="' + i + '" style="cursor:move">';
-      svg += '<rect x="' + rm.x + '" y="' + rm.y + '" width="' + rm.w + '" height="' + rm.h + '" rx="2" fill="' + (_out ? 'rgba(0,245,160,0.04)' : 'rgba(0,242,254,0.06)') + '" stroke="' + c + '" stroke-width="1"' + (_out ? ' stroke-dasharray="4 3"' : '') + ' class="fp-drag-rect"/>';
-      svg += '<text x="' + (rm.x + rm.w/2) + '" y="' + (rm.y + rm.h/2 + 2) + '" text-anchor="middle" fill="' + c + '" font-size="' + fs + '" font-family="Orbitron, monospace" letter-spacing="0.3" pointer-events="none">' + this._esc(rm.name.toUpperCase()) + '</text>';
-      if (rm.w > 30 && rm.h > 24) svg += '<text x="' + (rm.x + rm.w/2) + '" y="' + (rm.y + rm.h/2 + fs + 2.5) + '" text-anchor="middle" fill="' + c + '" opacity="0.6" font-size="' + (fs*0.72).toFixed(1) + '" font-family="JetBrains Mono, monospace" pointer-events="none">' + this._fpDim(rm.w) + ' \u00d7 ' + this._fpDim(rm.h) + '</text>';
-      svg += '<rect x="' + (rm.x + rm.w - 8) + '" y="' + (rm.y + rm.h - 8) + '" width="8" height="8" fill="' + c + '" opacity="0.3" rx="1" class="fp-resize-handle" data-idx="' + i + '" style="cursor:nwse-resize"/>';
-      svg += '</g>';
+        svg += `<g class="fpn-drag-room" data-idx="${i}" style="cursor:move">`;
+        svg += `<rect x="${rm.x}" y="${rm.y}" width="${rm.w}" height="${rm.h}" rx="2" fill="${out ? "rgba(143,219,168,0.06)" : "rgba(244,184,96,0.08)"}" stroke="${c}" stroke-width="1" class="fpn-drag-rect"/>`;
+        svg += `<text x="${rm.x + rm.w / 2}" y="${rm.y + rm.h / 2}" text-anchor="middle" fill="${c}" font-size="${fs}" font-family="var(--font-display)" letter-spacing="0.3" pointer-events="none">${this._esc((rm.name || "").toUpperCase())}</text>`;
+        if (rm.w > 30 && rm.h > 24) svg += `<text x="${rm.x + rm.w / 2}" y="${rm.y + rm.h / 2 + fs + 2.5}" text-anchor="middle" fill="${c}" opacity="0.6" font-size="${(fs * 0.72).toFixed(1)}" font-family="var(--font-mono)" pointer-events="none">${this._fpDim(rm.w)} × ${this._fpDim(rm.h)}</text>`;
+        svg += `<rect x="${rm.x + rm.w - 8}" y="${rm.y + rm.h - 8}" width="8" height="8" fill="${c}" opacity="0.35" rx="1" class="fpn-resize-handle" data-idx="${i}" style="cursor:nwse-resize"/>`;
+        svg += "</g>";
       }
     }
-
-    // Labels
     for (const lbl of (floorData.labels || [])) {
-      svg += '<text x="' + lbl.x + '" y="' + lbl.y + '" text-anchor="middle" fill="#1a3040" font-size="4" font-family="JetBrains Mono, monospace">' + this._esc(lbl.text) + '</text>';
+      svg += `<text x="${lbl.x}" y="${lbl.y}" text-anchor="middle" fill="var(--ink-faint)" font-size="4" font-family="var(--font-mono)">${this._esc(lbl.text)}</text>`;
     }
 
-    // placed openings as wall markers (v7.101.28)
-    var _els = (this._getEditingElements()[floor]) || [];
-    if (_els.length && floorData.rooms && floorData.rooms.length) {
-      var mnx = 1e9, mny = 1e9, mxx = -1e9, mxy = -1e9;
-      floorData.rooms.forEach(function (r) { if (r.type === 'outdoor') return; mnx = Math.min(mnx, r.x); mny = Math.min(mny, r.y); mxx = Math.max(mxx, r.x + r.w); mxy = Math.max(mxy, r.y + r.h); });
-      _els.forEach(function (e, i) {
-        if (e.type === 'dormer') {
-          var dp = e.pos != null ? e.pos : 0.5, dcx = mnx + dp * (mxx - mnx), dcy = e.slope === 'rear' ? mxy : mny;
-          svg += '<rect class="op-marker" data-op-marker="' + i + '" x="' + (dcx - 4) + '" y="' + (dcy - 3) + '" width="8" height="6" fill="#b06aff" opacity="0.9" rx="1.5" pointer-events="none"/>';
+    // Placed openings as wall markers.
+    const els = this._elemsFor(floor) || [];
+    if (els.length && floorData.rooms && floorData.rooms.length) {
+      let mnx = 1e9, mny = 1e9, mxx = -1e9, mxy = -1e9;
+      floorData.rooms.forEach(r => { if (r.type === "outdoor") return; mnx = Math.min(mnx, r.x); mny = Math.min(mny, r.y); mxx = Math.max(mxx, r.x + r.w); mxy = Math.max(mxy, r.y + r.h); });
+      els.forEach((e, i) => {
+        if (e.type === "dormer") {
+          const dp = e.pos != null ? e.pos : 0.5, dcx = mnx + dp * (mxx - mnx), dcy = e.slope === "rear" ? mxy : mny;
+          svg += `<rect class="fpn-op-marker" data-op-marker="${i}" x="${dcx - 4}" y="${dcy - 3}" width="8" height="6" fill="#b06aff" opacity="0.9" rx="1.5" pointer-events="none"/>`;
           return;
         }
-        var w = e.w || 20, p = e.pos != null ? e.pos : 0.5, cx, cy, horiz = (e.wall === 'front' || e.wall === 'back');
-        var bx0 = mnx, by0 = mny, bx1 = mxx, by1 = mxy;
-        if ((e.kind === 'interior' || e.kind === 'cased') && e.room) {
-          var rr = floorData.rooms.filter(function (r) { return r.name === e.room; })[0];
+        const w = e.w || 20, p = e.pos != null ? e.pos : 0.5, horiz = (e.wall === "front" || e.wall === "back");
+        let bx0 = mnx, by0 = mny, bx1 = mxx, by1 = mxy;
+        if ((e.kind === "interior" || e.kind === "cased") && e.room) {
+          const rr = floorData.rooms.filter(r => r.name === e.room)[0];
           if (rr) { bx0 = rr.x; by0 = rr.y; bx1 = rr.x + rr.w; by1 = rr.y + rr.h; }
         }
-        if (e.wall === 'front') { cx = bx0 + p * (bx1 - bx0); cy = by0; }
-        else if (e.wall === 'back') { cx = bx0 + p * (bx1 - bx0); cy = by1; }
-        else if (e.wall === 'left') { cx = bx0; cy = by0 + p * (by1 - by0); }
+        let cx, cy;
+        if (e.wall === "front") { cx = bx0 + p * (bx1 - bx0); cy = by0; }
+        else if (e.wall === "back") { cx = bx0 + p * (bx1 - bx0); cy = by1; }
+        else if (e.wall === "left") { cx = bx0; cy = by0 + p * (by1 - by0); }
         else { cx = bx1; cy = by0 + p * (by1 - by0); }
-        var col = e.type === 'window' ? '#00f2fe' : (e.kind === 'interior' ? '#5a7a8a' : (e.kind === 'cellar' ? '#c98a2a' : (e.kind === 'cased' ? '#78b9d7' : '#ffaa28')));
-        var ex = horiz ? cx - w / 2 : cx - 2, ey = horiz ? cy - 2 : cy - w / 2, ew = horiz ? w : 4, eh = horiz ? 4 : w;
-        svg += '<rect class="op-marker" data-op-marker="' + i + '" x="' + ex + '" y="' + ey + '" width="' + ew + '" height="' + eh + '" fill="' + col + '" opacity="0.9" rx="1" pointer-events="none"/>';
+        const col = e.type === "window" ? "var(--gold)" : (e.kind === "interior" ? "#5a7a8a" : (e.kind === "cellar" ? "#c98a2a" : (e.kind === "cased" ? "#78b9d7" : "var(--warn)")));
+        const ex = horiz ? cx - w / 2 : cx - 2, ey = horiz ? cy - 2 : cy - w / 2, ew = horiz ? w : 4, eh = horiz ? 4 : w;
+        svg += `<rect class="fpn-op-marker" data-op-marker="${i}" x="${ex}" y="${ey}" width="${ew}" height="${eh}" fill="${col}" opacity="0.9" rx="1" pointer-events="none"/>`;
       });
     }
 
-    // Cameras — icon + FOV cone, clipped to walls (bleeds through openings).
-    var _cams = [];
-    try { _cams = this._camsFor(floor) || []; } catch (_) { _cams = []; }
-    var _camGeo = _cams.length ? this._planGeometry(floor) : null;
-    for (var _ci = 0; _ci < _cams.length; _ci++) {
-      var _cam = _cams[_ci], _out = _cam.indoor === false;
-      svg += '<g class="fp-cam" data-cam-idx="' + _ci + '">'
-        + '<path class="fp-cam-cone" d="' + this._clippedCone(_cam, _camGeo) + '" fill="' + (_out ? 'rgba(255,170,60,0.10)' : 'rgba(255,80,80,0.10)') + '" stroke="' + (_out ? 'rgba(255,185,90,0.6)' : 'rgba(255,110,110,0.6)') + '" stroke-width="0.7" pointer-events="none"/>'
-        + '<circle class="fp-cam-dot" cx="' + _cam.x + '" cy="' + _cam.y + '" r="3.2" fill="' + (_out ? '#ffaa3c' : '#ff5a5a') + '" stroke="#fff" stroke-width="0.7" style="cursor:grab"/>'
-        + '<text x="' + _cam.x + '" y="' + (_cam.y - 5) + '" text-anchor="middle" fill="' + (_out ? '#ffaa3c' : '#ff7a7a') + '" font-size="5" font-family="JetBrains Mono, monospace" pointer-events="none">' + (_ci + 1) + '</text>'
-        + '</g>';
+    // Cameras — icon + FOV cone, clipped to walls.
+    const cams = this._camsFor(floor);
+    const camGeo = cams.length ? this._planGeometry(floor) : null;
+    for (let ci = 0; ci < cams.length; ci++) {
+      const cam = cams[ci], out = cam.indoor === false;
+      svg += `<g class="fpn-cam" data-cam-idx="${ci}">`
+        + `<path class="fpn-cam-cone" d="${this._clippedCone(cam, camGeo)}" fill="${out ? "rgba(232,178,61,0.10)" : "rgba(226,84,47,0.10)"}" stroke="${out ? "rgba(232,178,61,0.6)" : "rgba(226,84,47,0.6)"}" stroke-width="0.7" pointer-events="none"/>`
+        + `<circle class="fpn-cam-dot" cx="${cam.x}" cy="${cam.y}" r="3.2" fill="${out ? "var(--warn)" : "var(--ember)"}" stroke="var(--ink)" stroke-width="0.7" style="cursor:grab"/>`
+        + `<text x="${cam.x}" y="${cam.y - 5}" text-anchor="middle" fill="${out ? "var(--warn)" : "var(--ember)"}" font-size="5" font-family="var(--font-mono)" pointer-events="none">${ci + 1}</text>`
+        + "</g>";
     }
 
-    // Placed device pins — live state; drag to move, tap to control.
-    var _ents = [];
-    try { _ents = this._entsFor(floor) || []; } catch (_) { _ents = []; }
-    for (var _ei = 0; _ei < _ents.length; _ei++) {
-      var _ent = _ents[_ei];
-      if (!_ent || !_ent.e) continue;
-      var _ms = this._entMarkerStyle(_ent.e);
-      var _nm = _ms.name.length > 16 ? (_ms.name.slice(0, 15) + '…') : _ms.name;
-      svg += '<g class="fp-ent" data-ent-idx="' + _ei + '" data-ent-id="' + this._esc(_ent.e) + '" style="cursor:pointer">'
-        + '<circle class="fp-ent-dot" cx="' + _ent.x + '" cy="' + _ent.y + '" r="3" fill="' + _ms.color + '" stroke="#0a0a0a" stroke-width="0.7"/>'
-        + '<text class="fp-ent-nm" x="' + _ent.x + '" y="' + (_ent.y - 4) + '" text-anchor="middle" fill="' + _ms.color + '" font-size="3.4" font-family="JetBrains Mono, monospace" pointer-events="none">' + this._esc(_nm) + '</text>'
-        + '<text class="fp-ent-val" x="' + _ent.x + '" y="' + (_ent.y + 6.5) + '" text-anchor="middle" fill="#9fb3c0" font-size="3" font-family="JetBrains Mono, monospace" pointer-events="none">' + this._esc(_ms.val) + '</text>'
-        + '</g>';
+    const ents = this._entsFor(floor);
+    for (let ei = 0; ei < ents.length; ei++) {
+      const ent = ents[ei];
+      if (!ent || !ent.e) continue;
+      const ms = this._entMarkerStyle(ent.e);
+      const nm = ms.name.length > 16 ? (ms.name.slice(0, 15) + "…") : ms.name;
+      svg += `<g class="fpn-ent" data-ent-idx="${ei}" data-ent-id="${this._esc(ent.e)}" style="cursor:pointer">`
+        + `<circle class="fpn-ent-dot" cx="${ent.x}" cy="${ent.y}" r="3" fill="${ms.color}" stroke="var(--bg)" stroke-width="0.7"/>`
+        + `<text class="fpn-ent-nm" x="${ent.x}" y="${ent.y - 4}" text-anchor="middle" fill="${ms.color}" font-size="3.4" font-family="var(--font-mono)" pointer-events="none">${this._esc(nm)}</text>`
+        + `<text class="fpn-ent-val" x="${ent.x}" y="${ent.y + 6.5}" text-anchor="middle" fill="var(--ink-dim)" font-size="3" font-family="var(--font-mono)" pointer-events="none">${this._esc(ms.val)}</text>`
+        + "</g>";
     }
 
-    svg += '</svg>';
+    svg += "</svg>";
     return svg;
   }
 
-
-
-  _renderOnboarding(d) {
-    const ob = d.onboarding;
-    if (!ob || !ob.show) return '';
-    const steps = ob.steps || [];
-    const rows = steps.map(s => `
-      <div class="ob-step ${s.done ? 'ob-done' : ''}">
-        <span class="ob-check">${s.done ? '✓' : '○'}</span>
-        <div class="ob-step-text">
-          <div class="ob-step-label">${this._esc(s.label)}</div>
-          <div class="ob-step-hint">${this._esc(s.hint)}</div>
-        </div>
-        ${s.jump ? `<button class="ob-step-go" data-ob-jump="${this._esc(s.jump)}" title="Go to this setting">→</button>` : ''}
-      </div>`).join('');
-    return `
-      <div class="onboarding-card">
-        <div class="ob-head">
-          <div class="ob-title">Welcome — let's get Nova working for you</div>
-          <button class="ob-dismiss" id="ob-dismiss" title="Dismiss">✕</button>
-        </div>
-        <div class="ob-sub">Nova is installed and its brain is online. A few quick steps unlock the rest — none are required, and you can talk to it right now.</div>
-        <div class="ob-progress"><span>${ob.done_count}/${ob.total} done</span><i style="width:${Math.round((ob.done_count/ob.total)*100)}%"></i></div>
-        <div class="ob-steps">${rows}</div>
-        <div class="ob-actions">
-          <button class="ob-go" data-tab-jump="settings">Open Settings →</button>
-          <span class="ob-tip">Tip: try asking Nova <em>"what's the weather"</em> or <em>"is anything open in the house?"</em></span>
-        </div>
-      </div>`;
+  // Re-renders just this one card (not the whole settings grid) so an
+  // in-progress edit elsewhere on the page isn't disturbed and scroll
+  // position is preserved — mirrors Classic's _rerenderFloorEditor().
+  _rerenderFloorPlanCard() {
+    const card = this.shadowRoot?.getElementById("settings-card-floor_plan_editor");
+    if (!card) return;
+    const c = NovaPanel.SETTINGS_CARDS.find(x => x.id === "floor_plan_editor");
+    card.innerHTML = `
+        <div class="panel-head"><div class="panel-title">${this._esc(c.title)}</div></div>
+        ${this._floorPlanEditorCardBody()}`;
+    this._wireFloorPlanEditor();
   }
 
-  _html() {
-    const d = this._data();
-    const now = new Date();
-    const hh = String(now.getHours()).padStart(2,"0");
-    const mm = String(now.getMinutes()).padStart(2,"0");
-    const ss = String(now.getSeconds()).padStart(2,"0");
-    const days = ["SUN","MON","TUE","WED","THU","FRI","SAT"];
-    const mons = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
-
-    const statusRow = (key, stateObj) => `
-      <div class="status-row ${stateObj.level}">
-        <span class="k"><span class="dot ${stateObj.level}"></span>${key}</span>
-        <span class="v">${stateObj.state}</span>
-      </div>`;
-
-    // Capability icons + labels — option C: icons above text codes
-    const CAP_ICONS = {
-      sat:    '<svg viewBox="0 0 24 24"><path d="M12,2A3,3 0 0,1 15,5V11A3,3 0 0,1 12,14A3,3 0 0,1 9,11V5A3,3 0 0,1 12,2M19,11C19,14.53 16.39,17.44 13,17.93V21H11V17.93C7.61,17.44 5,14.53 5,11H7A5,5 0 0,0 12,16A5,5 0 0,0 17,11H19Z"/></svg>',
-      spkr:   '<svg viewBox="0 0 24 24"><path d="M14,3.23V5.29C16.89,6.15 19,8.83 19,12C19,15.17 16.89,17.84 14,18.7V20.77C18,19.86 21,16.28 21,12C21,7.72 18,4.14 14,3.23M16.5,12C16.5,10.23 15.5,8.71 14,7.97V16C15.5,15.29 16.5,13.76 16.5,12M3,9V15H7L12,20V4L7,9H3Z"/></svg>',
-      mmwave: '<svg viewBox="0 0 24 24"><path d="M5,17L9.5,12.5L13.5,16.5L17,13L21,17L19.59,18.41L17,15.83L13.5,19.33L9.5,15.33L5,19.83L3.59,18.41L5,17M5,10.5L9.5,6L13.5,10L17,6.5L21,10.5L19.59,11.91L17,9.33L13.5,12.83L9.5,8.83L5,13.33L3.59,11.91L5,10.5Z"/></svg>',
-      cam:    '<svg viewBox="0 0 24 24"><path d="M17,10.5V7A1,1 0 0,0 16,6H4A1,1 0 0,0 3,7V17A1,1 0 0,0 4,18H16A1,1 0 0,0 17,17V13.5L21,17.5V6.5L17,10.5Z"/></svg>',
-      light:  '<svg viewBox="0 0 24 24"><path d="M12,2A7,7 0 0,0 5,9C5,11.38 6.19,13.47 8,14.74V17A1,1 0 0,0 9,18H15A1,1 0 0,0 16,17V14.74C17.81,13.47 19,11.38 19,9A7,7 0 0,0 12,2M9,21A1,1 0 0,0 10,22H14A1,1 0 0,0 15,21V20H9V21Z"/></svg>',
-      switch: '<svg viewBox="0 0 24 24"><path d="M17,7H7A5,5 0 0,0 2,12A5,5 0 0,0 7,17H17A5,5 0 0,0 22,12A5,5 0 0,0 17,7M17,15A3,3 0 0,1 14,12A3,3 0 0,1 17,9A3,3 0 0,1 20,12A3,3 0 0,1 17,15Z"/></svg>',
-      lock:   '<svg viewBox="0 0 24 24"><path d="M12,17A2,2 0 0,0 14,15C14,13.89 13.1,13 12,13A2,2 0 0,0 10,15A2,2 0 0,0 12,17M18,8A2,2 0 0,1 20,10V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V10C4,8.89 4.9,8 6,8H7V6A5,5 0 0,1 12,1A5,5 0 0,1 17,6V8H18M12,3A3,3 0 0,0 9,6V8H15V6A3,3 0 0,0 12,3Z"/></svg>',
-      climate:'<svg viewBox="0 0 24 24"><path d="M15,13V5A3,3 0 0,0 12,2A3,3 0 0,0 9,5V13A5,5 0 1,0 15,13M12,4A1,1 0 0,1 13,5V8H11V5A1,1 0 0,1 12,4Z"/></svg>',
-      door:   '<svg viewBox="0 0 24 24"><path d="M12,3V6H7V18H12V21H19V3H12M17,19H13V18H15V6H13V5H17V19Z"/></svg>',
-      leak:   '<svg viewBox="0 0 24 24"><path d="M12,20A6,6 0 0,1 6,14C6,10 12,3.25 12,3.25C12,3.25 18,10 18,14A6,6 0 0,1 12,20Z"/></svg>',
-      alarm:  '<svg viewBox="0 0 24 24"><path d="M21,19V20H3V19L5,17V11C5,7.9 7.03,5.17 10,4.29C10,4.2 10,4.1 10,4A2,2 0 0,1 12,2A2,2 0 0,1 14,4C14,4.1 14,4.2 14,4.29C16.97,5.17 19,7.9 19,11V17L21,19M14,21A2,2 0 0,1 12,23A2,2 0 0,1 10,21"/></svg>',
-    };
-    const capLabel = (c) => c.toUpperCase();
-    const capIcon  = (c) => CAP_ICONS[c] || '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/></svg>';
-
-    const areaTile = (a) => {
-      const caps = a.caps || [];
-      const iconsRow = caps.length
-        ? `<div class="area-caps">
-             ${caps.slice(0, 5).map(c => `
-               <div class="cap" title="${capLabel(c)}">
-                 <span class="cap-icon">${capIcon(c)}</span>
-                 <span class="cap-lbl">${capLabel(c)}</span>
-               </div>
-             `).join("")}
-           </div>`
-        : `<div class="area-caps"><div class="cap cap-empty"><span class="cap-lbl">—</span></div></div>`;
-      const hasLights = (a.lights_total || 0) > 0;
-      const lit = hasLights && (a.lights_on || 0) > 0;
-      const ctlOn = (this._liveData && this._liveData.config && this._liveData.config.light_control_enabled) !== false;
-      const lightCtl = hasLights
-        ? `<button class="area-light ${lit ? 'on' : ''} ${ctlOn ? '' : 'static'}" data-light-area="${this._esc(a.id || '')}" data-area-name="${this._esc(a.name)}" title="${a.lights_on}/${a.lights_total} lights on${ctlOn ? ' — tap to toggle' : ''}">
-             <span class="al-dot"></span>${lit ? 'ON' : 'OFF'}
-           </button>`
-        : '';
-      // v7.101.28: temp/humidity readout + sparkline, when the area has a sensor.
-      const spark = this._sparklines?.[a.id] || {};
-      const tempSpark = spark.temp ? this._sparklineSvg(spark.temp, 'var(--cyan-dim)') : '';
-      const humSpark = spark.humidity ? this._sparklineSvg(spark.humidity, 'var(--green)') : '';
-      const readingsRow = (a.temp || a.humidity) ? `
-        <div class="area-readings">
-          ${a.temp ? `<span class="area-reading">${this._esc(a.temp)}${tempSpark}</span>` : ''}
-          ${a.humidity ? `<span class="area-reading">${this._esc(a.humidity)}${humSpark}</span>` : ''}
-        </div>` : '';
-      return `
-        <div class="area ${a.active ? 'active' : ''} ${a.bedroom ? 'bedroom' : ''}" data-area-id="${this._esc(a.id || '')}" tabindex="0" role="button" aria-label="${this._esc(a.name)} details">
-          ${iconsRow}
-          ${readingsRow}
-          <div class="area-foot">
-            <div class="area-name">${a.name}</div>
-            ${lightCtl}
-          </div>
-        </div>`;
-    };
-
-    return `
-<div class="app">
-
-  <!-- MASTHEAD -->
-  <div class="masthead">
-    <button class="menu-btn" id="menu-btn" title="Menu" aria-label="Open sidebar">
-      <svg viewBox="0 0 24 24"><path d="M3,6H21V8H3V6M3,11H21V13H3V11M3,16H21V18H3V16Z"/></svg>
-    </button>
-    <div class="brand"><img class="brand-logo" src="/nova_panel_static/nova-logo.png" alt="" onerror="this.style.display='none'"/>N·O·V·A <span>// v${this._liveData?.version || '—'}</span><span class="status-badge ${this._liveData?.lockdown?.active ? 'alert' : ''}">[ STATUS: ${this._liveData?.lockdown?.active ? 'LOCKDOWN' : 'NOMINAL'} ]</span></div>
-    <div class="greeting"><span id="greeting-text">${this._greeting()}</span>, <b>sir</b></div>
-    <div class="clock">
-      <div class="time" id="clock-time">${hh}:${mm}:${ss}</div>
-      <div class="date" id="clock-date">${days[now.getDay()]} · ${String(now.getDate()).padStart(2,"0")} · ${mons[now.getMonth()]} · ${now.getFullYear()}</div>
-    </div>
-    <button class="lockdown-toggle ${this._liveData?.lockdown?.active ? 'on' : ''}" id="lockdown-btn"
-      role="switch" aria-checked="${this._liveData?.lockdown?.active ? 'true' : 'false'}" aria-label="Lockdown"
-      title="${this._liveData?.lockdown?.active ? 'Lockdown engaged — tap to lift' : 'Tap to engage lockdown'}">
-      <span class="ld-switch" aria-hidden="true"><span class="ld-knob"></span></span>
-      <span class="ld-label">LOCKDOWN</span>
-      <span class="ld-state">${this._liveData?.lockdown?.active ? 'ARMED' : 'OFF'}</span>
-    </button>
-  </div>
-
-  <!-- TAB NAV -->
-  <div class="tab-bar">
-    <button class="tab ${this._currentTab === 'dashboard' ? 'active' : ''}" data-tab="dashboard">Command Center</button>
-    <button class="tab ${this._currentTab === 'residence' ? 'active' : ''}" data-tab="residence">Residence</button>
-    <button class="tab ${this._currentTab === 'intrusion' ? 'active' : ''}" data-tab="intrusion">Intrusion</button>
-    <button class="tab ${this._currentTab === 'suggestions' ? 'active' : ''}" data-tab="suggestions">Suggestions</button>
-    <button class="tab ${this._currentTab === 'settings' ? 'active' : ''}" data-tab="settings">Settings</button>
-    <button class="tab ${this._currentTab === 'logs' ? 'active' : ''}" data-tab="logs">Logs</button>
-    <button class="tab ${this._currentTab === 'memory' ? 'active' : ''}" data-tab="memory">Memory</button>
-  </div>
-
-  ${this._currentTab === 'dashboard' ? `
-  <!-- ═══ DASHBOARD TAB ═══ -->
-
-  ${this._renderOnboarding(d)}
-
-  <!-- MAIN GRID -->
-  <div class="grid">
-
-    <!-- LEFT: STATUS -->
-    <div class="c-status panel">
-      <div class="head">
-        <span>System Status</span>
-        <span class="side">◉ LIVE</span>
-      </div>
-      <div class="status-list">
-        ${statusRow("Observer",   d.observer)}
-        ${statusRow("Sleep",      d.sleep)}
-        ${statusRow("Gemini",     d.gemini)}
-        ${statusRow("Broadcast",  d.broadcast)}
-        ${statusRow("Notify",     d.notify)}
-        ${statusRow("Satellites", d.satellites)}
-      </div>
-      <div class="meta">
-        Bedrooms <span>${d.bedrooms}</span><br>
-        Areas Monitored <span>${d.areas}</span><br>
-        Announcements Today <span>${d.announcements_today}</span><br>
-        Uptime <span>${d.uptime}</span>
-      </div>
-      <div class="meta" id="cognitive-stats" style="margin-top:8px;border-top:1px solid var(--line);padding-top:8px;">
-        <span style="color:var(--cyan);font-family:var(--font-display);font-size:9px;letter-spacing:0.2em;">COGNITIVE CORE</span><br>
-        <span class="loading-cog" style="font-size:10px;color:var(--text-dim);">Loading...</span>
-      </div>
-    </div>
-
-    <!-- CENTER: CAMERA WATCH — full width (residence now has its own tab) -->
-    <div class="c-camera panel">
-      <div class="head">
-        <span>Camera Watch</span>
-        <button class="cam-diag-btn" id="cam-diag-btn" title="Probe this camera's frame sources end-to-end">DIAG</button>
-        <span class="side" id="cam-state">◉ LIVE</span>
-      </div>
-      <div class="cam-sel" id="cam-sel"></div>
-      <div class="cam-feed" id="cam-feed">
-        <div class="cam-none">NO CAMERA SELECTED</div>
-        <div class="cam-tag" id="cam-tag"></div>
-        <div class="cam-vig"></div><div class="cam-scan"></div>
-      </div>
-      <div class="cam-strip" id="cam-strip"></div>
-    </div>
-
-    <!-- RIGHT: ACTIVITY -->
-    <div class="c-log panel">
-      <div class="head">
-        <span>Activity Feed</span>
-        <span class="side" id="activity-count">LAST ${d.activity.length}</span>
-      </div>
-      <input id="activity-search" class="log-search activity-search" type="text" placeholder="search…" autocomplete="off" value="${this._esc(this._activitySearch || '')}" />
-      <div class="log" id="activity-feed">
-        ${this._activityFiltered().rows.map(e => this._evtRowHtml(e)).join("")}
-      </div>
-    </div>
-
-  </div>
-
-  <!-- SOLAR (v7.101.28) -->
-  <div class="panel" id="solar-panel">
-    <div class="head">
-      <span>Solar</span>
-      <span class="side" id="solar-sufficiency">—</span>
-    </div>
-    <div id="solar-body">
-      <div class="mmwave-empty">Loading…</div>
-    </div>
-  </div>
-
-  <!-- AREAS -->
-  <div class="panel">
-    <div class="head">
-      <span>Areas · ${d.areas} Registered</span>
-      <span class="side">◉ ${d.areasGrid.filter(a => a.active).length} Occupied</span>
-    </div>
-    <div class="areas">
-      ${d.areasGrid.map(areaTile).join("")}
-    </div>
-  </div>
-
-  <!-- GOALS -->
-  ${this._renderGoals(d)}
-
-  <!-- QUICK ACTIONS (dashboard only — full settings in Settings tab) -->
-  <div class="panel">
-    <div class="head">
-      <span>Quick Actions</span>
-      <span class="side">CMD</span>
-    </div>
-    <div class="controls">
-      <button class="ctrl primary" data-svc="nova.briefing">Briefing</button>
-      <button class="ctrl"         data-svc="nova.nap" data-svc-data='{"duration_minutes":30}'>Nap 30m</button>
-      <button class="ctrl"         data-svc="nova.nap" data-svc-data='{"duration_minutes":60}'>Nap 60m</button>
-      <button class="ctrl"         data-svc="nova.unshush">Unshush All</button>
-      <button class="ctrl"         data-svc="nova.observer_status">Status Dump</button>
-      <button class="ctrl"         id="qa-run-analysis">Analyze Now</button>
-    </div>
-    <div class="qa-result" id="qa-analysis-result"></div>
-  </div>
-  ` : ''}
-
-  ${this._currentTab === 'residence' ? `
-  <!-- ═══ RESIDENCE TAB ═══ -->
-  <div class="res-tab">
-    <div class="res-main panel floorplan-panel">
-      <div class="head">
-        <span>Residence Overview</span>
-        <span class="side">◉ PRESENCE</span>
-      </div>
-
-      <!-- style template + floor controls -->
-      <div class="res-controls">
-        <div class="res-style">
-          <label>HOME STYLE</label>
-          <select class="res-style-sel" id="res-style-sel">
-            ${this._residenceStyleOptions(d)}
-          </select>
-        </div>
-        <div class="floor-tabs">
-          <button class="floor-tab ${this._currentFloor === 'all' ? 'active' : ''}" data-floor="all">All</button>
-          <button class="floor-tab ${this._currentFloor === '1f' ? 'active' : ''}" data-floor="1f">1st Floor</button>
-          ${String(d.config?.home_stories ?? '1.5') !== '1' ? `<button class="floor-tab ${this._currentFloor === '2f' ? 'active' : ''}" data-floor="2f">2nd Floor</button>` : ''}
-          ${(d.config?.has_basement !== false) ? `<button class="floor-tab ${this._currentFloor === 'bsmt' ? 'active' : ''}" data-floor="bsmt">Basement</button>` : ''}
-        </div>
-      </div>
-
-      ${this._viewPresetBar('residence')}
-      <div class="floorplan-wrap res-wrap-big" id="floorplan-wrap">
-        <div class="house3d-scene iso-scene" id="house3d-scene">
-          <div class="res-iso" id="res-iso"></div>
-          <div class="res-callouts" id="res-callouts"></div>
-          <div class="res-banner">
-            <div class="res-banner-t">PROPERTY · <span id="res-addr">ADDRESS NOT SET</span></div>
-            <div class="res-banner-s">SATELLITE + ARCHITECTURAL DATA MERGE</div>
-          </div>
-          <div class="res-stat">
-            <div class="res-stat-i"><label>EST SQ FT</label><b id="res-sqft">—</b></div>
-            <div class="res-stat-i"><label>BED / BATH</label><b id="res-bb">—</b></div>
-            <div class="res-stat-i"><label>STYLE</label><b id="res-style-tag">—</b></div>
-            <div class="res-stat-i"><label>OCCUPIED</label><b id="res-occ">—</b></div>
-          </div>
-        </div>
-      </div>
-
-      <div class="dom-info">
-        <div class="dom-left">
-          <div class="dom-name" id="dom-name">${d.dominantRoom.name}</div>
-          <div class="dom-sub" id="dom-sub">${d.dominantRoom.subtitle}</div>
-        </div>
-        <div class="dom-gauges">
-          ${this._domGauges(d.dominantRoom)}
-        </div>
-      </div>
-
-      ${this._renderDoorMapping(d)}
-    </div>
-
-    <!-- mmWave presence overview (v7.101.28) -->
-    <div class="res-side panel mmwave-panel">
-      <div class="head">
-        <span>mmWave Presence</span>
-        <span class="side" id="mmwave-summary">◉ SCAN</span>
-      </div>
-      <div class="mem-sub">Live occupancy per room from presence / motion / mmWave sensors — the ground truth behind the floor-plan glow.</div>
-      <div class="mmwave-list" id="mmwave-list">
-        <div class="mmwave-empty">Reading sensors…</div>
-      </div>
-    </div>
-  </div>
-  ` : ''}
-
-  ${this._currentTab === 'settings' ? `
-  <!-- ═══ SETTINGS TAB ═══ -->
-  <div class="settings-page">
-
-    <div class="settings-subnav">
-      ${[
-        ['general', 'General'], ['voice', 'Voice & Audio'],
-        ['learning', 'Learning'], ['safety', 'Safety & Energy'],
-        ['cameras', 'Cameras'], ['home', 'Home & Extras'],
-      ].map(([id, label]) => `<button class="settings-subnav-btn ${this._settingsSection === id ? 'active' : ''}" data-settings-section="${id}">${label}</button>`).join('')}
-    </div>
-
-    <div class="settings-grid">
-      <!-- RESIDENCE / HOME -->
-      <div class="panel">
-        <div class="head">
-          <span>Residence / Home</span>
-          <span class="side">3D MODEL</span>
-        </div>
-        <div class="home-cfg">
-          <div class="cfg-row">
-            <label>Home type</label>
-            <select class="cfg-field" data-cfg-key="residence_style">${this._residenceStyleOptions(d)}</select>
-          </div>
-          <div class="cfg-row">
-            <label>Stories</label>
-            <select class="cfg-field" data-cfg-key="home_stories">${this._opts(['1','1.5','2','3'], String(d.config?.home_stories ?? '1.5'))}</select>
-          </div>
-          <div class="cfg-row">
-            <label>Garage bays</label>
-            <select class="cfg-field" data-cfg-key="garage_bays">${this._opts(['0','1','2','3','4'], String(d.config?.garage_bays ?? '3'))}</select>
-          </div>
-          <div class="cfg-row">
-            <label>Front dormers</label>
-            <select class="cfg-field" data-cfg-key="dormers_front">${this._opts(['0','1','2','3'], String(d.config?.dormers_front ?? '2'))}</select>
-          </div>
-          <div class="cfg-row">
-            <label>Rear dormers</label>
-            <select class="cfg-field" data-cfg-key="dormers_rear">${this._opts(['0','1','2'], String(d.config?.dormers_rear ?? '1'))}</select>
-          </div>
-          <div class="cfg-row">
-            <label>Chimney</label>
-            <select class="cfg-field" data-cfg-key="chimney_side">${this._optsLabeled([['right','East / right'],['left','West / left'],['none','None']], d.config?.chimney_side || 'right')}</select>
-          </div>
-          <div class="cfg-row">
-            <label>Basement</label>
-            <button class="toggle-btn ${(d.config?.has_basement !== false) ? 'on' : 'off'}" data-cfg-key="has_basement" data-cfg-val="${(d.config?.has_basement !== false) ? 'false' : 'true'}">${(d.config?.has_basement !== false) ? 'YES' : 'NO'}</button>
-          </div>
-          <div class="cfg-row">
-            <label>Bedrooms</label>
-            <input class="cfg-field cfg-num" type="number" min="0" max="12" data-cfg-key="home_bedrooms" value="${d.config?.home_bedrooms ?? ''}" placeholder="3">
-          </div>
-          <div class="cfg-row">
-            <label>Bathrooms</label>
-            <input class="cfg-field cfg-num" type="number" min="0" max="12" step="0.5" data-cfg-key="home_bathrooms" value="${d.config?.home_bathrooms ?? ''}" placeholder="2">
-          </div>
-          <div class="cfg-row">
-            <label>Square feet</label>
-            <input class="cfg-field cfg-num" type="number" min="0" max="20000" step="50" data-cfg-key="floor_plan_sqft" value="${d.config?.floor_plan_sqft ?? ''}" placeholder="1800">
-          </div>
-          <div class="home-cfg-hint">Drives the Residence 3D model + property stats. Detailed room layout is edited in the floor-plan editor.</div>
-        </div>
-      </div>
-      <!-- GENERAL -->
-      <div class="panel">
-        <div class="head">
-          <span>General</span>
-          <span class="side">CORE</span>
-        </div>
-        <div class="home-cfg" style="margin-bottom:10px;">
-          <div class="cfg-row">
-            <label>Language</label>
-            <select id="ui-lang-select" class="cfg-field" data-cfg-key="ui_language">${this._optsLabeled([['auto','Auto (Home Assistant)'],['en','English'],['fr','Français'],['de','Deutsch'],['es','Español'],['it','Italiano'],['pt','Português'],['nl','Nederlands']], d.config?.ui_language || 'auto')}</select>
-          </div>
-          <div class="cfg-row">
-            <label>Sleep state</label>
-            <select class="cfg-field" data-cfg-key="sleep_override">${this._optsLabeled([['auto','Auto (occupancy + quiet hours)'],['awake','Awake'],['asleep','Asleep']], d.config?.sleep_override || 'auto')}</select>
-          </div>
-          ${(!d.config?.ground_floor_areas || !d.config.ground_floor_areas.length) ? `
-          <div class="home-cfg-hint">Ground floor not configured — night-time motion alerts check every floor. Set it under Settings → Devices &amp; Services → Nova → Configure → Routing for more precise alerts.</div>
-          ` : ``}
-        </div>
-        <div class="toggle-list">
-          <div class="toggle-row">
-            <span class="toggle-label">Announcements</span>
-            <span class="toggle-desc">Master switch — all proactive speech</span>
-            <button class="toggle-btn ${(d.config?.announcements_enabled) ? 'on' : 'off'}"
-              data-cfg-key="announcements_enabled"
-              data-cfg-val="${(d.config?.announcements_enabled) ? 'false' : 'true'}">
-              ${(d.config?.announcements_enabled) ? 'ON' : 'OFF'}
-            </button>
-          </div>
-          <div class="toggle-row">
-            <span class="toggle-label">Sentinel</span>
-            <span class="toggle-desc">Door/garage/lock-left-open alerts</span>
-            <button class="toggle-btn ${(d.config?.sentinel_enabled) ? 'on' : 'off'}"
-              data-cfg-key="sentinel_enabled"
-              data-cfg-val="${(d.config?.sentinel_enabled) ? 'false' : 'true'}">
-              ${(d.config?.sentinel_enabled) ? 'ON' : 'OFF'}
-            </button>
-          </div>
-          <div class="toggle-row">
-            <span class="toggle-label">Observer</span>
-            <span class="toggle-desc">AI event awareness (uses API)</span>
-            <button class="toggle-btn ${(d.config?.observer_enabled) ? 'on' : 'off'}"
-              data-cfg-key="observer_enabled"
-              data-cfg-val="${(d.config?.observer_enabled) ? 'false' : 'true'}">
-              ${(d.config?.observer_enabled) ? 'ON' : 'OFF'}
-            </button>
-          </div>
-          <div class="toggle-row">
-            <span class="toggle-label">Cognition</span>
-            <span class="toggle-desc">Local triage — sees all telemetry, gates cloud</span>
-            <button class="toggle-btn ${(d.config?.cognition_enabled) ? 'on' : 'off'}"
-              data-cfg-key="cognition_enabled"
-              data-cfg-val="${(d.config?.cognition_enabled) ? 'false' : 'true'}">
-              ${(d.config?.cognition_enabled) ? 'ON' : 'OFF'}
-            </button>
-          </div>
-          <div class="toggle-row">
-            <span class="toggle-label">Adaptive interruptions</span>
-            <span class="toggle-desc">Interrupt less after recent alerts were dismissed as unneeded</span>
-            <button class="toggle-btn ${(d.config?.adaptive_interruption_budget) ? 'on' : 'off'}"
-              data-cfg-key="adaptive_interruption_budget"
-              data-cfg-val="${(d.config?.adaptive_interruption_budget) ? 'false' : 'true'}">
-              ${(d.config?.adaptive_interruption_budget) ? 'ON' : 'OFF'}
-            </button>
-          </div>
-          <div class="toggle-row">
-            <span class="toggle-label">Adaptive suggestions</span>
-            <span class="toggle-desc">Tune the suggestion bar from how often past suggestions were useful</span>
-            <button class="toggle-btn ${(d.config?.adaptive_suggestion_threshold) ? 'on' : 'off'}"
-              data-cfg-key="adaptive_suggestion_threshold"
-              data-cfg-val="${(d.config?.adaptive_suggestion_threshold) ? 'false' : 'true'}">
-              ${(d.config?.adaptive_suggestion_threshold) ? 'ON' : 'OFF'}
-            </button>
-          </div>
-          <div class="toggle-row">
-            <span class="toggle-label">Camera Watch</span>
-            <span class="toggle-desc">Inspect doorbell presses (vision + event-media)</span>
-            <button class="toggle-btn ${(d.config?.camera_auto_analyze) ? 'on' : 'off'}"
-              data-cfg-key="camera_auto_analyze"
-              data-cfg-val="${(d.config?.camera_auto_analyze) ? 'false' : 'true'}">
-              ${(d.config?.camera_auto_analyze) ? 'ON' : 'OFF'}
-            </button>
-          </div>
-          <div class="toggle-row">
-            <span class="toggle-label">Package Watch</span>
-            <span class="toggle-desc">Detect packages &amp; mail at the door</span>
-            <button class="toggle-btn ${(d.config?.package_detection) ? 'on' : 'off'}"
-              data-cfg-key="package_detection"
-              data-cfg-val="${(d.config?.package_detection) ? 'false' : 'true'}">
-              ${(d.config?.package_detection) ? 'ON' : 'OFF'}
-            </button>
-          </div>
-          <div class="toggle-row">
-            <span class="toggle-label">Visitor Learning</span>
-            <span class="toggle-desc">Silently learn from person events — never spoken</span>
-            <button class="toggle-btn ${(d.config?.visitor_learning) ? 'on' : 'off'}"
-              data-cfg-key="visitor_learning"
-              data-cfg-val="${(d.config?.visitor_learning) ? 'false' : 'true'}">
-              ${(d.config?.visitor_learning) ? 'ON' : 'OFF'}
-            </button>
-          </div>
-          <div class="toggle-row">
-            <span class="toggle-label">Rich Reasoning</span>
-            <span class="toggle-desc">Cloud-first judgment for medium+ events</span>
-            <button class="toggle-btn ${(d.config?.rich_reasoning) ? 'on' : 'off'}"
-              data-cfg-key="rich_reasoning"
-              data-cfg-val="${(d.config?.rich_reasoning) ? 'false' : 'true'}">
-              ${(d.config?.rich_reasoning) ? 'ON' : 'OFF'}
-            </button>
-          </div>
-          <div class="toggle-row">
-            <span class="toggle-label">Light Control</span>
-            <span class="toggle-desc">Off = still show which rooms have lights on, but disable toggling from the dashboard</span>
-            <button class="toggle-btn ${(d.config?.light_control_enabled !== false) ? 'on' : 'off'}"
-              data-cfg-key="light_control_enabled"
-              data-cfg-val="${(d.config?.light_control_enabled !== false) ? 'false' : 'true'}">
-              ${(d.config?.light_control_enabled !== false) ? 'ON' : 'OFF'}
-            </button>
-          </div>
-          <div class="toggle-row">
-            <span class="toggle-label">Appliance Power Guessing</span>
-            <span class="toggle-desc">Off = only announce appliances with native sensors or ones you've mapped (no guessing from the power meter)</span>
-            <button class="toggle-btn ${(d.config?.appliance_power_guessing) ? 'on' : 'off'}"
-              data-cfg-key="appliance_power_guessing"
-              data-cfg-val="${(d.config?.appliance_power_guessing) ? 'false' : 'true'}">
-              ${(d.config?.appliance_power_guessing) ? 'ON' : 'OFF'}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- ANTICIPATION & MEMORY (v7.101.28) -->
-      <div class="panel">
-        <div class="head">
-          <span>Anticipation &amp; Memory</span>
-          <span class="side">PROACTIVE</span>
-        </div>
-        <div class="home-cfg">
-          <div class="cfg-row">
-            <label>Departure alerts</label>
-            <button class="toggle-btn ${(d.config?.departure_alerts_enabled) ? 'on' : 'off'}" data-cfg-key="departure_alerts_enabled" data-cfg-val="${(d.config?.departure_alerts_enabled) ? 'false' : 'true'}">${(d.config?.departure_alerts_enabled) ? 'ON' : 'OFF'}</button>
-          </div>
-          <div class="cfg-row">
-            <label>Routine alerts</label>
-            <button class="toggle-btn ${(d.config?.routine_alerts_enabled) ? 'on' : 'off'}" data-cfg-key="routine_alerts_enabled" data-cfg-val="${(d.config?.routine_alerts_enabled) ? 'false' : 'true'}">${(d.config?.routine_alerts_enabled) ? 'ON' : 'OFF'}</button>
-          </div>
-          <div class="cfg-row">
-            <label>Memory threading</label>
-            <button class="toggle-btn ${(d.config?.memory_threading_enabled) ? 'on' : 'off'}" data-cfg-key="memory_threading_enabled" data-cfg-val="${(d.config?.memory_threading_enabled) ? 'false' : 'true'}">${(d.config?.memory_threading_enabled) ? 'ON' : 'OFF'}</button>
-          </div>
-          <div class="cfg-row">
-            <label>Learn motion/presence triggers</label>
-            <button class="toggle-btn ${(d.config?.pattern_learn_motion) ? 'on' : 'off'}" data-cfg-key="pattern_learn_motion" data-cfg-val="${(d.config?.pattern_learn_motion) ? 'false' : 'true'}">${(d.config?.pattern_learn_motion) ? 'ON' : 'OFF'}</button>
-          </div>
-          <div class="cfg-row">
-            <label>Sibling-burst coalescing (sec)</label>
-            <input class="cfg-field cfg-num" type="number" min="0" max="600" step="10" data-cfg-key="observer_group_debounce" value="${d.config?.observer_group_debounce ?? ''}" placeholder="90">
-          </div>
-          <div class="cfg-row">
-            <label>Continued conversation</label>
-            <button class="toggle-btn ${(d.config?.continued_conversation_enabled) ? 'on' : 'off'}" data-cfg-key="continued_conversation_enabled" data-cfg-val="${(d.config?.continued_conversation_enabled) ? 'false' : 'true'}">${(d.config?.continued_conversation_enabled) ? 'ON' : 'OFF'}</button>
-          </div>
-          <div class="cfg-row">
-            <label>Follow me between rooms<span class="cfg-hint">reopen the mic in the room you moved to (needs 2+ satellites)</span></label>
-            <button class="toggle-btn ${(d.config?.continued_conversation_multi_satellite) ? 'on' : 'off'}" data-cfg-key="continued_conversation_multi_satellite" data-cfg-val="${(d.config?.continued_conversation_multi_satellite) ? 'false' : 'true'}">${(d.config?.continued_conversation_multi_satellite) ? 'ON' : 'OFF'}</button>
-          </div>
-          <div class="cfg-row">
-            <label>Follow-up mic reopen (speaker-aware)</label>
-            <button class="toggle-btn ${(d.config?.continued_conversation_speaker_reopen !== false) ? 'on' : 'off'}" data-cfg-key="continued_conversation_speaker_reopen" data-cfg-val="${(d.config?.continued_conversation_speaker_reopen !== false) ? 'false' : 'true'}">${(d.config?.continued_conversation_speaker_reopen !== false) ? 'ON' : 'OFF'}</button>
-          </div>
-          <div class="cfg-row">
-            <label>Use Home Assistant default voice</label>
-            <button class="toggle-btn ${(d.config?.tts_use_ha_voice) ? 'on' : 'off'}" data-cfg-key="tts_use_ha_voice" data-cfg-val="${(d.config?.tts_use_ha_voice) ? 'false' : 'true'}">${(d.config?.tts_use_ha_voice) ? 'ON' : 'OFF'}</button>
-          </div>
-          <div class="cfg-row">
-            <label>Departure lead (min)</label>
-            <input class="cfg-field cfg-num" type="number" min="0" max="240" step="5" data-cfg-key="departure_lead_minutes" value="${d.config?.departure_lead_minutes ?? ''}" placeholder="30">
-          </div>
-          <div class="cfg-row">
-            <label>Memory window (hrs)</label>
-            <input class="cfg-field cfg-num" type="number" min="1" max="336" step="1" data-cfg-key="memory_threading_hours" value="${d.config?.memory_threading_hours ?? ''}" placeholder="48">
-          </div>
-          <div class="cfg-row">
-            <label>Memory max turns</label>
-            <input class="cfg-field cfg-num" type="number" min="1" max="50" step="1" data-cfg-key="memory_threading_max" value="${d.config?.memory_threading_max ?? ''}" placeholder="12">
-          </div>
-          <div class="cfg-row">
-            <label>Origin tracker</label>
-            <select class="cfg-field" data-cfg-key="departure_origin_entity">${this._trackerOptions(d.config?.departure_origin_entity || '')}</select>
-          </div>
-          <div class="cfg-row">
-            <label>OSRM URL</label>
-            <input class="cfg-field cfg-text" type="text" data-cfg-key="departure_osrm_url" value="${this._esc(d.config?.departure_osrm_url || '')}" placeholder="self-host (optional)">
-          </div>
-          <div class="cfg-row">
-            <label>Travel sensor</label>
-            <select class="cfg-field" data-cfg-key="departure_travel_sensor">${this._travelSensorOptions(d.config?.departure_travel_sensor || '')}</select>
-          </div>
-          <div class="home-cfg-hint">Departure warns when to leave for calendar events using your device location + open-source routing (Nominatim + OSRM). Routine alerts learn per-person timing over about a week. Continued conversation keeps the mic open after a question &mdash; best tuned on your satellites.</div>
-        </div>
-      </div>
-      <!-- AI MODELS -->
-      <div class="panel">
-        <div class="head">
-          <span>AI Models</span>
-          <span class="side">LLM</span>
-        </div>
-        <div class="model-list">
-          ${this._renderModelRoles(d)}
-        </div>
-        <div class="model-hint">Model lists are fetched live from each provider. Pick "Custom…" to enter one manually.</div>
-        <div class="ctx-size-row" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line);display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-          <span style="font-family:var(--font-mono);font-size:10px;color:var(--text-dim);letter-spacing:0.04em;">PROMPT SIZE \u00b7 entity names per type</span>
-          <input class="cfg-field cfg-num" type="number" min="0" max="15" step="1" data-cfg-key="home_context_max_entities" value="${d.config?.home_context_max_entities ?? 15}" style="width:56px;" title="Fewer names = smaller prompt">
-          <span style="font-size:9px;color:var(--text-faint);font-style:italic;max-width:520px;">Lower this (0 = counts only) if your LLM provider rejects requests for being too large \u2014 e.g. Groq\'s free tier caps tokens-per-minute. The assistant still discovers entities on demand, so nothing breaks.</span>
-        </div>
-        <div class="llm-url-row">
-          <span class="llm-url-label">LOCAL LLM URL</span>
-          <input class="llm-url-input" type="text"
-            placeholder="http://gpu-server:11434/v1"
-            value="${this._esc(d.config?.llm_base_url || '')}"
-            title="OpenAI-compatible endpoint for the ollama/custom providers — your GPU server. Leave empty for the default."/>
-        </div>
-        <div class="llm-url-row">
-          <span class="llm-url-label">OLLAMA num_ctx</span>
-          <input class="cfg-field cfg-num" type="number" min="512" max="131072" step="512"
-            data-cfg-key="ollama_num_ctx" value="${d.config?.ollama_num_ctx ?? ''}" placeholder="8192"
-            title="Context window for local Ollama models. Larger = more context, but more VRAM and slower. Default 8192."/>
-        </div>
-      </div>
-
-      <!-- NOTIFICATIONS -->
-      <div class="panel">
-        <div class="head">
-          <span>Notifications</span>
-          <span class="side">PUSH</span>
-        </div>
-        <div class="toggle-list">
-          <div class="toggle-row">
-            <span class="toggle-label">Notify Device</span>
-            <span class="toggle-desc">Phone push for high/critical alerts</span>
-            <select class="notify-select" id="notify-select">
-              ${this._renderNotifyOptions(d)}
-            </select>
-          </div>
-        </div>
-      </div>
-${this._renderRoutineLearning(d)}
-${this._renderExcludedEntities(d)}
-      <!-- APPLIANCES / ENERGY PROFILE -->
-      <div class="panel">
-        <div class="head">
-          <span>Appliances</span>
-          <span class="side">ENERGY PROFILE</span>
-        </div>
-        <div class="appliance-intro">Tell Nova which appliances exist so it names cycles correctly instead of guessing from the whole-home meter. Map a dedicated power or status entity when one exists (most accurate); otherwise set typical running watts so the meter can match it.</div>
-        <div class="appliance-list" id="appliance-list">
-          ${this._renderAppliances(d)}
-        </div>
-        <div class="appliance-actions">
-          <button class="btn" id="appliance-add">+ Add appliance</button>
-          <button class="btn primary" id="appliance-save">Save appliances</button>
-        </div>
-        <label class="appliance-unknown">
-          <input type="checkbox" id="appliance-unknown-toggle" ${d.config?.appliance_announce_unknown ? 'checked' : ''}/>
-          <span>Announce unidentified loads (loads matching no declared appliance)</span>
-        </label>
-      </div>
-
-      <!-- SENTINEL RULES -->
-      <div class="panel">
-        <div class="head">
-          <span>Sentinel Rules</span>
-          <span class="side">${(d.config?.sentinel_rules || []).length} RULES</span>
-        </div>
-        <div class="rule-list">
-          ${this._renderSentinelRules(d)}
-        </div>
-      </div>
-
-      <!-- OBSERVER STATS -->
-      <div class="panel">
-        <div class="head">
-          <span>Observer Tuning</span>
-          <span class="side">STATS</span>
-        </div>
-        <div class="status-list">
-          <div class="status-row ${d.config?.observer_stats?.running ? 'live' : 'off'}">
-            <span class="k">Status</span>
-            <span class="v">${d.config?.observer_stats?.running ? 'RUNNING' : 'STOPPED'}</span>
-          </div>
-          <div class="status-row live">
-            <span class="k">Calls / Hour</span>
-            <span class="v">${d.config?.observer_stats?.calls_last_hour || 0} / ${(d.config?.observer_stats?.rate_limit ?? 30) <= 0 ? '&#8734;' : (d.config?.observer_stats?.rate_limit ?? 30)}</span>
-          </div>
-          <div class="status-row live">
-            <span class="k">Hourly Cap</span>
-            <span class="v"><input type="number" min="0" step="1" class="rate-limit-input" value="${d.config?.observer_stats?.rate_limit ?? 30}" title="Max observer LLM calls per hour. 0 = unlimited (local LLM / high-quota tiers)." style="width:58px;background:rgba(0,0,0,0.4);border:1px solid var(--line-hot,#2a3f4a);color:var(--text,#cde);padding:2px 6px;border-radius:4px;font-family:inherit;font-size:inherit;text-align:right;"></span>
-          </div>
-          <div class="status-row live">
-            <span class="k">Events 24h</span>
-            <span class="v">${d.config?.observer_stats?.events_24h || 0}</span>
-          </div>
-          <div class="status-row live">
-            <span class="k">Flagged 24h</span>
-            <span class="v">${d.config?.observer_stats?.flagged_24h || 0}</span>
-          </div>
-          <div class="status-row live">
-            <span class="k">Spoken 24h</span>
-            <span class="v">${d.config?.observer_stats?.spoken_24h || 0}</span>
-          </div>
-          <div class="status-row ${d.config?.observer_stats?.cognition_enabled ? 'live' : 'off'}">
-            <span class="k">Cognition</span>
-            <span class="v">${d.config?.observer_stats?.cognition_enabled ? 'ACTIVE' : 'OFF'}</span>
-          </div>
-          <div class="status-row live">
-            <span class="k">Tracked Entities</span>
-            <span class="v">${d.config?.observer_stats?.cog_entities || 0}</span>
-          </div>
-          <div class="status-row live">
-            <span class="k">Predictable</span>
-            <span class="v">${d.config?.observer_stats?.cog_predictable || 0}</span>
-          </div>
-          <div class="status-row live">
-            <span class="k">Routines Learned</span>
-            <span class="v">${d.config?.observer_stats?.cog_routines || 0}</span>
-          </div>
-          <div class="status-row live">
-            <span class="k">Presence Routines</span>
-            <span class="v">${d.config?.observer_stats?.cog_presence || 0}</span>
-          </div>
-          ${(d.config?.observer_stats?.presence || []).map(p => `
-          <div class="status-row live">
-            <span class="k">${p.name}${p.gps ? ' 📍' : ''}</span>
-            <span class="v">${p.zone}${p.distance_km != null ? ' · ' + p.distance_km + ' km' : ''}</span>
-          </div>`).join('')}
-          <div class="status-row live">
-            <span class="k">Cog Escalated</span>
-            <span class="v">${d.config?.observer_stats?.cog_escalated || 0}</span>
-          </div>
-          <div class="status-row live">
-            <span class="k">Local Decisions</span>
-            <span class="v">${d.config?.observer_stats?.local_rate || 0}% (${d.config?.observer_stats?.local_decisions || 0} local / ${d.config?.observer_stats?.cloud_calls || 0} cloud)</span>
-          </div>
-          <div class="status-row live">
-            <span class="k">Learned Patterns</span>
-            <span class="v">${d.config?.observer_stats?.learned_patterns || 0}</span>
-          </div>
-          <div class="status-row live">
-            <span class="k">LLM Link</span>
-            <span class="v" style="${(d.config?.observer_stats?.llm_breaker === 'open') ? 'color:#ff8a8a' : ((d.config?.observer_stats?.llm_breaker === 'half_open') ? 'color:#ffcf6a' : '')}">${(d.config?.observer_stats?.llm_breaker === 'open') ? 'LOCAL-ONLY' : ((d.config?.observer_stats?.llm_breaker === 'half_open') ? 'PROBING' : 'ONLINE')}</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- MEMORY -->
-      <div class="panel">
-        <div class="head">
-          <span>Memory</span>
-          <span class="side">RECALL</span>
-        </div>
-        <div class="status-list">
-          <div class="status-row live">
-            <span class="k">Backend</span>
-            <span class="v">${d.config?.memory_stats?.backend || '—'}</span>
-          </div>
-          <div class="status-row live">
-            <span class="k">Stored Memories</span>
-            <span class="v">${d.config?.memory_stats?.total_memories || 0}</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- OPERATIONAL MODE (Directive Layer, v7.101.28) -->
-      <div class="panel">
-        <div class="head">
-          <span>Operational Mode</span>
-          <span class="side" id="mode-active">…</span>
-        </div>
-        <div class="mem-sub" id="mode-desc">A high-level state that shifts Nova's whole behavior — proactivity, tone, what it surfaces. Safety always stays active.</div>
-        <div class="mode-auto-row">
-          <span class="mode-auto-label">AUTO · follow occupancy (away ↔ normal). Off = you set modes by hand or voice; discretionary modes (party/movie/lab/…) are always manual.</span>
-          <button class="toggle-btn ${d.config?.operational_mode_auto !== false ? 'on' : 'off'}" data-cfg-key="operational_mode_auto" data-cfg-val="${d.config?.operational_mode_auto !== false ? 'false' : 'true'}">${d.config?.operational_mode_auto !== false ? 'ON' : 'OFF'}</button>
-        </div>
-        <div class="mode-grid" id="mode-grid"></div>
-        ${this._renderModeBindings(d)}
-      </div>
-
-      <!-- WELLBEING CONTEXT (v7.101.28) -->
-      <div class="panel">
-        <div class="head">
-          <span>Wellbeing Context</span>
-          <span class="side" id="bio-status">…</span>
-        </div>
-        <div class="mem-sub">Lets Nova read a connected wearable (heart rate, sleep, steps) so it can be quieter when you're resting. <strong>Context only — not medical.</strong> Off by default; health data stays private.</div>
-        <div class="doclib-controls">
-          <button class="cam-diag-btn" id="bio-toggle">◉ ENABLE</button>
-        </div>
-        <div class="bio-body" id="bio-body">
-          <div class="mmwave-empty">Loading…</div>
-        </div>
-      </div>
-
-      <!-- ENERGY MANAGEMENT (v7.101.28) -->
-      <div class="panel">
-        <div class="head">
-          <span>Energy Management</span>
-          <span class="side" id="energy-draw">…</span>
-        </div>
-        <div class="mem-sub">Whole-home power, peak awareness, and load advice. Pick how much Nova may act — it never sheds critical loads (fridge, medical, network).</div>
-        <div class="energy-agency" id="energy-agency">
-          <span class="energy-agency-label">Agency</span>
-          <button class="mode-chip" data-agency="advisory">advisory</button>
-          <button class="mode-chip" data-agency="opt_in">opt-in</button>
-          <button class="mode-chip" data-agency="autonomous">autonomous</button>
-        </div>
-        <div class="energy-body" id="energy-body">
-          <div class="mmwave-empty">Loading…</div>
-        </div>
-        <div class="mem-sub">Daily solar report cost (optional): if you already track exact electricity cost, point Nova at your own sensor instead of its price × kWh estimate.</div>
-        <div class="home-cfg">
-          <div class="cfg-row">
-            <label>Cost today entity</label>
-            <input class="cfg-field cfg-text" type="text" data-cfg-key="energy_cost_today_entity" value="${this._esc(d.config?.energy_cost_today_entity || '')}" placeholder="sensor.electricity_cost_today">
-          </div>
-          <div class="cfg-row">
-            <label>Net cost today entity (optional)</label>
-            <input class="cfg-field cfg-text" type="text" data-cfg-key="energy_cost_net_entity" value="${this._esc(d.config?.energy_cost_net_entity || '')}" placeholder="sensor.net_electricity_cost_today">
-          </div>
-        </div>
-      </div>
-
-      <!-- SYSTEM DIAGNOSTICS (v7.101.28) -->
-      <div class="panel">
-        <div class="head">
-          <span>System Diagnostics</span>
-          <span class="side" id="diag-overall">…</span>
-        </div>
-        <div class="mem-sub">Health of the core services Nova calls — LLM, embeddings, speech. A quick "is everything up?" check.</div>
-        <div class="doclib-controls">
-          <button class="cam-diag-btn" id="diag-refresh">⟳ RUN CHECK</button>
-        </div>
-        <div class="diag-body" id="diag-body">
-          <div class="mmwave-empty">Loading…</div>
-        </div>
-      </div>
-
-      <!-- MULTI-HAZARD MONITOR (v7.101.28) -->
-      <div class="panel">
-        <div class="head">
-          <span>Hazard Monitor</span>
-          <span class="side" id="hazard-overall">OFF</span>
-        </div>
-        <div class="mem-sub">Real-time nearby earthquakes (USGS), severe-weather warnings (NWS), and natural disasters like wildfires (NASA EONET). Scoped to your home location; alerts speak and push like any Nova alert.</div>
-        <div class="haz-row">
-          <span class="haz-label">Monitor</span>
-          <button class="toggle-btn ${d.config?.hazard_monitor_enabled ? 'on' : 'off'}" data-cfg-key="hazard_monitor_enabled" data-cfg-val="${d.config?.hazard_monitor_enabled ? 'false' : 'true'}" id="haz-enable">${d.config?.hazard_monitor_enabled ? 'ON' : 'OFF'}</button>
-        </div>
-        <div class="haz-feeds">
-          <button class="toggle-btn ${d.config?.hazard_quakes_on !== false ? 'on' : 'off'}" data-cfg-key="hazard_quakes_on" data-cfg-val="${d.config?.hazard_quakes_on !== false ? 'false' : 'true'}">${d.config?.hazard_quakes_on !== false ? 'EARTHQUAKES ON' : 'EARTHQUAKES OFF'}</button>
-          <button class="toggle-btn ${d.config?.hazard_weather_on !== false ? 'on' : 'off'}" data-cfg-key="hazard_weather_on" data-cfg-val="${d.config?.hazard_weather_on !== false ? 'false' : 'true'}">${d.config?.hazard_weather_on !== false ? 'WEATHER ON' : 'WEATHER OFF'}</button>
-          <button class="toggle-btn ${d.config?.hazard_disasters_on !== false ? 'on' : 'off'}" data-cfg-key="hazard_disasters_on" data-cfg-val="${d.config?.hazard_disasters_on !== false ? 'false' : 'true'}">${d.config?.hazard_disasters_on !== false ? 'DISASTERS ON' : 'DISASTERS OFF'}</button>
-        </div>
-        <div class="haz-loc" id="haz-loc">Location: using home coordinates.</div>
-        <div class="haz-override">
-          <span class="haz-label">Override (optional)</span>
-          <input class="cfg-field cfg-text haz-in" type="text" inputmode="decimal" data-cfg-key="hazard_lat" value="${this._esc(d.config?.hazard_lat || '')}" placeholder="latitude">
-          <input class="cfg-field cfg-text haz-in" type="text" inputmode="decimal" data-cfg-key="hazard_lon" value="${this._esc(d.config?.hazard_lon || '')}" placeholder="longitude">
-        </div>
-        <div class="haz-tune">
-          <span class="haz-label">Quake radius (km)</span>
-          <input class="cfg-field cfg-text haz-in" type="text" inputmode="numeric" data-cfg-key="hazard_quake_radius_km" value="${this._esc(d.config?.hazard_quake_radius_km ?? 300)}">
-          <span class="haz-label">Min magnitude</span>
-          <input class="cfg-field cfg-text haz-in" type="text" inputmode="decimal" data-cfg-key="hazard_quake_min_mag" value="${this._esc(d.config?.hazard_quake_min_mag ?? 2.5)}">
-        </div>
-        <div class="doclib-controls">
-          <button class="cam-diag-btn" id="haz-scan">⟳ SCAN NOW</button>
-        </div>
-        <div class="haz-body" id="haz-body"></div>
-      </div>
-
-      <!-- SCHEDULED BRIEFINGS (v7.101.28) -->
-      <div class="panel">
-        <div class="head">
-          <span>Briefings</span>
-          <span class="side">${(d.config?.briefing_morning_enabled || d.config?.briefing_evening_enabled) ? 'SCHEDULED' : 'OFF'}</span>
-        </div>
-        <div class="mem-sub">Nova speaks a summary at the times you set — weather and the day's forecast, your calendar, what happened overnight, power draw, and any active hazards nearby.</div>
-        <div class="haz-row">
-          <span class="haz-label">Morning</span>
-          <input class="cfg-field cfg-text haz-in" type="text" data-cfg-key="briefing_morning_time" value="${this._esc(d.config?.briefing_morning_time || '07:30')}" placeholder="07:30">
-          <button class="toggle-btn ${d.config?.briefing_morning_enabled ? 'on' : 'off'}" data-cfg-key="briefing_morning_enabled" data-cfg-val="${d.config?.briefing_morning_enabled ? 'false' : 'true'}">${d.config?.briefing_morning_enabled ? 'ON' : 'OFF'}</button>
-        </div>
-        <div class="haz-row">
-          <span class="haz-label">Evening</span>
-          <input class="cfg-field cfg-text haz-in" type="text" data-cfg-key="briefing_evening_time" value="${this._esc(d.config?.briefing_evening_time || '19:30')}" placeholder="19:30">
-          <button class="toggle-btn ${d.config?.briefing_evening_enabled ? 'on' : 'off'}" data-cfg-key="briefing_evening_enabled" data-cfg-val="${d.config?.briefing_evening_enabled ? 'false' : 'true'}">${d.config?.briefing_evening_enabled ? 'ON' : 'OFF'}</button>
-        </div>
-        <div class="haz-row">
-          <span class="haz-label">Only when someone's home</span>
-          <button class="toggle-btn ${d.config?.briefing_require_home !== false ? 'on' : 'off'}" data-cfg-key="briefing_require_home" data-cfg-val="${d.config?.briefing_require_home !== false ? 'false' : 'true'}">${d.config?.briefing_require_home !== false ? 'YES' : 'NO'}</button>
-        </div>
-        <div class="haz-label" style="margin:10px 0 6px">Include</div>
-        <div class="haz-feeds">
-          <button class="toggle-btn ${d.config?.briefing_include_weather !== false ? 'on' : 'off'}" data-cfg-key="briefing_include_weather" data-cfg-val="${d.config?.briefing_include_weather !== false ? 'false' : 'true'}">WEATHER</button>
-          <button class="toggle-btn ${d.config?.briefing_include_calendar !== false ? 'on' : 'off'}" data-cfg-key="briefing_include_calendar" data-cfg-val="${d.config?.briefing_include_calendar !== false ? 'false' : 'true'}">CALENDAR</button>
-          <button class="toggle-btn ${d.config?.briefing_include_events !== false ? 'on' : 'off'}" data-cfg-key="briefing_include_events" data-cfg-val="${d.config?.briefing_include_events !== false ? 'false' : 'true'}">OVERNIGHT</button>
-          <button class="toggle-btn ${d.config?.briefing_include_energy !== false ? 'on' : 'off'}" data-cfg-key="briefing_include_energy" data-cfg-val="${d.config?.briefing_include_energy !== false ? 'false' : 'true'}">ENERGY</button>
-          <button class="toggle-btn ${d.config?.briefing_include_hazards !== false ? 'on' : 'off'}" data-cfg-key="briefing_include_hazards" data-cfg-val="${d.config?.briefing_include_hazards !== false ? 'false' : 'true'}">HAZARDS</button>
-        </div>
-        <div class="doclib-controls">
-          <button class="cam-diag-btn" id="brief-now">▶ BRIEF ME NOW</button>
-        </div>
-      </div>
-
-      <!-- DOCUMENT LIBRARY (v7.101.28) -->
-      <div class="panel">
-        <div class="head">
-          <span>Document Library</span>
-          <span class="side" id="doclib-status">RAG</span>
-        </div>
-        <div class="mem-sub">Drop manuals &amp; receipts (PDF, .txt, .md) into <code>/config/nova/documents</code> or upload below, then ingest. Ask Nova "what's the furnace filter size?" and it answers from your paperwork.</div>
-        <div class="doclib-controls">
-          <button class="cam-diag-btn" id="doclib-upload-btn">⬆ UPLOAD FILE</button>
-          <input type="file" id="doclib-file" accept=".pdf,.txt,.md" style="display:none;" />
-          <button class="cam-diag-btn" id="doclib-ingest">⟳ INGEST FOLDER</button>
-          <input class="log-search doclib-q" id="doclib-q" type="text" placeholder="test a search — e.g. furnace filter size" autocomplete="off" />
-        </div>
-        <div class="doclib-watch">
-          <input class="log-search doclib-watch-field" id="doclib-watch" type="text" placeholder="watch folders (one per line/comma) — e.g. /media/downloads" autocomplete="off" />
-          <button class="cam-diag-btn" id="doclib-scan">⟳ SCAN WATCH</button>
-        </div>
-        <div class="doclib-body" id="doclib-body">
-          <div class="mmwave-empty">Loading library…</div>
-        </div>
-        <div class="vecbk" id="vecbk">
-          <div class="vecbk-row">
-            <span class="vecbk-label">Search engine</span>
-            <span class="vecbk-state" id="vecbk-state">…</span>
-          </div>
-          <div class="vecbk-hint" id="vecbk-hint"></div>
-          <button class="cam-diag-btn" id="vecbk-toggle" style="display:none;">⬆ ENABLE SEMANTIC SEARCH</button>
-        </div>
-      </div>
-
-      <!-- Nova CHARACTER + RESEARCH (v7.101.28) -->
-      <div class="panel">
-        <div class="head">
-          <span>Nova Character &amp; Research</span>
-          <span class="side">PERSONA · WEB</span>
-        </div>
-        <div class="mem-sub">Banter is silenced automatically during anything urgent — a safety alert always speaks plainly. DuckDuckGo needs no setup; SearXNG needs a URL.</div>
-        <div class="home-cfg">
-          <div class="cfg-row">
-            <label>Banter level</label>
-            <select class="cfg-field" data-cfg-key="banter_level">${this._optsLabeled([['0','Plain — no wit'],['1','Dry — occasional wit (default)'],['2','Full — MCU Nova']], String(d.config?.banter_level ?? '1'))}</select>
-          </div>
-          <div class="cfg-row">
-            <label>Web research backend</label>
-            <select class="cfg-field" data-cfg-key="search_backend">${this._optsLabeled([['duckduckgo','DuckDuckGo (no key, default)'],['searxng','SearXNG (self-hosted)']], d.config?.search_backend || 'duckduckgo')}</select>
-          </div>
-          <div class="cfg-row">
-            <label>SearXNG URL</label>
-            <input class="cfg-field" type="text" data-cfg-key="searxng_url"
-                   value="${this._esc(d.config?.searxng_url || '')}" placeholder="http://searxng.local:8080" autocomplete="off" />
-          </div>
-          <div class="cfg-row">
-            <label>Calendar tight-gap (min)</label>
-            <input class="cfg-field" type="number" min="0" max="120" data-cfg-key="calendar_tight_gap_min"
-                   value="${this._esc(String(d.config?.calendar_tight_gap_min ?? 15))}" autocomplete="off" />
-          </div>
-        </div>
-      </div>
-
-      <!-- CAMERAS (names + location designation, v7.101.28 — moved from Command Center) -->
-      <div class="panel">
-        <div class="head">
-          <span>Cameras</span>
-          <span class="side">NAMES · LOCATION</span>
-        </div>
-        <div class="mem-sub">Names are Nova-only (HA untouched; blank reverts). Location governs intrusion + outdoor-event filtering — AUTO shows what the heuristics resolve.</div>
-        <div class="home-cfg" style="margin-bottom:10px;">
-          <div class="cfg-row">
-            <label>Face recognition source</label>
-            <select class="cfg-field" data-cfg-key="recognition_source">${this._optsLabeled([['both','Both (Double Take + Frigate)'],['frigate','Frigate only (sub_label)'],['doubletake','Double Take only']], d.config?.recognition_source || 'both')}</select>
-          </div>
-          <div class="cfg-row">
-            <label>Recognition confidence</label>
-            <input class="cfg-field cfg-num" type="number" min="0" max="1" step="0.05" data-cfg-key="identity_min_confidence" value="${d.config?.identity_min_confidence ?? ''}" placeholder="0.45" title="Below this face-match confidence a person is recorded as 'unknown'. Higher = stricter, fewer false names.">
-          </div>
-        </div>
-        <div class="camset-list" id="camset-body">
-          ${this._renderCameraSettings(d)}
-        </div>
-      </div>
-
-      <!-- INTRUSION / SECURITY + LOG moved to their own tab (v7.101.28) -->
-
-      <!-- VOICE CONFIRMATION (v7.101.28) -->
-      <div class="panel">
-        <div class="head">
-          <span>Voice Confirmation</span>
-          <span class="side" id="vc-status">${d.config?.voice_confirm_enabled ? '<span class="diag-ok">ON</span>' : '<span class="diag-off">OFF</span>'}</span>
-        </div>
-        <div class="mem-sub">Ask out loud before sensitive actions (unlock, garage, disarm) and listen for a spoken yes/no. Native mode uses the satellite's own audio; gated mode speaks through the room speaker (Nest) — run the test to see which your setup supports.</div>
-        <div class="home-cfg">
-          <div class="cfg-row">
-            <label>Voice confirmation</label>
-            <button class="toggle-btn ${d.config?.voice_confirm_enabled ? 'on' : 'off'}" data-cfg-key="voice_confirm_enabled" data-cfg-val="${d.config?.voice_confirm_enabled ? 'false' : 'true'}">${d.config?.voice_confirm_enabled ? 'ON' : 'OFF'}</button>
-          </div>
-          <div class="cfg-row">
-            <label>Mode</label>
-            <select class="cfg-field" data-cfg-key="voice_confirm_mode">${this._optsLabeled([['auto','Auto (try native, fall back)'],['native','Native (satellite audio)'],['gated','Gated (room speaker)']], d.config?.voice_confirm_mode || 'auto')}</select>
-          </div>
-        </div>
-        <div class="doclib-controls">
-          <button class="cam-diag-btn" id="vc-test">▶ TEST SATELLITE AUDIO</button>
-        </div>
-        <div class="vc-test-result" id="vc-test-result"></div>
-      </div>
-
-      <!-- SATELLITE ROUTING -->
-      <div class="panel">
-        <div class="head">
-          <span>Satellite → Speaker</span>
-          <span class="side">ROUTING</span>
-        </div>
-        <div class="pairing-list">
-          ${this._renderSatellitePairings(d)}
-        </div>
-      </div>
-
-      <!-- ROOM SPEAKERS (v7.101.28) -->
-      <div class="panel">
-        <div class="head">
-          <span>Room Speakers</span>
-          <span class="side">ROUTING</span>
-        </div>
-        <div class="toggle-desc" style="padding:0 10px 10px">
-          Assign the ONE speaker Nova is allowed to use in each room — replies and
-          proactive comments only ever go to the assigned speaker, never any other
-          media_player HA happens to find in that area. Rooms with nothing assigned
-          fall back to the general speaker below.
-        </div>
-        <div class="pairing-list">
-          ${this._renderRoomSpeakers(d)}
-        </div>
-        <div class="pairing-row">
-          <span class="pairing-label">General speaker (fallback)</span>
-          ${this._renderGeneralSpeakerSelect(d)}
-        </div>
-      </div>
-
-      <!-- ANNOUNCEMENT SPEAKERS -->
-      <div class="panel">
-        <div class="head">
-          <span>Announcement Speakers</span>
-          <span class="side">BROADCAST</span>
-        </div>
-        <div class="rule-list">
-          ${this._renderAnnouncementSpeakers(d)}
-        </div>
-      </div>
-
-      <!-- DIAGNOSTICS (moved under announcements) -->
-      <div class="panel">
-        <div class="head">
-          <span>Diagnostics</span>
-          <span class="side">TEST</span>
-        </div>
-        <div class="diag-row">
-          <div class="label">TTS — Nova voice test</div>
-          <button class="btn" data-svc="nova.test_tts">Run</button>
-        </div>
-        <div class="diag-row">
-          <div class="label">Observer — fire status event</div>
-          <button class="btn" data-svc="nova.observer_status">Run</button>
-        </div>
-        <div class="diag-row">
-          <div class="label">Briefing — manual trigger</div>
-          <button class="btn" data-svc="nova.briefing">Run</button>
-        </div>
-        <div class="diag-row">
-          <div class="label">Doorbell — run diagnostics</div>
-          <button class="btn" data-svc="nova.diagnose_doorbell">Run</button>
-        </div>
-        <div class="diag-row">
-          <div class="label">Notification — test phone push</div>
-          <button class="btn" data-svc="nova.test_notify">Run</button>
-        </div>
-        <div class="diag-row">
-          <div class="label">Routing — dump routing state to log</div>
-          <button class="btn" data-svc="nova.test_routing">Run</button>
-        </div>
-        <div class="diag-row">
-          <div class="label">Camera — analyze now (vision → reasoning)</div>
-          <select class="notify-select diag-camera-select">${this._renderCameraOptions(d)}</select>
-          <button class="btn diag-camera-run">Run</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- FLOOR PLAN EDITOR — full width below settings grid -->
-    <div class="panel" style="margin-top:16px;">
-      <div class="head">
-        <span>Floor Plan Editor</span>
-        <span class="side">LAYOUT</span>
-      </div>
-      <div class="fp-editor" id="fp-editor-wrap">
-        ${this._renderFloorPlanEditor(d)}
-      </div>
-    </div>
-
-    <!-- DOORBELL TRAINING — backlog scan + analysed-event dataset -->
-    <div class="panel" style="margin-top:16px;">
-      <div class="head">
-        <span>Doorbell Training</span>
-        <span class="side">DATASET</span>
-      </div>
-      <div class="dbt-intro">Analysed doorbell events — Nova's visitor training data. Each press is logged automatically; run a backlog scan to mine the Nest recorded-event history into the dataset.</div>
-      ${this._renderDoorbellTraining(d)}
-    </div>
-
-  </div>
-  ` : ''}
-
-  ${this._currentTab === 'intrusion' ? `
-  <!-- ═══ INTRUSION TAB ═══ -->
-  <div class="logs-tab">
-    <!-- INTRUSION / SECURITY -->
-    <div class="panel">
-      <div class="head">
-        <span>Intrusion</span>
-        <span class="side" id="intr-status">…</span>
-      </div>
-      <div class="mem-sub">Last intrusion snapshot and false-alarm call-off. When Nova confirms an intruder on camera it grabs a still; if it's not real, call it off here or say "it's a false alarm".</div>
-      <div class="intr-body" id="intr-body">
-        <div class="mmwave-empty">Loading…</div>
-      </div>
-    </div>
-
-    <!-- INTRUSION LOG + TRAINING -->
-    <div class="panel">
-      <div class="head">
-        <span>Intrusion Log</span>
-        <span class="side" id="ilog-learn">…</span>
-      </div>
-      <div class="mem-sub">Every intrusion event with its snapshot. Mark each one <b>real</b> or <b>false alarm</b> — Nova learns from your labels and stops firing the low-confidence alerts for patterns you keep calling false. A confirmed intrusion always alerts, no matter what it has learned.</div>
-      <div class="doclib-controls">
-        <button class="cam-diag-btn" id="ilog-refresh">⟳ REFRESH</button>
-      </div>
-      <div class="ilog-body" id="ilog-body">
-        <div class="mmwave-empty">Loading…</div>
-      </div>
-    </div>
-  </div>
-  ` : ''}
-
-  ${this._currentTab === 'suggestions' ? `
-  <div class="logs-tab">
-    <div class="panel">
-      <div class="head"><span>SUGGESTIONS</span></div>
-      <div class="sug-tab-intro">Automations Nova has learned from watching your
-        routines. Review each — approve to create it in Home Assistant, or dismiss
-        it. Nothing runs until you approve, and you can see the exact automation
-        before deciding.</div>
-      ${this._renderSuggestions(d)}
-    </div>
-  </div>
-  ` : ''}
-
-  ${this._currentTab === 'logs' ? `
-  <div class="logs-tab">
-    <div class="panel">
-      <div class="head">
-        <span>System Log</span>
-        <span class="side">Nova INTERNAL</span>
-      </div>
-      <div class="log-filters">
-        <input id="log-search" class="log-search" type="text" placeholder="search…" autocomplete="off" value="${this._esc(this._logSearch || '')}" />
-        <button class="log-filter ${(this._logFilter || 'all') === 'all' ? 'active' : ''}" data-filter="all">ALL</button>
-        <button class="log-filter ${this._logFilter === 'CONV' ? 'active' : ''}" data-filter="CONV">CONV</button>
-        <button class="log-filter ${this._logFilter === 'REPLY' ? 'active' : ''}" data-filter="REPLY">REPLY</button>
-        <button class="log-filter ${this._logFilter === 'LOCAL' ? 'active' : ''}" data-filter="LOCAL">LOCAL</button>
-        <button class="log-filter ${this._logFilter === 'LEARN' ? 'active' : ''}" data-filter="LEARN">LEARN</button>
-        <button class="log-filter ${this._logFilter === 'AGENT' ? 'active' : ''}" data-filter="AGENT">AGENT</button>
-        <button class="log-filter ${this._logFilter === 'AUTO' ? 'active' : ''}" data-filter="AUTO">AUTO</button>
-        <button class="log-filter ${this._logFilter === 'MODE' ? 'active' : ''}" data-filter="MODE">MODE</button>
-        <button class="log-filter ${this._logFilter === 'CONFIG' ? 'active' : ''}" data-filter="CONFIG">CONFIG</button>
-        <button class="log-filter ${this._logFilter === 'CLASSIFY' ? 'active' : ''}" data-filter="CLASSIFY">CLASSIFY</button>
-        <button class="log-filter ${this._logFilter === 'CAMERA' ? 'active' : ''}" data-filter="CAMERA">CAMERA</button>
-        <button class="log-filter ${this._logFilter === 'ENERGY' ? 'active' : ''}" data-filter="ENERGY">ENERGY</button>
-        <button class="log-filter ${this._logFilter === 'BIO' ? 'active' : ''}" data-filter="BIO">BIO</button>
-        <button class="log-filter ${this._logFilter === 'OFFER' ? 'active' : ''}" data-filter="OFFER">OFFER</button>
-        <button class="log-filter ${this._logFilter === 'SAFETY' ? 'active' : ''}" data-filter="SAFETY">SAFETY</button>
-        <button class="log-filter ${this._logFilter === 'ERROR' ? 'active' : ''}" data-filter="ERROR">ERROR</button>
-        <button class="log-filter ${this._logFilter === 'WARNING' ? 'active' : ''}" data-filter="WARNING">WARNING</button>
-        <button class="log-filter ${this._logFilter === 'GATE' ? 'active' : ''}" data-filter="GATE">GATE</button>
-        <button class="log-filter ${this._logFilter === 'DEDUP' ? 'active' : ''}" data-filter="DEDUP">DEDUP</button>
-        <button class="log-filter ${this._logFilter === 'OFFLINE' ? 'active' : ''}" data-filter="OFFLINE">OFFLINE</button>
-      </div>
-      <div class="log-count" id="log-count"></div>
-      <div id="debug-log-entries" class="log-entries">
-        <div class="log-loading">Loading...</div>
-      </div>
-    </div>
-  </div>
-  ` : ''}
-
-  ${this._currentTab === 'memory' ? `
-  <!-- ═══ MEMORY TAB ═══ -->
-  <div class="mem-tab">
-    <div class="panel">
-      <div class="head">
-        <span>What Nova Knows</span>
-        <span class="side" id="mem-count">— FACTS</span>
-      </div>
-      <div class="mem-sub">Durable facts &amp; preferences Nova recalls in conversation. Teach it something, or forget anything with ✕.</div>
-      <div class="mem-teach">
-        <input id="mem-key" class="mem-input" placeholder="what  (e.g. trash day)" autocomplete="off" />
-        <input id="mem-val" class="mem-input" placeholder="is  (e.g. Tuesday)" autocomplete="off" />
-        <select id="mem-subject" class="mem-input mem-select">
-          <option value="household">Household</option>
-          <option value="primary">About me</option>
-        </select>
-        <button id="mem-add" class="mem-btn">TEACH</button>
-      </div>
-      <div id="memory-list" class="mem-list"><div class="mem-empty">Loading…</div></div>
-    </div>
-
-    <div class="panel" id="pending-facts-panel" hidden>
-      <div class="head">
-        <span>Pending Confirmation</span>
-        <span class="side" id="pending-count">— WAITING</span>
-      </div>
-      <div class="mem-sub">Nova proposed these while talking with you — from "remember that…" — but nobody confirmed them yet, so they aren't trusted or used in conversation until you approve, edit, or reject them here.</div>
-      <div id="pending-facts-list" class="mem-list"></div>
-    </div>
-
-    <div class="panel">
-      <div class="head">
-        <span>Person Routines</span>
-        <span class="side">LEARNED</span>
-      </div>
-      <div class="mem-sub">Habits Nova has confidently attributed to one person, from 30 days of sole-occupant activity — separate from household-wide facts above.</div>
-      <div id="proutine-list" class="mem-list"><div class="mem-empty">Loading…</div></div>
-    </div>
-  </div>
-  ` : ''}
-
-  <!-- FOOTER -->
-  <div class="footer">
-    <div>NODE: <span class="hl">HOMEASSISTANT.LOCAL</span></div>
-    <div class="mid">// Nova · v${this._liveData?.version || '—'} · ${this._currentTab.toUpperCase()}</div>
-    <div>STATUS: <span class="hl">NOMINAL</span></div>
-  </div>
-
-  <!-- Toast container -->
-  <div class="toast-wrap" id="toast-wrap"></div>
-
-  <!-- AREA DETAIL (drill-down) -->
-  ${this._renderAreaDetail(d)}
-</div>
-    `;
-  }
-
-  // ─── Event wiring ────────────────────────────────────────────────────────
-
-  _stampSettingsSections() {
-    // Assign each Settings card to a sub-section and record it on the element as
-    // data-section. Runs while headings are still their original English text, so
-    // the mapping is stable even after _localizeDOM() translates the visible text.
-    // Matching the *displayed* text (as this used to) silently put every card in
-    // "general" on any non-English UI — leaving every other sub-tab empty.
+  _wireFloorPlanEditor() {
     const root = this.shadowRoot;
-    const grid = root && root.querySelector(".settings-grid");
-    if (!grid) return;
-    // Card heading → section. Unmapped cards fall into "general" so nothing ever
-    // disappears (a new/renamed card just shows under General until mapped).
-    const MAP = {
-      "Residence / Home": "general", "General": "general",
-      "Operational Mode": "general", "System Diagnostics": "general",
-      "AI Models": "voice", "Briefings": "voice", "Voice Confirmation": "voice",
-      "Satellite → Speaker": "voice", "Announcement Speakers": "voice",
-      "Room Speakers": "voice",
-      "Anticipation & Memory": "learning", "Memory": "learning",
-      "Observer Tuning": "learning", "Routine Learning": "learning",
-      "Excluded Entities": "learning",
-      "Notifications": "safety", "Sentinel Rules": "safety",
-      "Hazard Monitor": "safety", "Energy Management": "safety",
-      "Appliances": "safety",
-      "Cameras": "cameras", "Diagnostics": "cameras",
-      "Doorbell Training": "cameras",
-      "Floor Plan Editor": "home", "Wellbeing Context": "home",
-      "Nova Character & Research": "home", "Document Library": "home",
-    };
-    Array.from(grid.children).forEach(card => {
-      if (!card.classList || !card.classList.contains("panel")) return;
-      const h = card.querySelector(".head span");
-      const title = h ? h.textContent.trim() : "";
-      card.dataset.section = MAP[title] || "general";
-    });
-  }
+    if (!root || !root.getElementById("fpnCanvas")) return;   // card not in the DOM right now
 
-  _applySettingsSections() {
-    const root = this.shadowRoot;
-    const grid = root && root.querySelector(".settings-grid");
-    if (!grid) return;
-    const active = this._settingsSection || "general";
-    root.querySelectorAll(".settings-subnav-btn").forEach(b => {
-      b.classList.toggle("active", b.getAttribute("data-settings-section") === active);
-    });
-    Array.from(grid.children).forEach(card => {
-      if (!card.classList || !card.classList.contains("panel")) return;
-      // Read the section stamped at render time (localization-proof), not the
-      // possibly-translated heading text.
-      const section = card.dataset.section || "general";
-      card.style.display = section === active ? "" : "none";
-    });
-  }
-
-  _wire() {
-    // Hamburger menu → HA sidebar toggle
-    const mBtn = this.shadowRoot.querySelector("#menu-btn");
-    if (mBtn) {
-      mBtn.addEventListener("click", () => {
-        this.dispatchEvent(new Event("hass-toggle-menu", { bubbles: true, composed: true }));
-      });
-    }
-
-    // Lockdown toggle
-    const ldBtn = this.shadowRoot.querySelector("#lockdown-btn");
-    if (ldBtn) {
-      ldBtn.addEventListener("click", async () => {
-        const active = !!this._liveData?.lockdown?.active;
-        ldBtn.disabled = true;
-        try {
-          const res = await this._hass.callWS({ type: "nova/set_lockdown", on: !active });
-          if (res && res.lockdown) {
-            if (!this._liveData) this._liveData = {};
-            this._liveData.lockdown = res.lockdown;
-            this._patchLockdown(this._liveData);   // flip the switch on the WS result, not the next poll
-          }
-          await this._fetchLiveData();
-        } catch (e) {
-          console.warn("Nova: lockdown toggle failed", e);
-        } finally {
-          ldBtn.disabled = false;
-        }
-      });
-    }
-
-    // Tab switching
-    this.shadowRoot.querySelectorAll(".tab").forEach(tab => {
-      tab.addEventListener("click", (e) => {
-        const newTab = e.currentTarget.getAttribute("data-tab");
-        if (newTab && newTab !== this._currentTab) {
-          this._currentTab = newTab;
-          this._render();
-          if (newTab === "logs") this._fetchDebugLog();
-          if (newTab === "memory") { this._fetchKnowledge(); this._fetchPersonRoutines(); }
-        }
-      });
-    });
-
-    // Settings sub-navigation: switch section without a full re-render (cards
-    // stay in the DOM; we just show the active section's cards).
-    this.shadowRoot.querySelectorAll(".settings-subnav-btn").forEach(btn => {
-      btn.addEventListener("click", (e) => {
-        const sec = e.currentTarget.getAttribute("data-settings-section");
-        if (sec && sec !== this._settingsSection) {
-          this._settingsSection = sec;
-          this._applySettingsSections();
-        }
-      });
-    });
-    // Apply the active section on every render (Settings tab only).
-    if (this._currentTab === "settings") this._applySettingsSections();
-
-    // Memory tab: teach a new fact
-    const memAdd = this.shadowRoot.querySelector("#mem-add");
-    if (memAdd) {
-      memAdd.addEventListener("click", () => this._teachKnowledge());
-      ["mem-key", "mem-val"].forEach(id => {
-        const el = this.shadowRoot.getElementById(id);
-        if (el) el.addEventListener("keydown", (e) => {
-          if (e.key === "Enter") { e.preventDefault(); this._teachKnowledge(); }
-        });
-      });
-      // first paint of the tab renders whatever we already have, then refresh
-      this._renderKnowledgeList();
-      this._renderPersonRoutines();
-    }
-
-    // Log filter buttons
-    this.shadowRoot.querySelectorAll(".log-filter").forEach(btn => {
-      btn.addEventListener("click", (e) => {
-        const filter = e.currentTarget.getAttribute("data-filter");
-        this._logFilter = filter;
-        // Update active state
-        this.shadowRoot.querySelectorAll(".log-filter").forEach(b => b.classList.remove("active"));
-        e.currentTarget.classList.add("active");
-        this._fetchDebugLog();
-      });
-    });
-
-    // Log text search — debounced, filters client-side alongside the category buttons
-    const logSearch = this.shadowRoot.querySelector("#log-search");
-    if (logSearch) {
-      logSearch.addEventListener("input", (e) => {
-        clearTimeout(this._logSearchDebounce);
-        const val = e.currentTarget.value;
-        this._logSearchDebounce = setTimeout(() => {
-          this._logSearch = val;
-          this._fetchDebugLog();
-        }, 200);
-      });
-    }
-
-    // Activity feed search — debounced; updates only the feed rows so the
-    // input keeps focus while typing (no full re-render).
-    const actSearch = this.shadowRoot.querySelector("#activity-search");
-    if (actSearch) {
-      actSearch.addEventListener("input", (e) => {
-        clearTimeout(this._activitySearchDebounce);
-        const val = e.currentTarget.value;
-        this._activitySearchDebounce = setTimeout(() => {
-          this._activitySearch = val;
-          this._updateActivityFeed();
-        }, 200);
-      });
-    }
-
-    // Floor plan tabs — rebuild 3D house
-    this.shadowRoot.querySelectorAll(".view-btn").forEach(btn => {
-      btn.addEventListener("click", (e) => {
-        const t = e.currentTarget, scope = t.getAttribute("data-vscope"), theta = parseFloat(t.getAttribute("data-vtheta"));
-        this._setView(scope, theta);
-        t.parentElement.querySelectorAll(".view-btn").forEach(b => b.classList.remove("active"));
-        t.classList.add("active");
-      });
-    });
-    this._wireEditorPreviewDrag();
-
-    this.shadowRoot.querySelectorAll(".floor-tab").forEach(btn => {
-      btn.addEventListener("click", (e) => {
-        const floor = e.currentTarget.getAttribute("data-floor");
-        if (floor && floor !== this._currentFloor) {
-          this._currentFloor = floor;
-          this.shadowRoot.querySelectorAll(".floor-tab").forEach(b => b.classList.remove("active"));
-          e.currentTarget.classList.add("active");
-          this._build3DHouse();
-        }
-      });
-    });
-
-    // Camera Watch lives on the Command Center; the 3D house on its own tab.
-    if (this._currentTab === 'dashboard') {
-      this._setupCameras();
-      this.shadowRoot.getElementById("cam-diag-btn")
-        ?.addEventListener("click", () => this._runCamDiagnostics());
-      this._wireSolar();
-    }
-    if (this._currentTab === 'residence') {
-      this._build3DHouse();
-      this._wire3DDrag();
-      this._wireResidenceControls();
-      this._fetchMmwave();
-    }
-    if (this._currentTab === 'settings') {
-      this._wireCameraSettings();
-      this._wireMode();
-      this._wireBio();
-      this._wireEnergy();
-      this._wireDiagnostics();
-      this._wireHazard();
-      this._wireBriefings();
-      this._wireDocLibrary();
-    }
-    if (this._currentTab === 'intrusion') {
-      this._wireIntrusion();
-      this._wireIntrusionLog();
-    }
-
-    // Service-call buttons
-    this.shadowRoot.querySelectorAll("[data-svc]").forEach(btn => {
-      btn.addEventListener("click", async (e) => {
-        const svcAttr = e.currentTarget.getAttribute("data-svc");
-        const dataAttr = e.currentTarget.getAttribute("data-svc-data");
-        if (!svcAttr || !this._hass) return;
-        const [domain, service] = svcAttr.split(".");
-        let serviceData = {};
-        if (dataAttr) {
-          try { serviceData = JSON.parse(dataAttr); } catch (_) { serviceData = {}; }
-        }
-        try {
-          await this._hass.callService(domain, service, serviceData);
-          this._toast(`✓ ${svcAttr}`, "ok");
-        } catch (err) {
-          this._toast(`✗ ${svcAttr} — ${err?.message || err}`, "err");
-        }
-      });
-    });
-
-    // Observer hourly call cap (0 = unlimited). Saves live to runtime_config.
-    const rl = this.shadowRoot.querySelector(".rate-limit-input");
-    if (rl) {
-      rl.addEventListener("change", async () => {
-        let v = parseInt(rl.value, 10);
-        if (isNaN(v) || v < 0) v = 0;
-        rl.value = v;
-        await this._saveConfig("classifier_rate_limit", v);
-        this._toast(v === 0 ? "✓ hourly cap → unlimited" : `✓ hourly cap → ${v}/hr`, "ok");
-      });
-    }
-
-    // Area-card light toggles (flat, always-clickable control mirroring the 3D lamp).
-    // Skipped entirely when light control is disabled — the pill stays as a pure indicator.
-    const _lightCtlOn = (this._liveData && this._liveData.config && this._liveData.config.light_control_enabled) !== false;
-    if (_lightCtlOn) {
-      this.shadowRoot.querySelectorAll('.area-light').forEach(btn => {
-        btn.addEventListener('click', (ev) => {
-          ev.stopPropagation();
-          const areaId = btn.getAttribute('data-light-area');
-          const name = btn.getAttribute('data-area-name') || 'Area';
-          const isOn = btn.classList.contains('on');
-          this._toggleAreaLights(areaId, name, isOn);
-        });
-      });
-    }
-
-    // Area tiles: click (or Enter/Space) opens the drill-down detail card.
-    // The light-toggle pill inside a tile already stopPropagation()s so it
-    // doesn't also trigger the expand.
-    this.shadowRoot.querySelectorAll('.area[data-area-id]').forEach(tile => {
-      const open = () => {
-        const id = tile.getAttribute('data-area-id');
-        if (!id) return;
-        this._expandedArea = id;
-        this._render();
-      };
-      tile.addEventListener('click', open);
-      tile.addEventListener('keydown', (ev) => {
-        if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); open(); }
-      });
-    });
-
-    // Area detail overlay: close on the ✕ button or a backdrop click.
-    const detailOverlay = this.shadowRoot.querySelector('#area-detail-overlay');
-    if (detailOverlay) {
-      const close = () => { this._expandedArea = null; this._render(); };
-      detailOverlay.addEventListener('click', (ev) => {
-        if (ev.target === detailOverlay) close();   // backdrop only
-      });
-      detailOverlay.querySelector('.area-detail-close')?.addEventListener('click', close);
-    }
-
-    // Pattern-engine suggestions: approve / dismiss / YAML reveal
-    this.shadowRoot.querySelectorAll(".sug").forEach(card => {
-      const sid = parseInt(card.getAttribute("data-sug-id"), 10);
-      const act = async (action) => {
-        if (!this._hass || isNaN(sid)) return;
-        try {
-          const res = await this._hass.callWS({ type: "nova/suggestion_action", suggestion_id: sid, action });
-          if (action === "approve") {
-            // v7.101.28: approval now installs the automation into HA directly.
-            this._toast(res?.installed
-              ? `✓ installed — "${res.alias || 'automation'}" is now live in Home Assistant`
-              : `✓ approved — advisory only${res?.reason ? ` (${res.reason})` : ''}`, "ok");
-          } else {
-            this._toast("✓ dismissed", "ok");
-          }
-          card.style.opacity = "0.35";
-          card.querySelectorAll("button").forEach(b => b.disabled = true);
-        } catch (err) {
-          this._toast(`✗ suggestion — ${err?.message || err}`, "err");
-        }
-      };
-      card.querySelector(".sug-approve")?.addEventListener("click", () => act("approve"));
-      card.querySelector(".sug-dismiss")?.addEventListener("click", () => act("dismiss"));
-      card.querySelector(".sug-yaml-btn")?.addEventListener("click", () => {
-        const pre = card.querySelector(".sug-yaml");
-        if (pre) pre.hidden = !pre.hidden;
-      });
-    });
-
-    // Goals: cancel an active goal
-    this.shadowRoot.querySelectorAll(".goal-cancel").forEach(btn => {
-      btn.addEventListener("click", async (e) => {
-        const card = e.currentTarget.closest(".goal");
-        const gid = parseInt(card?.getAttribute("data-goal-id"), 10);
-        if (!this._hass || isNaN(gid)) return;
-        e.currentTarget.disabled = true;
-        try {
-          await this._hass.callWS({ type: "nova/goal_action", goal_id: gid, action: "cancel" });
-          this._toast("✓ goal cancelled", "ok");
-          await this._fetchLiveData();
-        } catch (err) {
-          this._toast(`✗ cancel — ${err?.message || err}`, "err");
-          e.currentTarget.disabled = false;
-        }
-      });
-    });
-
-    // Goals: delete a finished/cancelled goal (tidy the list)
-    this.shadowRoot.querySelectorAll(".goal-delete").forEach(btn => {
-      btn.addEventListener("click", async (e) => {
-        const card = e.currentTarget.closest(".goal");
-        const gid = parseInt(card?.getAttribute("data-goal-id"), 10);
-        if (!this._hass || isNaN(gid)) return;
-        e.currentTarget.disabled = true;
-        try {
-          await this._hass.callWS({ type: "nova/goal_action", goal_id: gid, action: "delete" });
-          this._toast("✓ goal deleted", "ok");
-          await this._fetchLiveData();
-        } catch (err) {
-          this._toast(`✗ delete — ${err?.message || err}`, "err");
-          e.currentTarget.disabled = false;
-        }
-      });
-    });
-
-    // Goals: write in a new goal from the panel
-    const goalInput = this.shadowRoot.querySelector(".goal-new-input");
-    const goalBtn = this.shadowRoot.querySelector(".goal-new-btn");
-    const submitGoal = async () => {
-      const outcome = (goalInput?.value || "").trim();
-      if (!this._hass || !outcome) return;
-      if (goalBtn) goalBtn.disabled = true;
-      if (goalInput) goalInput.disabled = true;
-      try {
-        await this._hass.callWS({ type: "nova/goal_action", action: "create", outcome });
-        this._toast("✓ goal added", "ok");
-        if (goalInput) goalInput.value = "";
-        await this._fetchLiveData();
-      } catch (err) {
-        this._toast(`✗ add — ${err?.message || err}`, "err");
-        if (goalBtn) goalBtn.disabled = false;
-        if (goalInput) goalInput.disabled = false;
-      }
-    };
-    goalBtn?.addEventListener("click", submitGoal);
-    goalInput?.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") { e.preventDefault(); submitGoal(); }
-    });
-
-    // Local LLM base URL (Ollama / GPU server endpoint)
-    const llmUrl = this.shadowRoot.querySelector(".llm-url-input");
-    if (llmUrl) {
-      llmUrl.addEventListener("change", async () => {
-        const v = llmUrl.value.trim();
-        await this._saveConfig("llm_base_url", v);
-        this._toast(v ? `✓ local LLM endpoint → ${v}` : "✓ local LLM endpoint cleared", "ok");
-      });
-    }
-
-    // Doorbell backlog training scan
-    const dbtScan = this.shadowRoot.querySelector(".dbt-scan");
-    if (dbtScan) {
-      dbtScan.addEventListener("click", async () => {
-        if (!this._hass) return;
-        const limInput = this.shadowRoot.querySelector(".dbt-limit");
-        let limit = limInput ? parseInt(limInput.value, 10) : 40;
-        if (isNaN(limit) || limit < 1) limit = 40;
-        this._toast(`⏳ scanning doorbell backlog (up to ${limit})…`, "ok");
-        try {
-          await this._hass.callService("nova", "train_doorbell_backlog", { limit });
-          this._toast("✓ backlog scan running — dataset updates shortly (see Logs)", "ok");
-          setTimeout(() => this._fetchLiveData && this._fetchLiveData(), 4000);
-        } catch (err) {
-          this._toast(`✗ backlog — ${err?.message || err}`, "err");
-        }
-      });
-    }
-
-    // Camera diagnostic: run a full vision → reasoning → incorporate review
-    // on the selected camera. Manual call, so it always reports the result.
-    const camRun = this.shadowRoot.querySelector(".diag-camera-run");
-    if (camRun) {
-      camRun.addEventListener("click", async () => {
-        const sel = this.shadowRoot.querySelector(".diag-camera-select");
-        const entity_id = sel ? sel.value : "";
-        if (!entity_id || !this._hass) {
-          this._toast("✗ no camera selected", "err");
-          return;
-        }
-        this._toast(`⏳ analyzing ${entity_id}…`, "ok");
-        try {
-          await this._hass.callService("nova", "analyze_camera", {
-            entity_id, announce: true,
-          });
-          this._toast(`✓ camera review ran — check Logs for the result`, "ok");
-        } catch (err) {
-          this._toast(`✗ camera — ${err?.message || err}`, "err");
-        }
-      });
-    }
-
-    // Config toggle buttons (Settings panel). Scope to elements that carry a
-    // toggle VALUE (data-cfg-val) — i.e. the on/off buttons. Without this,
-    // the selector also matched the AI-Models provider/model <select>s (which
-    // carry data-cfg-key but no data-cfg-val), and their click fired this
-    // handler too — writing data-cfg-val (null) over the just-saved value and
-    // reverting the provider to groq.
-    // Routine learning: add/remove specific opt-in entities (v7.101.28)
-    const _plAddBtn = this.shadowRoot.querySelector('#pl-add-entity');
-    if (_plAddBtn) _plAddBtn.addEventListener('click', () => {
-      const inp = this.shadowRoot.querySelector('#pl-entity-input');
-      const eid = inp && inp.value.trim();
-      if (!eid) return;
-      if (this._hass && this._hass.states && this._hass.states[eid]) {
-        const arr = this._plList();
-        if (!arr.includes(eid)) { arr.push(eid); this._plSave(arr); }
-      } else {
-        this._toast(`"${eid}" is not a known entity id`, 'err');
-      }
-    });
-    this.shadowRoot.querySelectorAll('.pl-del').forEach(b => b.addEventListener('click', () => {
-      const arr = this._plList(); arr.splice(parseInt(b.getAttribute('data-i')), 1); this._plSave(arr);
-    }));
-
-    // Excluded entities: three chip pickers (entities / domains / labels)
-    const _exclAdd = (addId, inpId, key, validate) => {
-      const btn = this.shadowRoot.querySelector('#' + addId);
-      if (!btn) return;
-      btn.addEventListener('click', () => {
-        const inp = this.shadowRoot.querySelector('#' + inpId);
-        const val = inp && inp.value.trim();
-        if (!val) return;
-        if (validate && !validate(val)) return;
-        const arr = this._exclArr((this._data().config || {})[key]);
-        if (!arr.includes(val)) { arr.push(val); this._exclSave(key, arr); }
-      });
-    };
-    _exclAdd('excl-ent-add', 'excl-ent-input', 'excluded_entities', (v) => {
-      if (this._hass && this._hass.states && this._hass.states[v]) return true;
-      this._toast(`"${v}" is not a known entity id`, 'err'); return false;
-    });
-    _exclAdd('excl-dom-add', 'excl-dom-input', 'excluded_domains', null);
-    _exclAdd('excl-lab-add', 'excl-lab-input', 'excluded_labels', null);
-    const _exclDel = (cls, key) => this.shadowRoot.querySelectorAll('.' + cls).forEach(b =>
-      b.addEventListener('click', () => {
-        const arr = this._exclArr((this._data().config || {})[key]);
-        arr.splice(parseInt(b.getAttribute('data-i')), 1); this._exclSave(key, arr);
-      }));
-    _exclDel('excl-ent-del', 'excluded_entities');
-    _exclDel('excl-dom-del', 'excluded_domains');
-    _exclDel('excl-lab-del', 'excluded_labels');
-
-    this.shadowRoot.querySelectorAll("[data-cfg-key][data-cfg-val]").forEach(btn => {
-      btn.addEventListener("click", async (e) => {
-        const key = e.currentTarget.getAttribute("data-cfg-key");
-        const rawVal = e.currentTarget.getAttribute("data-cfg-val");
-        const value = rawVal === "true" ? true : rawVal === "false" ? false : rawVal;
-        if (!key || !this._hass) return;
-        try {
-          await this._hass.callWS({
-            type: "nova/update_config",
-            key: key,
-            value: value,
-          });
-          this._toast(`✓ ${key} → ${value}`, "ok");
-          await this._fetchAndRender();
-        } catch (err) {
-          this._toast(`✗ ${key} — ${err?.message || err}`, "err");
-        }
-      });
-    });
-
-    // Voice Confirmation: announce test (v7.101.28)
-    // Manual "Analyze Now" — force a pattern-analysis pass (bypasses only the
-    // 6h throttle, not the data gate) and show the outcome. (v7.101.28)
-    const runAnaBtn = this.shadowRoot?.getElementById("qa-run-analysis");
-    if (runAnaBtn && !runAnaBtn._wired) {
-      runAnaBtn._wired = true;
-      runAnaBtn.addEventListener("click", async () => {
-        if (!this._hass) return;
-        const out = this.shadowRoot?.getElementById("qa-analysis-result");
-        runAnaBtn.disabled = true;
-        const orig = runAnaBtn.textContent;
-        runAnaBtn.textContent = "Analyzing…";
-        if (out) out.textContent = "Running pattern analysis over your history…";
-        try {
-          const res = await this._hass.callWS({ type: "nova/run_analysis" });
-          const bf = res.backfill || {};
-          const bfNote = bf.imported ? `<br><span class="qa-diag">Imported ${bf.imported} past event${bf.imported === 1 ? "" : "s"} from history for ${bf.entities} new entit${bf.entities === 1 ? "y" : "ies"}.</span>` : "";
-          if (out) {
-            if (res.ran) {
-              const nf = res.patterns_found ?? 0;
-              const ns = res.new_suggestions ?? 0;
-              let msg = `<span class="diag-ok">✓</span> Found ${nf} pattern${nf === 1 ? "" : "s"}, ${ns} new suggestion${ns === 1 ? "" : "s"}.`;
-              if (ns > 0) {
-                msg += ` Check Review Suggestions.`;
-              } else {
-                msg += ` Nothing cleared the confidence bar this pass.`;
-                const dg = res.diagnostic || {};
-                const cand = (dg.candidates || [])[0];
-                if (cand) {
-                  const hr = String(cand.hour).padStart(2, "0");
-                  msg += `<br><span class="qa-diag">Closest routine: <b>${this._esc(cand.entity_id)}</b> → ${this._esc(cand.state)} ~${hr}:00, seen ${cand.days}/${dg.total_days} days (needs ${dg.min_days}).</span>`;
-                }
-                const src = (dg.top_sources || [])[0];
-                if (src) {
-                  msg += `<br><span class="qa-diag">Busiest source: ${this._esc(src.entity_id)} (${src.changes} changes).</span>`;
-                }
-              }
-              const nm = Array.isArray(res.near_misses) ? res.near_misses : [];
-              if (nm.length) {
-                msg += `<br><span class="qa-diag">Building toward suggestions:</span>`;
-                msg += nm.slice(0, 5).map(m => {
-                  const prog = m.needed ? ` (${m.occurrences}/${m.needed})` : ` (${m.occurrences}×)`;
-                  return `<br><span class="qa-diag">• ${this._esc(m.description || m.type)}${prog}</span>`;
-                }).join("");
-              }
-              out.innerHTML = msg + bfNote;
-            } else {
-              out.innerHTML = `<span class="diag-down">✕</span> ${this._esc(res.reason || res.error || "Analysis did not run.")}` + bfNote;
-            }
-          }
-          // Refresh the cognitive readout so the last-analysis line updates
-          try { await this._fetchLiveData?.(); } catch (_) {}
-        } catch (err) {
-          if (out) out.innerHTML = `<span class="diag-down">✕</span> ${this._esc(err?.message || String(err))}`;
-        } finally {
-          runAnaBtn.disabled = false;
-          runAnaBtn.textContent = orig;
-        }
-      });
-    }
-
-    const vcTestBtn = this.shadowRoot?.getElementById("vc-test");
-    if (vcTestBtn && !vcTestBtn._wired) {
-      vcTestBtn._wired = true;
-      vcTestBtn.addEventListener("click", async () => {
-        if (!this._hass) return;
-        const out = this.shadowRoot?.getElementById("vc-test-result");
-        vcTestBtn.disabled = true;
-        const orig = vcTestBtn.textContent;
-        vcTestBtn.textContent = "▶ PLAYING…";
-        if (out) out.textContent = "Firing announce to your satellite — listen for it…";
-        try {
-          const res = await this._hass.callWS({ type: "nova/voice_confirm_test" });
-          if (out) out.innerHTML = res.ok
-            ? `<span class="diag-ok">✓</span> ${this._esc(res.note || "Announce fired.")} <span class="vc-sat">(${this._esc(res.satellite || "")})</span>`
-            : `<span class="diag-down">✕</span> ${this._esc(res.note || res.error || "Test failed.")}`;
-        } catch (err) {
-          if (out) out.innerHTML = `<span class="diag-down">✕</span> ${this._esc(err?.message || String(err))}`;
-        } finally {
-          vcTestBtn.disabled = false;
-          vcTestBtn.textContent = orig;
-        }
-      });
-    }
-
-    // Onboarding welcome card: dismiss + settings jump (v7.101.28)
-    const obDismiss = this.shadowRoot?.getElementById("ob-dismiss");
-    obDismiss?.addEventListener("click", async () => {
-      if (this._liveData?.onboarding) this._liveData.onboarding.show = false;
-      this._render();
-      try {
-        await this._hass?.callWS({ type: "nova/update_config", key: "onboarding_dismissed", value: true });
-      } catch (_) {}
-    });
-    const obGo = this.shadowRoot?.querySelector(".ob-go[data-tab-jump]");
-    obGo?.addEventListener("click", () => {
-      this._currentTab = "settings";
-      this._render();
-    });
-    // Per-step jump: switch to Settings and scroll/flash the relevant card (v7.101.28)
-    this.shadowRoot?.querySelectorAll(".ob-step-go[data-ob-jump]").forEach(btn => {
+    root.querySelectorAll(".fpn-floor-tab").forEach(btn => {
       btn.addEventListener("click", () => {
-        const title = btn.getAttribute("data-ob-jump") || "";
-        this._currentTab = "settings";
-        this._render();
-        requestAnimationFrame(() => {
-          const panels = this.shadowRoot?.querySelectorAll(".settings-grid .panel") || [];
-          for (const p of panels) {
-            const head = (p.querySelector(".head span")?.textContent || "").trim();
-            if (title && head.includes(title)) {
-              p.scrollIntoView({ behavior: "smooth", block: "start" });
-              p.classList.add("ob-flash");
-              setTimeout(() => p.classList.remove("ob-flash"), 1600);
-              break;
-            }
-          }
-        });
+        this._editorFloor = btn.getAttribute("data-fpn-floor");
+        this._editVB = null;
+        this._rerenderFloorPlanCard();
       });
     });
+    const fit = root.getElementById("fpnZoomFit");
+    if (fit) fit.addEventListener("click", () => { this._editVB = null; this._rerenderFloorPlanCard(); });
 
-    // Saves on change; empty number fields clear the key so the model reverts to its default.
-    this.shadowRoot.querySelectorAll("[data-lab-area]").forEach(btn => {
-      btn.addEventListener("click", async () => {
-        const id = btn.getAttribute("data-lab-area");
-        let cur = this._data().config?.lab_areas;
-        cur = Array.isArray(cur) ? cur.slice() : [];
-        const i = cur.indexOf(id);
-        if (i >= 0) cur.splice(i, 1); else cur.push(id);
-        try { await this._saveConfig("lab_areas", cur); } catch (_) {}
-        await this._fetchAndRender();
-      });
+    const units = root.getElementById("fpnUnits");
+    if (units) units.addEventListener("click", async () => {
+      const next = this._fpUnits() === "metric" ? "imperial" : "metric";
+      try {
+        await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_units", value: next });
+        if (this._liveData?.config) this._liveData.config.floor_plan_units = next;
+      } catch (err) { console.error("Nova: floor plan units save failed", err); }
+      this._rerenderFloorPlanCard();
     });
 
-    this.shadowRoot.querySelectorAll("select.cfg-field[data-cfg-key], input.cfg-field[data-cfg-key]").forEach(el => {
-      if (el._cfgWired) return;
-      el._cfgWired = true;
-      el.addEventListener("change", async () => {
-        const key = el.getAttribute("data-cfg-key");
-        if (!key) return;
-        let value = el.value;
-        if (el.type === "number") value = (value === "" ? null : Number(value));
-        await this._saveConfig(key, value);
-        await this._fetchAndRender();
-      });
+    const addRoom = root.getElementById("fpnAddRoom");
+    if (addRoom) addRoom.addEventListener("click", () => {
+      const plan = this._getEditingPlan();
+      const floor = this._editorFloor;
+      if (!plan[floor]) return;
+      const name = window.prompt("Room name:");
+      if (!name) return;
+      const type = window.prompt("Type (room, bath, stairs, door):", "room") || "room";
+      plan[floor].rooms = plan[floor].rooms || [];
+      plan[floor].rooms.push({ name, x: 50, y: 50, w: 60, h: 40, type });
+      this._rerenderFloorPlanCard();
     });
 
-    // Language override: the generic handler above saves ui_language; this reloads the
-    // matching translation file and re-renders so the switch is immediate (v7.101.28).
-    const _langSel = this.shadowRoot.getElementById("ui-lang-select");
-    if (_langSel && !_langSel._langWired) {
-      _langSel._langWired = true;
-      _langSel.addEventListener("change", () => { this._uiLangLoaded = null; this._loadUiStrings(); });
-    }
+    const addZone = root.getElementById("fpnAddZone");
+    if (addZone) addZone.addEventListener("click", () => {
+      const plan = this._getEditingPlan();
+      const floor = this._editorFloor;
+      if (!plan[floor]) return;
+      const name = window.prompt("Outdoor zone name (e.g. Front Yard, Driveway, Backyard):");
+      if (!name) return;
+      plan[floor].rooms = plan[floor].rooms || [];
+      const house = plan[floor].rooms.filter(r => r.type !== "outdoor");
+      let zx = 40, zy = 40, zw = 90, zh = 70;
+      if (house.length) {
+        let hx0 = 1e9, hx1 = -1e9, hy1 = -1e9;
+        house.forEach(r => { hx0 = Math.min(hx0, r.x); hx1 = Math.max(hx1, r.x + r.w); hy1 = Math.max(hy1, r.y + r.h); });
+        zx = Math.round(hx0); zy = Math.round(hy1 + 25); zw = Math.round(Math.max(hx1 - hx0, 90));
+      }
+      plan[floor].rooms.push({ name, x: zx, y: zy, w: zw, h: zh, type: "outdoor", points: [[zx, zy], [zx + zw, zy], [zx + zw, zy + zh], [zx, zy + zh]] });
+      this._rerenderFloorPlanCard();
+    });
 
+    const addProperty = root.getElementById("fpnAddProperty");
+    if (addProperty) addProperty.addEventListener("click", () => {
+      const cur = this._propertyPts();
+      if (cur.length >= 3) {
+        if (window.confirm("Remove the property boundary?")) { this._setProperty([]); this._rerenderFloorPlanCard(); }
+        return;
+      }
+      const floor = this._editorFloor;
+      const rooms = ((this._getEditingPlan()[floor] || {}).rooms) || [];
+      let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+      rooms.forEach(r => { x0 = Math.min(x0, r.x); y0 = Math.min(y0, r.y); x1 = Math.max(x1, r.x + r.w); y1 = Math.max(y1, r.y + r.h); });
+      if (!isFinite(x0)) { x0 = 20; y0 = 20; x1 = 220; y1 = 170; }
+      const m = Math.max(150, Math.max(x1 - x0, y1 - y0) * 0.7);
+      this._setProperty([[Math.round(x0 - m), Math.round(y0 - m)], [Math.round(x1 + m), Math.round(y0 - m)], [Math.round(x1 + m), Math.round(y1 + m)], [Math.round(x0 - m), Math.round(y1 + m)]]);
+      this._rerenderFloorPlanCard();
+    });
 
-    // AI Models: provider + live-fetched model dropdowns, with custom fallback.
-    // No _fetchAndRender on change — that would tear down the just-populated
-    // model list. The native <select> already reflects the new value, and the
-    // 5s poll leaves the settings tab untouched (see _patchLiveDom guard).
-    this.shadowRoot.querySelectorAll(".model-row").forEach(row => {
-      const provSel = row.querySelector(".prov-select");
-      const modelSel = row.querySelector(".model-select");
-      const customInput = row.querySelector(".model-custom");
-      if (!provSel || !modelSel) return;
-      // Custom input is shown only when the current model isn't a listed one;
-      // hidden by default, revealed when "Custom…" is chosen.
-      if (customInput) customInput.style.display = "none";
-      // Populate live models for the current provider.
-      this._loadModelsFor(provSel.value, modelSel);
-      // Provider change → persist + refetch this role's model list, then
-      // persist the resulting first model so provider+model stay CONSISTENT.
-      // (Without this, switching groq→gemini→groq left a gemini model under
-      // the groq provider, which fails at call time.)
-      provSel.addEventListener("change", async (e) => {
-        const provider = e.target.value;
-        const provKey = provSel.getAttribute("data-cfg-key");
-        await this._saveConfig(provKey, provider);
-        // Main Agent only: clear the shared base_url when switching to a
-        // provider that has a built-in endpoint, so a stale base_url can't
-        // misroute the call (e.g. a Groq client pointed at Google's URL →
-        // 500 INTERNAL). Ollama/custom keep their URL (they need one).
-        if (provKey === "llm_provider" &&
-            ["groq", "openai", "gemini", "anthropic"].includes(provider)) {
-          await this._saveConfig("llm_base_url", "");
-        }
-        modelSel.setAttribute("data-current", "");
-        if (customInput) customInput.style.display = "none";
-        await this._loadModelsFor(provider, modelSel);
-        const newModel = modelSel.value;
-        if (newModel && newModel !== "__custom__" && newModel !== "") {
-          await this._saveConfig(modelSel.getAttribute("data-cfg-key"), newModel);
-          modelSel.setAttribute("data-current", newModel);
-        }
+    const addElem = (type, kind) => {
+      const floor = this._editorFloor;
+      this._elemsFor(floor).push({ id: "e" + Date.now().toString(36), type, kind, wall: "front", pos: 0.5, w: 20, entity: "" });
+      this._rerenderFloorPlanCard();
+    };
+    const opAddWindow = root.getElementById("opAddWindow"); if (opAddWindow) opAddWindow.addEventListener("click", () => addElem("window", null));
+    const opAddExtdoor = root.getElementById("opAddExtdoor"); if (opAddExtdoor) opAddExtdoor.addEventListener("click", () => addElem("door", "exterior"));
+    const opAddCellar = root.getElementById("opAddCellar"); if (opAddCellar) opAddCellar.addEventListener("click", () => addElem("door", "cellar"));
+    const opAddIntdoor = root.getElementById("opAddIntdoor"); if (opAddIntdoor) opAddIntdoor.addEventListener("click", () => addElem("door", "interior"));
+    const opAddCased = root.getElementById("opAddCased"); if (opAddCased) opAddCased.addEventListener("click", () => addElem("door", "cased"));
+    const opAddFdormer = root.getElementById("opAddFdormer");
+    if (opAddFdormer) opAddFdormer.addEventListener("click", () => {
+      this._elemsFor(this._editorFloor).push({ id: "e" + Date.now().toString(36), type: "dormer", slope: "front", pos: 0.5, entity: "" });
+      this._rerenderFloorPlanCard();
+    });
+    const opAddRdormer = root.getElementById("opAddRdormer");
+    if (opAddRdormer) opAddRdormer.addEventListener("click", () => {
+      this._elemsFor(this._editorFloor).push({ id: "e" + Date.now().toString(36), type: "dormer", slope: "rear", pos: 0.5, entity: "" });
+      this._rerenderFloorPlanCard();
+    });
+    root.querySelectorAll(".op-field-new").forEach(f => {
+      f.addEventListener("change", () => {
+        const arr = this._elemsFor(this._editorFloor), e = arr[parseInt(f.getAttribute("data-i"))];
+        if (!e) return;
+        const op = f.getAttribute("data-op");
+        if (op === "w") e.w = this._fpFromReal(parseFloat(f.value) || 4);
+        else if (op === "pos") e.pos = parseFloat(f.value);
+        else e[op] = f.value;
+        this._rerenderFloorPlanCard();
       });
-      // Model change → persist, or reveal custom input.
-      modelSel.addEventListener("change", async (e) => {
-        if (e.target.value === "__custom__") {
-          if (customInput) { customInput.style.display = ""; customInput.focus(); }
-          return;
-        }
-        if (customInput) customInput.style.display = "none";
-        await this._saveConfig(modelSel.getAttribute("data-cfg-key"), e.target.value);
-        modelSel.setAttribute("data-current", e.target.value);
-      });
-      // Custom model entry → persist on commit.
-      if (customInput) {
-        customInput.addEventListener("change", async (e) => {
-          const v = (e.target.value || "").trim();
-          if (v) {
-            await this._saveConfig(customInput.getAttribute("data-cfg-key"), v);
-            modelSel.setAttribute("data-current", v);
-          }
-        });
+    });
+    root.querySelectorAll(".op-del-new").forEach(b => b.addEventListener("click", () => {
+      this._elemsFor(this._editorFloor).splice(parseInt(b.getAttribute("data-i")), 1);
+      this._rerenderFloorPlanCard();
+    }));
+    const glowMarker = (i, on) => {
+      const m = root.querySelector(`.fpn-op-marker[data-op-marker="${i}"]`);
+      if (m) m.classList.toggle("op-glow", on);
+    };
+    root.querySelectorAll(".op-row-new").forEach(row => {
+      const i = row.getAttribute("data-i");
+      row.addEventListener("mouseenter", () => glowMarker(i, true));
+      row.addEventListener("mouseleave", () => glowMarker(i, false));
+      const ent = row.querySelector(".op-ent-new");
+      if (ent) {
+        ent.addEventListener("focus", () => glowMarker(i, true));
+        ent.addEventListener("blur", () => glowMarker(i, false));
       }
     });
 
-    // Notify device dropdown
-    const notifySel = this.shadowRoot.querySelector("#notify-select");
-    if (notifySel) {
-      notifySel.addEventListener("change", async (e) => {
-        const value = e.target.value || "";
-        if (!this._hass) return;
-        try {
-          await this._hass.callWS({
-            type: "nova/update_config",
-            key: "notify_service",
-            value: value,
-          });
-          this._toast(`✓ notify → ${value || 'none'}`, "ok");
-        } catch (err) {
-          this._toast(`✗ notify — ${err?.message || err}`, "err");
-        }
-      });
-    }
-
-    // Appliance profile editor (Settings → Appliances)
-    const apList = this.shadowRoot.querySelector("#appliance-list");
-    const apAdd = this.shadowRoot.querySelector("#appliance-add");
-    const apSave = this.shadowRoot.querySelector("#appliance-save");
-    const apUnknown = this.shadowRoot.querySelector("#appliance-unknown-toggle");
-    if (apAdd && apList) {
-      apAdd.addEventListener("click", () => {
-        const empty = apList.querySelector(".appliance-empty");
-        if (empty) empty.remove();
-        const tmp = document.createElement("div");
-        tmp.innerHTML = this._applianceRow({ name: "", type: "appliance", entity: "", watts: "" }, 0);
-        const row = tmp.firstElementChild;
-        if (row) apList.appendChild(row);
-      });
-    }
-    if (apList) {
-      apList.addEventListener("click", (e) => {
-        const rm = e.target.closest(".appliance-remove");
-        if (rm) {
-          e.preventDefault();
-          const row = rm.closest(".appliance-row");
-          if (row) row.remove();
-        }
-      });
-    }
-    if (apSave) {
-      apSave.addEventListener("click", async () => {
-        const rows = Array.from(this.shadowRoot.querySelectorAll(".appliance-row"));
-        const out = [];
-        rows.forEach(r => {
-          const name = (r.querySelector(".appliance-name")?.value || "").trim();
-          if (!name) return;
-          out.push({
-            name,
-            type: r.querySelector(".appliance-type")?.value || "appliance",
-            entity: r.querySelector(".appliance-entity")?.value || "",
-            watts: parseFloat(r.querySelector(".appliance-watts")?.value || "0") || 0,
-          });
-        });
-        await this._saveConfig("appliance_profile", JSON.stringify(out));
-        try {
-          await this._hass.callWS({ type: "nova/reload_appliances" });
-          this._toast(`✓ ${out.length} appliance(s) applied`, "ok");
-        } catch (err) {
-          this._toast(`✗ reload — ${err?.message || err}`, "err");
-        }
-      });
-    }
-    if (apUnknown) {
-      apUnknown.addEventListener("change", async (e) => {
-        await this._saveConfig("appliance_announce_unknown", e.target.checked);
-        try { await this._hass.callWS({ type: "nova/reload_appliances" }); } catch (err) {}
-      });
-    }
-
-    // Sentinel rule toggles
-    this.shadowRoot.querySelectorAll(".rule-toggle").forEach(btn => {
-      btn.addEventListener("click", async (e) => {
-        const ruleId = e.currentTarget.getAttribute("data-rule-id");
-        if (!ruleId || !this._hass) return;
-        const d = this._data();
-        const current = d.config?.disabled_sentinel_rules || [];
-        const isDisabled = current.includes(ruleId);
-        const updated = isDisabled
-          ? current.filter(id => id !== ruleId)
-          : [...current, ruleId];
-        try {
-          await this._hass.callWS({
-            type: "nova/update_config",
-            key: "disabled_sentinel_rules",
-            value: JSON.stringify(updated),
-          });
-          this._toast(`✓ ${ruleId} → ${isDisabled ? 'ON' : 'OFF'}`, "ok");
-          await this._fetchAndRender();
-        } catch (err) {
-          this._toast(`✗ rule toggle — ${err?.message || err}`, "err");
-        }
-      });
-    });
-
-    // Satellite → Cast device pairing dropdowns
-    this.shadowRoot.querySelectorAll(".sat-pair-select").forEach(sel => {
-      sel.addEventListener("change", async (e) => {
-        const satId = e.currentTarget.getAttribute("data-sat-id");
-        const castId = e.currentTarget.value || "";
-        if (!satId || !this._hass) return;
-        const d = this._data();
-        const pairings = {...(d.config?.satellite_pairings || {})};
-        if (castId) {
-          pairings[satId] = castId;
-        } else {
-          delete pairings[satId];
-        }
-        try {
-          await this._hass.callWS({
-            type: "nova/update_config",
-            key: "satellite_pairings",
-            value: JSON.stringify(pairings),
-          });
-          const label = castId ? castId.split(".").pop() : "none";
-          this._toast(`✓ paired → ${label}`, "ok");
-        } catch (err) {
-          this._toast(`✗ pairing — ${err?.message || err}`, "err");
-        }
-      });
-    });
-
-    // Room → speaker assignment dropdowns (v7.101.28)
-    this.shadowRoot.querySelectorAll(".room-speaker-select").forEach(sel => {
-      sel.addEventListener("change", async (e) => {
-        const areaId = e.currentTarget.getAttribute("data-area-id");
-        const spkId = e.currentTarget.value || "";
-        if (!areaId || !this._hass) return;
-        const d = this._data();
-        const assigned = {...(d.config?.room_speakers || {})};
-        if (spkId) {
-          assigned[areaId] = spkId;
-        } else {
-          delete assigned[areaId];
-        }
-        try {
-          await this._hass.callWS({
-            type: "nova/update_config",
-            key: "room_speakers",
-            value: JSON.stringify(assigned),
-          });
-          const label = spkId ? spkId.split(".").pop() : "none";
-          this._toast(`✓ room speaker → ${label}`, "ok");
-        } catch (err) {
-          this._toast(`✗ room speaker — ${err?.message || err}`, "err");
-        }
-      });
-    });
-
-    // General fallback speaker (v7.101.28)
-    const generalSel = this.shadowRoot.querySelector(".general-speaker-select");
-    if (generalSel) {
-      generalSel.addEventListener("change", async (e) => {
-        if (!this._hass) return;
-        const spkId = e.currentTarget.value || "";
-        try {
-          await this._hass.callWS({
-            type: "nova/update_config",
-            key: "general_speaker",
-            value: spkId,
-          });
-          this._toast(`✓ general speaker → ${spkId ? spkId.split(".").pop() : 'none'}`, "ok");
-        } catch (err) {
-          this._toast(`✗ general speaker — ${err?.message || err}`, "err");
-        }
-      });
-    }
-
-    // Announcement speaker toggles
-    this.shadowRoot.querySelectorAll(".ann-speaker-toggle").forEach(btn => {
-      btn.addEventListener("click", async (e) => {
-        const spkId = e.currentTarget.getAttribute("data-speaker-id");
-        if (!spkId || !this._hass) return;
-        const d = this._data();
-        const current = d.config?.announcement_speakers || [];
-        const isOn = current.includes(spkId);
-        const updated = isOn ? current.filter(id => id !== spkId) : [...current, spkId];
-        try {
-          await this._hass.callWS({ type: "nova/update_config", key: "announcement_speakers", value: JSON.stringify(updated) });
-          this._toast(`\u2713 ${spkId.split(".").pop()} \u2192 ${isOn ? 'OFF' : 'ON'}`, "ok");
-          await this._fetchAndRender();
-        } catch (err) {
-          this._toast(`\u2717 speaker toggle \u2014 ${err?.message || err}`, "err");
-        }
-      });
-    });
-
-    // Floor plan editor controls (floor tabs, add/save/reset/units/map/image, drag)
-    this._wireFloorPlanControls();
-  }
-
-  // Re-render the floor-plan editor AND re-wire every control (not just drag), so
-  // floor switching, Add Room, delete, etc. keep working after each update (v7.101.28).
-  _rerenderFloorEditor() {
-    const edWrap = this.shadowRoot.querySelector("#fp-editor-wrap");
-    if (!edWrap) return;
-    edWrap.innerHTML = this._renderFloorPlanEditor(this._data());
-    this._wireFloorPlanControls();
-  }
-
-  _wireFloorPlanControls() {
-    // Floor tabs
-    this.shadowRoot.querySelectorAll(".fp-ed-floor").forEach(btn => {
-      btn.addEventListener("click", (e) => {
-        this._editorFloor = e.currentTarget.getAttribute("data-ed-floor");
-        this._editVB = null;   // refit the new floor
-        this._rerenderFloorEditor();
-      });
-    });
-    const fpFit = this.shadowRoot.querySelector("#fp-zoom-fit");
-    if (fpFit) fpFit.addEventListener("click", () => { this._editVB = null; this._rerenderFloorEditor(); });
-
-    // Save
-    const fpSave = this.shadowRoot.querySelector("#fp-save");
-    if (fpSave) {
-      fpSave.addEventListener("click", async () => {
-        if (!this._editingPlan && !this._editingElements && !this._editingCameras && !this._editingEntities) return;
-        const savedPlan = this._editingPlan, savedEls = this._editingElements, savedCams = this._editingCameras, savedEnts = this._editingEntities;
-        try {
-          if (savedPlan) await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_rooms", value: JSON.stringify(savedPlan) });
-          if (savedEls) await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_elements", value: JSON.stringify(savedEls) });
-          if (savedCams) await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_cameras", value: JSON.stringify(savedCams) });
-          if (savedEnts) await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_entities", value: JSON.stringify(savedEnts) });
-          if (this._editingProperty !== null && this._editingProperty !== undefined) await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_property", value: JSON.stringify({ points: this._editingProperty }) });
-          // Reflect immediately so the 3D house updates now, not on the next fetch.
-          if (this._liveData && this._liveData.config) {
-            if (savedPlan) this._liveData.config.floor_plan_rooms = savedPlan;
-            if (savedEls) this._liveData.config.floor_plan_elements = savedEls;
-            if (savedCams) this._liveData.config.floor_plan_cameras = savedCams;
-            if (savedEnts) this._liveData.config.floor_plan_entities = savedEnts;
-            if (this._editingProperty !== null && this._editingProperty !== undefined) this._liveData.config.floor_plan_property = { points: this._editingProperty };
-          }
-          this._house3dBoxKey = null;
-          this._editingPlan = null; this._editingElements = null; this._editingCameras = null; this._editingEntities = null; this._editingProperty = null;
-          this._toast("\u2713 Floor plan saved", "ok");
-        } catch (err) { this._toast("\u2717 Save failed \u2014 " + err, "err"); }
-      });
-    }
-
-    // Reset
-    const fpReset = this.shadowRoot.querySelector("#fp-reset");
-    if (fpReset) {
-      fpReset.addEventListener("click", async () => {
-        this._editingPlan = null;
-        try {
-          await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_rooms", value: "" });
-          if (this._liveData && this._liveData.config) this._liveData.config.floor_plan_rooms = {};
-          this._house3dBoxKey = null;
-          this._editingPlan = null;
-          this._toast("\u2713 Floor plan reset to default", "ok");
-          this._rerenderFloorEditor();
-        } catch (err) { this._toast("\u2717 Reset failed \u2014 " + err, "err"); }
-      });
-    }
-
-    // Add Room
-    const fpAdd = this.shadowRoot.querySelector("#fp-add-room");
-    if (fpAdd) {
-      fpAdd.addEventListener("click", () => {
-        const plan = this._getEditingPlan();
-        const floor = this._editorFloor || '1f';
-        if (!plan[floor]) return;
-        const name = prompt("Room name:");
-        if (!name) return;
-        const type = prompt("Type (room, bath, stairs, door, outdoor):", "room") || "room";
-        plan[floor].rooms = plan[floor].rooms || [];
-        plan[floor].rooms.push({ name: name, x: 50, y: 50, w: 60, h: 40, type: type });
-        this._rerenderFloorEditor();
-        this._toast("Added " + name + " \u2014 drag to position, then Save", "ok");
-      });
-    }
-    const fpZone = this.shadowRoot.querySelector("#fp-add-zone");
-    if (fpZone) {
-      fpZone.addEventListener("click", () => {
-        const plan = this._getEditingPlan();
-        const floor = this._editorFloor || '1f';
-        if (!plan[floor]) return;
-        const name = prompt("Outdoor zone name (e.g. Front Yard, Driveway, Backyard):");
-        if (!name) return;
-        plan[floor].rooms = plan[floor].rooms || [];
-        const _house = plan[floor].rooms.filter(r => r.type !== 'outdoor');
-        let _zx = 40, _zy = 40, _zw = 90, _zh = 70;
-        if (_house.length) {
-          let hx0 = 1e9, hx1 = -1e9, hy1 = -1e9;
-          _house.forEach(r => { hx0 = Math.min(hx0, r.x); hx1 = Math.max(hx1, r.x + r.w); hy1 = Math.max(hy1, r.y + r.h); });
-          _zx = Math.round(hx0); _zy = Math.round(hy1 + 25); _zw = Math.round(Math.max(hx1 - hx0, 90));
-        }
-        plan[floor].rooms.push({ name: name, x: _zx, y: _zy, w: _zw, h: _zh, type: 'outdoor', points: [[_zx, _zy], [_zx + _zw, _zy], [_zx + _zw, _zy + _zh], [_zx, _zy + _zh]] });
-        this._rerenderFloorEditor();
-        this._toast("Added zone " + name + " \u2014 size it over the area the camera watches, then Save", "ok");
-      });
-    }
-    const fpProp = this.shadowRoot.querySelector("#fp-add-property");
-    if (fpProp) {
-      fpProp.addEventListener("click", () => {
-        const cur = this._propertyPts();
-        if (cur.length >= 3) {
-          if (confirm("Remove the property boundary?")) { this._setProperty([]); this._rerenderFloorEditor(); this._toast("Property boundary cleared", "ok"); }
-          return;
-        }
-        const floor = this._editorFloor || '1f';
-        const rooms = ((this._getEditingPlan()[floor] || {}).rooms) || [];
-        let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
-        rooms.forEach(r => { x0 = Math.min(x0, r.x); y0 = Math.min(y0, r.y); x1 = Math.max(x1, r.x + r.w); y1 = Math.max(y1, r.y + r.h); });
-        if (!isFinite(x0)) { x0 = 20; y0 = 20; x1 = 220; y1 = 170; }
-        const m = Math.max(150, Math.max(x1 - x0, y1 - y0) * 0.7);   // generous default lot — front/back/side room to place zones
-        this._setProperty([[Math.round(x0 - m), Math.round(y0 - m)], [Math.round(x1 + m), Math.round(y0 - m)], [Math.round(x1 + m), Math.round(y1 + m)], [Math.round(x0 - m), Math.round(y1 + m)]]);
-        this._rerenderFloorEditor();
-        this._toast("Property boundary added \u2014 drag the corners to your lot lines; double-click an edge to add a corner, right-click a corner to remove", "ok");
-      });
-    }
-
-    // Units toggle
-    const fpUnits = this.shadowRoot.querySelector("#fp-units");
-    if (fpUnits) {
-      fpUnits.addEventListener("click", async () => {
-        const next = this._fpUnits() === 'metric' ? 'imperial' : 'metric';
-        try {
-          await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_units", value: next });
-          if (this._liveData && this._liveData.config) this._liveData.config.floor_plan_units = next;
-          this._rerenderFloorEditor();
-          this._toast("Units: " + (next === 'metric' ? 'Metric (m)' : 'Imperial (ft)'), "ok");
-        } catch (err) { this._toast("\u2717 " + err, "err"); }
-      });
-    }
-
-    // Image import
-    const fpImg = this.shadowRoot.querySelector(".fp-import-img");
-    if (fpImg) {
-      fpImg.addEventListener("change", async (e) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = async (ev) => {
-          const base64 = ev.target.result;
-          const floor = this._editorFloor || "1f";
-          let bgs = {};
-          try {
-            const raw = this._data().config?.floor_plan_bg;
-            if (raw) bgs = typeof raw === 'string' ? JSON.parse(raw) : raw;
-          } catch (_) {}
-          bgs[floor] = base64;
-          try {
-            await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_bg", value: JSON.stringify(bgs) });
-            this._toast("\u2713 Background image set for " + floor, "ok");
-            this._rerenderFloorEditor();
-          } catch (err) { this._toast("\u2717 Image import failed \u2014 " + err, "err"); }
-        };
-        reader.readAsDataURL(file);
-      });
-    }
-
-    // Export layout to a JSON file (backup / restore for home-layout upgrades)
-    const fpExport = this.shadowRoot.querySelector("#fp-export");
-    if (fpExport) {
-      fpExport.addEventListener("click", () => {
-        try {
-          const data = JSON.stringify(this._getEditingPlan(), null, 2);
-          const blob = new Blob([data], { type: "application/json" });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement("a");
-          a.href = url; a.download = "nova-floor-plan.json";
-          a.click();
-          setTimeout(() => URL.revokeObjectURL(url), 1000);
-          this._toast("\u2713 Floor plan exported", "ok");
-        } catch (err) { this._toast("\u2717 Export failed \u2014 " + err, "err"); }
-      });
-    }
-
-    // Import a layout JSON file into the editor (review, then Save to apply)
-    const fpImportLayout = this.shadowRoot.querySelector(".fp-import-layout");
-    if (fpImportLayout) {
-      fpImportLayout.addEventListener("change", (e) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-          try {
-            const parsed = JSON.parse(ev.target.result);
-            if (!parsed || typeof parsed !== "object" || !Object.keys(parsed).length) throw new Error("empty");
-            this._editingPlan = parsed;
-            if (!this._editingPlan[this._editorFloor]) this._editorFloor = Object.keys(parsed)[0];
-            this._rerenderFloorEditor();
-            this._toast("\u2713 Layout imported \u2014 review, then Save to apply", "ok");
-          } catch (err) { this._toast("\u2717 Invalid layout file", "err"); }
-        };
-        reader.readAsText(file);
-      });
-    }
-
-    // Openings (windows/doors) — add / edit / remove (v7.101.28)
-    const addElem = (type, kind) => {
-      const fl = this._editorFloor || '1f';
-      this._elemsFor(fl).push({ id: 'e' + Date.now().toString(36), type: type, kind: kind, wall: 'front', pos: 0.5, w: 20, entity: '' });
-      this._rerenderFloorEditor();
-    };
-    const _oaw = this.shadowRoot.querySelector('#op-add-window'); if (_oaw) _oaw.addEventListener('click', () => addElem('window', null));
-    const _oae = this.shadowRoot.querySelector('#op-add-extdoor'); if (_oae) _oae.addEventListener('click', () => addElem('door', 'exterior'));
-    const _oac = this.shadowRoot.querySelector('#op-add-cellar'); if (_oac) _oac.addEventListener('click', () => addElem('door', 'cellar'));
-    const _ofd = this.shadowRoot.querySelector('#op-add-fdormer'); if (_ofd) _ofd.addEventListener('click', () => { this._elemsFor(this._editorFloor || '1f').push({ id: 'e' + Date.now().toString(36), type: 'dormer', slope: 'front', pos: 0.5, entity: '' }); this._rerenderFloorEditor(); });
-    const _ord = this.shadowRoot.querySelector('#op-add-rdormer'); if (_ord) _ord.addEventListener('click', () => { this._elemsFor(this._editorFloor || '1f').push({ id: 'e' + Date.now().toString(36), type: 'dormer', slope: 'rear', pos: 0.5, entity: '' }); this._rerenderFloorEditor(); });
-    const _oai = this.shadowRoot.querySelector('#op-add-intdoor'); if (_oai) _oai.addEventListener('click', () => addElem('door', 'interior'));
-    const _ocs = this.shadowRoot.querySelector('#op-add-cased'); if (_ocs) _ocs.addEventListener('click', () => addElem('door', 'cased'));
-    // Cameras: add / configure / toggle indoor-outdoor / delete
-    const _cadd = this.shadowRoot.querySelector('#cam-add');
-    if (_cadd) _cadd.addEventListener('click', () => {
-      const fl = this._editorFloor || '1f';
-      const rms2 = ((this._getEditingPlan()[fl] || {}).rooms) || [];
+    const camAdd = root.getElementById("fpnCamAdd");
+    if (camAdd) camAdd.addEventListener("click", () => {
+      const floor = this._editorFloor;
+      const rooms = ((this._getEditingPlan()[floor] || {}).rooms) || [];
       let ccx = 100, ccy = 80;
-      if (rms2.length) { let mnx=1e9,mny=1e9,mxx=-1e9,mxy=-1e9; rms2.forEach(r=>{mnx=Math.min(mnx,r.x);mny=Math.min(mny,r.y);mxx=Math.max(mxx,r.x+r.w);mxy=Math.max(mxy,r.y+r.h);}); ccx=Math.round((mnx+mxx)/2); ccy=Math.round((mny+mxy)/2); }
-      this._camsFor(fl).push({ id: 'c' + Date.now().toString(36), x: ccx, y: ccy, angle: 270, fov: 90, range: 55, entity: '', indoor: true });
-      this._rerenderFloorEditor();
+      if (rooms.length) {
+        let mnx = 1e9, mny = 1e9, mxx = -1e9, mxy = -1e9;
+        rooms.forEach(r => { mnx = Math.min(mnx, r.x); mny = Math.min(mny, r.y); mxx = Math.max(mxx, r.x + r.w); mxy = Math.max(mxy, r.y + r.h); });
+        ccx = Math.round((mnx + mxx) / 2); ccy = Math.round((mny + mxy) / 2);
+      }
+      this._camsFor(floor).push({ id: "c" + Date.now().toString(36), x: ccx, y: ccy, angle: 270, fov: 90, range: 55, entity: "", indoor: true });
+      this._rerenderFloorPlanCard();
     });
-    const _setCamField = (f) => {
-      const cam = this._camsFor(this._editorFloor || '1f')[parseInt(f.getAttribute('data-ci'))];
+    const setCamField = (f) => {
+      const cam = this._camsFor(this._editorFloor)[parseInt(f.getAttribute("data-ci"))];
       if (!cam) return null;
-      const k = f.getAttribute('data-cam');
-      if (k === 'range') cam.range = this._fpFromReal(parseFloat(f.value) || 10);
-      else if (k === 'angle' || k === 'fov') cam[k] = parseFloat(f.value);
+      const k = f.getAttribute("data-cam");
+      if (k === "range") cam.range = this._fpFromReal(parseFloat(f.value) || 10);
+      else if (k === "angle" || k === "fov") cam[k] = parseFloat(f.value);
       else cam[k] = f.value;
       return cam;
     };
-    this.shadowRoot.querySelectorAll('.cam-field').forEach(f => {
-      // during drag: update just the cone (cheap). On commit: full re-render → coverage recomputes.
-      f.addEventListener('input', () => {
-        const cam = _setCamField(f);
-        if (!cam || f.getAttribute('data-cam') === 'entity') return;
-        const g = this.shadowRoot.querySelector('.fp-cam[data-cam-idx="' + f.getAttribute('data-ci') + '"]');
-        if (g) { const cone = g.querySelector('.fp-cam-cone'); if (cone) cone.setAttribute('d', this._clippedCone(cam, this._planGeometry(this._editorFloor || '1f'))); }
+    root.querySelectorAll(".cam-field-new").forEach(f => {
+      f.addEventListener("input", () => {
+        const cam = setCamField(f);
+        if (!cam || f.getAttribute("data-cam") === "entity") return;
+        const g = root.querySelector(`.fpn-cam[data-cam-idx="${f.getAttribute("data-ci")}"]`);
+        if (g) { const cone = g.querySelector(".fpn-cam-cone"); if (cone) cone.setAttribute("d", this._clippedCone(cam, this._planGeometry(this._editorFloor))); }
       });
-      f.addEventListener('change', () => { _setCamField(f); this._rerenderFloorEditor(); });
+      f.addEventListener("change", () => { setCamField(f); this._rerenderFloorPlanCard(); });
     });
-    this.shadowRoot.querySelectorAll('.cam-io').forEach(b => b.addEventListener('click', () => {
-      const cam = this._camsFor(this._editorFloor || '1f')[parseInt(b.getAttribute('data-ci'))];
-      if (!cam) return; cam.indoor = (cam.indoor === false); this._rerenderFloorEditor();
+    root.querySelectorAll(".cam-io-new").forEach(b => b.addEventListener("click", () => {
+      const cam = this._camsFor(this._editorFloor)[parseInt(b.getAttribute("data-ci"))];
+      if (!cam) return; cam.indoor = (cam.indoor === false); this._rerenderFloorPlanCard();
     }));
-    this.shadowRoot.querySelectorAll('.cam-del').forEach(b => b.addEventListener('click', () => {
-      this._camsFor(this._editorFloor || '1f').splice(parseInt(b.getAttribute('data-ci')), 1);
-      this._rerenderFloorEditor();
+    root.querySelectorAll(".cam-del-new").forEach(b => b.addEventListener("click", () => {
+      this._camsFor(this._editorFloor).splice(parseInt(b.getAttribute("data-ci")), 1);
+      this._rerenderFloorPlanCard();
     }));
-    const _ccomp = this.shadowRoot.querySelector('#cam-compute');
-    if (_ccomp) _ccomp.addEventListener('click', async () => {
-      const fl = this._editorFloor || '1f';
-      const cams = this._camsFor(fl);
+    const camCompute = root.getElementById("fpnCamCompute");
+    if (camCompute) camCompute.addEventListener("click", async () => {
+      const floor = this._editorFloor;
+      const cams = this._camsFor(floor);
       if (!cams.length) return;
-      _ccomp.disabled = true; const _lbl = _ccomp.textContent; _ccomp.textContent = 'Computing\u2026';
-      const geo = this._planGeometry(fl), openings = this._openingDescriptions(fl);
+      camCompute.disabled = true;
+      const geo = this._planGeometry(floor), openings = this._openingDescriptions(floor);
       for (const cam of cams) {
-        const cand = this._computeCoverage(fl, cam, geo);
-        const ctx = { entity: cam.entity || '', room: this._roomAt(fl, cam.x, cam.y), fov: cam.fov || 90, range_ft: this._fpToReal(cam.range || 55), indoor: cam.indoor !== false, candidates: cand, openings: openings };
-        try { cam.coverage = await this._hass.callWS({ type: 'nova/compute_camera_coverage', camera: ctx }); } catch (err) { /* keep going */ }
+        const cand = this._computeCoverage(floor, cam, geo);
+        const ctx = { entity: cam.entity || "", room: this._roomAt(floor, cam.x, cam.y), fov: cam.fov || 90, range_ft: this._fpToReal(cam.range || 55), indoor: cam.indoor !== false, candidates: cand, openings };
+        try { cam.coverage = await this._hass.callWS({ type: "nova/compute_camera_coverage", camera: ctx }); } catch (err) { /* keep going */ }
       }
-      _ccomp.disabled = false; _ccomp.textContent = _lbl;
-      this._rerenderFloorEditor();
-      this._toast('\u2713 Coverage computed \u2014 Save Layout to keep it', 'ok');
+      this._rerenderFloorPlanCard();
     });
 
-    // Devices on plan: add / remove (positions saved with the plan) + bg opacity (saved immediately)
-    const _eadd = this.shadowRoot.querySelector('#ent-add');
-    if (_eadd) _eadd.addEventListener('click', () => {
-      const inp = this.shadowRoot.querySelector('#fp-ent-input');
+    const save = root.getElementById("fpnSave");
+    if (save) save.addEventListener("click", async () => {
+      const hasProperty = this._editingProperty !== null && this._editingProperty !== undefined;
+      if (!this._editingPlan && !this._editingEntities && !this._editingCameras && !this._editingElements && !hasProperty) return;
+      const savedPlan = this._editingPlan, savedEnts = this._editingEntities,
+        savedCams = this._editingCameras, savedEls = this._editingElements, savedProp = this._editingProperty;
+      try {
+        if (savedPlan) await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_rooms", value: JSON.stringify(savedPlan) });
+        if (savedEnts) await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_entities", value: JSON.stringify(savedEnts) });
+        if (savedCams) await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_cameras", value: JSON.stringify(savedCams) });
+        if (savedEls) await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_elements", value: JSON.stringify(savedEls) });
+        if (hasProperty) await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_property", value: JSON.stringify({ points: savedProp }) });
+        if (this._liveData?.config) {
+          if (savedPlan) this._liveData.config.floor_plan_rooms = savedPlan;
+          if (savedEnts) this._liveData.config.floor_plan_entities = savedEnts;
+          if (savedCams) this._liveData.config.floor_plan_cameras = savedCams;
+          if (savedEls) this._liveData.config.floor_plan_elements = savedEls;
+          if (hasProperty) this._liveData.config.floor_plan_property = { points: savedProp };
+        }
+        this._editingPlan = null;
+        this._editingEntities = null;
+        this._editingCameras = null;
+        this._editingElements = null;
+        this._editingProperty = null;
+      } catch (err) { console.error("Nova: floor plan save failed", err); }
+    });
+
+    const reset = root.getElementById("fpnReset");
+    if (reset) reset.addEventListener("click", async () => {
+      try {
+        await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_rooms", value: "" });
+        if (this._liveData?.config) this._liveData.config.floor_plan_rooms = {};
+      } catch (err) { console.error("Nova: floor plan reset failed", err); }
+      this._editingPlan = null;
+      this._editorFloor = null;
+      this._rerenderFloorPlanCard();
+    });
+
+    const entAdd = root.getElementById("fpnEntAdd");
+    if (entAdd) entAdd.addEventListener("click", () => {
+      const inp = root.getElementById("fpnEntInput");
       const val = inp && inp.value.trim();
       if (!val) return;
-      if (!(this._hass && this._hass.states && this._hass.states[val])) { this._toast('"' + val + '" is not a known entity id', 'err'); return; }
-      const fl = this._editorFloor || '1f';
-      if (this._entsFor(fl).some(x => x.e === val)) { this._toast('Already placed on this floor', 'err'); return; }
-      const rms3 = ((this._getEditingPlan()[fl] || {}).rooms) || [];
+      if (!(this._hass && this._hass.states && this._hass.states[val])) return;
+      const floor = this._editorFloor;
+      if (this._entsFor(floor).some(x => x.e === val)) return;
+      const rooms = ((this._getEditingPlan()[floor] || {}).rooms) || [];
       let ecx = 100, ecy = 80;
-      if (rms3.length) {
+      if (rooms.length) {
         let mnx = 1e9, mny = 1e9, mxx = -1e9, mxy = -1e9;
-        rms3.forEach(r => { mnx = Math.min(mnx, r.x); mny = Math.min(mny, r.y); mxx = Math.max(mxx, r.x + r.w); mxy = Math.max(mxy, r.y + r.h); });
+        rooms.forEach(r => { mnx = Math.min(mnx, r.x); mny = Math.min(mny, r.y); mxx = Math.max(mxx, r.x + r.w); mxy = Math.max(mxy, r.y + r.h); });
         ecx = Math.round((mnx + mxx) / 2); ecy = Math.round((mny + mxy) / 2);
       }
-      this._entsFor(fl).push({ e: val, x: ecx, y: ecy });
-      this._rerenderFloorEditor();
+      this._entsFor(floor).push({ e: val, x: ecx, y: ecy });
+      this._rerenderFloorPlanCard();
     });
-    this.shadowRoot.querySelectorAll('.ent-del').forEach(b => b.addEventListener('click', () => {
-      this._entsFor(this._editorFloor || '1f').splice(parseInt(b.getAttribute('data-ei')), 1);
-      this._rerenderFloorEditor();
+    root.querySelectorAll(".fpn-ent-del").forEach(b => b.addEventListener("click", () => {
+      this._entsFor(this._editorFloor).splice(parseInt(b.getAttribute("data-ei")), 1);
+      this._rerenderFloorPlanCard();
     }));
-    const _bgop = this.shadowRoot.querySelector('#fp-bg-op');
-    if (_bgop) {
-      const _bgv = this.shadowRoot.querySelector('#fp-bg-op-val');
-      _bgop.addEventListener('input', () => {
-        if (_bgv) _bgv.textContent = Math.round(parseFloat(_bgop.value) * 100) + '%';
-        const img = this.shadowRoot.querySelector('#fp-editor-svg image');
-        if (img) img.setAttribute('opacity', _bgop.value);
-      });
-      _bgop.addEventListener('change', async () => {
-        const v = String(parseFloat(_bgop.value));
+    const bgUpBtn = root.getElementById("fpnBgUpload");
+    const bgFileInput = root.getElementById("fpnBgFile");
+    if (bgUpBtn && bgFileInput) {
+      bgUpBtn.addEventListener("click", () => bgFileInput.click());
+      bgFileInput.addEventListener("change", async () => {
+        const file = bgFileInput.files && bgFileInput.files[0];
+        if (!file) return;
+        const floor = this._editorFloor;
         try {
-          await this._hass.callWS({ type: 'nova/update_config', key: 'floor_plan_bg_opacity', value: v });
-          if (this._liveData && this._liveData.config) this._liveData.config.floor_plan_bg_opacity = v;
-        } catch (err) { this._toast('\u2717 ' + err, 'err'); }
+          const dataUrl = await new Promise((resolve, reject) => {
+            const r = new FileReader();
+            r.onload = () => resolve(String(r.result));
+            r.onerror = () => reject(new Error("read failed"));
+            r.readAsDataURL(file);
+          });
+          let bgs = {};
+          try {
+            const raw = this._data()?.config?.floor_plan_bg;
+            if (raw) bgs = typeof raw === "string" ? JSON.parse(raw) : raw;
+          } catch (_) {}
+          bgs[floor] = dataUrl;
+          await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_bg", value: JSON.stringify(bgs) });
+          if (this._liveData?.config) this._liveData.config.floor_plan_bg = JSON.stringify(bgs);
+          this._rerenderFloorPlanCard();
+        } catch (err) {
+          console.error("Nova: floor plan background upload failed", err);
+        } finally {
+          bgFileInput.value = "";
+        }
       });
     }
 
-    this.shadowRoot.querySelectorAll('.op-field').forEach(f => {
-      f.addEventListener('change', () => {
-        const arr = this._elemsFor(this._editorFloor || '1f'), e = arr[parseInt(f.getAttribute('data-i'))];
-        if (!e) return;
-        const op = f.getAttribute('data-op');
-        if (op === 'w') e.w = this._fpFromReal(parseFloat(f.value) || 4);
-        else if (op === 'pos') e.pos = parseFloat(f.value);
-        else e[op] = f.value;
-        this._rerenderFloorEditor();
+    const bgOp = root.getElementById("fpnBgOp");
+    if (bgOp) {
+      const bgVal = root.getElementById("fpnBgOpVal");
+      bgOp.addEventListener("input", () => {
+        if (bgVal) bgVal.textContent = Math.round(parseFloat(bgOp.value) * 100) + "%";
+        const img = root.querySelector("#fpnSvg image");
+        if (img) img.setAttribute("opacity", bgOp.value);
       });
-    });
-    this.shadowRoot.querySelectorAll('.op-del').forEach(b => b.addEventListener('click', () => {
-      this._elemsFor(this._editorFloor || '1f').splice(parseInt(b.getAttribute('data-i')), 1);
-      this._rerenderFloorEditor();
-    }));
-    // Highlight an opening's marker while you hover its row or pick its sensor (v7.101.28)
-    const glowMarker = (i, on) => {
-      const m = this.shadowRoot.querySelector('.op-marker[data-op-marker="' + i + '"]');
-      if (m) m.classList.toggle('op-glow', on);
-    };
-    this.shadowRoot.querySelectorAll('.op-row').forEach(row => {
-      const i = row.getAttribute('data-i');
-      row.addEventListener('mouseenter', () => glowMarker(i, true));
-      row.addEventListener('mouseleave', () => glowMarker(i, false));
-      const ent = row.querySelector('.op-ent');
-      if (ent) {
-        ent.addEventListener('focus', () => glowMarker(i, true));
-        ent.addEventListener('blur', () => glowMarker(i, false));
-      }
-    });
+      bgOp.addEventListener("change", async () => {
+        const v = String(parseFloat(bgOp.value));
+        try {
+          await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_bg_opacity", value: v });
+          if (this._liveData?.config) this._liveData.config.floor_plan_bg_opacity = v;
+        } catch (err) { console.error("Nova: floor plan bg opacity save failed", err); }
+      });
+    }
 
-    // Drag / resize / select / right-click delete
     this._wireFloorPlanDrag();
   }
 
-  _toast(msg, kind = "ok") {
-    const wrap = this.shadowRoot.querySelector("#toast-wrap");
-    if (!wrap) return;
-    const el = document.createElement("div");
-    el.className = `toast ${kind}`;
-    el.textContent = msg;
-    wrap.appendChild(el);
-    setTimeout(() => el.classList.add("out"), 2600);
-    setTimeout(() => el.remove(), 3100);
-  }
-
   _wireFloorPlanDrag() {
-    const svgEl = this.shadowRoot.querySelector("#fp-editor-svg");
+    const svgEl = this.shadowRoot.getElementById("fpnSvg");
     if (!svgEl) return;
     const self = this;
-    const plan = this._getEditingPlan(); // shared editing copy
-    const floor = this._editorFloor || '1f';
+    const plan = this._getEditingPlan();
+    const floor = this._editorFloor;
     const rooms = plan[floor]?.rooms;
     if (!rooms) return;
 
-    let dragging = null;
-    let panning = null;
-    let _infoIdx = -1;
-    const infoEl = this.shadowRoot.querySelector("#fp-selected-info");
+    let dragging = null, panning = null;
 
     function svgPoint(e) {
       const pt = svgEl.createSVGPoint();
@@ -6532,85 +5823,58 @@ ${this._renderExcludedEntities(d)}
       pt.x = e.clientX; pt.y = e.clientY;
       return pt.matrixTransform(ctm);
     }
-    const vbFromAttr = () => { const p = (svgEl.getAttribute('viewBox') || '0 0 320 140').split(' ').map(Number); return { x: p[0], y: p[1], w: p[2], h: p[3] }; };
-
-    function updateInfo(rm) {
-      if (!infoEl || !rm) return;
-      const idx = rooms.indexOf(rm), uL = self._fpUnitLabel();
-      const ist = 'width:54px;background:var(--bg);border:1px solid var(--line);color:var(--cyan);border-radius:4px;padding:2px 4px;font-family:var(--font-mono);font-size:11px;';
-      if (idx !== _infoIdx) {
-        _infoIdx = idx;
-        infoEl.innerHTML = '<b>' + self._esc(rm.name.toUpperCase()) + '</b> \u00b7 ' + self._esc(rm.type) + ' \u00b7 '
-          + 'W <input class="fp-dim-in" data-dim="w" type="number" step="0.5" min="1" style="' + ist + '"> ' + uL
-          + ' \u00d7 L <input class="fp-dim-in" data-dim="h" type="number" step="0.5" min="1" style="' + ist + '"> ' + uL
-          + (rm.type !== 'outdoor' && !(rm.points && rm.points.length >= 3) ? ' <button class="ctrl fp-reshape-btn" style="padding:2px 8px;font-size:9px;margin-left:8px;">\u25c7 Reshape</button>' : '');
-        const rshBtn = infoEl.querySelector('.fp-reshape-btn');
-        if (rshBtn) rshBtn.addEventListener('click', () => {
-          const r = rooms[_infoIdx]; if (!r) return;
-          self._ensureZonePoints(r); self._syncRoomBBox(r);
-          _infoIdx = -1;
-          self._rerenderFloorEditor();
-          self._toast('Reshape: drag the corners, double-click an edge to add one, right-click a corner to remove', 'ok');
-        });
-        infoEl.querySelectorAll('.fp-dim-in').forEach(inp => {
-          inp.addEventListener('change', () => {
-            const r = rooms[_infoIdx]; if (!r) return;
-            const v = parseFloat(inp.value); if (!(v > 0)) return;
-            if (inp.getAttribute('data-dim') === 'w') r.w = self._fpFromReal(v); else r.h = self._fpFromReal(v);
-            redraw();
-          });
-        });
-      }
-      const wIn = infoEl.querySelector('.fp-dim-in[data-dim="w"]');
-      const hIn = infoEl.querySelector('.fp-dim-in[data-dim="h"]');
-      const act = self.shadowRoot.activeElement;
-      if (wIn && act !== wIn) wIn.value = self._fpToReal(rm.w);
-      if (hIn && act !== hIn) hIn.value = self._fpToReal(rm.h);
+    const vbFromAttr = () => {
+      const p = (svgEl.getAttribute("viewBox") || "0 0 320 150").split(" ").map(Number);
+      return { x: p[0], y: p[1], w: p[2], h: p[3] };
+    };
+    function applyVB() {
+      const v = self._editVB; if (!v) return;
+      svgEl.setAttribute("viewBox", `${v.x} ${v.y} ${v.w} ${v.h}`);
+      svgEl.querySelectorAll(".fpn-grid-rect").forEach(r => {
+        r.setAttribute("x", v.x); r.setAttribute("y", v.y); r.setAttribute("width", v.w); r.setAttribute("height", v.h);
+      });
     }
-
     function redraw() {
-      const canvas = self.shadowRoot.querySelector("#fp-editor-canvas");
+      const canvas = self.shadowRoot.getElementById("fpnCanvas");
       if (canvas) {
-        canvas.innerHTML = self._renderEditableSVG(plan, floor);
+        canvas.innerHTML = self._renderFloorPlanSVG(plan, floor);
         setTimeout(() => self._wireFloorPlanDrag(), 10);
       }
-      self._refreshEditorPreview();
     }
 
-    // Room drag start
-    svgEl.querySelectorAll(".fp-drag-room").forEach(g => {
-      const rect = g.querySelector(".fp-drag-rect");
+    svgEl.querySelectorAll(".fpn-drag-room").forEach(g => {
+      const rect = g.querySelector(".fpn-drag-rect");
       if (!rect) return;
-
-      // Left click — drag
       rect.addEventListener("mousedown", (e) => {
         if (e.button !== 0) return;
         e.preventDefault();
         const idx = parseInt(g.getAttribute("data-idx"));
-        const rm = rooms[idx];
-        if (!rm) return;
+        const rm = rooms[idx]; if (!rm) return;
         const pt = svgPoint(e);
         dragging = { idx, startX: pt.x, startY: pt.y, origX: rm.x, origY: rm.y, resize: false };
         rect.setAttribute("stroke-width", "2.5");
-        updateInfo(rm);
       });
-
-      // Right click — delete
       g.addEventListener("contextmenu", (e) => {
         e.preventDefault();
         const idx = parseInt(g.getAttribute("data-idx"));
-        const rm = rooms[idx];
-        if (!rm) return;
-        if (confirm("Delete '" + rm.name + "' from floor plan?")) {
-          rooms.splice(idx, 1);
-          redraw();
-          self._toast("Removed " + rm.name, "ok");
-        }
+        const rm = rooms[idx]; if (!rm) return;
+        if (window.confirm(`Delete '${rm.name}' from floor plan?`)) { rooms.splice(idx, 1); redraw(); }
+      });
+    });
+
+    svgEl.querySelectorAll(".fpn-resize-handle").forEach(handle => {
+      handle.addEventListener("mousedown", (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault(); e.stopPropagation();
+        const idx = parseInt(handle.getAttribute("data-idx"));
+        const rm = rooms[idx]; if (!rm) return;
+        const pt = svgPoint(e);
+        dragging = { idx, startX: pt.x, startY: pt.y, origW: rm.w, origH: rm.h, resize: true };
       });
     });
 
     // Outdoor zone polygons: drag body (move), drag corner (reshape), add/remove corners
-    svgEl.querySelectorAll(".fp-zone-path").forEach(pth => {
+    svgEl.querySelectorAll(".fpn-zone-path").forEach(pth => {
       pth.addEventListener("mousedown", (e) => {
         if (e.button !== 0) return;
         e.preventDefault(); e.stopPropagation();
@@ -6621,7 +5885,7 @@ ${this._renderExcludedEntities(d)}
         dragging = { zoneBody: true, zi, startX: pt.x, startY: pt.y, ddx: 0, ddy: 0 };
       });
     });
-    svgEl.querySelectorAll(".fp-zone-vtx").forEach(v => {
+    svgEl.querySelectorAll(".fpn-zone-vtx").forEach(v => {
       v.addEventListener("mousedown", (e) => {
         if (e.button !== 0) return;
         e.preventDefault(); e.stopPropagation();
@@ -6636,11 +5900,11 @@ ${this._renderExcludedEntities(d)}
         const zi = parseInt(v.getAttribute("data-zone-idx")), vi = parseInt(v.getAttribute("data-vtx"));
         const rm = rooms[zi]; if (!rm) return;
         const pts = self._ensureZonePoints(rm);
-        if (pts.length <= 3) { self._toast("Needs at least 3 corners", "warn"); return; }
-        pts.splice(vi, 1); self._syncRoomBBox(rm); self._rerenderFloorEditor();
+        if (pts.length <= 3) return;
+        pts.splice(vi, 1); self._syncRoomBBox(rm); self._rerenderFloorPlanCard();
       });
     });
-    svgEl.querySelectorAll(".fp-zone-mid").forEach(m => {
+    svgEl.querySelectorAll(".fpn-zone-mid").forEach(m => {
       m.addEventListener("mousedown", (e) => {
         if (e.button !== 0) return;
         e.preventDefault(); e.stopPropagation();
@@ -6649,12 +5913,12 @@ ${this._renderExcludedEntities(d)}
         const pts = self._ensureZonePoints(rm);
         const a = pts[ei], b = pts[(ei + 1) % pts.length]; if (!a || !b) return;
         pts.splice(ei + 1, 0, [Math.round((a[0] + b[0]) / 2), Math.round((a[1] + b[1]) / 2)]);
-        self._rerenderFloorEditor();
+        self._rerenderFloorPlanCard();
       });
     });
 
     // Property boundary: drag a corner, add a corner (edge midpoint), remove (right-click)
-    svgEl.querySelectorAll(".fp-prop-vtx").forEach(v => {
+    svgEl.querySelectorAll(".fpn-prop-vtx").forEach(v => {
       v.addEventListener("mousedown", (e) => {
         if (e.button !== 0) return;
         e.preventDefault(); e.stopPropagation();
@@ -6668,11 +5932,11 @@ ${this._renderExcludedEntities(d)}
         e.preventDefault();
         const pi = parseInt(v.getAttribute("data-prop-vtx"));
         const pts = self._propertyPts();
-        if (pts.length <= 3) { self._toast("A boundary needs at least 3 corners", "warn"); return; }
-        pts.splice(pi, 1); self._rerenderFloorEditor();
+        if (pts.length <= 3) return;
+        pts.splice(pi, 1); self._rerenderFloorPlanCard();
       });
     });
-    svgEl.querySelectorAll(".fp-prop-mid").forEach(m => {
+    svgEl.querySelectorAll(".fpn-prop-mid").forEach(m => {
       m.addEventListener("mousedown", (e) => {
         if (e.button !== 0) return;
         e.preventDefault(); e.stopPropagation();
@@ -6681,13 +5945,13 @@ ${this._renderExcludedEntities(d)}
         const a = pts[ei], b = pts[(ei + 1) % pts.length];
         if (!a || !b) return;
         pts.splice(ei + 1, 0, [Math.round((a[0] + b[0]) / 2), Math.round((a[1] + b[1]) / 2)]);
-        self._rerenderFloorEditor();
+        self._rerenderFloorPlanCard();
       });
     });
 
     // Camera drag + right-click delete
-    svgEl.querySelectorAll(".fp-cam").forEach(g => {
-      const dot = g.querySelector(".fp-cam-dot");
+    svgEl.querySelectorAll(".fpn-cam").forEach(g => {
+      const dot = g.querySelector(".fpn-cam-dot");
       if (dot) dot.addEventListener("mousedown", (e) => {
         if (e.button !== 0) return;
         e.preventDefault(); e.stopPropagation();
@@ -6701,13 +5965,13 @@ ${this._renderExcludedEntities(d)}
         e.preventDefault();
         const ci = parseInt(g.getAttribute("data-cam-idx"));
         const arr = self._camsFor(floor);
-        if (arr[ci] && confirm("Delete this camera?")) { arr.splice(ci, 1); redraw(); self._toast("Camera removed", "ok"); }
+        if (arr[ci] && window.confirm("Delete this camera?")) { arr.splice(ci, 1); redraw(); }
       });
     });
 
-    // Device pins — drag to move (saved with the plan); a tap with no drag opens
-    // the entity's controls; right-click removes it.
-    svgEl.querySelectorAll(".fp-ent").forEach(g => {
+    // Device pins — drag to move (saved with the plan); a tap with no drag
+    // opens the entity's controls; right-click removes it.
+    svgEl.querySelectorAll(".fpn-ent").forEach(g => {
       g.addEventListener("mousedown", (e) => {
         if (e.button !== 0) return;
         e.preventDefault(); e.stopPropagation();
@@ -6721,22 +5985,7 @@ ${this._renderExcludedEntities(d)}
         e.preventDefault();
         const ei = parseInt(g.getAttribute("data-ent-idx"));
         const arr = self._entsFor(floor);
-        if (arr[ei] && confirm("Remove this device from the plan?")) { arr.splice(ei, 1); redraw(); self._toast("Device removed", "ok"); }
-      });
-    });
-
-    // Resize handles
-    svgEl.querySelectorAll(".fp-resize-handle").forEach(handle => {
-      handle.addEventListener("mousedown", (e) => {
-        if (e.button !== 0) return;
-        e.preventDefault();
-        e.stopPropagation();
-        const idx = parseInt(handle.getAttribute("data-idx"));
-        const rm = rooms[idx];
-        if (!rm) return;
-        const pt = svgPoint(e);
-        dragging = { idx, startX: pt.x, startY: pt.y, origW: rm.w, origH: rm.h, resize: true };
-        updateInfo(rm);
+        if (arr[ei] && window.confirm("Remove this device from the plan?")) { arr.splice(ei, 1); redraw(); }
       });
     });
 
@@ -6744,8 +5993,11 @@ ${this._renderExcludedEntities(d)}
       if (panning) {
         const rect = svgEl.getBoundingClientRect();
         const sx = panning.w / rect.width, sy = panning.h / rect.height;
-        self._editVB = { x: panning.vbX - (e.clientX - panning.sx) * sx, y: panning.vbY - (e.clientY - panning.sy) * sy, w: panning.w, h: panning.h };
-        self._applyEditVB(svgEl);
+        self._editVB = {
+          x: panning.vbX - (e.clientX - panning.sx) * sx, y: panning.vbY - (e.clientY - panning.sy) * sy,
+          w: panning.w, h: panning.h,
+        };
+        applyVB();
         return;
       }
       if (!dragging) return;
@@ -6755,17 +6007,17 @@ ${this._renderExcludedEntities(d)}
         const p = rm.points[dragging.vi]; if (!p) return;
         p[0] = Math.round(dragging.origX + (pt.x - dragging.startX));
         p[1] = Math.round(dragging.origY + (pt.y - dragging.startY));
-        const g = svgEl.querySelector('.fp-zone[data-zone-idx="' + dragging.zi + '"]');
+        const g = svgEl.querySelector(`.fpn-zone[data-zone-idx="${dragging.zi}"]`);
         if (g) {
-          const path = g.querySelector('.fp-zone-path'); if (path) path.setAttribute('d', self._propPathD(rm.points));
-          const dot = g.querySelector('.fp-zone-vtx[data-vtx="' + dragging.vi + '"]'); if (dot) { dot.setAttribute('cx', p[0]); dot.setAttribute('cy', p[1]); }
+          const path = g.querySelector(".fpn-zone-path"); if (path) path.setAttribute("d", self._propPathD(rm.points));
+          const dot = g.querySelector(`.fpn-zone-vtx[data-vtx="${dragging.vi}"]`); if (dot) { dot.setAttribute("cx", p[0]); dot.setAttribute("cy", p[1]); }
         }
         return;
       }
       if (dragging.zoneBody) {
         dragging.ddx = Math.round(pt.x - dragging.startX); dragging.ddy = Math.round(pt.y - dragging.startY);
-        const g = svgEl.querySelector('.fp-zone[data-zone-idx="' + dragging.zi + '"]');
-        if (g) g.setAttribute('transform', 'translate(' + dragging.ddx + ',' + dragging.ddy + ')');
+        const g = svgEl.querySelector(`.fpn-zone[data-zone-idx="${dragging.zi}"]`);
+        if (g) g.setAttribute("transform", `translate(${dragging.ddx},${dragging.ddy})`);
         return;
       }
       if (dragging.property) {
@@ -6773,10 +6025,10 @@ ${this._renderExcludedEntities(d)}
         if (!p) return;
         p[0] = Math.round(dragging.origX + (pt.x - dragging.startX));
         p[1] = Math.round(dragging.origY + (pt.y - dragging.startY));
-        const dot = svgEl.querySelector('.fp-prop-vtx[data-prop-vtx="' + dragging.propVtx + '"]');
-        if (dot) { dot.setAttribute('cx', p[0]); dot.setAttribute('cy', p[1]); }
-        const path = svgEl.querySelector('.fp-prop-path');
-        if (path) path.setAttribute('d', self._propPathD(self._propertyPts()));
+        const dot = svgEl.querySelector(`.fpn-prop-vtx[data-prop-vtx="${dragging.propVtx}"]`);
+        if (dot) { dot.setAttribute("cx", p[0]); dot.setAttribute("cy", p[1]); }
+        const path = svgEl.querySelector(".fpn-prop-path");
+        if (path) path.setAttribute("d", self._propPathD(self._propertyPts()));
         return;
       }
       if (dragging.camera) {
@@ -6784,11 +6036,11 @@ ${this._renderExcludedEntities(d)}
         if (!cam) return;
         cam.x = Math.round(dragging.origX + (pt.x - dragging.startX));
         cam.y = Math.round(dragging.origY + (pt.y - dragging.startY));
-        const gc = svgEl.querySelector('.fp-cam[data-cam-idx="' + dragging.camIdx + '"]');
+        const gc = svgEl.querySelector(`.fpn-cam[data-cam-idx="${dragging.camIdx}"]`);
         if (gc) {
-          const dot = gc.querySelector('.fp-cam-dot'); if (dot) { dot.setAttribute('cx', cam.x); dot.setAttribute('cy', cam.y); }
-          const cone = gc.querySelector('.fp-cam-cone'); if (cone) cone.setAttribute('d', self._clippedCone(cam, dragging.geo));
-          const tx = gc.querySelector('text'); if (tx) { tx.setAttribute('x', cam.x); tx.setAttribute('y', cam.y - 5); }
+          const dot = gc.querySelector(".fpn-cam-dot"); if (dot) { dot.setAttribute("cx", cam.x); dot.setAttribute("cy", cam.y); }
+          const cone = gc.querySelector(".fpn-cam-cone"); if (cone) cone.setAttribute("d", self._clippedCone(cam, dragging.geo));
+          const tx = gc.querySelector("text"); if (tx) { tx.setAttribute("x", cam.x); tx.setAttribute("y", cam.y - 5); }
         }
         return;
       }
@@ -6799,36 +6051,30 @@ ${this._renderExcludedEntities(d)}
         const ny = Math.round(dragging.origY + (pt.y - dragging.startY));
         if (Math.abs(nx - dragging.origX) > 1 || Math.abs(ny - dragging.origY) > 1) dragging.moved = true;
         ent.x = nx; ent.y = ny;
-        const ge = svgEl.querySelector('.fp-ent[data-ent-idx="' + dragging.entIdx + '"]');
+        const ge = svgEl.querySelector(`.fpn-ent[data-ent-idx="${dragging.entIdx}"]`);
         if (ge) {
-          const dot = ge.querySelector('.fp-ent-dot'); if (dot) { dot.setAttribute('cx', nx); dot.setAttribute('cy', ny); }
-          const nm = ge.querySelector('.fp-ent-nm'); if (nm) { nm.setAttribute('x', nx); nm.setAttribute('y', ny - 4); }
-          const vl = ge.querySelector('.fp-ent-val'); if (vl) { vl.setAttribute('x', nx); vl.setAttribute('y', ny + 6.5); }
+          const dot = ge.querySelector(".fpn-ent-dot"); if (dot) { dot.setAttribute("cx", nx); dot.setAttribute("cy", ny); }
+          const nm = ge.querySelector(".fpn-ent-nm"); if (nm) { nm.setAttribute("x", nx); nm.setAttribute("y", ny - 4); }
+          const vl = ge.querySelector(".fpn-ent-val"); if (vl) { vl.setAttribute("x", nx); vl.setAttribute("y", ny + 6.5); }
         }
         return;
       }
       const rm = rooms[dragging.idx];
       if (!rm) return;
-
       if (dragging.resize) {
         rm.w = Math.max(15, Math.round(dragging.origW + (pt.x - dragging.startX)));
         rm.h = Math.max(10, Math.round(dragging.origH + (pt.y - dragging.startY)));
       } else {
-        // No positive clamp — objects place anywhere in the field, including left of
-        // the garage (x<0) and in front of the home (y<0). (v7.101.28)
         rm.x = Math.round(dragging.origX + (pt.x - dragging.startX));
         rm.y = Math.round(dragging.origY + (pt.y - dragging.startY));
       }
-      updateInfo(rm);
-
-      // Live update SVG elements
-      const g = svgEl.querySelector('.fp-drag-room[data-idx="' + dragging.idx + '"]');
+      const g = svgEl.querySelector(`.fpn-drag-room[data-idx="${dragging.idx}"]`);
       if (g) {
-        const r = g.querySelector(".fp-drag-rect");
+        const r = g.querySelector(".fpn-drag-rect");
         if (r) { r.setAttribute("x", rm.x); r.setAttribute("y", rm.y); r.setAttribute("width", rm.w); r.setAttribute("height", rm.h); }
         const t = g.querySelector("text");
-        if (t) { t.setAttribute("x", rm.x + rm.w/2); t.setAttribute("y", rm.y + rm.h/2 + 2); }
-        const rh = g.querySelector(".fp-resize-handle");
+        if (t) { t.setAttribute("x", rm.x + rm.w / 2); t.setAttribute("y", rm.y + rm.h / 2); }
+        const rh = g.querySelector(".fpn-resize-handle");
         if (rh) { rh.setAttribute("x", rm.x + rm.w - 8); rh.setAttribute("y", rm.y + rm.h - 8); }
       }
     });
@@ -6843,15 +6089,15 @@ ${this._renderExcludedEntities(d)}
       if ((dragging.zoneVtx || dragging.zoneBody) && rooms[dragging.zi]) self._syncRoomBBox(rooms[dragging.zi]);
       // A device pin clicked without dragging → open its HA more-info controls.
       if (dragging.entity && !dragging.moved && dragging.entId) {
-        self.dispatchEvent(new CustomEvent('hass-more-info', { detail: { entityId: dragging.entId }, bubbles: true, composed: true }));
+        self.dispatchEvent(new CustomEvent("hass-more-info", { detail: { entityId: dragging.entId }, bubbles: true, composed: true }));
       }
       const heavy = dragging.camera || dragging.property || dragging.zoneVtx || dragging.zoneBody;
       dragging = null;
-      if (heavy) self._rerenderFloorEditor(); else redraw();
+      if (heavy) self._rerenderFloorPlanCard(); else redraw();
     };
     svgEl.addEventListener("mouseup", endDrag);
     svgEl.addEventListener("mouseleave", endDrag);
-    // Zoom (wheel, cursor-centered) + pan (middle-drag, or left-drag on empty space)
+
     svgEl.addEventListener("wheel", (e) => {
       e.preventDefault();
       const v = self._editVB || vbFromAttr();
@@ -6860,12 +6106,13 @@ ${this._renderExcludedEntities(d)}
       const nw = Math.max(60, Math.min(8000, v.w * f)), nh = Math.max(42, Math.min(8000, v.h * f));
       const fx = nw / v.w, fy = nh / v.h;
       self._editVB = { x: p.x - (p.x - v.x) * fx, y: p.y - (p.y - v.y) * fy, w: nw, h: nh };
-      self._applyEditVB(svgEl);
+      applyVB();
     }, { passive: false });
+
     svgEl.addEventListener("mousedown", (e) => {
-      if (dragging) return;   // an object drag started first (its handler ran)
+      if (dragging) return;
       const mid = e.button === 1;
-      const bg = e.button === 0 && !e.target.closest('.fp-drag-room, .fp-cam, .fp-zone, .fp-prop-vtx, .fp-prop-mid, .fp-zone-vtx, .fp-zone-mid, .fp-zone-path, .fp-resize-handle');
+      const bg = e.button === 0 && !e.target.closest(".fpn-drag-room, .fpn-resize-handle, .fpn-zone, .fpn-zone-vtx, .fpn-zone-mid, .fpn-zone-path, .fpn-prop-vtx, .fpn-prop-mid, .fpn-cam, .fpn-ent");
       if (!mid && !bg) return;
       e.preventDefault();
       const v = self._editVB || vbFromAttr();
@@ -6874,3765 +6121,222 @@ ${this._renderExcludedEntities(d)}
     });
   }
 
-  // ─── Styles (ported from HTML mockup; pared for panel) ──────────────────
-
-  // ─── Camera Watch: live, selectable, event auto-focus ──────────────────
-  _setupCameras() {
-    const d = this._liveData;
-    const cams = ((d && d.config && d.config.cameras) || []).filter(c => c.enabled !== false);
-    this._cams = Array.isArray(cams) ? cams : [];
-    if (!this._activeCam && this._cams.length) {
-      this._activeCam = this._cams[0].entity_id;
-      this._manualCam = this._activeCam;
-    }
-    this._lastCamKey = "";  // a full render replaced the feed node — force re-attach
-    this._renderCamSelector();
-    this._renderCameraFeed();
-  }
-
-  _renderCamSelector() {
-    const sel = this.shadowRoot?.getElementById("cam-sel");
-    if (!sel) return;
-    if (!this._cams.length) { sel.innerHTML = '<span class="camchip">— no cameras —</span>'; return; }
-    sel.innerHTML = this._cams.map(c => {
-      const on = c.entity_id === this._activeCam;
-      const evt = this._camFocus && this._camFocus.entity === c.entity_id;
-      const short = (c.name || c.entity_id).replace(/^camera\./, "").toUpperCase().slice(0, 18);
-      return `<span class="camchip ${on ? 'on' : ''} ${evt ? 'evt' : ''}" data-cam="${this._esc(c.entity_id)}">${this._esc(short)}</span>`;
-    }).join("");
-    sel.querySelectorAll(".camchip[data-cam]").forEach(chip =>
-      chip.addEventListener("click", () => this._selectCam(chip.getAttribute("data-cam"))));
-  }
-
-  _camToken(entity) {
-    const st = this._hass && this._hass.states && this._hass.states[entity];
-    return st && st.attributes ? st.attributes.access_token : null;
-  }
-
-  _camSource(entity) {
-    // Mirrors server-side resolve_camera_source: camera_overrides maps a
-    // camera to its frame source (e.g. a go2rtc/Frigate restream of a Nest
-    // cam). Chip identity stays the original; pixels come from the source.
-    const ov = (this._liveData && this._liveData.config && this._liveData.config.camera_overrides) || {};
-    return ov[entity] || entity;
-  }
-
-  _camName(entity) {
-    // Nova-only display name (v7.101.28): camera_names map → picker name →
-    // entity tail. Mirrors server-side camera.display_name.
-    const cfg = (this._liveData && this._liveData.config) || {};
-    const custom = (cfg.camera_names || {})[entity];
-    if (typeof custom === "string" && custom.trim()) return custom.trim();
-    const cam = (this._cams || []).find(c => c.entity_id === entity);
-    return (cam && cam.name) || entity.split(".").pop();
-  }
-
-  _renderCameraFeed() {
-    const feed = this.shadowRoot?.getElementById("cam-feed");
-    if (!feed) return;
-    const entity = this._activeCam;
-    const stateEl = this.shadowRoot.getElementById("cam-state");
-    const tagEl = this.shadowRoot.getElementById("cam-tag");
-    const stripEl = this.shadowRoot.getElementById("cam-strip");
-
-    if (!entity) {
-      feed.querySelector("img")?.remove();
-      if (!feed.querySelector(".cam-none")) {
-        const n = document.createElement("div"); n.className = "cam-none"; n.textContent = "NO CAMERA SELECTED"; feed.prepend(n);
-      }
-      if (stripEl) stripEl.innerHTML = "";
-      return;
-    }
-    const cam = this._cams.find(c => c.entity_id === entity);
-    if (tagEl) tagEl.textContent = "◱ " + entity;
-
-    // event-focus banner
-    let foc = feed.querySelector(".cam-focus");
-    if (this._camFocus && this._camFocus.entity === entity) {
-      if (!foc) { foc = document.createElement("div"); foc.className = "cam-focus"; feed.appendChild(foc); }
-      const cf = this._camFocus.conf != null ? ` ${this._camFocus.conf}%` : "";
-      foc.innerHTML = `<i></i>EVENT · ${this._esc((this._camFocus.label || "").toUpperCase())}${cf}`;
-      if (stateEl) { stateEl.textContent = "◉ EVENT"; stateEl.style.color = "var(--red)"; }
-    } else {
-      foc?.remove();
-      if (stateEl) { stateEl.textContent = "◉ LIVE"; stateEl.style.color = "var(--green)"; }
-    }
-
-    // live MJPEG via HA's camera proxy; only (re)attach when entity, source,
-    // or token changes. src = the frame source (override-aware, v7.101.28).
-    const src = this._camSource(entity);
-    const tok = this._camToken(src);
-    const key = entity + "|" + src + "|" + (tok || "");
-    if (key !== this._lastCamKey) {
-      this._lastCamKey = key;
-      this._camMode = "stream";
-      if (this._camWsTimer) { clearInterval(this._camWsTimer); this._camWsTimer = null; }
-      feed.querySelector(".cam-none")?.remove();
-      let img = feed.querySelector("img");
-      if (!img) {
-        img = document.createElement("img");
-        feed.prepend(img);
-        // Escalating fallback chain (v7.101.28): MJPEG stream → proxy stills →
-        // Nova backend snapshot. WebRTC-only Nest cams fail BOTH proxy
-        // tiers (no MJPEG; no stills while idle), which used to leave the
-        // tile blank in an error loop.
-        img.addEventListener("error", () => {
-          if (this._camMode === "stream") this._camFallback(entity);
-          else if (this._camMode === "still") this._camNovaFallback(entity);
-        });
-        // v7.101.28: a decoded frame proves the tier works only if it isn't
-        // BLACK — Nest MJPEG happily decodes an all-black stream.
-        img.addEventListener("load", () => {
-          if (img.naturalWidth > 0 && this._camWatchdog) {
-            const luma = this._frameLuma(img);
-            if (luma === null || luma > 10) {
-              clearTimeout(this._camWatchdog); this._camWatchdog = null;
-            }
-          }
-        });
-      }
-      img.src = tok
-        ? `/api/camera_proxy_stream/${src}?token=${encodeURIComponent(tok)}`
-        : `/api/camera_proxy_stream/${src}`;
-      // A camera that already escalated to the Nova tier will fail both
-      // proxy tiers again — skip the blank-flash and go straight there.
-      if (this._camModeByEntity[entity] === "nova") {
-        this._camNovaFallback(entity);
-      } else {
-        // v7.101.28: no-frame watchdog. Nest WebRTC proxies typically HANG
-        // (HTTP 200, zero frames) instead of erroring, so the error-driven
-        // chain never fired. No decoded pixels within the window ⇒ escalate.
-        this._armCamWatchdog(entity, img, "stream", 6000);
-      }
-    }
-    if (stripEl && this._camMode !== "nova") {
-      const tgt = this._camFocus && this._camFocus.entity === entity && this._camFocus.conf != null
-        ? `${(this._camFocus.label || 'OBJECT').toUpperCase()} [${this._camFocus.conf}%]` : "STREAMING";
-      const srcLbl = src !== entity
-        ? `${this._esc(this._camName(entity))} → <b>${this._esc(src.split(".").pop())}</b>`
-        : `<b>${this._esc(this._camName(entity))}</b>`;
-      stripEl.innerHTML = `<span>SRC ${srcLbl}</span><span>MJPEG</span><span>TARGET <b>${this._esc(tgt)}</b></span>`;
-    }
-  }
-
-  _renderCameraSettings(d) {
-    const cams = (d.config && d.config.cameras) || [];
-    if (!cams.length) return `<div class="mem-empty">No camera entities in Home Assistant.</div>`;
-    const names = (d.config && d.config.camera_names) || {};
-    const overrides = (d.config && d.config.camera_overrides) || {};
-    const nOn = cams.filter(c => c.enabled !== false).length;
-    const head = `<div class="camset-head">
-      <span id="camset-count">${nOn} of ${cams.length} cameras in use</span>
-      <span class="camset-bulk">
-        <button class="cam-diag-btn" id="cam-enable-all">Enable all</button>
-        <button class="cam-diag-btn" id="cam-disable-all">Disable all</button>
-      </span>
-    </div>`;
-    return head + cams.map(c => {
-      const enabled = c.enabled !== false;
-      const custom = names[c.entity_id] || "";
-      const mode = c.location_mode || "auto";
-      const resolved = c.outdoor ? "outdoor" : "indoor";
-      const chip = (m, label) =>
-        `<button class="cam-diag-btn cam-loc-chip ${mode === m ? 'active' : ''}" data-loc="${m}" data-cam="${this._esc(c.entity_id)}">${label}</button>`;
-      const ov = overrides[c.entity_id];
-      return `<div class="camset-row ${enabled ? '' : 'cam-off'}" data-cam="${this._esc(c.entity_id)}">
-        <div class="camset-id">
-          <button class="cam-enable-toggle ${enabled ? 'on' : 'off'}" data-cam="${this._esc(c.entity_id)}" title="${enabled ? 'In use \u2014 click to disable' : 'Disabled \u2014 click to enable'}">${enabled ? 'ON' : 'OFF'}</button>
-          <span class="camset-ent">${this._esc(c.entity_id)}${ov ? ` <span class="camset-ov">\u2192 ${this._esc(ov)}</span>` : ''}</span>
-        </div>
-        <div class="camset-controls">
-          <input class="log-search camset-name" type="text" data-cam="${this._esc(c.entity_id)}"
-                 value="${this._esc(custom)}" placeholder="${this._esc(c.raw_name || c.entity_id)}" autocomplete="off" />
-          <div class="camset-chips">
-            ${chip("auto", `AUTO (${resolved})`)}
-            ${chip("indoor", "⌂ INDOOR")}
-            ${chip("outdoor", "▲ OUTDOOR")}
-          </div>
-        </div>
-      </div>`;
-    }).join("");
-  }
-
-  // ── Wellbeing Context (v7.101.28) ──
-  async _fetchBio() {
-    if (!this._hass) return;
-    try {
-      this._bio = await this._hass.callWS({ type: "nova/biometrics", action: "status" });
-    } catch (_) {
-      this._bio = { error: true };
-    }
-    this._renderBio();
-  }
-
-  _renderBio() {
-    const body = this.shadowRoot?.getElementById("bio-body");
-    const statusEl = this.shadowRoot?.getElementById("bio-status");
-    const btn = this.shadowRoot?.getElementById("bio-toggle");
-    if (!body) return;
-    const b = this._bio || {};
-    if (b.error) {
-      body.innerHTML = `<div class="mmwave-empty">Couldn't load — restart Home Assistant after updating.</div>`;
-      if (statusEl) statusEl.textContent = "—";
-      return;
-    }
-    if (statusEl) statusEl.innerHTML = b.enabled
-      ? `<span class="diag-ok">ON · ${b.found || 0} sensor${b.found === 1 ? "" : "s"}</span>`
-      : `<span class="diag-off">OFF</span>`;
-    if (btn) btn.textContent = b.enabled ? "✕ DISABLE" : "◉ ENABLE";
-    const ents = b.entities || [];
-    if (!b.enabled) {
-      body.innerHTML = `<div class="mmwave-empty">Off — enable to let Nova use wearable context. Health readings are never diagnosed or alarmed on.</div>`;
-      return;
-    }
-    if (!ents.length) {
-      body.innerHTML = `<div class="mmwave-empty">No wearable entities found. Connect a wearable integration (Withings, Google Fit, Oura, etc.) to Home Assistant.</div>`;
-      return;
-    }
-    body.innerHTML = `<div class="bio-list">` + ents.map(e =>
-      `<div class="bio-row"><span class="bio-kind">${this._esc((e.kind || "").replace(/_/g, " "))}</span><span class="bio-val">${this._esc(e.value)}${e.unit ? " " + this._esc(e.unit) : ""}</span></div>`
-    ).join("") + `</div>`;
-  }
-
-  _wireBio() {
-    this._fetchBio();
-    const btn = this.shadowRoot?.getElementById("bio-toggle");
-    btn?.addEventListener("click", async () => {
-      if (!this._hass) return;
-      const enabling = !(this._bio && this._bio.enabled);
-      btn.disabled = true;
-      try {
-        await this._hass.callWS({ type: "nova/biometrics", action: enabling ? "enable" : "disable" });
-        this._toast(enabling ? "✓ wellbeing context on" : "✓ wellbeing context off", "ok");
-        await this._fetchBio();
-      } catch (err) {
-        this._toast(`✗ ${err?.message || err}`, "err");
-      } finally {
-        btn.disabled = false;
-      }
-    });
-  }
-
-  // ── Energy Management (v7.101.28) ──
-  async _fetchEnergy() {
-    if (!this._hass) return;
-    try {
-      this._energy = await this._hass.callWS({ type: "nova/energy", action: "status" });
-    } catch (_) {
-      this._energy = { error: true };
-    }
-    this._renderEnergy();
-  }
-
-  _renderEnergy() {
-    const body = this.shadowRoot?.getElementById("energy-body");
-    const drawEl = this.shadowRoot?.getElementById("energy-draw");
-    const agencyBox = this.shadowRoot?.getElementById("energy-agency");
-    if (!body) return;
-    const e = this._energy || {};
-    if (e.error) {
-      body.innerHTML = `<div class="mmwave-empty">Couldn't load energy data — restart Home Assistant after updating.</div>`;
-      if (drawEl) drawEl.textContent = "—";
-      return;
-    }
-    if (drawEl) {
-      if (e.kw == null) { drawEl.innerHTML = `<span class="diag-off">NO METER</span>`; }
-      else {
-        const cls = e.over_peak ? "diag-warn" : "diag-ok";
-        drawEl.innerHTML = `<span class="${cls}">${e.kw} kW${e.over_peak ? " · OVER PEAK" : ""}</span>`;
-      }
-    }
-    // highlight the active agency chip (configured, not effective)
-    if (agencyBox) {
-      agencyBox.querySelectorAll(".mode-chip").forEach(b => {
-        b.classList.toggle("mode-chip-on", b.dataset.agency === e.configured_agency);
-      });
-    }
-    const advice = (e.advice || []).map(a => `<div class="energy-advice">${this._esc(a)}</div>`).join("");
-    const running = (e.running || []);
-    const runHtml = running.length
-      ? `<div class="energy-run-head">Running now</div>` + running.map(r =>
-          `<div class="energy-run-row"><span class="energy-run-name">${this._esc(r.name || r.entity)}</span><span class="energy-run-w ${r.shed_ok ? "" : "energy-locked"}">${r.watts} W${r.shed_ok ? "" : " · protected"}</span></div>`
-        ).join("")
-      : "";
-    body.innerHTML = advice + runHtml;
-  }
-
-  _wireEnergy() {
-    this._fetchEnergy();
-    const agencyBox = this.shadowRoot?.getElementById("energy-agency");
-    agencyBox?.querySelectorAll(".mode-chip").forEach(btn => {
-      btn.addEventListener("click", async () => {
-        if (!this._hass) return;
-        const agency = btn.dataset.agency;
-        agencyBox.querySelectorAll(".mode-chip").forEach(b => b.disabled = true);
-        try {
-          await this._hass.callWS({ type: "nova/energy", action: "set_agency", agency });
-          this._toast(`✓ energy agency: ${agency}`, "ok");
-          await this._fetchEnergy();
-        } catch (err) {
-          this._toast(`✗ ${err?.message || err}`, "err");
-        } finally {
-          agencyBox.querySelectorAll(".mode-chip").forEach(b => b.disabled = false);
-        }
-      });
-    });
-  }
-
-  // ── Solar (v7.101.28) ──
-  async _fetchSolar() {
-    if (!this._hass) return;
-    try {
-      this._solar = await this._hass.callWS({ type: "nova/solar", action: "status" });
-    } catch (_) {
-      this._solar = { error: true };
-    }
-    this._renderSolar();
-  }
-
-  _renderSolar() {
-    const body = this.shadowRoot?.getElementById("solar-body");
-    const sufficiencyEl = this.shadowRoot?.getElementById("solar-sufficiency");
-    if (!body) return;
-    const s = this._solar || {};
-    if (s.error) {
-      body.innerHTML = `<div class="mmwave-empty">Couldn't load solar data — restart Home Assistant after updating.</div>`;
-      if (sufficiencyEl) sufficiencyEl.textContent = "—";
-      return;
-    }
-    if (!s.configured) {
-      body.innerHTML = `<div class="mmwave-empty">${this._esc((s.advice || [])[0] || "No solar source configured yet.")}</div>`;
-      if (sufficiencyEl) sufficiencyEl.textContent = "—";
-      return;
-    }
-    if (sufficiencyEl) {
-      sufficiencyEl.innerHTML = s.self_sufficiency_pct != null
-        ? `<span class="diag-ok">${s.self_sufficiency_pct}% self-sufficient</span>`
-        : "—";
-    }
-    const rows = [];
-    if (s.solar_w != null) {
-      rows.push(`<div class="energy-run-row"><span class="energy-run-name">Solar</span><span class="energy-run-w">${(s.solar_w / 1000).toFixed(2)} kW</span></div>`);
-    }
-    if (s.grid_w != null) {
-      const dirLabel = s.grid_direction === "export" ? "Exporting" : s.grid_direction === "import" ? "Importing" : "Balanced";
-      const cls = s.grid_direction === "export" ? "diag-ok" : s.grid_direction === "import" ? "diag-warn" : "";
-      rows.push(`<div class="energy-run-row"><span class="energy-run-name">Grid</span><span class="energy-run-w ${cls}">${dirLabel} ${(Math.abs(s.grid_w) / 1000).toFixed(2)} kW</span></div>`);
-    }
-    if (s.battery_w != null || s.battery_pct != null) {
-      const pct = s.battery_pct != null ? `${s.battery_pct}%` : "no % available";
-      rows.push(`<div class="energy-run-row"><span class="energy-run-name">Battery</span><span class="energy-run-w">${pct}${s.battery_w != null ? ` · ${(s.battery_w / 1000).toFixed(2)} kW` : ""}</span></div>`);
-    }
-    const advice = (s.advice || []).map(a => `<div class="energy-advice">${this._esc(a)}</div>`).join("");
-    body.innerHTML = advice + rows.join("");
-  }
-
-  _wireSolar() {
-    this._fetchSolar();
-  }
-
-  // ── Operational Mode (Directive Layer, v7.101.28) ──
-  // ── Intrusion / Security (v7.101.28) ──
-  async _fetchIntrusion() {
-    if (!this._hass) return;
-    // pull the configured response timeout so the select reflects the saved value
-    try {
-      const cfg = this._liveData?.config || {};
-      if (cfg.intrusion_response_timeout != null) this._intrTimeout = cfg.intrusion_response_timeout;
-    } catch (_) {}
-    try {
-      this._intr = await this._hass.callWS({ type: "nova/intrusion", action: "status" });
-    } catch (_) {
-      this._intr = { error: true };
-    }
-    this._renderIntrusion();
-  }
-
-  _renderIntrusion() {
-    const body = this.shadowRoot?.getElementById("intr-body");
-    const statusEl = this.shadowRoot?.getElementById("intr-status");
-    if (!body) return;
-    const s = this._intr || {};
-    if (s.error) {
-      body.innerHTML = `<div class="mmwave-empty">Couldn't load — restart Home Assistant after updating.</div>`;
-      if (statusEl) statusEl.textContent = "—";
-      return;
-    }
-    if (statusEl) {
-      statusEl.innerHTML = s.called_off
-        ? `<span class="diag-warn">CALLED OFF · ${s.suppressed_for}s</span>`
-        : `<span class="diag-ok">ARMED</span>`;
-    }
-    const snap = s.last_snapshot;
-    let html = "";
-    if (snap && snap.url) {
-      const when = snap.ts ? new Date(snap.ts * 1000).toLocaleString() : "";
-      html += `<div class="intr-snap">
-        <img src="${this._esc(snap.url)}" alt="intrusion snapshot" class="intr-img" />
-        <div class="intr-snap-meta">${this._esc((snap.camera || "").replace("camera.", "").replace(/_/g, " "))} · ${this._esc(when)}</div>
-      </div>`;
-    } else {
-      html += `<div class="mmwave-empty">No intrusion snapshots captured. This stays empty unless Nova confirms an intruder on camera.</div>`;
-    }
-    if (s.false_alarms_24h) {
-      html += `<div class="intr-fa">${s.false_alarms_24h} false alarm${s.false_alarms_24h === 1 ? "" : "s"} called off in the last 24h</div>`;
-    }
-    if (s.acknowledged) {
-      html += `<div class="intr-ack">✓ Acknowledged — automatic escalation held (you're handling it)</div>`;
-    }
-    html += `<div class="intr-timeout-row">
-      <label>Auto-escalate if no response after</label>
-      <select class="cfg-field intr-timeout" data-cfg-key="intrusion_response_timeout">${this._optsLabeled([['60','1 min'],['120','2 min'],['180','3 min'],['300','5 min'],['600','10 min']], String(this._intrTimeout || 120))}</select>
-    </div>`;
-    html += `<div class="intr-timeout-row">
-      <label>Confirm Frigate person with Nova vision before alarming</label>
-      <button class="toggle-btn ${this._liveData?.config?.intrusion_vision_confirm !== false ? 'on' : 'off'}" data-cfg-key="intrusion_vision_confirm" data-cfg-val="${this._liveData?.config?.intrusion_vision_confirm !== false ? 'false' : 'true'}">${this._liveData?.config?.intrusion_vision_confirm !== false ? 'ON' : 'OFF'}</button>
-    </div>`;
-    html += `<div class="doclib-controls">
-      <button class="cam-diag-btn intr-ack-btn">✓ I'M LOOKING (HOLD)</button>
-      <button class="cam-diag-btn intr-dismiss">✕ CALL OFF (FALSE ALARM)</button>
-    </div>`;
-    body.innerHTML = html;
-    const btn = body.querySelector(".intr-dismiss");
-    btn?.addEventListener("click", async () => {
-      if (!this._hass) return;
-      btn.disabled = true;
-      try {
-        await this._hass.callWS({ type: "nova/intrusion", action: "dismiss", reason: "panel" });
-        this._toast("✓ intrusion called off", "ok");
-        await this._fetchIntrusion();
-      } catch (err) {
-        this._toast(`✗ ${err?.message || err}`, "err");
-        btn.disabled = false;
-      }
-    });
-    const ackBtn = body.querySelector(".intr-ack-btn");
-    ackBtn?.addEventListener("click", async () => {
-      if (!this._hass) return;
-      ackBtn.disabled = true;
-      try {
-        await this._hass.callWS({ type: "nova/intrusion", action: "acknowledge", reason: "panel" });
-        this._toast("✓ acknowledged — holding escalation", "ok");
-        await this._fetchIntrusion();
-      } catch (err) {
-        this._toast(`✗ ${err?.message || err}`, "err");
-        ackBtn.disabled = false;
-      }
-    });
-  }
-
-  // ── Intrusion Log + training (v7.101.28) ──
-  async _wireIntrusionLog() {
-    await this._fetchIntrusionLog();
-    const btn = this.shadowRoot?.getElementById("ilog-refresh");
-    btn?.addEventListener("click", async () => {
-      btn.disabled = true;
-      const orig = btn.textContent;
-      btn.textContent = "\u27f3 LOADING\u2026";
-      try { await this._fetchIntrusionLog(); }
-      finally { btn.disabled = false; btn.textContent = orig; }
-    });
-  }
-
-  async _fetchIntrusionLog() {
-    const body = this.shadowRoot?.getElementById("ilog-body");
-    const side = this.shadowRoot?.getElementById("ilog-learn");
-    if (!this._hass || !body) return;
-    try {
-      const res = await this._hass.callWS({ type: "nova/intrusion", action: "log", limit: 40 });
-      this._ilog = res;
-      const L = res?.learning || {};
-      if (side) side.textContent = `${L.labeled || 0}/${L.events || 0} LABELLED`;
-      body.innerHTML = this._renderIntrusionLog(res);
-      this._wireIntrusionLabels();
-    } catch (err) {
-      body.innerHTML = `<div class="mmwave-empty">Could not load the log.</div>`;
-    }
-  }
-
-  _renderIntrusionLog(res) {
-    const evs = (res && res.events) || [];
-    if (!evs.length) {
-      return `<div class="mmwave-empty">No intrusion events recorded yet.</div>`;
-    }
-    const damped = ((res.learning || {}).damped_patterns || []).length;
-    let html = "";
-    if (damped) {
-      html += `<div class="ilog-learned">Nova has learned ${damped} benign pattern${damped === 1 ? "" : "s"} — low-confidence alerts for these stay quiet.</div>`;
-    }
-    for (const e of evs) {
-      const when = new Date((e.ts || 0) * 1000).toLocaleString();
-      const kindCls = { confirmed: "ilog-confirmed", unresolved: "ilog-unresolved",
-                        investigating: "ilog-investigating" }[e.kind] || "ilog-investigating";
-      const label = e.label || "";
-      html += `<div class="ilog-item" data-ev="${this._esc(e.id)}">
-        <div class="ilog-row">
-          <span class="ilog-kind ${kindCls}">${this._esc((e.kind || "").toUpperCase())}</span>
-          <span class="ilog-when">${this._esc(when)}</span>
-        </div>
-        <div class="ilog-what">${this._esc(e.breach || e.camera || "activity")}${e.reason ? " — " + this._esc(e.reason) : ""}</div>
-        ${e.snapshot_url ? `<img class="ilog-snap" src="${this._esc(e.snapshot_url)}" alt="snapshot">` : ""}
-        <div class="ilog-actions">
-          <button class="ilog-btn ilog-real ${label === "real" ? "ilog-on" : ""}" data-label="real">REAL</button>
-          <button class="ilog-btn ilog-false ${label === "false" ? "ilog-on" : ""}" data-label="false">FALSE ALARM</button>
-          ${label ? `<button class="ilog-btn ilog-clear" data-label="">CLEAR</button>` : ""}
-        </div>
-      </div>`;
-    }
-    return html;
-  }
-
-  _wireIntrusionLabels() {
-    const body = this.shadowRoot?.getElementById("ilog-body");
-    body?.querySelectorAll(".ilog-btn").forEach(btn => {
-      btn.addEventListener("click", async () => {
-        const item = btn.closest(".ilog-item");
-        const id = item?.getAttribute("data-ev");
-        if (!id || !this._hass) return;
-        try {
-          await this._hass.callWS({ type: "nova/intrusion", action: "label",
-                                    event_id: id, label: btn.getAttribute("data-label") });
-          await this._fetchIntrusionLog();
-        } catch (_) {}
-      });
-    });
-  }
-
-  _wireIntrusion() {
-    this._fetchIntrusion();
-  }
-
-  async _fetchMode() {
-    if (!this._hass) return;
-    try {
-      this._mode = await this._hass.callWS({ type: "nova/mode", action: "status" });
-    } catch (_) {
-      this._mode = { error: true };
-    }
-    this._renderMode();
-  }
-
-  _renderMode() {
-    const grid = this.shadowRoot?.getElementById("mode-grid");
-    const activeEl = this.shadowRoot?.getElementById("mode-active");
-    const descEl = this.shadowRoot?.getElementById("mode-desc");
-    if (!grid) return;
-    const m = this._mode || {};
-    if (m.error) {
-      grid.innerHTML = `<div class="mmwave-empty">Couldn't load modes — restart Home Assistant after updating.</div>`;
-      if (activeEl) activeEl.textContent = "—";
-      return;
-    }
-    const active = m.active || "normal";
-    if (activeEl) activeEl.innerHTML = `<span class="mode-active-tag">${this._esc(active.toUpperCase())}</span>`;
-    if (descEl && m.description) descEl.textContent = m.description;
-    const avail = m.available || [];
-    grid.innerHTML = avail.map(mo =>
-      `<button class="mode-chip ${mo.name === active ? "mode-chip-on" : ""}" data-mode="${this._esc(mo.name)}" title="${this._esc(mo.description || "")}">${this._esc(mo.name)}</button>`
-    ).join("");
-    grid.querySelectorAll(".mode-chip").forEach(btn => {
-      btn.addEventListener("click", async () => {
-        const mode = btn.dataset.mode;
-        if (!this._hass || mode === active) return;
-        grid.querySelectorAll(".mode-chip").forEach(b => b.disabled = true);
-        try {
-          await this._hass.callWS({ type: "nova/mode", action: "set", mode });
-          this._toast(`✓ ${mode} mode`, "ok");
-          await this._fetchMode();
-        } catch (err) {
-          this._toast(`✗ ${err?.message || err}`, "err");
-          grid.querySelectorAll(".mode-chip").forEach(b => b.disabled = false);
-        }
-      });
-    });
-  }
-
-  _wireMode() {
-    this._fetchMode();
-  }
-
-  // ── System Diagnostics — core service health (v7.101.28) ──
-  async _fetchDiagnostics() {
-    if (!this._hass) return;
-    try {
-      this._diag = await this._hass.callWS({ type: "nova/diagnostics" });
-    } catch (_) {
-      this._diag = { error: true };
-    }
-    try {
-      this._calib = await this._hass.callWS({ type: "nova/get_calibration" });
-    } catch (_) {
-      this._calib = null;
-    }
-    this._renderDiagnostics();
-  }
-
-  _renderDiagnostics() {
-    const body = this.shadowRoot?.getElementById("diag-body");
-    const overallEl = this.shadowRoot?.getElementById("diag-overall");
-    if (!body) return;
-    const d = this._diag || {};
-    if (d.error) {
-      body.innerHTML = `<div class="mmwave-empty">Couldn't run diagnostics — restart Home Assistant after updating.</div>`;
-      if (overallEl) overallEl.textContent = "—";
-      return;
-    }
-    const cls = (st) => ({ ok: "diag-ok", warn: "diag-warn", idle: "diag-idle", down: "diag-down", off: "diag-off" }[st] || "diag-off");
-    const label = (st) => ({ ok: "OK", warn: "WARN", idle: "IDLE", down: "DOWN", off: "OFF" }[st] || "?");
-    const dot = (st) => `<span class="diag-dot ${cls(st)}">◉</span><span class="diag-st ${cls(st)}">${label(st)}</span>`;
-    if (overallEl) {
-      const ov = d.overall || "off";
-      overallEl.innerHTML = `<span class="${cls(ov)}">${(d.summary || ov).toUpperCase()}</span>`;
-    }
-    const svcs = d.services || [];
-    body.innerHTML = `<div class="diag-list">` + svcs.map(s =>
-      `<div class="diag-row">
-         <div class="diag-row-head"><span class="diag-name">${this._esc(s.name)}</span>${dot(s.status)}</div>
-         <div class="diag-detail">${this._esc(s.detail || "")}</div>
-       </div>`
-    ).join("") + `</div>` + this._renderCalibration();
-  }
-
-  _renderCalibration() {
-    const c = this._calib || {};
-    const cal = c.calibration || {};
-    const ib = c.interruption_budget || {};
-    const top = `margin-top:14px;padding-top:12px;border-top:1px solid rgba(120,160,220,0.15)`;
-    if (!cal.n) {
-      return `<div style="${top}">
-        <div style="font-weight:600;margin-bottom:6px">Judgment calibration</div>
-        <div class="diag-detail">No judged decisions yet — this appears once Nova's decisions accrue outcomes.</div></div>`;
-    }
-    const pct = (v) => v == null ? "—" : Math.round(v * 100) + "%";
-    const bars = (cal.bins || []).filter(b => b.count > 0).map(b => {
-      const w = Math.round((b.good_rate ?? 0) * 100);
-      return `<div style="display:flex;align-items:center;gap:8px;margin:3px 0;font-size:12px">
-        <span style="width:74px;color:#9fb3d0">${pct(b.lo)}–${pct(b.hi)}</span>
-        <span style="flex:1;height:8px;background:rgba(120,160,220,0.15);border-radius:4px;overflow:hidden">
-          <span style="display:block;height:100%;width:${w}%;background:#5aa0ff"></span></span>
-        <span style="width:104px;text-align:right;color:#c8d6ea">${pct(b.good_rate)} good · n=${b.count}</span>
-      </div>`;
-    }).join("");
-    const budgetLine = ib.judged
-      ? `Interruption budget: <b>${this._esc(ib.assessment || "")}</b> — ${pct(ib.unwelcome_rate)} of ${ib.judged} recent decisions dismissed (cap ×${ib.multiplier ?? 1}).`
-      : `Interruption budget: no recent judged decisions.`;
-    const st = c.suggestion_threshold;
-    let suggestLine = "";
-    if (st && Math.abs(st.learned_delta || 0) > 0.001) {
-      const dir = st.learned_delta > 0 ? "raised" : "lowered";
-      suggestLine = `<div class="diag-detail" style="margin-top:4px">Suggestion bar ${dir} to ${pct(st.effective)} (from ${pct(st.base)}) based on recent usefulness.</div>`;
-    }
-    return `<div style="${top}">
-      <div style="font-weight:600;margin-bottom:6px">Judgment calibration
-        <span style="font-weight:400;color:#8496b0;font-size:11px">Brier ${cal.brier ?? "—"} · ECE ${cal.ece ?? "—"} · n=${cal.n}</span></div>
-      ${bars}
-      <div class="diag-detail" style="margin-top:8px">${budgetLine}</div>
-      ${suggestLine}
-    </div>`;
-  }
-
-  _wireDiagnostics() {
-    this._fetchDiagnostics();
-    const btn = this.shadowRoot?.getElementById("diag-refresh");
-    btn?.addEventListener("click", async () => {
-      if (!this._hass) return;
-      btn.disabled = true;
-      const orig = btn.textContent;
-      btn.textContent = "⟳ CHECKING…";
-      try { await this._fetchDiagnostics(); }
-      finally { btn.disabled = false; btn.textContent = orig; }
-    });
-  }
-
-  // ── Multi-Hazard Monitor — v7.101.28 ──
-  // ── Scheduled briefings — v7.101.28 ──
-  _wireBriefings() {
-    const btn = this.shadowRoot?.getElementById("brief-now");
-    btn?.addEventListener("click", async () => {
-      if (!this._hass) return;
-      // Silent-until-configured: a briefing with no announcement speakers set
-      // won't play, so tell the user where to set them instead of firing quietly.
-      const cfg = this._liveData?.config || {};
-      const spk = cfg.announcement_speakers;
-      const hasTargets = (Array.isArray(spk) && spk.length > 0) || !!cfg.broadcast_group;
-      if (!hasTargets) {
-        this._toast("No announcement speakers set \u2014 choose them in Settings \u2192 Announcement Speakers", "err");
-        return;
-      }
-      btn.disabled = true;
-      const orig = btn.textContent;
-      btn.textContent = "\u25b6 BRIEFING\u2026";
-      try {
-        await this._hass.callService("nova", "briefing", { announce: true });
-        this._toast("\u2713 briefing requested", "ok");
-      } catch (err) {
-        this._toast(`\u2717 ${err?.message || err}`, "err");
-      } finally {
-        btn.disabled = false; btn.textContent = orig;
-      }
-    });
-  }
-
-  async _wireHazard() {
-    const loc = this.shadowRoot?.getElementById("haz-loc");
-    const overall = this.shadowRoot?.getElementById("hazard-overall");
-    try {
-      const st = await this._hass?.callWS({ type: "nova/hazard", action: "status" });
-      if (st) {
-        if (overall) overall.textContent = st.enabled ? "ON" : "OFF";
-        if (loc) {
-          if (st.center) {
-            loc.textContent = st.using_override
-              ? `Location: override ${st.center[0]}, ${st.center[1]}.`
-              : `Location: home ${st.center[0]}, ${st.center[1]}.`;
-          } else {
-            loc.textContent = "Location: no home coordinates set in Home Assistant.";
-          }
-        }
-      }
-    } catch (_) {}
-
-    const btn = this.shadowRoot?.getElementById("haz-scan");
-    const body = this.shadowRoot?.getElementById("haz-body");
-    btn?.addEventListener("click", async () => {
-      if (!this._hass) return;
-      btn.disabled = true;
-      const orig = btn.textContent;
-      btn.textContent = "⟳ SCANNING…";
-      if (body) body.innerHTML = `<div class="mmwave-empty">Checking USGS, NWS, and NASA EONET…</div>`;
-      try {
-        const res = await this._hass.callWS({ type: "nova/hazard", action: "scan" });
-        if (body) body.innerHTML = this._renderHazardScan(res);
-      } catch (err) {
-        if (body) body.innerHTML = `<div class="mmwave-empty">Scan failed: ${this._esc(err?.message || String(err))}</div>`;
-      } finally {
-        btn.disabled = false; btn.textContent = orig;
-      }
-    });
-  }
-
-  _renderHazardScan(res) {
-    if (!res || res.ok === false) {
-      return `<div class="mmwave-empty">${this._esc(res?.error || "No location configured.")}</div>`;
-    }
-    const q = res.earthquakes || [], w = res.weather || [], d = res.disasters || [];
-    if (!q.length && !w.length && !d.length) {
-      return `<div class="haz-clear">✓ All clear near ${res.center ? res.center[0] + ", " + res.center[1] : "home"} — no active earthquakes, severe weather, or disasters.</div>`;
-    }
-    let html = "";
-    for (const e of q) {
-      const mag = (typeof e.mag === "number") ? `M${e.mag.toFixed(1)}` : "M?";
-      html += `<div class="haz-item"><span class="haz-badge haz-quake">${mag}</span> ${this._esc(e.place)} — ${e.dist_km} km away</div>`;
-    }
-    for (const e of w) {
-      html += `<div class="haz-item"><span class="haz-badge haz-wx">${this._esc(e.severity)}</span> ${this._esc(e.event)}${e.area ? " — " + this._esc(e.area) : ""}</div>`;
-    }
-    for (const e of d) {
-      html += `<div class="haz-item"><span class="haz-badge haz-dis">${this._esc(e.category)}</span> ${this._esc(e.title)} — ${e.dist_km} km away</div>`;
-    }
-    return html;
-  }
-
-  // ── Document Library (RAG) — v7.101.28 ──
-  async _fetchDocLibrary() {
-    if (!this._hass) return;
-    try {
-      this._docLib = await this._hass.callWS({ type: "nova/documents", action: "status" });
-    } catch (_) {
-      this._docLib = { error: true };
-    }
-    this._renderDocLibrary();
-  }
-
-  _renderDocLibrary() {
-    const body = this.shadowRoot?.getElementById("doclib-body");
-    const statusEl = this.shadowRoot?.getElementById("doclib-status");
-    if (!body) return;
-    const d = this._docLib || {};
-    if (d.error) {
-      body.innerHTML = `<div class="mmwave-empty">Couldn't reach the library — restart Home Assistant after updating, then reopen.</div>`;
-      if (statusEl) statusEl.textContent = "—";
-      return;
-    }
-    const backend = d.chroma ? "VECTOR" : d.fts ? "KEYWORD" : "NONE";
-    if (statusEl) statusEl.textContent = `${backend} · ${d.chunk_count || 0} chunks`;
-    const sources = d.sources || [];
-    if (!sources.length) {
-      body.innerHTML = `<div class="mmwave-empty">No documents ingested yet. Add PDF/.txt/.md files to <code>/config/nova/documents</code> and press Ingest.${d.chroma ? "" : " (Vector search needs ChromaDB; keyword fallback is active.)"}</div>`;
-      return;
-    }
-    body.innerHTML = `<div class="doclib-list">` + sources.map(s =>
-      `<div class="doclib-row"><span class="doclib-name">${this._esc(s.source)}</span><span class="doclib-row-r"><span class="doclib-chunks">${s.chunks} chunks</span><button class="doclib-del" data-src="${this._esc(s.source)}" title="Remove document">✕</button></span></div>`
-    ).join("") + `</div>`;
-    // wire delete buttons
-    body.querySelectorAll(".doclib-del").forEach(btn => {
-      btn.addEventListener("click", async () => {
-        const src = btn.getAttribute("data-src");
-        if (!src || !this._hass) return;
-        if (!window.confirm(`Remove "${src}" from the library? This deletes the file and its indexed chunks.`)) return;
-        try {
-          await this._hass.callWS({ type: "nova/documents", action: "delete", filename: src });
-          this._toast(`✓ removed ${src}`, "ok");
-          await this._fetchDocLibrary();
-        } catch (err) {
-          this._toast(`✗ delete — ${err?.message || err}`, "err");
-        }
-      });
-    });
-  }
-
-  _renderDocSearch(hits) {
-    const body = this.shadowRoot?.getElementById("doclib-body");
-    if (!body) return;
-    if (!hits || !hits.length) {
-      body.innerHTML = `<div class="mmwave-empty">No matches. Try different words, or ingest more documents.</div>`;
-      return;
-    }
-    body.innerHTML = `<div class="doclib-list">` + hits.map(h => {
-      const score = (h.score != null) ? ` · ${Math.round(h.score * 100)}%` : "";
-      const excerpt = (h.text || "").slice(0, 220);
-      return `<div class="doclib-hit"><div class="doclib-hit-src">${this._esc(h.source || "?")}${score}</div><div class="doclib-hit-txt">${this._esc(excerpt)}${h.text && h.text.length > 220 ? "…" : ""}</div></div>`;
-    }).join("") + `</div>`;
-  }
-
-  _wireDocLibrary() {
-    this._fetchDocLibrary();
-    this._fetchVectorBackend();
-    this._wireVectorBackend();
-    const ingestBtn = this.shadowRoot?.getElementById("doclib-ingest");
-    ingestBtn?.addEventListener("click", async () => {
-      if (!this._hass) return;
-      ingestBtn.disabled = true;
-      const orig = ingestBtn.textContent;
-      ingestBtn.textContent = "⟳ INGESTING…";
-      try {
-        const res = await this._hass.callWS({ type: "nova/documents", action: "ingest" });
-        this._toast(`✓ ingested ${res.files_ingested || 0} file(s), ${res.total_chunks || 0} chunks`, "ok");
-        await this._fetchDocLibrary();
-      } catch (err) {
-        this._toast(`✗ ingest — ${err?.message || err}`, "err");
-      } finally {
-        ingestBtn.disabled = false;
-        ingestBtn.textContent = orig;
-      }
-    });
-    const q = this.shadowRoot?.getElementById("doclib-q");
-    q?.addEventListener("keydown", async (ev) => {
-      if (ev.key !== "Enter") return;
-      ev.preventDefault();
-      const query = q.value.trim();
-      if (!query || !this._hass) { this._fetchDocLibrary(); return; }
-      try {
-        const res = await this._hass.callWS({ type: "nova/documents", action: "search", query });
-        this._renderDocSearch(res?.results || []);
-      } catch (err) {
-        this._toast(`✗ search — ${err?.message || err}`, "err");
-      }
-    });
-
-    // ── upload (file → base64 → WS) ──
-    const upBtn = this.shadowRoot?.getElementById("doclib-upload-btn");
-    const fileInput = this.shadowRoot?.getElementById("doclib-file");
-    upBtn?.addEventListener("click", () => fileInput?.click());
-    fileInput?.addEventListener("change", async () => {
-      const file = fileInput.files && fileInput.files[0];
-      if (!file || !this._hass) return;
-      if (file.size > 25 * 1024 * 1024) {
-        this._toast("✗ file exceeds 25MB", "err");
-        fileInput.value = ""; return;
-      }
-      upBtn.disabled = true;
-      const orig = upBtn.textContent;
-      upBtn.textContent = "⬆ UPLOADING…";
-      try {
-        const b64 = await new Promise((resolve, reject) => {
-          const r = new FileReader();
-          r.onload = () => resolve(String(r.result).split(",")[1] || "");
-          r.onerror = () => reject(new Error("read failed"));
-          r.readAsDataURL(file);
-        });
-        const res = await this._hass.callWS({ type: "nova/documents", action: "upload", filename: file.name, content: b64 });
-        if (res.ok) {
-          this._toast(`✓ uploaded ${res.filename} — ${res.chunks || 0} chunks${res.embedded ? `, ${res.embedded} embedded` : ""}`, "ok");
-          await this._fetchDocLibrary();
-        } else {
-          this._toast(`✗ upload — ${res.error || "failed"}`, "err");
-        }
-      } catch (err) {
-        this._toast(`✗ upload — ${err?.message || err}`, "err");
-      } finally {
-        upBtn.disabled = false;
-        upBtn.textContent = orig;
-        fileInput.value = "";
-      }
-    });
-
-    // ── watch folders (config field + scan button) ──
-    const watchField = this.shadowRoot?.getElementById("doclib-watch");
-    if (watchField && this._hass) {
-      // prefill from config
-      this._hass.callWS({ type: "nova/get_panel_data" }).then(pd => {
-        const wf = pd?.config?.document_watch_folders;
-        if (wf && !watchField.value) watchField.value = Array.isArray(wf) ? wf.join("\n") : wf;
-      }).catch(() => {});
-      const saveWatch = async () => {
-        try {
-          await this._hass.callWS({ type: "nova/update_config", key: "document_watch_folders", value: watchField.value.trim() });
-        } catch (_) {}
-      };
-      watchField.addEventListener("blur", saveWatch);
-    }
-    const scanBtn = this.shadowRoot?.getElementById("doclib-scan");
-    scanBtn?.addEventListener("click", async () => {
-      if (!this._hass) return;
-      // persist the field first so the scan sees current folders
-      if (watchField) {
-        try { await this._hass.callWS({ type: "nova/update_config", key: "document_watch_folders", value: watchField.value.trim() }); } catch (_) {}
-      }
-      scanBtn.disabled = true;
-      const orig = scanBtn.textContent;
-      scanBtn.textContent = "⟳ SCANNING…";
-      try {
-        const res = await this._hass.callWS({ type: "nova/documents", action: "scan_watch" });
-        if (res.watched === 0) {
-          this._toast("no watch folders configured", "err");
-        } else {
-          this._toast(`✓ scanned ${res.watched} folder(s) — ${res.new_files || 0} new document(s)`, "ok");
-          await this._fetchDocLibrary();
-        }
-      } catch (err) {
-        this._toast(`✗ scan — ${err?.message || err}`, "err");
-      } finally {
-        scanBtn.disabled = false;
-        scanBtn.textContent = orig;
-      }
-    });
-  }
-
-  // ── Optional ChromaDB vector backend — v7.101.28 ──
-  async _fetchVectorBackend() {
-    if (!this._hass) return;
-    try {
-      this._vecbk = await this._hass.callWS({ type: "nova/semantic_search", action: "status" });
-    } catch (_) {
-      this._vecbk = { error: true };
-    }
-    this._renderVectorBackend();
-  }
-
-  _renderVectorBackend() {
-    const stateEl = this.shadowRoot?.getElementById("vecbk-state");
-    const hintEl = this.shadowRoot?.getElementById("vecbk-hint");
-    const btn = this.shadowRoot?.getElementById("vecbk-toggle");
-    if (!stateEl) return;
-    const v = this._vecbk || {};
-    if (v.error) { stateEl.textContent = "—"; if (btn) btn.style.display = "none"; return; }
-
-    if (v.enabled) {
-      stateEl.innerHTML = `<span class="vecbk-on">◉ SEMANTIC (Ollama)</span>`;
-      if (hintEl) hintEl.textContent =
-        `Meaning-based matching via Ollama ${v.model || "nomic-embed-text"}${v.vector_count ? ` · ${v.vector_count} vectors` : " · re-ingest to embed your documents"}.`;
-      if (btn) { btn.style.display = ""; btn.textContent = "✕ DISABLE SEMANTIC SEARCH"; btn.dataset.mode = "disable"; }
-    } else if (!v.ollama_configured) {
-      stateEl.innerHTML = `<span class="vecbk-off">KEYWORD (FTS)</span>`;
-      if (hintEl) hintEl.textContent =
-        "Works everywhere with no setup. Semantic search needs an Ollama host — set the LLM base URL (llm_base_url) to your Ollama server and pull an embed model (ollama pull nomic-embed-text).";
-      if (btn) btn.style.display = "none";
-    } else {
-      stateEl.innerHTML = `<span class="vecbk-off">KEYWORD (FTS)</span>`;
-      if (hintEl) hintEl.textContent =
-        `Enable semantic search to match on meaning, using your Ollama server (${v.model || "nomic-embed-text"}). No install, no ChromaDB — embeddings run on Ollama. Re-ingest afterward to embed existing docs.`;
-      if (btn) { btn.style.display = ""; btn.textContent = "⬆ ENABLE SEMANTIC SEARCH"; btn.dataset.mode = "enable"; }
-    }
-  }
-
-  _wireVectorBackend() {
-    const btn = this.shadowRoot?.getElementById("vecbk-toggle");
-    btn?.addEventListener("click", async () => {
-      if (!this._hass) return;
-      const mode = btn.dataset.mode || "enable";
-      if (mode === "disable") {
-        try {
-          await this._hass.callWS({ type: "nova/semantic_search", action: "disable" });
-          this._toast("✓ semantic search disabled — keyword active", "ok");
-          await this._fetchVectorBackend();
-        } catch (err) { this._toast(`✗ ${err?.message || err}`, "err"); }
-        return;
-      }
-      btn.disabled = true;
-      const orig = btn.textContent;
-      btn.textContent = "⬆ CHECKING OLLAMA…";
-      try {
-        const res = await this._hass.callWS({ type: "nova/semantic_search", action: "enable" });
-        if (res.ok) {
-          this._toast(`✓ semantic search on (Ollama ${res.model}, ${res.dim}-dim) — re-ingest to embed docs`, "ok");
-        } else {
-          this._toast(`⚠ enabled, but Ollama isn't ready: ${res.error || "unreachable"}`, "err");
-        }
-        await this._fetchVectorBackend();
-        this._fetchDocLibrary();
-      } catch (err) {
-        this._toast(`✗ ${err?.message || err}`, "err");
-      } finally {
-        btn.disabled = false;
-        if (btn.textContent === "⬆ CHECKING OLLAMA…") btn.textContent = orig;
-      }
-    });
-  }
-
-  _rerenderCameraSettings() {
-    const host = this.shadowRoot?.querySelector("#camset-body");
-    if (!host) return;
-    host.innerHTML = this._renderCameraSettings(this._data());
-    this._wireCameraSettings();
-  }
-
-  _wireCameraSettings() {
-    // Camera on/off toggles — choose which cameras Nova uses (v7.101.28).
-    const applyDisabled = async (next, msg) => {
-      try {
-        await this._hass.callWS({ type: "nova/update_config", key: "disabled_cameras", value: JSON.stringify(next) });
-        if (this._liveData && this._liveData.config) {
-          this._liveData.config.disabled_cameras = next;
-          const off = new Set(next);
-          (this._liveData.config.cameras || []).forEach(c => { c.enabled = !off.has(c.entity_id); });
-        }
-        this._rerenderCameraSettings();
-        this._toast(msg, "ok");
-      } catch (err) { this._toast("\u2717 " + (err?.message || err), "err"); }
-    };
-    const curDisabled = () => {
-      const v = (this._data().config || {}).disabled_cameras;
-      return Array.isArray(v) ? v.slice() : [];
-    };
-    this.shadowRoot.querySelectorAll(".cam-enable-toggle[data-cam]").forEach(btn => {
-      btn.addEventListener("click", () => {
-        const cam = btn.getAttribute("data-cam"), cur = curDisabled(), isOff = cur.includes(cam);
-        applyDisabled(isOff ? cur.filter(c => c !== cam) : [...cur, cam], isOff ? "Camera enabled" : "Camera disabled");
-      });
-    });
-    const enAll = this.shadowRoot.querySelector("#cam-enable-all");
-    if (enAll) enAll.addEventListener("click", () => applyDisabled([], "All cameras enabled"));
-    const disAll = this.shadowRoot.querySelector("#cam-disable-all");
-    if (disAll) disAll.addEventListener("click", () =>
-      applyDisabled(((this._data().config || {}).cameras || []).map(c => c.entity_id), "All cameras disabled"));
-
-    // Name inputs: save on Enter or blur, only when changed. The settings
-    // tab skips poll re-renders, so typing is never wiped mid-edit.
-    this.shadowRoot.querySelectorAll(".camset-name").forEach(input => {
-      input.dataset.saved = input.value;
-      const save = async () => {
-        const entity = input.getAttribute("data-cam");
-        const name = input.value;
-        if (name === input.dataset.saved) return;      // unchanged — no call
-        try {
-          const res = await this._hass.callWS({
-            type: "nova/rename_camera", entity_id: entity, name,
-          });
-          input.dataset.saved = name;
-          if (this._liveData?.config) {
-            this._liveData.config.camera_names = res?.camera_names || {};
-            if (Array.isArray(res?.cameras)) {
-              this._liveData.config.cameras = res.cameras;
-              this._cams = res.cameras;
-            }
-          }
-          this._toast(`✓ ${name.trim() ? `renamed to "${name.trim()}"` : "name reverted"}`, "ok");
-        } catch (err) {
-          this._toast(`✗ rename — ${err?.message || err}`, "err");
-        }
-      };
-      input.addEventListener("keydown", (ev) => {
-        if (ev.key === "Enter") { ev.preventDefault(); input.blur(); }
-      });
-      input.addEventListener("blur", save);
-    });
-
-    // Location chips: instant save, row-local refresh.
-    this.shadowRoot.querySelectorAll(".camset-row .cam-loc-chip").forEach(chipEl => {
-      chipEl.addEventListener("click", async () => {
-        const entity = chipEl.getAttribute("data-cam");
-        const m = chipEl.getAttribute("data-loc");
-        chipEl.disabled = true;
-        try {
-          const res = await this._hass.callWS({
-            type: "nova/camera_location", entity_id: entity, mode: m,
-          });
-          if (Array.isArray(res?.cameras) && this._liveData?.config) {
-            this._liveData.config.cameras = res.cameras;
-            this._cams = res.cameras;
-          }
-          const fresh = (this._cams || []).find(c => c.entity_id === entity);
-          const resolved = fresh && fresh.outdoor ? "outdoor" : "indoor";
-          // entity_ids are [a-z0-9._] — safe raw inside a quoted attribute
-          // selector; CSS.escape isn't guaranteed in every embedding.
-          const row = this.shadowRoot.querySelector(`.camset-row[data-cam="${entity}"]`);
-          row?.querySelectorAll(".cam-loc-chip").forEach(c => {
-            c.classList.toggle("active", c.getAttribute("data-loc") === m);
-            if (c.getAttribute("data-loc") === "auto") c.textContent = `AUTO (${resolved})`;
-            c.disabled = false;
-          });
-          this._toast(`✓ ${this._camName(entity)} → ${m === "auto" ? `auto (${resolved})` : m}`, "ok");
-        } catch (err) {
-          this._toast(`✗ location — ${err?.message || err}`, "err");
-          chipEl.disabled = false;
-        }
-      });
-    });
-  }
-
-  async _runCamDiagnostics() {
-    const feed = this.shadowRoot?.getElementById("cam-feed");
-    const btn = this.shadowRoot?.getElementById("cam-diag-btn");
-    if (!feed || !this._hass) return;
-    const existing = feed.querySelector(".cam-diag");
-    if (existing) { existing.remove(); return; }   // toggle off
-    const box = document.createElement("div");
-    box.className = "cam-diag";
-    box.innerHTML = `<div class="cam-diag-line">PROBING ${this._esc(this._activeCam || "—")} … may take up to ~30s (stream wake)</div>`;
-    feed.appendChild(box);
-    if (btn) btn.disabled = true;
-    try {
-      const res = await this._hass.callWS({
-        type: "nova/camera_diagnostics", entity_id: this._activeCam || undefined,
-      });
-      const esc = (s) => this._esc(String(s == null ? "" : s));
-      // What the TILE itself is showing right now — the client half of the story.
-      const tileImg = feed.querySelector("img");
-      let tileLine = `<b>TILE</b> mode=${esc(this._camMode)}`;
-      if (tileImg && tileImg.naturalWidth > 0) {
-        const luma = this._frameLuma(tileImg);
-        tileLine += `  decoded ${tileImg.naturalWidth}×${tileImg.naturalHeight}`;
-        if (luma !== null) {
-          tileLine += luma <= 10
-            ? `  <span class="cam-diag-bad">lum ${luma.toFixed(1)} — BLACK STREAM (decodes fine, shows nothing)</span>`
-            : `  <span class="cam-diag-ok">lum ${luma.toFixed(1)}</span>`;
-        }
-      } else {
-        tileLine += `  <span class="cam-diag-bad">no decoded pixels</span>`;
-      }
-      const plats = Object.entries(res?.platforms || {})
-        .map(([p, n]) => `${esc(p)}×${n}`).join("  ") || "none";
-      const lines = [];
-      lines.push(`<div class="cam-diag-line">${tileLine}</div>`);
-      lines.push(`<div class="cam-diag-line"><b>HA CAMERAS</b> ${plats}${/nest/.test(plats) ? "" : "  <span class='cam-diag-bad'>— NO nest-platform entities: the Google Nest integration isn't delivering cameras to HA. Fix that first (SDM credentials / integration setup); Nova can only consume what HA has.</span>"}</div>`);
-      const p = res?.probe;
-      if (p) {
-        lines.push(`<div class="cam-diag-line"><b>${esc(p.entity_id)}</b>  state=${esc(p.state)}  platform=${esc(p.platform || "?")}${p.attrs?.frontend_stream_type ? "  stream=" + esc(p.attrs.frontend_stream_type) : ""}</div>`);
-        (p.tiers || []).forEach(([tier, detail]) => {
-          const ok = /^OK/.test(String(detail));
-          lines.push(`<div class="cam-diag-line">  ${esc(tier)}: <span class="${ok ? "cam-diag-ok" : "cam-diag-bad"}">${esc(detail)}</span></div>`);
-        });
-        lines.push(`<div class="cam-diag-line cam-diag-verdict">${esc(p.verdict || "")}${p.elapsed_ms != null ? `  (${p.elapsed_ms}ms)` : ""}</div>`);
-      }
-      lines.push(`<div class="cam-diag-line cam-diag-hint">tap DIAG again to close · verdict also logged to the Logs tab</div>`);
-      box.innerHTML = lines.join("");
-    } catch (err) {
-      box.innerHTML = `<div class="cam-diag-line cam-diag-bad">DIAG failed — ${this._esc(String(err?.message || err))}. If this says unknown command, restart Home Assistant after updating.</div>`;
-    } finally {
-      if (btn) btn.disabled = false;
-    }
-  }
-
-  _frameLuma(img) {
-    // Mean luminance of the img's CURRENT frame via a small canvas, or null
-    // if it can't be sampled (no pixels yet, no 2d context in the harness,
-    // tainted canvas). Same-origin proxy URLs and data: URLs sample fine.
-    try {
-      if (!img || !img.naturalWidth) return null;
-      const c = document.createElement("canvas");
-      c.width = 32; c.height = 32;
-      const ctx = c.getContext("2d");
-      if (!ctx) return null;
-      ctx.drawImage(img, 0, 0, 32, 32);
-      const d = ctx.getImageData(0, 0, 32, 32).data;
-      let sum = 0;
-      for (let i = 0; i < d.length; i += 4) sum += (d[i] + d[i + 1] + d[i + 2]) / 3;
-      return sum / (d.length / 4);
-    } catch (_) { return null; }
-  }
-
-  _armCamWatchdog(entity, img, expectMode, ms) {
-    if (this._camWatchdog) { clearTimeout(this._camWatchdog); }
-    this._camWatchdog = setTimeout(() => {
-      this._camWatchdog = null;
-      if (this._activeCam !== entity || this._camMode !== expectMode) return;
-      // v7.101.28: pixels alone don't prove a working tier — a Nest MJPEG can
-      // decode a steady BLACK stream (naturalWidth > 0, nothing visible),
-      // which defeated the original watchdog. Escalate on no-pixels OR a
-      // near-black frame; an unsampleable frame gets the benefit of the doubt.
-      if (img && img.naturalWidth > 0) {
-        const luma = this._frameLuma(img);
-        if (luma === null || luma > 10) return;   // real (or unverifiable) frame
-      }
-      if (expectMode === "stream") this._camFallback(entity);
-      else if (expectMode === "still") this._camNovaFallback(entity);
-    }, ms);
-  }
-
-  _camFallback(entity) {
-    // Nest/WebRTC cameras may not serve MJPEG — fall back to a refreshed still.
-    if (entity !== this._activeCam) return;
-    this._camMode = "still";
-    const feed = this.shadowRoot?.getElementById("cam-feed");
-    const img = feed && feed.querySelector("img");
-    if (!img) return;
-    const src = this._camSource(entity);
-    const tok = this._camToken(src);
-    const still = () => { img.src = `/api/camera_proxy/${src}?token=${encodeURIComponent(tok || "")}&_=${Date.now()}`; };
-    still();
-    if (!this._camStillTimer) this._camStillTimer = setInterval(() => { if (this._activeCam === entity) still(); }, 2000);
-    // Stills can hang exactly like the stream tier — watchdog here too.
-    this._armCamWatchdog(entity, img, "still", 5000);
-  }
-
-  _camNovaFallback(entity) {
-    // Last tier: frames through Nova's backend registry (Nest event media,
-    // stream-wake) over WS. Slower cadence — stream-wake isn't free.
-    if (entity !== this._activeCam) return;
-    this._camMode = "nova";
-    this._camModeByEntity[entity] = "nova";
-    if (this._camStillTimer) { clearInterval(this._camStillTimer); this._camStillTimer = null; }
-    if (this._camWatchdog) { clearTimeout(this._camWatchdog); this._camWatchdog = null; }
-    const feed = this.shadowRoot?.getElementById("cam-feed");
-    const img = feed && feed.querySelector("img");
-    if (!img || !this._hass) return;
-    const strip = this.shadowRoot?.querySelector("#cam-strip");
-    if (strip) strip.innerHTML = `<span>SRC <b>${this._esc(this._camName(entity))}</b></span><span>Nova SNAPSHOT</span>`;
-    const hint = (text) => {
-      let d = feed.querySelector(".cam-none");
-      if (!d) { d = document.createElement("div"); d.className = "cam-none"; feed.appendChild(d); }
-      d.textContent = text;
-      img.style.display = "none";
-    };
-    const shot = async () => {
-      if (this._activeCam !== entity || this._camMode !== "nova") return;
-      try {
-        const res = await this._hass.callWS({ type: "nova/camera_snapshot", entity_id: entity });
-        if (res?.image) {
-          feed.querySelector(".cam-none")?.remove();
-          img.style.display = "";
-          img.src = `data:image/jpeg;base64,${res.image}`;
-        } else {
-          hint("NO FRAME — camera idle or unreachable. For Nest: verify the Google Nest integration is loaded and events are enabled.");
-        }
-      } catch (err) {
-        // v7.101.28: don't swallow this — the most common cause is the WS
-        // command not existing because HA wasn't restarted after updating.
-        const m = String(err?.message || err?.code || err || "");
-        hint(/unknown|not.*found|invalid.*type/i.test(m)
-          ? "Nova SNAPSHOT UNAVAILABLE — restart Home Assistant to load the updated integration, then refresh."
-          : `Nova SNAPSHOT ERROR — ${m.slice(0, 120)}`);
-      }
-    };
-    shot();
-    if (!this._camWsTimer) this._camWsTimer = setInterval(shot, 6000);
-  }
-
-  _selectCam(entity) {
-    if (!entity) return;
-    if (this._camStillTimer) { clearInterval(this._camStillTimer); this._camStillTimer = null; }
-    this._activeCam = entity;
-    this._manualCam = entity;
-    this._camFocus = null;
-    this._renderCamSelector();
-    this._renderCameraFeed();
-  }
-
-  // Domains whose changes actually move something on the dashboard (area
-  // occupancy/lights, sparklines, lockdown, presence). Deliberately excludes
-  // chatty domains the panel never displays (update, automation, etc.) so a
-  // burst of unrelated HA activity can't trigger refreshes.
-  static _REALTIME_DOMAINS = new Set([
-    "light", "lock", "cover", "climate", "sensor", "binary_sensor",
-    "person", "device_tracker", "alarm_control_panel",
-  ]);
-
-  async _subscribeStateEvents() {
-    const conn = this._hass && this._hass.connection;
-    if (!conn || this._stateSubs.length) return;  // subscribe once
-    try {
-      this._stateSubs.push(await conn.subscribeEvents(
-        e => this._onStateChangedEvent(e.data || {}), "state_changed"));
-    } catch (_) {}
-  }
-
-  _onStateChangedEvent(data) {
-    const entityId = data.entity_id || "";
-    const domain = entityId.split(".", 1)[0];
-    if (!NovaPanel._REALTIME_DOMAINS.has(domain)) return;
-    this._scheduleRealtimeRefresh();
-  }
-
-  _scheduleRealtimeRefresh() {
-    // Throttle with a trailing edge: refresh immediately if we haven't in a
-    // while, otherwise coalesce a burst (e.g. a scene firing many entities
-    // at once) into a single refresh at the end of the window — never more
-    // than one fetch per window, never longer than one window's delay.
-    const MIN_GAP_MS = 2000;
-    const now = Date.now();
-    const elapsed = now - this._lastRealtimeFetch;
-    if (elapsed >= MIN_GAP_MS) {
-      this._lastRealtimeFetch = now;
-      this._fetchLiveData();
-      return;
-    }
-    if (this._realtimeTrailing) return;
-    this._realtimeTrailing = setTimeout(() => {
-      this._realtimeTrailing = null;
-      this._lastRealtimeFetch = Date.now();
-      this._fetchLiveData();
-    }, MIN_GAP_MS - elapsed);
-  }
-
-  async _subscribeCameraEvents() {
-    const conn = this._hass && this._hass.connection;
-    if (!conn || this._camSubs.length) return;  // subscribe once
-    try {
-      this._camSubs.push(await conn.subscribeEvents(e => this._onCamEvent(e.data || {}), "nova_camera_event"));
-    } catch (_) {}
-    try {
-      this._camSubs.push(await conn.subscribeEvents(e => {
-        const x = e.data || {};
-        if (x.is_confident && x.camera_entity) {
-          this._onCamEvent({ entity_id: x.camera_entity, label: x.name || "FACE", confidence: Math.round(x.confidence || 0) });
-        }
-      }, "nova_face_recognized"));
-    } catch (_) {}
-  }
-
-  _onCamEvent(data) {
-    const entity = data.entity_id;
-    if (!entity) return;
-    if (this._camStillTimer) { clearInterval(this._camStillTimer); this._camStillTimer = null; }
-    if (!this._cams.find(c => c.entity_id === entity)) this._cams.push({ entity_id: entity, name: entity });
-    this._manualCam = this._manualCam || this._activeCam;
-    this._activeCam = entity;
-    this._camFocus = { entity, label: data.label || "EVENT", conf: (data.confidence != null ? data.confidence : null) };
-    this._lastCamKey = "";  // force the stream to re-attach to the event camera
-    this._renderCamSelector();
-    this._renderCameraFeed();
-    this._toast(`◉ EVENT · ${entity.split(".").pop()} — camera focused`, "ok");
-    if (this._camFocusTimer) clearTimeout(this._camFocusTimer);
-    this._camFocusTimer = setTimeout(() => {
-      this._camFocus = null;
-      if (this._manualCam) { this._activeCam = this._manualCam; this._lastCamKey = ""; }
-      this._renderCamSelector();
-      this._renderCameraFeed();
-    }, 25000);
-  }
-
-  _styles() {
+  _css() {
     return `
-<style>
-  @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700&family=JetBrains+Mono:wght@300;400;500&family=Rajdhani:wght@300;400;500;600;700&display=swap');
-
-  :host {
-    display: block;
-    height: 100%;
-    background-color: #060a13;
-    background-image:
-      linear-gradient(rgba(0, 242, 254, 0.022) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(0, 242, 254, 0.022) 1px, transparent 1px),
-      radial-gradient(circle at 50% 0%, rgba(0, 242, 254, 0.05) 0%, transparent 50%),
-      radial-gradient(circle at 100% 100%, rgba(10, 18, 36, 0.85) 0%, #060a13 100%);
-    background-size: 44px 44px, 44px 44px, 100% 100%, 100% 100%;
-    background-attachment: fixed;
-    color: #e2e8f0;
-    font-family: 'Space Grotesk', 'Rajdhani', 'Segoe UI', sans-serif;
-    --bg:         #060a13;
-    --bg-panel:   rgba(10, 18, 36, 0.45);
-    --bg-elev:    rgba(14, 24, 44, 0.55);
-    --line:       rgba(0, 242, 254, 0.12);
-    --line-hot:   rgba(0, 242, 254, 0.35);
-    --cyan:       #00f2fe;
-    --cyan-dim:   #1fb6c9;
-    --cyan-glow:  rgba(0, 242, 254, 0.45);
-    --cyan-faint: rgba(0, 242, 254, 0.07);
-    --amber:      #ffb454;
-    --red:        #ff4d6d;
-    --green:      #00f5a0;
-    --purple:     #b48cff;
-    --pink:       #ff6b9d;
-    --text:       #e2e8f0;
-    --text-dim:   #64748b;
-    --text-faint: #334155;
-    --font-display: 'Space Grotesk', 'Rajdhani', sans-serif;
-    --font-body:    'Space Grotesk', 'Segoe UI', sans-serif;
-    --font-mono:    'JetBrains Mono', 'Consolas', monospace;
-    --radius:     8px;
-    --radius-lg:  12px;
-  }
-  * { box-sizing: border-box; }
-  *::-webkit-scrollbar { width: 4px; height: 4px; }
-  *::-webkit-scrollbar-thumb { background: rgba(0, 242, 254, 0.14); border-radius: 2px; }
-  *::-webkit-scrollbar-thumb:hover { background: rgba(0, 242, 254, 0.3); }
-  *::-webkit-scrollbar-track { background: transparent; }
-
-  .app {
-    min-height: 100%;
-    background: radial-gradient(ellipse at 50% 0%, rgba(0, 242, 254, 0.03) 0%, transparent 60%),
-                radial-gradient(ellipse at 80% 100%, rgba(0, 100, 180, 0.02) 0%, transparent 50%),
-                var(--bg);
-    padding: 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-    position: relative;
-  }
-  .app::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: repeating-linear-gradient(
-      to bottom,
-      transparent 0, transparent 3px,
-      rgba(0, 242, 254, 0.008) 3px, rgba(0, 242, 254, 0.008) 4px
-    );
-    pointer-events: none;
-    z-index: 0;
-  }
-  .app > * { position: relative; z-index: 1; }
-
-  /* MASTHEAD */
-  .masthead {
-    display: grid;
-    grid-template-columns: auto 1fr auto;
-    align-items: center;
-    gap: 24px;
-    padding: 16px 20px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-lg);
-    background: var(--bg-panel);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-    position: relative;
-  }
-  .status-badge {
-    font-family: var(--font-mono);
-    font-size: 0.68rem;
-    font-weight: 500;
-    background: rgba(0, 245, 160, 0.05);
-    border: 1px solid rgba(0, 245, 160, 0.3);
-    padding: 3px 9px;
-    border-radius: 4px;
-    letter-spacing: 1px;
-    color: var(--green);
-    margin-left: 14px;
-    vertical-align: middle;
-    white-space: nowrap;
-  }
-  .status-badge.alert {
-    background: rgba(255, 77, 109, 0.06);
-    border-color: rgba(255, 77, 109, 0.4);
-    color: var(--red);
-    animation: ldpulse 1.6s infinite;
-  }
-  .masthead::before, .masthead::after {
-    content: ''; position: absolute; width: 14px; height: 14px; border-color: var(--cyan);
-  }
-  .masthead::before { top: -1px; left: -1px; border-top: 2px solid; border-left: 2px solid; border-radius: var(--radius-lg) 0 0 0; }
-  .masthead::after  { bottom: -1px; right: -1px; border-bottom: 2px solid; border-right: 2px solid; border-radius: 0 0 var(--radius-lg) 0; }
-
-  .menu-btn {
-    display: none;
-    width: 40px; height: 40px;
-    border-radius: 4px;
-    border: 1px solid var(--line);
-    background: transparent;
-    color: var(--text);
-    cursor: pointer;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    padding: 0;
-  }
-  .menu-btn:hover { background: rgba(255,255,255,0.05); border-color: var(--cyan-dim); }
-  .menu-btn svg { width: 22px; height: 22px; fill: currentColor; }
-
-  .brand {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    font-family: var(--font-display);
-    font-weight: 500;
-    font-size: 19px;
-    letter-spacing: 0.35em;
-    color: var(--text);
-  }
-  .brand > span:not(.status-badge) {
-    color: var(--cyan);
-    text-shadow: 0 0 10px var(--cyan-glow);
-    font-weight: 500;
-  }
-  .brand-logo {
-    width: 38px;
-    height: 38px;
-    border-radius: 9px;
-    flex: 0 0 auto;
-    box-shadow: 0 0 16px var(--cyan-glow);
-  }
-  .brand span { color: var(--text-dim); font-weight: 400; }
-
-  /* Lockdown toggle switch */
-  .lockdown-toggle {
-    display: inline-flex; align-items: center; gap: 8px;
-    background: rgba(0,0,0,0.35);
-    border: 1px solid var(--line-hot, #2a3f4a);
-    padding: 5px 12px 5px 8px; border-radius: 999px; cursor: pointer;
-    transition: border-color .2s ease, box-shadow .2s ease; white-space: nowrap;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .lockdown-toggle:hover { border-color: var(--cyan); }
-  .lockdown-toggle:focus-visible { outline: none; border-color: var(--cyan); box-shadow: 0 0 0 2px rgba(0,242,254,0.35); }
-  .ld-switch {
-    position: relative; flex: 0 0 auto; box-sizing: border-box;
-    width: 40px; height: 22px; border-radius: 999px;
-    background: rgba(120,150,165,0.18);
-    border: 1px solid var(--line-hot, #2a3f4a);
-    transition: background .2s ease, border-color .2s ease, box-shadow .2s ease;
-  }
-  .ld-knob {
-    position: absolute; top: 2px; left: 2px; box-sizing: border-box;
-    width: 16px; height: 16px; border-radius: 50%;
-    background: #7d97a6;
-    transition: transform .2s ease, background .2s ease, box-shadow .2s ease;
-  }
-  .ld-label {
-    font-family: var(--font-display); font-size: 12px; letter-spacing: 0.16em;
-    color: var(--text-dim); transition: color .2s ease;
-  }
-  .ld-state {
-    font-family: var(--font-mono); font-size: 9px; font-weight: 600; letter-spacing: 0.14em;
-    color: var(--text-faint); transition: color .2s ease; min-width: 34px;
-  }
-  /* armed */
-  .lockdown-toggle.on { border-color: #ff5a5a; box-shadow: 0 0 18px rgba(255,60,60,0.30); }
-  .lockdown-toggle.on .ld-switch {
-    background: rgba(255,60,60,0.28); border-color: #ff6a6a;
-    box-shadow: 0 0 10px rgba(255,60,60,0.45), inset 0 0 6px rgba(255,60,60,0.35);
-  }
-  .lockdown-toggle.on .ld-knob {
-    transform: translateX(18px); background: #ff8080; box-shadow: 0 0 9px #ff5a5a;
-  }
-  .lockdown-toggle.on .ld-label { color: #ff9a9a; }
-  .lockdown-toggle.on .ld-state { color: #ff6a6a; animation: ldpulse 1.6s ease-in-out infinite; }
-  @keyframes ldpulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
-
-  .greeting {
-    font-size: 15px;
-    letter-spacing: 0.25em;
-    text-transform: uppercase;
-    color: var(--text-dim);
-    text-align: center;
-  }
-  .greeting b { color: var(--text); font-weight: 500; margin-left: 0.4em; }
-
-  .clock { text-align: right; font-family: var(--font-mono); }
-  .clock .time {
-    font-size: 26px;
-    font-weight: 500;
-    color: var(--cyan);
-    letter-spacing: 0.12em;
-    line-height: 1;
-    text-shadow: 0 0 12px var(--cyan-glow);
-  }
-  .clock .date {
-    font-size: 11px;
-    color: var(--text-dim);
-    letter-spacing: 0.3em;
-    margin-top: 4px;
-  }
-
-  /* GRID */
-  .grid {
-    display: grid;
-    grid-template-columns: 240px 1fr 300px;
-    gap: 16px;
-    align-items: start;
-  }
-
-  /* PANEL base */
-  .panel {
-    background: var(--bg-panel);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-lg);
-    padding: 20px;
-    position: relative;
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
-    transition: border-color 0.3s, box-shadow 0.3s;
-  }
-  .panel:hover {
-    border-color: var(--line-hot);
-    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37), 0 0 24px rgba(0, 242, 254, 0.05);
-  }
-  .panel::before, .panel::after {
-    content: ''; position: absolute; width: 10px; height: 10px; border-color: var(--cyan-dim);
-  }
-  .panel::before { top: -1px; left: -1px; border-top: 1.5px solid; border-left: 1.5px solid; border-radius: var(--radius-lg) 0 0 0; }
-  .panel::after  { bottom: -1px; right: -1px; border-bottom: 1.5px solid; border-right: 1.5px solid; border-radius: 0 0 var(--radius-lg) 0; }
-
-  .panel .head {
-    font-family: var(--font-display);
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.25em;
-    color: var(--text-dim);
-    text-transform: uppercase;
-    padding-bottom: 10px;
-    margin-bottom: 15px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    display: flex; justify-content: space-between; align-items: center;
-  }
-  .panel .head > span:first-child { color: var(--text-main, var(--text)); }
-  .panel:hover .head > span:first-child { color: var(--cyan); transition: color 0.4s; }
-  .panel .head .side {
-    font-family: var(--font-mono);
-    color: var(--text-dim);
-    font-size: 9px;
-    letter-spacing: 0.2em;
-  }
-
-  /* STATUS */
-  .status-list { display: flex; flex-direction: column; gap: 10px; }
-  .status-row {
-    display: grid; grid-template-columns: 1fr auto;
-    align-items: center;
-    padding: 10px 12px;
-    background: var(--bg-elev);
-    border-left: 2px solid var(--line);
-    border-radius: var(--radius);
-    font-size: 13px; letter-spacing: 0.08em;
-    transition: border-color 0.3s, background 0.3s;
-  }
-  .status-row.live { border-left-color: var(--green); background: rgba(0, 245, 160, 0.03); }
-  .status-row.warn { border-left-color: var(--amber); background: rgba(255, 157, 46, 0.03); }
-  .status-row.off  { border-left-color: var(--text-faint); }
-  .status-row .k {
-    color: var(--text-dim);
-    text-transform: uppercase;
-    font-size: 11px;
-    letter-spacing: 0.22em;
-  }
-  .status-row .v {
-    font-family: var(--font-mono);
-    color: var(--text);
-    font-size: 12px;
-    letter-spacing: 0.1em;
-  }
-  .status-row.live .v { color: var(--green); }
-  .status-row.warn .v { color: var(--amber); }
-  .dot {
-    display: inline-block;
-    width: 6px; height: 6px;
-    border-radius: 50%;
-    background: var(--green);
-    margin-right: 8px;
-    box-shadow: 0 0 8px var(--green);
-    animation: pulse 2.6s ease-in-out infinite;
-  }
-  .dot.warn { background: var(--amber); box-shadow: 0 0 8px var(--amber); }
-  .dot.off  { background: var(--text-faint); box-shadow: none; animation: none; }
-
-  @keyframes pulse {
-    0%, 100% { opacity: 1; transform: scale(1); }
-    50%      { opacity: 0.5; transform: scale(0.85); }
-  }
-
-  .meta {
-    margin-top: 14px;
-    padding-top: 14px;
-    border-top: 1px dashed var(--line);
-    font-size: 10px;
-    color: var(--text-dim);
-    letter-spacing: 0.18em;
-    font-family: var(--font-mono);
-    line-height: 1.8;
-    text-transform: uppercase;
-  }
-  .meta span { color: var(--cyan); }
-
-  /* ANCHOR */
-  .anchor {
-    background: linear-gradient(135deg, rgba(5, 7, 9, 0.9), rgba(0, 30, 50, 0.3));
-    border: 1px solid var(--line-hot);
-    border-radius: var(--radius-lg);
-    padding: 28px 24px 24px;
-    position: relative;
-    min-height: 360px;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    backdrop-filter: blur(12px);
-    box-shadow: inset 0 0 60px rgba(0, 242, 254, 0.02);
-  }
-  .anchor::before {
-    content: ''; position: absolute;
-    top: 50%; left: 50%;
-    width: 420px; height: 420px;
-    border: 1px solid var(--cyan-faint);
-    border-radius: 50%;
-    transform: translate(-50%, -50%);
-    pointer-events: none;
-  }
-  .anchor::after {
-    content: ''; position: absolute;
-    top: 50%; left: 50%;
-    width: 280px; height: 280px;
-    border: 1px solid var(--cyan-faint);
-    border-radius: 50%;
-    transform: translate(-50%, -50%);
-    pointer-events: none;
-    animation: rotate-slow 90s linear infinite;
-    border-top-color: var(--cyan-dim);
-  }
-  @keyframes rotate-slow {
-    from { transform: translate(-50%, -50%) rotate(0deg); }
-    to   { transform: translate(-50%, -50%) rotate(360deg); }
-  }
-
-  .anchor-head {
-    display: flex; justify-content: space-between; align-items: flex-start;
-    position: relative; z-index: 2;
-  }
-  .anchor-label {
-    font-family: var(--font-display);
-    font-size: 10px; letter-spacing: 0.4em;
-    color: var(--cyan); text-transform: uppercase;
-  }
-  .anchor-coord {
-    font-family: var(--font-mono);
-    font-size: 10px; color: var(--text-dim); letter-spacing: 0.15em;
-  }
-
-  .anchor-core {
-    flex: 1;
-    display: flex; flex-direction: column;
-    justify-content: center; align-items: center;
-    position: relative; z-index: 2;
-    padding: 20px 0;
-  }
-
-  .room-name {
-    font-family: var(--font-display);
-    font-size: 42px; font-weight: 500;
-    letter-spacing: 0.1em;
-    color: var(--text);
-    text-transform: uppercase;
-    text-shadow: 0 0 30px var(--cyan-glow);
-    margin-bottom: 6px;
-    text-align: center;
-    transition: opacity 0.25s;
-  }
-  .room-sub {
-    font-size: 11px;
-    color: var(--cyan);
-    letter-spacing: 0.3em;
-    text-transform: uppercase;
-    margin-bottom: 24px;
-    display: flex; align-items: center; gap: 10px;
-  }
-  .room-sub::before, .room-sub::after {
-    content: ''; width: 30px; height: 1px; background: var(--cyan-dim);
-  }
-
-  .reactor {
-    width: 72px; height: 72px;
-    border-radius: 50%;
-    background: radial-gradient(circle at center, var(--cyan) 0%, var(--cyan-dim) 40%, transparent 70%);
-    box-shadow: 0 0 40px var(--cyan-glow), inset 0 0 20px rgba(255,255,255,0.1);
-    animation: reactor-pulse 3s ease-in-out infinite;
-    position: relative;
-    margin-bottom: 24px;
-  }
-  .reactor::before {
-    content: ''; position: absolute; inset: 10px;
-    border-radius: 50%;
-    border: 1px solid rgba(255,255,255,0.25);
-  }
-  .reactor::after {
-    content: ''; position: absolute; inset: 22px;
-    border-radius: 50%;
-    background: rgba(255,255,255,0.9);
-    box-shadow: 0 0 20px rgba(255,255,255,0.6);
-  }
-  @keyframes reactor-pulse {
-    0%, 100% { box-shadow: 0 0 40px var(--cyan-glow), inset 0 0 20px rgba(255,255,255,0.1); }
-    50%      { box-shadow: 0 0 60px var(--cyan-glow), inset 0 0 25px rgba(255,255,255,0.2); }
-  }
-
-  .room-stats {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 18px;
-    width: 100%;
-    max-width: 380px;
-  }
-  .stat {
-    text-align: center;
-    padding: 10px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    background: rgba(0, 242, 254, 0.02);
-    backdrop-filter: blur(4px);
-    transition: border-color 0.3s;
-  }
-  .stat:hover { border-color: var(--cyan-dim); }
-  .stat .v {
-    font-family: var(--font-display);
-    font-size: 20px; font-weight: 500;
-    color: var(--cyan); line-height: 1;
-    margin-bottom: 6px;
-  }
-  .stat .k {
-    font-size: 9px; color: var(--text-dim);
-    letter-spacing: 0.25em; text-transform: uppercase;
-  }
-
-  .anchor-foot {
-    position: relative; z-index: 2;
-    display: flex; justify-content: space-between;
-    font-family: var(--font-mono);
-    font-size: 10px; color: var(--text-dim);
-    letter-spacing: 0.15em;
-    padding-top: 16px;
-    border-top: 1px solid var(--line);
-  }
-  .anchor-foot span { color: var(--cyan); }
-
-  /* FLOOR PLAN */
-  .floorplan-panel {
-    padding: 16px;
-  }
-  .floor-tabs {
-    display: flex;
-    gap: 4px;
-    margin-bottom: 12px;
-  }
-  .floor-tab {
-    padding: 5px 16px;
-    border: 1px solid var(--line);
-    border-radius: 20px;
-    background: transparent;
-    color: var(--text-dim);
-    font-family: var(--font-display);
-    font-size: 9px;
-    letter-spacing: 0.2em;
-    text-transform: uppercase;
-    cursor: pointer;
-    transition: all 0.25s;
-  }
-  .floor-tab:hover {
-    border-color: var(--cyan-dim);
-    color: var(--text);
-  }
-  .floor-tab.active {
-    border-color: var(--cyan);
-    color: var(--cyan);
-    background: rgba(0, 242, 254, 0.08);
-    box-shadow: 0 0 10px rgba(0, 242, 254, 0.15);
-  }
-  .floorplan-wrap {
-    background: rgba(0, 5, 10, 0.5);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    padding: 0;
-    min-height: 450px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
-  }
-
-  /* 3D House Scene */
-  .house3d-scene {
-    width: 100%;
-    height: 450px;
-    perspective: 1100px;
-    touch-action: pan-y;
-    background:
-      radial-gradient(ellipse at 50% 42%, rgba(0, 242, 254, 0.05) 0%, transparent 55%),
-      radial-gradient(ellipse at 50% 40%, rgba(0, 25, 45, 0.35), #04070d 72%);
-    position: relative;
-    overflow: hidden;
-    cursor: grab;
-    border-radius: var(--radius);
-  }
-  .house3d-scene::before {
-    content: '';
-    position: absolute; inset: -30%;
-    background-image:
-      linear-gradient(rgba(0, 242, 254, 0.035) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(0, 242, 254, 0.035) 1px, transparent 1px);
-    background-size: 34px 34px;
-    transform: rotateX(60deg) scale(1.15);
-    transform-origin: 50% 60%;
-    pointer-events: none;
-    -webkit-mask-image: radial-gradient(ellipse at 50% 55%, #000 30%, transparent 72%);
-    mask-image: radial-gradient(ellipse at 50% 55%, #000 30%, transparent 72%);
-  }
-  .house3d-scene::after {
-    content: '';
-    position: absolute; inset: -25%;
-    background: conic-gradient(from 0deg at 50% 55%,
-      transparent 0deg, rgba(0, 242, 254, 0.05) 16deg,
-      rgba(0, 242, 254, 0.012) 32deg, transparent 52deg);
-    animation: radarSweep 16s linear infinite;
-    pointer-events: none;
-  }
-  @keyframes radarSweep { to { transform: rotate(360deg); } }
-  .house3d-scene:active { cursor: grabbing; }
-  .house3d {
-    position: absolute;
-    left: 50%;
-    top: 52%;
-    transform-style: preserve-3d;
-  }
-  .res-iso {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 6px 12px 14px;
-  }
-  .res-iso svg { width: 100%; height: 100%; display: block; }
-  /* 2D isometric: drop the 3D perspective grid/radar so it doesn't clash with the SVG */
-  .iso-scene::before, .iso-scene::after { display: none; }
-  .iso-scene, .iso-scene:active { cursor: default; }
-  .h3d-face {
-    position: absolute;
-    backface-visibility: visible;
-  }
-  .h3d-label {
-    position: absolute;
-    font-family: var(--font-display);
-    letter-spacing: 1.5px;
-    text-align: center;
-    pointer-events: none;
-    text-transform: uppercase;
-    font-weight: 500;
-  }
-  .h3d-occ-dot {
-    position: absolute;
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--green);
-    animation: pulse 2.5s ease-in-out infinite;
-  }
-  .h3d-occ-dot-dom {
-    width: 9px;
-    height: 9px;
-    box-shadow: 0 0 10px 3px rgba(0,245,160,0.75);
-  }
-  .h3d-glow { box-shadow: 0 0 16px 2px rgba(0,242,254,0.32); }  .h3d-glow-dom {
-    box-shadow: 0 0 18px 3px rgba(0,242,254,0.45);
-    animation: h3dDom 2.4s ease-in-out infinite;
-  }
-  @keyframes h3dDom {
-    0%, 100% { box-shadow: 0 0 16px 3px rgba(0,242,254,0.40); }
-    50%      { box-shadow: 0 0 32px 7px rgba(0,242,254,0.72); }
-  }
-  .h3d-platform {
-    box-shadow: 0 0 30px 2px rgba(0,242,254,0.16);
-    pointer-events: none;
-  }
-  .h3d-floor-badge {
-    position: absolute;
-    font-family: var(--font-display);
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 3px;
-    color: rgba(120,225,255,0.85);
-    text-shadow: 0 0 10px rgba(0,242,254,0.6);
-    pointer-events: none;
-    white-space: nowrap;
-  }
-  .h3d-lit {
-    box-shadow: 0 0 18px 2px rgba(255,184,72,0.30);
-  }
-  .h3d-lamp {
-    position: absolute;
-    width: 17px;
-    height: 17px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 50%;
-    color: rgba(0,242,254,0.35);
-    background: rgba(6,14,22,0.55);
-    border: 1px solid rgba(0,242,254,0.22);
-    cursor: pointer;
-    pointer-events: auto;
-    transition: transform 0.12s ease, box-shadow 0.2s ease, color 0.2s ease;
-  }
-  .h3d-lamp:hover {
-    color: #fff;
-    border-color: rgba(255,200,110,0.7);
-    transform: scale(1.18);
-  }
-  .h3d-lamp.on {
-    color: #ffce6b;
-    background: rgba(58,40,12,0.6);
-    border-color: rgba(255,196,96,0.75);
-    box-shadow: 0 0 13px 2px rgba(255,184,72,0.6);
-  }
-  .house3d-hud-tl, .house3d-hud-tr {
-    position: absolute;
-    color: rgba(0,242,254,0.4);
-    font-family: var(--font-mono);
-    font-size: 8px;
-    letter-spacing: 2px;
-    pointer-events: none;
-  }
-  .house3d-hud-tl { top: 8px; left: 12px; }
-  .house3d-hud-tr { top: 8px; right: 12px; }
-  .fp-svg {
-    width: 100%;
-    max-height: 240px;
-  }
-  .fp-room { cursor: pointer; transition: opacity 0.3s; }
-  .fp-room:hover rect { stroke-width: 2 !important; }
-
-  /* Dominant room info bar */
-  .dom-info {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-top: 12px;
-    padding-top: 12px;
-    border-top: 1px solid var(--line);
-    gap: 16px;
-  }
-  .dom-left { flex: 1; }
-  .dom-name {
-    font-family: var(--font-display);
-    font-size: 18px;
-    font-weight: 500;
-    letter-spacing: 0.1em;
-    color: var(--cyan);
-    text-transform: uppercase;
-    text-shadow: 0 0 12px var(--cyan-glow);
-  }
-  .dom-sub {
-    font-size: 11px;
-    color: var(--text-dim);
-    letter-spacing: 0.12em;
-    margin-top: 2px;
-  }
-  .dom-gauges {
-    display: flex;
-    gap: 14px;
-  }
-  .rgauge {
-    position: relative;
-    width: 64px;
-    text-align: center;
-    transition: opacity 0.3s ease;
-  }
-  .rgauge.dim { opacity: 0.45; }
-  .rgauge-svg { width: 64px; height: 64px; display: block; }
-  .rgauge-track {
-    fill: none;
-    stroke: rgba(0, 242, 254, 0.12);
-    stroke-width: 5;
-  }
-  .rgauge-fill {
-    fill: none;
-    stroke-width: 5;
-    stroke-linecap: round;
-    transform: rotate(-90deg);
-    transform-origin: 50% 50%;
-    transition: stroke-dashoffset 0.8s cubic-bezier(0.22, 1, 0.36, 1), stroke 0.6s ease;
-    filter: drop-shadow(0 0 4px currentColor);
-  }
-  .rgauge-val {
-    position: absolute;
-    top: 26px;
-    left: 0;
-    width: 64px;
-    font-family: var(--font-display);
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text);
-    line-height: 1;
-    text-shadow: 0 0 8px var(--cyan-glow);
-  }
-  .rgauge-lbl {
-    margin-top: 2px;
-    font-size: 8px;
-    color: var(--text-dim);
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-  }
-
-  /* AREAS */
-  .areas {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-    gap: 10px;
-  }
-  .area {
-    padding: 12px 10px 10px;
-    background: var(--bg-panel);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    display: flex; flex-direction: column; gap: 8px;
-    position: relative;
-    cursor: pointer;
-    transition: transform 0.2s, border-color 0.3s, box-shadow 0.3s;
-    min-height: 88px;
-  }
-  .area:focus-visible { outline: none; border-color: var(--cyan); box-shadow: 0 0 0 2px rgba(0,242,254,0.35); }
-  .area:hover {
-    border-color: rgba(0, 242, 254, 0.4);
-    transform: translateY(-2px);
-  }
-  .area.active {
-    border-color: var(--cyan);
-    background: rgba(0, 242, 254, 0.03);
-    box-shadow: inset 0 0 15px rgba(0, 242, 254, 0.05), 0 0 18px rgba(0, 242, 254, 0.08);
-  }
-  .area.active::before {
-    content: ''; position: absolute;
-    top: 6px; right: 6px;
-    width: 7px; height: 7px;
-    border-radius: 50%;
-    background: var(--green);
-    box-shadow: 0 0 8px var(--green);
-    animation: pulse 2.6s ease-in-out infinite;
-  }
-
-  /* Capability row (icons above, labels below) */
-  .area-caps {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    align-items: flex-start;
-    min-height: 42px;
-  }
-  .cap {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 2px;
-    min-width: 26px;
-  }
-  .cap-icon {
-    width: 18px; height: 18px;
-    display: flex; align-items: center; justify-content: center;
-    color: var(--text-dim);
-    transition: color 0.25s;
-  }
-  .cap-icon svg {
-    width: 18px; height: 18px;
-    fill: currentColor;
-  }
-  .cap-lbl {
-    font-family: var(--font-mono);
-    font-size: 8px;
-    letter-spacing: 0.1em;
-    color: var(--text-dim);
-    line-height: 1;
-  }
-  .cap-empty .cap-lbl { opacity: 0.4; }
-  .area.active .cap-icon { color: var(--cyan); }
-  .area.active .cap-lbl  { color: var(--cyan-dim); }
-
-  .area-name {
-    font-size: 12px; color: var(--text);
-    letter-spacing: 0.1em; text-transform: uppercase;
-    font-weight: 500;
-    padding-top: 4px;
-    border-top: 1px solid var(--line);
-    margin-top: auto;
-  }
-  .area.active .area-name { color: var(--cyan); border-top-color: var(--cyan-faint); }
-  .area-foot {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 6px;
-    margin-top: auto;
-    border-top: 1px solid var(--line);
-    padding-top: 4px;
-  }
-  .area-foot .area-name {
-    border-top: none;
-    padding-top: 0;
-    margin-top: 0;
-  }
-  .area.active .area-foot { border-top-color: var(--cyan-faint); }
-  .area-light {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-family: var(--font-mono);
-    font-size: 8.5px;
-    letter-spacing: 0.08em;
-    padding: 3px 7px;
-    border-radius: 999px;
-    cursor: pointer;
-    background: transparent;
-    border: 1px solid rgba(0,242,254,0.22);
-    color: var(--text-dim);
-    transition: color 0.15s, border-color 0.15s, box-shadow 0.2s;
-    flex-shrink: 0;
-  }
-  .area-light .al-dot {
-    width: 6px; height: 6px; border-radius: 50%;
-    background: rgba(0,242,254,0.3);
-    transition: background 0.15s, box-shadow 0.2s;
-  }
-  .area-light:hover { color: #fff; border-color: rgba(255,200,110,0.6); }
-  .area-light.on {
-    color: #ffce6b;
-    border-color: rgba(255,196,96,0.7);
-    box-shadow: 0 0 10px rgba(255,184,72,0.4);
-  }
-  .area-light.on .al-dot {
-    background: #ffce6b;
-    box-shadow: 0 0 8px 1px rgba(255,184,72,0.8);
-  }
-  .area-light.static { cursor: default; }
-  .area-light.static:hover { color: var(--text-dim); border-color: rgba(0,242,254,0.22); }
-  .area-light.static.on:hover { color: #ffce6b; border-color: rgba(255,196,96,0.7); }
-  .h3d-lamp.static { cursor: default; }
-  .area.bedroom .area-name::before { content: '◐ '; color: var(--amber); }
-
-  /* AREA READINGS + SPARKLINES (v7.101.28) */
-  .area-readings { display: flex; gap: 10px; flex-wrap: wrap; }
-  .area-reading {
-    display: inline-flex; align-items: center; gap: 5px;
-    font-family: var(--font-mono); font-size: 10px; color: var(--text-dim);
-  }
-  .spark { width: 44px; height: 14px; flex-shrink: 0; opacity: 0.85; }
-
-  /* AREA DETAIL DRILL-DOWN (v7.101.28) */
-  .area-detail-overlay {
-    position: fixed; inset: 0; z-index: 40;
-    background: rgba(2, 6, 10, 0.75);
-    backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
-    display: flex; align-items: center; justify-content: center;
-    padding: 20px;
-  }
-  .area-detail-card {
-    width: 100%; max-width: 420px;
-    background: var(--bg-panel);
-    border: 1px solid var(--line-hot);
-    border-radius: 12px;
-    box-shadow: 0 0 40px rgba(0,242,254,0.15);
-    padding: 16px 18px 18px;
-  }
-  .area-detail-head {
-    display: flex; align-items: center; gap: 10px; margin-bottom: 14px;
-  }
-  .area-detail-title {
-    flex: 1; font-family: var(--font-display); font-size: 15px;
-    letter-spacing: 0.08em; color: var(--cyan); text-transform: uppercase;
-  }
-  .area-detail-status {
-    font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.1em;
-    color: var(--text-dim);
-  }
-  .area-detail-status.active { color: var(--green); }
-  .area-detail-close {
-    background: transparent; border: 1px solid var(--line); color: var(--text-dim);
-    border-radius: 4px; width: 22px; height: 22px; cursor: pointer; line-height: 1;
-  }
-  .area-detail-close:hover { border-color: var(--red); color: var(--red); }
-  .area-detail-grid {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px;
-  }
-  .area-detail-stat {
-    border: 1px solid var(--line); border-radius: 8px; padding: 10px;
-    display: flex; flex-direction: column; gap: 6px;
-  }
-  .ads-label {
-    font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.12em;
-    color: var(--text-dim); text-transform: uppercase;
-  }
-  .ads-value { font-size: 20px; color: var(--text); font-weight: 500; }
-  .ads-spark { width: 100%; }
-  .ads-spark .spark { width: 100%; height: 24px; }
-  .area-detail-meta { display: flex; flex-direction: column; gap: 0; }
-  .adm-row {
-    display: flex; justify-content: space-between; gap: 10px;
-    padding: 7px 0; border-top: 1px dashed var(--line);
-    font-family: var(--font-mono); font-size: 10px; color: var(--text-dim);
-  }
-  .adm-row:first-child { border-top: none; }
-  .adm-row span:last-child { color: var(--text); }
-  .area-light.adl { margin: 0; }
-
-  /* CAMERA DIAGNOSTICS (v7.101.28) */
-  .cam-diag-btn {
-    font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.14em;
-    padding: 2px 8px; margin-left: 10px; border-radius: 3px; cursor: pointer;
-    background: transparent; border: 1px solid var(--line); color: var(--text-dim);
-  }
-  .cam-diag-btn:hover { border-color: var(--cyan-dim); color: var(--cyan); }
-  .cam-diag-btn:disabled { opacity: 0.5; cursor: wait; }
-  .cam-diag {
-    position: absolute; inset: 8px; z-index: 5; overflow: auto;
-    background: rgba(2, 6, 10, 0.92); border: 1px solid var(--line-hot);
-    border-radius: 6px; padding: 10px 12px;
-    font-family: var(--font-mono); font-size: 9.5px; line-height: 1.7;
-    color: var(--text); white-space: pre-wrap; word-break: break-word;
-  }
-  .cam-diag-line { min-height: 14px; }
-  .cam-diag-ok { color: var(--green); }
-  .cam-diag-bad { color: #ff8a9d; }
-  .cam-diag-verdict { margin-top: 6px; color: var(--cyan); }
-  .cam-diag-hint { margin-top: 6px; color: var(--text-dim); font-size: 8.5px; }
-  .cam-loc-chip.active { border-color: var(--cyan); color: var(--cyan); background: rgba(0, 242, 254, 0.08); }
-  .camset-list { display: flex; flex-direction: column; gap: 10px; }
-  .camset-row { border-top: 1px dashed var(--line); padding-top: 10px; }
-  .camset-row:first-child { border-top: none; padding-top: 0; }
-  .camset-id { font-family: var(--font-mono); font-size: 9px; color: var(--text-dim); letter-spacing: 0.04em; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
-  .camset-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); letter-spacing: 0.04em; }
-  .camset-bulk { display: flex; gap: 6px; }
-  .cam-enable-toggle { flex-shrink: 0; min-width: 34px; padding: 2px 8px; border-radius: var(--radius); font-family: var(--font-mono); font-size: 9px; font-weight: 600; letter-spacing: 0.08em; cursor: pointer; }
-  .cam-enable-toggle.on { background: var(--cyan-faint); color: var(--cyan); border: 1px solid var(--cyan-dim); }
-  .cam-enable-toggle.off { background: rgba(120,140,160,0.08); color: var(--text-faint); border: 1px solid var(--line); }
-  .cam-enable-toggle:hover { filter: brightness(1.3); }
-  .camset-ent { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .camset-row.cam-off { opacity: 0.5; }
-  .fp-openings { margin-top: 12px; border-top: 1px dashed var(--line); padding-top: 10px; }
-  .op-headr { font-family: var(--font-mono); font-size: 10px; color: var(--cyan); letter-spacing: 0.06em; margin-bottom: 8px; }
-  .op-hint { color: var(--text-dim); margin-left: 8px; letter-spacing: 0.02em; }
-  .op-add { display: flex; gap: 6px; margin-bottom: 10px; }
-  .op-add .ctrl { padding: 5px 10px; font-size: 9px; }
-  .op-row { display: flex; align-items: center; gap: 6px; padding: 5px 0; border-top: 1px solid rgba(0,242,254,0.06); flex-wrap: wrap; }
-  .op-type { flex-shrink: 0; min-width: 66px; text-align: center; padding: 2px 6px; border-radius: 4px; font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.06em; }
-  .op-window { background: rgba(0,242,254,0.12); color: var(--cyan); border: 1px solid var(--cyan-dim); }
-  .op-door { background: rgba(255,170,40,0.14); color: #ffb84d; border: 1px solid rgba(255,170,40,0.4); }
-  .op-door.op-int { background: rgba(120,140,160,0.1); color: var(--text-faint); border: 1px solid var(--line); }
-  .op-door.op-cellar { background: rgba(201,138,42,0.14); color: #e0a94a; border: 1px solid rgba(201,138,42,0.4); }
-  .op-dormer { background: rgba(176,106,255,0.14); color: #c79bff; border: 1px solid rgba(176,106,255,0.4); }
-  .op-door.op-cased { background: rgba(120,185,215,0.12); color: #9fd0e8; border: 1px solid rgba(120,185,215,0.4); }
-  .op-cased-tag { font-size: 9px; color: var(--text-faint); font-style: italic; opacity: 0.85; }
-  .fp-3d-preview { height: 260px; margin-bottom: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: radial-gradient(ellipse at 50% 40%, rgba(0,40,60,0.4), rgba(0,5,10,0.85)); overflow: hidden; display: flex; align-items: center; justify-content: center; }
-  .fp-3d-preview svg { max-height: 100%; max-width: 100%; }
-  .fp-3d-empty { color: var(--text-dim); font-family: var(--font-mono); font-size: 11px; }
-  .op-room { max-width: 120px; }
-  .op-field { background: var(--bg); border: 1px solid var(--line); color: var(--cyan); border-radius: 4px; padding: 2px 5px; font-family: var(--font-mono); font-size: 10px; }
-  .fp-cameras { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
-  .cam-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 5px 0; }
-  .cam-tag { flex-shrink: 0; min-width: 52px; text-align: center; padding: 2px 6px; border-radius: 4px; font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.06em; background: rgba(255,90,90,0.14); color: #ff8a8a; border: 1px solid rgba(255,90,90,0.4); }
-  .cam-tag.out { background: rgba(255,170,60,0.14); color: #ffbb5c; border-color: rgba(255,170,60,0.4); }
-  .cam-field { background: var(--bg); border: 1px solid var(--line); color: var(--cyan); border-radius: 4px; padding: 2px 5px; font-family: var(--font-mono); font-size: 10px; }
-  .cam-num { width: 46px; }
-  .cam-lbl { font-size: 9px; color: var(--text-dim); display: inline-flex; align-items: center; gap: 4px; }
-  .cam-io { font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.06em; padding: 3px 8px; border-radius: 4px; cursor: pointer; background: rgba(255,90,90,0.1); color: #ff8a8a; border: 1px solid rgba(255,90,90,0.35); }
-  .cam-io.out { background: rgba(255,170,60,0.1); color: #ffbb5c; border-color: rgba(255,170,60,0.35); }
-  .cam-item { margin: 5px 0; }
-  .cam-cov { font-size: 9px; color: var(--text-dim); margin: 2px 0 0 56px; letter-spacing: 0.02em; }
-  .cam-cov-room { color: var(--text-faint); }
-  .cam-cov-room.full { color: var(--cyan); }
-  .cam-cov-room.zone { color: #00f5a0; }
-  .cam-cov-none { color: #b06a6a; opacity: 0.8; font-style: italic; }
-  .cam-cov-llm { font-size: 9px; margin: 2px 0 0 56px; line-height: 1.45; }
-  .cam-cov-conf { color: #34d399; font-family: var(--font-mono); letter-spacing: 0.04em; }
-  .cam-cov-reason { color: var(--text-dim); font-style: italic; }
-  .op-pos { padding: 0; }
-  .op-ent { flex: 1; min-width: 130px; }
-  .op-del { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 14px; padding: 0 4px; }
-  .op-del:hover { color: #ff5a5a; }
-  .op-empty { color: var(--text-dim); font-family: var(--font-mono); font-size: 10px; padding: 6px 0; }
-  .op-marker { transition: all 0.12s ease; }
-  .op-marker.op-glow { opacity: 1; stroke: #ffffff; stroke-width: 2.5; filter: drop-shadow(0 0 6px #ffffff); }
-  .op-row:hover { background: rgba(0,242,254,0.04); }
-  .camset-ov { color: var(--cyan-dim); }
-  .camset-controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-  .camset-name { width: 200px; font-size: 11px; }
-  .camset-chips { display: flex; gap: 6px; }
-
-  /* LOG */
-  .log {
-    display: flex; flex-direction: column; gap: 1px;
-    max-height: 480px;
-    overflow-y: auto;
-  }
-  .log::-webkit-scrollbar { width: 2px; }
-  .log::-webkit-scrollbar-track { background: var(--line); }
-  .log::-webkit-scrollbar-thumb { background: var(--cyan-dim); }
-  .evt {
-    padding: 10px 12px;
-    border-left: 2px solid var(--cyan);
-    border-radius: 0 6px 6px 0;
-    background: rgba(255, 255, 255, 0.02);
-    display: grid; grid-template-columns: 52px 16px 1fr;
-    gap: 8px; font-size: 12px;
-    animation: evt-in 0.5s ease-out;
-    transition: background 0.2s, border-color 0.2s;
-    margin-bottom: 2px;
-  }
-  .evt:hover { background: rgba(0, 242, 254, 0.04); }
-  @keyframes evt-in {
-    from { opacity: 0; transform: translateX(8px); }
-    to   { opacity: 1; transform: translateX(0); }
-  }
-  .evt .ts {
-    font-family: var(--font-mono);
-    color: var(--text-dim);
-    font-size: 10px; letter-spacing: 0.1em;
-  }
-  .evt .msg { color: var(--text); line-height: 1.4; }
-  .evt-icon { color: var(--cyan-dim); align-self: start; margin-top: 2px; opacity: 0.9; }
-  .evt.critical .evt-icon { color: var(--red); opacity: 1; }
-  .evt.high .evt-icon { color: var(--amber); opacity: 1; }
-  .evt.medium .evt-icon { color: var(--cyan); }
-  .evt .msg b {
-    color: var(--cyan); font-weight: 500; letter-spacing: 0.08em;
-  }
-  .evt.critical { border-left-color: var(--red); background: rgba(255, 59, 59, 0.04); }
-  .evt.critical .msg b { color: var(--red); }
-  .evt.high     { border-left-color: var(--amber); background: rgba(255, 157, 46, 0.04); }
-  .evt.high .msg b { color: var(--amber); }
-  .evt.medium   { border-left-color: var(--cyan-dim); }
-  .evt.low      { border-left-color: var(--text-faint); opacity: 0.75; }
-  .evt.muted    { border-left-color: var(--text-faint); opacity: 0.5; }
-  .evt.muted .msg { font-style: italic; }
-
-  /* CONTROLS */
-  .controls {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-    gap: 8px;
-  }
-
-  /* LOGS TAB */
-  .logs-tab { padding: 0; }
-  .log-filters {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    padding: 0 0 12px;
-    margin-bottom: 12px;
-    border-bottom: 1px solid var(--line);
-  }
-  .log-filter {
-    padding: 4px 12px;
-    border: 1px solid var(--line);
-    border-radius: 20px;
-    background: transparent;
-    color: var(--text-dim);
-    font-family: var(--font-mono);
-    font-size: 10px;
-    letter-spacing: 0.12em;
-    cursor: pointer;
-    transition: all 0.2s;
-  }
-  .log-filter:hover {
-    border-color: var(--cyan-dim);
-    color: var(--text);
-    background: rgba(0, 242, 254, 0.04);
-  }
-  .log-search {
-    padding: 4px 12px;
-    border: 1px solid var(--line);
-    border-radius: 20px;
-    background: rgba(0, 242, 254, 0.03);
-    color: var(--text);
-    font-family: var(--font-mono);
-    font-size: 10px;
-    letter-spacing: 0.04em;
-    width: 140px;
-    outline: none;
-  }
-  .log-search::placeholder { color: var(--text-faint); letter-spacing: 0.1em; }
-  .log-search:focus { border-color: var(--cyan-dim); background: rgba(0, 242, 254, 0.06); }
-  .activity-search { width: 100%; margin-bottom: 8px; box-sizing: border-box; }
-  .log-count {
-    font-family: var(--font-mono); font-size: 9px; color: var(--text-dim);
-    letter-spacing: 0.08em; margin: -6px 0 10px;
-  }
-  .log-filter.active {
-    border-color: var(--cyan);
-    color: var(--cyan);
-    background: rgba(0, 242, 254, 0.1);
-    box-shadow: 0 0 8px rgba(0, 242, 254, 0.15);
-  }
-  .log-entries {
-    max-height: 65vh;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-  .log-entries::-webkit-scrollbar { width: 3px; }
-  .log-entries::-webkit-scrollbar-track { background: var(--bg-elev); border-radius: 3px; }
-  .log-entries::-webkit-scrollbar-thumb { background: var(--cyan-dim); border-radius: 3px; }
-  .log-entry {
-    display: grid;
-    grid-template-columns: 60px 100px 1fr;
-    gap: 10px;
-    padding: 6px 10px;
-    background: var(--bg-elev);
-    border-radius: var(--radius);
-    border-left: 2px solid var(--line);
-    font-family: var(--font-mono);
-    font-size: 11px;
-    line-height: 1.5;
-    transition: background 0.2s;
-    animation: evt-in 0.3s ease-out;
-  }
-  .log-entry:hover { background: rgba(0, 242, 254, 0.02); }
-  .log-entry-error {
-    border-left-color: var(--red) !important;
-    background: rgba(255, 59, 59, 0.04) !important;
-  }
-  .log-ts {
-    color: var(--text-dim);
-    font-size: 10px;
-    letter-spacing: 0.05em;
-    white-space: nowrap;
-  }
-  .log-cat {
-    font-weight: 600;
-    font-size: 10px;
-    letter-spacing: 0.08em;
-    white-space: nowrap;
-  }
-  .log-msg {
-    color: var(--text);
-    word-break: break-word;
-  }
-  .log-loading {
-    color: var(--cyan-dim);
-    padding: 16px;
-    text-align: center;
-    font-family: var(--font-mono);
-    font-size: 11px;
-    letter-spacing: 0.1em;
-  }
-
-  /* TAB BAR */
-  .tab-bar {
-    display: flex;
-    gap: 2px;
-    border-bottom: 1px solid var(--line);
-    padding: 0 4px;
-  }
-  .tab {
-    padding: 10px 24px;
-    background: transparent;
-    border: none;
-    border-bottom: 2px solid transparent;
-    border-radius: var(--radius) var(--radius) 0 0;
-    color: var(--text-dim);
-    font-family: var(--font-display);
-    font-size: 11px;
-    letter-spacing: 0.3em;
-    text-transform: uppercase;
-    cursor: pointer;
-    transition: all 0.25s;
-  }
-  .tab:hover {
-    color: var(--text);
-    background: rgba(0, 242, 254, 0.04);
-  }
-  .tab.active {
-    color: var(--cyan);
-    border-bottom-color: var(--cyan);
-    background: rgba(0, 242, 254, 0.06);
-    text-shadow: 0 0 8px var(--cyan-glow);
-  }
-
-  /* SETTINGS PAGE */
-  .settings-page {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
-  .settings-subnav {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    border-bottom: 1px solid var(--line);
-    padding-bottom: 12px;
-  }
-  .settings-subnav-btn {
-    background: transparent;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    color: var(--text-dim);
-    font-family: var(--font-display);
-    font-size: 10px;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    padding: 8px 14px;
-    cursor: pointer;
-    transition: color 0.15s, border-color 0.15s, background 0.15s;
-  }
-  .settings-subnav-btn:hover { color: var(--text); border-color: var(--cyan-dim); }
-  .settings-subnav-btn.active {
-    color: var(--bg);
-    background: var(--cyan);
-    border-color: var(--cyan);
-  }
-  .settings-grid {
-    column-width: 340px;
-    column-gap: 16px;
-  }
-  .settings-grid > * {
-    break-inside: avoid;
-    -webkit-column-break-inside: avoid;
-    width: 100%;
-    margin-bottom: 16px;
-  }
-  .ctrl {
-    padding: 12px 16px;
-    background: var(--bg-elev);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    color: var(--text-dim);
-    font-family: var(--font-body);
-    font-size: 12px; font-weight: 500;
-    letter-spacing: 0.25em;
-    text-transform: uppercase;
-    cursor: pointer;
-    transition: all 0.25s;
-    text-align: center;
-  }
-  .ctrl:hover {
-    border-color: var(--cyan); color: var(--cyan);
-    background: rgba(0, 242, 254, 0.06);
-    box-shadow: 0 0 15px var(--cyan-glow);
-    text-shadow: 0 0 8px var(--cyan-glow);
-    transform: translateY(-1px);
-  }
-  .ctrl.primary { border-color: var(--cyan-dim); color: var(--cyan); }
-  .ctrl.warn    { border-color: var(--amber); color: var(--amber); }
-  .ctrl.warn:hover { background: rgba(255, 157, 46, 0.05); box-shadow: 0 0 15px rgba(255, 157, 46, 0.2); }
-
-  /* SETTINGS TOGGLES */
-  .toggle-list { display: flex; flex-direction: column; gap: 8px; }
-  .toggle-row {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    grid-template-rows: auto auto;
-    align-items: center;
-    padding: 10px 12px;
-    background: var(--bg-elev);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    gap: 2px 12px;
-    transition: border-color 0.2s;
-  }
-  .toggle-row:hover { border-color: var(--line-hot); }
-  .toggle-label {
-    font-size: 12px; font-weight: 500;
-    letter-spacing: 0.15em;
-    text-transform: uppercase;
-    color: var(--text);
-    grid-column: 1; grid-row: 1;
-  }
-  .toggle-desc {
-    font-size: 9px;
-    color: var(--text-dim);
-    letter-spacing: 0.1em;
-    grid-column: 1; grid-row: 2;
-  }
-  .toggle-btn {
-    grid-column: 2; grid-row: 1 / 3;
-    padding: 6px 14px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    background: var(--bg-elev);
-    font-family: var(--font-mono);
-    font-size: 11px; font-weight: 500;
-    letter-spacing: 0.2em;
-    cursor: pointer;
-    transition: all 0.25s;
-    min-width: 52px;
-    text-align: center;
-  }
-  .toggle-btn.on {
-    border-color: var(--green);
-    color: var(--green);
-    background: rgba(0, 245, 160, 0.08);
-    box-shadow: 0 0 10px rgba(0, 245, 160, 0.1);
-  }
-  .toggle-btn.off {
-    border-color: var(--text-faint);
-    color: var(--text-dim);
-  }
-  .toggle-btn:hover {
-    border-color: var(--cyan);
-    color: var(--cyan);
-    background: rgba(0, 242, 254, 0.06);
-  }
-
-  /* Residence / Home config card */
-  .home-cfg { display: flex; flex-direction: column; gap: 8px; }
-  .cfg-row {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    align-items: center;
-    gap: 10px;
-    padding: 9px 12px;
-    background: var(--bg-elev);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    transition: border-color 0.2s;
-  }
-  .cfg-row:hover { border-color: var(--cyan-dim); }
-  .cfg-row > label {
-    font-family: var(--font-mono);
-    font-size: 11px;
-    letter-spacing: 0.06em;
-    color: var(--text-dim);
-  }
-  .cfg-field {
-    grid-column: 2;
-    min-width: 140px;
-    padding: 6px 10px;
-    background: var(--bg);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    color: var(--cyan);
-    font-family: var(--font-mono);
-    font-size: 12px;
-    letter-spacing: 0.04em;
-    cursor: pointer;
-    transition: all 0.2s;
-  }
-  .cfg-field:hover, .cfg-field:focus { border-color: var(--cyan); outline: none; }
-  .cfg-num { width: 92px; min-width: 0; text-align: right; cursor: text; }
-  .cfg-text { width: 100%; min-width: 0; cursor: text; letter-spacing: 0; }
-  .cfg-row:has(.cfg-text) { grid-template-columns: 1fr; gap: 5px; }
-  .cfg-row:has(.cfg-text) > label { grid-column: 1; }
-  .cfg-row:has(.cfg-text) > .cfg-text { grid-column: 1; }
-  .home-cfg-hint {
-    font-family: var(--font-mono);
-    font-size: 10px;
-    line-height: 1.5;
-    color: var(--text-faint);
-    padding: 4px 4px 0;
-  }
-  .notify-select {
-    grid-column: 2; grid-row: 1 / 3;
-    padding: 6px 10px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    background: var(--bg-elev);
-    color: var(--cyan);
-    font-family: var(--font-mono);
-    font-size: 10px;
-    letter-spacing: 0.1em;
-    cursor: pointer;
-    min-width: 120px;
-    max-width: 180px;
-    transition: border-color 0.2s;
-  }
-  .notify-select:hover { border-color: var(--cyan-dim); }
-  .notify-select option {
-    background: var(--bg-panel);
-    color: var(--text);
-  }
-
-  /* AI MODELS */
-  .model-list { display: flex; flex-direction: column; gap: 8px; }
-  .model-row {
-    display: grid;
-    grid-template-columns: 90px 1fr 1.4fr;
-    grid-auto-rows: auto;
-    gap: 6px;
-    align-items: center;
-  }
-  .model-hint { grid-column: 1 / -1; font-family: var(--font-mono); font-size: 10px;
-    line-height: 1.4; color: var(--text-dim); margin-top: 2px; opacity: 0.85; }
-  .model-label {
-    font-family: var(--font-mono);
-    font-size: 10px;
-    letter-spacing: 0.12em;
-    color: var(--text-dim);
-    text-transform: uppercase;
-  }
-  .model-row .prov-select,
-  .model-row .model-select {
-    grid-column: auto; grid-row: auto;
-    min-width: 0; max-width: none; width: 100%;
-  }
-  .model-custom {
-    grid-column: 2 / 4;
-    padding: 6px 10px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    background: var(--bg-elev);
-    color: var(--cyan);
-    font-family: var(--font-mono);
-    font-size: 10px;
-    letter-spacing: 0.08em;
-    width: 100%;
-    box-sizing: border-box;
-  }
-  .model-custom:focus { outline: none; border-color: var(--cyan-dim); }
-  .model-hint {
-    margin-top: 8px;
-    font-family: var(--font-mono);
-    font-size: 9px;
-    color: var(--text-dim);
-    letter-spacing: 0.05em;
-    opacity: 0.7;
-  }
-
-  /* APPLIANCES / ENERGY PROFILE */
-  .pl-entities { padding: 10px 14px 14px; border-top: 1px solid var(--line); }
-  .pl-ehead { font-family: var(--font-mono); font-size: 10px; color: var(--cyan); letter-spacing: 0.06em; margin-bottom: 8px; }
-  .pl-hint { color: var(--text-dim); margin-left: 6px; letter-spacing: 0.02em; }
-  .pl-add { display: flex; gap: 8px; margin-bottom: 10px; }
-  .pl-add .op-field, .pl-add .pl-input { flex: 1; min-width: 0; }
-  .pl-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-  .pl-chip { display: inline-flex; align-items: center; gap: 4px; background: rgba(0,242,254,0.1); border: 1px solid var(--cyan-dim); color: var(--cyan); border-radius: 12px; padding: 3px 6px 3px 10px; font-family: var(--font-mono); font-size: 10px; }
-  .pl-del { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 13px; padding: 0 2px; }
-  .pl-del:hover { color: #ff5a5a; }
-  .pl-empty { color: var(--text-dim); font-family: var(--font-mono); font-size: 10px; }
-  .appliance-intro {
-    font-family: var(--font-mono); font-size: 9px; color: var(--text-dim);
-    letter-spacing: 0.04em; opacity: 0.8; margin-bottom: 8px; line-height: 1.5;
-  }
-  .appliance-list { display: flex; flex-direction: column; gap: 8px; }
-  .appliance-empty {
-    font-family: var(--font-mono); font-size: 10px; color: var(--text-dim);
-    opacity: 0.7; padding: 6px 2px;
-  }
-  .appliance-row {
-    border: 1px solid rgba(0, 242, 254, 0.12);
-    border-radius: var(--radius);
-    background: rgba(0, 242, 254, 0.02);
-    padding: 7px 8px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    min-width: 0;
-  }
-  .ar-line1 { display: flex; gap: 6px; align-items: center; }
-  .ar-line1 .appliance-name { flex: 1 1 auto; min-width: 0; }
-  .ar-line2 {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) 56px;
-    gap: 6px;
-    align-items: center;
-  }
-  .appliance-row input, .appliance-row select {
-    background: rgba(0, 242, 254, 0.04);
-    border: 1px solid rgba(0, 242, 254, 0.2);
-    color: var(--text); font-family: var(--font-mono); font-size: 10px;
-    padding: 5px 6px; border-radius: 4px; min-width: 0; width: 100%;
-    box-sizing: border-box;
-  }
-  .appliance-row input:focus, .appliance-row select:focus {
-    outline: none; border-color: var(--cyan);
-  }
-  .appliance-learned {
-    font-family: var(--font-mono); font-size: 8px; color: var(--cyan);
-    opacity: 0.75; letter-spacing: 0.05em;
-  }
-  .appliance-remove {
-    flex: 0 0 auto;
-    width: 26px; height: 26px;
-    padding: 0; font-size: 11px; line-height: 1;
-    display: flex; align-items: center; justify-content: center;
-    background: transparent; border: 1px solid rgba(255, 90, 90, 0.3);
-    color: #ff8a8a; border-radius: 4px; cursor: pointer;
-  }
-  .appliance-remove:hover { border-color: #ff5a5a; background: rgba(255, 90, 90, 0.08); }
-  .appliance-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
-  .appliance-actions .btn.primary {
-    border-color: var(--cyan); color: var(--cyan);
-  }
-  .appliance-unknown {
-    display: flex; align-items: center; gap: 8px; margin-top: 10px;
-    font-family: var(--font-mono); font-size: 9px; color: var(--text-dim);
-    letter-spacing: 0.04em; cursor: pointer;
-  }
-  .appliance-unknown input { accent-color: var(--cyan); flex: 0 0 auto; }
-
-  .rule-list { display: flex; flex-direction: column; gap: 4px; }
-  .rule-row {
-    display: grid; grid-template-columns: 1fr auto;
-    grid-template-rows: auto auto;
-    padding: 8px 12px;
-    background: var(--bg-elev);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    gap: 2px 10px;
-    transition: border-color 0.2s;
-  }
-  .rule-row:hover { border-color: var(--line-hot); }
-  .rule-name {
-    font-size: 11px; font-weight: 500;
-    letter-spacing: 0.12em; text-transform: uppercase;
-    color: var(--text); grid-column: 1; grid-row: 1;
-  }
-  .rule-desc {
-    font-size: 9px; color: var(--text-dim);
-    letter-spacing: 0.08em; grid-column: 1; grid-row: 2;
-  }
-  .rule-toggle {
-    grid-column: 2; grid-row: 1 / 3;
-    padding: 4px 10px;
-    font-size: 10px;
-    min-width: 42px;
-    border-radius: var(--radius);
-  }
-
-  /* PAIRING ROWS */
-  .pairing-list { display: flex; flex-direction: column; gap: 6px; }
-  .pairing-row {
-    display: grid; grid-template-columns: 1fr auto;
-    align-items: center;
-    padding: 8px 12px;
-    background: var(--bg-elev);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    gap: 8px;
-    transition: border-color 0.2s;
-  }
-  .pairing-row:hover { border-color: var(--line-hot); }
-  .pairing-label {
-    font-size: 11px; font-weight: 500;
-    letter-spacing: 0.12em; text-transform: uppercase;
-    color: var(--text);
-  }
-  .sat-pair-select {
-    min-width: 160px; max-width: 220px;
-  }
-
-  .diag-row {
-    display: grid; grid-template-columns: 1fr auto;
-    align-items: center;
-    padding: 10px 12px;
-    background: var(--bg-elev);
-    border: 1px dashed var(--line);
-    border-radius: var(--radius);
-    margin-bottom: 6px; gap: 12px;
-    transition: border-color 0.2s;
-  }
-  .diag-row:hover { border-color: var(--line-hot); }
-
-  /* SUGGESTIONS */
-  .sug-tab-intro { font-family: var(--font-mono); font-size: 11px; line-height: 1.5;
-    color: var(--text-dim); margin: 4px 0 12px; max-width: 640px; }
-  .sug-empty { text-align: center; padding: 8px 0 4px; }
-  .sug-empty-body { display: flex; flex-direction: column; align-items: center;
-    gap: 6px; padding: 28px 16px; }
-  .sug-empty-icon { font-size: 32px; color: var(--green); opacity: 0.5;
-    line-height: 1; }
-  .sug-empty-title { font-family: var(--font-display); font-size: 13px;
-    letter-spacing: 0.08em; color: var(--text); }
-  .sug-empty-sub { font-family: var(--font-mono); font-size: 11px; line-height: 1.6;
-    color: var(--text-dim); max-width: 460px; }
-  .sug-list { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
-  .sug-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
-  .sug-header-title { color: var(--green); font-family: var(--font-display); font-size: 9px; letter-spacing: 0.2em; }
-  .sug-header-sub { font-family: var(--font-mono); font-size: 9px; color: var(--text-dim); }
-  .sug {
-    background: rgba(0, 245, 160, 0.03);
-    border: 1px solid rgba(0, 245, 160, 0.18);
-    border-radius: 8px; padding: 11px 12px;
-    transition: opacity 0.3s;
-  }
-  .sug-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 7px; }
-  .sug-type {
-    font-family: var(--font-mono); font-size: 8.5px; letter-spacing: 0.08em;
-    padding: 2px 7px; border-radius: 4px;
-    background: rgba(0, 245, 160, 0.10); color: var(--green);
-    border: 1px solid rgba(0, 245, 160, 0.3);
-  }
-  .sug-type-repeated_command { background: rgba(0,242,254,0.10); color: var(--cyan); border-color: rgba(0,242,254,0.3); }
-  .sug-type-presence { background: rgba(180,120,255,0.10); color: #c8a6ff; border-color: rgba(180,120,255,0.3); }
-  .sug-type-temp_pref { background: rgba(255,180,0,0.10); color: var(--amber); border-color: rgba(255,180,0,0.3); }
-  .sug-pct-txt { font-family: var(--font-mono); font-size: 9px; white-space: nowrap; }
-  .sug-pct-txt.sug-hi { color: var(--green); }
-  .sug-pct-txt.sug-mid { color: var(--amber); }
-  .sug-pct-txt.sug-lo { color: var(--text-dim); }
-  .sug-why { font-size: 12px; color: var(--text); font-weight: 500; margin-bottom: 3px; }
-  .sug-desc { font-size: 10.5px; color: var(--text-dim); line-height: 1.45; margin-bottom: 8px; }
-  .sug-ev-label {
-    font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.1em;
-    color: var(--text-dim); text-transform: uppercase; margin-bottom: 4px;
-  }
-  .sug-ev { margin: 0 0 8px; padding-left: 15px; }
-  .sug-ev li { font-size: 10.5px; color: var(--text); line-height: 1.55; }
-  .sug-ents { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
-  .sug-ent {
-    font-family: var(--font-mono); font-size: 8.5px; color: var(--cyan-dim);
-    background: rgba(0,242,254,0.06); border: 1px solid var(--line);
-    border-radius: 3px; padding: 1px 6px;
-  }
-  .sug-conf-row { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
-  .sug-conf {
-    flex: 1; height: 4px; background: rgba(0, 245, 160, 0.12);
-    border-radius: 2px; overflow: hidden;
-  }
-  .sug-conf i { display: block; height: 100%; background: var(--green); box-shadow: 0 0 6px rgba(0,245,160,0.6); }
-  .sug-conf.sug-mid i { background: var(--amber); box-shadow: 0 0 6px rgba(255,180,0,0.5); }
-  .sug-conf.sug-lo i { background: var(--text-dim); box-shadow: none; }
-  .sug-seen { font-family: var(--font-mono); font-size: 9px; color: var(--text-dim); white-space: nowrap; }
-  .sug-actions { display: flex; gap: 6px; flex-wrap: wrap; }
-  .sug-btn {
-    font-family: var(--font-mono); font-size: 9px; line-height: 1;
-    padding: 6px 10px; border-radius: 5px; cursor: pointer;
-    background: transparent; border: 1px solid var(--line); color: var(--text-dim);
-  }
-  .sug-btn:hover { border-color: var(--line-hot); color: var(--text); }
-  .sug-approve { border-color: rgba(0,245,160,0.35); color: var(--green); }
-  .sug-approve:hover { border-color: var(--green); background: rgba(0,245,160,0.08); }
-  .sug-dismiss { border-color: rgba(255,77,109,0.3); color: #ff8a9d; }
-  .sug-dismiss:hover { border-color: var(--red); }
-  .sug-yaml {
-    margin: 8px 0 0; padding: 8px; max-height: 160px; overflow: auto;
-    background: rgba(4, 8, 14, 0.7); border: 1px solid var(--line);
-    border-radius: 4px; font-family: var(--font-mono); font-size: 9.5px;
-    color: var(--cyan-dim); white-space: pre-wrap; word-break: break-word;
-    user-select: text;
-  }
-
-  /* GOALS */
-  .goal-list { display: flex; flex-direction: column; gap: 8px; }
-  .goal {
-    background: rgba(0, 242, 254, 0.025);
-    border: 1px solid var(--line);
-    border-left: 2px solid var(--cyan-dim);
-    border-radius: 6px; padding: 9px 10px;
-  }
-  .goal-done      { border-left-color: var(--green); opacity: 0.7; }
-  .goal-failed    { border-left-color: var(--red); opacity: 0.7; }
-  .goal-cancelled { border-left-color: var(--text-dim); opacity: 0.5; }
-  .goal-top { display: flex; align-items: center; gap: 8px; }
-  .goal-status-badge {
-    font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.1em;
-    color: var(--cyan-dim); border: 1px solid var(--line-hot); border-radius: 3px;
-    padding: 1px 5px; white-space: nowrap;
-  }
-  .goal-done .goal-status-badge      { color: var(--green); border-color: rgba(0,245,160,0.35); }
-  .goal-failed .goal-status-badge    { color: #ff8a9d; border-color: rgba(255,77,109,0.3); }
-  .goal-cancelled .goal-status-badge { color: var(--text-dim); }
-  .goal-title { flex: 1; font-size: 11.5px; color: var(--text); font-weight: 600; }
-  .goal-cancel {
-    font-family: var(--font-mono); font-size: 9px; line-height: 1;
-    padding: 3px 6px; border-radius: 4px; cursor: pointer;
-    background: transparent; border: 1px solid var(--line); color: var(--text-dim);
-  }
-  .goal-cancel:hover { border-color: var(--red); color: var(--red); }
-  .goal-delete {
-    margin-left: auto; background: transparent; border: 1px solid var(--line);
-    color: var(--text-dim); border-radius: 4px; cursor: pointer;
-    font-size: 11px; padding: 1px 7px; line-height: 1.4;
-  }
-  .goal-delete:hover { border-color: var(--red); color: var(--red); }
-  .goal-new { display: flex; gap: 6px; margin: 8px 0; }
-  .goal-new-input {
-    flex: 1; background: rgba(0,0,0,0.25); border: 1px solid var(--line);
-    border-radius: 5px; color: var(--text); font-size: 12px; padding: 7px 10px;
-    font-family: var(--font-display); outline: none;
-  }
-  .goal-new-input:focus { border-color: var(--cyan); }
-  .goal-new-btn {
-    font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.1em;
-    padding: 6px 12px; border-radius: 5px; cursor: pointer;
-    background: rgba(0,242,254,0.1); border: 1px solid var(--cyan); color: var(--cyan);
-  }
-  .goal-new-btn:hover { background: rgba(0,242,254,0.2); }
-  .goal-new-btn:disabled { opacity: 0.5; cursor: default; }
-  .goal-empty { color: var(--text-dim); font-size: 11px; padding: 8px 4px; }
-  .vc-test-result { font-size: 10.5px; color: var(--text-dim); margin-top: 8px; line-height: 1.5; min-height: 14px; }
-  .vc-sat { color: var(--text-faint); font-family: var(--font-mono); font-size: 9px; }
-  .intr-snap { margin-top: 6px; }
-  .intr-img { width: 100%; max-height: 260px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); display: block; }
-  .intr-snap-meta { font-size: 9px; color: var(--text-dim); font-family: var(--font-mono); margin-top: 4px; }
-  .intr-fa { font-size: 10px; color: var(--amber); margin-top: 8px; }
-  .intr-ack { font-size: 10px; color: var(--green); margin-top: 8px; }
-  .intr-timeout-row { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; }
-  .intr-timeout-row label { font-size: 11px; color: var(--text-dim); }
-  .intr-timeout { background: rgba(0,0,0,0.25); border: 1px solid var(--line); border-radius: 5px; color: var(--text); font-size: 11px; padding: 5px 9px; }
-  .onboarding-card { background: linear-gradient(135deg, rgba(0,242,254,0.08), rgba(10,18,36,0.6)); border: 1px solid var(--cyan); border-radius: 12px; padding: 18px 20px; margin-bottom: 16px; }
-  .ob-head { display: flex; justify-content: space-between; align-items: flex-start; }
-  .ob-title { font-size: 16px; font-weight: 600; color: var(--text); }
-  .ob-dismiss { background: transparent; border: none; color: var(--text-dim); font-size: 15px; cursor: pointer; padding: 0 2px; line-height: 1; }
-  .ob-dismiss:hover { color: var(--text); }
-  .ob-sub { font-size: 12px; color: var(--text-dim); margin: 6px 0 12px; line-height: 1.5; }
-  .ob-progress { position: relative; height: 5px; background: rgba(255,255,255,0.06); border-radius: 3px; margin-bottom: 14px; overflow: hidden; }
-  .ob-progress i { position: absolute; left: 0; top: 0; height: 100%; background: var(--cyan); border-radius: 3px; }
-  .ob-progress span { position: absolute; right: 0; top: -16px; font-size: 9px; font-family: var(--font-mono); color: var(--text-dim); }
-  .ob-steps { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
-  .ob-step { display: flex; gap: 10px; align-items: flex-start; }
-  .ob-check { font-family: var(--font-mono); color: var(--text-dim); font-size: 13px; line-height: 1.4; }
-  .ob-done .ob-check { color: var(--green); }
-  .ob-step-label { font-size: 12.5px; color: var(--text); font-weight: 500; }
-  .ob-done .ob-step-label { color: var(--text-dim); }
-  .ob-step-hint { font-size: 10.5px; color: var(--text-dim); margin-top: 1px; line-height: 1.4; }
-  .ob-step-go { margin-left: auto; align-self: center; flex-shrink: 0; background: var(--cyan-faint); color: var(--cyan); border: 1px solid var(--cyan-dim); border-radius: var(--radius); padding: 1px 9px; cursor: pointer; font-family: var(--font-mono); font-size: 14px; line-height: 1.3; }
-  .ob-step-go:hover { background: var(--cyan-glow); color: #fff; }
-  .settings-grid .panel.ob-flash { outline: 1px solid var(--cyan); outline-offset: 2px; animation: obFlash 1.6s ease-out; }
-  @keyframes obFlash { 0% { background: var(--cyan-faint); } 100% { background: transparent; } }
-  .ob-actions { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
-  .ob-go { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; padding: 7px 14px; border-radius: 6px; cursor: pointer; background: rgba(0,242,254,0.12); border: 1px solid var(--cyan); color: var(--cyan); }
-  .ob-go:hover { background: rgba(0,242,254,0.22); }
-  .ob-tip { font-size: 10.5px; color: var(--text-dim); }
-  .ob-tip em { color: var(--text); font-style: normal; }
-  .goal-outcome { font-size: 10.5px; color: var(--text-dim); line-height: 1.4; margin-top: 4px; }
-  .goal-meta { display: flex; align-items: center; gap: 7px; margin-top: 7px; }
-  .goal-steps-bar {
-    flex: 1; height: 3px; background: rgba(0, 242, 254, 0.12);
-    border-radius: 2px; overflow: hidden;
-  }
-  .goal-steps-bar i { display: block; height: 100%; background: var(--cyan-dim); box-shadow: 0 0 6px var(--cyan-glow); }
-  .goal-steps-pct { font-family: var(--font-mono); font-size: 9px; color: var(--text-dim); white-space: nowrap; }
-  .goal-when { font-family: var(--font-mono); font-size: 9px; color: var(--text-dim); margin-top: 6px; letter-spacing: 0.04em; }
-
-  /* PERSON ROUTINES (reuses .sug-conf / .mem-group styling) */
-  .proutine-item {
-    padding: 6px 0; border-top: 1px dashed var(--line);
-  }
-  .mem-group .proutine-item:first-of-type { border-top: none; }
-  .proutine-desc { font-size: 11px; color: var(--text); line-height: 1.45; }
-  .proutine-meta { display: flex; align-items: center; gap: 7px; margin-top: 5px; }
-
-
-  /* LOCAL LLM URL */
-  .llm-url-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
-  .llm-url-label {
-    font-family: var(--font-mono); font-size: 9px; color: var(--text-dim);
-    letter-spacing: 0.1em; white-space: nowrap;
-  }
-  .llm-url-input {
-    flex: 1; min-width: 0;
-    background: rgba(0, 242, 254, 0.04);
-    border: 1px solid rgba(0, 242, 254, 0.2); color: var(--text);
-    font-family: var(--font-mono); font-size: 10px; padding: 6px 8px; border-radius: 4px;
-  }
-  .llm-url-input:focus { outline: none; border-color: var(--cyan); }
-
-  /* DOORBELL TRAINING */
-  .dbt-intro {
-    font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
-    line-height: 1.5; margin-bottom: 12px; opacity: 0.85;
-  }
-  .dbt-controls { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
-  .dbt-scan {
-    border-color: var(--cyan); color: var(--cyan); white-space: nowrap;
-  }
-  .dbt-limit {
-    width: 64px; background: rgba(0,242,254,0.04);
-    border: 1px solid rgba(0,242,254,0.2); color: var(--text);
-    font-family: var(--font-mono); font-size: 11px; padding: 6px 8px; border-radius: 4px;
-  }
-  .dbt-stat {
-    font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
-    letter-spacing: 0.04em;
-  }
-  .dbt-list { display: flex; flex-direction: column; gap: 5px; max-height: 320px; overflow-y: auto; }
-  .dbt-empty {
-    font-family: var(--font-mono); font-size: 11px; color: var(--text-dim);
-    opacity: 0.7; padding: 14px 6px; text-align: center;
-  }
-  .dbt-row {
-    display: grid; grid-template-columns: 84px 78px auto 1fr; gap: 8px;
-    align-items: baseline; padding: 7px 9px;
-    background: var(--bg-elev); border: 1px solid var(--line);
-    border-left: 2px solid rgba(0,242,254,0.3);
-    border-radius: 4px; font-family: var(--font-mono); font-size: 11px;
-  }
-  .dbt-row.dbt-notable { border-left-color: var(--amber, #ffb300); }
-  .dbt-ts { color: var(--text-dim); white-space: nowrap; }
-  .dbt-src {
-    text-transform: uppercase; font-size: 9px; letter-spacing: 0.08em;
-    padding: 2px 5px; border-radius: 3px; text-align: center; white-space: nowrap;
-    color: var(--cyan); border: 1px solid rgba(0,242,254,0.3);
-  }
-  .dbt-src-backlog { color: #b48cff; border-color: rgba(180,140,255,0.4); }
-  .dbt-src-eventmedia { color: #ffb300; border-color: rgba(255,179,0,0.4); }
-  .dbt-cat {
-    color: var(--text-dim); text-transform: uppercase; font-size: 9px;
-    letter-spacing: 0.06em; align-self: center; white-space: nowrap;
-  }
-  .dbt-desc { color: var(--text); line-height: 1.4; }
-
-  /* FLOOR PLAN EDITOR */
-  .fp-editor { display: flex; flex-direction: column; gap: 4px; }
-  .fp-editor-canvas { min-height: 400px; }
-  #fp-editor-svg { min-height: 380px; }
-  .diag-row .label {
-    font-size: 11px; color: var(--text-dim);
-    letter-spacing: 0.15em; text-transform: uppercase;
-  }
-  .diag-row .btn {
-    padding: 6px 12px;
-    border: 1px solid var(--cyan-dim);
-    border-radius: var(--radius);
-    color: var(--cyan);
-    background: transparent;
-    font-family: var(--font-mono);
-    font-size: 10px; letter-spacing: 0.2em;
-    text-transform: uppercase;
-    cursor: pointer;
-    transition: all 0.25s;
-  }
-  .diag-row .btn:hover {
-    background: rgba(0, 242, 254, 0.1);
-    box-shadow: 0 0 12px var(--cyan-glow);
-    transform: translateY(-1px);
-  }
-
-  /* FOOTER */
-  .footer {
-    display: grid;
-    grid-template-columns: auto 1fr auto;
-    align-items: center;
-    gap: 24px;
-    padding: 10px 20px;
-    border-top: 1px solid var(--line);
-    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
-    font-family: var(--font-mono);
-    font-size: 10px; letter-spacing: 0.2em;
-    color: var(--text-dim);
-    text-transform: uppercase;
-    background: linear-gradient(to right, rgba(5, 7, 9, 0.5), transparent, rgba(5, 7, 9, 0.5));
-  }
-  .footer .mid { text-align: center; color: var(--cyan-dim); }
-  .footer .hl { color: var(--cyan); }
-
-  /* TOASTS */
-  .toast-wrap {
-    position: fixed;
-    bottom: 20px; right: 20px;
-    z-index: 9999;
-    display: flex; flex-direction: column; gap: 8px;
-    align-items: flex-end;
-  }
-  .toast {
-    padding: 10px 16px;
-    background: var(--bg-elev);
-    border: 1px solid var(--cyan-dim);
-    border-radius: var(--radius);
-    color: var(--cyan);
-    font-family: var(--font-mono);
-    font-size: 12px; letter-spacing: 0.1em;
-    box-shadow: 0 0 20px var(--cyan-glow);
-    transition: opacity 0.3s, transform 0.3s;
-    backdrop-filter: blur(8px);
-  }
-  .toast.err { border-color: var(--red); color: var(--red); box-shadow: 0 0 20px rgba(255,59,59,0.4); }
-  .toast.out { opacity: 0; transform: translateX(20px); }
-
-  /* MOBILE */
-  @media (max-width: 900px) {
-    .menu-btn { display: flex; }
-    .app { padding: 12px; gap: 12px; }
-    .grid { grid-template-columns: 1fr; }
-    .masthead {
-      grid-template-columns: auto 1fr auto;
-      gap: 10px;
-      padding: 10px 12px;
-    }
-    .brand { font-size: 14px; letter-spacing: 0.25em; }
-    .greeting { font-size: 11px; letter-spacing: 0.15em; }
-    .clock .time { font-size: 18px; }
-    .clock .date { display: none; }
-    .room-name { font-size: 28px; }
-    .anchor { padding: 20px 16px; min-height: 280px; }
-    .anchor::before { width: 320px; height: 320px; }
-    .anchor::after  { width: 200px; height: 200px; animation: none; }
-    .reactor { width: 56px; height: 56px; margin-bottom: 18px; }
-    .settings-grid { grid-template-columns: 1fr; }
-    .areas { grid-template-columns: repeat(2, 1fr); }
-    .log { max-height: 320px; }
-    .footer { grid-template-columns: 1fr; text-align: center; gap: 4px; padding: 10px; }
-    .footer .mid, .footer > div:last-child { display: none; }
-  }
-  /* CENTER: camera (primary) + residence overview, side by side */
-  .c-center { display: grid; grid-template-columns: 1.5fr 1fr; gap: 16px; align-items: start; min-width: 0; }
-  .c-center > .panel { min-width: 0; }
-  @media (max-width: 1280px) { .c-center { grid-template-columns: 1fr; } }
-
-  .c-camera { display: flex; flex-direction: column; }
-  .cam-sel { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
-  .camchip {
-    font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.05em; color: var(--text-dim);
-    border: 1px solid var(--line); padding: 4px 9px; cursor: pointer; transition: all 0.2s; white-space: nowrap;
-  }
-  .camchip:hover { border-color: var(--line-hot); color: var(--cyan); }
-  .camchip.on { color: var(--cyan); border-color: var(--line-hot); background: rgba(0,242,254,0.08); }
-  .camchip.evt { color: var(--red); border-color: rgba(255,77,109,0.5); background: rgba(255,77,109,0.08); }
-  .cam-feed {
-    position: relative; width: 100%; min-height: 220px; overflow: hidden;
-    border: 1px solid var(--line); background: #05090f; border-radius: 4px;
-  }
-  .cam-feed img { display: block; width: 100%; height: auto; }
-  .cam-none {
-    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-    color: var(--text-faint); font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.1em;
-  }
-  .cam-vig { position: absolute; inset: 0; z-index: 3; pointer-events: none;
-    background: radial-gradient(ellipse 78% 80% at 50% 46%, transparent 55%, rgba(0,0,0,0.7) 100%); }
-  .cam-scan { position: absolute; inset: 0; z-index: 4; pointer-events: none; opacity: 0.35;
-    background: linear-gradient(rgba(0,0,0,0) 50%, rgba(0,0,0,0.22) 50%),
-                linear-gradient(90deg, rgba(255,0,0,0.05), rgba(0,255,0,0.02), rgba(0,0,255,0.05));
-    background-size: 100% 3px, 7px 100%; }
-  .cam-tag { position: absolute; top: 8px; left: 10px; z-index: 6; font-family: var(--font-mono);
-    font-size: 9px; letter-spacing: 0.08em; color: rgba(0,242,254,0.7); }
-  .cam-focus { position: absolute; top: 8px; right: 10px; z-index: 6; font-family: var(--font-mono);
-    font-size: 9px; letter-spacing: 0.08em; color: var(--red); display: flex; align-items: center; gap: 5px;
-    background: rgba(8,12,20,0.72); padding: 3px 8px; border: 1px solid rgba(255,77,109,0.4); }
-  .cam-focus i { width: 6px; height: 6px; border-radius: 50%; background: var(--red); animation: camblink 1.1s steps(1) infinite; }
-  @keyframes camblink { 50% { opacity: 0; } }
-  .cam-strip { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 11px;
-    letter-spacing: 0.05em; color: var(--cyan); padding: 9px 2px 0; margin-top: 10px; border-top: 1px solid var(--line); }
-  .cam-strip b { color: var(--text); }
-  /* RESIDENCE OVERVIEW — architectural data-merge overlay */
-  #house3d { filter: drop-shadow(0 0 12px rgba(0, 242, 254, 0.10)); }
-  .res-banner { position: absolute; top: 10px; left: 13px; z-index: 8; pointer-events: none; }
-  .res-banner-t { font-family: var(--font-display); font-size: 11px; font-weight: 700; letter-spacing: 0.16em; color: var(--cyan); text-shadow: 0 0 12px rgba(0,242,254,0.35); }
-  .res-banner-s { font-family: var(--font-mono); font-size: 7.5px; letter-spacing: 0.22em; color: var(--text-dim); margin-top: 3px; }
-  .res-stat { position: absolute; top: 9px; right: 13px; z-index: 8; pointer-events: none; display: flex; gap: 16px; }
-  .res-stat-i { text-align: right; }
-  .res-stat-i label { display: block; font-family: var(--font-mono); font-size: 7px; letter-spacing: 0.2em; color: var(--text-dim); }
-  .res-stat-i b { font-family: var(--font-display); font-size: 13px; font-weight: 500; color: var(--cyan); letter-spacing: 0.04em; }
-
-  .res-callouts { position: absolute; inset: 0; z-index: 7; pointer-events: none; }
-  .res-co { position: absolute; display: flex; align-items: center; opacity: 0; animation: coIn 0.5s ease forwards; }
-  @keyframes coIn { to { opacity: 1; } }
-  .res-co.left  { left: 13px;  flex-direction: row; }
-  .res-co.right { right: 13px; flex-direction: row-reverse; }
-  .res-co-label { padding: 4px 9px; background: rgba(6, 11, 20, 0.80); border: 1px solid var(--line);
-    border-left: 2px solid var(--cyan-dim); min-width: 116px; backdrop-filter: blur(2px); }
-  .res-co.right .res-co-label { border-left: 1px solid var(--line); border-right: 2px solid var(--cyan-dim); text-align: right; }
-  .res-co-t { font-family: var(--font-display); font-size: 9.5px; font-weight: 500; letter-spacing: 0.12em; color: var(--text); }
-  .res-co-l { font-family: var(--font-mono); font-size: 7.5px; letter-spacing: 0.05em; color: var(--text-dim); margin-top: 2px; }
-  .res-co-line { width: 60px; height: 1px; background: linear-gradient(90deg, var(--cyan-dim), transparent); }
-  .res-co.right .res-co-line { background: linear-gradient(270deg, var(--cyan-dim), transparent); }
-  .res-co-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 7px var(--cyan); margin-left: -3px; flex: none; }
-  .res-co.right .res-co-dot { margin-left: 0; margin-right: -3px; }
-  .res-co.occ .res-co-label { border-left-color: var(--cyan); }
-  .res-co.occ.right .res-co-label { border-right-color: var(--cyan); border-left-color: var(--line); }
-  .res-co.occ .res-co-t { color: var(--cyan); }
-  .res-co.occ .res-co-line { background: linear-gradient(90deg, var(--cyan), transparent); }
-  .res-co.occ.right .res-co-line { background: linear-gradient(270deg, var(--cyan), transparent); }
-  .res-co.dom .res-co-label { border-left-color: var(--red); box-shadow: 0 0 16px rgba(255,77,109,0.20); }
-  .res-co.dom .res-co-t { color: var(--red); }
-  .res-co.dom .res-co-dot { background: var(--red); box-shadow: 0 0 9px var(--red); }
-  .res-co.dom .res-co-line { background: linear-gradient(90deg, var(--red), transparent); }
-  @media (max-width: 1480px) {
-    .res-co-label { min-width: 96px; padding: 3px 7px; }
-    .res-co-line { width: 34px; }
-    .res-co-l { font-size: 7px; }
-  }
-  /* RESIDENCE TAB — full-width house with style template */
-  .res-tab { display: block; }
-  .mmwave-panel { margin-top: 12px; }
-  .mmwave-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; margin-top: 8px; }
-  .mmwave-empty { color: var(--text-dim); font-size: 11px; font-family: var(--font-mono); padding: 12px; grid-column: 1 / -1; }
-  .mmwave-room { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: rgba(0,0,0,0.2); }
-  .mmwave-room.live { border-color: rgba(0,245,160,0.35); background: rgba(0,245,160,0.05); }
-  .mmwave-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--text-faint); flex: none; }
-  .mmwave-dot.on { background: var(--green); box-shadow: 0 0 8px var(--green); animation: mmwavePulse 2s ease-in-out infinite; }
-  @keyframes mmwavePulse { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
-  .mmwave-name { font-size: 12px; color: var(--text); font-family: var(--font-display); letter-spacing: 0.03em; }
-  .mmwave-meta { font-size: 9px; color: var(--text-dim); font-family: var(--font-mono); letter-spacing: 0.05em; margin-top: 2px; }
-  .mmwave-out { color: var(--amber); font-size: 8px; font-family: var(--font-mono); }
-  .doclib-controls { display: flex; gap: 8px; margin: 8px 0; align-items: center; flex-wrap: wrap; }
-  .doclib-q { flex: 1; min-width: 200px; font-size: 11px; }
-  .doclib-list { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
-  .doclib-row { display: flex; justify-content: space-between; padding: 6px 8px; border: 1px solid var(--line); border-radius: 5px; background: rgba(0,0,0,0.2); align-items: center; }
-  .doclib-row-r { display: flex; align-items: center; gap: 8px; }
-  .doclib-del { background: transparent; border: 1px solid var(--line); color: var(--text-dim); border-radius: 3px; font-size: 9px; cursor: pointer; padding: 2px 6px; line-height: 1; }
-  .doclib-del:hover { color: var(--red, #ff6b81); border-color: var(--red, #ff6b81); }
-  .doclib-watch { display: flex; gap: 8px; margin: 6px 0; align-items: center; }
-  .doclib-watch-field { flex: 1; min-width: 200px; font-size: 11px; }
-  .doclib-name { font-size: 11px; color: var(--text); font-family: var(--font-mono); }
-  .doclib-chunks { font-size: 9px; color: var(--text-dim); font-family: var(--font-mono); }
-  .doclib-hit { padding: 8px 10px; border: 1px solid var(--line); border-left: 2px solid var(--cyan); border-radius: 5px; background: rgba(0,242,254,0.03); margin-bottom: 6px; }
-  .doclib-hit-src { font-size: 9px; color: var(--cyan); font-family: var(--font-mono); letter-spacing: 0.05em; margin-bottom: 3px; }
-  .doclib-hit-txt { font-size: 11px; color: var(--text); line-height: 1.5; }
-  .diag-list { display: flex; flex-direction: column; gap: 5px; margin-top: 6px; }
-  .diag-row { padding: 7px 9px; border: 1px solid var(--line); border-radius: 5px; background: rgba(0,0,0,0.2); }
-  .diag-row-head { display: flex; justify-content: space-between; align-items: center; }
-  .diag-name { font-size: 11px; color: var(--text); font-family: var(--font-display); font-weight: 600; }
-  .diag-detail { font-size: 9.5px; color: var(--text-dim); margin-top: 2px; line-height: 1.4; }
-  .diag-dot { font-size: 9px; margin-right: 4px; }
-  .diag-st { font-size: 9px; font-family: var(--font-mono); letter-spacing: 0.06em; }
-  .ilog-learned { font-size: 10.5px; color: var(--green); margin-bottom: 10px; font-family: var(--font-mono); }
-  .ilog-item { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; background: rgba(0,0,0,0.18); }
-  .ilog-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-  .ilog-kind { font-family: var(--font-mono); font-size: 9px; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.05em; }
-  .ilog-confirmed { background: rgba(255,107,129,0.14); color: #ff6b81; border: 1px solid #ff6b81; }
-  .ilog-unresolved { background: rgba(255,180,0,0.14); color: var(--amber); border: 1px solid var(--amber); }
-  .ilog-investigating { background: rgba(0,242,254,0.10); color: var(--cyan); border: 1px solid var(--cyan); }
-  .ilog-when { font-size: 10px; color: var(--text-dim); font-family: var(--font-mono); }
-  .ilog-what { font-size: 11.5px; color: var(--text); margin: 6px 0; }
-  .ilog-snap { max-width: 100%; border-radius: 6px; border: 1px solid var(--line); margin: 4px 0 8px; display: block; }
-  .ilog-actions { display: flex; gap: 6px; flex-wrap: wrap; }
-  .ilog-btn { font-family: var(--font-mono); font-size: 9px; padding: 5px 10px; border-radius: 5px; cursor: pointer; background: transparent; border: 1px solid var(--line); color: var(--text-dim); }
-  .ilog-btn:hover { color: var(--text); }
-  .ilog-real.ilog-on { background: rgba(255,107,129,0.18); color: #ff6b81; border-color: #ff6b81; }
-  .ilog-false.ilog-on { background: rgba(0,245,160,0.15); color: var(--green); border-color: var(--green); }
-  .diag-ok { color: var(--green); }
-  .diag-warn { color: var(--amber); }
-  .diag-idle { color: var(--text-dim); }
-  .diag-down { color: #ff6b81; }
-  .haz-row { display: flex; align-items: center; justify-content: space-between; margin: 10px 0 6px; }
-  .haz-label { font-size: 10px; font-family: var(--font-mono); color: var(--text-dim); letter-spacing: 0.06em; }
-  .haz-feeds { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
-  .haz-feeds .toggle-btn { font-size: 9px; padding: 5px 8px; }
-  .haz-loc { font-size: 10.5px; color: var(--text-dim); font-family: var(--font-mono); margin-bottom: 10px; }
-  .haz-override, .haz-tune { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
-  .haz-in { width: 90px; background: rgba(0,0,0,0.25); border: 1px solid var(--line); border-radius: 5px; color: var(--text); font-size: 11px; padding: 5px 8px; }
-  .haz-body { margin-top: 10px; }
-  .haz-clear { font-size: 12px; color: var(--green); padding: 8px 0; }
-  .haz-item { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text); padding: 5px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
-  .haz-badge { font-family: var(--font-mono); font-size: 9px; padding: 2px 6px; border-radius: 4px; letter-spacing: 0.04em; white-space: nowrap; }
-  .haz-quake { background: rgba(255,180,0,0.15); color: var(--amber); border: 1px solid var(--amber); }
-  .haz-wx { background: rgba(255,107,129,0.14); color: #ff6b81; border: 1px solid #ff6b81; }
-  .haz-dis { background: rgba(0,242,254,0.12); color: var(--cyan); border: 1px solid var(--cyan); }
-  .diag-off { color: var(--text-faint); }
-  .mode-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-  .mode-chip { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase; padding: 6px 12px; border-radius: 5px; cursor: pointer; background: rgba(0,0,0,0.25); border: 1px solid var(--line); color: var(--text-dim); transition: all 0.15s; }
-  .mode-chip:hover { border-color: var(--cyan); color: var(--text); }
-  .mode-chip-on { background: rgba(0,242,254,0.12); border-color: var(--cyan); color: var(--cyan); font-weight: 600; }
-  .mode-active-tag { color: var(--cyan); font-weight: 600; }
-  .energy-agency { display: flex; align-items: center; gap: 6px; margin: 8px 0; flex-wrap: wrap; }
-  .energy-agency-label { font-size: 10px; color: var(--text-dim); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.06em; margin-right: 2px; }
-  .energy-advice { font-size: 11px; color: var(--text); line-height: 1.5; padding: 7px 9px; border: 1px solid var(--line); border-left: 2px solid var(--cyan); border-radius: 5px; background: rgba(0,242,254,0.03); margin-bottom: 6px; }
-  .energy-run-head { font-size: 9px; color: var(--text-dim); font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.06em; margin: 8px 0 4px; }
-  .energy-run-row { display: flex; justify-content: space-between; padding: 5px 8px; border: 1px solid var(--line); border-radius: 4px; background: rgba(0,0,0,0.2); margin-bottom: 3px; }
-  .energy-run-name { font-size: 10.5px; color: var(--text); font-family: var(--font-mono); }
-  .energy-run-w { font-size: 9.5px; color: var(--amber); font-family: var(--font-mono); }
-  .energy-locked { color: var(--text-faint); }
-  .bio-list { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
-  .bio-row { display: flex; justify-content: space-between; padding: 6px 9px; border: 1px solid var(--line); border-radius: 5px; background: rgba(0,0,0,0.2); }
-  .bio-kind { font-size: 10.5px; color: var(--text); font-family: var(--font-mono); text-transform: capitalize; }
-  .bio-val { font-size: 10.5px; color: var(--cyan); font-family: var(--font-mono); }
-  .vecbk { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--line); }
-  .vecbk-row { display: flex; justify-content: space-between; align-items: center; }
-  .vecbk-label { font-size: 11px; color: var(--text); font-family: var(--font-display); letter-spacing: 0.03em; }
-  .vecbk-state { font-size: 10px; font-family: var(--font-mono); letter-spacing: 0.05em; }
-  .vecbk-on { color: var(--green); }
-  .vecbk-off { color: var(--amber); }
-  .vecbk-hint { font-size: 9.5px; color: var(--text-dim); margin: 5px 0 7px; line-height: 1.5; }
-
-  .res-main { display: flex; flex-direction: column; }
-  .res-controls { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 12px; flex-wrap: wrap; }
-  .res-angles { display: flex; gap: 4px; flex-wrap: wrap; }
-  .res-style { display: flex; align-items: center; gap: 8px; }
-  .res-style > label { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.18em; color: var(--text-dim); }
-  .res-style-sel {
-    background: var(--bg); color: var(--cyan); border: 1px solid var(--line);
-    font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.05em; padding: 6px 11px;
-    border-radius: var(--radius); outline: none; cursor: pointer;
-  }
-  .res-style-sel:hover { border-color: var(--line-hot); }
-  .door-map { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
-  .door-map-head { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.18em; color: var(--text-dim); margin-bottom: 10px; }
-  .door-map-hint { color: var(--line-hot); letter-spacing: 0.08em; }
-  .door-map-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px 16px; }
-  .door-map-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  .door-map-row > label { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.08em; color: var(--text-dim); white-space: nowrap; }
-  .door-map-sel {
-    background: var(--bg); color: var(--cyan); border: 1px solid var(--line);
-    font-family: var(--font-mono); font-size: 10px; padding: 5px 9px;
-    border-radius: var(--radius); outline: none; cursor: pointer; flex: 1 1 auto; min-width: 0;
-  }
-  .door-map-sel:hover { border-color: var(--line-hot); }
-  .res-wrap-big { min-height: 560px; }
-  .res-wrap-big .house3d-scene { height: 560px; }
-  .h3d-roof { position: absolute; }
-  .h3d-roof-gable { position: absolute; backface-visibility: hidden; }
-
-  /* ───────────────── PHONE (≤600px) ───────────────── */
-  @media (max-width: 600px) {
-    .app { padding: 8px; gap: 10px; overflow-x: hidden; }
-
-    /* top tab bar: scroll horizontally instead of overflowing; comfortable tap height */
-    .tab-bar { overflow-x: auto; flex-wrap: nowrap; padding: 0 2px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
-    .tab-bar::-webkit-scrollbar { display: none; }
-    .tab { padding: 11px 13px; font-size: 10px; letter-spacing: 0.1em; white-space: nowrap; flex: 0 0 auto; }
-
-    /* masthead compact */
-    .masthead { padding: 9px 10px; gap: 8px; }
-    .ld-state { display: none; }
-    .brand { font-size: 13px; letter-spacing: 0.2em; }
-    .greeting { font-size: 10px; }
-    .clock .time { font-size: 16px; }
-
-    /* dominant-room hero smaller */
-    .room-name { font-size: 24px; }
-    .anchor { padding: 16px 12px; min-height: 240px; }
-
-    /* residence 3D scene shorter so the model + its controls fit one phone screen */
-    .floorplan-wrap, .res-wrap-big { min-height: 340px; }
-  .mode-auto-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 8px 0 10px; }
-  .mode-auto-label { font-size: 10px; line-height: 1.4; color: var(--text-dim); letter-spacing: 0.02em; }
-  .mode-bindings { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
-  .mode-bind-head { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.1em; color: var(--cyan-dim); margin-bottom: 8px; }
-  .mode-bind-row { display: flex; align-items: center; gap: 10px; margin: 6px 0; flex-wrap: wrap; }
-  .mode-bind-row > label { font-size: 10px; color: var(--text-dim); min-width: 92px; }
-  .mode-bind-sub { opacity: 0.55; }
-  .mode-bind-empty { font-size: 10px; color: var(--text-dim); opacity: 0.6; }
-  .area-chips { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; }
-  .area-chip { font-family: var(--font-mono); font-size: 9px; padding: 3px 8px; background: rgba(0,242,254,0.05); border: 1px solid var(--cyan-dim); color: var(--text-dim); border-radius: 4px; cursor: pointer; }
-  .area-chip.on { color: var(--cyan); border-color: var(--cyan); background: rgba(0,242,254,0.16); }
-  .view-presets { display: flex; align-items: center; gap: 4px; margin: 0 0 8px; flex-wrap: wrap; }
-  .view-btn { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.08em; padding: 3px 9px; background: rgba(0,242,254,0.06); border: 1px solid var(--cyan-dim); color: var(--text-dim); border-radius: 4px; cursor: pointer; }
-  .view-btn:hover, .view-btn.active { color: var(--cyan); border-color: var(--cyan); background: rgba(0,242,254,0.14); }
-  .view-hint { font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.06em; color: var(--text-dim); opacity: 0.6; margin-left: 4px; }
-  #fp-3d-preview { cursor: grab; }
-  #fp-3d-preview.dragging { cursor: grabbing; }
-    .house3d-scene, .res-wrap-big .house3d-scene { height: 340px; }
-
-    /* residence overlays: compact, avoid banner/stat collision on a narrow scene */
-    .res-banner { top: 6px; left: 8px; }
-    .res-banner-t { font-size: 9px; letter-spacing: 0.1em; }
-    .res-banner-s { display: none; }
-    .res-stat { top: 6px; right: 8px; gap: 9px; }
-    .res-stat-i label { font-size: 7px; letter-spacing: 0.08em; }
-    .res-stat-i b { font-size: 11px; }
-    .res-stat-i:nth-child(3) { display: none; }   /* drop STYLE stat to save width */
-
-    /* residence controls stack full-width; floor pills wrap with bigger tap targets */
-    .res-controls { flex-direction: column; align-items: stretch; gap: 8px; }
-    .res-style { width: 100%; }
-    .res-style-sel { flex: 1 1 auto; }
-    .floor-tabs { flex-wrap: wrap; gap: 6px; }
-    .floor-tab { padding: 8px 14px; font-size: 9px; }
-
-    /* let dense settings rows shrink within the viewport instead of overflowing */
-    .model-row > *, .dbt-row > *, .ar-line2 > * { min-width: 0; }
-    .log { max-height: 300px; }
-  }
-
-  /* ───────────────── very small phones (≤380px) ───────────────── */
-  @media (max-width: 380px) {
-    .tab { padding: 10px 10px; letter-spacing: 0.05em; }
-    .brand { font-size: 12px; }
-    .floor-tab { padding: 7px 11px; }
-    .res-stat-i:nth-child(1) { display: none; }   /* keep BED/BATH + OCCUPIED only */
-  }
-  /* ── Memory tab ───────────────────────────────────────────────── */
-  .mem-tab { padding: 4px 0 16px; }
-  .mem-sub {
-    color: var(--text-dim); font-size: 12px; line-height: 1.5;
-    margin: 2px 2px 14px; font-family: var(--font-body);
-  }
-  .mem-teach {
-    display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
-    margin-bottom: 16px;
-  }
-  .mem-input {
-    flex: 1 1 160px; min-width: 0;
-    padding: 9px 12px;
-    background: var(--bg-elev);
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    color: var(--text);
-    font-family: var(--font-body); font-size: 13px;
-    transition: border-color 0.2s, box-shadow 0.2s;
-  }
-  .mem-input::placeholder { color: var(--text-faint); }
-  .mem-input:focus {
-    outline: none; border-color: var(--cyan);
-    box-shadow: 0 0 10px rgba(0, 242, 254, 0.12);
-  }
-  .mem-select { flex: 0 0 130px; cursor: pointer; }
-  .mem-btn {
-    flex: 0 0 auto;
-    padding: 9px 18px;
-    border: 1px solid var(--cyan);
-    border-radius: var(--radius);
-    background: rgba(0, 242, 254, 0.1);
-    color: var(--cyan);
-    font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.14em;
-    cursor: pointer; transition: all 0.2s;
-  }
-  .mem-btn:hover {
-    background: rgba(0, 242, 254, 0.2);
-    box-shadow: 0 0 12px rgba(0, 242, 254, 0.25);
-  }
-  .mem-list { display: flex; flex-direction: column; gap: 14px; }
-  .mem-empty {
-    color: var(--text-dim); font-size: 13px; text-align: center;
-    padding: 28px 12px; font-family: var(--font-body);
-  }
-  .mem-group { display: flex; flex-direction: column; gap: 2px; }
-  .mem-group-head {
-    color: var(--cyan-dim); font-family: var(--font-mono);
-    font-size: 10px; letter-spacing: 0.18em;
-    padding: 2px 2px 6px; border-bottom: 1px solid var(--line);
-    margin-bottom: 6px;
-  }
-  .mem-fact {
-    display: flex; align-items: center; gap: 10px;
-    padding: 9px 10px; border: 1px solid var(--line);
-    border-left: 2px solid var(--cyan-dim);
-    border-radius: var(--radius);
-    background: var(--cyan-faint);
-    transition: border-color 0.18s, background 0.18s;
-  }
-  .mem-fact:hover { border-color: var(--line-hot); background: rgba(0, 242, 254, 0.06); }
-  .mem-kv { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-  .mem-key {
-    color: var(--text-dim); font-family: var(--font-mono);
-    font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase;
-  }
-  .mem-val {
-    color: var(--text); font-family: var(--font-body); font-size: 14px;
-    word-break: break-word;
-  }
-  .mem-hedge { color: var(--amber); margin-left: 6px; font-weight: 600; cursor: help; }
-  .mem-exp { margin-left: 6px; opacity: 0.6; cursor: help; }
-  .mem-forget {
-    flex: 0 0 auto; width: 26px; height: 26px;
-    border: 1px solid var(--line); border-radius: 6px;
-    background: transparent; color: var(--text-faint);
-    font-size: 13px; line-height: 1; cursor: pointer;
-    transition: all 0.18s;
-  }
-  .mem-forget:hover {
-    border-color: var(--red); color: var(--red);
-    background: rgba(255, 77, 109, 0.1);
-  }
-
-</style>
+      :host{
+        --bg:#15110d; --surface:#1e1712; --surface-2:#2a2119; --line-soft:#33291f;
+        --ink:#f3ece1; --ink-dim:#a89a89; --ink-faint:#7a6d5e;
+        --ember:#e2542f; --gold:#f4b860; --gold-pale:#ffe3ad; --warn:#e8b23d;
+        --font-display:'Fraunces',ui-serif,Georgia,serif;
+        --font-body:'Manrope',system-ui,-apple-system,'Segoe UI',sans-serif;
+        --font-mono:'IBM Plex Mono',ui-monospace,'SF Mono',monospace;
+      }
+      *{box-sizing:border-box}
+      .wrap{background:var(--bg);color:var(--ink);font-family:var(--font-body);
+        padding:20px 16px 40px;min-height:100vh;
+        background-image:radial-gradient(ellipse 900px 500px at 50% -8%, #2a1c1180 0%, transparent 60%);}
+      .topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:22px;flex-wrap:wrap;max-width:1100px;margin-inline:auto}
+      .brand{display:flex;align-items:center;gap:11px}
+      .brand-mark{width:26px;height:26px;border-radius:50%;flex:none;
+        background:radial-gradient(circle at 34% 30%, var(--gold-pale), var(--gold) 42%, var(--ember) 78%, #7a2513 100%);
+        box-shadow:0 0 14px 1px #e2542f55;}
+      .brand-name{font-family:var(--font-display);font-size:18px;font-weight:600}
+      .brand-tag{font-family:var(--font-mono);font-size:10px;color:var(--ink-faint);letter-spacing:.1em;text-transform:uppercase}
+      .hero{max-width:1100px;margin:0 auto;background:linear-gradient(180deg,var(--surface),#19140fdd);
+        border:1px solid var(--line-soft);border-radius:22px;padding:32px 20px 24px;
+        display:flex;flex-direction:column;align-items:center;text-align:center}
+      .core-wrap{width:min(70vw,280px);aspect-ratio:1/1;margin-bottom:4px}
+      canvas.core{width:100%;height:100%;display:block}
+      .state-line{font-family:var(--font-display);font-size:19px;font-weight:500;margin:4px 0 2px;text-wrap:balance}
+      .state-sub{font-family:var(--font-mono);font-size:10.5px;color:var(--ink-faint);letter-spacing:.05em;margin-bottom:18px}
+      .chips{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;padding-top:16px;border-top:1px solid var(--line-soft);width:100%}
+      .chip{display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:20px;background:var(--surface-2);
+        font-family:var(--font-mono);font-size:10.5px;color:var(--ink-dim);border:1px solid var(--line-soft)}
+      .chip .dot{width:6px;height:6px;border-radius:50%;background:#6fbf8a}
+      .chip.warn .dot{background:var(--warn)}
+      .chip b{color:var(--ink);font-weight:600}
+      .grid{max-width:1100px;margin:16px auto 0;display:grid;grid-template-columns:1fr;gap:16px}
+      .panel{background:var(--surface);border:1px solid var(--line-soft);border-radius:16px;padding:16px 16px 14px}
+      .panel-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px}
+      .panel-title{font-family:var(--font-display);font-size:15px;font-weight:600}
+      .panel-meta{font-family:var(--font-mono);font-size:10px;color:var(--ink-faint);letter-spacing:.05em}
+      .feed{max-height:420px;overflow-y:auto}
+      .feed::-webkit-scrollbar{width:3px}
+      .feed::-webkit-scrollbar-track{background:var(--surface-2)}
+      .feed::-webkit-scrollbar-thumb{background:var(--line-soft);border-radius:3px}
+      .feed-row{padding:9px 0;border-bottom:1px solid var(--line-soft);display:flex;justify-content:space-between;gap:10px}
+      .feed-row:last-child{border-bottom:none}
+      .feed-text{font-size:12.8px;line-height:1.4}
+      .feed-text .dim{color:var(--ink-dim)}
+      .feed-time{font-family:var(--font-mono);font-size:10px;color:var(--ink-faint);white-space:nowrap}
+      .areas-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:10px}
+      @media (max-width:1100px){.areas-grid{grid-template-columns:repeat(4,1fr)}}
+      @media (max-width:560px){.areas-grid{grid-template-columns:repeat(2,1fr)}}
+      .area-tile{position:relative;background:var(--surface-2);border:1px solid var(--line-soft);border-radius:13px;
+        padding:12px 12px 10px;overflow:hidden;transition:border-color .25s,box-shadow .25s}
+      .area-tile::before{content:"";position:absolute;top:0;left:0;right:0;height:2px;
+        background:linear-gradient(90deg,#6ea8ff,var(--gold) 55%,var(--ember));opacity:.55}
+      .area-tile.no-temp::before{display:none}
+      .area-tile.active{border-color:#e2542f70;box-shadow:inset 0 0 14px #e2542f14,0 0 14px #e2542f12}
+      .area-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+      .area-name{font-family:var(--font-display);font-size:14.5px;font-weight:600;display:flex;align-items:center;gap:6px}
+      .live-dot{width:6px;height:6px;border-radius:50%;background:#5fbf7a;box-shadow:0 0 6px 1px #5fbf7a99;
+        animation:novaLivePulse 2.4s ease-in-out infinite;flex:none}
+      @keyframes novaLivePulse{0%,100%{opacity:1}50%{opacity:.45}}
+      @media (prefers-reduced-motion: reduce){.live-dot{animation:none}}
+      .area-caps{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:9px;min-height:20px}
+      .area-cap{width:21px;height:21px;border-radius:6px;background:var(--surface);border:1px solid var(--line-soft);
+        display:flex;align-items:center;justify-content:center;font-size:10.5px;opacity:.85}
+      .area-climate{display:flex;gap:10px;margin-bottom:9px}
+      .area-climate-item{flex:1;min-width:0}
+      .area-climate-num{font-family:var(--font-mono);font-size:12.5px;font-weight:500;display:flex;align-items:baseline;gap:3px}
+      .area-climate-num .unit{font-size:9px;color:var(--ink-faint)}
+      .area-climate svg{display:block;width:100%;height:16px;margin-top:2px}
+      .area-bottom{display:flex;align-items:center;justify-content:space-between;padding-top:8px;border-top:1px solid var(--line-soft)}
+      .area-stat{font-family:var(--font-mono);font-size:10px;color:var(--ink-dim)}
+      .area-stat b{color:var(--ink);font-weight:600}
+      .area-light-toggle{font-family:var(--font-mono);font-size:9px;font-weight:600;letter-spacing:.05em;
+        padding:3px 9px;border-radius:7px;border:1px solid var(--line-soft);background:var(--surface);
+        color:var(--ink-faint);cursor:pointer}
+      .area-light-toggle.on{background:#f4b8602a;border-color:#f4b86070;color:var(--gold-pale)}
+      .camera-panel{grid-column:1/-1}
+      .camera-head-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+      .camera-note{font-size:11.5px;color:var(--ink-dim);max-width:46ch}
+      .camera-toggle{font-family:var(--font-mono);font-size:10.5px;color:var(--ink-faint);background:var(--surface-2);
+        border:1px solid var(--line-soft);border-radius:8px;padding:6px 10px;cursor:pointer}
+      .camera-strip{display:none;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;margin-top:12px}
+      .camera-strip.open{display:grid}
+      .camera-slot{aspect-ratio:16/10;border-radius:9px;background:var(--surface-2);border:1px solid var(--line-soft);
+        display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:10px;color:var(--ink-faint);text-align:center;padding:6px}
+      .footnote{max-width:1100px;margin:20px auto 0;text-align:center;font-family:var(--font-mono);font-size:10px;color:var(--ink-faint);letter-spacing:.05em}
+      .new-log-entries{max-height:65vh;overflow-y:auto;display:flex;flex-direction:column;gap:1px;margin-top:8px}
+      .intr-snap{margin-bottom:10px}
+      .intr-img{width:100%;max-width:320px;border-radius:10px;border:1px solid var(--line-soft);display:block;margin-bottom:6px}
+      .new-ilog-item{padding:10px 0;border-top:1px solid var(--line-soft)}
+      .new-ilog-item:first-of-type{border-top:none}
+      .new-log-entry{display:grid;grid-template-columns:70px 110px 1fr;gap:10px;padding:7px 8px;
+        font-family:var(--font-mono);font-size:11px;border-bottom:1px solid var(--line-soft);align-items:baseline}
+      .new-log-entry-error{background:#ff5a5a14}
+      .new-log-ts{color:var(--ink-faint)}
+      .new-log-cat{white-space:nowrap;font-weight:600}
+      .new-log-msg{color:var(--ink-dim);word-break:break-word}
+      @media (max-width:560px){.new-log-entry{grid-template-columns:1fr;gap:2px}}
+
+      /* Top nav (v7.94.0) */
+      .top-nav{display:flex;gap:4px;background:var(--surface);border:1px solid var(--line-soft);border-radius:11px;padding:4px}
+      .nav-tab{font-family:var(--font-body);font-size:12.5px;font-weight:600;padding:7px 14px;border-radius:8px;
+        border:none;background:transparent;color:var(--ink-dim);cursor:pointer}
+      .nav-tab.active{background:var(--ember);color:#1e0d06}
+      .nav-tab:not(.active):hover{color:var(--ink)}
+
+      /* Settings (v7.94.0) */
+      .settings-toolbar{max-width:1100px;margin:0 auto 16px;display:flex;flex-direction:column;gap:10px}
+      .settings-search{width:100%;background:var(--surface);border:1px solid var(--line-soft);color:var(--ink);
+        font-family:var(--font-body);font-size:13px;padding:10px 14px;border-radius:10px}
+      .settings-search::placeholder{color:var(--ink-faint)}
+      .settings-nav{display:flex;flex-wrap:wrap;gap:6px}
+      .settings-nav-btn{font-family:var(--font-body);font-size:11.5px;font-weight:600;padding:6px 12px;border-radius:20px;
+        border:1px solid var(--line-soft);background:var(--surface);color:var(--ink-dim);cursor:pointer}
+      .settings-nav-btn.active{background:var(--ember);border-color:var(--ember);color:#1e0d06}
+      .settings-grid{max-width:1100px;margin:0 auto;column-count:2;column-gap:14px}
+      @media (max-width:720px){.settings-grid{column-count:1}}
+      .settings-card{break-inside:avoid;margin-bottom:14px;display:inline-block;width:100%}
+      .settings-card[hidden]{display:none}
+      .stub-tag{font-family:var(--font-mono);font-size:9px;letter-spacing:.08em;color:var(--ink-faint);
+        background:var(--surface-2);border:1px solid var(--line-soft);border-radius:20px;padding:2px 8px;margin-left:8px;vertical-align:middle}
+      .stub-body{font-size:12.5px;color:var(--ink-dim);line-height:1.5}
+      .stub-where{display:block;margin-top:6px;font-family:var(--font-mono);font-size:10.5px;color:var(--ink-faint)}
+      .cfg-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
+      .cfg-row label{font-size:12.5px;color:var(--ink-dim)}
+      select.cfg-field,input.cfg-field{background:var(--surface-2);border:1px solid var(--line-soft);color:var(--ink);
+        font-family:var(--font-body);font-size:12px;padding:6px 9px;border-radius:8px}
+      input.cfg-field:hover,input.cfg-field:focus,select.cfg-field:hover,select.cfg-field:focus{border-color:var(--gold);outline:none}
+      .cfg-num{width:84px;min-width:0;text-align:right}
+      .mode-grid{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+      .mode-chip{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.04em;
+        padding:6px 12px;border-radius:8px;border:1px solid var(--line-soft);background:var(--surface-2);color:var(--ink-dim);cursor:pointer}
+      .mode-chip:hover{border-color:var(--gold)}
+      .mode-chip-on{background:var(--ember);border-color:var(--ember);color:var(--gold-pale)}
+      .mode-bind-head{font-family:var(--font-mono);font-size:10.5px;color:var(--ink-faint);letter-spacing:.05em;
+        text-transform:uppercase;margin:12px 0 8px;padding-top:12px;border-top:1px solid var(--line-soft)}
+      .diag-ok{color:#5fbf7a} .diag-warn{color:var(--warn)} .diag-idle{color:var(--ink-dim)}
+      .diag-down{color:#ff6b81} .diag-off{color:var(--ink-faint)}
+      .new-model-list{display:flex;flex-direction:column;gap:10px}
+      .new-model-row{display:grid;grid-template-columns:88px 1fr 1.3fr;gap:6px;align-items:center}
+      .model-label{font-family:var(--font-mono);font-size:10px;letter-spacing:.1em;color:var(--ink-faint);text-transform:uppercase}
+      .new-model-row .new-prov-select,.new-model-row .new-model-select{width:100%;min-width:0;
+        background:var(--surface-2);border:1px solid var(--line-soft);color:var(--ink);
+        font-family:var(--font-body);font-size:11.5px;padding:6px 8px;border-radius:8px}
+      .new-model-custom{grid-column:2/4;width:100%;box-sizing:border-box;padding:6px 9px;
+        background:var(--surface-2);border:1px solid var(--line-soft);color:var(--gold);
+        font-family:var(--font-mono);font-size:11px;border-radius:8px}
+      .new-model-custom:focus{outline:none;border-color:var(--gold)}
+      .new-model-row .stub-body{grid-column:1/-1;font-size:10.5px;margin-top:2px}
+      .new-appliance-list{display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
+      .new-appliance-row{display:grid;grid-template-columns:1.1fr .9fr 1.3fr 64px 28px;gap:6px;align-items:center}
+      .new-appliance-row input,.new-appliance-row select{background:var(--surface-2);border:1px solid var(--line-soft);
+        color:var(--ink);font-family:var(--font-body);font-size:11px;padding:5px 7px;border-radius:7px;min-width:0;width:100%;box-sizing:border-box}
+      .new-appliance-row input:focus,.new-appliance-row select:focus{outline:none;border-color:var(--gold)}
+      .new-appliance-remove{flex:none;width:26px;height:26px;padding:0;font-size:11px;color:#ff8a8a;
+        border:1px solid #ff5a5a4d;background:transparent;border-radius:7px;cursor:pointer}
+      .new-appliance-remove:hover{border-color:#ff5a5a;background:#ff5a5a14}
+      .new-pl-chip{display:inline-flex;align-items:center;gap:5px;font-family:var(--font-mono);font-size:10.5px;
+        padding:5px 8px;border-radius:8px;border:1px solid var(--line-soft);background:var(--surface-2);color:var(--ink-dim)}
+      .new-pl-del,.new-excl-ent-del,.new-excl-dom-del,.new-excl-lab-del,.new-mem-forget{background:none;border:none;color:var(--ink-faint);cursor:pointer;font-size:12px;padding:0}
+      .new-pl-del:hover,.new-excl-ent-del:hover,.new-excl-dom-del:hover,.new-excl-lab-del:hover,.new-mem-forget:hover{color:#ff5a5a}
+      .new-camset-row{padding:10px 0;border-top:1px solid var(--line-soft)}
+      .new-camset-row:first-of-type{border-top:none}
+      .toggle-list{display:flex;flex-direction:column;gap:2px}
+      .toggle-row{display:grid;grid-template-columns:1fr auto;grid-template-rows:auto auto;gap:2px 10px;
+        padding:9px 0;border-top:1px solid var(--line-soft)}
+      .toggle-row:first-child{border-top:none}
+      .toggle-label{font-size:12.5px;font-weight:600;grid-column:1;grid-row:1}
+      .toggle-desc{font-size:11px;color:var(--ink-faint);grid-column:1;grid-row:2}
+      .toggle-btn{grid-column:2;grid-row:1/3;align-self:center;font-family:var(--font-mono);font-size:10.5px;font-weight:600;
+        letter-spacing:.05em;padding:6px 12px;border-radius:8px;border:1px solid var(--line-soft);background:var(--surface-2);
+        color:var(--ink-faint);cursor:pointer;min-width:44px}
+      .toggle-btn.on{background:#5fbf7a2a;border-color:#5fbf7a70;color:#8fdba8}
+      .toggle-row select.cfg-field{grid-column:2;grid-row:1/3;align-self:center}
+      .pairing-list{display:flex;flex-direction:column;gap:8px;margin-bottom:8px}
+      .pairing-row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+      .pairing-label{font-size:12.5px;color:var(--ink-dim)}
+      .pairing-row select{background:var(--surface-2);border:1px solid var(--line-soft);color:var(--ink);
+        font-family:var(--font-body);font-size:12px;padding:6px 9px;border-radius:8px;max-width:56%}
+      .person-honorific-row{flex-wrap:wrap}
+      .person-honorific-custom{background:var(--surface-2);border:1px solid var(--line-soft);color:var(--ink);
+        font-family:var(--font-body);font-size:12px;padding:6px 9px;border-radius:8px;width:100%;margin-top:6px}
+      .fpn-toolbar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+      .fpn-floor-tabs,.fpn-actions{display:flex;gap:6px;flex-wrap:wrap}
+      .fpn-hint{font-size:10px;color:var(--ink-faint);font-family:var(--font-mono);letter-spacing:0.04em;margin-bottom:6px}
+      .fpn-canvas{min-height:520px;margin-bottom:10px}
+      .fpn-actions{margin-top:4px}
+      .fpn-op-marker.op-glow{opacity:1;stroke:var(--ink);stroke-width:2.5;filter:drop-shadow(0 0 6px var(--gold-pale))}
+      /* Openings/cameras rows pack more controls than a plain cfg-row (chip,
+         wall/room select, slider, size, entity select, delete). flex-wrap
+         alone isn't enough: a native <input type=range>/<select> has no
+         intrinsic width limit, so two of them can already be wider than a
+         settings-card's column before wrapping even has a reason to kick
+         in -- the settings-grid uses CSS columns, which don't clip
+         horizontal overflow, so a too-wide row bleeds into the next card
+         over instead of being clipped. Give every control in these rows an
+         explicit cap so the row actually has narrow enough pieces to wrap. */
+      .op-row-new,.cam-row-new{flex-wrap:wrap;row-gap:6px;max-width:100%}
+      .op-row-new select,.cam-row-new select{flex:0 1 auto;max-width:110px}
+      .op-row-new input[type="range"],.cam-row-new input[type="range"]{flex:0 0 auto;width:70px}
+      .op-row-new input[type="number"],.cam-row-new input[type="number"]{flex:0 0 auto;width:44px}
+      .fpn-inline-lbl{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--ink-dim)}
+      .res-tab-new{display:grid;grid-template-columns:1fr 260px;gap:16px}
+      .res-scene-new{min-height:360px;background:var(--surface-2);border:1px solid var(--line-soft);border-radius:10px;
+        margin-bottom:10px;cursor:grab;touch-action:none;display:flex;align-items:center;justify-content:center;overflow:hidden}
+      .res-scene-new.dragging{cursor:grabbing}
+      .res-scene-new svg{max-width:100%;height:auto}
+      .res-stats-new{margin-top:6px}
+      .res-side-new{display:flex;flex-direction:column;gap:6px}
+      @media (max-width:720px){.res-tab-new{grid-template-columns:1fr}}
     `;
   }
 }
 
-// The Classic implementation, unchanged above — registered under its own
-// tag so the shell below (which owns "nova-panel", the tag HA's panel
-// registration actually mounts) can choose it explicitly.
-if (!customElements.get("nova-panel-classic")) {
-  customElements.define("nova-panel-classic", NovaPanel);
-}
-
-// ─── Look shell (v7.101.28) ────────────────────────────────────────────────
-// HA's frontend always mounts whatever is registered as "nova-panel" (see
-// module_url in panel_register.py, which never changes). This thin shell
-// reads the stored ui_style preference once on first `hass` set, then
-// mounts either Classic (above, already loaded) or the new look
-// (frontend/nova-panel-new.js, dynamically imported only when needed) and
-// forwards hass/panel/narrow/route to it from then on. Keeps the two
-// implementations genuinely separate files — Classic's behavior is
-// untouched by anything below this line.
-class NovaPanelShell extends HTMLElement {
-  constructor() {
-    super();
-    this._hass = null;
-    this._panelProp = null;
-    this._narrow = false;
-    this._route = null;
-    this._child = null;
-    this._deciding = false;
-    this._mountedStyle = null;
-    this._watchInterval = null;
-  }
-
-  disconnectedCallback() {
-    if (this._watchInterval) { clearInterval(this._watchInterval); this._watchInterval = null; }
-  }
-
-  set hass(hass) {
-    this._hass = hass;
-    if (this._child) {
-      this._child.hass = hass;
-      return;
-    }
-    if (!this._deciding) {
-      this._deciding = true;
-      this._decide();
-    }
-  }
-  get hass() { return this._hass; }
-
-  set panel(panel) {
-    this._panelProp = panel;
-    if (this._child) this._child.panel = panel;
-  }
-  set narrow(narrow) {
-    this._narrow = narrow;
-    if (this._child) this._child.narrow = narrow;
-  }
-  set route(route) {
-    this._route = route;
-    if (this._child) this._child.route = route;
-  }
-
-  async _decide() {
-    const style = await this._readStyle();
-
-    let tag = "nova-panel-classic";
-    if (style === "new") {
-      const newLookUrl = this._panelProp?.config?.new_look_url;
-      if (newLookUrl) {
-        try {
-          // newLookUrl is already an absolute root path (see
-          // panel_register.py) — no need to resolve it against this
-          // module's own URL.
-          await import(/* webpackIgnore: true */ newLookUrl);
-          tag = "nova-panel-new";
-        } catch (exc) {
-          console.error("Nova: failed to load the new look, falling back to Classic", exc);
-        }
-      } else {
-        console.warn("Nova: ui_style is 'new' but no new_look_url was registered — falling back to Classic");
-      }
-    }
-
-    const child = document.createElement(tag);
-    child.hass = this._hass;
-    if (this._panelProp) child.panel = this._panelProp;
-    child.narrow = this._narrow;
-    if (this._route) child.route = this._route;
-    this.appendChild(child);
-    this._child = child;
-    this._mountedStyle = style;
-
-    // Self-healing (v7.101.28): "Panel look" can now change from three
-    // places — Classic's Configure dialog wasn't the panel's own page, so
-    // saving it there had no way to reload an already-open Nova tab, and a
-    // real user hit exactly this ("switched back and it wouldn't change").
-    // Rather than push a reload trigger through every place that can write
-    // ui_style, the shell just notices for itself: if the stored value
-    // ever differs from what's actually mounted, reload. Same 20s cadence
-    // as Classic's own live-data poll — not urgent, just eventually
-    // consistent without the user needing to know to hard-refresh.
-    if (!this._watchInterval) {
-      this._watchInterval = setInterval(() => this._checkForStyleChange(), 20000);
-    }
-  }
-
-  async _checkForStyleChange() {
-    const current = await this._readStyle();
-    const changed = current !== this._mountedStyle;
-    if (changed) window.location.reload();
-    return changed;
-  }
-
-  async _readStyle() {
-    try {
-      const data = await this._hass.callWS({ type: "nova/get_panel_data" });
-      return (data && data.config && data.config.ui_style) || "classic";
-    } catch (_) {
-      return "classic"; // fail closed to the proven implementation
-    }
-  }
-}
-
 if (!customElements.get("nova-panel")) {
-  customElements.define("nova-panel", NovaPanelShell);
+  customElements.define("nova-panel", NovaPanel);
 }
-
-console.info(
-  "%c Nova Panel %c v7.101.29 ",
-  "color: #00f2fe; background: #050709; padding: 2px 6px;",
-  "color: #567685; background: #0a0d12; padding: 2px 6px;"
-);

@@ -43,8 +43,7 @@
           "directive_preset": "Preset direttiva",
           "directive": "Direttiva personalizzata (facoltativa, sostituisce il preset)",
           "model": "Modello di conversazione",
-          "use_hass_api": "Abilita il controllo della casa (luci, clima, serrature, ecc.)",
-          "ui_style": "Aspetto del pannello (classico o nuova anteprima)"
+          "use_hass_api": "Abilita il controllo della casa (luci, clima, serrature, ecc.)"
         }
       },
       "routing": {

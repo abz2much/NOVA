@@ -47,7 +47,7 @@ def replace(path, pattern, replacement, expected=1):
     open(path, "w", encoding="utf-8").write(new_text)
 
 replace(manifest_path, re.compile(r"\b" + re.escape(old) + r"\b"), new)
-replace(panel_path, re.compile(re.escape(f"* v{old} (session 2")), f"* v{new} (session 2")
+replace(panel_path, re.compile(re.escape(f" * v{old}\n")), f" * v{new}\n")
 replace(panel_path, re.compile(re.escape(f"%c v{old} ")), f"%c v{new} ")
 PYEOF
 

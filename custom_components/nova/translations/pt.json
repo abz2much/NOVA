@@ -43,8 +43,7 @@
           "directive_preset": "Predefinição de diretiva",
           "directive": "Diretiva personalizada (opcional, substitui a predefinição)",
           "model": "Modelo de conversação",
-          "use_hass_api": "Ativar o controlo da casa (luzes, clima, fechaduras, etc.)",
-          "ui_style": "Aparência do painel (clássico ou nova pré-visualização)"
+          "use_hass_api": "Ativar o controlo da casa (luzes, clima, fechaduras, etc.)"
         }
       },
       "routing": {

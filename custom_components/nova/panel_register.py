@@ -27,9 +27,6 @@ PANEL_ICON:           Final = "mdi:robot-outline"
 PANEL_WEBCOMPONENT:   Final = "nova-panel"
 PANEL_STATIC_URL:     Final = "/nova_panel_static"
 PANEL_JS_FILENAME:    Final = "nova-panel.js"
-NEW_LOOK_JS_FILENAME: Final = "nova-panel-new.js"  # v7.93.0 — dynamically
-                                                     # imported by the shell
-                                                     # only when ui_style='new'
 
 # Command Center — the operational HUD (separate sidebar entry, same static dir)
 CMD_URL_PATH:         Final = "nova-command"
@@ -109,7 +106,7 @@ async def async_register_panel(hass: HomeAssistant) -> bool:
         _LOGGER.error("Nova panel: JS file not found at %s", js_path)
         return False
 
-    # Register static path for serving the frontend dir (both panels' JS live here)
+    # Register static path for serving the frontend dir (the panel's JS lives here)
     try:
         await hass.http.async_register_static_paths([
             StaticPathConfig(PANEL_STATIC_URL, panel_dir, cache_headers=False)
@@ -124,30 +121,12 @@ async def async_register_panel(hass: HomeAssistant) -> bool:
     except Exception:
         pass
 
-    # New-look URL (v7.93.0): the shell registered below dynamically imports
-    # this file only when a user has opted into ui_style='new', so it needs
-    # its own cache-busted URL the same way the shell's own module_url gets
-    # one — passed via panel_custom's `config`, which HA exposes to the
-    # element as `panel.config`. Soft: the new-look file may not exist yet
-    # on an older/partial checkout, so this degrades to None rather than
-    # failing panel registration entirely.
-    new_look_config: dict = {}
-    new_look_path = os.path.join(panel_dir, NEW_LOOK_JS_FILENAME)
-    if os.path.isfile(new_look_path):
-        new_look_hash = await hass.async_add_executor_job(_hash_file, new_look_path)
-        new_look_config["new_look_url"] = (
-            f"{PANEL_STATIC_URL}/{NEW_LOOK_JS_FILENAME}?v={new_look_hash}"
-        )
-    else:
-        _LOGGER.debug("Nova panel: new-look file not found, ui_style='new' will fail closed to Classic")
-
     # Single combined panel: the Nova Command Center (dashboard + cameras +
     # 3D residence + settings + logs all in one).
     main_ok = await _register_one(
         hass, panel_dir,
         webcomponent=PANEL_WEBCOMPONENT, url_path=PANEL_URL_PATH,
         title=PANEL_TITLE, icon=PANEL_ICON, js_filename=PANEL_JS_FILENAME,
-        config=new_look_config,
     )
     return main_ok
 
