@@ -735,7 +735,7 @@ async def ws_get_panel_data(
             "dominant":       dominant,
             "areas":          areas_list,
             "sleep_reason":   sleep_reason if sleeping else None,
-            "doorbell_training": _get_doorbell_training(),
+            "doorbell_training": _get_doorbell_training(hass),
             "doors":          _get_door_states(hass),
             "lockdown":       _get_lockdown_status(),
             "intrusion":      _get_intrusion_status(),
@@ -937,17 +937,24 @@ def _get_door_states(hass: HomeAssistant) -> dict:
         return {}
 
 
-def _get_doorbell_training() -> dict:
+def _get_doorbell_training(hass: HomeAssistant) -> dict:
     """Doorbell training-dataset stats + the most recent analysed events, for
     the panel's Doorbell Training view. Never raises."""
     try:
         from . import doorbell_training
+        from datetime import timedelta as _timedelta
+        from homeassistant.util import dt as dt_util
+        try:
+            offset = int((dt_util.now().utcoffset() or _timedelta()).total_seconds() // 60)
+        except Exception:
+            offset = 0
         return {
             "stats": doorbell_training.stats(),
             "recent": doorbell_training.load_events(limit=12),
+            "patterns": doorbell_training.find_patterns(utc_offset_minutes=offset),
         }
     except Exception:
-        return {"stats": {"total": 0}, "recent": []}
+        return {"stats": {"total": 0}, "recent": [], "patterns": []}
 
 
 def _get_suggestions() -> list[dict]:

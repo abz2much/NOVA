@@ -22,7 +22,8 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import datetime, timezone
+from collections import Counter
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Optional
 
 _LOGGER = logging.getLogger(__name__)
@@ -116,6 +117,110 @@ def stats() -> dict:
         "first": first,
         "last": last,
     }
+
+
+# ── Pattern mining (no names, no face data — see module docstring) ──────────
+# What this is NOT: face recognition. Nova has no local face model of its
+# own — identity ("that's Username") comes only from Frigate's face model or
+# DoubleTake (see recognition.py), neither of which this install has
+# configured. This only clusters the vision model's own category label
+# (delivery/package/mail/person/known_resident/vehicle/animal/other) by
+# camera and time of day, the same "seen on N of M days" honesty framing
+# pattern_analyzer.py uses for state-change routines — just applied to the
+# doorbell log instead of patterns.db.
+
+CATEGORY_LABEL = {
+    "delivery": "a delivery", "package": "a package drop-off", "mail": "mail",
+    "person": "someone", "known_resident": "a resident", "vehicle": "a vehicle",
+    "animal": "an animal", "empty": "nothing", "other": "something",
+}
+
+
+def _parse_ts(ts: str) -> Optional[datetime]:
+    """Log timestamps are UTC, written as naive isoformat + 'Z'. Never raises."""
+    try:
+        return datetime.fromisoformat(ts[:-1] if ts.endswith("Z") else ts)
+    except (ValueError, TypeError):
+        return None
+
+
+def find_patterns(
+    min_occurrences: int = 3,
+    lookback_days: int = 30,
+    utc_offset_minutes: int = 0,
+) -> list[dict]:
+    """
+    Mine the training log for recurring visitor patterns — no names, no face
+    matching, just "someone/something like this tends to show up around this
+    time." Groups by (camera, category); within each group finds the modal
+    hour and how many distinct days it happened, so a coincidence ("seen
+    twice, both today") reads differently from a real pattern ("seen on 4 of
+    the last 5 weekdays"). Pure, stdlib-only, never raises.
+
+    `utc_offset_minutes` shifts logged (UTC) timestamps to local time for the
+    hour bucketing — this module has no HA dependency of its own, so the
+    caller (which has `hass`) resolves and passes the offset.
+    """
+    try:
+        events = load_events()
+        if not events:
+            return []
+        offset = timedelta(minutes=utc_offset_minutes)
+        cutoff = datetime.utcnow() + offset - timedelta(days=lookback_days)
+
+        parsed: list[tuple[datetime, str, str]] = []  # (local_dt, camera, category)
+        for e in events:
+            dt = _parse_ts(e.get("ts", ""))
+            if dt is None:
+                continue
+            dt += offset
+            if dt < cutoff:
+                continue
+            camera = e.get("camera") or e.get("entity_id") or "camera"
+            category = e.get("category") or "other"
+            parsed.append((dt, camera, category))
+        if not parsed:
+            return []
+
+        observed_days = max(
+            1, min(lookback_days, (max(p[0] for p in parsed).date()
+                                    - min(p[0] for p in parsed).date()).days + 1))
+
+        groups: dict[tuple[str, str], list[datetime]] = {}
+        for dt, camera, category in parsed:
+            groups.setdefault((camera, category), []).append(dt)
+
+        out: list[dict] = []
+        for (camera, category), dts in groups.items():
+            if len(dts) < min_occurrences:
+                continue
+            distinct_days = len({d.date() for d in dts})
+            if distinct_days < min_occurrences:
+                continue  # repeats within one day aren't a time-of-day pattern
+            hours = [d.hour for d in dts]
+            modal_hour = Counter(hours).most_common(1)[0][0]
+            near_modal = sum(1 for h in hours
+                              if min((h - modal_hour) % 24, (modal_hour - h) % 24) <= 1)
+            label = CATEGORY_LABEL.get(category, category)
+            out.append({
+                "camera": camera,
+                "category": category,
+                "occurrences": len(dts),
+                "distinct_days": distinct_days,
+                "observed_days": observed_days,
+                "typical_hour": modal_hour,
+                "consistency": round(near_modal / len(dts), 2),
+                "description": (
+                    f"{label.capitalize()} at {camera}, mostly around "
+                    f"{modal_hour:02d}:00 — seen on {distinct_days} of the last "
+                    f"{observed_days} days"
+                ),
+            })
+        out.sort(key=lambda p: p["distinct_days"], reverse=True)
+        return out[:8]
+    except Exception as exc:
+        _LOGGER.debug("doorbell_training.find_patterns failed: %s", exc)
+        return []
 
 
 # ── Backlog scan (best-effort) ───────────────────────────────────────────────

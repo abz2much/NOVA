@@ -244,17 +244,6 @@ class NovaCommandCenterNew extends HTMLElement {
             </div>
             <div class="feed" id="feed"></div>
           </div>
-
-          <div class="panel camera-panel" id="cameraPanel" hidden>
-            <div class="camera-head-row">
-              <div>
-                <div class="panel-title" style="margin-bottom:5px">Camera Watch</div>
-                <div class="camera-note">Optional — only shown for cameras that actually stream live into Home Assistant.</div>
-              </div>
-              <button class="camera-toggle" id="camToggle">SHOW CAMERAS ▾</button>
-            </div>
-            <div class="camera-strip" id="camStrip"></div>
-          </div>
         </div>
 
         <div class="panel" style="max-width:1100px;margin:16px auto 0">
@@ -287,6 +276,17 @@ class NovaCommandCenterNew extends HTMLElement {
             <button class="mode-chip" id="qaRunAnalysis">Analyze Now</button>
           </div>
           <div class="toggle-desc" id="qaAnalysisResult" style="margin-top:8px"></div>
+        </div>
+
+        <div class="panel camera-panel" id="cameraPanel" style="max-width:1100px;margin:16px auto 0" hidden>
+          <div class="camera-head-row">
+            <div>
+              <div class="panel-title" style="margin-bottom:5px">Camera Watch</div>
+              <div class="camera-note">Optional — only shown for cameras that actually stream live into Home Assistant.</div>
+            </div>
+            <button class="camera-toggle" id="camToggle">SHOW CAMERAS ▾</button>
+          </div>
+          <div class="camera-strip" id="camStrip"></div>
         </div>
     `;
   }
@@ -2204,6 +2204,7 @@ class NovaCommandCenterNew extends HTMLElement {
     const t = this._data()?.doorbellTraining || {};
     const stats = t.stats || {};
     const events = t.recent || [];
+    const patterns = t.patterns || [];
     const total = stats.total || 0;
     const notable = stats.notable || 0;
     const bySource = stats.by_source || {};
@@ -2213,6 +2214,16 @@ class NovaCommandCenterNew extends HTMLElement {
     const rows = events.length
       ? events.slice().reverse().map(e => this._dbTrainRow(e)).join("")
       : `<div class="stub-body">No analysed doorbell events yet. Run a backlog scan, or wait for the next doorbell press.</div>`;
+    // Patterns are timing-only — no names, no face matching. Nova has no
+    // local face model; that needs Frigate or DoubleTake (recognition.py),
+    // neither configured here. This just clusters the vision model's own
+    // category label (delivery/mail/person/...) by camera and time of day.
+    const patternsBlock = patterns.length
+      ? `<div class="mode-bind-head">Recurring patterns (timing only — not face recognition)</div>
+         <ul style="margin:0 0 10px;padding-left:18px;font-size:12px;color:var(--ink-dim);line-height:1.7">
+           ${patterns.map(p => `<li>${this._esc(p.description)}</li>`).join("")}
+         </ul>`
+      : `<div class="stub-body">No recurring patterns yet — needs a few more days of data, or nothing repeats at a consistent time yet.</div>`;
     return `
       <div class="stub-body">Analysed doorbell events — Nova's visitor training data. Each press is logged automatically; run a backlog scan to mine the recorded-event history into the dataset.</div>
       <div class="cfg-row">
@@ -2223,6 +2234,7 @@ class NovaCommandCenterNew extends HTMLElement {
         </div>
       </div>
       <div class="stub-body">${total} analysed · ${notable} notable · ${this._esc(srcLine)}</div>
+      ${patternsBlock}
       ${rows}`;
   }
 
