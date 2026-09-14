@@ -107,6 +107,16 @@ def _read_override() -> tuple[str, Optional[datetime]]:
     return value, expires
 
 
+def current_override() -> str:
+    """Effective sleep_override value ('auto'/'awake'/'asleep'), accounting
+    for expiry. For display (the panel dropdown) — reading the raw stored
+    key directly would keep showing 'Asleep'/'Awake' forever after it
+    expires, since nothing rewrites the stored value on expiry; only this
+    computed read reflects the auto-revert."""
+    value, _ = _read_override()
+    return value
+
+
 def set_override(value: str, quiet_end: str = "07:00") -> None:
     """Explicitly set sleep state: 'auto' clears any override; 'awake' or
     'asleep' holds until the next quiet-hours end, then reverts to Auto on

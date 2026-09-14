@@ -90,6 +90,18 @@ def test_override_expires_at_quiet_end_and_falls_back_to_auto(sd, fake_hass, mon
     assert reason == "awake"
 
 
+def test_current_override_reflects_expiry(sd, monkeypatch):
+    """The panel dropdown reads current_override(), not the raw stored key —
+    it must flip back to 'auto' the moment expiry passes, not stay stuck on
+    'asleep' forever (the bug this function was added to fix)."""
+    _freeze(monkeypatch, sd, datetime(2026, 9, 13, 23, 15, tzinfo=timezone.utc))
+    sd.set_override("asleep", "07:00")
+    assert sd.current_override() == "asleep"
+
+    _freeze(monkeypatch, sd, datetime(2026, 9, 14, 7, 30, tzinfo=timezone.utc))
+    assert sd.current_override() == "auto"
+
+
 def test_set_auto_clears_override_immediately(sd, monkeypatch):
     _freeze(monkeypatch, sd, datetime(2026, 9, 13, 23, 15, tzinfo=timezone.utc))
     sd.set_override("asleep", "07:00")
