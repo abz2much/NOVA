@@ -1055,8 +1055,8 @@ class NovaCommandCenterNew extends HTMLElement {
       desc: "Camera names, indoor/outdoor designation, and location overrides." },
     { id: "doorbell_training", group: "cameras", title: "Doorbell Training", real: true,
       desc: "Teach Nova to recognize regular visitors at the door." },
-    { id: "floor_plan_editor", group: "home", title: "Floor Plan Editor",
-      desc: "A full SVG drag-and-drop editor tied to Classic's Residence 3D view — same reason that tab itself stays Classic-only in V1, not a smaller lift than the rest of this list." },
+    { id: "floor_plan_editor", group: "home", title: "Floor Plan Editor", real: true,
+      desc: "Room layout — drag to move, resize, add or remove rooms. Property line, outdoor zones, and camera placement stay on Classic for now." },
     { id: "wellbeing_context", group: "home", title: "Wellbeing Context", real: true,
       desc: "Whether wearable heart-rate/sleep data reaches Nova, and which providers." },
     { id: "character_research", group: "home", title: "Nova Character & Research", real: true,
@@ -1104,13 +1104,14 @@ class NovaCommandCenterNew extends HTMLElement {
         : c.id === "excluded_entities" ? this._excludedEntitiesCardBody()
         : c.id === "cameras" ? this._camerasCardBody()
         : c.id === "doorbell_training" ? this._doorbellTrainingCardBody()
+        : c.id === "floor_plan_editor" ? this._floorPlanEditorCardBody()
         : c.id === "wellbeing_context" ? this._wellbeingContextCardBody()
         : c.id === "character_research" ? this._characterResearchCardBody()
         : c.id === "document_library" ? this._documentLibraryCardBody()
         : "")
       : `<div class="stub-body">${this._esc(c.desc)}<br><span class="stub-where">Not built here yet — use Classic, or Settings → Devices &amp; Services → Nova → Configure.</span></div>`;
     return `
-      <div class="panel settings-card" data-settings-group="${c.group}" data-search="${this._esc((c.title + " " + c.desc).toLowerCase())}">
+      <div class="panel settings-card" id="settings-card-${c.id}" data-settings-group="${c.group}" data-search="${this._esc((c.title + " " + c.desc).toLowerCase())}">
         <div class="panel-head">
           <div class="panel-title">${this._esc(c.title)}${c.real ? "" : '<span class="stub-tag">SOON</span>'}</div>
         </div>
@@ -2955,6 +2956,8 @@ class NovaCommandCenterNew extends HTMLElement {
         await this._saveSetting("person_honorifics", JSON.stringify(overrides));
       });
     });
+    this._wireFloorPlanEditor();
+
     root.querySelectorAll(".new-room-speaker-select").forEach(sel => {
       sel.addEventListener("change", async () => {
         const cfg = this._data()?.config || {};
@@ -3415,6 +3418,362 @@ class NovaCommandCenterNew extends HTMLElement {
     ctx.globalCompositeOperation = "source-over";
   }
 
+  // ─── Floor Plan Editor: rooms only (v7.101.16) ──────────────────────────
+  // Ported from Classic's _renderFloorPlanEditor/_renderEditableSVG/
+  // _wireFloorPlanDrag — same floor_plan_rooms config, same working-copy
+  // pattern, room drag/resize/add/remove/save/reset. Property line, outdoor
+  // zones, camera placement, and the AI camera-coverage feature stay
+  // Classic-only for now ("Edit advanced layout in Classic" below) — ported
+  // separately later if it turns out to matter.
+
+  _defaultFloorPlan() {
+    return {
+      "1f": {
+        label: "1st Floor", viewBox: "0 0 320 150",
+        rooms: [
+          { name: "Garage", x: 5, y: 5, w: 100, h: 88, type: "room" },
+          { name: "Kitchen", x: 115, y: 5, w: 65, h: 40, type: "room" },
+          { name: "Bath", x: 185, y: 5, w: 28, h: 22, type: "bath" },
+          { name: "Guest Room", x: 218, y: 5, w: 95, h: 40, type: "room" },
+          { name: "Dining Room", x: 115, y: 50, w: 65, h: 38, type: "room" },
+          { name: "Stairs", x: 185, y: 32, w: 28, h: 32, type: "stairs" },
+          { name: "Living Room", x: 218, y: 50, w: 95, h: 38, type: "room" },
+          { name: "Downstairs Hallway", x: 115, y: 93, w: 198, h: 20, type: "room" },
+          { name: "Front Door", x: 185, y: 117, w: 50, h: 12, type: "door" },
+        ],
+      },
+      "2f": {
+        label: "2nd Floor", viewBox: "0 0 320 140",
+        rooms: [
+          { name: "Bedroom 2", x: 50, y: 25, w: 95, h: 80, type: "room" },
+          { name: "Bath", x: 150, y: 25, w: 30, h: 40, type: "bath" },
+          { name: "Master Bedroom", x: 185, y: 25, w: 85, h: 80, type: "room" },
+          { name: "Upstairs Hallway", x: 150, y: 70, w: 30, h: 35, type: "room" },
+          { name: "Stairs", x: 150, y: 108, w: 25, h: 20, type: "stairs" },
+        ],
+      },
+      "bsmt": {
+        label: "Basement", viewBox: "0 0 320 130",
+        rooms: [
+          { name: "Basement", x: 50, y: 10, w: 220, h: 90, type: "room" },
+          { name: "Stairs", x: 120, y: 20, w: 28, h: 35, type: "stairs" },
+        ],
+        labels: [
+          { text: "SUMP PUMP", x: 95, y: 55 }, { text: "DEHUMIDIFIER", x: 95, y: 75 },
+          { text: "HOME ENERGY", x: 235, y: 55 }, { text: "WASHER", x: 235, y: 75 },
+        ],
+      },
+    };
+  }
+
+  _getFloorPlan() {
+    try {
+      const raw = this._data()?.config?.floor_plan_rooms;
+      if (raw) {
+        const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+        if (parsed && typeof parsed === "object" && Object.keys(parsed).length) return parsed;
+      }
+    } catch (_) {}
+    return this._defaultFloorPlan();
+  }
+
+  _getEditingPlan() {
+    if (this._editingPlan) return this._editingPlan;
+    this._editingPlan = JSON.parse(JSON.stringify(this._getFloorPlan()));
+    return this._editingPlan;
+  }
+
+  _fpUnits() { return (this._data()?.config?.floor_plan_units === "metric") ? "metric" : "imperial"; }
+  _fpUnitLabel() { return this._fpUnits() === "metric" ? "m" : "ft"; }
+  _fpToReal(u) {
+    const ft = (u || 0) * 0.2;
+    return this._fpUnits() === "metric" ? Math.round(ft * 0.3048 * 10) / 10 : Math.round(ft * 10) / 10;
+  }
+  _fpDim(u) { return this._fpToReal(u) + (this._fpUnits() === "metric" ? "m" : "'"); }
+
+  _floorPlanEditorCardBody() {
+    const plan = this._getEditingPlan();
+    const floors = Object.keys(plan);
+    if (!this._editorFloor || !plan[this._editorFloor]) this._editorFloor = floors[0] || "1f";
+    const floor = this._editorFloor;
+    return `
+      <div class="fpn-toolbar">
+        <div class="fpn-floor-tabs">
+          ${floors.map(fk => `<button class="mode-chip fpn-floor-tab${fk === floor ? " active" : ""}" data-fpn-floor="${fk}">${this._esc(plan[fk].label || fk)}</button>`).join("")}
+        </div>
+        <div class="fpn-actions">
+          <button class="mode-chip" id="fpnAddRoom">+ Add Room</button>
+          <button class="mode-chip" id="fpnUnits">Units: ${this._fpUnits() === "metric" ? "Metric" : "Imperial"}</button>
+          <button class="mode-chip" id="fpnZoomFit">⤢ Fit</button>
+        </div>
+      </div>
+      <div class="fpn-hint">Drag to move · bottom-right handle to resize · right-click to delete · scroll to zoom · drag empty space to pan</div>
+      <div class="fpn-canvas" id="fpnCanvas">${this._renderFloorPlanSVG(plan, floor)}</div>
+      <div class="fpn-actions">
+        <button class="mode-chip" id="fpnSave">Save Layout</button>
+        <button class="mode-chip" id="fpnReset">Reset Default</button>
+      </div>
+      <div class="camera-note">Property line, outdoor zones, camera placement, and AI camera-coverage aren't ported here yet.
+        <button class="mode-chip" id="fpnGoClassic">Edit advanced layout in Classic</button>
+      </div>`;
+  }
+
+  _renderFloorPlanSVG(plan, floor) {
+    const floorData = plan[floor];
+    if (!floorData) return "";
+    const vb = this._editVB
+      ? `${this._editVB.x} ${this._editVB.y} ${this._editVB.w} ${this._editVB.h}`
+      : (floorData.viewBox || "0 0 320 150");
+    let svg = `<svg viewBox="${vb}" class="fpn-svg" id="fpnSvg" style="width:100%;height:100%;min-height:520px;background:var(--bg);border:1px solid var(--line-soft);border-radius:10px;cursor:crosshair;">`;
+    svg += '<defs>'
+      + '<pattern id="fpn-grid-sm" width="10" height="10" patternUnits="userSpaceOnUse"><path d="M 10 0 L 0 0 0 10" fill="none" stroke="rgba(244,184,96,0.05)" stroke-width="0.2"/></pattern>'
+      + '<pattern id="fpn-grid-lg" width="50" height="50" patternUnits="userSpaceOnUse"><path d="M 50 0 L 0 0 0 50" fill="none" stroke="rgba(244,184,96,0.12)" stroke-width="0.3"/></pattern>'
+      + '</defs>';
+    const vbp = vb.split(" ").map(Number);
+    const gx = vbp[0], gy = vbp[1], gw = vbp[2], gh = vbp[3];
+    svg += `<rect class="fpn-grid-rect" x="${gx}" y="${gy}" width="${gw}" height="${gh}" fill="url(#fpn-grid-sm)"/>`;
+    svg += `<rect class="fpn-grid-rect" x="${gx}" y="${gy}" width="${gw}" height="${gh}" fill="url(#fpn-grid-lg)"/>`;
+
+    const bgs = this._data()?.config?.floor_plan_bg;
+    if (bgs) {
+      try {
+        const bgData = typeof bgs === "string" ? JSON.parse(bgs) : bgs;
+        if (bgData && bgData[floor]) {
+          svg += `<image href="${bgData[floor]}" x="0" y="0" width="100%" height="100%" opacity="0.2" preserveAspectRatio="xMidYMid meet"/>`;
+        }
+      } catch (_) {}
+    }
+
+    for (let i = 0; i < (floorData.rooms || []).length; i++) {
+      const rm = floorData.rooms[i];
+      if (rm.points && rm.points.length >= 3) continue;   // zone/reshaped rooms: edit in Classic for now
+      const colors = { room: "var(--gold)", bath: "var(--ink-faint)", stairs: "var(--ember)", door: "var(--warn)", outdoor: "#8fdba8" };
+      const c = colors[rm.type] || "var(--gold)";
+      const out = rm.type === "outdoor";
+      const fs = rm.w > 80 ? 7 : (rm.w > 50 ? 5.5 : (rm.w > 25 ? 4 : 3));
+      svg += `<g class="fpn-drag-room" data-idx="${i}" style="cursor:move">`;
+      svg += `<rect x="${rm.x}" y="${rm.y}" width="${rm.w}" height="${rm.h}" rx="2" fill="${out ? "rgba(143,219,168,0.06)" : "rgba(244,184,96,0.08)"}" stroke="${c}" stroke-width="1" class="fpn-drag-rect"/>`;
+      svg += `<text x="${rm.x + rm.w / 2}" y="${rm.y + rm.h / 2}" text-anchor="middle" fill="${c}" font-size="${fs}" font-family="var(--font-display)" letter-spacing="0.3" pointer-events="none">${this._esc((rm.name || "").toUpperCase())}</text>`;
+      if (rm.w > 30 && rm.h > 24) svg += `<text x="${rm.x + rm.w / 2}" y="${rm.y + rm.h / 2 + fs + 2.5}" text-anchor="middle" fill="${c}" opacity="0.6" font-size="${(fs * 0.72).toFixed(1)}" font-family="var(--font-mono)" pointer-events="none">${this._fpDim(rm.w)} × ${this._fpDim(rm.h)}</text>`;
+      svg += `<rect x="${rm.x + rm.w - 8}" y="${rm.y + rm.h - 8}" width="8" height="8" fill="${c}" opacity="0.35" rx="1" class="fpn-resize-handle" data-idx="${i}" style="cursor:nwse-resize"/>`;
+      svg += "</g>";
+    }
+    for (const lbl of (floorData.labels || [])) {
+      svg += `<text x="${lbl.x}" y="${lbl.y}" text-anchor="middle" fill="var(--ink-faint)" font-size="4" font-family="var(--font-mono)">${this._esc(lbl.text)}</text>`;
+    }
+    svg += "</svg>";
+    return svg;
+  }
+
+  // Re-renders just this one card (not the whole settings grid) so an
+  // in-progress edit elsewhere on the page isn't disturbed and scroll
+  // position is preserved — mirrors Classic's _rerenderFloorEditor().
+  _rerenderFloorPlanCard() {
+    const card = this.shadowRoot?.getElementById("settings-card-floor_plan_editor");
+    if (!card) return;
+    const c = NovaCommandCenterNew.SETTINGS_CARDS.find(x => x.id === "floor_plan_editor");
+    card.innerHTML = `
+        <div class="panel-head"><div class="panel-title">${this._esc(c.title)}</div></div>
+        ${this._floorPlanEditorCardBody()}`;
+    this._wireFloorPlanEditor();
+  }
+
+  _wireFloorPlanEditor() {
+    const root = this.shadowRoot;
+    if (!root || !root.getElementById("fpnCanvas")) return;   // card not in the DOM right now
+
+    root.querySelectorAll(".fpn-floor-tab").forEach(btn => {
+      btn.addEventListener("click", () => {
+        this._editorFloor = btn.getAttribute("data-fpn-floor");
+        this._editVB = null;
+        this._rerenderFloorPlanCard();
+      });
+    });
+    const fit = root.getElementById("fpnZoomFit");
+    if (fit) fit.addEventListener("click", () => { this._editVB = null; this._rerenderFloorPlanCard(); });
+
+    const units = root.getElementById("fpnUnits");
+    if (units) units.addEventListener("click", async () => {
+      const next = this._fpUnits() === "metric" ? "imperial" : "metric";
+      try {
+        await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_units", value: next });
+        if (this._liveData?.config) this._liveData.config.floor_plan_units = next;
+      } catch (err) { console.error("Nova (new look): floor plan units save failed", err); }
+      this._rerenderFloorPlanCard();
+    });
+
+    const addRoom = root.getElementById("fpnAddRoom");
+    if (addRoom) addRoom.addEventListener("click", () => {
+      const plan = this._getEditingPlan();
+      const floor = this._editorFloor;
+      if (!plan[floor]) return;
+      const name = window.prompt("Room name:");
+      if (!name) return;
+      const type = window.prompt("Type (room, bath, stairs, door):", "room") || "room";
+      plan[floor].rooms = plan[floor].rooms || [];
+      plan[floor].rooms.push({ name, x: 50, y: 50, w: 60, h: 40, type });
+      this._rerenderFloorPlanCard();
+    });
+
+    const save = root.getElementById("fpnSave");
+    if (save) save.addEventListener("click", async () => {
+      if (!this._editingPlan) return;
+      try {
+        await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_rooms", value: JSON.stringify(this._editingPlan) });
+        if (this._liveData?.config) this._liveData.config.floor_plan_rooms = this._editingPlan;
+        this._editingPlan = null;
+      } catch (err) { console.error("Nova (new look): floor plan save failed", err); }
+    });
+
+    const reset = root.getElementById("fpnReset");
+    if (reset) reset.addEventListener("click", async () => {
+      try {
+        await this._hass.callWS({ type: "nova/update_config", key: "floor_plan_rooms", value: "" });
+        if (this._liveData?.config) this._liveData.config.floor_plan_rooms = {};
+      } catch (err) { console.error("Nova (new look): floor plan reset failed", err); }
+      this._editingPlan = null;
+      this._editorFloor = null;
+      this._rerenderFloorPlanCard();
+    });
+
+    const goClassic = root.getElementById("fpnGoClassic");
+    if (goClassic) goClassic.addEventListener("click", () => this._saveSetting("ui_style", "classic"));
+
+    this._wireFloorPlanDrag();
+  }
+
+  _wireFloorPlanDrag() {
+    const svgEl = this.shadowRoot.getElementById("fpnSvg");
+    if (!svgEl) return;
+    const self = this;
+    const plan = this._getEditingPlan();
+    const floor = this._editorFloor;
+    const rooms = plan[floor]?.rooms;
+    if (!rooms) return;
+
+    let dragging = null, panning = null;
+
+    function svgPoint(e) {
+      const pt = svgEl.createSVGPoint();
+      const ctm = svgEl.getScreenCTM().inverse();
+      pt.x = e.clientX; pt.y = e.clientY;
+      return pt.matrixTransform(ctm);
+    }
+    const vbFromAttr = () => {
+      const p = (svgEl.getAttribute("viewBox") || "0 0 320 150").split(" ").map(Number);
+      return { x: p[0], y: p[1], w: p[2], h: p[3] };
+    };
+    function applyVB() {
+      const v = self._editVB; if (!v) return;
+      svgEl.setAttribute("viewBox", `${v.x} ${v.y} ${v.w} ${v.h}`);
+      svgEl.querySelectorAll(".fpn-grid-rect").forEach(r => {
+        r.setAttribute("x", v.x); r.setAttribute("y", v.y); r.setAttribute("width", v.w); r.setAttribute("height", v.h);
+      });
+    }
+    function redraw() {
+      const canvas = self.shadowRoot.getElementById("fpnCanvas");
+      if (canvas) {
+        canvas.innerHTML = self._renderFloorPlanSVG(plan, floor);
+        setTimeout(() => self._wireFloorPlanDrag(), 10);
+      }
+    }
+
+    svgEl.querySelectorAll(".fpn-drag-room").forEach(g => {
+      const rect = g.querySelector(".fpn-drag-rect");
+      if (!rect) return;
+      rect.addEventListener("mousedown", (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        const idx = parseInt(g.getAttribute("data-idx"));
+        const rm = rooms[idx]; if (!rm) return;
+        const pt = svgPoint(e);
+        dragging = { idx, startX: pt.x, startY: pt.y, origX: rm.x, origY: rm.y, resize: false };
+        rect.setAttribute("stroke-width", "2.5");
+      });
+      g.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        const idx = parseInt(g.getAttribute("data-idx"));
+        const rm = rooms[idx]; if (!rm) return;
+        if (window.confirm(`Delete '${rm.name}' from floor plan?`)) { rooms.splice(idx, 1); redraw(); }
+      });
+    });
+
+    svgEl.querySelectorAll(".fpn-resize-handle").forEach(handle => {
+      handle.addEventListener("mousedown", (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault(); e.stopPropagation();
+        const idx = parseInt(handle.getAttribute("data-idx"));
+        const rm = rooms[idx]; if (!rm) return;
+        const pt = svgPoint(e);
+        dragging = { idx, startX: pt.x, startY: pt.y, origW: rm.w, origH: rm.h, resize: true };
+      });
+    });
+
+    svgEl.addEventListener("mousemove", (e) => {
+      if (panning) {
+        const rect = svgEl.getBoundingClientRect();
+        const sx = panning.w / rect.width, sy = panning.h / rect.height;
+        self._editVB = {
+          x: panning.vbX - (e.clientX - panning.sx) * sx, y: panning.vbY - (e.clientY - panning.sy) * sy,
+          w: panning.w, h: panning.h,
+        };
+        applyVB();
+        return;
+      }
+      if (!dragging) return;
+      const pt = svgPoint(e);
+      const rm = rooms[dragging.idx];
+      if (!rm) return;
+      if (dragging.resize) {
+        rm.w = Math.max(15, Math.round(dragging.origW + (pt.x - dragging.startX)));
+        rm.h = Math.max(10, Math.round(dragging.origH + (pt.y - dragging.startY)));
+      } else {
+        rm.x = Math.round(dragging.origX + (pt.x - dragging.startX));
+        rm.y = Math.round(dragging.origY + (pt.y - dragging.startY));
+      }
+      const g = svgEl.querySelector(`.fpn-drag-room[data-idx="${dragging.idx}"]`);
+      if (g) {
+        const r = g.querySelector(".fpn-drag-rect");
+        if (r) { r.setAttribute("x", rm.x); r.setAttribute("y", rm.y); r.setAttribute("width", rm.w); r.setAttribute("height", rm.h); }
+        const t = g.querySelector("text");
+        if (t) { t.setAttribute("x", rm.x + rm.w / 2); t.setAttribute("y", rm.y + rm.h / 2); }
+        const rh = g.querySelector(".fpn-resize-handle");
+        if (rh) { rh.setAttribute("x", rm.x + rm.w - 8); rh.setAttribute("y", rm.y + rm.h - 8); }
+      }
+    });
+
+    const endDrag = () => {
+      if (panning) { panning = null; return; }
+      if (!dragging) return;
+      dragging = null;
+      redraw();
+    };
+    svgEl.addEventListener("mouseup", endDrag);
+    svgEl.addEventListener("mouseleave", endDrag);
+
+    svgEl.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      const v = self._editVB || vbFromAttr();
+      const p = svgPoint(e);
+      const f = e.deltaY < 0 ? 0.85 : 1.18;
+      const nw = Math.max(60, Math.min(8000, v.w * f)), nh = Math.max(42, Math.min(8000, v.h * f));
+      const fx = nw / v.w, fy = nh / v.h;
+      self._editVB = { x: p.x - (p.x - v.x) * fx, y: p.y - (p.y - v.y) * fy, w: nw, h: nh };
+      applyVB();
+    }, { passive: false });
+
+    svgEl.addEventListener("mousedown", (e) => {
+      if (dragging) return;
+      const mid = e.button === 1;
+      const bg = e.button === 0 && !e.target.closest(".fpn-drag-room, .fpn-resize-handle");
+      if (!mid && !bg) return;
+      e.preventDefault();
+      const v = self._editVB || vbFromAttr();
+      self._editVB = { x: v.x, y: v.y, w: v.w, h: v.h };
+      panning = { sx: e.clientX, sy: e.clientY, vbX: v.x, vbY: v.y, w: v.w, h: v.h };
+    });
+  }
+
   _css() {
     return `
       :host{
@@ -3602,6 +3961,11 @@ class NovaCommandCenterNew extends HTMLElement {
       .person-honorific-row{flex-wrap:wrap}
       .person-honorific-custom{background:var(--surface-2);border:1px solid var(--line-soft);color:var(--ink);
         font-family:var(--font-body);font-size:12px;padding:6px 9px;border-radius:8px;width:100%;margin-top:6px}
+      .fpn-toolbar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+      .fpn-floor-tabs,.fpn-actions{display:flex;gap:6px;flex-wrap:wrap}
+      .fpn-hint{font-size:10px;color:var(--ink-faint);font-family:var(--font-mono);letter-spacing:0.04em;margin-bottom:6px}
+      .fpn-canvas{min-height:520px;margin-bottom:10px}
+      .fpn-actions{margin-top:4px}
     `;
   }
 }

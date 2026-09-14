@@ -22,6 +22,16 @@ global.window = window; global.document = window.document;
 // jsdom doesn't implement window.confirm (always undefined/falsy) — both
 // panels' document-delete flows gate on it, so stub it to auto-confirm.
 window.confirm = () => true;
+// jsdom's own window.prompt exists but a runtime reassignment (e.g. a test
+// setting window.prompt = fn after the component scripts are already
+// eval'd) isn't visible to bare `prompt(...)` calls inside that eval'd
+// code — a vm/jsdom quirk, not something a test should have to rediscover.
+// Define the real stub once, here, before any component script loads, and
+// let individual tests drive its answers through this mutable queue instead
+// of reassigning window.prompt themselves (Floor Plan Editor's Add Room
+// asks for a name, then a type).
+global.__promptQueue = [];
+window.prompt = () => (global.__promptQueue.length ? global.__promptQueue.shift() : null);
 
 window.eval(fs.readFileSync(COMPONENT, "utf8"));
 window.eval(fs.readFileSync(NEW_LOOK_COMPONENT, "utf8"));
@@ -1246,20 +1256,54 @@ setTimeout(async () => {
           && om.querySelectorAll(".mode-chip[data-mode]").length >= 2
           && om.querySelectorAll(".mode-chip-on").length === 1;
       })()],
-    ["settings tab: unbuilt cards are honestly labeled, not silently missing",
+    ["settings tab: no card is silently missing (all 26 are real)",
+      Array.from(sRoot.querySelectorAll(".settings-card")).every(c => !c.querySelector(".stub-tag"))],
+    ["settings tab: Floor Plan Editor is real, with rooms and the drag canvas",
       (() => {
-        // Floor Plan Editor stays a stub permanently (a full SVG drag-and-
-        // drop editor tied to Classic's Residence 3D view, out of scope for
-        // the same reason that tab is Classic-only) — a durable pointer,
-        // unlike the temporary ones this check used while other cards were
-        // still being built out.
         const fpeCard = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Floor Plan Editor/.test(c.querySelector(".panel-title")?.textContent || ""));
-        return !!fpeCard && !!fpeCard.querySelector(".stub-tag") && /Configure/.test(fpeCard.textContent);
+        return !!fpeCard && !fpeCard.querySelector(".stub-tag") && !!fpeCard.querySelector("#fpnSvg")
+          && !!fpeCard.querySelector(".fpn-drag-room");
+      })()],
+    ["settings tab: Floor Plan Editor bridges its not-yet-ported advanced features to Classic",
+      (() => {
+        const fpeCard = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Floor Plan Editor/.test(c.querySelector(".panel-title")?.textContent || ""));
+        return !!fpeCard && !!fpeCard.querySelector("#fpnGoClassic") && /Classic/.test(fpeCard.textContent);
       })()],
     ["settings tab shows only the active group by default",
       Array.from(sRoot.querySelectorAll('.settings-card[data-settings-group="general"]')).every(c => !c.hidden)
       && Array.from(sRoot.querySelectorAll('.settings-card:not([data-settings-group="general"])')).every(c => c.hidden)],
   );
+
+  // Floor Plan Editor: floor-tab switch, Add Room, Save, and Units toggle.
+  // Drag/resize itself isn't exercised here — jsdom implements neither
+  // createSVGPoint nor getScreenCTM, so that math needs a real browser to
+  // verify (same reason Classic's identical drag code isn't jsdom-tested).
+  sRoot.querySelector('.fpn-floor-tab[data-fpn-floor="2f"]').click();
+  let fpeCardNow = sRoot.getElementById("settings-card-floor_plan_editor");
+  checks.push(["floor plan editor: floor tab switch re-renders just that card with the other floor's rooms",
+    fpeCardNow.querySelector('.fpn-floor-tab[data-fpn-floor="2f"]')?.classList.contains("active")
+    && /MASTER BEDROOM/.test(fpeCardNow.textContent)
+    && !/DOWNSTAIRS HALLWAY/.test(fpeCardNow.textContent)]);
+
+  global.__promptQueue = ["Sun Room", "room"];
+  sRoot.getElementById("fpnAddRoom").click();
+  fpeCardNow = sRoot.getElementById("settings-card-floor_plan_editor");
+  checks.push(["floor plan editor: Add Room appends a room to the working copy and redraws it",
+    /SUN ROOM/.test(fpeCardNow.textContent)
+    && fpeCardNow.querySelectorAll(".fpn-drag-room").length === 6]);   // 2f default has 5 rooms + this one
+
+  sRoot.getElementById("fpnSave").click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["floor plan editor: Save writes floor_plan_rooms with the added room, not a full-page re-render",
+    _updateConfigCalls.some(c => c.key === "floor_plan_rooms" && /Sun Room/.test(c.value))]);
+
+  sRoot = elNew.shadowRoot;
+  fpeCardNow = sRoot.getElementById("settings-card-floor_plan_editor");
+  fpeCardNow.querySelector("#fpnUnits").click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["floor plan editor: Units toggle saves floor_plan_units",
+    _updateConfigCalls.some(c => c.key === "floor_plan_units" && c.value === "metric")]);
+  sRoot = elNew.shadowRoot;
 
   // Person Honorifics: picking "Custom…" reveals the text input without saving
   // yet (nothing to save), then typing+blurring the custom input saves it.
