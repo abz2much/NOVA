@@ -48,7 +48,7 @@ Modelled on Stark's Nova: dry, precise, unflappable, and quietly witty, but stri
 
 ### Vision and cameras
 
-Automatic doorbell-press analysis using a two-pass live-clip and recorded-event approach, package and mail detection on porch cameras, and silent visitor learning that quietly builds a picture of who comes and goes. All of it runs on vision models reasoning over Nest and Frigate feeds.
+Automatic doorbell-press analysis using a two-pass live-clip and recorded-event approach, package and mail detection on porch cameras, and silent visitor learning that quietly builds a picture of who comes and goes. Nest and Frigate feeds are reasoned over with vision models; a Eufy Security doorbell instead drives this natively off its own on-device sensors (ringing, stranger-vs-known-face, package delivered/stranded/taken) with no vision call needed for the routine cases — only an actual stranger triggers one.
 
 ### The Cognitive Core
 
@@ -108,7 +108,7 @@ Everything Nova can do today, grouped by domain. In conversation these surface a
 
 **Cameras and vision**
 - Look at a camera on demand and describe it (`look_at_camera`); report who's recognized at the door (`who_do_you_see`).
-- Automatic doorbell-press analysis, package and mail detection, and silent visitor learning over Nest and Frigate feeds.
+- Automatic doorbell-press analysis, package and mail detection, and silent visitor learning — over Nest/Frigate vision, or natively off a Eufy Security doorbell's own sensors.
 
 **Awareness, diagnostics and energy**
 - Report the cognitive core's state, connectivity, and a full self-diagnostic (`cognitive_status`, `connectivity_status`, `system_diagnostics`); reason about the root cause of a fault (`root_cause`).
@@ -142,7 +142,7 @@ To start, you need exactly two things:
 Optional add-ons unlock more, but none are required to begin:
 
 - *Voice*: HA OS / Supervised is recommended; Nova auto-installs the Piper, Whisper, and openWakeWord voice stack through the Supervisor. On Container/Core you'd add those yourself.
-- *Vision*: a Gemini API key for camera reasoning, plus cameras. Any HA camera works, but Frigate is the recommended backbone for detection and snapshots, and Nest cameras and doorbells are supported through it.
+- *Vision*: a Gemini API key for camera reasoning, plus cameras. Any HA camera works, but Frigate is the recommended backbone for detection and snapshots, and Nest cameras and doorbells are supported through it. A Eufy Security doorbell needs neither — it's detected natively, no plumbing required.
 - *Voice hardware*: ESP32-S3 satellites and a Piper TTS voice.
 - *Fully local inference*: a GPU box running Ollama. Point `llm_base_url` at it and Nova runs entirely on your own hardware, with no cloud account.
 
@@ -180,9 +180,17 @@ Frigate is the funnel: its on-camera object detection for people and packages, f
 
 Nest is a supported source, not a requirement. Nova can consume Nest cameras and doorbells too, but Google's cameras need extra plumbing (below) because of how their stream API behaves. If you have Nest gear, route it into Frigate through go2rtc and you get the best of both: Nest's doorbell events plus Frigate's detection and durable frames.
 
+Eufy Security is also a supported source, and needs *no* extra plumbing at all. If the [eufy_security HACS integration](https://github.com/fuatakgun/eufy_security) is set up, Nova auto-detects each Eufy camera/doorbell and drives doorbell press, stranger-vs-known-face, and package detection off its own native sensors directly — no Frigate, no go2rtc, no vision-LLM call for the routine cases (a known face, a normal delivery). Discovery is by the device's unique_id, so renaming it in HA never breaks it.
+
 Any other camera, generic RTSP, local ONVIF, and so on, works through the standard snapshot path with no special setup. Add it to Frigate for detection, or let Nova pull stills directly.
 
-The rest of this section is Nest-specific. If you don't use Nest, skip it entirely: point Frigate at your cameras and you're done.
+The rest of this section is Nest-specific. If you don't use Nest, skip it entirely: Eufy needs nothing below, and everything else just needs Frigate pointed at your cameras.
+
+### Eufy Security cameras (only if you use Eufy)
+
+Install the [eufy_security integration](https://github.com/fuatakgun/eufy_security) via HACS, add it in **Settings → Devices & Services**, and sign in with your Eufy account. That's the entire setup — Nova needs no configuration of its own. On the next Nova reload it discovers every Eufy camera automatically and starts watching its `ringing`, `stranger_person_detected`, and `package_delivered`/`package_stranded`/`package_taken` sensors directly.
+
+A camera added to Eufy *after* Nova has already started needs a Nova reload (not a full HA restart) to be picked up — same as every other camera-discovery path in the integration.
 
 ### Nest cameras (only if you use Nest)
 
