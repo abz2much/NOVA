@@ -37,19 +37,27 @@ const NOVA3D = (function () {
   }
 
   // ---------- palette (Nova dark-cyan HUD) ----------
+  // Warm ember/gold palette matching Command Center's own theme tokens
+  // (--ember:#e2542f, --gold:#f4b860, --gold-pale:#ffe3ad) — this engine
+  // used to be Classic's own cyan (#00f2fe), reused as-is when Command
+  // Center's Residence tab first adopted it (v7.101.24). Retheme keeps the
+  // exact same alpha/opacity structure per state (off/on/dominant), only
+  // the hue changes, so occupancy contrast logic is untouched. "dom" (the
+  // currently-dominant/focused area) stays green — consistent with the
+  // rest of the app's own status-dot language (RUNNING/ONLINE are green).
   var C = {
-    wallF: 'rgba(22,46,66,0.34)', wallS: 'rgba(0,242,254,0.5)',
-    wallDk:'rgba(14,32,48,0.40)', wallSdk:'rgba(0,242,254,0.34)',
-    roofF: 'rgba(10,24,36,0.94)', roofS: 'rgba(0,206,247,0.5)',
-    roofDk:'rgba(6,17,27,0.96)',  roofSdk:'rgba(0,206,247,0.3)',
-    gableF:'rgba(18,38,56,0.6)',  gableS:'rgba(0,242,254,0.46)',
-    chimF: 'rgba(13,28,42,0.97)', chimS:'rgba(0,242,254,0.42)',
-    doorOff:'rgba(0,242,254,0.10)', doorOn:'rgba(0,242,254,0.30)', doorS:'rgba(0,242,254,0.6)',
+    wallF: 'rgba(42,33,25,0.34)', wallS: 'rgba(244,184,96,0.5)',
+    wallDk:'rgba(21,17,13,0.40)', wallSdk:'rgba(244,184,96,0.34)',
+    roofF: 'rgba(21,17,13,0.94)', roofS: 'rgba(226,84,47,0.5)',
+    roofDk:'rgba(15,12,9,0.96)',  roofSdk:'rgba(226,84,47,0.3)',
+    gableF:'rgba(38,30,22,0.6)',  gableS:'rgba(244,184,96,0.46)',
+    chimF: 'rgba(24,19,14,0.97)', chimS:'rgba(244,184,96,0.42)',
+    doorOff:'rgba(244,184,96,0.10)', doorOn:'rgba(244,184,96,0.30)', doorS:'rgba(244,184,96,0.6)',
     doorOpen:'rgba(255,170,40,0.32)', doorOpenS:'rgba(255,190,72,0.95)', doorOpenGlow:'rgba(255,170,40,0.42)',
-    winOff:'rgba(0,242,254,0.07)', winOn:'rgba(0,242,254,0.72)', winDom:'rgba(0,245,160,0.82)',
-    glassOff:'rgba(0,242,254,0.32)', glassOn:'rgba(120,240,255,0.92)', glassDom:'rgba(150,255,210,0.95)',
-    edge:'rgba(0,242,254,0.5)', dim:'rgba(0,242,254,0.26)', faint:'rgba(0,242,254,0.13)',
-    glowOn:'rgba(0,242,254,0.5)', glowDom:'rgba(0,245,160,0.55)'
+    winOff:'rgba(244,184,96,0.07)', winOn:'rgba(244,184,96,0.72)', winDom:'rgba(0,245,160,0.82)',
+    glassOff:'rgba(244,184,96,0.32)', glassOn:'rgba(255,227,173,0.92)', glassDom:'rgba(150,255,210,0.95)',
+    edge:'rgba(244,184,96,0.5)', dim:'rgba(244,184,96,0.26)', faint:'rgba(244,184,96,0.13)',
+    glowOn:'rgba(244,184,96,0.5)', glowDom:'rgba(0,245,160,0.55)'
   };
 
   // ---------- projection (turntable axonometric, orthographic) ----------
@@ -130,27 +138,27 @@ const NOVA3D = (function () {
     var fx = hinge === 'right' ? x1 - dx : x0 + dx;
     var fy = yy + dy;
     if (GL) GL.push({ p: [[hx,yy,z0],[fx,fy,z0],[fx,fy,z1],[hx,yy,z1]], f: C.doorOpenGlow });
-    F(L, [[x0,yy,z0],[x1,yy,z0],[x1,yy,z1],[x0,yy,z1]], 'rgba(2,8,14,0.92)', C.doorOpenS, 0.45);   // dark opening
+    F(L, [[x0,yy,z0],[x1,yy,z0],[x1,yy,z1],[x0,yy,z1]], 'rgba(9,7,5,0.92)', C.doorOpenS, 0.45);   // dark opening
     F(L, [[hx,yy,z0],[fx,fy,z0],[fx,fy,z1],[hx,yy,z1]], C.doorOpen, C.doorOpenS, 0.9, { cls: 'door door-open' }); // swung leaf
   }
   // ---------- a slanted cellar bulkhead at the base of the rear wall ----------
   function bulkhead(L, GL, x0, x1, state) {
     var open = state === 'open', yTop = D, zTop = 3.0, yBot = D + 2.6, xm = (x0 + x1) / 2;
-    F(L, [[x0,yTop,0],[x0,yTop,zTop],[x0,yBot,0]], 'rgba(8,19,29,0.92)', C.dim, 0.5);   // left cheek
-    F(L, [[x1,yTop,0],[x1,yTop,zTop],[x1,yBot,0]], 'rgba(8,19,29,0.92)', C.dim, 0.5);   // right cheek
+    F(L, [[x0,yTop,0],[x0,yTop,zTop],[x0,yBot,0]], 'rgba(15,12,9,0.92)', C.dim, 0.5);   // left cheek
+    F(L, [[x1,yTop,0],[x1,yTop,zTop],[x1,yBot,0]], 'rgba(15,12,9,0.92)', C.dim, 0.5);   // right cheek
     if (!open) {
-      F(L, [[x0,yTop,zTop],[x1,yTop,zTop],[x1,yBot,0],[x0,yBot,0]], 'rgba(11,26,38,0.95)', C.doorS, 0.8, { cls: 'door' });
+      F(L, [[x0,yTop,zTop],[x1,yTop,zTop],[x1,yBot,0],[x0,yBot,0]], 'rgba(20,16,12,0.95)', C.doorS, 0.8, { cls: 'door' });
       F(L, [[xm,yTop,zTop],[xm,yBot,0]], 'none', C.doorS, 0.4);   // center seam
     } else {
       if (GL) GL.push({ p: [[x0,yTop,zTop],[x1,yTop,zTop],[x1,yTop,zTop+3.4],[x0,yTop,zTop+3.4]], f: C.doorOpenGlow });
-      F(L, [[x0,yTop,zTop],[x1,yTop,zTop],[x1,yBot,0],[x0,yBot,0]], 'rgba(2,8,14,0.95)', C.doorOpenS, 0.5);  // hole into ground
+      F(L, [[x0,yTop,zTop],[x1,yTop,zTop],[x1,yBot,0],[x0,yBot,0]], 'rgba(9,7,5,0.95)', C.doorOpenS, 0.5);  // hole into ground
       F(L, [[x0,yTop,zTop],[x1,yTop,zTop],[x1,yTop,zTop+3.4],[x0,yTop,zTop+3.4]], C.doorOpen, C.doorOpenS, 0.85, { cls: 'door door-open' }); // raised leaves
     }
   }
 
   function dormerFront(L, GL, cx, state) {
     var w = 6, yF = 1.6, zSill = WALL + 2.2, zHead = WALL + 6.2, zPk = WALL + 8.2, yBack = 6.2;
-    var wf = 'rgba(14,30,44,0.96)', rf = 'rgba(8,19,29,0.97)', es = C.roofSdk;
+    var wf = 'rgba(24,19,14,0.96)', rf = 'rgba(15,12,9,0.97)', es = C.roofSdk;
     // side walls (triang│ following slope back into roof)
     F(L, [[cx-w/2,yF,zSill],[cx-w/2,yF,zHead],[cx-w/2,yBack,WALL+RISE*(1-(yBack)/RY)]], wf, es, 0.55);
     F(L, [[cx+w/2,yF,zSill],[cx+w/2,yF,zHead],[cx+w/2,yBack,WALL+RISE*(1-(yBack)/RY)]], wf, es, 0.55);
@@ -166,7 +174,7 @@ const NOVA3D = (function () {
   // ---------- the rear dormer with a ROUND window (the upstairs bath) ----------
   function dormerRearRound(L, GL, cx, state) {
     var w = 7, yB = D - 1.6, zSill = WALL + 2.0, zHead = WALL + 6.6, zPk = WALL + 8.4, yFwd = D - 6.2;
-    var wf = 'rgba(14,30,44,0.96)', rf = 'rgba(8,19,29,0.97)', es = C.roofSdk;
+    var wf = 'rgba(24,19,14,0.96)', rf = 'rgba(15,12,9,0.97)', es = C.roofSdk;
     var zSlope = function (yy) { return WALL + RISE * (1 - (D - yy) / RY); };
     F(L, [[cx-w/2,yB,zSill],[cx-w/2,yB,zHead],[cx-w/2,yFwd,zSlope(yFwd)]], wf, es, 0.55);
     F(L, [[cx+w/2,yB,zSill],[cx+w/2,yB,zHead],[cx+w/2,yFwd,zSlope(yFwd)]], wf, es, 0.55);
@@ -237,9 +245,9 @@ const NOVA3D = (function () {
     if (side === 'left') { x0 = XG0; x1 = XG0 - 2.2; zt = GRIDGE + 4; }   // west gable (garage end)
     else { x0 = XHE; x1 = XHE + 2.2; zt = RIDGE + 4; }                    // default: east gable
     F(L, [[x1,ya,0],[x1,yb,0],[x1,yb,zt],[x1,ya,zt]], C.chimF, C.chimS, 0.7);      // outer
-    F(L, [[x0,ya,0],[x1,ya,0],[x1,ya,zt],[x0,ya,zt]], 'rgba(8,19,29,0.97)', C.chimS, 0.6); // front side
-    F(L, [[x0,yb,0],[x1,yb,0],[x1,yb,zt],[x0,yb,zt]], 'rgba(8,19,29,0.97)', C.dim, 0.5);    // back side
-    F(L, [[x0,ya,zt],[x1,ya,zt],[x1,yb,zt],[x0,yb,zt]], 'rgba(0,242,254,0.08)', C.chimS, 0.5); // cap
+    F(L, [[x0,ya,0],[x1,ya,0],[x1,ya,zt],[x0,ya,zt]], 'rgba(15,12,9,0.97)', C.chimS, 0.6); // front side
+    F(L, [[x0,yb,0],[x1,yb,0],[x1,yb,zt],[x0,yb,zt]], 'rgba(15,12,9,0.97)', C.dim, 0.5);    // back side
+    F(L, [[x0,ya,zt],[x1,ya,zt],[x1,yb,zt],[x0,yb,zt]], 'rgba(244,184,96,0.08)', C.chimS, 0.5); // cap
   }
 
   // ---------- interior rooms (labels/layout from Nova editor; sizes from the plan) ----------
@@ -274,10 +282,10 @@ const NOVA3D = (function () {
     var mm = state === 'mmwave';
     // dom → mint; mmwave (active sensor) → punchy aqua-green, brighter than a
     // bare area flag so live detection reads at a glance; plain occ → cyan
-    var ff = state === 'dom' ? 'rgba(0,245,160,0.15)' : mm ? 'rgba(30,255,180,0.22)' : occ ? 'rgba(0,242,254,0.13)' : 'rgba(0,242,254,0.035)';
-    var ss = state === 'dom' ? 'rgba(130,255,205,0.9)' : mm ? 'rgba(70,255,195,1)' : occ ? 'rgba(0,242,254,0.62)' : 'rgba(0,242,254,0.24)';
+    var ff = state === 'dom' ? 'rgba(0,245,160,0.15)' : mm ? 'rgba(30,255,180,0.22)' : occ ? 'rgba(244,184,96,0.13)' : 'rgba(244,184,96,0.035)';
+    var ss = state === 'dom' ? 'rgba(130,255,205,0.9)' : mm ? 'rgba(70,255,195,1)' : occ ? 'rgba(244,184,96,0.62)' : 'rgba(244,184,96,0.24)';
     var sw = mm ? 1.3 : occ ? 1.0 : 0.6;
-    var wf = state === 'dom' ? 'rgba(0,245,160,0.06)' : mm ? 'rgba(20,255,170,0.1)' : occ ? 'rgba(0,242,254,0.05)' : 'rgba(0,242,254,0.018)';
+    var wf = state === 'dom' ? 'rgba(0,245,160,0.06)' : mm ? 'rgba(20,255,170,0.1)' : occ ? 'rgba(244,184,96,0.05)' : 'rgba(244,184,96,0.018)';
     F(L, [[x0,y0,z0],[x1,y0,z0],[x1,y1,z0],[x0,y1,z0]], ff, ss, sw * 0.7);            // floor
     F(L, [[x0,y0,z0],[x1,y0,z0],[x1,y0,z1],[x0,y0,z1]], wf, ss, sw * 0.5);
     F(L, [[x0,y1,z0],[x1,y1,z0],[x1,y1,z1],[x0,y1,z1]], wf, ss, sw * 0.5);
@@ -291,10 +299,10 @@ const NOVA3D = (function () {
   // quad per edge. Same occupancy styling as roomBox.
   function roomPrism(L, LBL, pts, z0, z1, name, state) {
     var occ = state !== 'off', mm = state === 'mmwave';
-    var ff = state === 'dom' ? 'rgba(0,245,160,0.15)' : mm ? 'rgba(30,255,180,0.22)' : occ ? 'rgba(0,242,254,0.13)' : 'rgba(0,242,254,0.035)';
-    var ss = state === 'dom' ? 'rgba(130,255,205,0.9)' : mm ? 'rgba(70,255,195,1)' : occ ? 'rgba(0,242,254,0.62)' : 'rgba(0,242,254,0.24)';
+    var ff = state === 'dom' ? 'rgba(0,245,160,0.15)' : mm ? 'rgba(30,255,180,0.22)' : occ ? 'rgba(244,184,96,0.13)' : 'rgba(244,184,96,0.035)';
+    var ss = state === 'dom' ? 'rgba(130,255,205,0.9)' : mm ? 'rgba(70,255,195,1)' : occ ? 'rgba(244,184,96,0.62)' : 'rgba(244,184,96,0.24)';
     var sw = mm ? 1.3 : occ ? 1.0 : 0.6;
-    var wf = state === 'dom' ? 'rgba(0,245,160,0.06)' : mm ? 'rgba(20,255,170,0.1)' : occ ? 'rgba(0,242,254,0.05)' : 'rgba(0,242,254,0.018)';
+    var wf = state === 'dom' ? 'rgba(0,245,160,0.06)' : mm ? 'rgba(20,255,170,0.1)' : occ ? 'rgba(244,184,96,0.05)' : 'rgba(244,184,96,0.018)';
     F(L, pts.map(function (p) { return [p[0], p[1], z0]; }), ff, ss, sw * 0.7);   // floor polygon
     for (var i = 0; i < pts.length; i++) {                                        // walls: one quad per edge
       var a = pts[i], b = pts[(i + 1) % pts.length];
@@ -314,14 +322,14 @@ const NOVA3D = (function () {
       var fy = y0 + w * Math.cos(ang), fx = x + w * Math.sin(ang);   // swing into the kitchen (+x)
       F(L, [[x,y0,z0],[fx,fy,z0],[fx,fy,z1],[x,y0,z1]], C.doorOpen, C.doorOpenS, 0.8, { cls: 'door door-open' });
     } else {
-      F(L, [[x,y0,z0],[x,y1,z0],[x,y1,z1],[x,y0,z1]], 'rgba(0,242,254,0.14)', C.doorS, 0.7, { cls: 'door' });
+      F(L, [[x,y0,z0],[x,y1,z0],[x,y1,z1],[x,y0,z1]], 'rgba(244,184,96,0.14)', C.doorS, 0.7, { cls: 'door' });
     }
   }
   // interior door on a y=const wall (e.g. the basement door in the rear foundation wall)
   function intDoorY(L, y, x0, x1, z0, z1, faceOut, hinge, state) {
     var n = faceOut == null ? -0.06 : faceOut, yy = y + n;
     if (state !== 'open') {
-      F(L, [[x0,yy,z0],[x1,yy,z0],[x1,yy,z1],[x0,yy,z1]], 'rgba(0,242,254,0.14)', C.doorS, 0.7, { cls: 'door' });
+      F(L, [[x0,yy,z0],[x1,yy,z0],[x1,yy,z1],[x0,yy,z1]], 'rgba(244,184,96,0.14)', C.doorS, 0.7, { cls: 'door' });
       return;
     }
     var w = x1 - x0, ang = 58 * Math.PI / 180, dir = n >= 0 ? 1 : -1;
@@ -343,14 +351,14 @@ const NOVA3D = (function () {
   }
 
   function buildContext(L, floor) {
-    var fe = 'rgba(0,242,254,0.13)';
+    var fe = 'rgba(244,184,96,0.13)';
     F(L, [[XG0,0,0],[XHE,0,0],[XHE,D,0],[XG0,D,0]], 'none', fe, 0.5);   // footprint
     F(L, [[XGH,0,0],[XGH,D,0]], 'none', fe, 0.4);                       // garage/house split
     if (floor === '2f') {
-      var rw = 'rgba(0,242,254,0.10)';
+      var rw = 'rgba(244,184,96,0.10)';
       F(L, [[XGH,-OVH,WALL],[XHE,-OVH,WALL],[XHE,RY,RIDGE],[XGH,RY,RIDGE]], 'none', rw, 0.4);
       F(L, [[XGH,D+OVH,WALL],[XHE,D+OVH,WALL],[XHE,RY,RIDGE],[XGH,RY,RIDGE]], 'none', rw, 0.4);
-      F(L, [[XGH,RY,RIDGE],[XHE,RY,RIDGE]], 'none', 'rgba(0,242,254,0.16)', 0.5);
+      F(L, [[XGH,RY,RIDGE],[XHE,RY,RIDGE]], 'none', 'rgba(244,184,96,0.16)', 0.5);
     }
   }
 
@@ -583,10 +591,10 @@ const NOVA3D = (function () {
       var yFace = edge + sgn * 1.4, yBack = edge + sgn * proj;
       var zBack = eave + Math.abs(yBack - edge) * slope;
       var zSill = eave + 0.9, zHead = zSill + 3.4, zPk = zHead + 1.5, out = sgn * -0.06;
-      F(L, [[cx-dw/2,yFace,zSill],[cx+dw/2,yFace,zSill],[cx+dw/2,yFace,zHead],[cx-dw/2,yFace,zHead]], 'rgba(14,30,44,0.97)', C.wallS, 0.7);
-      F(L, [[cx-dw/2,yFace,zHead],[cx+dw/2,yFace,zHead],[cx,yFace,zPk]], 'rgba(14,30,44,0.97)', C.wallS, 0.7);
-      F(L, [[cx-dw/2,yFace,zSill],[cx-dw/2,yFace,zHead],[cx-dw/2,yBack,zBack]], 'rgba(9,22,34,0.94)', C.roofSdk, 0.55);   // cheek L
-      F(L, [[cx+dw/2,yFace,zSill],[cx+dw/2,yFace,zHead],[cx+dw/2,yBack,zBack]], 'rgba(9,22,34,0.94)', C.roofSdk, 0.55);   // cheek R
+      F(L, [[cx-dw/2,yFace,zSill],[cx+dw/2,yFace,zSill],[cx+dw/2,yFace,zHead],[cx-dw/2,yFace,zHead]], 'rgba(24,19,14,0.97)', C.wallS, 0.7);
+      F(L, [[cx-dw/2,yFace,zHead],[cx+dw/2,yFace,zHead],[cx,yFace,zPk]], 'rgba(24,19,14,0.97)', C.wallS, 0.7);
+      F(L, [[cx-dw/2,yFace,zSill],[cx-dw/2,yFace,zHead],[cx-dw/2,yBack,zBack]], 'rgba(17,13,10,0.94)', C.roofSdk, 0.55);   // cheek L
+      F(L, [[cx+dw/2,yFace,zSill],[cx+dw/2,yFace,zHead],[cx+dw/2,yBack,zBack]], 'rgba(17,13,10,0.94)', C.roofSdk, 0.55);   // cheek R
       F(L, [[cx-dw/2,yFace,zHead],[cx,yFace,zPk],[cx,yBack,zBack],[cx-dw/2,yBack,zBack]], C.roofF, C.roofS, 0.6);         // gable slope L
       F(L, [[cx+dw/2,yFace,zHead],[cx,yFace,zPk],[cx,yBack,zBack],[cx+dw/2,yBack,zBack]], C.roofF, C.roofS, 0.6);         // gable slope R
       var _dst = (states && states[i] != null) ? states[i] : wSt;
@@ -620,9 +628,9 @@ const NOVA3D = (function () {
   function chimneyAt(L, xEdge, yc, zTop, outward) {
     var ya = yc - 1.8, yb = yc + 1.8, x0 = xEdge, x1 = xEdge + outward * 2.2;
     F(L, [[x1,ya,0],[x1,yb,0],[x1,yb,zTop],[x1,ya,zTop]], C.chimF, C.chimS, 0.7);
-    F(L, [[x0,ya,0],[x1,ya,0],[x1,ya,zTop],[x0,ya,zTop]], 'rgba(8,19,29,0.97)', C.chimS, 0.6);
-    F(L, [[x0,yb,0],[x1,yb,0],[x1,yb,zTop],[x0,yb,zTop]], 'rgba(8,19,29,0.97)', C.dim, 0.5);
-    F(L, [[x0,ya,zTop],[x1,ya,zTop],[x1,yb,zTop],[x0,yb,zTop]], 'rgba(0,242,254,0.08)', C.chimS, 0.5);
+    F(L, [[x0,ya,0],[x1,ya,0],[x1,ya,zTop],[x0,ya,zTop]], 'rgba(15,12,9,0.97)', C.chimS, 0.6);
+    F(L, [[x0,yb,0],[x1,yb,0],[x1,yb,zTop],[x0,yb,zTop]], 'rgba(15,12,9,0.97)', C.dim, 0.5);
+    F(L, [[x0,ya,zTop],[x1,ya,zTop],[x1,yb,zTop],[x0,yb,zTop]], 'rgba(244,184,96,0.08)', C.chimS, 0.5);
   }
 
   // A Bilco-style bulkhead cellar door: a sloped wedge against the wall, high at
@@ -630,7 +638,7 @@ const NOVA3D = (function () {
   function bulkheadDoor(L, GL, wall, cx, cy, w, open) {
     var depth = Math.max(w, 5.5), zHigh = 3.2, zLow = 0.2;   // ~28\u00b0 slope, low enough to clear windows
     var f = open ? C.doorOpen : C.doorOff, s = open ? C.doorOpenS : C.doorS, cls = open ? 'cellar-door door-open' : 'cellar-door';
-    var dk = 'rgba(9,22,34,0.94)';
+    var dk = 'rgba(17,13,10,0.94)';
     if (wall === 'front' || wall === 'back') {
       var sgn = wall === 'front' ? -1 : 1, yw = cy, yo = cy + sgn * depth;
       F(L, [[cx-w/2,yw,zHigh],[cx,yw,zHigh],[cx,yo,zLow],[cx-w/2,yo,zLow]], f, s, 0.9, { cls: cls });      // left panel
@@ -655,7 +663,7 @@ const NOVA3D = (function () {
   // between the two rooms the wall separates (v7.101.28).
   function casedOnWall(L, GL, wall, cx, cy, w, z0, z1) {
     var horiz = (wall === 'front' || wall === 'back');
-    var f = 'rgba(70,120,150,0.12)', s = 'rgba(120,185,215,0.8)';
+    var f = 'rgba(120,100,70,0.12)', s = 'rgba(210,185,140,0.8)';
     if (horiz) {
       var yy = cy + (wall === 'front' ? -0.06 : 0.06);
       F(L, [[cx-w/2,yy,z0],[cx+w/2,yy,z0],[cx+w/2,yy,z1],[cx-w/2,yy,z1]], f, s, 0.7, { cls: 'cased' });
@@ -1016,7 +1024,7 @@ const NOVA3D = (function () {
 
     var body = '';
     body += '<defs><filter id="g3" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3"/></filter>'
-         + '<radialGradient id="bg3" cx="50%" cy="40%" r="65%"><stop offset="0%" stop-color="rgba(0,60,90,0.20)"/><stop offset="100%" stop-color="rgba(0,0,0,0)"/></radialGradient>'
+         + '<radialGradient id="bg3" cx="50%" cy="40%" r="65%"><stop offset="0%" stop-color="rgba(90,45,20,0.20)"/><stop offset="100%" stop-color="rgba(0,0,0,0)"/></radialGradient>'
          + '<radialGradient id="sh3" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="rgba(0,0,0,0.55)"/><stop offset="100%" stop-color="rgba(0,0,0,0)"/></radialGradient></defs>';
     body += '<rect x="' + X0.toFixed(1) + '" y="' + Y0.toFixed(1) + '" width="' + W.toFixed(1) + '" height="' + H.toFixed(1) + '" fill="url(#bg3)"/>';
     // ground shadow
@@ -1034,11 +1042,11 @@ const NOVA3D = (function () {
     for (i = 0; i < labels.length; i++) {
       var lb = labels[i], sp = project([lb.x, lb.y, lb.z], theta);
       if (lb.dot) {
-        var dc = lb.st === 'dom' ? '#7dffcd' : lb.st === 'mmwave' ? '#5affbe' : '#7af0ff';
+        var dc = lb.st === 'dom' ? '#7dffcd' : lb.st === 'mmwave' ? '#5affbe' : '#f4b860';
         body += '<circle cx="' + sp[0].toFixed(1) + '" cy="' + sp[1].toFixed(1) + '" r="2.4" fill="' + dc + '">'
               + '<animate attributeName="opacity" values="0.35;1;0.35" dur="2s" repeatCount="indefinite"/></circle>';
       } else {
-        var tc = lb.st === 'dom' ? '#9effd0' : lb.st === 'mmwave' ? '#8fffd4' : lb.st === 'on' ? '#7af0ff' : 'rgba(120,200,225,0.5)';
+        var tc = lb.st === 'dom' ? '#9effd0' : lb.st === 'mmwave' ? '#8fffd4' : lb.st === 'on' ? '#f4b860' : 'rgba(244,184,96,0.5)';
         var fs = lb.small ? 6 : (lb.big ? 9 : 7.5);
         body += '<text x="' + sp[0].toFixed(1) + '" y="' + sp[1].toFixed(1) + '" text-anchor="middle" dominant-baseline="middle"'
               + ' font-family="JetBrains Mono, ui-monospace, monospace" font-size="' + fs + '" font-weight="600" letter-spacing="0.8"'
@@ -1072,7 +1080,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v7.101.34
+ * v7.101.35
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1137,7 +1145,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v7.101.34 ",
+      console.log("%c Nova Panel %c v7.101.35 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -6292,6 +6300,7 @@ class NovaPanel extends HTMLElement {
         font-family:var(--font-body);font-size:12px;padding:6px 9px;border-radius:8px}
       input.cfg-field:hover,input.cfg-field:focus,select.cfg-field:hover,select.cfg-field:focus{border-color:var(--gold);outline:none}
       .cfg-num{width:84px;min-width:0;text-align:right}
+      .door-map-sel-new{flex:1;min-width:0;max-width:220px}
       .mode-grid{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
       .mode-chip{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.04em;
         padding:6px 12px;border-radius:8px;border:1px solid var(--line-soft);background:var(--surface-2);color:var(--ink-dim);cursor:pointer}
