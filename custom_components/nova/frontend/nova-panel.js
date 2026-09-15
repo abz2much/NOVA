@@ -1411,17 +1411,19 @@ class NovaPanel extends HTMLElement {
     const filterChips = NovaPanel.LOG_FILTERS.map(f =>
       `<button class="mode-chip new-log-filter${(this._logFilter || "all") === f ? " mode-chip-on" : ""}" data-filter="${f}">${f.toUpperCase()}</button>`).join("");
     const view = this._logView || "system";
+    const title = view === "decisions" ? "Decisions" : view === "spoken_history" ? "Spoken History" : "System Log";
     return `
         <div class="panel">
           <div class="panel-head">
-            <div class="panel-title">${view === "decisions" ? "Decisions" : "System Log"}</div>
+            <div class="panel-title">${title}</div>
             <div class="panel-meta">Nova internal</div>
           </div>
           <div class="mode-grid">
             <button class="mode-chip new-logview${view === "system" ? " mode-chip-on" : ""}" data-view="system">SYSTEM LOG</button>
             <button class="mode-chip new-logview${view === "decisions" ? " mode-chip-on" : ""}" data-view="decisions">DECISIONS</button>
+            <button class="mode-chip new-logview${view === "spoken_history" ? " mode-chip-on" : ""}" data-view="spoken_history">SPOKEN HISTORY</button>
           </div>
-          ${view === "decisions" ? this._htmlDecisionsView() : `
+          ${view === "decisions" ? this._htmlDecisionsView() : view === "spoken_history" ? this._htmlSpokenHistoryView() : `
           <div class="cfg-row">
             <input id="newLogSearch" class="cfg-field" style="flex:1" type="text" placeholder="search…" autocomplete="off" value="${this._esc(this._logSearch || "")}">
           </div>
@@ -1432,6 +1434,88 @@ class NovaPanel extends HTMLElement {
           </div>`}
         </div>
     `;
+  }
+
+  // ─── Spoken History (v7.104.0) ──────────────────────────────────────────
+  // The last things Nova actually sent to a speaker — welcome-home,
+  // reminders, alerts, briefings, manual tests, confirmed Assist replies,
+  // and repeats. Text only, bounded to the last 100, newest first. Always
+  // renders its heading; a distinct empty vs. error state, same pattern as
+  // Provider Activity/Installed Automations.
+
+  _spokenSourceLabel(source) {
+    return {
+      welcome: "Welcome", reminder: "Reminder", alert: "Alert",
+      briefing: "Briefing", camera: "Camera", manual: "Manual",
+      reply: "Reply", repeat: "Repeat", routine: "Routine", scene: "Scene",
+      confirm: "Confirmation", followup: "Follow-up",
+    }[source] || (source ? source[0].toUpperCase() + source.slice(1) : "Other");
+  }
+
+  _speakerLabel(eid) {
+    const st = this._hass?.states?.[eid];
+    return (st && st.attributes && st.attributes.friendly_name) || eid;
+  }
+
+  _htmlSpokenHistoryView() {
+    // Static shell only — _fetchSpokenHistory()/_renderSpokenHistoryRows()
+    // update #spokenHistoryEntries directly, the same way _fetchDecisions()/
+    // _renderDecisionRows() do, so a fetch never has to go through a full
+    // _render() (which would re-trigger _wire() and re-fetch, looping).
+    return `<div id="spokenHistoryEntries"><div class="stub-body">Loading…</div></div>`;
+  }
+
+  async _fetchSpokenHistory() {
+    if (!this._hass) return;
+    try {
+      const result = await this._hass.callWS({ type: "nova/get_spoken_history" });
+      this._spokenHistory = result.entries || [];
+    } catch (_) { this._spokenHistory = null; }
+    this._renderSpokenHistoryRows();
+  }
+
+  _renderSpokenHistoryRows() {
+    const container = this.shadowRoot?.getElementById("spokenHistoryEntries");
+    if (!container) return;
+    const entries = this._spokenHistory;
+    if (entries === null) {
+      container.innerHTML = `<div class="stub-body">Couldn't load spoken history.</div>`;
+      return;
+    }
+    if (!entries || !entries.length) {
+      container.innerHTML = `<div class="stub-body">No spoken messages recorded yet.</div>`;
+      return;
+    }
+    container.innerHTML = entries.map(e => {
+      const when = e.timestamp ? new Date(e.timestamp * 1000).toLocaleString() : "";
+      const speakerNames = (e.speakers || []).map(s => this._speakerLabel(s)).join(", ") || "—";
+      return `
+        <div class="cfg-row">
+          <label>${this._esc(this._spokenSourceLabel(e.source))} · ${this._esc(when)}</label>
+          <span class="toggle-desc">${this._esc((e.delivery_state || "sent").toUpperCase())}</span>
+        </div>
+        <div class="stub-body" style="margin:-6px 0 4px">${this._esc(e.text)}</div>
+        <div class="cfg-row">
+          <span class="toggle-desc">${this._esc(speakerNames)}</span>
+          <button class="mode-chip new-spoken-repeat" data-spoken-id="${e.id}">REPEAT</button>
+        </div>`;
+    }).join("");
+    container.querySelectorAll(".new-spoken-repeat").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const id = parseInt(btn.getAttribute("data-spoken-id"), 10);
+        if (!isNaN(id)) this._repeatSpoken(id);
+      });
+    });
+  }
+
+  async _repeatSpoken(spokenId) {
+    if (!this._hass) return;
+    try {
+      await this._hass.callWS({ type: "nova/repeat_spoken", spoken_id: spokenId });
+      this._fetchSpokenHistory();
+    } catch (err) {
+      console.error("Nova: repeat spoken failed", err);
+    }
   }
 
   // ─── Decisions (Phase 1: decision explanations + feedback) ─────────────
@@ -1684,6 +1768,7 @@ class NovaPanel extends HTMLElement {
       if (loadMoreBtn) loadMoreBtn.addEventListener("click", () => this._fetchDecisions(false));
       return;
     }
+    if ((this._logView || "system") === "spoken_history") return;
     root.querySelectorAll(".new-log-filter").forEach(btn => {
       btn.addEventListener("click", () => {
         this._logFilter = btn.getAttribute("data-filter");
@@ -4649,7 +4734,9 @@ class NovaPanel extends HTMLElement {
     if (this._currentTab === "settings") this._wireSettings();
     if (this._currentTab === "logs") {
       this._wireLogs();
-      if ((this._logView || "system") === "decisions") this._fetchDecisions();
+      const logView = this._logView || "system";
+      if (logView === "decisions") this._fetchDecisions();
+      else if (logView === "spoken_history") this._fetchSpokenHistory();
       else this._fetchDebugLog();
     }
     if (this._currentTab === "memory") { this._wireMemory(); this._fetchKnowledge(); this._fetchPersonRoutines(); }

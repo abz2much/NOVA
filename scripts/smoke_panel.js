@@ -1506,6 +1506,60 @@ setTimeout(async () => {
     && window.__xssFiredNew2 === false]);
   hass.callWS = originalCallWS;
 
+  // ── Spoken History (v7.104.0) — beside System Log and Decisions ──
+  const spokenViewBtn = Array.from(sRoot.querySelectorAll(".new-logview")).find(b => b.getAttribute("data-view") === "spoken_history");
+  spokenViewBtn.click();
+  await new Promise(r => setTimeout(r, 20));
+  sRoot = elNew.shadowRoot;
+  checks.push(
+    ["spoken history: heading always renders",
+      /Spoken History/.test(sRoot.querySelector(".panel-title")?.textContent || "")],
+    ["spoken history: empty result shows a clear empty state",
+      /No spoken messages recorded yet\./.test(sRoot.getElementById("spokenHistoryEntries")?.textContent || "")],
+  );
+
+  const spokenCallWS = hass.callWS;
+  let repeatCalls = [];
+  hass.callWS = async (m) => {
+    if (m.type === "nova/get_spoken_history") return { entries: [
+      { id: 5, timestamp: 1700000000, text: "Welcome home, sir.", source: "welcome",
+        speakers: ["binary_sensor.mailbox"], delivery_state: "sent", repeat_of_id: null },
+      { id: 4, timestamp: 1699990000, text: "Reminder: take out the bins.", source: "reminder",
+        speakers: ["media_player.gone"], delivery_state: "sent", repeat_of_id: null },
+    ] };
+    if (m.type === "nova/repeat_spoken") { repeatCalls.push(m.spoken_id); return { ok: true, spoken: "Welcome home, sir." }; }
+    return spokenCallWS(m);
+  };
+  await elNew._fetchSpokenHistory();
+  sRoot = elNew.shadowRoot;
+  const spokenRows = sRoot.querySelectorAll("#spokenHistoryEntries .cfg-row");
+  checks.push(
+    ["spoken history: renders newest-first with source, text, delivery label and resolved/fallback speaker names",
+      (() => {
+        const body = sRoot.getElementById("spokenHistoryEntries");
+        const text = body?.textContent || "";
+        return /Welcome/.test(text) && text.indexOf("Welcome") < text.indexOf("Reminder")
+          && /Welcome home, sir\./.test(text) && /Reminder: take out the bins\./.test(text)
+          && /SENT/.test(text) && /Mailbox/.test(text)          // resolved friendly_name
+          && /media_player\.gone/.test(text);                    // entity-id fallback when unresolved
+      })()],
+    ["spoken history: each entry has a Repeat button", sRoot.querySelectorAll(".new-spoken-repeat").length === 2],
+  );
+  sRoot.querySelector('.new-spoken-repeat[data-spoken-id="5"]').click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["spoken history: Repeat button calls nova/repeat_spoken with spoken_id (never id)",
+    repeatCalls.length === 1 && repeatCalls[0] === 5]);
+
+  hass.callWS = async (m) => {
+    if (m.type === "nova/get_spoken_history") throw new Error("boom");
+    return spokenCallWS(m);
+  };
+  await elNew._fetchSpokenHistory();
+  sRoot = elNew.shadowRoot;
+  checks.push(["spoken history: distinct error state when the request fails",
+    /Couldn't load spoken history\./.test(sRoot.getElementById("spokenHistoryEntries")?.textContent || "")]);
+  hass.callWS = spokenCallWS;
+
   // ── New look: Memory tab (ported from Classic's own Memory tab) ──
   // Force an empty pending-facts queue explicitly, rather than asserting
   // against the fixture's original seed fact, so this section's outcome

@@ -31,6 +31,8 @@ class _Hass:
         self.services = self
     def async_all(self, domain=None):
         return list(self._players.values())
+    async def async_add_executor_job(self, func, *args):
+        return func(*args)
     class _S: pass
     @property
     def states(self):
@@ -356,3 +358,94 @@ def test_drop_display_targets_keeps_plain_speakers(routing, load):
     kept = routing.drop_display_targets(
         hass, ["media_player.kitchen", "media_player.den"], "unit-test")
     assert kept == ["media_player.kitchen", "media_player.den"]
+
+
+# ── Spoken History recording hook (v7.104.0) ────────────────────────────────
+# async_announce is the ONLY recorder for anything routed through it — these
+# prove it records exactly once on a real delivery, never on total failure,
+# and that a broken history store can't turn a delivered announcement into a
+# failed one. spoken_history.py's own functions (retention, newest-first,
+# hydrate, the in-memory mirror) are tested directly in
+# test_spoken_history.py; the local "repeat that" command and its
+# repeat_of_id threading are tested in test_local_engine.py.
+
+@pytest.fixture
+def sh(load):
+    # tts_helper's `from . import spoken_history` (a local import inside
+    # async_announce) resolves through the same sys.modules cache `load`
+    # populates, so loading it here makes tts.async_announce see this exact
+    # module — including the tmp-path db_path override tests below apply.
+    mod = load("spoken_history")
+    mod._last = None
+    return mod
+
+
+async def test_successful_announce_is_recorded_exactly_once(tts, sh, tmp_path, monkeypatch):
+    monkeypatch.setattr(sh, "_DEFAULT_DB", str(tmp_path / "conversations.db"))
+    hass = _Hass({"media_player.a": _State("media_player.a", "idle", volume_level=0.5)})
+    ok = await tts.async_announce(hass, "Welcome home, sir.", "tts.piper",
+                                  ["media_player.a"], context="routine")
+    assert ok is True
+    entries = sh.list_recent()
+    assert len(entries) == 1
+    assert entries[0]["text"] == "Welcome home, sir."
+    assert entries[0]["source"] == "routine"
+    assert entries[0]["speakers"] == ["media_player.a"]
+    assert entries[0]["delivery_state"] == "sent"
+
+
+async def test_failed_announce_is_never_recorded(tts, sh, tmp_path, monkeypatch):
+    monkeypatch.setattr(sh, "_DEFAULT_DB", str(tmp_path / "conversations.db"))
+    hass = _Hass({"media_player.a": _State("media_player.a", "idle")}, fail_on={"media_player.a"})
+    ok = await tts.async_announce(hass, "hello", "tts.piper", ["media_player.a"], context="reminder")
+    assert ok is False
+    assert sh.list_recent() == []
+
+
+async def test_only_the_delivered_subset_is_recorded_as_speakers(tts, sh, tmp_path, monkeypatch):
+    """One bad speaker in a broadcast must not appear in the recorded
+    'sent' speaker list — only the ones Home Assistant actually accepted."""
+    monkeypatch.setattr(sh, "_DEFAULT_DB", str(tmp_path / "conversations.db"))
+    hass = _Hass({
+        "media_player.dead": _State("media_player.dead", "idle", volume_level=0.5),
+        "media_player.good": _State("media_player.good", "idle", volume_level=0.5),
+    }, fail_on={"media_player.dead"})
+    ok = await tts.async_announce(hass, "briefing text", "tts.piper",
+                                  ["media_player.dead", "media_player.good"], context="briefing")
+    assert ok is True
+    entries = sh.list_recent()
+    assert len(entries) == 1
+    assert entries[0]["speakers"] == ["media_player.good"]
+
+
+async def test_chat_context_is_never_recorded(tts, sh, tmp_path, monkeypatch):
+    """The default/unlabeled context must never create a history row — only
+    Nova's own explicitly-tagged announcements should ever appear."""
+    monkeypatch.setattr(sh, "_DEFAULT_DB", str(tmp_path / "conversations.db"))
+    hass = _Hass({"media_player.a": _State("media_player.a", "idle", volume_level=0.5)})
+    ok = await tts.async_announce(hass, "hello", "tts.piper", ["media_player.a"])  # context defaults to "chat"
+    assert ok is True
+    assert sh.list_recent() == []
+
+
+async def test_a_broken_history_store_never_turns_delivered_speech_into_failed(tts, sh, monkeypatch):
+    """Recording failure must never break speech: point spoken_history at an
+    unwritable path and confirm async_announce still reports success."""
+    monkeypatch.setattr(sh, "_connect", lambda _db: (_ for _ in ()).throw(RuntimeError("disk full")))
+    hass = _Hass({"media_player.a": _State("media_player.a", "idle", volume_level=0.5)})
+    ok = await tts.async_announce(hass, "hello", "tts.piper", ["media_player.a"], context="reminder")
+    assert ok is True  # the announcement itself must still be reported as delivered
+
+
+async def test_repeat_of_id_is_threaded_through_to_spoken_history(tts, sh, tmp_path, monkeypatch):
+    monkeypatch.setattr(sh, "_DEFAULT_DB", str(tmp_path / "conversations.db"))
+    hass = _Hass({"media_player.a": _State("media_player.a", "idle", volume_level=0.5)})
+    original_id = sh.record("hello", "reminder", ["media_player.a"])
+    ok = await tts.async_announce(hass, "hello", "tts.piper", ["media_player.a"],
+                                  context="repeat", repeat_of_id=original_id)
+    assert ok is True
+    entries = sh.list_recent()
+    assert len(entries) == 2
+    repeat_entry = entries[0]  # newest first
+    assert repeat_entry["source"] == "repeat"
+    assert repeat_entry["repeat_of_id"] == original_id

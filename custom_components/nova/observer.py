@@ -805,7 +805,15 @@ async def _process_event(event: Event) -> None:
             return
 
         # Actually speak
-        await _speak(message, targets=targets)
+        spoken_to = await _speak(message, targets=targets)
+        if spoken_to:
+            try:
+                from . import spoken_history
+                await _STATE.hass.async_add_executor_job(
+                    spoken_history.record, message, "alert", spoken_to, None,
+                )
+            except Exception:
+                pass  # recording must never turn a delivered announcement into a failed one
 
         output_gate.record_announcement(
             entity_id=entity_id, category=category,
@@ -867,8 +875,11 @@ def _get_announcement_speakers() -> list[str] | None:
 
 # ─── Speaking + notification ────────────────────────────────────────────────
 
-async def _speak(message: str, *, targets: list[str]) -> None:
-    """Call tts.speak for each target using configured TTS engine."""
+async def _speak(message: str, *, targets: list[str]) -> list[str]:
+    """Call tts.speak for each target using configured TTS engine. Returns
+    the targets Home Assistant actually accepted the call for — used only
+    to decide whether to record Spoken History; existing routing/error
+    handling is unchanged."""
     hass = _STATE.hass
     # Final safety net: never speak through a TV/movie player.
     try:
@@ -877,7 +888,7 @@ async def _speak(message: str, *, targets: list[str]) -> None:
     except Exception:
         pass
     if not targets:
-        return
+        return []
     _LOGGER.info("Observer speaking → %s: %s", targets, message)
 
     # Resolve TTS entity from config (same as the rest of Nova)
@@ -896,6 +907,7 @@ async def _speak(message: str, *, targets: list[str]) -> None:
     except Exception as exc:
         _LOGGER.debug("Observer TTS resolve fallback to tts.piper: %s", exc)
 
+    succeeded = []
     for target in targets:
         try:
             await hass.services.async_call(
@@ -908,8 +920,10 @@ async def _speak(message: str, *, targets: list[str]) -> None:
                 },
                 blocking=False,
             )
+            succeeded.append(target)
         except Exception as exc:
             _LOGGER.warning("tts.speak to %s failed: %s", target, exc)
+    return succeeded
 
 
 async def _send_notification(message: str, *, urgency: str) -> None:

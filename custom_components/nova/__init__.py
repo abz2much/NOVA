@@ -136,6 +136,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # hot paths that read them (observer tick, panel data, intrusion log) don't
     # trip Home Assistant's blocking-I/O detector on first access.
     await hass.async_add_executor_job(_prewarm_persisted_state)
+
+    # Spoken History (v7.104.0): point the store at this instance's own
+    # config directory, then load the most recent entry into memory so a
+    # voice "repeat that" works right after a restart without Nova needing
+    # to speak something new first. Must fail open — a history-database
+    # problem can never be allowed to block Nova from loading at all.
+    try:
+        from . import spoken_history
+        spoken_history.configure(hass)
+        await hass.async_add_executor_job(spoken_history.hydrate)
+    except Exception as exc:
+        _LOGGER.warning("Nova: spoken history hydrate failed (non-fatal): %s", exc)
     api_key           = _eff.get(CONF_API_KEY, "") or entry.data.get(CONF_API_KEY, "")
     llm_provider_name = _eff.get("llm_provider", "groq")
     llm_model         = _eff.get("model", "openai/gpt-oss-120b")

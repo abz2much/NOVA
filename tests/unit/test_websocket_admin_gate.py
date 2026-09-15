@@ -62,6 +62,8 @@ ADMIN_GATED_TYPES = [
     "list_automation_trials",
     "automation_trial_feedback",
     "get_provider_activity",
+    "get_spoken_history",
+    "repeat_spoken",
 ]
 
 

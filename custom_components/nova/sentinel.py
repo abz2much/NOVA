@@ -400,7 +400,7 @@ class NovaSentinel:
             )
         except Exception:
             pass
-        await async_announce(self.hass, text, self._tts_entity(), self._speakers())
+        await async_announce(self.hass, text, self._tts_entity(), self._speakers(), context="sentinel")
 
         # v5.6.5: Also send phone push notification for sentinel alerts
         try:

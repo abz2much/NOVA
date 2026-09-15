@@ -86,6 +86,8 @@ def async_register(hass: HomeAssistant) -> None:
         websocket_api.async_register_command(hass, ws_diagnostics)
         websocket_api.async_register_command(hass, ws_get_setup_health)
         websocket_api.async_register_command(hass, ws_get_provider_activity)
+        websocket_api.async_register_command(hass, ws_get_spoken_history)
+        websocket_api.async_register_command(hass, ws_repeat_spoken)
         websocket_api.async_register_command(hass, ws_voice_confirm_test)
         websocket_api.async_register_command(hass, ws_intrusion)
         websocket_api.async_register_command(hass, ws_mode)
@@ -2965,6 +2967,90 @@ async def ws_get_provider_activity(
     except Exception as exc:
         _LOGGER.exception("ws_get_provider_activity failed: %s", exc)
         connection.send_error(msg["id"], "get_provider_activity_failed", str(exc))
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "nova/get_spoken_history",
+})
+@websocket_api.async_response
+async def ws_get_spoken_history(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict,
+) -> None:
+    """Spoken History (v7.104.0): the last things Nova actually sent to a
+    speaker — welcome-home, reminders, alerts, briefings, manual tests,
+    confirmed Assist replies, and repeats. Text only, newest first, bounded
+    to the last 100. Admin-only: this reveals what was actually said in the
+    house, unlike the panel's other pure-read commands."""
+    try:
+        from . import spoken_history
+        entries = await hass.async_add_executor_job(spoken_history.list_recent)
+        connection.send_result(msg["id"], {"entries": entries})
+    except Exception as exc:
+        _LOGGER.exception("ws_get_spoken_history failed: %s", exc)
+        connection.send_error(msg["id"], "get_spoken_history_failed", str(exc))
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "nova/repeat_spoken",
+    vol.Required("spoken_id"): int,
+})
+@websocket_api.async_response
+async def ws_repeat_spoken(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict,
+) -> None:
+    """Re-announce one Spoken History entry (the panel's Repeat button).
+    `spoken_id` (never `id` — that field is reserved for websocket message
+    correlation) names which row to repeat.
+
+    Sends to the original speaker(s) if they still resolve to a real
+    entity; otherwise falls back to Nova's configured default speakers
+    (the same broadcast_target() the manual TTS test already uses).
+    Delivery and recording both happen inside async_announce — this
+    handler never calls spoken_history.record itself, so a repeat is
+    recorded exactly once, by the same single recorder as every other
+    path that goes through async_announce."""
+    try:
+        from . import spoken_history, nova_config
+        from .tts_helper import async_announce, resolve_tts_entity
+        from .audio_routing import broadcast_target
+
+        row = await hass.async_add_executor_job(spoken_history.get, msg["spoken_id"])
+        if row is None:
+            connection.send_error(msg["id"], "not_found", "No spoken history entry with that id")
+            return
+
+        speakers = [s for s in row["speakers"] if hass.states.get(s) is not None]
+        entry = _get_entry(hass)
+        cfg = await hass.async_add_executor_job(nova_config.effective_config, entry)
+        if not speakers:
+            speakers = broadcast_target(
+                hass,
+                broadcast_group=(cfg.get("broadcast_group") or None),
+                announcement_speakers=cfg.get("announcement_speakers"),
+            )
+        if not speakers:
+            connection.send_error(msg["id"], "no_speaker", "No speaker available to repeat through")
+            return
+
+        tts_entity = resolve_tts_entity(hass, cfg.get("tts_engine", "auto"))
+        if not tts_entity:
+            connection.send_error(msg["id"], "no_tts_entity", "No TTS entity available")
+            return
+
+        ok = await async_announce(
+            hass, row["text"], tts_entity, speakers,
+            context="repeat", repeat_of_id=row["id"],
+        )
+        connection.send_result(msg["id"], {"ok": ok, "spoken": row["text"] if ok else ""})
+    except Exception as exc:
+        _LOGGER.exception("ws_repeat_spoken failed: %s", exc)
+        connection.send_error(msg["id"], "repeat_spoken_failed", str(exc))
 
 
 @websocket_api.require_admin

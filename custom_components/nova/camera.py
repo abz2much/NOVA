@@ -932,7 +932,7 @@ async def async_analyze_camera(
         except Exception:
             pass
         if announce:
-            await async_announce(hass, msg, tts_entity, speakers)
+            await async_announce(hass, msg, tts_entity, speakers, context="camera")
         return {"success": False, "error": "no_image", "camera": camera_name}
 
     # Temporal clip: prefer a single labelled contact sheet (works with any
@@ -1086,11 +1086,11 @@ async def async_analyze_camera(
     spoke = False
     if announce:
         if judgment["notable"] and judgment.get("speak"):
-            await async_announce(hass, judgment["speak"], tts_entity, speakers)
+            await async_announce(hass, judgment["speak"], tts_entity, speakers, context="camera")
             spoke = True
         elif not gate_announce:
             # Manual analyze request on a non-notable scene — still report it.
-            await async_announce(hass, analysis, tts_entity, speakers)
+            await async_announce(hass, analysis, tts_entity, speakers, context="camera")
             spoke = True
         # else: auto event + not notable → stay silent
 
@@ -1351,7 +1351,7 @@ async def _analyze_doorbell_press(
     # Single, notability-gated announcement for the chosen result
     if res.get("success"):
         if res.get("notable") and res.get("speak"):
-            await async_announce(hass, res["speak"], tts_entity, speakers)
+            await async_announce(hass, res["speak"], tts_entity, speakers, context="camera")
             res["spoke"] = True
         # Training data — every analysed press, regardless of whether it spoke
         try:

@@ -114,7 +114,7 @@ async def async_activate_by_intent(
     scene_name = next((s["name"] for s in scenes if s["entity_id"] == pick), pick)
     msg = f"Activating {scene_name}{addr}."
     if announce:
-        await async_announce(hass, msg, tts_entity, speakers)
+        await async_announce(hass, msg, tts_entity, speakers, context="scene")
 
     _LOGGER.info("Nova: scene '%s' activated for intent '%s'", pick, intent)
     return {"success": True, "scene": pick, "scene_name": scene_name}
