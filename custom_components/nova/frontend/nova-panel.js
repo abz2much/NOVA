@@ -1072,7 +1072,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v7.101.33
+ * v7.101.34
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1137,7 +1137,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v7.101.33 ",
+      console.log("%c Nova Panel %c v7.101.34 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -1521,7 +1521,7 @@ class NovaPanel extends HTMLElement {
             <div class="panel-meta" id="newMemCount">—</div>
           </div>
           <div class="stub-body">Durable facts &amp; preferences Nova recalls in conversation. Teach it something, or forget anything with ✕.</div>
-          <div class="cfg-row">
+          <div class="cfg-row cfg-row-wrap">
             <input id="newMemKey" class="cfg-field" style="flex:1" placeholder="what (e.g. trash day)" autocomplete="off">
             <input id="newMemVal" class="cfg-field" style="flex:1" placeholder="is (e.g. Tuesday)" autocomplete="off">
             <select id="newMemSubject" class="cfg-field">
@@ -5336,7 +5336,7 @@ class NovaPanel extends HTMLElement {
     const dBtns = floor === "2f" ? `<button class="mode-chip" id="opAddFdormer">+ Front Dormer</button><button class="mode-chip" id="opAddRdormer">+ Rear Dormer</button>` : "";
     return `
       <div class="mode-bind-head">Windows, doors &amp; dormers <span class="toggle-desc">interior doors &amp; cased openings attach to a room · a cased opening is a doorway with no door · dormers on the 2nd floor</span></div>
-      <div class="cfg-row">
+      <div class="cfg-row cfg-row-wrap">
         <button class="mode-chip" id="opAddWindow">+ Window</button>
         <button class="mode-chip" id="opAddExtdoor">+ Exterior Door</button>
         <button class="mode-chip" id="opAddCellar">+ Cellar Door</button>
@@ -5375,7 +5375,7 @@ class NovaPanel extends HTMLElement {
     }).join("");
     return `
       <div class="mode-bind-head">Cameras · field of view <span class="toggle-desc">drop a camera, bind its entity, aim it — drag the dot on the plan to move, right-click to delete</span></div>
-      <div class="cfg-row">
+      <div class="cfg-row cfg-row-wrap">
         <button class="mode-chip" id="fpnCamAdd">+ Camera</button>
         ${cams.length ? `<button class="mode-chip" id="fpnCamCompute" title="AI: judge what each camera can confirm">Compute coverage</button>` : ""}
       </div>
@@ -6286,6 +6286,7 @@ class NovaPanel extends HTMLElement {
       .stub-body{font-size:12.5px;color:var(--ink-dim);line-height:1.5}
       .stub-where{display:block;margin-top:6px;font-family:var(--font-mono);font-size:10.5px;color:var(--ink-faint)}
       .cfg-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px}
+      .cfg-row-wrap{flex-wrap:wrap;justify-content:flex-start}
       .cfg-row label{font-size:12.5px;color:var(--ink-dim)}
       select.cfg-field,input.cfg-field{background:var(--surface-2);border:1px solid var(--line-soft);color:var(--ink);
         font-family:var(--font-body);font-size:12px;padding:6px 9px;border-radius:8px}

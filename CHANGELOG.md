@@ -1,3 +1,12 @@
+## [7.101.34] — fix: two more button rows overflowed off-screen on phones
+
+Fuller phone-width pass across every tab (dashboard, residence, intrusion, suggestions, settings' 27 cards, logs, memory), prompted by the nav-wrap fix in 7.101.33. Rendered the real component and screenshotted it inside a fixed 390px container for each tab/settings-group rather than just spot-checking. Found two more of the same `.cfg-row`-has-no-flex-wrap pattern, both pre-existing:
+
+- Floor Plan Editor's "Windows, doors & dormers" row (5 buttons) and its "Cameras" row — "+ Cased Opening" ran off the edge.
+- Memory tab's TEACH row (2 inputs + a select + a button) — the TEACH button itself ran off the edge.
+
+Added a `.cfg-row-wrap` modifier class (flex-wrap without disturbing the many other `.cfg-row` label/value rows that intentionally don't wrap) and applied it to both. Checked several other `.cfg-row`s with 3+ controls (Document Library's upload row, hazard's two number fields, the intrusion vision-confirm toggle) and they're genuinely fine at 390px — not fixed, no bug there.
+
 ## [7.101.33] — fix: top nav overflowed off-screen on phones
 
 Abi caught this live on a real phone: the 7-tab nav row (`Command Center`/`Residence`/`Intrusion`/`Suggestions`/`Settings`/`Logs`/`Memory`) had no `flex-wrap` of its own, so on a narrow screen it just kept extending past the edge instead of wrapping — the whole page scrolled sideways. Pre-existing, not something tonight's changes introduced; Command Center had never actually been checked at phone width before (all prior live verification was on desktop browser). Added `flex-wrap:wrap` to `.top-nav` so it drops to a second row instead of overflowing. Verified at a 390px width by rendering the real component and screenshotting it inside a fixed-width test container — confirmed no content crosses the boundary.
