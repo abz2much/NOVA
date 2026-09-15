@@ -9,16 +9,45 @@ as a `tts_options` query param on the media_content_id URL, not as a
 tts.speak `options` dict — so these tests inspect the play_media call.
 """
 import json
+import sys
+import types
 import urllib.parse
 
 import pytest
 
 DOMAIN = "nova"
 
+# tts_helper lazily imports bootstrap (for resolve_installed_quality), which
+# imports aiohttp at module level — stub it the same way test_bootstrap.py
+# does, so that import succeeds regardless of which test file collects first.
+if "aiohttp" not in sys.modules:
+    _aiohttp = types.ModuleType("aiohttp")
+    _aiohttp.ClientTimeout = lambda **kw: None
+    _aiohttp.ClientSession = object
+    sys.modules["aiohttp"] = _aiohttp
+
 
 @pytest.fixture
 def tts(load):
     return load("tts_helper")
+
+
+@pytest.fixture
+def bootstrap(load):
+    return load("bootstrap")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_piper_dir(tmp_path, monkeypatch, bootstrap):
+    from pathlib import Path
+    monkeypatch.setattr(bootstrap, "PIPER_DIR", Path(tmp_path / "piper"))
+
+
+def _install_voice(bootstrap, quality):
+    bootstrap.PIPER_DIR.mkdir(parents=True, exist_ok=True)
+    (bootstrap.PIPER_DIR / f"en_GB-nova-{quality}.onnx").write_bytes(
+        b"x" * (bootstrap.MIN_ONNX_SIZE + 10))
+    (bootstrap.PIPER_DIR / f"en_GB-nova-{quality}.onnx.json").write_text("{}")
 
 
 def _set_ha_voice(hass, on):
@@ -43,20 +72,23 @@ def _requested_voice(hass):
     return json.loads(raw[0]).get("voice")
 
 
-async def test_default_requests_nova_voice_on_piper(tts, fake_hass):
+async def test_default_requests_nova_voice_on_piper(tts, bootstrap, fake_hass):
+    _install_voice(bootstrap, "high")
     ok = await tts.async_announce(fake_hass, "hello", "tts.piper", ["media_player.x"])
     assert ok is True
     assert _requested_voice(fake_hass) == "en_GB-nova-high"
 
 
-async def test_ha_voice_mode_omits_voice(tts, fake_hass):
+async def test_ha_voice_mode_omits_voice(tts, bootstrap, fake_hass):
+    _install_voice(bootstrap, "high")
     _set_ha_voice(fake_hass, True)
     ok = await tts.async_announce(fake_hass, "bonjour", "tts.piper", ["media_player.x"])
     assert ok is True
     assert _requested_voice(fake_hass) is None
 
 
-async def test_ha_voice_off_keeps_nova_voice(tts, fake_hass):
+async def test_ha_voice_off_keeps_nova_voice(tts, bootstrap, fake_hass):
+    _install_voice(bootstrap, "high")
     _set_ha_voice(fake_hass, False)
     await tts.async_announce(fake_hass, "hi", "tts.piper", ["media_player.x"])
     assert _requested_voice(fake_hass) == "en_GB-nova-high"
@@ -65,6 +97,47 @@ async def test_ha_voice_off_keeps_nova_voice(tts, fake_hass):
 async def test_non_piper_never_forces_voice(tts, fake_hass):
     await tts.async_announce(fake_hass, "hi", "tts.google_ai_tts", ["media_player.x"])
     assert _requested_voice(fake_hass) is None
+
+
+async def test_non_piper_fish_audio_never_resolves_or_injects_nova_voice(tts, bootstrap, fake_hass, monkeypatch):
+    """A non-Piper engine (e.g. a Fish Audio TTS entity) must never trigger
+    Nova's voice-quality resolution at all — not merely end up with no voice
+    by coincidence. Spies on resolve_installed_quality rather than relying on
+    the final tts_options value, so this fails if is_piper detection regresses
+    to calling the resolver unconditionally."""
+    _install_voice(bootstrap, "high")  # even with a Nova voice installed...
+    calls = []
+
+    def _spy(preferred="high"):
+        calls.append(preferred)
+        return preferred
+    monkeypatch.setattr(bootstrap, "resolve_installed_quality", _spy)
+
+    ok = await tts.async_announce(fake_hass, "hi", "tts.fish_audio", ["media_player.x"])
+    assert ok is True
+    assert calls == []  # ...the resolver is never even called for a non-Piper entity
+    assert _requested_voice(fake_hass) is None
+
+
+# ─── on-demand announcement quality resolution (v7.102.x) ────────────────────
+#
+# tts_options used to hardcode "en_GB-nova-high" unconditionally. If bootstrap
+# had fallen back to medium (high not hosted, or not yet downloaded), every
+# single announcement requested a voice file that doesn't exist. It's now
+# resolved from what's actually on disk, the same way bootstrap's own
+# pipeline setup is.
+
+async def test_announce_omits_voice_when_none_installed(tts, bootstrap, fake_hass):
+    ok = await tts.async_announce(fake_hass, "hi", "tts.piper", ["media_player.x"])
+    assert ok is True
+    assert _requested_voice(fake_hass) is None
+
+
+async def test_announce_requests_installed_fallback_quality(tts, bootstrap, fake_hass):
+    _install_voice(bootstrap, "medium")  # high not installed
+    ok = await tts.async_announce(fake_hass, "hi", "tts.piper", ["media_player.x"])
+    assert ok is True
+    assert _requested_voice(fake_hass) == "en_GB-nova-medium"
 
 
 # ─── resolve_tts_entity — routing to HA's configured Assist pipeline voice ───

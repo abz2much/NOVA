@@ -5,6 +5,7 @@ Supervisor, no aiohttp), so these cover the orchestration *guards* (the safety
 gates that protect a real HA), the run-once marker, the voice short-circuit, and
 the in-process Wyoming/engine logic. Module-level aiohttp imports are stubbed.
 """
+import contextlib
 import sys
 import types
 from types import SimpleNamespace
@@ -183,7 +184,7 @@ async def test_force_overrides_marker(bootstrap, nova_config, fake_hass, monkeyp
     monkeypatch.setattr(bootstrap, "_ensure_addon", _no_addon)
 
     async def _no_voice(hass, quality):
-        return False
+        return None
     monkeypatch.setattr(bootstrap, "_download_voice", _no_voice)
     monkeypatch.setattr(bootstrap, "_reload_wyoming",
                         lambda hass: _async_return(0))
@@ -235,19 +236,288 @@ def _async_return(value):
     return _coro()
 
 
-def test_create_pipeline_points_agent_at_nova(bootstrap):
-    """The Nova pipeline must run Nova's own conversation entity.
-    async_create_default_pipeline leaves the agent on HA's default (an LLM
-    integration), and then Nova's reply routing never runs — so the bootstrap
-    must set conversation_engine=agent on both a new pipeline and an existing one
-    (repair in place, not "leave as-is")."""
-    import inspect
-    src = inspect.getsource(bootstrap._create_pipeline)
-    assert "async_update_pipeline" in src
-    assert "conversation_engine=agent" in src
-    assert "leaving as-is" not in src
-    # existing pipeline matched case-insensitively so "Nova (English)" is caught
-    assert '.lower()' in src
+# ── voice-quality resolver (v7.102.x — shared by bootstrap + tts_helper) ────
+
+def test_resolve_installed_quality_prefers_requested(bootstrap):
+    bootstrap.PIPER_DIR.mkdir(parents=True, exist_ok=True)
+    for q in ("high", "medium"):
+        (bootstrap.PIPER_DIR / f"en_GB-nova-{q}.onnx").write_bytes(
+            b"x" * (bootstrap.MIN_ONNX_SIZE + 10))
+        (bootstrap.PIPER_DIR / f"en_GB-nova-{q}.onnx.json").write_text("{}")
+    assert bootstrap.resolve_installed_quality("high") == "high"
+    assert bootstrap.resolve_installed_quality("medium") == "medium"
+
+
+def test_resolve_installed_quality_falls_back_to_other(bootstrap):
+    bootstrap.PIPER_DIR.mkdir(parents=True, exist_ok=True)
+    (bootstrap.PIPER_DIR / "en_GB-nova-medium.onnx").write_bytes(
+        b"x" * (bootstrap.MIN_ONNX_SIZE + 10))
+    (bootstrap.PIPER_DIR / "en_GB-nova-medium.onnx.json").write_text("{}")
+    assert bootstrap.resolve_installed_quality("high") == "medium"
+
+
+def test_resolve_installed_quality_none_when_nothing_present(bootstrap):
+    assert bootstrap.resolve_installed_quality("high") is None
+
+
+# ── _download_voice — returns the real quality, not just success/failure ────
+
+@pytest.mark.asyncio
+async def test_download_voice_short_circuits_when_requested_present(bootstrap, fake_hass, monkeypatch):
+    bootstrap.PIPER_DIR.mkdir(parents=True, exist_ok=True)
+    (bootstrap.PIPER_DIR / "en_GB-nova-high.onnx").write_bytes(
+        b"x" * (bootstrap.MIN_ONNX_SIZE + 10))
+    (bootstrap.PIPER_DIR / "en_GB-nova-high.onnx.json").write_text("{}")
+
+    async def _boom(hass, quality):
+        raise AssertionError("must not attempt a download when already installed")
+    monkeypatch.setattr(bootstrap, "_try_quality", _boom)
+
+    assert await bootstrap._download_voice(fake_hass, "high") == "high"
+
+
+@pytest.mark.asyncio
+async def test_download_voice_attempts_requested_even_when_fallback_installed(bootstrap, fake_hass, monkeypatch):
+    """Only medium is on disk (e.g. left over from a previous fallback) and the
+    configured quality is high — an already-present fallback must NOT stop
+    Nova from attempting to get the quality actually requested."""
+    bootstrap.PIPER_DIR.mkdir(parents=True, exist_ok=True)
+    (bootstrap.PIPER_DIR / "en_GB-nova-medium.onnx").write_bytes(
+        b"x" * (bootstrap.MIN_ONNX_SIZE + 10))
+    (bootstrap.PIPER_DIR / "en_GB-nova-medium.onnx.json").write_text("{}")
+
+    calls = []
+
+    async def _try(hass, quality):
+        calls.append(quality)
+        return quality == "high"  # the requested quality is downloadable
+    monkeypatch.setattr(bootstrap, "_try_quality", _try)
+
+    assert await bootstrap._download_voice(fake_hass, "high") == "high"
+    assert calls == ["high"]  # attempted despite medium already being on disk
+
+
+async def test_download_voice_falls_back_to_already_present_when_requested_download_fails(
+        bootstrap, fake_hass, monkeypatch):
+    """Requested quality isn't installed and its download fails, but the
+    fallback quality is already on disk — must return it without attempting a
+    further (redundant) download for it."""
+    bootstrap.PIPER_DIR.mkdir(parents=True, exist_ok=True)
+    (bootstrap.PIPER_DIR / "en_GB-nova-medium.onnx").write_bytes(
+        b"x" * (bootstrap.MIN_ONNX_SIZE + 10))
+    (bootstrap.PIPER_DIR / "en_GB-nova-medium.onnx.json").write_text("{}")
+
+    async def _try(hass, quality):
+        if quality == "medium":
+            raise AssertionError("must not attempt to download an already-present fallback")
+        return False  # requested quality's download fails
+    monkeypatch.setattr(bootstrap, "_try_quality", _try)
+
+    assert await bootstrap._download_voice(fake_hass, "high") == "medium"
+
+
+@pytest.mark.asyncio
+async def test_download_voice_downloads_requested_quality(bootstrap, fake_hass, monkeypatch):
+    calls = []
+
+    async def _try(hass, quality):
+        calls.append(quality)
+        return quality == "high"
+    monkeypatch.setattr(bootstrap, "_try_quality", _try)
+
+    assert await bootstrap._download_voice(fake_hass, "high") == "high"
+    assert calls == ["high"]
+
+
+@pytest.mark.asyncio
+async def test_download_voice_falls_back_when_requested_not_hosted(bootstrap, fake_hass, monkeypatch):
+    calls = []
+
+    async def _try(hass, quality):
+        calls.append(quality)
+        return quality == "medium"
+    monkeypatch.setattr(bootstrap, "_try_quality", _try)
+
+    assert await bootstrap._download_voice(fake_hass, "high") == "medium"
+    assert calls == ["high", "medium"]
+
+
+@pytest.mark.asyncio
+async def test_download_voice_returns_none_when_both_fail(bootstrap, fake_hass, monkeypatch):
+    async def _try(hass, quality):
+        return False
+    monkeypatch.setattr(bootstrap, "_try_quality", _try)
+
+    assert await bootstrap._download_voice(fake_hass, "high") is None
+
+
+# ── _create_pipeline — behavioural (not source-inspection) ──────────────────
+
+class _FakePipeline:
+    def __init__(self, name="Nova", conversation_engine=None, tts_voice=None):
+        self.name = name
+        self.conversation_engine = conversation_engine
+        self.tts_voice = tts_voice
+
+
+class _FakeAssistPipelineModule:
+    """Minimal stand-in for homeassistant.components.assist_pipeline."""
+
+    def __init__(self, existing=None, create_result=None, update_raises_first=False):
+        self._existing = existing or []
+        self._create_result = create_result
+        self.updates: list[dict] = []
+        self._update_raises_first = update_raises_first
+        self._raised_once = False
+
+    def async_get_pipelines(self, hass):
+        return list(self._existing)
+
+    async def async_create_default_pipeline(self, hass, stt_engine_id, tts_engine_id, pipeline_name):
+        return self._create_result
+
+    async def async_update_pipeline(self, hass, pipeline, **kwargs):
+        if self._update_raises_first and not self._raised_once:
+            self._raised_once = True
+            raise RuntimeError("tts_voice rejected on this HA version")
+        self.updates.append(kwargs)
+        for k, v in kwargs.items():
+            setattr(pipeline, k, v)
+
+
+@contextlib.contextmanager
+def _install_assist_pipeline(fake):
+    components = sys.modules["homeassistant.components"]
+    sys.modules["homeassistant.components.assist_pipeline"] = fake
+    components.assist_pipeline = fake
+    try:
+        yield fake
+    finally:
+        del sys.modules["homeassistant.components.assist_pipeline"]
+        del components.assist_pipeline
+
+
+def _hass_with_agent_and_engines(fake_hass):
+    fake_hass.states.set("conversation.nova", "idle")
+    fake_hass.states.set("stt.faster_whisper", "idle")
+    fake_hass.states.set("tts.piper", "idle")
+    return fake_hass
+
+
+async def test_create_pipeline_new_sets_agent_and_voice(bootstrap, fake_hass):
+    _hass_with_agent_and_engines(fake_hass)
+    created = _FakePipeline(name="Nova")
+    fake = _FakeAssistPipelineModule(existing=[], create_result=created)
+    with _install_assist_pipeline(fake):
+        ok = await bootstrap._create_pipeline(fake_hass, "medium")
+    assert ok is True
+    assert fake.updates == [{"conversation_engine": "conversation.nova",
+                             "tts_voice": "en_GB-nova-medium"}]
+
+
+async def test_create_pipeline_new_falls_back_when_tts_voice_rejected(bootstrap, fake_hass):
+    """Compatibility fallback: some HA versions can reject tts_voice on
+    creation — the pipeline must still get its conversation agent set rather
+    than being left on HA's default."""
+    _hass_with_agent_and_engines(fake_hass)
+    created = _FakePipeline(name="Nova")
+    fake = _FakeAssistPipelineModule(existing=[], create_result=created, update_raises_first=True)
+    with _install_assist_pipeline(fake):
+        ok = await bootstrap._create_pipeline(fake_hass, "medium")
+    assert ok is True
+    assert fake.updates == [{"conversation_engine": "conversation.nova"}]
+    assert created.conversation_engine == "conversation.nova"
+
+
+async def test_create_pipeline_existing_repairs_missing_voice(bootstrap, fake_hass, monkeypatch):
+    _hass_with_agent_and_engines(fake_hass)
+    existing = _FakePipeline(name="Nova", conversation_engine="conversation.nova",
+                              tts_voice="en_GB-nova-high")
+    fake = _FakeAssistPipelineModule(existing=[existing])
+    monkeypatch.setattr(bootstrap, "_voice_present", lambda q: q == "medium")  # high missing
+    with _install_assist_pipeline(fake):
+        ok = await bootstrap._create_pipeline(fake_hass, "medium")
+    assert ok is True
+    assert fake.updates == [{"tts_voice": "en_GB-nova-medium"}]
+    assert existing.tts_voice == "en_GB-nova-medium"
+
+
+async def test_create_pipeline_existing_no_clobber_when_current_voice_present(bootstrap, fake_hass, monkeypatch):
+    """A deliberately-chosen voice that's still valid on disk must never be
+    overwritten just because it differs from the configured quality."""
+    _hass_with_agent_and_engines(fake_hass)
+    existing = _FakePipeline(name="Nova", conversation_engine="conversation.nova",
+                              tts_voice="en_GB-nova-high")
+    fake = _FakeAssistPipelineModule(existing=[existing])
+    monkeypatch.setattr(bootstrap, "_voice_present", lambda q: True)  # both present
+    with _install_assist_pipeline(fake):
+        ok = await bootstrap._create_pipeline(fake_hass, "medium")
+    assert ok is True
+    assert fake.updates == []
+    assert existing.tts_voice == "en_GB-nova-high"
+
+
+async def test_create_pipeline_existing_no_repair_when_fallback_also_missing(bootstrap, fake_hass, monkeypatch):
+    """Can't repoint to a quality that isn't there either — leave it alone."""
+    _hass_with_agent_and_engines(fake_hass)
+    existing = _FakePipeline(name="Nova", conversation_engine="conversation.nova",
+                              tts_voice="en_GB-nova-high")
+    fake = _FakeAssistPipelineModule(existing=[existing])
+    monkeypatch.setattr(bootstrap, "_voice_present", lambda q: False)  # neither present
+    with _install_assist_pipeline(fake):
+        ok = await bootstrap._create_pipeline(fake_hass, "medium")
+    assert ok is True
+    assert fake.updates == []
+    assert existing.tts_voice == "en_GB-nova-high"
+
+
+async def test_create_pipeline_existing_agent_repair_unaffected_by_voice_logic(bootstrap, fake_hass, monkeypatch):
+    """Pre-existing conversation-engine repair must still work when there's no
+    voice mismatch to consider."""
+    _hass_with_agent_and_engines(fake_hass)
+    existing = _FakePipeline(name="Nova", conversation_engine="conversation.other",
+                              tts_voice="en_GB-nova-medium")
+    fake = _FakeAssistPipelineModule(existing=[existing])
+    monkeypatch.setattr(bootstrap, "_voice_present", lambda q: True)
+    with _install_assist_pipeline(fake):
+        ok = await bootstrap._create_pipeline(fake_hass, "medium")
+    assert ok is True
+    assert fake.updates == [{"conversation_engine": "conversation.nova"}]
+
+
+# ── async_run_bootstrap — passes the *installed* quality to the pipeline ────
+
+@pytest.mark.asyncio
+async def test_run_bootstrap_passes_installed_quality_to_pipeline(bootstrap, nova_config, fake_hass, monkeypatch):
+    monkeypatch.setenv("SUPERVISOR_TOKEN", "tok")
+    cfg = {"voice_quality": "high", "tts_provider": "piper_nova", "auto_pipeline": True}
+    monkeypatch.setattr(nova_config, "get", lambda k, d=None: cfg.get(k, d))
+
+    async def _fake_ensure_addon(hass, slug, friendly):
+        return True
+    monkeypatch.setattr(bootstrap, "_ensure_addon", _fake_ensure_addon)
+
+    async def _fake_download_voice(hass, quality):
+        assert quality == "high"
+        return "medium"  # fell back to the other quality
+    monkeypatch.setattr(bootstrap, "_download_voice", _fake_download_voice)
+
+    monkeypatch.setattr(bootstrap, "_addon_action", lambda *a, **k: _async_return(True))
+    monkeypatch.setattr(bootstrap, "_wait_addon_state", lambda *a, **k: _async_return(True))
+    monkeypatch.setattr(bootstrap.asyncio, "sleep", lambda *a, **k: _async_return(None))
+    monkeypatch.setattr(bootstrap, "_reload_wyoming", lambda hass: _async_return(0))
+    monkeypatch.setattr(bootstrap, "_wait_for_agent", lambda hass, **kw: _async_return("conversation.nova"))
+
+    captured = {}
+
+    async def _fake_create_pipeline(hass, voice_quality):
+        captured["voice_quality"] = voice_quality
+        return True
+    monkeypatch.setattr(bootstrap, "_create_pipeline", _fake_create_pipeline)
+
+    status = await bootstrap.async_run_bootstrap(fake_hass)
+    assert status["voice_ok"] is True
+    assert captured["voice_quality"] == "medium"
 
 
 def test_ensure_pipeline_agent_repairs_by_name_or_voice(bootstrap):

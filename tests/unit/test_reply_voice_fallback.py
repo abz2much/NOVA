@@ -17,12 +17,43 @@ one succeeds.
 """
 from __future__ import annotations
 
+import sys
+import types
+
 import pytest
+
+# tts_helper lazily imports bootstrap (for resolve_installed_quality), which
+# imports aiohttp at module level — stub it the same way test_bootstrap.py
+# does, so that import succeeds regardless of which test file collects first.
+if "aiohttp" not in sys.modules:
+    _aiohttp = types.ModuleType("aiohttp")
+    _aiohttp.ClientTimeout = lambda **kw: None
+    _aiohttp.ClientSession = object
+    sys.modules["aiohttp"] = _aiohttp
 
 
 @pytest.fixture
 def tts(load):
     return load("tts_helper")
+
+
+@pytest.fixture
+def bootstrap(load):
+    return load("bootstrap")
+
+
+@pytest.fixture(autouse=True)
+def _installed_nova_voice(tmp_path, monkeypatch, bootstrap):
+    """These fakes exercise the *delivery* fallback (voice rejected mid-call),
+    not the quality-resolution logic covered in test_bootstrap.py / test_tts_
+    voice_mode.py — so just make a Nova voice genuinely present on disk, same
+    as the real world when bootstrap has installed one."""
+    from pathlib import Path
+    monkeypatch.setattr(bootstrap, "PIPER_DIR", Path(tmp_path / "piper"))
+    bootstrap.PIPER_DIR.mkdir(parents=True, exist_ok=True)
+    (bootstrap.PIPER_DIR / "en_GB-nova-high.onnx").write_bytes(
+        b"x" * (bootstrap.MIN_ONNX_SIZE + 10))
+    (bootstrap.PIPER_DIR / "en_GB-nova-high.onnx.json").write_text("{}")
 
 
 class _State:
@@ -41,6 +72,8 @@ class _StatesMixin:
         s = type("States", (), {})()
         s.get = lambda eid: self._state
         return s
+    async def async_add_executor_job(self, func, *args):
+        return func(*args)
 
 
 class _OKHass(_StatesMixin):
