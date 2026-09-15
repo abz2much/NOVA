@@ -44,7 +44,7 @@ Drop appliance manuals and receipts (PDF, `.txt`, `.md`) into `/config/nova/docu
 
 ### The Nova voice
 
-Modelled on Stark's Nova: dry, precise, unflappable, and quietly witty, but strictly situational about it. The wit stays out of the way the moment something is wrong; Nova does not joke during a smoke alarm. A banter level setting (plain / dry / full) tunes how much character surfaces, and urgent or grave events always speak plainly no matter what that setting is.
+Nova's persona is inspired by Stark's JARVIS: dry, precise, unflappable, and quietly witty, but strictly situational about it. The wit stays out of the way the moment something is wrong; Nova does not joke during a smoke alarm. A banter level setting (plain / dry / full) tunes how much character surfaces, and urgent or grave events always speak plainly no matter what that setting is.
 
 ### Vision and cameras
 
@@ -288,7 +288,9 @@ What leaves your network is only what you choose: requests to whichever LLM prov
 
 ## What's different from upstream
 
-Nova started as a fork of [jarvis-aio](https://github.com/sam3gp8/jarvis-aio) and shares most of its architecture — jarvis-aio is itself actively developed, not a frozen base. This section tracks where Nova has genuinely diverged, updated as real changes ship rather than left to go stale.
+Nova began as a fork of [jarvis-aio](https://github.com/sam3gp8/jarvis-aio), and the two projects still share their original structure. Nova is now maintained as an independent fork and no longer tracks Jarvis release for release. Most shared backend modules have changed, Nova has its own features, interface, security controls, and Home Assistant lifecycle behaviour, and fixes added to either project do not automatically exist in the other.
+
+The list below covers Nova-specific differences. It is not a complete release-by-release comparison; see each project's changelog for that.
 
 **Security hardening**
 - Voice commands can lock a door instantly, but can never unlock one or open a garage — that always requires a tap on your phone, so a spoofed or deepfaked voice can't grant physical access on its own.
@@ -297,6 +299,7 @@ Nova started as a fork of [jarvis-aio](https://github.com/sam3gp8/jarvis-aio) an
 - Every memory store Nova has — cross-session conversation recall, long-term semantic search, and curated facts/preferences from "remember that…" — is scoped to the right conversation or person rather than searched globally, and anything pulled back into a live conversation is wrapped against prompt injection rather than trusted verbatim.
 - A new preference or routine from "remember that…" isn't trusted immediately — Nova asks you to confirm it in the same conversation, and if you don't, it waits in the panel's Memory tab for you to approve, edit, or reject, rather than something Nova merely read (an email, a calendar invite) quietly becoming an accepted fact.
 - Voice model downloads verify file size before installing, and reject a checksum mismatch outright when one is configured; the upstream voice repository is currently access-gated, so no checksum is populated for it today (an optional cosmetic TTS voice — not required for Nova to function).
+- Confirmed intrusion snapshots are stored privately under Nova's config directory and retrieved through the admin-gated websocket command. Temporary notification copies use signed URLs and are deleted after expiry.
 
 **Smarter, less noisy home awareness**
 - Sleep state is explicit (Auto / Awake / Asleep), not inferred purely from bedroom occupancy — one person going to bed no longer marks the whole house "asleep" while someone else is still up.
@@ -312,6 +315,12 @@ Nova started as a fork of [jarvis-aio](https://github.com/sam3gp8/jarvis-aio) an
 - Daily solar/energy report: ask "how much solar today," "how much is left," "what did we use," or "what did it cost" for today's totals — generated, self-consumed, exported, imported, forecast remaining, and cost — on top of the same live solar tool above.
 - Command Center: an animated "stellar core" centerpiece instead of a camera feed, so the dashboard looks and feels the same whether you have zero cameras or twelve, with Command Center/Residence/Intrusion/Suggestions/Settings/Logs/Memory navigation, a Settings tab reorganized around what you're doing rather than which subsystem it touches, and Areas cards showing every monitored room (no hard cap) with capability icons, live temperature/humidity sparklines, and a light toggle. Includes a full Floor Plan Editor (rooms, outdoor zones, property-line boundary, windows/doors/dormers, camera placement, an uploadable/opacity-adjustable background image, JSON export/import for backup or moving a layout between installs, and AI camera-coverage estimation) and a Residence tab with a live, rotatable and scroll-to-zoomable 3D house view built from that same floor plan — home style selector, floor tabs, view presets, live room lighting from occupancy/mmWave presence, and door/garage entity mapping.
 - Command Center is now Nova's only dashboard (v7.101.30): it started as an optional alternate look, reached full feature parity with the original "Classic" dashboard, and Classic was deleted rather than maintaining two UIs indefinitely.
+
+**Reliability and Home Assistant integration**
+- Runtime paths use Home Assistant's reported configuration directory instead of assuming `/config`.
+- A partial setup failure cleans up registered services, listeners, entities, scheduler jobs, and other resources before the setup error is returned.
+- Configuration and database write failures are reported instead of silently treated as successful.
+- A PHACC integration suite now tests setup, reload, config flow, websocket permissions, snapshot retrieval, and setup-failure cleanup in CI.
 
 This list grows as real fixes ship — see `CHANGELOG.md` for the full history.
 
