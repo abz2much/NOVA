@@ -1,3 +1,9 @@
+## [7.103.1] — fix: post-7.103.0 UI visibility
+
+- Installed Automations now stays visible even when there are no pending suggestions to review, with clear empty and loading-error states instead of silently disappearing.
+- Setup Doctor's heading now uses Nova's standard prominent section-heading typography, matching the rest of the diagnostics card instead of a smaller diagnostic-label style.
+- Provider Activity's empty-state message is clearer about when activity will start appearing.
+
 ## [7.103.0] — decision transparency: browser, replay, Setup Doctor, automation probation, provider activity
 
 - New Decisions view in the Logs tab: browse Nova's proactive decisions with cursor-paginated listing, full detail (observation, interpretation, evidence, confidence, model, tokens, latency), and Helpful/Unnecessary/Wrong feedback that respects the existing set-once outcome rule.
