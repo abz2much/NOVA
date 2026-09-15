@@ -59,6 +59,13 @@ class LocalResult:
     text: str
     success: bool
     handled: bool = True   # False = couldn't handle, fall through to LLM
+    # Set only by the deterministic "repeat that" command below — lets the
+    # conversation-reply path (conversation.py) attribute a Spoken History
+    # entry back to the original it repeated, but ONLY when that reply ends
+    # up going through a confirmed-delivery path (async_announce). An
+    # ordinary Assist reply routed through the pipeline's own TTS, where
+    # Nova cannot observe whether speech happened, is never recorded.
+    repeat_of_id: Optional[int] = None
 
 
 # ── Follow-up context ──────────────────────────────────────────────────────
@@ -188,6 +195,8 @@ _BULK_PATTERNS = [
 # ── Contextual queries ──────────────────────────────────────────────────────
 
 _QUERY_PATTERNS = [
+    (r"(?:repeat\s+that|say\s+that\s+again|what\s+did\s+you\s+just\s+say|"
+     r"repeat\s+(?:your\s+)?last\s+announcement)\b",       "repeat_last"),
     (r"(?:who(?:'s| is)\s+)?home\b",                     "who_home"),
     (r"(?:is\s+)?(?:anyone|anybody)\s+home",              "who_home"),
     (r"(?:what(?:'s| is)\s+)?(?:open|unlocked)",          "what_open"),
@@ -839,6 +848,22 @@ async def try_local(hass, text, honorific="sir", force=False):
     for pattern, qtype in _QUERY_PATTERNS:
         match = re.search(pattern, normalized)
         if match:
+            if qtype == "repeat_last":
+                # Deterministic, no LLM/network — reads only the in-memory
+                # mirror kept by spoken_history.py (never SQLite directly;
+                # this runs on the event loop). Always handled, even when
+                # there's nothing to repeat, so it can never fall through
+                # to the LLM. See spoken_history.py's module docstring for
+                # why this can survive a restart without Nova needing to
+                # speak something new first (hydrate() at startup).
+                from . import spoken_history
+                last = spoken_history.get_last()
+                if last is None:
+                    return LocalResult(
+                        text="I don't have a recent spoken message to repeat.",
+                        success=False,
+                    )
+                return LocalResult(text=last["text"], success=True, repeat_of_id=last["id"])
             area_m = match.group(1) if match.lastindex else ""
             resp = _ctx_query(hass, qtype, honorific, area_m)
             if resp:

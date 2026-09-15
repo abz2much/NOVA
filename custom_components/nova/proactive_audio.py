@@ -260,15 +260,19 @@ async def _set_volume(hass: HomeAssistant, entity_id: str, level: float) -> None
 
 async def _speak_tts(
     hass: HomeAssistant, targets: list[str], message: str, profile: dict
-) -> None:
-    """Call tts.speak, retrying without options if the engine rejects them."""
+) -> list[str]:
+    """Call tts.speak, retrying without options if the engine rejects them.
+    Returns the targets Home Assistant actually accepted the call for
+    (after drop_display_targets filtering), or [] if none — used only to
+    decide whether/what to record in Spoken History; existing routing,
+    ducking, and error-handling behavior is otherwise unchanged."""
     try:
         from .audio_routing import drop_display_targets
         targets = drop_display_targets(hass, targets, "proactive_audio")
     except Exception:
         pass
     if not targets:
-        return
+        return []
     payload = {
         "entity_id": _resolve_tts_entity(hass),
         "media_player_entity_id": targets,
@@ -278,9 +282,11 @@ async def _speak_tts(
         await hass.services.async_call(
             "tts", "speak", {**payload, "options": _tts_options(profile)}, blocking=True
         )
+        return targets
     except (vol.Invalid, HomeAssistantError):
         _LOGGER.debug("TTS rejected options; retrying without them")
         await hass.services.async_call("tts", "speak", payload, blocking=True)
+        return targets
 
 
 async def _announce(hass: HomeAssistant, message: str, area_id: str, critical: bool) -> None:
@@ -317,6 +323,7 @@ async def _announce(hass: HomeAssistant, message: str, area_id: str, critical: b
         area_id, mode, profile["style"], announce_volume, targets,
     )
 
+    delivered: list[str] = []
     try:
         if profile["duck_media"] or original:
             for eid in original:
@@ -325,16 +332,26 @@ async def _announce(hass: HomeAssistant, message: str, area_id: str, critical: b
                 except Exception:  # noqa: BLE001
                     _LOGGER.exception("nova.speak: failed to set volume for %s", eid)
 
-        await _speak_tts(hass, targets, message, profile)
+        delivered = await _speak_tts(hass, targets, message, profile)
         await asyncio.sleep(_estimate_duration(message, float(profile["speech_rate"])))
     except Exception:  # noqa: BLE001
         _LOGGER.exception("nova.speak: announcement failed in area '%s'", area_id)
+        delivered = []
     finally:
         for eid, level in original.items():
             try:
                 await _set_volume(hass, eid, level)
             except Exception:  # noqa: BLE001
                 _LOGGER.exception("nova.speak: failed to restore volume for %s", eid)
+
+    if delivered:
+        try:
+            from . import spoken_history
+            await hass.async_add_executor_job(
+                spoken_history.record, message, "manual", delivered, None,
+            )
+        except Exception:
+            pass  # recording must never turn a delivered announcement into a failed one
 
 
 def _history_phrase(matches: list[dict], honorific: str) -> str:

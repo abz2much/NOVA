@@ -302,7 +302,7 @@ async def async_briefing(
                 "Nova briefing: no announcement speakers configured — choose "
                 "them in Settings \u2192 Announcement Speakers")
         else:
-            await async_announce(hass, briefing_text, tts_entity, speakers)
+            await async_announce(hass, briefing_text, tts_entity, speakers, context="briefing")
             announced = True
 
     return {"success": True, "briefing": briefing_text, "context": context,

@@ -1131,11 +1131,29 @@ class NovaAgent(conversation.ConversationEntity):
                             # misfired on idle Cast speakers that play fine but don't
                             # report 'playing' during a short announce, breaking the
                             # working case. Reverted to the original behavior.
+                            #
+                            # Spoken History (v7.104.0): when this reply is itself
+                            # the deterministic "repeat that" command's answer
+                            # (local_result.repeat_of_id set — see local_engine.py),
+                            # tag it "repeat" with a reference to the original
+                            # instead of "reply", so it's recorded as a repeat.
+                            # This is the ONLY place a voice-triggered repeat is
+                            # ever recorded — only here does Nova get a confirmed
+                            # delivery result; an ordinary reply that instead plays
+                            # through the pipeline's own TTS on the satellite
+                            # (the non-Cast-routed branch below) is never recorded,
+                            # because Nova cannot observe whether that TTS ran.
+                            repeat_of_id = (
+                                local_result.repeat_of_id
+                                if local_result and getattr(local_result, "repeat_of_id", None)
+                                else None
+                            )
                             self.hass.async_create_task(
                                 async_announce(
                                     self.hass, response_text,
                                     tts_ent, [speaker],
-                                    context="reply",
+                                    context="repeat" if repeat_of_id else "reply",
+                                    repeat_of_id=repeat_of_id,
                                 )
                             )
                             cast_routed = True

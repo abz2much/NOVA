@@ -221,7 +221,7 @@ class ReminderWatcher:
                 text = f"{honorific}, reminder: {reminder['label']}."
             else:
                 text = f"Reminder: {reminder['label']}."
-            await async_announce(self.hass, text, tts_entity, speakers)
+            await async_announce(self.hass, text, tts_entity, speakers, context="reminder")
             await self.hass.async_add_executor_job(mark_fired, reminder["id"])
             await self.hass.async_add_executor_job(_advance_repeating, reminder)
 
@@ -261,5 +261,6 @@ async def async_add_reminder_service(
         hass,
         f"Reminder saved{addr}. I'll let you know.",
         tts_entity, speakers,
+        context="reminder",
     )
     return {"success": True, "reminder_id": rid}

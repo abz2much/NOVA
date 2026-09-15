@@ -100,7 +100,10 @@ async def async_run_routine(
             if announce_text:
                 from .directive_helper import fill_honorific
                 text = fill_honorific(announce_text, honorific)
-                await async_announce(hass, text, tts_entity, speakers)
+                await async_announce(
+                    hass, text, tts_entity, speakers,
+                    context="welcome" if name == "arriving" else "routine",
+                )
 
             # Service call, if present
             service = step.get("service")

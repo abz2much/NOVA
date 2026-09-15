@@ -207,6 +207,32 @@ def resolve_tts_for_context(
     return resolve_tts_entity(hass, regular_configured)
 
 
+# ─── Spoken History source mapping ───────────────────────────────────────────
+# async_announce is the single recorder for every path that goes through it —
+# no other module may call spoken_history.record for the same delivery. A
+# context not listed here is recorded under its own name unchanged (kept
+# inclusive rather than silently dropping something unanticipated); "chat"
+# and the two voice-confirmation contexts are the only ones ever suppressed.
+_HISTORY_SOURCE_MAP = {
+    "chat": None,        # plain/unlabeled — never one of Nova's own announcements
+    "routine": "routine",
+    "sentinel": "alert",
+    "hazard": "alert",
+    "package": "alert",
+    "appliance": "alert",
+    "test": "manual",
+    "doorbell": "camera",
+    "recognition": "camera",
+    "summary": "briefing",
+}
+
+
+def _history_source(context: str) -> Optional[str]:
+    """Map an async_announce `context` to the Spoken History `source` shown
+    in the panel, or None to skip recording entirely for that context."""
+    return _HISTORY_SOURCE_MAP.get(context, context)
+
+
 # ─── The announce primitive ──────────────────────────────────────────────────
 
 
@@ -217,6 +243,7 @@ async def async_announce(
     speakers: Sequence[str],
     use_announce: bool = True,
     context: str = "chat",
+    repeat_of_id: Optional[int] = None,
 ) -> bool:
     """
     Speak text via tts_entity to the given speaker list. No-op if either empty.
@@ -225,6 +252,17 @@ async def async_announce(
     could not be delivered at all — callers that silence a satellite when they
     route a reply here rely on this so a delivery failure doesn't turn into
     total silence.
+
+    Spoken History (v7.104.0): on any successful delivery, records the text,
+    mapped source, and the speakers that actually succeeded to spoken_history
+    — this is the ONLY place that happens for anything routed through here;
+    a direct speech path that bypasses this function (observer.py,
+    proactive_audio.py) records itself instead, never both. `repeat_of_id`
+    lets a caller (the panel's Repeat button, or a voice "repeat that" that
+    happened to route through here) attribute the new entry back to the
+    original it repeated. Recording never raises into this function — a
+    history-store failure must never turn a delivered announcement into a
+    failed one.
 
     Delivery (v7.86.0): `media_player.play_media` per speaker, with
     `announce: true` and `extra: {volume: <that speaker's current volume>}`.
@@ -323,7 +361,7 @@ async def async_announce(
         return False
 
     media_content_id = _media_content_id(text)
-    delivered, failed = 0, []
+    delivered, failed, succeeded = 0, [], []
     for spk in list(speakers):
         st = hass.states.get(spk)
         vol = st.attributes.get("volume_level") if st is not None else None
@@ -351,6 +389,7 @@ async def async_announce(
 
         if ok:
             delivered += 1
+            succeeded.append(spk)
         else:
             failed.append(spk)
 
@@ -363,6 +402,15 @@ async def async_announce(
     if delivered:
         _LOGGER.info("Nova TTS delivered to %d/%d speaker(s); failed: %s",
                      delivered, len(list(speakers)), failed or "none")
+        source = _history_source(context)
+        if source:
+            try:
+                from . import spoken_history
+                await hass.async_add_executor_job(
+                    spoken_history.record, text, source, succeeded, repeat_of_id,
+                )
+            except Exception:
+                pass  # recording must never turn a delivered announcement into a failed one
     else:
         _LOGGER.warning("Nova TTS failed on every speaker (%s): %s", context, failed)
     return delivered > 0

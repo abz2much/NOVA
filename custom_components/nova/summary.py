@@ -46,7 +46,7 @@ async def async_summarise(
             f"The last {_period(hours)} appear to have been remarkably quiet."
         )
         if announce:
-            await async_announce(hass, summary, tts_entity, speakers)
+            await async_announce(hass, summary, tts_entity, speakers, context="summary")
         return {"success": True, "summary": summary, "message_count": 0}
 
     # ── Build transcript ──────────────────────────────────────────────────────
@@ -90,7 +90,7 @@ async def async_summarise(
         )
 
     if announce:
-        await async_announce(hass, summary, tts_entity, speakers)
+        await async_announce(hass, summary, tts_entity, speakers, context="summary")
 
     _LOGGER.info("Nova summary: %d messages → %d chars", len(messages), len(summary))
     return {"success": True, "summary": summary, "message_count": len(messages), "period_hours": hours}
