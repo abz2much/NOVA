@@ -54,6 +54,9 @@ ADMIN_GATED_TYPES = [
     "goal_action",
     "pending_fact_action",
     "edit_pending_fact",
+    "list_decisions",
+    "get_decision",
+    "set_decision_outcome",
 ]
 
 

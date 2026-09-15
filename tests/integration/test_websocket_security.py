@@ -8,6 +8,7 @@ test_wiring_smoke.py for why this needs PHACC instead of tests/unit/'s fakes.
 """
 import base64
 
+import pytest
 from homeassistant.setup import async_setup_component
 
 from .conftest import MockConfigEntry
@@ -101,3 +102,108 @@ async def test_intrusion_snapshot_reaches_panel_only_via_admin_websocket(
     http_client = await hass_client()
     resp_local = await http_client.get(f"/local/nova/intrusion/{fname}")
     assert resp_local.status == 404
+
+
+# ─── Decision browser (Phase 1: decision explanations + feedback) ───────────
+
+@pytest.mark.parametrize("msg", [
+    {"type": "nova/list_decisions"},
+    {"type": "nova/get_decision", "decision_id": 1},
+    {"type": "nova/set_decision_outcome", "decision_id": 1, "verdict": "good"},
+])
+async def test_decision_commands_reject_non_admin(
+    hass, hass_ws_client, hass_read_only_access_token, msg,
+):
+    """All three decision-browser commands can reveal or judge household
+    decision content — none of them may be reachable by a read-only user."""
+    await _setup_nova(hass)
+    client = await hass_ws_client(hass, access_token=hass_read_only_access_token)
+
+    await client.send_json_auto_id(msg)
+    resp = await client.receive_json()
+
+    assert resp["success"] is False
+    assert resp["error"]["code"] == "unauthorized"
+
+
+def _isolate_decisions_db(monkeypatch, tmp_path):
+    from custom_components.nova import decision_record
+    monkeypatch.setattr(decision_record, "_DEFAULT_DB", str(tmp_path / "decisions.db"))
+    return decision_record
+
+
+async def test_list_decisions_paginates_and_get_decision_returns_full_row(
+    hass, tmp_path, monkeypatch, hass_ws_client,
+):
+    """Exercises the real handlers end-to-end (not just permission-gating):
+    pagination actually advances, and the detail call returns the fields the
+    Logs-tab drawer needs."""
+    dr = _isolate_decisions_db(monkeypatch, tmp_path)
+    ids = [dr.record("intrusion", observation={"n": i}, ts=float(100 + i)) for i in range(3)]
+    await _setup_nova(hass)
+    ws = await hass_ws_client(hass)
+
+    await ws.send_json_auto_id({"type": "nova/list_decisions", "limit": 2})
+    page1 = await ws.receive_json()
+    assert page1["success"] is True
+    assert [d["id"] for d in page1["result"]["decisions"]] == [ids[2], ids[1]]
+    cursor = page1["result"]["next_cursor"]
+    assert cursor is not None
+
+    await ws.send_json_auto_id({
+        "type": "nova/list_decisions", "limit": 2,
+        "cursor_ts": cursor["ts"], "cursor_id": cursor["id"],
+    })
+    page2 = await ws.receive_json()
+    assert [d["id"] for d in page2["result"]["decisions"]] == [ids[0]]
+    assert page2["result"]["next_cursor"] is None
+
+    await ws.send_json_auto_id({"type": "nova/get_decision", "decision_id": ids[0]})
+    detail = await ws.receive_json()
+    assert detail["success"] is True
+    assert detail["result"]["decision"]["observation"] == {"n": 0}
+    assert detail["result"]["decision"]["kind"] == "intrusion"
+
+
+async def test_get_decision_truncates_and_redacts(hass, tmp_path, monkeypatch, hass_ws_client):
+    """A calendar-title-shaped free-text field over the cap comes back
+    truncated, and a credential-shaped key comes back redacted — proven
+    against the REAL handler, since this composition can't run in tests/unit/
+    (websocket.py needs a real websocket_api to import)."""
+    dr = _isolate_decisions_db(monkeypatch, tmp_path)
+    long_title = "Doctor's appointment " + ("x" * 600)
+    rid = dr.record(
+        "anticipation_departure",
+        observation={"event": long_title},
+        evidence={"api_key": "sk-should-never-reach-the-panel"},
+    )
+    await _setup_nova(hass)
+    ws = await hass_ws_client(hass)
+
+    await ws.send_json_auto_id({"type": "nova/get_decision", "decision_id": rid})
+    resp = await ws.receive_json()
+
+    assert resp["success"] is True
+    d = resp["result"]["decision"]
+    assert d["observation"]["event"].endswith("…")
+    assert len(d["observation"]["event"]) == 501  # 500-char cap + the "…" marker
+    assert d["evidence"]["api_key"] == "**REDACTED**"
+
+
+async def test_set_decision_outcome_status_transitions(hass, tmp_path, monkeypatch, hass_ws_client):
+    dr = _isolate_decisions_db(monkeypatch, tmp_path)
+    rid = dr.record("suggestion")
+    await _setup_nova(hass)
+    ws = await hass_ws_client(hass)
+
+    await ws.send_json_auto_id({"type": "nova/set_decision_outcome", "decision_id": rid, "verdict": "good"})
+    first = await ws.receive_json()
+    assert first["result"]["status"] == "ok"
+
+    await ws.send_json_auto_id({"type": "nova/set_decision_outcome", "decision_id": rid, "verdict": "wrong"})
+    second = await ws.receive_json()
+    assert second["result"]["status"] == "already_judged"
+
+    await ws.send_json_auto_id({"type": "nova/set_decision_outcome", "decision_id": 99999, "verdict": "wrong"})
+    third = await ws.receive_json()
+    assert third["result"]["status"] == "not_found"
