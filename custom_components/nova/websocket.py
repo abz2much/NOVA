@@ -1461,6 +1461,7 @@ PANEL_WRITABLE_KEYS = {
     "camera_reasoning_provider",
     "camera_reasoning_model",
     "classifier_rate_limit",
+    "intrusion_notify_image_ttl_minutes",  # minutes: signed notification-image copy lifetime (v7.102.0)
     "cognition_enabled",
     "cognition_threshold",
     "observer_group_debounce",      # seconds: coalesce a burst of numbered sibling entities (0 = off)
@@ -1941,12 +1942,22 @@ async def ws_update_config(
         rc[key] = value
         _LOGGER.info("Nova panel: set %s = %s", key, str(value)[:80])
 
-        # Persist via centralized config module (survives restarts)
+        # Persist via centralized config module (survives restarts). The
+        # in-memory runtime_config above is already set either way, so this
+        # session keeps working even on a save failure — but the panel is
+        # told, since otherwise the setting silently reverts on next restart
+        # with no visible sign anything went wrong.
+        persisted = True
         try:
             from . import nova_config
-            await hass.async_add_executor_job(nova_config.set, key, value)
+            persisted = await hass.async_add_executor_job(nova_config.set, key, value)
         except Exception as exc:
             _LOGGER.debug("Config persist note: %s", exc)
+            persisted = False
+        if not persisted:
+            _LOGGER.warning("Nova panel: %s = %s applied for this session but "
+                            "FAILED to persist to disk — it will revert on restart",
+                            key, str(value)[:80])
 
         # sleep_override needs its expiry computed too (a plain nova_config.set
         # above would otherwise leave the override permanently inert — see
@@ -1975,7 +1986,7 @@ async def ws_update_config(
                 await observer_mod.stop()
                 data["observer_running"] = False
 
-        connection.send_result(msg["id"], {"key": key, "value": value})
+        connection.send_result(msg["id"], {"key": key, "value": value, "persisted": persisted})
     except Exception as exc:
         _LOGGER.warning("ws_update_config failed: %s", exc)
         connection.send_error(msg["id"], "update_failed", str(exc))
@@ -2601,9 +2612,22 @@ async def ws_intrusion(
 ) -> None:
     """Intrusion snapshot + call-off for the panel (v6.68.0): report the last
     snapshot and call-off state, dismiss an active alert as a false alarm, or
-    acknowledge it (hold auto-escalation without cancelling) (v6.69.0)."""
+    acknowledge it (hold auto-escalation without cancelling) (v6.69.0).
+
+    Snapshot images are never served over HTTP (v7.102.0) — they live in a
+    private directory and are read back and base64-inlined here, so they can
+    only ever reach the panel through this already-@require_admin command.
+    """
     try:
         from . import intrusion
+
+        async def _status_with_image() -> dict:
+            s = intrusion.status()
+            snap = s.get("last_snapshot")
+            if snap and snap.get("path"):
+                snap["image_b64"] = await intrusion.get_snapshot_b64(hass, snap["path"])
+            return s
+
         if msg["action"] == "dismiss":
             res = intrusion.dismiss_intrusion(msg.get("reason", "panel"))
             try:
@@ -2614,15 +2638,20 @@ async def ws_intrusion(
             except Exception:
                 pass
             nova_log("SAFETY", "Intrusion called off from panel (false alarm)")
-            connection.send_result(msg["id"], {**res, **intrusion.status()})
+            connection.send_result(msg["id"], {**res, **await _status_with_image()})
         elif msg["action"] == "acknowledge":
             res = intrusion.acknowledge(msg.get("reason", "panel"))
             nova_log("SAFETY", "Intrusion acknowledged from panel (holding escalation)")
-            connection.send_result(msg["id"], {**res, **intrusion.status()})
+            connection.send_result(msg["id"], {**res, **await _status_with_image()})
         elif msg["action"] == "log":
             # Reviewable event history with snapshots (v6.76.0)
+            events = intrusion.get_log(msg.get("limit", 50))
+            for ev in events:
+                p = ev.get("snapshot_path")
+                if p:
+                    ev["image_b64"] = await intrusion.get_snapshot_b64(hass, p)
             connection.send_result(msg["id"], {
-                "events": intrusion.get_log(msg.get("limit", 50)),
+                "events": events,
                 "learning": intrusion.learning_summary(),
             })
         elif msg["action"] == "label":
@@ -2636,7 +2665,7 @@ async def ws_intrusion(
         elif msg["action"] == "learning":
             connection.send_result(msg["id"], intrusion.learning_summary())
         else:
-            connection.send_result(msg["id"], intrusion.status())
+            connection.send_result(msg["id"], await _status_with_image())
     except Exception as exc:
         _LOGGER.exception("ws_intrusion failed: %s", exc)
         connection.send_error(msg["id"], "intrusion_failed", str(exc))

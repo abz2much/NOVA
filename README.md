@@ -268,7 +268,7 @@ To add a language or refine an existing one, copy an existing file, translate th
 
 ## Architecture
 
-Nova is a Home Assistant custom integration (domain `nova`, around 86 Python modules) installed through HACS into `custom_components/nova/`. It runs in-process: it registers the conversation agent and voice pipeline and serves the custom dashboard panel directly. State and learned behavior persist under `/config/nova/` (a SQLite `patterns.db`, the curated `knowledge.db`, the reasoning cache, the doorbell-training dataset, and lockdown state), so Nova keeps getting smarter across restarts.
+Nova is a Home Assistant custom integration (domain `nova`, around 90 Python modules) installed through HACS into `custom_components/nova/`. It runs in-process: it registers the conversation agent and voice pipeline and serves the custom dashboard panel directly. State and learned behavior persist under `/config/nova/` (a SQLite `patterns.db`, the curated `knowledge.db`, the reasoning cache, the doorbell-training dataset, and lockdown state), so Nova keeps getting smarter across restarts.
 
 The reasoning pipeline is layered for resilience and cost: local templates, then a learned cache, then cloud (or eventually a local model), with the Local Mind offline brain as the floor beneath everything. A connectivity breaker guards cloud calls, and every local decision logs its reasoning chain to the dashboard's log view.
 
@@ -281,7 +281,7 @@ What's stored, and where:
 - **Learned behavior and patterns:** `patterns.db` (state changes and commands used to propose automations), `person_patterns` (per-person routines), and the reasoning cache. All local SQLite.
 - **Knowledge and memory:** the curated `knowledge.db` and conversation memory (vectors or FTS), local SQLite. Editable and erasable from the dashboard.
 - **Documents:** anything you drop in `/config/nova/documents` for the RAG agent, plus its index and vectors. Ingestion is path-guarded so it only ever reads inside that folder.
-- **Camera and vision:** snapshots are analyzed on demand and not retained by Nova; recording is Frigate's job, under your control.
+- **Camera and vision:** snapshots analyzed on demand aren't retained. Confirmed-intrusion snapshots are the one exception (last 40, for the panel's review/labeling history) — stored privately under `/config/nova/`, never in a web-servable location, and delivered to the panel only over its own authenticated connection. A push notification's photo is a short-lived, cryptographically signed copy that expires and deletes itself. Recording is Frigate's job, under your control.
 - **Biometrics:** off by default and opt-in. When enabled, Nova reads wearable entities Home Assistant already exposes for comfort context (being quieter when a sleep sensor says you're resting, for example). This context only ever reaches the model when you're running a local Ollama provider — with a cloud provider configured (Groq, OpenAI, Anthropic, Gemini) it's withheld entirely, so heart-rate/sleep readings never leave your network. It is explicitly not medical: it never diagnoses, alarms on, or clinically interprets a reading, and anything concerning is left to your own device or a medical professional.
 
 What leaves your network is only what you choose: requests to whichever LLM provider (Groq, OpenAI, Anthropic) and vision model you configure, or nothing at all if you run everything locally through Ollama. Swap any provider for a local model to keep the whole pipeline on premises. Sensitive integration credentials are held by Home Assistant, not Nova.
@@ -296,7 +296,7 @@ Nova started as a fork of [jarvis-aio](https://github.com/sam3gp8/jarvis-aio) an
 - Biometric/wellbeing data (heart rate, sleep stage) is withheld entirely from cloud LLM calls — it only ever reaches the model when you're running a local Ollama provider.
 - Every memory store Nova has — cross-session conversation recall, long-term semantic search, and curated facts/preferences from "remember that…" — is scoped to the right conversation or person rather than searched globally, and anything pulled back into a live conversation is wrapped against prompt injection rather than trusted verbatim.
 - A new preference or routine from "remember that…" isn't trusted immediately — Nova asks you to confirm it in the same conversation, and if you don't, it waits in the panel's Memory tab for you to approve, edit, or reject, rather than something Nova merely read (an email, a calendar invite) quietly becoming an accepted fact.
-- Voice model downloads are checksum-verified before being installed.
+- Voice model downloads verify file size before installing, and reject a checksum mismatch outright when one is configured; the upstream voice repository is currently access-gated, so no checksum is populated for it today (an optional cosmetic TTS voice — not required for Nova to function).
 
 **Smarter, less noisy home awareness**
 - Sleep state is explicit (Auto / Awake / Asleep), not inferred purely from bedroom occupancy — one person going to bed no longer marks the whole house "asleep" while someone else is still up.

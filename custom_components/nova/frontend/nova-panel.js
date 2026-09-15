@@ -1838,10 +1838,10 @@ class NovaPanel extends HTMLElement {
     }
     const snap = s.last_snapshot;
     let html = "";
-    if (snap && snap.url) {
+    if (snap && snap.image_b64) {
       const when = snap.ts ? new Date(snap.ts * 1000).toLocaleString() : "";
       html += `<div class="intr-snap">
-        <img src="${this._esc(snap.url)}" alt="intrusion snapshot" class="intr-img">
+        <img src="data:image/jpeg;base64,${snap.image_b64}" alt="intrusion snapshot" class="intr-img">
         <div class="toggle-desc">${this._esc((snap.camera || "").replace("camera.", "").replace(/_/g, " "))} · ${this._esc(when)}</div>
       </div>`;
     } else {
@@ -1937,7 +1937,7 @@ class NovaPanel extends HTMLElement {
           <span class="toggle-desc">${this._esc(when)}</span>
         </div>
         <div class="toggle-desc">${this._esc(e.breach || e.camera || "activity")}${e.reason ? " — " + this._esc(e.reason) : ""}</div>
-        ${e.snapshot_url ? `<img class="intr-img" src="${this._esc(e.snapshot_url)}" alt="snapshot">` : ""}
+        ${e.image_b64 ? `<img class="intr-img" src="data:image/jpeg;base64,${e.image_b64}" alt="snapshot">` : ""}
         <div class="mode-grid">
           <button class="mode-chip new-ilog-btn${label === "real" ? " mode-chip-on" : ""}" data-label="real">REAL</button>
           <button class="mode-chip new-ilog-btn${label === "false" ? " mode-chip-on" : ""}" data-label="false">FALSE ALARM</button>

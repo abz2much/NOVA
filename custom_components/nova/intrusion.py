@@ -11,24 +11,35 @@ Two additions to the existing SafetyManager intrusion flow:
      active investigation, suppresses further escalation for a cooldown, and
      records the false alarm so repeated benign triggers can be learned from.
 
-Snapshots are written under /config/www/nova/intrusion (served at
-/local/nova/intrusion/...) so HA can render them in notifications and the
-panel. Everything here is defensive and never raises to the caller.
+Snapshots are written under /config/nova/intrusion — NOT /config/www, which
+Home Assistant serves at /local/... with no authentication at all. These
+images can show a confirmed intruder's face; they're read back and sent to
+the panel as base64 over the existing @require_admin `nova/intrusion`
+websocket command instead; there is no HTTP path serving them at all, so
+there's nothing new to authenticate. (Pre-v7.102.0 this lived under
+/config/www/nova/intrusion; see migrate_legacy_snapshots() for the one-time
+move of any pre-existing files — old snapshots are relocated, never deleted.)
+Everything here is defensive and never raises to the caller.
 """
 from __future__ import annotations
 
+import base64
 import logging
 import os
+import secrets
 import time
 import json
+from datetime import timedelta
 from pathlib import Path
 from typing import Optional
 
 _LOGGER = logging.getLogger(__name__)
 
-# Servable snapshot dir: /config/www/... is exposed at /local/...
-SNAPSHOT_DIR = "/config/www/nova/intrusion"
-SNAPSHOT_URL_BASE = "/local/nova/intrusion"
+_DEFAULT_NOTIFY_IMAGE_TTL_MIN = 60.0
+
+# Private snapshot dir — never under /config/www (see module docstring).
+SNAPSHOT_DIR = "/config/nova/intrusion"
+_LEGACY_SNAPSHOT_DIR = "/config/www/nova/intrusion"  # pre-v7.102.0 location
 _MAX_SNAPSHOTS = 40           # keep the last N, prune older
 
 # Call-off state (module-level; the investigation itself lives in SafetyManager)
@@ -61,8 +72,8 @@ def is_acknowledged() -> bool:
 
 async def capture_snapshot(hass, camera_entity: str,
                            tag: str = "intrusion") -> Optional[dict]:
-    """Grab a still from camera_entity and write it to the servable dir. Returns
-    {path, url, camera, ts} or None. Never raises."""
+    """Grab a still from camera_entity and write it to the private snapshot
+    dir. Returns {path, camera, ts} or None. Never raises."""
     if not camera_entity:
         return None
     try:
@@ -80,14 +91,13 @@ async def capture_snapshot(hass, camera_entity: str,
         _prune_old()
         info = {
             "path": path,
-            "url": f"{SNAPSHOT_URL_BASE}/{fname}",
             "camera": camera_entity,
             "ts": ts,
         }
         global _last_snapshot
         _last_snapshot = info
         _LOGGER.info("Nova: intrusion snapshot saved from %s → %s",
-                     camera_entity, info["url"])
+                     camera_entity, path)
         return info
     except Exception as exc:
         _LOGGER.debug("intrusion snapshot failed for %s: %s", camera_entity, exc)
@@ -97,6 +107,136 @@ async def capture_snapshot(hass, camera_entity: str,
 def _write_bytes(path: str, data: bytes) -> None:
     with open(path, "wb") as f:
         f.write(data)
+
+
+def _read_b64(path: str) -> Optional[str]:
+    """Read a snapshot file and return its base64-encoded bytes, or None.
+    Refuses to read anything outside SNAPSHOT_DIR — path comes from our own
+    stored metadata, not user input, but this costs nothing and closes off
+    a path-traversal class of bug outright. Never raises."""
+    try:
+        if not path:
+            return None
+        real_dir = os.path.realpath(SNAPSHOT_DIR)
+        real_path = os.path.realpath(path)
+        if os.path.commonpath([real_dir, real_path]) != real_dir:
+            _LOGGER.warning("intrusion: refused to read snapshot outside %s: %s",
+                            SNAPSHOT_DIR, path)
+            return None
+        with open(real_path, "rb") as f:
+            return base64.b64encode(f.read()).decode("ascii")
+    except Exception as exc:
+        _LOGGER.debug("intrusion: snapshot read failed for %s: %s", path, exc)
+        return None
+
+
+async def get_snapshot_b64(hass, path: str) -> Optional[str]:
+    """Async wrapper for _read_b64 — file I/O off the event loop."""
+    return await hass.async_add_executor_job(_read_b64, path)
+
+
+def _notify_ttl_minutes(hass) -> float:
+    """How long a notification's signed image copy lives before being
+    deleted. Configurable via `intrusion_notify_image_ttl_minutes`
+    (Settings → Devices & Services → Nova → Configure)."""
+    try:
+        from . import nova_config
+        v = nova_config.get("intrusion_notify_image_ttl_minutes",
+                            _DEFAULT_NOTIFY_IMAGE_TTL_MIN)
+        return max(1.0, float(v))
+    except Exception:
+        return _DEFAULT_NOTIFY_IMAGE_TTL_MIN
+
+
+def _copy_for_notify(snapshot_path: str, sub_dir: str) -> Optional[str]:
+    """Copy the private snapshot into HA's local media directory under a
+    fresh, unguessable filename. Returns the filename, or None on failure.
+    Runs in the executor."""
+    try:
+        os.makedirs(sub_dir, exist_ok=True)
+        fname = f"{secrets.token_urlsafe(16)}.jpg"
+        dst = os.path.join(sub_dir, fname)
+        with open(snapshot_path, "rb") as src_f:
+            data = src_f.read()
+        with open(dst, "wb") as dst_f:
+            dst_f.write(data)
+        return fname
+    except Exception as exc:
+        _LOGGER.debug("intrusion: notification image copy failed: %s", exc)
+        return None
+
+
+def _delete_notify_copy(path: str) -> None:
+    try:
+        os.remove(path)
+    except Exception:
+        pass
+
+
+async def get_notification_image_url(hass, snapshot_path: str) -> Optional[str]:
+    """Return a short-lived, cryptographically SIGNED url for a mobile push
+    notification's image attachment. Never returns the persistent, private
+    archive path directly and never falls back to the old /config/www /
+    /local/... mechanism.
+
+    Phones fetch a push notification's image attachment directly (iOS/
+    Android — no Authorization header support), so the file has to be
+    reachable by a plain URL. Rather than storing it anywhere permanently
+    unauthenticated, this uses Home Assistant's own media_source support:
+    the image is copied into HA's configured local media directory (under
+    an unguessable, per-notification filename) and served at /media/...,
+    which — unlike /config/www's /local/... — is a real HomeAssistantView
+    that requires either a normal auth token or a valid signed path
+    (homeassistant.components.http.auth.async_sign_path). The signed URL
+    this returns expires after `_notify_ttl_minutes()`, and the copy is
+    deleted from disk on that same schedule regardless of whether the
+    signature was ever used. The permanent, private archive in
+    SNAPSHOT_DIR is completely untouched by any of this.
+
+    Returns None (never raises) if no local media directory is configured,
+    or on any failure — the notification still sends, just without a photo.
+    """
+    if not snapshot_path:
+        return None
+    try:
+        media_dirs = getattr(hass.config, "media_dirs", None) or {}
+        source_dir_id = "local" if "local" in media_dirs else next(iter(media_dirs), None)
+        if not source_dir_id:
+            _LOGGER.debug("intrusion: no local media directory configured; "
+                          "notification will send without a photo")
+            return None
+        sub_dir = os.path.join(media_dirs[source_dir_id], "nova_intrusion")
+
+        fname = await hass.async_add_executor_job(_copy_for_notify, snapshot_path, sub_dir)
+        if not fname:
+            return None
+        dst_path = os.path.join(sub_dir, fname)
+
+        ttl_minutes = _notify_ttl_minutes(hass)
+        try:
+            from homeassistant.components.http.auth import async_sign_path
+            url_path = f"/media/{source_dir_id}/nova_intrusion/{fname}"
+            signed_url = async_sign_path(hass, url_path, timedelta(minutes=ttl_minutes))
+        except Exception as exc:
+            _LOGGER.debug("intrusion: signing notification image path failed: %s", exc)
+            await hass.async_add_executor_job(_delete_notify_copy, dst_path)
+            return None
+
+        try:
+            from homeassistant.helpers.event import async_call_later
+            async_call_later(hass, ttl_minutes * 60,
+                             lambda _now: hass.async_add_executor_job(
+                                 _delete_notify_copy, dst_path))
+        except Exception as exc:
+            _LOGGER.debug("intrusion: could not schedule notification image "
+                          "cleanup, deleting immediately as a fallback: %s", exc)
+            await hass.async_add_executor_job(_delete_notify_copy, dst_path)
+            return None
+
+        return signed_url
+    except Exception as exc:
+        _LOGGER.debug("intrusion: get_notification_image_url failed: %s", exc)
+        return None
 
 
 def _prune_old() -> None:
@@ -114,6 +254,56 @@ def _prune_old() -> None:
                 pass
     except Exception:
         pass
+
+
+def migrate_legacy_snapshots() -> dict:
+    """One-time move of any snapshots left under the old, unauthenticated
+    /config/www/nova/intrusion location (pre-v7.102.0) to the private
+    SNAPSHOT_DIR, and repoint any log entries that still reference the old
+    path. Files are moved, never deleted — if a destination file somehow
+    already exists, the legacy copy is left in place rather than overwritten
+    or dropped. Safe to call on every startup: a no-op once nothing legacy
+    remains. Never raises."""
+    moved = 0
+    skipped = 0
+    try:
+        if not os.path.isdir(_LEGACY_SNAPSHOT_DIR):
+            return {"moved": 0, "skipped": 0}
+        os.makedirs(SNAPSHOT_DIR, exist_ok=True)
+        for fname in os.listdir(_LEGACY_SNAPSHOT_DIR):
+            if not fname.endswith(".jpg"):
+                continue
+            src = os.path.join(_LEGACY_SNAPSHOT_DIR, fname)
+            dst = os.path.join(SNAPSHOT_DIR, fname)
+            try:
+                if os.path.exists(dst):
+                    skipped += 1
+                    continue
+                os.rename(src, dst)
+                moved += 1
+            except Exception as exc:
+                _LOGGER.warning("intrusion: could not migrate legacy snapshot %s: %s",
+                                fname, exc)
+                skipped += 1
+        if moved:
+            _load_log()
+            changed = False
+            for ev in _log:
+                p = ev.get("snapshot_path") or ""
+                if p.startswith(_LEGACY_SNAPSHOT_DIR):
+                    ev["snapshot_path"] = p.replace(_LEGACY_SNAPSHOT_DIR, SNAPSHOT_DIR, 1)
+                    changed = True
+            if changed:
+                _save_log()
+            _LOGGER.warning(
+                "Nova: migrated %d intrusion snapshot(s) from the old, "
+                "unauthenticated %s to %s (%d left in place)%s",
+                moved, _LEGACY_SNAPSHOT_DIR, SNAPSHOT_DIR, skipped,
+                " — remaining legacy files were left untouched" if skipped else "",
+            )
+    except Exception as exc:
+        _LOGGER.debug("intrusion: legacy snapshot migration skipped: %s", exc)
+    return {"moved": moved, "skipped": skipped}
 
 
 def last_snapshot() -> Optional[dict]:
@@ -273,7 +463,6 @@ def record_event(kind: str, reason: str = "", breach: Optional[str] = None,
         "breach": breach or "",
         "breach_area": breach_area or "",
         "camera": camera or (snapshot or {}).get("camera") or "",
-        "snapshot_url": (snapshot or {}).get("url") or "",
         "snapshot_path": (snapshot or {}).get("path") or "",
         "zones": list(zones or []),
         "max_depth": max_depth,

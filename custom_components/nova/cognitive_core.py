@@ -979,14 +979,21 @@ class SafetyManager:
                 "message": msg, "auto_act": True, "notify_all": True,
                 "can_dismiss": True,
             }
+            notify_url = None
             if snap:
-                action["snapshot_url"] = snap.get("url")
+                try:
+                    from . import intrusion as _intr
+                    notify_url = await _intr.get_notification_image_url(
+                        self.hass, snap.get("path"))
+                except Exception:
+                    notify_url = None
+                action["snapshot_url"] = notify_url
                 action["snapshot_path"] = snap.get("path")
                 action["camera"] = snap.get("camera")
             try:
                 self.hass.bus.async_fire("nova_intrusion_confirmed", {
                     "reason": reason,
-                    "snapshot_url": (snap or {}).get("url"),
+                    "snapshot_url": notify_url,
                     "snapshot_path": (snap or {}).get("path"),
                     "camera": (snap or {}).get("camera"),
                 })
@@ -1056,14 +1063,21 @@ class SafetyManager:
                 "message": msg, "auto_act": True, "notify_all": True,
                 "can_dismiss": True,
             }
+            notify_url = None
             if snap:
-                action["snapshot_url"] = snap.get("url")
+                try:
+                    from . import intrusion as _intr
+                    notify_url = await _intr.get_notification_image_url(
+                        self.hass, snap.get("path"))
+                except Exception:
+                    notify_url = None
+                action["snapshot_url"] = notify_url
                 action["snapshot_path"] = snap.get("path")
                 action["camera"] = snap.get("camera")
             try:
                 self.hass.bus.async_fire("nova_intrusion_unresolved", {
                     "reason": "no response; unconfirmed activity",
-                    "snapshot_url": (snap or {}).get("url"),
+                    "snapshot_url": notify_url,
                     "snapshot_path": (snap or {}).get("path"),
                     "camera": (snap or {}).get("camera"),
                 })

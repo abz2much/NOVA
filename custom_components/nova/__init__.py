@@ -130,6 +130,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # wins over stale entry data/options) so the boot client, conversation, and
     # agent never diverge on which model to run. ───────────────────────────
     from . import nova_config as _jc
+    _jc.configure(hass)
     _eff = await hass.async_add_executor_job(_jc.effective_config, entry)
     # Warm the remaining persisted-state caches off the event loop too, so the
     # hot paths that read them (observer tick, panel data, intrusion log) don't
@@ -722,18 +723,47 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         from . import ha_secrets as _hs
         await _hs.relocate_plaintext_credentials(hass)
     except Exception as exc:
-        _LOGGER.debug("Credential relocation: %s", exc)
+        # Safety property holds regardless (verify-before-strip means a
+        # credential is never lost or exposed by a failure here) but a
+        # failure was previously only visible at DEBUG — you'd have no way
+        # to know a credential is still sitting in plaintext in config.json.
+        _LOGGER.warning("Credential relocation failed — credential(s) remain "
+                        "in config.json, not moved to secrets.yaml: %s", exc)
 
-    _register_services(hass, entry, llm_client, sentinel)
+    # Move any intrusion snapshots left under the old, unauthenticated
+    # /config/www location (pre-v7.102.0) to the private snapshot dir
+    # (v7.102.0). Safe: files are moved, never deleted; a no-op once nothing
+    # legacy remains.
+    try:
+        from . import intrusion as _intrusion
+        await hass.async_add_executor_job(_intrusion.migrate_legacy_snapshots)
+    except Exception as exc:
+        _LOGGER.debug("Intrusion snapshot migration: %s", exc)
 
-    # Reload services when options change
-    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+    try:
+        _register_services(hass, entry, llm_client, sentinel)
 
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+        # Reload services when options change
+        entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
-    # Auto-start Sentinel + Reminder watcher
-    await sentinel.async_start()
-    await reminder_watcher.async_start()
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+        # Auto-start Sentinel + Reminder watcher
+        await sentinel.async_start()
+        await reminder_watcher.async_start()
+    except Exception:
+        # Confirmed by tests/integration/test_setup_failure_cleanup.py: any of
+        # the three calls above failing used to leave the just-registered
+        # services, camera/Eufy bus listeners, every scheduled sweep, and the
+        # hass.data entry itself behind — nothing tears them down on a setup
+        # exception, since HA doesn't call async_unload_entry for you here.
+        # async_unload_entry is already fail-safe/idempotent (that's what
+        # NovaResources.close_all() is for) and tolerates a partial setup —
+        # it defaults hass.data lookups to {} and unloading a platform that
+        # was never forwarded is a no-op — so reuse it instead of duplicating
+        # its teardown.
+        await async_unload_entry(hass, entry)
+        raise
 
     # ── v5.2 Observer Mode ──────────────────────────────────────────────────
     # Observer subscribes to state_changed events and proactively announces
