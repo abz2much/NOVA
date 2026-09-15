@@ -769,16 +769,23 @@ setTimeout(async () => {
   checks.push(["settings tab: Diagnostics service call reached hass.callService",
     _serviceCalls.some(c => c.domain === "nova" && c.service === "test_tts")]);
 
-  // Post-v7.103.0 fix: Provider Activity's section heading, and a distinct
-  // empty-vs-error state, must always render — the default mock returns {}
-  // for nova/get_provider_activity, exercising the real empty-result path.
-  // Also guards that Setup Doctor's heading reuses Nova's normal prominent
-  // section-heading pattern (.panel-head > .panel-title — same element used
-  // by the Diagnostics card's own title, "Installed Automations", "What
-  // Nova Has Learned", etc.), not the small .mode-bind-head diagnostic-label
-  // style still correctly used by "Provider Activity" and "Service tests".
+  // Post-v7.103.1 layout polish: Setup Doctor, Provider Activity and Service
+  // tests all use Nova's normal prominent .panel-head > .panel-title pattern
+  // (same element as the Diagnostics card's own title), replacing the small
+  // .mode-bind-head diagnostic-label style everywhere it was used as a real
+  // heading. The divider that used to be baked into .mode-bind-head's own
+  // border-top (lost when Setup Doctor moved off that class) is restored as
+  // a standalone empty .mode-bind-head spacer between the main Diagnostics
+  // section and Setup Doctor — same class, same CSS, no new line style.
+  // Individual check rows (Core services and Setup Doctor) now render their
+  // name and OK/OFF/IDLE/WARN/DOWN status as separate sibling elements
+  // inside the existing two-column .cfg-row pattern (the same one the
+  // Core-services aggregate summary already used), instead of appending the
+  // status into the label's own text.
   const diagCardOf = (root) => Array.from(root.querySelectorAll(".settings-card"))
     .find(c => /^Diagnostics$/.test(c.querySelector(".panel-title")?.textContent?.trim() || ""));
+  const rowFor = (diagCard, labelText) => Array.from(diagCard.querySelectorAll(".cfg-row"))
+    .find(r => r.querySelector("label")?.textContent.trim() === labelText);
   checks.push(
     ["settings tab: Provider Activity section renders its heading with an empty result",
       (() => {
@@ -786,26 +793,77 @@ setTimeout(async () => {
         return !!diagCard && /Provider Activity/.test(diagCard.textContent)
           && /No provider activity recorded yet\. Activity appears after Nova uses a supported conversation or classifier path\./.test(diagCard.textContent);
       })()],
-    ["settings tab: Setup Doctor heading reuses Nova's prominent .panel-head > .panel-title pattern",
+    ["settings tab: Setup Doctor, Provider Activity and Service tests all use the same .panel-head > .panel-title heading pattern",
+      (() => {
+        const diagCard = diagCardOf(sRoot);
+        if (!diagCard) return false;
+        const referenceTitle = diagCard.querySelector(".panel-title"); // the card's own "Diagnostics" title — the reference prominent heading
+        const titleFor = (text) => Array.from(diagCard.querySelectorAll(".panel-title")).find(h => h.textContent.trim() === text);
+        const matchesReference = (el) => !!el && !!referenceTitle
+          && el.tagName === referenceTitle.tagName
+          && el.className === referenceTitle.className
+          && el.parentElement?.className === "panel-head";
+        const noneStillSmall = ["Setup Doctor", "Provider Activity", "Service tests"].every(text =>
+          !Array.from(diagCard.querySelectorAll(".mode-bind-head")).some(h => h.textContent.trim() === text));
+        return matchesReference(titleFor("Setup Doctor"))
+          && matchesReference(titleFor("Provider Activity"))
+          && matchesReference(titleFor("Service tests"))
+          && noneStillSmall;
+      })()],
+    ["settings tab: a divider (the existing empty .mode-bind-head spacer) sits between the main Diagnostics section and Setup Doctor",
       (() => {
         const diagCard = diagCardOf(sRoot);
         if (!diagCard) return false;
         const setupTitle = Array.from(diagCard.querySelectorAll(".panel-title")).find(h => h.textContent.trim() === "Setup Doctor");
-        const referenceTitle = diagCard.querySelector(".panel-title"); // the card's own "Diagnostics" title — the reference prominent heading
-        const stillUsesSmallLabel = Array.from(diagCard.querySelectorAll(".mode-bind-head")).some(h => h.textContent.trim() === "Setup Doctor");
-        return !!setupTitle && !!referenceTitle
-          && setupTitle.tagName === referenceTitle.tagName
-          && setupTitle.className === referenceTitle.className
-          && setupTitle.parentElement?.className === "panel-head"
-          && !stillUsesSmallLabel;
+        const dividers = Array.from(diagCard.querySelectorAll(".mode-bind-head")).filter(h => h.textContent.trim() === "");
+        return !!setupTitle && dividers.some(d =>
+          d.compareDocumentPosition(setupTitle) & Node.DOCUMENT_POSITION_FOLLOWING);
       })()],
-    ["settings tab: Provider Activity and Service tests still use the small .mode-bind-head style (unchanged)",
+    ["settings tab: Core services aggregate summary row is unchanged — label left, rolled-up status right",
       (() => {
         const diagCard = diagCardOf(sRoot);
-        const headings = diagCard ? Array.from(diagCard.querySelectorAll(".mode-bind-head")).map(h => h.textContent.trim()) : [];
-        return headings.includes("Provider Activity") && headings.includes("Service tests");
+        const row = rowFor(diagCard, "Core services");
+        const status = row?.querySelector("span");
+        return !!row && !!status && /3\/4 CORE SERVICES HEALTHY/.test(status.textContent)
+          && row.children.length === 2 && row.children[0].tagName === "LABEL" && row.children[1] === status;
+      })()],
+    ["settings tab: Core-services check labels and statuses are separate elements, status right-aligned via .cfg-row",
+      (() => {
+        const diagCard = diagCardOf(sRoot);
+        const row = rowFor(diagCard, "LLM");
+        const status = row?.querySelector("span.diag-ok");
+        return !!row && !!status && row.classList.contains("cfg-row")
+          && row.querySelector("label").textContent.trim() === "LLM"
+          && status.textContent.trim() === "OK"
+          && !row.querySelector("label").textContent.includes("OK");
       })()],
   );
+  // Setup Doctor's own check rows only render once nova/get_setup_health
+  // returns a non-core-service check; the default mock leaves it in its
+  // "Loading…" state (exercised by the heading-pattern check above), so
+  // fetch a realistic payload here to prove the row layout itself.
+  const setupHealthCallWS = hass.callWS;
+  hass.callWS = async (m) => {
+    if (m.type === "nova/get_setup_health") return { checks: [
+      { key: "room_speakers", name: "Room speakers", status: "warn", detail: "2 rooms missing a speaker", suggested_fix: "assign one in Settings" },
+    ] };
+    return setupHealthCallWS(m);
+  };
+  await elNew._fetchDiagnosticsData();
+  sRoot = elNew.shadowRoot;
+  checks.push(["settings tab: Setup Doctor labels and statuses are separate elements, status right-aligned via .cfg-row",
+    (() => {
+      const diagCard = diagCardOf(sRoot);
+      const row = rowFor(diagCard, "Room speakers");
+      const status = row?.querySelector("span.diag-warn");
+      return !!row && !!status && row.classList.contains("cfg-row")
+        && row.querySelector("label").textContent.trim() === "Room speakers"
+        && status.textContent.trim() === "WARN"
+        && !row.querySelector("label").textContent.includes("WARN");
+    })()]);
+  hass.callWS = setupHealthCallWS;
+  await elNew._fetchDiagnosticsData();
+  sRoot = elNew.shadowRoot;
   const providerActivityCallWS = hass.callWS;
   hass.callWS = async (m) => {
     if (m.type === "nova/get_provider_activity") throw new Error("boom");
