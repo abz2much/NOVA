@@ -37,10 +37,10 @@ jobs:
         uses: hacs/action@d556e736723344f83838d08488c983a15381059a
         with:
           category: integration
-          # explicit token: this is a private repo, and hacs/action needs to
-          # call the GitHub API for repo metadata (topics, description,
-          # license, file contents) — its default of `github.token` should
-          # cover this, but being explicit removes any doubt (11 Sept 2026).
+          # explicit token: hacs/action needs to call the GitHub API for repo
+          # metadata (topics, description, license, file contents) — its
+          # default of `github.token` should cover this, but being explicit
+          # removes any doubt (11 Sept 2026).
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
   tests:
