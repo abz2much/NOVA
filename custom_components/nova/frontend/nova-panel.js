@@ -1080,7 +1080,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v7.101.35
+ * v7.101.36
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1145,7 +1145,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v7.101.35 ",
+      console.log("%c Nova Panel %c v7.101.36 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -2358,12 +2358,27 @@ class NovaPanel extends HTMLElement {
     const scene = this.shadowRoot?.getElementById("resScene");
     if (!scene || scene._house3dWired) return;
     scene._house3dWired = true;
+    // Touch is ambiguous between "rotate the house" and "scroll the page
+    // past it" — both start as a drag on the same element. Committing to
+    // rotate on touchstart (and preventDefault-ing every touchmove) hijacked
+    // every vertical scroll attempt that happened to start on the house,
+    // which read as "the 3D view is sluggish" (real complaint: it wouldn't
+    // let go of the touch to let the page scroll at all). Mouse drag has no
+    // such ambiguity — only touch needs the direction check below.
     let dragging = false, lastX = 0, raf = null;
+    let isTouch = false, startX = 0, startY = 0, decided = false;
+    const DIR_THRESHOLD = 6; // px of movement before committing to a direction
     const schedule = () => { if (!raf) raf = requestAnimationFrame(() => { raf = null; this._renderHouse3dNew(); }); };
     const pt = e => (e.touches && e.touches[0] ? e.touches[0] : e);
     const move = (e) => {
       if (!dragging) return;
       const p = pt(e);
+      if (isTouch && !decided) {
+        const dx = Math.abs(p.clientX - startX), dy = Math.abs(p.clientY - startY);
+        if (dx < DIR_THRESHOLD && dy < DIR_THRESHOLD) return; // not enough movement yet to tell
+        if (dy > dx) { up(); return; } // vertical swipe — let the page scroll instead
+        decided = true;
+      }
       if (e.cancelable) e.preventDefault();
       this._house3dTheta = (this._house3dTheta || 35) + (p.clientX - lastX) * 0.5;
       lastX = p.clientX;
@@ -2374,15 +2389,16 @@ class NovaPanel extends HTMLElement {
       window.removeEventListener("mousemove", move); window.removeEventListener("mouseup", up);
       window.removeEventListener("touchmove", move); window.removeEventListener("touchend", up);
     };
-    const down = (e) => {
+    const down = (e, touch) => {
       const p = pt(e);
       dragging = true; lastX = p.clientX;
+      isTouch = !!touch; startX = p.clientX; startY = p.clientY; decided = !isTouch;
       scene.classList.add("dragging");
       window.addEventListener("mousemove", move); window.addEventListener("mouseup", up);
       window.addEventListener("touchmove", move, { passive: false }); window.addEventListener("touchend", up);
     };
-    scene.addEventListener("mousedown", (e) => { down(e); e.preventDefault(); });
-    scene.addEventListener("touchstart", (e) => down(e), { passive: true });
+    scene.addEventListener("mousedown", (e) => { down(e, false); e.preventDefault(); });
+    scene.addEventListener("touchstart", (e) => down(e, true), { passive: true });
     scene.addEventListener("wheel", (e) => {
       e.preventDefault();
       const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;

@@ -1,3 +1,9 @@
+## [7.101.36] — fix: touch drag on the 3D house blocked page scroll entirely
+
+Abi reported "moving around the 3D is sluggish, but scrolling at the edge is smooth" — that phrasing was the tell. The drag-to-rotate handler committed to a rotate gesture on `touchstart` unconditionally and called `preventDefault()` on every `touchmove` while dragging, regardless of swipe direction. A vertical swipe intended to scroll the page — if it happened to start on top of the house — got captured as a (visually jerky, unwanted) rotate instead, and the page couldn't scroll at all until the touch lifted. Fixed by checking the first ~6px of movement: a mostly-vertical swipe now releases the drag and lets the browser scroll normally; only a mostly-horizontal swipe commits to rotating. Mouse drag is unaffected (no ambiguity there — always rotates immediately, same as before).
+
+Also directly verified, on Abi's actual live instance via DOM inspection (not a guess): at 7.101.35 the Residence tab's door-mapping select and its container genuinely have zero overflow at a forced 390px width with real entity data — the fix from 7.101.35 is working correctly server-side. If the overflow is still visible, it's very likely the phone browser serving a cached copy of the old `nova-panel.js` — worth a hard-refresh or clearing site data for the Home Assistant domain before assuming the code is still wrong.
+
 ## [7.101.35] — fix: Residence tab overflow on phones; 3D house retheme to match Command Center
 
 Abi caught two things I missed in the mobile audit and one older cosmetic mismatch:
