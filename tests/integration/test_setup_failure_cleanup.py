@@ -31,6 +31,7 @@ _CLEAN = {
     "hass_data_entry_present": False,
     "service_registered": False,
     "camera_listeners": 0,
+    "automation_trigger_listeners": 0,
     "resource_unsubs": 0,
     "resource_closeables": 0,
     "scheduler_jobs": [],
@@ -47,6 +48,10 @@ def _left_behind(hass, entry) -> dict:
         "hass_data_entry_present": data is not None,
         "service_registered": hass.services.has_service(DOMAIN, "analyze_camera"),
         "camera_listeners": hass.bus.async_listeners().get("nest_event", 0),
+        # Phase 3: the automation probation listener registers alongside the
+        # camera listeners, before all three late steps below — it must be
+        # torn down by the same async_unload_entry-on-failure path.
+        "automation_trigger_listeners": hass.bus.async_listeners().get("automation_triggered", 0),
         "resource_unsubs": len(getattr(resources, "_unsubs", [])) if resources else 0,
         "resource_closeables": len(getattr(resources, "_closeables", [])) if resources else 0,
         "scheduler_jobs": sched.task_names() if sched else [],

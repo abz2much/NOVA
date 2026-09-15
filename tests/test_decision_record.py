@@ -283,6 +283,51 @@ def test_mark_installed_marks_good(load, monkeypatch, tmp_path):
     assert ("suggestion:9", "good", "installed") in calls
 
 
+def test_mark_installed_creates_automation_trial_separately(load, monkeypatch, tmp_path):
+    """Phase 3: installing a suggestion creates an Automation Trial row too —
+    a materially different record from the suggestion-acceptance Decision
+    Record outcome above, tracking whether the automation actually runs
+    rather than whether it was accepted."""
+    pa = load("pattern_analyzer")
+    at = load("automation_trials")
+    trials_db = str(tmp_path / "trials.db")
+    monkeypatch.setattr(at, "_DEFAULT_DB", trials_db)
+
+    an = pa.PatternAnalyzer()
+    an._db = _suggestions_db(tmp_path, 12)
+    an.mark_installed(12, "nova_auto_porch_light")
+
+    trials = at.list_trials(db_path=trials_db)
+    assert len(trials) == 1
+    assert trials[0]["suggestion_id"] == 12
+    assert trials[0]["automation_id"] == "nova_auto_porch_light"
+    # installation is acceptance, not proof of performance
+    assert trials[0]["run_count"] == 0
+    assert trials[0]["manual_outcome"] is None
+
+
+def test_mark_installed_survives_automation_trial_failure(load, monkeypatch, tmp_path):
+    """A logging failure in the new trial-tracking path must not stop the
+    existing suggestion-acceptance behavior (status update + Decision Record)."""
+    pa = load("pattern_analyzer")
+    at = load("automation_trials")
+
+    def _boom(*a, **k):
+        raise RuntimeError("db down")
+    monkeypatch.setattr(at, "create", _boom)
+
+    an = pa.PatternAnalyzer()
+    db = _suggestions_db(tmp_path, 13)
+    an._db = db
+    an.mark_installed(13, "nova_auto_x")  # must not raise
+
+    import sqlite3
+    conn = sqlite3.connect(db)
+    status = conn.execute("SELECT status FROM suggestions WHERE id = 13").fetchone()[0]
+    conn.close()
+    assert status == "installed"
+
+
 def test_dismiss_intrusion_marks_wrong(load, monkeypatch):
     intr = load("intrusion")
     dr = load("decision_record")

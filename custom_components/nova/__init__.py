@@ -637,6 +637,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Register DoubleTake MQTT face recognition listener
     recognition_unsubs = await register_recognition_listener(hass)
 
+    # Automation probation (Phase 3) — observe confirmed runs of Nova-installed
+    # automations via Home Assistant's own automation_triggered event (the
+    # documented, supported mechanism; see automation_trials.py). Every
+    # automation in the house fires this, not just Nova's, so the listener is
+    # a single cheap subscription rather than one per installed automation.
+    @callback
+    def _on_automation_triggered(event) -> None:
+        from . import automation_trials
+        hass.async_create_task(automation_trials.async_handle_triggered(hass, event))
+
+    try:
+        automation_trial_unsub = hass.bus.async_listen(
+            "automation_triggered", _on_automation_triggered)
+        resources.add_unsub(automation_trial_unsub)
+    except Exception as exc:
+        _LOGGER.debug("Nova: automation probation listener registration failed: %s", exc)
+
     # Reminder watcher — checks every 30 seconds for due reminders
     reminder_watcher = ReminderWatcher(
         hass,
