@@ -769,6 +769,59 @@ setTimeout(async () => {
   checks.push(["settings tab: Diagnostics service call reached hass.callService",
     _serviceCalls.some(c => c.domain === "nova" && c.service === "test_tts")]);
 
+  // Post-v7.103.0 fix: Provider Activity's section heading, and a distinct
+  // empty-vs-error state, must always render — the default mock returns {}
+  // for nova/get_provider_activity, exercising the real empty-result path.
+  // Also guards that Setup Doctor's heading reuses Nova's normal prominent
+  // section-heading pattern (.panel-head > .panel-title — same element used
+  // by the Diagnostics card's own title, "Installed Automations", "What
+  // Nova Has Learned", etc.), not the small .mode-bind-head diagnostic-label
+  // style still correctly used by "Provider Activity" and "Service tests".
+  const diagCardOf = (root) => Array.from(root.querySelectorAll(".settings-card"))
+    .find(c => /^Diagnostics$/.test(c.querySelector(".panel-title")?.textContent?.trim() || ""));
+  checks.push(
+    ["settings tab: Provider Activity section renders its heading with an empty result",
+      (() => {
+        const diagCard = diagCardOf(sRoot);
+        return !!diagCard && /Provider Activity/.test(diagCard.textContent)
+          && /No provider activity recorded yet\. Activity appears after Nova uses a supported conversation or classifier path\./.test(diagCard.textContent);
+      })()],
+    ["settings tab: Setup Doctor heading reuses Nova's prominent .panel-head > .panel-title pattern",
+      (() => {
+        const diagCard = diagCardOf(sRoot);
+        if (!diagCard) return false;
+        const setupTitle = Array.from(diagCard.querySelectorAll(".panel-title")).find(h => h.textContent.trim() === "Setup Doctor");
+        const referenceTitle = diagCard.querySelector(".panel-title"); // the card's own "Diagnostics" title — the reference prominent heading
+        const stillUsesSmallLabel = Array.from(diagCard.querySelectorAll(".mode-bind-head")).some(h => h.textContent.trim() === "Setup Doctor");
+        return !!setupTitle && !!referenceTitle
+          && setupTitle.tagName === referenceTitle.tagName
+          && setupTitle.className === referenceTitle.className
+          && setupTitle.parentElement?.className === "panel-head"
+          && !stillUsesSmallLabel;
+      })()],
+    ["settings tab: Provider Activity and Service tests still use the small .mode-bind-head style (unchanged)",
+      (() => {
+        const diagCard = diagCardOf(sRoot);
+        const headings = diagCard ? Array.from(diagCard.querySelectorAll(".mode-bind-head")).map(h => h.textContent.trim()) : [];
+        return headings.includes("Provider Activity") && headings.includes("Service tests");
+      })()],
+  );
+  const providerActivityCallWS = hass.callWS;
+  hass.callWS = async (m) => {
+    if (m.type === "nova/get_provider_activity") throw new Error("boom");
+    return providerActivityCallWS(m);
+  };
+  await elNew._fetchDiagnosticsData();
+  sRoot = elNew.shadowRoot;
+  checks.push(["settings tab: Provider Activity shows a distinct error state when the request fails",
+    (() => {
+      const diagCard = diagCardOf(sRoot);
+      return !!diagCard && /Provider Activity/.test(diagCard.textContent) && /Couldn't load provider activity\./.test(diagCard.textContent);
+    })()]);
+  hass.callWS = providerActivityCallWS;
+  await elNew._fetchDiagnosticsData();
+  sRoot = elNew.shadowRoot;
+
   // Toggling a real General setting saves through the same nova/update_config
   // contract Classic uses.
   const announceToggle = sRoot.querySelector('.toggle-btn[data-cfg-key="announcements_enabled"]');
@@ -1554,6 +1607,28 @@ setTimeout(async () => {
     _sugCalls.some(c => c.id === 11 && c.action === "approve")
     && sRoot.querySelector(".new-sug")?.style.opacity === "0.35"
     && Array.from(sRoot.querySelectorAll(".new-sug button")).every(b => b.disabled)]);
+
+  // Post-v7.103.0 fix: Installed Automations used to vanish entirely —
+  // _htmlAutomationTrials() returned "" for an empty result, and the
+  // no-suggestions early-return in _htmlSuggestions() never called it at
+  // all. It must always render its heading, with a distinct empty vs.
+  // error state. The default mock returns {} for nova/list_automation_trials,
+  // exercising the real empty-result path already reached above.
+  checks.push(["suggestions tab: Installed Automations section renders with an empty result",
+    /Installed Automations/.test(sRoot.textContent)
+    && /No tracked Nova automations yet\. Automations installed from new suggestions will appear here\./.test(sRoot.textContent)]);
+  const automationTrialsCallWS = hass.callWS;
+  hass.callWS = async (m) => {
+    if (m.type === "nova/list_automation_trials") throw new Error("boom");
+    return automationTrialsCallWS(m);
+  };
+  await elNew._fetchAutomationTrials();
+  sRoot = elNew.shadowRoot;
+  checks.push(["suggestions tab: Installed Automations shows a distinct error state when the request fails",
+    /Installed Automations/.test(sRoot.textContent) && /Couldn't load installed automations\./.test(sRoot.textContent)]);
+  hass.callWS = automationTrialsCallWS;
+  await elNew._fetchAutomationTrials();
+  sRoot = elNew.shadowRoot;
 
   // Switching tabs back and forth must not leak the core's animation loop
   // (a real bug caught before shipping — _render() tearing down the canvas

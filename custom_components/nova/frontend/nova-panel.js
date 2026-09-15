@@ -2192,7 +2192,8 @@ class NovaPanel extends HTMLElement {
           <div class="stub-body">No suggestions right now. Nova proposes automations as it notices routines repeat — a light you turn on each evening, a scene after a button press, the heat when it's cold. As patterns build up, they'll appear here for you to review and approve. Nothing is ever created without your say-so.</div>
           <div class="mode-grid"><button class="mode-chip" id="sugRunAnalysis">Analyze Now</button></div>
           <div class="toggle-desc" id="sugAnalysisResult" style="margin-top:8px">See why nothing has qualified yet, or force a fresh pass over your history.</div>
-        </div>`;
+        </div>
+        ${this._htmlAutomationTrials()}`;
     }
     const rows = sugs.map(s => {
       const pct = Math.round((s.confidence || 0) * 100);
@@ -2240,8 +2241,25 @@ class NovaPanel extends HTMLElement {
   // event; "Working"/"Needs adjustment" is manual feedback only, never inferred.
 
   _htmlAutomationTrials() {
-    const trials = this._automationTrials || [];
-    if (!trials.length) return "";
+    const trials = this._automationTrials;
+    if (trials === null) {
+      return `
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">Installed Automations</div>
+          </div>
+          <div class="stub-body">Couldn't load installed automations.</div>
+        </div>`;
+    }
+    if (!trials || !trials.length) {
+      return `
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">Installed Automations</div>
+          </div>
+          <div class="stub-body">No tracked Nova automations yet. Automations installed from new suggestions will appear here.</div>
+        </div>`;
+    }
     const rows = trials.map(t => {
       const when = t.last_run ? new Date(t.last_run * 1000).toLocaleString() : "never";
       const outcome = t.manual_outcome
@@ -2274,7 +2292,7 @@ class NovaPanel extends HTMLElement {
     try {
       const result = await this._hass.callWS({ type: "nova/list_automation_trials" });
       this._automationTrials = result.trials || [];
-    } catch (_) { this._automationTrials = []; }
+    } catch (_) { this._automationTrials = null; }
     if (this._currentTab === "suggestions") this._render();
   }
 
@@ -3060,7 +3078,7 @@ class NovaPanel extends HTMLElement {
     }
     const checks = (sh.checks || []).filter(c => !NovaPanel.SETUP_HEALTH_CORE_KEYS.has(c.key));
     if (!checks.length) {
-      return `<div class="mode-bind-head">Setup Doctor</div><div class="stub-body">Loading…</div>`;
+      return `<div class="panel-head"><div class="panel-title">Setup Doctor</div></div><div class="stub-body">Loading…</div>`;
     }
     const rows = checks.map(c => `
         <div class="cfg-row">
@@ -3068,7 +3086,7 @@ class NovaPanel extends HTMLElement {
         </div>
         <div class="stub-body" style="margin:-6px 0 8px">${this._esc(c.detail || "")}${
           c.suggested_fix ? ` — ${this._esc(c.suggested_fix)}` : ""}</div>`).join("");
-    return `<div class="mode-bind-head">Setup Doctor</div>${rows}`;
+    return `<div class="panel-head"><div class="panel-title">Setup Doctor</div></div>${rows}`;
   }
 
   // ── Provider activity (Phase 5): bounded daily aggregates only — never
@@ -3080,7 +3098,7 @@ class NovaPanel extends HTMLElement {
       return `<div class="mode-bind-head">Provider Activity</div><div class="stub-body">Couldn't load provider activity.</div>`;
     }
     if (!days || !days.length) {
-      return `<div class="mode-bind-head">Provider Activity</div><div class="stub-body">No LLM activity recorded in the last 7 days.</div>`;
+      return `<div class="mode-bind-head">Provider Activity</div><div class="stub-body">No provider activity recorded yet. Activity appears after Nova uses a supported conversation or classifier path.</div>`;
     }
     const rows = days.map(d => {
       const entries = (d.entries || []).map(e => {
@@ -4641,7 +4659,7 @@ class NovaPanel extends HTMLElement {
     if (this._currentTab === "suggestions") {
       this._wireSuggestions();
       this._wireAnalyzeButton("sugRunAnalysis", "sugAnalysisResult");
-      if (!this._automationTrials) this._fetchAutomationTrials();
+      if (this._automationTrials === undefined) this._fetchAutomationTrials();
     }
     if (this._currentTab === "dashboard") {
       this._wireAnalyzeButton("qaRunAnalysis", "qaAnalysisResult");
