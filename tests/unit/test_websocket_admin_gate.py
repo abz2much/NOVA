@@ -61,6 +61,7 @@ ADMIN_GATED_TYPES = [
     "get_setup_health",
     "list_automation_trials",
     "automation_trial_feedback",
+    "get_provider_activity",
 ]
 
 
