@@ -101,6 +101,11 @@ jobs:
           # missing a submodule (hassil.fuzzy) this installed HA version
           # needs, so don't "latest"-install these.
           pip install 'hassil==3.5.0' 'home-assistant-intents==2026.1.28'
+          # assist_pipeline's own import chain (via tts/wake_word) pulls in
+          # these optional deps that PHACC doesn't install on its own — only
+          # needed now that Setup Doctor's tests exercise the real component
+          # (Phase 2) rather than a fake stand-in.
+          pip install mutagen ha-ffmpeg pymicro-vad pyspeex-noise
       - name: Integration tests
         run: python -m pytest tests/integration/ -v
 

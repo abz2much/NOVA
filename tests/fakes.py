@@ -65,6 +65,9 @@ class _Services:
     def async_services(self) -> dict:
         return self._registered
 
+    def has_service(self, domain: str, service: str) -> bool:
+        return service in self._registered.get(domain, {})
+
 
 class _Bus:
     def __init__(self):
