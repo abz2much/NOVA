@@ -1072,7 +1072,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v7.101.32
+ * v7.101.33
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1137,7 +1137,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v7.101.32 ",
+      console.log("%c Nova Panel %c v7.101.33 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -6262,7 +6262,7 @@ class NovaPanel extends HTMLElement {
       @media (max-width:560px){.new-log-entry{grid-template-columns:1fr;gap:2px}}
 
       /* Top nav (v7.94.0) */
-      .top-nav{display:flex;gap:4px;background:var(--surface);border:1px solid var(--line-soft);border-radius:11px;padding:4px}
+      .top-nav{display:flex;flex-wrap:wrap;gap:4px;background:var(--surface);border:1px solid var(--line-soft);border-radius:11px;padding:4px}
       .nav-tab{font-family:var(--font-body);font-size:12.5px;font-weight:600;padding:7px 14px;border-radius:8px;
         border:none;background:transparent;color:var(--ink-dim);cursor:pointer}
       .nav-tab.active{background:var(--ember);color:#1e0d06}

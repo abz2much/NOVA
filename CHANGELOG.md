@@ -1,3 +1,9 @@
+## [7.101.33] — fix: top nav overflowed off-screen on phones
+
+Abi caught this live on a real phone: the 7-tab nav row (`Command Center`/`Residence`/`Intrusion`/`Suggestions`/`Settings`/`Logs`/`Memory`) had no `flex-wrap` of its own, so on a narrow screen it just kept extending past the edge instead of wrapping — the whole page scrolled sideways. Pre-existing, not something tonight's changes introduced; Command Center had never actually been checked at phone width before (all prior live verification was on desktop browser). Added `flex-wrap:wrap` to `.top-nav` so it drops to a second row instead of overflowing. Verified at a 390px width by rendering the real component and screenshotting it inside a fixed-width test container — confirmed no content crosses the boundary.
+
+Only checked the header for this pass, not the rest of the dashboard/settings tabs at phone width — a fuller mobile pass is still worth doing separately if other cramped spots turn up.
+
 ## [7.101.32] — fix: header layout broke when the Look selector was removed
 
 Caught live by Abi right after updating: the top bar looked "off" — the nav moved and the logo read as smaller. Real cause: `.topbar` used `justify-content:space-between` across three children (brand, nav, the "Look" selector); deleting the selector's wrapper div in 7.101.30 left only two children, which `space-between` then stretched to opposite edges of the 1100px-wide bar instead of grouping them together like before. Changed to `justify-content:flex-start` with an explicit gap so brand and nav sit together on the left again. Verified visually (rendered the actual component and screenshotted it) before shipping, not just reasoned about the CSS.
