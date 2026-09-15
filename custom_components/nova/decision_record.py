@@ -221,6 +221,54 @@ def set_outcome(
             pass
 
 
+def set_outcome_checked(
+    record_id: int,
+    verdict: str,
+    source: str = "",
+    ts: Optional[float] = None,
+    db_path: Optional[str] = None,
+) -> str:
+    """Like :func:`set_outcome`, but distinguishes *why* it didn't apply.
+
+    Returns "ok", "already_judged", or "not_found" — callers that need to tell
+    a user "that decision was already judged" apart from "that decision
+    doesn't exist" can't do so from set_outcome's plain bool. One extra cheap
+    indexed lookup, only on the (rare) non-success path.
+    """
+    if record_id is None:
+        return "not_found"
+    db = _resolve(db_path)
+    try:
+        conn = _connect(db)
+    except Exception:
+        return "not_found"
+    try:
+        cur = conn.execute(
+            "UPDATE decision_records SET outcome = ?, outcome_ts = ?, outcome_source = ? "
+            "WHERE id = ? AND outcome IS NULL",
+            (
+                str(verdict),
+                float(ts) if ts is not None else time.time(),
+                str(source or ""),
+                int(record_id),
+            ),
+        )
+        conn.commit()
+        if cur.rowcount > 0:
+            return "ok"
+        row = conn.execute(
+            "SELECT 1 FROM decision_records WHERE id = ?", (int(record_id),)
+        ).fetchone()
+        return "already_judged" if row else "not_found"
+    except Exception:
+        return "not_found"
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 def _apply_outcome(conn, rid, verdict, source, ts) -> bool:
     cur = conn.execute(
         "UPDATE decision_records SET outcome = ?, outcome_ts = ?, outcome_source = ? "
@@ -331,6 +379,67 @@ def recent(
         return [_row_to_dict(r) for r in rows]
     except Exception:
         return []
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def page(
+    limit: int = 50,
+    kind: Optional[str] = None,
+    only_unjudged: bool = False,
+    cursor_ts: Optional[float] = None,
+    cursor_id: Optional[int] = None,
+    db_path: Optional[str] = None,
+) -> dict:
+    """Bounded, keyset-paginated decision summaries (most recent first).
+
+    Unlike ``recent()``, rows carry only summary columns (no observation/
+    interpretation/evidence blobs — those are a separate ``get()`` call), and
+    the result includes ``next_cursor``: pass its ``ts``/``id`` back as
+    ``cursor_ts``/``cursor_id`` to fetch the next page, or stop once it's
+    ``None``. ``cursor_ts``/``cursor_id`` must be supplied together or not at
+    all. Ordering is ``(ts, id) DESC`` and the cursor compares the same pair
+    (SQLite's native row-value comparison), so two records sharing a ``ts``
+    can never be skipped or duplicated across pages the way a plain
+    ``ts``-only cursor could.
+    """
+    db = _resolve(db_path)
+    out = {"items": [], "next_cursor": None}
+    try:
+        conn = _connect(db)
+    except Exception:
+        return out
+    try:
+        clauses, params = [], []
+        if kind:
+            clauses.append("kind = ?")
+            params.append(str(kind))
+        if only_unjudged:
+            clauses.append("outcome IS NULL")
+        if cursor_ts is not None and cursor_id is not None:
+            clauses.append("(ts, id) < (?, ?)")
+            params.append(float(cursor_ts))
+            params.append(int(cursor_id))
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        n = max(1, int(limit))
+        params.append(n + 1)  # one extra row reveals whether another page follows
+        rows = conn.execute(
+            "SELECT id, ts, kind, decision, reason, confidence, model, tokens, "
+            "latency_ms, outcome FROM decision_records" + where +
+            " ORDER BY ts DESC, id DESC LIMIT ?",
+            tuple(params),
+        ).fetchall()
+        items = [dict(r) for r in rows[:n]]
+        out["items"] = items
+        if len(rows) > n:
+            last = items[-1]
+            out["next_cursor"] = {"ts": last["ts"], "id": last["id"]}
+        return out
+    except Exception:
+        return out
     finally:
         try:
             conn.close()

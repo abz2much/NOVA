@@ -65,6 +65,9 @@ def async_register(hass: HomeAssistant) -> None:
         websocket_api.async_register_command(hass, ws_get_cognitive_status)
         websocket_api.async_register_command(hass, ws_run_analysis)
         websocket_api.async_register_command(hass, ws_get_calibration)
+        websocket_api.async_register_command(hass, ws_list_decisions)
+        websocket_api.async_register_command(hass, ws_get_decision)
+        websocket_api.async_register_command(hass, ws_set_decision_outcome)
         websocket_api.async_register_command(hass, ws_list_models)
         websocket_api.async_register_command(hass, ws_suggestion_action)
         websocket_api.async_register_command(hass, ws_goal_action)
@@ -2262,6 +2265,122 @@ async def ws_get_calibration(
             "calibration": {"n": 0}, "interruption_budget": {"judged": 0},
             "error": str(exc),
         })
+
+
+# ─── Decision Record browser (Phase 1: decision explanations + feedback) ────
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "nova/list_decisions",
+    vol.Optional("kind"): str,
+    vol.Optional("only_unjudged", default=False): bool,
+    vol.Optional("limit", default=50): int,
+    vol.Optional("cursor_ts"): vol.Coerce(float),
+    vol.Optional("cursor_id"): int,
+})
+@websocket_api.async_response
+async def ws_list_decisions(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict,
+) -> None:
+    """Bounded, cursor-paginated Decision Record browser for the Logs tab.
+    Summary rows only (no observation/interpretation/evidence) — full detail
+    is a separate nova/get_decision call."""
+    try:
+        from . import decision_record
+        limit = max(1, min(int(msg.get("limit", 50)), 200))
+        result = await hass.async_add_executor_job(
+            lambda: decision_record.page(
+                limit=limit,
+                kind=msg.get("kind"),
+                only_unjudged=bool(msg.get("only_unjudged", False)),
+                cursor_ts=msg.get("cursor_ts"),
+                cursor_id=msg.get("cursor_id"),
+            )
+        )
+        connection.send_result(msg["id"], {
+            "decisions": result["items"], "next_cursor": result["next_cursor"],
+        })
+    except Exception as exc:
+        _LOGGER.exception("ws_list_decisions failed: %s", exc)
+        connection.send_error(msg["id"], "list_decisions_failed", str(exc))
+
+
+_DECISION_FIELD_MAX_CHARS = 500
+
+
+def _bound_decision_strings(obj):
+    """Recursively cap every string at _DECISION_FIELD_MAX_CHARS. The
+    observation/interpretation/evidence blobs can carry free text (a calendar
+    event title, a routine description) with no length limit enforced at
+    write time (decision_record._js() has none) — this bounds it before it
+    ever reaches the panel. Never raises."""
+    try:
+        if isinstance(obj, str):
+            return obj if len(obj) <= _DECISION_FIELD_MAX_CHARS else (
+                obj[:_DECISION_FIELD_MAX_CHARS] + "…")
+        if isinstance(obj, dict):
+            return {k: _bound_decision_strings(v) for k, v in obj.items()}
+        if isinstance(obj, (list, tuple)):
+            return [_bound_decision_strings(v) for v in obj]
+        return obj
+    except Exception:
+        return obj
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "nova/get_decision",
+    vol.Required("decision_id"): int,
+})
+@websocket_api.async_response
+async def ws_get_decision(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict,
+) -> None:
+    """Full detail for one Decision Record — the drawer behind nova/list_decisions.
+    Defence in depth (today's writers put nothing sensitive here — verified):
+    redacted the same way the config-entry diagnostics dump already is, then
+    string-bounded, before this ever reaches the panel."""
+    try:
+        from . import decision_record
+        from .diagnostics import _redact
+        rec = await hass.async_add_executor_job(decision_record.get, msg["decision_id"])
+        if rec is None:
+            connection.send_error(msg["id"], "not_found", "decision not found")
+            return
+        connection.send_result(
+            msg["id"], {"decision": _bound_decision_strings(_redact(rec))})
+    except Exception as exc:
+        _LOGGER.exception("ws_get_decision failed: %s", exc)
+        connection.send_error(msg["id"], "get_decision_failed", str(exc))
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "nova/set_decision_outcome",
+    vol.Required("decision_id"): int,
+    vol.Required("verdict"): vol.In(["good", "unnecessary", "wrong"]),
+})
+@websocket_api.async_response
+async def ws_set_decision_outcome(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict,
+) -> None:
+    """Record Helpful/Unnecessary/Wrong feedback on a Decision Record.
+    Set-once: an already-judged record reports "already_judged", not a silent
+    no-op, so the panel can tell the two apart from "not_found"."""
+    try:
+        from . import decision_record
+        status = await hass.async_add_executor_job(
+            decision_record.set_outcome_checked, msg["decision_id"], msg["verdict"], "panel")
+        connection.send_result(msg["id"], {"status": status})
+    except Exception as exc:
+        _LOGGER.exception("ws_set_decision_outcome failed: %s", exc)
+        connection.send_error(msg["id"], "set_decision_outcome_failed", str(exc))
 
 
 @websocket_api.require_admin

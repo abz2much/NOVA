@@ -1410,12 +1410,18 @@ class NovaPanel extends HTMLElement {
   _htmlLogs() {
     const filterChips = NovaPanel.LOG_FILTERS.map(f =>
       `<button class="mode-chip new-log-filter${(this._logFilter || "all") === f ? " mode-chip-on" : ""}" data-filter="${f}">${f.toUpperCase()}</button>`).join("");
+    const view = this._logView || "system";
     return `
         <div class="panel">
           <div class="panel-head">
-            <div class="panel-title">System Log</div>
+            <div class="panel-title">${view === "decisions" ? "Decisions" : "System Log"}</div>
             <div class="panel-meta">Nova internal</div>
           </div>
+          <div class="mode-grid">
+            <button class="mode-chip new-logview${view === "system" ? " mode-chip-on" : ""}" data-view="system">SYSTEM LOG</button>
+            <button class="mode-chip new-logview${view === "decisions" ? " mode-chip-on" : ""}" data-view="decisions">DECISIONS</button>
+          </div>
+          ${view === "decisions" ? this._htmlDecisionsView() : `
           <div class="cfg-row">
             <input id="newLogSearch" class="cfg-field" style="flex:1" type="text" placeholder="search…" autocomplete="off" value="${this._esc(this._logSearch || "")}">
           </div>
@@ -1423,9 +1429,149 @@ class NovaPanel extends HTMLElement {
           <div class="toggle-desc" id="newLogCount" style="margin:8px 0"></div>
           <div id="newLogEntries" class="new-log-entries">
             <div class="stub-body">Loading…</div>
-          </div>
+          </div>`}
         </div>
     `;
+  }
+
+  // ─── Decisions (Phase 1: decision explanations + feedback) ─────────────
+  // A bounded, cursor-paginated browser over Nova's Decision Record store —
+  // separate from the System Log above (nova/get_debug_log): these are the
+  // structured observation/interpretation/evidence/outcome rows behind
+  // nova/get_calibration's aggregate stats, not free-text log lines.
+
+  _htmlDecisionsView() {
+    return `
+      <div class="cfg-row">
+        <button class="mode-chip${this._decisionsUnjudgedOnly ? " mode-chip-on" : ""}" id="newDecUnjudged">UNJUDGED ONLY</button>
+      </div>
+      <div class="toggle-desc" id="newDecCount" style="margin:8px 0"></div>
+      <div id="decisionEntries" class="new-log-entries">
+        <div class="stub-body">Loading…</div>
+      </div>
+      <div class="cfg-row" id="decisionLoadMoreRow" hidden>
+        <button class="mode-chip" id="newDecLoadMore">LOAD MORE</button>
+      </div>
+      <div id="decisionDrawer" class="new-decision-drawer" hidden></div>
+    `;
+  }
+
+  async _fetchDecisions(reset = true) {
+    if (!this._hass) return;
+    if (reset) { this._decisions = []; this._decisionsCursor = null; }
+    const container = this.shadowRoot?.getElementById("decisionEntries");
+    if (container && reset) container.innerHTML = `<div class="stub-body">Loading…</div>`;
+    try {
+      const args = { type: "nova/list_decisions", limit: 50, only_unjudged: !!this._decisionsUnjudgedOnly };
+      if (!reset && this._decisionsCursor) {
+        args.cursor_ts = this._decisionsCursor.ts;
+        args.cursor_id = this._decisionsCursor.id;
+      }
+      const result = await this._hass.callWS(args);
+      this._decisions = reset ? (result.decisions || []) : (this._decisions || []).concat(result.decisions || []);
+      this._decisionsCursor = result.next_cursor || null;
+      this._renderDecisionRows();
+    } catch (err) {
+      if (container) container.innerHTML = `<div class="new-log-entry-error" style="padding:12px">Error loading decisions: ${this._esc(err)}</div>`;
+    }
+  }
+
+  _renderDecisionRows() {
+    const container = this.shadowRoot?.getElementById("decisionEntries");
+    if (!container) return;
+    const entries = this._decisions || [];
+    const countEl = this.shadowRoot?.getElementById("newDecCount");
+    if (countEl) countEl.textContent = `${entries.length} decision(s) loaded`;
+    container.innerHTML = entries.length ? entries.map(d => {
+      const outcomeCls = d.outcome === "good" ? "diag-ok" : d.outcome === "wrong" ? "diag-down"
+        : d.outcome === "unnecessary" ? "diag-warn" : "diag-idle";
+      const outcomeLabel = d.outcome ? d.outcome.toUpperCase() : "UNJUDGED";
+      const when = d.ts ? new Date(d.ts * 1000).toLocaleString() : "";
+      return `<div class="new-log-entry new-decision-row" data-id="${this._esc(d.id)}">
+          <span class="new-log-ts">${this._esc(when)}</span>
+          <span class="new-log-cat">${this._esc((d.kind || "").toUpperCase())}</span>
+          <span class="new-log-msg">${this._esc(d.decision || "")}</span>
+          <span class="${outcomeCls}">${this._esc(outcomeLabel)}</span>
+        </div>`;
+    }).join("") : `<div class="stub-body">No decisions recorded yet.</div>`;
+    const loadMoreRow = this.shadowRoot?.getElementById("decisionLoadMoreRow");
+    if (loadMoreRow) loadMoreRow.hidden = !this._decisionsCursor;
+    container.querySelectorAll(".new-decision-row").forEach(row => {
+      row.addEventListener("click", () => this._openDecisionDetail(parseInt(row.getAttribute("data-id"), 10)));
+    });
+  }
+
+  _decisionBlockHtml(label, value) {
+    const text = value === null || value === undefined || value === ""
+      ? "—" : (typeof value === "object" ? JSON.stringify(value, null, 2) : String(value));
+    return `<div class="mode-bind-head">${this._esc(label)}</div>
+      <pre class="new-sug-yaml" style="white-space:pre-wrap;font-family:var(--font-mono);font-size:10.5px;color:var(--ink-dim);background:var(--surface-2);border:1px solid var(--line-soft);border-radius:8px;padding:10px;margin:0 0 8px">${this._esc(text)}</pre>`;
+  }
+
+  async _openDecisionDetail(id) {
+    const drawer = this.shadowRoot?.getElementById("decisionDrawer");
+    if (!drawer) return;
+    drawer.hidden = false;
+    drawer.innerHTML = `<div class="stub-body">Loading…</div>`;
+    try {
+      const result = await this._hass.callWS({ type: "nova/get_decision", decision_id: id });
+      const d = result.decision || {};
+      const judged = !!d.outcome;
+      const row = (label, value) => `<div class="cfg-row"><label>${this._esc(label)}</label><span>${this._esc(
+        value === null || value === undefined || value === "" ? "—" : String(value))}</span></div>`;
+      drawer.innerHTML = `
+        <div class="panel-head"><div class="panel-title">Decision #${this._esc(d.id)}</div>
+          <button class="mode-chip" id="newDecCloseDrawer">CLOSE</button></div>
+        ${row("Route", d.kind)}
+        ${row("Decision", d.decision)}
+        ${row("Reason", d.reason)}
+        ${row("Confidence", d.confidence)}
+        ${row("Model", d.model)}
+        ${row("Tokens", d.tokens)}
+        ${row("Latency (ms)", d.latency_ms)}
+        ${row("Outcome", d.outcome)}
+        ${this._decisionBlockHtml("Observation", d.observation)}
+        ${this._decisionBlockHtml("Interpretation", d.interpretation)}
+        ${this._decisionBlockHtml("Evidence", d.evidence)}
+        <div class="mode-bind-head">Feedback</div>
+        <div class="mode-grid">
+          <button class="mode-chip new-dec-fb" data-verdict="good" data-id="${this._esc(d.id)}" ${judged ? "disabled" : ""}>HELPFUL</button>
+          <button class="mode-chip new-dec-fb" data-verdict="unnecessary" data-id="${this._esc(d.id)}" ${judged ? "disabled" : ""}>UNNECESSARY</button>
+          <button class="mode-chip new-dec-fb" data-verdict="wrong" data-id="${this._esc(d.id)}" ${judged ? "disabled" : ""}>WRONG</button>
+        </div>
+        <div class="toggle-desc" id="newDecFbStatus">${judged ? `Already judged: ${this._esc(d.outcome)}` : ""}</div>
+      `;
+      drawer.querySelector("#newDecCloseDrawer")?.addEventListener("click", () => {
+        drawer.hidden = true; drawer.innerHTML = "";
+      });
+      drawer.querySelectorAll(".new-dec-fb").forEach(btn => {
+        btn.addEventListener("click", () => this._submitDecisionOutcome(
+          parseInt(btn.getAttribute("data-id"), 10), btn.getAttribute("data-verdict")));
+      });
+    } catch (err) {
+      drawer.innerHTML = `<div class="new-log-entry-error" style="padding:12px">Error loading decision: ${this._esc(err)}</div>`;
+    }
+  }
+
+  async _submitDecisionOutcome(id, verdict) {
+    const statusEl = this.shadowRoot?.getElementById("newDecFbStatus");
+    try {
+      const result = await this._hass.callWS({ type: "nova/set_decision_outcome", decision_id: id, verdict });
+      const disableButtons = () => this.shadowRoot?.querySelectorAll(".new-dec-fb")
+        .forEach(b => b.setAttribute("disabled", "disabled"));
+      if (result.status === "ok") {
+        if (statusEl) statusEl.textContent = `Recorded: ${verdict}`;
+        disableButtons();
+        this._fetchDecisions(true);
+      } else if (result.status === "already_judged") {
+        if (statusEl) statusEl.textContent = "This decision was already judged.";
+        disableButtons();
+      } else {
+        if (statusEl) statusEl.textContent = "Decision not found.";
+      }
+    } catch (err) {
+      if (statusEl) statusEl.textContent = `Error: ${this._esc(err)}`;
+    }
   }
 
   async _fetchDebugLog() {
@@ -1492,6 +1638,24 @@ class NovaPanel extends HTMLElement {
 
   _wireLogs() {
     const root = this.shadowRoot;
+    root.querySelectorAll(".new-logview").forEach(btn => {
+      btn.addEventListener("click", () => {
+        this._logView = btn.getAttribute("data-view");
+        this._render();
+      });
+    });
+    if ((this._logView || "system") === "decisions") {
+      const unjudgedBtn = root.getElementById("newDecUnjudged");
+      if (unjudgedBtn) {
+        unjudgedBtn.addEventListener("click", () => {
+          this._decisionsUnjudgedOnly = !this._decisionsUnjudgedOnly;
+          this._render();
+        });
+      }
+      const loadMoreBtn = root.getElementById("newDecLoadMore");
+      if (loadMoreBtn) loadMoreBtn.addEventListener("click", () => this._fetchDecisions(false));
+      return;
+    }
     root.querySelectorAll(".new-log-filter").forEach(btn => {
       btn.addEventListener("click", () => {
         this._logFilter = btn.getAttribute("data-filter");
@@ -4307,7 +4471,11 @@ class NovaPanel extends HTMLElement {
     });
 
     if (this._currentTab === "settings") this._wireSettings();
-    if (this._currentTab === "logs") { this._wireLogs(); this._fetchDebugLog(); }
+    if (this._currentTab === "logs") {
+      this._wireLogs();
+      if ((this._logView || "system") === "decisions") this._fetchDecisions();
+      else this._fetchDebugLog();
+    }
     if (this._currentTab === "memory") { this._wireMemory(); this._fetchKnowledge(); this._fetchPersonRoutines(); }
     if (this._currentTab === "intrusion") this._wireIntrusion();
     if (this._currentTab === "residence") {

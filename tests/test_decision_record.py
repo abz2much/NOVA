@@ -297,3 +297,86 @@ def test_dismiss_intrusion_marks_wrong(load, monkeypatch):
         # from leaking into other intrusion tests (shared jc.intrusion module).
         intr.clear_calloff()
         intr._called_off_until = 0.0
+
+
+# ── Phase 1: decision browser (cursor pagination + checked outcome) ───────
+
+def test_set_outcome_checked_distinguishes_all_three_cases(load, tmp_path):
+    dr = load("decision_record")
+    db = str(tmp_path / "d.db")
+    rid = dr.record("intrusion", db_path=db)
+    assert dr.set_outcome_checked(rid, "wrong", "panel", db_path=db) == "ok"
+    assert dr.set_outcome_checked(rid, "good", "panel", db_path=db) == "already_judged"
+    assert dr.set_outcome_checked(99999, "good", "panel", db_path=db) == "not_found"
+    # the successful call actually persisted, same as set_outcome would
+    assert dr.get(rid, db_path=db)["outcome"] == "wrong"
+
+
+def test_page_orders_most_recent_first_and_paginates(load, tmp_path):
+    dr = load("decision_record")
+    db = str(tmp_path / "d.db")
+    ids = [dr.record("intrusion", ts=float(100 + i), db_path=db) for i in range(5)]
+    first = dr.page(limit=2, db_path=db)
+    assert [r["id"] for r in first["items"]] == [ids[4], ids[3]]
+    assert first["next_cursor"] == {"ts": 103.0, "id": ids[3]}
+
+    second = dr.page(limit=2, db_path=db,
+                     cursor_ts=first["next_cursor"]["ts"], cursor_id=first["next_cursor"]["id"])
+    assert [r["id"] for r in second["items"]] == [ids[2], ids[1]]
+    assert second["next_cursor"] == {"ts": 101.0, "id": ids[1]}
+
+    third = dr.page(limit=2, db_path=db,
+                    cursor_ts=second["next_cursor"]["ts"], cursor_id=second["next_cursor"]["id"])
+    assert [r["id"] for r in third["items"]] == [ids[0]]
+    assert third["next_cursor"] is None  # last page — nothing left to fetch
+
+
+def test_page_cursor_breaks_ties_on_identical_ts(load, tmp_path):
+    """Two records sharing the exact same ts must not be skipped or
+    duplicated across pages — id is the tie-breaker."""
+    dr = load("decision_record")
+    db = str(tmp_path / "d.db")
+    a = dr.record("intrusion", ts=100.0, db_path=db)
+    b = dr.record("intrusion", ts=100.0, db_path=db)
+    c = dr.record("intrusion", ts=100.0, db_path=db)
+    assert sorted([a, b, c]) == [a, b, c]  # autoincrement — a < b < c
+
+    first = dr.page(limit=2, db_path=db)
+    assert [r["id"] for r in first["items"]] == [c, b]
+    second = dr.page(limit=2, db_path=db,
+                     cursor_ts=first["next_cursor"]["ts"], cursor_id=first["next_cursor"]["id"])
+    assert [r["id"] for r in second["items"]] == [a]
+    assert second["next_cursor"] is None
+
+
+def test_page_filters_by_kind_and_only_unjudged(load, tmp_path):
+    dr = load("decision_record")
+    db = str(tmp_path / "d.db")
+    a = dr.record("suggestion", ts=100.0, db_path=db)
+    dr.record("intrusion", ts=200.0, db_path=db)
+    dr.set_outcome(a, dr.OUTCOME_GOOD, db_path=db)
+
+    only_suggestion = dr.page(kind="suggestion", db_path=db)
+    assert [r["id"] for r in only_suggestion["items"]] == [a]
+
+    only_unjudged = dr.page(only_unjudged=True, db_path=db)
+    assert a not in {r["id"] for r in only_unjudged["items"]}
+
+
+def test_page_returns_summary_columns_only(load, tmp_path):
+    """No observation/interpretation/evidence blobs in the list view — those
+    are a separate get() call, per the WS contract."""
+    dr = load("decision_record")
+    db = str(tmp_path / "d.db")
+    dr.record("intrusion", observation={"secret": "x"}, db_path=db)
+    row = dr.page(db_path=db)["items"][0]
+    assert "observation" not in row and "interpretation" not in row and "evidence" not in row
+    assert set(row.keys()) == {"id", "ts", "kind", "decision", "reason", "confidence",
+                               "model", "tokens", "latency_ms", "outcome"}
+
+
+def test_page_empty_db_returns_no_items_and_no_cursor(load, tmp_path):
+    dr = load("decision_record")
+    db = str(tmp_path / "d.db")
+    result = dr.page(db_path=db)
+    assert result == {"items": [], "next_cursor": None}
