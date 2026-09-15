@@ -1,3 +1,8 @@
+## [7.103.3] — fix: per-person honorifics actually apply
+
+- Fixed a bug where configured Person Honorifics (Settings → Person Honorifics) were silently ignored — Nova fell back to the global default honorific for everyone instead of the person-specific one, because the saved setting wasn't being read back in the shape the code expected.
+- Setup Doctor's "Person entities" check now correctly reports configured honorifics as resolved instead of showing OFF when they're genuinely set up.
+
 ## [7.103.2] — fix: diagnostics card layout polish
 
 - Restored the divider between the main Diagnostics section and Setup Doctor, lost in 7.103.1's heading typography fix.
