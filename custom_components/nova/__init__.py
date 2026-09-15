@@ -722,7 +722,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         from . import ha_secrets as _hs
         await _hs.relocate_plaintext_credentials(hass)
     except Exception as exc:
-        _LOGGER.debug("Credential relocation: %s", exc)
+        # Safety property holds regardless (verify-before-strip means a
+        # credential is never lost or exposed by a failure here) but a
+        # failure was previously only visible at DEBUG — you'd have no way
+        # to know a credential is still sitting in plaintext in config.json.
+        _LOGGER.warning("Credential relocation failed — credential(s) remain "
+                        "in config.json, not moved to secrets.yaml: %s", exc)
 
     # Move any intrusion snapshots left under the old, unauthenticated
     # /config/www location (pre-v7.102.0) to the private snapshot dir

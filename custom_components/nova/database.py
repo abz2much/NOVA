@@ -87,6 +87,7 @@ def health() -> dict:
 
 def save_message(role: str, content: str, device_id: str = "unknown") -> None:
     """Persist a single conversation turn."""
+    global _last_error
     try:
         with _connect() as conn:
             conn.execute(
@@ -94,6 +95,11 @@ def save_message(role: str, content: str, device_id: str = "unknown") -> None:
                 (datetime.now(timezone.utc).replace(tzinfo=None).isoformat(), device_id, role, content),
             )
     except Exception as exc:
+        # _connect() already records a connect/schema failure in _last_error;
+        # this also catches a failure in the INSERT itself (e.g. disk full)
+        # after a successful connect had already cleared it — without this,
+        # health() would keep reporting "ok" right after a real write failure.
+        _last_error = f"{type(exc).__name__}: {exc}"
         _LOGGER.warning("Nova DB write error: %s", exc)
 
 

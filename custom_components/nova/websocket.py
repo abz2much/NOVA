@@ -1942,12 +1942,22 @@ async def ws_update_config(
         rc[key] = value
         _LOGGER.info("Nova panel: set %s = %s", key, str(value)[:80])
 
-        # Persist via centralized config module (survives restarts)
+        # Persist via centralized config module (survives restarts). The
+        # in-memory runtime_config above is already set either way, so this
+        # session keeps working even on a save failure — but the panel is
+        # told, since otherwise the setting silently reverts on next restart
+        # with no visible sign anything went wrong.
+        persisted = True
         try:
             from . import nova_config
-            await hass.async_add_executor_job(nova_config.set, key, value)
+            persisted = await hass.async_add_executor_job(nova_config.set, key, value)
         except Exception as exc:
             _LOGGER.debug("Config persist note: %s", exc)
+            persisted = False
+        if not persisted:
+            _LOGGER.warning("Nova panel: %s = %s applied for this session but "
+                            "FAILED to persist to disk — it will revert on restart",
+                            key, str(value)[:80])
 
         # sleep_override needs its expiry computed too (a plain nova_config.set
         # above would otherwise leave the override permanently inert — see
@@ -1976,7 +1986,7 @@ async def ws_update_config(
                 await observer_mod.stop()
                 data["observer_running"] = False
 
-        connection.send_result(msg["id"], {"key": key, "value": value})
+        connection.send_result(msg["id"], {"key": key, "value": value, "persisted": persisted})
     except Exception as exc:
         _LOGGER.warning("ws_update_config failed: %s", exc)
         connection.send_error(msg["id"], "update_failed", str(exc))
