@@ -3030,6 +3030,10 @@ class NovaPanel extends HTMLElement {
     try {
       this._setupHealth = await this._hass.callWS({ type: "nova/get_setup_health" });
     } catch (_) { this._setupHealth = { error: true }; }
+    try {
+      const activity = await this._hass.callWS({ type: "nova/get_provider_activity", days: 7 });
+      this._providerActivity = activity.days || [];
+    } catch (_) { this._providerActivity = null; }
     if (this._currentTab === "settings") this._render();
   }
 
@@ -3067,6 +3071,34 @@ class NovaPanel extends HTMLElement {
     return `<div class="mode-bind-head">Setup Doctor</div>${rows}`;
   }
 
+  // ── Provider activity (Phase 5): bounded daily aggregates only — never
+  // prompts, responses, tool arguments, images, or credentials. Days with no
+  // recorded activity are simply absent, not shown as zero rows.
+  _providerActivityCardBody() {
+    const days = this._providerActivity;
+    if (days === null) {
+      return `<div class="mode-bind-head">Provider Activity</div><div class="stub-body">Couldn't load provider activity.</div>`;
+    }
+    if (!days || !days.length) {
+      return `<div class="mode-bind-head">Provider Activity</div><div class="stub-body">No LLM activity recorded in the last 7 days.</div>`;
+    }
+    const rows = days.map(d => {
+      const entries = (d.entries || []).map(e => {
+        const tokens = (e.avg_input_tokens != null || e.avg_output_tokens != null)
+          ? ` · avg tokens in/out ${e.avg_input_tokens ?? "—"}/${e.avg_output_tokens ?? "—"}`
+          : "";
+        return `<div class="stub-body" style="margin:2px 0">
+            ${this._esc(e.provider)}/${this._esc(e.model)} (${this._esc(e.role)}, ${this._esc(e.location)}) —
+            ${e.call_count} call${e.call_count === 1 ? "" : "s"},
+            ${e.success_count} ok / ${e.failure_count} failed,
+            avg ${e.avg_latency_ms ?? "—"}ms${tokens}
+          </div>`;
+      }).join("");
+      return `<div class="cfg-row"><label>${this._esc(d.day)}</label></div>${entries}`;
+    }).join("");
+    return `<div class="mode-bind-head">Provider Activity</div>${rows}`;
+  }
+
   _diagnosticsCardBody() {
     const cfg = this._data()?.config || {};
     const diag = this._diag || {};
@@ -3095,6 +3127,7 @@ class NovaPanel extends HTMLElement {
       ${rows}
       <div class="cfg-row"><button class="mode-chip" id="newDiagRefresh">⟳ RUN CHECK</button></div>
       ${this._setupHealthCardBody()}
+      ${this._providerActivityCardBody()}
       <div class="mode-bind-head">Service tests</div>
       ${svcTest("nova.test_tts", "TTS — Nova voice test")}
       ${svcTest("nova.observer_status", "Observer — fire status event")}

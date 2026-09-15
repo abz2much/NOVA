@@ -85,6 +85,7 @@ def async_register(hass: HomeAssistant) -> None:
         websocket_api.async_register_command(hass, ws_semantic_search)
         websocket_api.async_register_command(hass, ws_diagnostics)
         websocket_api.async_register_command(hass, ws_get_setup_health)
+        websocket_api.async_register_command(hass, ws_get_provider_activity)
         websocket_api.async_register_command(hass, ws_voice_confirm_test)
         websocket_api.async_register_command(hass, ws_intrusion)
         websocket_api.async_register_command(hass, ws_mode)
@@ -2939,6 +2940,31 @@ async def ws_get_setup_health(
     except Exception as exc:
         _LOGGER.exception("ws_get_setup_health failed: %s", exc)
         connection.send_error(msg["id"], "get_setup_health_failed", str(exc))
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "nova/get_provider_activity",
+    vol.Optional("days", default=7): int,
+})
+@websocket_api.async_response
+async def ws_get_provider_activity(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict,
+) -> None:
+    """Bounded daily LLM provider/model/role activity (Phase 5) — call
+    counts, success/failure, average tokens and latency. Never prompts,
+    responses, tool arguments, images, or credentials; admin-only regardless,
+    since it still reveals which providers/models are configured."""
+    try:
+        from . import provider_activity
+        days = max(1, min(int(msg.get("days", 7)), 90))
+        result = await hass.async_add_executor_job(provider_activity.list_days, days)
+        connection.send_result(msg["id"], {"days": result})
+    except Exception as exc:
+        _LOGGER.exception("ws_get_provider_activity failed: %s", exc)
+        connection.send_error(msg["id"], "get_provider_activity_failed", str(exc))
 
 
 @websocket_api.require_admin

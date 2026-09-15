@@ -188,12 +188,13 @@ async def classify(
         pass
     msg = f"Time:{now_hhmm} Entity:{entity_id} Name:{friendly_name} Class:{device_class} {old_state}→{new_state}"
     try:
-        resp = await hass.async_add_executor_job(
-            lambda: provider.chat(
-                [{"role": "system", "content": _LLM_PROMPT},
-                 {"role": "user", "content": msg}],
-                temperature=0.0, max_tokens=80,
-            )
+        from . import llm_provider
+        resp = await llm_provider.chat_with_activity(
+            hass, provider,
+            [{"role": "system", "content": _LLM_PROMPT},
+             {"role": "user", "content": msg}],
+            role="classifier", data_category="text",
+            temperature=0.0, max_tokens=80,
         )
         parsed = _parse_json(resp.get("text", "") if isinstance(resp, dict) else str(resp))
         if not parsed.get("worth_considering"):

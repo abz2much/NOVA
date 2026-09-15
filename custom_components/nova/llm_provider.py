@@ -18,11 +18,14 @@ uniform interface and doesn't need changes.
 """
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import re
+import time as _time
 from abc import ABC, abstractmethod
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -36,7 +39,23 @@ _LOGGER = logging.getLogger(__name__)
 #       {"id": "call_xyz", "name": "...", "args": {...}},
 #     ],
 #     "raw": <provider-specific object>,  # for debugging / feeding back
+#     "usage": {"input_tokens": int|None, "output_tokens": int|None},  # Phase 5:
+#       whatever the provider itself reported — never estimated. None per
+#       field when the server didn't report it (e.g. some self-hosted
+#       OpenAI-compatible endpoints omit usage entirely).
 #   }
+
+
+def _openai_style_usage(resp) -> dict:
+    """Token usage from an OpenAI-compatible chat completion response (Groq,
+    OpenAI, and Ollama's OpenAI-compatible endpoint all share this shape).
+    None per field when the response has no usage object, or the field
+    itself is absent — never estimated."""
+    u = getattr(resp, "usage", None)
+    return {
+        "input_tokens": getattr(u, "prompt_tokens", None) if u is not None else None,
+        "output_tokens": getattr(u, "completion_tokens", None) if u is not None else None,
+    }
 
 
 class LLMProvider(ABC):
@@ -119,6 +138,7 @@ class GroqProvider(LLMProvider):
             "text": (choice.message.content or "").strip(),
             "tool_calls": tool_calls,
             "raw": choice.message,
+            "usage": _openai_style_usage(resp),
         }
 
     def supports_vision(self) -> bool:
@@ -174,6 +194,7 @@ class OpenAIProvider(LLMProvider):
             "text": (choice.message.content or "").strip(),
             "tool_calls": tool_calls,
             "raw": choice.message,
+            "usage": _openai_style_usage(resp),
         }
 
     def _extra_body(self) -> dict:
@@ -375,10 +396,15 @@ class AnthropicProvider(LLMProvider):
                     "name": block.name,
                     "args": block.input,
                 })
+        u = getattr(resp, "usage", None)
         return {
             "text": "".join(text_parts).strip(),
             "tool_calls": tool_calls,
             "raw": resp,
+            "usage": {
+                "input_tokens": getattr(u, "input_tokens", None) if u is not None else None,
+                "output_tokens": getattr(u, "output_tokens", None) if u is not None else None,
+            },
         }
 
     def supports_vision(self) -> bool:
@@ -438,6 +464,46 @@ _CLOUD_PROVIDERS = {"groq", "gemini", "openai", "anthropic"}
 # Ollama tag syntax: name[:size-tag], e.g. gemma4:26b, llama3.3:70b-instruct.
 # No cloud provider uses colon-tagged model ids, which makes this a safe tell.
 _OLLAMA_TAG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]*:[a-z0-9][a-z0-9._-]*$", re.I)
+
+
+def _is_local_url(base_url: Optional[str]) -> bool:
+    """Whether a configured base_url unambiguously points at a local/private
+    host — loopback, an RFC1918 private address, or an mDNS .local name.
+    Used only to disambiguate 'custom' providers off their OWN already-
+    configured base_url; never a guess beyond what that config already says."""
+    try:
+        host = (urlparse(base_url or "").hostname or "").lower()
+    except Exception:
+        return False
+    if not host:
+        return False
+    if host == "localhost" or host.endswith(".local"):
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+        return ip.is_loopback or ip.is_private
+    except ValueError:
+        return False
+
+
+def execution_location(provider: "LLMProvider") -> str:
+    """Where a provider's calls actually execute, for Phase 5's activity
+    aggregate — determined at runtime, never guessed beyond what's already
+    configured:
+      - a known hosted (cloud) provider -> "cloud"
+      - ollama                          -> "local"
+      - anything else ("custom")        -> "unknown", unless its own
+        configured base_url is unambiguously local (see _is_local_url)
+    """
+    name = getattr(provider, "name", "")
+    if name == "ollama":
+        return "local"
+    if name in _CLOUD_PROVIDERS:
+        return "cloud"
+    if _is_local_url(getattr(provider, "base_url", None)):
+        return "local"
+    return "unknown"
+
 
 # A default model per cloud provider, used when first-run setup detects a
 # provider from the pasted key but the model field is still on its
@@ -612,6 +678,68 @@ def create_tier_provider(
         model=model,
         base_url=base_url,
     )
+
+
+# ─── Activity-aware chat wrapper (Phase 5) ───────────────────────────────────
+#
+# Absorbs the hass.async_add_executor_job(lambda: provider.chat(...)) boilerplate
+# every call site already needs (provider.chat is a blocking, synchronous call),
+# and records bounded activity metadata about the call — never its content.
+# Adopting it is a net simplification at a call site, not an added step.
+
+DATA_CATEGORIES = {"text", "vision"}  # fixed vocabulary — never inferred from content
+
+
+async def chat_with_activity(
+    hass,
+    provider: "LLMProvider",
+    messages: list[dict],
+    *,
+    role: str,
+    data_category: str,
+    tools: Optional[list[dict]] = None,
+    max_tokens: int = 512,
+    temperature: float = 0.7,
+    model_override: Optional[str] = None,
+) -> dict:
+    """Run provider.chat() off the event loop and record bounded activity
+    metadata (provider/model/role/location/category, success, token counts,
+    latency) — never prompts, responses, tool arguments, images, entity
+    states, credentials, or the raw provider object.
+
+    Recording is best-effort and structurally cannot change what the caller
+    sees: on success the same standardised dict comes back untouched; on
+    failure the same exception is re-raised untouched — activity recording
+    happens in a `finally` and can never itself alter or swallow it.
+    """
+    start = _time.monotonic()
+    result = None
+    success = False
+    try:
+        result = await hass.async_add_executor_job(
+            lambda: provider.chat(messages, tools=tools, max_tokens=max_tokens,
+                                  temperature=temperature, model_override=model_override))
+        success = True
+        return result
+    finally:
+        latency_ms = int((_time.monotonic() - start) * 1000)
+        usage = (result or {}).get("usage") or {}
+        try:
+            from . import provider_activity
+            await hass.async_add_executor_job(
+                provider_activity.record,
+                provider.name,
+                model_override or getattr(provider, "model", ""),
+                role,
+                execution_location(provider),
+                data_category if data_category in DATA_CATEGORIES else "text",
+                success,
+                usage.get("input_tokens"),
+                usage.get("output_tokens"),
+                latency_ms,
+            )
+        except Exception:
+            pass  # activity logging must never affect the actual call
 
 
 def _classify_conn_error(exc) -> str:

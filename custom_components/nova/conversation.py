@@ -563,16 +563,20 @@ class NovaAgent(conversation.ConversationEntity):
 
     # ── LLM calls (provider-agnostic) ─────────────────────────────────────────
 
-    def _llm_text(self, messages: list[dict], persona: str) -> str:
-        """Plain text call — no tools. Uses the LLMProvider interface."""
-        result = self._client.chat(
-            messages=[{"role": "system", "content": persona}] + messages,
-            max_tokens=512,
-            temperature=0.7,
+    async def _llm_text(self, messages: list[dict], persona: str) -> str:
+        """Plain text call — no tools. Uses the LLMProvider interface via
+        the activity-aware wrapper (Phase 5) — records bounded call metadata
+        (provider/model/success/tokens/latency), never the content."""
+        from . import llm_provider
+        result = await llm_provider.chat_with_activity(
+            self.hass, self._client,
+            [{"role": "system", "content": persona}] + messages,
+            role="llm", data_category="text",
+            max_tokens=512, temperature=0.7,
         )
         return result["text"]
 
-    def _llm_with_tools(self, messages: list[dict], persona: str, tools: list[dict]) -> dict:
+    async def _llm_with_tools(self, messages: list[dict], persona: str, tools: list[dict]) -> dict:
         """Call with function-calling tools. Returns standardised dict.
 
         Returns:
@@ -581,11 +585,12 @@ class NovaAgent(conversation.ConversationEntity):
            "raw_message": <provider-specific>,
            "calls": [{"id", "name", "args"}, ...]}      when tools invoked
         """
-        result = self._client.chat(
-            messages=[{"role": "system", "content": persona}] + messages,
-            tools=tools or None,
-            max_tokens=1024,
-            temperature=0.7,
+        from . import llm_provider
+        result = await llm_provider.chat_with_activity(
+            self.hass, self._client,
+            [{"role": "system", "content": persona}] + messages,
+            role="llm", data_category="text",
+            tools=tools or None, max_tokens=1024, temperature=0.7,
         )
         if result["tool_calls"]:
             return {
@@ -606,9 +611,7 @@ class NovaAgent(conversation.ConversationEntity):
     ) -> str:
         """LLM → execute HA tools → feed results back → repeat until text."""
         if hass_api is None or not hass_api.tools:
-            return await self.hass.async_add_executor_job(
-                self._llm_text, messages, persona
-            )
+            return await self._llm_text(messages, persona)
 
         # HA tool parameters are a voluptuous Schema, not a JSON-serializable
         # dict — passing t.parameters straight through (as this used to)
@@ -624,9 +627,7 @@ class NovaAgent(conversation.ConversationEntity):
 
         working = list(messages)
         for _ in range(MAX_ITERS):
-            result = await self.hass.async_add_executor_job(
-                self._llm_with_tools, working, persona, tools
-            )
+            result = await self._llm_with_tools(working, persona, tools)
             if result["type"] == "text":
                 return result["text"]
 
@@ -678,7 +679,7 @@ class NovaAgent(conversation.ConversationEntity):
 
         # Max iterations — ask for a plain summary of what was done
         working.append({"role": "user", "content": "Briefly summarise what you have done."})
-        return await self.hass.async_add_executor_job(self._llm_text, working, persona)
+        return await self._llm_text(working, persona)
 
     # ── Main entry point ──────────────────────────────────────────────────────
 
