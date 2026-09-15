@@ -3082,7 +3082,8 @@ class NovaPanel extends HTMLElement {
     }
     const rows = checks.map(c => `
         <div class="cfg-row">
-          <label>${this._esc(c.name)} <span class="${this._diagStatusCls(c.status)}">${this._diagStatusLabel(c.status)}</span></label>
+          <label>${this._esc(c.name)}</label>
+          <span class="${this._diagStatusCls(c.status)}">${this._diagStatusLabel(c.status)}</span>
         </div>
         <div class="stub-body" style="margin:-6px 0 8px">${this._esc(c.detail || "")}${
           c.suggested_fix ? ` — ${this._esc(c.suggested_fix)}` : ""}</div>`).join("");
@@ -3095,10 +3096,10 @@ class NovaPanel extends HTMLElement {
   _providerActivityCardBody() {
     const days = this._providerActivity;
     if (days === null) {
-      return `<div class="mode-bind-head">Provider Activity</div><div class="stub-body">Couldn't load provider activity.</div>`;
+      return `<div class="panel-head"><div class="panel-title">Provider Activity</div></div><div class="stub-body">Couldn't load provider activity.</div>`;
     }
     if (!days || !days.length) {
-      return `<div class="mode-bind-head">Provider Activity</div><div class="stub-body">No provider activity recorded yet. Activity appears after Nova uses a supported conversation or classifier path.</div>`;
+      return `<div class="panel-head"><div class="panel-title">Provider Activity</div></div><div class="stub-body">No provider activity recorded yet. Activity appears after Nova uses a supported conversation or classifier path.</div>`;
     }
     const rows = days.map(d => {
       const entries = (d.entries || []).map(e => {
@@ -3114,7 +3115,7 @@ class NovaPanel extends HTMLElement {
       }).join("");
       return `<div class="cfg-row"><label>${this._esc(d.day)}</label></div>${entries}`;
     }).join("");
-    return `<div class="mode-bind-head">Provider Activity</div>${rows}`;
+    return `<div class="panel-head"><div class="panel-title">Provider Activity</div></div>${rows}`;
   }
 
   _diagnosticsCardBody() {
@@ -3130,7 +3131,8 @@ class NovaPanel extends HTMLElement {
     const rows = svcs.length
       ? svcs.map(s => `
         <div class="cfg-row">
-          <label>${this._esc(s.name)} <span class="${this._diagStatusCls(s.status)}">${this._diagStatusLabel(s.status)}</span></label>
+          <label>${this._esc(s.name)}</label>
+          <span class="${this._diagStatusCls(s.status)}">${this._diagStatusLabel(s.status)}</span>
         </div>
         <div class="stub-body" style="margin:-6px 0 8px">${this._esc(s.detail || "")}</div>`).join("")
       : `<div class="stub-body">Loading…</div>`;
@@ -3144,9 +3146,10 @@ class NovaPanel extends HTMLElement {
       <div class="cfg-row"><label>Core services</label>${overall}</div>
       ${rows}
       <div class="cfg-row"><button class="mode-chip" id="newDiagRefresh">⟳ RUN CHECK</button></div>
+      <div class="mode-bind-head"></div>
       ${this._setupHealthCardBody()}
       ${this._providerActivityCardBody()}
-      <div class="mode-bind-head">Service tests</div>
+      <div class="panel-head"><div class="panel-title">Service tests</div></div>
       ${svcTest("nova.test_tts", "TTS — Nova voice test")}
       ${svcTest("nova.observer_status", "Observer — fire status event")}
       ${svcTest("nova.briefing", "Briefing — manual trigger")}
