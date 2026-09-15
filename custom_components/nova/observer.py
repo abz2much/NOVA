@@ -180,6 +180,25 @@ def _live_honorific(hass: HomeAssistant) -> str:
 
 # ─── Pre-filter ──────────────────────────────────────────────────────────────
 
+def _is_person_home_transition(event: Event) -> bool:
+    """True if this is a person.* entity crossing the home/away boundary
+    (either direction). `person` sits in IGNORED_DOMAINS for the blanket
+    pre-filter (too noisy in general — location-string changes, GPS jitter),
+    but classifier.py has dedicated arrived/left handling for exactly this
+    transition. Without this carve-out, a routine arrival could only ever
+    reach that logic via cognition.py's anomaly escalation (i.e. only when
+    the *timing* was unusual), silently dropping the common case — a real
+    arrival on an ordinary day never got announced or logged."""
+    entity_id = event.data.get("entity_id", "")
+    if not entity_id.startswith("person."):
+        return False
+    old_state = event.data.get("old_state")
+    new_state = event.data.get("new_state")
+    if old_state is None or new_state is None:
+        return False
+    return (new_state.state == "home") != (old_state.state == "home")
+
+
 def _should_pre_filter(event: Event) -> bool:
     """Return True if this event should be dropped before any LLM call."""
     entity_id = event.data.get("entity_id", "")
@@ -210,6 +229,10 @@ def _should_pre_filter(event: Event) -> bool:
             dclass = new_state.attributes.get("device_class")
             if dclass in INTERESTING_SENSOR_CLASSES:
                 return False
+        # Re-admit person.* crossing the home/away boundary — see
+        # _is_person_home_transition for why this carve-out exists.
+        if domain == "person" and _is_person_home_transition(event):
+            return False
         return True
 
     if domain not in WATCHED_DOMAINS:
@@ -521,8 +544,12 @@ def _on_state_changed(event: Event) -> None:
     if _debounced(entity_id, interval):
         return
 
-    # Hourly rate limit — user-configurable cap to bound API cost
-    if _classifier_rate_limited():
+    # Hourly rate limit — user-configurable cap to bound API cost. Person
+    # arrivals/departures are exempt: they're rare (a handful a day, not
+    # per-sensor chatter) but high-value, and a busy morning of routine
+    # sensor noise burning the budget shouldn't be able to silently eat the
+    # one event a household actually cares about hearing.
+    if _classifier_rate_limited() and not _is_person_home_transition(event):
         if not _STATE.rate_limit_warn_logged:
             _LOGGER.warning(
                 "Nova Observer: hit rate limit of %d classifier calls/hour. "
