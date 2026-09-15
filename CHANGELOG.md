@@ -1,3 +1,11 @@
+## [7.104.0] — Spoken History: see and repeat what Nova has said
+
+- New persistent Spoken History view in the Logs tab, beside System Log and Decisions: the last 100 confirmed announcements Nova sent to a speaker (welcome-home, reminders, alerts, briefings, manual tests, confirmed replies), each with its source, time, spoken text, and speaker.
+- A Repeat control on every entry re-sends it to the original speaker, or Nova's configured default if that speaker no longer exists.
+- Say "repeat that," "say that again," "what did you just say," or "repeat your last announcement" and Nova answers locally and instantly — no LLM or internet call.
+- History survives a Home Assistant restart, so a repeat request works immediately without Nova needing to say something new first.
+- Ordinary Assist replies that don't go through a paired Cast speaker are deliberately left out: Nova has no reliable way to confirm Home Assistant actually sent them to text-to-speech, and never guesses.
+
 ## [7.103.3] — fix: per-person honorifics actually apply
 
 - Fixed a bug where configured Person Honorifics (Settings → Person Honorifics) were silently ignored — Nova fell back to the global default honorific for everyone instead of the person-specific one, because the saved setting wasn't being read back in the shape the code expected.
