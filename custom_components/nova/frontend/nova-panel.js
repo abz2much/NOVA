@@ -1540,6 +1540,9 @@ class NovaPanel extends HTMLElement {
           <button class="mode-chip new-dec-fb" data-verdict="wrong" data-id="${this._esc(d.id)}" ${judged ? "disabled" : ""}>WRONG</button>
         </div>
         <div class="toggle-desc" id="newDecFbStatus">${judged ? `Already judged: ${this._esc(d.outcome)}` : ""}</div>
+        <div class="mode-bind-head">Decision Lab</div>
+        <div class="cfg-row"><button class="mode-chip" id="newDecReplay" data-id="${this._esc(d.id)}">REPLAY</button></div>
+        <div id="newDecReplayResult"></div>
       `;
       drawer.querySelector("#newDecCloseDrawer")?.addEventListener("click", () => {
         drawer.hidden = true; drawer.innerHTML = "";
@@ -1548,8 +1551,33 @@ class NovaPanel extends HTMLElement {
         btn.addEventListener("click", () => this._submitDecisionOutcome(
           parseInt(btn.getAttribute("data-id"), 10), btn.getAttribute("data-verdict")));
       });
+      drawer.querySelector("#newDecReplay")?.addEventListener("click", () => this._replayDecision(d.id));
     } catch (err) {
       drawer.innerHTML = `<div class="new-log-entry-error" style="padding:12px">Error loading decision: ${this._esc(err)}</div>`;
+    }
+  }
+
+  async _replayDecision(id) {
+    const resultEl = this.shadowRoot?.getElementById("newDecReplayResult");
+    if (resultEl) resultEl.innerHTML = `<div class="stub-body">Replaying…</div>`;
+    try {
+      const r = await this._hass.callWS({ type: "nova/replay_decision", decision_id: id });
+      if (!resultEl) return;
+      const row = (label, value) => `<div class="cfg-row"><label>${this._esc(label)}</label><span>${this._esc(String(value))}</span></div>`;
+      if (!r.supported) {
+        resultEl.innerHTML = `
+          <div class="toggle-desc" style="margin-top:8px"><b>${this._esc(r.label)}</b></div>
+          <div class="stub-body">${this._esc(r.reason || "Not supported for this decision kind.")}</div>`;
+        return;
+      }
+      resultEl.innerHTML = `
+        <div class="toggle-desc" style="margin-top:8px"><b>${this._esc(r.label)}</b></div>
+        ${row("Current suggestion threshold", r.current_threshold)}
+        ${row("Would pass current threshold", r.would_pass_current_threshold ? "Yes" : "No")}
+        ${row("Within 0.05 of threshold", r.within_0_05_of_threshold ? "Yes" : "No")}
+      `;
+    } catch (err) {
+      if (resultEl) resultEl.innerHTML = `<div class="new-log-entry-error" style="padding:12px">Error running replay: ${this._esc(err)}</div>`;
     }
   }
 

@@ -57,6 +57,7 @@ ADMIN_GATED_TYPES = [
     "list_decisions",
     "get_decision",
     "set_decision_outcome",
+    "replay_decision",
 ]
 
 

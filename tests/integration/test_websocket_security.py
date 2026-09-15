@@ -110,11 +110,12 @@ async def test_intrusion_snapshot_reaches_panel_only_via_admin_websocket(
     {"type": "nova/list_decisions"},
     {"type": "nova/get_decision", "decision_id": 1},
     {"type": "nova/set_decision_outcome", "decision_id": 1, "verdict": "good"},
+    {"type": "nova/replay_decision", "decision_id": 1},
 ])
 async def test_decision_commands_reject_non_admin(
     hass, hass_ws_client, hass_read_only_access_token, msg,
 ):
-    """All three decision-browser commands can reveal or judge household
+    """All four decision-drawer commands can reveal or judge household
     decision content — none of them may be reachable by a read-only user."""
     await _setup_nova(hass)
     client = await hass_ws_client(hass, access_token=hass_read_only_access_token)
@@ -207,3 +208,40 @@ async def test_set_decision_outcome_status_transitions(hass, tmp_path, monkeypat
     await ws.send_json_auto_id({"type": "nova/set_decision_outcome", "decision_id": 99999, "verdict": "wrong"})
     third = await ws.receive_json()
     assert third["result"]["status"] == "not_found"
+
+
+# ─── Decision Lab (Phase 4: current-policy replay) ──────────────────────────
+
+async def test_replay_decision_end_to_end(hass, tmp_path, monkeypatch, hass_ws_client):
+    """Exercises the real handler (not just permission-gating): a suggestion
+    decision replays against the real, live pattern_analyzer threshold, and
+    an unsupported kind comes back clearly marked rather than erroring."""
+    from custom_components.nova import pattern_analyzer
+    monkeypatch.setattr(pattern_analyzer, "_effective_threshold", lambda: 0.65)
+
+    dr = _isolate_decisions_db(monkeypatch, tmp_path)
+    suggestion_id = dr.record("suggestion", decision="propose automation", confidence=0.9)
+    intrusion_id = dr.record("intrusion", decision="raise intrusion alert", confidence=0.9)
+    await _setup_nova(hass)
+    ws = await hass_ws_client(hass)
+
+    await ws.send_json_auto_id({"type": "nova/replay_decision", "decision_id": suggestion_id})
+    supported = await ws.receive_json()
+    assert supported["success"] is True
+    r = supported["result"]
+    assert r["supported"] is True
+    assert r["current_threshold"] == 0.65
+    assert r["would_pass_current_threshold"] is True
+    assert "original_would_act" not in r
+    assert r["label"] == ("Replay using current settings. This is not an "
+                          "exact reconstruction of the original decision.")
+
+    await ws.send_json_auto_id({"type": "nova/replay_decision", "decision_id": intrusion_id})
+    unsupported = await ws.receive_json()
+    assert unsupported["result"]["supported"] is False
+    assert "current_threshold" not in unsupported["result"]
+
+    await ws.send_json_auto_id({"type": "nova/replay_decision", "decision_id": 99999})
+    missing = await ws.receive_json()
+    assert missing["success"] is False
+    assert missing["error"]["code"] == "not_found"
