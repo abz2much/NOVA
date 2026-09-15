@@ -67,7 +67,17 @@ def effective_honorific(hass: HomeAssistant) -> str:
         return ""
     try:
         from . import nova_config
+        import json
         per_person = nova_config.get("person_honorifics", {}) or {}
+        # Stored via nova/update_config as a JSON-encoded string (the panel
+        # sends JSON.stringify(overrides)); nova_config.get() returns it
+        # verbatim, so it needs decoding here — otherwise per_person is a
+        # str and .get(entity_id) below raises, silently losing every
+        # configured per-person override to the except below.
+        if isinstance(per_person, str):
+            per_person = json.loads(per_person)
+        if not isinstance(per_person, dict):
+            per_person = {}
         global_default = nova_config.get("honorific", DEFAULT_HONORIFIC) or DEFAULT_HONORIFIC
     except Exception:
         return DEFAULT_HONORIFIC

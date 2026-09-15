@@ -83,3 +83,28 @@ def test_effective_honorific_empty_when_nobody_home(hon, fake_hass, monkeypatch)
     fake_hass.states.set("person.abi", "not_home", friendly_name="Abi")
     _set_nova_config(hon, monkeypatch, {"honorific": "sir"})
     assert hon.effective_honorific(fake_hass) == ""
+
+
+def test_effective_honorific_decodes_person_honorifics_stored_as_json_string(hon, fake_hass, monkeypatch):
+    """Real production shape: the panel saves person_honorifics via
+    nova/update_config as JSON.stringify(...), and nova_config.set/get
+    store and return it verbatim — so the value read back here is a JSON
+    string, not an already-decoded dict, unlike every other test above.
+    A prior bug called .get() straight on that string, which raised and
+    was silently caught, so every configured override was ignored and
+    Nova fell back to the global default for everyone."""
+    fake_hass.states.set("person.rachel", "home", friendly_name="Rachel")
+    _set_nova_config(hon, monkeypatch, {
+        "person_honorifics": '{"person.rachel": "ma\'am"}',
+        "honorific": "sir",
+    })
+    assert hon.effective_honorific(fake_hass) == "ma'am"
+
+
+def test_effective_honorific_falls_back_when_person_honorifics_is_malformed_json(hon, fake_hass, monkeypatch):
+    fake_hass.states.set("person.rachel", "home", friendly_name="Rachel")
+    _set_nova_config(hon, monkeypatch, {
+        "person_honorifics": "not valid json{",
+        "honorific": "boss",
+    })
+    assert hon.effective_honorific(fake_hass) == "sir"

@@ -189,6 +189,27 @@ def test_person_entities_ok_when_resolved(sh, nova_config, fake_hass, monkeypatc
     assert sh._check_person_entities(fake_hass)["status"] == "ok"
 
 
+def test_person_entities_ok_when_resolved_and_stored_as_json_string(sh, nova_config, fake_hass, monkeypatch):
+    """Real production shape: the panel saves person_honorifics via
+    nova/update_config as JSON.stringify(...), and nova_config.get returns
+    it verbatim — so this is a JSON string, not an already-decoded dict,
+    unlike the fixture above. A prior bug's isinstance(honorifics, dict)
+    check failed on the string and reported this check OFF even when
+    honorifics were genuinely configured and resolved."""
+    fake_hass.states.set("person.abi", "home")
+    monkeypatch.setattr(nova_config, "get", _cfg_get(nova_config, {
+        "person_honorifics": '{"person.abi": "sir"}',
+    }))
+    assert sh._check_person_entities(fake_hass)["status"] == "ok"
+
+
+def test_person_entities_off_when_person_honorifics_is_malformed_json(sh, nova_config, fake_hass, monkeypatch):
+    monkeypatch.setattr(nova_config, "get", _cfg_get(nova_config, {
+        "person_honorifics": "not valid json{",
+    }))
+    assert sh._check_person_entities(fake_hass)["status"] == "off"
+
+
 # ── required integrations ────────────────────────────────────────────────────
 
 def test_required_integrations_ok(sh, fake_hass):
