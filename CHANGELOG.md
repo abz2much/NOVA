@@ -1,3 +1,9 @@
+## [7.103.2] — fix: diagnostics card layout polish
+
+- Restored the divider between the main Diagnostics section and Setup Doctor, lost in 7.103.1's heading typography fix.
+- Individual health check statuses (OK/OFF/IDLE/WARN/DOWN) under Core services and Setup Doctor are now right-aligned on their own, separate from the check name, instead of appended to the label text.
+- Setup Doctor, Provider Activity, and Service Tests now share the same consistent prominent heading style.
+
 ## [7.103.1] — fix: post-7.103.0 UI visibility
 
 - Installed Automations now stays visible even when there are no pending suggestions to review, with clear empty and loading-error states instead of silently disappearing.
