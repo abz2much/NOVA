@@ -1,3 +1,11 @@
+## [7.102.0] — security review: private snapshots, safer setup, visible write failures
+
+- Intrusion snapshots moved off `/config/www` (previously served unauthenticated at `/local/...`) into a private directory, readable only through the existing admin-gated `nova/intrusion` websocket command. Old snapshots are migrated automatically on upgrade, never deleted.
+- Config-path resolution (`nova_config.py`, `config_flow.py`) now goes through Home Assistant's own reported config directory instead of a hardcoded `/config`, so setup resolves the right location regardless of install layout.
+- A failure partway through setup (platform registration, sentinel, or reminder-watcher startup) now cleans up fully — no orphaned listeners, scheduler jobs, or services left behind — instead of leaving the integration half-started.
+- Config and database write failures are now surfaced (a warning in the log, and `"persisted": false` in the panel) instead of failing silently.
+- Added a Home Assistant integration test suite (setup, reload, config-flow, websocket admin-gating, failure recovery) and wired it into CI alongside the existing checks.
+
 ## [7.101.37] — fix: routine arrivals silently dropped, no greeting or log entry
 
 Abi: went out, came back, got no welcome-home greeting, and the activity log had no record of the arrival at all — not even the front door. Root-caused against his live instance, not guessed:
