@@ -1,3 +1,11 @@
+## [7.103.0] — decision transparency: browser, replay, Setup Doctor, automation probation, provider activity
+
+- New Decisions view in the Logs tab: browse Nova's proactive decisions with cursor-paginated listing, full detail (observation, interpretation, evidence, confidence, model, tokens, latency), and Helpful/Unnecessary/Wrong feedback that respects the existing set-once outcome rule.
+- Decision Lab: read-only "replay using current settings" for suggestion decisions, showing whether a recorded decision would pass today's confidence threshold — labeled clearly as a policy replay, never a reconstruction of what actually happened. Also fixes a real bug in the replay engine: it compared outcomes against an unused "right"/"wrong" vocabulary that no part of the integration ever wrote, so every "good" decision was silently invisible to threshold evaluation.
+- Setup Doctor: a read-only "Setup" section in the diagnostics card checking configured entity references, room speakers, camera overrides, the notification service, Assist pipeline wiring, person entities, required integrations, and config-directory persistence — each with a plain-language suggested fix, never an automatic one.
+- Automation probation: installing a suggested automation now tracks whether it actually runs (via Home Assistant's own `automation_triggered` event) separately from whether it was accepted — installing is acceptance, not proof the automation works. Shows run count, last run, and manual Working/Needs adjustment feedback in the Suggestions tab.
+- Provider activity: bounded daily aggregates of LLM calls by provider, model, role, and execution location (cloud/local/unknown) — call counts, success/failure, average tokens and latency, visible in the diagnostics card. Never stores prompts, responses, tool arguments, images, or credentials.
+
 ## [7.102.1] — fix: Piper voice quality resolved from disk, not assumed
 
 - `_download_voice()` now returns the Nova voice quality actually installed or downloaded ('high'/'medium'), always trying the requested quality first even when a fallback is already on disk from a previous run.
