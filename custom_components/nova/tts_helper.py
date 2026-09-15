@@ -252,6 +252,12 @@ async def async_announce(
     language-default voice instead of honoring the explicit `voice`. The voice
     string already encodes its language (en_GB), so Piper infers it correctly.
 
+    Which quality ("high"/"medium") to request is resolved from what's
+    actually on disk (:func:`bootstrap.resolve_installed_quality`) rather than
+    assumed — bootstrap's own voice download can fall back to medium when high
+    isn't hosted, and a hardcoded "high" here would then request a file that
+    doesn't exist on every single announcement.
+
     `context` is accepted for logging; callers resolve the entity beforehand.
     """
     if not text or not tts_entity or not speakers:
@@ -279,12 +285,19 @@ async def async_announce(
     # panel) so we don't import nova_config on this path.
     use_ha_voice = tts_use_ha_voice(hass)
 
-    # Request the Nova Piper voice. If it isn't installed (VoiceNotFoundError),
-    # the fallback below retries without it, using the engine's default voice,
-    # so a missing custom voice is never fatal.
+    # Request whichever Nova Piper voice quality is actually installed. If
+    # neither is (resolve_installed_quality returns None), omit the option
+    # entirely and let the engine use its own default rather than naming a
+    # voice file that doesn't exist (VoiceNotFoundError).
     tts_options: dict | None = None
     if is_piper and not use_ha_voice:
-        tts_options = {"voice": "en_GB-nova-high"}
+        try:
+            from .bootstrap import resolve_installed_quality
+            quality = await hass.async_add_executor_job(resolve_installed_quality)
+        except Exception:
+            quality = None
+        if quality:
+            tts_options = {"voice": f"en_GB-nova-{quality}"}
 
     def _media_content_id(message: str) -> str:
         params = {"message": message, "cache": "true"}

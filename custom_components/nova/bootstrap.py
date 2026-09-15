@@ -198,6 +198,20 @@ def _voice_present(quality: str) -> bool:
     return onnx.exists() and js.exists() and onnx.stat().st_size > MIN_ONNX_SIZE
 
 
+def resolve_installed_quality(preferred: str = "high") -> str | None:
+    """Whichever Nova Piper voice quality is actually on disk right now —
+    `preferred` if present, else the other quality, else None. Disk-only,
+    never downloads. Shared by the bootstrap's pipeline setup and
+    tts_helper's on-demand announcements so both agree on what's really
+    installed instead of each assuming a fixed quality is there."""
+    other = "medium" if preferred == "high" else "high"
+    if _voice_present(preferred):
+        return preferred
+    if _voice_present(other):
+        return other
+    return None
+
+
 async def _try_quality(hass: HomeAssistant, quality: str) -> bool:
     onnx = PIPER_DIR / f"en_GB-nova-{quality}.onnx"
     js = PIPER_DIR / f"en_GB-nova-{quality}.onnx.json"
@@ -215,22 +229,35 @@ async def _try_quality(hass: HomeAssistant, quality: str) -> bool:
     return False
 
 
-async def _download_voice(hass: HomeAssistant, quality: str) -> bool:
+async def _download_voice(hass: HomeAssistant, quality: str) -> str | None:
+    """Ensure a Nova voice is on disk. Returns the quality actually available
+    ('high'/'medium') or None — never just whether *some* download succeeded,
+    since a caller that assumes the requested quality is what landed can point
+    the Assist pipeline at a voice file that doesn't exist (VoiceNotFound).
+
+    Always tries the REQUESTED quality first, even if the other quality is
+    already installed (e.g. left over from a previous fallback) — an already-
+    present fallback must never stop Nova from getting the quality actually
+    asked for. Only after that attempt fails does an already-present fallback
+    short-circuit a further download attempt for it."""
     await hass.async_add_executor_job(lambda: PIPER_DIR.mkdir(parents=True, exist_ok=True))
-    for q in ("high", "medium"):
-        if await hass.async_add_executor_job(_voice_present, q):
-            _LOGGER.info("Nova bootstrap: voice en_GB-nova-%s already present", q)
-            return True
+    other = "medium" if quality == "high" else "high"
+    if await hass.async_add_executor_job(_voice_present, quality):
+        _LOGGER.info("Nova bootstrap: voice en_GB-nova-%s already present", quality)
+        return quality
     if await _try_quality(hass, quality):
-        return True
-    if quality == "high" and await _try_quality(hass, "medium"):
-        _LOGGER.info("Nova bootstrap: fell back to medium voice (high not hosted)")
-        return True
+        return quality
+    if await hass.async_add_executor_job(_voice_present, other):
+        _LOGGER.info("Nova bootstrap: '%s' unavailable; using already-present '%s'", quality, other)
+        return other
+    if await _try_quality(hass, other):
+        _LOGGER.info("Nova bootstrap: '%s' not hosted; installed '%s' instead", quality, other)
+        return other
     _LOGGER.warning(
         "Nova bootstrap: voice download failed. Manual: "
         "https://huggingface.co/jgkawell/nova/tree/main/en/en_GB/nova/%s "
         "→ copy both files to %s/", quality, PIPER_DIR)
-    return False
+    return None
 
 
 # ── HA-side steps (in-process) ───────────────────────────────────────────────
@@ -330,18 +357,36 @@ async def _create_pipeline(hass: HomeAssistant, voice_quality: str) -> bool:
             # reply routing — delivering the reply to the paired room/Cast speaker
             # — never runs, because the turn is handled by the wrong agent. Repair
             # it in place rather than leaving it as-is.
+            #
+            # Also repair a Nova voice that points at a MISSING file — e.g.
+            # tts_voice is en_GB-nova-high while only medium is on disk, which
+            # is exactly the VoiceNotFoundError / no-speech case. Only touch it
+            # when the current voice is confirmed missing AND the quality we'd
+            # switch to is confirmed present — a deliberate, still-valid voice
+            # choice is never clobbered.
             try:
+                updates: dict = {}
                 if getattr(existing, "conversation_engine", None) != agent:
-                    await assist_pipeline.async_update_pipeline(
-                        hass, existing, conversation_engine=agent)
-                    _LOGGER.info(
-                        "Nova bootstrap: pointed pipeline '%s' conversation agent at %s",
-                        getattr(existing, "name", "?"), agent)
+                    updates["conversation_engine"] = agent
+                cur_voice = getattr(existing, "tts_voice", "") or ""
+                if cur_voice.startswith("en_GB-nova-") and cur_voice != tts_voice:
+                    cur_q = cur_voice.rsplit("-", 1)[-1]
+                    cur_ok = await hass.async_add_executor_job(_voice_present, cur_q)
+                    want_ok = await hass.async_add_executor_job(_voice_present, voice_quality)
+                    if not cur_ok and want_ok:
+                        updates["tts_voice"] = tts_voice
+                        _LOGGER.info(
+                            "Nova bootstrap: pipeline voice '%s' is missing on disk; "
+                            "repointing to installed '%s'", cur_voice, tts_voice)
+                if updates:
+                    await assist_pipeline.async_update_pipeline(hass, existing, **updates)
+                    _LOGGER.info("Nova bootstrap: updated pipeline '%s' (%s)",
+                                 getattr(existing, "name", "?"), ", ".join(updates))
                 else:
-                    _LOGGER.info("Nova bootstrap: Nova pipeline already uses %s", agent)
+                    _LOGGER.info("Nova bootstrap: Nova pipeline already correct (agent=%s)", agent)
             except Exception as exc:
                 _LOGGER.warning(
-                    "Nova bootstrap: couldn't set pipeline conversation agent: %s", exc)
+                    "Nova bootstrap: couldn't update existing pipeline: %s", exc)
             return True
 
         pipeline = await assist_pipeline.async_create_default_pipeline(
@@ -350,15 +395,23 @@ async def _create_pipeline(hass: HomeAssistant, voice_quality: str) -> bool:
             _LOGGER.warning("Nova bootstrap: default pipeline creation returned nothing")
             _manual_pipeline_hint(voice_quality)
             return False
-        # async_create_default_pipeline uses HA's default conversation agent — set
-        # it to Nova's entity so Nova handles the turn and its reply routing runs.
+        # async_create_default_pipeline uses HA's default conversation agent AND
+        # whichever voice Piper happens to list first for the language — neither
+        # is guaranteed to be Nova's. Set both explicitly so Nova handles the turn
+        # and speaks in its own installed voice. tts_voice can be rejected on some
+        # HA versions, so fall back to agent-only rather than losing the pipeline.
         try:
             await assist_pipeline.async_update_pipeline(
-                hass, pipeline, conversation_engine=agent)
+                hass, pipeline, conversation_engine=agent, tts_voice=tts_voice)
         except Exception as exc:
+            try:
+                await assist_pipeline.async_update_pipeline(
+                    hass, pipeline, conversation_engine=agent)
+            except Exception:
+                pass
             _LOGGER.warning(
-                "Nova bootstrap: created pipeline but couldn't set agent to %s: %s",
-                agent, exc)
+                "Nova bootstrap: created pipeline; agent set but voice '%s' not applied "
+                "(%s) — select it under Voice assistants if needed", tts_voice, exc)
         _LOGGER.info("Nova bootstrap: created Nova pipeline (agent=%s stt=%s tts=%s/%s)",
                      agent, stt, tts, tts_voice)
         return True
@@ -438,8 +491,10 @@ async def async_run_bootstrap(hass: HomeAssistant, *, force: bool = False) -> di
 
     # Phase 2 — voice model
     if tts_provider == "piper_nova":
-        status["voice_ok"] = await _download_voice(hass, voice_quality)
+        installed_voice_q = await _download_voice(hass, voice_quality)
+        status["voice_ok"] = installed_voice_q is not None
     else:
+        installed_voice_q = voice_quality
         status["voice_ok"] = True
 
     # Phase 3 — restart Piper to rescan the voice
@@ -459,7 +514,7 @@ async def async_run_bootstrap(hass: HomeAssistant, *, force: bool = False) -> di
     if auto_pipeline:
         agent = await _wait_for_agent(hass)
         if agent:
-            status["pipeline_ok"] = await _create_pipeline(hass, voice_quality)
+            status["pipeline_ok"] = await _create_pipeline(hass, installed_voice_q or voice_quality)
         else:
             _LOGGER.warning("Nova bootstrap: conversation agent didn't register in time")
             _manual_pipeline_hint(voice_quality)
