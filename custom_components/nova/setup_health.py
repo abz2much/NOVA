@@ -17,6 +17,7 @@ it covers is actually configured; an unconfigured optional feature reports
 """
 from __future__ import annotations
 
+import json
 import logging
 
 _LOGGER = logging.getLogger(__name__)
@@ -206,6 +207,15 @@ def _check_assist_pipeline(hass) -> dict:
 def _check_person_entities(hass) -> dict:
     out = {"name": "Person entities", "key": "person_entities", "status": _OFF, "detail": ""}
     honorifics = _cfg("person_honorifics", {}) or {}
+    # Stored via nova/update_config as a JSON-encoded string (the panel
+    # sends JSON.stringify(overrides)); nova_config.get() returns it
+    # verbatim, so it needs decoding here the same way honorific.py's own
+    # reader does — otherwise every configured person(s) look unconfigured.
+    if isinstance(honorifics, str):
+        try:
+            honorifics = json.loads(honorifics)
+        except Exception:
+            honorifics = {}
     if not isinstance(honorifics, dict) or not honorifics:
         out["detail"] = "no per-person honorifics configured"
         return out
