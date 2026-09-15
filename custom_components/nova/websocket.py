@@ -82,6 +82,7 @@ def async_register(hass: HomeAssistant) -> None:
         websocket_api.async_register_command(hass, ws_documents)
         websocket_api.async_register_command(hass, ws_semantic_search)
         websocket_api.async_register_command(hass, ws_diagnostics)
+        websocket_api.async_register_command(hass, ws_get_setup_health)
         websocket_api.async_register_command(hass, ws_voice_confirm_test)
         websocket_api.async_register_command(hass, ws_intrusion)
         websocket_api.async_register_command(hass, ws_mode)
@@ -2862,6 +2863,32 @@ async def ws_diagnostics(
     except Exception as exc:
         _LOGGER.exception("ws_diagnostics failed: %s", exc)
         connection.send_error(msg["id"], "diagnostics_failed", str(exc))
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "nova/get_setup_health",
+})
+@websocket_api.async_response
+async def ws_get_setup_health(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict,
+) -> None:
+    """Setup Doctor (Phase 2): read-only configuration health — stale entity
+    references, room speakers, camera overrides, notification service,
+    Assist pipeline wiring, person entities, required integrations, and
+    persistence — plus the existing service-health checks folded in unchanged.
+    Admin-only: the response can contain entity_ids. Never makes a
+    configuration change, offers no automatic fix, and never creates a
+    Repair issue — this is a panel-only report."""
+    try:
+        from . import setup_health
+        res = await setup_health.run_setup_health(hass)
+        connection.send_result(msg["id"], res)
+    except Exception as exc:
+        _LOGGER.exception("ws_get_setup_health failed: %s", exc)
+        connection.send_error(msg["id"], "get_setup_health_failed", str(exc))
 
 
 @websocket_api.require_admin

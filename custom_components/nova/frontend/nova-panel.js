@@ -2964,6 +2964,9 @@ class NovaPanel extends HTMLElement {
     try {
       this._calib = await this._hass.callWS({ type: "nova/get_calibration" });
     } catch (_) { this._calib = null; }
+    try {
+      this._setupHealth = await this._hass.callWS({ type: "nova/get_setup_health" });
+    } catch (_) { this._setupHealth = { error: true }; }
     if (this._currentTab === "settings") this._render();
   }
 
@@ -2972,6 +2975,33 @@ class NovaPanel extends HTMLElement {
   }
   _diagStatusLabel(st) {
     return { ok: "OK", warn: "WARN", idle: "IDLE", down: "DOWN", off: "OFF" }[st] || "?";
+  }
+
+  // ── Setup Doctor (Phase 2): read-only configuration health, folded into
+  // the same diagnostics card. Only the setup-specific checks are shown here
+  // — the 8 core-service checks (llm/embeddings/tts/stt/cameras/routines/
+  // database/scheduler) already render above under "Core services"; showing
+  // them a second time from the same backend payload would just be noise.
+  static SETUP_HEALTH_CORE_KEYS = new Set([
+    "llm", "embeddings", "tts", "stt", "cameras", "routines", "database", "scheduler",
+  ]);
+
+  _setupHealthCardBody() {
+    const sh = this._setupHealth || {};
+    if (sh.error) {
+      return `<div class="stub-body">Couldn't run Setup Doctor — restart Home Assistant after updating.</div>`;
+    }
+    const checks = (sh.checks || []).filter(c => !NovaPanel.SETUP_HEALTH_CORE_KEYS.has(c.key));
+    if (!checks.length) {
+      return `<div class="mode-bind-head">Setup Doctor</div><div class="stub-body">Loading…</div>`;
+    }
+    const rows = checks.map(c => `
+        <div class="cfg-row">
+          <label>${this._esc(c.name)} <span class="${this._diagStatusCls(c.status)}">${this._diagStatusLabel(c.status)}</span></label>
+        </div>
+        <div class="stub-body" style="margin:-6px 0 8px">${this._esc(c.detail || "")}${
+          c.suggested_fix ? ` — ${this._esc(c.suggested_fix)}` : ""}</div>`).join("");
+    return `<div class="mode-bind-head">Setup Doctor</div>${rows}`;
   }
 
   _diagnosticsCardBody() {
@@ -3001,6 +3031,7 @@ class NovaPanel extends HTMLElement {
       <div class="cfg-row"><label>Core services</label>${overall}</div>
       ${rows}
       <div class="cfg-row"><button class="mode-chip" id="newDiagRefresh">⟳ RUN CHECK</button></div>
+      ${this._setupHealthCardBody()}
       <div class="mode-bind-head">Service tests</div>
       ${svcTest("nova.test_tts", "TTS — Nova voice test")}
       ${svcTest("nova.observer_status", "Observer — fire status event")}

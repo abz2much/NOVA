@@ -58,6 +58,7 @@ ADMIN_GATED_TYPES = [
     "get_decision",
     "set_decision_outcome",
     "replay_decision",
+    "get_setup_health",
 ]
 
 
