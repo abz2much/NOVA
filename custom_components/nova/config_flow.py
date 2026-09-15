@@ -59,17 +59,17 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-# The panel's runtime config — survives integration removal, so a re-install
-# can pick everything back up without re-entry. (v6.45.0: the legacy add-on
-# path /config/nova_config.json is no longer read.)
-_RUNTIME_CONFIG_PATH = "/config/nova/config.json"
-
-
-def _find_config() -> dict | None:
-    """Read an existing runtime config, if one with a usable LLM exists."""
+def _find_config(config_path: str) -> dict | None:
+    """Read an existing runtime config at config_path, if one with a usable
+    LLM exists. This is the panel's runtime config — survives integration
+    removal, so a re-install can pick everything back up without re-entry.
+    (v6.45.0: the legacy add-on path /config/nova_config.json is no longer
+    read.) config_path is resolved by the caller via hass.config.path(),
+    since a bare module constant can't see which directory THIS Home
+    Assistant instance was actually configured with."""
     try:
-        if os.path.exists(_RUNTIME_CONFIG_PATH):
-            with open(_RUNTIME_CONFIG_PATH) as f:
+        if os.path.exists(config_path):
+            with open(config_path) as f:
                 data = json.load(f)
             if data.get(CONF_API_KEY) or data.get("groq_api_key"):
                 return data
@@ -91,7 +91,8 @@ class NovaConfigFlow(ConfigFlow, domain=DOMAIN):
         manual API key entry only if no config file exists.
         """
         # Try auto-import from an existing runtime config (re-install case)
-        cfg = await self.hass.async_add_executor_job(_find_config)
+        config_path = self.hass.config.path("nova", "config.json")
+        cfg = await self.hass.async_add_executor_job(_find_config, config_path)
         if cfg:
             return await self.async_step_import(cfg)
 

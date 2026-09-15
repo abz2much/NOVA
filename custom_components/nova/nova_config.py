@@ -34,6 +34,23 @@ _loaded = False
 last_load_error: Optional[str] = None
 
 
+def configure(hass) -> None:
+    """Point CONFIG_PATH at this Home Assistant instance's own config dir.
+
+    hass.config.path() resolves to whatever directory THIS instance was
+    configured with — /config on HA OS/Supervised/container installs, but
+    not universally (a Core install run out of a venv can point anywhere).
+    Before this, nova_config always wrote through the literal `/config`
+    regardless of what hass actually reported, which made setup unrunnable
+    anywhere that isn't the real config dir — including every test harness
+    (PHACC), whose hass fixture points elsewhere. On an install where
+    hass.config.path() genuinely is /config, this resolves to the same path
+    CONFIG_PATH already had, so behaviour there is unchanged.
+    Call once, early in async_setup_entry, before any config.json access."""
+    global CONFIG_PATH
+    CONFIG_PATH = Path(hass.config.path("nova", "config.json"))
+
+
 def _ensure_dir():
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
 
