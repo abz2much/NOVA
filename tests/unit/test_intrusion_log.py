@@ -54,9 +54,10 @@ def test_log_capped(intr):
 
 
 def test_event_carries_snapshot(intr):
-    snap = {"url": "/local/x.jpg", "path": "/config/www/x.jpg", "camera": "camera.kitchen"}
+    snap = {"path": "/config/nova/intrusion/x.jpg", "camera": "camera.kitchen"}
     ev = intr.record_event("confirmed", snapshot=snap)
-    assert ev["snapshot_url"] == "/local/x.jpg"
+    assert ev["snapshot_path"] == "/config/nova/intrusion/x.jpg"
+    assert "snapshot_url" not in ev  # no unauthenticated URL is ever recorded (v7.102.0)
     assert ev["camera"] == "camera.kitchen"
 
 

@@ -724,6 +724,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     except Exception as exc:
         _LOGGER.debug("Credential relocation: %s", exc)
 
+    # Move any intrusion snapshots left under the old, unauthenticated
+    # /config/www location (pre-v7.102.0) to the private snapshot dir
+    # (v7.102.0). Safe: files are moved, never deleted; a no-op once nothing
+    # legacy remains.
+    try:
+        from . import intrusion as _intrusion
+        await hass.async_add_executor_job(_intrusion.migrate_legacy_snapshots)
+    except Exception as exc:
+        _LOGGER.debug("Intrusion snapshot migration: %s", exc)
+
     _register_services(hass, entry, llm_client, sentinel)
 
     # Reload services when options change

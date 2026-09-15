@@ -1461,6 +1461,7 @@ PANEL_WRITABLE_KEYS = {
     "camera_reasoning_provider",
     "camera_reasoning_model",
     "classifier_rate_limit",
+    "intrusion_notify_image_ttl_minutes",  # minutes: signed notification-image copy lifetime (v7.102.0)
     "cognition_enabled",
     "cognition_threshold",
     "observer_group_debounce",      # seconds: coalesce a burst of numbered sibling entities (0 = off)
@@ -2601,9 +2602,22 @@ async def ws_intrusion(
 ) -> None:
     """Intrusion snapshot + call-off for the panel (v6.68.0): report the last
     snapshot and call-off state, dismiss an active alert as a false alarm, or
-    acknowledge it (hold auto-escalation without cancelling) (v6.69.0)."""
+    acknowledge it (hold auto-escalation without cancelling) (v6.69.0).
+
+    Snapshot images are never served over HTTP (v7.102.0) — they live in a
+    private directory and are read back and base64-inlined here, so they can
+    only ever reach the panel through this already-@require_admin command.
+    """
     try:
         from . import intrusion
+
+        async def _status_with_image() -> dict:
+            s = intrusion.status()
+            snap = s.get("last_snapshot")
+            if snap and snap.get("path"):
+                snap["image_b64"] = await intrusion.get_snapshot_b64(hass, snap["path"])
+            return s
+
         if msg["action"] == "dismiss":
             res = intrusion.dismiss_intrusion(msg.get("reason", "panel"))
             try:
@@ -2614,15 +2628,20 @@ async def ws_intrusion(
             except Exception:
                 pass
             nova_log("SAFETY", "Intrusion called off from panel (false alarm)")
-            connection.send_result(msg["id"], {**res, **intrusion.status()})
+            connection.send_result(msg["id"], {**res, **await _status_with_image()})
         elif msg["action"] == "acknowledge":
             res = intrusion.acknowledge(msg.get("reason", "panel"))
             nova_log("SAFETY", "Intrusion acknowledged from panel (holding escalation)")
-            connection.send_result(msg["id"], {**res, **intrusion.status()})
+            connection.send_result(msg["id"], {**res, **await _status_with_image()})
         elif msg["action"] == "log":
             # Reviewable event history with snapshots (v6.76.0)
+            events = intrusion.get_log(msg.get("limit", 50))
+            for ev in events:
+                p = ev.get("snapshot_path")
+                if p:
+                    ev["image_b64"] = await intrusion.get_snapshot_b64(hass, p)
             connection.send_result(msg["id"], {
-                "events": intrusion.get_log(msg.get("limit", 50)),
+                "events": events,
                 "learning": intrusion.learning_summary(),
             })
         elif msg["action"] == "label":
@@ -2636,7 +2655,7 @@ async def ws_intrusion(
         elif msg["action"] == "learning":
             connection.send_result(msg["id"], intrusion.learning_summary())
         else:
-            connection.send_result(msg["id"], intrusion.status())
+            connection.send_result(msg["id"], await _status_with_image())
     except Exception as exc:
         _LOGGER.exception("ws_intrusion failed: %s", exc)
         connection.send_error(msg["id"], "intrusion_failed", str(exc))

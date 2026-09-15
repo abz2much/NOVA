@@ -138,7 +138,7 @@ let _knownFacts = [
 ];
 let _intrCalledOff = false;
 let _intrAck = false;
-const _intrSnap = { url: "/local/nova/intrusion/intrusion_dining_room_1730000000.jpg", camera: "camera.dining_room", ts: 1730000000, path: "/config/www/nova/intrusion/x.jpg" };
+const _intrSnap = { image_b64: "ZmFrZQ==", camera: "camera.dining_room", ts: 1730000000, path: "/config/nova/intrusion/x.jpg" };
 const _updateConfigCalls = [];
 const _coverageCalls = [];
 const hass = {
@@ -226,9 +226,9 @@ const hass = {
       if (m.action === "log") return { events: [
         { id: "evt_1", ts: 1786000000, kind: "confirmed", reason: "person on camera",
           breach: "kitchen window", breach_area: "kitchen", camera: "camera.kitchen",
-          snapshot_url: "/local/nova/intrusion/a.jpg", label: null },
+          snapshot_path: "/config/nova/intrusion/a.jpg", image_b64: "ZmFrZQ==", label: null },
         { id: "evt_2", ts: 1785999000, kind: "unresolved", reason: "no response",
-          breach: "kitchen window", breach_area: "kitchen", snapshot_url: "", label: "false" },
+          breach: "kitchen window", breach_area: "kitchen", snapshot_path: "", label: "false" },
       ], learning: { events: 2, labeled: 1, patterns: {}, damped_patterns: ["kitchen|4"], min_false_to_damp: 3 } };
       if (m.action === "label") { _intrLabelCalls.push({ event_id: m.event_id, label: m.label }); return { ok: true, id: m.event_id, label: m.label,
         learning: { events: 2, labeled: 2, patterns: {}, damped_patterns: [], min_false_to_damp: 3 } }; }
