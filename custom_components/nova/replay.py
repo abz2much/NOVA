@@ -7,26 +7,41 @@ before it ships.
 
 The policy modelled here is the general one every tier shares: *act only when
 confidence ≥ threshold*. Each recorded decision carries a confidence and, once
-judged, an outcome of ``"right"`` or ``"wrong"``. Sweeping the threshold sorts
-each judged decision into one of four buckets:
+judged, an outcome — one of decision_record.py's real verdicts: ``"good"``,
+``"unnecessary"``, or ``"wrong"`` (see decision_record.OUTCOME_GOOD etc.).
+``"good"`` is the positive class, matching decision_record.calibration()'s own
+convention exactly; ``"unnecessary"`` and ``"wrong"`` are both negative — Nova
+either acted when it shouldn't have (wrong) or the call didn't earn its keep
+(unnecessary), and either way a threshold that would have suppressed it was
+the better call. Sweeping the threshold sorts each judged decision into one of
+four buckets:
 
-    acted (conf ≥ T) & right      → kept a good call        (correct)
-    acted (conf ≥ T) & wrong      → still made a mistake     (incorrect)
-    held  (conf < T) & wrong      → avoided a mistake        (correct)
-    held  (conf < T) & right      → suppressed a good call   (incorrect)
+    acted (conf ≥ T) & good        → kept a good call        (correct)
+    acted (conf ≥ T) & not good    → still made a mistake     (incorrect)
+    held  (conf < T) & not good    → avoided a mistake        (correct)
+    held  (conf < T) & good        → suppressed a good call   (incorrect)
 
 Maximising (kept-right + avoided-mistake) picks the threshold that best separates
-right decisions from wrong ones by confidence. Everything here is pure over a list
+good decisions from bad ones by confidence. Everything here is pure over a list
 of record dicts — nothing mutates records, calls a model, or acts on the home.
+
+Was ``RIGHT = "right"`` / ``WRONG = "wrong"`` before this fix — a vocabulary
+that no part of the integration ever actually wrote to a Decision Record (real
+writers only ever use good/unnecessary/wrong), so every "good" outcome was
+silently invisible to this module and only "wrong" records were ever counted.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Optional
 
-# Verdict vocabulary used across the integration (see decision_record.set_outcome).
-RIGHT = "right"
-WRONG = "wrong"
+from . import decision_record as _dr
+
+# The real verdict vocabulary decision_record.py actually writes (see
+# decision_record.OUTCOME_GOOD / OUTCOME_UNNECESSARY / OUTCOME_WRONG) — not a
+# separate vocabulary of our own that can drift out of sync with it again.
+POSITIVE_OUTCOME = _dr.OUTCOME_GOOD
+NEGATIVE_OUTCOMES = (_dr.OUTCOME_UNNECESSARY, _dr.OUTCOME_WRONG)
 
 # Below this many judged samples a recommendation is withheld — a threshold tuned
 # on a handful of outcomes would chase noise. Cold-start gate, same spirit as the
@@ -38,10 +53,10 @@ DEFAULT_MIN_SAMPLES = 25
 class ReplayResult:
     """Outcome of replaying one confidence threshold over judged records."""
     threshold: float
-    kept_right: int = 0        # acted (conf ≥ T) and it was right
-    kept_wrong: int = 0        # acted and it was wrong
-    suppressed_right: int = 0  # held (conf < T) but it was right — a good call lost
-    suppressed_wrong: int = 0  # held and it was wrong — a mistake avoided
+    kept_right: int = 0        # acted (conf ≥ T) and it was good
+    kept_wrong: int = 0        # acted and it was NOT good (unnecessary or wrong)
+    suppressed_right: int = 0  # held (conf < T) but it was good — a good call lost
+    suppressed_wrong: int = 0  # held and it was NOT good — a mistake avoided
 
     @property
     def total(self) -> int:
@@ -49,7 +64,7 @@ class ReplayResult:
 
     @property
     def correct(self) -> int:
-        """Decisions the policy got right: kept a right call or avoided a wrong one."""
+        """Decisions the policy got right: kept a good call or avoided a bad one."""
         return self.kept_right + self.suppressed_wrong
 
     @property
@@ -83,33 +98,34 @@ class ReplayResult:
 
 
 def _judged(records) -> list:
-    """(confidence, is_right) for records with a numeric confidence AND a
-    right/wrong outcome. Everything else is skipped — unjudged decisions and
-    ones logged without a confidence carry no signal for threshold evaluation."""
+    """(confidence, is_good) for records with a numeric confidence AND a real
+    judged outcome (good/unnecessary/wrong). Everything else is skipped —
+    unjudged decisions and ones logged without a confidence carry no signal
+    for threshold evaluation."""
     out = []
     for r in records or []:
         conf = r.get("confidence")
         outcome = r.get("outcome")
-        if conf is None or outcome not in (RIGHT, WRONG):
+        if conf is None or outcome not in (POSITIVE_OUTCOME, *NEGATIVE_OUTCOMES):
             continue
         try:
             conf = float(conf)
         except (TypeError, ValueError):
             continue
-        out.append((conf, outcome == RIGHT))
+        out.append((conf, outcome == POSITIVE_OUTCOME))
     return out
 
 
 def evaluate_threshold(records, threshold: float) -> ReplayResult:
     """Replay a single confidence threshold over the judged records."""
     res = ReplayResult(threshold=float(threshold))
-    for conf, is_right in _judged(records):
+    for conf, is_good in _judged(records):
         acted = conf >= threshold
-        if acted and is_right:
+        if acted and is_good:
             res.kept_right += 1
-        elif acted and not is_right:
+        elif acted and not is_good:
             res.kept_wrong += 1
-        elif not acted and is_right:
+        elif not acted and is_good:
             res.suppressed_right += 1
         else:
             res.suppressed_wrong += 1
@@ -169,3 +185,62 @@ def replay_kind(kind: str, min_samples: int = DEFAULT_MIN_SAMPLES,
             "reason": f"only {judged} judged decision(s); need {min_samples} to recommend a threshold",
         }
     return {"kind": kind, "ready": True, **rec}
+
+
+REPLAY_LABEL = ("Replay using current settings. This is not an exact "
+                "reconstruction of the original decision.")
+
+# How close (in confidence units) counts as "near" the current threshold —
+# reuses _default_grid()'s own step size rather than inventing a separate one.
+_NEAR_THRESHOLD_MARGIN = 0.05
+
+
+def replay_one(record: dict) -> dict:
+    """Replay one stored Decision Record against Nova's CURRENT policy —
+    never a reconstruction of what actually happened at the time, since no
+    historical threshold was ever stored alongside the decision. Supported
+    today only for ``suggestion`` decisions, the one kind with a real,
+    currently-effective, adjustable confidence threshold
+    (pattern_analyzer._effective_threshold()); every other kind returns
+    ``supported: False`` rather than inventing a threshold that doesn't exist
+    for it.
+
+    Structurally read-only: takes a plain record dict, not `hass` — it has no
+    way to write to a database, call a Home Assistant service, send a
+    notification, speak, call an LLM/cloud service, or change a device or
+    configuration, because nothing here is ever handed the means to.
+    """
+    kind = record.get("kind")
+    confidence = record.get("confidence")
+    out = {
+        "id": record.get("id"),
+        "kind": kind,
+        "recorded_decision": record.get("decision"),
+        "recorded_outcome": record.get("outcome"),
+        "recorded_confidence": confidence,
+        "label": REPLAY_LABEL,
+    }
+    if kind != "suggestion":
+        out["supported"] = False
+        out["reason"] = f"no adjustable policy threshold exists for kind '{kind}'"
+        return out
+    if confidence is None:
+        out["supported"] = False
+        out["reason"] = "no confidence was recorded for this decision"
+        return out
+    try:
+        confidence = float(confidence)
+    except (TypeError, ValueError):
+        out["supported"] = False
+        out["reason"] = "recorded confidence is not numeric"
+        return out
+
+    from . import pattern_analyzer
+    threshold = float(pattern_analyzer._effective_threshold())
+    out.update({
+        "supported": True,
+        "current_threshold": round(threshold, 3),
+        "would_pass_current_threshold": confidence >= threshold,
+        "within_0_05_of_threshold": abs(confidence - threshold) <= _NEAR_THRESHOLD_MARGIN,
+    })
+    return out
