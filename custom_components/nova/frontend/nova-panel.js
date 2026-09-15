@@ -2229,7 +2229,63 @@ class NovaPanel extends HTMLElement {
         </div>
         <div class="stub-body">Automations Nova has learned from watching your routines. Review each — approve to create it in Home Assistant, or dismiss it. Nothing runs until you approve, and you can see the exact automation before deciding.</div>
       </div>
-      ${rows}`;
+      ${rows}
+      ${this._htmlAutomationTrials()}`;
+  }
+
+  // ─── Automation probation (Phase 3) ──────────────────────────────────────
+  // Installing a suggestion only means it was ACCEPTED — this section shows
+  // what's actually been observed running since, entirely separate from that
+  // acceptance. Run counts come from Home Assistant's own automation_triggered
+  // event; "Working"/"Needs adjustment" is manual feedback only, never inferred.
+
+  _htmlAutomationTrials() {
+    const trials = this._automationTrials || [];
+    if (!trials.length) return "";
+    const rows = trials.map(t => {
+      const when = t.last_run ? new Date(t.last_run * 1000).toLocaleString() : "never";
+      const outcome = t.manual_outcome
+        ? `<span class="toggle-desc">Feedback: ${this._esc(t.manual_outcome === "working" ? "Working" : "Needs adjustment")}</span>`
+        : "";
+      return `
+        <div class="cfg-row">
+          <label>${this._esc(t.automation_id)}</label>
+          <span class="toggle-desc">ran ${t.run_count || 0}× · last ${this._esc(when)}</span>
+        </div>
+        <div class="mode-grid" data-trial-id="${t.id}">
+          <button class="mode-chip new-trial-fb" data-verdict="working">WORKING</button>
+          <button class="mode-chip new-trial-fb" data-verdict="needs_adjustment">NEEDS ADJUSTMENT</button>
+        </div>
+        <div class="cfg-row">${outcome}</div>`;
+    }).join("");
+    return `
+      <div class="panel">
+        <div class="panel-head">
+          <div class="panel-title">Installed Automations</div>
+          <div class="panel-meta">${trials.length} tracked</div>
+        </div>
+        <div class="stub-body">Installing an automation means you accepted the suggestion — it isn't proof the automation works. This shows what's actually been observed running; "Working" and "Needs adjustment" are your own call, not Nova's.</div>
+        ${rows}
+      </div>`;
+  }
+
+  async _fetchAutomationTrials() {
+    if (!this._hass) return;
+    try {
+      const result = await this._hass.callWS({ type: "nova/list_automation_trials" });
+      this._automationTrials = result.trials || [];
+    } catch (_) { this._automationTrials = []; }
+    if (this._currentTab === "suggestions") this._render();
+  }
+
+  async _submitAutomationTrialFeedback(trialId, verdict) {
+    if (!this._hass) return;
+    try {
+      await this._hass.callWS({ type: "nova/automation_trial_feedback", trial_id: trialId, verdict });
+      this._fetchAutomationTrials();
+    } catch (err) {
+      console.error("Nova: automation trial feedback failed", err);
+    }
   }
 
   _wireSuggestions() {
@@ -2251,6 +2307,13 @@ class NovaPanel extends HTMLElement {
       card.querySelector(".new-sug-yaml-btn")?.addEventListener("click", () => {
         const pre = card.querySelector(".new-sug-yaml");
         if (pre) pre.hidden = !pre.hidden;
+      });
+    });
+    root.querySelectorAll(".new-trial-fb").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const group = btn.closest("[data-trial-id]");
+        const trialId = parseInt(group?.getAttribute("data-trial-id"), 10);
+        if (!isNaN(trialId)) this._submitAutomationTrialFeedback(trialId, btn.getAttribute("data-verdict"));
       });
     });
   }
@@ -4542,7 +4605,11 @@ class NovaPanel extends HTMLElement {
       this._wireResidenceControlsNew();
       this._fetchMmwaveNew();
     }
-    if (this._currentTab === "suggestions") { this._wireSuggestions(); this._wireAnalyzeButton("sugRunAnalysis", "sugAnalysisResult"); }
+    if (this._currentTab === "suggestions") {
+      this._wireSuggestions();
+      this._wireAnalyzeButton("sugRunAnalysis", "sugAnalysisResult");
+      if (!this._automationTrials) this._fetchAutomationTrials();
+    }
     if (this._currentTab === "dashboard") {
       this._wireAnalyzeButton("qaRunAnalysis", "qaAnalysisResult");
       root.querySelectorAll(".panel [data-svc]").forEach(btn => {

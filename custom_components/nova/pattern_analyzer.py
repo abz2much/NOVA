@@ -1569,6 +1569,14 @@ class PatternAnalyzer:
                     "suggestion:%d" % suggestion_id, "good", "installed")
             except Exception:
                 pass
+            try:  # Automation Trial (Phase 3): tracks whether it RUNS — kept
+                # deliberately separate from the acceptance outcome above.
+                # Installing it only proves the suggestion was accepted, not
+                # that the automation works.
+                from . import automation_trials
+                automation_trials.create(suggestion_id, automation_id)
+            except Exception:
+                pass
             conn.commit()
         except Exception:
             pass

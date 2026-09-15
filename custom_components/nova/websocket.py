@@ -71,6 +71,8 @@ def async_register(hass: HomeAssistant) -> None:
         websocket_api.async_register_command(hass, ws_replay_decision)
         websocket_api.async_register_command(hass, ws_list_models)
         websocket_api.async_register_command(hass, ws_suggestion_action)
+        websocket_api.async_register_command(hass, ws_list_automation_trials)
+        websocket_api.async_register_command(hass, ws_automation_trial_feedback)
         websocket_api.async_register_command(hass, ws_goal_action)
         websocket_api.async_register_command(hass, ws_get_person_routines)
         websocket_api.async_register_command(hass, ws_get_area_sparklines)
@@ -2495,6 +2497,54 @@ async def ws_suggestion_action(
     except Exception as exc:
         _LOGGER.exception("ws_suggestion_action failed: %s", exc)
         connection.send_error(msg["id"], "suggestion_action_failed", str(exc))
+
+
+# ─── Automation probation (Phase 3) ──────────────────────────────────────────
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "nova/list_automation_trials",
+})
+@websocket_api.async_response
+async def ws_list_automation_trials(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict,
+) -> None:
+    """Installed-automation run counts + manual feedback for the Suggestions
+    tab. Installation only means the suggestion was accepted — this reports
+    what's actually observed running, never a claim that it works."""
+    try:
+        from . import automation_trials
+        trials = await hass.async_add_executor_job(automation_trials.list_trials)
+        connection.send_result(msg["id"], {"trials": trials})
+    except Exception as exc:
+        _LOGGER.exception("ws_list_automation_trials failed: %s", exc)
+        connection.send_error(msg["id"], "list_automation_trials_failed", str(exc))
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "nova/automation_trial_feedback",
+    vol.Required("trial_id"): int,
+    vol.Required("verdict"): vol.In(["working", "needs_adjustment"]),
+})
+@websocket_api.async_response
+async def ws_automation_trial_feedback(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict,
+) -> None:
+    """Manual Working / Needs adjustment feedback — never inferred, only ever
+    what the household actually reports."""
+    try:
+        from . import automation_trials
+        ok = await hass.async_add_executor_job(
+            automation_trials.set_manual_outcome, msg["trial_id"], msg["verdict"])
+        connection.send_result(msg["id"], {"ok": bool(ok)})
+    except Exception as exc:
+        _LOGGER.exception("ws_automation_trial_feedback failed: %s", exc)
+        connection.send_error(msg["id"], "automation_trial_feedback_failed", str(exc))
 
 
 _SNAP_LOG_TS: dict[str, float] = {}
