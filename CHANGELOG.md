@@ -1,3 +1,8 @@
+## [7.102.1] — fix: Piper voice quality resolved from disk, not assumed
+
+- `_download_voice()` now returns the Nova voice quality actually installed or downloaded ('high'/'medium'), always trying the requested quality first even when a fallback is already on disk from a previous run.
+- The Assist pipeline (new or existing) and on-demand announcements now request whichever Nova voice quality is really present instead of assuming "high" — an existing pipeline pointing at a missing voice file is repaired only when the fallback quality is confirmed present, never clobbering a deliberate, still-valid choice.
+
 ## [7.102.0] — security review: private snapshots, safer setup, visible write failures
 
 - Intrusion snapshots moved off `/config/www` (previously served unauthenticated at `/local/...`) into a private directory, readable only through the existing admin-gated `nova/intrusion` websocket command. Old snapshots are migrated automatically on upgrade, never deleted.
