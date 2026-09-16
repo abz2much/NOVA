@@ -93,9 +93,11 @@ def _build_summary(hass: HomeAssistant) -> str:
         parts.append(f"All {lights_total} lights are off")
 
     # ── Locks ────────────────────────────────────────────────────────────
+    from .cognitive_core import _lockdown_exempt_locks
+    exempt = _lockdown_exempt_locks()
     unlocked = []
     for state in hass.states.async_all("lock"):
-        if state.state == "unlocked":
+        if state.state == "unlocked" and state.entity_id not in exempt:
             unlocked.append(state.attributes.get("friendly_name", state.entity_id))
     if unlocked:
         parts.append(f"Unlocked: {', '.join(unlocked)}")

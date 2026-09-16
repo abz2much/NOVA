@@ -71,8 +71,10 @@ def _gather_open_things(hass: HomeAssistant) -> list[str]:
         if dc in ("door", "window", "garage_door") and state.state == "on":
             name = state.attributes.get("friendly_name", state.entity_id)
             items.append(f"{name} is open")
+    from .cognitive_core import _lockdown_exempt_locks
+    exempt = _lockdown_exempt_locks()
     for state in hass.states.async_all("lock"):
-        if state.state == "unlocked":
+        if state.state == "unlocked" and state.entity_id not in exempt:
             name = state.attributes.get("friendly_name", state.entity_id)
             items.append(f"{name} is unlocked")
     return items
