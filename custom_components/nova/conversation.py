@@ -819,6 +819,27 @@ class NovaAgent(conversation.ConversationEntity):
         # Warm persona cache (reads file in executor) before sync _persona()
         await _ensure_persona_loaded(self.hass)
         persona   = self._persona()
+
+        # Reject irrelevant speech before it can mutate conversation memory
+        # (history, DB, semantic recall, knowledge injection). Pending-offer
+        # state is captured once here and reused by the offer handler below.
+        try:
+            from . import cognitive_core
+            pending_offer = cognitive_core.get_pending_offer()
+        except Exception:
+            cognitive_core = None
+            pending_offer = None
+        gate_enabled = self._opt("relevance_gate", True)
+        is_addressed = _is_addressed_to_nova(user_input.text)
+        relevant = bool(pending_offer) or not gate_enabled or is_addressed
+
+        if not relevant:
+            nova_log("GATE", f"ignored ambient input: '{user_input.text.strip()[:60]}'")
+            _LOGGER.info("Nova relevance gate: ignored '%s'", user_input.text.strip()[:80])
+            ir = intent.IntentResponse(language=user_input.language)
+            ir.async_set_speech("")  # silence — do not respond to ambient speech
+            return conversation.ConversationResult(response=ir, conversation_id=cid)
+
         history   = self._history(cid)
         await self._maybe_seed_history(cid, history)
 
@@ -874,9 +895,9 @@ class NovaAgent(conversation.ConversationEntity):
         addr = f", {honorific}" if honorific else ""
         offer_reply = None
         try:
-            from . import cognitive_core
-            pending = cognitive_core.get_pending_offer()
-            if pending:
+            # Reuses the SAME pending_offer object captured before the
+            # relevance decision above — no second get_pending_offer() read.
+            if pending_offer:
                 low = user_input.text.strip().lower()
                 affirm = low in ("yes", "yes please", "yeah", "yep", "sure",
                                  "do it", "go ahead", "please do", "okay", "ok",
@@ -925,7 +946,12 @@ class NovaAgent(conversation.ConversationEntity):
         # to Nova (filler, fragments, rambling dialogue) BEFORE it reaches the
         # local engine or the agent — staying silent rather than acting on, or
         # chattering back at, ambient noise. Toggle off via `relevance_gate`.
-        if self._opt("relevance_gate", True) and not _is_addressed_to_nova(user_input.text):
+        # v7.105.0: reachable only when a pending offer made the turn relevant
+        # for persistence above but this reply didn't parse as accept/decline
+        # and isn't addressed to Nova either — still don't route it. Reuses
+        # the values computed above so this and the persistence gate above
+        # can never disagree.
+        if gate_enabled and not is_addressed:
             nova_log("GATE", f"ignored ambient input: '{user_input.text.strip()[:60]}'")
             _LOGGER.info("Nova relevance gate: ignored '%s'", user_input.text.strip()[:80])
             ir = intent.IntentResponse(language=user_input.language)
