@@ -816,39 +816,54 @@ def _resp(action, fname, success, args=None, h="sir", status=None):
         return (f"I sent the command to {verb} {fname}{addr}, but I can't "
                 f"confirm it worked yet.")
 
+    # status == "accepted": the command was sent and didn't error, but
+    # nothing here confirms it landed -- lock/unlock/open/close rely on the
+    # existing background _verify_control (unchanged); toggle on a non-fast
+    # domain and every climate/media action never get a synchronous check at
+    # all. Neutral, in-progress wording only. Deliberately does NOT use the
+    # completion-style lead-ins below (_pick(["Secured", ... "Consider it
+    # done", ...])) -- those read as confirmed even paired with "now"
+    # phrasing, which is the exact overclaim this branch exists to avoid.
+    if status == "accepted":
+        temp = (args or {}).get("temperature", "?")
+        vol = (args or {}).get("volume_level", "?")
+        accepted_r = {
+            "turn_on":        f"I've sent the command to turn on {fname}{addr}.",
+            "turn_off":       f"I've sent the command to turn off {fname}{addr}.",
+            "toggle":         f"I've sent the toggle command to {fname}{addr}.",
+            "lock":           f"Locking {fname} now{addr}.",
+            "unlock":         f"Unlocking {fname} now{addr}.",
+            "open":           f"Opening {fname} now{addr}.",
+            "close":          f"Closing {fname} now{addr}.",
+            "set_temp":       f"I've sent the command to set the temperature to {temp}°{addr}.",
+            "set_temp_named": f"I've sent the command to set {fname} to {temp}°{addr}.",
+            "media_pause":    f"I've sent the pause command{addr}.",
+            "media_play":     f"I've sent the play command{addr}.",
+            "media_next":     f"I've sent the next-track command{addr}.",
+            "volume_up":      f"I've sent the volume-up command{addr}.",
+            "volume_down":    f"I've sent the volume-down command{addr}.",
+            "volume_set":     f"I've sent the command to set the volume to {vol}%{addr}.",
+            "mute":           f"I've sent the mute command{addr}.",
+            "unmute":         f"I've sent the unmute command{addr}.",
+        }
+        return accepted_r.get(
+            action, f"I've sent the {action.replace('_', ' ')} command to {fname}{addr}.")
+
+    # status == "verified": the state was actually confirmed, so completion
+    # wording is accurate here -- the only actions that ever reach "verified"
+    # are turn_on/turn_off/toggle on a fast domain, and dim/brighten.
     # Understated lead-ins, MCU style. Varied so confirmations never sound
     # canned. Each is something Nova would actually say.
     ack = _pick(["Done", "Right away", "As you wish", "Consider it done", "At once"])
-    sec = _pick(["Secured", "Done", "Locked up"])
 
     bp = (args or {}).get('brightness_pct', '?')
-    temp = (args or {}).get('temperature', '?')
-    vol = (args or {}).get('volume_level', '?')
 
     r = {
-        "turn_on":        f"{ack}{addr}. {fname} is on.",
-        "turn_off":       f"{ack}{addr}. {fname} is off.",
-        "toggle":         f"{ack}{addr}. {fname} toggled.",
-        # lock/unlock: only "accepted" status reaches here -- background
-        # verification hasn't confirmed the physical state yet, so this must
-        # not claim completion (same honesty fix as the covers below, which
-        # already used in-progress phrasing rather than "is locked").
-        "lock":           f"{sec}{addr}. Locking {fname} now.",
-        "unlock":         f"{ack}{addr}. Unlocking {fname} now.",
-        "open":           f"Opening {fname} now{addr}.",
-        "close":          f"Closing {fname} now{addr}.",
-        "dim":            f"{ack}{addr}. {fname} at {bp}%.",
-        "brighten":       f"{ack}{addr}. {fname} at full brightness.",
-        "set_temp":       f"{ack}{addr}. Temperature set to {temp}°.",
-        "set_temp_named": f"{ack}{addr}. {fname} set to {temp}°.",
-        "media_pause":    f"Paused{addr}.",
-        "media_play":     f"Playing now{addr}.",
-        "media_next":     f"Next track{addr}.",
-        "volume_up":      f"Volume up{addr}.",
-        "volume_down":    f"Volume down{addr}.",
-        "volume_set":     f"Volume at {vol}%{addr}.",
-        "mute":           f"Muted{addr}.",
-        "unmute":         f"Unmuted{addr}.",
+        "turn_on":  f"{ack}{addr}. {fname} is on.",
+        "turn_off": f"{ack}{addr}. {fname} is off.",
+        "toggle":   f"{ack}{addr}. {fname} toggled.",
+        "dim":      f"{ack}{addr}. {fname} at {bp}%.",
+        "brighten": f"{ack}{addr}. {fname} at full brightness.",
     }
     return r.get(action, f"{ack}{addr}. {action} applied to {fname}.")
 

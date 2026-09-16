@@ -1883,15 +1883,59 @@ async def _exec_bulk_control(hass: HomeAssistant, args: dict, device_id: Optiona
             hass.async_create_task(
                 _verify_control(hass, eid, action, sd, sn, {"entity_id": eid}))
 
+    total = len(entities)
+    verb = action.replace("_", " ")
+
+    # Nothing actually ran -- success/status must reflect that honestly,
+    # not report success=true for a bulk call that changed nothing.
+    if total and success == 0:
+        if failed and not blocked:
+            status = "error"
+        elif blocked and not failed:
+            status = "awaiting_confirmation"
+        else:
+            # a mix of blocked and failed, still nothing succeeded
+            status = "error"
+        parts = []
+        if failed:
+            parts.append(f"{len(failed)} failed")
+        if blocked:
+            parts.append(f"{blocked} blocked")
+        result = {
+            "success": False,
+            "status": status,
+            "message": (f"I wasn't able to {verb} any of the {total} device(s) "
+                        f"({', '.join(parts)})."),
+            "action": action,
+            "domain": domain,
+            "area": area_name,
+            "count": success,
+            "total": total,
+        }
+        if blocked:
+            result["blocked"] = blocked
+        if failed:
+            result["failed"] = failed
+        return json.dumps(result)
+
+    message = f"I've sent the {verb} command to {success} device(s)."
+    if failed or blocked:
+        parts = []
+        if failed:
+            parts.append(f"{len(failed)} failed")
+        if blocked:
+            parts.append(f"{blocked} blocked")
+        message += f" ({', '.join(parts)})."
+
     result = {
         "success": True,
         "status": "accepted",
-        "message": f"I've sent the {action.replace('_', ' ')} command to {success} device(s).",
+        "message": message,
         "action": action,
         "domain": domain,
         "area": area_name,
         "count": success,
-        "total": len(entities),
+        "total": total,
     }
     if blocked:
         result["blocked"] = blocked
@@ -2034,7 +2078,10 @@ async def _exec_execute_plan(hass: HomeAssistant, args: dict, device_id: Optiona
     return json.dumps({
         "goal": goal,
         "status": "accepted" if succeeded else "error",
-        "message": f"I've completed {succeeded} of {len(steps)} step(s) for {goal}.",
+        # "accepted" means the service calls were sent, not that HA finished
+        # carrying them out (no reliable per-step completion signal exists
+        # for a generic plan) -- never claim "completed" here.
+        "message": f"I've sent {succeeded} of {len(steps)} step(s) for {goal}.",
         "total_steps": len(steps),
         "succeeded": succeeded,
         "failed": len(steps) - succeeded,

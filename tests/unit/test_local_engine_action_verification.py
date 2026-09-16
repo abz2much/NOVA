@@ -245,6 +245,56 @@ def test_resp_verified_turn_on_unchanged_wording(le):
     assert "is on" in text
 
 
+# ── Corrective fix: completion-style _pick lead-ins must never leak into an
+# "accepted" (unconfirmed) response, however _pick happens to roll. ─────────
+
+def test_pick_forced_to_secured_cannot_leak_into_accepted_lock(le, monkeypatch):
+    monkeypatch.setattr(le, "_pick", lambda options: "Secured")
+    text = le._resp("lock", "Front Door", True, {}, "sir", status="accepted")
+    assert "Secured" not in text
+    assert "Locking Front Door now" in text
+
+
+def test_pick_forced_to_secured_cannot_leak_into_accepted_unlock(le, monkeypatch):
+    monkeypatch.setattr(le, "_pick", lambda options: "Secured")
+    text = le._resp("unlock", "Front Door", True, {}, "sir", status="accepted")
+    assert "Secured" not in text
+    assert "Unlocking Front Door now" in text
+
+
+def test_pick_forced_to_consider_it_done_cannot_leak_into_accepted_toggle(le, monkeypatch):
+    monkeypatch.setattr(le, "_pick", lambda options: "Consider it done")
+    text = le._resp("toggle", "Den", True, {}, "sir", status="accepted")
+    assert "Consider it done" not in text
+    assert "toggled" not in text
+    assert "I've sent the toggle command" in text
+
+
+def test_pick_forced_to_secured_cannot_leak_into_accepted_climate(le, monkeypatch):
+    monkeypatch.setattr(le, "_pick", lambda options: "Secured")
+    text = le._resp("set_temp", "Den", True, {"temperature": 72}, "sir", status="accepted")
+    assert "Secured" not in text
+    assert "Temperature set to" not in text
+    assert "I've sent the command to set the temperature to 72" in text
+
+
+def test_pick_forced_to_consider_it_done_cannot_leak_into_accepted_media(le, monkeypatch):
+    monkeypatch.setattr(le, "_pick", lambda options: "Consider it done")
+    text = le._resp("media_pause", "Den", True, {}, "sir", status="accepted")
+    assert "Consider it done" not in text
+    assert "Paused" not in text
+    assert "I've sent the pause command" in text
+
+
+def test_pick_still_used_for_genuinely_verified_actions(le, monkeypatch):
+    """The accepted-status fix must not silence _pick entirely -- a truly
+    verified action still gets the varied completion lead-in."""
+    monkeypatch.setattr(le, "_pick", lambda options: "Consider it done")
+    text = le._resp("turn_on", "Den", True, {}, "sir", status="verified")
+    assert "Consider it done" in text
+    assert "is on" in text
+
+
 # ── goodnight shortcut ────────────────────────────────────────────────────────
 
 async def test_goodnight_reports_sent_not_confirmed_and_verifies_in_background(

@@ -379,6 +379,86 @@ async def test_bulk_control_does_not_delay_the_response(agent, fake_hass, monkey
     fake_hass.close_pending()
 
 
+# ── Corrective fixes: bulk_control's success/status must never overclaim ────
+
+async def test_bulk_control_all_calls_failed_reports_error(agent, fake_hass, monkeypatch):
+    fake_hass.states.set("light.a", "off")
+    fake_hass.states.set("light.b", "off")
+    monkeypatch.setattr(agent, "_load_learned", lambda: {"alias": {}})
+
+    async def always_fail(domain, service, data=None, blocking=False, **kw):
+        raise RuntimeError("offline")
+    fake_hass.services.async_call = always_fail
+
+    import json
+    out = await agent._exec_bulk_control(fake_hass, {"domain": "light", "action": "turn_on"})
+    result = json.loads(out)
+    assert result["success"] is False
+    assert result["status"] == "error"
+    assert result["count"] == 0
+    assert len(result["failed"]) == 2
+
+
+async def test_bulk_control_all_blocked_reports_awaiting_confirmation(
+    agent, fake_hass, load, monkeypatch,
+):
+    fake_hass.states.set("lock.front", "unlocked")
+    fake_hass.states.set("lock.back", "unlocked")
+    monkeypatch.setattr(agent, "_load_learned", lambda: {"alias": {}})
+    policy = load("policy")
+    monkeypatch.setattr(policy, "requires_confirmation", lambda *a, **k: True)
+
+    import json
+    out = await agent._exec_bulk_control(fake_hass, {"domain": "lock", "action": "unlock"})
+    result = json.loads(out)
+    assert result["success"] is False
+    assert result["status"] == "awaiting_confirmation"
+    assert result["blocked"] == 2
+    assert result["count"] == 0
+    assert fake_hass.service_calls == []
+
+
+async def test_bulk_control_partial_failure_mentions_counts_stays_accepted(
+    agent, fake_hass, monkeypatch,
+):
+    fake_hass.states.set("light.a", "off")
+    fake_hass.states.set("light.b", "off")
+    monkeypatch.setattr(agent, "_load_learned", lambda: {"alias": {}})
+
+    async def flaky(domain, service, data=None, blocking=False, **kw):
+        if data.get("entity_id") == "light.b":
+            raise RuntimeError("light.b offline")
+        fake_hass.service_calls.append((domain, service, dict(data or {})))
+    fake_hass.services.async_call = flaky
+
+    import json
+    out = await agent._exec_bulk_control(fake_hass, {"domain": "light", "action": "turn_on"})
+    result = json.loads(out)
+    assert result["success"] is True
+    assert result["status"] == "accepted"
+    assert result["count"] == 1
+    assert "1 failed" in result["message"]
+    fake_hass.close_pending()
+
+
+async def test_bulk_control_full_success_message_has_no_failed_or_blocked_mention(
+    agent, fake_hass, monkeypatch,
+):
+    fake_hass.states.set("light.a", "off")
+    fake_hass.states.set("light.b", "off")
+    monkeypatch.setattr(agent, "_load_learned", lambda: {"alias": {}})
+
+    import json
+    out = await agent._exec_bulk_control(fake_hass, {"domain": "light", "action": "turn_on"})
+    result = json.loads(out)
+    assert result["success"] is True
+    assert result["status"] == "accepted"
+    assert result["count"] == 2
+    assert "failed" not in result["message"]
+    assert "blocked" not in result["message"]
+    fake_hass.close_pending()
+
+
 # ── Phase 3: scene/script/automation/execute_plan wording ───────────────────
 
 async def test_scene_script_reports_accepted_not_verified(agent, load, fake_hass, monkeypatch):
@@ -419,3 +499,23 @@ async def test_execute_plan_exception_step_reports_error(agent, fake_hass, monke
     result = json.loads(out)
     assert result["results"][0]["status"] == "error"
     assert result["status"] == "error"
+
+
+async def test_execute_plan_summary_never_claims_completion(agent, fake_hass, monkeypatch):
+    """Regression: accepted steps must never be summarised as "completed" --
+    HA accepted the service calls, it didn't confirm they finished."""
+    monkeypatch.setattr(agent, "_load_learned", lambda: {"alias": {}})
+    fake_hass.states.set("light.den", "off")
+    fake_hass.states.set("light.hall", "off")
+    import json
+    out = await agent._exec_execute_plan(fake_hass, {
+        "goal": "evening routine",
+        "steps": [
+            {"domain": "light", "service": "turn_on", "entity_id": "light.den"},
+            {"domain": "light", "service": "turn_on", "entity_id": "light.hall"},
+        ],
+    })
+    result = json.loads(out)
+    assert result["status"] == "accepted"
+    assert "completed" not in result["message"].lower()
+    assert "I've sent 2 of 2 step(s) for evening routine." == result["message"]

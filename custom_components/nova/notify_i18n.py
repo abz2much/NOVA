@@ -154,7 +154,10 @@ MESSAGES: dict[str, dict[str, str]] = {
     # completion it hasn't observed) -- these are infinitive forms paired
     # with the "I sent commands to ..." wrappers below. lockdown_locked/
     # lockdown_closed above are untouched and still used, unchanged, by
-    # _nighttime_lockdown's own blocking (already-observed) wording.
+    # _nighttime_lockdown's own blocking wording -- a blocking service call
+    # only proves Home Assistant accepted and handled the request, not that
+    # the lock/cover physically reached that state; that path is unchanged
+    # and out of scope for this phase, not claimed as verified.
     "lockdown_lock_pending": {
         "en": "lock {names}", "fr": "verrouiller {names}",
         "de": "{names} zu verriegeln", "es": "bloquear {names}",
