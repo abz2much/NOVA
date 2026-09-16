@@ -1192,11 +1192,23 @@ def build_lockdown_message(honorific: str, locked: list, closed: list,
     """
     Compose the lockdown-engaged announcement. Pure (no I/O) so it's unit-tested.
 
-    Three outcomes are reported distinctly: locks Nova locked, closeable
-    openings it closed (garage doors / motorized covers), and openings it can't
-    secure remotely (bare window contacts) — those are named and framed as the
-    gap to close by hand, never a footnote. The message never claims the home is
-    secure while something is open, and never announces a non-event.
+    Three outcomes are reported distinctly: locks Nova sent a lock command to,
+    closeable openings it sent a close command to (garage doors / motorized
+    covers), and openings it can't secure remotely (bare window contacts) —
+    those are named and framed as the gap to close by hand, never a footnote.
+    The message never claims the home is secure while something is open, and
+    never announces a non-event.
+
+    Phase 3 (honest verification): engage() only ever gets here with a
+    non-empty `locked`/`closed` list when it just called the lock/close
+    service and scheduled a background _verify_secured() for each of those
+    entities — at the moment this message is composed, none of that has been
+    confirmed yet. So the "did" branches report what was SENT, not what was
+    achieved, and promise the alert _verify_secured() delivers on failure,
+    rather than asserting the home is secure. The "already secured" and
+    "gap only" branches are unaffected: they're only reached when nothing was
+    acted on (everything was already observed secure before any action), so
+    there's nothing pending to be honest about.
 
     Fully localized (v7.80.0): the composed variants are stitched from localized
     verb phrases, a localized list join, and per-language wrappers, so a
@@ -1211,12 +1223,12 @@ def build_lockdown_message(honorific: str, locked: list, closed: list,
 
     actions = []
     if locked:
-        actions.append(i18n.message("lockdown_locked", lang,
+        actions.append(i18n.message("lockdown_lock_pending", lang,
                                     names=i18n.join_names(locked, lang)))
     if closed:
-        actions.append(i18n.message("lockdown_closed", lang,
+        actions.append(i18n.message("lockdown_close_pending", lang,
                                     names=i18n.join_names(closed, lang)))
-    did = i18n.join_names(actions, lang)   # localized "locked X and closed Y"
+    did = i18n.join_names(actions, lang)   # localized "lock X and close Y"
 
     def gap(names: list) -> str:
         if len(names) == 1:
@@ -1228,10 +1240,10 @@ def build_lockdown_message(honorific: str, locked: list, closed: list,
         return i18n.message("lockdown_gap_many", lang, count=len(names))
 
     if did and open_names:
-        return i18n.message("lockdown_did_gap", lang, honorific=h, did=did,
+        return i18n.message("lockdown_did_gap_pending", lang, honorific=h, did=did,
                             gap=gap(open_names))
     if did:
-        return i18n.message("lockdown_did", lang, honorific=h, did=did)
+        return i18n.message("lockdown_did_pending", lang, honorific=h, did=did)
     if open_names:
         return i18n.message("lockdown_gap_only", lang, honorific=h,
                             gap=gap(open_names))
@@ -1413,6 +1425,10 @@ class LockdownManager:
         return ((st.attributes.get("friendly_name") if st else None) or eid)
 
     async def _lock_all(self) -> list:
+        """Returns (entity_id, friendly_name) pairs for every lock the call
+        actually reached — the entity_id is needed so engage() can schedule
+        _verify_secured() per lock, the same honest background-confirmation
+        step the cover/opening sweep below already uses."""
         locked = []
         for st in self.hass.states.async_all("lock"):
             eid = st.entity_id
@@ -1423,7 +1439,7 @@ class LockdownManager:
                 try:
                     await self.hass.services.async_call(
                         "lock", "lock", {"entity_id": eid}, blocking=True)
-                    locked.append(fname)
+                    locked.append((eid, fname))
                     _LOGGER.info("Lockdown: locked %s", eid)
                 except Exception as exc:
                     _LOGGER.warning("Lockdown: failed to lock %s: %s", eid, exc)
@@ -1443,7 +1459,10 @@ class LockdownManager:
         honorific = _live_honorific(self.hass)  # Phase C: presence-aware
 
         # 1) Lock every closed-but-unlocked lock.
-        locked = await self._lock_all()
+        locked_pairs = await self._lock_all()
+        locked = [fname for _eid, fname in locked_pairs]
+        for eid, fname in locked_pairs:
+            self.hass.async_create_task(self._verify_secured(eid, "lock", fname))
 
         # 2) Close every open *closeable* opening (garage doors / motorized
         #    covers). These have safety sensors, so an obstruction simply fails

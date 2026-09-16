@@ -85,6 +85,7 @@ async def test_unlock_actuates_fast_when_confirmation_disabled(load, monkeypatch
     result = await le.try_local(h, "unlock the front door", "sir")
     assert result is not None and result.handled
     assert ("lock", "unlock", {"entity_id": "lock.front_door"}) in h.service_calls
+    h.close_pending()  # accepted -> background _verify_control scheduled
 
 
 async def test_bulk_unlock_defers_when_confirmation_enabled(load, monkeypatch):
@@ -99,11 +100,20 @@ async def test_bulk_unlock_defers_when_confirmation_enabled(load, monkeypatch):
 async def test_turn_off_light_is_never_gated(load, monkeypatch):
     le = load("local_engine")
     _install_vc(monkeypatch, protected=True)       # confirmation on, but lights aren't protected
+    # Phase 3's fast-domain synchronous check (light/switch/fan) uses its own
+    # sleep seam -- mock it, or this real turn_off (FakeHass never flips the
+    # state) takes a real ~1s bounded poll before falling back.
+    ev = load("entity_verify")
+    async def _no_sleep(_secs):
+        pass
+    monkeypatch.setattr(ev, "_SLEEP", _no_sleep)
+
     h = FakeHass()
     h.states.set("light.kitchen", "on", friendly_name="Kitchen")
     result = await le.try_local(h, "turn off the kitchen light", "sir")
     assert result is not None and result.handled
     assert any(c[:2] == ("light", "turn_off") for c in h.service_calls)
+    h.close_pending()  # unverified -> background _verify_control scheduled
 
 
 # ── scene/script activation via the fast path (audit fix, local_engine.py) ──

@@ -111,7 +111,12 @@ NOVA_TOOLS = [
             "description": (
                 "Search for HA entities by name, area, or domain. Use this when "
                 "you don't know the exact entity_id. Returns matching entities "
-                "with their current state."
+                "with their current state. Set require_unique=true when resolving "
+                "exactly ONE target entity before acting on it (e.g. before "
+                "control_device) — Nova will ask the user to clarify automatically "
+                "if multiple entities plausibly match, instead of guessing. Leave "
+                "require_unique false (default) for browsing/discovery queries "
+                "where multiple results are expected and useful."
             ),
             "parameters": {
                 "type": "object",
@@ -129,6 +134,15 @@ NOVA_TOOLS = [
                             "Optional domain filter: light, switch, lock, cover, "
                             "climate, fan, media_player, sensor, binary_sensor, "
                             "scene, script, automation, person"
+                        ),
+                    },
+                    "require_unique": {
+                        "type": "boolean",
+                        "description": (
+                            "Set true when you need exactly one target entity "
+                            "resolved before acting on it. Set false (default) for "
+                            "general browsing/discovery where multiple results "
+                            "are expected."
                         ),
                     },
                 },
@@ -1292,17 +1306,34 @@ NOVA_TOOLS = [
 # ── Tool execution ──────────────────────────────────────────────────────────
 
 async def _exec_control_device(hass: HomeAssistant, args: dict, device_id: Optional[str] = None) -> str:
-    """Execute a device control action."""
+    """Execute a device control action.
+
+    Phase 3 status contract (alongside the existing `success`/error shape,
+    never replacing it): `status` is "verified" (a bounded synchronous check
+    confirmed the result — light/switch/fan turn_on/turn_off/toggle, and
+    light set_brightness), "accepted" (the call completed but confirmation
+    isn't available yet or wasn't attempted — covers, locks, other domains,
+    set_temperature, volume_set), or "unverified" (the bounded fast check
+    ran and did NOT confirm the result — toggle and set_brightness only,
+    since those are the two actions explicitly excluded from the existing
+    retrying `_verify_control`: a delayed real toggle plus an automatic
+    retry-toggle could reverse the outcome, and `_verify_control` has no
+    brightness-attribute awareness at all). A raised exception is always
+    `status: "error"`, `success: False` — unchanged from before, error
+    handling was never optimistic.
+    """
     entity_id = args.get("entity_id", "")
     action = args.get("action", "")
     value = args.get("value")
 
     state = hass.states.get(entity_id)
     if not state:
-        return json.dumps({"error": f"Entity '{entity_id}' not found"})
+        return json.dumps({"error": f"Entity '{entity_id}' not found", "status": "error"})
 
     domain = entity_id.split(".")[0]
     svc_data = {"entity_id": entity_id}
+    pre_state = state.state
+    fname = state.attributes.get("friendly_name", entity_id)
 
     try:
         action_map = {
@@ -1320,8 +1351,13 @@ async def _exec_control_device(hass: HomeAssistant, args: dict, device_id: Optio
             "volume_down": ("media_player", "volume_down"),
         }
 
+        status = "accepted"
+        message = None
+        requested_pct = None
+
         if action == "set_brightness":
-            svc_data["brightness_pct"] = int(value or 50)
+            requested_pct = int(value or 50)
+            svc_data["brightness_pct"] = requested_pct
             await hass.services.async_call("light", "turn_on", svc_data, blocking=True)
         elif action == "set_temperature":
             svc_data["temperature"] = float(value or 72)
@@ -1347,28 +1383,96 @@ async def _exec_control_device(hass: HomeAssistant, args: dict, device_id: Optio
                 })
             await hass.services.async_call(svc_domain, svc_name, svc_data, blocking=True)
         else:
-            return json.dumps({"error": f"Unknown action: {action}"})
+            return json.dumps({"error": f"Unknown action: {action}", "status": "error"})
+
+        # ── Fast-domain synchronous verification (Phase 3) ──────────────
+        # Gated strictly by domain — a turn_on/turn_off/toggle on any domain
+        # OTHER than light/switch/fan never reaches this branch, falling
+        # through to the existing background-only path below unchanged.
+        from . import entity_verify
+
+        if action in ("turn_on", "turn_off") and domain in entity_verify.FAST_VERIFY_DOMAINS:
+            expected = _EXPECTED_STATES[action][0]
+            verified = await entity_verify.wait_until(
+                lambda: entity_verify.check_state_once(hass, entity_id, expected))
+            if verified:
+                status = "verified"
+                message = f"I've {'turned on' if action == 'turn_on' else 'turned off'} {fname}."
+            else:
+                status = "unverified"
+                message = (f"I sent the command to {action.replace('_', ' ')} {fname}, "
+                            f"but I can't confirm it worked yet.")
+                v_dom, v_svc = action_map[action]
+                hass.async_create_task(
+                    _verify_control(hass, entity_id, action, v_dom, v_svc, svc_data))
+        elif action == "toggle" and domain in entity_verify.FAST_VERIFY_DOMAINS:
+            expected = {"on": "off", "off": "on"}.get(pre_state)
+            if expected is None:
+                status = "accepted"
+                message = f"I've sent the toggle command to {fname}."
+            else:
+                verified = await entity_verify.wait_until(
+                    lambda: entity_verify.check_state_once(hass, entity_id, expected))
+                if verified:
+                    status = "verified"
+                    message = f"I've toggled {fname}."
+                else:
+                    status = "unverified"
+                    message = (f"I sent the toggle command to {fname}, but I can't "
+                                f"confirm it worked yet.")
+                    # Never sent to _verify_control: a delayed successful toggle
+                    # plus an automatic retry could reverse the outcome.
+                    await entity_verify.record_unverified(
+                        hass, entity_id, "toggle", source="agent",
+                        detail=", not retried automatically because repeating "
+                               "toggle could reverse a delayed successful action")
+        elif action == "set_brightness":
+            verified = await entity_verify.wait_until(
+                lambda: entity_verify.check_brightness_once(hass, entity_id, requested_pct))
+            if verified:
+                status = "verified"
+                message = f"I've set {fname} to {requested_pct}%."
+            else:
+                status = "unverified"
+                message = (f"I sent the command to set {fname} to {requested_pct}%, "
+                            f"but I can't confirm the brightness reached that level yet.")
+                # Never sent to _verify_control: it only validates entity
+                # state and cannot confirm the requested brightness attribute.
+                await entity_verify.record_unverified(
+                    hass, entity_id, "set_brightness", source="agent",
+                    detail=f", requested {requested_pct}%, not retried "
+                           "automatically because the background verifier "
+                           "cannot validate the requested brightness level")
+        elif action in action_map and action in _EXPECTED_STATES:
+            # Existing background-only path — covers, locks, and turn_on/
+            # turn_off/toggle on any domain outside light/switch/fan.
+            # Unchanged: reports accepted now, verified/logged later.
+            v_dom, v_svc = action_map[action]
+            hass.async_create_task(
+                _verify_control(hass, entity_id, action, v_dom, v_svc, svc_data))
+            message = f"I've sent the command to {action.replace('_', ' ')} {fname}."
+        else:
+            # set_temperature, volume_set, media_play/pause/next, volume_up/
+            # down — no verification attempted this phase (unchanged).
+            message = f"I've sent the {action.replace('_', ' ')} command to {fname}."
 
         # Get updated state
         new_state = hass.states.get(entity_id)
 
-        # v6.38: verify-after-act — for deterministic targets (on/off, lock,
-        # open/close), confirm the device actually got there in the background;
-        # retry once; log honestly if it still didn't. Silent when it worked.
-        if action in action_map and action in _EXPECTED_STATES:
-            v_dom, v_svc = action_map[action]
-            hass.async_create_task(
-                _verify_control(hass, entity_id, action, v_dom, v_svc, svc_data))
-
         return json.dumps({
             "success": True,
+            "status": status,
+            "message": message,
             "entity_id": entity_id,
-            "previous_state": state.state,
+            "previous_state": pre_state,
             "new_state": new_state.state if new_state else "unknown",
             "action": action,
         })
     except Exception as exc:
-        return json.dumps({"error": f"Failed: {exc}", "entity_id": entity_id})
+        return json.dumps({
+            "error": f"Failed: {exc}", "status": "error", "success": False,
+            "entity_id": entity_id,
+        })
 
 
 async def _exec_get_entity_state(hass: HomeAssistant, args: dict) -> str:
@@ -1402,13 +1506,51 @@ async def _exec_get_entity_state(hass: HomeAssistant, args: dict) -> str:
     return json.dumps(results)
 
 
+def _dedupe_candidates(items: list[dict]) -> list[dict]:
+    """Dedupe a candidate list by entity_id, first occurrence wins. Used
+    everywhere an ambiguity candidate list is built, so the same entity can
+    never appear twice in a clarification."""
+    seen: dict = {}
+    for it in items:
+        seen.setdefault(it["entity_id"], it)
+    return list(seen.values())
+
+
+def _build_clarification(candidates: list[dict]) -> str:
+    """Fixed, deterministic clarification question — no LLM call. If two or
+    more candidates share the same friendly_name, the entity_id is appended
+    to disambiguate (never "did you mean Kitchen Light or Kitchen Light?")."""
+    names = [c.get("friendly_name") or c["entity_id"] for c in candidates]
+    counts: dict = {}
+    for n in names:
+        counts[n] = counts.get(n, 0) + 1
+    labels = [f"{n} ({c['entity_id']})" if counts[n] > 1 else n
+              for c, n in zip(candidates, names)]
+    if len(labels) >= 2:
+        return f"I found more than one match — did you mean {labels[0]} or {labels[1]}?"
+    return "I found more than one possible match — could you be more specific about which one you mean?"
+
+
 async def _exec_search_entities(hass: HomeAssistant, args: dict) -> str:
-    """Search for entities by name, area, or domain with fuzzy matching."""
+    """Search for entities by name, area, or domain with fuzzy matching.
+
+    `require_unique` (Phase 3): when true, this search is resolving exactly
+    ONE target entity before an action. If two or more plausible candidates
+    remain after scoring (ratio of runner-up/top score >= 0.85, empirically
+    derived — see Phase 3 design notes), returns an `{"ambiguous": true,
+    "candidates": [...]}` marker instead of a plain list, which run_agent's
+    tool-dispatch loop intercepts to stop the turn with a fixed clarification
+    question rather than letting the model guess. Default false preserves
+    ordinary multi-result discovery exactly as before — no marker, no forced
+    clarification, ever.
+    """
     import re
     query = args.get("query", "").lower().strip()
     domain_filter = args.get("domain")
+    require_unique = bool(args.get("require_unique", False))
 
-    # Check learned aliases first
+    # Check learned aliases first — an exact key maps to exactly one entity,
+    # so this is always inherently unique regardless of require_unique.
     learned = _load_learned()
     aliases = learned.get("alias", {})
     if query in aliases:
@@ -1422,17 +1564,32 @@ async def _exec_search_entities(hass: HomeAssistant, args: dict) -> str:
                 "matched_by": f"learned alias: '{query}'",
             }])
 
-    # Also check partial alias matches
+    # Partial alias matches — collect ALL matches (deduped by entity_id),
+    # not just the first. Multiple *different* entities matching partially
+    # is genuine ambiguity when require_unique is set; require_unique=false
+    # now returns every plausible partial-alias match instead of silently
+    # hiding all but the first (closest honest match to "discovery" intent —
+    # the old single-item return was an accident of early-return, not a
+    # deliberate one-result contract).
+    alias_matches: dict = {}
     for alias_name, alias_id in aliases.items():
         if query in alias_name or alias_name in query:
             state = hass.states.get(alias_id)
-            if state:
-                return json.dumps([{
+            if state and alias_id not in alias_matches:
+                alias_matches[alias_id] = {
                     "entity_id": alias_id,
                     "friendly_name": state.attributes.get("friendly_name", ""),
                     "state": state.state,
                     "matched_by": f"partial alias: '{alias_name}'",
-                }])
+                }
+    if alias_matches:
+        alias_results = list(alias_matches.values())
+        if require_unique and len(alias_results) > 1:
+            return json.dumps({
+                "ambiguous": True,
+                "candidates": _dedupe_candidates(alias_results),
+            })
+        return json.dumps(alias_results)
 
     domains = [domain_filter] if domain_filter else [
         "light", "switch", "lock", "cover", "climate", "fan",
@@ -1497,7 +1654,18 @@ async def _exec_search_entities(hass: HomeAssistant, args: dict) -> str:
                 })
 
     results.sort(key=lambda r: r["score"], reverse=True)
-    return json.dumps(results[:15])
+    results = results[:15]
+
+    if require_unique and len(results) >= 2 and results[0]["score"] > 0:
+        ratio = results[1]["score"] / results[0]["score"]
+        if ratio >= 0.85:
+            near_tie = [r for r in results if r["score"] / results[0]["score"] >= 0.85][:4]
+            return json.dumps({
+                "ambiguous": True,
+                "candidates": _dedupe_candidates(near_tie),
+            })
+
+    return json.dumps(results)
 
 
 async def _exec_get_area_devices(hass: HomeAssistant, args: dict) -> str:
@@ -1575,9 +1743,16 @@ async def _exec_run_scene_script(hass: HomeAssistant, args: dict) -> str:
 
     try:
         await hass.services.async_call(domain, svc, {"entity_id": entity_id}, blocking=True)
-        return json.dumps({"success": True, "entity_id": entity_id, "action": "activated"})
+        # HA exposes no reliable "did the scene/script/automation finish"
+        # state -- accepted only, never a completion claim.
+        return json.dumps({
+            "success": True, "status": "accepted", "entity_id": entity_id,
+            "action": "activated",
+            "message": f"I've triggered {label}.",
+        })
     except Exception as exc:
-        return json.dumps({"error": str(exc)})
+        return json.dumps({"error": str(exc), "status": "error", "success": False,
+                            "entity_id": entity_id})
 
 
 async def _exec_home_summary(hass: HomeAssistant, args: dict) -> str:
@@ -1675,39 +1850,99 @@ async def _exec_bulk_control(hass: HomeAssistant, args: dict, device_id: Optiona
     from . import policy
     success = 0
     blocked = 0
+    failed: list[dict] = []
     for eid in entities:
+        svc_domain = eid.split(".")[0]
+        svc_map = {
+            "turn_on": (svc_domain, "turn_on"), "turn_off": (svc_domain, "turn_off"),
+            "lock": ("lock", "lock"), "unlock": ("lock", "unlock"),
+            "open": ("cover", "open_cover"), "close": ("cover", "close_cover"),
+        }
+        if action not in svc_map:
+            continue
+        sd, sn = svc_map[action]
+        # Protected actions are not run in bulk — a batch can't be
+        # meaningfully voice-confirmed per device. Skip and report so
+        # the agent confirms each one via control_device instead.
+        if policy.requires_confirmation(hass, sd, sn, eid, device_id=device_id or ""):
+            blocked += 1
+            continue
         try:
-            svc_domain = eid.split(".")[0]
-            svc_map = {
-                "turn_on": (svc_domain, "turn_on"), "turn_off": (svc_domain, "turn_off"),
-                "lock": ("lock", "lock"), "unlock": ("lock", "unlock"),
-                "open": ("cover", "open_cover"), "close": ("cover", "close_cover"),
-            }
-            if action in svc_map:
-                sd, sn = svc_map[action]
-                # Protected actions are not run in bulk — a batch can't be
-                # meaningfully voice-confirmed per device. Skip and report so
-                # the agent confirms each one via control_device instead.
-                if policy.requires_confirmation(hass, sd, sn, eid, device_id=device_id or ""):
-                    blocked += 1
-                    continue
-                await hass.services.async_call(sd, sn, {"entity_id": eid}, blocking=False)
-                success += 1
-        except Exception:
-            pass
+            await hass.services.async_call(sd, sn, {"entity_id": eid}, blocking=False)
+        except Exception as exc:
+            # Phase 3: an immediate service-call exception is now recorded,
+            # not silently swallowed.
+            failed.append({"entity_id": eid, "error": str(exc)})
+            continue
+        success += 1
+        # Successful calls schedule the SAME existing per-entity background
+        # verifier single-entity actions already use — every action in
+        # svc_map has a known expected state, so this always applies. Fire-
+        # and-forget: never delays this response.
+        if action in _EXPECTED_STATES:
+            hass.async_create_task(
+                _verify_control(hass, eid, action, sd, sn, {"entity_id": eid}))
+
+    total = len(entities)
+    verb = action.replace("_", " ")
+
+    # Nothing actually ran -- success/status must reflect that honestly,
+    # not report success=true for a bulk call that changed nothing.
+    if total and success == 0:
+        if failed and not blocked:
+            status = "error"
+        elif blocked and not failed:
+            status = "awaiting_confirmation"
+        else:
+            # a mix of blocked and failed, still nothing succeeded
+            status = "error"
+        parts = []
+        if failed:
+            parts.append(f"{len(failed)} failed")
+        if blocked:
+            parts.append(f"{blocked} blocked")
+        result = {
+            "success": False,
+            "status": status,
+            "message": (f"I wasn't able to {verb} any of the {total} device(s) "
+                        f"({', '.join(parts)})."),
+            "action": action,
+            "domain": domain,
+            "area": area_name,
+            "count": success,
+            "total": total,
+        }
+        if blocked:
+            result["blocked"] = blocked
+        if failed:
+            result["failed"] = failed
+        return json.dumps(result)
+
+    message = f"I've sent the {verb} command to {success} device(s)."
+    if failed or blocked:
+        parts = []
+        if failed:
+            parts.append(f"{len(failed)} failed")
+        if blocked:
+            parts.append(f"{blocked} blocked")
+        message += f" ({', '.join(parts)})."
 
     result = {
         "success": True,
+        "status": "accepted",
+        "message": message,
         "action": action,
         "domain": domain,
         "area": area_name,
         "count": success,
-        "total": len(entities),
+        "total": total,
     }
     if blocked:
         result["blocked"] = blocked
         result["note"] = (f"{blocked} protected device(s) not changed in bulk; "
                           f"confirm each individually.")
+    if failed:
+        result["failed"] = failed
     return json.dumps(result)
 
 
@@ -1829,13 +2064,24 @@ async def _exec_execute_plan(hass: HomeAssistant, args: dict, device_id: Optiona
                 blocking=True,
             )
             succeeded += 1
-            results.append({"step": i + 1, "description": desc, "ok": True})
+            # No reliable final state for a generic plan step (this is also
+            # the only reachable path to alarm_control_panel — the existing
+            # confirm_gate above still applies, and nothing here adds a
+            # retry or re-attempt for it): accepted only, never a completion
+            # claim, regardless of domain.
+            results.append({"step": i + 1, "description": desc, "ok": True,
+                            "status": "accepted"})
         except Exception as exc:
             results.append({"step": i + 1, "description": desc,
-                            "ok": False, "error": str(exc)})
+                            "ok": False, "status": "error", "error": str(exc)})
 
     return json.dumps({
         "goal": goal,
+        "status": "accepted" if succeeded else "error",
+        # "accepted" means the service calls were sent, not that HA finished
+        # carrying them out (no reliable per-step completion signal exists
+        # for a generic plan) -- never claim "completed" here.
+        "message": f"I've sent {succeeded} of {len(steps)} step(s) for {goal}.",
         "total_steps": len(steps),
         "succeeded": succeeded,
         "failed": len(steps) - succeeded,
@@ -2147,8 +2393,14 @@ def _state_ok(hass: HomeAssistant, entity_id: str, expected: tuple) -> Optional[
 
 
 async def _verify_control(hass: HomeAssistant, entity_id: str, action: str,
-                          svc_domain: str, svc_name: str, svc_data: dict) -> None:
-    """Confirm a control action landed; one retry; honest report on failure."""
+                          svc_domain: str, svc_name: str, svc_data: dict,
+                          *, source: str = "agent") -> None:
+    """Confirm a control action landed; one retry; honest report on failure.
+
+    `source` records which caller scheduled this verification (agent.py's
+    tool-calling path defaults to "agent"; local_engine.py's fast path must
+    pass source="local_engine") so the resulting activity entries attribute
+    correctly rather than always reading "agent"."""
     expected = _EXPECTED_STATES.get(action)
     if not expected:
         return
@@ -2171,7 +2423,7 @@ async def _verify_control(hass: HomeAssistant, entity_id: str, action: str,
             database.save_activity(
                 entity_id=entity_id, category="verify", urgency="low",
                 message=f"{entity_id} needed a second attempt to {action} — "
-                        f"succeeded on retry.", source="agent")
+                        f"succeeded on retry.", source=source)
         else:
             st = hass.states.get(entity_id)
             database.save_activity(
@@ -2179,7 +2431,7 @@ async def _verify_control(hass: HomeAssistant, entity_id: str, action: str,
                 message=f"{entity_id} did not respond to {action} "
                         f"(state: {st.state if st else 'unknown'}) even after a "
                         f"retry — it may be jammed, obstructed, or offline.",
-                source="agent")
+                source=source)
     except Exception as exc:
         _LOGGER.debug("verify_control failed for %s: %s", entity_id, exc)
 
@@ -2780,6 +3032,12 @@ async def _exec_ingest_documents(hass: HomeAssistant, args: dict) -> str:
     except Exception as exc:
         return json.dumps({"error": str(exc)})
 
+
+# Tools that call a real HA service against a specific entity, resolved via
+# search_entities — deferred within a batch when a require_unique search is
+# also present in that same batch, so an unresolved/ambiguous entity_id can
+# never reach a service call (Phase 3, see run_agent's dispatch loop).
+_MUTATING_TOOL_NAMES = {"control_device", "bulk_control", "run_scene_or_script", "execute_plan"}
 
 _TOOL_MAP = {
     "control_device":      _exec_control_device,
@@ -3400,7 +3658,15 @@ async def run_agent(
         f"before consequential action — if a cheap check can confirm an "
         f"assumption (right entity, current state, who's home), run it first. "
         f"(4) After acting, CONFIRM the result changed as intended rather than "
-        f"assuming success. (5) When evidence is thin on something consequential, "
+        f"assuming success — action tool results carry a `status` "
+        f"(verified/accepted/unverified/error) and an exact `message`. Preserve "
+        f"that status's meaning in what you tell the user: for `verified`, the "
+        f"action is confirmed and you may state it as fact. For `accepted`, the "
+        f"command was sent but not yet confirmed — say it was sent/triggered, "
+        f"never that it's done, confirmed, or successful. For `unverified`, say "
+        f"the command was sent but couldn't be confirmed. For `error`, report the "
+        f"failure plainly. Never upgrade a tool's status in your own words. "
+        f"(5) When evidence is thin on something consequential, "
         f"fail safe: ask, or decline crisply — never guess at locks, alarms, or "
         f"anything irreversible. (6) If you don't know, say so plainly; an honest "
         f"gap beats an invented answer. Reason step-by-step internally; report "
@@ -3427,7 +3693,10 @@ async def run_agent(
         f"user actually asks for the current time ('what time is it?').\n\n"
         f"## Critical rules\n"
         f"1. ALWAYS use search_entities first if you're unsure of an entity_id. "
-        f"Never guess entity_ids — search for them.\n"
+        f"Never guess entity_ids — search for them. When you need exactly ONE "
+        f"target entity before acting (not browsing), call it with "
+        f"require_unique=true — if multiple entities plausibly match, Nova will "
+        f"ask the user to clarify automatically; do not pick one yourself.\n"
         f"2. When a user corrects you ('no, the chase lamp is...', 'I meant the...'), "
         f"use the remember tool to save the correction as an alias so you get it "
         f"right next time. This is how you learn.\n"
@@ -3711,7 +3980,20 @@ async def run_agent(
                 ],
             })
 
-        # Execute tools
+        # Execute tools. A search_entities(require_unique=true) call must
+        # resolve before any mutating tool call from the SAME batch — if the
+        # model asked for both in one response, run only the search now and
+        # defer the mutating calls to a later iteration once it has a clear
+        # entity_id. An ambiguous unique search stops the whole batch and
+        # returns a fixed clarification immediately, with no further LLM
+        # call and no pending state stored anywhere.
+        batch_names = {c["name"] for c in tool_calls}
+        has_unique_search = any(
+            c["name"] == "search_entities" and c["args"].get("require_unique")
+            for c in tool_calls
+        )
+        defer_mutating = has_unique_search and bool(batch_names & _MUTATING_TOOL_NAMES)
+
         for call in tool_calls:
             if call["name"] == "delegate_task":
                 result_str = await _run_delegated(
@@ -3720,10 +4002,24 @@ async def run_agent(
                     api_key=api_key, model=model, base_url=base_url,
                     config=config, depth=depth,
                 )
+            elif defer_mutating and call["name"] in _MUTATING_TOOL_NAMES:
+                result_str = json.dumps({
+                    "deferred": True,
+                    "reason": "Resolve the exact entity with "
+                              "search_entities(require_unique=true) first, then "
+                              "repeat this action with the resolved entity_id.",
+                })
             else:
                 result_str = await _execute_tool(
                     hass, call["name"], call["args"], hass_api, user_input,
                 )
+                if call["name"] == "search_entities" and call["args"].get("require_unique"):
+                    try:
+                        parsed = json.loads(result_str)
+                    except Exception:
+                        parsed = None
+                    if isinstance(parsed, dict) and parsed.get("ambiguous"):
+                        return _build_clarification(parsed.get("candidates", []))
             working.append({
                 "role": "tool",
                 "tool_call_id": call.get("id", ""),
