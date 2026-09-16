@@ -194,7 +194,15 @@ async def test_try_local_state_query_ambiguous_returns_clarification(le, no_alia
         assert hass.service_calls == []
 
 
-async def test_try_local_clear_winner_action_still_executes(le, no_aliases):
+async def test_try_local_clear_winner_action_still_executes(le, no_aliases, load, monkeypatch):
+    # Phase 3's fast-domain synchronous check (light/switch/fan) uses its own
+    # sleep seam -- mock it, or this real turn_on (which FakeHass never
+    # flips to "on") takes a real ~1s bounded poll before falling back.
+    ev = load("entity_verify")
+    async def _no_sleep(_secs):
+        pass
+    monkeypatch.setattr(ev, "_SLEEP", _no_sleep)
+
     hass = FakeHass()
     hass.states.set("light.kitchen", "off", friendly_name="Kitchen")
     result = await le.try_local(hass, "turn on the kitchen", "sir")
@@ -203,3 +211,4 @@ async def test_try_local_clear_winner_action_still_executes(le, no_aliases):
     assert len(hass.service_calls) == 1
     assert hass.service_calls[0][0] == "light"
     assert hass.service_calls[0][1] == "turn_on"
+    hass.close_pending()  # unverified -> background _verify_control scheduled

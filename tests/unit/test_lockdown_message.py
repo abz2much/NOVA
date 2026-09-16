@@ -35,17 +35,26 @@ def test_already_secured(cc):
 
 def test_locked_only(cc):
     msg = cc.build_lockdown_message("sir", ["Front Lock", "Back Lock"], [], [])
-    assert "I locked Front Lock and Back Lock" in msg and "The home is secure." in msg
+    assert "I sent commands to lock Front Lock and Back Lock" in msg
+    assert "I will alert you if anything does not secure." in msg
+    # Phase 3: engage() hasn't observed the lock actually take yet -- must
+    # not claim completion or overall home security.
+    assert "is locked" not in msg
+    assert "The home is secure" not in msg
 
 
 def test_closed_a_garage(cc):
     msg = cc.build_lockdown_message("sir", [], ["the Garage Door"], [])
-    assert "I closed the Garage Door" in msg and "The home is secure." in msg
+    assert "I sent commands to close the Garage Door" in msg
+    assert "I will alert you if anything does not secure." in msg
+    assert "is closed" not in msg
+    assert "The home is secure" not in msg
 
 
 def test_locked_and_closed(cc):
     msg = cc.build_lockdown_message("sir", ["Front Lock"], ["the Garage Door"], [])
-    assert "I locked Front Lock and closed the Garage Door" in msg
+    assert "I sent commands to lock Front Lock and close the Garage Door" in msg
+    assert "The home is secure" not in msg
 
 
 def test_open_window_named_and_actionable(cc):
@@ -59,9 +68,10 @@ def test_open_window_named_and_actionable(cc):
 
 def test_closed_garage_but_window_open(cc):
     msg = cc.build_lockdown_message("sir", [], ["the Garage Door"], ["Username's Window 1"])
-    assert "I closed the Garage Door" in msg
+    assert "I sent commands to close the Garage Door" in msg
     assert "Username's Window 1 is open" in msg
     assert "close it" in msg
+    assert "I will alert you if anything does not secure." in msg
 
 
 def test_multiple_open_named(cc):
@@ -82,3 +92,37 @@ def test_empty_honorific_capitalizes_instead_of_defaulting(cc):
     # Nobody specifically home to address (see honorific.py) -> no longer
     # silently coerced to "sir"; the sentence is just capitalized on its own.
     assert cc.build_lockdown_message("", [], [], []).startswith("Lockdown engaged")
+
+
+# ── Phase 3: honest wording for actions awaiting background verification ────
+
+def test_pending_actions_never_claim_locked_closed_or_secure(cc):
+    """engage() schedules _verify_secured() in the background and responds
+    before any of it resolves -- the immediate message must not claim a
+    lock/cover reached its target state, nor that the home is secure."""
+    msg = cc.build_lockdown_message(
+        "sir", ["Front Door"], ["Garage Door"], [])
+    assert "locked" not in msg.lower()
+    assert "closed" not in msg.lower()
+    assert "is secure" not in msg.lower()
+    assert "is secured" not in msg.lower()
+    assert msg == (
+        "Sir, lockdown engaged. I sent commands to lock Front Door and close "
+        "Garage Door. I will alert you if anything does not secure.")
+
+
+def test_pending_actions_with_uncloseable_gap(cc):
+    msg = cc.build_lockdown_message(
+        "sir", ["Front Door"], ["Garage Door"], ["the Window"])
+    assert msg == (
+        "Sir, lockdown engaged. I sent commands to lock Front Door and close "
+        "Garage Door, but the Window is open and I can't secure it remotely "
+        "— you'll want to close it. I will alert you if anything does not "
+        "secure.")
+
+
+def test_already_secured_wording_is_unaffected_by_the_pending_fix(cc):
+    # Nothing acted on -> everything was already observed secure -> no
+    # pending-verification wording applies at all.
+    assert cc.build_lockdown_message("sir", [], [], []) == \
+        "Sir, lockdown engaged — the home was already fully secured."

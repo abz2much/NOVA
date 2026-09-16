@@ -148,6 +148,25 @@ MESSAGES: dict[str, dict[str, str]] = {
         "it": "chiuso {names}", "nl": "{names} gesloten",
         "pt": "fechei {names}",
     },
+    # Pending-verification verb phrases (Phase 3): engage() schedules a
+    # background _verify_secured() for every lock/cover it acts on, so its
+    # own immediate announcement must not claim "locked"/"closed" (a
+    # completion it hasn't observed) -- these are infinitive forms paired
+    # with the "I sent commands to ..." wrappers below. lockdown_locked/
+    # lockdown_closed above are untouched and still used, unchanged, by
+    # _nighttime_lockdown's own blocking (already-observed) wording.
+    "lockdown_lock_pending": {
+        "en": "lock {names}", "fr": "verrouiller {names}",
+        "de": "{names} zu verriegeln", "es": "bloquear {names}",
+        "it": "bloccare {names}", "nl": "{names} te vergrendelen",
+        "pt": "trancar {names}",
+    },
+    "lockdown_close_pending": {
+        "en": "close {names}", "fr": "fermer {names}",
+        "de": "{names} zu schließen", "es": "cerrar {names}",
+        "it": "chiudere {names}", "nl": "{names} te sluiten",
+        "pt": "fechar {names}",
+    },
     # Gap clauses — openings that can't be secured remotely. Phrased to avoid any
     # adjective/pronoun agreeing with the (unknown-gender) device: impersonal /
     # infinitive forms, so one wording is correct whatever the device is.
@@ -198,6 +217,30 @@ MESSAGES: dict[str, dict[str, str]] = {
         "it": "{honorific}, blocco attivato — ho {did}, ma {gap}.",
         "nl": "{honorific}, vergrendeling ingeschakeld — ik heb {did}, maar {gap}.",
         "pt": "{honorific}, confinamento ativado — {did}, mas {gap}.",
+    },
+    # Pending-verification wrappers (Phase 3): used by build_lockdown_message
+    # in place of lockdown_did/lockdown_did_gap whenever it locked or closed
+    # something -- that action is only accepted, not yet confirmed, so the
+    # wrapper reports what was SENT and promises an alert rather than
+    # asserting the home is secure. lockdown_did/lockdown_did_gap below are
+    # untouched (still used by their own existing callers/tests).
+    "lockdown_did_pending": {
+        "en": "{honorific}, lockdown engaged. I sent commands to {did}. I will alert you if anything does not secure.",
+        "fr": "{honorific}, confinement activé. J'ai envoyé les commandes pour {did}. Je vous alerterai si quelque chose ne se sécurise pas.",
+        "de": "{honorific}, Sicherung aktiviert. Ich habe Befehle gesendet, um {did}. Ich werde Sie benachrichtigen, falls etwas nicht sichert.",
+        "es": "{honorific}, confinamiento activado. He enviado órdenes para {did}. Le avisaré si algo no se asegura.",
+        "it": "{honorific}, blocco attivato. Ho inviato i comandi per {did}. Ti avviserò se qualcosa non si mette in sicurezza.",
+        "nl": "{honorific}, vergrendeling ingeschakeld. Ik heb opdrachten gestuurd om {did}. Ik waarschuw u als iets niet beveiligt.",
+        "pt": "{honorific}, confinamento ativado. Enviei comandos para {did}. Vou avisá-lo se algo não ficar seguro.",
+    },
+    "lockdown_did_gap_pending": {
+        "en": "{honorific}, lockdown engaged. I sent commands to {did}, but {gap}. I will alert you if anything does not secure.",
+        "fr": "{honorific}, confinement activé. J'ai envoyé les commandes pour {did}, mais {gap}. Je vous alerterai si quelque chose ne se sécurise pas.",
+        "de": "{honorific}, Sicherung aktiviert. Ich habe Befehle gesendet, um {did}, aber {gap}. Ich werde Sie benachrichtigen, falls etwas nicht sichert.",
+        "es": "{honorific}, confinamiento activado. He enviado órdenes para {did}, pero {gap}. Le avisaré si algo no se asegura.",
+        "it": "{honorific}, blocco attivato. Ho inviato i comandi per {did}, ma {gap}. Ti avviserò se qualcosa non si mette in sicurezza.",
+        "nl": "{honorific}, vergrendeling ingeschakeld. Ik heb opdrachten gestuurd om {did}, maar {gap}. Ik waarschuw u als iets niet beveiligt.",
+        "pt": "{honorific}, confinamento ativado. Enviei comandos para {did}, mas {gap}. Vou avisá-lo se algo não ficar seguro.",
     },
     "lockdown_gap_only": {
         "en": "{honorific}, lockdown engaged. Everything was already secured, but {gap}.",

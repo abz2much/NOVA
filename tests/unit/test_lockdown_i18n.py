@@ -42,21 +42,22 @@ def test_join_names_english_keeps_oxford(i18n):
 def test_lockdown_french_locked_and_closed(cc):
     msg = cc.build_lockdown_message(
         "monsieur", ["Porte d'entrée"], ["Garage"], [], "fr")
-    assert msg == ("Monsieur, confinement activé — j'ai verrouillé Porte d'entrée "
-                   "et fermé Garage. La maison est sécurisée.")
+    assert msg == ("Monsieur, confinement activé. J'ai envoyé les commandes pour "
+                   "verrouiller Porte d'entrée et fermer Garage. Je vous "
+                   "alerterai si quelque chose ne se sécurise pas.")
 
 
 def test_lockdown_french_locked_only(cc):
     msg = cc.build_lockdown_message("monsieur", ["Serrure avant"], [], [], "fr")
-    assert "j'ai verrouillé Serrure avant" in msg
-    assert "La maison est sécurisée." in msg
+    assert "verrouiller Serrure avant" in msg
+    assert "Je vous alerterai si quelque chose ne se sécurise pas." in msg
 
 
 def test_lockdown_french_gap(cc):
     # a window that can't be secured remotely — gender-safe phrasing, no
     # adjective/pronoun agreeing with the device
     msg = cc.build_lockdown_message("monsieur", [], ["Garage"], ["Fenêtre 1"], "fr")
-    assert "j'ai fermé Garage" in msg
+    assert "fermer Garage" in msg
     assert "Fenêtre 1 : impossible à verrouiller à distance" in msg
     assert "mais" in msg
 
@@ -75,10 +76,11 @@ def test_lockdown_french_many_open(cc):
 
 # ── English output is unchanged (regression guard) ───────────────────────────
 
-def test_lockdown_english_unchanged(cc):
+def test_lockdown_english_pending_wording(cc):
     msg = cc.build_lockdown_message("sir", ["Front Lock"], ["the Garage Door"], [])
-    assert msg == ("Sir, lockdown engaged — I locked Front Lock and closed the "
-                   "Garage Door. The home is secure.")
+    assert msg == ("Sir, lockdown engaged. I sent commands to lock Front Lock "
+                   "and close the Garage Door. I will alert you if anything "
+                   "does not secure.")
 
 
 # ── nighttime wrapper renders in French ──────────────────────────────────────

@@ -707,9 +707,91 @@ async def _execute_action(hass, action, entity_id, args):
         return False
 
 
+_LOCK_COVER_SERVICE = {
+    "lock":   ("lock", "lock"),
+    "unlock": ("lock", "unlock"),
+    "open":   ("cover", "open_cover"),
+    "close":  ("cover", "close_cover"),
+}
+
+
+async def _execute_action_verified(hass, action, entity_id, args, fname):
+    """Single-entity wrapper around _execute_action that reports Nova's
+    Phase 3 status vocabulary ("verified"/"accepted"/"unverified"/"error"),
+    using the SAME entity_verify helpers and the SAME background
+    _verify_control agent.py's own tool-calling path uses, so the two paths
+    never disagree about what "verified" means. Bulk/multi-entity call sites
+    (the "turn off all lights" and "all switches in area" shortcuts) deliberately
+    do NOT go through this wrapper -- polling each entity synchronously would
+    multiply latency by the number of entities, so they keep the existing
+    fire-and-forget behavior unchanged.
+    """
+    domain = entity_id.split(".")[0]
+    pre_state = hass.states.get(entity_id)
+    pre = pre_state.state if pre_state else None
+
+    ok = await _execute_action(hass, action, entity_id, args)
+    if not ok:
+        return "error"
+
+    from . import entity_verify
+
+    if action in ("turn_on", "turn_off"):
+        if domain in entity_verify.FAST_VERIFY_DOMAINS:
+            expected = "on" if action == "turn_on" else "off"
+            verified = await entity_verify.wait_until(
+                lambda: entity_verify.check_state_once(hass, entity_id, expected))
+            if verified:
+                return "verified"
+        from .agent import _verify_control
+        hass.async_create_task(
+            _verify_control(hass, entity_id, action, domain, action,
+                             {"entity_id": entity_id}, source="local_engine"))
+        return "accepted" if domain not in entity_verify.FAST_VERIFY_DOMAINS else "unverified"
+
+    if action == "toggle":
+        if domain not in entity_verify.FAST_VERIFY_DOMAINS:
+            return "accepted"   # never sent to _verify_control (see docstring)
+        expected = {"on": "off", "off": "on"}.get(pre)
+        if expected is None:
+            return "accepted"
+        verified = await entity_verify.wait_until(
+            lambda: entity_verify.check_state_once(hass, entity_id, expected))
+        if verified:
+            return "verified"
+        await entity_verify.record_unverified(
+            hass, entity_id, "toggle", source="local_engine",
+            detail=", not retried automatically because repeating toggle "
+                   "could reverse a delayed successful action")
+        return "unverified"
+
+    if action in ("dim", "brighten"):
+        requested_pct = args.get("brightness_pct", 100 if action == "brighten" else 50)
+        verified = await entity_verify.wait_until(
+            lambda: entity_verify.check_brightness_once(hass, entity_id, requested_pct))
+        if verified:
+            return "verified"
+        await entity_verify.record_unverified(
+            hass, entity_id, action, source="local_engine",
+            detail=(f", requested {requested_pct}%, not retried automatically "
+                    "because the background verifier cannot validate the "
+                    "requested brightness level"))
+        return "unverified"
+
+    if action in _LOCK_COVER_SERVICE:
+        v_dom, v_svc = _LOCK_COVER_SERVICE[action]
+        from .agent import _verify_control
+        hass.async_create_task(
+            _verify_control(hass, entity_id, action, v_dom, v_svc,
+                             {"entity_id": entity_id}, source="local_engine"))
+        return "accepted"
+
+    return "accepted"
+
+
 # ── Response generation ──────────────────────────────────────────────────────
 
-def _resp(action, fname, success, args=None, h="sir"):
+def _resp(action, fname, success, args=None, h="sir", status=None):
     # h may be "" once nobody specific is home to address (see honorific.py)
     # — addr collapses the trailing ", {h}" to nothing rather than a
     # dangling comma.
@@ -718,6 +800,21 @@ def _resp(action, fname, success, args=None, h="sir"):
         # Nova reports failure calmly and precisely, no hand-wringing.
         return (f"I wasn't able to {action.replace('_', ' ')} {fname}{addr} — "
                 f"there may be a connectivity issue.")
+
+    # Phase 3: the command was sent and didn't error, but the bounded
+    # synchronous check (light/switch/fan turn_on/turn_off/toggle, dim,
+    # brighten) never confirmed it landed. Report honestly instead of
+    # claiming it's done -- toggle/dim/brighten are never auto-retried
+    # (see entity_verify.record_unverified), turn_on/turn_off get a
+    # background retry via the existing _verify_control.
+    if status == "unverified":
+        bp = (args or {}).get("brightness_pct", 100 if action == "brighten" else "?")
+        if action in ("dim", "brighten"):
+            return (f"I sent the command to set {fname} to {bp}%{addr}, but I "
+                     f"can't confirm the brightness reached that level yet.")
+        verb = action.replace("_", " ")
+        return (f"I sent the command to {verb} {fname}{addr}, but I can't "
+                f"confirm it worked yet.")
 
     # Understated lead-ins, MCU style. Varied so confirmations never sound
     # canned. Each is something Nova would actually say.
@@ -732,8 +829,12 @@ def _resp(action, fname, success, args=None, h="sir"):
         "turn_on":        f"{ack}{addr}. {fname} is on.",
         "turn_off":       f"{ack}{addr}. {fname} is off.",
         "toggle":         f"{ack}{addr}. {fname} toggled.",
-        "lock":           f"{sec}{addr}. {fname} is locked.",
-        "unlock":         f"{ack}{addr}. {fname} is unlocked.",
+        # lock/unlock: only "accepted" status reaches here -- background
+        # verification hasn't confirmed the physical state yet, so this must
+        # not claim completion (same honesty fix as the covers below, which
+        # already used in-progress phrasing rather than "is locked").
+        "lock":           f"{sec}{addr}. Locking {fname} now.",
+        "unlock":         f"{ack}{addr}. Unlocking {fname} now.",
         "open":           f"Opening {fname} now{addr}.",
         "close":          f"Closing {fname} now{addr}.",
         "dim":            f"{ack}{addr}. {fname} at {bp}%.",
@@ -1023,26 +1124,51 @@ async def try_local(hass, text, honorific="sir", force=False):
                 return None   # protected activation → the agent runs the confirmation gate
             try:
                 await hass.services.async_call(dtype, "turn_on", {"entity_id": eid}, blocking=True)
-                return LocalResult(text=f"Goodnight{addr}. {fname} activated. Rest well.", success=True)
+                return LocalResult(text=f"Goodnight{addr}. I've triggered {fname}. Rest well.", success=True)
             except Exception:
                 pass
-        off_count = 0
+        # Phase 3: don't claim "lights off"/"locks secured" before checking --
+        # report what was SENT, then verify each entity in the background
+        # (same _verify_control the agent path uses, so a jammed lock or a
+        # light that didn't respond gets the same honest retry-then-report
+        # treatment either way).
+        from .agent import _verify_control
+        sent_lights: list[str] = []
         for s in hass.states.async_all("light"):
             if s.state == "on":
                 try:
-                    await hass.services.async_call("light", "turn_off", {"entity_id": s.entity_id}, blocking=False)
-                    off_count += 1
+                    await hass.services.async_call(
+                        "light", "turn_off", {"entity_id": s.entity_id}, blocking=True)
+                    sent_lights.append(s.entity_id)
                 except Exception:
                     pass
+        for eid in sent_lights:
+            hass.async_create_task(
+                _verify_control(hass, eid, "turn_off", "light", "turn_off",
+                                 {"entity_id": eid}, source="local_engine"))
+
         from .cognitive_core import _lockdown_exempt_locks
         exempt = _lockdown_exempt_locks()
+        sent_locks: list[str] = []
         for s in hass.states.async_all("lock"):
             if s.state == "unlocked" and s.entity_id not in exempt:
                 try:
-                    await hass.services.async_call("lock", "lock", {"entity_id": s.entity_id}, blocking=False)
+                    await hass.services.async_call(
+                        "lock", "lock", {"entity_id": s.entity_id}, blocking=True)
+                    sent_locks.append(s.entity_id)
                 except Exception:
                     pass
-        return LocalResult(text=f"Goodnight{addr}. {off_count} lights off, all locks secured. Rest well.", success=True)
+        for eid in sent_locks:
+            hass.async_create_task(
+                _verify_control(hass, eid, "lock", "lock", "lock",
+                                 {"entity_id": eid}, source="local_engine"))
+
+        n_lights, n_locks = len(sent_lights), len(sent_locks)
+        return LocalResult(
+            text=(f"Goodnight{addr}. I've sent the command to turn off "
+                  f"{n_lights} light{'s' if n_lights != 1 else ''} and lock "
+                  f"{n_locks} lock{'s' if n_locks != 1 else ''}. Rest well."),
+            success=True)
 
     # Single-entity patterns
     _last_failed_name = None  # Track for end-of-loop error
@@ -1096,9 +1222,12 @@ async def try_local(hass, text, honorific="sir", force=False):
             _LOGGER.info("Local: '%s' on %s needs confirmation — deferring to agent",
                          action, entity_id)
             return None   # protected action → the agent runs the confirmation gate
-        success = await _execute_action(hass, action, entity_id, args)
+        status = await _execute_action_verified(hass, action, entity_id, args, fname)
+        success = status != "error"
         _update_ctx(entity=entity_id, domain=entity_id.split(".")[0], action=action)
-        return LocalResult(text=_resp(action, fname, success, args, honorific), success=success)
+        return LocalResult(
+            text=_resp(action, fname, success, args, honorific, status=status),
+            success=success)
 
     # v5.7.08: If patterns matched but entity resolution failed, ALWAYS
     # fall through to the agentic LLM. The agent has search_entities which

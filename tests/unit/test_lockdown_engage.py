@@ -45,7 +45,7 @@ async def test_engage_locks_and_closes_garage(cc, fake_hass):
     # the window can't be closed → left open and alerted, never auto-closed
     assert "binary_sensor.usernames_window_1" in mgr.exempt_windows
     assert action and "Username's Window 1 is open" in action["message"]
-    assert "closed Garage Door" in action["message"]
+    assert "close Garage Door" in action["message"]
 
 
 async def test_bare_window_is_not_closed(cc, fake_hass):
@@ -83,3 +83,78 @@ async def test_nothing_to_do_is_fully_secured_message(cc, fake_hass):
     action = await mgr.engage("test")
     fake_hass.close_pending()
     assert action["message"].endswith("the home was already fully secured.")
+
+
+# ── Phase 3: the lock step gets the same honest background verification the
+# cover/opening step already uses -- reusing _verify_secured() unchanged. ──
+
+async def test_lock_all_returns_entity_id_friendly_name_pairs(cc, fake_hass):
+    fake_hass.states.set("lock.front", "unlocked", friendly_name="Front Lock")
+    mgr = _mgr(cc, fake_hass)
+    locked_pairs = await mgr._lock_all()
+    fake_hass.close_pending()
+    assert locked_pairs == [("lock.front", "Front Lock")]
+
+
+async def test_engage_schedules_verify_secured_for_each_locked_entity(cc, fake_hass, monkeypatch):
+    fake_hass.states.set("lock.front", "unlocked", friendly_name="Front Lock")
+    fake_hass.states.set("lock.back", "unlocked", friendly_name="Back Lock")
+    fake_hass.states.set("lock.garage_side", "locked", friendly_name="Side Lock")  # already secure
+    mgr = _mgr(cc, fake_hass)
+
+    verified = []
+    async def fake_verify(eid, dom, name):
+        verified.append((eid, dom, name))
+    monkeypatch.setattr(mgr, "_verify_secured", fake_verify)
+
+    action = await mgr.engage("test")
+    await fake_hass.drain()
+
+    assert sorted(verified) == sorted([
+        ("lock.front", "lock", "Front Lock"),
+        ("lock.back", "lock", "Back Lock"),
+    ])
+    # message wording is unaffected -- still names the locks that were locked
+    assert "Front Lock" in action["message"] or "locked" in action["message"].lower()
+
+
+async def test_engage_does_not_block_on_background_verification(cc, fake_hass, monkeypatch):
+    """The immediate response must not wait the real 25s LOCKDOWN_SECURE_
+    VERIFY_DELAY -- _verify_secured() is scheduled, never awaited inline."""
+    fake_hass.states.set("lock.front", "unlocked", friendly_name="Front Lock")
+    mgr = _mgr(cc, fake_hass)
+
+    async def real_sleep_would_hang(_secs):
+        raise AssertionError("engage() must not await asyncio.sleep directly")
+    monkeypatch.setattr(cc.asyncio, "sleep", real_sleep_would_hang)
+
+    action = await mgr.engage("test")   # must return without hitting the patched sleep
+    assert action is not None
+    fake_hass.close_pending()
+
+
+async def test_verify_secured_still_alerts_on_persistent_lock_failure(
+    cc, fake_hass, monkeypatch,
+):
+    """Phase 3 only changed engage()'s IMMEDIATE announcement -- the separate
+    background _verify_secured() poll-and-alert mechanism (explicitly out of
+    scope, unchanged) must still fire when a lock genuinely never secures."""
+    fake_hass.states.set("lock.front", "unlocked", friendly_name="Front Lock")
+    mgr = _mgr(cc, fake_hass)
+
+    async def fast_sleep(_secs):
+        pass
+    monkeypatch.setattr(cc.asyncio, "sleep", fast_sleep)
+
+    emitted = []
+    async def fake_emit(hass, config, action, sleeping):
+        emitted.append(action)
+    monkeypatch.setattr(cc, "_emit_action", fake_emit)
+
+    await mgr.engage("test")
+    await fake_hass.drain()   # let the real (now-fast) _verify_secured() run
+
+    assert len(emitted) == 1
+    assert emitted[0]["type"] == "lockdown_breach"
+    assert "tried to secure" in emitted[0]["message"]
+    assert "still open" in emitted[0]["message"] or "still" in emitted[0]["message"]

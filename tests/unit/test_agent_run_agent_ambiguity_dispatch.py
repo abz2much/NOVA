@@ -45,6 +45,15 @@ async def _run(agent, monkeypatch, script, service_sink=None):
     monkeypatch.setattr(agent, "_create_provider_with_fallback", fake_create_provider)
     monkeypatch.setattr(agent, "_load_learned", lambda: {"alias": {}})
 
+    # Phase 3's fast-domain synchronous check (light/switch/fan) uses its own
+    # sleep seam, separate from agent._VERIFY_SLEEP -- mock it too, or a
+    # control_device call on a light in this script takes a real ~1s.
+    from conftest import _load
+    ev = _load("entity_verify")
+    async def _no_sleep(_secs):
+        pass
+    monkeypatch.setattr(ev, "_SLEEP", _no_sleep)
+
     hass = FakeHass()
     hass.states.set("light.office", "off", friendly_name="Office")
     hass.states.set("light.office_desk", "off", friendly_name="Office Desk")
