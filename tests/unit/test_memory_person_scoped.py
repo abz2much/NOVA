@@ -345,3 +345,49 @@ def test_paired_exchange_output_is_fenced_exactly_once(mem, monkeypatch):
     q_at = ctx.index("what's the garage code")
     a_at = ctx.index("4471")
     assert begin_at < q_at < a_at < end_at
+
+
+# ── Fix: pairing must not reduce the output below k distinct exchanges ──────
+
+def test_pairing_does_not_reduce_below_k_distinct_exchanges_when_more_exist(mem):
+    """Real, unmocked FTS5 store/search: raw results contain both halves of
+    exchange A (same turn_id) plus two distinct, unpaired exchanges B and C.
+    With k=3, the output must contain A once, plus B and C -- not just two
+    results because A's pair consumed two of only k=3 raw candidate slots."""
+    mem.store_memory("garage question A", role="user", conversation_id="conv-A",
+                      subject="alice", turn_id="1")
+    mem.store_memory("garage answer A", role="assistant", conversation_id="conv-A",
+                      subject="alice", turn_id="1")
+    mem.store_memory("garage note B standalone", role="user", conversation_id="conv-A")
+    mem.store_memory("garage note C standalone", role="user", conversation_id="conv-A")
+
+    ctx = mem.get_conversation_context("garage", k=3, conversation_id="conv-A")
+
+    assert ctx.count("garage question A") == 1
+    assert ctx.count("garage answer A") == 1
+    assert "garage note B standalone" in ctx
+    assert "garage note C standalone" in ctx
+
+
+def test_get_conversation_context_requests_2x_k_raw_candidates(mem, monkeypatch):
+    seen_k = []
+
+    def fake_search(query, k=5, hours=None, conversation_id=None, subject=None):
+        seen_k.append(k)
+        return []
+
+    monkeypatch.setattr(mem, "search_memory", fake_search)
+    mem.get_conversation_context("q", k=3, conversation_id="conv-A")
+    assert seen_k == [3 * 2]
+
+
+def test_output_never_exceeds_k_distinct_exchanges_even_with_many_raw_hits(mem, monkeypatch):
+    raw_hits = [
+        {"text": f"unpaired message {i}", "role": "user", "timestamp": f"t{i}",
+         "conversation_id": "conv-A", "subject": "alice", "turn_id": None}
+        for i in range(10)
+    ]
+    monkeypatch.setattr(mem, "search_memory", lambda *a, **k: raw_hits)
+    ctx = mem.get_conversation_context("q", k=3, conversation_id="conv-A")
+    emitted = sum(1 for i in range(10) if f"unpaired message {i}" in ctx)
+    assert emitted == 3

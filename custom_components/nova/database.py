@@ -154,26 +154,41 @@ def get_recent_messages(
     when to use it, this function never combines the two. No index added for
     `subject` — see database.py's migration note for the query-plan/scale
     justification (bounded household row count, fallback-only query
-    frequency, existing idx_timestamp already narrows the scan first)."""
+    frequency, existing idx_timestamp already narrows the scan first).
+
+    Selects the NEWEST `limit` matching rows (an inner query ordered
+    timestamp DESC, id DESC — id as a deterministic tiebreaker for rows
+    sharing a timestamp), then re-sorts just that selected set back into
+    chronological order for the return value, preserving the existing
+    oldest-first caller contract. Ordering ascending before LIMIT (the prior
+    behavior) selected the OLDEST matching rows instead of the most recent
+    ones whenever more than `limit` rows exist in the window — wrong for
+    continuity, which needs the most recent history."""
     try:
         since = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=hours)).isoformat()
         with _connect() as conn:
             if device_id:
                 rows = conn.execute(
-                    "SELECT * FROM conversations WHERE timestamp > ? AND device_id = ? "
-                    "ORDER BY timestamp ASC LIMIT ?",
+                    "SELECT * FROM ("
+                    "  SELECT * FROM conversations WHERE timestamp > ? AND device_id = ? "
+                    "  ORDER BY timestamp DESC, id DESC LIMIT ?"
+                    ") ORDER BY timestamp ASC, id ASC",
                     (since, device_id, limit),
                 ).fetchall()
             elif subject:
                 rows = conn.execute(
-                    "SELECT * FROM conversations WHERE timestamp > ? AND subject = ? "
-                    "ORDER BY timestamp ASC LIMIT ?",
+                    "SELECT * FROM ("
+                    "  SELECT * FROM conversations WHERE timestamp > ? AND subject = ? "
+                    "  ORDER BY timestamp DESC, id DESC LIMIT ?"
+                    ") ORDER BY timestamp ASC, id ASC",
                     (since, subject, limit),
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    "SELECT * FROM conversations WHERE timestamp > ? "
-                    "ORDER BY timestamp ASC LIMIT ?",
+                    "SELECT * FROM ("
+                    "  SELECT * FROM conversations WHERE timestamp > ? "
+                    "  ORDER BY timestamp DESC, id DESC LIMIT ?"
+                    ") ORDER BY timestamp ASC, id ASC",
                     (since, limit),
                 ).fetchall()
         return [dict(r) for r in rows]

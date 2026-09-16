@@ -429,21 +429,39 @@ def get_conversation_context(query: str, k: int = 3,
     chronological order, counted as ONE result. Duplicate hits from both
     halves of the same exchange collapse to one pairing. A hit with no
     turn_id, or whose sibling can't be found, falls back to the existing
-    single-message format — never invented or summarised.
+    single-message format — never invented or summarised. Raw search results
+    are over-fetched at 2*k so that up to k pairs can collapse without
+    reducing the number of distinct exchanges returned below k when more
+    exist; the output is still capped at k distinct exchanges/records.
 
     The returned string is fenced against prompt injection
     (_fence_retrieved_text) exactly once, after all formatting/pairing is
     done, since it re-enters the conversation with no other framing at all.
     """
-    memories = search_memory(query, k=k, conversation_id=conversation_id)
+    # Over-fetch raw results: a paired exchange consumes TWO raw slots (the
+    # user half and the assistant half) but counts as ONE final result below,
+    # so requesting only `k` raw hits could under-fill the k-exchange output
+    # whenever pairs collapse — fewer than k distinct exchanges returned even
+    # though more exist. At most two records ever share one turn_id, so 2*k
+    # is always sufficient headroom, regardless of how many of the eventual
+    # k exchanges turn out to be paired. This does not add a second search
+    # pass — still one call (or the same conversation-then-subject fallback
+    # pair of calls as before) — only the requested count changes; search
+    # results remain sorted by relevance/rank, so the top-k prefix a caller
+    # ultimately sees is unaffected, just backed by a larger candidate pool.
+    fetch_k = k * 2
+    memories = search_memory(query, k=fetch_k, conversation_id=conversation_id)
     if not memories and subject:
-        memories = search_memory(query, k=k, subject=subject)
+        memories = search_memory(query, k=fetch_k, subject=subject)
     if not memories:
         return ""
 
     parts = ["## Relevant past conversations"]
     seen_turn_ids: set[str] = set()
+    exchange_count = 0
     for m in memories:
+        if exchange_count >= k:
+            break  # at most k distinct exchanges/legacy records in the output
         turn_id = m.get("turn_id")
         if turn_id and turn_id in seen_turn_ids:
             continue  # already emitted as part of an earlier pair this call
@@ -462,6 +480,7 @@ def get_conversation_context(query: str, k: int = 3,
                 parts.append(_format_memory_line(entry))
         else:
             parts.append(_format_memory_line(m))
+        exchange_count += 1
 
     return _fence_retrieved_text("\n".join(parts))
 

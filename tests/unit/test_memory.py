@@ -85,7 +85,10 @@ def test_get_conversation_context_scopes_via_search_memory(mem, monkeypatch):
 
     monkeypatch.setattr(mem, "search_memory", fake_search)
     mem.get_conversation_context("what's the wifi password", k=3, conversation_id="conv-a")
-    assert seen == {"query": "what's the wifi password", "k": 3, "conversation_id": "conv-a"}
+    # Phase 2 (exchange-pairing fix): requests 2*k raw candidates so that up
+    # to k pairs can collapse without under-filling the k-exchange output --
+    # see get_conversation_context's own over-fetch note.
+    assert seen == {"query": "what's the wifi password", "k": 6, "conversation_id": "conv-a"}
 
 
 def test_get_conversation_context_empty_when_no_memories(mem, monkeypatch):
