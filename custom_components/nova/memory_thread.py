@@ -90,18 +90,30 @@ def shape_history(rows, limit: int = DEFAULT_MAX, char_cap: int = _CHAR_CAP) -> 
 
 
 async def load_recent(hass, hours: int = DEFAULT_HOURS, limit: int = DEFAULT_MAX,
-                      device_id: str | None = None) -> list:
+                      device_id: str | None = None,
+                      subject: str | None = None) -> list:
     """Recent cross-session turns to seed a conversation with. Reads the
     DB in the executor. Never raises.
 
     `device_id` (v7.87.0) scopes the read to the caller's own conversation
     thread — pass the same id `database.save_message` stored turns under
-    (conversation.py's `cid`). Left as None (global) only for a caller that
-    genuinely has no scope to give; today's one caller always has one."""
+    (conversation.py's `cid`). This is the first-choice scope, tried first.
+
+    `subject` (Phase 2) — person-scoped fallback, tried ONLY when the
+    device_id-scoped read returns no usable (shaped) rows, and only when
+    `subject` is given: a confidently resolved person. An unresolved
+    identity or the shared "primary" bucket must never reach this
+    parameter — callers pass None for both, which disables the fallback
+    entirely (falls through to returning the empty device_id-scoped
+    result). The two scopes are never merged into one read."""
     try:
         from .database import get_recent_messages
         rows = await hass.async_add_executor_job(get_recent_messages, hours, device_id, limit)
-        return shape_history(rows, limit)
+        shaped = shape_history(rows, limit)
+        if not shaped and subject:
+            rows = await hass.async_add_executor_job(get_recent_messages, hours, None, limit, subject)
+            shaped = shape_history(rows, limit)
+        return shaped
     except Exception as exc:
         _LOGGER.debug("memory_thread load_recent failed: %s", exc)
         return []

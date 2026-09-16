@@ -53,8 +53,11 @@ def test_reseed_scoped_to_the_conversation_not_global():
     # Fixed v7.87.0 (backlog #1): reseed used to pull globally across every
     # device/conversation in the house -- one household member's exchange
     # could leak into another's session. Must pass this conversation's own
-    # cid through to load_recent, not call it with no scope.
-    assert "memory_thread.load_recent(self.hass, hours, limit, device_id=cid)" in src
+    # cid through to load_recent, not call it with no scope. Phase 2 added a
+    # `subject=` kwarg alongside it for person-scoped fallback -- device_id
+    # remains the first-choice scope, unchanged.
+    assert "memory_thread.load_recent(" in src
+    assert "self.hass, hours, limit, device_id=cid, subject=subject" in src
 
 
 def test_semantic_memory_context_scoped_to_the_conversation_not_global():

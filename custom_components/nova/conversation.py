@@ -512,7 +512,8 @@ class NovaAgent(conversation.ConversationEntity):
             self._histories[cid] = h[-MAX_HISTORY:]
         return self._histories[cid]
 
-    async def _maybe_seed_history(self, cid: str, history: list) -> None:
+    async def _maybe_seed_history(self, cid: str, history: list,
+                                   subject: str | None = None) -> None:
         """Seed this conversation with recent cross-session history — on its
         first-ever turn, and again any time it resumes after being idle past
         the configured window (default 48h) — so Nova keeps catching up
@@ -524,7 +525,13 @@ class NovaAgent(conversation.ConversationEntity):
         Scoped to this conversation's own history (v7.87.0, backlog #1) — the
         reseed used to pull globally across every device/conversation in the
         house, so one household member's exchange could leak into another's
-        session on reseed."""
+        session on reseed.
+
+        `subject` (Phase 2) — person-scoped fallback, used by
+        memory_thread.load_recent only when this conversation_id's own
+        history comes up empty and `subject` is a confidently resolved
+        person (never for an unresolved identity or "primary" — see the
+        identity-resolution block in _handle_message_impl)."""
         from . import memory_thread
         enabled, hours, limit = memory_thread.config()
         now = time.time()
@@ -532,7 +539,8 @@ class NovaAgent(conversation.ConversationEntity):
         self._last_seen[cid] = now
         if not enabled or not memory_thread.should_reseed(last_seen, now, hours):
             return
-        seeded = await memory_thread.load_recent(self.hass, hours, limit, device_id=cid)
+        seeded = await memory_thread.load_recent(
+            self.hass, hours, limit, device_id=cid, subject=subject)
         if seeded:
             # Wrapped as one 'system' note, not raw turns — see
             # memory_thread.format_seed_message for why: raw turns read as
@@ -840,47 +848,96 @@ class NovaAgent(conversation.ConversationEntity):
             ir.async_set_speech("")  # silence — do not respond to ambient speech
             return conversation.ConversationResult(response=ir, conversation_id=cid)
 
+        # Phase 2: resolve identity exactly once for this turn, fail-open.
+        # `episodic_subject` is the safe-person predicate: a confidently
+        # resolved named person gets a real subject string (person-scoped
+        # episodic fallback allowed); an unresolved identity gets None
+        # (never the shared "primary" bucket — that string is only ever
+        # produced by identity.subject_for()'s fallback branch, which is
+        # never called here). Reused below by transcript seeding, semantic
+        # storage/retrieval, knowledge injection, and command-log
+        # attribution — identity.resolve() is never called again this turn.
+        identity_module = None
+        ident = None
+        episodic_subject = None
+        try:
+            from . import identity as identity_module
+            ident = identity_module.resolve(
+                self.hass,
+                device_id=getattr(user_input, "device_id", None),
+            )
+            if ident.known:
+                episodic_subject = identity_module.normalize(ident.person)
+        except Exception as exc:
+            _LOGGER.debug("Identity resolve: %s", exc)
+            # ident/episodic_subject stay None — conversation-id-scoped
+            # storage/retrieval below continue unaffected; person-scoped
+            # fallback simply doesn't fire (same as a genuinely unresolved
+            # identity); knowledge injection and command logging degrade to
+            # their existing no-identity behavior, defined at their own
+            # call sites below.
+
         history   = self._history(cid)
-        await self._maybe_seed_history(cid, history)
+        await self._maybe_seed_history(cid, history, subject=episodic_subject)
 
         history.append({"role": "user", "content": user_input.text})
-        save_message("user", user_input.text, device_id=cid)
+        # Phase 2: capture the inserted row id as the stable exchange link —
+        # save_message() now returns lastrowid (or None on its existing
+        # fail-open write failure). turn_id is only ever created from a real
+        # id, never the string "None".
+        user_row_id = await self.hass.async_add_executor_job(
+            save_message, "user", user_input.text, cid, episodic_subject)
+        turn_id = str(user_row_id) if user_row_id is not None else None
 
-        # v5.6.1: Store user message in long-term memory
+        # v5.6.1 / Phase 2: retrieve previous semantic context BEFORE storing
+        # this turn's own message — storing first let the current message
+        # become its own top search result. Retrieval and storage are
+        # separate fail-open blocks: a retrieval failure must not prevent
+        # this message from being stored for future recall, and a storage
+        # failure must not discard context already retrieved and already
+        # folded into `persona` below.
+        mem_context = ""
         try:
-            from .memory import store_memory, get_conversation_context
+            from .memory import get_conversation_context
+            mem_context = await self.hass.async_add_executor_job(
+                get_conversation_context, user_input.text, 3, cid, episodic_subject,
+            )
+        except Exception as exc:
+            _LOGGER.debug("Memory retrieve: %s", exc)
+        if mem_context:
+            persona = persona + "\n\n" + mem_context
+
+        try:
+            from .memory import store_memory
             await self.hass.async_add_executor_job(
                 lambda: store_memory(user_input.text, role="user",
-                    device_id=user_input.device_id or "", conversation_id=cid)
+                    device_id=user_input.device_id or "", conversation_id=cid,
+                    subject=episodic_subject, turn_id=turn_id)
             )
-            # Retrieve relevant past context and inject into persona. Scoped
-            # to this conversation's own history (v7.87.0, backlog #1
-            # follow-up) — used to search every household member's stored
-            # turns regardless of who was asking.
-            mem_context = await self.hass.async_add_executor_job(
-                get_conversation_context, user_input.text, 3, cid,
-            )
-            if mem_context:
-                persona = persona + "\n\n" + mem_context
         except Exception as exc:
-            _LOGGER.debug("Memory store/retrieve: %s", exc)
+            _LOGGER.debug("Memory store: %s", exc)
 
         # v6.25.0: Inject curated knowledge — durable facts/preferences Nova
         # knows (distinct from the transcript recall above), scored against the
         # current message so the most relevant facts lead.
         # v6.29.0: scope to *this* person + household so one resident's private
         # facts don't leak into another's context.
-        try:
-            from . import knowledge, identity
-            ident = identity.resolve(
-                self.hass, device_id=getattr(user_input, "device_id", None))
-            subjects = [identity.subject_for(ident), "household"]
-            kn_block = await self.hass.async_add_executor_job(
-                lambda: knowledge.prompt_block(user_input.text, subjects=subjects))
-            if kn_block:
-                persona = persona + "\n\n" + kn_block
-        except Exception as exc:
-            _LOGGER.debug("Knowledge inject: %s", exc)
+        # Phase 2: reuses `ident` captured above — no second
+        # identity.resolve() call. When ident is None (import/resolve failed
+        # earlier), this reproduces the pre-Phase-2 failure behavior exactly:
+        # knowledge injection (person AND household) is skipped entirely for
+        # the turn, not partially degraded to household-only.
+        kn_block = None
+        if ident is not None:
+            try:
+                from . import knowledge
+                subjects = [identity_module.subject_for(ident), "household"]
+                kn_block = await self.hass.async_add_executor_job(
+                    lambda: knowledge.prompt_block(user_input.text, subjects=subjects))
+            except Exception as exc:
+                _LOGGER.debug("Knowledge inject: %s", exc)
+        if kn_block:
+            persona = persona + "\n\n" + kn_block
 
         hass_api = await self._get_hass_api(user_input) if self._use_hass_api() else None
 
@@ -1077,10 +1134,19 @@ class NovaAgent(conversation.ConversationEntity):
             # v6.29.0: attribute to the resolved person so per-person command
             # patterns are real (falls back to "unknown" when not confident).
             try:
-                from . import cognitive_core, identity, voice_recognition
+                from . import cognitive_core, voice_recognition
                 handler = "local" if local_result and local_result.handled else "agent"
                 dev = getattr(user_input, "device_id", None)
-                who = identity.resolve(self.hass, device_id=dev).person
+                # Phase 2: reuse the identity captured once at the top of the
+                # turn — no second identity.resolve() call. Falls back to
+                # the same "unknown" value a fresh unresolved identity
+                # (or a failed import/resolve) would have produced.
+                if ident is not None:
+                    who = ident.person
+                elif identity_module is not None:
+                    who = identity_module.UNKNOWN
+                else:
+                    who = "unknown"
                 cognitive_core.log_command(
                     text=user_input.text,
                     handled_by=handler,
@@ -1225,18 +1291,33 @@ class NovaAgent(conversation.ConversationEntity):
             # Now safe to do blocking DB operations
             history.append({"role": "assistant", "content": response_text})
             try:
+                # Phase 2: same episodic_subject captured at the top of the
+                # turn, so subject-scoped transcript fallback (memory_thread)
+                # can find both halves of a past exchange, not just the
+                # user's side. This row keeps its own independent primary
+                # key — it is never itself a turn_id, only ever tagged with
+                # the triggering user row's turn_id in semantic memory below.
                 await self.hass.async_add_executor_job(
-                    save_message, "assistant", response_text, cid,
+                    save_message, "assistant", response_text, cid, episodic_subject,
                 )
             except Exception:
                 pass
             _LOGGER.debug("Nova → %s", response_text[:120])
 
-            # Store assistant response in long-term memory
+            # Store assistant response in long-term memory. Phase 2: threads
+            # the SAME turn_id/episodic_subject captured for this turn's user
+            # message, so the two halves pair on retrieval. If this turn
+            # never reached this point (offer short-circuit, an exception
+            # above), this block simply never runs — the user's row/semantic
+            # record stay a legitimately unpaired turn, and a later,
+            # unrelated assistant reply carries its OWN fresh turn_id, so it
+            # can never accidentally pair with this one.
             try:
+                from .memory import store_memory
                 await self.hass.async_add_executor_job(
                     lambda: store_memory(response_text, role="assistant",
-                        device_id=user_input.device_id or "", conversation_id=cid)
+                        device_id=user_input.device_id or "", conversation_id=cid,
+                        subject=episodic_subject, turn_id=turn_id)
                 )
             except Exception:
                 pass

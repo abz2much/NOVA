@@ -47,6 +47,29 @@ CREATE INDEX IF NOT EXISTS idx_activity_ts ON activity_log(timestamp);
 _last_error: Optional[str] = None   # last connect/schema failure, for diagnostics
 
 
+def _migrate_subject_column(conn: sqlite3.Connection) -> None:
+    """Additive migration: nullable `subject` column on conversations, for
+    person-scoped episodic continuity (Phase 2). Re-checked on every connect,
+    no cached flag — matches this file's existing schema-application
+    convention (conn.executescript(SCHEMA) above). No backfill: existing rows
+    read back as NULL.
+
+    Only a PROVEN concurrent duplicate-column race (confirmed by a second,
+    fresh PRAGMA showing the column already present) is treated as success —
+    every other failure propagates to _connect()'s own except block below,
+    which already logs to _last_error and re-raises, so health() reports the
+    degraded state. Never swallowed here."""
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(conversations)")}
+    if "subject" in cols:
+        return
+    try:
+        conn.execute("ALTER TABLE conversations ADD COLUMN subject TEXT")
+    except sqlite3.OperationalError:
+        cols_after = {row["name"] for row in conn.execute("PRAGMA table_info(conversations)")}
+        if "subject" not in cols_after:
+            raise
+
+
 def _connect() -> sqlite3.Connection:
     global _last_error
     try:
@@ -56,6 +79,7 @@ def _connect() -> sqlite3.Connection:
         conn.execute("PRAGMA busy_timeout=10000")
         conn.row_factory = sqlite3.Row
         conn.executescript(SCHEMA)
+        _migrate_subject_column(conn)
         conn.commit()
         _last_error = None
         return conn
@@ -85,15 +109,26 @@ def health() -> dict:
 
 # ── Conversation history ──────────────────────────────────────────────────────
 
-def save_message(role: str, content: str, device_id: str = "unknown") -> None:
-    """Persist a single conversation turn."""
+def save_message(
+    role: str,
+    content: str,
+    device_id: str = "unknown",
+    subject: Optional[str] = None,
+) -> Optional[int]:
+    """Persist a single conversation turn. Returns the inserted row's id on
+    success, or None on failure (fail-open, unchanged externally-visible
+    failure behavior — existing callers that ignore the return value, such
+    as sentinel.py, are unaffected)."""
     global _last_error
     try:
         with _connect() as conn:
-            conn.execute(
-                "INSERT INTO conversations (timestamp, device_id, role, content) VALUES (?,?,?,?)",
-                (datetime.now(timezone.utc).replace(tzinfo=None).isoformat(), device_id, role, content),
+            cur = conn.execute(
+                "INSERT INTO conversations (timestamp, device_id, role, content, subject) "
+                "VALUES (?,?,?,?,?)",
+                (datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+                 device_id, role, content, subject),
             )
+            return cur.lastrowid
     except Exception as exc:
         # _connect() already records a connect/schema failure in _last_error;
         # this also catches a failure in the INSERT itself (e.g. disk full)
@@ -101,14 +136,25 @@ def save_message(role: str, content: str, device_id: str = "unknown") -> None:
         # health() would keep reporting "ok" right after a real write failure.
         _last_error = f"{type(exc).__name__}: {exc}"
         _LOGGER.warning("Nova DB write error: %s", exc)
+        return None
 
 
 def get_recent_messages(
     hours: int = 24,
     device_id: Optional[str] = None,
     limit: int = 200,
+    subject: Optional[str] = None,
 ) -> list[dict]:
-    """Return recent conversation rows, oldest first."""
+    """Return recent conversation rows, oldest first.
+
+    `device_id` (conversation-id scope) is the first-choice filter — when
+    given, it's used and `subject` is ignored. `subject` is an exact-match
+    fallback filter for person-scoped continuity when the caller has no
+    conversation-id to scope by (or that scope came up empty); callers decide
+    when to use it, this function never combines the two. No index added for
+    `subject` — see database.py's migration note for the query-plan/scale
+    justification (bounded household row count, fallback-only query
+    frequency, existing idx_timestamp already narrows the scan first)."""
     try:
         since = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=hours)).isoformat()
         with _connect() as conn:
@@ -117,6 +163,12 @@ def get_recent_messages(
                     "SELECT * FROM conversations WHERE timestamp > ? AND device_id = ? "
                     "ORDER BY timestamp ASC LIMIT ?",
                     (since, device_id, limit),
+                ).fetchall()
+            elif subject:
+                rows = conn.execute(
+                    "SELECT * FROM conversations WHERE timestamp > ? AND subject = ? "
+                    "ORDER BY timestamp ASC LIMIT ?",
+                    (since, subject, limit),
                 ).fetchall()
             else:
                 rows = conn.execute(
