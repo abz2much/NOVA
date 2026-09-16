@@ -1,7 +1,6 @@
 """Nova conversation agent — provider-agnostic via LLMProvider interface."""
 from __future__ import annotations
 
-import json
 import logging
 import os
 import time
@@ -568,126 +567,6 @@ class NovaAgent(conversation.ConversationEntity):
         except Exception as exc:  # pylint: disable=broad-except
             _LOGGER.debug("Nova: HA Assist API unavailable (%s) — chat-only mode", exc)
             return None
-
-    # ── LLM calls (provider-agnostic) ─────────────────────────────────────────
-
-    async def _llm_text(self, messages: list[dict], persona: str) -> str:
-        """Plain text call — no tools. Uses the LLMProvider interface via
-        the activity-aware wrapper (Phase 5) — records bounded call metadata
-        (provider/model/success/tokens/latency), never the content."""
-        from . import llm_provider
-        result = await llm_provider.chat_with_activity(
-            self.hass, self._client,
-            [{"role": "system", "content": persona}] + messages,
-            role="llm", data_category="text",
-            max_tokens=512, temperature=0.7,
-        )
-        return result["text"]
-
-    async def _llm_with_tools(self, messages: list[dict], persona: str, tools: list[dict]) -> dict:
-        """Call with function-calling tools. Returns standardised dict.
-
-        Returns:
-          {"type": "text", "text": "..."}               when no tool calls
-          {"type": "tool_calls",
-           "raw_message": <provider-specific>,
-           "calls": [{"id", "name", "args"}, ...]}      when tools invoked
-        """
-        from . import llm_provider
-        result = await llm_provider.chat_with_activity(
-            self.hass, self._client,
-            [{"role": "system", "content": persona}] + messages,
-            role="llm", data_category="text",
-            tools=tools or None, max_tokens=1024, temperature=0.7,
-        )
-        if result["tool_calls"]:
-            return {
-                "type":        "tool_calls",
-                "raw_message": result["raw"],
-                "calls":       result["tool_calls"],
-            }
-        return {"type": "text", "text": result["text"]}
-
-    # ── Agentic loop ──────────────────────────────────────────────────────────
-
-    async def _agentic_loop(
-        self,
-        messages: list[dict],
-        persona: str,
-        hass_api,
-        user_input: conversation.ConversationInput,
-    ) -> str:
-        """LLM → execute HA tools → feed results back → repeat until text."""
-        if hass_api is None or not hass_api.tools:
-            return await self._llm_text(messages, persona)
-
-        # HA tool parameters are a voluptuous Schema, not a JSON-serializable
-        # dict — passing t.parameters straight through (as this used to)
-        # makes the LLM request fail as soon as any tool is offered, with
-        # "Object of type Schema/_Unsupported is not JSON serializable".
-        # agent.py's run_agent() already has the real fix (voluptuous_openapi
-        # convert() with HA's selector custom_serializer); reuse it here
-        # instead of keeping a second, out-of-sync copy of this conversion.
-        from .agent import _ha_tools_to_openai_format
-        tools = _ha_tools_to_openai_format(
-            hass_api.tools, getattr(hass_api, "custom_serializer", None)
-        )
-
-        working = list(messages)
-        for _ in range(MAX_ITERS):
-            result = await self._llm_with_tools(working, persona, tools)
-            if result["type"] == "text":
-                return result["text"]
-
-            raw_msg = result["raw_message"]
-            working.append({
-                "role":       "assistant",
-                "content":    raw_msg.content or "",
-                "tool_calls": [
-                    {
-                        "id":   tc.id,
-                        "type": "function",
-                        "function": {
-                            "name":      tc.function.name,
-                            "arguments": tc.function.arguments,
-                        },
-                    }
-                    for tc in raw_msg.tool_calls
-                ],
-            })
-
-            for call in result["calls"]:
-                try:
-                    tool_input = llm.ToolInput(**_ha_kwargs(
-                        llm.ToolInput,
-                        tool_name=call["name"],
-                        tool_args=call["args"],
-                        platform=DOMAIN,
-                        context=user_input.context,
-                        user_prompt=user_input.text,
-                        language=user_input.language,
-                        assistant=conversation.HOME_ASSISTANT_AGENT,
-                        device_id=user_input.device_id,
-                    ))
-                    tool_result = await hass_api.async_call_tool(tool_input)
-                    result_str = (
-                        json.dumps(tool_result)
-                        if isinstance(tool_result, dict)
-                        else str(tool_result)
-                    )
-                except Exception as exc:  # pylint: disable=broad-except
-                    _LOGGER.warning("Nova tool '%s' failed: %s", call["name"], exc)
-                    result_str = f"Error: {exc}"
-
-                working.append({
-                    "role":         "tool",
-                    "tool_call_id": call["id"],
-                    "content":      result_str,
-                })
-
-        # Max iterations — ask for a plain summary of what was done
-        working.append({"role": "user", "content": "Briefly summarise what you have done."})
-        return await self._llm_text(working, persona)
 
     # ── Main entry point ──────────────────────────────────────────────────────
 
