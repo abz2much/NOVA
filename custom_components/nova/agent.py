@@ -111,7 +111,12 @@ NOVA_TOOLS = [
             "description": (
                 "Search for HA entities by name, area, or domain. Use this when "
                 "you don't know the exact entity_id. Returns matching entities "
-                "with their current state."
+                "with their current state. Set require_unique=true when resolving "
+                "exactly ONE target entity before acting on it (e.g. before "
+                "control_device) — Nova will ask the user to clarify automatically "
+                "if multiple entities plausibly match, instead of guessing. Leave "
+                "require_unique false (default) for browsing/discovery queries "
+                "where multiple results are expected and useful."
             ),
             "parameters": {
                 "type": "object",
@@ -129,6 +134,15 @@ NOVA_TOOLS = [
                             "Optional domain filter: light, switch, lock, cover, "
                             "climate, fan, media_player, sensor, binary_sensor, "
                             "scene, script, automation, person"
+                        ),
+                    },
+                    "require_unique": {
+                        "type": "boolean",
+                        "description": (
+                            "Set true when you need exactly one target entity "
+                            "resolved before acting on it. Set false (default) for "
+                            "general browsing/discovery where multiple results "
+                            "are expected."
                         ),
                     },
                 },
@@ -1402,13 +1416,51 @@ async def _exec_get_entity_state(hass: HomeAssistant, args: dict) -> str:
     return json.dumps(results)
 
 
+def _dedupe_candidates(items: list[dict]) -> list[dict]:
+    """Dedupe a candidate list by entity_id, first occurrence wins. Used
+    everywhere an ambiguity candidate list is built, so the same entity can
+    never appear twice in a clarification."""
+    seen: dict = {}
+    for it in items:
+        seen.setdefault(it["entity_id"], it)
+    return list(seen.values())
+
+
+def _build_clarification(candidates: list[dict]) -> str:
+    """Fixed, deterministic clarification question — no LLM call. If two or
+    more candidates share the same friendly_name, the entity_id is appended
+    to disambiguate (never "did you mean Kitchen Light or Kitchen Light?")."""
+    names = [c.get("friendly_name") or c["entity_id"] for c in candidates]
+    counts: dict = {}
+    for n in names:
+        counts[n] = counts.get(n, 0) + 1
+    labels = [f"{n} ({c['entity_id']})" if counts[n] > 1 else n
+              for c, n in zip(candidates, names)]
+    if len(labels) >= 2:
+        return f"I found more than one match — did you mean {labels[0]} or {labels[1]}?"
+    return "I found more than one possible match — could you be more specific about which one you mean?"
+
+
 async def _exec_search_entities(hass: HomeAssistant, args: dict) -> str:
-    """Search for entities by name, area, or domain with fuzzy matching."""
+    """Search for entities by name, area, or domain with fuzzy matching.
+
+    `require_unique` (Phase 3): when true, this search is resolving exactly
+    ONE target entity before an action. If two or more plausible candidates
+    remain after scoring (ratio of runner-up/top score >= 0.85, empirically
+    derived — see Phase 3 design notes), returns an `{"ambiguous": true,
+    "candidates": [...]}` marker instead of a plain list, which run_agent's
+    tool-dispatch loop intercepts to stop the turn with a fixed clarification
+    question rather than letting the model guess. Default false preserves
+    ordinary multi-result discovery exactly as before — no marker, no forced
+    clarification, ever.
+    """
     import re
     query = args.get("query", "").lower().strip()
     domain_filter = args.get("domain")
+    require_unique = bool(args.get("require_unique", False))
 
-    # Check learned aliases first
+    # Check learned aliases first — an exact key maps to exactly one entity,
+    # so this is always inherently unique regardless of require_unique.
     learned = _load_learned()
     aliases = learned.get("alias", {})
     if query in aliases:
@@ -1422,17 +1474,32 @@ async def _exec_search_entities(hass: HomeAssistant, args: dict) -> str:
                 "matched_by": f"learned alias: '{query}'",
             }])
 
-    # Also check partial alias matches
+    # Partial alias matches — collect ALL matches (deduped by entity_id),
+    # not just the first. Multiple *different* entities matching partially
+    # is genuine ambiguity when require_unique is set; require_unique=false
+    # now returns every plausible partial-alias match instead of silently
+    # hiding all but the first (closest honest match to "discovery" intent —
+    # the old single-item return was an accident of early-return, not a
+    # deliberate one-result contract).
+    alias_matches: dict = {}
     for alias_name, alias_id in aliases.items():
         if query in alias_name or alias_name in query:
             state = hass.states.get(alias_id)
-            if state:
-                return json.dumps([{
+            if state and alias_id not in alias_matches:
+                alias_matches[alias_id] = {
                     "entity_id": alias_id,
                     "friendly_name": state.attributes.get("friendly_name", ""),
                     "state": state.state,
                     "matched_by": f"partial alias: '{alias_name}'",
-                }])
+                }
+    if alias_matches:
+        alias_results = list(alias_matches.values())
+        if require_unique and len(alias_results) > 1:
+            return json.dumps({
+                "ambiguous": True,
+                "candidates": _dedupe_candidates(alias_results),
+            })
+        return json.dumps(alias_results)
 
     domains = [domain_filter] if domain_filter else [
         "light", "switch", "lock", "cover", "climate", "fan",
@@ -1497,7 +1564,18 @@ async def _exec_search_entities(hass: HomeAssistant, args: dict) -> str:
                 })
 
     results.sort(key=lambda r: r["score"], reverse=True)
-    return json.dumps(results[:15])
+    results = results[:15]
+
+    if require_unique and len(results) >= 2 and results[0]["score"] > 0:
+        ratio = results[1]["score"] / results[0]["score"]
+        if ratio >= 0.85:
+            near_tie = [r for r in results if r["score"] / results[0]["score"] >= 0.85][:4]
+            return json.dumps({
+                "ambiguous": True,
+                "candidates": _dedupe_candidates(near_tie),
+            })
+
+    return json.dumps(results)
 
 
 async def _exec_get_area_devices(hass: HomeAssistant, args: dict) -> str:
@@ -2781,6 +2859,12 @@ async def _exec_ingest_documents(hass: HomeAssistant, args: dict) -> str:
         return json.dumps({"error": str(exc)})
 
 
+# Tools that call a real HA service against a specific entity, resolved via
+# search_entities — deferred within a batch when a require_unique search is
+# also present in that same batch, so an unresolved/ambiguous entity_id can
+# never reach a service call (Phase 3, see run_agent's dispatch loop).
+_MUTATING_TOOL_NAMES = {"control_device", "bulk_control", "run_scene_or_script", "execute_plan"}
+
 _TOOL_MAP = {
     "control_device":      _exec_control_device,
     "get_entity_state":    _exec_get_entity_state,
@@ -3400,7 +3484,15 @@ async def run_agent(
         f"before consequential action — if a cheap check can confirm an "
         f"assumption (right entity, current state, who's home), run it first. "
         f"(4) After acting, CONFIRM the result changed as intended rather than "
-        f"assuming success. (5) When evidence is thin on something consequential, "
+        f"assuming success — action tool results carry a `status` "
+        f"(verified/accepted/unverified/error) and an exact `message`. Preserve "
+        f"that status's meaning in what you tell the user: for `verified`, the "
+        f"action is confirmed and you may state it as fact. For `accepted`, the "
+        f"command was sent but not yet confirmed — say it was sent/triggered, "
+        f"never that it's done, confirmed, or successful. For `unverified`, say "
+        f"the command was sent but couldn't be confirmed. For `error`, report the "
+        f"failure plainly. Never upgrade a tool's status in your own words. "
+        f"(5) When evidence is thin on something consequential, "
         f"fail safe: ask, or decline crisply — never guess at locks, alarms, or "
         f"anything irreversible. (6) If you don't know, say so plainly; an honest "
         f"gap beats an invented answer. Reason step-by-step internally; report "
@@ -3427,7 +3519,10 @@ async def run_agent(
         f"user actually asks for the current time ('what time is it?').\n\n"
         f"## Critical rules\n"
         f"1. ALWAYS use search_entities first if you're unsure of an entity_id. "
-        f"Never guess entity_ids — search for them.\n"
+        f"Never guess entity_ids — search for them. When you need exactly ONE "
+        f"target entity before acting (not browsing), call it with "
+        f"require_unique=true — if multiple entities plausibly match, Nova will "
+        f"ask the user to clarify automatically; do not pick one yourself.\n"
         f"2. When a user corrects you ('no, the chase lamp is...', 'I meant the...'), "
         f"use the remember tool to save the correction as an alias so you get it "
         f"right next time. This is how you learn.\n"
@@ -3711,7 +3806,20 @@ async def run_agent(
                 ],
             })
 
-        # Execute tools
+        # Execute tools. A search_entities(require_unique=true) call must
+        # resolve before any mutating tool call from the SAME batch — if the
+        # model asked for both in one response, run only the search now and
+        # defer the mutating calls to a later iteration once it has a clear
+        # entity_id. An ambiguous unique search stops the whole batch and
+        # returns a fixed clarification immediately, with no further LLM
+        # call and no pending state stored anywhere.
+        batch_names = {c["name"] for c in tool_calls}
+        has_unique_search = any(
+            c["name"] == "search_entities" and c["args"].get("require_unique")
+            for c in tool_calls
+        )
+        defer_mutating = has_unique_search and bool(batch_names & _MUTATING_TOOL_NAMES)
+
         for call in tool_calls:
             if call["name"] == "delegate_task":
                 result_str = await _run_delegated(
@@ -3720,10 +3828,24 @@ async def run_agent(
                     api_key=api_key, model=model, base_url=base_url,
                     config=config, depth=depth,
                 )
+            elif defer_mutating and call["name"] in _MUTATING_TOOL_NAMES:
+                result_str = json.dumps({
+                    "deferred": True,
+                    "reason": "Resolve the exact entity with "
+                              "search_entities(require_unique=true) first, then "
+                              "repeat this action with the resolved entity_id.",
+                })
             else:
                 result_str = await _execute_tool(
                     hass, call["name"], call["args"], hass_api, user_input,
                 )
+                if call["name"] == "search_entities" and call["args"].get("require_unique"):
+                    try:
+                        parsed = json.loads(result_str)
+                    except Exception:
+                        parsed = None
+                    if isinstance(parsed, dict) and parsed.get("ambiguous"):
+                        return _build_clarification(parsed.get("candidates", []))
             working.append({
                 "role": "tool",
                 "tool_call_id": call.get("id", ""),

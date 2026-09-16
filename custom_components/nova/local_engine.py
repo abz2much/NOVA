@@ -310,21 +310,66 @@ _STT_CORRECTIONS = {
 }
 
 
+class _AmbiguousEntity:
+    """Non-iterable sentinel returned by _find_entity() when two or more
+    entities are plausible matches, instead of a real (entity_id,
+    friendly_name) tuple. Every caller must check
+    `isinstance(result, _AmbiguousEntity)` before unpacking — an `or`-chained
+    fallback (see try_local's first call site) correctly short-circuits on
+    it since it's truthy, but a bare `if not resolved:` guard does NOT catch
+    it, so skipping the isinstance check would crash on unpack (a safe
+    failure mode, never a silently wrong entity) rather than produce a
+    proper clarification. `candidates` is always deduplicated by entity_id
+    and always has at least 2 entries."""
+    def __init__(self, candidates: list[dict]):
+        seen: dict = {}
+        for c in candidates:
+            seen.setdefault(c["entity_id"], c)
+        self.candidates = list(seen.values())
+
+
+def _build_local_clarification(candidates: list[dict], addr: str) -> str:
+    """Fixed, deterministic clarification — no LLM in this file at all, so
+    this is inherently deterministic. If two or more candidates share a
+    friendly_name, the entity_id is appended so the question never asks
+    'did you mean Kitchen Light or Kitchen Light?'."""
+    names = [c.get("friendly_name") or c["entity_id"] for c in candidates]
+    counts: dict = {}
+    for n in names:
+        counts[n] = counts.get(n, 0) + 1
+    labels = [f"{n} ({c['entity_id']})" if counts[n] > 1 else n
+              for c, n in zip(candidates, names)]
+    if len(labels) >= 2:
+        return f"I found more than one match{addr} — did you mean {labels[0]} or {labels[1]}?"
+    return f"I found more than one possible match{addr} — could you be more specific?"
+
+
 def _find_entity(hass, name_fragment, domain_hint=None):
     """
     Fuzzy-match a name fragment against HA entities. v5.7.08.
 
-    Matching tiers (first match wins):
-      1. Learned aliases (from agent's remember tool)
-      2. Exact friendly_name match
+    Matching tiers:
+      1. Learned aliases (from agent's remember tool) — exact key, always
+         unique by construction.
+      2. Exact friendly_name match — ALL exact matches are collected before
+         deciding; ambiguous if more than one distinct entity matches.
       3. Substring: fragment appears inside friendly_name
       4. Word overlap: all words in fragment appear in friendly_name
-      5. STT correction → retry with corrected form
-      6. Fuzzy similarity scoring (handles phonetic/STT errors)
-      7. Entity_id substring match
-      8. Area-based fallback
+      5. Fuzzy similarity scoring (handles phonetic/STT errors)
+      6. Entity_id substring match
+      6b. STT correction → retry with corrected form (continues updating the
+          SAME per-entity best-score tracking as tiers 3-6, not a fresh pass)
+      7. Area-based fallback — ALL eligible entities in the first matching
+         area are collected; ambiguous if more than one.
 
-    Returns (entity_id, friendly_name) or None.
+    Tiers 3-6b share one dict keyed by entity_id, holding each entity's
+    HIGHEST score seen across every pass (original fragment AND
+    STT-corrected fragment) — this is what guarantees the same entity can
+    never occupy both the top and runner-up slot after the STT retry pass
+    re-scores it (a plain best/runner-up pair could let that happen; a
+    dict keyed by entity_id structurally cannot).
+
+    Returns (entity_id, friendly_name), an _AmbiguousEntity, or None.
     """
     fragment = name_fragment.lower().strip()
 
@@ -338,7 +383,8 @@ def _find_entity(hass, name_fragment, domain_hint=None):
     if not fragment:
         return None
 
-    # ── Tier 0: Check learned aliases ───────────────────────────────
+    # ── Tier 1: Check learned aliases ───────────────────────────────
+    # An exact key maps to exactly one entity — always unique.
     try:
         import json as _json, os as _os
         learn_file = "/config/.nova_learned.json"
@@ -360,77 +406,86 @@ def _find_entity(hass, name_fragment, domain_hint=None):
         "fan", "media_player", "sensor", "binary_sensor"]
 
     frag_words = set(fragment.split())
-    best_match = None
-    best_score = 0
+    exact_matches: dict = {}     # entity_id -> {"entity_id","friendly_name"}
+    candidate_scores: dict = {}  # entity_id -> {"entity_id","friendly_name","score"} — highest score seen
+
+    def _consider(eid, fname_display, score):
+        cur = candidate_scores.get(eid)
+        if cur is None or score > cur["score"]:
+            candidate_scores[eid] = {
+                "entity_id": eid, "friendly_name": fname_display, "score": score,
+            }
 
     for domain in domains:
         for state in hass.states.async_all(domain):
             eid = state.entity_id
             fname = (state.attributes.get("friendly_name") or "").lower()
+            fname_display = state.attributes.get("friendly_name", eid)
             fname_words = set(fname.split())
 
-            # Tier 1: exact
+            # Tier 2: exact — collected, not returned immediately.
             if fname == fragment:
-                _LOGGER.info("Entity resolve: exact '%s' → %s", fragment, eid)
-                return (eid, state.attributes.get("friendly_name", eid))
+                exact_matches.setdefault(eid, {"entity_id": eid, "friendly_name": fname_display})
+                continue
 
-            # Tier 2: substring
+            # Tier 3: substring
             if fragment in fname:
-                score = len(fragment) / max(len(fname), 1) * 100
-                if score > best_score:
-                    best_score = score
-                    best_match = (eid, state.attributes.get("friendly_name", eid))
+                _consider(eid, fname_display, len(fragment) / max(len(fname), 1) * 100)
                 continue
 
-            # Tier 3: word overlap
+            # Tier 4: word overlap
             if frag_words and frag_words.issubset(fname_words):
-                score = len(frag_words) / max(len(fname_words), 1) * 95
-                if score > best_score:
-                    best_score = score
-                    best_match = (eid, state.attributes.get("friendly_name", eid))
+                _consider(eid, fname_display, len(frag_words) / max(len(fname_words), 1) * 95)
                 continue
 
-            # Tier 4: fuzzy similarity
+            # Tier 5: fuzzy similarity
             fuzz = _fuzzy_score(fragment, fname)
-            if fuzz > 55 and fuzz > best_score:
-                best_score = fuzz
-                best_match = (eid, state.attributes.get("friendly_name", eid))
+            if fuzz > 55:
+                _consider(eid, fname_display, fuzz)
                 continue
 
-            # Tier 5: entity_id substring
+            # Tier 6: entity_id substring
             frag_u = fragment.replace(" ", "_")
             if frag_u in eid:
-                score = len(frag_u) / max(len(eid), 1) * 80
-                if score > best_score:
-                    best_score = score
-                    best_match = (eid, state.attributes.get("friendly_name", eid))
+                _consider(eid, fname_display, len(frag_u) / max(len(eid), 1) * 80)
 
-    # ── Tier 5b: STT correction retry ──────────────────────────────
-    if (not best_match or best_score < 50):
+    if exact_matches:
+        if len(exact_matches) > 1:
+            _LOGGER.info("Entity resolve: '%s' ambiguous — %d exact matches",
+                         fragment, len(exact_matches))
+            return _AmbiguousEntity(list(exact_matches.values()))
+        only = next(iter(exact_matches.values()))
+        _LOGGER.info("Entity resolve: exact '%s' → %s", fragment, only["entity_id"])
+        return (only["entity_id"], only["friendly_name"])
+
+    # ── Tier 6b: STT correction retry ────────────────────────────────
+    # Continues updating the SAME candidate_scores dict (not a fresh
+    # best/runner-up pair) — an entity re-scored here just has its existing
+    # entry's score raised if the correction scores higher, it never becomes
+    # a second, distinct candidate for itself.
+    top_score_so_far = max((c["score"] for c in candidate_scores.values()), default=0)
+    if not candidate_scores or top_score_so_far < 50:
         corrected = fragment
         for wrong, right in _STT_CORRECTIONS.items():
             if wrong in corrected:
                 corrected = corrected.replace(wrong, right)
         if corrected != fragment:
             _LOGGER.info("Entity resolve: STT correction '%s' → '%s'", fragment, corrected)
-            # Retry with corrected form (non-recursive, just one pass)
             for domain in domains:
                 for state in hass.states.async_all(domain):
+                    eid = state.entity_id
                     fname = (state.attributes.get("friendly_name") or "").lower()
+                    fname_display = state.attributes.get("friendly_name", eid)
                     if corrected in fname:
-                        score = len(corrected) / max(len(fname), 1) * 90
-                        if score > best_score:
-                            best_score = score
-                            best_match = (state.entity_id,
-                                          state.attributes.get("friendly_name", state.entity_id))
+                        _consider(eid, fname_display, len(corrected) / max(len(fname), 1) * 90)
                     fuzz = _fuzzy_score(corrected, fname)
-                    if fuzz > 55 and fuzz > best_score:
-                        best_score = fuzz
-                        best_match = (state.entity_id,
-                                      state.attributes.get("friendly_name", state.entity_id))
+                    if fuzz > 55:
+                        _consider(eid, fname_display, fuzz)
 
-    # ── Tier 6: area-based fallback ────────────────────────────────
-    if not best_match and domain_hint:
+    # ── Tier 7: area-based fallback ────────────────────────────────
+    # ALL eligible entities in the first matching area are collected before
+    # deciding, rather than returning the first registry entry found.
+    if not candidate_scores and domain_hint:
         try:
             from homeassistant.helpers import (
                 area_registry as areg, entity_registry as er, device_registry as dr)
@@ -439,6 +494,7 @@ def _find_entity(hass, name_fragment, domain_hint=None):
             dev_reg = dr.async_get(hass)
             for area in area_reg.async_list_areas():
                 if fragment in area.name.lower():
+                    eligible: dict = {}
                     for entry in ent_reg.entities.values():
                         if entry.domain != domain_hint:
                             continue
@@ -449,20 +505,42 @@ def _find_entity(hass, name_fragment, domain_hint=None):
                         if in_area:
                             state = hass.states.get(entry.entity_id)
                             if state:
-                                return (entry.entity_id,
-                                        state.attributes.get("friendly_name", entry.entity_id))
+                                eligible.setdefault(entry.entity_id, {
+                                    "entity_id": entry.entity_id,
+                                    "friendly_name": state.attributes.get(
+                                        "friendly_name", entry.entity_id),
+                                })
+                    if len(eligible) > 1:
+                        _LOGGER.info("Entity resolve: '%s' ambiguous — %d entities in area",
+                                     fragment, len(eligible))
+                        return _AmbiguousEntity(list(eligible.values()))
+                    if len(eligible) == 1:
+                        only = next(iter(eligible.values()))
+                        return (only["entity_id"], only["friendly_name"])
+                    # zero eligible in this area — keep checking other areas
         except Exception:
             pass
 
-    if best_match and best_score > 25:
-        _LOGGER.info("Entity resolve: '%s' → %s (score=%.0f)", fragment, best_match[0], best_score)
-        return best_match
+    # ── Final decision ──────────────────────────────────────────────
+    if candidate_scores:
+        ranked = sorted(candidate_scores.values(), key=lambda c: (-c["score"], c["entity_id"]))
+        top = ranked[0]
+        if top["score"] > 25:
+            if len(ranked) > 1:
+                second = ranked[1]
+                if second["score"] > 25 and second["score"] / top["score"] >= 0.75:
+                    _LOGGER.info("Entity resolve: '%s' ambiguous — top=%.0f second=%.0f",
+                                 fragment, top["score"], second["score"])
+                    return _AmbiguousEntity([top, second])
+            _LOGGER.info("Entity resolve: '%s' → %s (score=%.0f)",
+                         fragment, top["entity_id"], top["score"])
+            return (top["entity_id"], top["friendly_name"])
 
     # A failed resolution is normal, expected control flow: the phrase looked
     # vaguely command-like but matched no device, so the caller falls through
     # to the LLM (which has fuzzy search + aliases). DEBUG, not WARNING — this
     # is not an error condition and should not surface in the user's log.
-    _LOGGER.debug("Entity resolve unmatched: '%s' (domain=%s, best=%.0f)", fragment, domain_hint, best_score)
+    _LOGGER.debug("Entity resolve unmatched: '%s' (domain=%s)", fragment, domain_hint)
     return None
 
 
@@ -983,6 +1061,11 @@ async def try_local(hass, text, honorific="sir", force=False):
         if not name_frag:
             continue
         resolved = _find_entity(hass, name_frag, domain_hint) or _find_entity(hass, name_frag, None)
+        if isinstance(resolved, _AmbiguousEntity):
+            return LocalResult(
+                text=_build_local_clarification(resolved.candidates, addr),
+                success=False,
+            )
         if not resolved:
             # Track failure but keep trying other patterns/domains
             _last_failed_name = name_frag
@@ -1110,6 +1193,11 @@ async def try_local(hass, text, honorific="sir", force=False):
     # which wastes a full registry scan and (previously) logged noise.
     if complexity < 40 and _looks_like_entity_name(normalized):
         resolved = _find_entity(hass, normalized, None)
+        if isinstance(resolved, _AmbiguousEntity):
+            return LocalResult(
+                text=_build_local_clarification(resolved.candidates, addr),
+                success=False,
+            )
         if resolved:
             entity_id, fname = resolved
             state = hass.states.get(entity_id)

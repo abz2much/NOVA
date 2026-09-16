@@ -14,7 +14,18 @@ def cc(load):
 
 def _wire(cc, monkeypatch, *, enabled, area_of, occupied_areas, sats_by_area,
           area_occupied):
-    """Point continued_conversation at controlled config + routing."""
+    """Point continued_conversation at controlled config + routing.
+
+    Patches BOTH sys.modules and the `jc` package's own attribute for each
+    name: `from . import nova_config` resolves via getattr(jc_package,
+    "nova_config") once that attribute exists (Python caches it there the
+    first time anything really imports jc.nova_config), and a plain
+    sys.modules patch alone has no effect once that attribute is cached --
+    confirmed live: any other test that calls a code path touching
+    voice_confirm._cfg (e.g. local_engine.try_local on a protected action)
+    imports the real jc.nova_config first, after which this fixture's old
+    sys.modules-only patch silently stopped working depending on test
+    order."""
     pkg = cc.__name__.rsplit(".", 1)[0]
     import sys, types
     jc = types.SimpleNamespace(
@@ -27,6 +38,10 @@ def _wire(cc, monkeypatch, *, enabled, area_of, occupied_areas, sats_by_area,
     )
     monkeypatch.setitem(sys.modules, f"{pkg}.nova_config", jc)
     monkeypatch.setitem(sys.modules, f"{pkg}.audio_routing", ar)
+    pkg_module = sys.modules.get(pkg)
+    if pkg_module is not None:
+        monkeypatch.setattr(pkg_module, "nova_config", jc, raising=False)
+        monkeypatch.setattr(pkg_module, "audio_routing", ar, raising=False)
 
 
 def test_disabled_always_returns_original(cc, monkeypatch):
