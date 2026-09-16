@@ -1602,9 +1602,12 @@ async def _exec_home_summary(hass: HomeAssistant, args: dict) -> str:
     summary["lights_on_count"] = len(on_lights)
 
     # Locks
+    from .cognitive_core import _lockdown_exempt_locks
+    exempt = _lockdown_exempt_locks()
     unlocked = [
         s.attributes.get("friendly_name", s.entity_id)
-        for s in hass.states.async_all("lock") if s.state == "unlocked"
+        for s in hass.states.async_all("lock")
+        if s.state == "unlocked" and s.entity_id not in exempt
     ]
     summary["locks_unlocked"] = unlocked
 

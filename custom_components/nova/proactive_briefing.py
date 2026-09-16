@@ -280,7 +280,24 @@ async def _trigger_briefing(
     # Build extra context based on reason
     extra_context = ""
     if reason == "arrival":
-        extra_context = f"{person_name} just arrived home. This is a welcome briefing."
+        if honorific:
+            # honorific is non-empty only when exactly one person is home
+            # (see honorific.py) — that's the person who just walked in, so
+            # this briefing is spoken directly to them. Telling the model
+            # their name AND instructing it to greet "sir"/"ma'am" produced
+            # redundant lines like "Good afternoon, sir. Abi has just
+            # arrived home." Drop the name restatement; the greeting alone
+            # already addresses them.
+            extra_context = (
+                "This welcome-home briefing is addressed directly to the "
+                "person who just walked in. Do not restate their name or "
+                "the fact that they arrived — the greeting already covers that."
+            )
+        else:
+            # Nobody specific is being addressed (others already home, or
+            # this is a whole-house broadcast) — naming who arrived is the
+            # useful part for everyone else.
+            extra_context = f"{person_name} just arrived home. This is a welcome briefing."
     elif reason == "security":
         extra_context = (
             "Multiple security events detected in a short period. "
@@ -307,6 +324,12 @@ async def _trigger_briefing(
         if weather:
             context_lines.append(f"Weather: {weather}.")
         open_things = _gather_open_things(hass)
+        if reason == "arrival":
+            # The arrival trigger IS a door opening (see _configured_front_door)
+            # — reporting that door as "open" on the very briefing it caused
+            # is stating the obvious. Unlocked locks are still worth a
+            # mention (that's not self-evident from having just walked in).
+            open_things = [item for item in open_things if not item.endswith("is open")]
         if open_things:
             context_lines.append(f"Open/unlocked: {', '.join(open_things)}.")
         events = _gather_overnight_events(hass, 4)
@@ -323,7 +346,10 @@ async def _trigger_briefing(
         # blank subject or a dangling "Begin with 'Good morning, .'"
         if honorific:
             to_whom = f"to {honorific}"
-            begin_with = f"Begin with '{greeting}, {honorific}.'"
+            if reason == "arrival":
+                begin_with = f"Begin with 'Welcome home, {honorific}.'"
+            else:
+                begin_with = f"Begin with '{greeting}, {honorific}.'"
         else:
             to_whom = "to the household"
             begin_with = f"Begin with '{greeting}.'"

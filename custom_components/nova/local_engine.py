@@ -712,8 +712,11 @@ def _query_resp(hass, action, entity_id, fname, h="sir"):
 
 def _home_status(hass, h="sir"):
     addr = f", {h}" if h else ""
+    from .cognitive_core import _lockdown_exempt_locks
+    exempt = _lockdown_exempt_locks()
     lights_on = sum(1 for s in hass.states.async_all("light") if s.state == "on")
-    locks_ul = sum(1 for s in hass.states.async_all("lock") if s.state == "unlocked")
+    locks_ul = sum(1 for s in hass.states.async_all("lock")
+                   if s.state == "unlocked" and s.entity_id not in exempt)
     doors_open = sum(1 for s in hass.states.async_all("binary_sensor")
                      if s.attributes.get("device_class") == "door" and s.state == "on")
     people = sum(1 for s in hass.states.async_all("person") if s.state == "home")
@@ -749,8 +752,10 @@ def _ctx_query(hass, qtype, h="sir", area_match=""):
         for s in hass.states.async_all("cover"):
             if s.state == "open":
                 items.append(s.attributes.get("friendly_name", s.entity_id))
+        from .cognitive_core import _lockdown_exempt_locks
+        exempt = _lockdown_exempt_locks()
         for s in hass.states.async_all("lock"):
-            if s.state == "unlocked":
+            if s.state == "unlocked" and s.entity_id not in exempt:
                 items.append(s.attributes.get("friendly_name", s.entity_id) + " (unlocked)")
         if not items:
             return f"Everything is closed and secured{addr}."
@@ -951,8 +956,10 @@ async def try_local(hass, text, honorific="sir", force=False):
                     off_count += 1
                 except Exception:
                     pass
+        from .cognitive_core import _lockdown_exempt_locks
+        exempt = _lockdown_exempt_locks()
         for s in hass.states.async_all("lock"):
-            if s.state == "unlocked":
+            if s.state == "unlocked" and s.entity_id not in exempt:
                 try:
                     await hass.services.async_call("lock", "lock", {"entity_id": s.entity_id}, blocking=False)
                 except Exception:
