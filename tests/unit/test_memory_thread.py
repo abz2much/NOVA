@@ -208,3 +208,61 @@ def test_format_seed_message_default_token_looks_random_not_fixed(mt):
     import re
     content = mt.format_seed_message([{"role": "user", "content": "hi"}])["content"]
     assert re.search(r"BEGIN_HISTORY_[0-9a-f]{16}", content)
+
+
+# ── Phase 2: subject-scoped fallback, tried only when device_id is empty ────
+
+async def test_load_recent_subject_fallback_used_when_device_id_scope_empty(
+    mt, fake_hass, load, monkeypatch,
+):
+    db = load("database")
+    calls = []
+
+    def _rec(hours, device_id, limit, subject=None):
+        calls.append({"hours": hours, "device_id": device_id, "limit": limit, "subject": subject})
+        if subject:
+            return [{"role": "user", "content": "alice's earlier question"}]
+        return []
+
+    monkeypatch.setattr(db, "get_recent_messages", _rec)
+    result = await mt.load_recent(fake_hass, 48, 12, device_id="new-conv-id", subject="alice")
+    assert result == [{"role": "user", "content": "alice's earlier question"}]
+    assert len(calls) == 2
+    assert calls[0] == {"hours": 48, "device_id": "new-conv-id", "limit": 12, "subject": None}
+    assert calls[1] == {"hours": 48, "device_id": None, "limit": 12, "subject": "alice"}
+
+
+async def test_load_recent_no_subject_fallback_when_device_id_scope_has_rows(
+    mt, fake_hass, load, monkeypatch,
+):
+    db = load("database")
+    calls = []
+
+    def _rec(hours, device_id, limit, subject=None):
+        calls.append(1)
+        if device_id == "existing-conv":
+            return [{"role": "user", "content": "same-conversation history"}]
+        return []
+
+    monkeypatch.setattr(db, "get_recent_messages", _rec)
+    result = await mt.load_recent(fake_hass, 48, 12, device_id="existing-conv", subject="alice")
+    assert result == [{"role": "user", "content": "same-conversation history"}]
+    assert len(calls) == 1  # conversation-scoped succeeded -- fallback never tried, never merged
+
+
+async def test_load_recent_no_subject_fallback_when_subject_is_none(
+    mt, fake_hass, load, monkeypatch,
+):
+    """Unresolved identity (or "primary") must pass subject=None, which
+    disables the fallback entirely -- never queries by subject at all."""
+    db = load("database")
+    calls = []
+
+    def _rec(hours, device_id, limit, subject=None):
+        calls.append(1)
+        return []
+
+    monkeypatch.setattr(db, "get_recent_messages", _rec)
+    result = await mt.load_recent(fake_hass, 48, 12, device_id="new-conv-id", subject=None)
+    assert result == []
+    assert len(calls) == 1  # only the device_id-scoped call, no subject attempt

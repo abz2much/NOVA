@@ -55,7 +55,7 @@ def test_relevance_decision_precedes_all_five_persistence_writes():
     gate_idx = _index("if not relevant:")
     writes = {
         "in-session history append": 'history.append({"role": "user", "content": user_input.text})',
-        "conversation DB write": 'save_message("user", user_input.text, device_id=cid)',
+        "conversation DB write": 'save_message, "user", user_input.text, cid, episodic_subject)',
         "semantic-memory write": "lambda: store_memory(user_input.text, role=\"user\",",
         "semantic recall": "get_conversation_context, user_input.text, 3, cid,",
         "curated-knowledge injection": "lambda: knowledge.prompt_block(user_input.text, subjects=subjects))",
@@ -74,7 +74,7 @@ def test_relevance_decision_precedes_history_accessor_and_seed():
     # persistence writes that follow them.
     gate_idx = _index("if not relevant:")
     assert _index("history   = self._history(cid)") > gate_idx
-    assert _index("await self._maybe_seed_history(cid, history)") > gate_idx
+    assert _index("await self._maybe_seed_history(cid, history, subject=episodic_subject)") > gate_idx
 
 
 def test_persona_construction_is_the_only_thing_left_before_the_decision():
@@ -182,7 +182,7 @@ def test_routing_gate_is_still_reachable_after_persistence_and_offer_block():
     # (so it persists), but a reply that's neither accept/decline nor
     # addressed to Nova must still fail to ROUTE anywhere. The routing gate
     # must sit after both the persistence writes and the offer short-circuit.
-    persistence_idx = _index('save_message("user", user_input.text, device_id=cid)')
+    persistence_idx = _index('save_message, "user", user_input.text, cid, episodic_subject)')
     offer_shortcircuit_idx = _index("if offer_reply is not None:")
     routing_gate_idx = _index("if gate_enabled and not is_addressed:")
     assert offer_shortcircuit_idx > persistence_idx
@@ -195,7 +195,7 @@ def test_offer_short_circuit_returns_after_persistence_writes():
     # A pending-offer accept/decline reply must still be persisted before its
     # own short-circuit return — i.e. persistence for THIS turn happens
     # before the "Done"/"Understood" canned reply is sent.
-    persistence_idx = _index('save_message("user", user_input.text, device_id=cid)')
+    persistence_idx = _index('save_message, "user", user_input.text, cid, episodic_subject)')
     offer_return_idx = SRC.find(
         "return conversation.ConversationResult(response=ir, conversation_id=cid)",
         _index("if offer_reply is not None:"),
