@@ -1,3 +1,9 @@
+## [7.104.1] — fix: arrival/departure briefing wording, ignore thermostat locks
+
+- Arrival briefing no longer restates the arriving person's name when addressing them directly by honorific ("Good afternoon, sir. Abi has just arrived home." → "Welcome home, sir."), and drops the open-door line from the briefing context since the arrival trigger IS a door opening.
+- Departure announcements now escalate to medium urgency when the last person home leaves, so routing correctly pushes a phone notification instead of speaking into an empty house — low-urgency routing was trusting room occupancy sensors, which can still read "on" briefly after someone physically walks out.
+- Thermostat keypad/child locks (already exempt from the lockdown auto-lock sweep) are now also excluded everywhere else Nova talks about or acts on "unlocked locks": briefings, home state summary, the status/what's-open/goodnight local intents, and the agent's home-state context.
+
 ## [7.104.0] — Spoken History: see and repeat what Nova has said
 
 - New persistent Spoken History view in the Logs tab, beside System Log and Decisions: the last 100 confirmed announcements Nova sent to a speaker (welcome-home, reminders, alerts, briefings, manual tests, confirmed replies), each with its source, time, spoken text, and speaker.
