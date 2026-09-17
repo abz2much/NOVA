@@ -18,7 +18,13 @@ whole-home load matched against a declared appliance (whole_home_match).
 Everything else (unidentified, keyword/area/sibling-name guesses, power
 fingerprinting, unmatched whole-home deltas) keeps being tracked and logged
 (appliance learning is unaffected) but can never reach speech or a push
-notification, regardless of appliance_power_guessing.
+notification.
+
+Follow-up: appliance_power_guessing and appliance_announce_unknown (the
+settings this originally neutralised) have since been removed entirely --
+config loading, websocket response, writable allowlist, and panel UI -- so
+_MonitorState no longer even has power_guessing/announce_unknown attributes.
+Nothing here depends on either setting existing any more.
 """
 import time as _time
 
@@ -146,12 +152,24 @@ async def test_unmatched_whole_home_load_stays_silent(am, fake_hass, announce_sp
     assert announce_spy == []
 
 
-# ── appliance_power_guessing no longer overrides the provenance gate ────────
+# ── The old override settings are gone entirely, not just unused ────────────
+# appliance_power_guessing and appliance_announce_unknown were removed
+# (config loading, websocket response, writable allowlist, and panel UI) --
+# the provenance gate never reads a setting to decide whether to speak, so
+# there is nothing left to depend on.
 
-async def test_power_guessing_enabled_does_not_unlock_an_unidentified_guess(
+def test_monitor_state_no_longer_has_the_removed_settings(am):
+    mon = am._MonitorState()
+    assert not hasattr(mon, "power_guessing")
+    assert not hasattr(mon, "announce_unknown")
+
+
+async def test_unmatched_guess_stays_silent_with_no_guessing_setting_at_all(
     am, fake_hass, announce_spy,
 ):
-    am._MON.power_guessing = True   # previously the escape hatch
+    """An unidentified/guessed load stays silent purely because of its
+    discovery method -- no config key controls this decision any more."""
+    am._MON.config = {}   # nothing resembling appliance_power_guessing set
     sensor = _sensor(am, "sensor.kitchen_counter_light_power",
                       "Kitchen Counter Light Power", am.ApplianceType.GENERIC,
                       "unidentified")
@@ -159,8 +177,10 @@ async def test_power_guessing_enabled_does_not_unlock_an_unidentified_guess(
     assert announce_spy == []
 
 
-async def test_power_guessing_disabled_still_allows_trusted_native(am, fake_hass, announce_spy):
-    am._MON.power_guessing = False
+async def test_trusted_native_still_announces_with_no_guessing_setting_at_all(
+    am, fake_hass, announce_spy,
+):
+    am._MON.config = {}
     sensor = _sensor(am, "sensor.dishwasher_job_state", "Dishwasher",
                       am.ApplianceType.DISHWASHER, "native_status")
     await am._announce_done(sensor, "dishwasher")

@@ -173,3 +173,131 @@ async def test_alert_message_never_uses_usually_as_sole_justification(cog, fake_
     assert len(out) == 1
     assert "usually" not in out[0]["message"]
     assert "open" not in out[0]["message"].lower().replace("unlocked", "")  # no suggestion to open/unlock anything
+
+
+# ── Corrective fix 1: reuse presence.everyone_confidently_away(), which ─────
+# ── fails safe on unknown/unavailable presence, instead of duplicated logic ─
+
+async def test_all_configured_people_explicitly_away_is_true(cog, fake_hass):
+    fake_hass.states.set("person.abi", "not_home")
+    fake_hass.states.set("person.rachel", "away")
+    assert cog._all_tracked_residents_away(fake_hass) is True
+
+
+async def test_one_person_home_is_false(cog, fake_hass):
+    fake_hass.states.set("person.abi", "home")
+    fake_hass.states.set("person.rachel", "not_home")
+    assert cog._all_tracked_residents_away(fake_hass) is False
+
+
+async def test_one_person_unknown_is_false(cog, fake_hass):
+    fake_hass.states.set("person.abi", "unknown")
+    fake_hass.states.set("person.rachel", "not_home")
+    assert cog._all_tracked_residents_away(fake_hass) is False
+
+
+async def test_one_person_unavailable_is_false(cog, fake_hass):
+    fake_hass.states.set("person.abi", "unavailable")
+    fake_hass.states.set("person.rachel", "not_home")
+    assert cog._all_tracked_residents_away(fake_hass) is False
+
+
+async def test_no_person_entities_is_false(cog, fake_hass):
+    assert cog._all_tracked_residents_away(fake_hass) is False
+
+
+async def test_unrelated_device_tracker_away_does_not_prove_household_away(cog, fake_hass):
+    """Household residents are person.* entities only -- an arbitrary
+    device_tracker (a guest's phone, a car, a package courier's device)
+    marked "away" must never stand in for a configured resident."""
+    fake_hass.states.set("device_tracker.delivery_van", "not_home")
+    assert cog._all_tracked_residents_away(fake_hass) is False
+
+
+async def test_window_open_one_person_unknown_no_alert_end_to_end(cog, fake_hass):
+    """End-to-end through predict(): an uncertain presence state must not
+    let a less-secure deviation alert."""
+    now = _time.time()
+    fake_hass.states.set("binary_sensor.first_floor_windows", "on",
+                          device_class="window", friendly_name="First Floor Windows")
+    fake_hass.states.set("person.abi", "unknown")
+    _seed(cog, "binary_sensor.first_floor_windows", now, dominant_state="off", current_state="on")
+    out = cog.predict(fake_hass, now)
+    assert out == []
+
+
+# ── Corrective fix 2: only security-relevant cover device_classes ──────────
+# ── (door/garage/garage_door/gate/window) count for anticipation ───────────
+
+async def test_open_blind_everyone_away_no_prediction(cog, fake_hass):
+    now = _time.time()
+    fake_hass.states.set("cover.living_room_blind", "open", device_class="blind",
+                          friendly_name="Living Room Blind")
+    fake_hass.states.set("person.abi", "not_home")
+    _seed(cog, "cover.living_room_blind", now, dominant_state="closed", current_state="open")
+    out = cog.predict(fake_hass, now)
+    assert out == []
+
+
+async def test_open_curtain_or_shade_no_prediction(cog, fake_hass):
+    now = _time.time()
+    fake_hass.states.set("cover.bedroom_curtain", "open", device_class="curtain",
+                          friendly_name="Bedroom Curtain")
+    fake_hass.states.set("cover.kitchen_shade", "open", device_class="shade",
+                          friendly_name="Kitchen Shade")
+    fake_hass.states.set("person.abi", "not_home")
+    _seed(cog, "cover.bedroom_curtain", now, dominant_state="closed", current_state="open")
+    _seed(cog, "cover.kitchen_shade", now, dominant_state="closed", current_state="open")
+    out = cog.predict(fake_hass, now)
+    assert out == []
+
+
+async def test_open_cover_no_device_class_no_prediction(cog, fake_hass):
+    now = _time.time()
+    fake_hass.states.set("cover.mystery_cover", "open", friendly_name="Mystery Cover")
+    fake_hass.states.set("person.abi", "not_home")
+    _seed(cog, "cover.mystery_cover", now, dominant_state="closed", current_state="open")
+    out = cog.predict(fake_hass, now)
+    assert out == []
+
+
+async def test_open_garage_everyone_away_can_alert_with_real_reason(cog, fake_hass):
+    now = _time.time()
+    fake_hass.states.set("cover.garage_door", "open", device_class="garage",
+                          friendly_name="Garage Door")
+    fake_hass.states.set("person.abi", "not_home")
+    _seed(cog, "cover.garage_door", now, dominant_state="closed", current_state="open")
+    out = cog.predict(fake_hass, now)
+    assert len(out) == 1
+    assert "nobody appears to be home" in out[0]["message"]
+
+
+async def test_open_gate_everyone_away_can_alert_with_real_reason(cog, fake_hass):
+    now = _time.time()
+    fake_hass.states.set("cover.front_gate", "open", device_class="gate",
+                          friendly_name="Front Gate")
+    fake_hass.states.set("person.abi", "not_home")
+    _seed(cog, "cover.front_gate", now, dominant_state="closed", current_state="open")
+    out = cog.predict(fake_hass, now)
+    assert len(out) == 1
+    assert "nobody appears to be home" in out[0]["message"]
+
+
+async def test_closed_blind_usually_open_stays_silent(cog, fake_hass):
+    """Safer/neutral-state rule still applies regardless of device_class."""
+    now = _time.time()
+    fake_hass.states.set("cover.living_room_blind", "closed", device_class="blind",
+                          friendly_name="Living Room Blind")
+    _seed(cog, "cover.living_room_blind", now, dominant_state="open", current_state="closed")
+    out = cog.predict(fake_hass, now)
+    assert out == []
+
+
+async def test_closed_garage_usually_open_stays_silent(cog, fake_hass):
+    now = _time.time()
+    fake_hass.states.set("cover.garage_door", "closed", device_class="garage",
+                          friendly_name="Garage Door")
+    fake_hass.states.set("person.abi", "not_home")
+    _seed(cog, "cover.garage_door", now, dominant_state="open", current_state="closed")
+    out = cog.predict(fake_hass, now)
+    assert out == []

@@ -452,6 +452,13 @@ def sample_occupancy(hass, now: float = None) -> int:
 
 _SECURE_BINARY_CLASSES = {"door", "window", "garage_door", "opening", "garage"}
 
+# Cover device_classes that are actually security-relevant openings. Blinds,
+# curtains, shades, shutters, awnings and dampers are window TREATMENTS, not
+# openings a burglar could use -- an open blind is not a security-relevant
+# deviation, and must never be treated as one just because it shares the
+# `cover` domain with a garage door.
+_SECURITY_COVER_CLASSES = {"door", "garage", "garage_door", "gate", "window"}
+
 
 def _security_direction(domain: str, dclass, state) -> Optional[bool]:
     """Is `state` the safer/secure direction for this entity, the less-secure
@@ -475,6 +482,8 @@ def _security_direction(domain: str, dclass, state) -> Optional[bool]:
             return False
         return None
     if domain == "cover":
+        if dclass not in _SECURITY_COVER_CLASSES:
+            return None         # blind/curtain/shade/shutter/awning/damper/unknown/missing
         if s in ("closed", "closing"):
             return True
         if s in ("open", "opening"):
@@ -489,25 +498,19 @@ def _security_direction(domain: str, dclass, state) -> Optional[bool]:
 
 
 def _all_tracked_residents_away(hass) -> bool:
-    """Positively confirmed absence of every tracked household member --
-    every person/device_tracker entity that exists reads away, and at least
-    one actually exists to read. Missing or untracked presence is NEVER
-    evidence of an empty house (same principle, deliberately reimplemented
-    standalone here so cognition.py has no dependency on cognitive_core.py's
-    Sentinel/lockdown internals): with nobody tracked at all, "away" can't be
-    positively confirmed, so this returns False and no alert follows."""
-    tracked = False
-    for st in hass.states.async_all("person"):
-        tracked = True
-        if str(st.state).lower() == "home":
-            return False
-    for st in hass.states.async_all("device_tracker"):
-        s = str(st.state).lower()
-        if s == "home":
-            return False
-        if s in ("home", "not_home", "away"):
-            tracked = True
-    return tracked
+    """Positively confirmed absence of every configured household member.
+
+    Delegates to presence.everyone_confidently_away(hass) -- the existing,
+    already-correct source of truth (household residents are person.*
+    entities only, never arbitrary device_tracker.* entities; every one of
+    them must read an explicitly-away state; missing/unknown/unavailable
+    presence, or no configured people at all, returns False) -- rather than
+    duplicating that logic here with its own, subtly different rules."""
+    try:
+        from . import presence
+        return bool(presence.everyone_confidently_away(hass))
+    except Exception:
+        return False
 
 
 def _conflicting_armed_alarm(hass) -> bool:
