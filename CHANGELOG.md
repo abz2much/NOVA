@@ -1,3 +1,15 @@
+## [7.105.0] — honest action verification, deterministic entity resolution, proactive false-positive fixes
+
+- Irrelevant ambient speech is now rejected before it can alter conversation memory.
+- Conversation continuity is now scoped per person, while still retaining shared household context.
+- Recent conversation retrieval now selects the latest messages correctly and keeps exchanges intact.
+- Ambiguous device names now produce a clarification instead of silently acting on a near match.
+- Device actions distinguish verified, accepted, unverified, and failed outcomes.
+- Bulk actions, plans, scenes, scripts, lockdown, and local commands no longer claim completion without evidence.
+- Removed the unused direct-LLM conversation path.
+- Appliance completion announcements now require native or user-declared provenance — generic power guesses stay silent.
+- State anticipation no longer treats ordinary habits as reasons to interrupt: safer states stay silent, and less-secure states require an evidence-backed reason.
+
 ## [7.104.1] — fix: arrival/departure briefing wording, ignore thermostat locks
 
 - Arrival briefing no longer restates the arriving person's name when addressing them directly by honorific ("Good afternoon, sir. Abi has just arrived home." → "Welcome home, sir."), and drops the open-door line from the briefing context since the arrival trigger IS a door opening.
