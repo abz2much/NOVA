@@ -27,6 +27,7 @@ import logging
 import math
 import time
 from collections import deque, namedtuple
+from typing import Optional
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -449,11 +450,101 @@ def sample_occupancy(hass, now: float = None) -> int:
     return sampled
 
 
+_SECURE_BINARY_CLASSES = {"door", "window", "garage_door", "opening", "garage"}
+
+# Cover device_classes that are actually security-relevant openings. Blinds,
+# curtains, shades, shutters, awnings and dampers are window TREATMENTS, not
+# openings a burglar could use -- an open blind is not a security-relevant
+# deviation, and must never be treated as one just because it shares the
+# `cover` domain with a garage door.
+_SECURITY_COVER_CLASSES = {"door", "garage", "garage_door", "gate", "window"}
+
+
+def _security_direction(domain: str, dclass, state) -> Optional[bool]:
+    """Is `state` the safer/secure direction for this entity, the less-secure
+    direction, or not a security-relevant judgement at all?　Returns True
+    (safer), False (less secure), or None when the domain/class/state isn't
+    one this can confidently classify -- callers must treat None like True
+    (never a reason to alert), since guessing "less secure" wrongly is the
+    exact failure mode this exists to prevent. Deliberately narrow: this only
+    ever sees entities from OCCUPANCY_DOMAINS/OCCUPANCY_BINARY_CLASSES."""
+    s = str(state).lower()
+    if domain == "lock":
+        if s == "locked":
+            return True
+        if s == "unlocked":
+            return False
+        return None
+    if domain == "alarm_control_panel":
+        if s.startswith("armed"):
+            return True
+        if s == "disarmed":
+            return False
+        return None
+    if domain == "cover":
+        if dclass not in _SECURITY_COVER_CLASSES:
+            return None         # blind/curtain/shade/shutter/awning/damper/unknown/missing
+        if s in ("closed", "closing"):
+            return True
+        if s in ("open", "opening"):
+            return False
+        return None
+    if domain == "binary_sensor" and s in ("on", "off"):
+        if dclass in _SECURE_BINARY_CLASSES:
+            return s == "off"          # off = closed = safer, on = open = less secure
+        if dclass == "lock":
+            return s == "off"          # off = locked = safer, on = unlocked = less secure
+    return None
+
+
+def _all_tracked_residents_away(hass) -> bool:
+    """Positively confirmed absence of every configured household member.
+
+    Delegates to presence.everyone_confidently_away(hass) -- the existing,
+    already-correct source of truth (household residents are person.*
+    entities only, never arbitrary device_tracker.* entities; every one of
+    them must read an explicitly-away state; missing/unknown/unavailable
+    presence, or no configured people at all, returns False) -- rather than
+    duplicating that logic here with its own, subtly different rules."""
+    try:
+        from . import presence
+        return bool(presence.everyone_confidently_away(hass))
+    except Exception:
+        return False
+
+
+def _conflicting_armed_alarm(hass) -> bool:
+    """A currently-armed alarm is itself a deterministic, actionable reason
+    to flag a less-secure deviation -- the house is meant to be secured
+    right now regardless of who's tracked as home or away."""
+    for st in hass.states.async_all("alarm_control_panel"):
+        if str(st.state).lower().startswith("armed"):
+            return True
+    return False
+
+
 def predict(hass, now: float = None) -> list:
     """
-    Flag entities currently in a state that's unusual for this hour, held long
-    enough to not be a transient. Returns action dicts (same shape the proactive
-    managers use) for the cognitive-core tick to announce through the gated path.
+    Flag entities currently in a LESS-SECURE state that's unusual for this
+    hour, held long enough to not be a transient, AND backed by a separate,
+    deterministic, actionable reason -- not just the historical pattern
+    itself.
+
+    A learned habit is not automatically an actionable expectation: opening a
+    window is an activity or preference, not something worth interrupting the
+    user about just because it's uncommon at this hour. So this deliberately
+    does NOT alert:
+      - when the current state is the SAFER/neutral direction (closed,
+        locked, armed) even if the opposite is historically dominant --
+        Nova never nudges toward recreating a less-secure historical state;
+      - when the current state is less secure (open, unlocked, disarmed) but
+        there's no corroborating reason -- the deviation is still recorded
+        into the occupancy model (sample_occupancy, unaffected by this
+        function) so the pattern keeps being learned, it just doesn't
+        interrupt anyone without cause.
+    The only accepted reasons are a positively confirmed absence of every
+    tracked household member, or a conflicting armed security state -- never
+    the mere absence of presence tracking, and never "usually" on its own.
     """
     now = now or time.time()
     hour = time.localtime(now).tm_hour
@@ -480,15 +571,25 @@ def predict(hass, now: float = None) -> list:
             dominant = max(bucket, key=bucket.get)
             if dominant == cur:
                 continue
-            _PREDICT_COOLDOWNS[eid] = now
+
             dclass = st.attributes.get("device_class")
-            name = st.attributes.get("friendly_name", eid)
             domain = eid.split(".", 1)[0]
+            # The deviation itself is never sufficient -- see docstring. Only
+            # a genuinely less-secure current state, corroborated by a
+            # separate deterministic reason, is worth interrupting anyone.
+            if _security_direction(domain, dclass, cur) is not False:
+                continue
+            if _all_tracked_residents_away(hass):
+                reason = "nobody appears to be home"
+            elif _conflicting_armed_alarm(hass):
+                reason = "the alarm is armed"
+            else:
+                continue  # no corroborating evidence — keep learning, stay silent
+
+            _PREDICT_COOLDOWNS[eid] = now
+            name = st.attributes.get("friendly_name", eid)
             urgency = "medium" if domain in ("lock", "alarm_control_panel", "cover") else "low"
-            msg = (
-                f"{name} is {_humanize(cur, dclass)}. Around this time it's "
-                f"usually {_humanize(dominant, dclass)}, so I thought it worth mentioning."
-            )
+            msg = f"{name} is {_humanize(cur, dclass)} while {reason}."
             out.append({
                 "type": "anticipation",
                 "urgency": urgency,

@@ -85,7 +85,6 @@ const PANEL = {
     ],
     disabled_sentinel_rules: ["garage_left_open"],
     appliance_profile: [{ name: "Dryer", type: "dryer", entity: "", watts: 4200 }],
-    appliance_announce_unknown: false,
     memory_stats: { backend: "sqlite-vec", total_memories: 214 },
     observer_stats: {
       running: true, calls_last_hour: 4, rate_limit: 30, events_24h: 112, flagged_24h: 9,
@@ -1131,6 +1130,16 @@ setTimeout(async () => {
           && ac.querySelector(".new-appliance-name")?.value === "Dryer";
       })()],
   );
+  // Regression guard: the dead "Announce unidentified loads" toggle (backed
+  // by appliance_announce_unknown, which the announce chokepoint no longer
+  // reads at all) was removed rather than left as a control with no effect.
+  checks.push(["settings tab: Appliances card no longer has the dead 'Announce unidentified loads' toggle",
+    (() => {
+      const ac = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Appliances/.test(c.querySelector(".panel-title")?.textContent || ""));
+      return !!ac && !ac.querySelector("#newApplianceUnknown")
+        && !/loads matching no declared appliance/.test(ac.textContent || "");
+    })()],
+  );
   const applianceAddBtn = sRoot.getElementById("newApplianceAdd");
   applianceAddBtn.click();
   const newRows = sRoot.querySelectorAll(".new-appliance-row");
@@ -1784,6 +1793,18 @@ setTimeout(async () => {
   // text for the explicit override instead.
   checks.push(["new look's .settings-card[hidden] explicitly forces display:none (overrides its own display rule)",
     /\.settings-card\[hidden\]\s*\{\s*display\s*:\s*none\s*\}/.test(panelSrc)]);
+
+  // Regression guard: appliance_announce_unknown/appliance_power_guessing no
+  // longer have any effect on whether Nova announces a cycle (the provenance
+  // gate is unconditional) -- neither the removed setting keys, the removed
+  // toggle's element id, nor the old "falls back to generic power guesses"
+  // empty-state wording (which implied unidentified loads could announce)
+  // may reappear anywhere in the panel source.
+  checks.push(["panel source: dead appliance settings/wording were fully removed, not left dangling",
+    !/appliance_announce_unknown/.test(panelSrc)
+      && !/appliance_power_guessing/.test(panelSrc)
+      && !/newApplianceUnknown/.test(panelSrc)
+      && !/generic power guesses/.test(panelSrc)]);
 
   let ok = true;
   for (const [n, p] of checks) { console.log((p ? "  PASS  " : "  FAIL  ") + n); if (!p) ok = false; }

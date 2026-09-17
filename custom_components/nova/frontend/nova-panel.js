@@ -3680,17 +3680,13 @@ class NovaPanel extends HTMLElement {
     const cfg = this._data()?.config || {};
     const prof = cfg.appliance_profile || [];
     const rows = prof.map(a => this._applianceRowHtml(a)).join("")
-      || `<div class="stub-body">No appliances declared yet — Nova falls back to generic power guesses until you add some.</div>`;
+      || `<div class="stub-body">No appliances declared yet. Nova still tracks unidentified power sensors in the background, but only a declared or native appliance ever announces a finished cycle.</div>`;
     return `
       <div class="stub-body">Tell Nova which appliances exist so it names cycles correctly instead of guessing from the whole-home meter. Map a dedicated power or status entity when one exists; otherwise set typical running watts.</div>
       <div class="new-appliance-list" id="newApplianceList">${rows}</div>
       <div class="mode-grid">
         <button class="mode-chip" id="newApplianceAdd">+ Add appliance</button>
         <button class="mode-chip mode-chip-on" id="newApplianceSave">Save appliances</button>
-      </div>
-      <div class="cfg-row" style="margin-top:12px">
-        <label>Announce unidentified loads <span class="toggle-desc">loads matching no declared appliance</span></label>
-        <button class="toggle-btn ${cfg.appliance_announce_unknown ? "on" : "off"}" id="newApplianceUnknown">${cfg.appliance_announce_unknown ? "ON" : "OFF"}</button>
       </div>`;
   }
 
@@ -3699,7 +3695,6 @@ class NovaPanel extends HTMLElement {
     const apList = root.getElementById("newApplianceList");
     const apAdd = root.getElementById("newApplianceAdd");
     const apSave = root.getElementById("newApplianceSave");
-    const apUnknown = root.getElementById("newApplianceUnknown");
     if (apAdd && apList) {
       apAdd.addEventListener("click", () => {
         const empty = apList.querySelector(".stub-body");
@@ -3735,15 +3730,6 @@ class NovaPanel extends HTMLElement {
         });
         await this._rawSaveConfig("appliance_profile", JSON.stringify(out));
         try { await this._hass.callWS({ type: "nova/reload_appliances" }); } catch (err) { console.error("Nova: appliance reload failed", err); }
-        await this._fetchLiveData();
-        if (this._currentTab === "settings") this._render();
-      });
-    }
-    if (apUnknown) {
-      apUnknown.addEventListener("click", async () => {
-        const newVal = !apUnknown.classList.contains("on");
-        await this._rawSaveConfig("appliance_announce_unknown", newVal);
-        try { await this._hass.callWS({ type: "nova/reload_appliances" }); } catch (_) {}
         await this._fetchLiveData();
         if (this._currentTab === "settings") this._render();
       });

@@ -330,8 +330,6 @@ class _MonitorState:
         self.profile: list = []          # user-declared appliances (name/type/entity/watts)
         self.disagg: list = []           # declared appliances WITHOUT a dedicated entity
         self.claimed: set = set()        # entities owned by a declared appliance
-        self.announce_unknown: bool = False  # announce loads that match no declared appliance
-        self.power_guessing: bool = False     # announce fingerprint/auto-discovered guesses
         self.unsub = None
         self.running = False
 
@@ -944,23 +942,13 @@ def _process_delta(power_w: float) -> None:
                 elif _MON.profile:
                     # A profile is configured but nothing matched — do NOT claim a
                     # specific appliance (this is what caused wrong "washer done"
-                    # calls). Optionally note an unidentified load.
-                    if _MON.announce_unknown:
-                        synth = _SensorState(
-                            entity_id=dt.entity_id,
-                            friendly_name="an appliance",
-                            appliance=ApplianceType.GENERIC,
-                            discovery_method=f"whole_home_unmatched:{delta_w:.0f}W",
-                            peak_power=peak_w,
-                        )
-                        _MON.hass.async_create_task(
-                            _announce_done(synth, f"an appliance (~{delta_w:.0f}W)")
-                        )
-                    else:
-                        _LOGGER.info(
-                            "Unmatched load (~%.0fW) finished — not announced "
-                            "(no declared appliance matches)", delta_w,
-                        )
+                    # calls). An unmatched load is only ever an automatic guess,
+                    # never a trusted provenance (see _announce_done), so it's
+                    # observed/logged here but never announced or pushed.
+                    _LOGGER.info(
+                        "Unmatched load (~%.0fW) finished — not announced "
+                        "(no declared appliance matches)", delta_w,
+                    )
                 elif guess != "unknown":
                     # Legacy behaviour when no profile is configured at all.
                     result = _fingerprint_from_power(delta_w)
@@ -1009,15 +997,35 @@ async def _announce_done(sensor: _SensorState, appliance_label: str) -> None:
         )
         return
 
-    # Power-guessing gate: only NATIVE completion entities and USER-DECLARED
-    # appliances are trusted. Auto-discovered / power-fingerprinted detections are
-    # guesses and stay silent unless the user enables power guessing.
+    # Provenance gate: speech is earned by WHERE the identification came from,
+    # never by how confident a power-based guess happens to be. Only three
+    # provenances are trusted to speak or push:
+    #   - native_status*    — the appliance itself reports completion
+    #   - declared_entity*, explicit_config* — the user named this exact
+    #     entity as an appliance (Settings → Appliances, or config)
+    #   - whole_home_match:* — a whole-home load matched a user-declared
+    #     appliance's wattage, not just an arbitrary signature
+    # Everything else (unidentified, keyword/area/sibling name-guesses,
+    # fingerprint power-guesses, unmatched whole-home deltas) is exactly the
+    # class of false positive this exists to stop — a "Kitchen Counter Light
+    # Power" sensor, or any other differently-named light/plug/charger,
+    # reaches the exact same state machine as a real appliance with nothing
+    # but a naming or wattage coincidence behind it. Those keep being
+    # discovered, tracked, and logged (learning is unaffected) — they just
+    # never reach speech or a push notification. This governs ALL entry
+    # points into this function alike (native/declared/power-sensor/whole-
+    # home), since it's the single chokepoint. There is no opt-in override:
+    # the old appliance_power_guessing/appliance_announce_unknown settings
+    # that used to let an untrusted guess speak have been removed entirely
+    # (config, websocket response, writable allowlist, and panel UI) rather
+    # than left as dead controls — this decision is provenance-only, always.
     method = sensor.discovery_method or ""
     trusted = any(method.startswith(t) for t in
                   ("native_status", "declared_entity", "explicit_config", "whole_home_match"))
-    if not trusted and not _MON.power_guessing:
+    if not trusted:
         _LOGGER.info(
-            "Appliance announcement suppressed (power guessing off): %s [method=%s]",
+            "Appliance announcement suppressed (unconfirmed guess, not a "
+            "native/declared/whole-home-matched source): %s [method=%s]",
             appliance_label, method,
         )
         return
@@ -1031,16 +1039,16 @@ async def _announce_done(sensor: _SensorState, appliance_label: str) -> None:
     friendly = sensor.friendly_name or nice_name
 
     from . import persona
-    # Build the announcement message
-    if appliance_label.lower() in friendly.lower():
+    # Build the announcement message. A GENERIC type reaching here is a
+    # TRUSTED source (e.g. a user-declared appliance explicitly typed
+    # "appliance" — no more specific type to name) rather than an untrusted
+    # guess, but it must still never produce the templated "The Appliance is
+    # done." — there is nothing more specific to say than the entity's own
+    # name, which `friendly` already carries.
+    if sensor.appliance == ApplianceType.GENERIC:
+        message = persona.lead_in(honorific, f"{friendly} has finished its cycle.")
+    elif appliance_label.lower() in friendly.lower():
         message = persona.lead_in(honorific, f"the {nice_name} cycle is complete.")
-    elif "fingerprint" in sensor.discovery_method:
-        # Auto-identified — mention what we think it is
-        message = persona.lead_in(honorific,
-            f"{friendly} appears to have finished "
-            f"a cycle. Based on its power profile, it looks like a "
-            f"{nice_name}."
-        )
     else:
         message = persona.lead_in(honorific,
             f"{friendly} has finished its cycle. "
@@ -1191,8 +1199,6 @@ async def start(hass: HomeAssistant, config: dict) -> None:
     # home meter (the "Washer cycle complete" false positives). runtime_config
     # holds the live panel values; the persisted config is the boot-time fallback.
     _prof_val = None
-    _unknown_val = None
-    _guess_val = None
     try:
         from .const import DOMAIN as _DOM
         for _eid, _data in (hass.data.get(_DOM) or {}).items():
@@ -1200,10 +1206,6 @@ async def start(hass: HomeAssistant, config: dict) -> None:
                 _rc = _data["runtime_config"]
                 if "appliance_profile" in _rc:
                     _prof_val = _rc["appliance_profile"]
-                if "appliance_announce_unknown" in _rc:
-                    _unknown_val = _rc["appliance_announce_unknown"]
-                if "appliance_power_guessing" in _rc:
-                    _guess_val = _rc["appliance_power_guessing"]
                 break
     except Exception as _exc:
         _LOGGER.debug("Appliance profile runtime read note: %s", _exc)
@@ -1211,20 +1213,13 @@ async def start(hass: HomeAssistant, config: dict) -> None:
         try:
             from . import nova_config
             _persisted = await hass.async_add_executor_job(nova_config.get_all)
-            if isinstance(_persisted, dict):
-                if "appliance_profile" in _persisted:
-                    _prof_val = _persisted["appliance_profile"]
-                if _unknown_val is None and "appliance_announce_unknown" in _persisted:
-                    _unknown_val = _persisted["appliance_announce_unknown"]
+            if isinstance(_persisted, dict) and "appliance_profile" in _persisted:
+                _prof_val = _persisted["appliance_profile"]
         except Exception as _exc:
             _LOGGER.debug("Appliance profile persisted read note: %s", _exc)
     config = dict(config)
     if _prof_val is not None:
         config["appliance_profile"] = _prof_val
-    if _unknown_val is not None:
-        config["appliance_announce_unknown"] = _unknown_val
-    if _guess_val is not None:
-        config["appliance_power_guessing"] = _guess_val
     _MON.config = config
 
     # Discover sensors
@@ -1249,11 +1244,11 @@ async def start(hass: HomeAssistant, config: dict) -> None:
                 _MON.sensors.pop(seid, None)
                 _LOGGER.info("Appliance: power sensor %s superseded by native on same device", seid)
 
-    # Whole-home power guessing is OFF by default. When off, only NATIVE
-    # completion entities and USER-DECLARED appliances are announced; the
-    # fingerprint/area/auto-discovery guesses are suppressed at the announce
-    # chokepoint. The user can opt back into guessing from Settings.
-    _MON.power_guessing = bool(config.get("appliance_power_guessing", False))
+    # Only NATIVE completion entities, USER-DECLARED appliances, and a
+    # whole-home load matched against a declared appliance are ever
+    # announced; fingerprint/keyword/area/sibling/unmatched-whole-home
+    # guesses are suppressed at the announce chokepoint UNCONDITIONALLY —
+    # there is no config override for this (see _announce_done).
 
     # Discover whole-home energy meter for delta tracking
     _MON.delta = await hass.async_add_executor_job(
@@ -1285,7 +1280,6 @@ async def start(hass: HomeAssistant, config: dict) -> None:
                 )
 
     # ── User-declared appliance profile (Settings → Appliances) ──────────────
-    _MON.announce_unknown = bool(config.get("appliance_announce_unknown", False))
     _MON.profile = _normalize_profile(config)
     _MON.claimed = set()
     _MON.disagg = []

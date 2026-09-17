@@ -771,7 +771,6 @@ async def ws_get_panel_data(
                 "visitor_learning": bool(_runtime_opt(hass, entry, "visitor_learning", True)),
                 "rich_reasoning": bool(_runtime_opt(hass, entry, "rich_reasoning", False)),
                 "light_control_enabled": bool(_runtime_opt(hass, entry, "light_control_enabled", True)),
-                "appliance_power_guessing": bool(_runtime_opt(hass, entry, "appliance_power_guessing", False)),
                 "departure_alerts_enabled": bool(_runtime_opt(hass, entry, "departure_alerts_enabled", True)),
                 "routine_alerts_enabled": bool(_runtime_opt(hass, entry, "routine_alerts_enabled", True)),
                 "departure_lead_minutes": _runtime_opt(hass, entry, "departure_lead_minutes", 30),
@@ -810,7 +809,6 @@ async def ws_get_panel_data(
                 "lockdown": _get_lockdown_status(),
                 "appliances": _get_appliance_status(),
                 "appliance_profile": _get_runtime_json(hass, entry, "appliance_profile", []),
-                "appliance_announce_unknown": _runtime_opt(hass, entry, "appliance_announce_unknown", False),
                 "energy_cost_today_entity": str(_runtime_opt(hass, entry, "energy_cost_today_entity", "") or ""),
                 "energy_cost_net_entity": str(_runtime_opt(hass, entry, "energy_cost_net_entity", "") or ""),
                 "memory_stats": _get_memory_stats(),
@@ -1480,7 +1478,6 @@ PANEL_WRITABLE_KEYS = {
     "tts_use_ha_voice",              # bool: use Home Assistant's configured TTS voice instead of the Nova Piper voice
     "pattern_learn_motion",          # bool: learn motion/occupancy triggers for "when X, do Y" suggestions (rate-limited)
     "appliance_profile",            # JSON list of declared appliances (name/type/entity/watts)
-    "appliance_announce_unknown",   # bool: announce loads matching no declared appliance
     "camera_auto_analyze",          # bool: auto-inspect doorbell/person camera events
     "camera_auto_analyze_motion",   # bool: also auto-inspect motion events (noisier)
     "package_detection",            # bool: watch porch cameras for packages & mail
@@ -1490,7 +1487,6 @@ PANEL_WRITABLE_KEYS = {
     "pattern_min_occurrences",      # int: pattern engine repeat threshold
     "pattern_confidence",           # float: pattern engine confidence threshold
     "light_control_enabled",        # bool: allow toggling lights from the dashboard
-    "appliance_power_guessing",     # bool: announce fingerprint/auto-discovered guesses
     "energy_cost_today_entity",     # str: entity_id of an install's own "cost today" sensor,
                                      # preferred over solar.py's generic price x kWh estimate
     "energy_cost_net_entity",       # str: entity_id of an install's own "net cost today" sensor
