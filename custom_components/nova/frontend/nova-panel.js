@@ -1793,65 +1793,102 @@ class NovaPanel extends HTMLElement {
     }
   }
 
+  // Pure DOM-render step, given an already-fetched entries array — no
+  // network I/O. Called both synchronously from cache (_wire(), on
+  // re-entering the System Log view) and from _fetchDebugLog()'s network
+  // result, so a cached view renders immediately and a background refresh
+  // reuses the exact same render path. Keeps the existing signature-based
+  // skip (avoids flicker/scroll-jump on the shared 20s poll) — safe now
+  // that the container is never left holding a stale "Loading…" shell by
+  // the time this runs, cache-rendered or freshly fetched alike.
+  _renderDebugLogEntries(entries) {
+    const container = this.shadowRoot?.getElementById("newLogEntries");
+    if (!container) return;
+    if (!entries || !entries.length) {
+      container.innerHTML = `<div class="stub-body">No entries yet. Talk to Nova to generate log entries.</div>`;
+      return;
+    }
+    const cc = NovaPanel.LOG_CATEGORIES;
+    const activeFilter = this._logFilter || "all";
+    const categoryFiltered = activeFilter === "all" ? entries : entries.filter(e => e.cat === activeFilter);
+    const search = (this._logSearch || "").trim().toLowerCase();
+    const filtered = search
+      ? categoryFiltered.filter(e => (e.msg || "").toLowerCase().includes(search) || (e.cat || "").toLowerCase().includes(search))
+      : categoryFiltered;
+
+    const countEl = this.shadowRoot?.getElementById("newLogCount");
+    if (countEl) {
+      countEl.textContent = search || activeFilter !== "all"
+        ? `${filtered.length} of ${entries.length}`
+        : `${entries.length} entries`;
+    }
+
+    const ordered = filtered.slice().reverse();
+
+    // Skip the rebuild when nothing changed (same signature trick as
+    // Classic) — avoids flicker/scroll-jump on the shared 20s poll. The
+    // signature is stamped on the CONTAINER ELEMENT itself (dataset), not
+    // kept as component-instance state: _render() tears down and rebuilds
+    // #newLogEntries from scratch on every tab/view switch, so a fresh
+    // container's dataset is naturally unstamped and this always proceeds
+    // to render — instance-level state would instead persist a stale
+    // "already rendered" signature across the rebuild and skip the render
+    // that was needed to replace the shell's "Loading…" placeholder (the
+    // exact bug this replaced).
+    const first = ordered[0];
+    const last = ordered[ordered.length - 1];
+    const sig = ordered.length + "|" + (first ? first.ts + first.msg : "") + "|" + (last ? last.ts + last.msg : "");
+    const renderSig = sig + " " + activeFilter + " " + search;
+    if (renderSig === container.dataset.renderSig) {
+      return;
+    }
+    const filterChanged = activeFilter !== container.dataset.renderFilter || search !== container.dataset.renderSearch;
+    const nearTop = container.scrollTop < 40;
+    const prevTop = container.scrollTop;
+
+    container.innerHTML = ordered.length ? ordered.map(e => {
+      const cat = cc[e.cat] || { color: "var(--ink-dim)", icon: "•" };
+      const isError = e.cat === "ERROR" || (e.msg || "").toLowerCase().includes("error") || (e.msg || "").toLowerCase().includes("failed");
+      const safeCat = this._esc(e.cat);
+      return `<div class="new-log-entry${isError ? " new-log-entry-error" : ""}">
+        <span class="new-log-ts">${this._esc(e.ts)}</span>
+        <span class="new-log-cat" style="color:${cat.color}">${cat.icon} ${safeCat}</span>
+        <span class="new-log-msg">${this._esc(e.msg)}</span>
+      </div>`;
+    }).join("") : `<div class="stub-body">No entries match${search ? ` "${this._esc(search)}"` : ""}${activeFilter !== "all" ? ` in ${activeFilter}` : ""}.</div>`;
+
+    container.dataset.renderSig = renderSig;
+    container.dataset.renderFilter = activeFilter;
+    container.dataset.renderSearch = search;
+
+    container.scrollTop = (filterChanged || nearTop) ? 0 : prevTop;
+  }
+
   async _fetchDebugLog() {
     if (!this._hass) return;
+    // Repeated navigation back into System Log must not pile up concurrent
+    // duplicate requests — the in-flight one will render whatever it finds
+    // in #newLogEntries when it resolves, same as any other stale-view
+    // guard here (container lookup by id, below).
+    if (this._debugLogFetchInFlight) return;
+    this._debugLogFetchInFlight = true;
     try {
       const result = await this._hass.callWS({ type: "nova/get_debug_log" });
       const entries = result?.entries || [];
-      const container = this.shadowRoot?.getElementById("newLogEntries");
-      if (!container) return;
-      if (!entries.length) {
-        container.innerHTML = `<div class="stub-body">No entries yet. Talk to Nova to generate log entries.</div>`;
-        return;
-      }
-      const cc = NovaPanel.LOG_CATEGORIES;
-      const activeFilter = this._logFilter || "all";
-      const categoryFiltered = activeFilter === "all" ? entries : entries.filter(e => e.cat === activeFilter);
-      const search = (this._logSearch || "").trim().toLowerCase();
-      const filtered = search
-        ? categoryFiltered.filter(e => (e.msg || "").toLowerCase().includes(search) || (e.cat || "").toLowerCase().includes(search))
-        : categoryFiltered;
-
-      const countEl = this.shadowRoot?.getElementById("newLogCount");
-      if (countEl) {
-        countEl.textContent = search || activeFilter !== "all"
-          ? `${filtered.length} of ${entries.length}`
-          : `${entries.length} entries`;
-      }
-
-      const ordered = filtered.slice().reverse();
-
-      // Skip the rebuild when nothing changed (same signature trick as
-      // Classic) — avoids flicker/scroll-jump on the shared 20s poll.
-      const first = ordered[0];
-      const last = ordered[ordered.length - 1];
-      const sig = ordered.length + "|" + (first ? first.ts + first.msg : "") + "|" + (last ? last.ts + last.msg : "");
-      if (sig === this._lastLogSig && activeFilter === this._lastLogFilter && search === this._lastLogSearch) {
-        return;
-      }
-      const filterChanged = activeFilter !== this._lastLogFilter || search !== this._lastLogSearch;
-      const nearTop = container.scrollTop < 40;
-      const prevTop = container.scrollTop;
-
-      container.innerHTML = ordered.length ? ordered.map(e => {
-        const cat = cc[e.cat] || { color: "var(--ink-dim)", icon: "•" };
-        const isError = e.cat === "ERROR" || (e.msg || "").toLowerCase().includes("error") || (e.msg || "").toLowerCase().includes("failed");
-        const safeCat = this._esc(e.cat);
-        return `<div class="new-log-entry${isError ? " new-log-entry-error" : ""}">
-          <span class="new-log-ts">${this._esc(e.ts)}</span>
-          <span class="new-log-cat" style="color:${cat.color}">${cat.icon} ${safeCat}</span>
-          <span class="new-log-msg">${this._esc(e.msg)}</span>
-        </div>`;
-      }).join("") : `<div class="stub-body">No entries match${search ? ` "${this._esc(search)}"` : ""}${activeFilter !== "all" ? ` in ${activeFilter}` : ""}.</div>`;
-
-      this._lastLogSig = sig;
-      this._lastLogFilter = activeFilter;
-      this._lastLogSearch = search;
-
-      container.scrollTop = (filterChanged || nearTop) ? 0 : prevTop;
+      this._debugLogEntries = entries;
+      this._renderDebugLogEntries(entries);
     } catch (err) {
-      const c = this.shadowRoot?.getElementById("newLogEntries");
-      if (c) c.innerHTML = `<div class="new-log-entry-error" style="padding:12px">Error loading logs: ${this._esc(err)}</div>`;
+      // Fail-open: a background refresh failure must never discard rows
+      // already on screen. Only show the error state when there's nothing
+      // usable cached to fall back on (a genuine first-load failure).
+      if (!this._debugLogEntries || !this._debugLogEntries.length) {
+        const c = this.shadowRoot?.getElementById("newLogEntries");
+        if (c) c.innerHTML = `<div class="new-log-entry-error" style="padding:12px">Error loading logs: ${this._esc(err)}</div>`;
+      } else {
+        console.warn("Nova: System Log refresh failed, keeping cached entries", err);
+      }
+    } finally {
+      this._debugLogFetchInFlight = false;
     }
   }
 
@@ -4836,7 +4873,16 @@ class NovaPanel extends HTMLElement {
       if (logView === "decisions") this._fetchDecisions();
       else if (logView === "spoken_history") this._fetchSpokenHistory();
       else if (logView === "actions") this._fetchActions();
-      else this._fetchDebugLog();
+      else {
+        // The shell always starts each render on "Loading…" (torn down and
+        // rebuilt fresh on every tab/view switch), but the entries fetched
+        // last time are still sitting in _debugLogEntries — render them
+        // immediately so re-entering System Log shows the cached rows
+        // instantly instead of a blocking spinner, then refresh in the
+        // background exactly as a first visit would.
+        if (this._debugLogEntries) this._renderDebugLogEntries(this._debugLogEntries);
+        this._fetchDebugLog();
+      }
     }
     if (this._currentTab === "memory") { this._wireMemory(); this._fetchKnowledge(); this._fetchPersonRoutines(); }
     if (this._currentTab === "intrusion") this._wireIntrusion();
