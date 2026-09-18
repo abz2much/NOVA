@@ -256,6 +256,89 @@ def test_observer_low_suppressed_without_any_speaker_configured(routing, monkeyp
     assert (targets, mode) == ([], "suppressed")
 
 
+# ── authoritative_anyone_home: last-person departure must not speak ─────────
+# 2026-09-18 08:30 incident: a genuine last-person departure still spoke
+# through a house speaker, because audio_routing's own anyone_home(hass) —
+# called independently at routing time — counted a phone-presence
+# binary_sensor that was still "on" ~63s after the person entity had
+# already gone not_home (clear-delay). observer.py already computes the
+# authoritative "is anyone home" from the person/device_tracker state it
+# used to make its own decision; threading that exact value through removes
+# the second, laggier recomputation for MEDIUM/HIGH, without touching
+# currently_occupied_areas() (room-speaker selection stays physical-sensor
+# based, since someone genuinely home must still get occupied-room routing).
+
+def test_last_person_departure_no_stale_sensor_is_notify_only(routing, monkeypatch):
+    hass = _Hass({"media_player.entry": _State("media_player.entry", "idle")})
+    monkeypatch.setattr(routing, "currently_occupied_areas", lambda h: [])
+    _set_nova_config(routing, monkeypatch, {
+        "room_speakers": {"entry": "media_player.entry"},
+        "general_speaker": "media_player.entry",
+    })
+    targets, mode = routing.observer_speak_target(
+        hass, urgency="medium", authoritative_anyone_home=False,
+    )
+    assert (targets, mode) == ([], "notify_only")
+
+
+def test_last_person_departure_with_stale_sensor_is_still_notify_only(routing, monkeypatch):
+    # Reproduces the incident directly: the module's own anyone_home(hass)
+    # says True (a stale presence sensor is still "on"), but the caller's
+    # authoritative value — computed from the person/device_tracker state
+    # actually used for the decision — says nobody is home. The
+    # authoritative value must win.
+    hass = _Hass({"media_player.entry": _State("media_player.entry", "idle")})
+    monkeypatch.setattr(routing, "anyone_home", lambda h: True)
+    monkeypatch.setattr(routing, "currently_occupied_areas", lambda h: ["entry"])
+    _set_nova_config(routing, monkeypatch, {
+        "room_speakers": {"entry": "media_player.entry"},
+        "general_speaker": "media_player.entry",
+    })
+    targets, mode = routing.observer_speak_target(
+        hass, urgency="medium", authoritative_anyone_home=False,
+    )
+    assert (targets, mode) == ([], "notify_only")
+
+
+def test_another_person_home_preserves_occupied_room_routing(routing, monkeypatch):
+    # authoritative_anyone_home=True still lets occupied-room selection use
+    # live physical sensors, unchanged.
+    hass = _Hass({"media_player.living_room": _State("media_player.living_room", "idle")})
+    monkeypatch.setattr(routing, "currently_occupied_areas", lambda h: ["living_room"])
+    _set_nova_config(routing, monkeypatch, {
+        "room_speakers": {"living_room": "media_player.living_room"},
+    })
+    targets, mode = routing.observer_speak_target(
+        hass, urgency="medium", authoritative_anyone_home=True,
+    )
+    assert (targets, mode) == (["media_player.living_room"], "local")
+
+
+def test_high_urgency_last_person_departure_is_notify_only(routing, monkeypatch):
+    hass = _Hass({"media_player.entry": _State("media_player.entry", "idle")})
+    monkeypatch.setattr(routing, "anyone_home", lambda h: True)  # stale
+    monkeypatch.setattr(routing, "currently_occupied_areas", lambda h: [])
+    _set_nova_config(routing, monkeypatch, {"general_speaker": "media_player.entry"})
+    targets, mode = routing.observer_speak_target(
+        hass, urgency="high", authoritative_anyone_home=False,
+    )
+    assert (targets, mode) == ([], "notify_only")
+
+
+def test_callers_without_authoritative_argument_keep_existing_behaviour(routing, monkeypatch):
+    # A caller that doesn't opt in (e.g. proactive_briefing.py, cognitive_core.py)
+    # must see exactly the prior behaviour: audio_routing's own anyone_home(hass)
+    # still decides, stale sensor and all. This is unchanged, not newly correct.
+    hass = _Hass({"media_player.entry": _State("media_player.entry", "idle")})
+    monkeypatch.setattr(routing, "anyone_home", lambda h: True)  # stale, as before the fix
+    monkeypatch.setattr(routing, "currently_occupied_areas", lambda h: ["entry"])
+    _set_nova_config(routing, monkeypatch, {
+        "room_speakers": {"entry": "media_player.entry"},
+    })
+    targets, mode = routing.observer_speak_target(hass, urgency="medium")
+    assert (targets, mode) == (["media_player.entry"], "local")
+
+
 # ── per-speaker delivery: volume-pinned play_media, with tts.speak fallback ─
 
 async def test_announce_plays_via_play_media_pinned_to_current_volume(tts):

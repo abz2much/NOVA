@@ -432,6 +432,7 @@ def observer_speak_target(
     broadcast_group: Optional[str] = None,
     announcement_speakers: Optional[list[str]] = None,
     is_sleeping: bool = False,
+    authoritative_anyone_home: Optional[bool] = None,
 ) -> tuple[list[str], str]:
     """
     Decide where to speak for an observer-mode announcement.
@@ -446,6 +447,21 @@ def observer_speak_target(
     announcement_speakers: explicit list from the panel Settings toggle.
     When set and non-empty, this overrides broadcast_group for broadcast-mode
     announcements (but NOT for local/room routing).
+
+    authoritative_anyone_home: when the caller already computed "is anyone
+    home" from the person/device_tracker state it used to make ITS decision
+    (e.g. observer.py's presence pipeline), pass that exact boolean here so
+    MEDIUM/HIGH's home/away branch uses it instead of re-deriving its own
+    answer. Re-deriving it here calls anyone_home(hass), which also counts
+    any occupancy/motion/presence binary_sensor anywhere in the house —
+    those can read "on" for tens of seconds after the last person's
+    person/device_tracker entity has already gone not_home (clear-delay),
+    which let a genuine last-person departure fall through to a speaker
+    instead of notify_only (the 2026-09-18 08:30 incident). Leave this None
+    to keep a caller's existing behavior unchanged — it only takes effect
+    when explicitly supplied. Room-level occupied-speaker selection (which
+    legitimately needs live physical sensors) is untouched either way:
+    currently_occupied_areas() keeps using physical sensors as before.
 
     Rules:
       CRITICAL: always broadcast (announcement_speakers > broadcast_group > all speakers); overrides sleep
@@ -476,7 +492,11 @@ def observer_speak_target(
         speakers = _broadcast_speakers()
         return (speakers, "broadcast") if speakers else ([], "notify_only")
 
-    home = anyone_home(hass)
+    home = (
+        authoritative_anyone_home
+        if authoritative_anyone_home is not None
+        else anyone_home(hass)
+    )
 
     # ─── HIGH ────────────────────────────────────────────────────────────────
     if urgency == "high":

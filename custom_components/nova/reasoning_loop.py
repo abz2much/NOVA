@@ -136,6 +136,8 @@ def _try_local_reasoning(
     honorific: str,
     recent_announcements: list[str],
     anyone_home: bool = False,
+    from_state: str = "",
+    to_state: str = "",
 ) -> Optional[dict]:
     """
     Handle common events with templated responses (v5.7.00).
@@ -187,38 +189,44 @@ def _try_local_reasoning(
             "urgency": "critical",
         }
 
-    # ── Person arrived ───────────────────────────────────────────────
-    m = re.search(r"(\w+)\s+(?:arrived|came)\s+home|person\.(\w+).*not_home.*→.*home", evt)
-    if m or ("arrived" in evt and category == "presence"):
-        name = "Someone"
-        nm = re.search(r"person\.(\w+)", evt)
-        if nm:
-            name = nm.group(1).replace("_", " ").title()
-        return {
-            "speak": True,
-            "message": persona.lead_in(honorific, f"{name} has arrived home."),
-            "urgency": "medium",
-        }
-
-    # ── Person left ──────────────────────────────────────────────────
-    if ("left" in evt or "not_home" in evt) and category == "presence":
-        name = "Someone"
-        nm = re.search(r"person\.(\w+)", evt)
-        if nm:
-            name = nm.group(1).replace("_", " ").title()
-        # If this was the last person leaving, nobody's left in the house to
-        # hear a spoken announcement — "low" urgency routing decides whether
-        # to speak based on live room occupancy sensors, which can still read
-        # "on" for a moment after someone physically walks out (clear delay),
-        # wrongly triggering a spoken line into an empty house. "medium"
-        # already has the correct away rule (push a notification, don't
-        # speak) — reuse it instead of adding a new routing path.
-        urgency = "low" if anyone_home else "medium"
-        return {
-            "speak": True,
-            "message": persona.lead_in(honorific, f"{name} has left the premises."),
-            "urgency": urgency,
-        }
+    # ── Person arrived / left ──────────────────────────────────────────
+    # Direction is read from the entity's own from_state/to_state (exact
+    # state comparison against the literal "home"), never from parsing evt
+    # prose. A text scan for "arrived"/"came home" wording or an arrow-
+    # delimited pattern never matched observer.py's actual event_summary
+    # format ("X changed from A to B"), and a substring check for
+    # "not_home" matched arrivals too — the FROM state of "not_home to
+    # home" also contains "not_home" — collapsing every presence
+    # transition into "has left the premises" regardless of direction.
+    # A zone-to-zone move (e.g. not_home → "Jianna School") is neither:
+    # both comparisons require one side to be exactly "home".
+    if category == "presence":
+        is_arrival = to_state == "home" and from_state != "home"
+        is_departure = from_state == "home" and to_state != "home"
+        if is_arrival or is_departure:
+            name = "Someone"
+            nm = re.search(r"person\.(\w+)", evt)
+            if nm:
+                name = nm.group(1).replace("_", " ").title()
+            if is_arrival:
+                return {
+                    "speak": True,
+                    "message": persona.lead_in(honorific, f"{name} has arrived home."),
+                    "urgency": "medium",
+                }
+            # If this was the last person leaving, nobody's left in the house to
+            # hear a spoken announcement — "low" urgency routing decides whether
+            # to speak based on live room occupancy sensors, which can still read
+            # "on" for a moment after someone physically walks out (clear delay),
+            # wrongly triggering a spoken line into an empty house. "medium"
+            # already has the correct away rule (push a notification, don't
+            # speak) — reuse it instead of adding a new routing path.
+            urgency = "low" if anyone_home else "medium"
+            return {
+                "speak": True,
+                "message": persona.lead_in(honorific, f"{name} has left the premises."),
+                "urgency": urgency,
+            }
 
     # ── Door/window opened ───────────────────────────────────────────
     if category == "doors_windows" and (_summary_new_state(evt) == "on"
@@ -482,19 +490,38 @@ async def decide(
     decisions, then the cloud LLM (whose decision is then learned). When the
     connectivity breaker is OPEN, skips the cloud and decides locally.
     """
+    # A presence transition touching the literal "home" state (arrival or
+    # departure) is decided by exact state comparison, not LLM judgment —
+    # there's nothing ambiguous for a cloud call to adjudicate, and routing
+    # it through rich reasoning would re-open the direction-inversion bug
+    # the exact-state check exists to close (arrivals/departures classify
+    # as MEDIUM urgency, which rich reasoning would otherwise send cloud-
+    # first, skipping _try_local_reasoning entirely). This carve-out is
+    # scoped to exactly that transition — every other MEDIUM/HIGH event
+    # still gets rich reasoning when enabled, unchanged.
+    is_home_boundary_transition = classifier_category == "presence" and (
+        (to_state == "home" and from_state != "home")
+        or (from_state == "home" and to_state != "home")
+    )
+
     # ── Rich Reasoning mode ───────────────────────────────────────────
     # With API spend a non-issue, the user can flip "Rich Reasoning" on: medium/
     # high events go cloud-FIRST for full-context judgment instead of being
     # short-circuited by local templates or the learned cache. Low-urgency events
     # stay local (a template suffices), the connectivity breaker still guards the
     # call, and any cloud failure falls back through the cache/local path below.
-    rich = _rich_mode(hass) and classifier_urgency in ("medium", "high")
+    rich = (
+        _rich_mode(hass)
+        and classifier_urgency in ("medium", "high")
+        and not is_home_boundary_transition
+    )
 
     # ── Local reasoning shortcuts (no API call) ──────────────────────
     if not rich:
         local = _try_local_reasoning(
             event_summary, classifier_urgency, classifier_category,
             honorific, recent_announcements, anyone_home,
+            from_state=from_state, to_state=to_state,
         )
         if local is not None:
             _LOGGER.info("Reasoning local: %s", local.get("message", local.get("reason", ""))[:80])
