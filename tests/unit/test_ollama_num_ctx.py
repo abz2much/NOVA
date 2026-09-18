@@ -12,7 +12,6 @@ def _install_nova_config(monkeypatch, value):
         return value if key == "ollama_num_ctx" else default
     fake.get = get
     monkeypatch.setitem(sys.modules, "jc.nova_config", fake)
-    monkeypatch.setattr(sys.modules["jc"], "nova_config", fake, raising=False)
 
 
 def _ollama(load):

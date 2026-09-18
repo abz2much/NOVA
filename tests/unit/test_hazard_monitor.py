@@ -27,9 +27,6 @@ def hz(monkeypatch):
     jc_cfg = types.ModuleType("jc.nova_config")
     jc_cfg.get = lambda k, d=None: cfg_store.get(k, d)
     monkeypatch.setitem(sys.modules, "jc.nova_config", jc_cfg)
-    # `from . import nova_config` reads the jc package ATTRIBUTE, so patch it
-    # too — monkeypatch restores the prior value (or removes it) after the test.
-    monkeypatch.setattr(sys.modules["jc"], "nova_config", jc_cfg, raising=False)
     key = "jc.hazard_monitor"
     monkeypatch.delitem(sys.modules, key, raising=False)
     spec = importlib.util.spec_from_file_location(key, COMP / "hazard_monitor.py")

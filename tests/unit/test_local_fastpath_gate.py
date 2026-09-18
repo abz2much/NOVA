@@ -28,7 +28,6 @@ def _install_vc(monkeypatch, protected: bool):
         return False
     fake.confirm = _confirm
     monkeypatch.setitem(sys.modules, "jc.voice_confirm", fake)
-    monkeypatch.setattr(sys.modules["jc"], "voice_confirm", fake, raising=False)
 
 
 # ── _service_for (pure mapping) ───────────────────────────────────────────────
