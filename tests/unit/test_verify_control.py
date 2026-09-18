@@ -464,7 +464,7 @@ async def test_bulk_control_full_success_message_has_no_failed_or_blocked_mentio
 async def test_scene_script_reports_accepted_not_verified(agent, load, fake_hass, monkeypatch):
     policy = load("policy")
     async def _ok_gate(*a, **k):
-        return True, None
+        return True, None, "not_required"
     monkeypatch.setattr(policy, "confirm_gate", _ok_gate)
     fake_hass.states.set("scene.movie_night", "off")
     out = await agent._exec_run_scene_script(fake_hass, {"entity_id": "scene.movie_night"})

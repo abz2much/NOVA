@@ -94,7 +94,7 @@ async def test_confirm_via_phone_only_never_touches_satellite_tiers(vc, monkeypa
 
     async def fake_notify(hass, question, timeout=None):
         calls.append(question)
-        return True
+        return "approved"
 
     async def _must_not_run(*a, **k):
         raise AssertionError("a voice confirmation tier must never run here")
@@ -122,26 +122,28 @@ async def test_confirm_gate_blocks_voice_unlock_until_phone_confirmed(pol, vc, m
     monkeypatch.setattr(vc, "is_voice_satellite_device", lambda hass, did: True)
 
     async def deny(hass, question, timeout=None):
-        return False
-    monkeypatch.setattr(vc, "confirm_via_phone_only", deny)
+        return "rejected"
+    monkeypatch.setattr(vc, "confirm_via_phone_only_typed", deny)
 
-    ok, note = await pol.confirm_gate(_Hass(), "lock", "unlock", "lock.front_door",
+    ok, note, approval_result = await pol.confirm_gate(_Hass(), "lock", "unlock", "lock.front_door",
                                       "unlock", device_id="dev-sat-1")
     assert ok is False
     assert "voice" in note.lower()
+    assert approval_result == "rejected"
 
 
 async def test_confirm_gate_allows_voice_unlock_once_phone_confirmed(pol, vc, monkeypatch):
     monkeypatch.setattr(vc, "is_voice_satellite_device", lambda hass, did: True)
 
     async def approve(hass, question, timeout=None):
-        return True
-    monkeypatch.setattr(vc, "confirm_via_phone_only", approve)
+        return "approved"
+    monkeypatch.setattr(vc, "confirm_via_phone_only_typed", approve)
 
-    ok, note = await pol.confirm_gate(_Hass(), "lock", "unlock", "lock.front_door",
+    ok, note, approval_result = await pol.confirm_gate(_Hass(), "lock", "unlock", "lock.front_door",
                                       "unlock", device_id="dev-sat-1")
     assert ok is True
     assert note == ""
+    assert approval_result == "approved"
 
 
 async def test_confirm_gate_uses_phone_only_not_spoken_confirm(pol, vc, monkeypatch):
@@ -153,16 +155,18 @@ async def test_confirm_gate_uses_phone_only_not_spoken_confirm(pol, vc, monkeypa
     async def _must_not_run(*a, **k):
         raise AssertionError("voice_confirm.confirm (a voice-capable channel) must not run here")
     monkeypatch.setattr(vc, "confirm", _must_not_run)
+    monkeypatch.setattr(vc, "confirm_typed", _must_not_run)
 
     called = []
     async def approve(hass, question, timeout=None):
         called.append(question)
-        return True
-    monkeypatch.setattr(vc, "confirm_via_phone_only", approve)
+        return "approved"
+    monkeypatch.setattr(vc, "confirm_via_phone_only_typed", approve)
 
-    ok, _ = await pol.confirm_gate(_Hass(), "cover", "open_cover", "cover.garage",
+    ok, _, approval_result = await pol.confirm_gate(_Hass(), "cover", "open_cover", "cover.garage",
                                    "open", device_id="dev-sat-1")
     assert ok is True
+    assert approval_result == "approved"
     assert len(called) == 1
 
 
@@ -174,12 +178,13 @@ async def test_confirm_gate_lock_is_never_blocked_by_voice_rule(pol, vc, monkeyp
 
     async def _must_not_run(*a, **k):
         raise AssertionError("confirm_via_phone_only must not run for a lock (safe direction)")
-    monkeypatch.setattr(vc, "confirm_via_phone_only", _must_not_run)
+    monkeypatch.setattr(vc, "confirm_via_phone_only_typed", _must_not_run)
     monkeypatch.setattr(vc, "action_is_protected", lambda hass, d, s, e="": False)
 
-    ok, note = await pol.confirm_gate(_Hass(), "lock", "lock", "lock.front_door",
+    ok, note, approval_result = await pol.confirm_gate(_Hass(), "lock", "lock", "lock.front_door",
                                       "lock", device_id="dev-sat-1")
     assert ok is True and note == ""
+    assert approval_result == "not_required"
 
 
 async def test_confirm_gate_text_request_unaffected_by_voice_rule(pol, vc, monkeypatch):
@@ -191,11 +196,12 @@ async def test_confirm_gate_text_request_unaffected_by_voice_rule(pol, vc, monke
 
     async def _must_not_run(*a, **k):
         raise AssertionError("phone confirmation must not be forced for a text request")
-    monkeypatch.setattr(vc, "confirm_via_phone_only", _must_not_run)
+    monkeypatch.setattr(vc, "confirm_via_phone_only_typed", _must_not_run)
 
-    ok, note = await pol.confirm_gate(_Hass(), "lock", "unlock", "lock.front_door",
+    ok, note, approval_result = await pol.confirm_gate(_Hass(), "lock", "unlock", "lock.front_door",
                                       "unlock", device_id="")
     assert ok is True and note == ""
+    assert approval_result == "not_required"
 
 
 def test_requires_confirmation_true_for_voice_unlock_regardless_of_toggle(pol, vc, monkeypatch):
@@ -219,7 +225,7 @@ def test_requires_confirmation_lock_stays_false_when_unprotected(pol, vc, monkey
 async def test_control_device_voice_unlock_needs_phone_confirmation(agent, pol, monkeypatch):
     async def fake_gate(hass, domain, service, entity_id="", action_label="", device_id=""):
         assert device_id == "dev-sat-1"
-        return False, "voice alone can't authorize this"
+        return False, "voice alone can't authorize this", "rejected"
     monkeypatch.setattr(pol, "confirm_gate", fake_gate)
 
     hass = _Hass()
@@ -231,7 +237,7 @@ async def test_control_device_voice_unlock_needs_phone_confirmation(agent, pol, 
 
 async def test_control_device_voice_unlock_proceeds_once_confirmed(agent, pol, monkeypatch):
     async def fake_gate(hass, domain, service, entity_id="", action_label="", device_id=""):
-        return True, ""
+        return True, "", "approved"
     monkeypatch.setattr(pol, "confirm_gate", fake_gate)
 
     hass = _Hass()
@@ -248,7 +254,7 @@ async def test_execute_tool_extracts_device_id_from_user_input(agent, pol, monke
 
     async def fake_gate(hass, domain, service, entity_id="", action_label="", device_id=""):
         seen["device_id"] = device_id
-        return True, ""
+        return True, "", "not_required"
     monkeypatch.setattr(pol, "confirm_gate", fake_gate)
 
     user_input = types.SimpleNamespace(device_id="dev-sat-1")
@@ -278,7 +284,7 @@ async def test_control_device_lock_action_not_gated_by_device_id(agent, pol, mon
     lock action -- only confirm_gate's own logic (tested above) decides
     that, and here it's mocked to allow through unconditionally."""
     async def fake_gate(hass, domain, service, entity_id="", action_label="", device_id=""):
-        return True, ""
+        return True, "", "not_required"
     monkeypatch.setattr(pol, "confirm_gate", fake_gate)
 
     hass = _Hass()

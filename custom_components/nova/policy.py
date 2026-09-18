@@ -180,17 +180,29 @@ async def confirm_gate(
     entity_id: str = "",
     action_label: str = "",
     device_id: str = "",
-) -> Tuple[bool, str]:
-    """May this action proceed now? Returns ``(allowed, note)``.
+) -> Tuple[bool, str, str]:
+    """May this action proceed now? Returns ``(allowed, note, approval_result)``.
 
-    Outcomes:
-      * not a protected action              -> ``(True, "")``   (no friction)
-      * protected and confirmed             -> ``(True, "")``
-      * protected and declined              -> ``(False, "<awaiting confirmation>")``
-      * protected but the confirm path errored -> ``(False, "<denied for safety>")``
+    ``approval_result`` is the EXACT typed outcome (see voice_confirm.py's
+    ConfirmResult) — never a generic reason_code, never something a caller
+    derives by parsing ``note``'s text. One of:
+      "not_required" — not a protected action, or the confirmation subsystem
+                        couldn't be consulted at all but the action's own
+                        risk is low enough to proceed anyway.
+      "approved"     — a real yes was captured.
+      "rejected"     — a real, explicit no was captured.
+      "expired"      — a genuine bounded wait (phone-notification timeout)
+                        ran out with no answer.
+      "deferred"     — the gated voice path asked but cannot capture a
+                        synchronous answer by design; not a timeout, not a
+                        decline.
+      "error"        — an internal failure (import, protection-check, or
+                        the confirmation call itself raised) denied the
+                        action for safety, unrelated to what the user said.
 
-    The final case is the fail-closed guarantee: an error anywhere in the
-    confirmation subsystem can never let a protected action through.
+    ``allowed`` is False for every value except "not_required"/"approved" —
+    the fail-closed guarantee: an error anywhere in the confirmation
+    subsystem can never let a protected action through.
 
     ``device_id`` (v7.87.0): when given and it's a voice satellite, an
     unlock/open action is ALWAYS gated behind a phone tap — never a spoken
@@ -204,15 +216,15 @@ async def confirm_gate(
             from . import voice_confirm
             question = (f"{label} {ent} was requested by voice — confirm on your phone "
                        f"to proceed. Voice alone can't unlock or open this.").strip()
-            confirmed = await voice_confirm.confirm_via_phone_only(hass, question)
+            result = await voice_confirm.confirm_via_phone_only_typed(hass, question)
         except Exception as exc:
             _LOGGER.warning("policy: voice-unlock phone-confirm failed for %s.%s (%s); denying",
                             domain, service, exc)
-            return False, "phone confirmation unavailable — action denied for safety"
-        if confirmed:
-            return True, ""
+            return False, "phone confirmation unavailable — action denied for safety", "error"
+        if result == "approved":
+            return True, "", "approved"
         return False, (f"{label} {ent} was requested by voice; voice alone can't authorize "
-                       f"this, and phone confirmation wasn't received")
+                       f"this, and phone confirmation wasn't received"), result
 
     # Resolve the confirmation module. If it's missing, LOW-risk proceeds and
     # anything higher is denied (fail closed for authority).
@@ -221,10 +233,10 @@ async def confirm_gate(
     except Exception as exc:
         risk, _ = classify(domain, service, entity_id)
         if risk == "low":
-            return True, ""
+            return True, "", "not_required"
         _LOGGER.warning("policy: voice_confirm import failed for %s.%s (%s); denying",
                         domain, service, exc)
-        return False, "confirmation unavailable — action denied for safety"
+        return False, "confirmation unavailable — action denied for safety", "error"
 
     # Does this action need confirmation at all?
     try:
@@ -232,24 +244,24 @@ async def confirm_gate(
     except Exception as exc:
         risk, _ = classify(domain, service, entity_id)
         if risk == "low":
-            return True, ""
+            return True, "", "not_required"
         _LOGGER.warning("policy: protection check failed for %s.%s (%s); denying",
                         domain, service, exc)
-        return False, "confirmation check failed — action denied for safety"
+        return False, "confirmation check failed — action denied for safety", "error"
 
     if not protected:
-        return True, ""
+        return True, "", "not_required"
 
     # Confirmation required — ask. ANY failure here denies (fail closed).
     question = (f"{label} {ent} — are you sure?").strip()
     try:
-        confirmed = await voice_confirm.confirm(hass, question, entity_id=entity_id)
+        result = await voice_confirm.confirm_typed(hass, question, entity_id=entity_id)
     except Exception as exc:
         _LOGGER.warning("policy: confirmation errored for %s.%s (%s); denying",
                         domain, service, exc)
-        return False, "confirmation unavailable — action denied for safety"
+        return False, "confirmation unavailable — action denied for safety", "error"
 
-    if confirmed:
-        return True, ""
+    if result == "approved":
+        return True, "", "approved"
     return False, (f"asked for spoken confirmation before {label} "
-                   f"on {entity_id}; not yet confirmed")
+                   f"on {entity_id}; not yet confirmed"), result

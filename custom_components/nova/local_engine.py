@@ -730,9 +730,30 @@ async def _execute_action_verified(hass, action, entity_id, args, fname):
     pre_state = hass.states.get(entity_id)
     pre = pre_state.state if pre_state else None
 
+    # Action Audit Log (top-level boundary: this is the sole caller of
+    # _execute_action_verified, and it's always a genuine top-level voice
+    # action — _needs_confirmation() already sends anything protected to
+    # the agent instead, so this path never calls confirm_gate).
+    from . import action_log
+    request_id = action_log.new_request_id()
+    action_id = await hass.async_add_executor_job(
+        lambda: action_log.start(
+            request_id, "control_device", "voice",
+            domain=domain, entity_id=entity_id,
+            requested_state=str(args.get("brightness_pct") or args.get("temperature")
+                                or args.get("volume_level") or action),
+        )
+    )
+
     ok = await _execute_action(hass, action, entity_id, args)
     if not ok:
+        await hass.async_add_executor_job(
+            lambda: action_log.set_execution(action_id, "failed", reason_code="service_call_failed")
+        )
         return "error"
+    await hass.async_add_executor_job(
+        lambda: action_log.set_execution(action_id, "accepted")
+    )
 
     from . import entity_verify
 
@@ -742,11 +763,15 @@ async def _execute_action_verified(hass, action, entity_id, args, fname):
             verified = await entity_verify.wait_until(
                 lambda: entity_verify.check_state_once(hass, entity_id, expected))
             if verified:
+                await hass.async_add_executor_job(
+                    lambda: action_log.set_execution(action_id, "verified")
+                )
                 return "verified"
         from .agent import _verify_control
         hass.async_create_task(
             _verify_control(hass, entity_id, action, domain, action,
-                             {"entity_id": entity_id}, source="local_engine"))
+                             {"entity_id": entity_id}, source="local_engine",
+                             action_id=action_id))
         return "accepted" if domain not in entity_verify.FAST_VERIFY_DOMAINS else "unverified"
 
     if action == "toggle":
@@ -758,11 +783,18 @@ async def _execute_action_verified(hass, action, entity_id, args, fname):
         verified = await entity_verify.wait_until(
             lambda: entity_verify.check_state_once(hass, entity_id, expected))
         if verified:
+            await hass.async_add_executor_job(
+                lambda: action_log.set_execution(action_id, "verified")
+            )
             return "verified"
         await entity_verify.record_unverified(
             hass, entity_id, "toggle", source="local_engine",
             detail=", not retried automatically because repeating toggle "
                    "could reverse a delayed successful action")
+        await hass.async_add_executor_job(
+            lambda: action_log.set_execution(
+                action_id, "unverified", reason_code="not_retried_toggle_could_reverse")
+        )
         return "unverified"
 
     if action in ("dim", "brighten"):
@@ -770,12 +802,19 @@ async def _execute_action_verified(hass, action, entity_id, args, fname):
         verified = await entity_verify.wait_until(
             lambda: entity_verify.check_brightness_once(hass, entity_id, requested_pct))
         if verified:
+            await hass.async_add_executor_job(
+                lambda: action_log.set_execution(action_id, "verified")
+            )
             return "verified"
         await entity_verify.record_unverified(
             hass, entity_id, action, source="local_engine",
             detail=(f", requested {requested_pct}%, not retried automatically "
                     "because the background verifier cannot validate the "
                     "requested brightness level"))
+        await hass.async_add_executor_job(
+            lambda: action_log.set_execution(
+                action_id, "unverified", reason_code="brightness_not_confirmed")
+        )
         return "unverified"
 
     if action in _LOCK_COVER_SERVICE:
@@ -783,7 +822,8 @@ async def _execute_action_verified(hass, action, entity_id, args, fname):
         from .agent import _verify_control
         hass.async_create_task(
             _verify_control(hass, entity_id, action, v_dom, v_svc,
-                             {"entity_id": entity_id}, source="local_engine"))
+                             {"entity_id": entity_id}, source="local_engine",
+                             action_id=action_id))
         return "accepted"
 
     return "accepted"
@@ -1078,24 +1118,61 @@ async def try_local(hass, text, honorific="sir", force=False):
         if _needs_confirmation(hass, action, ""):
             _LOGGER.info("Local: bulk '%s' needs confirmation — deferring to agent", action)
             return None   # protected bulk → agent skips/confirms per device
+        from . import action_log
         if domain == "all":
-            total = 0
+            all_ents: list = []
             for d in ("light", "switch", "fan"):
-                ents = [(s.entity_id, s.attributes.get("friendly_name", s.entity_id))
-                        for s in hass.states.async_all(d) if s.state == "on"]
-                for eid, fn in ents:
-                    if await _execute_action(hass, "turn_off", eid, {}):
-                        total += 1
+                all_ents.extend(
+                    (s.entity_id, d) for s in hass.states.async_all(d) if s.state == "on")
+            request_id = action_log.new_request_id()
+            row_ids = await hass.async_add_executor_job(
+                lambda: action_log.start_many(
+                    request_id, "bulk_control", "chat",
+                    [{"key": eid, "domain": d, "service": "turn_off", "entity_id": eid}
+                     for eid, d in all_ents],
+                )
+            )
+            total = 0
+            for eid, d in all_ents:
+                row_id = row_ids.get(eid)
+                if await _execute_action(hass, "turn_off", eid, {}):
+                    total += 1
+                    if row_id is not None:
+                        await hass.async_add_executor_job(
+                            lambda rid=row_id: action_log.set_execution(rid, "accepted")
+                        )
+                elif row_id is not None:
+                    await hass.async_add_executor_job(
+                        lambda rid=row_id: action_log.set_execution(
+                            rid, "failed", reason_code="service_call_failed")
+                    )
             return LocalResult(text=f"Done{addr}. {total} device{'s' if total != 1 else ''} turned off.", success=True)
         entities = _find_entities_in_area(hass, area_name, domain) if area_name else [
             (s.entity_id, s.attributes.get("friendly_name", s.entity_id))
             for s in hass.states.async_all(domain)]
         if not entities:
             continue
+        request_id = action_log.new_request_id()
+        row_ids = await hass.async_add_executor_job(
+            lambda: action_log.start_many(
+                request_id, "bulk_control", "chat",
+                [{"key": eid, "domain": domain, "entity_id": eid} for eid, _fn in entities],
+            )
+        )
         ok = 0
         for eid, fn in entities:
+            row_id = row_ids.get(eid)
             if await _execute_action(hass, action, eid, {}):
                 ok += 1
+                if row_id is not None:
+                    await hass.async_add_executor_job(
+                        lambda rid=row_id: action_log.set_execution(rid, "accepted")
+                    )
+            elif row_id is not None:
+                await hass.async_add_executor_job(
+                    lambda rid=row_id: action_log.set_execution(
+                        rid, "failed", reason_code="service_call_failed")
+                )
         area_str = f" in {area_name}" if area_name else ""
         verb = action.replace("_", " ")
         return LocalResult(text=f"Done{addr}. {ok} {domain}{'s' if ok != 1 else ''}{area_str} {verb}.", success=ok > 0)
@@ -1122,11 +1199,26 @@ async def try_local(hass, text, honorific="sir", force=False):
             if _needs_confirmation_domain(hass, dtype, "turn_on", eid):
                 _LOGGER.info("Local: scene/script '%s' needs confirmation — deferring to agent", eid)
                 return None   # protected activation → the agent runs the confirmation gate
+            from . import action_log
+            _req_id = action_log.new_request_id()
+            _action_id = await hass.async_add_executor_job(
+                lambda: action_log.start(
+                    _req_id, "scene_activation" if dtype == "scene" else "script_run", "chat",
+                    domain=dtype, service="turn_on", entity_id=eid,
+                )
+            )
             try:
                 await hass.services.async_call(dtype, "turn_on", {"entity_id": eid}, blocking=True)
                 _update_ctx(entity=eid, domain=dtype)
+                await hass.async_add_executor_job(
+                    lambda: action_log.set_execution(_action_id, "accepted")
+                )
                 return LocalResult(text=f"Activating {fname} now{addr}.", success=True)
             except Exception as exc:
+                await hass.async_add_executor_job(
+                    lambda: action_log.set_execution(
+                        _action_id, "failed", reason_code="service_call_failed")
+                )
                 return LocalResult(text=f"I wasn't able to activate {fname}{addr}. {exc}", success=False)
 
     # Goodnight shortcut
@@ -1137,10 +1229,25 @@ async def try_local(hass, text, honorific="sir", force=False):
             if _needs_confirmation_domain(hass, dtype, "turn_on", eid):
                 _LOGGER.info("Local: goodnight scene '%s' needs confirmation — deferring to agent", eid)
                 return None   # protected activation → the agent runs the confirmation gate
+            from . import action_log
+            _req_id = action_log.new_request_id()
+            _action_id = await hass.async_add_executor_job(
+                lambda: action_log.start(
+                    _req_id, "scene_activation", "chat",
+                    domain=dtype, service="turn_on", entity_id=eid,
+                )
+            )
             try:
                 await hass.services.async_call(dtype, "turn_on", {"entity_id": eid}, blocking=True)
+                await hass.async_add_executor_job(
+                    lambda: action_log.set_execution(_action_id, "accepted")
+                )
                 return LocalResult(text=f"Goodnight{addr}. I've triggered {fname}. Rest well.", success=True)
             except Exception:
+                await hass.async_add_executor_job(
+                    lambda: action_log.set_execution(
+                        _action_id, "failed", reason_code="service_call_failed")
+                )
                 pass
         # Phase 3: don't claim "lights off"/"locks secured" before checking --
         # report what was SENT, then verify each entity in the background
@@ -1148,35 +1255,75 @@ async def try_local(hass, text, honorific="sir", force=False):
         # light that didn't respond gets the same honest retry-then-report
         # treatment either way).
         from .agent import _verify_control
+        from . import action_log
+        goodnight_request_id = action_log.new_request_id()
+
+        light_candidates = [s.entity_id for s in hass.states.async_all("light") if s.state == "on"]
+        light_row_ids = await hass.async_add_executor_job(
+            lambda: action_log.start_many(
+                goodnight_request_id, "goodnight_sweep", "chat",
+                [{"key": eid, "domain": "light", "service": "turn_off", "entity_id": eid}
+                 for eid in light_candidates],
+            )
+        ) if light_candidates else {}
         sent_lights: list[str] = []
-        for s in hass.states.async_all("light"):
-            if s.state == "on":
-                try:
-                    await hass.services.async_call(
-                        "light", "turn_off", {"entity_id": s.entity_id}, blocking=True)
-                    sent_lights.append(s.entity_id)
-                except Exception:
-                    pass
+        for eid in light_candidates:
+            row_id = light_row_ids.get(eid)
+            try:
+                await hass.services.async_call(
+                    "light", "turn_off", {"entity_id": eid}, blocking=True)
+                sent_lights.append(eid)
+                if row_id is not None:
+                    await hass.async_add_executor_job(
+                        lambda rid=row_id: action_log.set_execution(rid, "accepted")
+                    )
+            except Exception:
+                if row_id is not None:
+                    await hass.async_add_executor_job(
+                        lambda rid=row_id: action_log.set_execution(
+                            rid, "failed", reason_code="service_call_failed")
+                    )
         for eid in sent_lights:
             hass.async_create_task(
                 _verify_control(hass, eid, "turn_off", "light", "turn_off",
-                                 {"entity_id": eid}, source="local_engine"))
+                                 {"entity_id": eid}, source="local_engine",
+                                 action_id=light_row_ids.get(eid)))
 
         from .cognitive_core import _lockdown_exempt_locks
         exempt = _lockdown_exempt_locks()
+        lock_candidates = [
+            s.entity_id for s in hass.states.async_all("lock")
+            if s.state == "unlocked" and s.entity_id not in exempt
+        ]
+        lock_row_ids = await hass.async_add_executor_job(
+            lambda: action_log.start_many(
+                goodnight_request_id, "goodnight_sweep", "chat",
+                [{"key": eid, "domain": "lock", "service": "lock", "entity_id": eid}
+                 for eid in lock_candidates],
+            )
+        ) if lock_candidates else {}
         sent_locks: list[str] = []
-        for s in hass.states.async_all("lock"):
-            if s.state == "unlocked" and s.entity_id not in exempt:
-                try:
-                    await hass.services.async_call(
-                        "lock", "lock", {"entity_id": s.entity_id}, blocking=True)
-                    sent_locks.append(s.entity_id)
-                except Exception:
-                    pass
+        for eid in lock_candidates:
+            row_id = lock_row_ids.get(eid)
+            try:
+                await hass.services.async_call(
+                    "lock", "lock", {"entity_id": eid}, blocking=True)
+                sent_locks.append(eid)
+                if row_id is not None:
+                    await hass.async_add_executor_job(
+                        lambda rid=row_id: action_log.set_execution(rid, "accepted")
+                    )
+            except Exception:
+                if row_id is not None:
+                    await hass.async_add_executor_job(
+                        lambda rid=row_id: action_log.set_execution(
+                            rid, "failed", reason_code="service_call_failed")
+                    )
         for eid in sent_locks:
             hass.async_create_task(
                 _verify_control(hass, eid, "lock", "lock", "lock",
-                                 {"entity_id": eid}, source="local_engine"))
+                                 {"entity_id": eid}, source="local_engine",
+                                 action_id=lock_row_ids.get(eid)))
 
         n_lights, n_locks = len(sent_lights), len(sent_locks)
         return LocalResult(

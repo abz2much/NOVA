@@ -56,6 +56,23 @@ CREATE TABLE IF NOT EXISTS spoken_history (
 CREATE INDEX IF NOT EXISTS idx_spoken_history_ts ON spoken_history(timestamp);
 """
 
+
+def _migrate_action_request_id_column(conn: sqlite3.Connection) -> None:
+    """Additive migration: nullable action_request_id, linking a spoken row
+    back to the Action Audit Log request it narrates (if any) — same
+    convention as database.py::_migrate_subject_column. Re-checked on every
+    connect, no cached flag. Never stores the action row's text or any
+    other action_log field, only the request_id string."""
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(spoken_history)")}
+    if "action_request_id" in cols:
+        return
+    try:
+        conn.execute("ALTER TABLE spoken_history ADD COLUMN action_request_id TEXT")
+    except sqlite3.OperationalError:
+        cols_after = {row["name"] for row in conn.execute("PRAGMA table_info(spoken_history)")}
+        if "action_request_id" not in cols_after:
+            raise
+
 # In-memory mirror of the most recent successfully recorded entry, e.g.
 # {"id": 42, "text": "...", "source": "reminder", "speakers": [...], "repeat_of_id": None}.
 # Never read from or written to SQLite directly — see module docstring.
@@ -81,11 +98,13 @@ def _connect(db_path: str) -> sqlite3.Connection:
     conn.execute("PRAGMA busy_timeout=10000")
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA)
+    _migrate_action_request_id_column(conn)
     conn.commit()
     return conn
 
 
 def _row_to_dict(row: sqlite3.Row) -> dict:
+    keys = row.keys()
     return {
         "id": row["id"],
         "timestamp": row["timestamp"],
@@ -94,6 +113,7 @@ def _row_to_dict(row: sqlite3.Row) -> dict:
         "speakers": json.loads(row["speakers"]) if row["speakers"] else [],
         "delivery_state": row["delivery_state"],
         "repeat_of_id": row["repeat_of_id"],
+        "action_request_id": row["action_request_id"] if "action_request_id" in keys else None,
     }
 
 
@@ -103,6 +123,8 @@ def record(
     speakers: list,
     repeat_of_id: Optional[int] = None,
     db_path: Optional[str] = None,
+    *,
+    action_request_id: Optional[str] = None,
 ) -> Optional[int]:
     """Insert one spoken-history row and prune to the most recent
     _MAX_ENTRIES. Call only after Home Assistant has actually accepted the
@@ -113,6 +135,15 @@ def record(
     ``repeat_of_id`` is flattened to the true original automatically — if
     the referenced row is itself a "repeat" entry, this stores a reference
     to *its* original instead, so a chain of repeats never nests.
+
+    ``action_request_id`` (Action Audit Log linkage, v3 correction):
+    optional, nullable, and purely a reference — this stores the shared
+    request_id string only, never any action_log field or text. The link
+    is to the REQUEST (a bulk action, a briefing), not to one target row,
+    since one spoken message can describe several targets at once. Omit it
+    for ordinary speech that isn't about a logged action (the common case).
+    Never affects delivery or recording — a bad/unknown request_id is
+    stored as given, the panel resolves it, this module doesn't validate it.
 
     Safe to call from an executor thread only (does blocking SQLite I/O).
     """
@@ -134,9 +165,10 @@ def record(
 
             cur = conn.execute(
                 "INSERT INTO spoken_history "
-                "(timestamp, text, source, speakers, delivery_state, repeat_of_id) "
-                "VALUES (?, ?, ?, ?, 'sent', ?)",
-                (time.time(), text, source, json.dumps(list(speakers)), resolved_repeat_of_id),
+                "(timestamp, text, source, speakers, delivery_state, repeat_of_id, action_request_id) "
+                "VALUES (?, ?, ?, ?, 'sent', ?, ?)",
+                (time.time(), text, source, json.dumps(list(speakers)), resolved_repeat_of_id,
+                 action_request_id),
             )
             new_id = cur.lastrowid
             conn.execute(
@@ -157,6 +189,7 @@ def record(
         "source": source,
         "speakers": list(speakers),
         "repeat_of_id": resolved_repeat_of_id,
+        "action_request_id": action_request_id,
     }
     return new_id
 
@@ -170,7 +203,8 @@ def list_recent(db_path: Optional[str] = None) -> list:
     conn = _connect(db)
     try:
         rows = conn.execute(
-            "SELECT id, timestamp, text, source, speakers, delivery_state, repeat_of_id "
+            "SELECT id, timestamp, text, source, speakers, delivery_state, repeat_of_id, "
+            "action_request_id "
             "FROM spoken_history ORDER BY id DESC LIMIT ?",
             (_MAX_ENTRIES,),
         ).fetchall()
@@ -186,7 +220,8 @@ def get(spoken_id: int, db_path: Optional[str] = None) -> Optional[dict]:
     conn = _connect(db)
     try:
         row = conn.execute(
-            "SELECT id, timestamp, text, source, speakers, delivery_state, repeat_of_id "
+            "SELECT id, timestamp, text, source, speakers, delivery_state, repeat_of_id, "
+            "action_request_id "
             "FROM spoken_history WHERE id = ?",
             (spoken_id,),
         ).fetchone()
@@ -200,6 +235,36 @@ def get_last() -> Optional[dict]:
     directly on the event loop. Used by the deterministic local
     "repeat that" command."""
     return dict(_last) if _last is not None else None
+
+
+def find_by_action_request_id(
+    request_ids: list[str], db_path: Optional[str] = None,
+) -> dict[str, int]:
+    """{request_id: spoken_history_id} for whichever of `request_ids` have a
+    linked spoken row — a direct indexed lookup, not bounded by
+    list_recent's retention window (an action page can legitimately show
+    requests older than the last 100 spoken entries). When a request_id has
+    more than one spoken row (rare — e.g. a briefing that pushed and also
+    spoke), the most recent one wins. Raises on a genuine connect/schema
+    failure (same convention as list_recent/get); returns {} for an empty
+    or falsy `request_ids`."""
+    if not request_ids:
+        return {}
+    db = _resolve(db_path)
+    conn = _connect(db)
+    try:
+        placeholders = ",".join("?" for _ in request_ids)
+        rows = conn.execute(
+            f"SELECT id, action_request_id FROM spoken_history "
+            f"WHERE action_request_id IN ({placeholders}) ORDER BY id ASC",
+            tuple(request_ids),
+        ).fetchall()
+    finally:
+        conn.close()
+    result: dict[str, int] = {}
+    for row in rows:
+        result[row["action_request_id"]] = row["id"]  # later rows overwrite -> most recent wins
+    return result
 
 
 def hydrate(db_path: Optional[str] = None) -> None:

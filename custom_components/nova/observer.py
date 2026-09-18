@@ -945,16 +945,34 @@ async def _send_notification(message: str, *, urgency: str) -> None:
         notify_service = (_STATE.config or {}).get(CONF_NOTIFY_SERVICE)
     if not notify_service:
         return
+    from . import action_log
+    request_id = action_log.new_request_id()
+    domain = service = None
     try:
         domain, service = notify_service.split(".", 1)
+    except Exception:
+        pass
+    action_id = await _STATE.hass.async_add_executor_job(
+        lambda: action_log.start(
+            request_id, "notify", "proactive",
+            domain=domain, service=service, requested_state=urgency,
+        )
+    )
+    try:
         title = "Nova" if urgency != "critical" else "⚠ Nova URGENT"
         await _STATE.hass.services.async_call(
             domain, service,
             {"title": title, "message": message},
             blocking=False,
         )
+        await _STATE.hass.async_add_executor_job(
+            lambda: action_log.set_execution(action_id, "accepted")
+        )
     except Exception as exc:
         _LOGGER.warning("notification failed: %s", exc)
+        await _STATE.hass.async_add_executor_job(
+            lambda: action_log.set_execution(action_id, "failed", reason_code="service_call_failed")
+        )
 
 
 # ─── Lifecycle ──────────────────────────────────────────────────────────────

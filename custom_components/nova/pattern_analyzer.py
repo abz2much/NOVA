@@ -1674,7 +1674,11 @@ def get_analyzer() -> PatternAnalyzer:
     return _ANALYZER
 
 
-async def install_approved_suggestion(hass, suggestion_id: int) -> dict:
+async def install_approved_suggestion(
+    hass, suggestion_id: int, *,
+    requested_by_user_id: Optional[str] = None,
+    requested_by_name: Optional[str] = None,
+) -> dict:
     """
     Close the pattern-engine loop (v6.52.0): approve a suggestion AND actually
     install its automation into Home Assistant, instead of only flagging it
@@ -1686,8 +1690,17 @@ async def install_approved_suggestion(hass, suggestion_id: int) -> dict:
 
     Advisory suggestions (repeated-command notes with no concrete trigger) are
     still marked approved — the user acknowledged them — but nothing is written
-    to HA, and the reason says so plainly.
+    to HA, and the reason says so plainly — and nothing is logged to the
+    Action Audit Log either (no action was actually attempted).
+
+    Action Audit Log ownership (v3 correction): this IS the top-level
+    action (a person clicked Approve in the panel) — it generates the
+    request_id and passes it into create_automation() below so the whole
+    "approve suggestion -> install automation" flow logs as ONE request,
+    not two.
     """
+    from . import action_log
+    request_id = action_log.new_request_id()
     analyzer = get_analyzer()
     try:
         sug = await hass.async_add_executor_job(analyzer.get_suggestion, suggestion_id)
@@ -1711,6 +1724,9 @@ async def install_approved_suggestion(hass, suggestion_id: int) -> dict:
             trigger=norm["trigger"],
             condition=norm.get("condition"),
             action=norm["action"],
+            request_id=request_id, source="suggestion",
+            requested_by_user_id=requested_by_user_id,
+            requested_by_name=requested_by_name,
         )
         if result.get("success"):
             await hass.async_add_executor_job(

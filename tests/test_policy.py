@@ -25,8 +25,14 @@ def _fake_vc(protected=True, confirm_result=True,
             raise RuntimeError("confirm exploded")
         return confirm_result
 
+    async def confirm_typed(hass, question, entity_id=""):
+        if confirm_raises:
+            raise RuntimeError("confirm exploded")
+        return "approved" if confirm_result else "rejected"
+
     m.action_is_protected = action_is_protected
     m.confirm = confirm
+    m.confirm_typed = confirm_typed
     return m
 
 
@@ -61,44 +67,50 @@ async def test_confirm_gate_fails_closed_when_confirm_raises(load, monkeypatch):
     """THE regression guard: confirm() erroring on a protected action denies."""
     policy = load("policy")
     _install_vc(monkeypatch, _fake_vc(protected=True, confirm_raises=True))
-    ok, note = await policy.confirm_gate(None, "lock", "unlock", "lock.front")
+    ok, note, approval_result = await policy.confirm_gate(None, "lock", "unlock", "lock.front")
     assert ok is False
     assert "denied" in note.lower() or "unavailable" in note.lower()
+    assert approval_result == "error"
 
 
 async def test_confirm_gate_allows_when_confirmed(load, monkeypatch):
     policy = load("policy")
     _install_vc(monkeypatch, _fake_vc(protected=True, confirm_result=True))
-    ok, note = await policy.confirm_gate(None, "lock", "unlock", "lock.front")
+    ok, note, approval_result = await policy.confirm_gate(None, "lock", "unlock", "lock.front")
     assert ok is True
     assert note == ""
+    assert approval_result == "approved"
 
 
 async def test_confirm_gate_denies_when_declined(load, monkeypatch):
     policy = load("policy")
     _install_vc(monkeypatch, _fake_vc(protected=True, confirm_result=False))
-    ok, note = await policy.confirm_gate(None, "lock", "unlock", "lock.front")
+    ok, note, approval_result = await policy.confirm_gate(None, "lock", "unlock", "lock.front")
     assert ok is False
     assert "not yet confirmed" in note
+    assert approval_result == "rejected"
 
 
 async def test_confirm_gate_no_friction_when_not_protected(load, monkeypatch):
     policy = load("policy")
     _install_vc(monkeypatch, _fake_vc(protected=False))
-    ok, note = await policy.confirm_gate(None, "light", "turn_on", "light.kitchen")
+    ok, note, approval_result = await policy.confirm_gate(None, "light", "turn_on", "light.kitchen")
     assert ok is True
     assert note == ""
+    assert approval_result == "not_required"
 
 
 async def test_confirm_gate_fails_closed_when_protection_check_raises(load, monkeypatch):
     policy = load("policy")
     _install_vc(monkeypatch, _fake_vc(protected_raises=True))
     # high-risk action -> denied when the checker errors
-    ok, _ = await policy.confirm_gate(None, "lock", "unlock", "lock.front")
+    ok, _, approval_result = await policy.confirm_gate(None, "lock", "unlock", "lock.front")
     assert ok is False
+    assert approval_result == "error"
     # low-risk convenience still flows even if the checker errors
-    ok2, _ = await policy.confirm_gate(None, "light", "turn_on", "light.kitchen")
+    ok2, _, approval_result2 = await policy.confirm_gate(None, "light", "turn_on", "light.kitchen")
     assert ok2 is True
+    assert approval_result2 == "not_required"
 
 
 # ── requires_confirmation (sync, used by bulk_control) ────────────────────────

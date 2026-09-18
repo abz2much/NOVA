@@ -91,9 +91,31 @@ async def async_run_routine(
     steps = routines[name]
     _LOGGER.info("Nova: running routine '%s' (%d steps)", name, len(steps))
 
+    from . import action_log
+    request_id = action_log.new_request_id()
+    requested_by_user_id = getattr(getattr(call, "context", None), "user_id", None)
+    # Only steps with a service call are audited targets — an announce-only
+    # step is pure speech, out of scope for this log. Placeholder rows for
+    # the whole routine run are created in one batch (v3 correction), then
+    # each step updates its own row as it's processed.
+    service_step_indices = [i for i, s in enumerate(steps) if s.get("service")]
+    step_targets = []
+    for i in service_step_indices:
+        s = steps[i]
+        svc = s.get("service", "")
+        d, sv = svc.split(".", 1) if "." in svc else ("", svc)
+        step_targets.append({"key": i, "domain": d or None, "service": sv or None})
+    row_ids = await hass.async_add_executor_job(
+        lambda: action_log.start_many(
+            request_id, f"routine:{name}", "routine", step_targets,
+            requested_by_user_id=requested_by_user_id,
+        )
+    )
+
     errors = []
     executed = 0
-    for step in steps:
+    for step_i, step in enumerate(steps):
+        row_id = row_ids.get(step_i)
         try:
             # Announce, if present
             announce_text = step.get("announce")
@@ -126,8 +148,15 @@ async def async_run_routine(
                     step_entity = step_entity[0] if step_entity else ""
                 from . import policy
                 if policy.requires_confirmation(hass, domain, svc, step_entity):
-                    ok_gate, gate_note = await policy.confirm_gate(
+                    await hass.async_add_executor_job(
+                        lambda rid=row_id: action_log.mark_awaiting_approval(rid)
+                    )
+                    ok_gate, gate_note, approval_result = await policy.confirm_gate(
                         hass, domain, svc, step_entity, service.replace(".", " "))
+                    await hass.async_add_executor_job(
+                        lambda rid=row_id, ar=approval_result: action_log.set_approval(
+                            rid, ar, approval_required=(ar != "not_required"))
+                    )
                     if not ok_gate:
                         if step.get("optional"):
                             _LOGGER.debug(
@@ -138,17 +167,28 @@ async def async_run_routine(
                                 "Nova: step '%s' needs confirmation, not run: %s",
                                 service, gate_note)
                             errors.append(f"{service}: {gate_note or 'confirmation required'}")
+                        await hass.async_add_executor_job(
+                            lambda rid=row_id: action_log.set_execution(
+                                rid, "blocked", reason_code="confirmation_not_approved")
+                        )
                         continue
 
                 try:
                     await hass.services.async_call(domain, svc, data, target=target, blocking=True)
                     executed += 1
+                    await hass.async_add_executor_job(
+                        lambda rid=row_id: action_log.set_execution(rid, "accepted")
+                    )
                 except Exception as exc:
                     if step.get("optional"):
                         _LOGGER.debug("Nova: optional step '%s' skipped: %s", service, exc)
                     else:
                         _LOGGER.warning("Nova: step '%s' failed: %s", service, exc)
                         errors.append(f"{service}: {exc}")
+                    await hass.async_add_executor_job(
+                        lambda rid=row_id: action_log.set_execution(
+                            rid, "failed", reason_code="service_call_failed")
+                    )
         except Exception as exc:
             _LOGGER.warning("Nova: routine step error: %s", exc)
             errors.append(str(exc))

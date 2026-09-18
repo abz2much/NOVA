@@ -112,26 +112,30 @@ def test_mode_explicit_gated(vc, monkeypatch):
 async def test_confirm_no_satellite_returns_false(vc, monkeypatch):
     monkeypatch.setattr(vc, "_cfg", _cfg_map({"voice_confirm_enabled": True}))
     monkeypatch.setattr(vc, "_satellite_for_entity", lambda h, e: None)
-    # no satellite → cannot confirm → fail-safe False (action won't run)
+    # no satellite → falls to phone notification → no notify.mobile_app_*
+    # targets on the minimal fake hass → "error" → fail-safe False.
     assert await vc.confirm(_Hass(), "sure?", entity_id="lock.front") is False
+    assert await vc.confirm_typed(_Hass(), "sure?", entity_id="lock.front") == "error"
 
 
 async def test_confirm_native_affirmative_returns_true(vc, monkeypatch):
     monkeypatch.setattr(vc, "_cfg", _cfg_map({
         "voice_confirm_enabled": True, "voice_confirm_mode": "native"}))
     monkeypatch.setattr(vc, "_satellite_for_entity", lambda h, e: "assist_satellite.basement")
-    async def _native_yes(h, s, q, t): return True
+    async def _native_yes(h, s, q, t): return "approved"
     monkeypatch.setattr(vc, "_confirm_native", _native_yes)
     assert await vc.confirm(_Hass(), "sure?", entity_id="lock.front") is True
+    assert await vc.confirm_typed(_Hass(), "sure?", entity_id="lock.front") == "approved"
 
 
 async def test_confirm_native_denial_returns_false(vc, monkeypatch):
     monkeypatch.setattr(vc, "_cfg", _cfg_map({
         "voice_confirm_enabled": True, "voice_confirm_mode": "native"}))
     monkeypatch.setattr(vc, "_satellite_for_entity", lambda h, e: "assist_satellite.basement")
-    async def _native_no(h, s, q, t): return False
+    async def _native_no(h, s, q, t): return "rejected"
     monkeypatch.setattr(vc, "_confirm_native", _native_no)
     assert await vc.confirm(_Hass(), "sure?", entity_id="lock.front") is False
+    assert await vc.confirm_typed(_Hass(), "sure?", entity_id="lock.front") == "rejected"
 
 
 async def test_confirm_gated_never_auto_approves(vc, monkeypatch):
@@ -153,6 +157,7 @@ async def test_confirm_gated_never_auto_approves(vc, monkeypatch):
     monkeypatch.setattr(vc, "_start_listening", _noop_start)
     try:
         assert await vc.confirm(_Hass(), "sure?", entity_id="lock.front") is False
+        assert await vc.confirm_typed(_Hass(), "sure?", entity_id="lock.front") == "deferred"
     finally:
         sys.modules.pop("jc.tts_helper", None)
 
@@ -162,6 +167,93 @@ async def test_confirm_exception_is_failsafe_false(vc, monkeypatch):
     def _boom(h, e): raise RuntimeError("x")
     monkeypatch.setattr(vc, "_satellite_for_entity", _boom)
     assert await vc.confirm(_Hass(), "sure?", entity_id="lock.front") is False
+    assert await vc.confirm_typed(_Hass(), "sure?", entity_id="lock.front") == "error"
+
+
+# ── typed layer: the three-way split _confirm_via_notification actually
+# computes internally, previously discarded before this feature and never
+# directly tested at all ─────────────────────────────────────────────────────
+
+class _HassWithNotify(_Hass):
+    """Adds services.async_services() so _confirm_via_notification can find
+    a notify.mobile_app_* target, and a controllable bus for firing the
+    confirm/deny action event."""
+    def __init__(self, notify_names=("mobile_app_abi",)):
+        super().__init__()
+        self._notify_names = notify_names
+        self._bus_listener = None
+        outer = self
+        class _Svc(type(self.services)):
+            def async_services(self):
+                return {"notify": {n: {} for n in outer._notify_names}}
+        self.services = _Svc()
+        self.services.calls = self.calls
+        self.services._call_result = None
+        class _Bus:
+            def async_listen(_self, event_type, cb):
+                outer._bus_listener = cb
+                return lambda: None
+        self.bus = _Bus()
+
+    def fire(self, action):
+        self._bus_listener(type("Ev", (), {"data": {"action": action}})())
+
+
+async def test_confirm_via_notification_explicit_confirm_is_approved(vc):
+    hass = _HassWithNotify()
+
+    import asyncio
+    async def _tap_soon():
+        await asyncio.sleep(0)
+        # The action name is generated per-call; recover it from the sent payload.
+        domain, name, data, kw = hass.calls[0]
+        hass.fire(data["data"]["actions"][0]["action"])
+
+    task = asyncio.ensure_future(_tap_soon())
+    result = await vc._confirm_via_notification(hass, "Unlock the door?", timeout=2)
+    await task
+    assert result == "approved"
+
+
+async def test_confirm_via_notification_explicit_deny_is_rejected(vc):
+    hass = _HassWithNotify()
+
+    import asyncio
+    async def _tap_soon():
+        await asyncio.sleep(0)
+        domain, name, data, kw = hass.calls[0]
+        hass.fire(data["data"]["actions"][1]["action"])
+
+    task = asyncio.ensure_future(_tap_soon())
+    result = await vc._confirm_via_notification(hass, "Unlock the door?", timeout=2)
+    await task
+    assert result == "rejected"
+
+
+async def test_confirm_via_notification_timeout_is_expired(vc):
+    hass = _HassWithNotify()
+    result = await vc._confirm_via_notification(hass, "Unlock the door?", timeout=0.01)
+    assert result == "expired"
+
+
+async def test_confirm_via_notification_no_targets_is_error(vc):
+    hass = _HassWithNotify(notify_names=())
+    result = await vc._confirm_via_notification(hass, "Unlock the door?", timeout=1)
+    assert result == "error"
+
+
+async def test_confirm_via_phone_only_typed_matches_bool_wrapper(vc, monkeypatch):
+    async def _approved(hass, q, timeout=None):
+        return "approved"
+    monkeypatch.setattr(vc, "_confirm_via_notification", _approved)
+    assert await vc.confirm_via_phone_only_typed(_Hass(), "sure?") == "approved"
+    assert await vc.confirm_via_phone_only(_Hass(), "sure?") is True
+
+    async def _rejected(hass, q, timeout=None):
+        return "rejected"
+    monkeypatch.setattr(vc, "_confirm_via_notification", _rejected)
+    assert await vc.confirm_via_phone_only_typed(_Hass(), "sure?") == "rejected"
+    assert await vc.confirm_via_phone_only(_Hass(), "sure?") is False
 
 
 # ── sentence sets ────────────────────────────────────────────────────────────

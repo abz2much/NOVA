@@ -400,21 +400,41 @@ class NovaSentinel:
             )
         except Exception:
             pass
-        await async_announce(self.hass, text, self._tts_entity(), self._speakers(), context="sentinel")
+        from . import action_log
+        request_id = action_log.new_request_id()
+        await async_announce(
+            self.hass, text, self._tts_entity(), self._speakers(), context="sentinel",
+            action_request_id=request_id,
+        )
 
         # v5.6.5: Also send phone push notification for sentinel alerts
+        action_id = None
         try:
             notify_svc = nova_config.runtime_get(
                 self.hass, self._entry, "notify_service", "")
             if notify_svc:
                 domain, service = notify_svc.split(".", 1)
+                action_id = await self.hass.async_add_executor_job(
+                    lambda: action_log.start(
+                        request_id, "notify", "proactive",
+                        domain=domain, service=service, entity_id=entity_id,
+                    )
+                )
                 await self.hass.services.async_call(
                     domain, service,
                     {"title": "Nova", "message": text},
                     blocking=False,
                 )
+                await self.hass.async_add_executor_job(
+                    lambda: action_log.set_execution(action_id, "accepted")
+                )
         except Exception as exc:
             _LOGGER.debug("Sentinel phone notify failed: %s", exc)
+            if action_id is not None:
+                await self.hass.async_add_executor_job(
+                    lambda: action_log.set_execution(
+                        action_id, "failed", reason_code="service_call_failed")
+                )
 
     async def _groq_line(
         self, entity_id: str, friendly_name: str, rule: dict, minutes: int

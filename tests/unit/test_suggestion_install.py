@@ -12,6 +12,11 @@ def pa(load):
     return load("pattern_analyzer")
 
 
+@pytest.fixture
+def ac(load):
+    return load("automation_creator")
+
+
 # ── normalize_suggestion_automation (pure) ───────────────────────────────────
 
 def test_time_routine_normalizes_and_modernizes(pa):
@@ -142,7 +147,7 @@ class _StubAnalyzer:
         self.installed = (sid, auto_id)
 
 
-async def test_installer_installs_concrete_suggestion(pa, fake_hass, monkeypatch):
+async def test_installer_installs_concrete_suggestion(pa, ac, fake_hass, monkeypatch):
     sug = {"id": 7, "description": "learned",
            "automation_yaml": json.dumps({
                "alias": "porch on at 18:00",
@@ -157,7 +162,7 @@ async def test_installer_installs_concrete_suggestion(pa, fake_hass, monkeypatch
         calls.update(kw)
         return {"success": True, "automation_id": "nova_auto_porch",
                 "alias": "Nova · porch on at 18:00"}
-    monkeypatch.setattr("jc.automation_creator.create_automation", _fake_create, raising=False)
+    monkeypatch.setattr(ac, "create_automation", _fake_create)
 
     res = await pa.install_approved_suggestion(fake_hass, 7)
     assert res["ok"] is True and res["installed"] is True
@@ -167,7 +172,7 @@ async def test_installer_installs_concrete_suggestion(pa, fake_hass, monkeypatch
     assert calls["alias"] == "porch on at 18:00"    # normalized args passed through
 
 
-async def test_installer_advisory_approves_without_install(pa, fake_hass, monkeypatch):
+async def test_installer_advisory_approves_without_install(pa, ac, fake_hass, monkeypatch):
     sug = {"id": 9, "description": "note",
            "automation_yaml": json.dumps({"note": "x", "type": "manual_review"})}
     stub = _StubAnalyzer(sug)
@@ -177,7 +182,7 @@ async def test_installer_advisory_approves_without_install(pa, fake_hass, monkey
     async def _fake_create(hass, **kw):
         called["n"] += 1
         return {"success": True, "automation_id": "x", "alias": "x"}
-    monkeypatch.setattr("jc.automation_creator.create_automation", _fake_create, raising=False)
+    monkeypatch.setattr(ac, "create_automation", _fake_create)
 
     res = await pa.install_approved_suggestion(fake_hass, 9)
     assert res["ok"] is True and res["installed"] is False
@@ -194,7 +199,7 @@ async def test_installer_missing_suggestion(pa, fake_hass, monkeypatch):
     assert res["ok"] is False and "not found" in res["error"]
 
 
-async def test_installer_reports_write_failure(pa, fake_hass, monkeypatch):
+async def test_installer_reports_write_failure(pa, ac, fake_hass, monkeypatch):
     sug = {"id": 3, "description": "d",
            "automation_yaml": json.dumps({
                "alias": "a", "trigger": {"platform": "time", "at": "18:00:00"},
@@ -204,7 +209,7 @@ async def test_installer_reports_write_failure(pa, fake_hass, monkeypatch):
 
     async def _fail_create(hass, **kw):
         return {"success": False, "error": "disk full"}
-    monkeypatch.setattr("jc.automation_creator.create_automation", _fail_create, raising=False)
+    monkeypatch.setattr(ac, "create_automation", _fail_create)
 
     res = await pa.install_approved_suggestion(fake_hass, 3)
     assert res["ok"] is True and res["installed"] is False

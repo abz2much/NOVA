@@ -103,13 +103,30 @@ async def async_activate_by_intent(
         pick = pick_clean
 
     # Activate
+    from . import action_log
+    request_id = action_log.new_request_id()
+    requested_by_user_id = getattr(getattr(call, "context", None), "user_id", None)
+    action_id = await hass.async_add_executor_job(
+        lambda: action_log.start(
+            request_id, "scene_by_intent", "ha_service",
+            domain="scene", service="turn_on", entity_id=pick,
+            requested_by_user_id=requested_by_user_id,
+        )
+    )
     try:
         await hass.services.async_call(
             "scene", "turn_on", {"entity_id": pick}, blocking=True
         )
     except Exception as exc:
         _LOGGER.error("Nova scene activation error: %s", exc)
+        await hass.async_add_executor_job(
+            lambda: action_log.set_execution(
+                action_id, "failed", reason_code="service_call_failed")
+        )
         return {"success": False, "error": str(exc)}
+    await hass.async_add_executor_job(
+        lambda: action_log.set_execution(action_id, "accepted")
+    )
 
     scene_name = next((s["name"] for s in scenes if s["entity_id"] == pick), pick)
     msg = f"Activating {scene_name}{addr}."

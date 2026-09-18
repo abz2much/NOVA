@@ -212,7 +212,7 @@ async def test_confirmation_policy_still_gates_before_any_verification_real_hass
     hass.services.async_register("lock", "unlock", unlock)
 
     async def deny(*a, **k):
-        return False, "Confirmation required before unlocking Front Door."
+        return False, "Confirmation required before unlocking Front Door.", "rejected"
     with patch("custom_components.nova.policy.confirm_gate", new=deny):
         out = await agent._exec_control_device(
             hass, {"entity_id": "lock.front", "action": "unlock"})
