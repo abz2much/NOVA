@@ -759,6 +759,7 @@ async def _process_event(event: Event) -> None:
             broadcast_group=broadcast_group,
             announcement_speakers=ann_speakers,
             is_sleeping=(sleeping or in_quiet_hours),
+            authoritative_anyone_home=anyone_home,
         )
         _LOGGER.warning(
             "Observer routing result: targets=%s, mode=%s", targets, mode,

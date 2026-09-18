@@ -247,6 +247,115 @@ def _on_state_changed(event: Event) -> None:
             _STATE.security_events.clear()
 
 
+# ── Action-claim guard ───────────────────────────────────────────────────────
+# _trigger_briefing's LLM call below is a single-shot text completion with no
+# device-control tools at all — nothing stops it writing in-character flavor
+# text that CLAIMS a device action happened ("I've nudged the thermostat up
+# two degrees") when nothing was ever executed (the 2026-09-18 08:54
+# incident). This is detected deterministically (no second LLM call) and,
+# if found, the ENTIRE generated briefing is discarded for a safe fallback —
+# never edited sentence-by-sentence, since a partial edit of model text can
+# leave behind damaged or misleading wording. Kept generic across every
+# controllable domain (lights, locks, covers, climate, media players,
+# scenes, scripts, ...), not just climate.
+#
+# Device-action QUESTIONS/OFFERS ("Would you like me to raise the
+# thermostat?") are rejected too, not just completed/promised claims. This
+# branch has no mechanism to turn a "yes" reply into a real action — no
+# device-control tools, and no pending-offer system — so an offer here
+# would be a dead end for the user. Questions unrelated to device control
+# (e.g. offering to read out the calendar) are unaffected.
+import re as _re
+
+_ACTION_VERBS = (
+    r"turn(?:ed|ing)?|switch(?:ed|ing)?|set(?:ting)?|adjust(?:ed|ing)?|"
+    r"nudg(?:ed|e|ing)|lock(?:ed|ing)?|unlock(?:ed|ing)?|open(?:ed|ing)?|"
+    r"clos(?:ed|e|ing)|start(?:ed|ing)?|stopp?(?:ed|ing)?|"
+    r"activat(?:ed|e|ing)|deactivat(?:ed|e|ing)|dimm?(?:ed|ing)?|"
+    r"rais(?:ed|e|ing)|lower(?:ed|ing)?|arm(?:ed|ing)?|disarm(?:ed|ing)?|"
+    r"paus(?:ed|e|ing)|resum(?:ed|e|ing)|play(?:ed|ing)?|runn?(?:ing)?|ran|"
+    r"launch(?:ed|ing)?"
+)
+# Deliberately excludes observation verbs (checked, noticed, seen,
+# confirmed, ...) — those describe what Nova perceived, not an action it
+# took or is offering, and must never be treated as a control claim.
+_APOSTROPHE = r"['’]"  # straight and curly ('ve vs 've)
+_FIRST_PERSON_ACTION_CLAIM = _re.compile(
+    rf"\bI(?:{_APOSTROPHE}ve|\s+have|\s+just|\s+already|{_APOSTROPHE}ll|"
+    rf"\s+will|{_APOSTROPHE}m|\s+am(?:\s+going\s+to)?)?"
+    rf"\s+(?:{_ACTION_VERBS})\b",
+    _re.IGNORECASE,
+)
+# "Would you like me to raise..." / "Do you want me to lock..." — offer
+# phrasing whose subject is "me"/"you", not "I", so it never matches
+# _FIRST_PERSON_ACTION_CLAIM above. ("Shall I turn off the lights?" /
+# "Should I lock the door?" / "Can I raise the thermostat?" DO contain a
+# literal "I <verb>" and are already caught by _FIRST_PERSON_ACTION_CLAIM
+# now that questions are no longer exempt from it — see below.)
+_OFFER_ACTION_PATTERN = _re.compile(
+    rf"\b(?:would you like (?:me )?to|do you want me to|want me to)"
+    rf"\s+(?:{_ACTION_VERBS})\b",
+    _re.IGNORECASE,
+)
+_DEVICE_NOUN = _re.compile(
+    r"\b(light|lamp|lock|door|thermostat|climate|heat(?:ing)?|cover|blind|"
+    r"curtain|shade|garage|media\s*player|speaker|tv|television|scene|"
+    r"script|fan|switch|outlet|plug|alarm|siren|camera)s?\b",
+    _re.IGNORECASE,
+)
+
+
+def _split_sentences(text: str) -> list[str]:
+    """Sentence split good enough to scope matching per sentence — not meant
+    to reconstruct polished text."""
+    return _re.split(r"(?<=[.!?])\s+", text.strip())
+
+
+def contains_unsupported_device_action_claim(text: str) -> bool:
+    """True if `text` contains a first-person claim that Nova performed, is
+    performing, or will perform a device action, OR a question/offer asking
+    whether Nova should perform one. This briefing path has no way to turn
+    either into a real action (no device-control tools, no pending-offer
+    system), so both are rejected — regardless of phrasing as a statement
+    or a question. Plain factual state reports ("the thermostat is at 18")
+    and questions unrelated to device control (e.g. offering to read out
+    the calendar) are never flagged."""
+    for sentence in _split_sentences(text):
+        stripped = sentence.strip()
+        if not stripped:
+            continue
+        if not _DEVICE_NOUN.search(stripped):
+            continue
+        if _FIRST_PERSON_ACTION_CLAIM.search(stripped) or _OFFER_ACTION_PATTERN.search(stripped):
+            return True
+    return False
+
+
+def _deterministic_fallback_briefing(
+    *, honorific: str, greeting: str, reason: str,
+    weather: str = "", open_things: list[str] | None = None,
+    events: list[str] | None = None,
+) -> str:
+    """A safe briefing built only from context already verified elsewhere in
+    _trigger_briefing — used when the generated text fails the action-claim
+    guard. Never claims a device was changed and never mentions a device
+    action at all, question or otherwise — this function only ever emits
+    the greeting plus verified weather/security/event facts."""
+    parts = []
+    if honorific:
+        parts.append(f"Welcome home, {honorific}." if reason == "arrival"
+                      else f"{greeting}, {honorific}.")
+    else:
+        parts.append(f"{greeting}.")
+    if weather:
+        parts.append(f"{weather}.")
+    if open_things:
+        parts.append(f"Open/unlocked: {', '.join(open_things)}.")
+    if events:
+        parts.append(f"Recent events: {'; '.join(events[:3])}.")
+    return " ".join(parts)
+
+
 # ── Briefing trigger ────────────────────────────────────────────────────────
 
 async def _trigger_briefing(
@@ -356,7 +465,21 @@ async def _trigger_briefing(
         task = (
             f"You are delivering a proactive briefing ({reason}) {to_whom}. "
             f"{begin_with} "
-            f"Cover only the important items. Under 100 words. Be direct."
+            f"Cover only the important items. Under 100 words. Be direct. "
+            f"This message has NO device-control tools — you cannot turn "
+            f"anything on or off, lock or unlock anything, or adjust any "
+            f"device right now, and nothing you say here can be followed up "
+            f"on or acted on later. Do not claim, promise, or imply that you "
+            f"changed or will change a device (never say things like "
+            f"\"I've turned up the heat\" or \"I'll lock the door\"). Do not "
+            f"ask whether the user wants you to change a device either "
+            f"(never say things like \"Would you like me to raise the "
+            f"thermostat?\" or \"Shall I turn off the lights?\") — if they "
+            f"want a device changed, they can ask you directly by voice or "
+            f"chat afterward. Report verified current state only (e.g. "
+            f"\"the thermostat is at 18 degrees\"). Questions unrelated to "
+            f"device control — for example offering to read out the "
+            f"calendar — are fine."
         )
         system = build_system_prompt(hass, honorific, task)
 
@@ -386,6 +509,19 @@ async def _trigger_briefing(
         briefing_text = result.get("text", "").strip()
         if not briefing_text:
             return
+
+        if contains_unsupported_device_action_claim(briefing_text):
+            _LOGGER.warning(
+                "Proactive briefing (%s) rejected — unsupported device-action "
+                "claim in generated text; using deterministic fallback: %s",
+                reason, briefing_text[:200],
+            )
+            briefing_text = _deterministic_fallback_briefing(
+                honorific=honorific, greeting=greeting, reason=reason,
+                weather=weather, open_things=open_things, events=events,
+            )
+            if not briefing_text:
+                return
 
         _LOGGER.info("Proactive briefing (%s): %s", reason, briefing_text[:100])
 
