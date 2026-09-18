@@ -1,3 +1,9 @@
+## [7.105.1] — fix: presence direction and fabricated briefing actions
+
+- Arrival and departure are now determined from the exact Home Assistant state transition (`not_home` ↔ `home`), not by pattern-matching event text — a departure's own "not_home" wording could previously misclassify an arrival as a departure and announce it backwards.
+- A departure that leaves nobody home no longer plays through a speaker: routing now uses the same authoritative presence check the decision itself was made with, instead of re-deriving it from physical sensors that can still read "on" briefly after the last person actually leaves.
+- Proactive briefings can no longer claim, imply, or offer a device action they have no ability to perform (e.g. "I've nudged the thermostat up two degrees," or asking "Would you like me to raise the thermostat?") — a deterministic check rejects the whole generated briefing and falls back to a plain, verified summary instead.
+
 ## [7.105.0] — honest action verification, deterministic entity resolution, proactive false-positive fixes
 
 - Irrelevant ambient speech is now rejected before it can alter conversation memory.
