@@ -1,3 +1,11 @@
+## [7.106.0] — Action Audit Log: see what Nova actually did
+
+- New read-only Actions view in the Logs tab: device controls, routines, safety actions, notifications, and every other verified action path Nova actually attempted or performed.
+- Approval outcome (approved, rejected, expired, not required) is shown separately from execution result, so a confirmation decision is never conflated with whether the action itself succeeded.
+- Multi-target actions (bulk control, routine runs, safety sweeps) are grouped under one request, with an honest aggregate status — accepted, blocked, verified, unverified, and failed are never dressed up as a uniform success or failure.
+- Entries link to the matching Spoken History record where one exists, without copying the spoken text itself.
+- Logging storage is bounded and fail-open: a logging problem can never block, delay, or alter the underlying action it's recording.
+
 ## [7.105.1] — fix: presence direction and fabricated briefing actions
 
 - Arrival and departure are now determined from the exact Home Assistant state transition (`not_home` ↔ `home`), not by pattern-matching event text — a departure's own "not_home" wording could previously misclassify an arrival as a departure and announce it backwards.
