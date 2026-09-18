@@ -93,7 +93,6 @@ def test_mode_bonus_reads_configured_bump_list(energy, monkeypatch):
     modes_stub = types.ModuleType("jc.modes")
     modes_stub.active_mode = lambda: "away"
     monkeypatch.setitem(sys.modules, "jc.modes", modes_stub)
-    monkeypatch.setattr(sys.modules["jc"], "modes", modes_stub, raising=False)
     assert energy._mode_agency_bonus() == 1
     modes_stub.active_mode = lambda: "normal"
     assert energy._mode_agency_bonus() == 0             # not in bump list

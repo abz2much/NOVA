@@ -525,6 +525,13 @@ async def _trigger_briefing(
 
         _LOGGER.info("Proactive briefing (%s): %s", reason, briefing_text[:100])
 
+        # Action Audit Log / Spoken History linkage (v3 correction): one
+        # request_id for this whole briefing event — the spoken copy (if
+        # any) and the phone push (if any) are two sides of the SAME
+        # request, not independent actions.
+        from . import action_log
+        request_id = action_log.new_request_id()
+
         # Route: speak at home, push notification when away
         if anyone_home:
             # Check sleep
@@ -538,7 +545,7 @@ async def _trigger_briefing(
 
             if sleeping:
                 # Push to phone instead of speaking
-                await _push_to_phone(hass, config, briefing_text, reason)
+                await _push_to_phone(hass, config, briefing_text, reason, request_id=request_id)
             else:
                 # Speak via announcement speakers
                 tts_entity = resolve_tts_for_context(
@@ -554,13 +561,13 @@ async def _trigger_briefing(
                 if tts_entity and targets:
                     await async_announce(
                         hass, briefing_text, tts_entity, targets,
-                        context="briefing",
+                        context="briefing", action_request_id=request_id,
                     )
                 # Also push to phone for record
-                await _push_to_phone(hass, config, briefing_text, reason)
+                await _push_to_phone(hass, config, briefing_text, reason, request_id=request_id)
         else:
             # Everyone away — push only
-            await _push_to_phone(hass, config, briefing_text, reason)
+            await _push_to_phone(hass, config, briefing_text, reason, request_id=request_id)
 
     except Exception as exc:
         _LOGGER.warning("Proactive briefing failed: %s", exc)
@@ -571,6 +578,8 @@ async def _push_to_phone(
     config: dict,
     message: str,
     reason: str,
+    *,
+    request_id: Optional[str] = None,
 ) -> None:
     """Push briefing to phone via configured notify service."""
     notify_svc = config.get("notify_service", "")
@@ -578,8 +587,22 @@ async def _push_to_phone(
         _LOGGER.debug("Proactive: no notify_service configured, skipping push")
         return
 
+    from . import action_log
+    if request_id is None:
+        request_id = action_log.new_request_id()
+    svc_domain = svc_name = None
     try:
         svc_domain, svc_name = notify_svc.split(".", 1)
+    except Exception:
+        pass
+    action_id = await hass.async_add_executor_job(
+        lambda: action_log.start(
+            request_id, "notify", "proactive",
+            domain=svc_domain, service=svc_name,
+        )
+    )
+
+    try:
         title = {
             "arrival": "Nova — Welcome Home",
             "security": "Nova — Security Alert",
@@ -593,8 +616,14 @@ async def _push_to_phone(
             blocking=False,
         )
         _LOGGER.info("Proactive: pushed to phone via %s", notify_svc)
+        await hass.async_add_executor_job(
+            lambda: action_log.set_execution(action_id, "accepted")
+        )
     except Exception as exc:
         _LOGGER.warning("Proactive: phone push failed: %s", exc)
+        await hass.async_add_executor_job(
+            lambda: action_log.set_execution(action_id, "failed", reason_code="service_call_failed")
+        )
 
 
 # ── Start / Stop ────────────────────────────────────────────────────────────

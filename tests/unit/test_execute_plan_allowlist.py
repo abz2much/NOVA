@@ -47,13 +47,16 @@ class _Hass:
         self.states = _States(self)
         self.services = _Services(self)
 
+    async def async_add_executor_job(self, func, *args):
+        return func(*args)
+
 
 def _step(domain, service, entity_id, **extra):
     return {"domain": domain, "service": service, "entity_id": entity_id, **extra}
 
 
 async def _allow_gate(hass, domain, service, entity_id="", action_label="", device_id=""):
-    return True, ""
+    return True, "", "not_required"
 
 
 async def test_allowed_domain_runs_normally(agent, pol, monkeypatch):

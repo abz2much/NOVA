@@ -148,6 +148,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await hass.async_add_executor_job(spoken_history.hydrate)
     except Exception as exc:
         _LOGGER.warning("Nova: spoken history hydrate failed (non-fatal): %s", exc)
+
+    # Action Audit Log: same portability fix — point the store at this
+    # instance's own config directory rather than the hardcoded default.
+    # No hydrate step needed (nothing to warm into memory); must fail open
+    # the same way, though configure() itself can't meaningfully raise.
+    try:
+        from . import action_log
+        action_log.configure(hass)
+    except Exception as exc:
+        _LOGGER.warning("Nova: action log configure failed (non-fatal): %s", exc)
     api_key           = _eff.get(CONF_API_KEY, "") or entry.data.get(CONF_API_KEY, "")
     llm_provider_name = _eff.get("llm_provider", "groq")
     llm_model         = _eff.get("model", "openai/gpt-oss-120b")
@@ -1155,9 +1165,28 @@ def _register_services(
         await async_briefing(hass, call, groq_client, honorific, tts, spk)
 
     async def _nova_backup(call):
+        from . import action_log
         from .backup import create_backup
-        path = await hass.async_add_executor_job(create_backup, hass.config.path())
+        request_id = action_log.new_request_id()
+        requested_by_user_id = getattr(getattr(call, "context", None), "user_id", None)
+        action_id = await hass.async_add_executor_job(
+            lambda: action_log.start(
+                request_id, "backup", "ha_service",
+                requested_by_user_id=requested_by_user_id,
+            )
+        )
+        try:
+            path = await hass.async_add_executor_job(create_backup, hass.config.path())
+        except Exception:
+            await hass.async_add_executor_job(
+                lambda: action_log.set_execution(
+                    action_id, "failed", reason_code="backup_failed")
+            )
+            raise
         _LOGGER.info("Nova state backed up to %s", path)
+        await hass.async_add_executor_job(
+            lambda: action_log.set_execution(action_id, "accepted")
+        )
         await hass.services.async_call("persistent_notification", "create", {
             "title": "Nova backup",
             "message": (f"Nova state saved to:\n`{path}`\n\nDownload this file before "
@@ -1168,10 +1197,30 @@ def _register_services(
     hass.services.async_register(DOMAIN, "backup", _nova_backup)
 
     async def _nova_restore(call):
+        from . import action_log
         from .backup import restore_backup
         archive = (call.data or {}).get("archive", "") or ""
-        path = await hass.async_add_executor_job(restore_backup, hass.config.path(), archive)
+        request_id = action_log.new_request_id()
+        requested_by_user_id = getattr(getattr(call, "context", None), "user_id", None)
+        action_id = await hass.async_add_executor_job(
+            lambda: action_log.start(
+                request_id, "restore", "ha_service",
+                requested_by_user_id=requested_by_user_id,
+            )
+        )
+        try:
+            path = await hass.async_add_executor_job(
+                restore_backup, hass.config.path(), archive)
+        except Exception:
+            await hass.async_add_executor_job(
+                lambda: action_log.set_execution(
+                    action_id, "failed", reason_code="restore_failed")
+            )
+            raise
         _LOGGER.info("Nova state restored from %s", path)
+        await hass.async_add_executor_job(
+            lambda: action_log.set_execution(action_id, "accepted")
+        )
         await hass.services.async_call("persistent_notification", "create", {
             "title": "Nova restore",
             "message": (f"Nova state restored from:\n`{path}`\n\nRestart Home Assistant "
@@ -1487,6 +1536,8 @@ def _register_services(
             condition=call.data.get("condition"),
             action=call.data.get("action"),
             mode=call.data.get("mode", "single"),
+            source="ha_service",
+            requested_by_user_id=getattr(getattr(call, "context", None), "user_id", None),
         )
         if result.get("success"):
             hass.bus.async_fire("nova_automation_created", result)
@@ -1555,8 +1606,19 @@ def _register_services(
         if not notify_svc:
             _LOGGER.warning("Test notify: no notify_service configured")
             return
+        from . import action_log
+        request_id = action_log.new_request_id()
+        requested_by_user_id = getattr(getattr(call, "context", None), "user_id", None)
+        action_id = None
         try:
             domain, service = notify_svc.split(".", 1)
+            action_id = await hass.async_add_executor_job(
+                lambda: action_log.start(
+                    request_id, "test_notify", "ha_service",
+                    domain=domain, service=service,
+                    requested_by_user_id=requested_by_user_id,
+                )
+            )
             await hass.services.async_call(
                 domain, service,
                 {
@@ -1566,8 +1628,16 @@ def _register_services(
                 blocking=False,
             )
             _LOGGER.info("Test notification sent via %s", notify_svc)
+            await hass.async_add_executor_job(
+                lambda: action_log.set_execution(action_id, "accepted")
+            )
         except Exception as exc:
             _LOGGER.warning("Test notification failed: %s", exc)
+            if action_id is not None:
+                await hass.async_add_executor_job(
+                    lambda: action_log.set_execution(
+                        action_id, "failed", reason_code="service_call_failed")
+                )
 
     hass.services.async_register(DOMAIN, "test_notify", _test_notify)
 

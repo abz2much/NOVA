@@ -1411,7 +1411,8 @@ class NovaPanel extends HTMLElement {
     const filterChips = NovaPanel.LOG_FILTERS.map(f =>
       `<button class="mode-chip new-log-filter${(this._logFilter || "all") === f ? " mode-chip-on" : ""}" data-filter="${f}">${f.toUpperCase()}</button>`).join("");
     const view = this._logView || "system";
-    const title = view === "decisions" ? "Decisions" : view === "spoken_history" ? "Spoken History" : "System Log";
+    const title = view === "decisions" ? "Decisions" : view === "spoken_history" ? "Spoken History"
+      : view === "actions" ? "Actions" : "System Log";
     return `
         <div class="panel">
           <div class="panel-head">
@@ -1422,8 +1423,10 @@ class NovaPanel extends HTMLElement {
             <button class="mode-chip new-logview${view === "system" ? " mode-chip-on" : ""}" data-view="system">SYSTEM LOG</button>
             <button class="mode-chip new-logview${view === "decisions" ? " mode-chip-on" : ""}" data-view="decisions">DECISIONS</button>
             <button class="mode-chip new-logview${view === "spoken_history" ? " mode-chip-on" : ""}" data-view="spoken_history">SPOKEN HISTORY</button>
+            <button class="mode-chip new-logview${view === "actions" ? " mode-chip-on" : ""}" data-view="actions">ACTIONS</button>
           </div>
-          ${view === "decisions" ? this._htmlDecisionsView() : view === "spoken_history" ? this._htmlSpokenHistoryView() : `
+          ${view === "decisions" ? this._htmlDecisionsView() : view === "spoken_history" ? this._htmlSpokenHistoryView()
+            : view === "actions" ? this._htmlActionsView() : `
           <div class="cfg-row">
             <input id="newLogSearch" class="cfg-field" style="flex:1" type="text" placeholder="search…" autocomplete="off" value="${this._esc(this._logSearch || "")}">
           </div>
@@ -1516,6 +1519,110 @@ class NovaPanel extends HTMLElement {
     } catch (err) {
       console.error("Nova: repeat spoken failed", err);
     }
+  }
+
+  // ─── Actions (Action Audit Log) ─────────────────────────────────────────
+  // Actions Nova genuinely attempted or performed — device controls, bulk
+  // controls, scene/script/automation execution, safety routines, suggested-
+  // automation installation, notifications. Request-level, keyset-paginated:
+  // one page is a set of COMPLETE request groups (a bulk action's targets
+  // are never split across pages). Strictly read-only — no retry/replay/
+  // approve/reject control here, matching Spoken History and Decisions.
+
+  _actionStatusClass(status) {
+    return {
+      success: "diag-ok", verified: "diag-ok",
+      partial: "diag-warn", awaiting: "diag-warn",
+      failed: "diag-down", blocked: "diag-down",
+    }[status] || "diag-idle";
+  }
+
+  _htmlActionsView() {
+    // Static shell only — _fetchActions()/_renderActionRows() update
+    // #actionEntries directly, same pattern as Spoken History/Decisions, so
+    // a fetch never re-triggers a full _render().
+    return `
+      <div id="actionEntries" class="new-log-entries">
+        <div class="stub-body">Loading…</div>
+      </div>
+      <div class="cfg-row" id="actionLoadMoreRow" hidden>
+        <button class="mode-chip" id="newActionLoadMore">LOAD MORE</button>
+      </div>
+    `;
+  }
+
+  async _fetchActions(reset = true) {
+    if (!this._hass) return;
+    if (reset) { this._actions = []; this._actionsCursor = null; }
+    const container = this.shadowRoot?.getElementById("actionEntries");
+    if (container && reset) container.innerHTML = `<div class="stub-body">Loading…</div>`;
+    try {
+      const args = { type: "nova/list_actions", limit: 20 };
+      if (!reset && this._actionsCursor) {
+        args.cursor_ts = this._actionsCursor.ts;
+        args.cursor_request_id = this._actionsCursor.request_id;
+      }
+      const result = await this._hass.callWS(args);
+      const page = result.requests || [];
+      this._actions = reset ? page : (this._actions || []).concat(page);
+      this._actionsCursor = result.next_cursor || null;
+      this._renderActionRows();
+    } catch (err) {
+      this._actions = null;
+      this._renderActionRows();
+    }
+  }
+
+  _actionLabel(a) {
+    return (a.action || "").replace(/_/g, " ");
+  }
+
+  _renderActionRows() {
+    const container = this.shadowRoot?.getElementById("actionEntries");
+    if (!container) return;
+    const requests = this._actions;
+    if (requests === null) {
+      container.innerHTML = `<div class="new-log-entry-error" style="padding:12px">Couldn't load actions.</div>`;
+      const row = this.shadowRoot?.getElementById("actionLoadMoreRow");
+      if (row) row.hidden = true;
+      return;
+    }
+    if (!requests || !requests.length) {
+      container.innerHTML = `<div class="stub-body">No actions recorded yet.</div>`;
+      const row = this.shadowRoot?.getElementById("actionLoadMoreRow");
+      if (row) row.hidden = true;
+      return;
+    }
+    container.innerHTML = requests.map(r => {
+      const when = r.ts_created ? new Date(r.ts_created * 1000).toLocaleString() : "";
+      const statusCls = this._actionStatusClass(r.status);
+      const requester = r.requested_by_name || r.requested_by_user_id || r.request_device_id || "";
+      const targets = r.targets || [];
+      const spokenNote = (r.spoken_history_id !== null && r.spoken_history_id !== undefined)
+        ? `<span class="toggle-desc" title="Linked Spoken History entry">🔊 spoken</span>` : "";
+      const targetRows = targets.map(t => {
+        const targetName = t.entity_id || [t.domain, t.service].filter(Boolean).join(".") || "—";
+        return `
+          <div class="cfg-row">
+            <label>${this._esc(targetName)}</label>
+            <span class="toggle-desc">approval: ${this._esc(t.approval_result)} · execution: ${this._esc(t.execution_result)}</span>
+          </div>
+          ${t.reason_text ? `<div class="stub-body" style="margin:-4px 0 6px;font-size:11px">${this._esc(t.reason_text)}</div>` : ""}`;
+      }).join("");
+      return `
+        <details class="new-log-entry" style="display:block">
+          <summary style="cursor:pointer;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span class="new-log-ts">${this._esc(when)}</span>
+            <span class="new-log-cat">${this._esc((r.source || "").toUpperCase())}</span>
+            <span class="new-log-msg">${this._esc(this._actionLabel(r))}${requester ? " · " + this._esc(requester) : ""}</span>
+            <span class="${statusCls}">${this._esc((r.status || "").toUpperCase())}</span>
+            ${spokenNote}
+          </summary>
+          <div style="margin-top:8px">${targetRows || '<div class="stub-body">No target detail.</div>'}</div>
+        </details>`;
+    }).join("");
+    const loadMoreRow = this.shadowRoot?.getElementById("actionLoadMoreRow");
+    if (loadMoreRow) loadMoreRow.hidden = !this._actionsCursor;
   }
 
   // ─── Decisions (Phase 1: decision explanations + feedback) ─────────────
@@ -1769,6 +1876,11 @@ class NovaPanel extends HTMLElement {
       return;
     }
     if ((this._logView || "system") === "spoken_history") return;
+    if ((this._logView || "system") === "actions") {
+      const loadMoreBtn = root.getElementById("newActionLoadMore");
+      if (loadMoreBtn) loadMoreBtn.addEventListener("click", () => this._fetchActions(false));
+      return;
+    }
     root.querySelectorAll(".new-log-filter").forEach(btn => {
       btn.addEventListener("click", () => {
         this._logFilter = btn.getAttribute("data-filter");
@@ -4723,6 +4835,7 @@ class NovaPanel extends HTMLElement {
       const logView = this._logView || "system";
       if (logView === "decisions") this._fetchDecisions();
       else if (logView === "spoken_history") this._fetchSpokenHistory();
+      else if (logView === "actions") this._fetchActions();
       else this._fetchDebugLog();
     }
     if (this._currentTab === "memory") { this._wireMemory(); this._fetchKnowledge(); this._fetchPersonRoutines(); }

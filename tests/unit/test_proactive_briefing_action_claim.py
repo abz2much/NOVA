@@ -143,12 +143,6 @@ def _stub_module(monkeypatch, name, **attrs):
     for k, v in attrs.items():
         setattr(mod, k, v)
     monkeypatch.setitem(sys.modules, f"jc.{name}", mod)
-    # `from . import X` inside proactive_briefing.py resolves via
-    # getattr(jc_package, "X") when that attribute is already cached on the
-    # `jc` package object (set by an earlier test file's real import of the
-    # same submodule) — overriding sys.modules alone isn't enough once that
-    # attribute exists, so it must be overridden too.
-    monkeypatch.setattr(sys.modules["jc"], name, mod, raising=False)
     return mod
 
 
@@ -204,7 +198,7 @@ def briefing_mod(load, monkeypatch):
     )
     async_announce_calls = []
 
-    async def fake_async_announce(hass, text, tts_entity, targets, context=""):
+    async def fake_async_announce(hass, text, tts_entity, targets, context="", **kw):
         async_announce_calls.append({"text": text, "targets": targets})
 
     _stub_module(

@@ -187,8 +187,6 @@ def _stub_room(identity, monkeypatch, seen, cam_areas, meta=None):
     amod = types.SimpleNamespace(entity_area=lambda h, e: cam_areas.get(e))
     monkeypatch.setitem(sys.modules, "jc.recognition", rmod)
     monkeypatch.setitem(sys.modules, "jc.audio_routing", amod)
-    monkeypatch.setattr(sys.modules["jc"], "recognition", rmod, raising=False)
-    monkeypatch.setattr(sys.modules["jc"], "audio_routing", amod, raising=False)
 
 
 def test_room_votes_sole_person_in_room(identity, monkeypatch):

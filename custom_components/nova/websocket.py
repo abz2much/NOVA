@@ -87,6 +87,7 @@ def async_register(hass: HomeAssistant) -> None:
         websocket_api.async_register_command(hass, ws_get_setup_health)
         websocket_api.async_register_command(hass, ws_get_provider_activity)
         websocket_api.async_register_command(hass, ws_get_spoken_history)
+        websocket_api.async_register_command(hass, ws_list_actions)
         websocket_api.async_register_command(hass, ws_repeat_spoken)
         websocket_api.async_register_command(hass, ws_voice_confirm_test)
         websocket_api.async_register_command(hass, ws_intrusion)
@@ -2476,7 +2477,11 @@ async def ws_suggestion_action(
         analyzer = get_analyzer()
         sid = int(msg["suggestion_id"])
         if msg["action"] == "approve":
-            res = await install_approved_suggestion(hass, sid)
+            res = await install_approved_suggestion(
+                hass, sid,
+                requested_by_user_id=getattr(connection.user, "id", None),
+                requested_by_name=getattr(connection.user, "name", None),
+            )
             if res.get("installed"):
                 nova_log("LEARN", f"Suggestion #{sid} approved & installed "
                                     f"as '{res.get('alias')}'")
@@ -2783,7 +2788,11 @@ async def ws_mode(
                 nova_log("MODE", f"mode → {res['mode']} (panel)")
                 try:
                     from . import mode_scene
-                    await mode_scene.apply_mode_entry(hass, res["mode"])
+                    await mode_scene.apply_mode_entry(
+                        hass, res["mode"], source="panel",
+                        requested_by_user_id=getattr(connection.user, "id", None),
+                        requested_by_name=getattr(connection.user, "name", None),
+                    )
                 except Exception:
                     pass
             connection.send_result(msg["id"], {**res, **modes.mode_info()})
@@ -2987,6 +2996,61 @@ async def ws_get_spoken_history(
     except Exception as exc:
         _LOGGER.exception("ws_get_spoken_history failed: %s", exc)
         connection.send_error(msg["id"], "get_spoken_history_failed", str(exc))
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "nova/list_actions",
+    vol.Optional("limit", default=20): int,
+    vol.Optional("cursor_ts"): vol.Coerce(float),
+    vol.Optional("cursor_request_id"): str,
+})
+@websocket_api.async_response
+async def ws_list_actions(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict,
+) -> None:
+    """Action Audit Log: actions Nova genuinely attempted or performed on
+    the user's behalf — device controls, bulk controls, scene/script/
+    automation execution, safety routines, suggested-automation
+    installation, notifications. Request-level, keyset-paginated: one page
+    is a set of COMPLETE request groups (never a request split across two
+    pages), newest first. Admin-only: reveals what Nova actually did in
+    the house, same tier as Spoken History.
+
+    Each returned request carries its own aggregate `status` (success/
+    partial/failed/blocked/awaiting) separate from each target row's own
+    approval_result/execution_result, and — when a matching Spoken History
+    entry exists for that request_id — a `spoken_history_id` reference
+    (never the spoken text itself; the panel fetches that separately via
+    the existing nova/get_spoken_history command if it wants to show it)."""
+    try:
+        from . import action_log
+        limit = max(1, min(int(msg.get("limit", 20)), 100))
+        result = await hass.async_add_executor_job(
+            lambda: action_log.page_requests(
+                limit=limit,
+                cursor_ts=msg.get("cursor_ts"),
+                cursor_request_id=msg.get("cursor_request_id"),
+            )
+        )
+        request_ids = [r["request_id"] for r in result["requests"]]
+        spoken_links: dict[str, int] = {}
+        if request_ids:
+            try:
+                from . import spoken_history
+                spoken_links = await hass.async_add_executor_job(
+                    spoken_history.find_by_action_request_id, request_ids
+                )
+            except Exception:
+                pass  # a Spoken History lookup failure must never break the actions list
+        for r in result["requests"]:
+            r["spoken_history_id"] = spoken_links.get(r["request_id"])
+        connection.send_result(msg["id"], result)
+    except Exception as exc:
+        _LOGGER.exception("ws_list_actions failed: %s", exc)
+        connection.send_error(msg["id"], "list_actions_failed", str(exc))
 
 
 @websocket_api.require_admin

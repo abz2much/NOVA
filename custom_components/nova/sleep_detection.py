@@ -295,32 +295,55 @@ async def _send_sleep_prompt(hass: HomeAssistant, quiet_end: str) -> None:
     sent = 0
     try:
         services = hass.services.async_services().get("notify", {})
-        for name in list(services):
-            if not name.startswith("mobile_app_"):
-                continue
-            try:
-                await hass.services.async_call(
-                    "notify", name,
-                    {
-                        "title": "Nova",
-                        "message": "Heading to bed?",
-                        "data": {
-                            "actions": [
-                                {"action": yes_action, "title": "Yes"},
-                                {"action": no_action, "title": "No"},
-                            ],
-                            "push": {"interruption-level": "active"},
-                        },
-                    },
-                    blocking=False,
-                )
-                sent += 1
-            except Exception as exc:
-                _LOGGER.debug("sleep_detection notify.%s failed: %s", name, exc)
+        names = [n for n in services if n.startswith("mobile_app_")]
     except Exception as exc:
         _LOGGER.warning("sleep_detection: enumerate notify services failed: %s", exc)
-    if sent == 0:
+        names = []
+
+    if not names:
         _LOGGER.debug("sleep_detection: no notify.mobile_app_* service found; skipping sleep prompt")
+        return
+
+    from . import action_log
+    request_id = action_log.new_request_id()
+    row_ids = await hass.async_add_executor_job(
+        lambda: action_log.start_many(
+            request_id, "sleep_prompt", "proactive",
+            [{"key": n, "domain": "notify", "service": n} for n in names],
+        )
+    )
+
+    for name in names:
+        row_id = row_ids.get(name)
+        try:
+            await hass.services.async_call(
+                "notify", name,
+                {
+                    "title": "Nova",
+                    "message": "Heading to bed?",
+                    "data": {
+                        "actions": [
+                            {"action": yes_action, "title": "Yes"},
+                            {"action": no_action, "title": "No"},
+                        ],
+                        "push": {"interruption-level": "active"},
+                    },
+                },
+                blocking=False,
+            )
+            sent += 1
+            if row_id is not None:
+                await hass.async_add_executor_job(
+                    lambda rid=row_id: action_log.set_execution(rid, "accepted")
+                )
+        except Exception as exc:
+            _LOGGER.debug("sleep_detection notify.%s failed: %s", name, exc)
+            if row_id is not None:
+                await hass.async_add_executor_job(
+                    lambda rid=row_id: action_log.set_execution(
+                        rid, "failed", reason_code="service_call_failed")
+                )
+    if sent == 0:
         return
 
     @callback

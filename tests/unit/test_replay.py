@@ -134,7 +134,6 @@ def test_replay_kind_not_ready_with_no_data(replay, monkeypatch):
     fake = types.ModuleType("jc.decision_record")
     fake.recent = lambda **k: []                 # no records
     monkeypatch.setitem(sys.modules, "jc.decision_record", fake)
-    monkeypatch.setattr(sys.modules["jc"], "decision_record", fake, raising=False)
     out = replay.replay_kind("intrusion", min_samples=25)
     assert out["ready"] is False
     assert out["samples"] == 0 and out["needed"] == 25
@@ -146,7 +145,6 @@ def test_replay_kind_ready_with_enough_judged(replay, monkeypatch):
     fake = types.ModuleType("jc.decision_record")
     fake.recent = lambda **k: _separable_corpus()
     monkeypatch.setitem(sys.modules, "jc.decision_record", fake)
-    monkeypatch.setattr(sys.modules["jc"], "decision_record", fake, raising=False)
     out = replay.replay_kind("intrusion", min_samples=10)
     assert out["ready"] is True
     assert out["kind"] == "intrusion"

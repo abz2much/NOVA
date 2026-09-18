@@ -244,6 +244,8 @@ async def async_announce(
     use_announce: bool = True,
     context: str = "chat",
     repeat_of_id: Optional[int] = None,
+    *,
+    action_request_id: Optional[str] = None,
 ) -> bool:
     """
     Speak text via tts_entity to the given speaker list. No-op if either empty.
@@ -407,7 +409,10 @@ async def async_announce(
             try:
                 from . import spoken_history
                 await hass.async_add_executor_job(
-                    spoken_history.record, text, source, succeeded, repeat_of_id,
+                    lambda: spoken_history.record(
+                        text, source, succeeded, repeat_of_id,
+                        action_request_id=action_request_id,
+                    )
                 )
             except Exception:
                 pass  # recording must never turn a delivered announcement into a failed one

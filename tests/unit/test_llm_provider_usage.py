@@ -203,7 +203,6 @@ def fake_provider_activity(monkeypatch):
     calls = []
     fake = types.SimpleNamespace(record=lambda *a, **k: calls.append(a) or True)
     monkeypatch.setitem(sys.modules, "jc.provider_activity", fake)
-    monkeypatch.setattr(sys.modules["jc"], "provider_activity", fake, raising=False)
     return calls
 
 
@@ -272,7 +271,6 @@ def test_chat_with_activity_recording_failure_does_not_affect_result(lp, monkeyp
         raise RuntimeError("db down")
     fake_pa = types.SimpleNamespace(record=_boom_record)
     monkeypatch.setitem(sys.modules, "jc.provider_activity", fake_pa)
-    monkeypatch.setattr(sys.modules["jc"], "provider_activity", fake_pa, raising=False)
 
     expected = {"text": "hi", "tool_calls": [], "raw": None, "usage": {}}
     provider = types.SimpleNamespace(name="groq", model="m", base_url=None,
@@ -294,7 +292,6 @@ def test_chat_with_activity_recording_failure_does_not_mask_original_exception(l
         raise RuntimeError("db down")
     fake_pa = types.SimpleNamespace(record=_boom_record)
     monkeypatch.setitem(sys.modules, "jc.provider_activity", fake_pa)
-    monkeypatch.setattr(sys.modules["jc"], "provider_activity", fake_pa, raising=False)
 
     def _boom_chat(*a, **k):
         raise ValueError("the real failure")

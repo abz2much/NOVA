@@ -150,8 +150,39 @@ _install_ha_stubs()
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 COMP = ROOT / "custom_components" / "nova"
 
+class _JCPackage(types.ModuleType):
+    """A plain ModuleType lets Python's real import machinery permanently
+    stick a submodule onto it as an attribute the first time ANY code does a
+    genuine `from . import X` for a name not yet in sys.modules (this happens
+    inside component modules themselves, e.g. audio_routing.py's function-
+    local `from . import nova_config` — not just via our own _load() below).
+    That stale attribute then shadows sys.modules for every later `from .
+    import X`, which resolves via getattr(jc_pkg, "X") first and only falls
+    back to sys.modules if unset — silently defeating any test that patches
+    sys.modules["jc.X"] directly (a documented, previously-hit fragility;
+    see _load()'s docstring). Making sys.modules the single source of truth
+    here, for every access, closes the whole class of bug at its root.
+
+    Test files must NOT also monkeypatch.setattr(jc_pkg, name, ...) alongside
+    monkeypatch.setitem(sys.modules, f"jc.{name}", ...) — with this override,
+    monkeypatch's own getattr-based "old value" snapshot for the setattr call
+    reads back through sys.modules (already mutated by the setitem moments
+    earlier in the same test), so its snapshot is wrong and its teardown
+    restore leaves a stale, unreachable-but-real entry in jc_pkg.__dict__
+    that can resurface if sys.modules[key] is later removed elsewhere.
+    sys.modules alone is sufficient with this class in place — plain
+    monkeypatch.setitem(sys.modules, f"jc.{name}", stub) is the only patch
+    a test needs."""
+    def __getattribute__(self, name):
+        if not name.startswith("_"):
+            mod = sys.modules.get(f"jc.{name}")
+            if mod is not None:
+                return mod
+        return super().__getattribute__(name)
+
+
 if "jc" not in sys.modules:
-    _pkg = types.ModuleType("jc")
+    _pkg = _JCPackage("jc")
     _pkg.__path__ = [str(COMP)]
     sys.modules["jc"] = _pkg
 
@@ -178,12 +209,19 @@ def _load(modname: str):
     that defeat monkeypatching. As plain modules their __package__ is "jc", so
     `from . import X` resolves to jc.X via the jc package __path__."""
     key = f"jc.{modname}"
-    if key in sys.modules:
-        return sys.modules[key]
-    spec = importlib.util.spec_from_file_location(key, COMP / f"{modname}.py")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[key] = mod
-    spec.loader.exec_module(mod)
+    if key not in sys.modules:
+        spec = importlib.util.spec_from_file_location(key, COMP / f"{modname}.py")
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules[key] = mod
+        spec.loader.exec_module(mod)
+    mod = sys.modules[key]
+    # Keep the `jc` package's own attribute in sync with sys.modules. A plain
+    # `from . import X` resolves via getattr(jc_pkg, "X") first and only
+    # falls back to sys.modules if that's unset — so a real (non-_load())
+    # import of X elsewhere in the session can permanently stick a stale
+    # module onto the package object, which later shadows a fresh reload
+    # here even after sys.modules.pop("jc.X") + a new _load("X").
+    setattr(sys.modules["jc"], modname, mod)
     return mod
 
 

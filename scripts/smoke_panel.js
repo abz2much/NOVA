@@ -1569,6 +1569,79 @@ setTimeout(async () => {
     /Couldn't load spoken history\./.test(sRoot.getElementById("spokenHistoryEntries")?.textContent || "")]);
   hass.callWS = spokenCallWS;
 
+  // ── Actions (Action Audit Log) — beside Spoken History, read-only ──
+  const actionsViewBtn = Array.from(sRoot.querySelectorAll(".new-logview")).find(b => b.getAttribute("data-view") === "actions");
+  actionsViewBtn.click();
+  await new Promise(r => setTimeout(r, 20));
+  sRoot = elNew.shadowRoot;
+  checks.push(
+    ["actions tab: heading always renders",
+      /Actions/.test(sRoot.querySelector(".panel-title")?.textContent || "")],
+    ["actions tab: empty result shows a clear empty state",
+      /No actions recorded yet\./.test(sRoot.getElementById("actionEntries")?.textContent || "")],
+  );
+
+  const actionsCallWS = hass.callWS;
+  hass.callWS = async (m) => {
+    if (m.type === "nova/list_actions") return { requests: [
+      {
+        request_id: "req-bulk-1", ts_created: 1700000000, action: "bulk_control",
+        source: "voice", requested_by_user_id: null, requested_by_name: null,
+        request_device_id: "dev-sat-1", status: "partial", spoken_history_id: 5,
+        targets: [
+          { entity_id: "light.kitchen", domain: "light", service: "turn_off",
+            approval_result: "not_required", execution_result: "verified", reason_text: null },
+          { entity_id: "light.hall", domain: "light", service: "turn_off",
+            approval_result: "not_requested", execution_result: "blocked",
+            reason_text: "requires per-device confirmation; skipped in bulk control" },
+        ],
+      },
+      {
+        request_id: "req-single-1", ts_created: 1699990000, action: "control_device",
+        source: "chat", requested_by_user_id: null, requested_by_name: null,
+        request_device_id: null, status: "success", spoken_history_id: null,
+        targets: [
+          { entity_id: "lock.front_door", domain: "lock", service: "lock",
+            approval_result: "not_required", execution_result: "verified", reason_text: null },
+        ],
+      },
+    ], next_cursor: { ts: 1699990000, request_id: "req-single-1" } };
+    return actionsCallWS(m);
+  };
+  await elNew._fetchActions();
+  sRoot = elNew.shadowRoot;
+  const actionGroups = sRoot.querySelectorAll("#actionEntries details");
+  checks.push(
+    ["actions tab: renders one row per REQUEST, not one per target (2 requests, 3 targets total)",
+      actionGroups.length === 2],
+    ["actions tab: mixed target outcomes render as PARTIAL, not success or failed",
+      /PARTIAL/.test(actionGroups[0]?.textContent || "")],
+    ["actions tab: a fully-verified single-target request renders as SUCCESS",
+      /SUCCESS/.test(actionGroups[1]?.textContent || "")],
+    ["actions tab: per-target approval and execution results are both shown, separately",
+      /approval: not_required/.test(actionGroups[0].textContent) && /execution: verified/.test(actionGroups[0].textContent)
+      && /approval: not_requested/.test(actionGroups[0].textContent) && /execution: blocked/.test(actionGroups[0].textContent)],
+    ["actions tab: the policy-skip reason is shown for the blocked target",
+      /requires per-device confirmation; skipped in bulk control/.test(actionGroups[0].textContent)],
+    ["actions tab: a linked Spoken History entry is indicated",
+      /spoken/i.test(actionGroups[0].textContent)],
+    ["actions tab: LOAD MORE appears when a next_cursor is present",
+      sRoot.getElementById("actionLoadMoreRow")?.hidden === false],
+    ["actions tab: no retry/replay/approve/reject/run button anywhere in the view",
+      !sRoot.getElementById("actionEntries").querySelector(
+        "button, [data-retry], [data-approve], [data-reject], [data-run], [data-replay]")],
+  );
+
+  hass.callWS = async (m) => {
+    if (m.type === "nova/list_actions") throw new Error("boom");
+    return actionsCallWS(m);
+  };
+  await elNew._fetchActions();
+  sRoot = elNew.shadowRoot;
+  checks.push(["actions tab: distinct error state when the request fails",
+    /Couldn't load actions\./.test(sRoot.getElementById("actionEntries")?.textContent || "")]);
+  hass.callWS = actionsCallWS;
+
   // ── New look: Memory tab (ported from Classic's own Memory tab) ──
   // Force an empty pending-facts queue explicitly, rather than asserting
   // against the fixture's original seed fact, so this section's outcome

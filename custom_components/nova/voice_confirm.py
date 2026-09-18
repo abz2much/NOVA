@@ -206,11 +206,33 @@ def _satellite_has_audio_out(hass, satellite: str) -> bool:
 
 # ── public: confirm a yes/no ─────────────────────────────────────────────────
 
-async def confirm(hass, question: str, *, entity_id: str = "",
-                  timeout: float = _ANSWER_TIMEOUT) -> bool:
-    """Ask `question` aloud and return True only on an affirmative spoken answer.
-    Fail-safe: any error, timeout, or negative → False (the protected action does
-    NOT run). Chooses native vs gated per config. Never raises."""
+# ── Typed confirmation results (Action Audit Log) ────────────────────────────
+# ConfirmResult values and their EXACT meaning — used to populate an action
+# row's approval_result directly, never derived by parsing `note` text:
+#   "approved" / "rejected" — a real yes/no was captured (spoken match, or an
+#       explicit phone Confirm/Deny tap).
+#   "expired"  — a genuine bounded wait (the phone-notification timeout) ran
+#       out with no tap at all.
+#   "deferred" — the gated voice path asked the question but cannot capture a
+#       synchronous answer by design (see _confirm_gated docstring): NOT a
+#       timeout (no timer ran out) and NOT a rejection (nothing was denied).
+#       If the user answers, it arrives as an ordinary later conversation
+#       turn with no code-level link back to this attempt — see the design
+#       report for why that link isn't fabricated here.
+#   "error"    — an internal failure (no notify target found, an exception
+#       anywhere in the cascade) prevented ever asking at all.
+#
+# confirm()/confirm_via_phone_only() keep their existing bool contract and
+# every existing caller/test untouched: each is now a one-line wrapper over
+# its *_typed() counterpart, `== "approved"`. Nothing about their timeout,
+# fallback order, or fail-safe behavior changes.
+ConfirmResult = str  # Literal["approved", "rejected", "expired", "deferred", "error"]
+
+
+async def confirm_typed(hass, question: str, *, entity_id: str = "",
+                        timeout: float = _ANSWER_TIMEOUT) -> ConfirmResult:
+    """Typed counterpart of confirm() — see ConfirmResult above. Never raises;
+    an internal failure returns "error", never propagates."""
     try:
         satellite = _satellite_for_entity(hass, entity_id)
         if not satellite:
@@ -219,14 +241,27 @@ async def confirm(hass, question: str, *, entity_id: str = "",
             return await _confirm_via_notification(hass, question)
         mode = _mode(hass)
         if mode == "native" or (mode == "auto" and _satellite_has_audio_out(hass, satellite)):
-            ok = await _confirm_native(hass, satellite, question, timeout)
-            if ok is not None:
-                return ok
+            result = await _confirm_native(hass, satellite, question, timeout)
+            if result is not None:
+                return result
             # native failed to run → fall through to gated
         return await _confirm_gated(hass, satellite, question, timeout)
     except Exception as exc:
-        _LOGGER.warning("voice_confirm.confirm failed (treating as no): %s", exc)
-        return False
+        _LOGGER.warning("voice_confirm.confirm failed (treating as error): %s", exc)
+        return "error"
+
+
+async def confirm(hass, question: str, *, entity_id: str = "",
+                  timeout: float = _ANSWER_TIMEOUT) -> bool:
+    """Ask `question` aloud and return True only on an affirmative spoken answer.
+    Fail-safe: any error, timeout, or negative → False (the protected action does
+    NOT run). Chooses native vs gated per config. Never raises.
+
+    A thin bool wrapper over confirm_typed() — behavior, timeout, and
+    fallback order are unchanged; only confirm_typed() exposes the finer
+    approved/rejected/expired/deferred/error distinction."""
+    return (await confirm_typed(hass, question, entity_id=entity_id,
+                                timeout=timeout)) == "approved"
 
 
 def is_voice_satellite_device(hass, device_id: str) -> bool:
@@ -249,24 +284,37 @@ def is_voice_satellite_device(hass, device_id: str) -> bool:
     return False
 
 
+async def confirm_via_phone_only_typed(hass, question: str, *,
+                                       timeout: float = _NOTIFY_CONFIRM_TIMEOUT) -> ConfirmResult:
+    """Typed counterpart of confirm_via_phone_only() — see ConfirmResult
+    above. Never raises; an internal failure returns "error"."""
+    try:
+        return await _confirm_via_notification(hass, question, timeout)
+    except Exception as exc:
+        _LOGGER.warning("voice_confirm.confirm_via_phone_only failed (treating as error): %s", exc)
+        return "error"
+
+
 async def confirm_via_phone_only(hass, question: str, *,
                                  timeout: float = _NOTIFY_CONFIRM_TIMEOUT) -> bool:
     """Like confirm(), but NEVER uses a voice channel — always the phone
     push-notification tier, even when a satellite is available (v7.87.0).
     For actions where asking "did you say yes" by voice again would just
-    repeat the exact weakness a non-voice confirmation exists to close."""
-    try:
-        return await _confirm_via_notification(hass, question, timeout)
-    except Exception as exc:
-        _LOGGER.warning("voice_confirm.confirm_via_phone_only failed (treating as no): %s", exc)
-        return False
+    repeat the exact weakness a non-voice confirmation exists to close.
+
+    A thin bool wrapper over confirm_via_phone_only_typed() — unchanged
+    behavior/timeout; only the typed variant exposes approved/rejected/
+    expired/error."""
+    return (await confirm_via_phone_only_typed(hass, question, timeout=timeout)) == "approved"
 
 
 async def _confirm_native(hass, satellite: str, question: str,
-                          timeout: float) -> Optional[bool]:
+                          timeout: float) -> Optional[ConfirmResult]:
     """Use assist_satellite.ask_question with yes/no sentence sets. Returns
-    True/False on a matched answer, or None if the action couldn't run (so the
-    caller can fall back to gated)."""
+    "approved"/"rejected" on a matched answer, or None if the action
+    couldn't run at all (so the caller falls back to gated) — None is an
+    internal fall-through signal only, never a terminal ConfirmResult on
+    its own."""
     try:
         result = await hass.services.async_call(
             "assist_satellite", "ask_question",
@@ -293,14 +341,14 @@ async def _confirm_native(hass, satellite: str, question: str,
                         break
         if ans is None:
             return None                        # couldn't parse → fall back
-        return ans == "confirm"
+        return "approved" if ans == "confirm" else "rejected"
     except Exception as exc:
         _LOGGER.debug("voice_confirm native path unavailable: %s", exc)
         return None
 
 
 async def _confirm_gated(hass, satellite: str, question: str,
-                         timeout: float) -> bool:
+                         timeout: float) -> ConfirmResult:
     """Fallback: speak via the normal announce path (to the Nest), wait for
     playback to finish, then open listening on the satellite and interpret the
     reply. Since we can't synchronously capture the STT result here without deep
@@ -308,9 +356,18 @@ async def _confirm_gated(hass, satellite: str, question: str,
     as a normal Nova conversation turn that the caller's follow-up handles.
 
     For a *blocking* yes/no we do the safe thing: speak the question, open the
-    mic, and return False unless the pipeline round-trip confirms — i.e. gated
-    confirm never auto-approves a protected action on its own. This keeps the
-    fail-safe property while still voicing the prompt and listening."""
+    mic, and return "deferred" unless the pipeline round-trip confirms — i.e.
+    gated confirm never auto-approves a protected action on its own. This
+    keeps the fail-safe property (the caller treats anything but "approved"
+    as "don't run the action now") while still voicing the prompt and
+    listening.
+
+    "deferred", not "expired" or "rejected": no timer ran out here, and
+    nothing was explicitly denied — the question was asked and no
+    synchronous answer was captured by design. If the user does answer, it
+    arrives as an ordinary later conversation turn with no code-level link
+    back to this attempt (no correlation id exists for that hand-off
+    today)."""
     from . import tts_helper
     tts_entity, speakers = _speaker_for_satellite(hass, satellite)
     if tts_entity and speakers:
@@ -322,7 +379,7 @@ async def _confirm_gated(hass, satellite: str, question: str,
     else:
         _LOGGER.warning("voice_confirm gated: no speaker for %s; cannot voice prompt",
                         satellite)
-        return False
+        return "error"
 
     # Wait for playback to finish so we don't capture our own prompt (echo).
     await _wait_for_playback(hass, speakers)
@@ -331,21 +388,26 @@ async def _confirm_gated(hass, satellite: str, question: str,
     started = await _start_listening(hass, satellite)
     if not started:
         _LOGGER.debug("voice_confirm gated: couldn't reopen mic on %s", satellite)
-    # We deliberately return False here: the gated path cannot itself capture the
-    # STT result synchronously, so it never auto-approves. The spoken answer
-    # comes back as a normal conversation turn; the agent, seeing a pending
-    # confirmation in context, completes the action then. (Fail-safe.)
-    return False
+    # We deliberately return "deferred" here: the gated path cannot itself
+    # capture the STT result synchronously, so it never auto-approves. The
+    # spoken answer comes back as a normal conversation turn; the agent,
+    # seeing a pending confirmation in context, completes the action then.
+    # (Fail-safe: the caller treats this exactly like a decline for the
+    # purpose of "does the action run right now" — it does not.)
+    return "deferred"
 
 
 async def _confirm_via_notification(hass, question: str,
-                                    timeout: float = _NOTIFY_CONFIRM_TIMEOUT) -> bool:
+                                    timeout: float = _NOTIFY_CONFIRM_TIMEOUT) -> ConfirmResult:
     """Fallback when no assist_satellite is available at all: push an
     actionable notification (Confirm / Deny) to every registered phone —
     every `notify.mobile_app_*` service, same enumeration Nova's other
     household-wide alerts use — and act on whichever household member
-    answers first. Fail-safe: no tap within `timeout` → False (deny), same
-    guarantee as the voice paths above."""
+    answers first. Fail-safe: no tap within `timeout` → "expired" (a real
+    timeout genuinely occurred), an explicit Deny tap → "rejected", no
+    notify target found at all → "error" — same fail-safe guarantee as the
+    voice paths above (the caller treats anything but "approved" as
+    "don't run the action")."""
     req_id = uuid.uuid4().hex[:8]
     confirm_action = f"NOVA_CONFIRM_{req_id}"
     deny_action = f"NOVA_DENY_{req_id}"
@@ -380,7 +442,7 @@ async def _confirm_via_notification(hass, question: str,
 
     if sent == 0:
         _LOGGER.warning("voice_confirm: no notify.mobile_app_* service found; cannot confirm")
-        return False
+        return "error"
 
     loop = asyncio.get_event_loop()
     fut: asyncio.Future = loop.create_future()
@@ -391,16 +453,16 @@ async def _confirm_via_notification(hass, question: str,
         if fut.done():
             return
         if action == confirm_action:
-            fut.set_result(True)
+            fut.set_result("approved")
         elif action == deny_action:
-            fut.set_result(False)
+            fut.set_result("rejected")
 
     unsub = hass.bus.async_listen("mobile_app_notification_action", _on_action)
     try:
         return await asyncio.wait_for(fut, timeout=timeout)
     except asyncio.TimeoutError:
-        _LOGGER.info("voice_confirm: no phone response within %.0fs; denying", timeout)
-        return False
+        _LOGGER.info("voice_confirm: no phone response within %.0fs; expiring", timeout)
+        return "expired"
     finally:
         unsub()
 

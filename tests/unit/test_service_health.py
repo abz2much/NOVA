@@ -13,9 +13,15 @@ COMP = pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova
 
 
 @pytest.fixture
-def sh():
+def sh(monkeypatch):
     """Load diagnostics.service_health with a stub parent package so its
-    `from .. import nova_config` resolves without pulling the whole tree."""
+    `from .. import nova_config` resolves without pulling the whole tree.
+
+    jc.nova_config is patched via monkeypatch (not a raw sys.modules
+    assignment) so it reverts after this test — a raw assignment here would
+    permanently stick this fixture's stub into sys.modules["jc.nova_config"]
+    for the rest of the session, leaking into any later test's unrelated
+    `from . import nova_config`."""
     # stub parent 'jc' with a nova_config that reads an overridable dict
     if "jc" not in sys.modules:
         pkg = types.ModuleType("jc")
@@ -24,12 +30,14 @@ def sh():
     cfg_store = {}
     jc_cfg = types.ModuleType("jc.nova_config")
     jc_cfg.get = lambda k, d=None: cfg_store.get(k, d)
-    sys.modules["jc.nova_config"] = jc_cfg
-    # diagnostics subpackage
+    monkeypatch.setitem(sys.modules, "jc.nova_config", jc_cfg)
+    # diagnostics subpackage placeholder -- also via monkeypatch, so it can't
+    # permanently shadow the REAL jc.diagnostics package for a later test
+    # (e.g. test_diagnostics_entry.py's own fixture) once this one reverts.
     if "jc.diagnostics" not in sys.modules:
         dpkg = types.ModuleType("jc.diagnostics")
         dpkg.__path__ = [str(COMP / "diagnostics")]
-        sys.modules["jc.diagnostics"] = dpkg
+        monkeypatch.setitem(sys.modules, "jc.diagnostics", dpkg)
     key = "jc.diagnostics.service_health"
     if key in sys.modules:
         del sys.modules[key]
@@ -276,8 +284,6 @@ def _install_emb_stub(monkeypatch, probe_result):
     async def _probe(h): return probe_result
     emb.probe = _probe
     monkeypatch.setitem(sys.modules, "jc.embeddings", emb)
-    if "jc" in sys.modules:
-        monkeypatch.setattr(sys.modules["jc"], "embeddings", emb, raising=False)
     return emb
 
 
@@ -379,7 +385,6 @@ def test_database_check_down_on_health_failure(sh, monkeypatch):
     fake.DB_PATH = type("P", (), {"exists": staticmethod(lambda: True)})()
     fake.health = lambda: {"ok": False, "error": "disk I/O error"}
     monkeypatch.setitem(sys.modules, "jc.database", fake)
-    monkeypatch.setattr(sys.modules["jc"], "database", fake, raising=False)
     out = sh._check_database(_Hass({}))
     assert out["status"] == "down"
     assert "disk I/O" in out["detail"]
@@ -390,7 +395,6 @@ def test_database_check_ok_when_healthy(sh, monkeypatch):
     fake.DB_PATH = type("P", (), {"exists": staticmethod(lambda: True)})()
     fake.health = lambda: {"ok": True, "error": ""}
     monkeypatch.setitem(sys.modules, "jc.database", fake)
-    monkeypatch.setattr(sys.modules["jc"], "database", fake, raising=False)
     out = sh._check_database(_Hass({}))
     assert out["status"] == "ok"
 

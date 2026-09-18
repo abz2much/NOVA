@@ -25,8 +25,24 @@ def _movie_area(hass, nova_config, audio_routing) -> Optional[str]:
     return None
 
 
-async def apply_mode_entry(hass, mode: str) -> None:
-    """Apply a mode's on-activation mood. Movie → dim the bound room's lights."""
+async def apply_mode_entry(
+    hass, mode: str, *,
+    request_id: Optional[str] = None,
+    source: str = "chat",
+    requested_by_user_id: Optional[str] = None,
+    requested_by_name: Optional[str] = None,
+) -> None:
+    """Apply a mode's on-activation mood. Movie → dim the bound room's lights.
+
+    Action Audit Log ownership (v3 correction): called from both the
+    `set_mode` conversational tool and the panel's mode-switch button — both
+    genuine top-level triggers. Pass `request_id` when the caller already
+    owns one for this mode change (folds this light action into that same
+    request instead of minting a second one); omit it to let this call be
+    its own top-level request."""
+    from . import action_log
+    if request_id is None:
+        request_id = action_log.new_request_id()
     try:
         if mode != "movie":
             return
@@ -45,6 +61,15 @@ async def apply_mode_entry(hass, mode: str) -> None:
         ]
         if not lights:
             return
+        action_id = await hass.async_add_executor_job(
+            lambda: action_log.start(
+                request_id, "mode_entry_mood", source,
+                requested_by_user_id=requested_by_user_id,
+                requested_by_name=requested_by_name,
+                domain="light", entity_id=f"area:{area}",
+                requested_state=f"{pct}%",
+            )
+        )
         if pct <= 0:
             await hass.services.async_call(
                 "light", "turn_off", {"entity_id": lights}, blocking=False)
@@ -52,6 +77,9 @@ async def apply_mode_entry(hass, mode: str) -> None:
             await hass.services.async_call(
                 "light", "turn_on",
                 {"entity_id": lights, "brightness_pct": pct}, blocking=False)
+        await hass.async_add_executor_job(
+            lambda: action_log.set_execution(action_id, "accepted")
+        )
         _LOGGER.info("Movie mood: dimmed %d light(s) in %s to %d%%",
                      len(lights), area, pct)
     except Exception as exc:

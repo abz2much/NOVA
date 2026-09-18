@@ -1097,6 +1097,26 @@ class SafetyManager:
         actions = []
         honorific = _live_honorific(self.hass)  # Phase C: presence-aware
 
+        # Action Audit Log (top-level boundary: this sweep decides which
+        # entities need securing — it owns one request_id for every target
+        # it touches this run; nothing it calls creates its own row).
+        from . import action_log
+        request_id = action_log.new_request_id()
+        candidates: list[tuple[str, str, str]] = []  # (entity_id, domain, service)
+        for state in self.hass.states.async_all("lock"):
+            if state.state == "unlocked" and state.entity_id not in _lockdown_exempt_locks():
+                candidates.append((state.entity_id, "lock", "lock"))
+        for state in self.hass.states.async_all("cover"):
+            if state.state == "open":
+                candidates.append((state.entity_id, "cover", "close_cover"))
+        row_ids = await self.hass.async_add_executor_job(
+            lambda: action_log.start_many(
+                request_id, "lockdown", "safety_routine",
+                [{"key": eid, "domain": d, "service": s, "entity_id": eid}
+                 for eid, d, s in candidates],
+            )
+        ) if candidates else {}
+
         # Check locks
         unlocked = []
         for state in self.hass.states.async_all("lock"):
@@ -1105,6 +1125,7 @@ class SafetyManager:
                 if eid in _lockdown_exempt_locks():
                     continue
                 fname = state.attributes.get("friendly_name", eid)
+                row_id = row_ids.get(eid)
                 # Auto-lock
                 try:
                     await self.hass.services.async_call(
@@ -1112,8 +1133,15 @@ class SafetyManager:
                     )
                     unlocked.append(fname)
                     _LOGGER.info("Cognitive lockdown: locked %s", eid)
+                    await self.hass.async_add_executor_job(
+                        lambda rid=row_id: action_log.set_execution(rid, "accepted")
+                    )
                 except Exception as exc:
                     _LOGGER.warning("Cognitive lockdown: failed to lock %s: %s", eid, exc)
+                    await self.hass.async_add_executor_job(
+                        lambda rid=row_id: action_log.set_execution(
+                            rid, "failed", reason_code="service_call_failed")
+                    )
 
         # Check covers/garage
         open_covers = []
@@ -1121,14 +1149,22 @@ class SafetyManager:
             if state.state == "open":
                 eid = state.entity_id
                 fname = state.attributes.get("friendly_name", eid)
+                row_id = row_ids.get(eid)
                 try:
                     await self.hass.services.async_call(
                         "cover", "close_cover", {"entity_id": eid}, blocking=True,
                     )
                     open_covers.append(fname)
                     _LOGGER.info("Cognitive lockdown: closed %s", eid)
+                    await self.hass.async_add_executor_job(
+                        lambda rid=row_id: action_log.set_execution(rid, "accepted")
+                    )
                 except Exception as exc:
                     _LOGGER.warning("Cognitive lockdown: failed to close %s: %s", eid, exc)
+                    await self.hass.async_add_executor_job(
+                        lambda rid=row_id: action_log.set_execution(
+                            rid, "failed", reason_code="service_call_failed")
+                    )
 
         if unlocked or open_covers:
             i18n = _notify_i18n()
@@ -1424,25 +1460,50 @@ class LockdownManager:
         st = self.hass.states.get(eid)
         return ((st.attributes.get("friendly_name") if st else None) or eid)
 
-    async def _lock_all(self) -> list:
+    async def _lock_all(self, request_id: Optional[str] = None) -> list:
         """Returns (entity_id, friendly_name) pairs for every lock the call
         actually reached — the entity_id is needed so engage() can schedule
         _verify_secured() per lock, the same honest background-confirmation
-        step the cover/opening sweep below already uses."""
+        step the cover/opening sweep below already uses.
+
+        request_id, when given, is engage()'s own request_id — every lock
+        touched here is logged as a target of THAT one lockdown request, not
+        a separate action per lock (start_many, one batch)."""
+        candidates = [
+            st for st in self.hass.states.async_all("lock")
+            if st.entity_id not in self.exempt_locks and st.state == "unlocked"
+        ]
+        from . import action_log
+        row_ids: dict = {}
+        if request_id and candidates:
+            row_ids = await self.hass.async_add_executor_job(
+                lambda: action_log.start_many(
+                    request_id, "lockdown_engage", "safety",
+                    [{"key": st.entity_id, "domain": "lock", "service": "lock",
+                      "entity_id": st.entity_id} for st in candidates],
+                )
+            )
         locked = []
-        for st in self.hass.states.async_all("lock"):
+        for st in candidates:
             eid = st.entity_id
-            if eid in self.exempt_locks:
-                continue
-            if st.state == "unlocked":
-                fname = st.attributes.get("friendly_name", eid)
-                try:
-                    await self.hass.services.async_call(
-                        "lock", "lock", {"entity_id": eid}, blocking=True)
-                    locked.append((eid, fname))
-                    _LOGGER.info("Lockdown: locked %s", eid)
-                except Exception as exc:
-                    _LOGGER.warning("Lockdown: failed to lock %s: %s", eid, exc)
+            fname = st.attributes.get("friendly_name", eid)
+            row_id = row_ids.get(eid)
+            try:
+                await self.hass.services.async_call(
+                    "lock", "lock", {"entity_id": eid}, blocking=True)
+                locked.append((eid, fname))
+                _LOGGER.info("Lockdown: locked %s", eid)
+                if row_id is not None:
+                    await self.hass.async_add_executor_job(
+                        lambda rid=row_id: action_log.set_execution(rid, "accepted")
+                    )
+            except Exception as exc:
+                _LOGGER.warning("Lockdown: failed to lock %s: %s", eid, exc)
+                if row_id is not None:
+                    await self.hass.async_add_executor_job(
+                        lambda rid=row_id: action_log.set_execution(
+                            rid, "failed", reason_code="service_call_failed")
+                    )
         return locked
 
     async def engage(self, reason: str, auto: bool = False,
@@ -1458,8 +1519,14 @@ class LockdownManager:
         self._last_breach_alert = 0.0
         honorific = _live_honorific(self.hass)  # Phase C: presence-aware
 
+        # One request_id for the whole engage() call — locks and closed
+        # openings below are both targets of this ONE lockdown action, not
+        # separate logged actions.
+        from . import action_log
+        request_id = action_log.new_request_id()
+
         # 1) Lock every closed-but-unlocked lock.
-        locked_pairs = await self._lock_all()
+        locked_pairs = await self._lock_all(request_id=request_id)
         locked = [fname for _eid, fname in locked_pairs]
         for eid, fname in locked_pairs:
             self.hass.async_create_task(self._verify_secured(eid, "lock", fname))
@@ -1470,20 +1537,42 @@ class LockdownManager:
         #    contacts (windows) have no actuator and can't be closed.
         closed: list = []
         uncloseable: set = set()
+        close_candidates: list = []
         for eid in self._open_openings():
             dom = eid.split(".", 1)[0]
             st = self.hass.states.get(eid)
             dc = st.attributes.get("device_class") if st else None
             if self._can_secure(dom, dc):
-                name = self._friendly(eid)
-                if await self._secure_entity(eid, dom):
-                    closed.append(name)
-                    self._secured_by_us.add(eid)
-                    self.hass.async_create_task(self._verify_secured(eid, dom, name))
-                else:
-                    uncloseable.add(eid)   # the close call failed outright
+                close_candidates.append((eid, dom))
             else:
                 uncloseable.add(eid)
+        close_row_ids: dict = {}
+        if close_candidates:
+            close_row_ids = await self.hass.async_add_executor_job(
+                lambda: action_log.start_many(
+                    request_id, "lockdown_engage", "safety",
+                    [{"key": eid, "domain": dom, "service": "close_cover",
+                      "entity_id": eid} for eid, dom in close_candidates],
+                )
+            )
+        for eid, dom in close_candidates:
+            name = self._friendly(eid)
+            row_id = close_row_ids.get(eid)
+            if await self._secure_entity(eid, dom):
+                closed.append(name)
+                self._secured_by_us.add(eid)
+                self.hass.async_create_task(self._verify_secured(eid, dom, name))
+                if row_id is not None:
+                    await self.hass.async_add_executor_job(
+                        lambda rid=row_id: action_log.set_execution(rid, "accepted")
+                    )
+            else:
+                uncloseable.add(eid)   # the close call failed outright
+                if row_id is not None:
+                    await self.hass.async_add_executor_job(
+                        lambda rid=row_id: action_log.set_execution(
+                            rid, "failed", reason_code="service_call_failed")
+                    )
 
         # 3) What we can't secure is left as-is and adopted as intentional — the
         #    user is alerted once here and not nagged afterwards (no action means
@@ -1578,7 +1667,21 @@ class LockdownManager:
             }
 
         _LOGGER.warning("Lockdown: securing %s after it opened", eid)
+        from . import action_log
+        breach_request_id = action_log.new_request_id()
+        breach_action_id = await self.hass.async_add_executor_job(
+            lambda: action_log.start(
+                breach_request_id, "lockdown_breach_resecure", "safety",
+                domain=dom, service=("lock" if dom == "lock" else "close_cover"),
+                entity_id=eid,
+            )
+        )
         ok = await self._secure_entity(eid, dom)
+        await self.hass.async_add_executor_job(
+            lambda: action_log.set_execution(
+                breach_action_id, "accepted" if ok else "failed",
+                reason_code=None if ok else "service_call_failed")
+        )
         if ok:
             self._secured_by_us.add(eid)
             # Confirm it actually shut (slow covers report late) and alert if not.
@@ -2540,7 +2643,9 @@ async def _tick():
                 # Graduated autonomy: trusted actions execute silently — all of
                 # them, since they don't need a yes/no.
                 if pkey and _CORE.autonomy_mgr and _CORE.autonomy_mgr.is_autonomous(pkey):
-                    ok = await _execute_action_data(_CORE.hass, offer.get("action_data", {}))
+                    ok = await _execute_action_data(
+                        _CORE.hass, offer.get("action_data", {}),
+                        source="proactive_autonomous")
                     if ok:
                         _CORE.autonomous_actions += 1
                         # Mark cooldown so the same autonomous action doesn't
@@ -2724,6 +2829,11 @@ async def _emit_action(hass, config, action, sleeping):
         action_type, urgency, message[:100],
     )
 
+    # One request_id for this whole alert — whichever notify path(s) fire
+    # below, and the voice announcement's Spoken History link, all share it.
+    from . import action_log
+    request_id = action_log.new_request_id()
+
     # Route announcement
     try:
         from .tts_helper import resolve_tts_for_context, async_announce
@@ -2745,9 +2855,11 @@ async def _emit_action(hass, config, action, sleeping):
             # Push to phone only (no spoken announcement)
             _snap_url = action.get("snapshot_url")
             if notify_all:
-                await _notify_all_devices(hass, config, message, action_type, _snap_url)
+                await _notify_all_devices(hass, config, message, action_type, _snap_url,
+                                           request_id=request_id)
             else:
-                await _push_notification(hass, config, message, action_type, _snap_url)
+                await _push_notification(hass, config, message, action_type, _snap_url,
+                                          request_id=request_id)
         else:
             # Get announcement speakers from config
             ann_speakers = None
@@ -2783,16 +2895,18 @@ async def _emit_action(hass, config, action, sleeping):
                 if tts_entity:
                     await async_announce(
                         hass, message, tts_entity, targets,
-                        context="sentinel",
+                        context="sentinel", action_request_id=request_id,
                     )
 
             # Also push critical/high alerts to phones
             if urgency in ("critical", "high"):
                 _snap_url = action.get("snapshot_url")
                 if notify_all:
-                    await _notify_all_devices(hass, config, message, action_type, _snap_url)
+                    await _notify_all_devices(hass, config, message, action_type, _snap_url,
+                                               request_id=request_id)
                 else:
-                    await _push_notification(hass, config, message, action_type, _snap_url)
+                    await _push_notification(hass, config, message, action_type, _snap_url,
+                                              request_id=request_id)
 
     except Exception as exc:
         _LOGGER.warning("Cognitive: action routing failed: %s", exc)
@@ -3026,21 +3140,46 @@ async def request_lockdown(on: bool, reason: str = "requested", hass: HomeAssist
     return True
 
 
-async def _push_notification(hass, config, message, action_type, snapshot_url=None):
-    """Push notification to phone, with an optional snapshot image (v6.69.0)."""
+async def _push_notification(hass, config, message, action_type, snapshot_url=None,
+                              *, request_id=None):
+    """Push notification to phone, with an optional snapshot image (v6.69.0).
+
+    request_id, when given, is the caller's (_emit_action's or
+    _notify_all_devices's fallback) — this never mints a second request for
+    the same alert."""
     notify_svc = config.get("notify_service", "")
     if not notify_svc:
         return
+    from . import action_log
+    if request_id is None:
+        request_id = action_log.new_request_id()
+    svc_domain = svc_name = None
     try:
         svc_domain, svc_name = notify_svc.split(".", 1)
+    except Exception:
+        pass
+    action_id = await hass.async_add_executor_job(
+        lambda: action_log.start(
+            request_id, "cognitive_alert", "proactive",
+            domain=svc_domain, service=svc_name, requested_state=action_type,
+        )
+    )
+    try:
         data = {"message": message,
                 "title": _notify_i18n().title(action_type, _hass_lang(hass))}
         img_data = _notification_image_data(hass, snapshot_url)
         if img_data:
             data["data"] = img_data
         await hass.services.async_call(svc_domain, svc_name, data, blocking=False)
+        await hass.async_add_executor_job(
+            lambda: action_log.set_execution(action_id, "accepted")
+        )
     except Exception as exc:
         _LOGGER.debug("Cognitive: push notification failed: %s", exc)
+        await hass.async_add_executor_job(
+            lambda: action_log.set_execution(
+                action_id, "failed", reason_code="service_call_failed")
+        )
 
 
 def _notification_image_data(hass, snapshot_url):
@@ -3068,54 +3207,101 @@ def _notification_image_data(hass, snapshot_url):
     }
 
 
-async def _notify_all_devices(hass, config, message, action_type, snapshot_url=None):
+async def _notify_all_devices(hass, config, message, action_type, snapshot_url=None,
+                               *, request_id=None):
     """Push to EVERY connected device — every `notify.mobile_app_*` service the
     HA companion app registered — plus a persistent notification for confirmed
     intrusions. Attaches a snapshot image when provided (v6.69.0). Falls back to
-    the single configured service if no per-device services exist."""
+    the single configured service if no per-device services exist.
+
+    request_id, when given, is _emit_action's — every device target and the
+    persistent-notification catch-all below are logged under that ONE shared
+    request, not one apiece."""
+    from . import action_log
+    if request_id is None:
+        request_id = action_log.new_request_id()
     title = _notify_i18n().title(action_type, _hass_lang(hass))
     img_data = _notification_image_data(hass, snapshot_url)
     sent = 0
     try:
         services = hass.services.async_services().get("notify", {})
-        for name in list(services):
-            if not name.startswith("mobile_app_"):
-                continue
-            try:
-                payload = {"message": message, "title": title}
-                if img_data:
-                    payload["data"] = img_data
-                await hass.services.async_call("notify", name, payload, blocking=False)
-                sent += 1
-            except Exception as exc:
-                _LOGGER.debug("notify.%s failed: %s", name, exc)
+        names = [n for n in services if n.startswith("mobile_app_")]
     except Exception as exc:
         _LOGGER.debug("Cognitive: enumerate notify services failed: %s", exc)
+        names = []
+
+    row_ids: dict = {}
+    if names:
+        row_ids = await hass.async_add_executor_job(
+            lambda: action_log.start_many(
+                request_id, "cognitive_alert", "proactive",
+                [{"key": n, "domain": "notify", "service": n} for n in names],
+            )
+        )
+    for name in names:
+        row_id = row_ids.get(name)
+        try:
+            payload = {"message": message, "title": title}
+            if img_data:
+                payload["data"] = img_data
+            await hass.services.async_call("notify", name, payload, blocking=False)
+            sent += 1
+            if row_id is not None:
+                await hass.async_add_executor_job(
+                    lambda rid=row_id: action_log.set_execution(rid, "accepted")
+                )
+        except Exception as exc:
+            _LOGGER.debug("notify.%s failed: %s", name, exc)
+            if row_id is not None:
+                await hass.async_add_executor_job(
+                    lambda rid=row_id: action_log.set_execution(
+                        rid, "failed", reason_code="service_call_failed")
+                )
 
     # Fall back to the configured single service if nothing device-specific fired.
     if sent == 0:
-        await _push_notification(hass, config, message, action_type, snapshot_url)
+        await _push_notification(hass, config, message, action_type, snapshot_url,
+                                  request_id=request_id)
 
     # Always-visible catch-all for a confirmed intrusion.
     if action_type == "intrusion_confirmed":
+        pn_action_id = await hass.async_add_executor_job(
+            lambda: action_log.start(
+                request_id, "cognitive_alert", "proactive",
+                domain="persistent_notification", service="create",
+            )
+        )
         try:
             await hass.services.async_call(
                 "persistent_notification", "create",
                 {"message": message, "title": title,
                  "notification_id": "nova_intrusion"},
                 blocking=False)
+            await hass.async_add_executor_job(
+                lambda: action_log.set_execution(pn_action_id, "accepted")
+            )
         except Exception:
-            pass
+            await hass.async_add_executor_job(
+                lambda: action_log.set_execution(
+                    pn_action_id, "failed", reason_code="service_call_failed")
+            )
 
 
-async def _execute_action_data(hass, action_data: dict) -> bool:
+async def _execute_action_data(
+    hass, action_data: dict, *,
+    request_id: Optional[str] = None, source: str = "proactive",
+) -> bool:
     """
     Execute a proactive action's service call.
 
     action_data shape:
       {"domain": "light", "service": "turn_on",
        "entity_ids": ["light.x", ...], "service_data": {...optional...}}
-    """
+
+    request_id/source let the caller (an autonomous tick or an explicit
+    accept_pending_offer()) own the logged action; if the caller doesn't
+    pass one, this mints its own — either way it's the sole logger for this
+    one service call, never both."""
     if not action_data:
         return False
     domain = action_data.get("domain")
@@ -3124,15 +3310,33 @@ async def _execute_action_data(hass, action_data: dict) -> bool:
     extra = action_data.get("service_data", {}) or {}
     if not domain or not service or not entity_ids:
         return False
+    from . import action_log
+    if request_id is None:
+        request_id = action_log.new_request_id()
+    entity_repr = (
+        ", ".join(entity_ids) if isinstance(entity_ids, list) else str(entity_ids))
+    action_id = await hass.async_add_executor_job(
+        lambda: action_log.start(
+            request_id, "proactive_offer_execute", source,
+            domain=domain, service=service, entity_id=entity_repr,
+        )
+    )
     try:
         await hass.services.async_call(
             domain, service,
             {"entity_id": entity_ids, **extra},
             blocking=True,
         )
+        await hass.async_add_executor_job(
+            lambda: action_log.set_execution(action_id, "accepted")
+        )
         return True
     except Exception as exc:
         _LOGGER.warning("Proactive action failed (%s.%s): %s", domain, service, exc)
+        await hass.async_add_executor_job(
+            lambda: action_log.set_execution(
+                action_id, "failed", reason_code="service_call_failed")
+        )
         return False
 
 
@@ -3442,7 +3646,8 @@ async def accept_pending_offer() -> dict:
     if not offer:
         return {"ok": False, "reason": "no pending offer"}
     _CORE.pending_offer = None
-    ok = await _execute_action_data(_CORE.hass, offer.get("action_data", {}))
+    ok = await _execute_action_data(
+        _CORE.hass, offer.get("action_data", {}), source="proactive_accepted")
     pkey = offer.get("pattern_key", "")
     if ok and pkey and _CORE.autonomy_mgr:
         grant = _CORE.autonomy_mgr.record_acceptance(pkey, confidence=0.9)
