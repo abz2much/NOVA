@@ -269,3 +269,251 @@ def test_page_requests_aggregate_status(al, db_path):
     page = al.page_requests(limit=10, db_path=db_path)
     row = next(r for r in page["requests"] if r["request_id"] == rid)
     assert row["status"] == "partial"  # one verified, one failed -> mixed, not full success/failure
+
+
+# ── bounded SQLITE_BUSY/SQLITE_LOCKED retry ──────────────────────────────
+#
+# All of these drive the retry path through controlled fault injection
+# (a fake _connect that raises a real sqlite3.OperationalError with a real
+# SQLITE_BUSY/SQLITE_LOCKED errorcode on chosen calls) rather than timing
+# races, so they are deterministic. `no_retry_delay` collapses the retry
+# helper's backoff to zero real time so the suite stays fast; it does not
+# change attempt counts or which errors are retried.
+
+def _busy_error(msg: str = "database is locked") -> "sqlite3.OperationalError":
+    import sqlite3
+    exc = sqlite3.OperationalError(msg)
+    exc.sqlite_errorcode = sqlite3.SQLITE_BUSY
+    exc.sqlite_errorname = "SQLITE_BUSY"
+    return exc
+
+
+def _permanent_error(msg: str = "unable to open database file") -> "sqlite3.OperationalError":
+    import sqlite3
+    exc = sqlite3.OperationalError(msg)
+    # A real permanent failure's errorcode is never BUSY/LOCKED.
+    exc.sqlite_errorcode = sqlite3.SQLITE_CANTOPEN
+    exc.sqlite_errorname = "SQLITE_CANTOPEN"
+    return exc
+
+
+@pytest.fixture
+def no_retry_delay(al, monkeypatch):
+    """Make _run_with_retry's backoff instant and deterministic: no real
+    sleep, and jitter always returns the low end of its (low, high) range."""
+    monkeypatch.setattr(al, "_RETRY_SLEEP", lambda seconds: None)
+    monkeypatch.setattr(al, "_RETRY_JITTER", lambda low, high: low)
+
+
+def test_is_transient_busy_error_classifies_by_sqlite_errorcode(al):
+    assert al._is_transient_busy_error(_busy_error()) is True
+    locked = _busy_error("database table is locked")
+    locked.sqlite_errorcode = al.sqlite3.SQLITE_LOCKED
+    assert al._is_transient_busy_error(locked) is True
+    assert al._is_transient_busy_error(_permanent_error()) is False
+    assert al._is_transient_busy_error(ValueError("not sqlite at all")) is False
+
+
+def test_is_transient_busy_error_recognises_extended_busy_and_locked_codes(al):
+    """SQLite packs the primary result code into the low 8 bits of an
+    extended code and puts extra detail above that (e.g. SQLITE_BUSY_TIMEOUT
+    = SQLITE_BUSY | (3 << 8), SQLITE_LOCKED_SHAREDCACHE = SQLITE_LOCKED |
+    (1 << 8)) — the classifier must mask down to the primary code before
+    comparing, not require an exact match against the bare primary value."""
+    busy_timeout = _busy_error("database is locked")
+    busy_timeout.sqlite_errorcode = al.sqlite3.SQLITE_BUSY | (3 << 8)
+    assert al._is_transient_busy_error(busy_timeout) is True
+
+    busy_recovery = _busy_error("database is locked")
+    busy_recovery.sqlite_errorcode = al.sqlite3.SQLITE_BUSY | (1 << 8)
+    assert al._is_transient_busy_error(busy_recovery) is True
+
+    locked_sharedcache = _busy_error("database table is locked")
+    locked_sharedcache.sqlite_errorcode = al.sqlite3.SQLITE_LOCKED | (1 << 8)
+    assert al._is_transient_busy_error(locked_sharedcache) is True
+
+    locked_vtab = _busy_error("database table is locked")
+    locked_vtab.sqlite_errorcode = al.sqlite3.SQLITE_LOCKED | (2 << 8)
+    assert al._is_transient_busy_error(locked_vtab) is True
+
+    # An extended code whose PRIMARY (low 8 bits) is neither BUSY nor LOCKED
+    # must still be treated as permanent, extended form or not.
+    cantopen_extended = _permanent_error()
+    cantopen_extended.sqlite_errorcode = al.sqlite3.SQLITE_CANTOPEN | (2 << 8)
+    assert al._is_transient_busy_error(cantopen_extended) is False
+
+
+def test_is_transient_busy_error_falls_back_to_message_without_errorcode(al):
+    """Compatibility path only — a real Python 3.11+ error always carries
+    sqlite_errorcode, but the classifier must still work if it's absent."""
+    exc = al.sqlite3.OperationalError("database is locked")
+    exc.sqlite_errorcode = None
+    assert al._is_transient_busy_error(exc) is True
+    exc2 = al.sqlite3.OperationalError("unable to open database file")
+    exc2.sqlite_errorcode = None
+    assert al._is_transient_busy_error(exc2) is False
+
+
+def test_transient_lock_succeeds_after_retry(al, db_path, monkeypatch, no_retry_delay):
+    """A single SQLITE_BUSY on the first attempt must not fail the write —
+    the second (of three) attempts, on a fresh connection, succeeds. Fails
+    against the pre-fix implementation, which had no outer retry at all and
+    would return False/None on the very first busy error."""
+    rid = al.new_request_id()
+    aid = al.start(rid, "control_device", "voice", db_path=db_path)
+    al.set_execution(aid, "accepted", db_path=db_path)
+
+    real_connect = al._connect
+    calls = {"n": 0}
+
+    def flaky_connect(path):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise _busy_error()
+        return real_connect(path)
+
+    monkeypatch.setattr(al, "_connect", flaky_connect)
+    assert al.set_execution(aid, "verified", db_path=db_path) is True
+    assert calls["n"] == 2  # one failed attempt, one successful retry — not 3
+
+    got = al.get_request(rid, db_path=db_path)
+    assert got["targets"][0]["execution_result"] == "verified"
+
+
+def test_retry_exhaustion_fails_open_without_raising(al, db_path, monkeypatch, no_retry_delay):
+    """Sustained SQLITE_BUSY across all three attempts must still fail open
+    (return False, never raise) and must not touch the row. Fails against
+    the pre-fix implementation only in attempt count (it fails open after a
+    single attempt) — this proves the NEW implementation spends its full,
+    but still bounded, budget rather than giving up early or retrying
+    forever."""
+    rid = al.new_request_id()
+    aid = al.start(rid, "control_device", "voice", db_path=db_path)
+    al.set_execution(aid, "accepted", db_path=db_path)
+
+    calls = {"n": 0}
+
+    def always_busy(path):
+        calls["n"] += 1
+        raise _busy_error()
+
+    monkeypatch.setattr(al, "_connect", always_busy)
+    assert al.set_execution(aid, "verified", db_path=db_path) is False
+    assert calls["n"] == al._MAX_ATTEMPTS == 3
+    monkeypatch.undo()  # restore the real _connect before reading back to verify
+
+    got = al.get_request(rid, db_path=db_path)
+    assert got["targets"][0]["execution_result"] == "accepted"  # unchanged, not corrupted
+
+
+def test_permanent_database_error_is_not_retried(al, db_path, monkeypatch, no_retry_delay):
+    """A non-transient OperationalError (bad file, corruption, permissions —
+    anything that isn't SQLITE_BUSY/SQLITE_LOCKED) must fail open on the
+    FIRST attempt. Retrying it would just waste the bounded budget on a
+    fault no retry can fix."""
+    rid = al.new_request_id()
+    aid = al.start(rid, "control_device", "voice", db_path=db_path)
+
+    calls = {"n": 0}
+
+    def boom(path):
+        calls["n"] += 1
+        raise _permanent_error()
+
+    monkeypatch.setattr(al, "_connect", boom)
+    assert al.set_execution(aid, "accepted", db_path=db_path) is False
+    assert calls["n"] == 1
+
+
+def test_start_many_permanent_error_is_not_retried(al, monkeypatch):
+    calls = {"n": 0}
+
+    def boom(path):
+        calls["n"] += 1
+        raise _permanent_error()
+
+    monkeypatch.setattr(al, "_connect", boom)
+    rid = al.new_request_id()
+    assert al.start_many(
+        rid, "bulk_control", "voice", [{"entity_id": "light.x"}],
+    ) == {}
+    assert calls["n"] == 1
+
+
+def test_no_duplicate_rows_after_start_many_retries(al, db_path, monkeypatch, no_retry_delay):
+    """The first attempt inserts 2 of 5 targets into its own (uncommitted)
+    transaction, then hits a transient lock on the 3rd insert — that whole
+    attempt must be discarded, not partially kept, so the retry's full
+    re-insert leaves exactly 5 rows, never 7. Fails against the pre-fix
+    implementation because there IS no retry: the first attempt's failure
+    is final, so this scenario returns {} with the transaction rolled back
+    and NO rows persisted at all — the assertion on row count (5) fails."""
+    class _FlakyConn:
+        """sqlite3.Connection has no instance __dict__ (a C type), so its
+        methods can't be monkeypatched directly — wrap it instead and
+        forward everything except a deliberately-flaky execute()."""
+        def __init__(self, real):
+            self._real = real
+            self._insert_n = 0
+
+        def execute(self, sql, params=()):
+            if sql.strip().upper().startswith("INSERT"):
+                self._insert_n += 1
+                if self._insert_n == 3:
+                    raise _busy_error()
+            return self._real.execute(sql, params)
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+    real_connect = al._connect
+    attempt_n = {"n": 0}
+
+    def flaky_connect(path):
+        attempt_n["n"] += 1
+        conn = real_connect(path)
+        return _FlakyConn(conn) if attempt_n["n"] == 1 else conn
+
+    monkeypatch.setattr(al, "_connect", flaky_connect)
+    rid = al.new_request_id()
+    targets = [{"entity_id": f"light.{i}"} for i in range(5)]
+    ids = al.start_many(rid, "bulk_control", "voice", targets, db_path=db_path)
+
+    assert len(ids) == 5
+    assert attempt_n["n"] == 2  # one aborted attempt, one clean retry
+    got = al.get_request(rid, db_path=db_path)
+    assert len(got["targets"]) == 5  # not 7 — the aborted attempt left nothing behind
+
+
+def test_stale_update_cannot_overwrite_newer_terminal_state_even_after_retry(
+    al, db_path, monkeypatch, no_retry_delay,
+):
+    """The exact race the CAS guard exists for, but now driven through the
+    retry path: a late 'unverified' callback hits one transient lock,
+    retries, and STILL correctly no-ops on its retry because by then the
+    row is already 'verified' — the guarded UPDATE's WHERE clause is
+    re-evaluated fresh on every attempt, so a retry can never resurrect a
+    transition that's no longer legal."""
+    rid = al.new_request_id()
+    aid = al.start(rid, "control_device", "voice", db_path=db_path)
+    al.set_execution(aid, "accepted", db_path=db_path)
+    assert al.set_execution(aid, "verified", db_path=db_path) is True
+
+    real_connect = al._connect
+    calls = {"n": 0}
+
+    def flaky_connect(path):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise _busy_error()
+        return real_connect(path)
+
+    monkeypatch.setattr(al, "_connect", flaky_connect)
+    # A late/duplicate "unverified" callback arrives after the row already
+    # reached its terminal "verified" state, AND hits contention on its
+    # first attempt.
+    assert al.set_execution(aid, "unverified", db_path=db_path) is False
+    assert calls["n"] == 2  # it did retry — the no-op is from the guard, not a skipped attempt
+
+    got = al.get_request(rid, db_path=db_path)
+    assert got["targets"][0]["execution_result"] == "verified"  # never overwritten

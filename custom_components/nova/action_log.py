@@ -39,17 +39,24 @@ deliberately shorter than the 10000ms every other Nova SQLite module uses.
 A logging write sits in the same await chain as the device action it
 describes, so a long wait here is directly user-visible latency on a
 device-control path — see module docstring section below and the v3/v4
-design report for the full reasoning. A write that can't get a lock within
-250ms is abandoned (fail-open), not retried and not waited out further.
+design report for the full reasoning. A write that exhausts its 250ms
+SQLite-level busy wait gets a short, bounded number of additional whole-
+attempt retries (see ``_run_with_retry`` below) purely to absorb transient
+SQLITE_BUSY/SQLITE_LOCKED contention from other Nova writers hitting this
+same file at once (e.g. a bulk action's per-target verification callbacks
+landing within milliseconds of each other) — it is still fail-open, not
+fail-safe: once the retry budget is spent, the write is abandoned exactly
+as before.
 """
 from __future__ import annotations
 
 import logging
+import random
 import sqlite3
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional, TypeVar
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -62,6 +69,78 @@ _DEFAULT_DB = "/config/nova/conversations.db"
 # other Nova SQLite module uses; this table sits in a device-control await
 # chain, where a long wait is directly user-visible.
 _BUSY_TIMEOUT_MS = 250
+
+# Bounded whole-attempt retry budget for transient SQLITE_BUSY/SQLITE_LOCKED
+# contention only — see module docstring and _run_with_retry(). Three total
+# attempts (the initial one plus two retries); each entry is the (low, high)
+# jittered backoff window applied AFTER the attempt at that index fails,
+# before the next attempt opens its own fresh connection.
+_MAX_ATTEMPTS = 3
+_RETRY_BACKOFF_RANGES_S = ((0.02, 0.04), (0.04, 0.06))
+
+# Indirections so tests can make retries instant and deterministic (no real
+# sleep, no real randomness) without reaching into the retry loop itself.
+_RETRY_SLEEP: Callable[[float], None] = time.sleep
+_RETRY_JITTER: Callable[[float, float], float] = random.uniform
+
+_T = TypeVar("_T")
+
+
+def _is_transient_busy_error(exc: BaseException) -> bool:
+    """True only for SQLite's own transient-contention signals — SQLITE_BUSY
+    (another connection holds the lock this write needs) or SQLITE_LOCKED
+    (a table-level conflict, e.g. two writers inside the same connection
+    sharing a lock over separate cursors). Never true for a permanent
+    failure (missing/unwritable file, permission, disk, corruption, bad
+    SQL) — those must fail open on the FIRST attempt, not spend the retry
+    budget on something a retry can never fix.
+
+    Prefers the structured ``sqlite_errorcode`` the sqlite3 module attaches
+    to every ``Error`` (Python 3.11+, what every version this project
+    targets provides); falls back to matching SQLite's own fixed English
+    error text only for a hypothetical older interpreter where that
+    attribute is absent or unset.
+
+    ``sqlite_errorcode`` may be an EXTENDED result code (e.g.
+    SQLITE_BUSY_TIMEOUT, SQLITE_LOCKED_SHAREDCACHE) — SQLite packs the
+    primary code into the low 8 bits and puts extra detail above that, so
+    the primary code is recovered with ``& 0xFF`` before comparing, exactly
+    as SQLite's own documentation for interpreting extended codes says to."""
+    if not isinstance(exc, sqlite3.OperationalError):
+        return False
+    code = getattr(exc, "sqlite_errorcode", None)
+    if code is not None:
+        return (code & 0xFF) in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED)
+    msg = str(exc).lower()
+    return "database is locked" in msg or "database table is locked" in msg
+
+
+def _run_with_retry(attempt: Callable[[], _T]) -> _T:
+    """Run `attempt` (a zero-arg callable that opens its OWN fresh
+    connection, does its work, commits, and closes) up to _MAX_ATTEMPTS
+    times. Retries ONLY a transient SQLITE_BUSY/SQLITE_LOCKED failure from
+    `attempt`, with a short jittered backoff between tries; any other
+    exception, or the final attempt's transient one, propagates to the
+    caller unchanged — start_many()/_update() catch it there and fail open
+    exactly as before this existed.
+
+    Each attempt is a brand-new connection (never shared/reused across
+    attempts — see module docstring's ownership/isolation rules), so a
+    retry can never see a partially-applied prior attempt: if `attempt`
+    raises before its own commit(), nothing from it was ever made durable,
+    and a fresh attempt starts clean. Runs entirely on the caller's thread
+    (always an executor thread here, never the event loop — see module
+    docstring), so the bounded sleep below never blocks HA's event loop."""
+    for i in range(_MAX_ATTEMPTS):
+        try:
+            return attempt()
+        except sqlite3.OperationalError as exc:
+            if i == _MAX_ATTEMPTS - 1 or not _is_transient_busy_error(exc):
+                raise
+            low, high = _RETRY_BACKOFF_RANGES_S[i]
+            _RETRY_SLEEP(_RETRY_JITTER(low, high))
+    raise AssertionError("unreachable")  # pragma: no cover
+
 
 # Retention is group-aware (v3 correction): pruning by raw row count could
 # delete some rows of a bulk action while leaving others. Keep the newest
@@ -252,56 +331,63 @@ def start_many(
     On any failure (connect, transaction, or partial insert), returns {}
     unchanged and the caller's real action continues — this function never
     raises and is never awaited-per-target; the whole batch is one bounded
-    executor call, not N.
+    executor call, not N. A transient SQLITE_BUSY/SQLITE_LOCKED failure gets
+    a short bounded number of whole-attempt retries first (see
+    _run_with_retry) — each retry opens its own fresh connection and
+    re-inserts every target from scratch, so a retry can never leave
+    duplicate rows behind: nothing from a failed attempt was ever committed.
     """
     if not targets:
         return {}
     db = _resolve(db_path)
     now = time.time()
-    try:
+
+    def _attempt() -> dict[Any, int]:
         conn = _connect(db)
-    except Exception as exc:
-        _LOGGER.warning("Nova action_log: connect failed (start_many): %s", exc)
-        return {}
+        try:
+            ids: dict[Any, int] = {}
+            for i, t in enumerate(targets):
+                key = t.get("key", t.get("entity_id", i))
+                cur = conn.execute(
+                    "INSERT INTO action_log "
+                    "(request_id, ts_created, ts_updated, action, source, "
+                    " requested_by_user_id, requested_by_name, request_device_id, "
+                    " domain, service, entity_id, requested_state, "
+                    " approval_required, approval_result, execution_result, "
+                    " reason_code, reason_text) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        request_id, now, now, action, source,
+                        requested_by_user_id, requested_by_name, request_device_id,
+                        t.get("domain"), t.get("service"), t.get("entity_id"),
+                        t.get("requested_state"),
+                        1 if t.get("approval_required") else 0,
+                        t.get("approval_result", "not_required"),
+                        t.get("execution_result", "pending"),
+                        t.get("reason_code"), t.get("reason_text"),
+                    ),
+                )
+                ids[key] = int(cur.lastrowid)
+            _prune(conn)
+            conn.commit()
+            return ids
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
     try:
-        ids: dict[Any, int] = {}
-        for i, t in enumerate(targets):
-            key = t.get("key", t.get("entity_id", i))
-            cur = conn.execute(
-                "INSERT INTO action_log "
-                "(request_id, ts_created, ts_updated, action, source, "
-                " requested_by_user_id, requested_by_name, request_device_id, "
-                " domain, service, entity_id, requested_state, "
-                " approval_required, approval_result, execution_result, "
-                " reason_code, reason_text) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (
-                    request_id, now, now, action, source,
-                    requested_by_user_id, requested_by_name, request_device_id,
-                    t.get("domain"), t.get("service"), t.get("entity_id"),
-                    t.get("requested_state"),
-                    1 if t.get("approval_required") else 0,
-                    t.get("approval_result", "not_required"),
-                    t.get("execution_result", "pending"),
-                    t.get("reason_code"), t.get("reason_text"),
-                ),
-            )
-            ids[key] = int(cur.lastrowid)
-        _prune(conn)
-        conn.commit()
-        return ids
+        return _run_with_retry(_attempt)
     except Exception as exc:
         _LOGGER.warning("Nova action_log: start_many failed: %s", exc)
-        try:
-            conn.rollback()
-        except Exception:
-            pass
         return {}
-    finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
 
 
 def _update(
@@ -325,7 +411,14 @@ def _update(
     corrected creation order in the module docstring), so the final,
     resolved value is settled here, alongside approval_result, in the same
     guarded UPDATE — not a separate state machine, just a plain flag that
-    settles once."""
+    settles once.
+
+    A transient SQLITE_BUSY/SQLITE_LOCKED failure gets a short bounded
+    number of whole-attempt retries first (see _run_with_retry) — each
+    retry opens its own fresh connection and re-runs the SAME guarded
+    UPDATE, so it stays exactly as safe against a stale/late write racing a
+    newer terminal one: the WHERE ... IN (...) guard still only matches
+    when the row is genuinely still in a permitted prior state."""
     if action_id is None:
         return False
     priors = allowed_prior.get(new_value)
@@ -333,39 +426,46 @@ def _update(
         _LOGGER.warning("Nova action_log: unknown %s value %r", column, new_value)
         return False
     db = _resolve(db_path)
-    try:
+
+    def _attempt() -> bool:
         conn = _connect(db)
-    except Exception as exc:
-        _LOGGER.warning("Nova action_log: connect failed (update): %s", exc)
-        return False
+        try:
+            placeholders = ",".join("?" for _ in priors)
+            approval_required_sql = (
+                "approval_required = ?, " if approval_required is not None else ""
+            )
+            params: list = [new_value]
+            if approval_required is not None:
+                params.append(1 if approval_required else 0)
+            params.append(time.time())
+            params.extend([reason_code, reason_text, action_id, *priors])
+            cur = conn.execute(
+                f"UPDATE action_log SET {column} = ?, {approval_required_sql}"
+                f"ts_updated = ?, "
+                f"reason_code = COALESCE(?, reason_code), "
+                f"reason_text = COALESCE(?, reason_text) "
+                f"WHERE id = ? AND {column} IN ({placeholders})",
+                params,
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
     try:
-        placeholders = ",".join("?" for _ in priors)
-        approval_required_sql = (
-            "approval_required = ?, " if approval_required is not None else ""
-        )
-        params: list = [new_value]
-        if approval_required is not None:
-            params.append(1 if approval_required else 0)
-        params.append(time.time())
-        params.extend([reason_code, reason_text, action_id, *priors])
-        cur = conn.execute(
-            f"UPDATE action_log SET {column} = ?, {approval_required_sql}"
-            f"ts_updated = ?, "
-            f"reason_code = COALESCE(?, reason_code), "
-            f"reason_text = COALESCE(?, reason_text) "
-            f"WHERE id = ? AND {column} IN ({placeholders})",
-            params,
-        )
-        conn.commit()
-        return cur.rowcount > 0
+        return _run_with_retry(_attempt)
     except Exception as exc:
         _LOGGER.warning("Nova action_log: update failed: %s", exc)
         return False
-    finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
 
 
 def set_approval(
