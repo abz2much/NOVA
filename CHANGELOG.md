@@ -1,3 +1,11 @@
+## [7.106.2] — fix: Action Audit Log SQLite contention
+
+- Action Audit Log writes now retry transient SQLITE_BUSY and SQLITE_LOCKED contention instead of giving up on the first lock conflict.
+- Each retry opens a fresh connection, within a bounded three-attempt budget.
+- Burst operations (bulk control, routines, safety sweeps) are less likely to leave an audit row stuck at an outdated "accepted" state when the real action already verified.
+- Audit logging remains fail-open: it never delays, blocks, or changes the underlying Home Assistant action.
+- No schema migration or configuration change is required.
+
 ## [7.106.1] — fix: thermostat lock false alerts, quiet-hours enforcement, "lock" keyword false trigger
 
 - Thermostat configuration-lock entities are no longer treated as physical security locks, so a reconnect no longer triggers an unlocked-door-style alert.
