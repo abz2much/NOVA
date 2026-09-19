@@ -1,3 +1,12 @@
+## [7.106.1] — fix: thermostat lock false alerts, quiet-hours enforcement, "lock" keyword false trigger
+
+- Thermostat configuration-lock entities are no longer treated as physical security locks, so a reconnect no longer triggers an unlocked-door-style alert.
+- Non-urgent Sentinel announcements now respect quiet hours instead of speaking through the night.
+- Sentinel now honours enforceable ignore rules, instead of silently ignoring them.
+- A saved conversational memory is no longer described as an enforced alert rule.
+- Ordinary sentences containing "lock" or "unlocked" no longer trigger the secure-home shortcut response.
+- Returning to the System Log tab now restores the cached entries immediately instead of getting stuck on "Loading…".
+
 ## [7.106.0] — Action Audit Log: see what Nova actually did
 
 - New read-only Actions view in the Logs tab: device controls, routines, safety actions, notifications, and every other verified action path Nova actually attempted or performed.
