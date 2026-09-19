@@ -1515,6 +1515,162 @@ setTimeout(async () => {
     && window.__xssFiredNew2 === false]);
   hass.callWS = originalCallWS;
 
+  // ── System Log re-entry loading bug (fixed post-v7.106.0) ──
+  // Root cause: the dedup "skip redundant re-render" signature lived on
+  // the component INSTANCE, which survives a full shadow-DOM teardown and
+  // rebuild (every tab/Logs-sub-view switch tears down and recreates
+  // #newLogEntries from its hardcoded "Loading…" shell). Returning to
+  // System Log after the identical data had already been rendered once
+  // made the guard wrongly conclude the brand-new, still-blank container
+  // already showed it, and skipped the very render that would have
+  // replaced "Loading…" with the real rows — permanently, since nothing
+  // else ever revisits an already-"handled" fetch. Fixed by caching the
+  // fetched entries (_debugLogEntries) so a re-entry renders them
+  // synchronously before the background refresh even starts, and by
+  // moving the dedup signature onto the container element's own dataset
+  // (naturally unstamped on a fresh element) instead of the component
+  // instance.
+  {
+    const findNavTab = (root, tab) =>
+      Array.from(root.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === tab);
+    const findLogView = (root, view) =>
+      Array.from(root.querySelectorAll(".new-logview")).find(b => b.getAttribute("data-view") === view);
+    const FIRST_ENTRIES = [
+      { ts: "10:00:00", cat: "CONV", msg: "first-visit entry one" },
+      { ts: "10:00:01", cat: "AGENT", msg: "first-visit entry two" },
+    ];
+
+    // 1) First-ever visit: no cache yet — must show Loading, then entries.
+    delete elNew._debugLogEntries;
+    hass.callWS = async (m) => (m.type === "nova/get_debug_log" ? { entries: FIRST_ENTRIES } : originalCallWS(m));
+    elNew._logView = "system";
+    elNew._currentTab = "dashboard";
+    elNew._render();
+    let r = elNew.shadowRoot;
+    findNavTab(r, "logs").click();
+    r = elNew.shadowRoot;
+    checks.push(["system log: first visit (no cache) shows Loading before the fetch resolves",
+      /Loading/.test(r.getElementById("newLogEntries")?.textContent || "")]);
+    await new Promise(res => setTimeout(res, 20));
+    r = elNew.shadowRoot;
+    checks.push(["system log: first visit shows the real entries once the fetch resolves",
+      r.querySelectorAll("#newLogEntries .new-log-entry").length === 2
+      && /first-visit entry one/.test(r.getElementById("newLogEntries")?.textContent || "")]);
+
+    // 2) Leave for another top-level tab, then return: cached entries must
+    // render immediately (synchronously, before any network round trip),
+    // never a blocking "Loading…" — this is the exact reported bug.
+    findNavTab(r, "dashboard").click();
+    await new Promise(res => setTimeout(res, 5));
+    r = elNew.shadowRoot;
+    findNavTab(r, "logs").click();
+    r = elNew.shadowRoot; // freshly rebuilt shell, checked BEFORE the awaited refresh below
+    checks.push(["system log: returning to the tab renders cached entries immediately, not Loading",
+      r.querySelectorAll("#newLogEntries .new-log-entry").length === 2
+      && !/Loading/.test(r.getElementById("newLogEntries")?.textContent || "")]);
+
+    // 3) The background refresh that fires on that same re-entry must
+    // complete without ever blanking the cached rows back to Loading.
+    await new Promise(res => setTimeout(res, 20));
+    r = elNew.shadowRoot;
+    checks.push(["system log: the background refresh on return completes without hiding the cached rows",
+      r.querySelectorAll("#newLogEntries .new-log-entry").length === 2
+      && !/Loading/.test(r.getElementById("newLogEntries")?.textContent || "")]);
+
+    // 4) Rapid repeated tab switching must never have more than one
+    // System Log request in flight at once (the in-flight guard).
+    let concurrent = 0, maxConcurrent = 0, totalCalls = 0;
+    hass.callWS = async (m) => {
+      if (m.type !== "nova/get_debug_log") return originalCallWS(m);
+      totalCalls++; concurrent++; maxConcurrent = Math.max(maxConcurrent, concurrent);
+      await new Promise(res => setTimeout(res, 15)); // simulate real network latency
+      concurrent--;
+      return { entries: FIRST_ENTRIES };
+    };
+    for (let i = 0; i < 4; i++) {
+      findNavTab(elNew.shadowRoot, "dashboard").click();
+      findNavTab(elNew.shadowRoot, "logs").click();
+    }
+    await new Promise(res => setTimeout(res, 80));
+    checks.push(["system log: rapid repeated tab switching never has more than one request in flight at once",
+      maxConcurrent <= 1 && totalCalls >= 1]);
+
+    // 5) A failed background refresh must keep the cached rows visible
+    // (fail-open) and surface the failure only as a non-blocking signal
+    // (console.warn), never an error banner replacing valid rows.
+    hass.callWS = async (m) => (m.type === "nova/get_debug_log" ? { entries: FIRST_ENTRIES } : originalCallWS(m));
+    await elNew._fetchDebugLog();
+    r = elNew.shadowRoot;
+    const rowsBeforeFailure = r.querySelectorAll("#newLogEntries .new-log-entry").length;
+    const warnCalls = [];
+    const origWarn = console.warn;
+    console.warn = (...a) => { warnCalls.push(a); };
+    hass.callWS = async (m) => { if (m.type === "nova/get_debug_log") throw new Error("network down"); return originalCallWS(m); };
+    await elNew._fetchDebugLog();
+    console.warn = origWarn;
+    r = elNew.shadowRoot;
+    checks.push(["system log: a failed refresh keeps the cached rows visible instead of an error banner",
+      rowsBeforeFailure === 2
+      && r.querySelectorAll("#newLogEntries .new-log-entry").length === 2
+      && !r.getElementById("newLogEntries")?.querySelector(".new-log-entry-error")]);
+    checks.push(["system log: a failed refresh exposes a non-blocking warning, not a silent failure",
+      warnCalls.some(a => /System Log refresh failed/.test(String(a[0])))]);
+
+    // 6) A slow System Log response that resolves AFTER the user has
+    // switched to a different Logs sub-view must not touch that other
+    // view's DOM (its container id no longer exists to be found/written).
+    let resolveSlow;
+    hass.callWS = async (m) => {
+      if (m.type === "nova/get_debug_log") {
+        return new Promise(res => { resolveSlow = () => res({ entries: [{ ts: "11:00:00", cat: "CONV", msg: "stale, arrived late" }] }); });
+      }
+      return originalCallWS(m);
+    };
+    elNew._logView = "system";
+    elNew._render(); // kicks off a _fetchDebugLog() that is now pending on resolveSlow
+    r = elNew.shadowRoot;
+    findLogView(r, "decisions").click();
+    await new Promise(res => setTimeout(res, 5));
+    r = elNew.shadowRoot;
+    const decisionsHtmlBeforeStale = r.getElementById("decisionEntries")?.innerHTML || "";
+    resolveSlow();
+    await new Promise(res => setTimeout(res, 10));
+    r = elNew.shadowRoot;
+    checks.push(["system log: a stale response after switching sub-views cannot overwrite the new view",
+      !r.getElementById("newLogEntries") // System Log's own shell no longer exists
+      && !/stale, arrived late/.test(r.getElementById("decisionEntries")?.innerHTML || "")
+      && r.getElementById("decisionEntries")?.innerHTML === decisionsHtmlBeforeStale]);
+
+    // 7) Switching among all four Logs sub-views never mixes their data or
+    // loading flags — at any moment only the active sub-view's container
+    // exists in the DOM at all.
+    hass.callWS = async (m) => (m.type === "nova/get_debug_log" ? { entries: FIRST_ENTRIES } : originalCallWS(m));
+    const sequence = ["system", "decisions", "spoken_history", "actions", "system"];
+    const containerIdFor = { system: "newLogEntries", decisions: "decisionEntries", spoken_history: "spokenHistoryEntries", actions: "actionEntries" };
+    let sequenceOk = true;
+    for (const view of sequence) {
+      const btn = findLogView(elNew.shadowRoot, view) || findNavTab(elNew.shadowRoot, "logs");
+      btn.click();
+      await new Promise(res => setTimeout(res, 15));
+      const vr = elNew.shadowRoot;
+      for (const [otherView, otherId] of Object.entries(containerIdFor)) {
+        const shouldExist = otherView === view;
+        if (!!vr.getElementById(otherId) !== shouldExist) sequenceOk = false;
+      }
+    }
+    checks.push(["system log: switching among all four Logs sub-views never leaves more than one view's container in the DOM",
+      sequenceOk]);
+
+    // Restore the default mock and leave the shared element on System Log,
+    // matching what the rest of the suite expects below.
+    hass.callWS = originalCallWS;
+    delete elNew._debugLogEntries;
+    elNew._logView = "system";
+    elNew._render();
+    await new Promise(res => setTimeout(res, 20));
+    sRoot = elNew.shadowRoot;
+  }
+
   // ── Spoken History (v7.104.0) — beside System Log and Decisions ──
   const spokenViewBtn = Array.from(sRoot.querySelectorAll(".new-logview")).find(b => b.getAttribute("data-view") === "spoken_history");
   spokenViewBtn.click();
