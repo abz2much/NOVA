@@ -199,7 +199,17 @@ _QUERY_PATTERNS = [
      r"repeat\s+(?:your\s+)?last\s+announcement)\b",       "repeat_last"),
     (r"(?:who(?:'s| is)\s+)?home\b",                     "who_home"),
     (r"(?:is\s+)?(?:anyone|anybody)\s+home",              "who_home"),
-    (r"(?:what(?:'s| is)\s+)?(?:open|unlocked)",          "what_open"),
+    # The "what's/what is" lead-in is REQUIRED (not optional) — a bare
+    # "open"/"unlocked" occurring anywhere in a longer sentence used to
+    # match this via re.search, so an explanation, complaint, or quoted
+    # alert text merely containing "unlocked" ("why did you announce
+    # 'X has been unlocked for 20 minutes'") false-triggered this exact
+    # status-summary shortcut instead of falling through to the real
+    # conversation path. Requiring the literal "what's/what is" phrase
+    # immediately before the word keeps genuine status questions ("what's
+    # open", "Nova, what's unlocked") working while rejecting everything
+    # that merely mentions the word.
+    (r"(?:what(?:'s| is)\s+)(?:open|unlocked)\b",          "what_open"),
     (r"(?:are\s+)?(?:any|which)\s+(?:doors?|windows?)\s+open", "what_open"),
     (r"(?:are\s+)?(?:any|which)\s+(?:lights?)\s+on",     "lights_on"),
     (r"(?:how\s+many)\s+lights?\s+(?:are\s+)?on",        "lights_on"),
@@ -213,6 +223,18 @@ _QUERY_PATTERNS = [
 
 # ── Complexity scoring ──────────────────────────────────────────────────────
 
+def _contains_word(text: str, phrase: str) -> bool:
+    """Word-boundary-aware containment — unlike a bare `phrase in text`
+    substring check, this does not fire on "lock" inside "unlocked" or
+    "Thermo Lock" (the mechanism that let a "why did you announce ...
+    unlocked ..." complaint dodge LLM escalation: "lock" matching as a
+    plain substring artificially lowered its complexity score below the
+    local-handling threshold). Works for multi-word phrases too, since
+    \\b only needs non-word characters (or start/end of string) on each
+    side of the whole phrase, not of every word inside it."""
+    return re.search(r"\b" + re.escape(phrase) + r"\b", text) is not None
+
+
 def score_complexity(text: str) -> int:
     """Score 0-100. Higher = needs LLM. <70 handled locally."""
     t = text.lower()
@@ -225,7 +247,7 @@ def score_complexity(text: str) -> int:
               "code", "script", "program", "debug", "fix this",
               "plan", "schedule", "strategy", "brainstorm",
               "summarize", "translate", "calculate"):
-        if w in t:
+        if _contains_word(t, w):
             score += 40
             break
     if len(text.split()) > 20:
@@ -233,19 +255,19 @@ def score_complexity(text: str) -> int:
     if "?" in text and len(text.split()) > 10:
         score += 10
     for w in ("because", "however", "although"):
-        if w in t:
+        if _contains_word(t, w):
             score += 10
             break
     # Simple signals (reduce)
     for w in ("turn on", "turn off", "lock", "unlock", "open", "close",
               "dim", "brighten", "set temp", "volume", "pause", "play"):
-        if w in t:
+        if _contains_word(t, w):
             score -= 20
             break
     for w in ("what time", "who's home", "how many lights",
               "what's open", "temperature", "status",
               "good morning", "good night", "hello", "thanks"):
-        if w in t:
+        if _contains_word(t, w):
             score -= 15
             break
     return max(0, min(100, score))

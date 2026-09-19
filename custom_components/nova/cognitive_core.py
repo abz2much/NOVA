@@ -3382,11 +3382,12 @@ def ignore(entity_pattern: str, duration_minutes: int = 0,
         rule = _CORE.ignore_mgr.add(entity_pattern, duration_minutes, reason)
         return {
             "success": True,
+            "enforced": True,
             "pattern": rule.entity_pattern,
             "duration": duration_minutes,
             "reason": reason,
         }
-    return {"success": False, "error": "Cognitive core not running"}
+    return {"success": False, "enforced": False, "error": "Cognitive core not running"}
 
 
 def unignore(entity_pattern: str) -> dict:

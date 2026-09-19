@@ -301,7 +301,13 @@ NOVA_TOOLS = [
                 "new: device nicknames, routines, preferences. A preference or "
                 "routine is saved as PENDING, not yet trusted — you must ask the "
                 "user to confirm it's correct before it takes effect, then call "
-                "confirm_pending_fact (or reject_pending_fact if they say no)."
+                "confirm_pending_fact (or reject_pending_fact if they say no). "
+                "This ONLY writes a fact you can recall in later conversation — "
+                "it never changes what any alerting, sentinel, or automation code "
+                "actually does at runtime. Never describe a remember/confirm call "
+                "as installing, enforcing, or locking in a rule; to genuinely stop "
+                "Nova from alerting on an entity, use ignore_entity instead, which "
+                "does take effect in the alerting code."
             ),
             "parameters": {
                 "type": "object",
@@ -379,7 +385,11 @@ NOVA_TOOLS = [
                 "Tell Nova to ignore an entity or area for a specified duration. "
                 "Use when the user says things like 'ignore the garage door for "
                 "2 hours' or 'stop alerting me about the backyard'. Supports "
-                "glob patterns like 'binary_sensor.garage*'."
+                "glob patterns like 'binary_sensor.garage*'. This is the ONLY "
+                "tool that actually changes alerting behavior at runtime — a "
+                "success result here (enforced: true) means sentinel/cognitive "
+                "alerting will genuinely skip this entity, unlike remember, which "
+                "only saves a fact for later conversation."
             ),
             "parameters": {
                 "type": "object",
@@ -2341,12 +2351,16 @@ async def _exec_remember(hass: HomeAssistant, args: dict) -> str:
         "success": True,
         "status": "pending",
         "fact_id": fact["id"],
+        "enforced": False,
         "message": (
             f"Saved '{name}: {value}' as PENDING, not yet trusted — ask the "
             f"user to confirm this is actually correct before relying on it "
             f"again. If they confirm, call confirm_pending_fact with "
             f"fact_id={fact['id']}. If they say no or correct it, call "
-            f"reject_pending_fact with the same fact_id instead."
+            f"reject_pending_fact with the same fact_id instead. This is a "
+            f"conversational memory only — it does not change any alerting "
+            f"or automation code. Report it to the user as a saved "
+            f"preference, never as an installed or enforced rule."
         ),
     })
 
@@ -2363,7 +2377,11 @@ async def _exec_confirm_pending_fact(hass: HomeAssistant, args: dict) -> str:
     if not ok:
         return json.dumps({"error": f"no pending fact with id {fact_id} (already "
                                     f"confirmed, rejected, or never existed)"})
-    return json.dumps({"success": True, "confirmed": fact_id})
+    return json.dumps({
+        "success": True, "confirmed": fact_id, "enforced": False,
+        "message": "Fact confirmed and now trusted in conversation — still a "
+                   "memory only, not a change to any alerting or automation code.",
+    })
 
 
 async def _exec_reject_pending_fact(hass: HomeAssistant, args: dict) -> str:
@@ -3940,7 +3958,16 @@ async def run_agent(
         f"('keep an eye on the workshop for tools left out'), create a goal "
         f"whose recurring action is a look_at_camera check: alert only when the "
         f"thing is found, otherwise stay quiet. Vision is reliable for "
-        f"presence/absence, not fine detail.\n\n"
+        f"presence/absence, not fine detail.\n"
+        f"12. Never describe a rule, exclusion, or alert-suppression as "
+        f"'saved', 'locked in', 'registered', or 'enforced' unless a tool "
+        f"result actually contains enforced: true (only ignore_entity/"
+        f"unignore_entity return that). remember and confirm_pending_fact "
+        f"return enforced: false — they save a fact you can recall in "
+        f"conversation, nothing more; report those results as a saved "
+        f"preference, never as a change to what any alerting or automation "
+        f"code actually does. If asked to stop Nova alerting on something, "
+        f"call ignore_entity, not remember.\n\n"
         f"## Who you are\n"
         f"You are Nova — Tony Stark's Nova, serving this household. Dry, "
         f"precise, unflappable, quietly witty. You anticipate the user's actual "

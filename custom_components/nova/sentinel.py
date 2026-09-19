@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import (
     async_track_state_change_event,
     async_track_time_interval,
@@ -61,6 +62,15 @@ DEFAULT_RULES = [
         "domain": "lock",
         "state": "unlocked",
         "for_minutes": 20,
+        # The `lock` domain covers physical door/access locks AND unrelated
+        # config-surface locks (a thermostat's keypad lock, reported live as
+        # a real incident: "Upstairs Thermo Lock" — a Heatmiser Neo keypad
+        # lock — alerted as if it were a door). `domain`/`device_class`
+        # alone can't tell them apart (lock entities don't carry a
+        # device_class distinguishing this), so this rule additionally
+        # requires _is_security_relevant_lock() to pass — see its
+        # docstring for the exact verified-metadata signals used.
+        "requires_security_lock": True,
         "message": "{honorific}, {friendly_name} has been unlocked for {minutes} minutes.",
     },
     # NOTE: motion_after_hours / occupancy_after_hours rules REMOVED in v5.4.7.
@@ -68,6 +78,62 @@ DEFAULT_RULES = [
     # want night-motion alerts, add the rule explicitly in addon config under
     # sentinel_rules. Default is QUIET.
 ]
+
+
+def _is_ignored(hass: HomeAssistant, entity_id: str) -> bool:
+    """Check the REAL, enforceable ignore-rule store the `ignore_entity`
+    tool writes to (cognitive_core.IgnoreManager) — separate from, and in
+    addition to, entity_filter.py's user-configured exclusion list. Sentinel
+    previously checked only entity_filter, so a genuine `ignore_entity` call
+    had no actual effect on sentinel's own alerts despite the tool reporting
+    success — this closes that gap. Fails open (not ignored) on any error."""
+    try:
+        from . import cognitive_core
+        return bool(cognitive_core.is_ignored(entity_id))
+    except Exception:
+        return False
+
+
+def _is_security_relevant_lock(hass: HomeAssistant, entity_id: str) -> bool:
+    """Is this `lock.*` entity a real physical/access lock — the only kind
+    sentinel's lock_unlocked rule should ever alert on?
+
+    HA's `lock` domain has no device_class to separate a door/gate lock from
+    a config-surface lock (a thermostat keypad lock, a valve controller's
+    child lock, etc.), so name/entity_id text is the only thing that LOOKS
+    available — and is exactly what let "Upstairs Thermo Lock" read as a
+    door lock. Two verified-metadata signals are used instead, in order:
+
+      1. entity_category — HA's own "config"/"diagnostic" designation.
+         Reliable when an integration sets it, but not universal: the
+         Heatmiser Neo integration behind the reported incident leaves this
+         entity's entity_category unset (confirmed live), so it can't be
+         the only check.
+      2. Device co-membership — does this lock's own device ALSO expose a
+         climate.* entity? A lock sharing a device with a thermostat is
+         that thermostat's own configuration lock, not a standalone door
+         lock, verified directly against HA's device/entity registry
+         (never the entity's name or entity_id).
+
+    Fails open (True — treat as security-relevant) on a missing registry
+    entry or any lookup error: silence is only earned by a positive,
+    verified signal, never by default.
+    """
+    try:
+        ent_reg = er.async_get(hass)
+        entry = ent_reg.async_get(entity_id)
+        if entry is None:
+            return True
+        if entry.entity_category is not None:
+            return False
+        if entry.device_id:
+            siblings = er.async_entries_for_device(
+                ent_reg, entry.device_id, include_disabled_entities=True)
+            if any(s.entity_id.startswith("climate.") for s in siblings):
+                return False
+    except Exception as exc:
+        _LOGGER.debug("Sentinel: security-lock check failed for %s: %s", entity_id, exc)
+    return True
 
 
 class NovaSentinel:
@@ -260,7 +326,7 @@ class NovaSentinel:
                     continue  # mild out — skip this rule's checks this tick
 
             for entity_id in self._entity_cache:
-                if _excl(self.hass, entity_id):
+                if _excl(self.hass, entity_id) or _is_ignored(self.hass, entity_id):
                     continue
                 key = f"{entity_id}:{rule['id']}"
                 started = self._state_start.get(key)
@@ -317,6 +383,8 @@ class NovaSentinel:
                 return
         except Exception:
             pass
+        if _is_ignored(self.hass, entity_id):
+            return
         # runtime_config → config.json → options → data, via the canonical
         # resolver (immediate effect from panel toggles, no entry reload).
         if self._entry:
@@ -354,6 +422,35 @@ class NovaSentinel:
             except Exception:
                 pass
 
+        # Deterministic quiet-hours enforcement (code, never an LLM/memory
+        # fact — see entity_filter.py's is_excluded above for the same
+        # principle applied to entity scope). A generic "medium"/"security"
+        # label is not enough to bypass quiet hours on its own; only a rule
+        # explicitly marked urgent_security=True (none of DEFAULT_RULES are)
+        # may still reach the speaker while the house is asleep. The phone
+        # push below is unaffected either way — that's the existing
+        # intended overnight delivery channel, not a new one.
+        speak_overnight = bool(rule.get("urgent_security", False))
+        sleeping = False
+        if not speak_overnight:
+            try:
+                from . import sleep_detection
+                cfg_bedroom_areas = nova_config.runtime_get(
+                    self.hass, self._entry, "bedroom_areas", []) or []
+                cfg_quiet_start = nova_config.runtime_get(
+                    self.hass, self._entry, "observer_quiet_start", "22:00")
+                cfg_quiet_end = nova_config.runtime_get(
+                    self.hass, self._entry, "observer_quiet_end", "07:00")
+                sleeping, _ = sleep_detection.is_sleeping(
+                    self.hass,
+                    bedroom_area_ids=cfg_bedroom_areas,
+                    quiet_start=cfg_quiet_start,
+                    quiet_end=cfg_quiet_end,
+                )
+            except Exception as exc:
+                _LOGGER.debug("Sentinel: quiet-hours check failed, defaulting to speaking: %s", exc)
+                sleeping = False
+
         state = self.hass.states.get(entity_id)
         friendly_name = state.attributes.get("friendly_name", entity_id) if state else entity_id
         honorific = self._live_honorific()
@@ -386,7 +483,12 @@ class NovaSentinel:
             text = await self._groq_line(entity_id, friendly_name, rule, minutes)
 
         save_sentinel_event(entity_id, rule["id"], text)
-        save_message("assistant", f"[Sentinel] {text}", device_id="sentinel")
+        if not sleeping:
+            # Only recorded as something the assistant said if it was
+            # actually going to be spoken — a suppressed overnight event
+            # must never look, to later conversation context, like Nova
+            # already told the user about it.
+            save_message("assistant", f"[Sentinel] {text}", device_id="sentinel")
         # v5.4.8: persist to activity log for panel
         try:
             from .database import save_activity
@@ -395,17 +497,18 @@ class NovaSentinel:
                 category=rule.get("id", "sentinel"),
                 urgency="medium",
                 message=text,
-                was_spoken=True,
+                was_spoken=not sleeping,
                 source="sentinel",
             )
         except Exception:
             pass
         from . import action_log
         request_id = action_log.new_request_id()
-        await async_announce(
-            self.hass, text, self._tts_entity(), self._speakers(), context="sentinel",
-            action_request_id=request_id,
-        )
+        if not sleeping:
+            await async_announce(
+                self.hass, text, self._tts_entity(), self._speakers(), context="sentinel",
+                action_request_id=request_id,
+            )
 
         # v5.6.5: Also send phone push notification for sentinel alerts
         action_id = None
@@ -485,17 +588,24 @@ class NovaSentinel:
         ids: set[str] = set()
         for rule in self._rules:
             if rule.get("entity_id"):
-                if not is_excluded(self.hass, rule["entity_id"]):
+                if not is_excluded(self.hass, rule["entity_id"]) and not _is_ignored(
+                        self.hass, rule["entity_id"]):
                     ids.add(rule["entity_id"])
             else:
                 domain       = rule.get("domain")
                 device_class = rule.get("device_class")
+                requires_security_lock = rule.get("requires_security_lock", False)
                 for state in self.hass.states.async_all():
                     if domain and not state.entity_id.startswith(domain + "."):
                         continue
                     if device_class and state.attributes.get("device_class") != device_class:
                         continue
+                    if requires_security_lock and not _is_security_relevant_lock(
+                            self.hass, state.entity_id):
+                        continue
                     if is_excluded(self.hass, state.entity_id):
+                        continue
+                    if _is_ignored(self.hass, state.entity_id):
                         continue
                     ids.add(state.entity_id)
         return list(ids)
@@ -509,6 +619,9 @@ class NovaSentinel:
             state = self.hass.states.get(entity_id)
             if state and state.attributes.get("device_class") != rule["device_class"]:
                 return False
+        if rule.get("requires_security_lock") and not _is_security_relevant_lock(
+                self.hass, entity_id):
+            return False
         return True
 
     def _in_time_window(self, window: dict) -> bool:
