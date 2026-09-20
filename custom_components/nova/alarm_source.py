@@ -41,8 +41,7 @@ def _alarmo_entities(hass) -> tuple[str, ...]:
         for entity_id, entry in registry.entities.items():
             eid = getattr(entry, "entity_id", None) or entity_id
             if (str(eid).startswith("alarm_control_panel.")
-                    and getattr(entry, "platform", "") == "alarmo"
-                    and hass.states.get(eid) is not None):
+                    and getattr(entry, "platform", "") == "alarmo"):
                 found.append(str(eid))
         return tuple(sorted(set(found)))
     except Exception as exc:
@@ -64,7 +63,9 @@ def entity_ids(hass, config: dict | None = None) -> tuple[str, ...]:
             return (configured,)
         return ()
     alarmo = _alarmo_entities(hass)
-    return alarmo if len(alarmo) == 1 else ()
+    if len(alarmo) != 1 or hass.states.get(alarmo[0]) is None:
+        return ()
+    return alarmo
 
 
 def states(hass, config: dict | None = None) -> list:

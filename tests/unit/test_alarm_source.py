@@ -78,6 +78,20 @@ def test_multiple_alarmo_sources_require_user_choice(load, fake_hass, monkeypatc
     assert alarm_source.states(fake_hass, {}) == []
 
 
+def test_staggered_multiple_alarmo_startup_remains_ambiguous(
+        load, fake_hass, monkeypatch):
+    """A second registered partition may not have published state yet."""
+    alarm_source = load("alarm_source")
+    _registry(monkeypatch, {
+        "alarm_control_panel.upstairs": "alarmo",
+        "alarm_control_panel.downstairs": "alarmo",
+    })
+    fake_hass.states.set("alarm_control_panel.upstairs", "armed_home")
+
+    assert alarm_source.entity_ids(fake_hass, {}) == ()
+    assert alarm_source.states(fake_hass, {}) == []
+
+
 def test_no_alarmo_source_fails_quietly(load, fake_hass, monkeypatch):
     alarm_source = load("alarm_source")
     _registry(monkeypatch, {

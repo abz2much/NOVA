@@ -273,6 +273,88 @@ async def test_turning_off_automatic_lockdown_clears_only_nova_state(
     assert fake_hass.service_calls == []
 
 
+async def test_periodic_tick_holds_auto_lockdown_when_alarm_source_missing(
+        cognitive_core, fake_hass):
+    mgr = cognitive_core.LockdownManager(fake_hass, {
+        "lockdown_auto_on_arm": True,
+        "security_alarm_entity": "alarm_control_panel.missing",
+    })
+    mgr.active = True
+    mgr.auto = True
+
+    actions = await mgr.tick()
+
+    assert mgr.active is True
+    assert mgr.auto is True
+    assert actions == []
+
+
+async def test_disabling_auto_cancels_remaining_alarm_engage_work(
+        cognitive_core, fake_hass, monkeypatch):
+    import asyncio
+
+    fake_hass.states.set("cover.garage", "open", device_class="garage")
+    mgr = cognitive_core.LockdownManager(
+        fake_hass, {"lockdown_auto_on_arm": True})
+    cognitive_core._CORE.lockdown_mgr = mgr
+    cognitive_core._CORE.hass = fake_hass
+    cognitive_core._CORE.config = {"lockdown_auto_on_arm": True}
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def paused_lock_all(request_id=None, automatic_generation=None):
+        started.set()
+        await release.wait()
+        return []
+
+    monkeypatch.setattr(mgr, "_lock_all", paused_lock_all)
+    task = asyncio.create_task(mgr.engage("alarm armed", auto=True))
+    await started.wait()
+    await cognitive_core.apply_runtime_config("lockdown_auto_on_arm", False)
+    release.set()
+    action = await task
+
+    assert action is None
+    assert mgr.active is False
+    assert fake_hass.service_calls == []
+
+
+async def test_disabling_auto_cancels_remaining_sleep_sweep(
+        cognitive_core, fake_hass):
+    import asyncio
+
+    fake_hass.states.set("lock.front", "unlocked")
+    fake_hass.states.set("lock.back", "unlocked")
+    fake_hass.states.set("cover.garage", "open", device_class="garage")
+    safety = cognitive_core.SafetyManager(
+        fake_hass, {"lockdown_auto_on_arm": True})
+    cognitive_core._CORE.safety_mgr = safety
+    cognitive_core._CORE.config = {"lockdown_auto_on_arm": True}
+    started = asyncio.Event()
+    release = asyncio.Event()
+    real_call = fake_hass.services.async_call
+    calls = 0
+
+    async def paused_call(domain, service, data=None, blocking=False, **kwargs):
+        nonlocal calls
+        calls += 1
+        await real_call(domain, service, data, blocking=blocking, **kwargs)
+        if calls == 1:
+            started.set()
+            await release.wait()
+
+    fake_hass.services.async_call = paused_call
+    task = asyncio.create_task(safety.tick(sleeping=True, anyone_home=True))
+    await started.wait()
+    await cognitive_core.apply_runtime_config("lockdown_auto_on_arm", False)
+    release.set()
+    actions = await task
+
+    assert actions == []
+    assert len(fake_hass.service_calls) == 1
+
+
+
 # ── Open-entity policy (v6.24.3): snapshot-and-ignore at engage, secure-or-ignore on change ──
 from fakes import FakeState  # noqa: E402
 

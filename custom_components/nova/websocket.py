@@ -805,8 +805,8 @@ async def ws_get_panel_data(
                 "notify_services_available": notify_services,
                 "security_alarm_entity": str(_runtime_opt(
                     hass, entry, "security_alarm_entity", "") or ""),
-                "lockdown_auto_on_arm": bool(_runtime_opt(
-                    hass, entry, "lockdown_auto_on_arm", False)),
+                "lockdown_auto_on_arm": _runtime_opt(
+                    hass, entry, "lockdown_auto_on_arm", False) is True,
                 "alarm_panels": _get_alarm_panels(hass),
                 "onboarding": _get_onboarding_state(hass, entry, current_notify),
                 "sentinel_rules": _get_sentinel_rules(),
@@ -1947,6 +1947,14 @@ async def ws_update_config(
         connection.send_error(
             msg["id"], "invalid_key",
             f"Key '{key}' is not writable from the panel",
+        )
+        return
+
+    from . import safety_config
+    if not safety_config.valid_panel_value(key, value):
+        connection.send_error(
+            msg["id"], "invalid_value",
+            f"Key '{key}' requires a boolean value",
         )
         return
 
