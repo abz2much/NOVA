@@ -803,6 +803,11 @@ async def ws_get_panel_data(
                 "llm_base_url": str(_runtime_opt(hass, entry, "llm_base_url", "") or ""),
                 "notify_service": current_notify,
                 "notify_services_available": notify_services,
+                "security_alarm_entity": str(_runtime_opt(
+                    hass, entry, "security_alarm_entity", "") or ""),
+                "lockdown_auto_on_arm": bool(_runtime_opt(
+                    hass, entry, "lockdown_auto_on_arm", False)),
+                "alarm_panels": _get_alarm_panels(hass),
                 "onboarding": _get_onboarding_state(hass, entry, current_notify),
                 "sentinel_rules": _get_sentinel_rules(),
                 "disabled_sentinel_rules": _get_disabled_rules(hass, entry),
@@ -1169,6 +1174,15 @@ def _get_lockdown_status() -> dict:
         return {"active": False, "since": 0.0, "reason": "", "auto": False, "exempt_windows": 0}
 
 
+def _get_alarm_panels(hass: HomeAssistant) -> list[dict]:
+    """Alarm choices for the public security source setting."""
+    try:
+        from . import alarm_source
+        return alarm_source.available(hass)
+    except Exception:
+        return []
+
+
 def _get_intrusion_status() -> dict:
     """Active intrusion investigation (breach point + route) for the panel."""
     try:
@@ -1355,6 +1369,8 @@ PANEL_WRITABLE_KEYS = {
     "excluded_domains",            # JSON list: whole domains removed from awareness
     "excluded_labels",             # JSON list: HA labels whose entities are removed from awareness
     "notify_service",
+    "security_alarm_entity",       # str: authoritative household alarm panel
+    "lockdown_auto_on_arm",        # bool: explicit opt in for automatic lockdown
     "departure_alerts_enabled",
     "routine_alerts_enabled",
     "departure_lead_minutes",
@@ -1992,6 +2008,10 @@ async def ws_update_config(
             else:
                 await observer_mod.stop()
                 data["observer_running"] = False
+
+        if key in ("security_alarm_entity", "lockdown_auto_on_arm"):
+            from . import cognitive_core
+            await cognitive_core.apply_runtime_config(key, value)
 
         connection.send_result(msg["id"], {"key": key, "value": value, "persisted": persisted})
     except Exception as exc:

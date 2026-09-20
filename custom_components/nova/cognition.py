@@ -517,7 +517,8 @@ def _conflicting_armed_alarm(hass) -> bool:
     """A currently-armed alarm is itself a deterministic, actionable reason
     to flag a less-secure deviation -- the house is meant to be secured
     right now regardless of who's tracked as home or away."""
-    for st in hass.states.async_all("alarm_control_panel"):
+    from . import alarm_source
+    for st in alarm_source.states(hass):
         if str(st.state).lower().startswith("armed"):
             return True
     return False

@@ -81,6 +81,7 @@ async def test_person_home_suppresses_intrusion(safety, fake_hass):
 
 
 async def test_armed_away_alarm_enables_intrusion_without_trackers(safety, fake_hass):
+    safety.config["security_alarm_entity"] = "alarm_control_panel.home"
     fake_hass.states.set("alarm_control_panel.home", "armed_away")
     _motion(fake_hass)
     actions = await _tick(safety, fake_hass, anyone_home=False)

@@ -220,6 +220,11 @@ def _should_pre_filter(event: Event) -> bool:
 
     domain = entity_id.split(".", 1)[0]
 
+    if domain == "alarm_control_panel":
+        from . import alarm_source
+        if not alarm_source.is_selected(_STATE.hass, entity_id, _STATE.config):
+            return True
+
     if domain in IGNORED_DOMAINS:
         # Re-admit sensor if device_class is interesting
         if domain == "sensor":

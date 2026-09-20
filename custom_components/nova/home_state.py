@@ -120,7 +120,8 @@ def _build_summary(hass: HomeAssistant) -> str:
         parts.append(f"Open doors/windows: {', '.join(open_doors[:6])}")
 
     # ── Alarm ────────────────────────────────────────────────────────────
-    for state in hass.states.async_all("alarm_control_panel"):
+    from . import alarm_source
+    for state in alarm_source.states(hass):
         parts.append(f"Alarm: {state.state}")
 
     # ── Media ────────────────────────────────────────────────────────────

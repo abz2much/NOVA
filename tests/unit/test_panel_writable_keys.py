@@ -121,6 +121,14 @@ def test_onboarding_dismissed_is_writable():
     assert "onboarding_dismissed" in _allowlist()
 
 
+def test_security_alarm_settings_round_trip_through_panel_data():
+    allow = _allowlist()
+    surfaced = _panel_data_config_keys()
+    for key in ("security_alarm_entity", "lockdown_auto_on_arm"):
+        assert key in allow
+        assert key in surfaced
+
+
 def test_onboarding_steps_cover_key_setup():
     # the checklist should name the high-value post-install steps
     js = _WEBSOCKET.read_text()

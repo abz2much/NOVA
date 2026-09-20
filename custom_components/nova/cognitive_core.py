@@ -359,7 +359,8 @@ class SafetyManager:
 
         # ── Nighttime lockdown ──────────────────────────────────────
         # Skipped when a formal lockdown is already active (it handles securing).
-        if (sleeping and not is_lockdown()
+        if (self.config.get("lockdown_auto_on_arm", False)
+                and sleeping and not is_lockdown()
                 and (now - self._last_lockdown_check) > LOCKDOWN_CHECK_INTERVAL):
             self._last_lockdown_check = now
             lockdown = await self._nighttime_lockdown()
@@ -423,7 +424,8 @@ class SafetyManager:
         return None
 
     def _alarm_armed(self) -> bool:
-        for st in self.hass.states.async_all("alarm_control_panel"):
+        from . import alarm_source
+        for st in alarm_source.states(self.hass, self.config):
             if st.state in ALARM_ARMED_STATES:
                 return True
         return False
@@ -1208,7 +1210,8 @@ class SafetyManager:
             if str(st.state).lower() == "home":
                 return False
         # An intentionally armed-away alarm is a strong 'away' signal.
-        for st in self.hass.states.async_all("alarm_control_panel"):
+        from . import alarm_source
+        for st in alarm_source.states(self.hass, self.config):
             if str(st.state).lower() in ("armed_away", "armed_vacation"):
                 return True
         # Otherwise, only 'away' if presence is actually tracked and reads away.
@@ -1341,6 +1344,21 @@ class LockdownManager:
                 _LOGGER.warning(
                     "Lockdown state RESTORED (auto=%s, %d exempt windows)",
                     self.auto, len(self.exempt_windows))
+                # Versions before the automatic-lockdown opt-in could persist
+                # an alarm-owned lockdown even though the user never enabled
+                # automatic device control. Clear only that Nova state. Do not
+                # call disengage(): it emits speech, and neither path sends an
+                # unlock or disarm command.
+                if self.auto and not self.config.get("lockdown_auto_on_arm", False):
+                    self.active = False
+                    self.since = 0.0
+                    self.reason = ""
+                    self.auto = False
+                    self.exempt_windows = set()
+                    self._auto_suppressed = False
+                    self._persist_sync()
+                    _LOGGER.warning(
+                        "Cleared legacy automatic lockdown state; devices unchanged")
         except Exception as exc:
             _LOGGER.warning("Lockdown state restore failed: %s", exc)
 
@@ -1377,7 +1395,8 @@ class LockdownManager:
         }
 
     def _alarm_armed(self) -> bool:
-        for st in self.hass.states.async_all("alarm_control_panel"):
+        from . import alarm_source
+        for st in alarm_source.states(self.hass, self.config):
             if st.state in ALARM_ARMED_STATES:
                 return True
         return False
@@ -1722,7 +1741,7 @@ class LockdownManager:
         (handle_state_change), so it isn't repeated here."""
         actions = []
         armed = self._alarm_armed()
-        auto_on_arm = self.config.get("lockdown_auto_on_arm", True)
+        auto_on_arm = self.config.get("lockdown_auto_on_arm", False)
 
         # Clear a manual-exit suppression once the alarm is disarmed again.
         if not armed and self._auto_suppressed:
@@ -2951,6 +2970,31 @@ def lockdown_status() -> dict:
     return {"active": False, "since": 0.0, "reason": "", "auto": False, "exempt_windows": 0}
 
 
+async def apply_runtime_config(key: str, value) -> None:
+    """Apply safety settings immediately without reloading the integration."""
+    if key not in ("lockdown_auto_on_arm", "security_alarm_entity"):
+        return
+    if not isinstance(_CORE.config, dict):
+        _CORE.config = {}
+    _CORE.config[key] = value
+    for component in (_CORE.safety_mgr, _CORE.lockdown_mgr):
+        if component is not None and isinstance(component.config, dict):
+            component.config[key] = value
+    mgr = _CORE.lockdown_mgr
+    if key == "lockdown_auto_on_arm" and not bool(value) and mgr and mgr.active and mgr.auto:
+        mgr.active = False
+        mgr.since = 0.0
+        mgr.reason = ""
+        mgr.auto = False
+        mgr.exempt_windows = set()
+        mgr._secured_by_us = set()
+        mgr._alerted = set()
+        mgr._auto_suppressed = False
+        await mgr._persist()
+        _LOGGER.warning(
+            "Automatic lockdown disabled; cleared Nova lockdown state without device actions")
+
+
 def _ensure_lockdown_mgr(hass: HomeAssistant = None) -> Optional["LockdownManager"]:
     """
     Return the lockdown manager, creating it on demand. Lockdown is a security
@@ -3040,7 +3084,7 @@ async def _sync_lockdown_to_alarm(reason: str, announce: bool = True) -> None:
     mgr = _CORE.lockdown_mgr
     if mgr is None or _CORE.hass is None:
         return
-    if not (_CORE.config or {}).get("lockdown_auto_on_arm", True):
+    if not (_CORE.config or {}).get("lockdown_auto_on_arm", False):
         return
     try:
         armed, disarm_confirmed, indeterminate = _alarm_state_view(_CORE.hass)
@@ -3076,7 +3120,8 @@ def _alarm_state_view(hass) -> tuple:
     the integration is down, not the alarm off."""
     armed = False
     disarmed = False
-    for st in hass.states.async_all("alarm_control_panel"):
+    from . import alarm_source
+    for st in alarm_source.states(hass, _CORE.config or {}):
         s = str(st.state).lower()
         if s in ALARM_ARMED_STATES:
             armed = True
