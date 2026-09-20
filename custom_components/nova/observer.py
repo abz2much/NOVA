@@ -658,10 +658,13 @@ async def _process_event(event: Event) -> None:
 
         # Whether a registered user is home — open windows / unlocked doors are
         # normal household state when someone's in, only notable when away.
+        # Household occupancy comes from registered people only. A large
+        # number of integrations expose fixed appliances and hubs as
+        # device_tracker entities which remain "home" permanently; counting
+        # them made an empty house look occupied and caused departure speech.
         anyone_home = any(
-            s.state == "home" for s in _STATE.hass.states.async_all("person")
-        ) or any(
-            s.state == "home" for s in _STATE.hass.states.async_all("device_tracker")
+            str(s.state).lower() == "home"
+            for s in _STATE.hass.states.async_all("person")
         )
 
         # Tier 2: reason

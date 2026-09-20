@@ -32,7 +32,7 @@ def test_not_home_to_home_is_arrival(reasoning_loop):
     )
     assert decision["speak"] is True
     assert decision["urgency"] == "medium"
-    assert "Abi has arrived home" in decision["message"]
+    assert decision["message"] == "Welcome home, sir."
     assert "left" not in decision["message"].lower()
 
 
@@ -52,7 +52,7 @@ def test_home_to_not_home_is_departure(reasoning_loop):
     assert "Abi has left the premises" in decision["message"]
 
 
-def test_departure_escalates_to_medium_when_house_now_empty(reasoning_loop):
+def test_departure_stays_silent_when_house_now_empty(reasoning_loop):
     decision = reasoning_loop._try_local_reasoning(
         event_summary="Abi (person.abi) changed from home to not_home",
         urgency="low",
@@ -63,9 +63,7 @@ def test_departure_escalates_to_medium_when_house_now_empty(reasoning_loop):
         from_state="home",
         to_state="not_home",
     )
-    assert decision["speak"] is True
-    assert decision["urgency"] == "medium"
-    assert "Abi has left the premises" in decision["message"]
+    assert decision == {"speak": False, "reason": "last person departure"}
 
 
 def test_non_home_zone_transition_is_neither_arrival_nor_departure(reasoning_loop):
@@ -122,7 +120,7 @@ def test_arbitrary_event_summary_wording_cannot_reverse_direction(reasoning_loop
         to_state="home",
     )
     assert decision["speak"] is True
-    assert "arrived home" in decision["message"]
+    assert decision["message"] == "Welcome home, sir."
     assert "left the premises" not in decision["message"]
 
 
@@ -185,7 +183,7 @@ async def test_rich_reasoning_enabled_arrival_is_still_deterministic(
     )
     assert out["speak"] is True
     assert out["urgency"] == "medium"
-    assert "Abi has arrived home" in out["message"]
+    assert out["message"] == "Welcome home, sir."
     assert provider.calls == 0
 
 
@@ -200,9 +198,7 @@ async def test_rich_reasoning_enabled_departure_is_still_deterministic(
             from_state="home", to_state="not_home", anyone_home=False,
         ),
     )
-    assert out["speak"] is True
-    assert out["urgency"] == "medium"
-    assert "Abi has left the premises" in out["message"]
+    assert out == {"speak": False, "reason": "last person departure"}
     assert provider.calls == 0
 
 
@@ -237,7 +233,7 @@ async def test_rich_reasoning_unrelated_medium_event_still_uses_cloud(
     connectivity.reset()
 
 
-async def test_rich_reasoning_disabled_behaviour_is_unchanged(
+async def test_rich_reasoning_disabled_uses_same_presence_rules(
         reasoning_loop, fake_hass, provider_factory, monkeypatch):
     """With Rich Reasoning off (the default), arrivals/departures already
     went through _try_local_reasoning before this fix — confirming that
@@ -253,7 +249,7 @@ async def test_rich_reasoning_disabled_behaviour_is_unchanged(
         ),
     )
     assert arrival["speak"] is True
-    assert "Abi has arrived home" in arrival["message"]
+    assert arrival["message"] == "Welcome home, sir."
 
     departure = await reasoning_loop.decide(
         fake_hass, provider,
@@ -262,8 +258,7 @@ async def test_rich_reasoning_disabled_behaviour_is_unchanged(
             from_state="home", to_state="not_home", anyone_home=False,
         ),
     )
-    assert departure["speak"] is True
-    assert "Abi has left the premises" in departure["message"]
+    assert departure == {"speak": False, "reason": "last person departure"}
     assert provider.calls == 0
 
 

@@ -1,5 +1,4 @@
-"""End-to-end: a genuine last-person departure must not speak into the
-house, and must send the configured phone notification instead.
+"""End-to-end: a genuine last-person departure must stay fully silent.
 
 Reproduces the 2026-09-18 08:30 incident: person.abi went home -> not_home
 while a phone-presence binary_sensor (device_class="presence") was still
@@ -30,7 +29,9 @@ class _States:
         if domain == "person":
             return [SimpleNamespace(state="not_home", attributes={})]
         if domain == "device_tracker":
-            return [SimpleNamespace(state="not_home", attributes={})]
+            # Fixed infrastructure is commonly exposed as a tracker and must
+            # never be treated as a household member.
+            return [SimpleNamespace(state="home", attributes={})]
         if domain == "binary_sensor" and self._presence_sensor_on:
             # The stale phone-presence sensor from the real incident: still
             # "on" after the person entity already went not_home.
@@ -76,15 +77,16 @@ def _departure_event(observer):
 
 
 def _wire_fakes(observer, monkeypatch):
+    captured = {}
+
     async def fake_classify(*a, **kw):
         return {"worth_considering": True, "urgency": "medium", "category": "presence"}
 
     async def fake_decide(*a, **kw):
-        # The fixed reasoning_loop: a real last-person departure, from_state
-        # "home" to_state "not_home", anyone_home False -> medium urgency,
-        # correct "left the premises" message.
-        assert kw.get("anyone_home") is False
-        return {"speak": True, "message": "Abi has left the premises.", "urgency": "medium"}
+        # The reasoning layer receives person-only occupancy and suppresses the
+        # event at source when nobody remains home.
+        captured["anyone_home"] = kw.get("anyone_home")
+        return {"speak": False, "reason": "last person departure"}
 
     monkeypatch.setattr(observer.classifier, "classify", fake_classify)
     monkeypatch.setattr(observer.reasoning_loop, "decide", fake_decide)
@@ -95,13 +97,14 @@ def _wire_fakes(observer, monkeypatch):
     monkeypatch.setattr(observer.output_gate, "can_announce", lambda **kw: (True, ""))
     monkeypatch.setattr(observer.output_gate, "record_announcement", lambda **kw: None)
     monkeypatch.setattr(observer.output_gate, "recent_announcements", lambda n=5: [])
+    return captured
 
 
-def test_last_person_departure_notifies_and_never_speaks(load, monkeypatch):
+def test_last_person_departure_is_fully_silent_with_fixed_tracker_home(load, monkeypatch):
     """Reproduces the incident exactly: stale presence sensor still 'on'.
     Must still route notify_only and call the configured notify service."""
     observer = load("observer")
-    _wire_fakes(observer, monkeypatch)
+    captured = _wire_fakes(observer, monkeypatch)
     hass = _FakeHass(presence_sensor_on=True)
     observer._STATE.hass = hass
     observer._STATE.config = {"notify_service": "notify.mobile_app_abi_s26"}
@@ -113,19 +116,15 @@ def test_last_person_departure_notifies_and_never_speaks(load, monkeypatch):
         observer._process_event(_departure_event(observer))
     )
 
-    assert ("tts", "speak") not in {(d, s) for d, s, _ in hass.services.calls}
-    notify_calls = [c for c in hass.services.calls if c[0] == "notify"]
-    assert len(notify_calls) == 1
-    domain, service, data = notify_calls[0]
-    assert (domain, service) == ("notify", "mobile_app_abi_s26")
-    assert data["message"] == "Abi has left the premises."
+    assert hass.services.calls == []
+    assert captured["anyone_home"] is False
 
 
-def test_last_person_departure_no_stale_sensor_also_notifies(load, monkeypatch):
+def test_last_person_departure_without_presence_sensor_is_fully_silent(load, monkeypatch):
     """Same scenario without a lingering sensor at all — the non-stale case
     must behave identically (notify_only, no speech)."""
     observer = load("observer")
-    _wire_fakes(observer, monkeypatch)
+    captured = _wire_fakes(observer, monkeypatch)
     hass = _FakeHass(presence_sensor_on=False)
     observer._STATE.hass = hass
     observer._STATE.config = {"notify_service": "notify.mobile_app_abi_s26"}
@@ -137,6 +136,5 @@ def test_last_person_departure_no_stale_sensor_also_notifies(load, monkeypatch):
         observer._process_event(_departure_event(observer))
     )
 
-    assert ("tts", "speak") not in {(d, s) for d, s, _ in hass.services.calls}
-    notify_calls = [c for c in hass.services.calls if c[0] == "notify"]
-    assert len(notify_calls) == 1
+    assert hass.services.calls == []
+    assert captured["anyone_home"] is False
