@@ -310,6 +310,7 @@ The list below covers Nova-specific differences. It is not a complete release-by
 
 **Security hardening**
 - Voice commands can lock a door instantly, but can never unlock one or open a garage — that always requires a tap on your phone, so a spoofed or deepfaked voice can't grant physical access on its own.
+- Nova uses one explicit household alarm for security decisions instead of trusting every alarm-shaped entity exposed by camera hubs and vendor bridges. A single Alarmo panel is detected automatically, other setups can select their source, and automatic lockdown is opt in rather than silently enabled.
 - The `execute_plan` tool (multi-step device automation from a single request) is restricted to an explicit allowlist of home-control domains, so a hallucinated or injected plan step can't reach a system-level service like `homeassistant.restart` or `shell_command`.
 - Biometric/wellbeing data (heart rate, sleep stage) is withheld entirely from cloud LLM calls — it only ever reaches the model when you're running a local Ollama provider.
 - Every memory store Nova has — cross-session conversation recall, long-term semantic search, and curated facts/preferences from "remember that…" — is scoped to the right conversation or person rather than searched globally, and anything pulled back into a live conversation is wrapped against prompt injection rather than trusted verbatim.
@@ -326,7 +327,7 @@ The list below covers Nova-specific differences. It is not a complete release-by
 - State anticipation ("around this time, X is usually Y") never nags you back toward a less-secure historical habit — a window that's usually open but is currently closed stays silent, full stop. The reverse case (currently open, unlocked, or disarmed when that's unusual) only speaks up when there's a separate, concrete reason — everyone in the house confirmed away, or a security system that's actually armed — never "usually" on its own.
 - A door or window left open escalates properly on repeat nags (10 → 20 → 30 minutes, not the same "10 minutes" forever), and stays quiet altogether once outside is above 10°C — an open door isn't a heat-loss concern on a mild day.
 - Thermostat keypad/child locks are treated as what they are, not physical security: excluded from lockdown's auto-lock sweep and from every briefing/status/intent that lists "unlocked" locks, so Nova never asks to lock a thermostat panel or reports one as a security concern.
-- The last person leaving the house no longer gets spoken into an empty room: departure announcements push a phone notification instead of relying on room-occupancy sensors, which can still read "occupied" for a moment right after someone physically walks out.
+- The last person leaving the house stays fully silent. Household presence comes only from registered people, so fixed infrastructure exposed as a device tracker cannot create an audience that is not there.
 - Arrival briefings address the person who just walked in directly ("Welcome home, sir") instead of a generic time-of-day greeting followed by a redundant restatement of their own name, and skip reporting the front door as "open" on the very briefing that opening it caused.
 
 **New capabilities**

@@ -209,23 +209,24 @@ def _try_local_reasoning(
             if nm:
                 name = nm.group(1).replace("_", " ").title()
             if is_arrival:
+                if honorific:
+                    return {
+                        "speak": True,
+                        "message": f"Welcome home, {honorific.strip().lower()}.",
+                        "urgency": "medium",
+                    }
                 return {
                     "speak": True,
-                    "message": persona.lead_in(honorific, f"{name} has arrived home."),
+                    "message": f"{name} has arrived home.",
                     "urgency": "medium",
                 }
-            # If this was the last person leaving, nobody's left in the house to
-            # hear a spoken announcement — "low" urgency routing decides whether
-            # to speak based on live room occupancy sensors, which can still read
-            # "on" for a moment after someone physically walks out (clear delay),
-            # wrongly triggering a spoken line into an empty house. "medium"
-            # already has the correct away rule (push a notification, don't
-            # speak) — reuse it instead of adding a new routing path.
-            urgency = "low" if anyone_home else "medium"
+            if not anyone_home:
+                return {"speak": False, "reason": "last person departure"}
+            # Someone remains home, so this announcement has an audience.
             return {
                 "speak": True,
                 "message": persona.lead_in(honorific, f"{name} has left the premises."),
-                "urgency": urgency,
+                "urgency": "low",
             }
 
     # ── Door/window opened ───────────────────────────────────────────

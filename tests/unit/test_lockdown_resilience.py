@@ -27,6 +27,10 @@ def _reset(cc):
     cc._CORE.alarm_unsub = None
 
 
+def _select_alarm(cc, entity_id):
+    cc._CORE.config["security_alarm_entity"] = entity_id
+
+
 async def test_manual_toggle_lazily_creates_manager(cognitive_core, fake_hass):
     # Boot where start() never set lockdown_mgr — the manual toggle must still work.
     _reset(cognitive_core)
@@ -53,6 +57,7 @@ async def test_request_without_hass_or_core_is_safe(cognitive_core):
 async def test_alarm_armed_engages_on_ensure(cognitive_core, fake_hass):
     # A reboot while the alarm is armed must re-engage lockdown at setup time.
     _reset(cognitive_core)
+    _select_alarm(cognitive_core, "alarm_control_panel.home")
     fake_hass.states.set("alarm_control_panel.home", "armed_away")
     await cognitive_core.ensure_lockdown(fake_hass, cognitive_core._CORE.config)
     fake_hass.close_pending()
@@ -62,6 +67,7 @@ async def test_alarm_armed_engages_on_ensure(cognitive_core, fake_hass):
 
 async def test_alarm_disarm_lifts_auto_lockdown(cognitive_core, fake_hass):
     _reset(cognitive_core)
+    _select_alarm(cognitive_core, "alarm_control_panel.home")
     fake_hass.states.set("alarm_control_panel.home", "armed_home")
     await cognitive_core.ensure_lockdown(fake_hass, cognitive_core._CORE.config)
     fake_hass.close_pending()
@@ -79,6 +85,7 @@ async def test_alarm_unavailable_holds_lockdown(cognitive_core, fake_hass, monke
     """The live bug: armed-night lockdown lifted itself whenever the Cove
     integration lost its cloud and the panel went `unavailable`."""
     _reset(cognitive_core)
+    _select_alarm(cognitive_core, "alarm_control_panel.cove")
     monkeypatch.setattr(cognitive_core, "_ALARM_INDET_LOG_TS", 0.0)
     fake_hass.states.set("alarm_control_panel.cove", "armed_night")
     await cognitive_core.ensure_lockdown(fake_hass, cognitive_core._CORE.config)
@@ -94,6 +101,7 @@ async def test_alarm_unavailable_holds_lockdown(cognitive_core, fake_hass, monke
 
 async def test_alarm_recovery_after_dropout_stays_quietly_locked(cognitive_core, fake_hass, monkeypatch):
     _reset(cognitive_core)
+    _select_alarm(cognitive_core, "alarm_control_panel.cove")
     monkeypatch.setattr(cognitive_core, "_ALARM_INDET_LOG_TS", 0.0)
     fake_hass.states.set("alarm_control_panel.cove", "armed_night")
     await cognitive_core.ensure_lockdown(fake_hass, cognitive_core._CORE.config)
@@ -109,6 +117,7 @@ async def test_alarm_recovery_after_dropout_stays_quietly_locked(cognitive_core,
 
 async def test_real_disarm_after_dropout_still_lifts(cognitive_core, fake_hass, monkeypatch):
     _reset(cognitive_core)
+    _select_alarm(cognitive_core, "alarm_control_panel.cove")
     monkeypatch.setattr(cognitive_core, "_ALARM_INDET_LOG_TS", 0.0)
     fake_hass.states.set("alarm_control_panel.cove", "armed_away")
     await cognitive_core.ensure_lockdown(fake_hass, cognitive_core._CORE.config)
@@ -125,6 +134,7 @@ async def test_real_disarm_after_dropout_still_lifts(cognitive_core, fake_hass, 
 
 async def test_all_unavailable_at_startup_is_inert(cognitive_core, fake_hass, monkeypatch):
     _reset(cognitive_core)
+    _select_alarm(cognitive_core, "alarm_control_panel.cove")
     monkeypatch.setattr(cognitive_core, "_ALARM_INDET_LOG_TS", 0.0)
     fake_hass.states.set("alarm_control_panel.cove", "unavailable")
     await cognitive_core.ensure_lockdown(fake_hass, cognitive_core._CORE.config)
@@ -135,6 +145,7 @@ async def test_all_unavailable_at_startup_is_inert(cognitive_core, fake_hass, mo
 async def test_dropout_logs_safety_line_throttled(cognitive_core, fake_hass, monkeypatch):
     import sys
     _reset(cognitive_core)
+    _select_alarm(cognitive_core, "alarm_control_panel.cove")
     monkeypatch.setattr(cognitive_core, "_ALARM_INDET_LOG_TS", 0.0)
     logged = []
     monkeypatch.setattr(sys.modules["jc.websocket"], "nova_log",
@@ -153,8 +164,8 @@ async def test_dropout_logs_safety_line_throttled(cognitive_core, fake_hass, mon
 
 async def test_alarm_state_view_triads(cognitive_core, fake_hass):
     _reset(cognitive_core)
+    _select_alarm(cognitive_core, "alarm_control_panel.a")
     fake_hass.states.set("alarm_control_panel.a", "armed_home")
-    fake_hass.states.set("alarm_control_panel.b", "unavailable")
     assert cognitive_core._alarm_state_view(fake_hass) == (True, False, False)
     fake_hass.states.set("alarm_control_panel.a", "disarmed")
     assert cognitive_core._alarm_state_view(fake_hass) == (False, True, False)
@@ -170,6 +181,178 @@ async def test_auto_on_arm_can_be_disabled(cognitive_core, fake_hass):
     fake_hass.close_pending()
     # Opt-out respected: armed alarm does NOT force lockdown.
     assert cognitive_core.is_lockdown() is False
+
+
+async def test_auto_on_arm_is_disabled_by_default(cognitive_core, fake_hass):
+    _reset(cognitive_core)
+    cognitive_core._CORE.config = {
+        "security_alarm_entity": "alarm_control_panel.home",
+    }
+    fake_hass.states.set("alarm_control_panel.home", "armed_away")
+
+    await cognitive_core.ensure_lockdown(fake_hass, cognitive_core._CORE.config)
+
+    assert cognitive_core.is_lockdown() is False
+    assert fake_hass.service_calls == []
+
+
+async def test_sleeping_does_not_lock_or_close_devices_by_default(
+        cognitive_core, fake_hass):
+    fake_hass.states.set("lock.front_door", "unlocked")
+    fake_hass.states.set("cover.garage", "open", device_class="garage")
+    safety = cognitive_core.SafetyManager(fake_hass, {})
+
+    actions = await safety.tick(sleeping=True, anyone_home=True)
+
+    assert actions == []
+    assert fake_hass.service_calls == []
+
+
+async def test_legacy_automatic_lockdown_state_is_cleared_silently(
+        cognitive_core, fake_hass, tmp_path):
+    import json
+
+    path = tmp_path / "lockdown_state.json"
+    path.write_text(json.dumps({
+        "active": True,
+        "since": 123.0,
+        "reason": "alarm armed",
+        "auto": True,
+        "exempt_windows": ["binary_sensor.window"],
+        "auto_suppressed": False,
+    }))
+    cognitive_core.LOCKDOWN_STATE_PATH = str(path)
+
+    mgr = cognitive_core.LockdownManager(fake_hass, {})
+
+    assert mgr.active is False
+    assert mgr.auto is False
+    assert mgr.exempt_windows == set()
+    assert fake_hass.service_calls == []
+    assert json.loads(path.read_text())["active"] is False
+
+
+async def test_manual_lockdown_state_survives_restart_when_auto_is_off(
+        cognitive_core, fake_hass, tmp_path):
+    import json
+
+    path = tmp_path / "lockdown_state.json"
+    path.write_text(json.dumps({
+        "active": True,
+        "since": 123.0,
+        "reason": "manual request",
+        "auto": False,
+        "exempt_windows": [],
+        "auto_suppressed": False,
+    }))
+    cognitive_core.LOCKDOWN_STATE_PATH = str(path)
+
+    mgr = cognitive_core.LockdownManager(fake_hass, {})
+
+    assert mgr.active is True
+    assert mgr.auto is False
+
+
+async def test_turning_off_automatic_lockdown_clears_only_nova_state(
+        cognitive_core, fake_hass):
+    _reset(cognitive_core)
+    mgr = cognitive_core.LockdownManager(
+        fake_hass, {"lockdown_auto_on_arm": True})
+    mgr.active = True
+    mgr.auto = True
+    mgr.reason = "alarm armed"
+    cognitive_core._CORE.lockdown_mgr = mgr
+    cognitive_core._CORE.hass = fake_hass
+    cognitive_core._CORE.config = {"lockdown_auto_on_arm": True}
+
+    await cognitive_core.apply_runtime_config(
+        "lockdown_auto_on_arm", False)
+
+    assert mgr.active is False
+    assert mgr.auto is False
+    assert fake_hass.service_calls == []
+
+
+async def test_periodic_tick_holds_auto_lockdown_when_alarm_source_missing(
+        cognitive_core, fake_hass):
+    mgr = cognitive_core.LockdownManager(fake_hass, {
+        "lockdown_auto_on_arm": True,
+        "security_alarm_entity": "alarm_control_panel.missing",
+    })
+    mgr.active = True
+    mgr.auto = True
+
+    actions = await mgr.tick()
+
+    assert mgr.active is True
+    assert mgr.auto is True
+    assert actions == []
+
+
+async def test_disabling_auto_cancels_remaining_alarm_engage_work(
+        cognitive_core, fake_hass, monkeypatch):
+    import asyncio
+
+    fake_hass.states.set("cover.garage", "open", device_class="garage")
+    mgr = cognitive_core.LockdownManager(
+        fake_hass, {"lockdown_auto_on_arm": True})
+    cognitive_core._CORE.lockdown_mgr = mgr
+    cognitive_core._CORE.hass = fake_hass
+    cognitive_core._CORE.config = {"lockdown_auto_on_arm": True}
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def paused_lock_all(request_id=None, automatic_generation=None):
+        started.set()
+        await release.wait()
+        return []
+
+    monkeypatch.setattr(mgr, "_lock_all", paused_lock_all)
+    task = asyncio.create_task(mgr.engage("alarm armed", auto=True))
+    await started.wait()
+    await cognitive_core.apply_runtime_config("lockdown_auto_on_arm", False)
+    release.set()
+    action = await task
+
+    assert action is None
+    assert mgr.active is False
+    assert fake_hass.service_calls == []
+
+
+async def test_disabling_auto_cancels_remaining_sleep_sweep(
+        cognitive_core, fake_hass):
+    import asyncio
+
+    fake_hass.states.set("lock.front", "unlocked")
+    fake_hass.states.set("lock.back", "unlocked")
+    fake_hass.states.set("cover.garage", "open", device_class="garage")
+    safety = cognitive_core.SafetyManager(
+        fake_hass, {"lockdown_auto_on_arm": True})
+    cognitive_core._CORE.safety_mgr = safety
+    cognitive_core._CORE.config = {"lockdown_auto_on_arm": True}
+    started = asyncio.Event()
+    release = asyncio.Event()
+    real_call = fake_hass.services.async_call
+    calls = 0
+
+    async def paused_call(domain, service, data=None, blocking=False, **kwargs):
+        nonlocal calls
+        calls += 1
+        await real_call(domain, service, data, blocking=blocking, **kwargs)
+        if calls == 1:
+            started.set()
+            await release.wait()
+
+    fake_hass.services.async_call = paused_call
+    task = asyncio.create_task(safety.tick(sleeping=True, anyone_home=True))
+    await started.wait()
+    await cognitive_core.apply_runtime_config("lockdown_auto_on_arm", False)
+    release.set()
+    actions = await task
+
+    assert actions == []
+    assert len(fake_hass.service_calls) == 1
+
 
 
 # ── Open-entity policy (v6.24.3): snapshot-and-ignore at engage, secure-or-ignore on change ──

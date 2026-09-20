@@ -70,6 +70,7 @@ async def test_closed_garage_not_treated_as_intentional_open(cc, fake_hass):
 async def test_silent_engage_secures_without_announcing(cc, fake_hass):
     fake_hass.states.set("lock.front", "unlocked")
     mgr = _mgr(cc, fake_hass)
+    mgr.set_automatic_lockdown(True)
     action = await mgr.engage("startup", auto=True, announce=False)
     fake_hass.close_pending()
     assert action is None                       # no notification on silent adopt

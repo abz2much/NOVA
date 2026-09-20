@@ -402,8 +402,8 @@ setTimeout(async () => {
   checks.push(
     ["settings tab renders the search box and group nav",
       !!sRoot.getElementById("settingsSearch") && sRoot.querySelectorAll(".settings-nav-btn").length === 6],
-    ["settings tab has one card per Classic setting, General real",
-      sRoot.querySelectorAll(".settings-card").length === 27
+    ["settings tab has every setting card, General real",
+      sRoot.querySelectorAll(".settings-card").length === 28
       && /Sleep state/.test(sRoot.innerHTML) && /Announcements/.test(sRoot.innerHTML)],
     ["settings tab: Room Speakers card is real, not a stub",
       (() => {
@@ -448,8 +448,15 @@ setTimeout(async () => {
           && om.querySelectorAll(".mode-chip[data-mode]").length >= 2
           && om.querySelectorAll(".mode-chip-on").length === 1;
       })()],
-    ["settings tab: no card is silently missing (all 26 are real)",
+    ["settings tab: no card is silently missing (all 28 are real)",
       Array.from(sRoot.querySelectorAll(".settings-card")).every(c => !c.querySelector(".stub-tag"))],
+    ["settings tab: Security Alarm card exposes the source and opt in lockdown controls",
+      (() => {
+        const card = sRoot.getElementById("settings-card-security_alarm");
+        return !!card
+          && !!card.querySelector('select[data-cfg-key="security_alarm_entity"]')
+          && !!card.querySelector('button[data-cfg-key="lockdown_auto_on_arm"]');
+      })()],
     ["settings tab: Floor Plan Editor is real, with rooms and the drag canvas",
       (() => {
         const fpeCard = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Floor Plan Editor/.test(c.querySelector(".panel-title")?.textContent || ""));

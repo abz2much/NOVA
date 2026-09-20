@@ -1080,7 +1080,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v7.106.2
+ * v7.106.3
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1145,7 +1145,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v7.106.2 ",
+      console.log("%c Nova Panel %c v7.106.3 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -2613,6 +2613,8 @@ class NovaPanel extends HTMLElement {
       desc: "Which speakers whole-house broadcasts (briefings, sentinel alerts) use." },
     { id: "notifications", group: "safety", title: "Notifications", real: true,
       desc: "Your phone's notify service, for alerts when nobody's home to hear a speaker." },
+    { id: "security_alarm", group: "safety", title: "Security Alarm", real: true,
+      desc: "Choose the one alarm Nova uses for security decisions. Automatic lockdown is always opt in." },
     { id: "sentinel_rules", group: "safety", title: "Sentinel Rules", real: true,
       desc: "Enable or disable individual door/lock/garage anomaly rules." },
     { id: "hazard_monitor", group: "safety", title: "Hazard Monitor", real: true,
@@ -3053,6 +3055,7 @@ class NovaPanel extends HTMLElement {
         : c.id === "satellite_speaker" ? this._satelliteSpeakerCardBody()
         : c.id === "announcement_speakers" ? this._announcementSpeakersCardBody()
         : c.id === "notifications" ? this._notificationsCardBody()
+        : c.id === "security_alarm" ? this._securityAlarmCardBody()
         : c.id === "sentinel_rules" ? this._sentinelRulesCardBody()
         : c.id === "hazard_monitor" ? this._hazardMonitorCardBody()
         : c.id === "energy_management" ? this._energyManagementCardBody()
@@ -3644,6 +3647,28 @@ class NovaPanel extends HTMLElement {
         <span class="toggle-label">Notify Device</span>
         <span class="toggle-desc">Phone push for high/critical alerts</span>
         <select class="cfg-field" data-cfg-key="notify_service">${this._optSelect(opts, cfg.notify_service || "")}</select>
+      </div>`;
+  }
+
+  _securityAlarmCardBody() {
+    const cfg = this._data()?.config || {};
+    const panels = cfg.alarm_panels || [];
+    const selected = cfg.security_alarm_entity || "";
+    const opts = [["", "Auto detect a single Alarmo panel"], ...panels.map(p => {
+      const suffix = p.platform ? ` (${p.platform})` : "";
+      return [p.entity_id, `${p.name}${suffix}`];
+    })];
+    const automatic = !!cfg.lockdown_auto_on_arm;
+    return `
+      <div class="stub-body">Nova ignores every other alarm panel for security alerts and lockdown decisions. If more than one Alarmo panel exists, choose the intended household alarm here.</div>
+      <div class="cfg-row">
+        <label>Security alarm</label>
+        <select class="cfg-field" data-cfg-key="security_alarm_entity">${this._optSelect(opts, selected)}</select>
+      </div>
+      <div class="toggle-row">
+        <span class="toggle-label">Automatic lockdown</span>
+        <span class="toggle-desc">Allow the selected alarm and sleep mode to lock doors and close covers</span>
+        <button class="toggle-btn ${automatic ? "on" : "off"}" data-cfg-key="lockdown_auto_on_arm" data-cfg-val="${automatic ? "false" : "true"}">${automatic ? "ON" : "OFF"}</button>
       </div>`;
   }
 

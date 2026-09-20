@@ -138,7 +138,17 @@ async def test_lock_unlocked_everyone_confirmed_away_alerts_with_reason(cog, fak
 
 # ── Conflicting armed alarm is an independently acceptable reason ───────────
 
-async def test_window_open_alarm_armed_alerts_with_that_reason(cog, fake_hass):
+async def test_window_open_alarm_armed_alerts_with_that_reason(
+        cog, fake_hass, monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    er = sys.modules["homeassistant.helpers.entity_registry"]
+    registry = SimpleNamespace(entities={
+        "alarm_control_panel.home": SimpleNamespace(
+            entity_id="alarm_control_panel.home", platform="alarmo"),
+    })
+    monkeypatch.setattr(er, "async_get", lambda hass: registry)
     now = _time.time()
     fake_hass.states.set("binary_sensor.first_floor_windows", "on",
                           device_class="window", friendly_name="First Floor Windows")
@@ -204,6 +214,34 @@ async def test_one_person_unavailable_is_false(cog, fake_hass):
 
 async def test_no_person_entities_is_false(cog, fake_hass):
     assert cog._all_tracked_residents_away(fake_hass) is False
+
+
+async def test_unselected_armed_panel_does_not_create_window_alert(
+        cog, fake_hass, monkeypatch):
+    """An armed HomeBase must not conflict with a disarmed Alarmo panel."""
+    import sys
+    from types import SimpleNamespace
+
+    er = sys.modules["homeassistant.helpers.entity_registry"]
+    registry = SimpleNamespace(entities={
+        "alarm_control_panel.security": SimpleNamespace(
+            entity_id="alarm_control_panel.security", platform="alarmo"),
+        "alarm_control_panel.homebase": SimpleNamespace(
+            entity_id="alarm_control_panel.homebase", platform="eufy_security"),
+    })
+    monkeypatch.setattr(er, "async_get", lambda hass: registry)
+
+    now = _time.time()
+    fake_hass.states.set("alarm_control_panel.security", "disarmed")
+    fake_hass.states.set("alarm_control_panel.homebase", "armed_home")
+    fake_hass.states.set("person.abi", "unknown")
+    fake_hass.states.set(
+        "binary_sensor.bedroom_window", "on",
+        device_class="window", friendly_name="Bedroom Window")
+    _seed(cog, "binary_sensor.bedroom_window", now,
+          dominant_state="off", current_state="on")
+
+    assert cog.predict(fake_hass, now) == []
 
 
 async def test_unrelated_device_tracker_away_does_not_prove_household_away(cog, fake_hass):

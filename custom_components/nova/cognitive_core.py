@@ -337,6 +337,16 @@ class SafetyManager:
         self._last_intrusion_alert = 0.0
         self._investigation = None   # active intrusion investigation, or None
         self._freeze_warned = False
+        self._automatic_generation = 0
+
+    def set_automatic_lockdown(self, enabled: bool) -> None:
+        self.config["lockdown_auto_on_arm"] = enabled is True
+        self._automatic_generation += 1
+
+    def _automatic_operation_current(self, generation: int) -> bool:
+        from . import safety_config
+        return (generation == self._automatic_generation
+                and safety_config.automatic_lockdown_enabled(self.config))
 
     async def tick(self, sleeping: bool, anyone_home: bool) -> list[dict]:
         """Run all safety checks. Returns list of actions taken."""
@@ -359,10 +369,13 @@ class SafetyManager:
 
         # ── Nighttime lockdown ──────────────────────────────────────
         # Skipped when a formal lockdown is already active (it handles securing).
-        if (sleeping and not is_lockdown()
+        from . import safety_config
+        if (safety_config.automatic_lockdown_enabled(self.config)
+                and sleeping and not is_lockdown()
                 and (now - self._last_lockdown_check) > LOCKDOWN_CHECK_INTERVAL):
             self._last_lockdown_check = now
-            lockdown = await self._nighttime_lockdown()
+            generation = self._automatic_generation
+            lockdown = await self._nighttime_lockdown(generation)
             if lockdown:
                 actions.extend(lockdown)
 
@@ -423,7 +436,8 @@ class SafetyManager:
         return None
 
     def _alarm_armed(self) -> bool:
-        for st in self.hass.states.async_all("alarm_control_panel"):
+        from . import alarm_source
+        for st in alarm_source.states(self.hass, self.config):
             if st.state in ALARM_ARMED_STATES:
                 return True
         return False
@@ -1092,7 +1106,7 @@ class SafetyManager:
             self._investigation = None            # situation settled
         return None
 
-    async def _nighttime_lockdown(self) -> list[dict]:
+    async def _nighttime_lockdown(self, automatic_generation: int) -> list[dict]:
         """Check and secure all locks and doors during sleep."""
         actions = []
         honorific = _live_honorific(self.hass)  # Phase C: presence-aware
@@ -1120,6 +1134,8 @@ class SafetyManager:
         # Check locks
         unlocked = []
         for state in self.hass.states.async_all("lock"):
+            if not self._automatic_operation_current(automatic_generation):
+                return []
             if state.state == "unlocked":
                 eid = state.entity_id
                 if eid in _lockdown_exempt_locks():
@@ -1131,6 +1147,8 @@ class SafetyManager:
                     await self.hass.services.async_call(
                         "lock", "lock", {"entity_id": eid}, blocking=True,
                     )
+                    if not self._automatic_operation_current(automatic_generation):
+                        return []
                     unlocked.append(fname)
                     _LOGGER.info("Cognitive lockdown: locked %s", eid)
                     await self.hass.async_add_executor_job(
@@ -1146,6 +1164,8 @@ class SafetyManager:
         # Check covers/garage
         open_covers = []
         for state in self.hass.states.async_all("cover"):
+            if not self._automatic_operation_current(automatic_generation):
+                return []
             if state.state == "open":
                 eid = state.entity_id
                 fname = state.attributes.get("friendly_name", eid)
@@ -1154,6 +1174,8 @@ class SafetyManager:
                     await self.hass.services.async_call(
                         "cover", "close_cover", {"entity_id": eid}, blocking=True,
                     )
+                    if not self._automatic_operation_current(automatic_generation):
+                        return []
                     open_covers.append(fname)
                     _LOGGER.info("Cognitive lockdown: closed %s", eid)
                     await self.hass.async_add_executor_job(
@@ -1166,6 +1188,8 @@ class SafetyManager:
                             rid, "failed", reason_code="service_call_failed")
                     )
 
+        if not self._automatic_operation_current(automatic_generation):
+            return []
         if unlocked or open_covers:
             i18n = _notify_i18n()
             lang = _hass_lang(self.hass)
@@ -1208,7 +1232,8 @@ class SafetyManager:
             if str(st.state).lower() == "home":
                 return False
         # An intentionally armed-away alarm is a strong 'away' signal.
-        for st in self.hass.states.async_all("alarm_control_panel"):
+        from . import alarm_source
+        for st in alarm_source.states(self.hass, self.config):
             if str(st.state).lower() in ("armed_away", "armed_vacation"):
                 return True
         # Otherwise, only 'away' if presence is actually tracked and reads away.
@@ -1317,6 +1342,7 @@ class LockdownManager:
         self._secured_by_us: set = set()   # entities Nova closed/locked this lockdown (reopen ⇒ intentional)
         self._alerted: set = set()         # entities already alerted about this lockdown
         self._last_breach_alert = 0.0
+        self._automatic_generation = 0
         # When the user manually lifts lockdown while the alarm is still armed,
         # this suppresses auto re-engage until the alarm is disarmed and re-armed
         # — so "exit lockdown" from the UI actually keeps you out.
@@ -1341,6 +1367,22 @@ class LockdownManager:
                 _LOGGER.warning(
                     "Lockdown state RESTORED (auto=%s, %d exempt windows)",
                     self.auto, len(self.exempt_windows))
+                # Versions before the automatic-lockdown opt-in could persist
+                # an alarm-owned lockdown even though the user never enabled
+                # automatic device control. Clear only that Nova state. Do not
+                # call disengage(): it emits speech, and neither path sends an
+                # unlock or disarm command.
+                from . import safety_config
+                if self.auto and not safety_config.automatic_lockdown_enabled(self.config):
+                    self.active = False
+                    self.since = 0.0
+                    self.reason = ""
+                    self.auto = False
+                    self.exempt_windows = set()
+                    self._auto_suppressed = False
+                    self._persist_sync()
+                    _LOGGER.warning(
+                        "Cleared legacy automatic lockdown state; devices unchanged")
         except Exception as exc:
             _LOGGER.warning("Lockdown state restore failed: %s", exc)
 
@@ -1377,7 +1419,8 @@ class LockdownManager:
         }
 
     def _alarm_armed(self) -> bool:
-        for st in self.hass.states.async_all("alarm_control_panel"):
+        from . import alarm_source
+        for st in alarm_source.states(self.hass, self.config):
             if st.state in ALARM_ARMED_STATES:
                 return True
         return False
@@ -1460,7 +1503,19 @@ class LockdownManager:
         st = self.hass.states.get(eid)
         return ((st.attributes.get("friendly_name") if st else None) or eid)
 
-    async def _lock_all(self, request_id: Optional[str] = None) -> list:
+    def set_automatic_lockdown(self, enabled: bool) -> None:
+        self.config["lockdown_auto_on_arm"] = enabled is True
+        self._automatic_generation += 1
+
+    def _automatic_operation_current(self, generation: Optional[int]) -> bool:
+        if generation is None:
+            return True
+        from . import safety_config
+        return (generation == self._automatic_generation
+                and safety_config.automatic_lockdown_enabled(self.config))
+
+    async def _lock_all(self, request_id: Optional[str] = None,
+                        automatic_generation: Optional[int] = None) -> list:
         """Returns (entity_id, friendly_name) pairs for every lock the call
         actually reached — the entity_id is needed so engage() can schedule
         _verify_secured() per lock, the same honest background-confirmation
@@ -1485,12 +1540,16 @@ class LockdownManager:
             )
         locked = []
         for st in candidates:
+            if not self._automatic_operation_current(automatic_generation):
+                break
             eid = st.entity_id
             fname = st.attributes.get("friendly_name", eid)
             row_id = row_ids.get(eid)
             try:
                 await self.hass.services.async_call(
                     "lock", "lock", {"entity_id": eid}, blocking=True)
+                if not self._automatic_operation_current(automatic_generation):
+                    break
                 locked.append((eid, fname))
                 _LOGGER.info("Lockdown: locked %s", eid)
                 if row_id is not None:
@@ -1510,6 +1569,9 @@ class LockdownManager:
                      announce: bool = True) -> Optional[dict]:
         if self.active:
             return None
+        automatic_generation = self._automatic_generation if auto else None
+        if not self._automatic_operation_current(automatic_generation):
+            return None
         self.active = True
         self.since = time.time()
         self.reason = reason
@@ -1526,7 +1588,12 @@ class LockdownManager:
         request_id = action_log.new_request_id()
 
         # 1) Lock every closed-but-unlocked lock.
-        locked_pairs = await self._lock_all(request_id=request_id)
+        locked_pairs = await self._lock_all(
+            request_id=request_id,
+            automatic_generation=automatic_generation,
+        )
+        if not self._automatic_operation_current(automatic_generation):
+            return None
         locked = [fname for _eid, fname in locked_pairs]
         for eid, fname in locked_pairs:
             self.hass.async_create_task(self._verify_secured(eid, "lock", fname))
@@ -1556,9 +1623,13 @@ class LockdownManager:
                 )
             )
         for eid, dom in close_candidates:
+            if not self._automatic_operation_current(automatic_generation):
+                return None
             name = self._friendly(eid)
             row_id = close_row_ids.get(eid)
             if await self._secure_entity(eid, dom):
+                if not self._automatic_operation_current(automatic_generation):
+                    return None
                 closed.append(name)
                 self._secured_by_us.add(eid)
                 self.hass.async_create_task(self._verify_secured(eid, dom, name))
@@ -1580,6 +1651,8 @@ class LockdownManager:
         self.exempt_windows = uncloseable
         open_names = sorted(self._friendly(eid) for eid in uncloseable)
 
+        if not self._automatic_operation_current(automatic_generation):
+            return None
         message = build_lockdown_message(honorific, locked, closed, open_names,
                                           lang=_hass_lang(self.hass))
         _LOGGER.warning(
@@ -1721,11 +1794,15 @@ class LockdownManager:
         """Alarm-driven auto engage/disengage. Breach enforcement is event-driven
         (handle_state_change), so it isn't repeated here."""
         actions = []
-        armed = self._alarm_armed()
-        auto_on_arm = self.config.get("lockdown_auto_on_arm", True)
+        from . import safety_config
+        armed, disarm_confirmed, indeterminate = _alarm_state_view(
+            self.hass, self.config)
+        if indeterminate:
+            return actions
+        auto_on_arm = safety_config.automatic_lockdown_enabled(self.config)
 
         # Clear a manual-exit suppression once the alarm is disarmed again.
-        if not armed and self._auto_suppressed:
+        if disarm_confirmed and self._auto_suppressed:
             self._auto_suppressed = False
             await self._persist()
 
@@ -1733,7 +1810,7 @@ class LockdownManager:
             a = await self.engage("alarm armed", auto=True)
             if a:
                 actions.append(a)
-        elif self.active and self.auto and not armed:
+        elif self.active and self.auto and disarm_confirmed:
             a = await self.disengage("alarm disarmed")
             if a:
                 actions.append(a)
@@ -2951,6 +3028,38 @@ def lockdown_status() -> dict:
     return {"active": False, "since": 0.0, "reason": "", "auto": False, "exempt_windows": 0}
 
 
+async def apply_runtime_config(key: str, value) -> None:
+    """Apply safety settings immediately without reloading the integration."""
+    if key not in ("lockdown_auto_on_arm", "security_alarm_entity"):
+        return
+    if not isinstance(_CORE.config, dict):
+        _CORE.config = {}
+    if key == "lockdown_auto_on_arm":
+        enabled = value is True
+        _CORE.config[key] = enabled
+        for component in (_CORE.safety_mgr, _CORE.lockdown_mgr):
+            if component is not None:
+                component.set_automatic_lockdown(enabled)
+    else:
+        _CORE.config[key] = value
+        for component in (_CORE.safety_mgr, _CORE.lockdown_mgr):
+            if component is not None and isinstance(component.config, dict):
+                component.config[key] = value
+    mgr = _CORE.lockdown_mgr
+    if key == "lockdown_auto_on_arm" and value is not True and mgr and mgr.active and mgr.auto:
+        mgr.active = False
+        mgr.since = 0.0
+        mgr.reason = ""
+        mgr.auto = False
+        mgr.exempt_windows = set()
+        mgr._secured_by_us = set()
+        mgr._alerted = set()
+        mgr._auto_suppressed = False
+        await mgr._persist()
+        _LOGGER.warning(
+            "Automatic lockdown disabled; cleared Nova lockdown state without device actions")
+
+
 def _ensure_lockdown_mgr(hass: HomeAssistant = None) -> Optional["LockdownManager"]:
     """
     Return the lockdown manager, creating it on demand. Lockdown is a security
@@ -3040,7 +3149,8 @@ async def _sync_lockdown_to_alarm(reason: str, announce: bool = True) -> None:
     mgr = _CORE.lockdown_mgr
     if mgr is None or _CORE.hass is None:
         return
-    if not (_CORE.config or {}).get("lockdown_auto_on_arm", True):
+    from . import safety_config
+    if not safety_config.automatic_lockdown_enabled(_CORE.config or {}):
         return
     try:
         armed, disarm_confirmed, indeterminate = _alarm_state_view(_CORE.hass)
@@ -3068,7 +3178,7 @@ _ALARM_INDET_STATES = {"unavailable", "unknown", "none", ""}
 _ALARM_INDET_LOG_TS = 0.0
 
 
-def _alarm_state_view(hass) -> tuple:
+def _alarm_state_view(hass, config: Optional[dict] = None) -> tuple:
     """(armed, disarm_confirmed, indeterminate) across all alarm panels.
     armed: any panel in an armed state. disarm_confirmed: no panel armed AND
     at least one affirmatively reports 'disarmed'. indeterminate: no panel
@@ -3076,7 +3186,9 @@ def _alarm_state_view(hass) -> tuple:
     the integration is down, not the alarm off."""
     armed = False
     disarmed = False
-    for st in hass.states.async_all("alarm_control_panel"):
+    from . import alarm_source
+    selected_config = (_CORE.config or {}) if config is None else config
+    for st in alarm_source.states(hass, selected_config):
         s = str(st.state).lower()
         if s in ALARM_ARMED_STATES:
             armed = True
