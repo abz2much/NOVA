@@ -1,3 +1,12 @@
+## [7.106.3] — fix: presence announcements and explicit alarm safety
+
+- Last person departures now stay fully silent. Nova uses registered `person.*` entities only, so fixed device trackers can no longer make an empty house look occupied.
+- A person arriving to an empty home is addressed directly, for example “Welcome home, sir,” without repeating their name.
+- Nova now uses one authoritative household alarm for security reasoning. A single Alarmo panel is detected automatically, while other or ambiguous setups can be selected under Settings → Security Alarm.
+- Camera hub and vendor alarm entities no longer create false “window open while armed” alerts once the household alarm is selected.
+- Automatic lockdown is now an explicit opt in setting and is off by default. Alarm and sleep state changes cannot lock doors or close covers unless it is enabled.
+- Legacy alarm owned lockdown state is cleared silently on upgrade without unlocking or disarming anything. Manual lockdown state remains intact.
+
 ## [7.106.2] — fix: Action Audit Log SQLite contention
 
 - Action Audit Log writes now retry transient SQLITE_BUSY and SQLITE_LOCKED contention instead of giving up on the first lock conflict.
