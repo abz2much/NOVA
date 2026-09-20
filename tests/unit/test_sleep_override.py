@@ -153,17 +153,17 @@ def test_maybe_prompt_marks_today_so_it_only_fires_once(sd, fake_hass, monkeypat
     monkeypatch.setattr(sd, "_PROMPTED_DATE", None)
     sent = []
 
-    async def _fake_send(hass, quiet_end):
-        sent.append(quiet_end)
+    async def _fake_send(hass, quiet_end, config):
+        sent.append((quiet_end, config))
 
     monkeypatch.setattr(sd, "_send_sleep_prompt", _fake_send)
 
     import asyncio
     cfg = {"sleep_prompt_time": "23:00", "observer_quiet_end": "07:00"}
     asyncio.run(sd.maybe_prompt_sleep(fake_hass, cfg))
-    assert sent == ["07:00"]
+    assert sent == [("07:00", cfg)]
     assert sd._PROMPTED_DATE == now.date().isoformat()
 
     # Same tick again later tonight — must not re-send.
     asyncio.run(sd.maybe_prompt_sleep(fake_hass, cfg))
-    assert sent == ["07:00"]
+    assert sent == [("07:00", cfg)]

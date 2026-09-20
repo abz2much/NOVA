@@ -62,6 +62,10 @@ def test_residence_keys_specifically_writable():
         assert key in allow, f"{key} missing from PANEL_WRITABLE_KEYS"
 
 
+def test_multiple_notify_services_are_writable():
+    assert "notify_services" in _allowlist()
+
+
 def _panel_data_config_keys() -> set[str]:
     """Keys surfaced in ws_get_panel_data's `config` dict, read from the
     "key": _runtime_opt(...) / "key": _get_... lines via regex. This is what the

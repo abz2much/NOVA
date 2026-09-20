@@ -1,3 +1,11 @@
+## [7.106.4] — multi device normal notifications
+
+- Settings → Notifications now accepts any number of Home Assistant notification services instead of one device.
+- Every normal Nova push alert is sent to every selected service, including cognitive alerts, Observer, Sentinel, briefings, appliance alerts, and the notification test.
+- Existing single device settings are preserved automatically until the selection is changed.
+- A failure from one notification service no longer prevents the remaining selected devices from receiving the alert.
+- Critical intrusion and voice confirmation alerts keep their existing separate behaviour and continue broadcasting to all registered mobile app services.
+
 ## [7.106.3] — fix: presence announcements and explicit alarm safety
 
 - Last person departures now stay fully silent. Nova uses registered `person.*` entities only, so fixed device trackers can no longer make an empty house look occupied.

@@ -1029,27 +1029,33 @@ setTimeout(async () => {
     _updateConfigCalls.some(c => c.key === "announcement_speakers" && c.value === JSON.stringify(["media_player.living_room_speaker"]))]);
   sRoot = elNew.shadowRoot;
 
-  // Notifications: switch to the Awareness & Safety group, confirm it's
-  // real with the notify-service select populated, and that it saves
-  // through the same generic .cfg-field contract as everything else.
+  // Notifications: legacy single selection is preserved, then a second
+  // device can be selected and both are saved as a JSON list.
   const safetyNavBtn = Array.from(sRoot.querySelectorAll(".settings-nav-btn")).find(b => b.textContent === "Awareness & Safety");
   safetyNavBtn.click();
   await new Promise(r => setTimeout(r, 10));
   sRoot = elNew.shadowRoot;
   checks.push(
-    ["settings tab: Notifications card is real with the notify-service select populated",
+    ["settings tab: Notifications card preserves the legacy selected device",
       (() => {
         const nc = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /^Notifications$/.test(c.querySelector(".panel-title")?.textContent?.trim() || ""));
-        const sel = nc?.querySelector('select[data-cfg-key="notify_service"]');
-        return !!nc && !nc.querySelector(".stub-tag") && !!sel && /mobile_app_abi_phone/.test(sel.innerHTML);
+        const abi = nc?.querySelector('.new-notify-service-toggle[data-notify-service="notify.mobile_app_abi_phone"]');
+        return !!nc && !nc.querySelector(".stub-tag") && !!abi
+          && abi.classList.contains("on") && abi.textContent.trim() === "ON"
+          && nc.querySelectorAll(".new-notify-service-toggle").length === 2;
       })()],
   );
-  const notifySel = sRoot.querySelector('select[data-cfg-key="notify_service"]');
-  notifySel.value = "notify.mobile_app_spouse_phone";
-  notifySel.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+  const notifyToggle = sRoot.querySelector('.new-notify-service-toggle[data-notify-service="notify.mobile_app_spouse_phone"]');
+  notifyToggle.click();
+  const abiNotifyToggle = sRoot.querySelector('.new-notify-service-toggle[data-notify-service="notify.mobile_app_abi_phone"]');
+  abiNotifyToggle.click();
   await new Promise(r => setTimeout(r, 20));
-  checks.push(["settings tab: Notifications select autosaves via nova/update_config",
-    _updateConfigCalls.some(c => c.key === "notify_service" && c.value === "notify.mobile_app_spouse_phone")]);
+  checks.push(["settings tab: rapid Notifications toggles preserve both changes in order",
+    _updateConfigCalls.some(c => c.key === "notify_services" && c.value === JSON.stringify([
+      "notify.mobile_app_abi_phone", "notify.mobile_app_spouse_phone",
+    ])) && _updateConfigCalls.some(c => c.key === "notify_services" && c.value === JSON.stringify([
+      "notify.mobile_app_spouse_phone",
+    ]))]);
   sRoot = elNew.shadowRoot;
 
   // Sentinel Rules: real card, one toggle per rule, already-disabled rule

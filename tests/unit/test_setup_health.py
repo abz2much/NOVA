@@ -162,7 +162,49 @@ def test_notify_service_warn_when_not_registered(sh, nova_config, fake_hass, mon
     }))
     out = sh._check_notify_service(fake_hass)
     assert out["status"] == "warn"
+
+
+def test_notify_services_ok_when_every_selected_service_is_registered(
+        sh, nova_config, fake_hass, monkeypatch):
+    monkeypatch.setattr(nova_config, "get", _cfg_get(nova_config, {
+        "notify_services": '["notify.mobile_app_abi", "notify.mobile_app_rachel"]',
+    }))
+    fake_hass.services.has_service = lambda domain, service: (
+        f"{domain}.{service}" in {
+            "notify.mobile_app_abi", "notify.mobile_app_rachel"})
+
+    out = sh._check_notify_service(fake_hass)
+
+    assert out["status"] == "ok"
+    assert "2 notification services" in out["detail"]
+
+
+def test_notify_services_warn_and_name_only_missing_services(
+        sh, nova_config, fake_hass, monkeypatch):
+    monkeypatch.setattr(nova_config, "get", _cfg_get(nova_config, {
+        "notify_services": '["notify.mobile_app_abi", "notify.mobile_app_gone"]',
+    }))
+    fake_hass.services.has_service = lambda domain, service: service == "mobile_app_abi"
+
+    out = sh._check_notify_service(fake_hass)
+
+    assert out["status"] == "warn"
+    assert "notify.mobile_app_gone" in out["detail"]
+    assert "notify.mobile_app_abi" not in out["detail"]
     assert "not registered" in out["detail"]
+
+
+def test_explicit_empty_notify_services_are_off_not_malformed(
+        sh, nova_config, fake_hass, monkeypatch):
+    monkeypatch.setattr(nova_config, "get", _cfg_get(nova_config, {
+        "notify_services": "[]",
+        "notify_service": "notify.mobile_app_legacy",
+    }))
+
+    out = sh._check_notify_service(fake_hass)
+
+    assert out["status"] == "off"
+    assert out["detail"] == "no notification services configured"
 
 
 # ── person entities ──────────────────────────────────────────────────────────

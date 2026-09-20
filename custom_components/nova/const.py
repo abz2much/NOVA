@@ -53,6 +53,7 @@ CONF_REVIEW_PROVIDER          = "review_provider"
 CONF_REVIEW_MODEL             = "review_model"
 
 CONF_NOTIFY_SERVICE           = "notify_service"
+CONF_NOTIFY_SERVICES          = "notify_services"
 
 DEFAULT_OBSERVER_ENABLED      = False
 DEFAULT_OBSERVER_QUIET_START  = "22:00"

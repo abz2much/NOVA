@@ -1143,35 +1143,15 @@ async def _announce_done(sensor: _SensorState, appliance_label: str) -> None:
                 urgency="medium", message=message, was_spoken=False,
             )
             if mode == "notify_only":
-                # Try phone notification
-                action_id = None
                 try:
-                    from . import action_log
-                    notify_svc = config.get("notify_service", "")
-                    if notify_svc:
-                        svc_domain, svc_name = notify_svc.split(".", 1)
-                        request_id = action_log.new_request_id()
-                        action_id = await hass.async_add_executor_job(
-                            lambda: action_log.start(
-                                request_id, "notify", "proactive",
-                                domain=svc_domain, service=svc_name,
-                                entity_id=sensor.entity_id,
-                            )
-                        )
-                        await hass.services.async_call(
-                            svc_domain, svc_name,
-                            {"message": message, "title": "Nova"},
-                            blocking=False,
-                        )
-                        await hass.async_add_executor_job(
-                            lambda: action_log.set_execution(action_id, "accepted")
-                        )
-                except Exception:
-                    if action_id is not None:
-                        await hass.async_add_executor_job(
-                            lambda: action_log.set_execution(
-                                action_id, "failed", reason_code="service_call_failed")
-                        )
+                    from .notify_targets import async_send_configured_notifications
+                    await async_send_configured_notifications(
+                        hass, config, {"message": message, "title": "Nova"},
+                        action="notify", source="proactive",
+                        entity_id=sensor.entity_id,
+                    )
+                except Exception as exc:
+                    _LOGGER.debug("Appliance phone notification failed: %s", exc)
             return
 
         # Speak
