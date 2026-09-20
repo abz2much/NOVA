@@ -581,49 +581,21 @@ async def _push_to_phone(
     *,
     request_id: Optional[str] = None,
 ) -> None:
-    """Push briefing to phone via configured notify service."""
-    notify_svc = config.get("notify_service", "")
-    if not notify_svc:
-        _LOGGER.debug("Proactive: no notify_service configured, skipping push")
-        return
+    """Push briefing to every configured normal notification target."""
+    from .notify_targets import async_send_configured_notifications
 
-    from . import action_log
-    if request_id is None:
-        request_id = action_log.new_request_id()
-    svc_domain = svc_name = None
-    try:
-        svc_domain, svc_name = notify_svc.split(".", 1)
-    except Exception:
-        pass
-    action_id = await hass.async_add_executor_job(
-        lambda: action_log.start(
-            request_id, "notify", "proactive",
-            domain=svc_domain, service=svc_name,
-        )
+    title = {
+        "arrival": "Nova — Welcome Home",
+        "security": "Nova — Security Alert",
+        "scheduled": "Nova — Briefing",
+        "camera": "Nova — Camera Alert",
+    }.get(reason, "Nova — Briefing")
+    sent = await async_send_configured_notifications(
+        hass, config, {"message": message, "title": title},
+        request_id=request_id, action="notify", source="proactive",
     )
-
-    try:
-        title = {
-            "arrival": "Nova — Welcome Home",
-            "security": "Nova — Security Alert",
-            "scheduled": "Nova — Briefing",
-            "camera": "Nova — Camera Alert",
-        }.get(reason, "Nova — Briefing")
-
-        await hass.services.async_call(
-            svc_domain, svc_name,
-            {"message": message, "title": title},
-            blocking=False,
-        )
-        _LOGGER.info("Proactive: pushed to phone via %s", notify_svc)
-        await hass.async_add_executor_job(
-            lambda: action_log.set_execution(action_id, "accepted")
-        )
-    except Exception as exc:
-        _LOGGER.warning("Proactive: phone push failed: %s", exc)
-        await hass.async_add_executor_job(
-            lambda: action_log.set_execution(action_id, "failed", reason_code="service_call_failed")
-        )
+    if sent:
+        _LOGGER.info("Proactive: pushed to %d configured device(s)", len(sent))
 
 
 # ── Start / Stop ────────────────────────────────────────────────────────────

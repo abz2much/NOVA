@@ -511,33 +511,22 @@ class NovaSentinel:
             )
 
         # v5.6.5: Also send phone push notification for sentinel alerts
-        action_id = None
         try:
-            notify_svc = nova_config.runtime_get(
-                self.hass, self._entry, "notify_service", "")
-            if notify_svc:
-                domain, service = notify_svc.split(".", 1)
-                action_id = await self.hass.async_add_executor_job(
-                    lambda: action_log.start(
-                        request_id, "notify", "proactive",
-                        domain=domain, service=service, entity_id=entity_id,
-                    )
-                )
-                await self.hass.services.async_call(
-                    domain, service,
-                    {"title": "Nova", "message": text},
-                    blocking=False,
-                )
-                await self.hass.async_add_executor_job(
-                    lambda: action_log.set_execution(action_id, "accepted")
-                )
+            from .notify_targets import async_send_configured_notifications
+            notify_config = {
+                "notify_services": nova_config.runtime_get(
+                    self.hass, self._entry, "notify_services", None),
+                "notify_service": nova_config.runtime_get(
+                    self.hass, self._entry, "notify_service", ""),
+            }
+            await async_send_configured_notifications(
+                self.hass, notify_config,
+                {"title": "Nova", "message": text},
+                request_id=request_id, action="notify", source="proactive",
+                entity_id=entity_id,
+            )
         except Exception as exc:
             _LOGGER.debug("Sentinel phone notify failed: %s", exc)
-            if action_id is not None:
-                await self.hass.async_add_executor_job(
-                    lambda: action_log.set_execution(
-                        action_id, "failed", reason_code="service_call_failed")
-                )
 
     async def _groq_line(
         self, entity_id: str, friendly_name: str, rule: dict, minutes: int

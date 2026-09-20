@@ -129,8 +129,11 @@ async def test_sleep_prompt_batches_one_row_per_device(
     sd = load("sleep_detection")
     fake_hass.services.register("notify", "mobile_app_a")
     fake_hass.services.register("notify", "mobile_app_b")
+    fake_hass.services.register("notify", "mobile_app_unselected")
 
-    await sd._send_sleep_prompt(fake_hass, "07:00")
+    await sd._send_sleep_prompt(fake_hass, "07:00", {
+        "notify_services": '["notify.mobile_app_a", "notify.mobile_app_b"]',
+    })
 
     page = al.page_requests(limit=10, db_path=isolated_db)
     assert len(page["requests"]) == 1
@@ -138,11 +141,14 @@ async def test_sleep_prompt_batches_one_row_per_device(
     assert row["action"] == "sleep_prompt"
     assert len(row["targets"]) == 2
     assert all(t["execution_result"] == "accepted" for t in row["targets"])
+    called = {call[1] for call in fake_hass.service_calls if call[0] == "notify"}
+    assert called == {"mobile_app_a", "mobile_app_b"}
 
 
 async def test_sleep_prompt_no_devices_creates_no_row(load, fake_hass, isolated_db, al):
     sd = load("sleep_detection")
-    await sd._send_sleep_prompt(fake_hass, "07:00")
+    fake_hass.services.register("notify", "mobile_app_unselected")
+    await sd._send_sleep_prompt(fake_hass, "07:00", {"notify_services": "[]"})
     page = al.page_requests(limit=10, db_path=isolated_db)
     assert page["requests"] == []
 

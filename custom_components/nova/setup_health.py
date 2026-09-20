@@ -121,30 +121,49 @@ def _check_camera_overrides(hass) -> dict:
 
 
 def _check_notify_service(hass) -> dict:
-    out = {"name": "Notification service", "key": "notify_service", "status": _OFF, "detail": ""}
-    notify_service = str(_cfg("notify_service", "") or "").strip()
-    if not notify_service:
-        out["detail"] = "no notification service configured"
+    out = {"name": "Notification services", "key": "notify_services", "status": _OFF, "detail": ""}
+    from .notify_targets import configured_notify_services
+    raw_services = _cfg("notify_services", None)
+    legacy_service = _cfg("notify_service", "")
+    config = {"notify_service": legacy_service}
+    if raw_services is not None:
+        config["notify_services"] = raw_services
+    notify_services = configured_notify_services(config)
+    if not notify_services:
+        explicit_empty = raw_services == []
+        if isinstance(raw_services, str):
+            try:
+                explicit_empty = json.loads(raw_services) == []
+            except (TypeError, ValueError):
+                explicit_empty = False
+        if explicit_empty:
+            out["detail"] = "no notification services configured"
+            return out
+        if raw_services or legacy_service:
+            out["status"] = _WARN
+            out["detail"] = "configured notification target is malformed"
+            out["suggested_fix"] = "Re-select the notification targets under Settings → Notifications."
+            return out
+        out["detail"] = "no notification services configured"
         return out
 
-    if "." not in notify_service:
-        out["status"] = _WARN
-        out["detail"] = f"'{notify_service}' is not a valid domain.service"
-        out["suggested_fix"] = "Re-select the notification target under Settings → Notifications."
-        return out
-
-    domain, service = notify_service.split(".", 1)
-    try:
-        registered = hass.services.has_service(domain, service)
-    except Exception:
-        registered = False
-    if registered:
+    missing = []
+    for notify_service in notify_services:
+        domain, service = notify_service.split(".", 1)
+        try:
+            registered = hass.services.has_service(domain, service)
+        except Exception:
+            registered = False
+        if not registered:
+            missing.append(notify_service)
+    if not missing:
         out["status"] = _OK
-        out["detail"] = f"{notify_service} is registered"
+        noun = "service is" if len(notify_services) == 1 else "services are"
+        out["detail"] = f"{len(notify_services)} notification {noun} registered"
     else:
         out["status"] = _WARN
-        out["detail"] = f"configured service '{notify_service}' is not registered"
-        out["suggested_fix"] = "Re-select the notification target under Settings → Notifications."
+        out["detail"] = f"configured service(s) not registered: {', '.join(missing)}"
+        out["suggested_fix"] = "Re-select the notification targets under Settings → Notifications."
     return out
 
 

@@ -1595,49 +1595,25 @@ def _register_services(
 
     # v5.6.5: Test notification service
     async def _test_notify(call: ServiceCall) -> None:
-        """Send a test notification to the configured phone."""
-        notify_svc = None
-        # Check runtime_config first
+        """Send a test notification to every configured normal target."""
         data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
         rc = data.get("runtime_config", {}) if isinstance(data, dict) else {}
-        notify_svc = rc.get("notify_service") or entry.options.get(
-            "notify_service", entry.data.get("notify_service", "")
-        )
-        if not notify_svc:
-            _LOGGER.warning("Test notify: no notify_service configured")
-            return
-        from . import action_log
-        request_id = action_log.new_request_id()
+        notify_config = dict(entry.data)
+        notify_config.update(entry.options)
+        notify_config.update(rc)
         requested_by_user_id = getattr(getattr(call, "context", None), "user_id", None)
-        action_id = None
-        try:
-            domain, service = notify_svc.split(".", 1)
-            action_id = await hass.async_add_executor_job(
-                lambda: action_log.start(
-                    request_id, "test_notify", "ha_service",
-                    domain=domain, service=service,
-                    requested_by_user_id=requested_by_user_id,
-                )
-            )
-            await hass.services.async_call(
-                domain, service,
-                {
-                    "title": "Nova",
-                    "message": "This is a test notification from Nova. If you see this, phone notifications are working.",
-                },
-                blocking=False,
-            )
-            _LOGGER.info("Test notification sent via %s", notify_svc)
-            await hass.async_add_executor_job(
-                lambda: action_log.set_execution(action_id, "accepted")
-            )
-        except Exception as exc:
-            _LOGGER.warning("Test notification failed: %s", exc)
-            if action_id is not None:
-                await hass.async_add_executor_job(
-                    lambda: action_log.set_execution(
-                        action_id, "failed", reason_code="service_call_failed")
-                )
+        from .notify_targets import async_send_configured_notifications
+        sent = await async_send_configured_notifications(
+            hass, notify_config,
+            {
+                "title": "Nova",
+                "message": "This is a test notification from Nova. If you see this, phone notifications are working.",
+            },
+            action="test_notify", source="ha_service",
+            requested_by_user_id=requested_by_user_id,
+        )
+        if not sent:
+            _LOGGER.warning("Test notify: no configured service accepted the alert")
 
     hass.services.async_register(DOMAIN, "test_notify", _test_notify)
 

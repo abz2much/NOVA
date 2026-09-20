@@ -3259,39 +3259,18 @@ async def _push_notification(hass, config, message, action_type, snapshot_url=No
     request_id, when given, is the caller's (_emit_action's or
     _notify_all_devices's fallback) — this never mints a second request for
     the same alert."""
-    notify_svc = config.get("notify_service", "")
-    if not notify_svc:
-        return
-    from . import action_log
-    if request_id is None:
-        request_id = action_log.new_request_id()
-    svc_domain = svc_name = None
-    try:
-        svc_domain, svc_name = notify_svc.split(".", 1)
-    except Exception:
-        pass
-    action_id = await hass.async_add_executor_job(
-        lambda: action_log.start(
-            request_id, "cognitive_alert", "proactive",
-            domain=svc_domain, service=svc_name, requested_state=action_type,
-        )
+    from .notify_targets import async_send_configured_notifications
+
+    data = {"message": message,
+            "title": _notify_i18n().title(action_type, _hass_lang(hass))}
+    img_data = _notification_image_data(hass, snapshot_url)
+    if img_data:
+        data["data"] = img_data
+    await async_send_configured_notifications(
+        hass, config, data,
+        request_id=request_id, action="cognitive_alert", source="proactive",
+        requested_state=action_type,
     )
-    try:
-        data = {"message": message,
-                "title": _notify_i18n().title(action_type, _hass_lang(hass))}
-        img_data = _notification_image_data(hass, snapshot_url)
-        if img_data:
-            data["data"] = img_data
-        await hass.services.async_call(svc_domain, svc_name, data, blocking=False)
-        await hass.async_add_executor_job(
-            lambda: action_log.set_execution(action_id, "accepted")
-        )
-    except Exception as exc:
-        _LOGGER.debug("Cognitive: push notification failed: %s", exc)
-        await hass.async_add_executor_job(
-            lambda: action_log.set_execution(
-                action_id, "failed", reason_code="service_call_failed")
-        )
 
 
 def _notification_image_data(hass, snapshot_url):

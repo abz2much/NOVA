@@ -28,6 +28,7 @@ from .const import (
     CONF_BROADCAST_GROUP,
     CONF_GEMINI_API_KEY,
     CONF_NOTIFY_SERVICE,
+    CONF_NOTIFY_SERVICES,
     CONF_OBSERVER_ENABLED,
     CONF_OBSERVER_QUIET_END,
     CONF_OBSERVER_QUIET_START,
@@ -627,7 +628,14 @@ async def ws_get_panel_data(
 
         gemini_key = bool(_entry_opt(entry, CONF_GEMINI_API_KEY, ""))
         broadcast_group = _entry_opt(entry, CONF_BROADCAST_GROUP, "") or ""
-        notify_service = _entry_opt(entry, CONF_NOTIFY_SERVICE, "") or ""
+        from .notify_targets import configured_notify_services
+        notify_config = {CONF_NOTIFY_SERVICE: _runtime_opt(
+            hass, entry, CONF_NOTIFY_SERVICE, "") or ""}
+        entry_notify_services = _runtime_opt(
+            hass, entry, CONF_NOTIFY_SERVICES, None)
+        if entry_notify_services is not None:
+            notify_config[CONF_NOTIFY_SERVICES] = entry_notify_services
+        selected_notify_services = configured_notify_services(notify_config)
         observer_enabled_cfg = bool(_runtime_opt(hass, entry, CONF_OBSERVER_ENABLED, False))
 
         sat_avail, sat_total = _satellite_count(hass)
@@ -708,8 +716,8 @@ async def ws_get_panel_data(
                 "level": "live" if broadcast_group else "warn",
             },
             "notify": {
-                "state": "READY" if notify_service else "UNSET",
-                "level": "live" if notify_service else "warn",
+                "state": "READY" if selected_notify_services else "UNSET",
+                "level": "live" if selected_notify_services else "warn",
             },
             "satellites": {
                 "state": f"{sat_avail} / {sat_total}" if sat_total > 0 else "NONE",
@@ -731,7 +739,14 @@ async def ws_get_panel_data(
                 notify_services.append(f"notify.{svc}")
         except Exception:
             pass
-        current_notify = str(_runtime_opt(hass, entry, CONF_NOTIFY_SERVICE, "") or "")
+        runtime_notify_services = _runtime_opt(
+            hass, entry, CONF_NOTIFY_SERVICES, None)
+        notify_config = {CONF_NOTIFY_SERVICE: str(
+            _runtime_opt(hass, entry, CONF_NOTIFY_SERVICE, "") or "")}
+        if runtime_notify_services is not None:
+            notify_config[CONF_NOTIFY_SERVICES] = runtime_notify_services
+        current_notify_services = configured_notify_services(notify_config)
+        current_notify = current_notify_services[0] if current_notify_services else ""
 
         result = {
             "status":         status,
@@ -802,6 +817,7 @@ async def ws_get_panel_data(
                 "movie_dim_pct": int(_runtime_opt(hass, entry, "movie_dim_pct", 15) or 15),
                 "llm_base_url": str(_runtime_opt(hass, entry, "llm_base_url", "") or ""),
                 "notify_service": current_notify,
+                "notify_services": current_notify_services,
                 "notify_services_available": notify_services,
                 "security_alarm_entity": str(_runtime_opt(
                     hass, entry, "security_alarm_entity", "") or ""),
@@ -1369,6 +1385,7 @@ PANEL_WRITABLE_KEYS = {
     "excluded_domains",            # JSON list: whole domains removed from awareness
     "excluded_labels",             # JSON list: HA labels whose entities are removed from awareness
     "notify_service",
+    "notify_services",             # JSON list: normal alert push targets
     "security_alarm_entity",       # str: authoritative household alarm panel
     "lockdown_auto_on_arm",        # bool: explicit opt in for automatic lockdown
     "departure_alerts_enabled",

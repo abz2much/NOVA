@@ -280,70 +280,36 @@ async def maybe_prompt_sleep(hass: HomeAssistant, config: dict) -> None:
     # double-fire this on the next tick.
     _PROMPTED_DATE = dt_util.now().date().isoformat()
     quiet_end = config.get("observer_quiet_end", "07:00")
-    await _send_sleep_prompt(hass, quiet_end)
+    await _send_sleep_prompt(hass, quiet_end, config)
 
 
-async def _send_sleep_prompt(hass: HomeAssistant, quiet_end: str) -> None:
-    """Push an actionable Yes/No notification to every phone with the HA
-    companion app, same enumeration Nova's other household-wide alerts use
-    (see voice_confirm.py's _confirm_via_notification, the same pattern).
-    Fire-and-forget: doesn't block the calling tick waiting for a tap."""
+async def _send_sleep_prompt(
+    hass: HomeAssistant, quiet_end: str, config: dict,
+) -> None:
+    """Push an actionable Yes/No notification to configured normal targets."""
     req_id = uuid.uuid4().hex[:8]
     yes_action = f"NOVA_SLEEP_YES_{req_id}"
     no_action = f"NOVA_SLEEP_NO_{req_id}"
 
-    sent = 0
-    try:
-        services = hass.services.async_services().get("notify", {})
-        names = [n for n in services if n.startswith("mobile_app_")]
-    except Exception as exc:
-        _LOGGER.warning("sleep_detection: enumerate notify services failed: %s", exc)
-        names = []
-
-    if not names:
-        _LOGGER.debug("sleep_detection: no notify.mobile_app_* service found; skipping sleep prompt")
-        return
-
-    from . import action_log
-    request_id = action_log.new_request_id()
-    row_ids = await hass.async_add_executor_job(
-        lambda: action_log.start_many(
-            request_id, "sleep_prompt", "proactive",
-            [{"key": n, "domain": "notify", "service": n} for n in names],
-        )
+    from .notify_targets import async_send_configured_notifications
+    sent = await async_send_configured_notifications(
+        hass,
+        config,
+        {
+            "title": "Nova",
+            "message": "Heading to bed?",
+            "data": {
+                "actions": [
+                    {"action": yes_action, "title": "Yes"},
+                    {"action": no_action, "title": "No"},
+                ],
+                "push": {"interruption-level": "active"},
+            },
+        },
+        action="sleep_prompt",
+        source="proactive",
     )
-
-    for name in names:
-        row_id = row_ids.get(name)
-        try:
-            await hass.services.async_call(
-                "notify", name,
-                {
-                    "title": "Nova",
-                    "message": "Heading to bed?",
-                    "data": {
-                        "actions": [
-                            {"action": yes_action, "title": "Yes"},
-                            {"action": no_action, "title": "No"},
-                        ],
-                        "push": {"interruption-level": "active"},
-                    },
-                },
-                blocking=False,
-            )
-            sent += 1
-            if row_id is not None:
-                await hass.async_add_executor_job(
-                    lambda rid=row_id: action_log.set_execution(rid, "accepted")
-                )
-        except Exception as exc:
-            _LOGGER.debug("sleep_detection notify.%s failed: %s", name, exc)
-            if row_id is not None:
-                await hass.async_add_executor_job(
-                    lambda rid=row_id: action_log.set_execution(
-                        rid, "failed", reason_code="service_call_failed")
-                )
-    if sent == 0:
+    if not sent:
         return
 
     @callback

@@ -1080,7 +1080,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v7.106.3
+ * v7.106.4
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1145,7 +1145,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v7.106.3 ",
+      console.log("%c Nova Panel %c v7.106.4 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -3641,13 +3641,22 @@ class NovaPanel extends HTMLElement {
   _notificationsCardBody() {
     const cfg = this._data()?.config || {};
     const svcs = cfg.notify_services_available || [];
-    const opts = [["", "— none —"], ...svcs.map(s => [s, s.replace("notify.", "")])];
-    return `
-      <div class="toggle-row">
-        <span class="toggle-label">Notify Device</span>
-        <span class="toggle-desc">Phone push for high/critical alerts</span>
-        <select class="cfg-field" data-cfg-key="notify_service">${this._optSelect(opts, cfg.notify_service || "")}</select>
-      </div>`;
+    const selected = Array.isArray(cfg.notify_services)
+      ? cfg.notify_services
+      : (cfg.notify_service ? [cfg.notify_service] : []);
+    if (!this._notifySavePending) this._notifyServicesDraft = [...selected];
+    const displayed = this._notifySavePending ? this._notifyServicesDraft : selected;
+    if (!svcs.length) return `<div class="stub-body">No notification services found.</div>`;
+    const rows = svcs.map(service => {
+      const on = displayed.includes(service);
+      return `
+        <div class="toggle-row">
+          <span class="toggle-label">${this._esc(service.replace("notify.", ""))}</span>
+          <span class="toggle-desc">${this._esc(service)}</span>
+          <button class="toggle-btn ${on ? "on" : "off"} new-notify-service-toggle" data-notify-service="${this._esc(service)}">${on ? "ON" : "OFF"}</button>
+        </div>`;
+    }).join("");
+    return `<div class="stub-body">Normal Nova alerts go to every selected device.</div><div class="toggle-list">${rows}</div>`;
   }
 
   _securityAlarmCardBody() {
@@ -5053,6 +5062,32 @@ class NovaPanel extends HTMLElement {
         const isOn = current.includes(spkId);
         const updated = isOn ? current.filter(id => id !== spkId) : [...current, spkId];
         await this._saveSetting("announcement_speakers", JSON.stringify(updated));
+      });
+    });
+    root.querySelectorAll(".new-notify-service-toggle").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const service = btn.getAttribute("data-notify-service");
+        if (!service) return;
+        const cfg = this._data()?.config || {};
+        const current = Array.isArray(this._notifyServicesDraft)
+          ? this._notifyServicesDraft
+          : (Array.isArray(cfg.notify_services)
+            ? cfg.notify_services
+            : (cfg.notify_service ? [cfg.notify_service] : []));
+        const isOn = current.includes(service);
+        const updated = isOn
+          ? current.filter(item => item !== service)
+          : [...current, service];
+        this._notifyServicesDraft = updated;
+        this._notifySavePending = (this._notifySavePending || 0) + 1;
+        const previous = this._notifySaveQueue || Promise.resolve();
+        this._notifySaveQueue = previous.then(() =>
+          this._saveSetting("notify_services", JSON.stringify(updated)));
+        try {
+          await this._notifySaveQueue;
+        } finally {
+          this._notifySavePending -= 1;
+        }
       });
     });
     const generalSpeakerSel = root.querySelector(".new-general-speaker-select");

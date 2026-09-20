@@ -24,6 +24,7 @@ _REDACT_KEYS = {
     "api_key", "groq_api_key", "gemini_api_key", "anthropic_api_key",
     "openai_api_key", "llm_api_key", "token", "access_token", "refresh_token",
     "client_secret", "client_id", "password", "secret", "notify_service",
+    "notify_services",
     "floor_plan_address", "imap_user",
 }
 
@@ -179,4 +180,3 @@ async def async_get_config_entry_diagnostics(hass, entry) -> dict:
         diag["conversation_log_error"] = str(exc)
 
     return diag
-

@@ -34,7 +34,6 @@ from homeassistant.util import dt as dt_util
 
 from . import audio_routing, classifier, output_gate, reasoning_loop, sleep_detection
 from .const import (
-    CONF_NOTIFY_SERVICE,
     DEFAULT_OBSERVER_QUIET_END, DEFAULT_OBSERVER_QUIET_START,
 )
 from .llm_provider import create_tier_provider
@@ -936,51 +935,24 @@ async def _speak(message: str, *, targets: list[str]) -> list[str]:
 
 
 async def _send_notification(message: str, *, urgency: str) -> None:
-    """Send push notification via configured notify service."""
-    # v5.6.2: Check runtime_config first (panel Settings dropdown), then config
-    notify_service = None
+    """Send push notification to every configured normal target."""
+    config = dict(_STATE.config or {})
     try:
         from .const import DOMAIN
         for eid, data in _STATE.hass.data.get(DOMAIN, {}).items():
             if isinstance(data, dict):
                 rc = data.get("runtime_config", {})
-                if rc.get("notify_service"):
-                    notify_service = rc["notify_service"]
+                if isinstance(rc, dict):
+                    config.update(rc)
                     break
     except Exception:
         pass
-    if not notify_service:
-        notify_service = (_STATE.config or {}).get(CONF_NOTIFY_SERVICE)
-    if not notify_service:
-        return
-    from . import action_log
-    request_id = action_log.new_request_id()
-    domain = service = None
-    try:
-        domain, service = notify_service.split(".", 1)
-    except Exception:
-        pass
-    action_id = await _STATE.hass.async_add_executor_job(
-        lambda: action_log.start(
-            request_id, "notify", "proactive",
-            domain=domain, service=service, requested_state=urgency,
-        )
+    from .notify_targets import async_send_configured_notifications
+    title = "Nova" if urgency != "critical" else "⚠ Nova URGENT"
+    await async_send_configured_notifications(
+        _STATE.hass, config, {"title": title, "message": message},
+        action="notify", source="proactive", requested_state=urgency,
     )
-    try:
-        title = "Nova" if urgency != "critical" else "⚠ Nova URGENT"
-        await _STATE.hass.services.async_call(
-            domain, service,
-            {"title": title, "message": message},
-            blocking=False,
-        )
-        await _STATE.hass.async_add_executor_job(
-            lambda: action_log.set_execution(action_id, "accepted")
-        )
-    except Exception as exc:
-        _LOGGER.warning("notification failed: %s", exc)
-        await _STATE.hass.async_add_executor_job(
-            lambda: action_log.set_execution(action_id, "failed", reason_code="service_call_failed")
-        )
 
 
 # ─── Lifecycle ──────────────────────────────────────────────────────────────
