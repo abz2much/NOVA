@@ -34,6 +34,14 @@ class FakeStates:
         self._d[entity_id] = st
         return st
 
+    def async_set(self, entity_id: str, state, attributes: dict | None = None) -> FakeState:
+        """Same shape as real HA's hass.states.async_set(entity_id, state,
+        attributes_dict) — a dict, not **kwargs, so callers that build the
+        attributes dict themselves (camera_semantic.py) work unchanged."""
+        st = FakeState(entity_id, state, dict(attributes or {}))
+        self._d[entity_id] = st
+        return st
+
     def remove(self, entity_id: str) -> None:
         self._d.pop(entity_id, None)
 

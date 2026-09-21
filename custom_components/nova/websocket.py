@@ -779,6 +779,13 @@ async def ws_get_panel_data(
                 "pattern_learn_doors":     bool(_runtime_opt(hass, entry, "pattern_learn_doors", False)),
                 "pattern_learn_presence":  bool(_runtime_opt(hass, entry, "pattern_learn_presence", False)),
                 "pattern_learn_buttons":   bool(_runtime_opt(hass, entry, "pattern_learn_buttons", False)),
+                # Phase 4, v7.109.0 — defaults to True (opt-out, not opt-in),
+                # unlike the doors/presence/buttons toggles above which
+                # default off: camera detections already reach Nova through
+                # an integration the administrator explicitly set up (Eufy/
+                # Frigate/Nest), so there's no new noise source being turned
+                # on by default the way "log every door" would be.
+                "camera_event_learning": bool(_runtime_opt(hass, entry, "camera_event_learning", True)),
                 "pattern_include_entities": _get_runtime_json(hass, entry, "pattern_include_entities", []),
                 "excluded_entities": _get_runtime_json(hass, entry, "excluded_entities", []),
                 "excluded_domains": _get_runtime_json(hass, entry, "excluded_domains", []),
@@ -1515,6 +1522,9 @@ PANEL_WRITABLE_KEYS = {
     "adaptive_suggestion_threshold", # bool: tune the suggestion confidence bar from how welcome recent suggestions were
     "tts_use_ha_voice",              # bool: use Home Assistant's configured TTS voice instead of the Nova Piper voice
     "pattern_learn_motion",          # bool: learn motion/occupancy triggers for "when X, do Y" suggestions (rate-limited)
+    "camera_event_learning",        # bool: feed Eufy/Frigate/Nest/vision detections into pattern learning (Phase 4, v7.109.0)
+    "camera_event_confidence_floor",  # float 0-100: minimum source-supplied confidence to record a camera event (0 = off)
+    "camera_event_dedup_window",    # float seconds: window collapsing duplicate camera events across sources
     "appliance_profile",            # JSON list of declared appliances (name/type/entity/watts)
     "camera_auto_analyze",          # bool: auto-inspect doorbell/person camera events
     "camera_auto_analyze_motion",   # bool: also auto-inspect motion events (noisier)

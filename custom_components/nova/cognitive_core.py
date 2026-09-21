@@ -2272,6 +2272,17 @@ class StateLogger:
                     "CREATE INDEX IF NOT EXISTS idx_sc_person "
                     "ON state_changes(person)")
                 conn.commit()
+                # v7.109.0 (Phase 4): the source's own DETECTION confidence —
+                # distinct from person_confidence, which is the confidence of
+                # WHO it was, not confidence the event happened at all. NULL
+                # (not 0.0) when the source supplied none, so "no score" and
+                # "score of zero" stay distinguishable — camera_semantic.py
+                # is the only writer today, but the column is generic.
+                if "detection_confidence" not in cols:
+                    conn.execute("ALTER TABLE state_changes "
+                                 "ADD COLUMN detection_confidence REAL DEFAULT NULL")
+                    conn.commit()
+                    _LOGGER.info("Pattern DB: migrated state_changes.detection_confidence")
                 # v6.80.0: carry the EVIDENCE behind a suggestion through to the
                 # panel — which pattern, which entities, and the observation
                 # details — so reviewing a suggestion shows *why*, not just what.
@@ -2292,8 +2303,12 @@ class StateLogger:
                           triggered_by: str = "system",
                           person: str = "unknown",
                           person_confidence: float = 0.0,
-                          force_include: bool = False):
-        """Record a state change for pattern analysis."""
+                          force_include: bool = False,
+                          detection_confidence: Optional[float] = None):
+        """Record a state change for pattern analysis. `detection_confidence`
+        (v7.109.0) is the SOURCE's own confidence in the event happening at
+        all — distinct from person_confidence (confidence in WHO). None
+        means the source supplied no score; never invented here."""
         import sqlite3
         domain = entity_id.split(".")[0]
         if domain in ("automation", "script", "input_boolean", "input_number"):
@@ -2315,11 +2330,12 @@ class StateLogger:
                     "INSERT INTO state_changes "
                     "(timestamp, entity_id, domain, old_state, new_state, "
                     "area_id, hour, day_of_week, triggered_by, person, "
-                    "person_confidence) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "person_confidence, detection_confidence) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (now.isoformat(), entity_id, domain, old_state,
                      new_state, area_id, now.hour, now.weekday(),
-                     triggered_by, person, float(person_confidence or 0.0)),
+                     triggered_by, person, float(person_confidence or 0.0),
+                     None if detection_confidence is None else float(detection_confidence)),
                 )
         except Exception:
             pass
@@ -2524,6 +2540,17 @@ def _on_state_changed(event: Event) -> None:
     new_state = event.data.get("new_state")
 
     if not new_state:
+        return
+
+    # camera_event.* (Phase 4, v7.109.0) is written directly by
+    # camera_semantic.record_event -> log_camera_event, with its own
+    # confidence floor, dedup, resident attribution, and learning-enabled
+    # check — richer and more correct than this generic path (which would
+    # otherwise also attribute a "who's home" best guess, exactly what
+    # camera semantic events are deliberately NOT supposed to use). Skip it
+    # here entirely so setting the live state for automation-trigger
+    # purposes can never double-log the same event.
+    if entity_id.startswith("camera_event."):
         return
 
     # Check ignore rules
@@ -3508,6 +3535,44 @@ def log_command(text: str, handled_by: str = "agent",
     """Record a command for pattern learning."""
     if _CORE.state_logger:
         _CORE.state_logger.log_command(text, handled_by, entity_ids, person)
+
+
+def learning_active() -> bool:
+    """Whether Nova's pattern-learning subsystem is currently running —
+    the master learning setting every downstream consumer (including
+    camera_semantic.py, Phase 4 v7.109.0) gates on. There's no separate
+    always-on pattern-learning process independent of Observer/Cognitive
+    Core: state_logger is only ever created in start() and torn down in
+    stop(), so this is the same on/off surface every other state-change
+    row already depends on."""
+    return bool(_CORE.running and _CORE.state_logger)
+
+
+def log_camera_event(entity_id: str, new_state: str, area_id: str = "",
+                      person: str = "unknown", person_confidence: float = 0.0,
+                      detection_confidence: Optional[float] = None) -> bool:
+    """Record a synthetic camera-event state change for pattern learning
+    (Phase 4, v7.109.0) — the SAME state_changes table and StateLogger every
+    other entity's pattern data already goes through, not a parallel store.
+    `entity_id` is the synthetic, non-actuating camera_event.<location> id;
+    `new_state` is the canonical label or, for package events, the specific
+    delivered/stranded/taken/mail sub-state.
+
+    Returns False (a no-op, nothing written) when the learning subsystem
+    isn't running — camera events must not be stored while learning is
+    disabled, same as everything else state_logger gates on.
+
+    Blocking (SQLite) — callers MUST invoke this via the executor, never
+    directly from the event loop."""
+    if not learning_active():
+        return False
+    _CORE.state_logger.log_state_change(
+        entity_id, "", new_state, area_id,
+        triggered_by="camera", person=person,
+        person_confidence=float(person_confidence or 0.0),
+        detection_confidence=detection_confidence,
+    )
+    return True
 
 
 def status() -> dict:

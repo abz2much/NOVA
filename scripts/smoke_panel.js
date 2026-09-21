@@ -68,7 +68,7 @@ const PANEL = {
     { id: "banter", label: "Pick a personality level", hint: "wit", done: false },
     { id: "briefings", label: "Turn on daily briefings", hint: "briefings", done: false, jump: "Briefings" },
   ] },
-  config: { floor_plan_address: "123 Example St, Springfield IL", banter_level: 2, search_backend: "searxng", searxng_url: "http://sx.local:8080", calendar_tight_gap_min: 20, recognition_source: "frigate", voice_confirm_enabled: true, voice_confirm_mode: "gated", intrusion_response_timeout: 120, cameras: [{ entity_id: "camera.front", name: "Front Door", raw_name: "Front Door", outdoor: false, location_mode: "auto" }, { entity_id: "camera.back", name: "Backyard", raw_name: "Backyard", outdoor: true, location_mode: "auto" }], camera_names: {}, lockdown: { active: false },
+  config: { camera_event_learning: true, floor_plan_address: "123 Example St, Springfield IL", banter_level: 2, search_backend: "searxng", searxng_url: "http://sx.local:8080", calendar_tight_gap_min: 20, recognition_source: "frigate", voice_confirm_enabled: true, voice_confirm_mode: "gated", intrusion_response_timeout: 120, cameras: [{ entity_id: "camera.front", name: "Front Door", raw_name: "Front Door", outdoor: false, location_mode: "auto" }, { entity_id: "camera.back", name: "Backyard", raw_name: "Backyard", outdoor: true, location_mode: "auto" }], camera_names: {}, lockdown: { active: false },
     cast_devices: [{ entity_id: "media_player.living_room_speaker", name: "Living Room Speaker" }, { entity_id: "media_player.kitchen_speaker", name: "Kitchen Speaker" }],
     speaker_areas: [{ area_id: "living_room", name: "Living Room" }, { area_id: "kitchen", name: "Kitchen" }],
     room_speakers: { living_room: "media_player.living_room_speaker" },
@@ -1374,6 +1374,14 @@ setTimeout(async () => {
         return !!rc && !rc.querySelector(".stub-tag")
           && !!rc.querySelector('button[data-cfg-key="pattern_learn_doors"]')
           && !!rc.querySelector("#newPlAddEntity") && !!rc.querySelector("#newPlEntityInput");
+      })()],
+  );
+  checks.push(
+    ["settings tab: camera-event learning toggle is present and on by default (Phase 4, v7.109.0)",
+      (() => {
+        const rc = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Routine Learning/.test(c.querySelector(".panel-title")?.textContent || ""));
+        const btn = rc?.querySelector('button[data-cfg-key="camera_event_learning"]');
+        return !!btn && btn.classList.contains("on") && btn.textContent === "ON";
       })()],
   );
   const plInput = sRoot.getElementById("newPlEntityInput");
