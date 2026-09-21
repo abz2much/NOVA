@@ -30,7 +30,8 @@
         "menu_options": {
           "core": "Core — persona, directive, conversation model",
           "routing": "Routing — bedroom areas, broadcast group, notify service",
-          "observer": "Observer — proactive awareness (needs a Gemini key)",
+          "observer": "Observer — proactive awareness (model tiers, quiet hours)",
+          "credentials": "Credentials — provider API keys",
           "identity": "Identity — per-person recognition",
           "email": "Email — read-only inbox (password via secrets.yaml)"
         }
@@ -58,15 +59,33 @@
       },
       "observer": {
         "title": "Nova — Observer Mode",
-        "description": "Proactive awareness. Requires a Gemini API key.",
+        "description": "Proactive awareness. {note}",
         "data": {
           "observer_enabled": "Enable observer mode",
-          "gemini_api_key": "Gemini API key",
           "classifier_model": "Classifier model (Tier 1 — cheap)",
           "reasoning_model": "Reasoning model (Tier 2 — main)",
           "review_model": "Review model (Tier 3 — periodic)",
           "observer_quiet_start": "Quiet hours start (HH:MM)",
           "observer_quiet_end": "Quiet hours end (HH:MM)"
+        }
+      },
+      "credentials": {
+        "title": "Nova — Credentials",
+        "description": "One dedicated API key per provider. Stored only in secrets.yaml, never shown back here. Status: {status}. Blank = no change. Main Agent provider: {active}.",
+        "data": {
+          "groq_credential": "Groq API key",
+          "clear_groq": "Clear the stored Groq key",
+          "openai_credential": "OpenAI API key",
+          "clear_openai": "Clear the stored OpenAI key",
+          "anthropic_credential": "Anthropic API key",
+          "clear_anthropic": "Clear the stored Anthropic key",
+          "gemini_credential": "Gemini API key",
+          "clear_gemini": "Clear the stored Gemini key",
+          "custom_credential": "Custom endpoint API key",
+          "clear_custom": "Clear the stored custom-endpoint key",
+          "ollama_credential": "Ollama Bearer key (optional)",
+          "clear_ollama": "Clear the stored Ollama key",
+          "confirm_delete_active": "Yes, clearing the Main Agent's current provider key will disable it until replaced"
         }
       },
       "identity": {
@@ -93,12 +112,20 @@
           "imap_secret_key": "secrets.yaml key holding the password"
         }
       }
+    },
+    "error": {
+      "credential_set_and_clear": "For each provider, either enter a new key or tick \"clear\" — not both.",
+      "confirm_required_for_active_provider": "Clearing the Main Agent's current provider's key needs the confirmation box ticked."
     }
   },
   "issues": {
     "llm_unavailable": {
       "title": "Nova reasoning backend unavailable",
       "description": "Nova couldn't reach its reasoning model, so it's running in limited mode — device control, status, and scenes still work. Reason: {detail}\n\nOpen the Nova panel → Settings and check your provider, model, and API key. If your provider retired the model, re-select it from the list. This notice clears automatically once reasoning is working again."
+    },
+    "credential_migration_ambiguous": {
+      "title": "Nova: a saved credential needs to be assigned to a provider",
+      "description": "Nova found a shared credential from before separate provider credentials existed, but couldn't tell which provider it belongs to. Nothing was changed or deleted. Open Settings → Devices & Services → Nova → Configure → Credentials and enter it under the correct provider."
     }
   }
 }

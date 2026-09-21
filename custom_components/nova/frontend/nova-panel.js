@@ -1080,7 +1080,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v7.106.5
+ * v7.107.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1145,7 +1145,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v7.106.5 ",
+      console.log("%c Nova Panel %c v7.107.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -3438,7 +3438,18 @@ class NovaPanel extends HTMLElement {
           ${r.role === "vision" ? `<div class="stub-body">Needs an image-capable model — e.g. moondream on Ollama, or a Groq vision model. Text-only models will fail on camera analysis.</div>` : ""}
         </div>`;
     }).join("");
-    return `<div class="new-model-list">${rows}</div>`;
+    const credRows = ["groq", "openai", "anthropic", "gemini", "custom", "ollama"].map(p => `
+      <div class="cred-row" data-cred-provider="${p}">
+        <span class="model-label">${this._esc(p)}</span>
+        <span class="cred-status" data-cred-status="${p}">…</span>
+        <input class="cred-input" type="password" data-cred-provider="${p}" placeholder="enter to set or replace" autocomplete="off">
+        <button class="mode-chip cred-save" data-cred-provider="${p}">SAVE</button>
+        <button class="mode-chip cred-clear" data-cred-provider="${p}">CLEAR</button>
+      </div>`).join("");
+    return `<div class="new-model-list">${rows}</div>
+      <div class="panel-head" style="margin-top:14px"><div class="panel-title">Provider Credentials</div></div>
+      <div class="stub-body">Stored only in Home Assistant's secrets.yaml, one per provider. A saved credential is never shown here again — only whether one is set. Ollama's is optional, for a protected endpoint only.</div>
+      <div class="new-model-list">${credRows}</div>`;
   }
 
   _pickHealModel(models, cfgKey) {
@@ -3531,6 +3542,60 @@ class NovaPanel extends HTMLElement {
           }
         });
       }
+    });
+
+    this._wireCredentials();
+  }
+
+  // Provider Credentials (Phase 2, v7.107.0): status is fetched once per
+  // render (never cached across renders — a stale "configured" badge after
+  // a clear elsewhere would be misleading) and a saved/cleared value is
+  // never echoed back by the websocket commands, only `ok`.
+  async _wireCredentials() {
+    const root = this.shadowRoot;
+    const rows = root.querySelectorAll("[data-cred-provider]");
+    if (!rows.length || !this._hass) return;
+
+    try {
+      const res = await this._hass.callWS({ type: "nova/get_credential_status" });
+      const status = (res && res.status) || {};
+      root.querySelectorAll("[data-cred-status]").forEach(el => {
+        const p = el.getAttribute("data-cred-status");
+        const configured = !!status[p];
+        el.textContent = configured ? "configured" : "not set";
+        el.classList.toggle("cred-configured", configured);
+      });
+    } catch (_) { /* leave the "…" placeholder on error */ }
+
+    root.querySelectorAll(".cred-save").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const p = btn.getAttribute("data-cred-provider");
+        const input = root.querySelector(`.cred-input[data-cred-provider="${p}"]`);
+        const value = (input && input.value || "").trim();
+        if (!value || !this._hass) return;
+        try {
+          const res = await this._hass.callWS({ type: "nova/set_credential", provider: p, value });
+          if (res && res.ok) {
+            input.value = "";
+            const statusEl = root.querySelector(`[data-cred-status="${p}"]`);
+            if (statusEl) { statusEl.textContent = "configured"; statusEl.classList.add("cred-configured"); }
+          }
+        } catch (err) { console.error(`Nova: failed to save credential for ${p}`, err); }
+      });
+    });
+    root.querySelectorAll(".cred-clear").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const p = btn.getAttribute("data-cred-provider");
+        if (!this._hass) return;
+        if (!window.confirm(`Clear the stored ${p} credential? Any role still using it will stop working until a new key is set.`)) return;
+        try {
+          const res = await this._hass.callWS({ type: "nova/delete_credential", provider: p });
+          if (res && res.ok) {
+            const statusEl = root.querySelector(`[data-cred-status="${p}"]`);
+            if (statusEl) { statusEl.textContent = "not set"; statusEl.classList.remove("cred-configured"); }
+          }
+        } catch (err) { console.error(`Nova: failed to clear credential for ${p}`, err); }
+      });
     });
   }
 
@@ -6977,6 +7042,13 @@ class NovaPanel extends HTMLElement {
         font-family:var(--font-mono);font-size:11px;border-radius:8px}
       .new-model-custom:focus{outline:none;border-color:var(--gold)}
       .new-model-row .stub-body{grid-column:1/-1;font-size:10.5px;margin-top:2px}
+      .cred-row{display:grid;grid-template-columns:88px 74px 1fr auto auto;gap:6px;align-items:center}
+      .cred-status{font-family:var(--font-mono);font-size:10px;color:var(--ink-faint);text-transform:uppercase}
+      .cred-status.cred-configured{color:var(--gold)}
+      .cred-input{width:100%;min-width:0;box-sizing:border-box;padding:6px 8px;
+        background:var(--surface-2);border:1px solid var(--line-soft);color:var(--ink);
+        font-family:var(--font-body);font-size:11.5px;border-radius:8px}
+      .cred-input:focus{outline:none;border-color:var(--gold)}
       .new-appliance-list{display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
       .new-appliance-row{display:grid;grid-template-columns:1.1fr .9fr 1.3fr 64px 28px;gap:6px;align-items:center}
       .new-appliance-row input,.new-appliance-row select{background:var(--surface-2);border:1px solid var(--line-soft);

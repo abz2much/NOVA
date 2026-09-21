@@ -71,6 +71,26 @@ def _cfg_opt(hass: HomeAssistant, key: str, default=None):
 _PROVIDER_CACHE: dict = {}
 
 
+def _resolve_credential(hass: HomeAssistant, provider: str) -> str:
+    """The credential `provider` should use — its own dedicated field, with
+    the same narrow legacy-shared-key fallback every role uses (Phase 2,
+    v7.107.0). Fixes a cross-provider leak: the vision/camera-reasoning
+    roles used to always send the shared primary key (or its groq_api_key
+    alias) regardless of which provider was actually configured for them —
+    e.g. a Groq primary key being sent to OpenAI if vision_provider=openai."""
+    from .const import PROVIDER_API_KEY_FIELDS
+    from .llm_provider import resolve_provider_credential
+
+    field = PROVIDER_API_KEY_FIELDS.get(provider)
+    cfg = {
+        "llm_provider": _cfg_opt(hass, "llm_provider", "groq"),
+        "api_key": _cfg_opt(hass, "api_key", ""),
+    }
+    if field:
+        cfg[field] = _cfg_opt(hass, field, "")
+    return resolve_provider_credential(cfg, provider)
+
+
 def _make_client(hass: HomeAssistant, provider: str, model: str, fallback):
     """
     Create an LLM provider for the given provider/model from current config.
@@ -85,11 +105,10 @@ def _make_client(hass: HomeAssistant, provider: str, model: str, fallback):
     try:
         if not provider or not model:
             return fallback
-        if provider == "gemini":
-            api_key = _cfg_opt(hass, "gemini_api_key", "") or ""
-        else:
-            api_key = _cfg_opt(hass, "api_key", "") or _cfg_opt(hass, "groq_api_key", "") or ""
-        if not api_key:
+        api_key = _resolve_credential(hass, provider)
+        # Ollama alone needs no credential — it's a normal, fully working
+        # configuration, not a missing-key failure.
+        if not api_key and provider != "ollama":
             return fallback
         base_url = _cfg_opt(hass, "llm_base_url", "") or None
         key = (provider, model, api_key, base_url or "")

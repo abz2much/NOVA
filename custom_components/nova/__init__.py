@@ -39,7 +39,7 @@ from .recognition import register_recognition_listener
 from .summary import async_summarise
 from .sentinel import NovaSentinel
 from .database import purge_old_records, get_stats
-from .llm_provider import create_provider
+from .llm_provider import create_provider, resolve_provider_credential
 from .migrations import migrate_config, CURRENT_SCHEMA_VERSION
 from .panel_register import async_register_panel, async_unregister_panel
 from .websocket import async_register as async_register_ws
@@ -158,8 +158,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         action_log.configure(hass)
     except Exception as exc:
         _LOGGER.warning("Nova: action log configure failed (non-fatal): %s", exc)
-    api_key           = _eff.get(CONF_API_KEY, "") or entry.data.get(CONF_API_KEY, "")
     llm_provider_name = _eff.get("llm_provider", "groq")
+    # Phase 2 (v7.107.0): each provider's own dedicated credential, with a
+    # narrow fallback to the legacy shared key only when llm_provider_name is
+    # the installation's saved primary provider (see resolve_provider_credential).
+    api_key = resolve_provider_credential(_eff, llm_provider_name)
+    if not api_key:
+        api_key = entry.data.get(CONF_API_KEY, "")
     llm_model         = _eff.get("model", "openai/gpt-oss-120b")
     llm_base_url      = _eff.get("llm_base_url", "") or None
 
@@ -768,6 +773,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # to know a credential is still sitting in plaintext in config.json.
         _LOGGER.warning("Credential relocation failed — credential(s) remain "
                         "in config.json, not moved to secrets.yaml: %s", exc)
+
+    # Split the legacy shared credential into its own provider-specific slot
+    # (Phase 2, v7.107.0). Safe: verify-before-strip, idempotent, never
+    # guesses or deletes on ambiguous ownership — see split_shared_credential.
+    try:
+        from . import ha_secrets as _hs2
+        await _hs2.split_shared_credential(hass)
+    except Exception as exc:
+        _LOGGER.warning("Credential provider-split migration failed — the "
+                        "shared credential remains in place, unmigrated: %s", exc)
 
     # Move any intrusion snapshots left under the old, unauthenticated
     # /config/www location (pre-v7.102.0) to the private snapshot dir

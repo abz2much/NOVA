@@ -109,6 +109,105 @@ async def test_list_models_returns_safe_error_shape(hass, hass_ws_client):
     }
 
 
+async def test_get_credential_status_rejects_non_admin(
+    hass, hass_ws_client, hass_read_only_access_token,
+):
+    """Credential status reveals which providers are configured — admin only,
+    same as nova/list_models (Phase 2, v7.107.0)."""
+    await _setup_nova(hass)
+    client = await hass_ws_client(hass, access_token=hass_read_only_access_token)
+
+    await client.send_json_auto_id({"type": "nova/get_credential_status"})
+    resp = await client.receive_json()
+
+    assert resp["success"] is False
+    assert resp["error"]["code"] == "unauthorized"
+
+
+async def test_get_credential_status_returns_booleans_only(hass, hass_ws_client):
+    """The status payload never carries a credential value — only whether
+    each provider has one configured."""
+    await _setup_nova(hass)
+    client = await hass_ws_client(hass)
+
+    await client.send_json_auto_id({"type": "nova/get_credential_status"})
+    resp = await client.receive_json()
+
+    assert resp["success"] is True
+    status = resp["result"]["status"]
+    assert set(status) == {"groq", "openai", "anthropic", "gemini", "custom", "ollama"}
+    assert all(isinstance(v, bool) for v in status.values())
+
+
+async def test_set_and_delete_credential_reject_non_admin(
+    hass, hass_ws_client, hass_read_only_access_token,
+):
+    """Writing or clearing a stored provider credential is admin only."""
+    await _setup_nova(hass)
+    client = await hass_ws_client(hass, access_token=hass_read_only_access_token)
+
+    await client.send_json_auto_id({
+        "type": "nova/set_credential", "provider": "groq", "value": "x",
+    })
+    resp = await client.receive_json()
+    assert resp["success"] is False
+    assert resp["error"]["code"] == "unauthorized"
+
+    await client.send_json_auto_id({"type": "nova/delete_credential", "provider": "groq"})
+    resp = await client.receive_json()
+    assert resp["success"] is False
+    assert resp["error"]["code"] == "unauthorized"
+
+
+async def test_set_credential_never_echoes_the_value_back(
+    hass, tmp_path, monkeypatch, hass_ws_client,
+):
+    """The success response carries only `ok` — never the value just stored,
+    and status afterwards flips to configured without ever exposing it."""
+    from custom_components.nova import ha_secrets
+
+    monkeypatch.setattr(ha_secrets, "SECRETS_PATH", tmp_path / "secrets.yaml")
+    await _setup_nova(hass)
+    client = await hass_ws_client(hass)
+
+    await client.send_json_auto_id({
+        "type": "nova/set_credential", "provider": "groq", "value": "gsk_super_secret_value",
+    })
+    resp = await client.receive_json()
+    assert resp["success"] is True
+    assert resp["result"] == {"ok": True}
+    assert "gsk_super_secret_value" not in str(resp)
+
+    await client.send_json_auto_id({"type": "nova/get_credential_status"})
+    status_resp = await client.receive_json()
+    assert status_resp["result"]["status"]["groq"] is True
+
+    await client.send_json_auto_id({"type": "nova/delete_credential", "provider": "groq"})
+    delete_resp = await client.receive_json()
+    assert delete_resp["success"] is True
+    assert delete_resp["result"] == {"ok": True}
+
+
+async def test_update_config_rejects_every_credential_key(hass, hass_ws_client):
+    """nova/update_config (the generic panel autosave path) must never accept
+    a credential key — it belongs only to nova/set_credential/delete_credential
+    (Phase 2, v7.107.0). Defense in depth: none of these are in
+    PANEL_WRITABLE_KEYS today either, but this closes the path even if that
+    allowlist is ever edited by mistake."""
+    from custom_components.nova import ha_secrets
+
+    await _setup_nova(hass)
+    client = await hass_ws_client(hass)
+
+    for key in ha_secrets.CREDENTIAL_KEYS:
+        await client.send_json_auto_id({
+            "type": "nova/update_config", "key": key, "value": "should-never-be-stored",
+        })
+        resp = await client.receive_json()
+        assert resp["success"] is False, key
+        assert resp["error"]["code"] == "invalid_key", key
+
+
 async def test_intrusion_snapshot_reaches_panel_only_via_admin_websocket(
     hass, tmp_path, monkeypatch, hass_ws_client, hass_client,
 ):

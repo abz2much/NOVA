@@ -30,9 +30,10 @@
         "menu_options": {
           "core": "Núcleo — persona, diretiva, modelo de conversação",
           "routing": "Encaminhamento — áreas de quarto, grupo de difusão, serviço de notificação",
-          "observer": "Observador — perceção proativa (precisa de uma chave Gemini)",
+          "observer": "Observador — consciência proativa (níveis de modelo, horas de silêncio)",
           "identity": "Identidade — reconhecimento por pessoa",
-          "email": "Email — caixa de entrada só de leitura (palavra-passe via secrets.yaml)"
+          "email": "Email — caixa de entrada só de leitura (palavra-passe via secrets.yaml)",
+          "credentials": "Credenciais — chaves API dos fornecedores"
         }
       },
       "core": {
@@ -64,10 +65,9 @@
       },
       "observer": {
         "title": "Nova — Modo Observador",
-        "description": "perceção proativa. O Nova vigia a sua casa e intervém quando algo merece nota. Requer uma chave API do Gemini (recomenda-se com faturação ativa).",
+        "description": "consciência proativa. O Nova observa a sua casa e avisa quando algo merece atenção. {note}",
         "data": {
           "observer_enabled": "Ativar o modo observador",
-          "gemini_api_key": "Chave API do Gemini",
           "classifier_model": "Modelo classificador (Nível 1 — económico)",
           "reasoning_model": "Modelo de raciocínio (Nível 2 — principal)",
           "review_model": "Modelo de revisão (Nível 3 — periódico)",
@@ -103,13 +103,40 @@
           "imap_ssl": "Usar SSL (recomendado)",
           "imap_secret_key": "Chave do secrets.yaml que contém a palavra-passe"
         }
+      },
+      "credentials": {
+        "title": "Nova — Credenciais",
+        "description": "Uma chave API dedicada por fornecedor — Groq, OpenAI, Anthropic, Gemini, um endpoint personalizado compatível com OpenAI e uma chave Bearer opcional para um endpoint Ollama protegido. Armazenada apenas no secrets.yaml do Home Assistant, nunca na configuração do painel, e nunca mostrada novamente aqui. Estado: {status}. Deixar um campo em branco não altera a chave guardada desse fornecedor. Fornecedor atual do agente principal: {active}.",
+        "data": {
+          "groq_credential": "Chave API Groq",
+          "clear_groq": "Apagar a chave Groq guardada",
+          "openai_credential": "Chave API OpenAI",
+          "clear_openai": "Apagar a chave OpenAI guardada",
+          "anthropic_credential": "Chave API Anthropic",
+          "clear_anthropic": "Apagar a chave Anthropic guardada",
+          "gemini_credential": "Chave API Gemini",
+          "clear_gemini": "Apagar a chave Gemini guardada",
+          "custom_credential": "Chave API do endpoint personalizado",
+          "clear_custom": "Apagar a chave personalizada guardada",
+          "ollama_credential": "Chave Bearer do Ollama (opcional — apenas para um endpoint protegido)",
+          "clear_ollama": "Apagar a chave Ollama guardada",
+          "confirm_delete_active": "Sim, percebo que apagar a chave do fornecedor atual do agente principal irá desativá-lo até que uma nova chave seja definida ou o fornecedor seja alterado"
+        }
       }
+    },
+    "error": {
+      "credential_set_and_clear": "Para cada fornecedor, introduza uma nova chave ou assinale \"apagar\" — não ambos.",
+      "confirm_required_for_active_provider": "Apagar a chave do fornecedor atual do agente principal exige a caixa de confirmação assinalada."
     }
   },
   "issues": {
     "llm_unavailable": {
       "title": "Backend de raciocínio do Nova indisponível",
       "description": "O Nova não conseguiu aceder ao seu modelo de raciocínio, por isso está a funcionar em modo limitado — controlo de dispositivos, estado e cenas continuam a funcionar. Motivo: {detail}\n\nAbra o painel do Nova → Definições e verifique o fornecedor, o modelo e a chave de API. Se o seu fornecedor descontinuou o modelo, selecione-o novamente na lista. Este aviso desaparece automaticamente assim que o raciocínio voltar a funcionar."
+    },
+    "credential_migration_ambiguous": {
+      "title": "Nova: uma credencial guardada precisa de ser atribuída a um fornecedor",
+      "description": "O Nova encontrou uma credencial partilhada de antes de existirem credenciais separadas por fornecedor, mas não conseguiu determinar a que fornecedor pertence. Nada foi alterado ou eliminado. Abra Definições → Dispositivos e serviços → Nova → Configurar → Credenciais e introduza-a no fornecedor correto."
     }
   }
 }

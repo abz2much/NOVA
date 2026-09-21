@@ -115,7 +115,9 @@ async def test_step_init_renders_menu(config_flow, fake_hass):
     # init is now a landing menu (not a form) — jump to any section directly
     res = await _flow(config_flow, fake_hass).async_step_init(None)
     assert res["type"] == "menu" and res["step_id"] == "init"
-    assert set(res["menu_options"]) == {"core", "routing", "observer", "identity", "email"}
+    assert set(res["menu_options"]) == {
+        "core", "routing", "observer", "credentials", "identity", "email",
+    }
 
 
 async def test_step_core_renders_fields(config_flow, fake_hass):
@@ -130,8 +132,9 @@ async def test_step_routing_renders_fields(config_flow, fake_hass):
 
 
 async def test_step_observer_renders_fields(config_flow, fake_hass):
+    # gemini_api_key moved to the Credentials step (Phase 2, v7.107.0) — 7 -> 6
     res = await _flow(config_flow, fake_hass).async_step_observer(None)
-    assert len(res["data_schema"].schema) == 7
+    assert len(res["data_schema"].schema) == 6
 
 
 async def test_step_identity_renders_fields(config_flow, fake_hass):
@@ -157,4 +160,214 @@ async def test_section_saves_independently(config_flow, fake_hass):
     assert res["type"] == "create_entry"
     # only the submitted keys are carried in _data (other sections untouched)
     assert flow._data == {"honorific": "boss", "model": "x"}
+
+
+# ── Credentials step (Phase 2, v7.107.0) ──────────────────────────────────────
+
+_PROVIDERS = ("groq", "openai", "anthropic", "gemini", "custom", "ollama")
+
+
+@pytest.fixture
+def ha_secrets(load):
+    return load("ha_secrets")
+
+
+class _EntryWithActiveProvider(_Entry):
+    data = {"llm_provider": "openai"}
+
+
+async def test_step_credentials_renders_all_provider_fields(config_flow, fake_hass, ha_secrets, monkeypatch):
+    monkeypatch.setattr(ha_secrets, "has_provider_credential_sync", lambda p, path=None: False)
+    res = await _flow(config_flow, fake_hass).async_step_credentials(None)
+    assert res["type"] == "form" and res["step_id"] == "credentials"
+    # 6 providers x (credential field + clear checkbox) + 1 confirm checkbox
+    assert len(res["data_schema"].schema) == 6 * 2 + 1
+
+
+async def test_step_credentials_status_shown_without_values(config_flow, fake_hass, ha_secrets, monkeypatch):
+    monkeypatch.setattr(
+        ha_secrets, "has_provider_credential_sync",
+        lambda p, path=None: p == "anthropic",
+    )
+    res = await _flow(config_flow, fake_hass).async_step_credentials(None)
+    status_note = res["description_placeholders"]["status"]
+    assert "anthropic: configured" in status_note
+    assert "groq: not set" in status_note
+    # has_provider_credential_sync is boolean-only by construction (Phase 2's
+    # CRUD layer never returns a value) — the note built from it structurally
+    # cannot contain a credential.
+
+
+async def test_step_credentials_blank_submission_writes_and_deletes_nothing(
+    config_flow, fake_hass, ha_secrets, monkeypatch,
+):
+    writes = []
+    deletes = []
+    monkeypatch.setattr(ha_secrets, "has_provider_credential_sync", lambda p, path=None: False)
+
+    async def _fake_set(hass, provider, value):
+        writes.append((provider, value))
+        return True
+
+    async def _fake_delete(hass, provider):
+        deletes.append(provider)
+        return True
+
+    monkeypatch.setattr(ha_secrets, "async_set_provider_credential", _fake_set)
+    monkeypatch.setattr(ha_secrets, "async_delete_provider_credential", _fake_delete)
+
+    flow = _flow(config_flow, fake_hass)
+    submission = {f"{p}_credential": "" for p in _PROVIDERS}
+    submission.update({f"clear_{p}": False for p in _PROVIDERS})
+    res = await flow.async_step_credentials(submission)
+
+    assert res["type"] == "create_entry"
+    assert writes == []
+    assert deletes == []
+
+
+async def test_step_credentials_writes_only_the_submitted_provider(
+    config_flow, fake_hass, ha_secrets, monkeypatch,
+):
+    writes = []
+    monkeypatch.setattr(ha_secrets, "has_provider_credential_sync", lambda p, path=None: False)
+
+    async def _fake_set(hass, provider, value):
+        writes.append((provider, value))
+        return True
+
+    monkeypatch.setattr(ha_secrets, "async_set_provider_credential", _fake_set)
+    monkeypatch.setattr(
+        ha_secrets, "async_delete_provider_credential",
+        lambda hass, provider: pytest.fail("should not be called"),
+    )
+
+    flow = _flow(config_flow, fake_hass)
+    submission = {f"{p}_credential": "" for p in _PROVIDERS}
+    submission.update({f"clear_{p}": False for p in _PROVIDERS})
+    submission["groq_credential"] = "NEW-GROQ-KEY"
+    res = await flow.async_step_credentials(submission)
+
+    assert res["type"] == "create_entry"
+    assert writes == [("groq", "NEW-GROQ-KEY")]
+
+
+async def test_step_credentials_set_and_clear_same_provider_is_rejected(
+    config_flow, fake_hass, ha_secrets, monkeypatch,
+):
+    monkeypatch.setattr(ha_secrets, "has_provider_credential_sync", lambda p, path=None: False)
+    monkeypatch.setattr(
+        ha_secrets, "async_set_provider_credential",
+        lambda hass, provider, value: pytest.fail("should not be called"),
+    )
+    monkeypatch.setattr(
+        ha_secrets, "async_delete_provider_credential",
+        lambda hass, provider: pytest.fail("should not be called"),
+    )
+
+    flow = _flow(config_flow, fake_hass)
+    submission = {f"{p}_credential": "" for p in _PROVIDERS}
+    submission.update({f"clear_{p}": False for p in _PROVIDERS})
+    submission["openai_credential"] = "SOMETHING"
+    submission["clear_openai"] = True
+    res = await flow.async_step_credentials(submission)
+
+    assert res["type"] == "form"
+    assert res["errors"]["base"] == "credential_set_and_clear"
+
+
+async def test_step_credentials_clearing_active_provider_needs_confirmation(
+    config_flow, fake_hass, ha_secrets, monkeypatch,
+):
+    deletes = []
+    monkeypatch.setattr(ha_secrets, "has_provider_credential_sync", lambda p, path=None: False)
+    monkeypatch.setattr(
+        ha_secrets, "async_delete_provider_credential",
+        lambda hass, provider: deletes.append(provider),
+    )
+
+    flow = config_flow.NovaOptionsFlow(_EntryWithActiveProvider())
+    flow.hass = fake_hass
+    submission = {f"{p}_credential": "" for p in _PROVIDERS}
+    submission.update({f"clear_{p}": False for p in _PROVIDERS})
+    submission["clear_openai"] = True  # openai is the active provider here
+    # No confirm_delete_active -> must be rejected, nothing deleted.
+    res = await flow.async_step_credentials(submission)
+
+    assert res["type"] == "form"
+    assert res["errors"]["base"] == "confirm_required_for_active_provider"
+    assert deletes == []
+
+
+async def test_step_credentials_clearing_active_provider_with_confirmation_succeeds(
+    config_flow, fake_hass, ha_secrets, monkeypatch,
+):
+    deletes = []
+
+    async def _fake_delete(hass, provider):
+        deletes.append(provider)
+        return True
+
+    monkeypatch.setattr(ha_secrets, "has_provider_credential_sync", lambda p, path=None: False)
+    monkeypatch.setattr(ha_secrets, "async_delete_provider_credential", _fake_delete)
+
+    flow = config_flow.NovaOptionsFlow(_EntryWithActiveProvider())
+    flow.hass = fake_hass
+    submission = {f"{p}_credential": "" for p in _PROVIDERS}
+    submission.update({f"clear_{p}": False for p in _PROVIDERS})
+    submission["clear_openai"] = True
+    submission["confirm_delete_active"] = True
+    res = await flow.async_step_credentials(submission)
+
+    assert res["type"] == "create_entry"
+    assert deletes == ["openai"]
+
+
+async def test_step_credentials_clearing_non_active_provider_needs_no_confirmation(
+    config_flow, fake_hass, ha_secrets, monkeypatch,
+):
+    deletes = []
+
+    async def _fake_delete(hass, provider):
+        deletes.append(provider)
+        return True
+
+    monkeypatch.setattr(ha_secrets, "has_provider_credential_sync", lambda p, path=None: False)
+    monkeypatch.setattr(ha_secrets, "async_delete_provider_credential", _fake_delete)
+
+    # Active provider is openai (default entry -> "groq" via _cur default),
+    # but here we clear gemini, which isn't driving the Main Agent.
+    flow = _flow(config_flow, fake_hass)  # default _Entry -> active provider "groq"
+    submission = {f"{p}_credential": "" for p in _PROVIDERS}
+    submission.update({f"clear_{p}": False for p in _PROVIDERS})
+    submission["clear_gemini"] = True
+    res = await flow.async_step_credentials(submission)
+
+    assert res["type"] == "create_entry"
+    assert deletes == ["gemini"]
+
+
+async def test_step_credentials_values_never_land_in_nova_config(
+    config_flow, fake_hass, ha_secrets, load, monkeypatch,
+):
+    """Credential values submitted here must go straight to ha_secrets, never
+    through nova_config.set/set_many (which would plaintext them)."""
+    jc = load("nova_config")
+    calls = []
+    monkeypatch.setattr(jc, "set", lambda k, v: calls.append(("set", k, v)))
+    monkeypatch.setattr(jc, "set_many", lambda d: calls.append(("set_many", dict(d))))
+    monkeypatch.setattr(ha_secrets, "has_provider_credential_sync", lambda p, path=None: False)
+
+    async def _fake_set(hass, provider, value):
+        return True
+
+    monkeypatch.setattr(ha_secrets, "async_set_provider_credential", _fake_set)
+
+    flow = _flow(config_flow, fake_hass)
+    submission = {f"{p}_credential": "" for p in _PROVIDERS}
+    submission.update({f"clear_{p}": False for p in _PROVIDERS})
+    submission["anthropic_credential"] = "sk-ant-should-not-be-plaintext"
+    await flow.async_step_credentials(submission)
+
+    assert calls == []
 

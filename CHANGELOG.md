@@ -1,3 +1,12 @@
+## [7.107.0] — security: separate provider credentials (Phase 2)
+
+- Every LLM provider — Groq, OpenAI, Anthropic, Gemini, a custom OpenAI-compatible endpoint, and an optional Bearer key for a protected Ollama endpoint — now has its own dedicated credential, stored only in Home Assistant's `secrets.yaml`.
+- Fixes a real cross-provider leak: the Main Agent, Observer tiers (classifier/reasoning/review), vision, and camera-reasoning roles used to always resolve the shared primary key regardless of which provider that role was actually configured for — a role pointed at a different provider than the primary could receive the primary's key.
+- The existing shared credential is migrated automatically and safely: ownership is decided by the saved provider first, the key's own shape only as a fallback, and nothing is written, overwritten, or deleted when that's ambiguous — a Repair notice explains what to do by hand in that case. Existing Gemini credentials, and an installation's `groq_api_key` alias, are left exactly as they are.
+- Two places to manage credentials, both administrator only: the Nova panel's existing AI Models card (Settings → AI Models) now shows a Save/Clear row per provider next to the role pickers already there, and Settings → Devices & Services → Nova → Configure gains a dedicated Credentials section. Both show only whether a provider is configured (never the value); an empty field never erases a stored key, and clearing the key actively driving the Main Agent (Configure → Credentials) needs an explicit confirmation.
+- Live model discovery (`nova/list_models`, still administrator only) can now use a dedicated custom-endpoint or Ollama credential when one is configured; unauthenticated custom/Ollama endpoints are unaffected, and the shared primary key still never reaches either.
+- Compatibility: an installation using a custom OpenAI-compatible endpoint or a protected Ollama server via the old shared key keeps working through the automatic migration; if migration can't determine ownership, re-enter that one credential under the correct provider in the new Credentials section.
+
 ## [7.106.5] — security: secure model discovery
 
 - Model discovery is now restricted to Home Assistant administrators and no longer accepts a browser supplied destination URL.

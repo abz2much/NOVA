@@ -246,10 +246,42 @@ def runtime_get(hass, entry, key: str, default=None):
     return default
 
 
+_credential_keys_cache: Optional[frozenset] = None
+
+
+def _credential_keys() -> frozenset:
+    """The set of config keys that hold LLM credentials (ha_secrets.CREDENTIAL_KEYS),
+    cached after first lookup. set()/set_many() refuse to persist these as
+    plaintext — credentials belong only in secrets.yaml (ha_secrets.py), never
+    in config.json. Falls back to an empty set (nothing blocked) if ha_secrets
+    can't be imported, rather than ever raising."""
+    # NOTE: this module defines its own `set` function below (the public
+    # config-write API), which shadows the builtin within this module's
+    # namespace — frozenset(...) here, never bare set(...)/set().
+    global _credential_keys_cache
+    if _credential_keys_cache is None:
+        try:
+            from . import ha_secrets
+            _credential_keys_cache = frozenset(ha_secrets.CREDENTIAL_KEYS)
+        except Exception:
+            _credential_keys_cache = frozenset()
+    return _credential_keys_cache
+
+
 def set(key: str, value: Any) -> bool:
     """Set a config value and persist to disk. Returns whether the save to
-    disk succeeded (see save()) — the value is applied in memory regardless."""
+    disk succeeded (see save()) — the value is applied in memory regardless.
+
+    A credential key (ha_secrets.CREDENTIAL_KEYS) with a real value is
+    refused — those belong only in secrets.yaml, never here. Deleting one
+    (value is empty/None) is still allowed, since that's how a caller clears
+    a stale plaintext copy."""
     global _loaded
+    if key in _credential_keys() and value:
+        _LOGGER.warning(
+            "Nova config: refused to store credential key '%s' in config.json "
+            "— use ha_secrets.async_set_provider_credential instead", key)
+        return False
     if not _loaded:
         load()
     with _lock:
@@ -261,14 +293,24 @@ def set(key: str, value: Any) -> bool:
 
 def set_many(updates: dict) -> bool:
     """Set multiple config values and persist. Returns whether the save to
-    disk succeeded (see save()) — values are applied in memory regardless."""
+    disk succeeded (see save()) — values are applied in memory regardless.
+
+    Any credential key (see set()) with a real value is silently dropped from
+    `updates` before writing; every other key in the same call still saves."""
     global _loaded
+    blocked = _credential_keys()
+    filtered = {k: v for k, v in updates.items() if not (k in blocked and v)}
+    if len(filtered) != len(updates):
+        _LOGGER.warning(
+            "Nova config: refused to store %d credential key(s) in config.json "
+            "— use ha_secrets.async_set_provider_credential instead",
+            len(updates) - len(filtered))
     if not _loaded:
         load()
     with _lock:
-        _cache_dict().update(updates)
+        _cache_dict().update(filtered)
     ok = save()
-    _LOGGER.debug("Nova config set_many: %d keys", len(updates))
+    _LOGGER.debug("Nova config set_many: %d keys", len(filtered))
     return ok
 
 

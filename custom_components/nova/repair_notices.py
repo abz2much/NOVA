@@ -67,3 +67,47 @@ def clear_llm_problem(hass: HomeAssistant) -> None:
     except Exception as exc:
         _LOGGER.debug("could not clear LLM repair issue: %s", exc)
     _state.update(active=False, detail=None, cleared_once=True)
+
+
+# ─── Credential migration ambiguity (Phase 2, v7.107.0) ──────────────────────
+# ha_secrets.split_shared_credential raises this when it can't tell which
+# provider the legacy shared credential belongs to — it deliberately leaves
+# the credential untouched rather than guess, so this is the administrator's
+# only signal that a manual migration (Settings → Nova → Configure →
+# Credentials) is still needed.
+
+_CRED_ISSUE = "credential_migration_ambiguous"
+_cred_state = {"active": False}
+
+
+def note_credential_migration_ambiguous(hass: HomeAssistant) -> None:
+    """Raise the 'shared credential could not be auto-migrated' Repair
+    issue. Safe to call from the event loop; never raises; idempotent —
+    calling it again while already active is a no-op."""
+    if _cred_state["active"]:
+        return
+    try:
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            _CRED_ISSUE,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=_CRED_ISSUE,
+        )
+        _cred_state["active"] = True
+    except Exception as exc:
+        _LOGGER.debug("could not create credential migration repair issue: %s", exc)
+
+
+def clear_credential_migration_ambiguous(hass: HomeAssistant) -> None:
+    """Clear the credential-migration Repair issue once it's resolved
+    (migrated, or the administrator set the provider explicitly). Safe to
+    call unconditionally; never raises."""
+    if not _cred_state["active"]:
+        return
+    try:
+        ir.async_delete_issue(hass, DOMAIN, _CRED_ISSUE)
+    except Exception as exc:
+        _LOGGER.debug("could not clear credential migration repair issue: %s", exc)
+    _cred_state["active"] = False

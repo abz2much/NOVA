@@ -30,9 +30,10 @@
         "menu_options": {
           "core": "Núcleo — persona, directiva, modelo de conversación",
           "routing": "Enrutamiento — áreas de dormitorio, grupo de difusión, servicio de notificación",
-          "observer": "Observador — percepción proactiva (necesita una clave Gemini)",
+          "observer": "Observador — conciencia proactiva (niveles de modelo, horas de silencio)",
           "identity": "Identidad — reconocimiento por persona",
-          "email": "Correo — bandeja de entrada de solo lectura (contraseña vía secrets.yaml)"
+          "email": "Correo — bandeja de entrada de solo lectura (contraseña vía secrets.yaml)",
+          "credentials": "Credenciales — claves API de proveedores"
         }
       },
       "core": {
@@ -64,10 +65,9 @@
       },
       "observer": {
         "title": "Nova — Modo Observador",
-        "description": "percepción proactiva. Nova vigila su hogar e interviene cuando algo merece mención. Necesita una clave API de Gemini (se recomienda con facturación activada).",
+        "description": "conciencia proactiva. Nova observa tu hogar y avisa cuando algo merece la pena señalar. {note}",
         "data": {
           "observer_enabled": "Activar el modo observador",
-          "gemini_api_key": "Clave API de Gemini",
           "classifier_model": "Modelo clasificador (Nivel 1 — económico)",
           "reasoning_model": "Modelo de razonamiento (Nivel 2 — principal)",
           "review_model": "Modelo de revisión (Nivel 3 — periódico)",
@@ -103,13 +103,40 @@
           "imap_ssl": "Usar SSL (recomendado)",
           "imap_secret_key": "Clave de secrets.yaml que contiene la contraseña"
         }
+      },
+      "credentials": {
+        "title": "Nova — Credenciales",
+        "description": "Una clave API dedicada por proveedor — Groq, OpenAI, Anthropic, Gemini, un endpoint personalizado compatible con OpenAI y una clave Bearer opcional para un endpoint Ollama protegido. Almacenada solo en el secrets.yaml de Home Assistant, nunca en la configuración del panel, y nunca se muestra aquí. Estado: {status}. Dejar un campo en blanco no cambia la clave guardada de ese proveedor. Proveedor actual del agente principal: {active}.",
+        "data": {
+          "groq_credential": "Clave API de Groq",
+          "clear_groq": "Borrar la clave de Groq guardada",
+          "openai_credential": "Clave API de OpenAI",
+          "clear_openai": "Borrar la clave de OpenAI guardada",
+          "anthropic_credential": "Clave API de Anthropic",
+          "clear_anthropic": "Borrar la clave de Anthropic guardada",
+          "gemini_credential": "Clave API de Gemini",
+          "clear_gemini": "Borrar la clave de Gemini guardada",
+          "custom_credential": "Clave API del endpoint personalizado",
+          "clear_custom": "Borrar la clave personalizada guardada",
+          "ollama_credential": "Clave Bearer de Ollama (opcional — solo para un endpoint protegido)",
+          "clear_ollama": "Borrar la clave de Ollama guardada",
+          "confirm_delete_active": "Sí, entiendo que borrar la clave del proveedor actual del agente principal lo desactivará hasta que se defina una nueva clave o se cambie el proveedor"
+        }
       }
+    },
+    "error": {
+      "credential_set_and_clear": "Para cada proveedor, introduce una clave nueva o marca «borrar» — no ambas cosas.",
+      "confirm_required_for_active_provider": "Borrar la clave del proveedor actual del agente principal requiere marcar la casilla de confirmación."
     }
   },
   "issues": {
     "llm_unavailable": {
       "title": "Backend de razonamiento de Nova no disponible",
       "description": "Nova no pudo acceder a su modelo de razonamiento, por lo que funciona en modo limitado: el control de dispositivos, el estado y las escenas siguen funcionando. Motivo: {detail}\n\nAbre el panel de Nova → Ajustes y comprueba el proveedor, el modelo y la clave de API. Si tu proveedor retiró el modelo, vuelve a seleccionarlo de la lista. Este aviso desaparece automáticamente cuando el razonamiento vuelve a funcionar."
+    },
+    "credential_migration_ambiguous": {
+      "title": "Nova: una credencial guardada necesita asignarse a un proveedor",
+      "description": "Nova encontró una credencial compartida de antes de que existieran credenciales separadas por proveedor, pero no pudo determinar a qué proveedor pertenece. No se cambió ni eliminó nada. Abre Ajustes → Dispositivos y servicios → Nova → Configurar → Credenciales e introdúcela en el proveedor correcto."
     }
   }
 }

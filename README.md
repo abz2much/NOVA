@@ -258,6 +258,7 @@ This lives in `/config/nova/config.json`; merge it into the existing object rath
 | --- | --- |
 | `llm_provider` / per-role models | Choose Groq, Gemini, OpenAI, Anthropic, Ollama, or custom, independently for the main agent, classifier, reasoning, review, vision, and camera-reasoning roles. |
 | `llm_base_url` | Point the Ollama/custom providers at your local GPU server (for example `http://gpu-server:11434/v1`). |
+| Provider credentials | Settings → AI Models (or Configure → Credentials) — one dedicated key per provider, stored only in `secrets.yaml`. Each role above uses only its own provider's key, never another's. |
 | `observer_enabled` | Let Nova watch the event stream and decide what's worth surfacing. |
 | `rich_reasoning` | Cloud-first judgment for medium/high-urgency events: costs a bit more, reasons better. |
 | `visitor_learning` | Silently learn from person events at the door. Never spoken. |
@@ -317,6 +318,7 @@ The list below covers Nova-specific differences. It is not a complete release-by
 - A new preference or routine from "remember that…" isn't trusted immediately — Nova asks you to confirm it in the same conversation, and if you don't, it waits in the panel's Memory tab for you to approve, edit, or reject, rather than something Nova merely read (an email, a calendar invite) quietly becoming an accepted fact.
 - Voice model downloads verify file size before installing, and reject a checksum mismatch outright when one is configured; the upstream voice repository is currently access-gated, so no checksum is populated for it today (an optional cosmetic TTS voice — not required for Nova to function).
 - Confirmed intrusion snapshots are stored privately under Nova's config directory and retrieved through the admin-gated websocket command. Temporary notification copies use signed URLs and are deleted after expiry.
+- Every LLM provider (Groq, OpenAI, Anthropic, Gemini, a custom OpenAI-compatible endpoint, and an optional Bearer key for a protected Ollama endpoint) gets its own dedicated credential in Home Assistant's `secrets.yaml`, so a key configured for one provider can never be sent to another — a role (a tier, vision, camera-reasoning) pointed at a different provider than the Main Agent used to be able to receive the Main Agent's key by mistake. Credential values are never returned to any UI, only whether a provider is configured; migrating an existing shared key never guesses which provider it belongs to, and leaves it in place untouched if that can't be determined safely.
 
 **Smarter, less noisy home awareness**
 - Sleep state is explicit (Auto / Awake / Asleep), not inferred purely from bedroom occupancy — one person going to bed no longer marks the whole house "asleep" while someone else is still up.

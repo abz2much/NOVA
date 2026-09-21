@@ -126,6 +126,47 @@ def test_local_and_custom_use_only_saved_server_side_url_without_credentials(
     assert "attacker.invalid" not in url
 
 
+@pytest.mark.parametrize(
+    ("provider", "cred_field"),
+    [("custom", "custom_api_key"), ("ollama", "ollama_api_key")],
+)
+def test_custom_and_ollama_use_their_own_dedicated_credential_when_set(
+    discovery, provider, cred_field,
+):
+    """Phase 2, v7.107.0: an authenticated custom or protected-Ollama
+    endpoint can now use its own dedicated credential for discovery."""
+    resolve = discovery["_resolve_model_discovery_request"]
+    config = {
+        "llm_provider": provider,
+        "llm_base_url": "https://models.example.test/v1" if provider == "custom"
+                         else "http://ollama.lan:11434",
+        cred_field: "endpoint-own-secret",
+    }
+
+    url, headers = resolve(config, provider)
+
+    assert headers == {"Authorization": "Bearer endpoint-own-secret"}
+
+
+@pytest.mark.parametrize("provider", ["custom", "ollama"])
+def test_custom_and_ollama_still_never_receive_the_shared_key(discovery, provider):
+    """The dedicated credential is additive — the shared primary key (or its
+    groq_api_key alias) must still never reach a custom/Ollama endpoint,
+    matching Phase 1's existing isolation."""
+    resolve = discovery["_resolve_model_discovery_request"]
+    config = {
+        "llm_provider": provider,
+        "llm_base_url": "https://models.example.test/v1" if provider == "custom"
+                         else "http://ollama.lan:11434",
+        "api_key": "shared-cloud-secret",
+        "groq_api_key": "groq-secret",
+    }
+
+    _, headers = resolve(config, provider)
+
+    assert headers == {}
+
+
 def test_local_ollama_discovery_needs_no_cloud_key(discovery):
     resolve = discovery["_resolve_model_discovery_request"]
 

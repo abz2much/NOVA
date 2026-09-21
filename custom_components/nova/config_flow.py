@@ -38,7 +38,6 @@ from .const import (
     CONF_BROADCAST_GROUP,
     CONF_NOTIFY_SERVICE,
     CONF_OBSERVER_ENABLED,
-    CONF_GEMINI_API_KEY,
     CONF_CLASSIFIER_MODEL,
     CONF_REASONING_MODEL,
     CONF_REVIEW_MODEL,
@@ -244,7 +243,7 @@ class NovaOptionsFlow(OptionsFlow):
         """Landing menu — jump to any section directly."""
         return self.async_show_menu(
             step_id="init",
-            menu_options=["core", "routing", "observer", "identity", "email"],
+            menu_options=["core", "routing", "observer", "credentials", "identity", "email"],
         )
 
     async def async_step_core(self, user_input: dict[str, Any] | None = None) -> dict:
@@ -291,15 +290,14 @@ class NovaOptionsFlow(OptionsFlow):
         return self.async_show_form(step_id="routing", data_schema=schema)
 
     async def async_step_observer(self, user_input: dict[str, Any] | None = None) -> dict:
-        """Observer — proactive awareness (Gemini key + model tiers + quiet hours)."""
+        """Observer — proactive awareness (model tiers + quiet hours). Provider
+        credentials (including Gemini) live in the Credentials section — never
+        shown or re-collected here, so this step can't leak or re-plaintext one."""
         if user_input is not None:
             return await self._save_section(user_input)
         schema = vol.Schema({
             vol.Optional(CONF_OBSERVER_ENABLED, description=self._sv(CONF_OBSERVER_ENABLED, False)):
                 selector.BooleanSelector(),
-            vol.Optional(CONF_GEMINI_API_KEY, description=self._sv(CONF_GEMINI_API_KEY, "")):
-                selector.TextSelector(selector.TextSelectorConfig(
-                    type=selector.TextSelectorType.PASSWORD)),
             vol.Optional(CONF_CLASSIFIER_MODEL,
                          description=self._sv(CONF_CLASSIFIER_MODEL, DEFAULT_CLASSIFIER_MODEL)):
                 selector.TextSelector(),
@@ -316,7 +314,86 @@ class NovaOptionsFlow(OptionsFlow):
                          description=self._sv(CONF_OBSERVER_QUIET_END, DEFAULT_OBSERVER_QUIET_END)):
                 selector.TextSelector(),
         })
-        return self.async_show_form(step_id="observer", data_schema=schema)
+        return self.async_show_form(
+            step_id="observer",
+            data_schema=schema,
+            description_placeholders={
+                "note": "Provider API keys (Gemini included) are set in "
+                        "Configure → Credentials, not here.",
+            },
+        )
+
+    async def async_step_credentials(self, user_input: dict[str, Any] | None = None) -> dict:
+        """Credentials — one dedicated key per provider (Phase 2, v7.107.0).
+
+        Values are never shown back: every field starts blank, so leaving it
+        blank makes no change to that provider's stored credential (an empty
+        form field can never erase one). To remove a credential, tick its
+        "clear" box explicitly. Clearing the credential for the provider
+        currently driving the Main Agent (Core → Model provider) additionally
+        requires the confirmation box, so a stray click can't silently break
+        the Main Agent.
+        """
+        from . import ha_secrets
+        from .const import PROVIDER_API_KEY_FIELDS
+
+        active_provider = str(self._cur("llm_provider", "groq") or "groq").strip().lower()
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            writes: dict[str, str] = {}
+            deletes: list[str] = []
+            for provider in PROVIDER_API_KEY_FIELDS:
+                new_val = (user_input.get(f"{provider}_credential") or "").strip()
+                clear = bool(user_input.get(f"clear_{provider}", False))
+                if new_val and clear:
+                    errors["base"] = "credential_set_and_clear"
+                    break
+                if new_val:
+                    writes[provider] = new_val
+                elif clear:
+                    deletes.append(provider)
+
+            if not errors:
+                deleting_active = active_provider in deletes and active_provider not in writes
+                confirmed = bool(user_input.get("confirm_delete_active", False))
+                if deleting_active and not confirmed:
+                    errors["base"] = "confirm_required_for_active_provider"
+                else:
+                    for provider, value in writes.items():
+                        await ha_secrets.async_set_provider_credential(self.hass, provider, value)
+                    for provider in deletes:
+                        await ha_secrets.async_delete_provider_credential(self.hass, provider)
+                    return self.async_create_entry(title="", data={**self._entry.options})
+
+        status = {
+            provider: await self.hass.async_add_executor_job(
+                ha_secrets.has_provider_credential_sync, provider)
+            for provider in PROVIDER_API_KEY_FIELDS
+        }
+        schema_dict: dict = {}
+        for provider in PROVIDER_API_KEY_FIELDS:
+            schema_dict[vol.Optional(f"{provider}_credential", default="")] = \
+                selector.TextSelector(selector.TextSelectorConfig(
+                    type=selector.TextSelectorType.PASSWORD))
+            schema_dict[vol.Optional(f"clear_{provider}", default=False)] = \
+                selector.BooleanSelector()
+        schema_dict[vol.Optional("confirm_delete_active", default=False)] = \
+            selector.BooleanSelector()
+
+        status_note = ", ".join(
+            f"{provider}: {'configured' if configured else 'not set'}"
+            for provider, configured in status.items()
+        )
+        return self.async_show_form(
+            step_id="credentials",
+            data_schema=vol.Schema(schema_dict),
+            errors=errors,
+            description_placeholders={
+                "status": status_note,
+                "active": active_provider,
+            },
+        )
 
     async def async_step_identity(self, user_input: dict[str, Any] | None = None) -> dict:
         """Identity — per-person recognition; voice fingerprint tier needs a GPU."""
