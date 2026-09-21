@@ -767,7 +767,12 @@ NOVA_TOOLS = [
                 "that benefit from a clean, focused context (e.g. gathering the "
                 "week's schedule and weather together). Sub-agents are read-only: "
                 "they cannot control devices or change settings — do that yourself "
-                "with the result. Do not delegate trivial single-tool lookups."
+                "with the result. Do not delegate trivial single-tool lookups. For "
+                "a fault, error, or 'why is X broken/slow/unavailable' question, "
+                "pass profile='homer' instead of a capability — HOMER is Nova's "
+                "read-only System Diagnostic Specialist, with its own fixed "
+                "diagnostic tool set and a lower turn limit. Don't delegate a "
+                "single obvious state check to HOMER either — read it directly."
             ),
             "parameters": {
                 "type": "object",
@@ -779,14 +784,34 @@ NOVA_TOOLS = [
                     "capability": {
                         "type": "string",
                         "enum": ["scheduling", "inbox", "home_state", "diagnostics", "research", "environment"],
-                        "description": "Which curated read-only tool group the sub-agent gets.",
+                        "description": "Which curated read-only tool group the sub-agent gets. "
+                                       "Ignored if 'profile' is also set. 'diagnostics' is kept "
+                                       "as an accepted name for compatibility but is not a "
+                                       "separate group — it resolves to the exact same HOMER "
+                                       "specialist as profile='homer'; prefer 'profile': 'homer' "
+                                       "directly for a fault/diagnosis request.",
+                    },
+                    "profile": {
+                        "type": "string",
+                        "enum": ["homer"],
+                        "description": (
+                            "A named specialist sub-agent instead of a generic capability "
+                            "group. 'homer': Nova's read-only System Diagnostic Specialist — "
+                            "investigates a fault (an unavailable device, a failed automation, "
+                            "slow responses, connectivity/host health, 'what caused X to "
+                            "change') using diagnostic and state-reading tools only, and "
+                            "reports the likely cause, evidence, and a recommended next step. "
+                            "It never controls anything and cannot delegate further."
+                        ),
                     },
                     "max_turns": {
                         "type": "integer",
-                        "description": "Optional cap on the sub-agent's tool steps (default 6, max 6).",
+                        "description": "Optional cap on the sub-agent's tool steps (default/max "
+                                       "depends on the capability or profile; a profile's own "
+                                       "cap is never exceeded regardless of this value).",
                     },
                 },
-                "required": ["objective", "capability"],
+                "required": ["objective"],
             },
         },
     },
@@ -3679,16 +3704,35 @@ MAX_DELEGATION_DEPTH = 1        # parent (depth 0) may delegate; a sub-agent may
 _DELEGATION_MAX_TURNS = 6       # hard cap on a sub-agent's tool-loop iterations
 
 # Curated capability groups -> the read-only tools a sub-agent of that kind gets.
+#
+# NOTE: there is deliberately no "diagnostics" entry here. Diagnostics used to
+# be its own capability group with its own tool list, which would have left
+# two competing definitions of "what a diagnostic sub-agent may do" once HOMER
+# (a named profile, below) was added. HOMER is now the single, canonical
+# diagnostic policy — its tool grant, turn cap, and prompt live in exactly one
+# place (AGENT_PROFILES["homer"]) — and "diagnostics" survives only as a
+# backward-compatible alias for it (see _resolve_capability / _run_delegated),
+# not a second implementation. solar_status/energy_report were part of the
+# old diagnostics group but are NOT diagnostic tools in HOMER's sense (they
+# report totals/forecasts, not fault evidence) — they remain reachable the
+# same way every other Nova tool is: directly by the main agent, or via a
+# capability group where they actually fit (none currently curates them,
+# same as before this phase).
 CAPABILITY_GROUPS: dict = {
     "scheduling":  {"calendar_agenda", "read_email", "weather_forecast", "get_home_summary"},
     "inbox":       {"read_email", "calendar_agenda"},
     "home_state":  {"get_entity_state", "search_entities", "get_area_devices",
                     "get_home_summary", "activity_history"},
-    "diagnostics": {"system_diagnostics", "cognitive_status", "connectivity_status",
-                    "energy_status", "solar_status", "energy_report", "activity_history",
-                    "get_entity_state", "root_cause"},
     "research":    {"web_research", "search_documents", "search_entities"},
     "environment": {"weather_forecast", "hazard_report"},
+}
+
+# Legacy capability names that now resolve to a named profile's canonical
+# grant instead of their own entry in CAPABILITY_GROUPS above — preserves
+# existing internal delegate_task(capability="diagnostics", ...) calls
+# without maintaining a second diagnostics allowlist/prompt/turn-limit.
+_LEGACY_CAPABILITY_PROFILE_ALIASES: dict = {
+    "diagnostics": "homer",
 }
 
 # Never granted to a sub-agent, even if a group lists one (defense in depth):
@@ -3707,8 +3751,69 @@ _SUBAGENT_DENY: set = {
 
 def _resolve_capability(capability: str) -> set:
     """Capability group name -> tool-name set a sub-agent may use, always minus
-    the denylist. Unknown group -> empty set."""
-    return CAPABILITY_GROUPS.get(str(capability or ""), set()) - _SUBAGENT_DENY
+    the denylist. A legacy alias (currently just 'diagnostics') resolves to
+    its target profile's own tool set — the exact same grant _resolve_profile
+    would return, not a parallel copy. Unknown group -> empty set."""
+    cap = str(capability or "")
+    alias_target = _LEGACY_CAPABILITY_PROFILE_ALIASES.get(cap)
+    if alias_target:
+        resolved = _resolve_profile(alias_target)
+        return resolved[0] if resolved else set()
+    return CAPABILITY_GROUPS.get(cap, set()) - _SUBAGENT_DENY
+
+
+# ── Named sub-agent profiles (HOMER, Phase 7) ────────────────────────────────
+# A named profile is a fixed (tools, turn cap, system directive) triple keyed
+# by name — a more specialised alternative to the generic capability groups
+# above, for a sub-agent that needs its own persona and stricter limits, not
+# just a curated tool subset. Only HOMER exists today (a read-only diagnostic
+# specialist, so it fits the existing "sub-agents never actuate" model exactly
+# and needs no opt-in). An actuating profile is explicitly NOT part of this
+# phase — see CHANGELOG/README for the boundary this deliberately does not
+# cross.
+_HOMER_DIRECTIVE = (
+    "You are HOMER, Nova's System Diagnostic Specialist — a focused, read-only "
+    "sub-agent, not Nova itself. You have no tool that controls a device, "
+    "changes a setting, writes data, sends a notification, dismisses an alert, "
+    "or delegates work to anyone else; nothing you say makes any of those "
+    "happen. Investigate the supplied fault using only the diagnostic, "
+    "telemetry, and state tools you've been given. Separate what you OBSERVE "
+    "(a fact an actual tool call returned) from what you INFER (your reasoning "
+    "about what those facts mean) — do not guess, and do not blend the two "
+    "without saying which is which. When the evidence supports one, identify "
+    "the most likely cause and cite the evidence for it; when it doesn't, say "
+    "plainly what remains uncertain rather than filling the gap. Close with "
+    "one concrete recommended next step. Report back to the parent agent — you "
+    "never address a device directly, and you never claim to have fixed, "
+    "repaired, or changed anything; you only report findings."
+)
+
+AGENT_PROFILES: dict = {
+    "homer": {
+        "label": "HOMER",
+        "max_turns": 4,
+        "tools": frozenset({
+            "system_diagnostics", "cognitive_status", "connectivity_status",
+            "energy_status", "activity_history", "get_entity_state",
+            "search_entities", "root_cause",
+        }),
+        "directive": _HOMER_DIRECTIVE,
+    },
+}
+
+
+def _resolve_profile(name: str):
+    """Named profile -> (tools, max_turns, label, directive), always minus the
+    denylist (defense in depth — no profile is exempt from it). Case-
+    insensitive; unknown name returns None so the caller can build its own
+    error. The tool set, turn cap, and directive are entirely server-side:
+    nothing in the caller's args, objective text, or a model's own output can
+    add to or change what's returned here."""
+    prof = AGENT_PROFILES.get(str(name or "").strip().lower())
+    if not prof:
+        return None
+    allowed = set(prof["tools"]) - _SUBAGENT_DENY
+    return allowed, int(prof["max_turns"]), str(prof["label"]), str(prof["directive"])
 
 
 def _scoped_tool_list(allowed_tools: Optional[set]) -> list:
@@ -3737,20 +3842,51 @@ async def _run_delegated(hass, args: dict, *, persona: str, provider_name: str,
     string (result or error) for the parent's tool-result slot. Never raises."""
     objective = str(args.get("objective", "")).strip()
     capability = str(args.get("capability", "")).strip()
+    profile_name = str(args.get("profile", "")).strip()
     if not objective:
         return json.dumps({"error": "delegate_task needs an objective"})
     if depth >= MAX_DELEGATION_DEPTH:
         return json.dumps({"error": "delegation depth limit reached — a sub-agent "
                                     "cannot delegate further; handle this directly"})
-    allowed = _resolve_capability(capability)
-    if not allowed:
-        return json.dumps({"error": "unknown capability '%s'. Options: %s"
-                                    % (capability, ", ".join(sorted(CAPABILITY_GROUPS)))})
-    try:
-        turns = int(args.get("max_turns", _DELEGATION_MAX_TURNS) or _DELEGATION_MAX_TURNS)
-    except Exception:
-        turns = _DELEGATION_MAX_TURNS
-    turns = max(1, min(turns, _DELEGATION_MAX_TURNS))
+
+    # A named profile (HOMER) takes full precedence over 'capability' — its own
+    # fixed tool set, turn cap, and directive, resolved case-insensitively and
+    # ignoring anything else in `args`. An unrecognized profile is rejected
+    # outright; it never falls back to the generic capability groups (a typo'd
+    # or hostile profile name must not silently grant a broader tool set).
+    #
+    # 'capability' is checked for a legacy profile alias (currently just
+    # "diagnostics" -> "homer") BEFORE falling through to the generic
+    # CAPABILITY_GROUPS path, so an existing caller using
+    # capability="diagnostics" gets the exact same tool grant, turn cap, and
+    # directive as profile="homer" — one implementation, two accepted names.
+    directive = None
+    profile_label = None
+    legacy_alias = None if profile_name else _LEGACY_CAPABILITY_PROFILE_ALIASES.get(capability)
+    effective_profile = profile_name or legacy_alias
+
+    if effective_profile:
+        resolved = _resolve_profile(effective_profile)
+        if resolved is None:
+            return json.dumps({"error": "unknown profile '%s'. Options: %s"
+                                        % (profile_name, ", ".join(sorted(AGENT_PROFILES)))})
+        allowed, profile_cap, profile_label, directive = resolved
+        try:
+            turns = int(args.get("max_turns", profile_cap) or profile_cap)
+        except Exception:
+            turns = profile_cap
+        turns = max(1, min(turns, profile_cap))
+    else:
+        allowed = _resolve_capability(capability)
+        if not allowed:
+            return json.dumps({"error": "unknown capability '%s'. Options: %s"
+                                        % (capability, ", ".join(sorted(CAPABILITY_GROUPS)))})
+        try:
+            turns = int(args.get("max_turns", _DELEGATION_MAX_TURNS) or _DELEGATION_MAX_TURNS)
+        except Exception:
+            turns = _DELEGATION_MAX_TURNS
+        turns = max(1, min(turns, _DELEGATION_MAX_TURNS))
+
     try:
         result = await run_agent(
             hass,
@@ -3758,11 +3894,25 @@ async def _run_delegated(hass, args: dict, *, persona: str, provider_name: str,
             persona=persona, provider_name=provider_name, api_key=api_key,
             model=model, base_url=base_url, config=config,
             allowed_tools=allowed, max_iterations=turns, depth=depth + 1,
+            profile_directive=directive,
         )
-        return json.dumps({"capability": capability, "objective": objective,
-                           "result": result})
+        out = {"objective": objective, "result": result}
+        if profile_label:
+            out["profile"] = profile_label
+            if legacy_alias:
+                out["capability"] = capability  # preserve the field an existing caller reads
+        else:
+            out["capability"] = capability
+        return json.dumps(out)
     except Exception as exc:
-        return json.dumps({"error": "sub-agent failed: %s" % exc})
+        # Never echo the raw exception into a tool-result JSON that flows
+        # back into the model's context (and potentially gets narrated to
+        # the user) — it can carry a provider error string with more detail
+        # than should leave the server. Full detail goes to the log only.
+        _LOGGER.warning("delegate_task sub-agent failed (objective=%r): %s",
+                        objective[:120], exc)
+        return json.dumps({"error": "sub-agent failed — could not complete "
+                                    "the delegated objective"})
 
 
 _LANG_NAMES = {
@@ -3816,6 +3966,7 @@ async def run_agent(
     allowed_tools: Optional[set] = None,
     max_iterations: Optional[int] = None,
     depth: int = 0,
+    profile_directive: Optional[str] = None,
 ) -> str:
     """
     Run the Nova agentic LLM loop (v5.7.07).
@@ -3875,7 +4026,41 @@ async def run_agent(
     except Exception:
         pass
 
-    system_prompt = (
+    if profile_directive:
+        # A named sub-agent profile (HOMER) gets its own system prompt, not a
+        # directive bolted onto the standard one: the standard prompt below
+        # makes unconditional claims ("you have tools to control devices...",
+        # the "You are Nova" persona) that would contradict a strictly
+        # read-only profile's actual tool set. Home/situation/cognitive-core
+        # context is kept (useful, non-actuating grounding); the
+        # device-control and persona framing is not — this replaces it
+        # outright rather than layering the directive on top of it.
+        system_prompt = (
+            f"{profile_directive}\n\n"
+            f"{_language_directive(hass)}"
+            f"## Current home state\n{home_context}\n\n"
+            f"{situation_block}"
+            f"{cog_status}\n\n"
+            f"## Tools\n"
+            f"You have read-only diagnostic tools only: system health, "
+            f"cognitive-core status, connectivity, energy status, activity "
+            f"history, entity state lookup, entity search, and root-cause "
+            f"analysis. You have no tool that controls a device, changes a "
+            f"setting, writes data, sends a notification, or delegates work "
+            f"— never claim otherwise, even if asked to.\n\n"
+            f"## How you investigate\n"
+            f"(1) Read actual state and telemetry with your tools before "
+            f"concluding anything — never assume. (2) Separate OBSERVATION "
+            f"(what a tool actually returned) from INFERENCE (your reasoning "
+            f"about it), and label which is which in your report. (3) Check "
+            f"the tools that most directly bear on the reported fault first. "
+            f"(4) State a likely cause only when the evidence actually "
+            f"supports one; otherwise say plainly what remains unknown. "
+            f"(5) Close with one concrete recommended next step for Nova or "
+            f"the user to take — never perform it yourself.\n"
+        )
+    else:
+        system_prompt = (
         f"{persona}\n\n"
         f"{_language_directive(hass)}"
         f"## Current home state\n{home_context}\n\n"
@@ -3996,7 +4181,7 @@ async def run_agent(
         f"Nova does not quip during a smoke alarm. That restraint is not a "
         f"limitation of your character; it is the heart of it. You are Nova."
         f"{_banter_guidance()}"
-    )
+        )
 
     full_messages = [{"role": "system", "content": system_prompt}] + messages
 
@@ -4255,6 +4440,22 @@ async def run_agent(
                     "reason": "Resolve the exact entity with "
                               "search_entities(require_unique=true) first, then "
                               "repeat this action with the resolved entity_id.",
+                })
+            elif allowed_tools is not None and call["name"] not in allowed_tools:
+                # Hard server-side gate for a scoped sub-agent (capability group
+                # or named profile like HOMER): `allowed_tools` only shapes which
+                # tool SCHEMAS the model was offered (see `tools = _scoped_tool_
+                # list(...)` above) — without this check, a provider that doesn't
+                # strictly validate tool-call names against the schemas it was
+                # sent (a stochastic local model, a hallucinated/injected call)
+                # could still reach `_execute_tool`, which dispatches ANY name in
+                # `_TOOL_MAP` with no awareness of scoping. This closes that gap:
+                # a tool call outside the sub-agent's granted set is refused here,
+                # regardless of what the objective asked for or what the model
+                # emitted.
+                result_str = json.dumps({
+                    "error": f"tool '{call['name']}' is not available to this "
+                             f"sub-agent — it was not granted",
                 })
             else:
                 result_str = await _execute_tool(

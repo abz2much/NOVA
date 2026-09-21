@@ -871,6 +871,16 @@ setTimeout(async () => {
           && status.textContent.trim() === "OK"
           && !row.querySelector("label").textContent.includes("OK");
       })()],
+    ["settings tab: HOMER diagnostic sub-agent shows as available, no toggle (Phase 7, v7.111.0)",
+      (() => {
+        const diagCard = diagCardOf(sRoot);
+        const row = rowFor(diagCard, "HOMER — diagnostic sub-agent");
+        const status = row?.querySelector("span.diag-ok");
+        return !!row && !!status && status.textContent.trim() === "AVAILABLE"
+          && !row.querySelector("button")
+          && /read-only/i.test(diagCard.textContent)
+          && /never control anything/i.test(diagCard.textContent);
+      })()],
   );
   // Setup Doctor's own check rows only render once nova/get_setup_health
   // returns a non-core-service check; the default mock leaves it in its
