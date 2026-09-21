@@ -3383,6 +3383,8 @@ class NovaPanel extends HTMLElement {
       <div class="cfg-row"><label>Core services</label>${overall}</div>
       ${rows}
       <div class="cfg-row"><button class="mode-chip" id="newDiagRefresh">⟳ RUN CHECK</button></div>
+      <div class="cfg-row"><label>HOMER — diagnostic sub-agent</label><span class="diag-ok">AVAILABLE</span></div>
+      <div class="stub-body" style="margin:-6px 0 8px">Read-only. Nova can delegate a "why is this broken/slow" question to HOMER to investigate before answering — it can only read state, telemetry, and history, never control anything or change a setting. Always on; nothing to configure.</div>
       <div class="mode-bind-head"></div>
       ${this._setupHealthCardBody()}
       ${this._providerActivityCardBody()}

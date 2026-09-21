@@ -1,3 +1,14 @@
+## [7.112.0] — HOMER, a read-only diagnostic sub-agent (Phase 7)
+
+Nova's existing `delegate_task` sub-agent machinery (capability groups, the depth-1 cap, the actuator denylist) now also supports a named specialist profile. Only one exists: HOMER, Nova's read-only System Diagnostic Specialist — no actuating profile is part of this release.
+
+- `delegate_task` accepts `profile: "homer"` (case-insensitive) alongside the existing `capability` groups. HOMER gets its own fixed tool set — `system_diagnostics`, `cognitive_status`, `connectivity_status`, `energy_status`, `activity_history`, `get_entity_state`, `search_entities`, `root_cause` — resolved entirely server-side and always passed back through the existing actuator denylist as defense in depth, so nothing in a caller's arguments, an objective's wording, or a model's own output can add a tool HOMER wasn't already granted. An unrecognized profile name is rejected outright, never silently falling back to a capability group.
+- Capped at 4 tool turns regardless of what's requested, subject to the same delegation-depth-of-1 limit as every other sub-agent, and — since `delegate_task` itself is on the denylist — HOMER can never delegate further.
+- A genuine gap found while reviewing the upstream jarvis-aio reference for this feature: its HOMER layers a diagnostic directive on top of the standard system prompt, but that prompt still unconditionally says "you have tools to control devices..." and frames the agent as the household's persona — contradictory claims for a strictly read-only sub-agent. Nova's HOMER takes a genuinely separate system-prompt path instead (a new `run_agent(profile_directive=...)` branch) that never emits those claims; the boundary is enforced by which tools are actually granted, not by prompt wording layered over a wider claim.
+- HOMER's directive requires it to separate what it observed (an actual tool result) from what it inferred, state a likely cause only when the evidence supports one, and report a recommended next step to the parent agent — it never addresses a device directly and never claims to have fixed, repaired, or changed anything. It has no tool that could create an Action Audit Log entry, send a notification, or speak via TTS directly.
+- Settings → Diagnostics now shows HOMER as an always-available, read-only diagnostic sub-agent — no enable toggle, since there's nothing to turn off.
+- No new provider, credential, or configuration path: a delegated HOMER run reuses whichever provider/model the parent conversation already resolved, same as every existing capability-based sub-agent.
+
 ## [7.110.0] — historical camera awareness (Phase 5)
 
 - Interactive conversations can now include a short, fenced "What I've noticed lately" block built from repeated canonical camera events already stored by Phase 4. It reads the shared `patterns.db` store and creates no parallel Eufy path or second copy of the observations.
