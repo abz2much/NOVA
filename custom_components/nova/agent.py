@@ -3842,6 +3842,18 @@ async def run_agent(
     except Exception:
         situation_now = ""
     situation_block = f"## Situation now\n{situation_now}\n\n" if situation_now else ""
+    # Historical camera awareness stays separate from current situation. Its
+    # bounded SQLite read runs in HA's executor and only for a top-level,
+    # interactive conversation, never delegated or scheduled agent work.
+    awareness_block = ""
+    if depth == 0 and user_input is not None:
+        try:
+            from . import camera_awareness
+            awareness_block = await hass.async_add_executor_job(
+                camera_awareness.build_prompt, config or {},
+            )
+        except Exception:
+            awareness_block = ""
     # Inject cognitive core status
     cog_status = ""
     try:
@@ -3868,6 +3880,7 @@ async def run_agent(
         f"{_language_directive(hass)}"
         f"## Current home state\n{home_context}\n\n"
         f"{situation_block}"
+        f"{awareness_block}"
         f"{cog_status}\n\n"
         f"## Tools\n"
         f"You have tools to control devices, query states, search entities, "

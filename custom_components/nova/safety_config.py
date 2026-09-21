@@ -15,6 +15,8 @@ CAMERA_EVENT_CONFIDENCE_FLOOR_KEY = "camera_event_confidence_floor"
 CAMERA_EVENT_DEDUP_WINDOW_KEY = "camera_event_dedup_window"
 _CAMERA_EVENT_CONFIDENCE_FLOOR_RANGE = (0.0, 100.0)
 _CAMERA_EVENT_DEDUP_WINDOW_RANGE = (0.0, 3600.0)
+CAMERA_AWARENESS_MIN_OBSERVATIONS_KEY = "camera_awareness_min_observations"
+_CAMERA_AWARENESS_MIN_OBSERVATIONS_RANGE = (3, 12)
 
 
 def automatic_lockdown_enabled(config: dict | None) -> bool:
@@ -33,12 +35,20 @@ def _valid_bounded_number(value, lo: float, hi: float) -> bool:
     return math.isfinite(v) and lo <= v <= hi
 
 
+def _valid_bounded_integer(value, lo: int, hi: int) -> bool:
+    return type(value) is int and lo <= value <= hi
+
+
 def valid_panel_value(key: str, value) -> bool:
     """Reject truthy strings and numbers for the automatic safety opt in."""
     if key == LOCKDOWN_AUTO_KEY:
         return type(value) is bool
-    if key == "camera_event_learning":
+    if key in ("camera_event_learning", "camera_historical_awareness"):
         return type(value) is bool
+    if key == CAMERA_AWARENESS_MIN_OBSERVATIONS_KEY:
+        return _valid_bounded_integer(
+            value, *_CAMERA_AWARENESS_MIN_OBSERVATIONS_RANGE,
+        )
     if key == CAMERA_EVENT_CONFIDENCE_FLOOR_KEY:
         return _valid_bounded_number(value, *_CAMERA_EVENT_CONFIDENCE_FLOOR_RANGE)
     if key == CAMERA_EVENT_DEDUP_WINDOW_KEY:

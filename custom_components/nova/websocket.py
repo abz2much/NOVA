@@ -786,6 +786,13 @@ async def ws_get_panel_data(
                 # Frigate/Nest), so there's no new noise source being turned
                 # on by default the way "log every door" would be.
                 "camera_event_learning": bool(_runtime_opt(hass, entry, "camera_event_learning", True)),
+                "camera_historical_awareness": bool(_runtime_opt(
+                    hass, entry, "camera_historical_awareness",
+                    _runtime_opt(hass, entry, "camera_event_learning", True),
+                )),
+                "camera_awareness_min_observations": _runtime_opt(
+                    hass, entry, "camera_awareness_min_observations", 3,
+                ),
                 "pattern_include_entities": _get_runtime_json(hass, entry, "pattern_include_entities", []),
                 "excluded_entities": _get_runtime_json(hass, entry, "excluded_entities", []),
                 "excluded_domains": _get_runtime_json(hass, entry, "excluded_domains", []),
@@ -1525,6 +1532,8 @@ PANEL_WRITABLE_KEYS = {
     "camera_event_learning",        # bool: feed Eufy/Frigate/Nest/vision detections into pattern learning (Phase 4, v7.109.0)
     "camera_event_confidence_floor",  # float 0-100: minimum source-supplied confidence to record a camera event (0 = off)
     "camera_event_dedup_window",    # float seconds: window collapsing duplicate camera events across sources
+    "camera_historical_awareness",  # bool: add repeated camera history to interactive prompts (Phase 5)
+    "camera_awareness_min_observations",  # int 3-12: historical evidence floor
     "appliance_profile",            # JSON list of declared appliances (name/type/entity/watts)
     "camera_auto_analyze",          # bool: auto-inspect doorbell/person camera events
     "camera_auto_analyze_motion",   # bool: also auto-inspect motion events (noisier)
