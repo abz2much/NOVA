@@ -1080,7 +1080,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v7.111.0
+ * v7.112.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1145,7 +1145,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v7.111.0 ",
+      console.log("%c Nova Panel %c v7.112.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -2621,6 +2621,8 @@ class NovaPanel extends HTMLElement {
       desc: "Earthquake, severe weather, and disaster feeds near your home." },
     { id: "energy_management", group: "safety", title: "Energy Management", real: true,
       desc: "Peak-draw threshold and how much say Nova has over high-draw appliances." },
+    { id: "host_health", group: "safety", title: "Host Health", real: true,
+      desc: "Home Assistant's own System Monitor readings for the machine Nova runs on — off by default." },
     { id: "appliances", group: "safety", title: "Appliances", real: true,
       desc: "Declared appliance profiles Nova fingerprints by wattage." },
     { id: "anticipation_memory", group: "learning", title: "Anticipation & Memory", real: true,
@@ -3059,6 +3061,7 @@ class NovaPanel extends HTMLElement {
         : c.id === "sentinel_rules" ? this._sentinelRulesCardBody()
         : c.id === "hazard_monitor" ? this._hazardMonitorCardBody()
         : c.id === "energy_management" ? this._energyManagementCardBody()
+        : c.id === "host_health" ? this._hostHealthCardBody()
         : c.id === "appliances" ? this._appliancesCardBody()
         : c.id === "anticipation_memory" ? this._anticipationMemoryCardBody()
         : c.id === "memory_curated" ? this._memoryCardBody()
@@ -3914,6 +3917,79 @@ class NovaPanel extends HTMLElement {
       </div>
       <div class="cfg-row"><button class="mode-chip" id="newHazScan">⟳ SCAN NOW</button></div>
       <div id="newHazBody" class="stub-body"></div>`;
+  }
+
+  // Phase 10 (v7.112.0) — Host Health. Off by default; discovery/mapping
+  // status is always shown (so an admin can see what's detected before
+  // turning anything on), live readings only populate once enabled and the
+  // periodic sampler has run at least once.
+  _hostHealthCardBody() {
+    const cfg = this._data()?.config || {};
+    const status = cfg.host_health_status || {};
+    const metrics = status.metrics || [];
+    const snap = status.snapshot || {};
+    const enabled = cfg.host_health_enabled === true;
+    const alertsEnabled = cfg.host_health_alerts_enabled === true;
+    const mappings = cfg.host_health_mappings || {};
+
+    const STATUS_CLS = { mapped: "diag-ok", ambiguous: "diag-warn", missing: "diag-off", disabled: "diag-warn" };
+    const STATUS_LABEL = { mapped: "OK", ambiguous: "PICK ONE", missing: "MISSING", disabled: "DISABLED" };
+
+    const snapEntryFor = (key) =>
+      (snap.available || []).find(a => a.key === key)
+      || (snap.problems || []).find(a => a.key === key)
+      || (snap.missing_or_stale || []).find(a => a.key === key);
+
+    const metricRow = (m) => {
+      const entry = snapEntryFor(m.key);
+      const valueText = (entry && typeof entry.value === "number")
+        ? `${entry.value.toFixed(entry.unit === "°C" ? 1 : 0)}${entry.unit ? (entry.unit === "%" ? "%" : " " + entry.unit) : ""}`
+        : "—";
+      const stale = entry && !("value" in entry) && entry.reason === "stale";
+      const cands = m.candidates || [];
+      const selectHtml = cands.length ? `
+        <select class="host-health-map-select" data-metric-key="${this._esc(m.key)}">
+          <option value="">${m.source === "auto" ? "— auto —" : "— none —"}</option>
+          ${cands.map(c => `<option value="${this._esc(c.entity_id)}"${mappings[m.key] === c.entity_id ? " selected" : ""}>${this._esc(c.friendly_name)}${c.disabled ? " (disabled)" : ""}</option>`).join("")}
+        </select>` : "";
+      return `
+        <div class="cfg-row">
+          <label>${this._esc(m.label)}${m.recommended ? "" : ` <span class="toggle-desc">optional</span>`}</label>
+          <span style="font-family:var(--font-mono);font-size:11px">${valueText}${stale ? " (stale)" : ""}</span>
+          <span class="${STATUS_CLS[m.status] || "diag-off"}">${STATUS_LABEL[m.status] || (m.status || "").toUpperCase()}</span>
+        </div>
+        ${selectHtml ? `<div class="cfg-row">${selectHtml}</div>` : ""}`;
+    };
+
+    const setupNotes = metrics.filter(m => m.recommended && (m.status === "missing" || m.status === "disabled"));
+    const setupGuidance = setupNotes.length ? `
+      <div class="stub-body">Missing or disabled recommended readings: ${setupNotes.map(m => this._esc(m.label)).join(", ")}. In Home Assistant: Settings → Devices &amp; services → System Monitor → its entities → enable the ones you want (System Monitor disables several by default), then reopen this card.</div>` : "";
+
+    return `
+      <div class="stub-body">Reads Home Assistant's own System Monitor sensors for the machine Nova runs on — processor/memory/disk usage, memory &amp; I/O pressure, and (if your hardware exposes it) temperature. Off by default; nothing is read or reported until you turn it on. Disk usage measures capacity, not drive health; I/O pressure measures workload contention, not drive failure. Nova cannot warn you after this machine has completely frozen, since Nova runs on it too.</div>
+      <div class="cfg-row">
+        <label>Host health awareness</label>
+        <button class="toggle-btn ${enabled ? "on" : "off"}" data-cfg-key="host_health_enabled" data-cfg-val="${enabled ? "false" : "true"}">${enabled ? "ON" : "OFF"}</button>
+      </div>
+      <div class="cfg-row">
+        <label>Alerts <span class="toggle-desc">speak/push only once a problem persists — turn off to silence immediately</span></label>
+        <button class="toggle-btn ${alertsEnabled ? "on" : "off"}" data-cfg-key="host_health_alerts_enabled" data-cfg-val="${alertsEnabled ? "false" : "true"}" ${enabled ? "" : "disabled"}>${alertsEnabled ? "ON" : "OFF"}</button>
+      </div>
+      <div class="cfg-row">
+        <label>Announce recovery <span class="toggle-desc">bounded, optional</span></label>
+        <button class="toggle-btn ${cfg.host_health_recovery_announce !== false ? "on" : "off"}" data-cfg-key="host_health_recovery_announce" data-cfg-val="${cfg.host_health_recovery_announce !== false ? "false" : "true"}" ${enabled && alertsEnabled ? "" : "disabled"}>${cfg.host_health_recovery_announce !== false ? "ON" : "OFF"}</button>
+      </div>
+      <div class="cfg-row">
+        <label>Persistence (minutes) <span class="toggle-desc">how long a problem must persist before the first alert</span></label>
+        <input class="cfg-field cfg-num" type="number" min="2" max="120" step="1" data-cfg-key="host_health_persistence_minutes" value="${cfg.host_health_persistence_minutes ?? 10}" ${enabled ? "" : "disabled"}>
+      </div>
+      <div class="cfg-row">
+        <label>Cooldown (minutes) <span class="toggle-desc">minimum gap between repeat alerts on the same unresolved problem</span></label>
+        <input class="cfg-field cfg-num" type="number" min="5" max="720" step="1" data-cfg-key="host_health_cooldown_minutes" value="${cfg.host_health_cooldown_minutes ?? 60}" ${enabled ? "" : "disabled"}>
+      </div>
+      ${setupGuidance}
+      <div class="mode-bind-head">Readings</div>
+      ${metrics.length ? metrics.map(metricRow).join("") : `<div class="stub-body">Loading detected readings…</div>`}`;
   }
 
   _renderHazardScan(res) {
@@ -5212,6 +5288,15 @@ class NovaPanel extends HTMLElement {
         const areaId = sel.getAttribute("data-area-id");
         if (sel.value) assigned[areaId] = sel.value; else delete assigned[areaId];
         await this._saveSetting("room_speakers", JSON.stringify(assigned));
+      });
+    });
+    root.querySelectorAll(".host-health-map-select").forEach(sel => {
+      sel.addEventListener("change", async () => {
+        const cfg = this._data()?.config || {};
+        const mappings = { ...(cfg.host_health_mappings || {}) };
+        const metricKey = sel.getAttribute("data-metric-key");
+        if (sel.value) mappings[metricKey] = sel.value; else delete mappings[metricKey];
+        await this._saveSetting("host_health_mappings", JSON.stringify(mappings));
       });
     });
     root.querySelectorAll(".new-sat-pair-select").forEach(sel => {

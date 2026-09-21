@@ -7,16 +7,26 @@ Pure Python; no Home Assistant import required.
 from __future__ import annotations
 
 import types
+from datetime import datetime, timezone
 
 
 class FakeState:
-    """Mirrors the handful of attributes the cores read off a hass state."""
-    __slots__ = ("entity_id", "state", "attributes")
+    """Mirrors the handful of attributes the cores read off a hass state.
 
-    def __init__(self, entity_id: str, state, attributes: dict | None = None):
+    last_changed/last_updated default to "now" (like real HA setting a
+    state for the first time) so existing tests that never pass them keep
+    working unchanged; a test that cares about staleness passes an explicit
+    value (see host_health tests)."""
+    __slots__ = ("entity_id", "state", "attributes", "last_changed", "last_updated")
+
+    def __init__(self, entity_id: str, state, attributes: dict | None = None,
+                 last_changed=None, last_updated=None):
         self.entity_id = entity_id
         self.state = state
         self.attributes = attributes or {}
+        now = datetime.now(timezone.utc)
+        self.last_changed = last_changed or now
+        self.last_updated = last_updated or last_changed or now
 
     def __repr__(self):  # pragma: no cover - debugging aid
         return f"<FakeState {self.entity_id}={self.state!r} {self.attributes}>"
@@ -29,16 +39,20 @@ class FakeStates:
     def __init__(self):
         self._d: dict[str, FakeState] = {}
 
-    def set(self, entity_id: str, state, **attributes) -> FakeState:
-        st = FakeState(entity_id, state, attributes)
+    def set(self, entity_id: str, state, last_changed=None, last_updated=None,
+            **attributes) -> FakeState:
+        st = FakeState(entity_id, state, attributes,
+                       last_changed=last_changed, last_updated=last_updated)
         self._d[entity_id] = st
         return st
 
-    def async_set(self, entity_id: str, state, attributes: dict | None = None) -> FakeState:
+    def async_set(self, entity_id: str, state, attributes: dict | None = None,
+                  last_changed=None, last_updated=None) -> FakeState:
         """Same shape as real HA's hass.states.async_set(entity_id, state,
         attributes_dict) — a dict, not **kwargs, so callers that build the
         attributes dict themselves (camera_semantic.py) work unchanged."""
-        st = FakeState(entity_id, state, dict(attributes or {}))
+        st = FakeState(entity_id, state, dict(attributes or {}),
+                       last_changed=last_changed, last_updated=last_updated)
         self._d[entity_id] = st
         return st
 
@@ -75,6 +89,46 @@ class _Services:
 
     def has_service(self, domain: str, service: str) -> bool:
         return service in self._registered.get(domain, {})
+
+
+class FakeRegistryEntry:
+    """Mirrors the handful of homeassistant.helpers.entity_registry.RegistryEntry
+    fields host_health.py (and anything else doing integration-ownership-based
+    discovery) actually reads."""
+    __slots__ = ("entity_id", "platform", "unique_id", "translation_key",
+                "disabled_by", "device_id", "area_id",
+                "original_unit_of_measurement", "original_state_class")
+
+    def __init__(self, entity_id: str, platform: str, unique_id: str = "",
+                translation_key: str | None = None, disabled_by=None,
+                device_id: str | None = None, area_id: str | None = None,
+                original_unit_of_measurement: str | None = None,
+                original_state_class: str | None = None):
+        self.entity_id = entity_id
+        self.platform = platform
+        self.unique_id = unique_id
+        self.translation_key = translation_key
+        self.disabled_by = disabled_by
+        self.device_id = device_id
+        self.area_id = area_id
+        self.original_unit_of_measurement = original_unit_of_measurement
+        self.original_state_class = original_state_class
+
+
+class FakeEntityRegistry:
+    """Mirrors the slice of homeassistant.helpers.entity_registry.EntityRegistry
+    used for platform-ownership discovery: entities (dict-like, .values()
+    iterable) and async_get(entity_id)."""
+
+    def __init__(self):
+        self.entities: dict[str, FakeRegistryEntry] = {}
+
+    def add(self, entry: FakeRegistryEntry) -> FakeRegistryEntry:
+        self.entities[entry.entity_id] = entry
+        return entry
+
+    def async_get(self, entity_id: str):
+        return self.entities.get(entity_id)
 
 
 class _Bus:

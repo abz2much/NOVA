@@ -253,6 +253,35 @@ This lives in `/config/nova/config.json`; merge it into the existing object rath
 
 > **Note:** go2rtc's Nest source is a third-party bridge, and Google occasionally changes its auth behavior. If a restream ever drops, Nova falls back to the original Nest entity automatically; worst case is the pre-restream behavior, never worse.
 
+## Host health awareness (optional)
+
+Nova can give itself structured visibility into the health of the machine it runs on — CPU/memory/disk usage, memory and I/O pressure, and (where the hardware exposes it) temperature — entirely through Home Assistant's own built-in **System Monitor** integration. Nova never reads `/proc`, `/sys`, or any other filesystem path directly, never shells out, and never calls a Supervisor API; it only reads System Monitor's own sensor entities through Home Assistant's state machine, the same way it reads any other sensor. Off by default.
+
+**Setup:**
+1. Settings → Devices & services.
+2. Add or open the **System Monitor** integration.
+3. Open its entities.
+4. Enable the recommended entities below — System Monitor disables several of them by default.
+5. Enable any optional entities your hardware actually exposes.
+6. Come back to Nova's **Settings → Host Health**.
+7. Review the auto-detected mappings, and manually pick a source for anything ambiguous (most commonly disk usage, if you have more than one mount monitored).
+8. Turn on **Host health awareness**.
+9. Turn on **Alerts** separately, if you want Nova to say something when a problem persists — it's a distinct toggle from awareness itself, and turning it off silences alerts immediately.
+
+**Recommended entities:** Processor use, Memory usage, Memory Pressure Some 60s Average, Memory Pressure Full 60s Average, IO Pressure Some 60s Average, IO Pressure Full 60s Average, Disk usage percentage (for your Home Assistant data disk).
+
+**Optional entities:** Processor temperature, Swap usage, CPU Pressure Some 60s Average, Load 5 min, Uptime.
+
+**Worth knowing:**
+- Some hardware doesn't expose processor temperature at all — Home Assistant just won't have that sensor. A missing temperature reading is not an error; Nova simply reports it as not available.
+- Pressure (PSI) sensor availability depends on your platform and kernel — if System Monitor doesn't offer them on your install, host health just runs with the readings it does have.
+- Disk usage measures capacity, not drive health — a full disk and a failing disk are different problems, and Nova only reports the former.
+- I/O pressure measures workload contention (processes waiting on I/O), not drive failure — Nova never claims to measure NVMe/SSD health.
+- Nova cannot warn you after this machine has completely frozen or lost power, because Nova itself runs on it. This is visibility into degradation, not a substitute for real infrastructure monitoring.
+- If you've renamed an entity, or run Home Assistant in another language, that's fine — Nova identifies System Monitor entities by integration ownership and their own internal type, never by friendly name or entity_id text.
+
+A persistent problem (sustained past a configurable window, not a brief spike) can optionally speak or push a notification through Nova's existing presence-aware announcement and multi-device notification paths — the same ones used for every other Nova alert. Host resource load is never treated as a household safety emergency.
+
 ## Configuration highlights
 
 | Setting | What it does |
@@ -268,6 +297,8 @@ This lives in `/config/nova/config.json`; merge it into the existing object rath
 | `camera_event_learning` | Settings → Learning & Memory → Routine Learning. Feed Eufy/Frigate/Nest/vision detections into pattern learning. On by default; off automatically whenever Nova's learning system itself is off. |
 | `camera_event_confidence_floor` / `camera_event_dedup_window` | Minimum source-supplied confidence (0–100, floor of 0 disables filtering) and the cross-source deduplication window in seconds (default 300) for camera-event learning. |
 | `camera_historical_awareness` / `camera_awareness_min_observations` | Add repeated historical camera patterns to interactive conversation prompts, with a separate opt-out and a minimum evidence threshold from 3 to 12 observations across more than one day. Inactive whenever master learning or camera-event learning is off. |
+| `host_health_enabled` / `host_health_alerts_enabled` | Settings → Host Health. Reads Home Assistant's own System Monitor entities for the machine Nova runs on; awareness and alerts are two separate off-by-default toggles. |
+| `host_health_mappings` / `host_health_thresholds` / `host_health_persistence_minutes` / `host_health_cooldown_minutes` | Manual System Monitor entity mapping (only needed when more than one candidate exists for a reading), per-metric alert thresholds, how long a problem must persist before the first alert (2–120 min), and the minimum gap between repeat alerts (5–720 min). |
 
 ## Languages
 
@@ -347,6 +378,7 @@ The list below covers Nova-specific differences. It is not a complete release-by
 - Command Center: an animated "stellar core" centerpiece instead of a camera feed, so the dashboard looks and feels the same whether you have zero cameras or twelve, with Command Center/Residence/Intrusion/Suggestions/Settings/Logs/Memory navigation, a Settings tab reorganized around what you're doing rather than which subsystem it touches, and Areas cards showing every monitored room (no hard cap) with capability icons, live temperature/humidity sparklines, and a light toggle. Includes a full Floor Plan Editor (rooms, outdoor zones, property-line boundary, windows/doors/dormers, camera placement, an uploadable/opacity-adjustable background image, JSON export/import for backup or moving a layout between installs, and AI camera-coverage estimation) and a Residence tab with a live, rotatable and scroll-to-zoomable 3D house view built from that same floor plan — home style selector, floor tabs, view presets, live room lighting from occupancy/mmWave presence, and door/garage entity mapping.
 - Command Center is now Nova's only dashboard (v7.101.30): it started as an optional alternate look, reached full feature parity with the original "Classic" dashboard, and Classic was deleted rather than maintaining two UIs indefinitely.
 - HOMER, a named read-only diagnostic specialist (`delegate_task` profile `"homer"`) built on Nova's existing sub-agent delegation system — not a separate diagnostic engine. It replaces what used to be a standalone `"diagnostics"` capability group with one canonical tool grant, prompt, and turn limit; `capability="diagnostics"` still works, as a compatibility alias for the same profile. For a fault ("why is this unavailable," "why is Nova slow," "check connectivity and system health"), Nova can delegate to HOMER with a fixed diagnostic/telemetry/state tool set — no device control, configuration, memory-writing, or delegation tool, and no `solar_status`/`energy_report` either (those report totals and forecasts, not fault evidence, and remain ordinary main-agent tools) — that separates observation from inference and reports a likely cause, its confidence, and a recommended next step back to Nova rather than acting on it. Unlike jarvis-aio's own version of this idea, which layers a directive on top of its standard prompt while that prompt still unconditionally claims the agent "has tools to control devices," HOMER gets a genuinely separate system prompt with no such claim. A related hardening found while building this: the tool schema offered to a model was never itself an execution-time boundary — the dispatch loop now refuses any tool call outside a sub-agent's actual grant, for every scoped sub-agent, not only HOMER. Always on, capped at 4 tool turns, and — like every sub-agent — unable to delegate further.
+- Host health awareness: Nova can read Home Assistant's own System Monitor entities for the machine it runs on (CPU/memory/disk, memory and I/O pressure, optionally temperature) and fold a structured summary into `system_diagnostics` — the same tool HOMER already had, so diagnosing "why is Nova slow" now includes host resource evidence, with no new HOMER tool and no change to HOMER's eight-tool grant. Entities are discovered by System Monitor integration ownership and internal type, never by friendly name or entity_id (both renamable) — a single unambiguous candidate can auto-map, multiple candidates require a manual pick in Settings → Host Health, and a disabled System Monitor entity is reported with setup guidance, never silently force-enabled. A deterministic evaluator (no LLM) requires a problem to persist across multiple consecutive valid samples — never a brief spike — before the first alert, applies a configurable cooldown to repeats, and requires a comparably stable recovery streak before announcing recovery; a restart or reload starts persistence tracking from zero rather than reconstructing it from anything stored. Off by default, and — since a host isn't a household safety emergency — alerts route through the same presence-aware announcement and multi-notification-target paths every other Nova alert uses, never a separate dispatcher. No `/proc`, `/sys`, shell, SSH, or Supervisor API access anywhere in the implementation, and no host-control, restart, or remediation action exists.
 
 **Decision transparency and honest reporting**
 - A browsable Decisions view, a Decision Lab policy-replay tool, a read-only Setup Doctor, run-tracking for installed automations, and bounded Provider Activity aggregates give you visibility into what Nova decided and why, without ever storing the prompts or responses behind a call.

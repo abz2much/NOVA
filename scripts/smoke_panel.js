@@ -68,7 +68,44 @@ const PANEL = {
     { id: "banter", label: "Pick a personality level", hint: "wit", done: false },
     { id: "briefings", label: "Turn on daily briefings", hint: "briefings", done: false, jump: "Briefings" },
   ] },
-  config: { camera_event_learning: true, floor_plan_address: "123 Example St, Springfield IL", banter_level: 2, search_backend: "searxng", searxng_url: "http://sx.local:8080", calendar_tight_gap_min: 20, recognition_source: "frigate", voice_confirm_enabled: true, voice_confirm_mode: "gated", intrusion_response_timeout: 120, cameras: [{ entity_id: "camera.front", name: "Front Door", raw_name: "Front Door", outdoor: false, location_mode: "auto" }, { entity_id: "camera.back", name: "Backyard", raw_name: "Backyard", outdoor: true, location_mode: "auto" }], camera_names: {}, lockdown: { active: false },
+  config: { camera_event_learning: true,
+    host_health_enabled: true, host_health_alerts_enabled: false,
+    host_health_recovery_announce: true, host_health_persistence_minutes: 10,
+    host_health_cooldown_minutes: 60,
+    host_health_mappings: { disk_percent: "sensor.disk_root" },
+    host_health_thresholds: {},
+    host_health_status: {
+      metrics: [
+        { key: "cpu_percent", label: "Processor use", recommended: true, status: "mapped", source: "auto", entity_id: "sensor.cpu_use", candidates: [{ entity_id: "sensor.cpu_use", friendly_name: "CPU Use", disabled: false }] },
+        { key: "disk_percent", label: "Disk usage", recommended: true, status: "mapped", source: "manual", entity_id: "sensor.disk_root", candidates: [
+          { entity_id: "sensor.disk_root", friendly_name: "Disk / Use", disabled: false },
+          { entity_id: "sensor.disk_data", friendly_name: "Disk /data Use", disabled: false },
+        ] },
+        { key: "memory_pressure_some", label: "Memory Pressure Some 60s Average", recommended: true, status: "ambiguous", source: null, entity_id: null, candidates: [
+          { entity_id: "sensor.mem_p_a", friendly_name: "Memory Pressure Some A", disabled: false },
+          { entity_id: "sensor.mem_p_b", friendly_name: "Memory Pressure Some B", disabled: false },
+        ] },
+        { key: "cpu_temperature", label: "Processor temperature", recommended: false, status: "disabled", source: null, entity_id: null, candidates: [
+          { entity_id: "sensor.cpu_temp", friendly_name: "CPU Temperature", disabled: true },
+        ] },
+        { key: "swap_percent", label: "Swap usage", recommended: false, status: "missing", source: null, entity_id: null, candidates: [] },
+      ],
+      snapshot: {
+        enabled: true, alerts_enabled: false, overall: "watch",
+        available: [
+          { key: "cpu_percent", label: "Processor use", value: 42, unit: "%", sample_age_seconds: 30, threshold: 90, over_threshold: false },
+        ],
+        problems: [],
+        persistent_problems: [],
+        missing_or_stale: [
+          { key: "memory_pressure_some", label: "Memory Pressure Some 60s Average", reason: "ambiguous" },
+          { key: "cpu_temperature", label: "Processor temperature", reason: "disabled" },
+          { key: "swap_percent", label: "Swap usage", reason: "missing" },
+        ],
+        newest_sample_ts: "2026-01-01T00:00:00+00:00",
+      },
+    },
+    floor_plan_address: "123 Example St, Springfield IL", banter_level: 2, search_backend: "searxng", searxng_url: "http://sx.local:8080", calendar_tight_gap_min: 20, recognition_source: "frigate", voice_confirm_enabled: true, voice_confirm_mode: "gated", intrusion_response_timeout: 120, cameras: [{ entity_id: "camera.front", name: "Front Door", raw_name: "Front Door", outdoor: false, location_mode: "auto" }, { entity_id: "camera.back", name: "Backyard", raw_name: "Backyard", outdoor: true, location_mode: "auto" }], camera_names: {}, lockdown: { active: false },
     cast_devices: [{ entity_id: "media_player.living_room_speaker", name: "Living Room Speaker" }, { entity_id: "media_player.kitchen_speaker", name: "Kitchen Speaker" }],
     speaker_areas: [{ area_id: "living_room", name: "Living Room" }, { area_id: "kitchen", name: "Kitchen" }],
     room_speakers: { living_room: "media_player.living_room_speaker" },
@@ -431,7 +468,7 @@ setTimeout(async () => {
     ["settings tab renders the search box and group nav",
       !!sRoot.getElementById("settingsSearch") && sRoot.querySelectorAll(".settings-nav-btn").length === 6],
     ["settings tab has every setting card, General real",
-      sRoot.querySelectorAll(".settings-card").length === 28
+      sRoot.querySelectorAll(".settings-card").length === 29
       && /Sleep state/.test(sRoot.innerHTML) && /Announcements/.test(sRoot.innerHTML)],
     ["settings tab: Room Speakers card is real, not a stub",
       (() => {
@@ -880,6 +917,108 @@ setTimeout(async () => {
           && !row.querySelector("button")
           && /read-only/i.test(diagCard.textContent)
           && /never control anything/i.test(diagCard.textContent);
+      })()],
+  );
+
+  // Host Health (Phase 10, v7.112.0) — its own settings card.
+  const hostHealthCardOf = (root) => Array.from(root.querySelectorAll(".settings-card"))
+    .find(c => /^Host Health$/.test(c.querySelector(".panel-title")?.textContent?.trim() || ""));
+  checks.push(
+    ["settings tab: Host Health section is present, real (not a stub)",
+      (() => {
+        const hc = hostHealthCardOf(sRoot);
+        return !!hc && !hc.querySelector(".stub-tag");
+      })()],
+    ["settings tab: Host Health master toggle reflects enabled state",
+      (() => {
+        const hc = hostHealthCardOf(sRoot);
+        const btn = hc?.querySelector('button[data-cfg-key="host_health_enabled"]');
+        return !!btn && btn.classList.contains("on") && btn.textContent.trim() === "ON";
+      })()],
+    ["settings tab: Host Health has a separate alert toggle from the master toggle",
+      (() => {
+        const hc = hostHealthCardOf(sRoot);
+        const alertBtn = hc?.querySelector('button[data-cfg-key="host_health_alerts_enabled"]');
+        const masterBtn = hc?.querySelector('button[data-cfg-key="host_health_enabled"]');
+        // Fixture: enabled=true, alerts=false — two independent toggles, not one.
+        return !!alertBtn && !!masterBtn && alertBtn !== masterBtn
+          && masterBtn.classList.contains("on") && alertBtn.classList.contains("off");
+      })()],
+    ["settings tab: Host Health persistence/cooldown are bounded numeric inputs",
+      (() => {
+        const hc = hostHealthCardOf(sRoot);
+        const pers = hc?.querySelector('input[data-cfg-key="host_health_persistence_minutes"]');
+        const cool = hc?.querySelector('input[data-cfg-key="host_health_cooldown_minutes"]');
+        return !!pers && !!cool && pers.min === "2" && pers.max === "120"
+          && cool.min === "5" && cool.max === "720";
+      })()],
+    ["settings tab: Host Health shows an auto-detected mapping as OK",
+      (() => {
+        const hc = hostHealthCardOf(sRoot);
+        return /Processor use/.test(hc.textContent) && /\bOK\b/.test(hc.textContent);
+      })()],
+    ["settings tab: Host Health offers a manual-mapping select for an ambiguous metric",
+      (() => {
+        const hc = hostHealthCardOf(sRoot);
+        const sel = hc?.querySelector('select.host-health-map-select[data-metric-key="memory_pressure_some"]');
+        return !!sel && sel.querySelectorAll("option").length === 3  // placeholder + 2 candidates
+          && /PICK ONE/.test(hc.textContent);
+      })()],
+    ["settings tab: Host Health manual mapping select preselects the current mapping",
+      (() => {
+        const hc = hostHealthCardOf(sRoot);
+        const sel = hc?.querySelector('select.host-health-map-select[data-metric-key="disk_percent"]');
+        return !!sel && sel.value === "sensor.disk_root";
+      })()],
+    ["settings tab: Host Health shows missing-entity setup guidance naming System Monitor",
+      (() => {
+        const hc = hostHealthCardOf(sRoot);
+        return /DISABLED/.test(hc.textContent) && /MISSING/.test(hc.textContent)
+          && /System Monitor/.test(hc.textContent)
+          && /Processor temperature/.test(hc.textContent) && /Swap usage/.test(hc.textContent);
+      })()],
+    ["settings tab: Host Health shows a live available reading's value",
+      (() => {
+        const hc = hostHealthCardOf(sRoot);
+        return /42%/.test(hc.textContent);
+      })()],
+    ["settings tab: Host Health manual-mapping select saves via JSON-stringified update_config",
+      (() => {
+        const hc = hostHealthCardOf(sRoot);
+        const sel = hc?.querySelector('select.host-health-map-select[data-metric-key="memory_pressure_some"]');
+        sel.value = "sensor.mem_p_b";
+        sel.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+        return true; // assert the resulting call below, after the microtask settles
+      })()],
+  );
+  await new Promise(r => setTimeout(r, 10));
+  checks.push(["settings tab: Host Health mapping-select change reached nova/update_config with a JSON string value",
+    _updateConfigCalls.some(c => c.key === "host_health_mappings"
+      && typeof c.value === "string"
+      && JSON.parse(c.value).memory_pressure_some === "sensor.mem_p_b")]);
+
+  // Disabled state: rendered directly from the card-body method against an
+  // isolated, overridden _data() — avoids disturbing the shared live-
+  // rendered element/config used by every other check in this file.
+  checks.push(
+    ["settings tab: Host Health disabled state grays out alerts/persistence/cooldown controls",
+      (() => {
+        const realData = elNew._data.bind(elNew);
+        elNew._data = () => ({
+          ...realData(),
+          config: { ...realData().config, host_health_enabled: false, host_health_alerts_enabled: false },
+        });
+        const html = elNew._hostHealthCardBody();
+        elNew._data = realData;
+        const doc = new sRoot.ownerDocument.defaultView.DOMParser().parseFromString(
+          `<div>${html}</div>`, "text/html");
+        const alertsBtn = doc.querySelector('button[data-cfg-key="host_health_alerts_enabled"]');
+        const persInput = doc.querySelector('input[data-cfg-key="host_health_persistence_minutes"]');
+        const masterBtn = doc.querySelector('button[data-cfg-key="host_health_enabled"]');
+        return !!alertsBtn && alertsBtn.hasAttribute("disabled")
+          && !!persInput && persInput.hasAttribute("disabled")
+          && !!masterBtn && !masterBtn.hasAttribute("disabled")  // master toggle always usable
+          && masterBtn.classList.contains("off");
       })()],
   );
   // Setup Doctor's own check rows only render once nova/get_setup_health

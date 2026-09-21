@@ -406,6 +406,42 @@ def _check_scheduler(hass) -> dict:
     return out
 
 
+def _check_host_health(hass) -> dict:
+    """Host-health summary (Phase 10) — folded in from host_health.py's own
+    snapshot(), never a second diagnostics implementation. OFF when the
+    feature isn't enabled (nothing to report on a fresh install)."""
+    out = {"name": "Host health", "key": "host_health", "status": _OFF, "detail": ""}
+    try:
+        from .. import host_health, nova_config
+        snap = host_health.snapshot(hass, nova_config.get_all())
+        out["snapshot"] = snap
+        if not snap.get("enabled"):
+            out["detail"] = "not enabled (Settings → Host Health)"
+            return out
+        overall = snap.get("overall")
+        if overall == "problem":
+            out["status"] = _WARN
+            names = ", ".join(p["label"] for p in snap.get("persistent_problems", []))
+            out["detail"] = f"persistent problem: {names}"
+        elif overall == "watch":
+            out["status"] = _OK
+            out["detail"] = "elevated reading(s), not yet persistent"
+        elif overall == "partial":
+            out["status"] = _OK
+            out["detail"] = f"{len(snap.get('available', []))} reading(s) active, " \
+                            f"{len(snap.get('missing_or_stale', []))} missing/stale"
+        elif overall == "ok":
+            out["status"] = _OK
+            out["detail"] = f"{len(snap.get('available', []))} reading(s) healthy"
+        else:
+            out["status"] = _IDLE
+            out["detail"] = "no readings yet"
+    except Exception as exc:
+        out["status"] = _IDLE
+        out["detail"] = f"host health check could not run: {str(exc)[:120]}"
+    return out
+
+
 def _check_routines(hass) -> dict:
     """Config sanity: a very high identity-confidence bar starves per-person
     routine attribution (few observations ever clear it), so surface it here."""
@@ -437,6 +473,7 @@ async def run_service_health(hass) -> dict:
         ("Routines", "routines", _check_routines, False),
         ("Conversation store", "database", _check_database, False),
         ("Scheduler", "scheduler", _check_scheduler, False),
+        ("Host health", "host_health", _check_host_health, False),
     ):
         try:
             services.append(await fn(hass) if is_async else fn(hass))
