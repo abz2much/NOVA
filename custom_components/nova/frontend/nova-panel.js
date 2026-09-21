@@ -1080,7 +1080,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v7.107.0
+ * v7.108.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1145,7 +1145,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v7.107.0 ",
+      console.log("%c Nova Panel %c v7.108.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -3435,6 +3435,9 @@ class NovaPanel extends HTMLElement {
           <select class="new-model-select" data-role="${this._esc(r.role)}" data-cfg-key="${r.modelKey}" data-current="${this._esc(curModel)}">${modelOpts}</select>
           <input class="new-model-custom" data-role="${this._esc(r.role)}" data-cfg-key="${r.modelKey}"
                  type="text" placeholder="enter model id" value="${this._esc(curModel)}" style="display:none">
+          <button class="mode-chip new-model-refresh" data-role="${this._esc(r.role)}" title="Refresh the live model list (bypasses the cache)">↻</button>
+          <div class="new-model-warning" data-role-warning="${this._esc(r.role)}" hidden></div>
+          ${r.role === "llm" ? `<div class="stub-body">Provider/model changes here take effect after Nova reloads (Settings → Devices &amp; Services → Nova → ⋮ → Reload). Classifier, Reasoning, Vision, and Camera Rsn apply on their next use — no reload needed.</div>` : ""}
           ${r.role === "vision" ? `<div class="stub-body">Needs an image-capable model — e.g. moondream on Ollama, or a Groq vision model. Text-only models will fail on camera analysis.</div>` : ""}
         </div>`;
     }).join("");
@@ -3452,32 +3455,83 @@ class NovaPanel extends HTMLElement {
       <div class="new-model-list">${credRows}</div>`;
   }
 
-  _pickHealModel(models, cfgKey) {
-    if (/vision/.test(cfgKey || "")) {
-      return models.find(m => /vision|vl|scout|maverick|llama-4|gpt-4o|multimodal|qwen3\.\d|gemini/i.test(m)) || null;
-    }
-    return models[0] || null;
+  // Mismatch warnings (Phase 3, v7.108.0): flagged only on strong, specific
+  // evidence — never inferred from an unrecognised name, never auto-applied.
+  // Selecting the model is still the administrator's call either way.
+  _looksOllamaTagged(model) {
+    return /^[a-z0-9][a-z0-9._-]*:[a-z0-9][a-z0-9._-]*$/i.test((model || "").trim());
   }
 
-  async _loadModelsFor(provider, selectEl) {
+  _providerPrefixOwners() {
+    return [
+      { re: /^claude-/i, owner: "anthropic" },
+      { re: /^gemini-/i, owner: "gemini" },
+      { re: /^(gpt-|o[1-9](-|$))/i, owner: "openai" },
+    ];
+  }
+
+  // Nova's own well-known text-only defaults (const.py DEFAULT_MODEL /
+  // DEFAULT_CLASSIFIER_MODEL / etc, plus a few other common text-only cloud
+  // models) — selecting one of these EXACT ids for vision/camera-reasoning
+  // is strong evidence of a leftover default rather than a real choice.
+  // Deliberately NOT a broad "doesn't look like a vision model" regex —
+  // that would warn on every model Nova simply doesn't recognise yet.
+  _knownTextOnlyModels() {
+    return new Set([
+      "openai/gpt-oss-120b", "openai/gpt-oss-20b",
+      "llama-3.3-70b-versatile", "llama-3.1-8b-instant",
+      "mixtral-8x7b-32768", "deepseek-r1-distill-llama-70b",
+    ]);
+  }
+
+  _modelMismatchWarning(role, provider, model) {
+    const m = (model || "").trim();
+    if (!m) return null;
+    if (this._looksOllamaTagged(m) && provider !== "ollama") {
+      return `"${m}" looks like an Ollama-tagged model (name:tag) — ${provider} is a cloud provider and won't recognise that format.`;
+    }
+    for (const { re, owner } of this._providerPrefixOwners()) {
+      if (re.test(m) && provider !== owner) {
+        return `"${m}" looks like a ${owner} model, but the selected provider is ${provider}.`;
+      }
+    }
+    if ((role === "vision" || role === "camrsn") && this._knownTextOnlyModels().has(m)) {
+      return `"${m}" is one of Nova's own text-only default models — it will reject image input.`;
+    }
+    return null;
+  }
+
+  _updateRoleWarning(row) {
+    const provSel = row.querySelector(".new-prov-select");
+    const modelSel = row.querySelector(".new-model-select");
+    const customInput = row.querySelector(".new-model-custom");
+    const warnEl = row.querySelector("[data-role-warning]");
+    if (!provSel || !modelSel || !warnEl) return;
+    const role = row.getAttribute("data-role");
+    const model = (customInput && customInput.style.display !== "none")
+      ? customInput.value : modelSel.value;
+    const warning = this._modelMismatchWarning(role, provSel.value, model);
+    warnEl.textContent = warning || "";
+    warnEl.hidden = !warning;
+  }
+
+  async _loadModelsFor(provider, selectEl, { refresh = false } = {}) {
     if (!this._hass || !selectEl) return;
     const cur = selectEl.getAttribute("data-current") || "";
     try {
-      const res = await this._hass.callWS({ type: "nova/list_models", provider });
+      const res = await this._hass.callWS({ type: "nova/list_models", provider, refresh });
       const models = (res && res.models) || [];
       let opts = "";
       if (models.length) {
         if (cur && !models.includes(cur)) {
-          const cfgKey = selectEl.getAttribute("data-cfg-key");
-          const heal = this._pickHealModel(models, cfgKey);
-          if (heal && cfgKey) {
-            await this._rawSaveConfig(cfgKey, heal);
-            selectEl.setAttribute("data-current", heal);
-            opts += models.map(m => `<option value="${this._esc(m)}"${m === heal ? " selected" : ""}>${this._esc(m)}</option>`).join("");
-          } else {
-            opts += `<option value="${this._esc(cur)}" selected>${this._esc(cur)} — unavailable, pick one</option>`;
-            opts += models.map(m => `<option value="${this._esc(m)}">${this._esc(m)}</option>`).join("");
-          }
+          // Never silently replace a saved model just because a live
+          // discovery call didn't happen to list it — it may be private,
+          // preview, newly released, or simply not returned by this
+          // endpoint. Keep it selected and offer the live list alongside
+          // it. (Previously this auto-picked and SAVED a different model
+          // — often just the alphabetically-first one — on every render.)
+          opts += `<option value="${this._esc(cur)}" selected>${this._esc(cur)} — not in the live list</option>`;
+          opts += models.map(m => `<option value="${this._esc(m)}">${this._esc(m)}</option>`).join("");
         } else {
           opts += models.map(m => `<option value="${this._esc(m)}"${m === cur ? " selected" : ""}>${this._esc(m)}</option>`).join("");
         }
@@ -3488,6 +3542,10 @@ class NovaPanel extends HTMLElement {
       }
       opts += `<option value="__custom__">✎ Custom…</option>`;
       selectEl.innerHTML = opts;
+      selectEl.title = (res && res.truncated)
+        ? "The provider returned more models than fit in one page — list may be incomplete." : "";
+      const row = selectEl.closest(".new-model-row");
+      if (row) this._updateRoleWarning(row);
     } catch (_) { /* leave current options in place on error */ }
   }
 
@@ -3506,6 +3564,7 @@ class NovaPanel extends HTMLElement {
       const provSel = row.querySelector(".new-prov-select");
       const modelSel = row.querySelector(".new-model-select");
       const customInput = row.querySelector(".new-model-custom");
+      const refreshBtn = row.querySelector(".new-model-refresh");
       if (!provSel || !modelSel) return;
       this._loadModelsFor(provSel.value, modelSel);
       provSel.addEventListener("change", async (e) => {
@@ -3523,15 +3582,18 @@ class NovaPanel extends HTMLElement {
           await this._rawSaveConfig(modelSel.getAttribute("data-cfg-key"), newModel);
           modelSel.setAttribute("data-current", newModel);
         }
+        this._updateRoleWarning(row);
       });
       modelSel.addEventListener("change", async (e) => {
         if (e.target.value === "__custom__") {
           if (customInput) { customInput.style.display = ""; customInput.focus(); }
+          this._updateRoleWarning(row);
           return;
         }
         if (customInput) customInput.style.display = "none";
         await this._rawSaveConfig(modelSel.getAttribute("data-cfg-key"), e.target.value);
         modelSel.setAttribute("data-current", e.target.value);
+        this._updateRoleWarning(row);
       });
       if (customInput) {
         customInput.addEventListener("change", async (e) => {
@@ -3540,11 +3602,40 @@ class NovaPanel extends HTMLElement {
             await this._rawSaveConfig(customInput.getAttribute("data-cfg-key"), v);
             modelSel.setAttribute("data-current", v);
           }
+          this._updateRoleWarning(row);
+        });
+      }
+      if (refreshBtn) {
+        refreshBtn.addEventListener("click", async () => {
+          refreshBtn.disabled = true;
+          try {
+            await this._loadModelsFor(provSel.value, modelSel, { refresh: true });
+          } finally {
+            refreshBtn.disabled = false;
+          }
         });
       }
     });
 
     this._wireCredentials();
+  }
+
+  // Provider availability (Phase 3, v7.108.0): labels each role's provider
+  // <option> as "not configured" when unavailable, WITHOUT disabling it —
+  // an administrator can still pick it and add the credential/endpoint
+  // right after. Never a value, just a boolean-derived label; each
+  // provider's own evidence only (see websocket.py's
+  // _compute_provider_availability — this only renders what it returns).
+  _markProviderAvailability(available) {
+    if (!available) return;
+    const root = this.shadowRoot;
+    root.querySelectorAll(".new-prov-select").forEach(sel => {
+      Array.from(sel.options).forEach(opt => {
+        const base = opt.value;
+        if (!(base in available)) return;
+        opt.textContent = available[base] ? base : `${base} (not configured)`;
+      });
+    });
   }
 
   // Provider Credentials (Phase 2, v7.107.0): status is fetched once per
@@ -3565,6 +3656,7 @@ class NovaPanel extends HTMLElement {
         el.textContent = configured ? "configured" : "not set";
         el.classList.toggle("cred-configured", configured);
       });
+      this._markProviderAvailability(res && res.available);
     } catch (_) { /* leave the "…" placeholder on error */ }
 
     root.querySelectorAll(".cred-save").forEach(btn => {
@@ -3579,6 +3671,7 @@ class NovaPanel extends HTMLElement {
             input.value = "";
             const statusEl = root.querySelector(`[data-cred-status="${p}"]`);
             if (statusEl) { statusEl.textContent = "configured"; statusEl.classList.add("cred-configured"); }
+            this._markProviderAvailability({ [p]: true });
           }
         } catch (err) { console.error(`Nova: failed to save credential for ${p}`, err); }
       });
@@ -3593,6 +3686,12 @@ class NovaPanel extends HTMLElement {
           if (res && res.ok) {
             const statusEl = root.querySelector(`[data-cred-status="${p}"]`);
             if (statusEl) { statusEl.textContent = "not set"; statusEl.classList.remove("cred-configured"); }
+            // custom/ollama availability isn't credential-derived (endpoint
+            // / always-on respectively) — only the four cloud providers'
+            // availability tracks their own credential.
+            if (["groq", "openai", "anthropic", "gemini"].includes(p)) {
+              this._markProviderAvailability({ [p]: false });
+            }
           }
         } catch (err) { console.error(`Nova: failed to clear credential for ${p}`, err); }
       });
@@ -7032,7 +7131,7 @@ class NovaPanel extends HTMLElement {
       .diag-ok{color:#5fbf7a} .diag-warn{color:var(--warn)} .diag-idle{color:var(--ink-dim)}
       .diag-down{color:#ff6b81} .diag-off{color:var(--ink-faint)}
       .new-model-list{display:flex;flex-direction:column;gap:10px}
-      .new-model-row{display:grid;grid-template-columns:88px 1fr 1.3fr;gap:6px;align-items:center}
+      .new-model-row{display:grid;grid-template-columns:88px 1fr 1.3fr auto;gap:6px;align-items:center}
       .model-label{font-family:var(--font-mono);font-size:10px;letter-spacing:.1em;color:var(--ink-faint);text-transform:uppercase}
       .new-model-row .new-prov-select,.new-model-row .new-model-select{width:100%;min-width:0;
         background:var(--surface-2);border:1px solid var(--line-soft);color:var(--ink);
@@ -7041,6 +7140,8 @@ class NovaPanel extends HTMLElement {
         background:var(--surface-2);border:1px solid var(--line-soft);color:var(--gold);
         font-family:var(--font-mono);font-size:11px;border-radius:8px}
       .new-model-custom:focus{outline:none;border-color:var(--gold)}
+      .new-model-refresh{padding:5px 9px;font-size:12px;line-height:1}
+      .new-model-warning{grid-column:1/-1;font-size:10.5px;color:var(--warn);margin-top:2px}
       .new-model-row .stub-body{grid-column:1/-1;font-size:10.5px;margin-top:2px}
       .cred-row{display:grid;grid-template-columns:88px 74px 1fr auto auto;gap:6px;align-items:center}
       .cred-status{font-family:var(--font-mono);font-size:10px;color:var(--ink-faint);text-transform:uppercase}

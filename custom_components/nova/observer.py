@@ -1027,6 +1027,61 @@ async def start(hass: HomeAssistant, config: dict) -> None:
         _LOGGER.warning("Cognitive core start failed (non-fatal): %s", exc)
 
 
+async def refresh_tier_providers(hass: HomeAssistant, updates: Optional[dict] = None) -> None:
+    """Rebuild the classifier/reasoning tier providers from current config,
+    without restarting the rest of observer (listeners, appliance monitor,
+    briefings, cognitive core) — so a provider/model change made while
+    Observer is running takes effect on the very next tick, the same way
+    vision/camera-reasoning already do (Phase 3, v7.108.0). A no-op when
+    Observer isn't running: there's nothing live to refresh, and the normal
+    `start()` path will pick up the new config next time it's enabled.
+
+    `updates` is only used to skip the (blocking) rebuild entirely when
+    neither tier's provider/model actually changed — e.g. an unrelated
+    setting saved through the same generic nova/update_config path.
+    """
+    if not _STATE.running:
+        return
+    if updates is not None:
+        relevant = {"classifier_provider", "classifier_model",
+                    "reasoning_provider", "reasoning_model"}
+        if not (relevant & set(updates)):
+            return
+
+    config = dict(_STATE.config or {})
+    try:
+        from .const import DOMAIN as _DOM
+        for _data in (hass.data.get(_DOM) or {}).values():
+            if isinstance(_data, dict) and isinstance(_data.get("runtime_config"), dict):
+                rc = _data["runtime_config"]
+                config = {**config, **{
+                    k: v for k, v in rc.items()
+                    if k == "llm_base_url" or k.endswith(("_provider", "_model", "_base_url"))
+                }}
+                break
+    except Exception as exc:
+        _LOGGER.debug("Observer: refresh runtime-key merge note: %s", exc)
+
+    try:
+        classifier = await hass.async_add_executor_job(
+            create_tier_provider, config, "classifier")
+        reasoning = await hass.async_add_executor_job(
+            create_tier_provider, config, "reasoning")
+    except Exception as exc:
+        _LOGGER.warning("Observer: tier provider refresh failed (keeping the "
+                        "previous provider live): %s", exc)
+        return
+
+    _STATE.config = config
+    _STATE.classifier_provider = classifier
+    _STATE.reasoning_provider = reasoning
+    _LOGGER.info(
+        "Nova Observer: tier providers refreshed live (classifier=%s/%s, reasoning=%s/%s)",
+        getattr(classifier, "name", "?"), config.get("classifier_model", "default"),
+        getattr(reasoning, "name", "?"), config.get("reasoning_model", "default"),
+    )
+
+
 async def stop() -> None:
     if _STATE.unsub is not None:
         try:

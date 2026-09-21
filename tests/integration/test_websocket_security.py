@@ -26,6 +26,18 @@ async def _setup_nova(hass) -> MockConfigEntry:
     return entry
 
 
+@pytest.fixture(autouse=True)
+def _reset_model_discovery_cache():
+    """websocket.py's model-discovery cache (Phase 3, v7.108.0) is a plain
+    module-level dict — it isn't per-hass-instance, so it would otherwise
+    leak a cached (or missing) entry from one test into the next within the
+    same pytest process. Reset before and after every test in this file."""
+    from custom_components.nova import websocket
+    websocket.invalidate_model_cache()
+    yield
+    websocket.invalidate_model_cache()
+
+
 async def test_admin_required_command_rejects_non_admin(
     hass, hass_ws_client, hass_read_only_access_token,
 ):
@@ -109,6 +121,173 @@ async def test_list_models_returns_safe_error_shape(hass, hass_ws_client):
     }
 
 
+async def test_list_models_paginates_gemini_across_pages(hass, hass_ws_client, aioclient_mock, tmp_path, monkeypatch):
+    """Gemini's official ListModels pagination: page 1 has no pageToken,
+    page 2 is requested with the exact opaque token page 1 returned — the
+    result is the union, deduped and sorted (Phase 3, v7.108.0)."""
+    from custom_components.nova import ha_secrets
+
+    monkeypatch.setattr(ha_secrets, "SECRETS_PATH", tmp_path / "secrets.yaml")
+    await ha_secrets.async_set_provider_credential(hass, "gemini", "AIzaTestGeminiKey")
+
+    base = "https://generativelanguage.googleapis.com/v1beta/models"
+    # More specific (has pageToken) registered first — aioclient_mock does a
+    # present-subset match, so a less specific mock registered first would
+    # also match the second page's request (it too carries pageSize=100).
+    aioclient_mock.get(base, params={"pageToken": "page-2-token"}, json={
+        "models": [{"name": "models/gemini-legacy", "supportedGenerationMethods": ["generateContent"]}],
+    })
+    aioclient_mock.get(base, params={"pageSize": "100"}, json={
+        "models": [{"name": "models/gemini-3.6-flash", "supportedGenerationMethods": ["generateContent"]}],
+        "nextPageToken": "page-2-token",
+    })
+
+    await _setup_nova(hass)
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id({"type": "nova/list_models", "provider": "gemini"})
+    resp = await client.receive_json()
+
+    assert resp["success"] is True
+    assert resp["result"]["models"] == ["gemini-3.6-flash", "gemini-legacy"]
+    assert resp["result"]["truncated"] is False
+    assert resp["result"]["cached"] is False
+
+
+async def test_list_models_second_call_is_served_from_cache(hass, hass_ws_client, aioclient_mock, tmp_path, monkeypatch):
+    """A second nova/list_models call for the same provider within the TTL
+    doesn't repeat the HTTP fetch (Phase 3, v7.108.0)."""
+    from custom_components.nova import ha_secrets
+
+    monkeypatch.setattr(ha_secrets, "SECRETS_PATH", tmp_path / "secrets.yaml")
+    await ha_secrets.async_set_provider_credential(hass, "groq", "gsk_test_key")
+
+    aioclient_mock.get(
+        "https://api.groq.com/openai/v1/models",
+        json={"data": [{"id": "llama-3.3-70b-versatile"}]},
+    )
+
+    await _setup_nova(hass)
+    client = await hass_ws_client(hass)
+
+    await client.send_json_auto_id({"type": "nova/list_models", "provider": "groq"})
+    first = await client.receive_json()
+    await client.send_json_auto_id({"type": "nova/list_models", "provider": "groq"})
+    second = await client.receive_json()
+
+    assert first["result"]["cached"] is False
+    assert second["result"]["cached"] is True
+    assert second["result"]["models"] == first["result"]["models"]
+    assert aioclient_mock.call_count == 1
+
+
+async def test_list_models_refresh_bypasses_cache_with_no_url_param(hass, hass_ws_client, aioclient_mock, tmp_path, monkeypatch):
+    """`refresh: true` forces a fresh fetch — still only a boolean, never a
+    caller-supplied destination."""
+    from custom_components.nova import ha_secrets
+
+    monkeypatch.setattr(ha_secrets, "SECRETS_PATH", tmp_path / "secrets.yaml")
+    await ha_secrets.async_set_provider_credential(hass, "groq", "gsk_test_key")
+
+    aioclient_mock.get(
+        "https://api.groq.com/openai/v1/models",
+        json={"data": [{"id": "llama-3.3-70b-versatile"}]},
+    )
+
+    await _setup_nova(hass)
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id({"type": "nova/list_models", "provider": "groq"})
+    await client.receive_json()
+    await client.send_json_auto_id({"type": "nova/list_models", "provider": "groq", "refresh": True})
+    second = await client.receive_json()
+
+    assert second["result"]["cached"] is False
+    assert aioclient_mock.call_count == 2
+
+
+async def test_list_models_auth_failure_is_not_cached_as_success(hass, hass_ws_client, aioclient_mock, tmp_path, monkeypatch):
+    """A 401 must never be cached as an empty successful list — the very
+    next call must retry, not silently keep serving 'no models'."""
+    from custom_components.nova import ha_secrets
+
+    monkeypatch.setattr(ha_secrets, "SECRETS_PATH", tmp_path / "secrets.yaml")
+    await ha_secrets.async_set_provider_credential(hass, "groq", "gsk_bad_key")
+
+    aioclient_mock.get("https://api.groq.com/openai/v1/models", status=401)
+
+    await _setup_nova(hass)
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id({"type": "nova/list_models", "provider": "groq"})
+    first = await client.receive_json()
+    assert first["result"]["error"] == "model_discovery_unavailable"
+    assert "cached" not in first["result"]
+
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(
+        "https://api.groq.com/openai/v1/models",
+        json={"data": [{"id": "llama-3.3-70b-versatile"}]},
+    )
+    await client.send_json_auto_id({"type": "nova/list_models", "provider": "groq"})
+    second = await client.receive_json()
+    assert second["result"]["models"] == ["llama-3.3-70b-versatile"]
+    assert second["result"]["cached"] is False  # proves the 401 was never cached
+
+
+async def test_list_models_cache_invalidated_when_credential_changes(hass, hass_ws_client, aioclient_mock, tmp_path, monkeypatch):
+    """Setting a new credential for a provider must drop any cached list
+    fetched under the old (or no) credential."""
+    from custom_components.nova import ha_secrets
+
+    monkeypatch.setattr(ha_secrets, "SECRETS_PATH", tmp_path / "secrets.yaml")
+
+    aioclient_mock.get("https://api.groq.com/openai/v1/models", status=401)
+
+    await _setup_nova(hass)
+    client = await hass_ws_client(hass)
+    await client.send_json_auto_id({"type": "nova/list_models", "provider": "groq"})
+    first = await client.receive_json()
+    assert first["result"]["error"] == "model_discovery_unavailable"
+
+    await client.send_json_auto_id({
+        "type": "nova/set_credential", "provider": "groq", "value": "gsk_now_valid",
+    })
+    await client.receive_json()
+
+    aioclient_mock.clear_requests()
+    aioclient_mock.get(
+        "https://api.groq.com/openai/v1/models",
+        json={"data": [{"id": "llama-3.3-70b-versatile"}]},
+    )
+    await client.send_json_auto_id({"type": "nova/list_models", "provider": "groq"})
+    second = await client.receive_json()
+    assert second["result"]["models"] == ["llama-3.3-70b-versatile"]
+
+
+async def test_list_models_cache_invalidated_when_base_url_changes(hass, hass_ws_client, aioclient_mock):
+    """Changing llm_base_url (custom/ollama's saved endpoint identity) must
+    drop any cached list fetched under the old endpoint."""
+    await _setup_nova(hass)
+    client = await hass_ws_client(hass)
+
+    aioclient_mock.get("https://old.example.test/v1/models", json={"data": [{"id": "old-model"}]})
+    await client.send_json_auto_id({
+        "type": "nova/update_config", "key": "llm_base_url", "value": "https://old.example.test/v1",
+    })
+    await client.receive_json()
+    await client.send_json_auto_id({"type": "nova/list_models", "provider": "custom"})
+    first = await client.receive_json()
+    assert first["result"]["models"] == ["old-model"]
+
+    await client.send_json_auto_id({
+        "type": "nova/update_config", "key": "llm_base_url", "value": "https://new.example.test/v1",
+    })
+    await client.receive_json()
+    aioclient_mock.get("https://new.example.test/v1/models", json={"data": [{"id": "new-model"}]})
+    await client.send_json_auto_id({"type": "nova/list_models", "provider": "custom"})
+    second = await client.receive_json()
+    assert second["result"]["models"] == ["new-model"]
+    assert second["result"]["cached"] is False
+
+
 async def test_get_credential_status_rejects_non_admin(
     hass, hass_ws_client, hass_read_only_access_token,
 ):
@@ -122,6 +301,40 @@ async def test_get_credential_status_rejects_non_admin(
 
     assert resp["success"] is False
     assert resp["error"]["code"] == "unauthorized"
+
+
+async def test_get_credential_status_reports_availability_independently(
+    hass, hass_ws_client, tmp_path, monkeypatch,
+):
+    """Phase 3, v7.108.0: `available` tracks each provider's own evidence —
+    setting Groq's credential must not mark OpenAI or Anthropic available,
+    and custom/ollama follow the endpoint rule, not any credential."""
+    from custom_components.nova import ha_secrets
+
+    monkeypatch.setattr(ha_secrets, "SECRETS_PATH", tmp_path / "secrets.yaml")
+    await _setup_nova(hass)  # test entry seeds llm_base_url (ollama) — custom/ollama already True
+    client = await hass_ws_client(hass)
+
+    await client.send_json_auto_id({"type": "nova/get_credential_status"})
+    before = (await client.receive_json())["result"]["available"]
+    assert before["groq"] is False
+    assert before["openai"] is False
+    assert before["ollama"] is True  # always — has a working default
+
+    await client.send_json_auto_id({
+        "type": "nova/set_credential", "provider": "groq", "value": "gsk_test",
+    })
+    await client.receive_json()
+
+    await client.send_json_auto_id({"type": "nova/get_credential_status"})
+    after = (await client.receive_json())["result"]["available"]
+
+    assert after["groq"] is True          # the one that actually changed
+    assert after["openai"] is False       # untouched by groq's credential
+    assert after["anthropic"] is False    # untouched by groq's credential
+    assert after["gemini"] is False       # untouched by groq's credential
+    assert after["custom"] == before["custom"]    # unrelated to any credential
+    assert after["ollama"] == before["ollama"]    # unrelated to any credential
 
 
 async def test_get_credential_status_returns_booleans_only(hass, hass_ws_client):

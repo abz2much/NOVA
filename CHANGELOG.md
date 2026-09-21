@@ -1,3 +1,13 @@
+## [7.108.0] — consistent model selection and discovery (Phase 3)
+
+Nova still supports the same six provider families (Groq, OpenAI, Anthropic, Gemini, Ollama, custom OpenAI-compatible) — this release improves independent role selection, live discovery, and configuration consistency around them, not new providers.
+
+- Fixed a real bug: a saved model that wasn't in a provider's live discovery list (private, preview, newly released, or retired-but-still-working) used to be silently replaced and saved over on every Settings visit — often with the alphabetically-first model from the list. It's now kept selected and shown alongside the live list instead.
+- The Main Agent, Classifier, Reasoning, Review, Vision, and Camera-reasoning roles already saved and resolved their own provider and model independently; Classifier and Reasoning now also apply a changed provider or model immediately while Observer is running, instead of only after Observer (or Nova) restarts — matching Vision and Camera-reasoning, which already applied immediately. The Main Agent's provider/model still needs a reload to take effect; the panel now says so.
+- Each provider in the Settings → AI Models card now shows whether it's actually available — a cloud provider only when its own credential is set, custom only when its endpoint is saved, Ollama always (it has a working default) — never inferred from another provider's key.
+- Live model discovery (`nova/list_models`) now paginates Gemini's and Anthropic's official list endpoints (bounded to 5 pages / 500 models, built only from the endpoint already approved server-side plus an opaque cursor the provider itself returned — never a URL from the response), and results are cached briefly per provider+endpoint (never keyed on a credential, never caching an auth failure as a successful empty list) with a per-row refresh control to force a fresh fetch. The cache is invalidated automatically when a provider's credential or endpoint changes.
+- A clearly mismatched provider/model pairing (an Ollama-tagged model on a cloud provider, a distinctly-branded model like `claude-*`/`gemini-*`/`gpt-*` on a different provider, or one of Nova's own text-only defaults selected for Vision/Camera-reasoning) now shows a warning next to that role — informational only, it never moves the model, changes the provider, or blocks a manual override.
+
 ## [7.107.0] — security: separate provider credentials (Phase 2)
 
 - Every LLM provider — Groq, OpenAI, Anthropic, Gemini, a custom OpenAI-compatible endpoint, and an optional Bearer key for a protected Ollama endpoint — now has its own dedicated credential, stored only in Home Assistant's `secrets.yaml`.

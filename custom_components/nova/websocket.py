@@ -2008,6 +2008,13 @@ async def ws_update_config(
         rc[key] = value
         _LOGGER.info("Nova panel: set %s = %s", key, str(value)[:80])
 
+        # llm_base_url is the saved endpoint identity custom/ollama discovery
+        # is cached under (Phase 3, v7.108.0) — a stale cached list for the
+        # old endpoint must not survive the endpoint changing.
+        if key == "llm_base_url":
+            invalidate_model_cache("custom")
+            invalidate_model_cache("ollama")
+
         # Persist via centralized config module (survives restarts). The
         # in-memory runtime_config above is already set either way, so this
         # session keeps working even on a save failure — but the panel is
@@ -2055,6 +2062,20 @@ async def ws_update_config(
         if key in ("security_alarm_entity", "lockdown_auto_on_arm"):
             from . import cognitive_core
             await cognitive_core.apply_runtime_config(key, value)
+
+        # Classifier/reasoning provider or model changed while Observer is
+        # already running — refresh those two tier providers live, the same
+        # way vision/camera-reasoning already apply on their very next
+        # analysis (Phase 3, v7.108.0). A no-op if Observer isn't running or
+        # this key isn't one of the four that matter.
+        if key in ("classifier_provider", "classifier_model",
+                   "reasoning_provider", "reasoning_model"):
+            try:
+                from . import observer as observer_mod
+                if observer_mod.is_running():
+                    await observer_mod.refresh_tier_providers(hass, {key: value})
+            except Exception as exc:
+                _LOGGER.debug("Observer tier refresh note: %s", exc)
 
         connection.send_result(msg["id"], {"key": key, "value": value, "persisted": persisted})
     except Exception as exc:
@@ -2196,11 +2217,126 @@ def _log_model_discovery_failure(
     )
 
 
-async def _fetch_models(hass, provider: str, config: dict) -> list[str]:
+# ─── Pagination (Phase 3, v7.108.0) ──────────────────────────────────────────
+#
+# Gemini and Anthropic's official model-list endpoints paginate; the rest
+# (Groq, OpenAI, a custom OpenAI-compatible endpoint, Ollama) return a flat
+# list in one response. Pagination is driven ONLY by an opaque cursor/token
+# value the provider's own previous-page response returned — never a URL a
+# response might include — appended as a query param to the one endpoint
+# _resolve_model_discovery_request already approved. Bounded on both axes
+# (pages and total models) so a misbehaving or malicious endpoint can't turn
+# discovery into an unbounded fetch.
+_PAGINATION_STYLE = {
+    "gemini": "pageToken",       # request: pageToken=<token>; response: nextPageToken
+    "anthropic": "after_id",     # request: after_id=<id>; response: has_more, last_id
+}
+_MAX_DISCOVERY_PAGES = 5
+_MAX_DISCOVERY_MODELS = 500
+_MAX_CURSOR_LEN = 2048
+
+
+def _next_page_cursor(style: Optional[str], data: dict) -> Optional[str]:
+    """The opaque cursor/id for the next page, or None to stop. Any shape
+    that doesn't clearly and safely mean "there is a next page" — a missing
+    field, wrong type, empty/oversized value, or (for Anthropic) has_more
+    not literally True — stops pagination rather than guessing. Never
+    returns anything that looks like a URL."""
+    if not isinstance(data, dict) or style is None:
+        return None
+    if style == "pageToken":
+        token = data.get("nextPageToken")
+    elif style == "after_id":
+        if data.get("has_more") is not True:
+            return None
+        token = data.get("last_id")
+    else:
+        return None
+    if not isinstance(token, str):
+        return None
+    token = token.strip()
+    if not token or len(token) > _MAX_CURSOR_LEN or "://" in token:
+        return None
+    return token
+
+
+def _page_query_params(style: Optional[str], cursor: Optional[str]) -> dict:
+    if style == "pageToken":
+        params = {"pageSize": "100"}
+        if cursor:
+            params["pageToken"] = cursor
+        return params
+    if style == "after_id":
+        params = {"limit": "100"}
+        if cursor:
+            params["after_id"] = cursor
+        return params
+    return {}
+
+
+# ─── Bounded server-side cache (Phase 3, v7.108.0) ───────────────────────────
+#
+# Keyed by (provider, url) — url is never caller-supplied and never carries a
+# credential (see _resolve_model_discovery_request: cloud providers use a
+# fixed canonical URL; custom/ollama use only the saved, server-side
+# llm_base_url), so it's safe as a cache key on its own. A distinct base_url
+# is a distinct key, so custom endpoints never share a cache entry with each
+# other. Only a SUCCESSFUL fetch is ever cached — an exception path never
+# reaches _model_cache_set, so an auth failure can never masquerade as a
+# cached empty success. Invalidated explicitly (invalidate_model_cache) when
+# a credential or the saved endpoint changes.
+_MODEL_CACHE_TTL = 300.0  # seconds
+_MODEL_CACHE_MAX_ENTRIES = 32
+_MODEL_CACHE: dict[tuple[str, str], tuple[float, list[str], bool]] = {}
+_MODEL_CACHE_INFLIGHT: dict[tuple[str, str], Any] = {}  # asyncio.Task, deduped concurrent fetches
+
+
+def _model_cache_key(provider: str, url: str) -> tuple[str, str]:
+    return (provider, url)
+
+
+def _model_cache_get(key: tuple[str, str]):
+    entry = _MODEL_CACHE.get(key)
+    if entry is None:
+        return None
+    ts, models, truncated = entry
+    if (time.monotonic() - ts) > _MODEL_CACHE_TTL:
+        _MODEL_CACHE.pop(key, None)
+        return None
+    return models, truncated
+
+
+def _model_cache_set(key: tuple[str, str], models: list[str], truncated: bool) -> None:
+    if key not in _MODEL_CACHE and len(_MODEL_CACHE) >= _MODEL_CACHE_MAX_ENTRIES:
+        oldest = min(_MODEL_CACHE, key=lambda k: _MODEL_CACHE[k][0])
+        _MODEL_CACHE.pop(oldest, None)
+    _MODEL_CACHE[key] = (time.monotonic(), list(models), truncated)
+
+
+def invalidate_model_cache(provider: Optional[str] = None) -> None:
+    """Drop cached model lists (and any in-flight dedup entry) for
+    `provider`, or everything when `provider` is None. Called whenever a
+    credential or endpoint discovery depends on changes, so a stale list
+    from before the change can't linger for the rest of the TTL."""
+    if provider is None:
+        _MODEL_CACHE.clear()
+        _MODEL_CACHE_INFLIGHT.clear()
+        return
+    for key in [k for k in _MODEL_CACHE if k[0] == provider]:
+        _MODEL_CACHE.pop(key, None)
+    for key in [k for k in _MODEL_CACHE_INFLIGHT if k[0] == provider]:
+        _MODEL_CACHE_INFLIGHT.pop(key, None)
+
+
+async def _fetch_models(hass, provider: str, config: dict) -> tuple[list[str], bool]:
     """
-    Query a provider's models endpoint and return a sorted list of model IDs.
+    Query a provider's models endpoint and return (model IDs, truncated).
     Uses HA's shared aiohttp session (off-loop network I/O). Each provider has
-    a different endpoint/auth/response shape; we normalise to a list of strings.
+    a different endpoint/auth/response shape; we normalise to a list of
+    strings. Paginates (see _PAGINATION_STYLE) only for the providers that
+    officially support it, bounded to _MAX_DISCOVERY_PAGES requests and
+    _MAX_DISCOVERY_MODELS models total — `truncated` is True if either bound
+    was hit while more may remain.
     """
     from homeassistant.helpers import aiohttp_client
     import async_timeout
@@ -2208,25 +2344,64 @@ async def _fetch_models(hass, provider: str, config: dict) -> list[str]:
     session = aiohttp_client.async_get_clientsession(hass)
     provider = str(provider or "").strip().lower()
     url, headers = _resolve_model_discovery_request(config, provider)
+    style = _PAGINATION_STYLE.get(provider)
 
-    async with async_timeout.timeout(12):
-        async with session.get(url, headers=headers) as resp:
-            if resp.status != 200:
-                raise _ModelDiscoveryHTTPError(resp.status)
-            data = await resp.json()
+    all_models: list[str] = []
+    cursor: Optional[str] = None
+    truncated = False
+    for _page in range(_MAX_DISCOVERY_PAGES):
+        params = _page_query_params(style, cursor)
+        async with async_timeout.timeout(12):
+            async with session.get(url, headers=headers, params=params or None) as resp:
+                if resp.status != 200:
+                    raise _ModelDiscoveryHTTPError(resp.status)
+                data = await resp.json()
 
-    return _parse_model_list(provider, url, data)
+        all_models.extend(_parse_model_list(provider, url, data))
+        if len(all_models) >= _MAX_DISCOVERY_MODELS:
+            truncated = True
+            break
+        if style is None:
+            break  # not an officially paginated provider — one request only
+
+        cursor = _next_page_cursor(style, data)
+        if not cursor:
+            break
+    else:
+        truncated = True  # exhausted the page budget with a cursor still pending
+
+    models = sorted(set(all_models))[:_MAX_DISCOVERY_MODELS]
+    return models, truncated
+
+
+async def _fetch_models_deduped(hass, provider: str, config: dict, cache_key) -> tuple[list[str], bool]:
+    """_fetch_models, but concurrent callers for the same (provider, url)
+    share one in-flight request instead of each firing their own."""
+    import asyncio
+    existing = _MODEL_CACHE_INFLIGHT.get(cache_key)
+    if existing is not None:
+        return await existing
+    task = asyncio.ensure_future(_fetch_models(hass, provider, config))
+    _MODEL_CACHE_INFLIGHT[cache_key] = task
+    try:
+        return await task
+    finally:
+        _MODEL_CACHE_INFLIGHT.pop(cache_key, None)
 
 
 @websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/list_models",
     vol.Required("provider"): str,
+    vol.Optional("refresh", default=False): bool,
 })
 @websocket_api.async_response
 async def ws_list_models(hass: HomeAssistant, connection, msg) -> None:
-    """Return the live model list for a provider (Settings AI-Models dropdowns)."""
+    """Return the live model list for a provider (Settings AI-Models
+    dropdowns). `refresh: true` forces a fresh fetch past the cache — still
+    no caller-supplied destination, only a boolean."""
     provider = str(msg.get("provider") or "").strip().lower()
+    refresh = bool(msg.get("refresh", False))
     entry = _get_entry(hass)
     url = ""
     try:
@@ -2242,8 +2417,24 @@ async def ws_list_models(hass: HomeAssistant, connection, msg) -> None:
             runtime_config,
         )
         url = _resolve_model_discovery_request(config, provider)[0]
-        models = await _fetch_models(hass, provider, config)
-        connection.send_result(msg["id"], {"provider": provider, "models": models})
+        cache_key = _model_cache_key(provider, url)
+
+        if not refresh:
+            cached = _model_cache_get(cache_key)
+            if cached is not None:
+                models, truncated = cached
+                connection.send_result(msg["id"], {
+                    "provider": provider, "models": models,
+                    "cached": True, "truncated": truncated,
+                })
+                return
+
+        models, truncated = await _fetch_models_deduped(hass, provider, config, cache_key)
+        _model_cache_set(cache_key, models, truncated)
+        connection.send_result(msg["id"], {
+            "provider": provider, "models": models,
+            "cached": False, "truncated": truncated,
+        })
     except Exception as exc:
         _log_model_discovery_failure(provider, url, exc)
         connection.send_result(
@@ -2255,21 +2446,54 @@ async def ws_list_models(hass: HomeAssistant, connection, msg) -> None:
         )
 
 
+def _compute_provider_availability(credential_status: dict, base_url_set: bool) -> dict:
+    """Per-provider availability (Phase 3, v7.108.0), each rule independent
+    of every other provider's own state:
+      - a cloud provider is available only when ITS OWN credential exists;
+      - custom needs its own saved endpoint (llm_base_url) — there's no
+        sensible default for an arbitrary OpenAI-compatible endpoint;
+      - ollama is always available — unlike custom it has a working default
+        endpoint (see llm_provider.create_provider), so "no saved endpoint"
+        is a normal configuration, not a missing one.
+    Never reads or infers from another provider's field."""
+    return {
+        "groq": bool(credential_status.get("groq")),
+        "openai": bool(credential_status.get("openai")),
+        "anthropic": bool(credential_status.get("anthropic")),
+        "gemini": bool(credential_status.get("gemini")),
+        "custom": bool(base_url_set),
+        "ollama": True,
+    }
+
+
 @websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/get_credential_status",
 })
 @websocket_api.async_response
 async def ws_get_credential_status(hass: HomeAssistant, connection, msg) -> None:
-    """Whether each provider has a credential configured — booleans only,
-    never a value (Phase 2, v7.107.0). Admin-gated like nova/list_models."""
+    """Whether each provider has a credential configured (`status`, booleans
+    only, never a value — Phase 2, v7.107.0) and whether each is available
+    to select (`available`, Phase 3, v7.108.0 — see
+    _compute_provider_availability for the per-provider-type rule).
+    Admin-gated like nova/list_models."""
     try:
-        from . import ha_secrets
+        from . import ha_secrets, nova_config
         status = await ha_secrets.async_credential_status(hass)
-        connection.send_result(msg["id"], {"status": status})
+        entry = _get_entry(hass)
+        runtime_config: dict = {}
+        if entry is not None:
+            data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+            if isinstance(data, dict):
+                runtime_config = data.get("runtime_config", {}) or {}
+        config = await hass.async_add_executor_job(
+            nova_config.effective_config_with_runtime, entry, runtime_config)
+        base_url_set = bool(str(config.get("llm_base_url") or "").strip())
+        available = _compute_provider_availability(status, base_url_set)
+        connection.send_result(msg["id"], {"status": status, "available": available})
     except Exception as exc:
         _LOGGER.warning("ws_get_credential_status failed: %s", type(exc).__name__)
-        connection.send_result(msg["id"], {"status": {}})
+        connection.send_result(msg["id"], {"status": {}, "available": {}})
 
 
 @websocket_api.require_admin
@@ -2289,6 +2513,12 @@ async def ws_set_credential(hass: HomeAssistant, connection, msg) -> None:
         from . import ha_secrets
         ok = await ha_secrets.async_set_provider_credential(
             hass, msg["provider"], msg["value"])
+        if ok:
+            # A cached model list fetched under the old (or no) credential
+            # must not outlive the credential that produced it (Phase 3,
+            # v7.108.0) — e.g. an empty/unauthenticated result cached before
+            # a key was set.
+            invalidate_model_cache(str(msg["provider"] or "").strip().lower())
         connection.send_result(msg["id"], {"ok": ok})
     except Exception as exc:
         _LOGGER.warning("ws_set_credential failed: %s", type(exc).__name__)
@@ -2307,6 +2537,8 @@ async def ws_delete_credential(hass: HomeAssistant, connection, msg) -> None:
     try:
         from . import ha_secrets
         ok = await ha_secrets.async_delete_provider_credential(hass, msg["provider"])
+        if ok:
+            invalidate_model_cache(str(msg["provider"] or "").strip().lower())
         connection.send_result(msg["id"], {"ok": ok})
     except Exception as exc:
         _LOGGER.warning("ws_delete_credential failed: %s", type(exc).__name__)
