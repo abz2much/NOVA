@@ -124,6 +124,7 @@ const _locationCalls = [];
 const _sugCalls = [];
 let _semanticEnabled = false;
 let _activeMode = "normal";
+const _listModelCalls = [];
 const _modeSetCalls = [];
 const _serviceCalls = [];
 const _docDeleteCalls = [];
@@ -237,11 +238,17 @@ const hass = {
       return { last_snapshot: _intrSnap, called_off: _intrCalledOff, acknowledged: _intrAck, suppressed_for: _intrCalledOff ? 600 : 0, false_alarms_24h: _intrCalledOff ? 1 : 0 };
     }
     if (m.type === "nova/voice_confirm_test") return { ok: true, satellite: "assist_satellite.basement_nova", note: "Announce fired." };
-    if (m.type === "nova/list_models") return {
-      models: m.provider === "groq"
-        ? ["llama-3.3-70b-versatile", "moonshotai/kimi-k2-instruct", "meta-llama/llama-4-scout-17b"]
-        : ["gpt-4o", "gpt-4o-mini"],
-    };
+    if (m.type === "nova/list_models") {
+      _listModelCalls.push({ ...m });
+      if (m.provider === "custom") return {
+        models: [], error: "model_discovery_unavailable",
+      };
+      return {
+        models: m.provider === "groq"
+          ? ["llama-3.3-70b-versatile", "moonshotai/kimi-k2-instruct", "meta-llama/llama-4-scout-17b"]
+          : ["gpt-4o", "gpt-4o-mini"],
+      };
+    }
     if (m.type === "nova/diagnostics") return {
       overall: "warn", summary: "3/4 core services healthy",
       services: [
@@ -935,6 +942,9 @@ setTimeout(async () => {
           && /image-capable model/.test(aiCard.querySelector('.new-model-row[data-role="vision"]')?.textContent || "");
       })()],
   );
+  checks.push(["settings tab: model discovery sends no browser-controlled URL",
+    _listModelCalls.length > 0
+    && _listModelCalls.every(c => Object.keys(c).sort().join(",") === "provider,type")]);
   const llmProvSel = sRoot.querySelector('.new-model-row[data-role="llm"] .new-prov-select');
   llmProvSel.value = "openai";
   llmProvSel.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
@@ -943,6 +953,21 @@ setTimeout(async () => {
     _updateConfigCalls.some(c => c.key === "llm_provider" && c.value === "openai")
     && _updateConfigCalls.some(c => c.key === "llm_base_url" && c.value === "")
     && /gpt-4o/.test(sRoot.querySelector('.new-model-row[data-role="llm"] .new-model-select')?.innerHTML || "")]);
+
+  const llmModelSel = sRoot.querySelector('.new-model-row[data-role="llm"] .new-model-select');
+  const llmCustomInput = sRoot.querySelector('.new-model-row[data-role="llm"] .new-model-custom');
+  llmProvSel.value = "custom";
+  llmProvSel.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+  await new Promise(r => setTimeout(r, 20));
+  const unavailableShown = /no models found/.test(llmModelSel.textContent || "");
+  llmModelSel.value = "__custom__";
+  llmModelSel.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+  llmCustomInput.value = "manually-entered-model";
+  llmCustomInput.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: manual model entry remains available when discovery is unavailable",
+    unavailableShown
+    && _updateConfigCalls.some(c => c.key === "model" && c.value === "manually-entered-model")]);
 
   // Briefings: real card, schedule fields + include-feed chips autosave
   // through the same generic .cfg-field/.mode-chip[data-cfg-key] contract

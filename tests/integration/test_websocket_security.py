@@ -58,6 +58,57 @@ async def test_open_read_command_allowed_for_non_admin(
     assert resp["success"] is True
 
 
+async def test_list_models_rejects_non_admin(
+    hass, hass_ws_client, hass_read_only_access_token,
+):
+    """Model discovery can access stored credentials and is admin only."""
+    await _setup_nova(hass)
+    client = await hass_ws_client(hass, access_token=hass_read_only_access_token)
+
+    await client.send_json_auto_id({"type": "nova/list_models", "provider": "ollama"})
+    resp = await client.receive_json()
+
+    assert resp["success"] is False
+    assert resp["error"]["code"] == "unauthorized"
+
+
+async def test_list_models_schema_rejects_browser_supplied_base_url(
+    hass, hass_ws_client,
+):
+    """A browser supplied destination is rejected before the handler runs."""
+    await _setup_nova(hass)
+    client = await hass_ws_client(hass)
+
+    await client.send_json_auto_id({
+        "type": "nova/list_models",
+        "provider": "ollama",
+        "base_url": "https://attacker.invalid/v1",
+    })
+    resp = await client.receive_json()
+
+    assert resp["success"] is False
+    assert resp["error"]["code"] == "invalid_format"
+
+
+async def test_list_models_returns_safe_error_shape(hass, hass_ws_client):
+    """Discovery failures expose no exception detail or upstream content."""
+    await _setup_nova(hass)
+    client = await hass_ws_client(hass)
+
+    await client.send_json_auto_id({
+        "type": "nova/list_models",
+        "provider": "unsupported-provider",
+    })
+    resp = await client.receive_json()
+
+    assert resp["success"] is True
+    assert resp["result"] == {
+        "provider": "unsupported-provider",
+        "models": [],
+        "error": "model_discovery_unavailable",
+    }
+
+
 async def test_intrusion_snapshot_reaches_panel_only_via_admin_websocket(
     hass, tmp_path, monkeypatch, hass_ws_client, hass_client,
 ):
