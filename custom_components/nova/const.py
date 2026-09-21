@@ -52,6 +52,40 @@ CONF_REASONING_MODEL          = "reasoning_model"
 CONF_REVIEW_PROVIDER          = "review_provider"
 CONF_REVIEW_MODEL             = "review_model"
 
+# ─── Phase 2 — per-provider credentials (v7.107.0) ───────────────────────────
+#
+# Phase 1 (v7.106.0) kept one shared CONF_API_KEY for every cloud provider,
+# which could send one provider's secret to a different provider's endpoint
+# whenever a role (tier/vision/camera-reasoning) was pointed at a provider
+# other than the installation's original primary. Every provider now has its
+# own dedicated credential field, so multiple providers' keys coexist without
+# one clobbering or leaking into another.
+#
+# This is the fixed allowlist every credential read/write path validates
+# against — never accept or resolve a provider name that isn't a key here.
+CONF_OPENAI_API_KEY           = "openai_api_key"
+CONF_ANTHROPIC_API_KEY        = "anthropic_api_key"
+CONF_GROQ_API_KEY             = "groq_api_key"
+CONF_CUSTOM_API_KEY           = "custom_api_key"
+# Native Ollama doesn't require auth; this is only for a protected/reverse-
+# proxied Ollama endpoint that sits behind Bearer auth. Optional everywhere.
+CONF_OLLAMA_API_KEY           = "ollama_api_key"
+
+PROVIDER_API_KEY_FIELDS = {
+    "groq":      CONF_GROQ_API_KEY,
+    "openai":    CONF_OPENAI_API_KEY,
+    "anthropic": CONF_ANTHROPIC_API_KEY,
+    "gemini":    CONF_GEMINI_API_KEY,
+    "custom":    CONF_CUSTOM_API_KEY,
+    "ollama":    CONF_OLLAMA_API_KEY,
+}
+
+# Cloud providers with a fixed, canonical endpoint — the only providers the
+# narrow legacy-shared-key fallback (resolve_provider_credential) ever
+# applies to. Ollama and custom point at a self-hosted URL Nova cannot
+# verify the shared key was ever meant for, so they never inherit it.
+CREDENTIAL_LEGACY_FALLBACK_PROVIDERS = ("groq", "openai", "anthropic", "gemini")
+
 CONF_NOTIFY_SERVICE           = "notify_service"
 CONF_NOTIFY_SERVICES          = "notify_services"
 

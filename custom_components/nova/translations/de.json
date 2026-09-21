@@ -30,9 +30,10 @@
         "menu_options": {
           "core": "Kern — Persona, Direktive, Konversationsmodell",
           "routing": "Routing — Schlafzimmerbereiche, Broadcast-Gruppe, Benachrichtigungsdienst",
-          "observer": "Beobachter — proaktive Wahrnehmung (benötigt einen Gemini-Schlüssel)",
+          "observer": "Beobachter — proaktives Bewusstsein (Modellstufen, Ruhezeiten)",
           "identity": "Identität — Erkennung pro Person",
-          "email": "E-Mail — schreibgeschützter Posteingang (Passwort über secrets.yaml)"
+          "email": "E-Mail — schreibgeschützter Posteingang (Passwort über secrets.yaml)",
+          "credentials": "Anmeldedaten — API-Schlüssel der Anbieter"
         }
       },
       "core": {
@@ -64,10 +65,9 @@
       },
       "observer": {
         "title": "Nova — Beobachter-Modus",
-        "description": "proaktive Wahrnehmung. Nova beobachtet dein Zuhause und meldet sich, wenn etwas erwähnenswert ist. Benötigt einen Gemini-API-Schlüssel (Abrechnung aktiviert empfohlen).",
+        "description": "proaktives Bewusstsein. Nova beobachtet Ihr Zuhause und meldet sich, wenn etwas erwähnenswert ist. {note}",
         "data": {
           "observer_enabled": "Beobachter-Modus aktivieren",
-          "gemini_api_key": "Gemini-API-Schlüssel",
           "classifier_model": "Klassifizierer-Modell (Stufe 1 — günstig)",
           "reasoning_model": "Reasoning-Modell (Stufe 2 — Haupt)",
           "review_model": "Review-Modell (Stufe 3 — periodisch)",
@@ -103,13 +103,40 @@
           "imap_ssl": "SSL verwenden (empfohlen)",
           "imap_secret_key": "secrets.yaml-Schlüssel mit dem Passwort"
         }
+      },
+      "credentials": {
+        "title": "Nova — Anmeldedaten",
+        "description": "Ein eigener API-Schlüssel pro Anbieter — Groq, OpenAI, Anthropic, Gemini, ein benutzerdefinierter OpenAI-kompatibler Endpunkt und ein optionaler Bearer-Schlüssel für einen geschützten Ollama-Endpunkt. Nur in der secrets.yaml von Home Assistant gespeichert, niemals in der Panel-Konfiguration und hier nie wieder angezeigt. Status: {status}. Ein leeres Feld ändert den gespeicherten Schlüssel dieses Anbieters nicht. Aktueller Anbieter des Hauptagenten: {active}.",
+        "data": {
+          "groq_credential": "Groq-API-Schlüssel",
+          "clear_groq": "Gespeicherten Groq-Schlüssel löschen",
+          "openai_credential": "OpenAI-API-Schlüssel",
+          "clear_openai": "Gespeicherten OpenAI-Schlüssel löschen",
+          "anthropic_credential": "Anthropic-API-Schlüssel",
+          "clear_anthropic": "Gespeicherten Anthropic-Schlüssel löschen",
+          "gemini_credential": "Gemini-API-Schlüssel",
+          "clear_gemini": "Gespeicherten Gemini-Schlüssel löschen",
+          "custom_credential": "API-Schlüssel des benutzerdefinierten Endpunkts",
+          "clear_custom": "Gespeicherten benutzerdefinierten Schlüssel löschen",
+          "ollama_credential": "Ollama-Bearer-Schlüssel (optional — nur für einen geschützten Endpunkt)",
+          "clear_ollama": "Gespeicherten Ollama-Schlüssel löschen",
+          "confirm_delete_active": "Ja, mir ist bewusst, dass das Löschen des Schlüssels des aktuellen Anbieters des Hauptagenten diesen deaktiviert, bis ein neuer Schlüssel gesetzt oder der Anbieter gewechselt wird"
+        }
       }
+    },
+    "error": {
+      "credential_set_and_clear": "Geben Sie pro Anbieter entweder einen neuen Schlüssel ein oder aktivieren Sie „Löschen“ — nicht beides.",
+      "confirm_required_for_active_provider": "Zum Löschen des Schlüssels des aktuellen Anbieters des Hauptagenten muss das Bestätigungsfeld aktiviert sein."
     }
   },
   "issues": {
     "llm_unavailable": {
       "title": "Nova-Reasoning-Backend nicht erreichbar",
       "description": "Nova konnte sein Reasoning-Modell nicht erreichen und läuft daher im eingeschränkten Modus — Gerätesteuerung, Status und Szenen funktionieren weiterhin. Grund: {detail}\n\nÖffnen Sie das Nova-Panel → Einstellungen und prüfen Sie Anbieter, Modell und API-Schlüssel. Wenn Ihr Anbieter das Modell eingestellt hat, wählen Sie es erneut aus der Liste. Dieser Hinweis verschwindet automatisch, sobald das Reasoning wieder funktioniert."
+    },
+    "credential_migration_ambiguous": {
+      "title": "Nova: Ein gespeicherter Anmeldedatensatz muss einem Anbieter zugeordnet werden",
+      "description": "Nova hat einen gemeinsamen Anmeldedatensatz aus der Zeit vor separaten Anbieter-Anmeldedaten gefunden, konnte aber nicht feststellen, zu welchem Anbieter er gehört. Es wurde nichts geändert oder gelöscht. Öffnen Sie Einstellungen → Geräte & Dienste → Nova → Konfigurieren → Anmeldedaten und geben Sie ihn beim richtigen Anbieter ein."
     }
   }
 }

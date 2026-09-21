@@ -65,6 +65,9 @@ ADMIN_GATED_TYPES = [
     "get_spoken_history",
     "repeat_spoken",
     "list_models",
+    "get_credential_status",
+    "set_credential",
+    "delete_credential",
 ]
 
 

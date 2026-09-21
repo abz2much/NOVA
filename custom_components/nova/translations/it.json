@@ -30,9 +30,10 @@
         "menu_options": {
           "core": "Nucleo — persona, direttiva, modello di conversazione",
           "routing": "Instradamento — aree camera, gruppo broadcast, servizio di notifica",
-          "observer": "Osservatore — consapevolezza proattiva (richiede una chiave Gemini)",
+          "observer": "Osservatore — consapevolezza proattiva (livelli di modello, ore silenziose)",
           "identity": "Identità — riconoscimento per persona",
-          "email": "Email — casella di posta in sola lettura (password tramite secrets.yaml)"
+          "email": "Email — casella di posta in sola lettura (password tramite secrets.yaml)",
+          "credentials": "Credenziali — chiavi API dei provider"
         }
       },
       "core": {
@@ -64,10 +65,9 @@
       },
       "observer": {
         "title": "Nova — Modalità Osservatore",
-        "description": "consapevolezza proattiva. Nova sorveglia la tua casa e interviene quando c'è qualcosa da segnalare. Richiede una chiave API Gemini (consigliata con fatturazione attiva).",
+        "description": "consapevolezza proattiva. Nova osserva la tua casa e interviene quando qualcosa merita attenzione. {note}",
         "data": {
           "observer_enabled": "Abilita la modalità osservatore",
-          "gemini_api_key": "Chiave API Gemini",
           "classifier_model": "Modello classificatore (Livello 1 — economico)",
           "reasoning_model": "Modello di ragionamento (Livello 2 — principale)",
           "review_model": "Modello di revisione (Livello 3 — periodico)",
@@ -103,13 +103,40 @@
           "imap_ssl": "Usa SSL (consigliato)",
           "imap_secret_key": "Chiave di secrets.yaml che contiene la password"
         }
+      },
+      "credentials": {
+        "title": "Nova — Credenziali",
+        "description": "Una chiave API dedicata per ciascun provider — Groq, OpenAI, Anthropic, Gemini, un endpoint personalizzato compatibile con OpenAI e una chiave Bearer opzionale per un endpoint Ollama protetto. Archiviata solo nel secrets.yaml di Home Assistant, mai nella configurazione del pannello, e mai mostrata di nuovo qui. Stato: {status}. Lasciare un campo vuoto non modifica la chiave salvata di quel provider. Provider attuale dell'agente principale: {active}.",
+        "data": {
+          "groq_credential": "Chiave API Groq",
+          "clear_groq": "Cancella la chiave Groq salvata",
+          "openai_credential": "Chiave API OpenAI",
+          "clear_openai": "Cancella la chiave OpenAI salvata",
+          "anthropic_credential": "Chiave API Anthropic",
+          "clear_anthropic": "Cancella la chiave Anthropic salvata",
+          "gemini_credential": "Chiave API Gemini",
+          "clear_gemini": "Cancella la chiave Gemini salvata",
+          "custom_credential": "Chiave API dell'endpoint personalizzato",
+          "clear_custom": "Cancella la chiave personalizzata salvata",
+          "ollama_credential": "Chiave Bearer Ollama (opzionale — solo per un endpoint protetto)",
+          "clear_ollama": "Cancella la chiave Ollama salvata",
+          "confirm_delete_active": "Sì, capisco che cancellare la chiave del provider attuale dell'agente principale lo disabiliterà finché non verrà impostata una nuova chiave o cambiato il provider"
+        }
       }
+    },
+    "error": {
+      "credential_set_and_clear": "Per ogni provider, inserisci una nuova chiave oppure seleziona \"cancella\" — non entrambi.",
+      "confirm_required_for_active_provider": "Cancellare la chiave del provider attuale dell'agente principale richiede la casella di conferma selezionata."
     }
   },
   "issues": {
     "llm_unavailable": {
       "title": "Backend di ragionamento di Nova non disponibile",
       "description": "Nova non è riuscito a raggiungere il suo modello di ragionamento e funziona quindi in modalità limitata: controllo dei dispositivi, stato e scene continuano a funzionare. Motivo: {detail}\n\nApri il pannello Nova → Impostazioni e controlla provider, modello e chiave API. Se il tuo provider ha ritirato il modello, riselezionalo dall'elenco. Questo avviso scompare automaticamente quando il ragionamento torna a funzionare."
+    },
+    "credential_migration_ambiguous": {
+      "title": "Nova: una credenziale salvata deve essere assegnata a un provider",
+      "description": "Nova ha trovato una credenziale condivisa risalente a prima dell'esistenza di credenziali separate per provider, ma non è riuscita a determinare a quale provider appartenga. Non è stato modificato né eliminato nulla. Apri Impostazioni → Dispositivi e servizi → Nova → Configura → Credenziali e inseriscila sotto il provider corretto."
     }
   }
 }

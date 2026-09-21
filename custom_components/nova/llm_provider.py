@@ -610,6 +610,43 @@ def list_providers() -> list[str]:
     return list(PROVIDERS.keys())
 
 
+# ─── Phase 2 — per-provider credential resolution (v7.107.0) ─────────────────
+
+def resolve_provider_credential(config: dict, provider: str) -> str:
+    """The credential `provider` should use, and only that provider's own.
+
+    Every provider has a dedicated field (const.PROVIDER_API_KEY_FIELDS). Once
+    an installation has migrated (ha_secrets.split_shared_credential), that
+    field is always populated for whichever provider owns it and this is the
+    only thing read.
+
+    A narrow, self-expiring fallback covers an installation still waiting on
+    that migration (or where it failed — write/verify failure leaves the
+    legacy value in place by design): the shared legacy `api_key` is used
+    ONLY when `provider` is one of the four fixed cloud providers AND it is
+    also the installation's saved primary provider (`llm_provider`) — the
+    sole case where that shared value is actually known to belong to this
+    provider. Ollama and custom never receive it: Nova cannot prove a
+    self-hosted endpoint was ever the shared key's intended destination
+    (same reasoning Phase 1's model discovery already applies).
+    """
+    from .const import PROVIDER_API_KEY_FIELDS, CREDENTIAL_LEGACY_FALLBACK_PROVIDERS
+
+    provider = str(provider or "").strip().lower()
+    field = PROVIDER_API_KEY_FIELDS.get(provider)
+    if not field:
+        return ""
+    val = str(config.get(field) or "")
+    if val:
+        return val
+    if provider not in CREDENTIAL_LEGACY_FALLBACK_PROVIDERS:
+        return ""
+    saved_provider = str(config.get("llm_provider") or "groq").strip().lower()
+    if provider != saved_provider:
+        return ""
+    return str(config.get("api_key") or "")
+
+
 # ─── v5.2 Tiered provider selection (observer mode) ──────────────────────────
 #
 # Observer mode uses three distinct LLM tiers:
@@ -628,10 +665,12 @@ def create_tier_provider(
     Build a provider for a specific observer tier.
 
     tier must be one of: 'classifier', 'reasoning', 'review', 'conversation'.
-    For Gemini tiers, uses gemini_api_key if set, else falls back to api_key.
+    Each provider resolves its own dedicated credential (see
+    resolve_provider_credential) — a tier pointed at a different provider
+    than the Main Agent never reuses the Main Agent's key.
     """
     from .const import (
-        CONF_API_KEY, CONF_MODEL, CONF_GEMINI_API_KEY,
+        CONF_MODEL,
         DEFAULT_CLASSIFIER_PROVIDER, DEFAULT_CLASSIFIER_MODEL,
         DEFAULT_REASONING_PROVIDER, DEFAULT_REASONING_MODEL,
         DEFAULT_REVIEW_PROVIDER, DEFAULT_REVIEW_MODEL,
@@ -655,13 +694,7 @@ def create_tier_provider(
     provider_name = config.get(f"{tier}_provider", default_provider)
     model         = config.get(f"{tier}_model", default_model)
 
-    # Pick the right API key based on provider
-    if provider_name == "gemini":
-        api_key = config.get(CONF_GEMINI_API_KEY) or config.get(CONF_API_KEY, "")
-    elif provider_name == "groq":
-        api_key = config.get(CONF_API_KEY, "")
-    else:
-        api_key = config.get(f"{tier}_api_key") or config.get(CONF_API_KEY, "")
+    api_key = resolve_provider_credential(config, provider_name)
 
     # Per-tier base_url wins; otherwise the shared llm_base_url applies for
     # local/self-hosted backends (Ollama on the GPU server, any OpenAI-compatible

@@ -72,6 +72,9 @@ def async_register(hass: HomeAssistant) -> None:
         websocket_api.async_register_command(hass, ws_set_decision_outcome)
         websocket_api.async_register_command(hass, ws_replay_decision)
         websocket_api.async_register_command(hass, ws_list_models)
+        websocket_api.async_register_command(hass, ws_get_credential_status)
+        websocket_api.async_register_command(hass, ws_set_credential)
+        websocket_api.async_register_command(hass, ws_delete_credential)
         websocket_api.async_register_command(hass, ws_suggestion_action)
         websocket_api.async_register_command(hass, ws_list_automation_trials)
         websocket_api.async_register_command(hass, ws_automation_trial_feedback)
@@ -1961,6 +1964,20 @@ async def ws_update_config(
     key = msg["key"]
     value = msg["value"]
 
+    # Defense in depth (Phase 2, v7.107.0): no credential key is in
+    # PANEL_WRITABLE_KEYS today, so this is already unreachable in practice —
+    # but a credential must never be writable, loggable, or land in panel
+    # runtime_config through this generic command, even if that allowlist is
+    # ever edited by mistake. Credentials go only through the dedicated
+    # nova/set_credential and nova/delete_credential commands.
+    from . import ha_secrets
+    if key in ha_secrets.CREDENTIAL_KEYS:
+        connection.send_error(
+            msg["id"], "invalid_key",
+            "Credentials are set via nova/set_credential, not nova/update_config",
+        )
+        return
+
     if key not in PANEL_WRITABLE_KEYS:
         connection.send_error(
             msg["id"], "invalid_key",
@@ -2075,8 +2092,10 @@ def _resolve_model_discovery_request(config: dict, provider: str) -> tuple[str, 
 
     Cloud endpoints are fixed. Ollama and custom endpoints come only from the
     saved effective configuration. The shared primary key is never sent to a
-    local or custom endpoint because Phase 1 cannot prove that it belongs to
-    that destination.
+    local or custom endpoint because Nova cannot prove that it belongs to
+    that destination — instead each has its own optional, dedicated
+    credential (custom_api_key / ollama_api_key, Phase 2 v7.107.0), sent only
+    when the administrator has explicitly configured it for that endpoint.
     """
     provider = str(provider or "").strip().lower()
     if provider in _CLOUD_MODEL_ENDPOINTS:
@@ -2112,7 +2131,15 @@ def _resolve_model_discovery_request(config: dict, provider: str) -> tuple[str, 
         url = f"{base}/api/tags"
     else:
         url = f"{base}/models"
-    return url, {}
+
+    # Optional dedicated credential — never the shared primary key, and
+    # never a browser-supplied one; only what's already saved server-side
+    # under this endpoint's own field. Unauthenticated custom/Ollama
+    # installs are unaffected (no field set -> no header, same as before).
+    cred_field = "custom_api_key" if provider == "custom" else "ollama_api_key"
+    api_key = str(config.get(cred_field) or "")
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+    return url, headers
 
 
 def _parse_model_list(provider: str, url: str, data: dict) -> list[str]:
@@ -2226,6 +2253,64 @@ async def ws_list_models(hass: HomeAssistant, connection, msg) -> None:
                 "error": _SAFE_MODEL_DISCOVERY_ERROR,
             },
         )
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "nova/get_credential_status",
+})
+@websocket_api.async_response
+async def ws_get_credential_status(hass: HomeAssistant, connection, msg) -> None:
+    """Whether each provider has a credential configured — booleans only,
+    never a value (Phase 2, v7.107.0). Admin-gated like nova/list_models."""
+    try:
+        from . import ha_secrets
+        status = await ha_secrets.async_credential_status(hass)
+        connection.send_result(msg["id"], {"status": status})
+    except Exception as exc:
+        _LOGGER.warning("ws_get_credential_status failed: %s", type(exc).__name__)
+        connection.send_result(msg["id"], {"status": {}})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "nova/set_credential",
+    vol.Required("provider"): str,
+    vol.Required("value"): str,
+})
+@websocket_api.async_response
+async def ws_set_credential(hass: HomeAssistant, connection, msg) -> None:
+    """Store (or replace) one provider's credential (Phase 2, v7.107.0).
+    Never echoes the value back — success is `ok` only. A blank value is
+    rejected by ha_secrets.async_set_provider_credential itself, so an
+    accidentally-empty submission from the panel can never erase a stored
+    credential; clearing one is the separate, explicit nova/delete_credential."""
+    try:
+        from . import ha_secrets
+        ok = await ha_secrets.async_set_provider_credential(
+            hass, msg["provider"], msg["value"])
+        connection.send_result(msg["id"], {"ok": ok})
+    except Exception as exc:
+        _LOGGER.warning("ws_set_credential failed: %s", type(exc).__name__)
+        connection.send_result(msg["id"], {"ok": False})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "nova/delete_credential",
+    vol.Required("provider"): str,
+})
+@websocket_api.async_response
+async def ws_delete_credential(hass: HomeAssistant, connection, msg) -> None:
+    """Explicitly remove one provider's stored credential (Phase 2, v7.107.0).
+    The panel confirms with the administrator before ever sending this."""
+    try:
+        from . import ha_secrets
+        ok = await ha_secrets.async_delete_provider_credential(hass, msg["provider"])
+        connection.send_result(msg["id"], {"ok": ok})
+    except Exception as exc:
+        _LOGGER.warning("ws_delete_credential failed: %s", type(exc).__name__)
+        connection.send_result(msg["id"], {"ok": False})
 
 
 def _get_memory_stats() -> dict:

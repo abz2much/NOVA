@@ -30,9 +30,10 @@
         "menu_options": {
           "core": "Cœur — persona, directive, modèle de conversation",
           "routing": "Routage — zones de chambre, groupe de diffusion, service de notification",
-          "observer": "Observateur — conscience proactive (nécessite une clé Gemini)",
+          "observer": "Observateur — conscience proactive (niveaux de modèle, heures calmes)",
           "identity": "Identité — reconnaissance par personne",
-          "email": "E-mail — boîte de réception en lecture seule (mot de passe via secrets.yaml)"
+          "email": "E-mail — boîte de réception en lecture seule (mot de passe via secrets.yaml)",
+          "credentials": "Identifiants — clés API des fournisseurs"
         }
       },
       "core": {
@@ -64,10 +65,9 @@
       },
       "observer": {
         "title": "Nova — Mode Observateur",
-        "description": "conscience proactive. Nova surveille votre maison et intervient quand quelque chose mérite d'être signalé. Nécessite une clé API Gemini (facturation activée recommandée).",
+        "description": "conscience proactive. Nova surveille votre maison et intervient quand quelque chose mérite d'être signalé. {note}",
         "data": {
           "observer_enabled": "Activer le mode observateur",
-          "gemini_api_key": "Clé API Gemini",
           "classifier_model": "Modèle classificateur (Niveau 1 — économique)",
           "reasoning_model": "Modèle de raisonnement (Niveau 2 — principal)",
           "review_model": "Modèle de révision (Niveau 3 — périodique)",
@@ -103,13 +103,40 @@
           "imap_ssl": "Utiliser SSL (recommandé)",
           "imap_secret_key": "Clé de secrets.yaml contenant le mot de passe"
         }
+      },
+      "credentials": {
+        "title": "Nova — Identifiants",
+        "description": "Une clé API dédiée par fournisseur — Groq, OpenAI, Anthropic, Gemini, un point de terminaison personnalisé compatible OpenAI, et une clé Bearer optionnelle pour un point de terminaison Ollama protégé. Stockée uniquement dans secrets.yaml de Home Assistant, jamais dans la configuration du panneau, et jamais réaffichée ici. Statut : {status}. Laisser un champ vide ne modifie pas la clé stockée de ce fournisseur. Le fournisseur de l'agent principal est actuellement : {active}.",
+        "data": {
+          "groq_credential": "Clé API Groq",
+          "clear_groq": "Effacer la clé Groq enregistrée",
+          "openai_credential": "Clé API OpenAI",
+          "clear_openai": "Effacer la clé OpenAI enregistrée",
+          "anthropic_credential": "Clé API Anthropic",
+          "clear_anthropic": "Effacer la clé Anthropic enregistrée",
+          "gemini_credential": "Clé API Gemini",
+          "clear_gemini": "Effacer la clé Gemini enregistrée",
+          "custom_credential": "Clé API du point de terminaison personnalisé",
+          "clear_custom": "Effacer la clé personnalisée enregistrée",
+          "ollama_credential": "Clé Bearer Ollama (facultatif — uniquement pour un point de terminaison protégé)",
+          "clear_ollama": "Effacer la clé Ollama enregistrée",
+          "confirm_delete_active": "Oui, je comprends qu'effacer la clé du fournisseur actuel de l'agent principal le désactivera jusqu'à ce qu'une nouvelle clé soit définie ou que le fournisseur soit changé"
+        }
       }
+    },
+    "error": {
+      "credential_set_and_clear": "Pour chaque fournisseur, entrez une nouvelle clé ou cochez « effacer » — pas les deux.",
+      "confirm_required_for_active_provider": "Effacer la clé du fournisseur actuel de l'agent principal nécessite de cocher la case de confirmation."
     }
   },
   "issues": {
     "llm_unavailable": {
       "title": "Backend de raisonnement de Nova indisponible",
       "description": "Nova n'a pas pu joindre son modèle de raisonnement et fonctionne donc en mode limité — le contrôle des appareils, l'état et les scènes fonctionnent toujours. Raison : {detail}\n\nOuvrez le panneau Nova → Paramètres et vérifiez le fournisseur, le modèle et la clé API. Si votre fournisseur a retiré le modèle, resélectionnez-le dans la liste. Cet avis disparaît automatiquement une fois le raisonnement rétabli."
+    },
+    "credential_migration_ambiguous": {
+      "title": "Nova : un identifiant enregistré doit être attribué à un fournisseur",
+      "description": "Nova a trouvé un identifiant partagé datant d'avant l'existence d'identifiants séparés par fournisseur, mais n'a pas pu déterminer à quel fournisseur il appartient. Rien n'a été modifié ni supprimé. Ouvrez Paramètres → Appareils et services → Nova → Configurer → Identifiants et saisissez-le sous le bon fournisseur."
     }
   }
 }

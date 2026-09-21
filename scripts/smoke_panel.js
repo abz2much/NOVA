@@ -141,6 +141,9 @@ let _intrAck = false;
 const _intrSnap = { image_b64: "ZmFrZQ==", camera: "camera.dining_room", ts: 1730000000, path: "/config/nova/intrusion/x.jpg" };
 const _updateConfigCalls = [];
 const _coverageCalls = [];
+let _credStatus = { groq: true, openai: false, anthropic: false, gemini: false, custom: false, ollama: false };
+const _setCredentialCalls = [];
+const _deleteCredentialCalls = [];
 const hass = {
   config: { location_name: "Springfield IL", latitude: 39.78, longitude: -89.65 },
   states: { "assist_satellite.a": { state: "idle", attributes: {} }, "camera.front": { attributes: { access_token: "tok123" } }, "camera.back": { attributes: { access_token: "tok456" } },
@@ -248,6 +251,17 @@ const hass = {
           ? ["llama-3.3-70b-versatile", "moonshotai/kimi-k2-instruct", "meta-llama/llama-4-scout-17b"]
           : ["gpt-4o", "gpt-4o-mini"],
       };
+    }
+    if (m.type === "nova/get_credential_status") return { status: { ..._credStatus } };
+    if (m.type === "nova/set_credential") {
+      _setCredentialCalls.push({ ...m });
+      _credStatus = { ..._credStatus, [m.provider]: true };
+      return { ok: true };
+    }
+    if (m.type === "nova/delete_credential") {
+      _deleteCredentialCalls.push({ ...m });
+      _credStatus = { ..._credStatus, [m.provider]: false };
+      return { ok: true };
     }
     if (m.type === "nova/diagnostics") return {
       overall: "warn", summary: "3/4 core services healthy",
@@ -968,6 +982,39 @@ setTimeout(async () => {
   checks.push(["settings tab: manual model entry remains available when discovery is unavailable",
     unavailableShown
     && _updateConfigCalls.some(c => c.key === "model" && c.value === "manually-entered-model")]);
+
+  // Provider Credentials (Phase 2, v7.107.0): status-only display, a saved
+  // value is never echoed back, an explicit save/clear per provider.
+  await new Promise(r => setTimeout(r, 20));  // let the async status fetch settle
+  const aiCardForCreds = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /AI Models/.test(c.querySelector(".panel-title")?.textContent || ""));
+  checks.push(["settings tab: Provider Credentials shows all six providers with status, none pre-filled",
+    (() => {
+      const rows = aiCardForCreds.querySelectorAll(".cred-row");
+      if (rows.length !== 6) return false;
+      const groqStatus = aiCardForCreds.querySelector('[data-cred-status="groq"]')?.textContent || "";
+      const openaiStatus = aiCardForCreds.querySelector('[data-cred-status="openai"]')?.textContent || "";
+      const anyInputPrefilled = Array.from(aiCardForCreds.querySelectorAll(".cred-input")).some(i => i.value !== "");
+      return groqStatus === "configured" && openaiStatus === "not set" && !anyInputPrefilled;
+    })()]);
+
+  const openaiCredInput = aiCardForCreds.querySelector('.cred-input[data-cred-provider="openai"]');
+  const openaiCredSave = aiCardForCreds.querySelector('.cred-save[data-cred-provider="openai"]');
+  openaiCredInput.value = "sk-test-openai-secret";
+  openaiCredSave.click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: saving a credential calls nova/set_credential and never leaves the value in the input",
+    _setCredentialCalls.some(c => c.provider === "openai" && c.value === "sk-test-openai-secret")
+    && openaiCredInput.value === ""]);
+  checks.push(["settings tab: status flips to configured after saving, without exposing the value anywhere in the DOM",
+    aiCardForCreds.querySelector('[data-cred-status="openai"]')?.textContent === "configured"
+    && !aiCardForCreds.innerHTML.includes("sk-test-openai-secret")]);
+
+  const groqCredClear = aiCardForCreds.querySelector('.cred-clear[data-cred-provider="groq"]');
+  groqCredClear.click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: clearing a credential calls nova/delete_credential (window.confirm stubbed true) and flips status to not set",
+    _deleteCredentialCalls.some(c => c.provider === "groq")
+    && aiCardForCreds.querySelector('[data-cred-status="groq"]')?.textContent === "not set"]);
 
   // Briefings: real card, schedule fields + include-feed chips autosave
   // through the same generic .cfg-field/.mode-chip[data-cfg-key] contract

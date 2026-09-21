@@ -30,9 +30,10 @@
         "menu_options": {
           "core": "Kern — persona, richtlijn, conversatiemodel",
           "routing": "Routering — slaapkamergebieden, omroepgroep, meldingsdienst",
-          "observer": "Waarnemer — proactief bewustzijn (vereist een Gemini-sleutel)",
+          "observer": "Observer — proactief bewustzijn (modelniveaus, stille uren)",
           "identity": "Identiteit — herkenning per persoon",
-          "email": "E-mail — alleen-lezen inbox (wachtwoord via secrets.yaml)"
+          "email": "E-mail — alleen-lezen inbox (wachtwoord via secrets.yaml)",
+          "credentials": "Inloggegevens — API-sleutels van providers"
         }
       },
       "core": {
@@ -64,10 +65,9 @@
       },
       "observer": {
         "title": "Nova — Waarnemermodus",
-        "description": "proactief bewustzijn. Nova houdt je huis in de gaten en laat van zich horen als er iets vermeldenswaardig is. Vereist een Gemini-API-sleutel (facturering ingeschakeld aanbevolen).",
+        "description": "proactief bewustzijn. Nova houdt uw huis in de gaten en meldt zich wanneer iets het vermelden waard is. {note}",
         "data": {
           "observer_enabled": "Waarnemermodus inschakelen",
-          "gemini_api_key": "Gemini-API-sleutel",
           "classifier_model": "Classificatiemodel (Niveau 1 — goedkoop)",
           "reasoning_model": "Redeneermodel (Niveau 2 — hoofd)",
           "review_model": "Beoordelingsmodel (Niveau 3 — periodiek)",
@@ -103,13 +103,40 @@
           "imap_ssl": "SSL gebruiken (aanbevolen)",
           "imap_secret_key": "secrets.yaml-sleutel met het wachtwoord"
         }
+      },
+      "credentials": {
+        "title": "Nova — Inloggegevens",
+        "description": "Eén eigen API-sleutel per provider — Groq, OpenAI, Anthropic, Gemini, een aangepast OpenAI-compatibel endpoint en een optionele Bearer-sleutel voor een beveiligd Ollama-endpoint. Alleen opgeslagen in de secrets.yaml van Home Assistant, nooit in de paneelconfiguratie, en hier nooit opnieuw getoond. Status: {status}. Een leeg veld laten wijzigt de opgeslagen sleutel van die provider niet. Huidige provider van de hoofdagent: {active}.",
+        "data": {
+          "groq_credential": "Groq API-sleutel",
+          "clear_groq": "Opgeslagen Groq-sleutel wissen",
+          "openai_credential": "OpenAI API-sleutel",
+          "clear_openai": "Opgeslagen OpenAI-sleutel wissen",
+          "anthropic_credential": "Anthropic API-sleutel",
+          "clear_anthropic": "Opgeslagen Anthropic-sleutel wissen",
+          "gemini_credential": "Gemini API-sleutel",
+          "clear_gemini": "Opgeslagen Gemini-sleutel wissen",
+          "custom_credential": "API-sleutel van aangepast endpoint",
+          "clear_custom": "Opgeslagen aangepaste sleutel wissen",
+          "ollama_credential": "Ollama Bearer-sleutel (optioneel — alleen voor een beveiligd endpoint)",
+          "clear_ollama": "Opgeslagen Ollama-sleutel wissen",
+          "confirm_delete_active": "Ja, ik begrijp dat het wissen van de sleutel van de huidige provider van de hoofdagent deze uitschakelt totdat een nieuwe sleutel is ingesteld of de provider is gewijzigd"
+        }
       }
+    },
+    "error": {
+      "credential_set_and_clear": "Voer per provider óf een nieuwe sleutel in óf vink \"wissen\" aan — niet beide.",
+      "confirm_required_for_active_provider": "Het wissen van de sleutel van de huidige provider van de hoofdagent vereist het aangevinkte bevestigingsvakje."
     }
   },
   "issues": {
     "llm_unavailable": {
       "title": "Nova-redeneerbackend niet beschikbaar",
       "description": "Nova kon zijn redeneermodel niet bereiken en draait daarom in beperkte modus — apparaatbediening, status en scènes werken nog steeds. Reden: {detail}\n\nOpen het Nova-paneel → Instellingen en controleer provider, model en API-sleutel. Als uw provider het model heeft ingetrokken, selecteer het opnieuw uit de lijst. Deze melding verdwijnt automatisch zodra het redeneren weer werkt."
+    },
+    "credential_migration_ambiguous": {
+      "title": "Nova: een opgeslagen inloggegeven moet aan een provider worden toegewezen",
+      "description": "Nova heeft een gedeeld inloggegeven gevonden van vóór aparte providersleutels, maar kon niet vaststellen bij welke provider het hoort. Er is niets gewijzigd of verwijderd. Open Instellingen → Apparaten en diensten → Nova → Configureren → Inloggegevens en voer het in bij de juiste provider."
     }
   }
 }
