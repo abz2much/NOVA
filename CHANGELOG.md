@@ -1,4 +1,4 @@
-## Unreleased — historical camera awareness (Phase 5)
+## [7.110.0] — historical camera awareness (Phase 5)
 
 - Interactive conversations can now include a short, fenced "What I've noticed lately" block built from repeated canonical camera events already stored by Phase 4. It reads the shared `patterns.db` store and creates no parallel Eufy path or second copy of the observations.
 - Person, vehicle, animal, package, and activity patterns need repeated evidence across more than one day. Time and weekday wording appears only when the evidence is concentrated enough, and all reads, output counts, lookback, strings, prompt size, and per-location results are bounded.
