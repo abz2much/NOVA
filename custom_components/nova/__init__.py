@@ -325,7 +325,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         _eufy_roles = _eufy.all_camera_roles(hass)
         _eufy_reverse: dict[str, tuple[str, str]] = {}
-        _EUFY_WATCHED_ROLES = ("ringing", "stranger", "person", "vehicle",
+        # "pet" added for Phase 4 (v7.109.0) semantic learning only — it has
+        # no announcement/action branch below, same as before; this purely
+        # lets an animal detection reach camera_semantic.record_event.
+        _EUFY_WATCHED_ROLES = ("ringing", "stranger", "person", "vehicle", "pet",
                                "package_delivered", "package_stranded", "package_taken")
         for _cam, _roles in _eufy_roles.items():
             for _role in _EUFY_WATCHED_ROLES:
@@ -385,6 +388,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     hass.async_create_task(
                         async_visitor_observation(hass, llm_client, honorific, entity_id)
                     )
+                    # Semantic learning (Phase 4, v7.109.0): additive only —
+                    # the vision observation above is the existing action
+                    # path and is untouched. attribute=False: Eufy's own
+                    # "stranger" verdict must stay unattributed even if
+                    # Nova's separate recognition cache has a stale match
+                    # for this camera.
+                    from . import camera_semantic
+                    hass.async_create_task(camera_semantic.record_event(
+                        hass, label="person", camera_entity=entity_id,
+                        source="eufy", attribute=False, detail="stranger",
+                    ))
                     return
 
                 if role == "person":
@@ -409,6 +423,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         except Exception as exc:
                             _LOGGER.debug("Nova eufy: known-visitor log failed: %s", exc)
                     hass.async_create_task(_log_known_visitor())
+                    # Semantic learning (Phase 4, v7.109.0): additive to the
+                    # existing doorbell_training log above, not a replacement
+                    # for it — that log is visitor-training data; this is the
+                    # pattern-sequence store. Resident attribution IS
+                    # attempted here (default attribute=True): Eufy's own
+                    # "person" role means a known/regular face.
+                    from . import camera_semantic
+                    hass.async_create_task(camera_semantic.record_event(
+                        hass, label="person", camera_entity=entity_id,
+                        source="eufy", detail="known_person",
+                    ))
                     return
 
                 if role == "vehicle":
@@ -438,6 +463,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         except Exception as exc:
                             _LOGGER.debug("Nova eufy: vehicle announce failed: %s", exc)
                     hass.async_create_task(_announce_vehicle())
+                    # Semantic learning (Phase 4, v7.109.0): additive to the
+                    # announcement above, not a replacement for it. Never
+                    # attributed — a vehicle is never a resident.
+                    from . import camera_semantic
+                    hass.async_create_task(camera_semantic.record_event(
+                        hass, label="vehicle", camera_entity=entity_id,
+                        source="eufy", detail="motion_detection_type_vehicle",
+                    ))
+                    return
+
+                if role == "pet":
+                    # No announcement/action exists for this role — Phase 4
+                    # (v7.109.0) adds ONLY semantic recording here, not a new
+                    # spoken behaviour. Same cooldown pattern as vehicle.
+                    if now - _auto_cd.get(f"{entity_id}:pet", float("-inf")) < 300.0:
+                        return
+                    _auto_cd[f"{entity_id}:pet"] = now
+                    from . import camera_semantic
+                    hass.async_create_task(camera_semantic.record_event(
+                        hass, label="animal", camera_entity=entity_id,
+                        source="eufy", detail="pet_detected",
+                    ))
                     return
 
             camera_unsubs.append(async_track_state_change_event(

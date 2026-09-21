@@ -97,6 +97,63 @@ def test_sequence_scales_on_large_history(analyzer, tmp_path):
     assert elapsed < 10.0, f"sequence detection too slow on 15k rows: {elapsed:.1f}s"
 
 
+def test_sequence_scales_on_large_history_with_camera_events(analyzer, tmp_path):
+    """Phase 4, v7.109.0: camera_event.* rows go through the SAME
+    state_changes table and the SAME sequence detector as everything else,
+    with no special-cased domain handling — confirms mixing a realistic
+    volume of them into the large history doesn't regress the O(N)
+    performance guarantee test_sequence_scales_on_large_history already
+    pins. (Whether a SPECIFIC sequence surfaces depends on
+    pair_counts.most_common(15)'s existing cutoff against whatever else is
+    in the same window — same as any other entity; see
+    test_camera_event_sequence_detected_within_window for a correctness
+    check on a clean, uncontested dataset.)"""
+    conn = _conn(tmp_path / "big_with_camera.db")
+    base = datetime.now() - timedelta(days=15)
+    n = 0
+    for d in range(15):
+        day = base + timedelta(days=d)
+        for i in range(1000):
+            _insert(conn, f"switch.n{i % 30}", "on" if i % 2 else "off",
+                    day + timedelta(seconds=i * 60))
+            n += 1
+        # A realistic volume of camera detections each day — several
+        # cameras, several labels, interleaved throughout the day.
+        for h, cam, label in ((7, "front_door", "person"), (12, "driveway", "vehicle"),
+                              (19, "front_door", "person"), (22, "backyard", "animal")):
+            _insert(conn, f"camera_event.{cam}", label, day + timedelta(hours=h))
+            n += 1
+    conn.commit()
+    assert n >= 15000
+
+    pa = analyzer.PatternAnalyzer()
+    start = time.monotonic()
+    pats = pa._find_sequence_patterns(conn)
+    elapsed = time.monotonic() - start
+    assert isinstance(pats, list)
+    assert elapsed < 10.0, f"sequence detection too slow with camera events mixed in: {elapsed:.1f}s"
+
+
+def test_camera_event_sequence_detected_within_window(analyzer, tmp_path):
+    """Correctness, on a clean dataset (no flood competing for the top-15
+    cutoff): a camera_event trigger followed by a real entity's action —
+    the task's own 'person appears at the front door, then the porch light
+    turns on' example — is detected exactly like any other entity pair."""
+    conn = _conn(tmp_path / "camera_seq.db")
+    base = datetime.now() - timedelta(days=12)
+    for d in range(8):
+        t = base + timedelta(days=d, hours=19)
+        _insert(conn, "camera_event.front_door", "person", t)
+        _insert(conn, "light.porch", "on", t + timedelta(seconds=20))
+    conn.commit()
+    pats = analyzer.PatternAnalyzer()._find_sequence_patterns(conn)
+    m = [p for p in pats if p.details["trigger"]["entity"] == "camera_event.front_door"
+         and p.details["action"]["entity"] == "light.porch"]
+    assert m, "expected the camera_event.front_door -> light.porch sequence"
+    assert m[0].occurrences >= 5
+    assert "camera_event.front_door" in m[0].description and "light.porch" in m[0].description
+
+
 def test_cross_domain_sequence_with_measured_delay(analyzer, tmp_path):
     # a switch triggering a light ~90s later — cross-domain, was impossible before
     conn = _conn(tmp_path / "xd.db")

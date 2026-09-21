@@ -155,6 +155,30 @@ def _parse_json_obj(raw: str):
     return None
 
 
+def _map_vision_category(category: str) -> tuple[Optional[str], Optional[str]]:
+    """_reason_about_scene's `category` (delivery|package|mail|person|
+    known_resident|vehicle|animal|empty|other) -> (canonical_label,
+    package_state|None) for camera_semantic.record_event. (None, None)
+    means "don't record this one" — only for 'empty' (nothing was there)
+    and anything genuinely unrecognised (the LLM's JSON schema constrains
+    it to this fixed set, but a malformed/unexpected response is possible
+    and must be dropped, not guessed)."""
+    c = str(category or "").strip().lower()
+    if c in ("delivery", "package"):
+        return "package", "delivered"
+    if c == "mail":
+        return "package", "mail"
+    if c in ("person", "known_resident"):
+        return "person", None
+    if c == "vehicle":
+        return "vehicle", None
+    if c == "animal":
+        return "animal", None
+    if c == "other":
+        return "activity", None
+    return None, None
+
+
 def _guess_detection_type(prompt: str, analysis: str) -> str:
     al = (analysis or "").lower()
     if "person" in al or "someone" in al or "individual" in al:
@@ -1088,6 +1112,22 @@ async def async_analyze_camera(
         )
     except Exception:
         pass
+    # Semantic learning (Phase 4, v7.109.0): additive to the observer buffer
+    # and briefing snapshot above, not a replacement for either. Recorded
+    # regardless of `notable` — a known-resident arrival isn't announce-
+    # worthy but IS a meaningful trigger for a routine ("person appears,
+    # then porch light turns on"); "empty" (nothing there) is the only
+    # category that's skipped outright.
+    try:
+        _vision_label, _vision_pkg_state = _map_vision_category(judgment["category"])
+        if _vision_label:
+            from . import camera_semantic
+            hass.async_create_task(camera_semantic.record_event(
+                hass, label=_vision_label, camera_entity=entity_id, source="vision",
+                package_state=_vision_pkg_state, detail=judgment["category"],
+            ))
+    except Exception:
+        pass
     # Proactive-briefing snapshot record
     try:
         from .proactive_briefing import record_snapshot
@@ -1244,6 +1284,60 @@ def _handle_frigate_event(hass: HomeAssistant, event: Event) -> None:
         _LOGGER.debug("Nova: error caching Frigate event: %s", exc)
 
 
+def _map_bus_label(raw) -> Optional[str]:
+    """nova_camera_event's own 'label' field (Frigate's raw object-detection
+    label, or a substring of Nest's event-type string) -> one of
+    camera_semantic.CANONICAL_LABELS, or None to skip. A chime/doorbell
+    interaction, or any label with no confident mapping, is DROPPED here
+    rather than guessed into 'activity' — the doorbell-press path already
+    feeds semantic learning separately, with a full vision analysis, once
+    it concludes (see async_analyze_camera)."""
+    label = str(raw or "").strip().lower()
+    if not label:
+        return None
+    if label == "person":
+        return "person"
+    if label in ("car", "truck", "motorcycle"):
+        return "vehicle"
+    if label in ("dog", "cat"):
+        return "animal"
+    if label == "package":
+        return "package"
+    if label == "bicycle":
+        return "activity"
+    if "person" in label:
+        return "person"
+    if "package" in label:
+        return "package"
+    if "motion" in label:
+        return "activity"
+    return None
+
+
+@callback
+def _handle_semantic_camera_event(hass: HomeAssistant, event: Event) -> None:
+    """Feed the nova_camera_event bus signal _handle_nest_event/
+    _handle_frigate_event already fire into semantic learning (Phase 4,
+    v7.109.0) — additive only; those two functions' existing snapshot-
+    caching role is untouched and fires first, same event."""
+    try:
+        data = event.data
+        entity_id = data.get("entity_id")
+        source = data.get("source")
+        if not entity_id or source not in ("nest", "frigate"):
+            return
+        label = _map_bus_label(data.get("label"))
+        if label is None:
+            return
+        from . import camera_semantic
+        hass.async_create_task(camera_semantic.record_event(
+            hass, label=label, camera_entity=str(entity_id), source=str(source),
+            confidence=data.get("confidence"), detail=str(data.get("label") or "")[:40],
+        ))
+    except Exception as exc:
+        _LOGGER.debug("Nova: semantic camera-event recording failed: %s", exc)
+
+
 def register_event_listeners(hass: HomeAssistant) -> list:
     """
     Register HA event listeners that populate _EVENT_CACHE for
@@ -1263,6 +1357,16 @@ def register_event_listeners(hass: HomeAssistant) -> list:
         unsubs.append(hass.bus.async_listen("frigate_event", lambda e: _handle_frigate_event(hass, e)))
     except Exception as exc:
         _LOGGER.debug("Nova: could not subscribe to frigate_event: %s", exc)
+
+    # Nova's own nova_camera_event (fired by the two handlers above) — the
+    # single normalised signal Phase 4's semantic learning consumes for
+    # Nest + Frigate, rather than re-parsing each integration's raw payload
+    # a second time.
+    try:
+        unsubs.append(hass.bus.async_listen(
+            "nova_camera_event", lambda e: _handle_semantic_camera_event(hass, e)))
+    except Exception as exc:
+        _LOGGER.debug("Nova: could not subscribe to nova_camera_event: %s", exc)
 
     _LOGGER.info("Nova: camera event listeners registered (%d subscriptions)", len(unsubs))
     return unsubs

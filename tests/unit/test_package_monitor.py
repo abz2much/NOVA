@@ -123,6 +123,7 @@ async def test_periodic_announces_once_on_confirmed_arrival(pm, load, fake_hass,
 
     report = await pm.periodic_check(fake_hass, None, "Sir", "tts.x", ["media_player.y"],
                                      configured_camera="camera.front_door_test")
+    await fake_hass.drain()  # semantic-learning task _log() now also queues (Phase 4)
     assert report["checked"] == 1
     assert len(spoken) == 1 and "package has been delivered" in spoken[0]
 
@@ -142,6 +143,7 @@ async def test_eufy_delivered_announces_and_sets_state(pm, load, fake_hass, monk
 
     await pm.note_from_eufy(fake_hass, "Sir", "tts.x", ["media_player.y"],
                             "camera.front_door_bell", "package_delivered")
+    await fake_hass.drain()  # semantic-learning task _log() now also queues (Phase 4)
     assert len(spoken) == 1 and "package has been delivered" in spoken[0]
     assert pm._STATE["camera.front_door_bell"]["package"] is True
 
@@ -160,6 +162,7 @@ async def test_eufy_taken_while_home_updates_state_silently(pm, load, fake_hass,
 
     await pm.note_from_eufy(fake_hass, "Sir", "tts.x", ["media_player.y"],
                             "camera.front_door_bell", "package_taken")
+    await fake_hass.drain()  # semantic-learning task _log() now also queues (Phase 4)
     assert spoken == []
     assert pm._STATE["camera.front_door_bell"]["package"] is False
 
@@ -179,6 +182,7 @@ async def test_eufy_taken_while_away_announces_concern(pm, load, fake_hass, monk
 
     await pm.note_from_eufy(fake_hass, "Sir", "tts.x", ["media_player.y"],
                             "camera.front_door_bell", "package_taken")
+    await fake_hass.drain()  # semantic-learning task _log() now also queues (Phase 4)
     assert len(spoken) == 1 and "no one is home" in spoken[0]
 
 
@@ -194,6 +198,7 @@ async def test_eufy_stranded_announces_nag_message(pm, load, fake_hass, monkeypa
 
     await pm.note_from_eufy(fake_hass, "Sir", "tts.x", ["media_player.y"],
                             "camera.front_door_bell", "package_stranded")
+    await fake_hass.drain()  # semantic-learning task _log() now also queues (Phase 4)
     assert len(spoken) == 1 and "hasn't been picked up" in spoken[0]
 
 
@@ -206,6 +211,7 @@ async def test_eufy_stranded_respects_quiet_hours(pm, load, fake_hass, monkeypat
 
     await pm.note_from_eufy(fake_hass, "Sir", "tts.x", ["media_player.y"],
                             "camera.front_door_bell", "package_stranded")
+    await fake_hass.drain()  # semantic-learning task _log() now also queues (Phase 4)
     assert spoken == []
 
 
@@ -221,6 +227,7 @@ def test_eufy_delivered_does_not_call_vision(pm, fake_hass, monkeypatch):
     pm._STATE.clear()
     asyncio.run(pm.note_from_eufy(fake_hass, "Sir", "tts.x", ["media_player.y"],
                                   "camera.front_door_bell", "package_delivered"))
+    fake_hass.close_pending()  # semantic-learning task _log() now also queues (Phase 4)
     assert called["vision"] is False
 
 

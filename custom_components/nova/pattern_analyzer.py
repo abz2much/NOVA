@@ -200,6 +200,14 @@ def service_for(entity_id: str, state: str) -> Optional[dict]:
     if not entity_id or "." not in entity_id:
         return None
     domain = entity_id.split(".")[0]
+    # Phase 4 (v7.109.0): camera_event.* is a synthetic, non-actuating
+    # pattern-learning entity (camera_semantic.py) that was never registered
+    # as a real Home Assistant entity — it can only ever be a TRIGGER, never
+    # an action target. It was never in the mapped-domain list below either,
+    # so this is a defensive, explicit statement of that boundary rather
+    # than a behaviour change.
+    if domain == "camera_event":
+        return None
     s = str(state).lower().strip()
 
     onoff = {"light", "switch", "fan", "input_boolean", "humidifier", "siren"}

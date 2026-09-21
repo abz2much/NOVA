@@ -240,6 +240,14 @@ def watched_cameras(hass, configured=None) -> list[str]:
 
 # ── State machine + announcements ────────────────────────────────────────────
 
+_PACKAGE_KIND_TO_STATE = {
+    "delivered": "delivered",
+    "mail": "mail",
+    "removed": "taken",
+    "stranded": "stranded",
+}
+
+
 def _log(hass, entity_id: str, kind: str, det: dict, source: str) -> None:
     try:
         from .websocket import nova_log
@@ -258,6 +266,24 @@ def _log(hass, entity_id: str, kind: str, det: dict, source: str) -> None:
         }.get(kind, kind)
         observer.record_camera_event(entity_id, note, "delivery",
                                      notable=(kind in ("delivered", "removed", "mail", "stranded")))
+    except Exception:
+        pass
+    # Semantic learning (Phase 4, v7.109.0): the SAME single choke point
+    # every real package-state transition already flows through — fires
+    # once per transition, additively, never in place of the announcement/
+    # notification/observer logic above. `source` here is package_monitor's
+    # own "eufy"/"periodic"/"doorbell" — the latter two are Nova's own
+    # vision-classification passes, recorded as "vision" for camera_semantic's
+    # fixed source vocabulary.
+    try:
+        from . import camera_semantic
+        pkg_state = _PACKAGE_KIND_TO_STATE.get(kind)
+        if pkg_state and hass is not None:
+            hass.async_create_task(camera_semantic.record_event(
+                hass, label="package", camera_entity=entity_id,
+                source="eufy" if source == "eufy" else "vision",
+                package_state=pkg_state, detail=source,
+            ))
     except Exception:
         pass
 
