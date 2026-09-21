@@ -1,3 +1,11 @@
+## [7.106.5] — security: secure model discovery
+
+- Model discovery is now restricted to Home Assistant administrators and no longer accepts a browser supplied destination URL.
+- Groq, OpenAI, Anthropic, and Gemini discovery use fixed official endpoints. Ollama and custom discovery use only Nova's saved local LLM URL.
+- Stored credentials are attached only when configuration clearly associates them with the requested cloud provider. The shared primary key is never sent to Ollama or custom endpoints.
+- Discovery failures now return a generic panel error and log only sanitised provider, hostname, HTTP status, and exception type metadata. Manual model entry remains available.
+- Compatibility note: authenticated custom or Ollama endpoints that previously relied on Nova's shared primary key can no longer use live model discovery. Enter the model manually until separate provider credentials are added in a later phase.
+
 ## [7.106.4] — multi device normal notifications
 
 - Settings → Notifications now accepts any number of Home Assistant notification services instead of one device.

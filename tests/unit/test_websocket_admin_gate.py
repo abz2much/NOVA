@@ -64,6 +64,7 @@ ADMIN_GATED_TYPES = [
     "get_provider_activity",
     "get_spoken_history",
     "repeat_spoken",
+    "list_models",
 ]
 
 

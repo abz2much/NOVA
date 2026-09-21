@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import time
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 import voluptuous as vol
 
@@ -2044,18 +2045,131 @@ async def ws_update_config(
         connection.send_error(msg["id"], "update_failed", str(exc))
 
 
-def _resolve_provider_key(hass: HomeAssistant, entry, provider: str) -> str:
-    """Resolve the stored API key for a provider from config."""
+_CLOUD_MODEL_ENDPOINTS = {
+    "groq": "https://api.groq.com/openai/v1/models",
+    "openai": "https://api.openai.com/v1/models",
+    "anthropic": "https://api.anthropic.com/v1/models",
+    "gemini": "https://generativelanguage.googleapis.com/v1beta/models",
+}
+
+_PROVIDER_CREDENTIAL_KEYS = {
+    "groq": "groq_api_key",
+    "openai": "openai_api_key",
+    "anthropic": "anthropic_api_key",
+    "gemini": "gemini_api_key",
+}
+
+_SAFE_MODEL_DISCOVERY_ERROR = "model_discovery_unavailable"
+
+
+class _ModelDiscoveryHTTPError(RuntimeError):
+    """Upstream model endpoint returned a non-success status."""
+
+    def __init__(self, status: int):
+        super().__init__("model discovery request failed")
+        self.status = status
+
+
+def _resolve_model_discovery_request(config: dict, provider: str) -> tuple[str, dict]:
+    """Return a server-selected model endpoint and its safe auth headers.
+
+    Cloud endpoints are fixed. Ollama and custom endpoints come only from the
+    saved effective configuration. The shared primary key is never sent to a
+    local or custom endpoint because Phase 1 cannot prove that it belongs to
+    that destination.
+    """
+    provider = str(provider or "").strip().lower()
+    if provider in _CLOUD_MODEL_ENDPOINTS:
+        url = _CLOUD_MODEL_ENDPOINTS[provider]
+        credential_key = _PROVIDER_CREDENTIAL_KEYS[provider]
+        api_key = str(config.get(credential_key) or "")
+        saved_provider = str(config.get("llm_provider") or "").strip().lower()
+        if not api_key and saved_provider == provider:
+            api_key = str(config.get("api_key") or "")
+
+        headers: dict[str, str] = {}
+        if provider == "anthropic":
+            headers["anthropic-version"] = "2023-06-01"
+            if api_key:
+                headers["x-api-key"] = api_key
+        elif provider == "gemini":
+            if api_key:
+                headers["x-goog-api-key"] = api_key
+        elif api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        return url, headers
+
+    if provider not in ("ollama", "custom"):
+        raise ValueError("unknown model provider")
+
+    base = str(config.get("llm_base_url") or "").strip().rstrip("/")
+    if not base:
+        raise ValueError("saved model endpoint is not configured")
+
+    if base.endswith("/models"):
+        url = base
+    elif provider == "ollama" and not base.endswith("/v1"):
+        url = f"{base}/api/tags"
+    else:
+        url = f"{base}/models"
+    return url, {}
+
+
+def _parse_model_list(provider: str, url: str, data: dict) -> list[str]:
+    """Normalise every supported provider response to sorted model IDs."""
+    models: list[str] = []
     if provider == "gemini":
-        return str(_runtime_opt(hass, entry, "gemini_api_key", "") or "")
-    # groq/openai/anthropic/custom all use the primary key field
-    key = _runtime_opt(hass, entry, "api_key", None)
-    if not key:
-        key = _runtime_opt(hass, entry, "groq_api_key", "")
-    return str(key or "")
+        for model in data.get("models", []):
+            name = model.get("name", "")
+            if name.startswith("models/"):
+                name = name[len("models/"):]
+            methods = model.get("supportedGenerationMethods", [])
+            if name and (not methods or "generateContent" in methods):
+                models.append(name)
+    elif provider == "ollama" and url.endswith("/api/tags"):
+        for model in data.get("models", []):
+            name = model.get("name")
+            if name:
+                models.append(name)
+    else:
+        for model in data.get("data", []):
+            model_id = model.get("id")
+            if model_id:
+                models.append(model_id)
+    return sorted(set(models))
 
 
-async def _fetch_models(hass, provider: str, api_key: str, base_url: str) -> list[str]:
+def _log_model_discovery_failure(
+    provider: str,
+    url: str,
+    exc: Exception,
+    *,
+    logger=None,
+) -> None:
+    """Log bounded failure metadata without URLs, credentials, or bodies."""
+    logger = logger or _LOGGER
+    safe_provider = str(provider or "").strip().lower()
+    if safe_provider not in (*_CLOUD_MODEL_ENDPOINTS, "ollama", "custom"):
+        safe_provider = "unknown"
+    try:
+        hostname = urlparse(url).hostname or "unresolved"
+    except ValueError:
+        hostname = "unresolved"
+    hostname = "".join(
+        char for char in hostname if char.isalnum() or char in ".:_-"
+    )[:255] or "unresolved"
+    raw_status = getattr(exc, "status", None)
+    status = raw_status if isinstance(raw_status, int) else "none"
+    logger.info(
+        "Model discovery failed: provider=%s host=%s status=%s error=%s",
+        safe_provider,
+        hostname,
+        status,
+        type(exc).__name__,
+    )
+
+
+async def _fetch_models(hass, provider: str, config: dict) -> list[str]:
     """
     Query a provider's models endpoint and return a sorted list of model IDs.
     Uses HA's shared aiohttp session (off-loop network I/O). Each provider has
@@ -2065,89 +2179,54 @@ async def _fetch_models(hass, provider: str, api_key: str, base_url: str) -> lis
     import async_timeout
 
     session = aiohttp_client.async_get_clientsession(hass)
-    provider = (provider or "").lower()
-    url = ""
-    headers: dict = {}
-
-    if provider == "groq":
-        url = "https://api.groq.com/openai/v1/models"
-        headers = {"Authorization": f"Bearer {api_key}"}
-    elif provider == "openai":
-        url = "https://api.openai.com/v1/models"
-        headers = {"Authorization": f"Bearer {api_key}"}
-    elif provider == "anthropic":
-        url = "https://api.anthropic.com/v1/models"
-        headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
-    elif provider == "gemini":
-        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
-    elif provider in ("ollama", "custom"):
-        base = (base_url or "").rstrip("/")
-        if not base and provider == "ollama":
-            base = "http://homeassistant.local:11434/v1"   # same default as create_provider
-        if not base:
-            raise ValueError("base URL required for this provider")
-        # Ollama exposes /api/tags; an OpenAI-compatible base exposes /v1/models.
-        if base.endswith("/v1"):
-            url = f"{base}/models"
-            headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
-        else:
-            url = f"{base}/api/tags"
-    else:
-        raise ValueError(f"unknown provider: {provider}")
+    provider = str(provider or "").strip().lower()
+    url, headers = _resolve_model_discovery_request(config, provider)
 
     async with async_timeout.timeout(12):
         async with session.get(url, headers=headers) as resp:
             if resp.status != 200:
-                body = await resp.text()
-                raise RuntimeError(f"HTTP {resp.status}: {body[:160]}")
+                raise _ModelDiscoveryHTTPError(resp.status)
             data = await resp.json()
 
-    # Normalise per provider
-    models: list[str] = []
-    if provider == "gemini":
-        for m in data.get("models", []):
-            name = m.get("name", "")
-            if name.startswith("models/"):
-                name = name[len("models/"):]
-            # only generative chat models
-            methods = m.get("supportedGenerationMethods", [])
-            if name and (not methods or "generateContent" in methods):
-                models.append(name)
-    elif provider in ("ollama", "custom") and url.endswith("/api/tags"):
-        for m in data.get("models", []):
-            n = m.get("name")
-            if n:
-                models.append(n)
-    else:
-        # OpenAI-compatible shape: {"data": [{"id": ...}, ...]}
-        for m in data.get("data", []):
-            mid = m.get("id")
-            if mid:
-                models.append(mid)
-
-    return sorted(set(models))
+    return _parse_model_list(provider, url, data)
 
 
+@websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/list_models",
     vol.Required("provider"): str,
-    vol.Optional("base_url"): str,
 })
 @websocket_api.async_response
 async def ws_list_models(hass: HomeAssistant, connection, msg) -> None:
     """Return the live model list for a provider (Settings AI-Models dropdowns)."""
-    provider = (msg.get("provider") or "").lower()
+    provider = str(msg.get("provider") or "").strip().lower()
     entry = _get_entry(hass)
-    api_key = _resolve_provider_key(hass, entry, provider)
-    base_url = msg.get("base_url") or str(_runtime_opt(hass, entry, "llm_base_url", "") or "")
+    url = ""
     try:
-        models = await _fetch_models(hass, provider, api_key, base_url)
+        from . import nova_config
+        runtime_config: dict = {}
+        if entry is not None:
+            data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+            if isinstance(data, dict):
+                runtime_config = data.get("runtime_config", {}) or {}
+        config = await hass.async_add_executor_job(
+            nova_config.effective_config_with_runtime,
+            entry,
+            runtime_config,
+        )
+        url = _resolve_model_discovery_request(config, provider)[0]
+        models = await _fetch_models(hass, provider, config)
         connection.send_result(msg["id"], {"provider": provider, "models": models})
     except Exception as exc:
-        _LOGGER.info("list_models(%s) failed: %s", provider, exc)
+        _log_model_discovery_failure(provider, url, exc)
         connection.send_result(
-            msg["id"], {"provider": provider, "models": [], "error": str(exc)},
+            msg["id"], {
+                "provider": provider,
+                "models": [],
+                "error": _SAFE_MODEL_DISCOVERY_ERROR,
+            },
         )
+
 
 def _get_memory_stats() -> dict:
     """Return memory system stats for the panel."""
