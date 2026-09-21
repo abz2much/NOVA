@@ -195,3 +195,37 @@ async def test_homer_can_read_real_entity_state_and_report_it(hass):
                 homer_tool_result = m["content"]
     assert homer_tool_result is not None
     assert '"state": "on"' in homer_tool_result
+
+
+# ── consolidation: capability="diagnostics" stays a working compatibility
+#    alias for the same HOMER implementation, end to end against real hass ──
+
+async def test_legacy_capability_diagnostics_also_never_actuates(hass):
+    """An existing caller still using capability="diagnostics" (rather than
+    profile="homer") gets HOMER's exact same real-world behavior: it can
+    read real state, but a real mutating service never fires."""
+    hass.states.async_set("light.hallway", "unavailable", {"friendly_name": "Hallway"})
+
+    calls = []
+    async def fake_turn_on(call):
+        calls.append(call)
+    hass.services.async_register("light", "turn_on", fake_turn_on)
+
+    script = [
+        {"text": "", "tool_calls": [
+            _tool_call("delegate_task",
+                       {"objective": "why is light.hallway unavailable?",
+                        "capability": "diagnostics"}, "c1"),
+        ]},
+        {"text": "", "tool_calls": [
+            _tool_call("get_entity_state", {"entity_ids": ["light.hallway"]}, "h1"),
+            _tool_call("control_device",
+                       {"entity_id": "light.hallway", "action": "turn_on"}, "h2"),
+        ]},
+        {"text": "Likely an offline integration.", "tool_calls": []},
+        {"text": "Diagnostics: likely an offline integration.", "tool_calls": []},
+    ]
+    result, client = await _run_agent(hass, script)
+
+    assert calls == []
+    assert "unavailable" in result.lower() or "offline" in result.lower()

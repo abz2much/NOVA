@@ -248,10 +248,87 @@ async def test_homer_provider_failure_returns_safe_error(agent, monkeypatch):
     async def _boom(hass, **kw):
         raise RuntimeError("provider unreachable: sk-abc123-should-not-leak")
 
+    logged = []
     monkeypatch.setattr(agent, "run_agent", _boom)
+    monkeypatch.setattr(agent._LOGGER, "warning", lambda *a, **k: logged.append((a, k)))
     out = json.loads(await _delegate(agent, {"objective": "x", "profile": "homer"}))
     assert "error" in out
     assert "sub-agent failed" in out["error"]
+    # The raw exception text (which could carry provider-specific detail)
+    # must never reach the tool-result JSON that flows back into the
+    # model's context — only the generic message does.
+    assert "sk-abc123-should-not-leak" not in out["error"]
+    assert "RuntimeError" not in out["error"]
+    # It's still logged server-side, just not in the model-visible result.
+    assert logged and "sk-abc123-should-not-leak" in str(logged[0])
+
+
+# ── consolidation: 'diagnostics' is HOMER, not a second implementation ─────
+
+def test_capability_diagnostics_is_not_in_capability_groups(agent):
+    """There is exactly one diagnostic policy (AGENT_PROFILES['homer']) —
+    'diagnostics' must not also live in CAPABILITY_GROUPS as a second,
+    independently-maintained tool list."""
+    assert "diagnostics" not in agent.CAPABILITY_GROUPS
+
+
+def test_resolve_capability_diagnostics_returns_the_same_set_as_homer(agent):
+    assert agent._resolve_capability("diagnostics") == agent._resolve_profile("homer")[0]
+
+
+async def test_capability_diagnostics_and_profile_homer_dispatch_identically(agent, spy_run_agent):
+    """The two accepted spellings for a diagnostic sub-agent must produce the
+    exact same tool grant, turn cap, and directive — proving one shared
+    implementation, not two independently-behaving paths."""
+    out_capability = json.loads(await _delegate(
+        agent, {"objective": "why is light.hallway unavailable?", "capability": "diagnostics"}))
+    kw_capability = spy_run_agent[-1]
+
+    out_profile = json.loads(await _delegate(
+        agent, {"objective": "why is light.hallway unavailable?", "profile": "homer"}))
+    kw_profile = spy_run_agent[-1]
+
+    assert kw_capability["allowed_tools"] == kw_profile["allowed_tools"]
+    assert kw_capability["max_iterations"] == kw_profile["max_iterations"] == 4
+    assert kw_capability["profile_directive"] == kw_profile["profile_directive"] == agent._HOMER_DIRECTIVE
+    # The legacy field is preserved for an existing reader of the JSON result,
+    # but it's honestly labeled as HOMER underneath either way.
+    assert out_capability["capability"] == "diagnostics"
+    assert out_capability["profile"] == out_profile["profile"] == "HOMER"
+
+
+async def test_capability_diagnostics_max_turns_also_capped_at_four(agent, spy_run_agent):
+    await _delegate(agent, {"objective": "x", "capability": "diagnostics", "max_turns": 999})
+    assert spy_run_agent[-1]["max_iterations"] == 4
+
+
+def test_homer_cannot_reach_solar_or_energy_report(agent):
+    """solar_status/energy_report were part of the OLD diagnostics group but
+    are not fault-diagnosis tools — they stay reachable through the main
+    agent directly, never through HOMER."""
+    tools, _, _, _ = agent._resolve_profile("homer")
+    assert "solar_status" not in tools
+    assert "energy_report" not in tools
+
+
+def test_solar_and_energy_report_remain_ordinary_main_agent_tools(agent):
+    """Removing them from the diagnostics/HOMER grant doesn't remove them
+    from Nova — the main agent (allowed_tools=None) still has them, same as
+    every other top-level tool."""
+    names = {t["function"]["name"] for t in agent._scoped_tool_list(None)}
+    assert {"solar_status", "energy_report"} <= names
+
+
+def test_other_capability_groups_unaffected_by_the_diagnostics_consolidation(agent):
+    for name in ("scheduling", "inbox", "home_state", "research", "environment"):
+        assert agent._resolve_capability(name), f"{name} should still resolve to a non-empty set"
+
+
+async def test_unknown_capability_still_fails_closed_after_consolidation(agent, spy_run_agent):
+    out = json.loads(await _delegate(agent, {"objective": "x", "capability": "bogus"}))
+    assert "error" in out and "unknown capability" in out["error"]
+    assert "diagnostics" not in out["error"]  # no longer a listed CAPABILITY_GROUPS option
+    assert spy_run_agent == []
 
 
 # ── profile-aware prompt: no contradictory device-control claims ──────────—

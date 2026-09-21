@@ -785,7 +785,11 @@ NOVA_TOOLS = [
                         "type": "string",
                         "enum": ["scheduling", "inbox", "home_state", "diagnostics", "research", "environment"],
                         "description": "Which curated read-only tool group the sub-agent gets. "
-                                       "Ignored if 'profile' is also set.",
+                                       "Ignored if 'profile' is also set. 'diagnostics' is kept "
+                                       "as an accepted name for compatibility but is not a "
+                                       "separate group — it resolves to the exact same HOMER "
+                                       "specialist as profile='homer'; prefer 'profile': 'homer' "
+                                       "directly for a fault/diagnosis request.",
                     },
                     "profile": {
                         "type": "string",
@@ -3700,16 +3704,35 @@ MAX_DELEGATION_DEPTH = 1        # parent (depth 0) may delegate; a sub-agent may
 _DELEGATION_MAX_TURNS = 6       # hard cap on a sub-agent's tool-loop iterations
 
 # Curated capability groups -> the read-only tools a sub-agent of that kind gets.
+#
+# NOTE: there is deliberately no "diagnostics" entry here. Diagnostics used to
+# be its own capability group with its own tool list, which would have left
+# two competing definitions of "what a diagnostic sub-agent may do" once HOMER
+# (a named profile, below) was added. HOMER is now the single, canonical
+# diagnostic policy — its tool grant, turn cap, and prompt live in exactly one
+# place (AGENT_PROFILES["homer"]) — and "diagnostics" survives only as a
+# backward-compatible alias for it (see _resolve_capability / _run_delegated),
+# not a second implementation. solar_status/energy_report were part of the
+# old diagnostics group but are NOT diagnostic tools in HOMER's sense (they
+# report totals/forecasts, not fault evidence) — they remain reachable the
+# same way every other Nova tool is: directly by the main agent, or via a
+# capability group where they actually fit (none currently curates them,
+# same as before this phase).
 CAPABILITY_GROUPS: dict = {
     "scheduling":  {"calendar_agenda", "read_email", "weather_forecast", "get_home_summary"},
     "inbox":       {"read_email", "calendar_agenda"},
     "home_state":  {"get_entity_state", "search_entities", "get_area_devices",
                     "get_home_summary", "activity_history"},
-    "diagnostics": {"system_diagnostics", "cognitive_status", "connectivity_status",
-                    "energy_status", "solar_status", "energy_report", "activity_history",
-                    "get_entity_state", "root_cause"},
     "research":    {"web_research", "search_documents", "search_entities"},
     "environment": {"weather_forecast", "hazard_report"},
+}
+
+# Legacy capability names that now resolve to a named profile's canonical
+# grant instead of their own entry in CAPABILITY_GROUPS above — preserves
+# existing internal delegate_task(capability="diagnostics", ...) calls
+# without maintaining a second diagnostics allowlist/prompt/turn-limit.
+_LEGACY_CAPABILITY_PROFILE_ALIASES: dict = {
+    "diagnostics": "homer",
 }
 
 # Never granted to a sub-agent, even if a group lists one (defense in depth):
@@ -3728,8 +3751,15 @@ _SUBAGENT_DENY: set = {
 
 def _resolve_capability(capability: str) -> set:
     """Capability group name -> tool-name set a sub-agent may use, always minus
-    the denylist. Unknown group -> empty set."""
-    return CAPABILITY_GROUPS.get(str(capability or ""), set()) - _SUBAGENT_DENY
+    the denylist. A legacy alias (currently just 'diagnostics') resolves to
+    its target profile's own tool set — the exact same grant _resolve_profile
+    would return, not a parallel copy. Unknown group -> empty set."""
+    cap = str(capability or "")
+    alias_target = _LEGACY_CAPABILITY_PROFILE_ALIASES.get(cap)
+    if alias_target:
+        resolved = _resolve_profile(alias_target)
+        return resolved[0] if resolved else set()
+    return CAPABILITY_GROUPS.get(cap, set()) - _SUBAGENT_DENY
 
 
 # ── Named sub-agent profiles (HOMER, Phase 7) ────────────────────────────────
@@ -3824,10 +3854,19 @@ async def _run_delegated(hass, args: dict, *, persona: str, provider_name: str,
     # ignoring anything else in `args`. An unrecognized profile is rejected
     # outright; it never falls back to the generic capability groups (a typo'd
     # or hostile profile name must not silently grant a broader tool set).
+    #
+    # 'capability' is checked for a legacy profile alias (currently just
+    # "diagnostics" -> "homer") BEFORE falling through to the generic
+    # CAPABILITY_GROUPS path, so an existing caller using
+    # capability="diagnostics" gets the exact same tool grant, turn cap, and
+    # directive as profile="homer" — one implementation, two accepted names.
     directive = None
     profile_label = None
-    if profile_name:
-        resolved = _resolve_profile(profile_name)
+    legacy_alias = None if profile_name else _LEGACY_CAPABILITY_PROFILE_ALIASES.get(capability)
+    effective_profile = profile_name or legacy_alias
+
+    if effective_profile:
+        resolved = _resolve_profile(effective_profile)
         if resolved is None:
             return json.dumps({"error": "unknown profile '%s'. Options: %s"
                                         % (profile_name, ", ".join(sorted(AGENT_PROFILES)))})
@@ -3860,11 +3899,20 @@ async def _run_delegated(hass, args: dict, *, persona: str, provider_name: str,
         out = {"objective": objective, "result": result}
         if profile_label:
             out["profile"] = profile_label
+            if legacy_alias:
+                out["capability"] = capability  # preserve the field an existing caller reads
         else:
             out["capability"] = capability
         return json.dumps(out)
     except Exception as exc:
-        return json.dumps({"error": "sub-agent failed: %s" % exc})
+        # Never echo the raw exception into a tool-result JSON that flows
+        # back into the model's context (and potentially gets narrated to
+        # the user) — it can carry a provider error string with more detail
+        # than should leave the server. Full detail goes to the log only.
+        _LOGGER.warning("delegate_task sub-agent failed (objective=%r): %s",
+                        objective[:120], exc)
+        return json.dumps({"error": "sub-agent failed — could not complete "
+                                    "the delegated objective"})
 
 
 _LANG_NAMES = {

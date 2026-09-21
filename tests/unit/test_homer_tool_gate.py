@@ -139,3 +139,43 @@ async def test_top_level_agent_unaffected_allowed_tools_none(agent, monkeypatch)
     result, client, turn_on_calls = await _run_scoped(agent, monkeypatch, script, None)
     assert len(turn_on_calls) == 1
     assert result == "Turned it on."
+
+
+# ── the gate protects EVERY scoped sub-agent, not only HOMER ───────────────
+
+async def test_gate_also_protects_a_generic_capability_subagent(agent, monkeypatch):
+    """A plain capability-group sub-agent (e.g. 'scheduling', nothing to do
+    with HOMER) gets the exact same execution-time protection — the fix
+    lives in run_agent's dispatch loop, keyed only on allowed_tools, not on
+    which profile or capability produced it."""
+    scheduling_tools = agent._resolve_capability("scheduling")
+    assert "control_device" not in scheduling_tools  # sanity: genuinely ungranted
+
+    script = [
+        {"text": "", "tool_calls": [
+            _tc("control_device", {"entity_id": "light.hallway", "action": "turn_on"}),
+        ]},
+        {"text": "done", "tool_calls": []},
+    ]
+    result, client, turn_on_calls = await _run_scoped(agent, monkeypatch, script, scheduling_tools)
+    assert turn_on_calls == []
+    tool_msgs = [m for m in client.calls[-1]["messages"] if m.get("role") == "tool"]
+    assert any("not available" in m.get("content", "") for m in tool_msgs)
+
+
+async def test_gate_error_message_does_not_leak_internal_detail(agent, monkeypatch):
+    """The refusal names the tool the model itself already asked for (so it
+    can adjust), but nothing beyond that — no allowlist contents, no
+    denylist, no internal set contents."""
+    script = [
+        {"text": "", "tool_calls": [_tc("remember", {"fact": "x"})]},
+        {"text": "done", "tool_calls": []},
+    ]
+    _, client, _ = await _run_scoped(agent, monkeypatch, script, HOMER_TOOLS)
+    tool_msgs = [m for m in client.calls[-1]["messages"] if m.get("role") == "tool"]
+    refusal = next(m["content"] for m in tool_msgs if "not available" in m.get("content", ""))
+    payload = json.loads(refusal)
+    assert set(payload.keys()) == {"error"}
+    assert "remember" in payload["error"]
+    for leaked in HOMER_TOOLS:
+        assert leaked not in payload["error"]

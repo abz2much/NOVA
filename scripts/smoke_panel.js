@@ -871,7 +871,7 @@ setTimeout(async () => {
           && status.textContent.trim() === "OK"
           && !row.querySelector("label").textContent.includes("OK");
       })()],
-    ["settings tab: HOMER diagnostic sub-agent shows as available, no toggle (Phase 7, v7.112.0)",
+    ["settings tab: HOMER diagnostic sub-agent shows as available, no toggle (Phase 7, v7.111.0)",
       (() => {
         const diagCard = diagCardOf(sRoot);
         const row = rowFor(diagCard, "HOMER — diagnostic sub-agent");
