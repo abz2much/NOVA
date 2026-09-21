@@ -172,7 +172,7 @@ async def test_aggregate_overall_down_when_any_active_down(sh, monkeypatch):
     monkeypatch.setattr(sh, "_check_stt", lambda h: {"name": "STT", "key": "stt", "status": "ok", "detail": ""})
     res = await sh.run_service_health(_Hass({}))
     assert res["overall"] == "down"
-    assert len(res["services"]) == 8
+    assert len(res["services"]) == 9
     # 'off' services excluded from the healthy count
     assert "healthy" in res["summary"]
 
@@ -195,7 +195,7 @@ async def test_aggregate_never_raises_on_check_error(sh, monkeypatch):
     monkeypatch.setattr(sh, "_check_tts", lambda h: (_ for _ in ()).throw(RuntimeError("x")))
     monkeypatch.setattr(sh, "_check_stt", lambda h: {"name": "STT", "key": "stt", "status": "ok", "detail": ""})
     res = await sh.run_service_health(_Hass({}))       # must not raise
-    assert "services" in res and len(res["services"]) == 8
+    assert "services" in res and len(res["services"]) == 9
 
 
 # ── agent tool registration ──────────────────────────────────────────────────

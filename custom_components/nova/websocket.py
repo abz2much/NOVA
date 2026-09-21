@@ -793,6 +793,17 @@ async def ws_get_panel_data(
                 "camera_awareness_min_observations": _runtime_opt(
                     hass, entry, "camera_awareness_min_observations", 3,
                 ),
+                # Phase 10 (v7.112.0) — off by default; auto-mapping only
+                # ever suggests, never enables a disabled System Monitor
+                # entity (see host_health.py).
+                "host_health_enabled": bool(_runtime_opt(hass, entry, "host_health_enabled", False)),
+                "host_health_alerts_enabled": bool(_runtime_opt(hass, entry, "host_health_alerts_enabled", False)),
+                "host_health_recovery_announce": bool(_runtime_opt(hass, entry, "host_health_recovery_announce", True)),
+                "host_health_persistence_minutes": _runtime_opt(hass, entry, "host_health_persistence_minutes", 10),
+                "host_health_cooldown_minutes": _runtime_opt(hass, entry, "host_health_cooldown_minutes", 60),
+                "host_health_mappings": _get_runtime_json(hass, entry, "host_health_mappings", {}),
+                "host_health_thresholds": _get_runtime_json(hass, entry, "host_health_thresholds", {}),
+                "host_health_status": _get_host_health_status(hass, entry),
                 "pattern_include_entities": _get_runtime_json(hass, entry, "pattern_include_entities", []),
                 "excluded_entities": _get_runtime_json(hass, entry, "excluded_entities", []),
                 "excluded_domains": _get_runtime_json(hass, entry, "excluded_domains", []),
@@ -1235,6 +1246,42 @@ def _get_knowledge_stats() -> dict:
         return {"total": 0, "by_kind": {}, "by_subject": {}}
 
 
+def _get_host_health_status(hass: HomeAssistant, entry) -> dict:
+    """Live discovery + mapping + snapshot for the Host Health settings card
+    (Phase 10) — candidate entities per metric, current mapping status
+    (mapped/ambiguous/missing/disabled), and the last tick's readings.
+    Computed fresh on every panel load; never mutates host_health's own
+    persistence state machine (that only advances on the periodic tick)."""
+    try:
+        from . import host_health
+        config = {
+            "host_health_enabled": bool(_runtime_opt(hass, entry, "host_health_enabled", False)),
+            "host_health_mappings": _get_runtime_json(hass, entry, "host_health_mappings", {}),
+            "host_health_thresholds": _get_runtime_json(hass, entry, "host_health_thresholds", {}),
+        }
+        candidates = host_health.discover_candidates(hass)
+        mappings = host_health.resolve_mappings(hass, config, candidates)
+        metrics = []
+        for metric in host_health.METRICS:
+            mapping = mappings[metric.key]
+            metrics.append({
+                "key": metric.key,
+                "label": metric.label,
+                "recommended": metric.recommended,
+                "status": mapping.status,
+                "source": mapping.source,
+                "entity_id": mapping.entity_id,
+                "candidates": [
+                    {"entity_id": c.entity_id, "friendly_name": c.friendly_name,
+                     "disabled": c.disabled}
+                    for c in mapping.candidates
+                ],
+            })
+        return {"metrics": metrics, "snapshot": host_health.snapshot(hass, config)}
+    except Exception as exc:
+        return {"error": str(exc)[:160]}
+
+
 def _get_appliance_status() -> dict:
     """Appliance monitor state — declared profile (with learned watts) and what
     Nova is currently tracking — for the Settings → Appliances panel."""
@@ -1534,6 +1581,13 @@ PANEL_WRITABLE_KEYS = {
     "camera_event_dedup_window",    # float seconds: window collapsing duplicate camera events across sources
     "camera_historical_awareness",  # bool: add repeated camera history to interactive prompts (Phase 5)
     "camera_awareness_min_observations",  # int 3-12: historical evidence floor
+    "host_health_enabled",           # bool: master on/off for Home Assistant host telemetry (Phase 10, v7.112.0)
+    "host_health_alerts_enabled",    # bool: separate opt-in for spoken/pushed host-health alerts
+    "host_health_recovery_announce", # bool: announce a stable recovery, bounded and optional
+    "host_health_persistence_minutes",  # float 2-120: sustained-breach window before the first alert
+    "host_health_cooldown_minutes",     # float 5-720: minimum gap between repeat alerts on an unresolved problem
+    "host_health_mappings",          # dict: metric_key -> sensor.* entity_id (manual System Monitor mapping)
+    "host_health_thresholds",        # dict: metric_key -> float (per-metric alert threshold override)
     "appliance_profile",            # JSON list of declared appliances (name/type/entity/watts)
     "camera_auto_analyze",          # bool: auto-inspect doorbell/person camera events
     "camera_auto_analyze_motion",   # bool: also auto-inspect motion events (noisier)

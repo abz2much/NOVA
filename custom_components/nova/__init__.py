@@ -539,6 +539,33 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if sched.add("health", HEALTH_INTERVAL, _health_tick):
         _LOGGER.info("Nova: hourly service-health sweep active")
 
+    # Host-health awareness (Phase 10, v7.112.0): samples System Monitor
+    # entities and advances the persistence/cooldown state machine every
+    # tick. Off by default (host_health.tick itself no-ops when the master
+    # toggle is off, so this line always registers — same convention as
+    # hazard_monitor's periodic_check). Sampling cadence intentionally
+    # shorter than the persistence window (host_health.TICK_INTERVAL_SECONDS,
+    # 2 minutes) so a 10-minute-default persistence window still gets
+    # several samples.
+    from .host_health import TICK_INTERVAL_SECONDS as _HH_INTERVAL_SECONDS
+    HOST_HEALTH_INTERVAL = timedelta(seconds=_HH_INTERVAL_SECONDS)
+
+    async def _host_health_tick(_now) -> None:
+        try:
+            from . import host_health, nova_config as _jc3
+            rc = hass.data.get(DOMAIN, {}).get(
+                entry.entry_id, {}).get("runtime_config", {})
+            cfg = await hass.async_add_executor_job(
+                _jc3.effective_config_with_runtime, entry, rc)
+            res = await host_health.tick(hass, cfg)
+            _LOGGER.debug("Nova host-health tick: %s", res)
+        except Exception as exc:
+            _LOGGER.debug("Nova host-health tick error: %s", exc)
+
+    if sched.add("host_health", HOST_HEALTH_INTERVAL, _host_health_tick):
+        _LOGGER.info("Nova: host-health sampling active (every %s)",
+                     HOST_HEALTH_INTERVAL)
+
     # Multi-hazard monitor (v6.71.0): polls USGS/NWS/EONET every 10 min for new
     # nearby significant events, scoped to home coordinates (or a panel override).
     # No-op unless the user enables it; each feed fails safe (never fabricates).
