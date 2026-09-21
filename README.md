@@ -273,8 +273,8 @@ Nova can give itself structured visibility into the health of the machine it run
 **Optional entities:** Processor temperature, Swap usage, CPU Pressure Some 60s Average, Load 5 min, Uptime.
 
 **Worth knowing:**
-- Some hardware doesn't expose processor temperature at all — Home Assistant just won't have that sensor. A missing temperature reading is not an error; Nova simply reports it as not available.
-- Pressure (PSI) sensor availability depends on your platform and kernel — if System Monitor doesn't offer them on your install, host health just runs with the readings it does have.
+- Nova samples host health every 2 minutes. Right after you first turn on Host health awareness, the panel can show dashes for a short while — that's the normal gap before the first sample, not a failure. Wait up to 3 minutes and refresh the Nova panel.
+- Some hardware doesn't expose processor temperature at all, and pressure (PSI) sensor availability depends on your platform and kernel — Home Assistant just won't have those sensors on every machine. A missing optional entity (temperature, PSI, swap, load, uptime) is not a setup failure; Nova simply reports it as not available and runs with whatever readings it does have.
 - Disk usage measures capacity, not drive health — a full disk and a failing disk are different problems, and Nova only reports the former.
 - I/O pressure measures workload contention (processes waiting on I/O), not drive failure — Nova never claims to measure NVMe/SSD health.
 - Nova cannot warn you after this machine has completely frozen or lost power, because Nova itself runs on it. This is visibility into degradation, not a substitute for real infrastructure monitoring.
@@ -302,9 +302,9 @@ A persistent problem (sustained past a configurable window, not a brief spike) c
 
 ## Languages
 
-Nova follows your Home Assistant language automatically, and you can override it under **Settings → General → Language** (or leave it on Auto). The setup and configuration dialogs are localized through Home Assistant's own translation system; the in-panel HUD is localized by Nova. Anything not yet translated falls back cleanly to English, so nothing breaks.
+Nova follows your Home Assistant language automatically, and you can override it under **Settings → General → Language** (or leave it on Auto). The setup and configuration dialogs are localized through Home Assistant's own translation system. The in-panel Command Center UI is intended to be localized by Nova the same way, using the translation files described below — see the Panel UI note just below for where that currently stands. Anything not yet translated falls back cleanly to English, so nothing breaks.
 
-**Panel UI:** complete for all 18 supported languages: Czech, Danish, Dutch, Finnish, French, German, Italian, Norwegian Bokmål, Polish, Portuguese, Brazilian Portuguese, Romanian, Russian, Slovak, Spanish, Swedish, Turkish, and Ukrainian (English is the source language, built in).
+**Panel UI:** translation files exist for 18 languages (`custom_components/nova/frontend/i18n/`), but the current Command Center panel does not yet load or apply them — the panel UI runs in English regardless of your Home Assistant language today. Broader Command Center localisation is planned as future work; until that ships, English is the dependable, fully working path for the panel. The translation files themselves are still worth contributing to ahead of that work.
 
 **Setup dialog:** complete for French, German, Spanish, Italian, Portuguese, and Dutch. Other languages fall back to English here; this is Home Assistant's own translation layer, separate from the panel.
 
@@ -393,6 +393,14 @@ The list below covers Nova-specific differences. It is not a complete release-by
 - A PHACC integration suite now tests setup, reload, config flow, websocket permissions, snapshot retrieval, and setup-failure cleanup in CI.
 
 This list grows as real fixes ship — see `CHANGELOG.md` for the full history.
+
+## Possible future development
+
+These are ideas under consideration, not promised or scheduled features. None of the below is implemented.
+
+- **Driving Mode** — routing travel reminders, briefings, and alerts differently while away from home (e.g. through an Android Auto connection). Deferred: no current use case.
+- **FRIDAY automation specialist** — a second, actuating sub-agent. Deferred: Nova's main agent already controls devices directly, so a second actuator path would expand the safety boundary that needs defending without a clear distinct benefit today.
+- **Proximity-adjusted speech** — adjusting a speaker's volume based on how close a person is to it. Deferred: it depends on a suitable mmWave sensor being positioned relative to each speaker, and would behave inconsistently in any room without one.
 
 ## Credit
 
