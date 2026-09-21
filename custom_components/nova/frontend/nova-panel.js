@@ -4217,6 +4217,9 @@ class NovaPanel extends HTMLElement {
 
   _routineLearningCardBody() {
     const cfg = this._data()?.config || {};
+    const awarenessAvailable = cfg.observer_enabled !== false && cfg.cognition_enabled !== false && cfg.camera_event_learning !== false;
+    const awarenessOn = awarenessAvailable && cfg.camera_historical_awareness !== false;
+    const awarenessMinimum = Math.max(3, Math.min(12, Number(cfg.camera_awareness_min_observations ?? 3) || 3));
     const onOff = (key, label, desc) => `
       <div class="toggle-row">
         <span class="toggle-label">${this._esc(label)}</span>
@@ -4231,6 +4234,15 @@ class NovaPanel extends HTMLElement {
       <div class="stub-body">Nova learns routines from device activity (lights, locks, thermostats…) and skips noisy door/window and presence signals by default. Opt them in to build routines from them.</div>
       <div class="toggle-list">
         ${onOff("camera_event_learning", "Learn from camera detections", "Eufy, Frigate, Nest and Nova's own vision analysis — on by default, no images or faces stored")}
+        <div class="toggle-row">
+          <span class="toggle-label">What I've noticed lately</span>
+          <span class="toggle-desc">Use repeated historical camera patterns in conversation, never as current state</span>
+          <button class="toggle-btn ${awarenessOn ? "on" : "off"}" data-cfg-key="camera_historical_awareness" data-cfg-val="${awarenessOn ? "false" : "true"}" ${awarenessAvailable ? "" : "disabled"}>${awarenessOn ? "ON" : "OFF"}</button>
+        </div>
+        <div class="cfg-row">
+          <label>Minimum observations <span class="toggle-desc">across more than one day</span></label>
+          <input class="cfg-field cfg-num" type="number" min="3" max="12" step="1" data-cfg-key="camera_awareness_min_observations" value="${awarenessMinimum}" ${awarenessAvailable ? "" : "disabled"}>
+        </div>
         ${onOff("pattern_learn_doors", "Learn doors & windows", "Door, window and garage contact sensors")}
         ${onOff("pattern_learn_presence", "Learn presence & arrivals", "People and device trackers (home / away)")}
         ${onOff("pattern_learn_buttons", "Learn button & remote presses", "Suggest “press → scene / action” automations")}

@@ -1,3 +1,11 @@
+## Unreleased — historical camera awareness (Phase 5)
+
+- Interactive conversations can now include a short, fenced "What I've noticed lately" block built from repeated canonical camera events already stored by Phase 4. It reads the shared `patterns.db` store and creates no parallel Eufy path or second copy of the observations.
+- Person, vehicle, animal, package, and activity patterns need repeated evidence across more than one day. Time and weekday wording appears only when the evidence is concentrated enough, and all reads, output counts, lookback, strings, prompt size, and per-location results are bounded.
+- Resident names are used only for person rows that Phase 4 stored with camera-scoped recognition confidence. Unknown and stranger detections remain unnamed, and vehicles, animals, and packages are never attributed to a resident.
+- Historical language stays separate from Nova's current Situation block. Database failure or empty evidence adds nothing to the prompt, and awareness generation never reads images or raw payloads, calls vision or another language model, or changes existing camera announcements and package handling.
+- Settings → Learning & Memory → Routine Learning now has a separate historical awareness toggle and a validated minimum-observations threshold. Awareness is automatically inactive whenever master learning or semantic camera learning is off.
+
 ## [7.109.0] — semantic camera-event learning (Phase 4)
 
 Eufy, Frigate, Nest, and Nova's own vision analysis now feed one shared semantic learning stream, through a single new recording boundary (`camera_semantic.py`) rather than four separate ones. Native Eufy package, vehicle, animal, and person detections remain entirely local to the existing integration path and still never require a vision-model call for routine handling — this only adds a structured, bounded learning record alongside what already happens.

@@ -1384,6 +1384,17 @@ setTimeout(async () => {
         return !!btn && btn.classList.contains("on") && btn.textContent === "ON";
       })()],
   );
+  checks.push(
+    ["settings tab: historical camera awareness has a separate toggle and bounded evidence threshold",
+      (() => {
+        const rc = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Routine Learning/.test(c.querySelector(".panel-title")?.textContent || ""));
+        const toggle = rc?.querySelector('button[data-cfg-key="camera_historical_awareness"]');
+        const minimum = rc?.querySelector('input[data-cfg-key="camera_awareness_min_observations"]');
+        return !!toggle && toggle.classList.contains("on")
+          && !toggle.disabled && !minimum?.disabled
+          && minimum?.min === "3" && minimum?.max === "12" && minimum?.value === "3";
+      })()],
+  );
   const plInput = sRoot.getElementById("newPlEntityInput");
   plInput.value = "binary_sensor.mailbox";
   sRoot.getElementById("newPlAddEntity").click();

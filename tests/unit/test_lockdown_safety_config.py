@@ -42,3 +42,23 @@ def test_panel_validation_accepts_only_notify_service_lists(load):
         None,
     ):
         assert safety_config.valid_panel_value("notify_services", value) is False
+
+
+def test_panel_validation_bounds_historical_camera_awareness(load):
+    safety_config = load("safety_config")
+
+    assert safety_config.valid_panel_value("camera_historical_awareness", True) is True
+    assert safety_config.valid_panel_value("camera_historical_awareness", False) is True
+    for value in ("true", 1, 0, None):
+        assert safety_config.valid_panel_value(
+            "camera_historical_awareness", value,
+        ) is False
+
+    for value in (3, 5, 12):
+        assert safety_config.valid_panel_value(
+            "camera_awareness_min_observations", value,
+        ) is True
+    for value in (2, 13, 3.5, "3", True, None):
+        assert safety_config.valid_panel_value(
+            "camera_awareness_min_observations", value,
+        ) is False
