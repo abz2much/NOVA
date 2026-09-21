@@ -252,7 +252,14 @@ const hass = {
           : ["gpt-4o", "gpt-4o-mini"],
       };
     }
-    if (m.type === "nova/get_credential_status") return { status: { ..._credStatus } };
+    if (m.type === "nova/get_credential_status") return {
+      status: { ..._credStatus },
+      available: {
+        groq: !!_credStatus.groq, openai: !!_credStatus.openai,
+        anthropic: !!_credStatus.anthropic, gemini: !!_credStatus.gemini,
+        custom: false, ollama: true,
+      },
+    };
     if (m.type === "nova/set_credential") {
       _setCredentialCalls.push({ ...m });
       _credStatus = { ..._credStatus, [m.provider]: true };
@@ -957,8 +964,16 @@ setTimeout(async () => {
       })()],
   );
   checks.push(["settings tab: model discovery sends no browser-controlled URL",
+    // Phase 3, v7.108.0 adds `refresh` (a boolean, cache-bypass only) — the
+    // security property under test is that no url/base_url/endpoint field
+    // is ever present, not the exact key set.
     _listModelCalls.length > 0
-    && _listModelCalls.every(c => Object.keys(c).sort().join(",") === "provider,type")]);
+    && _listModelCalls.every(c => {
+      const keys = new Set(Object.keys(c));
+      const allowed = new Set(["type", "provider", "refresh"]);
+      return keys.has("type") && keys.has("provider")
+        && [...keys].every(k => allowed.has(k));
+    })]);
   const llmProvSel = sRoot.querySelector('.new-model-row[data-role="llm"] .new-prov-select');
   llmProvSel.value = "openai";
   llmProvSel.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
@@ -982,6 +997,59 @@ setTimeout(async () => {
   checks.push(["settings tab: manual model entry remains available when discovery is unavailable",
     unavailableShown
     && _updateConfigCalls.some(c => c.key === "model" && c.value === "manually-entered-model")]);
+
+  // Phase 3, v7.108.0: a saved model absent from the live list must be kept
+  // selected, NEVER silently auto-picked-and-saved (the exact bug this
+  // phase fixes — _pickHealModel used to call _rawSaveConfig here).
+  const classifierModelSel = sRoot.querySelector('.new-model-row[data-role="classifier"] .new-model-select');
+  classifierModelSel.setAttribute("data-current", "a-private-preview-model-not-in-discovery");
+  const updateCallsBeforeHeal = _updateConfigCalls.length;
+  await elNew._loadModelsFor("groq", classifierModelSel);
+  checks.push(["settings tab: a saved model missing from the live list is kept selected, not silently replaced",
+    classifierModelSel.value === "a-private-preview-model-not-in-discovery"
+    && /not in the live list/.test(classifierModelSel.innerHTML)
+    && _updateConfigCalls.length === updateCallsBeforeHeal]);   // proves nothing was auto-saved
+
+  // Phase 3, v7.108.0: provider availability is labelled on each role's
+  // provider dropdown — groq is "configured" (has a credential in this
+  // fixture), openai is not, and the label carries no credential value.
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: provider dropdown marks unconfigured providers, not configured ones",
+    (() => {
+      const opts = Array.from(classifierModelSel.closest(".new-model-row").querySelector(".new-prov-select").options);
+      const groqOpt = opts.find(o => o.value === "groq");
+      const openaiOpt = opts.find(o => o.value === "openai");
+      return groqOpt && groqOpt.textContent === "groq"
+        && openaiOpt && /not configured/.test(openaiOpt.textContent);
+    })()]);
+
+  // Phase 3, v7.108.0: strong-evidence mismatch warning — a clearly
+  // Anthropic-named model assigned to a different provider — shown without
+  // moving the model or changing the provider.
+  const reasoningRow = sRoot.querySelector('.new-model-row[data-role="reasoning"]');
+  const reasoningProvSel = reasoningRow.querySelector(".new-prov-select");
+  const reasoningModelSel = reasoningRow.querySelector(".new-model-select");
+  reasoningProvSel.value = "groq";
+  reasoningModelSel.innerHTML = '<option value="claude-sonnet-5" selected>claude-sonnet-5</option>';
+  elNew._updateRoleWarning(reasoningRow);
+  checks.push(["settings tab: a clearly-mismatched provider/model pairing shows a warning, without moving anything",
+    (() => {
+      const warnEl = reasoningRow.querySelector("[data-role-warning]");
+      return !warnEl.hidden && /anthropic/.test(warnEl.textContent)
+        && reasoningProvSel.value === "groq"                    // provider untouched
+        && reasoningModelSel.value === "claude-sonnet-5";       // model untouched
+    })()]);
+
+  // Phase 3, v7.108.0: the per-row refresh button bypasses the cache
+  // (refresh: true) — still no caller-supplied URL, just a boolean.
+  const classifierRow = classifierModelSel.closest(".new-model-row");
+  const classifierRefreshBtn = classifierRow.querySelector(".new-model-refresh");
+  const listCallsBeforeRefresh = _listModelCalls.length;
+  classifierRefreshBtn.click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: the row refresh button requests a fresh (non-cached) model list",
+    _listModelCalls.length > listCallsBeforeRefresh
+    && _listModelCalls[_listModelCalls.length - 1].refresh === true]);
 
   // Provider Credentials (Phase 2, v7.107.0): status-only display, a saved
   // value is never echoed back, an explicit save/clear per provider.

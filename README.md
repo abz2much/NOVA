@@ -256,7 +256,7 @@ This lives in `/config/nova/config.json`; merge it into the existing object rath
 
 | Setting | What it does |
 | --- | --- |
-| `llm_provider` / per-role models | Choose Groq, Gemini, OpenAI, Anthropic, Ollama, or custom, independently for the main agent, classifier, reasoning, review, vision, and camera-reasoning roles. |
+| `llm_provider` / per-role models | Choose Groq, Gemini, OpenAI, Anthropic, Ollama, or custom, independently for the main agent, classifier, reasoning, review, vision, and camera-reasoning roles. Each role shows only providers with a credential (or, for custom/Ollama, a saved endpoint) configured. A saved model missing from live discovery is kept, never silently replaced. |
 | `llm_base_url` | Point the Ollama/custom providers at your local GPU server (for example `http://gpu-server:11434/v1`). |
 | Provider credentials | Settings → AI Models (or Configure → Credentials) — one dedicated key per provider, stored only in `secrets.yaml`. Each role above uses only its own provider's key, never another's. |
 | `observer_enabled` | Let Nova watch the event stream and decide what's worth surfacing. |
@@ -333,6 +333,7 @@ The list below covers Nova-specific differences. It is not a complete release-by
 - Arrival briefings address the person who just walked in directly ("Welcome home, sir") instead of a generic time-of-day greeting followed by a redundant restatement of their own name, and skip reporting the front door as "open" on the very briefing that opening it caused.
 
 **New capabilities**
+- Live model discovery for Groq, OpenAI, Anthropic, Gemini, Ollama, and custom endpoints paginates the providers that officially support it (Gemini, Anthropic) with strict page/model-count bounds, briefly caches results per provider so switching tabs doesn't re-fetch every time, and never silently replaces a saved model just because a live list doesn't happen to include it — a real fix, since that used to happen on every Settings visit for any private, preview, or newly-released model.
 - Normal Nova push alerts can target multiple selected phones or notification services. Existing single device settings carry forward automatically, and one unavailable device cannot block delivery to the others. Critical intrusion and confirmation broadcasts remain household wide.
 - Native Eufy Security doorbell/camera support: doorbell press, stranger-vs-known-face detection, and package delivered/stranded/taken all use Eufy's own on-device sensors directly (discovered by unique_id, so a rename can't break it) instead of the Nest/Frigate-only pipeline jarvis-aio assumes. A known/regular face and routine package events cost zero vision-LLM calls — only an actual stranger triggers one.
 - Solar/battery/grid visibility: a dashboard card showing live solar generation, battery level, grid import/export direction, and self-sufficiency, plus a voice/chat tool ("how's our solar doing"). Reads straight from Home Assistant's own Energy dashboard configuration, so any install that's already set that up needs no separate setup for this.
