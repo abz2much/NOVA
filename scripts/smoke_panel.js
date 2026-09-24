@@ -162,6 +162,8 @@ const _sugCalls = [];
 let _semanticEnabled = false;
 let _activeMode = "normal";
 const _listModelCalls = [];
+const _endpointTestCalls = [];
+const _applyAiCalls = [];
 const _modeSetCalls = [];
 const _serviceCalls = [];
 const _docDeleteCalls = [];
@@ -283,11 +285,33 @@ const hass = {
       if (m.provider === "custom") return {
         models: [], error: "model_discovery_unavailable",
       };
+      if (m.provider === "ollama") return {
+        models: ["local-tools:latest", "local-vision:latest"],
+        model_details: [
+          { id: "local-tools:latest", capabilities: ["completion", "tools", "thinking"] },
+          { id: "local-vision:latest", capabilities: ["completion", "vision"] },
+        ],
+      };
       return {
         models: m.provider === "groq"
           ? ["llama-3.3-70b-versatile", "moonshotai/kimi-k2-instruct", "meta-llama/llama-4-scout-17b"]
           : ["gpt-4o", "gpt-4o-mini"],
       };
+    }
+    if (m.type === "nova/test_provider_endpoint") {
+      _endpointTestCalls.push({ ...m });
+      return {
+        ok: true, provider: m.provider, endpoint: m.endpoint,
+        models: ["local-tools:latest", "local-vision:latest"],
+        model_details: [
+          { id: "local-tools:latest", capabilities: ["completion", "tools", "thinking"] },
+          { id: "local-vision:latest", capabilities: ["completion", "vision"] },
+        ],
+      };
+    }
+    if (m.type === "nova/apply_ai_config") {
+      _applyAiCalls.push({ ...m });
+      return { ok: true, message: "AI settings saved. Nova is reloading." };
     }
     if (m.type === "nova/get_credential_status") return {
       status: { ..._credStatus },
@@ -1091,25 +1115,25 @@ setTimeout(async () => {
     Array.from(sRoot.querySelectorAll(".settings-card")).some(c =>
       !c.hidden && /Cameras/.test(c.querySelector(".panel-title")?.textContent || ""))]);
 
-  // AI Models: switch to its group, confirm it's real (not a stub) with all
-  // six roles rendered, live models loaded from nova/list_models, and the
-  // vision-role hint present — then exercise the provider-change flow
-  // (self-heal + llm_base_url clear), which deliberately does NOT go
-  // through _saveSetting/_render (see _wireAiModels's own comment).
+  // AI Models: five real runtime roles, separate self-hosted endpoints, and
+  // staged changes that only persist through the atomic Apply command.
   const voiceNavBtn = Array.from(sRoot.querySelectorAll(".settings-nav-btn")).find(b => b.textContent === "Voice & Speakers");
   voiceNavBtn.click();
   await new Promise(r => setTimeout(r, 30));
   sRoot = elNew.shadowRoot;
   checks.push(
-    ["settings tab: AI Models card is real with all six roles and live models loaded",
+    ["settings tab: AI Models card has five real roles and self-hosted setup controls",
       (() => {
         const aiCard = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /AI Models/.test(c.querySelector(".panel-title")?.textContent || ""));
         if (!aiCard || aiCard.querySelector(".stub-tag")) return false;
         const rows = aiCard.querySelectorAll(".new-model-row");
         const llmRow = aiCard.querySelector('.new-model-row[data-role="llm"] .new-model-select');
-        return rows.length === 6
+        return rows.length === 5
           && !!llmRow && /llama-3\.3-70b-versatile/.test(llmRow.innerHTML)
-          && /image-capable model/.test(aiCard.querySelector('.new-model-row[data-role="vision"]')?.textContent || "");
+          && !aiCard.querySelector('.new-model-row[data-role="review"]')
+          && !!aiCard.querySelector('.ai-endpoint[data-endpoint-provider="ollama"]')
+          && !!aiCard.querySelector("#aiApply")
+          && /Vision needs/.test(aiCard.querySelector('.new-model-row[data-role="vision"]')?.textContent || "");
       })()],
   );
   checks.push(["settings tab: model discovery sends no browser-controlled URL",
@@ -1124,12 +1148,12 @@ setTimeout(async () => {
         && [...keys].every(k => allowed.has(k));
     })]);
   const llmProvSel = sRoot.querySelector('.new-model-row[data-role="llm"] .new-prov-select');
+  const updatesBeforeProviderChange = _updateConfigCalls.length;
   llmProvSel.value = "openai";
   llmProvSel.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
   await new Promise(r => setTimeout(r, 20));
-  checks.push(["settings tab: AI Models provider change saves provider, clears base_url, and reloads its own model list",
-    _updateConfigCalls.some(c => c.key === "llm_provider" && c.value === "openai")
-    && _updateConfigCalls.some(c => c.key === "llm_base_url" && c.value === "")
+  checks.push(["settings tab: provider changes are staged, preserve endpoints, and load models",
+    _updateConfigCalls.length === updatesBeforeProviderChange
     && /gpt-4o/.test(sRoot.querySelector('.new-model-row[data-role="llm"] .new-model-select')?.innerHTML || "")]);
 
   const llmModelSel = sRoot.querySelector('.new-model-row[data-role="llm"] .new-model-select');
@@ -1141,11 +1165,34 @@ setTimeout(async () => {
   llmModelSel.value = "__custom__";
   llmModelSel.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
   llmCustomInput.value = "manually-entered-model";
-  llmCustomInput.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+  llmCustomInput.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("input", { bubbles: true }));
   await new Promise(r => setTimeout(r, 20));
   checks.push(["settings tab: manual model entry remains available when discovery is unavailable",
     unavailableShown
-    && _updateConfigCalls.some(c => c.key === "model" && c.value === "manually-entered-model")]);
+    && llmCustomInput.value === "manually-entered-model"
+    && _updateConfigCalls.length === updatesBeforeProviderChange]);
+
+  const ollamaEndpoint = sRoot.querySelector('.ai-endpoint[data-endpoint-provider="ollama"]');
+  ollamaEndpoint.value = "http://ollama.lan:11434";
+  sRoot.querySelector('.ai-endpoint-test[data-endpoint-provider="ollama"]').click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: endpoint Test uses the staged URL and shows discovered capabilities",
+    _endpointTestCalls.some(c => c.provider === "ollama" && c.endpoint === "http://ollama.lan:11434")
+    && /2 models found/.test(sRoot.querySelector('[data-endpoint-status="ollama"]')?.textContent || "")]);
+
+  sRoot.querySelector('[data-ai-profile="hybrid"]').click();
+  checks.push(["settings tab: Hybrid stages background text roles on a capability-matched local model",
+    sRoot.querySelector('.new-model-row[data-role="classifier"] .new-prov-select')?.value === "ollama"
+    && sRoot.querySelector('.new-model-row[data-role="classifier"] .new-model-select')?.value === "local-tools:latest"
+    && sRoot.querySelector('.new-model-row[data-role="llm"] .new-prov-select')?.value === "custom"]);
+
+  sRoot.querySelector("#aiApply").click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: Apply sends one complete AI transaction and no generic config writes",
+    _applyAiCalls.length === 1
+    && _applyAiCalls[0].updates.ollama_base_url === "http://ollama.lan:11434"
+    && _applyAiCalls[0].updates.classifier_provider === "ollama"
+    && _updateConfigCalls.length === updatesBeforeProviderChange]);
 
   // Phase 3, v7.108.0: a saved model absent from the live list must be kept
   // selected, NEVER silently auto-picked-and-saved (the exact bug this

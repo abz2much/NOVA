@@ -73,6 +73,8 @@ def async_register(hass: HomeAssistant) -> None:
         websocket_api.async_register_command(hass, ws_set_decision_outcome)
         websocket_api.async_register_command(hass, ws_replay_decision)
         websocket_api.async_register_command(hass, ws_list_models)
+        websocket_api.async_register_command(hass, ws_test_provider_endpoint)
+        websocket_api.async_register_command(hass, ws_apply_ai_config)
         websocket_api.async_register_command(hass, ws_get_credential_status)
         websocket_api.async_register_command(hass, ws_set_credential)
         websocket_api.async_register_command(hass, ws_delete_credential)
@@ -848,6 +850,8 @@ async def ws_get_panel_data(
                 "llm_base_url": str(_runtime_opt(hass, entry, "llm_base_url", "") or ""),
                 "ollama_base_url": str(_runtime_opt(hass, entry, "ollama_base_url", "") or ""),
                 "custom_base_url": str(_runtime_opt(hass, entry, "custom_base_url", "") or ""),
+                "self_hosted_endpoints_migrated": bool(_runtime_opt(
+                    hass, entry, "self_hosted_endpoints_migrated", False)),
                 "notify_service": current_notify,
                 "notify_services": current_notify_services,
                 "notify_services_available": notify_services,
@@ -2229,9 +2233,12 @@ def _resolve_model_discovery_request(config: dict, provider: str) -> tuple[str, 
         raise ValueError("saved model endpoint is not configured")
     base = base.rstrip("/")
 
+    if provider == "ollama" and base.endswith("/v1"):
+        base = base[:-3].rstrip("/")
+
     if base.endswith("/models"):
         url = base
-    elif provider == "ollama" and not base.endswith("/v1"):
+    elif provider == "ollama":
         url = f"{base}/api/tags"
     else:
         url = f"{base}/models"
@@ -2256,18 +2263,65 @@ def _parse_model_list(provider: str, url: str, data: dict) -> list[str]:
                 name = name[len("models/"):]
             methods = model.get("supportedGenerationMethods", [])
             if name and (not methods or "generateContent" in methods):
-                models.append(name)
+                models.append(name[:512])
     elif provider == "ollama" and url.endswith("/api/tags"):
         for model in data.get("models", []):
             name = model.get("name")
             if name:
-                models.append(name)
+                models.append(str(name)[:512])
     else:
         for model in data.get("data", []):
             model_id = model.get("id")
             if model_id:
-                models.append(model_id)
+                models.append(str(model_id)[:512])
     return sorted(set(models))
+
+
+def _parse_model_details(provider: str, url: str, data: dict) -> list[dict]:
+    """Return bounded, display-safe model metadata reported by a provider.
+
+    Capability flags are never guessed from a model name. Ollama exposes
+    them directly from ``/api/tags``; providers that only return IDs keep an
+    empty capability list so the panel can say the capability is unknown.
+    """
+    if provider != "ollama" or not url.endswith("/api/tags"):
+        return [
+            {"id": model_id, "capabilities": []}
+            for model_id in _parse_model_list(provider, url, data)
+        ]
+
+    result: list[dict] = []
+    for item in data.get("models", []):
+        if not isinstance(item, dict):
+            continue
+        model_id = str(item.get("name") or "").strip()
+        if not model_id:
+            continue
+        raw_caps = item.get("capabilities") or []
+        capabilities = sorted({
+            str(cap).strip().lower()[:64]
+            for cap in raw_caps
+            if isinstance(cap, str) and str(cap).strip()
+        })[:32]
+        details = item.get("details") if isinstance(item.get("details"), dict) else {}
+        row: dict[str, Any] = {
+            "id": model_id[:512],
+            "capabilities": capabilities,
+        }
+        family = str(details.get("family") or "").strip()
+        quantization = str(details.get("quantization_level") or "").strip()
+        if family:
+            row["family"] = family[:128]
+        if quantization:
+            row["quantization"] = quantization[:64]
+        size = item.get("size")
+        if isinstance(size, int) and size >= 0:
+            row["size"] = size
+        context_length = details.get("context_length")
+        if isinstance(context_length, int) and context_length > 0:
+            row["context_length"] = context_length
+        result.append(row)
+    return sorted(result, key=lambda item: item["id"])
 
 
 def _log_model_discovery_failure(
@@ -2370,7 +2424,7 @@ def _page_query_params(style: Optional[str], cursor: Optional[str]) -> dict:
 # a credential or the saved endpoint changes.
 _MODEL_CACHE_TTL = 300.0  # seconds
 _MODEL_CACHE_MAX_ENTRIES = 32
-_MODEL_CACHE: dict[tuple[str, str], tuple[float, list[str], bool]] = {}
+_MODEL_CACHE: dict[tuple[str, str], tuple[float, list[str], bool, list[dict]]] = {}
 _MODEL_CACHE_INFLIGHT: dict[tuple[str, str], Any] = {}  # asyncio.Task, deduped concurrent fetches
 
 
@@ -2382,18 +2436,24 @@ def _model_cache_get(key: tuple[str, str]):
     entry = _MODEL_CACHE.get(key)
     if entry is None:
         return None
-    ts, models, truncated = entry
+    ts, models, truncated, details = entry
     if (time.monotonic() - ts) > _MODEL_CACHE_TTL:
         _MODEL_CACHE.pop(key, None)
         return None
-    return models, truncated
+    return models, truncated, details
 
 
-def _model_cache_set(key: tuple[str, str], models: list[str], truncated: bool) -> None:
+def _model_cache_set(
+    key: tuple[str, str],
+    models: list[str],
+    truncated: bool,
+    details: Optional[list[dict]] = None,
+) -> None:
     if key not in _MODEL_CACHE and len(_MODEL_CACHE) >= _MODEL_CACHE_MAX_ENTRIES:
         oldest = min(_MODEL_CACHE, key=lambda k: _MODEL_CACHE[k][0])
         _MODEL_CACHE.pop(oldest, None)
-    _MODEL_CACHE[key] = (time.monotonic(), list(models), truncated)
+    _MODEL_CACHE[key] = (
+        time.monotonic(), list(models), truncated, list(details or []))
 
 
 def invalidate_model_cache(provider: Optional[str] = None) -> None:
@@ -2411,9 +2471,12 @@ def invalidate_model_cache(provider: Optional[str] = None) -> None:
         _MODEL_CACHE_INFLIGHT.pop(key, None)
 
 
-async def _fetch_models(hass, provider: str, config: dict) -> tuple[list[str], bool]:
+async def _fetch_models(
+    hass, provider: str, config: dict,
+) -> tuple[list[str], bool, list[dict]]:
     """
-    Query a provider's models endpoint and return (model IDs, truncated).
+    Query a provider's models endpoint and return model IDs, truncation state,
+    and provider-reported metadata.
     Uses HA's shared aiohttp session (off-loop network I/O). Each provider has
     a different endpoint/auth/response shape; we normalise to a list of
     strings. Paginates (see _PAGINATION_STYLE) only for the providers that
@@ -2430,6 +2493,7 @@ async def _fetch_models(hass, provider: str, config: dict) -> tuple[list[str], b
     style = _PAGINATION_STYLE.get(provider)
 
     all_models: list[str] = []
+    all_details: list[dict] = []
     cursor: Optional[str] = None
     truncated = False
     for _page in range(_MAX_DISCOVERY_PAGES):
@@ -2441,6 +2505,7 @@ async def _fetch_models(hass, provider: str, config: dict) -> tuple[list[str], b
                 data = await resp.json()
 
         all_models.extend(_parse_model_list(provider, url, data))
+        all_details.extend(_parse_model_details(provider, url, data))
         if len(all_models) >= _MAX_DISCOVERY_MODELS:
             truncated = True
             break
@@ -2454,10 +2519,19 @@ async def _fetch_models(hass, provider: str, config: dict) -> tuple[list[str], b
         truncated = True  # exhausted the page budget with a cursor still pending
 
     models = sorted(set(all_models))[:_MAX_DISCOVERY_MODELS]
-    return models, truncated
+    by_id = {
+        str(item.get("id")): item
+        for item in all_details
+        if isinstance(item, dict) and item.get("id") in models
+    }
+    details = [by_id.get(model_id, {"id": model_id, "capabilities": []})
+               for model_id in models]
+    return models, truncated, details
 
 
-async def _fetch_models_deduped(hass, provider: str, config: dict, cache_key) -> tuple[list[str], bool]:
+async def _fetch_models_deduped(
+    hass, provider: str, config: dict, cache_key,
+) -> tuple[list[str], bool, list[dict]]:
     """_fetch_models, but concurrent callers for the same (provider, url)
     share one in-flight request instead of each firing their own."""
     import asyncio
@@ -2505,17 +2579,20 @@ async def ws_list_models(hass: HomeAssistant, connection, msg) -> None:
         if not refresh:
             cached = _model_cache_get(cache_key)
             if cached is not None:
-                models, truncated = cached
+                models, truncated, details = cached
                 connection.send_result(msg["id"], {
                     "provider": provider, "models": models,
+                    "model_details": details,
                     "cached": True, "truncated": truncated,
                 })
                 return
 
-        models, truncated = await _fetch_models_deduped(hass, provider, config, cache_key)
-        _model_cache_set(cache_key, models, truncated)
+        models, truncated, details = await _fetch_models_deduped(
+            hass, provider, config, cache_key)
+        _model_cache_set(cache_key, models, truncated, details)
         connection.send_result(msg["id"], {
             "provider": provider, "models": models,
+            "model_details": details,
             "cached": False, "truncated": truncated,
         })
     except Exception as exc:
@@ -2527,6 +2604,229 @@ async def ws_list_models(hass: HomeAssistant, connection, msg) -> None:
                 "error": _SAFE_MODEL_DISCOVERY_ERROR,
             },
         )
+
+
+_AI_ROLE_FIELDS = (
+    ("Main Agent", "llm_provider", "model"),
+    ("Classifier", "classifier_provider", "classifier_model"),
+    ("Reasoning", "reasoning_provider", "reasoning_model"),
+    ("Vision", "vision_provider", "vision_model"),
+    ("Camera Reasoning", "camera_reasoning_provider", "camera_reasoning_model"),
+)
+_AI_APPLY_KEYS = frozenset({
+    key for _label, provider_key, model_key in _AI_ROLE_FIELDS
+    for key in (provider_key, model_key)
+} | {"ollama_base_url", "custom_base_url", "ollama_num_ctx"})
+_AI_PROVIDERS = frozenset({"groq", "openai", "gemini", "anthropic", "ollama", "custom"})
+_AI_CLOUD_PROVIDERS = frozenset({"groq", "openai", "gemini", "anthropic"})
+
+
+def _prepare_ai_config_updates(updates: dict) -> dict:
+    """Validate and normalise one staged AI-settings transaction."""
+    from .llm_provider import normalize_provider_endpoint
+
+    if not isinstance(updates, dict) or not updates:
+        raise ValueError("No AI settings were supplied")
+    unknown = set(updates) - _AI_APPLY_KEYS
+    if unknown:
+        raise ValueError("The request contains unsupported AI settings")
+
+    clean: dict[str, Any] = {}
+    provider_keys = {provider_key for _, provider_key, _ in _AI_ROLE_FIELDS}
+    model_keys = {model_key for _, _, model_key in _AI_ROLE_FIELDS}
+    for key, value in updates.items():
+        if key in provider_keys:
+            provider = str(value or "").strip().lower()
+            if provider not in _AI_PROVIDERS:
+                raise ValueError(f"Unsupported provider for {key}")
+            clean[key] = provider
+        elif key in model_keys:
+            model = str(value or "").strip()
+            if not model or len(model) > 512:
+                raise ValueError(f"A valid model is required for {key}")
+            clean[key] = model
+        elif key in ("ollama_base_url", "custom_base_url"):
+            provider = key.removesuffix("_base_url")
+            clean[key] = normalize_provider_endpoint(str(value or ""), provider)
+        elif key == "ollama_num_ctx":
+            if isinstance(value, bool):
+                raise ValueError("Ollama context length must be a number")
+            try:
+                number = int(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Ollama context length must be a number") from exc
+            if not 512 <= number <= 262144:
+                raise ValueError("Ollama context length must be between 512 and 262144")
+            clean[key] = number
+    return clean
+
+
+def _validate_ai_candidate(candidate: dict) -> list[str]:
+    """Return user-safe validation errors for the complete staged setup."""
+    from .llm_provider import resolve_provider_credential
+
+    errors: list[str] = []
+    for label, provider_key, model_key in _AI_ROLE_FIELDS:
+        provider = str(candidate.get(provider_key) or "").strip().lower()
+        model = str(candidate.get(model_key) or "").strip()
+        if provider not in _AI_PROVIDERS:
+            errors.append(f"{label} needs a supported provider")
+            continue
+        if not model:
+            errors.append(f"{label} needs a model")
+        if provider in _AI_CLOUD_PROVIDERS and not resolve_provider_credential(
+                candidate, provider):
+            errors.append(f"Add the {provider} credential before applying")
+        if provider in ("ollama", "custom"):
+            try:
+                endpoint = resolve_provider_endpoint(candidate, provider)
+            except ValueError:
+                endpoint = None
+            if not endpoint:
+                errors.append(f"Set the {provider} endpoint before applying")
+    return list(dict.fromkeys(errors))
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "nova/test_provider_endpoint",
+    vol.Required("provider"): vol.In(("ollama", "custom")),
+    vol.Required("endpoint"): str,
+})
+@websocket_api.async_response
+async def ws_test_provider_endpoint(hass: HomeAssistant, connection, msg) -> None:
+    """Test an explicitly staged self-hosted endpoint without saving it."""
+    provider = str(msg["provider"]).strip().lower()
+    try:
+        from . import nova_config
+        from .llm_provider import normalize_provider_endpoint
+
+        endpoint = normalize_provider_endpoint(msg["endpoint"], provider)
+        if not endpoint:
+            raise ValueError("Endpoint is required")
+        entry = _get_entry(hass)
+        config = await hass.async_add_executor_job(
+            nova_config.effective_config, entry)
+        config[f"{provider}_base_url"] = endpoint
+        models, truncated, details = await _fetch_models(hass, provider, config)
+        connection.send_result(msg["id"], {
+            "ok": True,
+            "provider": provider,
+            "endpoint": endpoint,
+            "models": models,
+            "model_details": details,
+            "truncated": truncated,
+        })
+    except ValueError as exc:
+        connection.send_result(msg["id"], {
+            "ok": False, "error": "invalid_endpoint", "message": str(exc)[:240],
+        })
+    except Exception as exc:
+        _log_model_discovery_failure(provider, "", exc)
+        connection.send_result(msg["id"], {
+            "ok": False,
+            "error": _SAFE_MODEL_DISCOVERY_ERROR,
+            "message": "Could not connect to the endpoint or list its models.",
+        })
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "nova/apply_ai_config",
+    vol.Required("updates"): dict,
+})
+@websocket_api.async_response
+async def ws_apply_ai_config(hass: HomeAssistant, connection, msg) -> None:
+    """Validate, test, and atomically apply the complete AI configuration."""
+    try:
+        from . import nova_config
+        from .llm_provider import (
+            resolve_provider_credential,
+            test_connection,
+        )
+
+        updates = _prepare_ai_config_updates(msg["updates"])
+        entry = _get_entry(hass)
+        if entry is None:
+            connection.send_result(msg["id"], {
+                "ok": False, "error": "no_entry", "message": "Nova is not loaded.",
+            })
+            return
+        current = await hass.async_add_executor_job(
+            nova_config.effective_config, entry)
+        candidate = dict(current)
+        candidate.update(updates)
+        # A successful staged apply migrates off the legacy shared endpoint.
+        # This key is server-owned: the browser cannot write it through this
+        # command, so one endpoint can never bleed into the other provider.
+        candidate["llm_base_url"] = ""
+        candidate["self_hosted_endpoints_migrated"] = True
+        errors = _validate_ai_candidate(candidate)
+        if errors:
+            connection.send_result(msg["id"], {
+                "ok": False, "error": "invalid_configuration",
+                "message": errors[0], "errors": errors,
+            })
+            return
+
+        tested: set[tuple[str, str, str]] = set()
+        for label, provider_key, model_key in _AI_ROLE_FIELDS:
+            provider = str(candidate[provider_key])
+            if provider not in ("ollama", "custom"):
+                continue
+            model = str(candidate[model_key])
+            endpoint = str(resolve_provider_endpoint(candidate, provider) or "")
+            test_key = (provider, endpoint, model)
+            if test_key in tested:
+                continue
+            tested.add(test_key)
+            problem = await test_connection(
+                hass,
+                provider,
+                resolve_provider_credential(candidate, provider),
+                model,
+                endpoint,
+            )
+            if problem is not None:
+                connection.send_result(msg["id"], {
+                    "ok": False,
+                    "error": "connection_test_failed",
+                    "message": f"{label} could not use {model} on {provider}.",
+                })
+                return
+
+        persisted_updates = dict(updates)
+        persisted_updates["llm_base_url"] = ""
+        persisted_updates["self_hosted_endpoints_migrated"] = True
+        persisted = await hass.async_add_executor_job(
+            nova_config.set_many_atomic, persisted_updates)
+        if not persisted:
+            connection.send_result(msg["id"], {
+                "ok": False, "error": "persist_failed",
+                "message": "Nova could not save the AI settings.",
+            })
+            return
+
+        data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+        if isinstance(data, dict):
+            data.setdefault("runtime_config", {}).update(persisted_updates)
+        invalidate_model_cache()
+        connection.send_result(msg["id"], {
+            "ok": True,
+            "message": "AI settings saved. Nova is reloading.",
+        })
+        hass.async_create_task(hass.config_entries.async_reload(entry.entry_id))
+    except ValueError as exc:
+        connection.send_result(msg["id"], {
+            "ok": False, "error": "invalid_configuration",
+            "message": str(exc)[:240],
+        })
+    except Exception as exc:
+        _LOGGER.warning("ws_apply_ai_config failed: %s", type(exc).__name__)
+        connection.send_result(msg["id"], {
+            "ok": False, "error": "apply_failed",
+            "message": "Nova could not apply the AI settings.",
+        })
 
 
 def _compute_provider_availability(

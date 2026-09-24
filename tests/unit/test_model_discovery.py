@@ -20,6 +20,7 @@ def _load_model_discovery_functions():
         "_SAFE_MODEL_DISCOVERY_ERROR",
         "_resolve_model_discovery_request",
         "_parse_model_list",
+        "_parse_model_details",
         "_log_model_discovery_failure",
     }
     tree = ast.parse(SRC.read_text())
@@ -42,6 +43,7 @@ def _load_model_discovery_functions():
     namespace = {
         "logging": logging,
         "urlparse": urlparse,
+        "Any": __import__("typing").Any,
         "resolve_provider_endpoint": lambda config, provider: (
             config.get(f"{provider}_base_url") or config.get("llm_base_url")
         ),
@@ -106,7 +108,7 @@ def test_shared_key_is_used_only_for_matching_saved_cloud_provider(discovery, pr
     ("provider", "saved_url", "expected_url"),
     [
         ("ollama", "http://ollama.lan:11434", "http://ollama.lan:11434/api/tags"),
-        ("ollama", "http://10.0.0.8:11434/v1", "http://10.0.0.8:11434/v1/models"),
+        ("ollama", "http://10.0.0.8:11434/v1", "http://10.0.0.8:11434/api/tags"),
         ("custom", "https://models.example.test/v1", "https://models.example.test/v1/models"),
     ],
 )
@@ -224,6 +226,35 @@ def test_existing_model_list_parsing_is_preserved(
 ):
     parse = discovery["_parse_model_list"]
     assert parse(provider, url, payload) == expected
+
+
+def test_ollama_model_details_use_only_server_reported_capabilities(discovery):
+    parse = discovery["_parse_model_details"]
+    details = parse("ollama", "http://ollama.lan:11434/api/tags", {"models": [{
+        "name": "qwen:latest",
+        "size": 1234,
+        "capabilities": ["completion", "tools", "thinking"],
+        "details": {
+            "family": "qwen",
+            "quantization_level": "Q4_K_M",
+            "context_length": 32768,
+        },
+    }]})
+    assert details == [{
+        "id": "qwen:latest",
+        "capabilities": ["completion", "thinking", "tools"],
+        "family": "qwen",
+        "quantization": "Q4_K_M",
+        "size": 1234,
+        "context_length": 32768,
+    }]
+
+
+def test_non_ollama_model_capabilities_are_unknown_not_guessed(discovery):
+    parse = discovery["_parse_model_details"]
+    assert parse("openai", "https://api.openai.com/v1/models", {
+        "data": [{"id": "model-with-vision-in-its-name"}],
+    }) == [{"id": "model-with-vision-in-its-name", "capabilities": []}]
 
 
 def test_failure_log_contains_only_sanitised_metadata(discovery, caplog):

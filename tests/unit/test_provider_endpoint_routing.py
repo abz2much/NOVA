@@ -59,6 +59,22 @@ def test_legacy_endpoint_remains_a_compatibility_fallback(llm):
     )
 
 
+def test_migrated_endpoints_never_cross_fallback_to_legacy(llm):
+    config = {
+        "self_hosted_endpoints_migrated": True,
+        "ollama_base_url": "http://ollama.lan:11434",
+        "custom_base_url": "",
+        "llm_base_url": "http://legacy-gpu:11434/v1",
+    }
+    assert llm.resolve_provider_endpoint(config, "ollama") == "http://ollama.lan:11434"
+    assert llm.resolve_provider_endpoint(config, "custom") is None
+
+
+def test_endpoint_length_is_bounded(llm):
+    with pytest.raises(ValueError, match="too long"):
+        llm.normalize_provider_endpoint("https://" + "a" * 3000, "custom")
+
+
 def test_cloud_provider_never_receives_a_self_hosted_endpoint(llm):
     config = {"llm_base_url": "http://gpu.local:11434"}
     assert llm.resolve_provider_endpoint(config, "groq") is None

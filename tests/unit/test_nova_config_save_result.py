@@ -50,3 +50,31 @@ def test_set_many_propagates_save_result(jcfg, monkeypatch):
     monkeypatch.setattr(jcfg, "save", lambda: False)
     assert jcfg.set_many({"a": 1, "b": 2}) is False
     assert jcfg._cache_dict()["a"] == 1
+
+
+def test_set_many_atomic_updates_disk_and_cache_together(jcfg):
+    jcfg._cache.update({"model": "before", "untouched": True})
+
+    assert jcfg.set_many_atomic({"model": "after", "ollama_num_ctx": 16384}) is True
+
+    assert jcfg.get("model") == "after"
+    assert jcfg.get("untouched") is True
+    saved = __import__("json").loads(jcfg.CONFIG_PATH.read_text())
+    assert saved["model"] == "after"
+    assert saved["ollama_num_ctx"] == 16384
+
+
+def test_set_many_atomic_rolls_back_memory_when_replace_fails(jcfg, monkeypatch):
+    jcfg._cache.update({"model": "before"})
+
+    def _boom(self, target):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(Path, "replace", _boom)
+    assert jcfg.set_many_atomic({"model": "after"}) is False
+    assert jcfg.get("model") == "before"
+
+
+def test_set_many_atomic_refuses_credentials(jcfg):
+    assert jcfg.set_many_atomic({"groq_api_key": "secret", "model": "after"}) is False
+    assert jcfg.get("model") is None

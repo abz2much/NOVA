@@ -40,6 +40,35 @@ def test_blank_panel_value_does_not_clobber_entry(jc, monkeypatch):
     assert eff["llm_provider"] == "ollama"
 
 
+def test_migrated_blank_endpoint_does_clear_stale_entry_value(jc, monkeypatch):
+    monkeypatch.setattr(jc, "get_all", lambda: {
+        "self_hosted_endpoints_migrated": True,
+        "ollama_base_url": "http://new-ollama:11434",
+        "custom_base_url": "",
+    })
+    e = _Entry(data={
+        "ollama_base_url": "http://old-ollama:11434",
+        "custom_base_url": "https://old-custom.example/v1",
+    })
+
+    eff = jc.effective_config(e)
+
+    assert eff["ollama_base_url"] == "http://new-ollama:11434"
+    assert eff["custom_base_url"] == ""
+
+
+def test_runtime_get_honours_migrated_blank_endpoint(jc, monkeypatch):
+    values = {
+        "self_hosted_endpoints_migrated": True,
+        "custom_base_url": "",
+    }
+    monkeypatch.setattr(jc, "get", lambda key, default=None: values.get(key, default))
+    monkeypatch.setattr(jc, "get_all", lambda: dict(values))
+    e = _Entry(data={"custom_base_url": "https://old-custom.example/v1"})
+
+    assert jc.runtime_get(None, e, "custom_base_url", None) == ""
+
+
 def test_options_win_over_data_when_panel_silent(jc, monkeypatch):
     monkeypatch.setattr(jc, "get_all", lambda: {})
     e = _Entry(data={"x": "from_data"}, options={"x": "from_options"})

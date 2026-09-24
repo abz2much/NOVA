@@ -162,7 +162,7 @@ def test_cache_miss_returns_none(m):
 def test_cache_set_then_get_hits(m):
     key = ("groq", "https://api.groq.com/openai/v1/models")
     m["_model_cache_set"](key, ["a", "b"], False)
-    assert m["_model_cache_get"](key) == (["a", "b"], False)
+    assert m["_model_cache_get"](key) == (["a", "b"], False, [])
 
 
 def test_cache_entry_expires_after_ttl(m, monkeypatch):
@@ -194,7 +194,7 @@ def test_invalidate_specific_provider_leaves_others(m):
     m["_model_cache_set"](("openai", "https://api.openai.com/v1/models"), ["b"], False)
     m["invalidate_model_cache"]("groq")
     assert m["_model_cache_get"](("groq", "https://api.groq.com/openai/v1/models")) is None
-    assert m["_model_cache_get"](("openai", "https://api.openai.com/v1/models")) == (["b"], False)
+    assert m["_model_cache_get"](("openai", "https://api.openai.com/v1/models")) == (["b"], False, [])
 
 
 def test_invalidate_all_clears_everything(m):

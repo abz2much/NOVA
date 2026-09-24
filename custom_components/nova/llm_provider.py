@@ -8,7 +8,7 @@ configuration change rather than a code rewrite.
 Supported backends today:
   - groq        (default — fast, free tier, OpenAI-compatible API)
   - openai      (OpenAI direct, or any OpenAI-compatible endpoint)
-  - ollama      (local, self-hosted via OpenAI-compatible endpoint)
+  - ollama      (local, self-hosted via Ollama's native chat API)
   - anthropic   (Claude API)
   - custom      (any OpenAI-compatible endpoint with a base_url)
 
@@ -52,7 +52,7 @@ _LOGGER = logging.getLogger(__name__)
 
 def _openai_style_usage(resp) -> dict:
     """Token usage from an OpenAI-compatible chat completion response (Groq,
-    OpenAI, and Ollama's OpenAI-compatible endpoint all share this shape).
+    OpenAI, and custom OpenAI-compatible endpoints share this shape).
     None per field when the response has no usage object, or the field
     itself is absent — never estimated."""
     u = getattr(resp, "usage", None)
@@ -689,6 +689,8 @@ def normalize_provider_endpoint(value: str, provider: str) -> str:
     raw = str(value or "").strip()
     if not raw:
         return ""
+    if len(raw) > 2048:
+        raise ValueError("endpoint is too long")
 
     had_scheme = "://" in raw
     if not had_scheme:
@@ -746,10 +748,9 @@ def resolve_provider_endpoint(
     candidates = []
     if tier:
         candidates.append(config.get(f"{tier}_base_url"))
-    candidates.extend((
-        config.get(_PROVIDER_ENDPOINT_FIELDS[provider]),
-        config.get("llm_base_url"),
-    ))
+    candidates.append(config.get(_PROVIDER_ENDPOINT_FIELDS[provider]))
+    if not config.get("self_hosted_endpoints_migrated"):
+        candidates.append(config.get("llm_base_url"))
     for candidate in candidates:
         if candidate not in (None, ""):
             return normalize_provider_endpoint(str(candidate), provider)

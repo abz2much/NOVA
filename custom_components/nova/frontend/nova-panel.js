@@ -3416,15 +3416,18 @@ class NovaPanel extends HTMLElement {
       { role: "llm", label: "Main Agent", provKey: "llm_provider", modelKey: "model" },
       { role: "classifier", label: "Classifier", provKey: "classifier_provider", modelKey: "classifier_model" },
       { role: "reasoning", label: "Reasoning", provKey: "reasoning_provider", modelKey: "reasoning_model" },
-      { role: "review", label: "Review", provKey: "review_provider", modelKey: "review_model" },
       { role: "vision", label: "Vision", provKey: "vision_provider", modelKey: "vision_model" },
-      { role: "camrsn", label: "Camera Rsn", provKey: "camera_reasoning_provider", modelKey: "camera_reasoning_model" },
+      { role: "camrsn", label: "Camera Reasoning", provKey: "camera_reasoning_provider", modelKey: "camera_reasoning_model" },
     ];
   }
 
   _aiModelsCardBody() {
     const cfg = this._data()?.config || {};
     const PROVIDERS = ["groq", "openai", "gemini", "ollama", "anthropic", "custom"];
+    const configuredProviders = this._modelRoles().map(r => cfg[r.provKey]);
+    const legacyEndpoint = cfg.self_hosted_endpoints_migrated ? "" : cfg.llm_base_url;
+    const ollamaEndpoint = cfg.ollama_base_url || (configuredProviders.includes("ollama") ? legacyEndpoint : "") || "";
+    const customEndpoint = cfg.custom_base_url || (configuredProviders.includes("custom") ? legacyEndpoint : "") || "";
     const rows = this._modelRoles().map(r => {
       const curProv = cfg[r.provKey] || "groq";
       const curModel = cfg[r.modelKey] || "";
@@ -3442,8 +3445,8 @@ class NovaPanel extends HTMLElement {
                  type="text" placeholder="enter model id" value="${this._esc(curModel)}" style="display:none">
           <button class="mode-chip new-model-refresh" data-role="${this._esc(r.role)}" title="Refresh the live model list (bypasses the cache)">↻</button>
           <div class="new-model-warning" data-role-warning="${this._esc(r.role)}" hidden></div>
-          ${r.role === "llm" ? `<div class="stub-body">Provider/model changes here take effect after Nova reloads (Settings → Devices &amp; Services → Nova → ⋮ → Reload). Classifier, Reasoning, Vision, and Camera Rsn apply on their next use — no reload needed.</div>` : ""}
-          ${r.role === "vision" ? `<div class="stub-body">Needs an image-capable model — e.g. moondream on Ollama, or a Groq vision model. Text-only models will fail on camera analysis.</div>` : ""}
+          ${r.role === "llm" ? `<div class="stub-body">Changes are staged until you press Apply. Nova reloads itself after a successful check and save.</div>` : ""}
+          ${r.role === "vision" ? `<div class="stub-body">Vision needs a model whose provider reports image support. Camera Reasoning is text-only and does not.</div>` : ""}
         </div>`;
     }).join("");
     const credRows = ["groq", "openai", "anthropic", "gemini", "custom", "ollama"].map(p => `
@@ -3454,7 +3457,37 @@ class NovaPanel extends HTMLElement {
         <button class="mode-chip cred-save" data-cred-provider="${p}">SAVE</button>
         <button class="mode-chip cred-clear" data-cred-provider="${p}">CLEAR</button>
       </div>`).join("");
-    return `<div class="new-model-list">${rows}</div>
+    return `
+      <div class="stub-body">Choose a starting profile or configure each role yourself. Profiles only stage changes; nothing is saved until Apply.</div>
+      <div class="cfg-row" data-ai-profiles>
+        <label>Profile</label>
+        <button class="mode-chip" data-ai-profile="hybrid">HYBRID</button>
+        <button class="mode-chip" data-ai-profile="local">LOCAL TEXT</button>
+        <button class="mode-chip" data-ai-profile="manual">MANUAL</button>
+      </div>
+      <div class="stub-body">Hybrid keeps the Main Agent and Vision choices, and moves background text work to Ollama. Local Text also moves the Main Agent. Vision only moves when Ollama reports a vision-capable model.</div>
+      <div class="panel-head" style="margin-top:14px"><div class="panel-title">Self-hosted endpoints</div></div>
+      <div class="cfg-row" data-endpoint-row="ollama">
+        <label>Ollama</label>
+        <input class="cfg-field ai-endpoint" data-endpoint-provider="ollama" type="text" value="${this._esc(ollamaEndpoint)}" placeholder="http://host:11434">
+        <button class="mode-chip ai-endpoint-test" data-endpoint-provider="ollama">TEST</button>
+      </div>
+      <div class="stub-body ai-endpoint-status" data-endpoint-status="ollama"></div>
+      <div class="cfg-row" data-endpoint-row="custom">
+        <label>OpenAI-compatible</label>
+        <input class="cfg-field ai-endpoint" data-endpoint-provider="custom" type="text" value="${this._esc(customEndpoint)}" placeholder="https://host/v1">
+        <button class="mode-chip ai-endpoint-test" data-endpoint-provider="custom">TEST</button>
+      </div>
+      <div class="stub-body ai-endpoint-status" data-endpoint-status="custom"></div>
+      <div class="cfg-row">
+        <label>Ollama context length</label>
+        <input class="cfg-field" id="aiOllamaNumCtx" type="number" min="512" max="262144" step="512" value="${this._esc(cfg.ollama_num_ctx || 8192)}">
+      </div>
+      <div class="new-model-list">${rows}</div>
+      <div class="cfg-row" style="margin-top:14px">
+        <button class="mode-chip" id="aiApply">APPLY</button>
+        <span class="stub-body" id="aiApplyStatus">No unsaved changes.</span>
+      </div>
       <div class="panel-head" style="margin-top:14px"><div class="panel-title">Provider Credentials</div></div>
       <div class="stub-body">Stored only in Home Assistant's secrets.yaml, one per provider. A saved credential is never shown here again — only whether one is set. Ollama's is optional, for a protected endpoint only.</div>
       <div class="new-model-list">${credRows}</div>`;
@@ -3500,8 +3533,16 @@ class NovaPanel extends HTMLElement {
         return `"${m}" looks like a ${owner} model, but the selected provider is ${provider}.`;
       }
     }
-    if ((role === "vision" || role === "camrsn") && this._knownTextOnlyModels().has(m)) {
+    if (role === "vision" && this._knownTextOnlyModels().has(m)) {
       return `"${m}" is one of Nova's own text-only default models — it will reject image input.`;
+    }
+    const detail = ((this._modelCatalog || {})[provider] || []).find(item => item.id === m);
+    const caps = new Set((detail && detail.capabilities) || []);
+    if (detail && role === "vision" && !caps.has("vision")) {
+      return `"${m}" does not report vision capability.`;
+    }
+    if (detail && role === "llm" && !caps.has("tools")) {
+      return `"${m}" does not report tool-calling capability, which the Main Agent needs.`;
     }
     return null;
   }
@@ -3520,38 +3561,51 @@ class NovaPanel extends HTMLElement {
     warnEl.hidden = !warning;
   }
 
-  async _loadModelsFor(provider, selectEl, { refresh = false } = {}) {
-    if (!this._hass || !selectEl) return;
+  _populateModelSelect(provider, selectEl, res) {
+    if (!selectEl) return;
     const cur = selectEl.getAttribute("data-current") || "";
-    try {
-      const res = await this._hass.callWS({ type: "nova/list_models", provider, refresh });
-      const models = (res && res.models) || [];
-      let opts = "";
-      if (models.length) {
-        if (cur && !models.includes(cur)) {
+    const models = (res && res.models) || [];
+    this._modelCatalog = this._modelCatalog || {};
+    this._modelCatalog[provider] = (res && res.model_details) || models.map(id => ({ id, capabilities: [] }));
+    let opts = "";
+    const label = model => {
+      const detail = this._modelCatalog[provider].find(item => item.id === model);
+      const caps = (detail && detail.capabilities) || [];
+      return caps.length ? `${model} · ${caps.join(", ")}` : model;
+    };
+    if (models.length) {
+      if (!cur) opts += `<option value="" selected disabled>choose a model…</option>`;
+      if (cur && !models.includes(cur)) {
           // Never silently replace a saved model just because a live
           // discovery call didn't happen to list it — it may be private,
           // preview, newly released, or simply not returned by this
           // endpoint. Keep it selected and offer the live list alongside
           // it. (Previously this auto-picked and SAVED a different model
           // — often just the alphabetically-first one — on every render.)
-          opts += `<option value="${this._esc(cur)}" selected>${this._esc(cur)} — not in the live list</option>`;
-          opts += models.map(m => `<option value="${this._esc(m)}">${this._esc(m)}</option>`).join("");
-        } else {
-          opts += models.map(m => `<option value="${this._esc(m)}"${m === cur ? " selected" : ""}>${this._esc(m)}</option>`).join("");
-        }
+        opts += `<option value="${this._esc(cur)}" selected>${this._esc(cur)} — not in the live list</option>`;
+        opts += models.map(m => `<option value="${this._esc(m)}">${this._esc(label(m))}</option>`).join("");
       } else {
-        const err = res && res.error ? ` — ${String(res.error).slice(0, 48)}` : "";
-        opts += (cur ? `<option value="${this._esc(cur)}" selected>${this._esc(cur)}</option>` : "");
-        opts += `<option value="" disabled>no models found${this._esc(err)}</option>`;
+        opts += models.map(m => `<option value="${this._esc(m)}"${m === cur ? " selected" : ""}>${this._esc(label(m))}</option>`).join("");
       }
-      opts += `<option value="__custom__">✎ Custom…</option>`;
-      selectEl.innerHTML = opts;
-      selectEl.title = (res && res.truncated)
-        ? "The provider returned more models than fit in one page — list may be incomplete." : "";
-      const row = selectEl.closest(".new-model-row");
-      if (row) this._updateRoleWarning(row);
-    } catch (_) { /* leave current options in place on error */ }
+    } else {
+      const err = res && res.error ? ` — ${String(res.error).slice(0, 48)}` : "";
+      opts += (cur ? `<option value="${this._esc(cur)}" selected>${this._esc(cur)}</option>` : "");
+      opts += `<option value="" disabled>no models found${this._esc(err)}</option>`;
+    }
+    opts += `<option value="__custom__">✎ Custom…</option>`;
+    selectEl.innerHTML = opts;
+    selectEl.title = (res && res.truncated)
+      ? "The provider returned more models than fit in one page — list may be incomplete." : "";
+    const row = selectEl.closest(".new-model-row");
+    if (row) this._updateRoleWarning(row);
+  }
+
+  async _loadModelsFor(provider, selectEl, { refresh = false } = {}) {
+    if (!this._hass || !selectEl) return;
+    try {
+      const res = await this._hass.callWS({ type: "nova/list_models", provider, refresh });
+      this._populateModelSelect(provider, selectEl, res);
+    } catch (_) { /* keep the saved selection and let endpoint Test explain failures */ }
   }
 
   async _rawSaveConfig(key, value) {
@@ -3565,6 +3619,10 @@ class NovaPanel extends HTMLElement {
 
   _wireAiModels() {
     const root = this.shadowRoot;
+    const markDirty = message => {
+      const status = root.getElementById("aiApplyStatus");
+      if (status) status.textContent = message || "Unsaved changes.";
+    };
     root.querySelectorAll(".new-model-row").forEach(row => {
       const provSel = row.querySelector(".new-prov-select");
       const modelSel = row.querySelector(".new-model-select");
@@ -3574,39 +3632,29 @@ class NovaPanel extends HTMLElement {
       this._loadModelsFor(provSel.value, modelSel);
       provSel.addEventListener("change", async (e) => {
         const provider = e.target.value;
-        const provKey = provSel.getAttribute("data-cfg-key");
-        await this._rawSaveConfig(provKey, provider);
-        if (provKey === "llm_provider" && ["groq", "openai", "gemini", "anthropic"].includes(provider)) {
-          await this._rawSaveConfig("llm_base_url", "");
-        }
         modelSel.setAttribute("data-current", "");
         if (customInput) customInput.style.display = "none";
         await this._loadModelsFor(provider, modelSel);
-        const newModel = modelSel.value;
-        if (newModel && newModel !== "__custom__" && newModel !== "") {
-          await this._rawSaveConfig(modelSel.getAttribute("data-cfg-key"), newModel);
-          modelSel.setAttribute("data-current", newModel);
-        }
+        markDirty();
         this._updateRoleWarning(row);
       });
-      modelSel.addEventListener("change", async (e) => {
+      modelSel.addEventListener("change", e => {
         if (e.target.value === "__custom__") {
           if (customInput) { customInput.style.display = ""; customInput.focus(); }
           this._updateRoleWarning(row);
+          markDirty();
           return;
         }
         if (customInput) customInput.style.display = "none";
-        await this._rawSaveConfig(modelSel.getAttribute("data-cfg-key"), e.target.value);
         modelSel.setAttribute("data-current", e.target.value);
+        markDirty();
         this._updateRoleWarning(row);
       });
       if (customInput) {
-        customInput.addEventListener("change", async (e) => {
+        customInput.addEventListener("input", e => {
           const v = (e.target.value || "").trim();
-          if (v) {
-            await this._rawSaveConfig(customInput.getAttribute("data-cfg-key"), v);
-            modelSel.setAttribute("data-current", v);
-          }
+          if (v) modelSel.setAttribute("data-current", v);
+          markDirty();
           this._updateRoleWarning(row);
         });
       }
@@ -3619,6 +3667,121 @@ class NovaPanel extends HTMLElement {
             refreshBtn.disabled = false;
           }
         });
+      }
+    });
+
+    root.querySelectorAll(".ai-endpoint").forEach(input => {
+      input.addEventListener("input", () => {
+        const provider = input.getAttribute("data-endpoint-provider");
+        if (this._modelCatalog) delete this._modelCatalog[provider];
+        const status = root.querySelector(`[data-endpoint-status="${provider}"]`);
+        if (status) status.textContent = "Endpoint changed. Test it before choosing a profile.";
+        markDirty();
+      });
+    });
+    root.getElementById("aiOllamaNumCtx")?.addEventListener("input", () => markDirty());
+
+    root.querySelectorAll(".ai-endpoint-test").forEach(button => {
+      button.addEventListener("click", async () => {
+        const provider = button.getAttribute("data-endpoint-provider");
+        const input = root.querySelector(`.ai-endpoint[data-endpoint-provider="${provider}"]`);
+        const status = root.querySelector(`[data-endpoint-status="${provider}"]`);
+        button.disabled = true;
+        if (status) status.textContent = "Testing…";
+        try {
+          const res = await this._hass.callWS({
+            type: "nova/test_provider_endpoint", provider,
+            endpoint: (input?.value || "").trim(),
+          });
+          if (!res || !res.ok) throw new Error((res && res.message) || "Endpoint test failed.");
+          if (input) input.value = res.endpoint;
+          this._modelCatalog = this._modelCatalog || {};
+          this._modelCatalog[provider] = res.model_details ||
+            res.models.map(id => ({ id, capabilities: [] }));
+          root.querySelectorAll(`.new-model-row`).forEach(row => {
+            const provSel = row.querySelector(".new-prov-select");
+            if (provSel?.value === provider) {
+              this._populateModelSelect(provider, row.querySelector(".new-model-select"), res);
+            }
+          });
+          if (status) status.textContent = `Connected. ${res.models.length} model${res.models.length === 1 ? "" : "s"} found.`;
+          markDirty("Endpoint tested. Changes are not saved yet.");
+        } catch (err) {
+          if (status) status.textContent = err?.message || "Could not test this endpoint.";
+        } finally {
+          button.disabled = false;
+        }
+      });
+    });
+
+    const selectProfileModel = (row, provider, requiredCapability) => {
+      const catalog = (this._modelCatalog || {})[provider] || [];
+      const match = catalog.find(item =>
+        !requiredCapability || (item.capabilities || []).includes(requiredCapability));
+      if (!match) return false;
+      const provSel = row.querySelector(".new-prov-select");
+      const modelSel = row.querySelector(".new-model-select");
+      provSel.value = provider;
+      modelSel.setAttribute("data-current", match.id);
+      this._populateModelSelect(provider, modelSel, {
+        models: catalog.map(item => item.id), model_details: catalog,
+      });
+      modelSel.value = match.id;
+      this._updateRoleWarning(row);
+      return true;
+    };
+    root.querySelectorAll("[data-ai-profile]").forEach(button => {
+      button.addEventListener("click", () => {
+        const profile = button.getAttribute("data-ai-profile");
+        if (profile === "manual") {
+          markDirty("Manual mode: choose each provider and model, then Apply.");
+          return;
+        }
+        const textRoles = profile === "hybrid"
+          ? ["classifier", "reasoning", "camrsn"]
+          : ["llm", "classifier", "reasoning", "camrsn"];
+        const missing = [];
+        textRoles.forEach(role => {
+          const row = root.querySelector(`.new-model-row[data-role="${role}"]`);
+          const required = role === "llm" ? "tools" : "completion";
+          if (!row || !selectProfileModel(row, "ollama", required)) missing.push(role);
+        });
+        if (profile === "local") {
+          const visionRow = root.querySelector('.new-model-row[data-role="vision"]');
+          if (visionRow) selectProfileModel(visionRow, "ollama", "vision");
+        }
+        markDirty(missing.length
+          ? "Profile staged where compatible models were found. Test Ollama first to load capabilities for the remaining roles."
+          : "Profile staged. Review the choices, then Apply.");
+      });
+    });
+
+    root.getElementById("aiApply")?.addEventListener("click", async event => {
+      const button = event.currentTarget;
+      const status = root.getElementById("aiApplyStatus");
+      const updates = {
+        ollama_base_url: (root.querySelector('.ai-endpoint[data-endpoint-provider="ollama"]')?.value || "").trim(),
+        custom_base_url: (root.querySelector('.ai-endpoint[data-endpoint-provider="custom"]')?.value || "").trim(),
+        ollama_num_ctx: Number(root.getElementById("aiOllamaNumCtx")?.value || 8192),
+      };
+      root.querySelectorAll(".new-model-row").forEach(row => {
+        const provSel = row.querySelector(".new-prov-select");
+        const modelSel = row.querySelector(".new-model-select");
+        const customInput = row.querySelector(".new-model-custom");
+        updates[provSel.getAttribute("data-cfg-key")] = provSel.value;
+        updates[modelSel.getAttribute("data-cfg-key")] =
+          customInput && customInput.style.display !== "none"
+            ? customInput.value.trim() : modelSel.value;
+      });
+      button.disabled = true;
+      if (status) status.textContent = "Checking models and saving…";
+      try {
+        const res = await this._hass.callWS({ type: "nova/apply_ai_config", updates });
+        if (!res || !res.ok) throw new Error((res && res.message) || "Could not apply AI settings.");
+        if (status) status.textContent = res.message || "Saved. Nova is reloading.";
+      } catch (err) {
+        if (status) status.textContent = err?.message || "Could not apply AI settings.";
+        button.disabled = false;
       }
     });
 

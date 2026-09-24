@@ -194,7 +194,15 @@ def effective_config(entry=None) -> dict:
     if entry is not None:
         merged.update(dict(getattr(entry, "data", None) or {}))
         merged.update(dict(getattr(entry, "options", None) or {}))
+    endpoints_migrated = cfg.get("self_hosted_endpoints_migrated") is True
     for k, v in cfg.items():
+        if (endpoints_migrated
+                and k in ("ollama_base_url", "custom_base_url")):
+            # After the staged AI setup has split the old shared endpoint,
+            # an explicit blank means "cleared" and must beat an old value
+            # still present in entry.data/options.
+            merged[k] = v or ""
+            continue
         if v is None or v == "":
             continue      # a blank panel value must not clobber the entry
         merged[k] = v
@@ -246,6 +254,10 @@ def runtime_get(hass, entry, key: str, default=None):
     # effective_config); cached in-memory after boot.
     try:
         v = get(key, None)
+        if (key in ("ollama_base_url", "custom_base_url")
+                and get("self_hosted_endpoints_migrated", False) is True
+                and key in get_all()):
+            return v or ""
         if v not in (None, ""):
             return v
     except Exception:
@@ -327,6 +339,40 @@ def set_many(updates: dict) -> bool:
     ok = save()
     _LOGGER.debug("Nova config set_many: %d keys", len(filtered))
     return ok
+
+
+def set_many_atomic(updates: dict) -> bool:
+    """Persist a group of non-credential settings as one transaction.
+
+    The in-memory cache changes only after the temporary file has replaced the
+    real config file. A failed write therefore leaves both disk and runtime on
+    the previous configuration instead of applying a partial session-only
+    update.
+    """
+    global _cache, _loaded
+    blocked = _credential_keys()
+    if any(key in blocked and value for key, value in updates.items()):
+        _LOGGER.warning(
+            "Nova config: refused atomic update containing a credential")
+        return False
+    if not _loaded:
+        load()
+    _ensure_dir()
+    with _lock:
+        candidate = dict(_cache_dict())
+        candidate.update(updates)
+        try:
+            tmp = CONFIG_PATH.with_suffix(".tmp")
+            with open(tmp, "w") as f:
+                json.dump(candidate, f, indent=2, default=str)
+            tmp.replace(CONFIG_PATH)
+        except Exception as exc:
+            _LOGGER.warning("Nova atomic config save error: %s", exc)
+            return False
+        _cache = candidate
+        _loaded = True
+    _LOGGER.debug("Nova config set_many_atomic: %d keys", len(updates))
+    return True
 
 
 def delete(key: str) -> None:
