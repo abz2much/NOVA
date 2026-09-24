@@ -234,3 +234,18 @@ def test_log_state_change_force_include_records_noisy_domain(core_state):
             "SELECT 1 FROM state_changes WHERE entity_id='binary_sensor.garage_door_1'"
         ).fetchall()
     assert len(rows) == 1
+
+
+def test_state_logger_persists_source_provenance(core_state):
+    core_state.state_logger.log_state_change(
+        "light.porch", "off", "on",
+        triggered_by="automation",
+        source_entity_id="automation.porch_schedule",
+        source_confidence=1.0,
+    )
+    with sqlite3.connect(core_state.state_logger._db_path) as conn:
+        row = conn.execute(
+            "SELECT triggered_by, source_entity_id, source_confidence "
+            "FROM state_changes WHERE entity_id='light.porch'"
+        ).fetchone()
+    assert row == ("automation", "automation.porch_schedule", 1.0)

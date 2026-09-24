@@ -191,8 +191,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # fail-safe teardown on unload/reload (v7.43.0).
     from .scheduler import NovaScheduler
     from .resources import NovaResources
+    from .automation_inventory import AutomationContextTracker
     sched = NovaScheduler(hass)
     resources = NovaResources()
+    automation_contexts = AutomationContextTracker()
+    resources.add_closeable(automation_contexts)
 
     # ── Auto-analyze camera events GOING FORWARD (doorbell / person) ─────────
     # The listeners above only CACHE Nest/Frigate events — historically nothing
@@ -747,6 +750,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     @callback
     def _on_automation_triggered(event) -> None:
         from . import automation_trials
+        # Record provenance synchronously before the automation's action state
+        # changes arrive. The lookup is in-memory and constant-time.
+        automation_contexts.record_trigger(event)
         hass.async_create_task(automation_trials.async_handle_triggered(hass, event))
 
     try:
@@ -781,7 +787,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "reminder_watcher":   reminder_watcher,
         "llm_provider_name":  llm_provider_name,
         "schema_version":     CURRENT_SCHEMA_VERSION,
+        "automation_contexts": automation_contexts,
     }
+
+    # Read-only inventory of every automation Home Assistant has actually
+    # loaded (UI, YAML, packages, and blueprints).  Build once now and refresh
+    # only on automation_reloaded; live state events never rescan config.
+    try:
+        from .automation_inventory import AutomationInventory
+        automation_inventory = AutomationInventory(hass)
+        automation_inventory.start()
+        automation_contexts.inventory = automation_inventory
+        hass.data[DOMAIN][entry.entry_id]["automation_inventory"] = automation_inventory
+        resources.add_closeable(automation_inventory)
+    except Exception as exc:
+        _LOGGER.warning("Nova automation inventory unavailable (non-fatal): %s", exc)
 
     # Restore persisted panel settings via centralized nova_config module.
     # This loads from /config/nova/config.json (or migrates from old path).

@@ -40,6 +40,25 @@ ANALYSIS_INTERVAL = 21600    # 6 hours between analyses
 KNOWLEDGE_FACT_CONFIDENCE = 0.75  # routines/commands above this also become observed facts
 PERSON_DOMINANCE_RATIO = 0.8      # a person must account for this share of a
                                    # pattern's occurrences to own it, vs. household
+_AUTOMATED_SOURCE_SQL = "('automation','nova_automation')"
+
+
+def _source_filter(conn: sqlite3.Connection, alias: str = "") -> str:
+    """SQL predicate excluding known automation-produced rows.
+
+    ``patterns.db`` is migrated by StateLogger, but keeping the analyzer
+    tolerant of a legacy/minimal table makes recovery and isolated tests fail
+    open: rows without a provenance column are old/unknown, not automated.
+    """
+    try:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(state_changes)")}
+        if "triggered_by" in cols:
+            prefix = f"{alias}." if alias else ""
+            return (f"COALESCE({prefix}triggered_by, 'system') NOT IN "
+                    f"{_AUTOMATED_SOURCE_SQL}")
+    except Exception:
+        pass
+    return "1=1"
 
 
 def set_thresholds(min_occurrences: int | None = None,
@@ -579,13 +598,16 @@ class PatternAnalyzer:
         if not conn:
             return False
         try:
+            source_filter = _source_filter(conn)
             oldest = conn.execute(
-                "SELECT MIN(timestamp) FROM state_changes"
+                f"SELECT MIN(timestamp) FROM state_changes WHERE {source_filter}"
             ).fetchone()[0]
             if not oldest:
                 return False
             days = (datetime.now() - datetime.fromisoformat(oldest)).days
-            count = conn.execute("SELECT COUNT(*) FROM state_changes").fetchone()[0]
+            count = conn.execute(
+                f"SELECT COUNT(*) FROM state_changes WHERE {source_filter}"
+            ).fetchone()[0]
             conn.close()
             return days >= MIN_DAYS and count >= 50
         except Exception:
@@ -603,21 +625,25 @@ class PatternAnalyzer:
         if not conn:
             return out
         try:
+            source_filter = _source_filter(conn)
             total_days = int((conn.execute(
                 "SELECT COUNT(DISTINCT date(timestamp)) FROM state_changes "
-                "WHERE timestamp > datetime('now', '-30 days')").fetchone()[0]) or 0)
+                "WHERE timestamp > datetime('now', '-30 days') AND "
+                + source_filter).fetchone()[0]) or 0)
             out["total_days"] = total_days
             # coverage >= 0.3 -> need ceil(0.3 * total_days) distinct days
             out["min_days"] = (total_days * 3 + 9) // 10 if total_days else 0
             for e, c in conn.execute(
                     "SELECT entity_id, COUNT(*) c FROM state_changes "
                     "WHERE timestamp > datetime('now', '-30 days') "
+                    "AND " + source_filter + " "
                     "GROUP BY entity_id ORDER BY c DESC LIMIT 10"):
                 out["top_sources"].append({"entity_id": e, "changes": int(c)})
             for e, s, h, cnt, days in conn.execute(
                     "SELECT entity_id, new_state, hour, COUNT(*) cnt, "
                     "COUNT(DISTINCT date(timestamp)) days FROM state_changes "
                     "WHERE timestamp > datetime('now', '-30 days') "
+                    "AND " + source_filter + " "
                     "GROUP BY entity_id, new_state, hour HAVING cnt >= 2 "
                     "ORDER BY days DESC, cnt DESC LIMIT 12"):
                 out["candidates"].append({
@@ -668,6 +694,7 @@ class PatternAnalyzer:
 
         # Store high-confidence patterns as suggestions
         new_suggestions = 0
+        already_automated = 0
         new_person_patterns = 0
         _eff_threshold = _effective_threshold()
         near_misses: list = []
@@ -678,6 +705,11 @@ class PatternAnalyzer:
             _seq_needed += 1
         for p in patterns:
             if p.confidence >= _eff_threshold:
+                match = self._automation_match(hass, p)
+                p.details["automation_match"] = match
+                if match.get("status") == "already_automated":
+                    already_automated += 1
+                    continue
                 stored = await hass.async_add_executor_job(
                     self._store_suggestion, p)
                 if stored:
@@ -714,6 +746,7 @@ class PatternAnalyzer:
             "ts": time.time(),
             "patterns_found": len(patterns),
             "new_suggestions": new_suggestions,
+            "already_automated": already_automated,
             "person_routines": new_person_patterns,
             "facts": promoted,
             "near_misses": near_misses,
@@ -728,6 +761,29 @@ class PatternAnalyzer:
             )
 
         return patterns
+
+    def _automation_match(self, hass, pattern: DetectedPattern) -> dict:
+        """Compare one generated automation with HA's cached live inventory."""
+        try:
+            norm = normalize_suggestion_automation(self._generate_automation(pattern))
+            if not norm.get("installable"):
+                return {"status": "advisory", "matches": [],
+                        "reason": norm.get("reason", "not installable")}
+            candidate = {
+                "triggers": norm["trigger"],
+                "conditions": norm.get("condition") or [],
+                "actions": norm["action"],
+            }
+            from .automation_inventory import get_inventory
+            inventory = get_inventory(hass)
+            if inventory is None:
+                return {"status": "inventory_unavailable", "matches": [],
+                        "reason": "automation inventory unavailable"}
+            from .automation_matcher import classify
+            return classify(candidate, inventory.records())
+        except Exception:
+            return {"status": "inventory_unavailable", "matches": [],
+                    "reason": "automation comparison failed"}
 
     def _person_entity_map(self, hass) -> dict:
         """Map every way a person might be recorded (friendly name, normalized
@@ -756,10 +812,12 @@ class PatternAnalyzer:
         patterns = []
 
         # Group state changes by entity + action, look for time clustering
-        rows = conn.execute("""
+        source_filter = _source_filter(conn)
+        rows = conn.execute(f"""
             SELECT entity_id, new_state, hour, day_of_week, COUNT(*) as cnt
             FROM state_changes
             WHERE timestamp > datetime('now', '-30 days')
+              AND {source_filter}
             GROUP BY entity_id, new_state, hour
             HAVING cnt >= ?
             ORDER BY cnt DESC
@@ -768,9 +826,10 @@ class PatternAnalyzer:
         # Opportunity days: distinct days we were observing at all (constant
         # across rows — computed once, was previously re-run per row and made a
         # large history crawl).
-        total_days = conn.execute("""
+        total_days = conn.execute(f"""
             SELECT COUNT(DISTINCT date(timestamp)) FROM state_changes
             WHERE timestamp > datetime('now', '-30 days')
+              AND {source_filter}
         """).fetchone()[0] or 1
 
         for row in rows:
@@ -782,10 +841,11 @@ class PatternAnalyzer:
             # Positive days: distinct days this routine ACTUALLY happened. Using
             # distinct days (not raw event count) so several same-hour events on
             # one day count once — the honest "on N of M days" numerator.
-            positive_days = conn.execute("""
+            positive_days = conn.execute(f"""
                 SELECT COUNT(DISTINCT date(timestamp)) FROM state_changes
                 WHERE entity_id = ? AND new_state = ? AND hour = ?
                   AND timestamp > datetime('now', '-30 days')
+                  AND {source_filter}
             """, (entity, state, hour)).fetchone()[0] or 0
 
             # Coverage weighs the negative evidence: a routine on 42 of 45 days
@@ -913,9 +973,11 @@ class PatternAnalyzer:
         from collections import deque, Counter
         patterns: list = []
         try:
+            source_filter = _source_filter(conn)
             rows = conn.execute(
                 "SELECT timestamp, entity_id, domain, new_state FROM state_changes "
-                "WHERE timestamp > datetime('now', '-30 days') ORDER BY timestamp"
+                "WHERE timestamp > datetime('now', '-30 days') AND "
+                + source_filter + " ORDER BY timestamp"
             ).fetchall()
         except Exception:
             return patterns
@@ -1008,10 +1070,12 @@ class PatternAnalyzer:
         _ACT = ("light", "switch", "cover", "lock", "climate", "fan",
                 "media_player", "humidifier", "water_heater", "valve")
         try:
+            source_filter = _source_filter(conn)
             rows = conn.execute(
                 "SELECT entity_id, new_state, timestamp FROM state_changes "
                 "WHERE timestamp > datetime('now', '-30 days') AND domain IN ({}) "
-                "ORDER BY timestamp".format(",".join("'%s'" % d for d in _ACT))
+                "AND {} ORDER BY timestamp".format(
+                    ",".join("'%s'" % d for d in _ACT), source_filter)
             ).fetchall()
         except Exception:
             return patterns
@@ -1124,7 +1188,8 @@ class PatternAnalyzer:
 
         # Look for state changes that happen within 5 min of person state changes
         try:
-            rows = conn.execute("""
+            action_filter = _source_filter(conn, "b")
+            rows = conn.execute(f"""
                 SELECT
                     a.entity_id as person_entity,
                     a.new_state as person_state,
@@ -1138,6 +1203,7 @@ class PatternAnalyzer:
                     a.entity_id != b.entity_id
                 WHERE a.timestamp > datetime('now', '-30 days')
                     AND a.domain = 'person'
+                    AND {action_filter}
                 GROUP BY a.entity_id, a.new_state, b.entity_id, b.new_state
                 HAVING cnt >= ?
                 ORDER BY cnt DESC
@@ -1188,12 +1254,14 @@ class PatternAnalyzer:
         # runs the full identity resolver, so those attributions are strong.
         try:
             if table == "state_changes":
-                rows = conn.execute("""
+                source_filter = _source_filter(conn)
+                rows = conn.execute(f"""
                     SELECT person, COUNT(*) as cnt,
                            SUM(COALESCE(NULLIF(person_confidence, 0), 0.5)) as wt
                     FROM state_changes
                     WHERE entity_id = ? AND new_state = ? AND hour = ?
                         AND timestamp > datetime('now', '-30 days')
+                        AND {source_filter}
                     GROUP BY person ORDER BY wt DESC
                 """, (entity, state, hour)).fetchall()
             else:
@@ -1208,11 +1276,13 @@ class PatternAnalyzer:
             # older DB without the confidence column — fall back to raw counts
             try:
                 if table == "state_changes":
-                    rows = conn.execute("""
+                    source_filter = _source_filter(conn)
+                    rows = conn.execute(f"""
                         SELECT person, COUNT(*) as cnt, COUNT(*) * 1.0 as wt
                         FROM state_changes
                         WHERE entity_id = ? AND new_state = ? AND hour = ?
                             AND timestamp > datetime('now', '-30 days')
+                            AND {source_filter}
                         GROUP BY person ORDER BY wt DESC
                     """, (entity, state, hour)).fetchall()
                 else:
@@ -1591,6 +1661,22 @@ class PatternAnalyzer:
         finally:
             conn.close()
 
+    def mark_covered(self, suggestion_id: int) -> None:
+        """Retire a stale suggestion when HA now has an equivalent automation."""
+        conn = self._connect()
+        if not conn:
+            return
+        try:
+            conn.execute(
+                "UPDATE suggestions SET status = 'already_automated' WHERE id = ?",
+                (suggestion_id,),
+            )
+            conn.commit()
+        except Exception:
+            pass
+        finally:
+            conn.close()
+
     def approve_suggestion(self, suggestion_id: int) -> bool:
         """Mark a suggestion as approved."""
         conn = self._connect()
@@ -1715,14 +1801,41 @@ async def install_approved_suggestion(
         if not sug:
             return {"ok": False, "error": f"suggestion #{suggestion_id} not found"}
 
-        # Always record the user's approval first.
-        await hass.async_add_executor_job(analyzer.approve_suggestion, suggestion_id)
-
         norm = normalize_suggestion_automation(sug.get("automation_yaml", ""))
         if not norm.get("installable"):
+            await hass.async_add_executor_job(analyzer.approve_suggestion, suggestion_id)
             return {"ok": True, "installed": False,
                     "reason": norm.get("reason", "not installable"),
                     "suggestion_id": suggestion_id}
+
+        # The home may have changed since this suggestion was created. Repeat
+        # duplicate detection immediately before writing so a newly-added HA
+        # automation cannot race Nova into creating an equivalent rule.
+        try:
+            from .automation_inventory import get_inventory
+            from .automation_matcher import classify
+            inventory = get_inventory(hass)
+            if inventory is not None:
+                match = classify({
+                    "triggers": norm["trigger"],
+                    "conditions": norm.get("condition") or [],
+                    "actions": norm["action"],
+                }, inventory.records())
+                if match.get("status") == "already_automated":
+                    await hass.async_add_executor_job(
+                        analyzer.mark_covered, suggestion_id)
+                    names = ", ".join(m.get("name") or m.get("entity_id", "")
+                                      for m in match.get("matches", []))
+                    return {"ok": True, "installed": False,
+                            "reason": "already automated" + (f" by {names}" if names else ""),
+                            "suggestion_id": suggestion_id,
+                            "automation_match": match}
+        except Exception:
+            # Inventory is an advisory guard. The fail-safe creator remains the
+            # final write boundary and will be hardened separately.
+            pass
+
+        await hass.async_add_executor_job(analyzer.approve_suggestion, suggestion_id)
 
         from .automation_creator import create_automation
         result = await create_automation(
@@ -1755,4 +1868,3 @@ async def install_approved_suggestion(
     except Exception as exc:
         _LOGGER.exception("install_approved_suggestion failed: %s", exc)
         return {"ok": False, "error": str(exc)}
-

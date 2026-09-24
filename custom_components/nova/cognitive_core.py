@@ -2198,6 +2198,8 @@ class StateLogger:
                         hour INTEGER,
                         day_of_week INTEGER,
                         triggered_by TEXT DEFAULT 'system',
+                        source_entity_id TEXT DEFAULT '',
+                        source_confidence REAL DEFAULT 0.0,
                         person TEXT DEFAULT 'unknown',
                         person_confidence REAL DEFAULT 0.0
                     );
@@ -2283,6 +2285,18 @@ class StateLogger:
                                  "ADD COLUMN detection_confidence REAL DEFAULT NULL")
                     conn.commit()
                     _LOGGER.info("Pattern DB: migrated state_changes.detection_confidence")
+                # Automation-awareness: retain how a state transition happened.
+                # Old rows remain honestly generic; no provenance is invented.
+                for col, ddl in (("source_entity_id", "TEXT DEFAULT ''"),
+                                 ("source_confidence", "REAL DEFAULT 0.0")):
+                    if col not in cols:
+                        conn.execute(f"ALTER TABLE state_changes ADD COLUMN {col} {ddl}")
+                        conn.commit()
+                        _LOGGER.info("Pattern DB: migrated state_changes.%s", col)
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_sc_source "
+                    "ON state_changes(triggered_by, source_entity_id)")
+                conn.commit()
                 # v6.80.0: carry the EVIDENCE behind a suggestion through to the
                 # panel — which pattern, which entities, and the observation
                 # details — so reviewing a suggestion shows *why*, not just what.
@@ -2301,6 +2315,8 @@ class StateLogger:
     def log_state_change(self, entity_id: str, old_state: str,
                           new_state: str, area_id: str = "",
                           triggered_by: str = "system",
+                          source_entity_id: str = "",
+                          source_confidence: float = 0.0,
                           person: str = "unknown",
                           person_confidence: float = 0.0,
                           force_include: bool = False,
@@ -2330,12 +2346,14 @@ class StateLogger:
                     "INSERT INTO state_changes "
                     "(timestamp, entity_id, domain, old_state, new_state, "
                     "area_id, hour, day_of_week, triggered_by, person, "
-                    "person_confidence, detection_confidence) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    "person_confidence, detection_confidence, source_entity_id, "
+                    "source_confidence) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (now.isoformat(), entity_id, domain, old_state,
                      new_state, area_id, now.hour, now.weekday(),
                      triggered_by, person, float(person_confidence or 0.0),
-                     None if detection_confidence is None else float(detection_confidence)),
+                     None if detection_confidence is None else float(detection_confidence),
+                     str(source_entity_id or ""), float(source_confidence or 0.0)),
                 )
         except Exception:
             pass
@@ -2442,6 +2460,7 @@ class _CoreState:
         self.proactive_mgr: Optional[ProactiveManager] = None
         self.autonomy_mgr: Optional[AutonomyManager] = None
         self.state_logger: Optional[StateLogger] = None
+        self.automation_contexts = None
         self.tick_count: int = 0
         self.actions_taken: int = 0
         self.offers_made: int = 0
@@ -2666,8 +2685,23 @@ def _on_state_changed(event: Event) -> None:
             _fi = _pattern_opted_in(entity_id, _dc)
         except Exception:
             _fi = False
+        source_kind = "unknown"
+        source_entity_id = ""
+        source_confidence = 0.0
+        if _CORE.automation_contexts is not None:
+            try:
+                source = _CORE.automation_contexts.resolve_state(new_state)
+                source_kind = source.kind
+                source_entity_id = source.entity_id
+                source_confidence = source.confidence
+            except Exception:
+                pass
         _CORE.state_logger.log_state_change(
-            entity_id, old_val, new_val, area_id, person=person,
+            entity_id, old_val, new_val, area_id,
+            triggered_by=source_kind,
+            source_entity_id=source_entity_id,
+            source_confidence=source_confidence,
+            person=person,
             person_confidence=person_conf,
             force_include=_fi,
         )
@@ -3856,6 +3890,17 @@ async def start(hass: HomeAssistant, config: dict) -> None:
     _CORE.offers_made = 0
     _CORE.autonomous_actions = 0
     _CORE.pending_offer = None
+    _CORE.automation_contexts = None
+    try:
+        # The integration owns one config entry in normal use. Pick the first
+        # live tracker once at startup; state changes never scan this mapping.
+        from .const import DOMAIN
+        for value in hass.data.get(DOMAIN, {}).values():
+            if isinstance(value, dict) and value.get("automation_contexts") is not None:
+                _CORE.automation_contexts = value["automation_contexts"]
+                break
+    except Exception:
+        pass
 
     _CORE.ignore_mgr = await hass.async_add_executor_job(IgnoreManager)
     _CORE.safety_mgr = SafetyManager(hass, config)
@@ -3912,6 +3957,7 @@ async def stop() -> None:
     """Stop the cognitive core."""
     _CORE.running = False
     _CORE.pending_offer = None  # don't let a stale offer survive a restart
+    _CORE.automation_contexts = None
     if _CORE.task:
         _CORE.task.cancel()
         try:

@@ -1080,7 +1080,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v7.113.1
+ * v7.114.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1154,7 +1154,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v7.113.1 ",
+      console.log("%c Nova Panel %c v7.114.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -2552,8 +2552,9 @@ ${this._htmlDashboardBody()}`;
     const sugs = this._data()?.suggestions || [];
     if (!sugs.length) {
       return `
+        ${this._htmlAutomationInventory()}
         <div class="panel">
-          <div class="panel-head"><div class="panel-title">What Nova Has Learned</div></div>
+          <div class="panel-head"><div class="panel-title">Learned Opportunities</div></div>
           <div class="stub-body">No suggestions right now. Nova proposes automations as it notices routines repeat — a light you turn on each evening, a scene after a button press, the heat when it's cold. As patterns build up, they'll appear here for you to review and approve. Nothing is ever created without your say-so.</div>
           <div class="mode-grid"><button class="mode-chip" id="sugRunAnalysis">Analyze Now</button></div>
           <div class="toggle-desc" id="sugAnalysisResult" style="margin-top:8px">See why nothing has qualified yet, or force a fresh pass over your history.</div>
@@ -2568,6 +2569,16 @@ ${this._htmlDashboardBody()}`;
       const entities = (s.entities || []).length
         ? `<div class="mode-grid">${(s.entities || []).map(e => `<span class="area-cap" style="width:auto;padding:3px 8px;font-family:var(--font-mono);font-size:10px">${this._esc(e)}</span>`).join("")}</div>`
         : "";
+      const match = s.automation_match || {};
+      const matchName = match.name || match.entity_id || "an existing automation";
+      let overlap = "";
+      if (match.status === "possible_overlap") {
+        overlap = `<div class="stub-body" style="color:var(--warn)">⚠ Possible overlap with <b>${this._esc(matchName)}</b>. Review both before creating this automation.</div>`;
+      } else if (match.status === "unknown_overlap") {
+        overlap = `<div class="stub-body" style="color:var(--warn)">⚠ <b>${this._esc(matchName)}</b> uses the same device, but Nova cannot fully compare its blueprint or template.</div>`;
+      } else if (match.status === "inventory_unavailable") {
+        overlap = `<div class="stub-body" style="color:var(--warn)">⚠ Nova could not check existing automations. Review Home Assistant before creating this one.</div>`;
+      }
       return `
         <div class="panel new-sug" data-sug-id="${s.id}">
           <div class="panel-head">
@@ -2576,6 +2587,7 @@ ${this._htmlDashboardBody()}`;
           </div>
           ${s.why_headline ? `<div class="stub-body"><b>${this._esc(s.why_headline)}</b></div>` : ""}
           <div class="stub-body">${this._esc(s.description)}</div>
+          ${overlap}
           ${evidence ? `<div class="mode-bind-head">What Nova observed</div><ul style="margin:0 0 10px;padding-left:18px;font-size:12px;color:var(--ink-dim);line-height:1.6">${evidence}</ul>` : ""}
           ${entities}
           <div class="cfg-row"><span class="toggle-desc">seen ${s.count || "?"}× in 30 days</span></div>
@@ -2588,15 +2600,72 @@ ${this._htmlDashboardBody()}`;
         </div>`;
     }).join("");
     return `
+      ${this._htmlAutomationInventory()}
       <div class="panel">
         <div class="panel-head">
-          <div class="panel-title">What Nova Has Learned</div>
+          <div class="panel-title">Learned Opportunities</div>
           <div class="panel-meta">${sugs.length} suggestion${sugs.length === 1 ? "" : "s"} to review</div>
         </div>
         <div class="stub-body">Automations Nova has learned from watching your routines. Review each — approve to create it in Home Assistant, or dismiss it. Nothing runs until you approve, and you can see the exact automation before deciding.</div>
       </div>
       ${rows}
       ${this._htmlAutomationTrials()}`;
+  }
+
+  _htmlAutomationInventory() {
+    const result = this._automationInventory;
+    if (result === null) {
+      return `
+        <div class="panel">
+          <div class="panel-head"><div class="panel-title">Existing Home Assistant Automations</div></div>
+          <div class="stub-body">Couldn't load Home Assistant automations. Nova will not assume the list is empty.</div>
+        </div>`;
+    }
+    if (result === undefined) {
+      return `
+        <div class="panel">
+          <div class="panel-head"><div class="panel-title">Existing Home Assistant Automations</div></div>
+          <div class="stub-body">Loading the automation inventory…</div>
+        </div>`;
+    }
+    const automations = result.automations || [];
+    if (!result.available) {
+      return `
+        <div class="panel">
+          <div class="panel-head"><div class="panel-title">Existing Home Assistant Automations</div></div>
+          <div class="stub-body">Nova's automation inventory is unavailable. Suggestions will be marked for manual review instead of assuming nothing exists.</div>
+        </div>`;
+    }
+    if (!automations.length) {
+      return `
+        <div class="panel">
+          <div class="panel-head"><div class="panel-title">Existing Home Assistant Automations</div><div class="panel-meta">0 found</div></div>
+          <div class="stub-body">Home Assistant currently reports no loaded automations.</div>
+        </div>`;
+    }
+    const rows = automations.map(a => {
+      const status = a.enabled ? "enabled" : "disabled";
+      const scope = a.understanding === "full" ? "fully understood"
+        : a.understanding === "partial" ? "blueprint · partial comparison"
+        : "metadata only";
+      const triggered = a.last_triggered
+        ? new Date(a.last_triggered).toLocaleString() : "never";
+      const origin = a.origin === "nova" ? "created by Nova" : "existing";
+      return `
+        <div class="cfg-row">
+          <label>${this._esc(a.name || a.entity_id)}</label>
+          <span class="toggle-desc">${this._esc(status)} · ${this._esc(origin)} · ${this._esc(scope)} · last triggered ${this._esc(triggered)}</span>
+        </div>`;
+    }).join("");
+    return `
+      <div class="panel">
+        <div class="panel-head">
+          <div class="panel-title">Existing Home Assistant Automations</div>
+          <div class="panel-meta">${automations.length} loaded</div>
+        </div>
+        <div class="stub-body">Nova uses this read-only inventory to avoid relearning routines Home Assistant already handles. It refreshes at startup and whenever automations are reloaded.</div>
+        ${rows}
+      </div>`;
   }
 
   // ─── Automation probation (Phase 3) ──────────────────────────────────────
@@ -2611,7 +2680,7 @@ ${this._htmlDashboardBody()}`;
       return `
         <div class="panel">
           <div class="panel-head">
-            <div class="panel-title">Installed Automations</div>
+            <div class="panel-title">Created by Nova</div>
           </div>
           <div class="stub-body">Couldn't load installed automations.</div>
         </div>`;
@@ -2620,7 +2689,7 @@ ${this._htmlDashboardBody()}`;
       return `
         <div class="panel">
           <div class="panel-head">
-            <div class="panel-title">Installed Automations</div>
+            <div class="panel-title">Created by Nova</div>
           </div>
           <div class="stub-body">No tracked Nova automations yet. Automations installed from new suggestions will appear here.</div>
         </div>`;
@@ -2644,7 +2713,7 @@ ${this._htmlDashboardBody()}`;
     return `
       <div class="panel">
         <div class="panel-head">
-          <div class="panel-title">Installed Automations</div>
+          <div class="panel-title">Created by Nova</div>
           <div class="panel-meta">${trials.length} tracked</div>
         </div>
         <div class="stub-body">Installing an automation means you accepted the suggestion — it isn't proof the automation works. This shows what's actually been observed running; "Working" and "Needs adjustment" are your own call, not Nova's.</div>
@@ -2658,6 +2727,16 @@ ${this._htmlDashboardBody()}`;
       const result = await this._hass.callWS({ type: "nova/list_automation_trials" });
       this._automationTrials = result.trials || [];
     } catch (_) { this._automationTrials = null; }
+    if (this._currentTab === "suggestions") this._render();
+  }
+
+  async _fetchAutomationInventory() {
+    if (!this._hass) return;
+    try {
+      this._automationInventory = await this._hass.callWS({
+        type: "nova/list_automation_inventory",
+      });
+    } catch (_) { this._automationInventory = null; }
     if (this._currentTab === "suggestions") this._render();
   }
 
@@ -5556,7 +5635,11 @@ ${this._htmlDashboardBody()}`;
           if (res.ran) {
             const nf = res.patterns_found ?? 0;
             const ns = res.new_suggestions ?? 0;
+            const covered = res.already_automated ?? 0;
             let msg = `✓ Found ${nf} pattern${nf === 1 ? "" : "s"}, ${ns} new suggestion${ns === 1 ? "" : "s"}.`;
+            if (covered > 0) {
+              msg += ` ${covered} already handled by Home Assistant.`;
+            }
             if (ns > 0) {
               msg += ` Check Suggestions.`;
             } else {
@@ -5565,7 +5648,11 @@ ${this._htmlDashboardBody()}`;
               const cand = (dg.candidates || [])[0];
               if (cand) {
                 const hr = String(cand.hour).padStart(2, "0");
-                msg += `<br>Closest routine: <b>${this._esc(cand.entity_id)}</b> → ${this._esc(cand.state)} ~${hr}:00, seen ${cand.days}/${dg.total_days} days (needs ${dg.min_days}).`;
+                const remaining = Math.max(0, (dg.min_days || 0) - (cand.days || 0));
+                const progress = remaining > 0
+                  ? `${remaining} more qualifying day${remaining === 1 ? "" : "s"} needed`
+                  : "day coverage met; confidence or evidence is still below the threshold";
+                msg += `<br>Closest routine: <b>${this._esc(cand.entity_id)}</b> → ${this._esc(cand.state)} ~${hr}:00, seen ${cand.days}/${dg.total_days} days (${progress}).`;
               }
               const src = (dg.top_sources || [])[0];
               if (src) msg += `<br>Busiest source: ${this._esc(src.entity_id)} (${src.changes} changes).`;
@@ -5677,6 +5764,7 @@ ${this._htmlDashboardBody()}`;
     if (this._currentTab === "suggestions") {
       this._wireSuggestions();
       this._wireAnalyzeButton("sugRunAnalysis", "sugAnalysisResult");
+      if (this._automationInventory === undefined) this._fetchAutomationInventory();
       if (this._automationTrials === undefined) this._fetchAutomationTrials();
     }
     if (this._currentTab === "dashboard") {

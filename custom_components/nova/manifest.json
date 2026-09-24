@@ -11,7 +11,8 @@
     "assist_pipeline",
     "recorder",
     "logbook",
-    "energy"
+    "energy",
+    "automation"
   ],
   "codeowners": [
     "@abz2much"
@@ -32,5 +33,5 @@
     "anthropic>=0.39.0",
     "pypdf>=4.0.0"
   ],
-  "version": "7.113.1"
+  "version": "7.114.0"
 }
