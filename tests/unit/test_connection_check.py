@@ -9,7 +9,12 @@ def lp(load):
 
 class _OkClient:
     def chat(self, messages, tools=None, max_tokens=512, **k):
-        return {"content": "pong"}
+        return {"text": "pong", "tool_calls": []}
+
+
+class _EmptyClient:
+    def chat(self, messages, tools=None, max_tokens=512, **k):
+        return {"text": "", "tool_calls": []}
 
 
 class _RaiseClient:
@@ -48,6 +53,13 @@ async def test_connection_success(lp, fake_hass, monkeypatch):
 async def test_connection_no_client(lp, fake_hass, monkeypatch):
     monkeypatch.setattr(lp, "create_provider", lambda p, k, m, b=None: None)
     assert await lp.test_connection(fake_hass, "ollama", "", "m", "http://x") == "cannot_connect"
+
+
+async def test_connection_rejects_empty_completion(lp, fake_hass, monkeypatch):
+    monkeypatch.setattr(lp, "create_provider", lambda p, k, m, b=None: _EmptyClient())
+    assert await lp.test_connection(
+        fake_hass, "ollama", "", "m", "http://x"
+    ) == "unknown"
 
 
 async def test_connection_auth_error(lp, fake_hass, monkeypatch):

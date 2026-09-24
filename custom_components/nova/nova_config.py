@@ -47,8 +47,23 @@ def configure(hass) -> None:
     hass.config.path() genuinely is /config, this resolves to the same path
     CONFIG_PATH already had, so behaviour there is unchanged.
     Call once, early in async_setup_entry, before any config.json access."""
-    global CONFIG_PATH
+    global CONFIG_PATH, _cache, _loaded
     CONFIG_PATH = Path(hass.config.path("nova", "config.json"))
+    # Integration reloads reuse this Python module. Invalidate the process
+    # cache every time setup begins so a file restored or edited on disk is
+    # visible after a Nova reload, without requiring a full HA restart.
+    with _lock:
+        _cache = {}
+        _loaded = False
+
+
+def reload() -> dict:
+    """Discard the in-memory snapshot and load config.json again."""
+    global _cache, _loaded
+    with _lock:
+        _cache = {}
+        _loaded = False
+    return load()
 
 
 def _ensure_dir():

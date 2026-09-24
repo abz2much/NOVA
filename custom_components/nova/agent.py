@@ -4329,9 +4329,10 @@ async def run_agent(
                             create_tier_provider, config, "reasoning",
                         )
                     else:
-                        client = await _create_provider_with_fallback(
-                            hass, "gemini", api_key, model, base_url, config,
-                        )
+                        # Without the full config there is no safe way to
+                        # resolve another provider's dedicated credential or
+                        # endpoint. Never reuse the primary key for Gemini.
+                        raise RuntimeError("no configured fallback provider")
                     result = await hass.async_add_executor_job(
                         client.chat, working, tools or None, 1024, temperature,
                     )

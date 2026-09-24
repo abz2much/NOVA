@@ -114,8 +114,18 @@ def _cfg(key: str, default=None):
 
 async def _check_llm(hass) -> dict:
     out = {"name": "LLM", "key": "llm", "status": _OFF, "detail": ""}
-    base = str(_cfg("llm_base_url", "") or "").strip()
     provider = str(_cfg("llm_provider", "") or _cfg("provider", "") or "").strip()
+    base = None
+    if provider in ("ollama", "custom"):
+        try:
+            from ..llm_provider import resolve_provider_endpoint
+            base = resolve_provider_endpoint({
+                "ollama_base_url": _cfg("ollama_base_url", ""),
+                "custom_base_url": _cfg("custom_base_url", ""),
+                "llm_base_url": _cfg("llm_base_url", ""),
+            }, provider)
+        except (ImportError, ValueError):
+            base = None
 
     breaker = None
     try:
@@ -124,8 +134,8 @@ async def _check_llm(hass) -> dict:
     except Exception:
         pass
 
-    if not base and provider in ("", "ollama"):
-        out["detail"] = "no LLM base URL configured"
+    if provider in ("ollama", "custom") and not base:
+        out["detail"] = f"no {provider} endpoint configured"
         return out
 
     # A real agent/conversation call that failed is authoritative → DOWN.
@@ -137,7 +147,7 @@ async def _check_llm(hass) -> dict:
             out["breaker"] = breaker.get("state")
         return out
 
-    if base:
+    if provider == "ollama" and base:
         ok, detail = await _ping_ollama(hass, base)
         if not ok:
             # retry once — a momentary miss shouldn't alarm if usage is fine
@@ -159,6 +169,8 @@ async def _check_llm(hass) -> dict:
         else:
             out["status"] = _OK
             out["detail"] = f"{provider or 'cloud'} provider — no recent failures"
+        if base:
+            out["base"] = _redact(base)
     if breaker:
         out["breaker"] = breaker.get("state")
     return out

@@ -517,6 +517,95 @@ DEFAULT_MODELS = {
 }
 
 
+_SELF_HOSTED_PROVIDERS = frozenset({"ollama", "custom"})
+_PROVIDER_ENDPOINT_FIELDS = {
+    "ollama": "ollama_base_url",
+    "custom": "custom_base_url",
+}
+
+
+def normalize_provider_endpoint(value: str, provider: str) -> str:
+    """Validate and normalise a self-hosted provider endpoint.
+
+    Accepts a full HTTP(S) URL or a bare host/IP. Bare Ollama endpoints get
+    Ollama's default port. Credentials, query strings, and fragments are not
+    accepted in endpoint URLs; authentication belongs in the provider's
+    dedicated credential field.
+    """
+    provider = str(provider or "").strip().lower()
+    if provider not in _SELF_HOSTED_PROVIDERS:
+        raise ValueError(f"provider '{provider}' does not use a self-hosted endpoint")
+
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+
+    had_scheme = "://" in raw
+    if not had_scheme:
+        # urlparse treats an unbracketed IPv6 address as several URL fields.
+        # Bracket it before adding the scheme and Ollama's default port.
+        try:
+            address = ipaddress.ip_address(raw)
+        except ValueError:
+            address = None
+        if address is not None and address.version == 6:
+            raw = f"http://[{raw}]"
+        else:
+            raw = f"http://{raw}"
+
+    parsed = urlparse(raw)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("endpoint must use http or https")
+    if not parsed.hostname:
+        raise ValueError("endpoint must include a host")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("endpoint credentials must be stored separately")
+    if parsed.query or parsed.fragment or parsed.params:
+        raise ValueError("endpoint must not include a query string or fragment")
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("endpoint has an invalid port") from exc
+
+    host = parsed.hostname
+    if ":" in host:
+        host = f"[{host}]"
+    if port is None and provider == "ollama" and not had_scheme:
+        port = 11434
+    authority = host if port is None else f"{host}:{port}"
+    path = parsed.path.rstrip("/")
+    return f"{parsed.scheme}://{authority}{path}"
+
+
+def resolve_provider_endpoint(
+    config: dict,
+    provider: str,
+    tier: Optional[str] = None,
+) -> Optional[str]:
+    """Return the endpoint belonging to ``provider``.
+
+    Provider-specific fields prevent an Ollama URL from being reused for a
+    custom OpenAI-compatible provider (and vice versa). ``llm_base_url`` stays
+    as a compatibility fallback for existing installations until the settings
+    UI has saved the dedicated field.
+    """
+    provider = str(provider or "").strip().lower()
+    if provider not in _SELF_HOSTED_PROVIDERS:
+        return None
+
+    candidates = []
+    if tier:
+        candidates.append(config.get(f"{tier}_base_url"))
+    candidates.extend((
+        config.get(_PROVIDER_ENDPOINT_FIELDS[provider]),
+        config.get("llm_base_url"),
+    ))
+    for candidate in candidates:
+        if candidate not in (None, ""):
+            return normalize_provider_endpoint(str(candidate), provider)
+    return None
+
+
 def detect_provider_from_key(api_key: str) -> str:
     """
     Guess the cloud provider from an API key's own shape, so first-run
@@ -574,7 +663,7 @@ def create_provider(
     Factory for provider instances.
 
     provider_name: 'groq' | 'openai' | 'gemini' | 'ollama' | 'anthropic' | 'custom'
-    For 'ollama', set base_url to e.g. 'http://homeassistant.local:11434/v1'
+    For 'ollama', set base_url to e.g. 'http://gpu-server:11434'.
     For 'gemini', base_url defaults to Google's OpenAI-compat endpoint.
     For 'custom', set base_url to whatever OpenAI-compatible endpoint you want.
     """
@@ -584,25 +673,15 @@ def create_provider(
         _LOGGER.warning("LLM routing corrected: %s", note)
     cls = PROVIDERS.get(provider_name)
     if cls is None:
-        _LOGGER.warning(
-            "Unknown LLM provider '%s' — falling back to groq", provider_name
-        )
-        cls = GroqProvider
+        raise ValueError(f"Unknown LLM provider '{provider_name}'")
 
     # Default base URLs for provider-specific cases
     if provider_name == "ollama" and not base_url:
-        base_url = "http://homeassistant.local:11434/v1"
+        raise ValueError("Ollama endpoint is not configured")
     elif provider_name == "gemini" and not base_url:
         base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
-    try:
-        return cls(api_key=api_key, model=model, base_url=base_url)
-    except Exception as exc:
-        _LOGGER.error(
-            "Failed to create provider '%s' (%s). Falling back to Groq.",
-            provider_name, exc,
-        )
-        return GroqProvider(api_key=api_key, model=model, base_url=None)
+    return cls(api_key=api_key, model=model, base_url=base_url)
 
 
 def list_providers() -> list[str]:
@@ -696,12 +775,7 @@ def create_tier_provider(
 
     api_key = resolve_provider_credential(config, provider_name)
 
-    # Per-tier base_url wins; otherwise the shared llm_base_url applies for
-    # local/self-hosted backends (Ollama on the GPU server, any OpenAI-compatible
-    # endpoint). Cloud providers keep their canonical endpoints.
-    base_url = config.get(f"{tier}_base_url")
-    if not base_url and provider_name in ("ollama", "custom"):
-        base_url = config.get("llm_base_url") or None
+    base_url = resolve_provider_endpoint(config, provider_name, tier)
 
     _LOGGER.debug("Creating %s tier provider: %s / %s", tier, provider_name, model)
 
@@ -815,8 +889,15 @@ async def test_connection(hass, provider, api_key, model, base_url):
         return "cannot_connect"
 
     def _ping():
-        return client.chat([{"role": "user", "content": "ping"}],
-                           tools=None, max_tokens=5)
+        result = client.chat(
+            [{"role": "user", "content": "Reply with the word pong."}],
+            tools=None,
+            max_tokens=32,
+            temperature=0.0,
+        )
+        if not str(result.get("text") or "").strip() and not result.get("tool_calls"):
+            raise RuntimeError("provider returned an empty response")
+        return result
     try:
         await hass.async_add_executor_job(_ping)
         return None

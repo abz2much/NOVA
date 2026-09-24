@@ -42,6 +42,9 @@ def _load_model_discovery_functions():
     namespace = {
         "logging": logging,
         "urlparse": urlparse,
+        "resolve_provider_endpoint": lambda config, provider: (
+            config.get(f"{provider}_base_url") or config.get("llm_base_url")
+        ),
     }
     exec(compile(ast.Module(body=nodes, type_ignores=[]), str(SRC), "exec"), namespace)
     return namespace
@@ -177,6 +180,19 @@ def test_local_ollama_discovery_needs_no_cloud_key(discovery):
 
     assert url == "http://192.168.1.20:11434/api/tags"
     assert headers == {}
+
+
+def test_local_providers_prefer_their_dedicated_endpoint(discovery):
+    resolve = discovery["_resolve_model_discovery_request"]
+    config = {
+        "ollama_base_url": "http://ollama.internal:11434",
+        "custom_base_url": "https://custom.internal/v1",
+        "llm_base_url": "https://legacy.invalid/v1",
+    }
+    ollama_url, _ = resolve(config, "ollama")
+    custom_url, _ = resolve(config, "custom")
+    assert ollama_url == "http://ollama.internal:11434/api/tags"
+    assert custom_url == "https://custom.internal/v1/models"
 
 
 @pytest.mark.parametrize(

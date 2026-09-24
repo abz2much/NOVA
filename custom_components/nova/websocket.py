@@ -23,6 +23,7 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 
 from . import audio_routing, sleep_detection
+from .llm_provider import resolve_provider_endpoint
 from .const import (
     CONF_BEDROOM_AREAS,
     CONF_GROUND_FLOOR_AREAS,
@@ -845,6 +846,8 @@ async def ws_get_panel_data(
                 "movie_media_player": str(_runtime_opt(hass, entry, "movie_media_player", "") or ""),
                 "movie_dim_pct": int(_runtime_opt(hass, entry, "movie_dim_pct", 15) or 15),
                 "llm_base_url": str(_runtime_opt(hass, entry, "llm_base_url", "") or ""),
+                "ollama_base_url": str(_runtime_opt(hass, entry, "ollama_base_url", "") or ""),
+                "custom_base_url": str(_runtime_opt(hass, entry, "custom_base_url", "") or ""),
                 "notify_service": current_notify,
                 "notify_services": current_notify_services,
                 "notify_services_available": notify_services,
@@ -1557,6 +1560,8 @@ PANEL_WRITABLE_KEYS = {
     "llm_provider",
     "model",
     "llm_base_url",
+    "ollama_base_url",
+    "custom_base_url",
     "classifier_provider",
     "classifier_model",
     "reasoning_provider",
@@ -1594,7 +1599,9 @@ PANEL_WRITABLE_KEYS = {
     "package_detection",            # bool: watch porch cameras for packages & mail
     "visitor_learning",             # bool: silent vision learning from person events
     "rich_reasoning",               # bool: cloud-first reasoning for medium+ events
-    "llm_base_url",                 # str: OpenAI-compatible endpoint (Ollama GPU server)
+    "llm_base_url",                 # legacy shared self-hosted endpoint
+    "ollama_base_url",              # str: dedicated Ollama endpoint
+    "custom_base_url",              # str: dedicated OpenAI-compatible endpoint
     "pattern_min_occurrences",      # int: pattern engine repeat threshold
     "pattern_confidence",           # float: pattern engine confidence threshold
     "light_control_enabled",        # bool: allow toggling lights from the dashboard
@@ -2084,9 +2091,11 @@ async def ws_update_config(
         # llm_base_url is the saved endpoint identity custom/ollama discovery
         # is cached under (Phase 3, v7.108.0) — a stale cached list for the
         # old endpoint must not survive the endpoint changing.
-        if key == "llm_base_url":
-            invalidate_model_cache("custom")
-            invalidate_model_cache("ollama")
+        if key in ("llm_base_url", "ollama_base_url", "custom_base_url"):
+            if key != "ollama_base_url":
+                invalidate_model_cache("custom")
+            if key != "custom_base_url":
+                invalidate_model_cache("ollama")
 
         # Persist via centralized config module (survives restarts). The
         # in-memory runtime_config above is already set either way, so this
@@ -2215,9 +2224,10 @@ def _resolve_model_discovery_request(config: dict, provider: str) -> tuple[str, 
     if provider not in ("ollama", "custom"):
         raise ValueError("unknown model provider")
 
-    base = str(config.get("llm_base_url") or "").strip().rstrip("/")
+    base = resolve_provider_endpoint(config, provider)
     if not base:
         raise ValueError("saved model endpoint is not configured")
+    base = base.rstrip("/")
 
     if base.endswith("/models"):
         url = base
@@ -2519,23 +2529,22 @@ async def ws_list_models(hass: HomeAssistant, connection, msg) -> None:
         )
 
 
-def _compute_provider_availability(credential_status: dict, base_url_set: bool) -> dict:
+def _compute_provider_availability(
+    credential_status: dict,
+    endpoint_status: dict,
+) -> dict:
     """Per-provider availability (Phase 3, v7.108.0), each rule independent
     of every other provider's own state:
       - a cloud provider is available only when ITS OWN credential exists;
-      - custom needs its own saved endpoint (llm_base_url) — there's no
-        sensible default for an arbitrary OpenAI-compatible endpoint;
-      - ollama is always available — unlike custom it has a working default
-        endpoint (see llm_provider.create_provider), so "no saved endpoint"
-        is a normal configuration, not a missing one.
+      - custom and Ollama each need their own resolved endpoint.
     Never reads or infers from another provider's field."""
     return {
         "groq": bool(credential_status.get("groq")),
         "openai": bool(credential_status.get("openai")),
         "anthropic": bool(credential_status.get("anthropic")),
         "gemini": bool(credential_status.get("gemini")),
-        "custom": bool(base_url_set),
-        "ollama": True,
+        "custom": bool(endpoint_status.get("custom")),
+        "ollama": bool(endpoint_status.get("ollama")),
     }
 
 
@@ -2561,8 +2570,14 @@ async def ws_get_credential_status(hass: HomeAssistant, connection, msg) -> None
                 runtime_config = data.get("runtime_config", {}) or {}
         config = await hass.async_add_executor_job(
             nova_config.effective_config_with_runtime, entry, runtime_config)
-        base_url_set = bool(str(config.get("llm_base_url") or "").strip())
-        available = _compute_provider_availability(status, base_url_set)
+        endpoint_status = {}
+        for provider in ("ollama", "custom"):
+            try:
+                endpoint_status[provider] = bool(
+                    resolve_provider_endpoint(config, provider))
+            except ValueError:
+                endpoint_status[provider] = False
+        available = _compute_provider_availability(status, endpoint_status)
         connection.send_result(msg["id"], {"status": status, "available": available})
     except Exception as exc:
         _LOGGER.warning("ws_get_credential_status failed: %s", type(exc).__name__)

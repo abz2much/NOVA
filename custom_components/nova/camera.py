@@ -106,16 +106,20 @@ def _make_client(hass: HomeAssistant, provider: str, model: str, fallback):
         if not provider or not model:
             return fallback
         api_key = _resolve_credential(hass, provider)
-        # Ollama alone needs no credential — it's a normal, fully working
-        # configuration, not a missing-key failure.
-        if not api_key and provider != "ollama":
+        # Self-hosted endpoints may be intentionally unauthenticated.
+        if not api_key and provider not in ("ollama", "custom"):
             return fallback
-        base_url = _cfg_opt(hass, "llm_base_url", "") or None
+        from .llm_provider import create_provider, resolve_provider_endpoint
+        endpoint_config = {
+            "ollama_base_url": _cfg_opt(hass, "ollama_base_url", ""),
+            "custom_base_url": _cfg_opt(hass, "custom_base_url", ""),
+            "llm_base_url": _cfg_opt(hass, "llm_base_url", ""),
+        }
+        base_url = resolve_provider_endpoint(endpoint_config, provider)
         key = (provider, model, api_key, base_url or "")
         cached = _PROVIDER_CACHE.get(key)
         if cached is not None:
             return cached
-        from .llm_provider import create_provider
         client = create_provider(provider, api_key, model, base_url)
         _PROVIDER_CACHE[key] = client
         return client
