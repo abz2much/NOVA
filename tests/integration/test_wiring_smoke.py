@@ -108,7 +108,9 @@ async def test_config_flow_accepts_local_llm(hass):
         )
     assert result["type"] == "create_entry"
     assert result["data"]["llm_provider"] == "ollama"
-    assert result["data"]["ollama_base_url"] == "http://localhost:11434"
+    # Storage preserves the user's compatible legacy path. OllamaProvider
+    # removes a trailing /v1 only when it builds the native /api/chat URL.
+    assert result["data"]["ollama_base_url"] == "http://localhost:11434/v1"
 
 
 async def test_config_flow_auto_imports_from_this_instances_config_dir(hass, tmp_path):
