@@ -164,6 +164,10 @@ let _activeMode = "normal";
 const _listModelCalls = [];
 const _endpointTestCalls = [];
 const _applyAiCalls = [];
+const _goalCalls = [];
+const _lockdownCalls = [];
+const _cameraSnapshotCalls = [];
+const _cameraDiagnosticCalls = [];
 const _modeSetCalls = [];
 const _serviceCalls = [];
 const _docDeleteCalls = [];
@@ -218,7 +222,7 @@ const hass = {
       if (f) f.value = m.value;
       return { ok: !!f, pending: _pendingFacts };
     }
-    if (m.type === "nova/camera_snapshot") return { image: "/9j/dGVzdGpwZWc=" };
+    if (m.type === "nova/camera_snapshot") { _cameraSnapshotCalls.push(m.entity_id); return { image: "/9j/dGVzdGpwZWc=" }; }
     if (m.type === "nova/compute_camera_coverage") { _coverageCalls.push(m.camera); return { reason: "faces the front walk", covered: ["Front Yard"] }; }
     if (m.type === "nova/biometrics") {
       if (m.action === "enable") _bioEnabled = true;
@@ -384,7 +388,7 @@ const hass = {
           { entity_id: "camera.back", name: "Backyard", raw_name: "Backyard", outdoor: true, location_mode: "auto" },
         ] };
     }
-    if (m.type === "nova/camera_diagnostics") return {
+    if (m.type === "nova/camera_diagnostics") { _cameraDiagnosticCalls.push(m.entity_id); return {
       summary: [{ entity_id: "camera.front", state: "idle", platform: "nest" }],
       platforms: { nest: 1, frigate: 1 },
       probe: {
@@ -398,7 +402,20 @@ const hass = {
         verdict: "NO FRAME from any tier. Nest cameras only yield event media after a motion/doorbell event — check Pub/Sub.",
         elapsed_ms: 4210,
       },
-    };
+    }; }
+    if (m.type === "nova/set_lockdown") {
+      _lockdownCalls.push(m.on);
+      PANEL.lockdown = { active: m.on, reason: "requested from panel" };
+      PANEL.config.lockdown = PANEL.lockdown;
+      return { ok: true, lockdown: PANEL.lockdown };
+    }
+    if (m.type === "nova/goal_action") {
+      _goalCalls.push({ ...m });
+      if (m.action === "create") PANEL.goals = [...PANEL.goals, { id: 3, title: m.outcome, outcome: m.outcome, status: "active", steps_done: 0, steps_total: 0 }];
+      if (m.action === "cancel") PANEL.goals = PANEL.goals.map(g => g.id === m.goal_id ? { ...g, status: "cancelled" } : g);
+      if (m.action === "delete") PANEL.goals = PANEL.goals.filter(g => g.id !== m.goal_id);
+      return { ok: true, goals: PANEL.goals };
+    }
     if (m.type === "nova/get_area_sparklines") return { sparklines: {
       garage: { temp: [64, 65, 66, 67, 68, 68, 67, 68], humidity: [50, 50, 51, 52, 51, 51, 50, 51] },
     } };
@@ -471,6 +488,54 @@ setTimeout(async () => {
   await new Promise(r => setTimeout(r, 20));
   checks.push(["new look: area light toggle calls light.turn_off targeted at the area",
     _serviceCalls.some(c => c.domain === "light" && c.service === "turn_off" && c.target?.area_id === "garage")]);
+
+  checks.push(
+    ["command center restores Cognitive Core status",
+      /48/.test(newRoot.getElementById("cognitiveMetrics")?.textContent || "")
+      && /217802/.test(newRoot.getElementById("cognitiveMetrics")?.textContent || "")],
+    ["command center restores Goals with active and completed outcomes",
+      newRoot.querySelectorAll(".goal-row").length === 2
+      && /Guest prep/.test(newRoot.getElementById("goalList")?.textContent || "")],
+    ["command center restores the guarded Lockdown control",
+      newRoot.getElementById("lockdownControl")?.textContent === "LOCKDOWN OFF"],
+  );
+  newRoot.getElementById("lockdownControl").click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["lockdown control confirms and calls nova/set_lockdown", _lockdownCalls.length === 1 && _lockdownCalls[0] === true
+    && newRoot.getElementById("lockdownControl")?.classList.contains("active")]);
+
+  const goalInput = newRoot.getElementById("goalOutcome");
+  goalInput.value = "Keep the greenhouse above freezing";
+  newRoot.getElementById("goalCreate").click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["goals can be created from the command center",
+    _goalCalls.some(c => c.action === "create" && c.outcome === "Keep the greenhouse above freezing")
+    && /greenhouse/.test(newRoot.getElementById("goalList")?.textContent || "")]);
+
+  newRoot.getElementById("camToggle").click();
+  await new Promise(r => setTimeout(r, 30));
+  checks.push(["Camera Watch loads authenticated snapshots through Nova",
+    _cameraSnapshotCalls.includes("camera.front")
+    && !!newRoot.querySelector('.camera-slot[data-camera="camera.front"] img')]);
+  newRoot.querySelector('.camera-diagnose[data-camera="camera.front"]').click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["Camera Watch exposes backend diagnostics",
+    _cameraDiagnosticCalls.includes("camera.front")
+    && /NO FRAME/.test(newRoot.querySelector('.camera-slot[data-camera="camera.front"]')?.textContent || "")]);
+  newRoot.querySelector('.camera-analyze[data-camera="camera.front"]').click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["Camera Watch analysis calls the public Nova service without announcing",
+    _serviceCalls.some(c => c.domain === "nova" && c.service === "analyze_camera"
+      && c.data?.entity_id === "camera.front" && c.data?.announce === false)]);
+
+  checks.push(["command center restores the first-run onboarding checklist",
+    newRoot.querySelectorAll(".onboarding-step").length === 5
+    && /1\/5 DONE/.test(newRoot.getElementById("onboardingCard")?.textContent || "")]);
+  newRoot.getElementById("onboardingDismiss").click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["onboarding can be dismissed persistently",
+    !newRoot.getElementById("onboardingCard")
+    && _updateConfigCalls.some(c => c.key === "onboarding_dismissed" && c.value === true)]);
 
   // ── New look: Settings tab (v7.94.0) ──
   // Patching `global`, not `window`: the component code runs via
