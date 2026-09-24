@@ -1,3 +1,12 @@
+## [7.114.0] — automation-aware learning
+
+- Nova now inventories every automation Home Assistant has loaded, regardless of whether it came from the UI, YAML, a package, or a blueprint. The Suggestions page separates that read-only inventory from new learned opportunities and automations created by Nova.
+- Automation execution contexts are attributed to the state changes they cause with a bounded in-memory lookup. Pattern analysis excludes those outcomes, so Nova no longer learns an existing automation's behavior and proposes it back as something new.
+- Suggested automations are compared deterministically with the loaded inventory. Exact duplicates are suppressed, same-target rules are flagged as possible overlaps, and opaque blueprint/template cases stay explicitly uncertain instead of being guessed equivalent. This adds no model calls and no per-event configuration scan.
+- Automation installation now validates through Home Assistant, refuses malformed or unexpected `automations.yaml` content, writes atomically, checks the loaded result after reload, and restores the exact original file if reload or confirmation fails.
+- Analyze Now reports patterns already handled by Home Assistant and gives an honest remaining-day explanation instead of displaying the minimum threshold as though it were always still needed.
+- Provider Activity now serializes its tiny SQLite schema/WAL setup boundary, fixing a real first-write race that could drop one aggregate when many provider calls opened a brand-new database at once; normal aggregate writes remain concurrent.
+
 ## [7.113.1] — Ollama response privacy and activity diagnostics
 
 - Ollama responses now keep model scratchpad text private even when a reasoning GGUF ignores `think: false` and leaks either a complete `<think>…</think>` envelope or Qwen's orphaned closing marker into normal response content. Inline literal text containing `</think>` is preserved.

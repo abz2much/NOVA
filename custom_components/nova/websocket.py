@@ -79,6 +79,7 @@ def async_register(hass: HomeAssistant) -> None:
         websocket_api.async_register_command(hass, ws_set_credential)
         websocket_api.async_register_command(hass, ws_delete_credential)
         websocket_api.async_register_command(hass, ws_suggestion_action)
+        websocket_api.async_register_command(hass, ws_list_automation_inventory)
         websocket_api.async_register_command(hass, ws_list_automation_trials)
         websocket_api.async_register_command(hass, ws_automation_trial_feedback)
         websocket_api.async_register_command(hass, ws_goal_action)
@@ -1058,6 +1059,7 @@ def _get_suggestions() -> list[dict]:
                 "entities": entities,
                 "why_headline": why.get("headline", ""),
                 "evidence": why.get("evidence", []),
+                "automation_match": details.get("automation_match") or {},
             })
         return out
     except Exception:
@@ -3346,6 +3348,36 @@ async def ws_suggestion_action(
 
 
 # ─── Automation probation (Phase 3) ──────────────────────────────────────────
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "nova/list_automation_inventory",
+})
+@websocket_api.async_response
+async def ws_list_automation_inventory(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict,
+) -> None:
+    """Return Nova's cached, read-only Home Assistant automation inventory.
+
+    Raw automation configuration never leaves the backend. This endpoint
+    reads the startup/reload cache, so opening Suggestions adds no inventory
+    scan to Home Assistant's normal dashboard polling.
+    """
+    try:
+        from .automation_inventory import get_inventory
+        inventory = get_inventory(hass)
+        connection.send_result(msg["id"], {
+            "available": inventory is not None,
+            "refreshed_at": inventory.refreshed_at if inventory else None,
+            "automations": inventory.public_items() if inventory else [],
+        })
+    except Exception as exc:
+        _LOGGER.exception("ws_list_automation_inventory failed: %s", exc)
+        connection.send_error(
+            msg["id"], "list_automation_inventory_failed", str(exc))
+
 
 @websocket_api.require_admin
 @websocket_api.websocket_command({

@@ -22,11 +22,13 @@ same shape as decision_record.py / automation_trials.py.
 from __future__ import annotations
 
 import sqlite3
+import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
 _DEFAULT_DB = "/config/nova/provider_activity.db"
+_SCHEMA_LOCK = threading.Lock()
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS provider_activity_daily (
@@ -53,11 +55,15 @@ def _resolve(db_path: Optional[str]) -> str:
 
 def _connect(db_path: str) -> sqlite3.Connection:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, timeout=10.0)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=10000")
-    conn.executescript(_SCHEMA)
+    # WAL negotiation and first-time schema creation themselves take a write
+    # lock. Serialize only that tiny setup boundary; the aggregate UPSERTs
+    # remain concurrent and are protected by SQLite's own busy timeout.
+    with _SCHEMA_LOCK:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.executescript(_SCHEMA)
     return conn
 
 

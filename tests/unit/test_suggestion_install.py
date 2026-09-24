@@ -3,6 +3,7 @@ once approved, actually becomes a Home Assistant automation instead of just
 flipping a DB flag. Covers the pure normalizer across every pattern shape the
 analyzer emits, and the async installer wiring end-to-end."""
 import json
+import types
 
 import pytest
 
@@ -135,6 +136,7 @@ class _StubAnalyzer:
         self._sug = suggestion
         self.approved = None
         self.installed = None
+        self.covered = None
 
     def get_suggestion(self, sid):
         return self._sug
@@ -145,6 +147,9 @@ class _StubAnalyzer:
 
     def mark_installed(self, sid, auto_id):
         self.installed = (sid, auto_id)
+
+    def mark_covered(self, sid):
+        self.covered = sid
 
 
 async def test_installer_installs_concrete_suggestion(pa, ac, fake_hass, monkeypatch):
@@ -216,3 +221,39 @@ async def test_installer_reports_write_failure(pa, ac, fake_hass, monkeypatch):
     assert "disk full" in res["reason"]
     assert stub.approved == 3        # approved, just not installed
     assert stub.installed is None
+
+
+async def test_installer_rechecks_and_blocks_new_duplicate(
+        pa, ac, fake_hass, monkeypatch, load):
+    sug = {"id": 14, "description": "porch",
+           "automation_yaml": json.dumps({
+               "alias": "porch on", "trigger": {"platform": "time", "at": "18:00:00"},
+               "action": {"service": "light.turn_on", "entity_id": "light.porch"}})}
+    stub = _StubAnalyzer(sug)
+    monkeypatch.setattr(pa, "get_analyzer", lambda: stub)
+
+    inventory_mod = load("automation_inventory")
+    existing = types.SimpleNamespace(
+        entity_id="automation.porch", name="Existing porch",
+        referenced_entities=("light.porch",),
+        raw_config={
+            "triggers": [{"trigger": "time", "at": "18:00:00"}],
+            "conditions": [],
+            "actions": [{"action": "light.turn_on", "entity_id": "light.porch"}],
+        })
+    monkeypatch.setattr(inventory_mod, "get_inventory", lambda hass:
+                        types.SimpleNamespace(records=lambda: [existing]))
+    calls = {"n": 0}
+
+    async def _create(*args, **kwargs):
+        calls["n"] += 1
+        return {"success": True}
+
+    monkeypatch.setattr(ac, "create_automation", _create)
+    result = await pa.install_approved_suggestion(fake_hass, 14)
+
+    assert result["installed"] is False
+    assert "already automated" in result["reason"]
+    assert stub.covered == 14
+    assert stub.approved is None
+    assert calls["n"] == 0

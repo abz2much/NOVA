@@ -386,6 +386,16 @@ const hass = {
         ? { ok: true, installed: true, alias: "Nova · porch on at 18:00" }
         : { ok: true };
     }
+    if (m.type === "nova/list_automation_inventory") return {
+      available: true,
+      refreshed_at: 1789948800,
+      automations: [
+        { entity_id: "automation.porch_evening", name: "Porch evening", enabled: true,
+          last_triggered: "2026-09-23T18:00:00+00:00", origin: "existing", understanding: "full" },
+        { entity_id: "automation.nova_hall", name: "Nova · hall light", enabled: false,
+          last_triggered: null, origin: "nova", understanding: "partial" },
+      ],
+    };
     if (m.type === "nova/camera_location") {
       _locationCalls.push({ entity_id: m.entity_id, mode: m.mode });
       return { ok: true, cameras: [
@@ -2397,6 +2407,10 @@ setTimeout(async () => {
   await new Promise(r => setTimeout(r, 20));
   sRoot = elNew.shadowRoot;
   checks.push(
+    ["suggestions tab: existing HA automations are visible with bounded status metadata",
+      /Existing Home Assistant Automations/.test(sRoot.textContent)
+      && /Porch evening/.test(sRoot.textContent)
+      && /enabled · existing · fully understood/.test(sRoot.textContent)],
     ["suggestions tab: real card shows the pattern type, confidence, and evidence",
       (() => {
         const card = sRoot.querySelector(".new-sug");
@@ -2416,14 +2430,14 @@ setTimeout(async () => {
     && sRoot.querySelector(".new-sug")?.style.opacity === "0.35"
     && Array.from(sRoot.querySelectorAll(".new-sug button")).every(b => b.disabled)]);
 
-  // Post-v7.103.0 fix: Installed Automations used to vanish entirely —
+  // Post-v7.103.0 fix: the Nova-created section used to vanish entirely —
   // _htmlAutomationTrials() returned "" for an empty result, and the
   // no-suggestions early-return in _htmlSuggestions() never called it at
   // all. It must always render its heading, with a distinct empty vs.
   // error state. The default mock returns {} for nova/list_automation_trials,
   // exercising the real empty-result path already reached above.
-  checks.push(["suggestions tab: Installed Automations section renders with an empty result",
-    /Installed Automations/.test(sRoot.textContent)
+  checks.push(["suggestions tab: Created by Nova section renders with an empty result",
+    /Created by Nova/.test(sRoot.textContent)
     && /No tracked Nova automations yet\. Automations installed from new suggestions will appear here\./.test(sRoot.textContent)]);
   const automationTrialsCallWS = hass.callWS;
   hass.callWS = async (m) => {
@@ -2432,8 +2446,8 @@ setTimeout(async () => {
   };
   await elNew._fetchAutomationTrials();
   sRoot = elNew.shadowRoot;
-  checks.push(["suggestions tab: Installed Automations shows a distinct error state when the request fails",
-    /Installed Automations/.test(sRoot.textContent) && /Couldn't load installed automations\./.test(sRoot.textContent)]);
+  checks.push(["suggestions tab: Created by Nova shows a distinct error state when the request fails",
+    /Created by Nova/.test(sRoot.textContent) && /Couldn't load installed automations\./.test(sRoot.textContent)]);
   hass.callWS = automationTrialsCallWS;
   await elNew._fetchAutomationTrials();
   sRoot = elNew.shadowRoot;

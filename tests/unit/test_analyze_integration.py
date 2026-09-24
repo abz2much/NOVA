@@ -91,6 +91,28 @@ async def test_analyze_survives_without_recorder(pa, tmp_path, monkeypatch, fake
     assert any(p.pattern_type == "sequence" for p in stored)
 
 
+async def test_analyze_suppresses_pattern_already_automated(
+        pa, tmp_path, monkeypatch, fake_hass):
+    db = str(tmp_path / "covered.db")
+    conn = sqlite3.connect(db); conn.executescript(_SCHEMA)
+    base = datetime.now() - timedelta(days=14)
+    for d in range(12):
+        _ins(conn, "light.porch", "on",
+             (base + timedelta(days=d)).replace(hour=18, minute=0))
+    conn.commit(); conn.close()
+
+    an, stored = _capture(pa, db, monkeypatch)
+    monkeypatch.setattr(an, "_automation_match", lambda hass, pattern: {
+        "status": "already_automated",
+        "matches": [{"entity_id": "automation.porch", "name": "Porch"}],
+        "reason": "equivalent",
+    })
+    await an.analyze(fake_hass)
+
+    assert stored == []
+    assert an._last_result["already_automated"] >= 1
+
+
 async def test_analyze_wires_numeric_trigger_from_sensor_history(pa, tmp_path, monkeypatch, fake_hass):
     # Prove the numeric detector is wired into analyze() AND receives the fetched
     # sensor history: a heater that comes on while a temp sensor reads cold.

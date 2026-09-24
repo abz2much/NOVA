@@ -50,13 +50,16 @@ def _ts(days_ago, hour, minute=0):
     return dt.isoformat(), dt.weekday()
 
 
-def _add_state(conn, entity_id, new_state, days_ago, hour, minute=0, person="unknown"):
+def _add_state(conn, entity_id, new_state, days_ago, hour, minute=0,
+               person="unknown", triggered_by="system"):
     ts, dow = _ts(days_ago, hour, minute)
     domain = entity_id.split(".", 1)[0]
     conn.execute(
         "INSERT INTO state_changes (timestamp, entity_id, domain, old_state, "
-        "new_state, area_id, hour, day_of_week, person) VALUES (?,?,?,?,?,?,?,?,?)",
-        (ts, entity_id, domain, "off", new_state, "", hour, dow, person))
+        "new_state, area_id, hour, day_of_week, person, triggered_by) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (ts, entity_id, domain, "off", new_state, "", hour, dow, person,
+         triggered_by))
 
 
 def _add_command(conn, text, days_ago, hour, person="unknown"):
@@ -79,6 +82,30 @@ def test_time_routine_detected(analyzer, tmp_path):
     assert match[0].pattern_type == "time_routine"
 
 
+def test_existing_automation_outcomes_do_not_form_a_routine(analyzer, tmp_path):
+    conn = _conn(tmp_path / "automated.db")
+    for d in range(1, 12):
+        _add_state(conn, "light.porch", "on", d, 18,
+                   triggered_by="automation")
+    conn.commit()
+
+    found = analyzer.PatternAnalyzer()._find_time_routines(conn)
+
+    assert not any(p.entity_ids == ["light.porch"] for p in found)
+
+
+def test_nova_automation_outcomes_do_not_self_train(analyzer, tmp_path):
+    conn = _conn(tmp_path / "nova-automated.db")
+    for d in range(1, 12):
+        _add_state(conn, "light.porch", "on", d, 18,
+                   triggered_by="nova_automation")
+    conn.commit()
+
+    found = analyzer.PatternAnalyzer()._find_time_routines(conn)
+
+    assert not any(p.entity_ids == ["light.porch"] for p in found)
+
+
 def test_repeated_command_detected(analyzer, tmp_path):
     conn = _conn(tmp_path / "p.db")
     for d in range(1, 7):
@@ -98,6 +125,20 @@ def test_sequence_detected(analyzer, tmp_path):
     pa = analyzer.PatternAnalyzer()
     found = pa._find_sequence_patterns(conn)
     assert any(set(p.entity_ids) == {"light.a_test", "light.b_test"} for p in found)
+
+
+def test_existing_automation_outcomes_do_not_form_sequence(analyzer, tmp_path):
+    conn = _conn(tmp_path / "automated-sequence.db")
+    for d in range(1, 8):
+        _add_state(conn, "switch.trigger", "on", d, 18, 0,
+                   triggered_by="automation")
+        _add_state(conn, "light.result", "on", d, 18, 1,
+                   triggered_by="automation")
+    conn.commit()
+
+    found = analyzer.PatternAnalyzer()._find_sequence_patterns(conn)
+
+    assert found == []
 
 
 def test_should_analyze_gates_on_min_days(analyzer, tmp_path):

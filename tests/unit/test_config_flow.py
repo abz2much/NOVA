@@ -123,12 +123,14 @@ async def test_step_init_renders_menu(config_flow, fake_hass):
 async def test_step_core_renders_fields(config_flow, fake_hass):
     res = await _flow(config_flow, fake_hass).async_step_core(None)
     assert res["type"] == "form" and res["step_id"] == "core"
-    assert len(res["data_schema"].schema) == 6   # persona, preset, directive, model, hass-api, ui-style
+    # The retired UI-style switch no longer belongs in the merged panel.
+    assert len(res["data_schema"].schema) == 5   # persona, preset, directive, model, hass-api
 
 
 async def test_step_routing_renders_fields(config_flow, fake_hass):
     res = await _flow(config_flow, fake_hass).async_step_routing(None)
-    assert len(res["data_schema"].schema) == 3
+    # bedroom + ground-floor areas, broadcast group, notify service
+    assert len(res["data_schema"].schema) == 4
 
 
 async def test_step_observer_renders_fields(config_flow, fake_hass):
@@ -370,4 +372,3 @@ async def test_step_credentials_values_never_land_in_nova_config(
     await flow.async_step_credentials(submission)
 
     assert calls == []
-
