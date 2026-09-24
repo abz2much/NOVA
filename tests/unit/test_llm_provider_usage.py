@@ -83,22 +83,13 @@ def test_groq_usage_partial_fields_missing(lp):
     assert result["usage"] == {"input_tokens": 5, "output_tokens": None}
 
 
-# ── OpenAI (and Ollama via inheritance) ──────────────────────────────────────
+# ── OpenAI-compatible providers ──────────────────────────────────────────────
 
 def test_openai_usage_extracted_when_present(lp):
     completion = _FakeCompletion(_FakeMessage("hi"), usage=_FakeUsage(7, 14))
     provider = _make_openai_style(lp, lp.OpenAIProvider, completion)
     result = provider.chat([{"role": "user", "content": "hi"}])
     assert result["usage"] == {"input_tokens": 7, "output_tokens": 14}
-
-
-def test_ollama_inherits_openai_usage_extraction(lp):
-    """OllamaProvider doesn't override chat() — proves the shared
-    implementation actually normalizes usage for it too, not just OpenAI."""
-    completion = _FakeCompletion(_FakeMessage("hi"), usage=_FakeUsage(3, 9))
-    provider = _make_openai_style(lp, lp.OllamaProvider, completion)
-    result = provider.chat([{"role": "user", "content": "hi"}])
-    assert result["usage"] == {"input_tokens": 3, "output_tokens": 9}
 
 
 def test_openai_usage_none_when_missing(lp):

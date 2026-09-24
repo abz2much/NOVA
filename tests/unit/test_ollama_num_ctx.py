@@ -16,32 +16,29 @@ def _install_nova_config(monkeypatch, value):
 
 def _ollama(load):
     lp = load("llm_provider")
-    # _extra_body reads only module config, no instance state — build via __new__
-    # so we don't construct a real OpenAI client (openai isn't in the sandbox).
+    # _num_ctx reads only module config, no instance state.
     return lp, lp.OllamaProvider.__new__(lp.OllamaProvider)
 
 
 def test_default_num_ctx_when_unset(load, monkeypatch):
     lp, prov = _ollama(load)
     _install_nova_config(monkeypatch, None)          # not configured
-    body = prov._extra_body()
-    assert body["options"]["num_ctx"] == lp.OLLAMA_NUM_CTX
-    assert body["think"] is False                      # reasoning-model guard intact
+    assert prov._num_ctx() == lp.OLLAMA_NUM_CTX
 
 
 def test_configured_num_ctx_is_used(load, monkeypatch):
     lp, prov = _ollama(load)
     _install_nova_config(monkeypatch, 32768)
-    assert prov._extra_body()["options"]["num_ctx"] == 32768
+    assert prov._num_ctx() == 32768
 
 
 def test_absurd_num_ctx_falls_back_to_default(load, monkeypatch):
     lp, prov = _ollama(load)
     _install_nova_config(monkeypatch, 16)            # too small to be real
-    assert prov._extra_body()["options"]["num_ctx"] == lp.OLLAMA_NUM_CTX
+    assert prov._num_ctx() == lp.OLLAMA_NUM_CTX
 
 
 def test_bad_num_ctx_value_falls_back(load, monkeypatch):
     lp, prov = _ollama(load)
     _install_nova_config(monkeypatch, "not-a-number")
-    assert prov._extra_body()["options"]["num_ctx"] == lp.OLLAMA_NUM_CTX
+    assert prov._num_ctx() == lp.OLLAMA_NUM_CTX
