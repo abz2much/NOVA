@@ -88,6 +88,30 @@ def test_chat_sends_native_controls_and_parses_text_usage(llm, monkeypatch):
     assert result["usage"] == {"input_tokens": 12, "output_tokens": 3}
 
 
+@pytest.mark.parametrize(("content", "expected"), [
+    (
+        "<think>\nI should answer directly.\n</think>\n\nNova online",
+        "Nova online",
+    ),
+    (
+        "I should answer directly.\nThe user asked for two sentences.\n"
+        "</think>\n\nNova online",
+        "Nova online",
+    ),
+    ("Nova online", "Nova online"),
+    ("Explain the literal token </think> carefully.",
+     "Explain the literal token </think> carefully."),
+])
+def test_chat_hides_qwen_thinking_envelope(llm, monkeypatch, content, expected):
+    provider, _ = _provider(
+        llm, monkeypatch, {"message": {"role": "assistant", "content": content}}
+    )
+
+    result = provider.chat([{"role": "user", "content": "status"}])
+
+    assert result["text"] == expected
+
+
 def test_chat_sends_optional_bearer_auth_only_when_configured(llm, monkeypatch):
     response = {"message": {"content": "ok"}}
     protected, protected_capture = _provider(

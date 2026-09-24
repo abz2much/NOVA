@@ -333,6 +333,34 @@ class OllamaProvider(LLMProvider):
             num_ctx = OLLAMA_NUM_CTX
         return num_ctx
 
+    @staticmethod
+    def _visible_text(content: Any) -> str:
+        """Remove a leaked reasoning envelope from Ollama response text.
+
+        ``think: false`` is the primary control, but some reasoning GGUFs can
+        still place their scratchpad in ``message.content``. Qwen can also
+        omit the opening ``<think>`` marker while retaining a line-delimited
+        closing marker. Strip only those two well-defined envelope shapes;
+        an inline literal ``</think>`` remains ordinary user-visible text.
+        """
+        text = str(content or "").strip()
+        lower = text.lower()
+        marker = "</think>"
+        marker_at = lower.find(marker)
+        if marker_at < 0:
+            return text
+
+        prefix = text[:marker_at]
+        suffix = text[marker_at + len(marker):]
+        has_opening_marker = prefix.lstrip().lower().startswith("<think>")
+        has_orphan_line_marker = (
+            (marker_at == 0 or prefix.endswith(("\n", "\r")))
+            and suffix.startswith(("\n", "\r"))
+        )
+        if has_opening_marker or has_orphan_line_marker:
+            return suffix.strip()
+        return text
+
     def chat(self, messages, tools=None, max_tokens=512, temperature=0.7,
              model_override=None):
         payload: dict[str, Any] = {
@@ -406,7 +434,7 @@ class OllamaProvider(LLMProvider):
             })
 
         return {
-            "text": str(message.get("content") or "").strip(),
+            "text": self._visible_text(message.get("content")),
             "tool_calls": tool_calls,
             "raw": data,
             "usage": {
@@ -974,9 +1002,15 @@ async def chat_with_activity(
     result = None
     success = False
     try:
+        chat_kwargs = {
+            "tools": tools,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+        if model_override is not None:
+            chat_kwargs["model_override"] = model_override
         result = await hass.async_add_executor_job(
-            lambda: provider.chat(messages, tools=tools, max_tokens=max_tokens,
-                                  temperature=temperature, model_override=model_override))
+            lambda: provider.chat(messages, **chat_kwargs))
         success = True
         return result
     finally:
