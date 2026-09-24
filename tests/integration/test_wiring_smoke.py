@@ -91,7 +91,15 @@ async def test_config_flow_accepts_local_llm(hass):
     v6.7.0 'local-first install' contract. test_connection is mocked so this
     exercises the flow's own acceptance logic, not a real network call to a
     local Ollama server that won't exist in CI."""
-    with patch("custom_components.nova.llm_provider.test_connection", return_value=None):
+    # Earlier setup tests legitimately persist a local-only runtime config in
+    # PHACC's shared test config directory. Once _find_config learned to
+    # recognise local endpoints (not only cloud keys), that state correctly
+    # triggers the reinstall auto-import path and completes this flow during
+    # async_init. This test is specifically for the *manual* form path, so
+    # isolate that path instead of depending on suite order or deleting a
+    # valid config file another test created.
+    with patch("custom_components.nova.config_flow._find_config", return_value=None), \
+            patch("custom_components.nova.llm_provider.test_connection", return_value=None):
         result = await hass.config_entries.flow.async_init(
             DOMAIN, context={"source": "user"})
         result = await hass.config_entries.flow.async_configure(
@@ -100,6 +108,7 @@ async def test_config_flow_accepts_local_llm(hass):
         )
     assert result["type"] == "create_entry"
     assert result["data"]["llm_provider"] == "ollama"
+    assert result["data"]["ollama_base_url"] == "http://localhost:11434"
 
 
 async def test_config_flow_auto_imports_from_this_instances_config_dir(hass, tmp_path):
