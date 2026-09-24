@@ -70,7 +70,12 @@ def _find_config(config_path: str) -> dict | None:
         if os.path.exists(config_path):
             with open(config_path) as f:
                 data = json.load(f)
-            if data.get(CONF_API_KEY) or data.get("groq_api_key"):
+            provider = str(data.get("llm_provider") or "").strip().lower()
+            has_endpoint = any(str(data.get(key) or "").strip() for key in (
+                "ollama_base_url", "custom_base_url", "llm_base_url",
+            ))
+            if (data.get(CONF_API_KEY) or data.get("groq_api_key")
+                    or has_endpoint or provider in ("ollama", "custom")):
                 return data
     except Exception:
         pass
@@ -105,8 +110,18 @@ class NovaConfigFlow(ConfigFlow, domain=DOMAIN):
                 # A cloud key's own shape tells us which provider it belongs
                 # to (Anthropic/Groq/Gemini/OpenAI) — no separate provider
                 # picker needed on this first screen.
-                from .llm_provider import test_connection, detect_provider_from_key, DEFAULT_MODELS
+                from .llm_provider import (
+                    DEFAULT_MODELS,
+                    detect_provider_from_key,
+                    normalize_provider_endpoint,
+                    test_connection,
+                )
                 provider = detect_provider_from_key(api_key) if api_key else "ollama"
+                if provider == "ollama":
+                    try:
+                        base_url = normalize_provider_endpoint(base_url, provider)
+                    except ValueError:
+                        errors["base"] = "cannot_connect"
                 model = user_input.get(CONF_MODEL, "").strip()
                 if not model or model == DEFAULT_MODEL:
                     # Field still on its placeholder — use the right default
@@ -114,7 +129,7 @@ class NovaConfigFlow(ConfigFlow, domain=DOMAIN):
                     model = DEFAULT_MODELS.get(provider, DEFAULT_MODEL)
                 # Validate the endpoint before committing, so a wrong URL or key
                 # fails here instead of installing into a broken state.
-                conn_err = await test_connection(
+                conn_err = errors.get("base") or await test_connection(
                     self.hass, provider, api_key, model, base_url or None)
                 if conn_err:
                     errors["base"] = conn_err
@@ -129,6 +144,7 @@ class NovaConfigFlow(ConfigFlow, domain=DOMAIN):
                             CONF_HONORIFIC: user_input.get(CONF_HONORIFIC, DEFAULT_HONORIFIC),
                             "llm_provider": provider,
                             "llm_base_url": base_url,
+                            "ollama_base_url": base_url if provider == "ollama" else "",
                             "schema_version": 7,
                         },
                     )
@@ -166,9 +182,13 @@ class NovaConfigFlow(ConfigFlow, domain=DOMAIN):
             import_data.get(CONF_API_KEY)
             or import_data.get("groq_api_key", "")
         ).strip()
-        base_url = (import_data.get("llm_base_url", "") or "").strip()
         provider = import_data.get("llm_provider", "groq")
-        local_ok = bool(base_url) or provider in ("ollama", "custom")
+        from .llm_provider import resolve_provider_endpoint
+        try:
+            base_url = resolve_provider_endpoint(import_data, provider) or ""
+        except ValueError:
+            base_url = ""
+        local_ok = provider in ("ollama", "custom") and bool(base_url)
 
         # An LLM is required, but a local model counts: proceed if we have either
         # a cloud key OR a local endpoint (provider=ollama/custom, or a base_url).
@@ -191,6 +211,8 @@ class NovaConfigFlow(ConfigFlow, domain=DOMAIN):
                 CONF_HONORIFIC: import_data.get(CONF_HONORIFIC, import_data.get("honorific", DEFAULT_HONORIFIC)),
                 "llm_provider": provider,
                 "llm_base_url": base_url,
+                "ollama_base_url": base_url if provider == "ollama" else "",
+                "custom_base_url": base_url if provider == "custom" else "",
                 "schema_version": 7,
             },
             options={k: v for k, v in import_data.items()

@@ -62,7 +62,11 @@ def _model() -> str:
 def _ollama_base() -> Optional[str]:
     """Resolve the Ollama host from the same config the LLM layer uses. Accepts
     a bare host:port and returns a clean base (no trailing slash, no /v1)."""
-    base = _cfg("embed_base_url", "") or _cfg("llm_base_url", "")
+    base = (
+        _cfg("embed_base_url", "")
+        or _cfg("ollama_base_url", "")
+        or _cfg("llm_base_url", "")
+    )
     base = str(base or "").strip().rstrip("/")
     if not base:
         return None

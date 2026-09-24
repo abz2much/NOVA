@@ -31,6 +31,16 @@ window.confirm = () => true;
 // asks for a name, then a type).
 global.__promptQueue = [];
 window.prompt = () => (global.__promptQueue.length ? global.__promptQueue.shift() : null);
+const _translationFetches = [];
+const I18N_DIR = path.resolve(__dirname, "..", "custom_components", "nova", "frontend", "i18n");
+const translationFetch = async (url) => {
+  _translationFetches.push(String(url));
+  const match = String(url).match(/\/i18n\/([a-z0-9-]+)\.json$/i);
+  const file = match ? path.join(I18N_DIR, `${match[1].toLowerCase()}.json`) : "";
+  if (!file || !fs.existsSync(file)) return { ok: false, json: async () => null };
+  return { ok: true, json: async () => JSON.parse(fs.readFileSync(file, "utf8")) };
+};
+global.fetch = window.fetch = translationFetch;
 
 window.eval(fs.readFileSync(COMPONENT, "utf8"));
 
@@ -162,6 +172,12 @@ const _sugCalls = [];
 let _semanticEnabled = false;
 let _activeMode = "normal";
 const _listModelCalls = [];
+const _endpointTestCalls = [];
+const _applyAiCalls = [];
+const _goalCalls = [];
+const _lockdownCalls = [];
+const _cameraSnapshotCalls = [];
+const _cameraDiagnosticCalls = [];
 const _modeSetCalls = [];
 const _serviceCalls = [];
 const _docDeleteCalls = [];
@@ -186,7 +202,11 @@ const hass = {
   states: { "assist_satellite.a": { state: "idle", attributes: {} }, "camera.front": { attributes: { access_token: "tok123" } }, "camera.back": { attributes: { access_token: "tok456" } },
     "binary_sensor.mailbox": { state: "off", attributes: { friendly_name: "Mailbox" } } },
   callWS: async (m) => {
-    if (m.type === "nova/update_config") { _updateConfigCalls.push({ key: m.key, value: m.value }); return {}; }
+    if (m.type === "nova/update_config") {
+      _updateConfigCalls.push({ key: m.key, value: m.value });
+      if (m.key === "ui_language") PANEL.config.ui_language = m.value;
+      return {};
+    }
     if (m.type === "nova/get_panel_data") return PANEL;
     if (m.type === "nova/get_activity_log") return { entries: [
       { ts: "08:59", urgency: "low", tag: "OBS", msg: "motion in kitchen" },
@@ -216,7 +236,7 @@ const hass = {
       if (f) f.value = m.value;
       return { ok: !!f, pending: _pendingFacts };
     }
-    if (m.type === "nova/camera_snapshot") return { image: "/9j/dGVzdGpwZWc=" };
+    if (m.type === "nova/camera_snapshot") { _cameraSnapshotCalls.push(m.entity_id); return { image: "/9j/dGVzdGpwZWc=" }; }
     if (m.type === "nova/compute_camera_coverage") { _coverageCalls.push(m.camera); return { reason: "faces the front walk", covered: ["Front Yard"] }; }
     if (m.type === "nova/biometrics") {
       if (m.action === "enable") _bioEnabled = true;
@@ -283,11 +303,33 @@ const hass = {
       if (m.provider === "custom") return {
         models: [], error: "model_discovery_unavailable",
       };
+      if (m.provider === "ollama") return {
+        models: ["local-tools:latest", "local-vision:latest"],
+        model_details: [
+          { id: "local-tools:latest", capabilities: ["completion", "tools", "thinking"] },
+          { id: "local-vision:latest", capabilities: ["completion", "vision"] },
+        ],
+      };
       return {
         models: m.provider === "groq"
           ? ["llama-3.3-70b-versatile", "moonshotai/kimi-k2-instruct", "meta-llama/llama-4-scout-17b"]
           : ["gpt-4o", "gpt-4o-mini"],
       };
+    }
+    if (m.type === "nova/test_provider_endpoint") {
+      _endpointTestCalls.push({ ...m });
+      return {
+        ok: true, provider: m.provider, endpoint: m.endpoint,
+        models: ["local-tools:latest", "local-vision:latest"],
+        model_details: [
+          { id: "local-tools:latest", capabilities: ["completion", "tools", "thinking"] },
+          { id: "local-vision:latest", capabilities: ["completion", "vision"] },
+        ],
+      };
+    }
+    if (m.type === "nova/apply_ai_config") {
+      _applyAiCalls.push({ ...m });
+      return { ok: true, message: "AI settings saved. Nova is reloading." };
     }
     if (m.type === "nova/get_credential_status") return {
       status: { ..._credStatus },
@@ -360,7 +402,7 @@ const hass = {
           { entity_id: "camera.back", name: "Backyard", raw_name: "Backyard", outdoor: true, location_mode: "auto" },
         ] };
     }
-    if (m.type === "nova/camera_diagnostics") return {
+    if (m.type === "nova/camera_diagnostics") { _cameraDiagnosticCalls.push(m.entity_id); return {
       summary: [{ entity_id: "camera.front", state: "idle", platform: "nest" }],
       platforms: { nest: 1, frigate: 1 },
       probe: {
@@ -374,7 +416,20 @@ const hass = {
         verdict: "NO FRAME from any tier. Nest cameras only yield event media after a motion/doorbell event — check Pub/Sub.",
         elapsed_ms: 4210,
       },
-    };
+    }; }
+    if (m.type === "nova/set_lockdown") {
+      _lockdownCalls.push(m.on);
+      PANEL.lockdown = { active: m.on, reason: "requested from panel" };
+      PANEL.config.lockdown = PANEL.lockdown;
+      return { ok: true, lockdown: PANEL.lockdown };
+    }
+    if (m.type === "nova/goal_action") {
+      _goalCalls.push({ ...m });
+      if (m.action === "create") PANEL.goals = [...PANEL.goals, { id: 3, title: m.outcome, outcome: m.outcome, status: "active", steps_done: 0, steps_total: 0 }];
+      if (m.action === "cancel") PANEL.goals = PANEL.goals.map(g => g.id === m.goal_id ? { ...g, status: "cancelled" } : g);
+      if (m.action === "delete") PANEL.goals = PANEL.goals.filter(g => g.id !== m.goal_id);
+      return { ok: true, goals: PANEL.goals };
+    }
     if (m.type === "nova/get_area_sparklines") return { sparklines: {
       garage: { temp: [64, 65, 66, 67, 68, 68, 67, 68], humidity: [50, 50, 51, 52, 51, 51, 50, 51] },
     } };
@@ -448,6 +503,54 @@ setTimeout(async () => {
   checks.push(["new look: area light toggle calls light.turn_off targeted at the area",
     _serviceCalls.some(c => c.domain === "light" && c.service === "turn_off" && c.target?.area_id === "garage")]);
 
+  checks.push(
+    ["command center restores Cognitive Core status",
+      /48/.test(newRoot.getElementById("cognitiveMetrics")?.textContent || "")
+      && /217802/.test(newRoot.getElementById("cognitiveMetrics")?.textContent || "")],
+    ["command center restores Goals with active and completed outcomes",
+      newRoot.querySelectorAll(".goal-row").length === 2
+      && /Guest prep/.test(newRoot.getElementById("goalList")?.textContent || "")],
+    ["command center restores the guarded Lockdown control",
+      newRoot.getElementById("lockdownControl")?.textContent === "LOCKDOWN OFF"],
+  );
+  newRoot.getElementById("lockdownControl").click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["lockdown control confirms and calls nova/set_lockdown", _lockdownCalls.length === 1 && _lockdownCalls[0] === true
+    && newRoot.getElementById("lockdownControl")?.classList.contains("active")]);
+
+  const goalInput = newRoot.getElementById("goalOutcome");
+  goalInput.value = "Keep the greenhouse above freezing";
+  newRoot.getElementById("goalCreate").click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["goals can be created from the command center",
+    _goalCalls.some(c => c.action === "create" && c.outcome === "Keep the greenhouse above freezing")
+    && /greenhouse/.test(newRoot.getElementById("goalList")?.textContent || "")]);
+
+  newRoot.getElementById("camToggle").click();
+  await new Promise(r => setTimeout(r, 30));
+  checks.push(["Camera Watch loads authenticated snapshots through Nova",
+    _cameraSnapshotCalls.includes("camera.front")
+    && !!newRoot.querySelector('.camera-slot[data-camera="camera.front"] img')]);
+  newRoot.querySelector('.camera-diagnose[data-camera="camera.front"]').click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["Camera Watch exposes backend diagnostics",
+    _cameraDiagnosticCalls.includes("camera.front")
+    && /NO FRAME/.test(newRoot.querySelector('.camera-slot[data-camera="camera.front"]')?.textContent || "")]);
+  newRoot.querySelector('.camera-analyze[data-camera="camera.front"]').click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["Camera Watch analysis calls the public Nova service without announcing",
+    _serviceCalls.some(c => c.domain === "nova" && c.service === "analyze_camera"
+      && c.data?.entity_id === "camera.front" && c.data?.announce === false)]);
+
+  checks.push(["command center restores the first-run onboarding checklist",
+    newRoot.querySelectorAll(".onboarding-step").length === 5
+    && /1\/5 DONE/.test(newRoot.getElementById("onboardingCard")?.textContent || "")]);
+  newRoot.getElementById("onboardingDismiss").click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["onboarding can be dismissed persistently",
+    !newRoot.getElementById("onboardingCard")
+    && _updateConfigCalls.some(c => c.key === "onboarding_dismissed" && c.value === true)]);
+
   // ── New look: Settings tab (v7.94.0) ──
   // Patching `global`, not `window`: the component code runs via
   // window.eval() but this harness only copies specific globals once at
@@ -470,6 +573,10 @@ setTimeout(async () => {
     ["settings tab has every setting card, General real",
       sRoot.querySelectorAll(".settings-card").length === 29
       && /Sleep state/.test(sRoot.innerHTML) && /Announcements/.test(sRoot.innerHTML)],
+    ["settings tab: General restores cognition, rich reasoning, and dashboard light controls",
+      !!sRoot.querySelector('.toggle-btn[data-cfg-key="cognition_enabled"]')
+      && !!sRoot.querySelector('.toggle-btn[data-cfg-key="rich_reasoning"]')
+      && !!sRoot.querySelector('.toggle-btn[data-cfg-key="light_control_enabled"]')],
     ["settings tab: Room Speakers card is real, not a stub",
       (() => {
         const rs = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Room Speakers/.test(c.querySelector(".panel-title")?.textContent || ""));
@@ -1091,25 +1198,25 @@ setTimeout(async () => {
     Array.from(sRoot.querySelectorAll(".settings-card")).some(c =>
       !c.hidden && /Cameras/.test(c.querySelector(".panel-title")?.textContent || ""))]);
 
-  // AI Models: switch to its group, confirm it's real (not a stub) with all
-  // six roles rendered, live models loaded from nova/list_models, and the
-  // vision-role hint present — then exercise the provider-change flow
-  // (self-heal + llm_base_url clear), which deliberately does NOT go
-  // through _saveSetting/_render (see _wireAiModels's own comment).
+  // AI Models: five real runtime roles, separate self-hosted endpoints, and
+  // staged changes that only persist through the atomic Apply command.
   const voiceNavBtn = Array.from(sRoot.querySelectorAll(".settings-nav-btn")).find(b => b.textContent === "Voice & Speakers");
   voiceNavBtn.click();
   await new Promise(r => setTimeout(r, 30));
   sRoot = elNew.shadowRoot;
   checks.push(
-    ["settings tab: AI Models card is real with all six roles and live models loaded",
+    ["settings tab: AI Models card has five real roles and self-hosted setup controls",
       (() => {
         const aiCard = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /AI Models/.test(c.querySelector(".panel-title")?.textContent || ""));
         if (!aiCard || aiCard.querySelector(".stub-tag")) return false;
         const rows = aiCard.querySelectorAll(".new-model-row");
         const llmRow = aiCard.querySelector('.new-model-row[data-role="llm"] .new-model-select');
-        return rows.length === 6
+        return rows.length === 5
           && !!llmRow && /llama-3\.3-70b-versatile/.test(llmRow.innerHTML)
-          && /image-capable model/.test(aiCard.querySelector('.new-model-row[data-role="vision"]')?.textContent || "");
+          && !aiCard.querySelector('.new-model-row[data-role="review"]')
+          && !!aiCard.querySelector('.ai-endpoint[data-endpoint-provider="ollama"]')
+          && !!aiCard.querySelector("#aiApply")
+          && /Vision needs/.test(aiCard.querySelector('.new-model-row[data-role="vision"]')?.textContent || "");
       })()],
   );
   checks.push(["settings tab: model discovery sends no browser-controlled URL",
@@ -1124,12 +1231,12 @@ setTimeout(async () => {
         && [...keys].every(k => allowed.has(k));
     })]);
   const llmProvSel = sRoot.querySelector('.new-model-row[data-role="llm"] .new-prov-select');
+  const updatesBeforeProviderChange = _updateConfigCalls.length;
   llmProvSel.value = "openai";
   llmProvSel.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
   await new Promise(r => setTimeout(r, 20));
-  checks.push(["settings tab: AI Models provider change saves provider, clears base_url, and reloads its own model list",
-    _updateConfigCalls.some(c => c.key === "llm_provider" && c.value === "openai")
-    && _updateConfigCalls.some(c => c.key === "llm_base_url" && c.value === "")
+  checks.push(["settings tab: provider changes are staged, preserve endpoints, and load models",
+    _updateConfigCalls.length === updatesBeforeProviderChange
     && /gpt-4o/.test(sRoot.querySelector('.new-model-row[data-role="llm"] .new-model-select')?.innerHTML || "")]);
 
   const llmModelSel = sRoot.querySelector('.new-model-row[data-role="llm"] .new-model-select');
@@ -1141,11 +1248,35 @@ setTimeout(async () => {
   llmModelSel.value = "__custom__";
   llmModelSel.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
   llmCustomInput.value = "manually-entered-model";
-  llmCustomInput.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+  llmCustomInput.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("input", { bubbles: true }));
   await new Promise(r => setTimeout(r, 20));
   checks.push(["settings tab: manual model entry remains available when discovery is unavailable",
     unavailableShown
-    && _updateConfigCalls.some(c => c.key === "model" && c.value === "manually-entered-model")]);
+    && llmCustomInput.value === "manually-entered-model"
+    && _updateConfigCalls.length === updatesBeforeProviderChange]);
+
+  const ollamaEndpoint = sRoot.querySelector('.ai-endpoint[data-endpoint-provider="ollama"]');
+  ollamaEndpoint.value = "http://ollama.lan:11434";
+  sRoot.querySelector('.ai-endpoint-test[data-endpoint-provider="ollama"]').click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: endpoint Test uses the staged URL and shows discovered capabilities",
+    _endpointTestCalls.some(c => c.provider === "ollama" && c.endpoint === "http://ollama.lan:11434")
+    && /2 models found/.test(sRoot.querySelector('[data-endpoint-status="ollama"]')?.textContent || "")]);
+
+  sRoot.querySelector('[data-ai-profile="hybrid"]').click();
+  checks.push(["settings tab: Hybrid stages background text roles on a capability-matched local model",
+    sRoot.querySelector('.new-model-row[data-role="classifier"] .new-prov-select')?.value === "ollama"
+    && sRoot.querySelector('.new-model-row[data-role="classifier"] .new-model-select')?.value === "local-tools:latest"
+    && sRoot.querySelector('.new-model-row[data-role="llm"] .new-prov-select')?.value === "custom"]);
+
+  sRoot.querySelector("#aiApply").click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: Apply sends one complete AI transaction and no generic config writes",
+    _applyAiCalls.length === 1
+    && _applyAiCalls[0].updates.ollama_base_url === "http://ollama.lan:11434"
+    && _applyAiCalls[0].updates.classifier_provider === "ollama"
+    && _applyAiCalls[0].updates.home_context_max_entities === 15
+    && _updateConfigCalls.length === updatesBeforeProviderChange]);
 
   // Phase 3, v7.108.0: a saved model absent from the live list must be kept
   // selected, NEVER silently auto-picked-and-saved (the exact bug this
@@ -1470,6 +1601,8 @@ setTimeout(async () => {
         const amCard = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Anticipation & Memory/.test(c.querySelector(".panel-title")?.textContent || ""));
         return !!amCard && !amCard.querySelector(".stub-tag")
           && !!amCard.querySelector('button[data-cfg-key="continued_conversation_enabled"]')
+          && !!amCard.querySelector('button[data-cfg-key="adaptive_interruption_budget"]')
+          && !!amCard.querySelector('button[data-cfg-key="adaptive_suggestion_threshold"]')
           && !!amCard.querySelector('input[data-cfg-key="memory_threading_hours"]');
       })()],
   );
@@ -1610,6 +1743,8 @@ setTimeout(async () => {
   // camera_auto_analyze from his actual settings screen.
   checks.push(["settings tab: Camera Watch and Visitor Learning toggles are real, not stubs",
     !!sRoot.querySelector('.toggle-btn[data-cfg-key="camera_auto_analyze"]')
+    && !!sRoot.querySelector('.toggle-btn[data-cfg-key="camera_auto_analyze_motion"]')
+    && !!sRoot.querySelector('.toggle-btn[data-cfg-key="package_detection"]')
     && !!sRoot.querySelector('.toggle-btn[data-cfg-key="visitor_learning"]')]);
   const camWatchBtn = sRoot.querySelector('.toggle-btn[data-cfg-key="camera_auto_analyze"]');
   camWatchBtn.click();
@@ -1684,15 +1819,17 @@ setTimeout(async () => {
     })()]);
 
   // Nova Character & Research: fully generic .cfg-field card, same as
-  // Anticipation & Memory — banter level, search backend, SearXNG URL.
+  // Anticipation & Memory — banter level, search backend, SearXNG URL,
+  // and the restored calendar tight-gap control.
   checks.push(
-    ["settings tab: Nova Character & Research card is real with its three fields",
+    ["settings tab: Nova Character & Research card restores all four fields",
       (() => {
         const crc = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Nova Character & Research/.test(c.querySelector(".panel-title")?.textContent || ""));
         return !!crc && !crc.querySelector(".stub-tag")
           && !!crc.querySelector('select[data-cfg-key="banter_level"]')
           && !!crc.querySelector('select[data-cfg-key="search_backend"]')
           && !!crc.querySelector('input[data-cfg-key="searxng_url"]')
+          && !!crc.querySelector('input[data-cfg-key="calendar_tight_gap_min"]')
           && crc.querySelector('input[data-cfg-key="searxng_url"]').value === "http://sx.local:8080";
       })()],
   );
@@ -2315,6 +2452,35 @@ setTimeout(async () => {
   checks.push(["switching tabs cancels the previous core animation loop instead of leaking it",
     _cafCalls >= 1]);
   global.cancelAnimationFrame = _realCaf;
+
+  // Command Center localization was accidentally dropped when Classic was
+  // removed even though all 18 dictionaries and ui_language persisted.
+  elNew._currentTab = "settings";
+  elNew._render();
+  let langSelect = elNew.shadowRoot.getElementById("uiLanguage");
+  checks.push(["settings restores the panel Language selector for every shipped locale",
+    !!langSelect && langSelect.options.length === 20 && langSelect.value === "auto"]);
+  langSelect.value = "fr";
+  langSelect.dispatchEvent(new window.Event("change", { bubbles: true }));
+  await new Promise(r => setTimeout(r, 60));
+  checks.push(["panel language can switch at runtime and translates exact static labels",
+    _updateConfigCalls.some(c => c.key === "ui_language" && c.value === "fr")
+    && Array.from(elNew.shadowRoot.querySelectorAll(".nav-tab")).some(b => b.textContent === "Paramètres")]);
+
+  PANEL.config.ui_language = "fr-ca";
+  elNew._uiLangLoaded = null;
+  _translationFetches.length = 0;
+  await elNew._loadUiStrings(true);
+  checks.push(["regional language tags fall back to the shipped base dictionary",
+    _translationFetches.some(u => /fr-ca\.json$/.test(u))
+    && _translationFetches.some(u => /fr\.json$/.test(u))
+    && Array.from(elNew.shadowRoot.querySelectorAll(".nav-tab")).some(b => b.textContent === "Paramètres")]);
+
+  PANEL.config.ui_language = "en";
+  elNew._uiLangLoaded = null;
+  await elNew._loadUiStrings(true);
+  checks.push(["English fallback restores the source UI without a translation request",
+    Array.from(elNew.shadowRoot.querySelectorAll(".nav-tab")).some(b => b.textContent === "Settings")]);
 
   if (elNew._fetchInterval) clearInterval(elNew._fetchInterval);
   if (elNew._sparklineInterval) clearInterval(elNew._sparklineInterval);

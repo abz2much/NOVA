@@ -8,7 +8,7 @@ configuration change rather than a code rewrite.
 Supported backends today:
   - groq        (default — fast, free tier, OpenAI-compatible API)
   - openai      (OpenAI direct, or any OpenAI-compatible endpoint)
-  - ollama      (local, self-hosted via OpenAI-compatible endpoint)
+  - ollama      (local, self-hosted via Ollama's native chat API)
   - anthropic   (Claude API)
   - custom      (any OpenAI-compatible endpoint with a base_url)
 
@@ -18,14 +18,18 @@ uniform interface and doesn't need changes.
 """
 from __future__ import annotations
 
+import base64
 import ipaddress
 import json
 import logging
 import re
 import time as _time
+import uuid
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 from urllib.parse import urlparse
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -48,7 +52,7 @@ _LOGGER = logging.getLogger(__name__)
 
 def _openai_style_usage(resp) -> dict:
     """Token usage from an OpenAI-compatible chat completion response (Groq,
-    OpenAI, and Ollama's OpenAI-compatible endpoint all share this shape).
+    OpenAI, and custom OpenAI-compatible endpoints share this shape).
     None per field when the response has no usage object, or the field
     itself is absent — never estimated."""
     u = getattr(resp, "usage", None)
@@ -222,38 +226,103 @@ OLLAMA_NUM_CTX = 8192
 OLLAMA_TIMEOUT = 120.0  # seconds
 
 
-class OllamaProvider(OpenAIProvider):
-    """Ollama via its OpenAI-compatible API, tuned for local/self-hosted use."""
+class OllamaProvider(LLMProvider):
+    """Ollama's native ``/api/chat`` transport.
+
+    Ollama's OpenAI-compatible endpoint does not reliably forward native
+    controls such as ``think``. The native endpoint also avoids an OpenAI SDK
+    dependency for a fully local installation.
+    """
     name = "ollama"
 
     def __init__(self, api_key: str, model: str, base_url: Optional[str] = None):
-        super().__init__(api_key or "ollama", model, self._normalize_url(base_url))
-        # Local generation (and cold model loads) can outlast the default HTTP
-        # timeout — give it room so a slow first token isn't a hard failure.
-        try:
-            self._client = self._client.with_options(timeout=OLLAMA_TIMEOUT)
-        except Exception:
-            pass
+        native_base = self._normalize_url(base_url)
+        if not native_base:
+            raise ValueError("Ollama endpoint is not configured")
+        super().__init__(api_key, model, native_base)
 
     @staticmethod
     def _normalize_url(base_url: Optional[str]) -> Optional[str]:
-        # Accept a bare host:port and append Ollama's OpenAI-compatible path
-        # (…:11434 → …:11434/v1) so the endpoint is correct either way.
-        if base_url and base_url.rstrip("/").endswith(":11434"):
-            return base_url.rstrip("/") + "/v1"
-        return base_url
+        """Return the native API root, accepting a legacy trailing ``/v1``."""
+        base = str(base_url or "").strip().rstrip("/")
+        if not base:
+            return None
+        if base.endswith("/v1"):
+            base = base[:-3].rstrip("/")
+        return base
 
-    def _extra_body(self) -> dict:
-        # keep_alive + num_ctx are Ollama extensions passed through the
-        # OpenAI-compatible endpoint; harmless no-ops on non-Ollama backends,
-        # but only OllamaProvider sends them.
-        # think=False: many local models (gemma3/4, qwen3, deepseek-r1) are
-        # reasoning models — their thinking goes to a separate "reasoning"
-        # field and "content" stays empty until it finishes. On a small token
-        # budget that means an empty answer, so we ask Ollama to skip thinking
-        # and answer directly. Harmless on non-reasoning models.
-        # num_ctx is configurable (ollama_num_ctx) so a larger local model can
-        # use a bigger context window; falls back to the default.
+    @staticmethod
+    def _content_to_native(content: Any) -> tuple[str, list[str]]:
+        """Convert OpenAI-style text/image blocks to Ollama message fields."""
+        if isinstance(content, str):
+            return content, []
+        if not isinstance(content, list):
+            return str(content or ""), []
+
+        text_parts: list[str] = []
+        images: list[str] = []
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            if part.get("type") == "text":
+                text_parts.append(str(part.get("text") or ""))
+                continue
+            if part.get("type") != "image_url":
+                continue
+            url = str((part.get("image_url") or {}).get("url") or "")
+            if not url.startswith("data:") or "," not in url:
+                raise ValueError("Ollama images must be inline data URLs")
+            payload = url.split(",", 1)[1]
+            try:
+                base64.b64decode(payload, validate=True)
+            except Exception as exc:
+                raise ValueError("Ollama image contains invalid base64 data") from exc
+            images.append(payload)
+        return "\n".join(p for p in text_parts if p), images
+
+    @classmethod
+    def _messages_to_native(cls, messages: list[dict]) -> list[dict]:
+        """Translate Nova's OpenAI-shaped history to Ollama chat messages."""
+        out: list[dict] = []
+        tool_names: dict[str, str] = {}
+        for message in messages:
+            role = str(message.get("role") or "user")
+            content, images = cls._content_to_native(message.get("content", ""))
+            native: dict[str, Any] = {"role": role, "content": content}
+            if images:
+                native["images"] = images
+
+            calls = message.get("tool_calls") or []
+            if calls:
+                native_calls = []
+                for call in calls:
+                    function = call.get("function") or {}
+                    name = str(function.get("name") or "")
+                    arguments = function.get("arguments") or {}
+                    if isinstance(arguments, str):
+                        try:
+                            arguments = json.loads(arguments)
+                        except json.JSONDecodeError as exc:
+                            raise ValueError("tool call arguments are not valid JSON") from exc
+                    if not isinstance(arguments, dict):
+                        raise ValueError("tool call arguments must be a JSON object")
+                    call_id = str(call.get("id") or "")
+                    if call_id and name:
+                        tool_names[call_id] = name
+                    native_calls.append({
+                        "function": {"name": name, "arguments": arguments},
+                    })
+                native["tool_calls"] = native_calls
+
+            if role == "tool":
+                tool_name = tool_names.get(str(message.get("tool_call_id") or ""))
+                if tool_name:
+                    native["tool_name"] = tool_name
+            out.append(native)
+        return out
+
+    @staticmethod
+    def _num_ctx() -> int:
         num_ctx = OLLAMA_NUM_CTX
         try:
             from . import nova_config
@@ -262,8 +331,89 @@ class OllamaProvider(OpenAIProvider):
                 num_ctx = OLLAMA_NUM_CTX
         except Exception:
             num_ctx = OLLAMA_NUM_CTX
-        return {"keep_alive": OLLAMA_KEEP_ALIVE, "think": False,
-                "options": {"num_ctx": num_ctx}}
+        return num_ctx
+
+    def chat(self, messages, tools=None, max_tokens=512, temperature=0.7,
+             model_override=None):
+        payload: dict[str, Any] = {
+            "model": model_override or self.model,
+            "messages": self._messages_to_native(messages),
+            "stream": False,
+            "think": False,
+            "keep_alive": OLLAMA_KEEP_ALIVE,
+            "options": {
+                "num_ctx": self._num_ctx(),
+                "num_predict": max_tokens,
+                "temperature": temperature,
+            },
+        }
+        if tools:
+            payload["tools"] = tools
+
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        request = Request(
+            f"{self.base_url}/api/chat",
+            data=json.dumps(payload).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=OLLAMA_TIMEOUT) as response:
+                raw_bytes = response.read()
+        except HTTPError as exc:
+            try:
+                detail = exc.read().decode("utf-8", errors="replace")[:300]
+                detail = str(json.loads(detail).get("error") or detail)
+            except Exception:
+                detail = "request failed"
+            raise RuntimeError(f"Ollama HTTP {exc.code}: {detail}") from exc
+        except (URLError, TimeoutError, OSError) as exc:
+            raise RuntimeError(f"Ollama connection failed: {exc}") from exc
+
+        try:
+            data = json.loads(raw_bytes)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise RuntimeError("Ollama returned an invalid JSON response") from exc
+        if not isinstance(data, dict):
+            raise RuntimeError("Ollama returned an invalid response")
+        if data.get("error"):
+            raise RuntimeError(f"Ollama error: {str(data['error'])[:300]}")
+
+        message = data.get("message") or {}
+        if not isinstance(message, dict):
+            raise RuntimeError("Ollama returned an invalid message")
+        tool_calls = []
+        for item in message.get("tool_calls") or []:
+            if not isinstance(item, dict):
+                raise RuntimeError("Ollama returned an invalid tool call")
+            function = item.get("function") or {}
+            if not isinstance(function, dict) or not function.get("name"):
+                raise RuntimeError("Ollama returned a tool call without a name")
+            arguments = function.get("arguments") or {}
+            if isinstance(arguments, str):
+                try:
+                    arguments = json.loads(arguments)
+                except json.JSONDecodeError as exc:
+                    raise RuntimeError("Ollama returned invalid tool arguments") from exc
+            if not isinstance(arguments, dict):
+                raise RuntimeError("Ollama returned non-object tool arguments")
+            tool_calls.append({
+                "id": f"call_ollama_{uuid.uuid4().hex}",
+                "name": str(function.get("name") or ""),
+                "args": arguments,
+            })
+
+        return {
+            "text": str(message.get("content") or "").strip(),
+            "tool_calls": tool_calls,
+            "raw": data,
+            "usage": {
+                "input_tokens": data.get("prompt_eval_count"),
+                "output_tokens": data.get("eval_count"),
+            },
+        }
 
 
 # ─── Anthropic ───────────────────────────────────────────────────────────────
@@ -453,7 +603,7 @@ class AnthropicProvider(LLMProvider):
 PROVIDERS = {
     "groq":      GroqProvider,
     "openai":    OpenAIProvider,
-    "ollama":    OllamaProvider,    # Ollama's OpenAI-compatible API, tuned local
+    "ollama":    OllamaProvider,    # Ollama's native /api/chat API
     "gemini":    OpenAIProvider,    # Gemini exposes an OpenAI-compatible API
     "custom":    OpenAIProvider,    # Any OpenAI-compatible endpoint
     "anthropic": AnthropicProvider,
@@ -517,6 +667,96 @@ DEFAULT_MODELS = {
 }
 
 
+_SELF_HOSTED_PROVIDERS = frozenset({"ollama", "custom"})
+_PROVIDER_ENDPOINT_FIELDS = {
+    "ollama": "ollama_base_url",
+    "custom": "custom_base_url",
+}
+
+
+def normalize_provider_endpoint(value: str, provider: str) -> str:
+    """Validate and normalise a self-hosted provider endpoint.
+
+    Accepts a full HTTP(S) URL or a bare host/IP. Bare Ollama endpoints get
+    Ollama's default port. Credentials, query strings, and fragments are not
+    accepted in endpoint URLs; authentication belongs in the provider's
+    dedicated credential field.
+    """
+    provider = str(provider or "").strip().lower()
+    if provider not in _SELF_HOSTED_PROVIDERS:
+        raise ValueError(f"provider '{provider}' does not use a self-hosted endpoint")
+
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    if len(raw) > 2048:
+        raise ValueError("endpoint is too long")
+
+    had_scheme = "://" in raw
+    if not had_scheme:
+        # urlparse treats an unbracketed IPv6 address as several URL fields.
+        # Bracket it before adding the scheme and Ollama's default port.
+        try:
+            address = ipaddress.ip_address(raw)
+        except ValueError:
+            address = None
+        if address is not None and address.version == 6:
+            raw = f"http://[{raw}]"
+        else:
+            raw = f"http://{raw}"
+
+    parsed = urlparse(raw)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("endpoint must use http or https")
+    if not parsed.hostname:
+        raise ValueError("endpoint must include a host")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("endpoint credentials must be stored separately")
+    if parsed.query or parsed.fragment or parsed.params:
+        raise ValueError("endpoint must not include a query string or fragment")
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("endpoint has an invalid port") from exc
+
+    host = parsed.hostname
+    if ":" in host:
+        host = f"[{host}]"
+    if port is None and provider == "ollama" and not had_scheme:
+        port = 11434
+    authority = host if port is None else f"{host}:{port}"
+    path = parsed.path.rstrip("/")
+    return f"{parsed.scheme}://{authority}{path}"
+
+
+def resolve_provider_endpoint(
+    config: dict,
+    provider: str,
+    tier: Optional[str] = None,
+) -> Optional[str]:
+    """Return the endpoint belonging to ``provider``.
+
+    Provider-specific fields prevent an Ollama URL from being reused for a
+    custom OpenAI-compatible provider (and vice versa). ``llm_base_url`` stays
+    as a compatibility fallback for existing installations until the settings
+    UI has saved the dedicated field.
+    """
+    provider = str(provider or "").strip().lower()
+    if provider not in _SELF_HOSTED_PROVIDERS:
+        return None
+
+    candidates = []
+    if tier:
+        candidates.append(config.get(f"{tier}_base_url"))
+    candidates.append(config.get(_PROVIDER_ENDPOINT_FIELDS[provider]))
+    if not config.get("self_hosted_endpoints_migrated"):
+        candidates.append(config.get("llm_base_url"))
+    for candidate in candidates:
+        if candidate not in (None, ""):
+            return normalize_provider_endpoint(str(candidate), provider)
+    return None
+
+
 def detect_provider_from_key(api_key: str) -> str:
     """
     Guess the cloud provider from an API key's own shape, so first-run
@@ -574,7 +814,7 @@ def create_provider(
     Factory for provider instances.
 
     provider_name: 'groq' | 'openai' | 'gemini' | 'ollama' | 'anthropic' | 'custom'
-    For 'ollama', set base_url to e.g. 'http://homeassistant.local:11434/v1'
+    For 'ollama', set base_url to e.g. 'http://gpu-server:11434'.
     For 'gemini', base_url defaults to Google's OpenAI-compat endpoint.
     For 'custom', set base_url to whatever OpenAI-compatible endpoint you want.
     """
@@ -584,25 +824,15 @@ def create_provider(
         _LOGGER.warning("LLM routing corrected: %s", note)
     cls = PROVIDERS.get(provider_name)
     if cls is None:
-        _LOGGER.warning(
-            "Unknown LLM provider '%s' — falling back to groq", provider_name
-        )
-        cls = GroqProvider
+        raise ValueError(f"Unknown LLM provider '{provider_name}'")
 
     # Default base URLs for provider-specific cases
     if provider_name == "ollama" and not base_url:
-        base_url = "http://homeassistant.local:11434/v1"
+        raise ValueError("Ollama endpoint is not configured")
     elif provider_name == "gemini" and not base_url:
         base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
 
-    try:
-        return cls(api_key=api_key, model=model, base_url=base_url)
-    except Exception as exc:
-        _LOGGER.error(
-            "Failed to create provider '%s' (%s). Falling back to Groq.",
-            provider_name, exc,
-        )
-        return GroqProvider(api_key=api_key, model=model, base_url=None)
+    return cls(api_key=api_key, model=model, base_url=base_url)
 
 
 def list_providers() -> list[str]:
@@ -696,12 +926,7 @@ def create_tier_provider(
 
     api_key = resolve_provider_credential(config, provider_name)
 
-    # Per-tier base_url wins; otherwise the shared llm_base_url applies for
-    # local/self-hosted backends (Ollama on the GPU server, any OpenAI-compatible
-    # endpoint). Cloud providers keep their canonical endpoints.
-    base_url = config.get(f"{tier}_base_url")
-    if not base_url and provider_name in ("ollama", "custom"):
-        base_url = config.get("llm_base_url") or None
+    base_url = resolve_provider_endpoint(config, provider_name, tier)
 
     _LOGGER.debug("Creating %s tier provider: %s / %s", tier, provider_name, model)
 
@@ -815,8 +1040,15 @@ async def test_connection(hass, provider, api_key, model, base_url):
         return "cannot_connect"
 
     def _ping():
-        return client.chat([{"role": "user", "content": "ping"}],
-                           tools=None, max_tokens=5)
+        result = client.chat(
+            [{"role": "user", "content": "Reply with the word pong."}],
+            tools=None,
+            max_tokens=32,
+            temperature=0.0,
+        )
+        if not str(result.get("text") or "").strip() and not result.get("tool_calls"):
+            raise RuntimeError("provider returned an empty response")
+        return result
     try:
         await hass.async_add_executor_job(_ping)
         return None

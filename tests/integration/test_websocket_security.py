@@ -84,6 +84,50 @@ async def test_list_models_rejects_non_admin(
     assert resp["error"]["code"] == "unauthorized"
 
 
+@pytest.mark.parametrize("message", [
+    {
+        "type": "nova/test_provider_endpoint",
+        "provider": "ollama",
+        "endpoint": "http://ollama.lan:11434",
+    },
+    {
+        "type": "nova/apply_ai_config",
+        "updates": {"ollama_num_ctx": 8192},
+    },
+])
+async def test_self_hosted_setup_commands_reject_non_admin(
+    hass, hass_ws_client, hass_read_only_access_token, message,
+):
+    """Testing or applying an endpoint is an administrator-only action."""
+    await _setup_nova(hass)
+    client = await hass_ws_client(hass, access_token=hass_read_only_access_token)
+
+    await client.send_json_auto_id(message)
+    resp = await client.receive_json()
+
+    assert resp["success"] is False
+    assert resp["error"]["code"] == "unauthorized"
+
+
+async def test_endpoint_test_schema_rejects_browser_supplied_credential(
+    hass, hass_ws_client,
+):
+    """Endpoint credentials can only come from the server-side secrets store."""
+    await _setup_nova(hass)
+    client = await hass_ws_client(hass)
+
+    await client.send_json_auto_id({
+        "type": "nova/test_provider_endpoint",
+        "provider": "ollama",
+        "endpoint": "http://ollama.lan:11434",
+        "api_key": "must-not-be-accepted",
+    })
+    resp = await client.receive_json()
+
+    assert resp["success"] is False
+    assert resp["error"]["code"] == "invalid_format"
+
+
 async def test_list_models_schema_rejects_browser_supplied_base_url(
     hass, hass_ws_client,
 ):

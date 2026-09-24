@@ -12,7 +12,6 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.event import async_track_time_change
 
 from .const import (
-    CONF_API_KEY,
     CONF_BEDROOM_AREAS,
     CONF_BROADCAST_GROUP,
     CONF_HONORIFIC,
@@ -39,7 +38,11 @@ from .recognition import register_recognition_listener
 from .summary import async_summarise
 from .sentinel import NovaSentinel
 from .database import purge_old_records, get_stats
-from .llm_provider import create_provider, resolve_provider_credential
+from .llm_provider import (
+    create_provider,
+    resolve_provider_credential,
+    resolve_provider_endpoint,
+)
 from .migrations import migrate_config, CURRENT_SCHEMA_VERSION
 from .panel_register import async_register_panel, async_unregister_panel
 from .websocket import async_register as async_register_ws
@@ -163,10 +166,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # narrow fallback to the legacy shared key only when llm_provider_name is
     # the installation's saved primary provider (see resolve_provider_credential).
     api_key = resolve_provider_credential(_eff, llm_provider_name)
-    if not api_key:
-        api_key = entry.data.get(CONF_API_KEY, "")
     llm_model         = _eff.get("model", "openai/gpt-oss-120b")
-    llm_base_url      = _eff.get("llm_base_url", "") or None
+    llm_base_url      = resolve_provider_endpoint(_eff, llm_provider_name)
 
     try:
         llm_client = await hass.async_add_executor_job(

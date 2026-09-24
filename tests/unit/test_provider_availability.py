@@ -29,7 +29,7 @@ def compute():
 
 def test_cloud_providers_available_only_with_their_own_credential(compute):
     status = {"groq": True, "openai": False, "anthropic": False, "gemini": False}
-    available = compute(status, base_url_set=False)
+    available = compute(status, endpoint_status={})
     assert available["groq"] is True
     assert available["openai"] is False
     assert available["anthropic"] is False
@@ -40,30 +40,30 @@ def test_one_providers_credential_never_marks_another_available(compute):
     """The exact shape of the requirement: never infer availability from
     another provider's key."""
     status = {"groq": True, "openai": True, "anthropic": False, "gemini": False}
-    available = compute(status, base_url_set=False)
+    available = compute(status, endpoint_status={})
     assert available["anthropic"] is False
     assert available["gemini"] is False
 
 
 def test_custom_available_only_when_endpoint_saved(compute):
-    assert compute({}, base_url_set=False)["custom"] is False
-    assert compute({}, base_url_set=True)["custom"] is True
+    assert compute({}, endpoint_status={})["custom"] is False
+    assert compute({}, endpoint_status={"custom": True})["custom"] is True
 
 
-def test_ollama_always_available(compute):
-    assert compute({}, base_url_set=False)["ollama"] is True
-    assert compute({}, base_url_set=True)["ollama"] is True
+def test_ollama_available_only_when_endpoint_saved(compute):
+    assert compute({}, endpoint_status={})["ollama"] is False
+    assert compute({}, endpoint_status={"ollama": True})["ollama"] is True
 
 
 def test_credential_status_never_influences_custom_or_ollama(compute):
     """A cloud credential existing must never make custom/ollama look
     configured — they have their own, unrelated availability evidence."""
     status = {"groq": True, "openai": True, "anthropic": True, "gemini": True}
-    available = compute(status, base_url_set=False)
+    available = compute(status, endpoint_status={})
     assert available["custom"] is False
-    assert available["ollama"] is True  # true regardless, not because of any key
+    assert available["ollama"] is False
 
 
 def test_returns_exactly_the_six_provider_families(compute):
-    available = compute({}, base_url_set=False)
+    available = compute({}, endpoint_status={})
     assert set(available) == {"groq", "openai", "anthropic", "gemini", "custom", "ollama"}

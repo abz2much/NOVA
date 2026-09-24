@@ -1121,11 +1121,19 @@ class NovaPanel extends HTMLElement {
     this._particles = [];
     this._current = { speed: 0.20, count: 70, radiusMul: 1, glow: 0.55, hot: 0.35, flare: 0.05 };
     this._camOpen = false;
+    this._cameraImages = {};
+    this._cameraLoading = {};
+    this._cameraDiagnostics = {};
+    this._cameraInterval = null;
+    this._cognitive = null;
     this._currentTab = "dashboard"; // "dashboard" | "settings" | "logs" | "memory" | "intrusion" | "suggestions"
     this._logFilter = "all";
     this._logSearch = "";
     this._settingsSection = "general";
     this._settingsSearch = "";
+    this._uiStrings = null;
+    this._uiLangLoaded = null;
+    this._uiLangRequest = 0;
   }
 
   // ─── HA property contract — same shape as Classic's, see nova-panel.js ──
@@ -1135,6 +1143,7 @@ class NovaPanel extends HTMLElement {
     if (first) {
       this._render();
       this._startIntervals();
+      this._loadUiStrings();
     }
   }
   get hass() { return this._hass; }
@@ -1165,6 +1174,7 @@ class NovaPanel extends HTMLElement {
   disconnectedCallback() {
     if (this._fetchInterval) clearInterval(this._fetchInterval);
     if (this._sparklineInterval) clearInterval(this._sparklineInterval);
+    if (this._cameraInterval) clearInterval(this._cameraInterval);
     if (this._animHandle) cancelAnimationFrame(this._animHandle);
     if (this._resizeListener) window.removeEventListener("resize", this._resizeListener);
   }
@@ -1215,7 +1225,13 @@ class NovaPanel extends HTMLElement {
     try {
       this._mode = await this._hass.callWS({ type: "nova/mode", action: "status" });
     } catch (_) { this._mode = null; }
+    if (this._currentTab === "dashboard") {
+      try {
+        this._cognitive = await this._hass.callWS({ type: "nova/get_cognitive_status" });
+      } catch (_) { this._cognitive = null; }
+    }
     if (this._currentTab === "logs") this._fetchDebugLog();
+    this._loadUiStrings();
     this._detectFlare();
     this._renderData();
   }
@@ -1249,6 +1265,9 @@ class NovaPanel extends HTMLElement {
       config: live.config || {},
       doorbellTraining: live.doorbell_training || {},
       suggestions: live.suggestions || [],
+      goals: live.goals || [],
+      lockdown: live.lockdown || live.config?.lockdown || {},
+      onboarding: live.onboarding || live.config?.onboarding || null,
     };
   }
 
@@ -1268,10 +1287,79 @@ class NovaPanel extends HTMLElement {
 
     const root = this.shadowRoot;
     root.innerHTML = this._html();
+    this._localizeDOM(root);
     this._renderedOnce = true;
     this._wire();
     this._initCore();
     this._renderData();
+  }
+
+  // Panel translations are keyed by exact English source strings. Dynamic
+  // values (entity ids, model names, counts) therefore remain untouched, and
+  // a missing key falls back to the English text already in the DOM.
+  _resolveUiLang() {
+    const override = this._liveData?.config?.ui_language;
+    if (override && override !== "auto") return String(override);
+    return String(this._hass?.language || "en");
+  }
+
+  async _loadUiStrings(force = false) {
+    const full = (this._resolveUiLang() || "en").toLowerCase().replace(/_/g, "-");
+    const base = full.split("-")[0];
+    if (!force && this._uiLangLoaded === full) return;
+    const request = ++this._uiLangRequest;
+    this._uiLangLoaded = full;
+    if (base === "en") {
+      this._uiStrings = null;
+      if (this._renderedOnce) this._render();
+      return;
+    }
+    const grab = async (lang) => {
+      const response = await fetch(`/nova_panel_static/i18n/${encodeURIComponent(lang)}.json`);
+      if (!response.ok) return null;
+      const value = await response.json();
+      if (!value || Array.isArray(value) || typeof value !== "object") return null;
+      return Object.fromEntries(Object.entries(value).filter(([k, v]) =>
+        typeof k === "string" && typeof v === "string"));
+    };
+    try {
+      let dict = await grab(full);
+      if (!dict && full !== base) dict = await grab(base);
+      if (request !== this._uiLangRequest) return;
+      this._uiStrings = dict || null;
+    } catch (_) {
+      if (request !== this._uiLangRequest) return;
+      this._uiStrings = null;
+    }
+    if (this._renderedOnce) this._render();
+  }
+
+  _localizeDOM(root) {
+    const dict = this._uiStrings;
+    if (!dict || !root) return;
+    try {
+      const walker = document.createTreeWalker(root, 4, null);
+      const swaps = [];
+      let node;
+      while ((node = walker.nextNode())) {
+        const raw = node.nodeValue;
+        if (!raw) continue;
+        const key = raw.trim();
+        if (key && Object.prototype.hasOwnProperty.call(dict, key)) {
+          swaps.push([node, raw.replace(key, dict[key])]);
+        }
+      }
+      swaps.forEach(([textNode, value]) => { textNode.nodeValue = value; });
+      root.querySelectorAll("[title],[placeholder]").forEach(el => {
+        ["title", "placeholder"].forEach(attr => {
+          const raw = el.getAttribute(attr);
+          const key = raw?.trim();
+          if (key && Object.prototype.hasOwnProperty.call(dict, key)) {
+            el.setAttribute(attr, raw.replace(key, dict[key]));
+          }
+        });
+      });
+    } catch (_) { /* English DOM remains usable if localization fails. */ }
   }
 
   _html() {
@@ -1296,6 +1384,7 @@ class NovaPanel extends HTMLElement {
             <button class="nav-tab${tab === "logs" ? " active" : ""}" data-tab="logs">Logs</button>
             <button class="nav-tab${tab === "memory" ? " active" : ""}" data-tab="memory">Memory</button>
           </nav>
+          <button class="lockdown-control" id="lockdownControl" hidden></button>
         </div>
 
         ${tab === "settings" ? this._htmlSettings() : tab === "logs" ? this._htmlLogs() : tab === "memory" ? this._htmlMemory() : tab === "intrusion" ? this._htmlIntrusion() : tab === "suggestions" ? this._htmlSuggestions() : tab === "residence" ? this._htmlResidence() : this._htmlDashboard()}
@@ -1307,13 +1396,32 @@ class NovaPanel extends HTMLElement {
 
   _htmlDashboard() {
     return `
+        <div id="onboardingMount"></div>
         <div class="hero">
           <div class="core-wrap"><canvas class="core" id="core"></canvas></div>
           <div class="state-line" id="stateLine">Watching over the house.</div>
           <div class="state-sub" id="stateSub">—</div>
           <div class="chips" id="chips"></div>
         </div>
+${this._htmlDashboardBody()}`;
+  }
 
+  _onboardingHtml(onboarding) {
+    return onboarding?.show ? `
+      <div class="onboarding-card" id="onboardingCard">
+        <div class="panel-head"><div><div class="panel-title">Welcome — get Nova working for you</div>
+          <div class="toggle-desc">These steps are optional. Nova can already answer you.</div></div>
+          <button class="camera-toggle" id="onboardingDismiss" title="Dismiss">DISMISS</button></div>
+        <div class="onboarding-progress"><span>${this._esc(onboarding.done_count || 0)}/${this._esc(onboarding.total || 0)} DONE</span><i style="width:${Math.round(((onboarding.done_count || 0) / Math.max(1, onboarding.total || 1)) * 100)}%"></i></div>
+        <div class="onboarding-steps">${(onboarding.steps || []).map(step => `<div class="onboarding-step${step.done ? " done" : ""}">
+          <span>${step.done ? "✓" : "○"}</span><div><b>${this._esc(step.label)}</b><small>${this._esc(step.hint)}</small></div>
+          ${step.jump ? `<button class="mode-chip onboarding-jump" data-settings-title="${this._esc(step.jump)}">OPEN</button>` : ""}</div>`).join("")}</div>
+        <button class="mode-chip onboarding-settings">OPEN SETTINGS</button>
+      </div>` : "";
+  }
+
+  _htmlDashboardBody() {
+    return `
         <div class="grid">
           <div class="panel">
             <div class="panel-head">
@@ -1330,6 +1438,29 @@ class NovaPanel extends HTMLElement {
             <div class="panel-meta" id="areasMeta">—</div>
           </div>
           <div class="areas-grid" id="areasGrid"></div>
+        </div>
+
+        <div class="dashboard-pair">
+          <div class="panel">
+            <div class="panel-head">
+              <div class="panel-title">Cognitive Core</div>
+              <div class="panel-meta" id="cognitiveState">—</div>
+            </div>
+            <div class="metric-grid" id="cognitiveMetrics"></div>
+            <div class="toggle-desc" id="cognitiveAnalysis"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-head">
+              <div class="panel-title">Goals</div>
+              <div class="panel-meta" id="goalsMeta">—</div>
+            </div>
+            <div class="goal-list" id="goalList"></div>
+            <div class="goal-create">
+              <input class="cfg-field" id="goalOutcome" maxlength="500" placeholder="Outcome Nova should work toward">
+              <button class="mode-chip" id="goalCreate">ADD GOAL</button>
+            </div>
+            <div class="toggle-desc" id="goalResult"></div>
+          </div>
         </div>
 
         <div class="panel" id="solarPanel" style="max-width:1100px;margin:16px auto 0">
@@ -1360,7 +1491,7 @@ class NovaPanel extends HTMLElement {
           <div class="camera-head-row">
             <div>
               <div class="panel-title" style="margin-bottom:5px">Camera Watch</div>
-              <div class="camera-note">Optional — only shown for cameras that actually stream live into Home Assistant.</div>
+              <div class="camera-note">Authenticated snapshots from cameras available to Home Assistant.</div>
             </div>
             <button class="camera-toggle" id="camToggle">SHOW CAMERAS ▾</button>
           </div>
@@ -3097,6 +3228,20 @@ class NovaPanel extends HTMLElement {
       </div>`;
     return `
       <div class="cfg-row">
+        <label>Language</label>
+        <select id="uiLanguage" class="cfg-field" data-cfg-key="ui_language">
+          ${this._optSelect([
+            ["auto", "Auto (Home Assistant)"], ["en", "English"], ["cs", "Čeština"],
+            ["da", "Dansk"], ["de", "Deutsch"], ["es", "Español"], ["fi", "Suomi"],
+            ["fr", "Français"], ["it", "Italiano"], ["nb", "Norsk bokmål"],
+            ["nl", "Nederlands"], ["pl", "Polski"], ["pt", "Português"],
+            ["pt-br", "Português (Brasil)"], ["ro", "Română"], ["ru", "Русский"],
+            ["sk", "Slovenčina"], ["sv", "Svenska"], ["tr", "Türkçe"],
+            ["uk", "Українська"],
+          ], cfg.ui_language || "auto")}
+        </select>
+      </div>
+      <div class="cfg-row">
         <label>Sleep state</label>
         <select class="cfg-field" data-cfg-key="sleep_override">
           ${this._optSelect([["auto", "Auto (occupancy + quiet hours)"], ["awake", "Awake"], ["asleep", "Asleep"]], cfg.sleep_override || "auto")}
@@ -3106,6 +3251,9 @@ class NovaPanel extends HTMLElement {
         ${onOff("announcements_enabled", "Announcements", "Master switch — all proactive speech")}
         ${onOff("sentinel_enabled", "Sentinel", "Door/garage/lock-left-open alerts")}
         ${onOff("observer_enabled", "Observer", "AI event awareness (uses API)")}
+        ${onOff("cognition_enabled", "Cognition", "Local triage — sees telemetry and decides what deserves deeper reasoning")}
+        ${onOff("rich_reasoning", "Rich Reasoning", "Use the configured reasoning model first for medium and high-priority events")}
+        ${onOff("light_control_enabled", "Dashboard Light Control", "Allow room light toggles on the dashboard; status remains visible when off")}
       </div>`;
   }
 
@@ -3416,15 +3564,18 @@ class NovaPanel extends HTMLElement {
       { role: "llm", label: "Main Agent", provKey: "llm_provider", modelKey: "model" },
       { role: "classifier", label: "Classifier", provKey: "classifier_provider", modelKey: "classifier_model" },
       { role: "reasoning", label: "Reasoning", provKey: "reasoning_provider", modelKey: "reasoning_model" },
-      { role: "review", label: "Review", provKey: "review_provider", modelKey: "review_model" },
       { role: "vision", label: "Vision", provKey: "vision_provider", modelKey: "vision_model" },
-      { role: "camrsn", label: "Camera Rsn", provKey: "camera_reasoning_provider", modelKey: "camera_reasoning_model" },
+      { role: "camrsn", label: "Camera Reasoning", provKey: "camera_reasoning_provider", modelKey: "camera_reasoning_model" },
     ];
   }
 
   _aiModelsCardBody() {
     const cfg = this._data()?.config || {};
     const PROVIDERS = ["groq", "openai", "gemini", "ollama", "anthropic", "custom"];
+    const configuredProviders = this._modelRoles().map(r => cfg[r.provKey]);
+    const legacyEndpoint = cfg.self_hosted_endpoints_migrated ? "" : cfg.llm_base_url;
+    const ollamaEndpoint = cfg.ollama_base_url || (configuredProviders.includes("ollama") ? legacyEndpoint : "") || "";
+    const customEndpoint = cfg.custom_base_url || (configuredProviders.includes("custom") ? legacyEndpoint : "") || "";
     const rows = this._modelRoles().map(r => {
       const curProv = cfg[r.provKey] || "groq";
       const curModel = cfg[r.modelKey] || "";
@@ -3442,8 +3593,8 @@ class NovaPanel extends HTMLElement {
                  type="text" placeholder="enter model id" value="${this._esc(curModel)}" style="display:none">
           <button class="mode-chip new-model-refresh" data-role="${this._esc(r.role)}" title="Refresh the live model list (bypasses the cache)">↻</button>
           <div class="new-model-warning" data-role-warning="${this._esc(r.role)}" hidden></div>
-          ${r.role === "llm" ? `<div class="stub-body">Provider/model changes here take effect after Nova reloads (Settings → Devices &amp; Services → Nova → ⋮ → Reload). Classifier, Reasoning, Vision, and Camera Rsn apply on their next use — no reload needed.</div>` : ""}
-          ${r.role === "vision" ? `<div class="stub-body">Needs an image-capable model — e.g. moondream on Ollama, or a Groq vision model. Text-only models will fail on camera analysis.</div>` : ""}
+          ${r.role === "llm" ? `<div class="stub-body">Changes are staged until you press Apply. Nova reloads itself after a successful check and save.</div>` : ""}
+          ${r.role === "vision" ? `<div class="stub-body">Vision needs a model whose provider reports image support. Camera Reasoning is text-only and does not.</div>` : ""}
         </div>`;
     }).join("");
     const credRows = ["groq", "openai", "anthropic", "gemini", "custom", "ollama"].map(p => `
@@ -3454,7 +3605,41 @@ class NovaPanel extends HTMLElement {
         <button class="mode-chip cred-save" data-cred-provider="${p}">SAVE</button>
         <button class="mode-chip cred-clear" data-cred-provider="${p}">CLEAR</button>
       </div>`).join("");
-    return `<div class="new-model-list">${rows}</div>
+    return `
+      <div class="stub-body">Choose a starting profile or configure each role yourself. Profiles only stage changes; nothing is saved until Apply.</div>
+      <div class="cfg-row" data-ai-profiles>
+        <label>Profile</label>
+        <button class="mode-chip" data-ai-profile="hybrid">HYBRID</button>
+        <button class="mode-chip" data-ai-profile="local">LOCAL TEXT</button>
+        <button class="mode-chip" data-ai-profile="manual">MANUAL</button>
+      </div>
+      <div class="stub-body">Hybrid keeps the Main Agent and Vision choices, and moves background text work to Ollama. Local Text also moves the Main Agent. Vision only moves when Ollama reports a vision-capable model.</div>
+      <div class="panel-head" style="margin-top:14px"><div class="panel-title">Self-hosted endpoints</div></div>
+      <div class="cfg-row" data-endpoint-row="ollama">
+        <label>Ollama</label>
+        <input class="cfg-field ai-endpoint" data-endpoint-provider="ollama" type="text" value="${this._esc(ollamaEndpoint)}" placeholder="http://host:11434">
+        <button class="mode-chip ai-endpoint-test" data-endpoint-provider="ollama">TEST</button>
+      </div>
+      <div class="stub-body ai-endpoint-status" data-endpoint-status="ollama"></div>
+      <div class="cfg-row" data-endpoint-row="custom">
+        <label>OpenAI-compatible</label>
+        <input class="cfg-field ai-endpoint" data-endpoint-provider="custom" type="text" value="${this._esc(customEndpoint)}" placeholder="https://host/v1">
+        <button class="mode-chip ai-endpoint-test" data-endpoint-provider="custom">TEST</button>
+      </div>
+      <div class="stub-body ai-endpoint-status" data-endpoint-status="custom"></div>
+      <div class="cfg-row">
+        <label>Ollama context length</label>
+        <input class="cfg-field" id="aiOllamaNumCtx" type="number" min="512" max="262144" step="512" value="${this._esc(cfg.ollama_num_ctx || 8192)}">
+      </div>
+      <div class="cfg-row">
+        <label>Prompt size <span class="toggle-desc">entity names per type; 0 = counts only</span></label>
+        <input class="cfg-field" id="aiHomeContextMaxEntities" type="number" min="0" max="50" step="1" value="${this._esc(cfg.home_context_max_entities ?? 15)}">
+      </div>
+      <div class="new-model-list">${rows}</div>
+      <div class="cfg-row" style="margin-top:14px">
+        <button class="mode-chip" id="aiApply">APPLY</button>
+        <span class="stub-body" id="aiApplyStatus">No unsaved changes.</span>
+      </div>
       <div class="panel-head" style="margin-top:14px"><div class="panel-title">Provider Credentials</div></div>
       <div class="stub-body">Stored only in Home Assistant's secrets.yaml, one per provider. A saved credential is never shown here again — only whether one is set. Ollama's is optional, for a protected endpoint only.</div>
       <div class="new-model-list">${credRows}</div>`;
@@ -3500,8 +3685,16 @@ class NovaPanel extends HTMLElement {
         return `"${m}" looks like a ${owner} model, but the selected provider is ${provider}.`;
       }
     }
-    if ((role === "vision" || role === "camrsn") && this._knownTextOnlyModels().has(m)) {
+    if (role === "vision" && this._knownTextOnlyModels().has(m)) {
       return `"${m}" is one of Nova's own text-only default models — it will reject image input.`;
+    }
+    const detail = ((this._modelCatalog || {})[provider] || []).find(item => item.id === m);
+    const caps = new Set((detail && detail.capabilities) || []);
+    if (detail && role === "vision" && !caps.has("vision")) {
+      return `"${m}" does not report vision capability.`;
+    }
+    if (detail && role === "llm" && !caps.has("tools")) {
+      return `"${m}" does not report tool-calling capability, which the Main Agent needs.`;
     }
     return null;
   }
@@ -3520,38 +3713,51 @@ class NovaPanel extends HTMLElement {
     warnEl.hidden = !warning;
   }
 
-  async _loadModelsFor(provider, selectEl, { refresh = false } = {}) {
-    if (!this._hass || !selectEl) return;
+  _populateModelSelect(provider, selectEl, res) {
+    if (!selectEl) return;
     const cur = selectEl.getAttribute("data-current") || "";
-    try {
-      const res = await this._hass.callWS({ type: "nova/list_models", provider, refresh });
-      const models = (res && res.models) || [];
-      let opts = "";
-      if (models.length) {
-        if (cur && !models.includes(cur)) {
+    const models = (res && res.models) || [];
+    this._modelCatalog = this._modelCatalog || {};
+    this._modelCatalog[provider] = (res && res.model_details) || models.map(id => ({ id, capabilities: [] }));
+    let opts = "";
+    const label = model => {
+      const detail = this._modelCatalog[provider].find(item => item.id === model);
+      const caps = (detail && detail.capabilities) || [];
+      return caps.length ? `${model} · ${caps.join(", ")}` : model;
+    };
+    if (models.length) {
+      if (!cur) opts += `<option value="" selected disabled>choose a model…</option>`;
+      if (cur && !models.includes(cur)) {
           // Never silently replace a saved model just because a live
           // discovery call didn't happen to list it — it may be private,
           // preview, newly released, or simply not returned by this
           // endpoint. Keep it selected and offer the live list alongside
           // it. (Previously this auto-picked and SAVED a different model
           // — often just the alphabetically-first one — on every render.)
-          opts += `<option value="${this._esc(cur)}" selected>${this._esc(cur)} — not in the live list</option>`;
-          opts += models.map(m => `<option value="${this._esc(m)}">${this._esc(m)}</option>`).join("");
-        } else {
-          opts += models.map(m => `<option value="${this._esc(m)}"${m === cur ? " selected" : ""}>${this._esc(m)}</option>`).join("");
-        }
+        opts += `<option value="${this._esc(cur)}" selected>${this._esc(cur)} — not in the live list</option>`;
+        opts += models.map(m => `<option value="${this._esc(m)}">${this._esc(label(m))}</option>`).join("");
       } else {
-        const err = res && res.error ? ` — ${String(res.error).slice(0, 48)}` : "";
-        opts += (cur ? `<option value="${this._esc(cur)}" selected>${this._esc(cur)}</option>` : "");
-        opts += `<option value="" disabled>no models found${this._esc(err)}</option>`;
+        opts += models.map(m => `<option value="${this._esc(m)}"${m === cur ? " selected" : ""}>${this._esc(label(m))}</option>`).join("");
       }
-      opts += `<option value="__custom__">✎ Custom…</option>`;
-      selectEl.innerHTML = opts;
-      selectEl.title = (res && res.truncated)
-        ? "The provider returned more models than fit in one page — list may be incomplete." : "";
-      const row = selectEl.closest(".new-model-row");
-      if (row) this._updateRoleWarning(row);
-    } catch (_) { /* leave current options in place on error */ }
+    } else {
+      const err = res && res.error ? ` — ${String(res.error).slice(0, 48)}` : "";
+      opts += (cur ? `<option value="${this._esc(cur)}" selected>${this._esc(cur)}</option>` : "");
+      opts += `<option value="" disabled>no models found${this._esc(err)}</option>`;
+    }
+    opts += `<option value="__custom__">✎ Custom…</option>`;
+    selectEl.innerHTML = opts;
+    selectEl.title = (res && res.truncated)
+      ? "The provider returned more models than fit in one page — list may be incomplete." : "";
+    const row = selectEl.closest(".new-model-row");
+    if (row) this._updateRoleWarning(row);
+  }
+
+  async _loadModelsFor(provider, selectEl, { refresh = false } = {}) {
+    if (!this._hass || !selectEl) return;
+    try {
+      const res = await this._hass.callWS({ type: "nova/list_models", provider, refresh });
+      this._populateModelSelect(provider, selectEl, res);
+    } catch (_) { /* keep the saved selection and let endpoint Test explain failures */ }
   }
 
   async _rawSaveConfig(key, value) {
@@ -3565,6 +3771,10 @@ class NovaPanel extends HTMLElement {
 
   _wireAiModels() {
     const root = this.shadowRoot;
+    const markDirty = message => {
+      const status = root.getElementById("aiApplyStatus");
+      if (status) status.textContent = message || "Unsaved changes.";
+    };
     root.querySelectorAll(".new-model-row").forEach(row => {
       const provSel = row.querySelector(".new-prov-select");
       const modelSel = row.querySelector(".new-model-select");
@@ -3574,39 +3784,29 @@ class NovaPanel extends HTMLElement {
       this._loadModelsFor(provSel.value, modelSel);
       provSel.addEventListener("change", async (e) => {
         const provider = e.target.value;
-        const provKey = provSel.getAttribute("data-cfg-key");
-        await this._rawSaveConfig(provKey, provider);
-        if (provKey === "llm_provider" && ["groq", "openai", "gemini", "anthropic"].includes(provider)) {
-          await this._rawSaveConfig("llm_base_url", "");
-        }
         modelSel.setAttribute("data-current", "");
         if (customInput) customInput.style.display = "none";
         await this._loadModelsFor(provider, modelSel);
-        const newModel = modelSel.value;
-        if (newModel && newModel !== "__custom__" && newModel !== "") {
-          await this._rawSaveConfig(modelSel.getAttribute("data-cfg-key"), newModel);
-          modelSel.setAttribute("data-current", newModel);
-        }
+        markDirty();
         this._updateRoleWarning(row);
       });
-      modelSel.addEventListener("change", async (e) => {
+      modelSel.addEventListener("change", e => {
         if (e.target.value === "__custom__") {
           if (customInput) { customInput.style.display = ""; customInput.focus(); }
           this._updateRoleWarning(row);
+          markDirty();
           return;
         }
         if (customInput) customInput.style.display = "none";
-        await this._rawSaveConfig(modelSel.getAttribute("data-cfg-key"), e.target.value);
         modelSel.setAttribute("data-current", e.target.value);
+        markDirty();
         this._updateRoleWarning(row);
       });
       if (customInput) {
-        customInput.addEventListener("change", async (e) => {
+        customInput.addEventListener("input", e => {
           const v = (e.target.value || "").trim();
-          if (v) {
-            await this._rawSaveConfig(customInput.getAttribute("data-cfg-key"), v);
-            modelSel.setAttribute("data-current", v);
-          }
+          if (v) modelSel.setAttribute("data-current", v);
+          markDirty();
           this._updateRoleWarning(row);
         });
       }
@@ -3619,6 +3819,123 @@ class NovaPanel extends HTMLElement {
             refreshBtn.disabled = false;
           }
         });
+      }
+    });
+
+    root.querySelectorAll(".ai-endpoint").forEach(input => {
+      input.addEventListener("input", () => {
+        const provider = input.getAttribute("data-endpoint-provider");
+        if (this._modelCatalog) delete this._modelCatalog[provider];
+        const status = root.querySelector(`[data-endpoint-status="${provider}"]`);
+        if (status) status.textContent = "Endpoint changed. Test it before choosing a profile.";
+        markDirty();
+      });
+    });
+    root.getElementById("aiOllamaNumCtx")?.addEventListener("input", () => markDirty());
+    root.getElementById("aiHomeContextMaxEntities")?.addEventListener("input", () => markDirty());
+
+    root.querySelectorAll(".ai-endpoint-test").forEach(button => {
+      button.addEventListener("click", async () => {
+        const provider = button.getAttribute("data-endpoint-provider");
+        const input = root.querySelector(`.ai-endpoint[data-endpoint-provider="${provider}"]`);
+        const status = root.querySelector(`[data-endpoint-status="${provider}"]`);
+        button.disabled = true;
+        if (status) status.textContent = "Testing…";
+        try {
+          const res = await this._hass.callWS({
+            type: "nova/test_provider_endpoint", provider,
+            endpoint: (input?.value || "").trim(),
+          });
+          if (!res || !res.ok) throw new Error((res && res.message) || "Endpoint test failed.");
+          if (input) input.value = res.endpoint;
+          this._modelCatalog = this._modelCatalog || {};
+          this._modelCatalog[provider] = res.model_details ||
+            res.models.map(id => ({ id, capabilities: [] }));
+          root.querySelectorAll(`.new-model-row`).forEach(row => {
+            const provSel = row.querySelector(".new-prov-select");
+            if (provSel?.value === provider) {
+              this._populateModelSelect(provider, row.querySelector(".new-model-select"), res);
+            }
+          });
+          if (status) status.textContent = `Connected. ${res.models.length} model${res.models.length === 1 ? "" : "s"} found.`;
+          markDirty("Endpoint tested. Changes are not saved yet.");
+        } catch (err) {
+          if (status) status.textContent = err?.message || "Could not test this endpoint.";
+        } finally {
+          button.disabled = false;
+        }
+      });
+    });
+
+    const selectProfileModel = (row, provider, requiredCapability) => {
+      const catalog = (this._modelCatalog || {})[provider] || [];
+      const match = catalog.find(item =>
+        !requiredCapability || (item.capabilities || []).includes(requiredCapability));
+      if (!match) return false;
+      const provSel = row.querySelector(".new-prov-select");
+      const modelSel = row.querySelector(".new-model-select");
+      provSel.value = provider;
+      modelSel.setAttribute("data-current", match.id);
+      this._populateModelSelect(provider, modelSel, {
+        models: catalog.map(item => item.id), model_details: catalog,
+      });
+      modelSel.value = match.id;
+      this._updateRoleWarning(row);
+      return true;
+    };
+    root.querySelectorAll("[data-ai-profile]").forEach(button => {
+      button.addEventListener("click", () => {
+        const profile = button.getAttribute("data-ai-profile");
+        if (profile === "manual") {
+          markDirty("Manual mode: choose each provider and model, then Apply.");
+          return;
+        }
+        const textRoles = profile === "hybrid"
+          ? ["classifier", "reasoning", "camrsn"]
+          : ["llm", "classifier", "reasoning", "camrsn"];
+        const missing = [];
+        textRoles.forEach(role => {
+          const row = root.querySelector(`.new-model-row[data-role="${role}"]`);
+          const required = role === "llm" ? "tools" : "completion";
+          if (!row || !selectProfileModel(row, "ollama", required)) missing.push(role);
+        });
+        if (profile === "local") {
+          const visionRow = root.querySelector('.new-model-row[data-role="vision"]');
+          if (visionRow) selectProfileModel(visionRow, "ollama", "vision");
+        }
+        markDirty(missing.length
+          ? "Profile staged where compatible models were found. Test Ollama first to load capabilities for the remaining roles."
+          : "Profile staged. Review the choices, then Apply.");
+      });
+    });
+
+    root.getElementById("aiApply")?.addEventListener("click", async event => {
+      const button = event.currentTarget;
+      const status = root.getElementById("aiApplyStatus");
+      const updates = {
+        ollama_base_url: (root.querySelector('.ai-endpoint[data-endpoint-provider="ollama"]')?.value || "").trim(),
+        custom_base_url: (root.querySelector('.ai-endpoint[data-endpoint-provider="custom"]')?.value || "").trim(),
+        ollama_num_ctx: Number(root.getElementById("aiOllamaNumCtx")?.value || 8192),
+        home_context_max_entities: Number(root.getElementById("aiHomeContextMaxEntities")?.value ?? 15),
+      };
+      root.querySelectorAll(".new-model-row").forEach(row => {
+        const provSel = row.querySelector(".new-prov-select");
+        const modelSel = row.querySelector(".new-model-select");
+        const customInput = row.querySelector(".new-model-custom");
+        updates[provSel.getAttribute("data-cfg-key")] = provSel.value;
+        updates[modelSel.getAttribute("data-cfg-key")] =
+          customInput && customInput.style.display !== "none"
+            ? customInput.value.trim() : modelSel.value;
+      });
+      button.disabled = true;
+      if (status) status.textContent = "Checking models and saving…";
+      try {
+        const res = await this._hass.callWS({ type: "nova/apply_ai_config", updates });
+        if (!res || !res.ok) throw new Error((res && res.message) || "Could not apply AI settings.");
+        if (status) status.textContent = res.message || "Saved. Nova is reloading.";
+      } catch (err) {
+        if (status) status.textContent = err?.message || "Could not apply AI settings.";
+        button.disabled = false;
       }
     });
 
@@ -4217,6 +4534,8 @@ class NovaPanel extends HTMLElement {
       ${onOff("routine_alerts_enabled", false, { label: "Routine alerts" })}
       ${onOff("memory_threading_enabled", false, { label: "Memory threading" })}
       ${onOff("pattern_learn_motion", false, { label: "Learn motion/presence triggers" })}
+      ${onOff("adaptive_interruption_budget", false, { label: "Adaptive interruptions", sub: "speak less after alerts are repeatedly marked unhelpful" })}
+      ${onOff("adaptive_suggestion_threshold", false, { label: "Adaptive suggestions", sub: "adjust the suggestion bar from past feedback" })}
       ${num("observer_group_debounce", "Sibling-burst coalescing (sec)", "90", 0, 600, 10)}
       ${onOff("continued_conversation_enabled", false, { label: "Continued conversation" })}
       ${onOff("continued_conversation_multi_satellite", false, { label: "Follow me between rooms", sub: "reopen the mic where you moved to (needs 2+ satellites)" })}
@@ -4439,8 +4758,16 @@ class NovaPanel extends HTMLElement {
     return `
       <div class="stub-body">Names are Nova-only (HA untouched; blank reverts). Location governs intrusion + outdoor-event filtering — AUTO shows what the heuristics resolve.</div>
       <div class="cfg-row">
-        <label>Camera Watch — auto-analyze doorbell/motion events</label>
+        <label>Camera Watch — auto-analyze doorbell and person events</label>
         <button class="toggle-btn ${cfg.camera_auto_analyze !== false ? "on" : "off"}" data-cfg-key="camera_auto_analyze" data-cfg-val="${cfg.camera_auto_analyze !== false ? "false" : "true"}">${cfg.camera_auto_analyze !== false ? "ON" : "OFF"}</button>
+      </div>
+      <div class="cfg-row">
+        <label>Also analyze motion events <span class="toggle-desc">noisier; off by default</span></label>
+        <button class="toggle-btn ${cfg.camera_auto_analyze_motion === true ? "on" : "off"}" data-cfg-key="camera_auto_analyze_motion" data-cfg-val="${cfg.camera_auto_analyze_motion === true ? "false" : "true"}">${cfg.camera_auto_analyze_motion === true ? "ON" : "OFF"}</button>
+      </div>
+      <div class="cfg-row">
+        <label>Package Watch — detect packages and mail at the door</label>
+        <button class="toggle-btn ${cfg.package_detection !== false ? "on" : "off"}" data-cfg-key="package_detection" data-cfg-val="${cfg.package_detection !== false ? "false" : "true"}">${cfg.package_detection !== false ? "ON" : "OFF"}</button>
       </div>
       <div class="cfg-row">
         <label>Visitor Learning — silently log strangers seen at the door</label>
@@ -4639,6 +4966,10 @@ class NovaPanel extends HTMLElement {
       <div class="cfg-row">
         <label>SearXNG URL</label>
         <input class="cfg-field" type="text" data-cfg-key="searxng_url" value="${this._esc(cfg.searxng_url || "")}" placeholder="http://searxng.local:8080" autocomplete="off">
+      </div>
+      <div class="cfg-row">
+        <label>Calendar tight gap <span class="toggle-desc">minutes between events treated as back-to-back</span></label>
+        <input class="cfg-field cfg-num" type="number" min="0" max="120" step="5" data-cfg-key="calendar_tight_gap_min" value="${this._esc(cfg.calendar_tight_gap_min ?? 15)}">
       </div>`;
   }
 
@@ -4896,6 +5227,12 @@ class NovaPanel extends HTMLElement {
     const root = this.shadowRoot;
     if (!d) return;
 
+    const onboardingMount = root.getElementById("onboardingMount");
+    if (onboardingMount) {
+      onboardingMount.innerHTML = this._onboardingHtml(d.onboarding);
+      this._wireOnboarding();
+    }
+
     // hero state line
     const state = this._coreState();
     const lineEl = root.getElementById("stateLine");
@@ -4920,6 +5257,18 @@ class NovaPanel extends HTMLElement {
         const warn = (s?.level === "warn") ? " warn" : "";
         return `<div class="chip${warn}"><span class="dot"></span> ${this._esc(label)} <b>${this._esc(s?.state ?? "—")}</b></div>`;
       }).join("");
+    }
+
+    // Formal lockdown is deliberately separate from the alarm controls. It
+    // only calls Nova's guarded lockdown command and always asks for a human
+    // confirmation before changing state.
+    const lockdown = d.lockdown || {};
+    const lockdownBtn = root.getElementById("lockdownControl");
+    if (lockdownBtn) {
+      lockdownBtn.hidden = false;
+      lockdownBtn.classList.toggle("active", !!lockdown.active);
+      lockdownBtn.textContent = lockdown.active ? "LOCKDOWN ACTIVE" : "LOCKDOWN OFF";
+      lockdownBtn.title = lockdown.reason || "Nova formal lockdown";
     }
 
     // activity feed
@@ -4957,6 +5306,47 @@ class NovaPanel extends HTMLElement {
 
     this._renderSolarPanel();
 
+    const cog = this._cognitive || {};
+    const learning = cog.learning || {};
+    const cognitiveState = root.getElementById("cognitiveState");
+    if (cognitiveState) cognitiveState.textContent = cog.running === false ? "STOPPED" : (cog.running ? "RUNNING" : "UNAVAILABLE");
+    const cognitiveMetrics = root.getElementById("cognitiveMetrics");
+    if (cognitiveMetrics) {
+      const metrics = [
+        ["Days learned", learning.days_of_data ?? 0],
+        ["State changes", learning.state_changes ?? 0],
+        ["Commands", learning.commands ?? 0],
+        ["Suggestions", learning.suggestions ?? 0],
+        ["Actions", cog.actions_taken ?? 0],
+        ["Ignore rules", cog.ignore_rules ?? 0],
+      ];
+      cognitiveMetrics.innerHTML = metrics.map(([label, value]) =>
+        `<div class="metric"><b>${this._esc(value)}</b><span>${this._esc(label)}</span></div>`).join("");
+    }
+    const cognitiveAnalysis = root.getElementById("cognitiveAnalysis");
+    if (cognitiveAnalysis) {
+      const analysis = cog.last_analysis || {};
+      cognitiveAnalysis.textContent = analysis.summary || analysis.message || "Nova learns from household patterns locally.";
+    }
+
+    const goals = d.goals || [];
+    const goalList = root.getElementById("goalList");
+    const goalsMeta = root.getElementById("goalsMeta");
+    if (goalsMeta) goalsMeta.textContent = `${goals.filter(g => g.status === "active").length} ACTIVE`;
+    if (goalList) {
+      goalList.innerHTML = goals.length ? goals.map(g => {
+        const active = g.status === "active";
+        const progress = g.steps_total ? `${g.steps_done || 0}/${g.steps_total} STEPS` : "OPEN OUTCOME";
+        return `<div class="goal-row">
+          <div class="goal-copy"><b>${this._esc(g.title || g.outcome || `Goal ${g.id}`)}</b>
+            <span>${this._esc(g.outcome || "")}</span>
+            <small>${this._esc(String(g.status || "active").toUpperCase())} · ${this._esc(progress)}</small></div>
+          <button class="mode-chip goal-action" data-goal-id="${this._esc(g.id)}" data-goal-action="${active ? "cancel" : "delete"}">${active ? "CANCEL" : "DELETE"}</button>
+        </div>`;
+      }).join("") : `<div class="empty-state">No goals yet.</div>`;
+      this._wireGoalActions();
+    }
+
     // camera — collapsed, optional, honest
     const camPanel = root.getElementById("cameraPanel");
     const camStrip = root.getElementById("camStrip");
@@ -4966,7 +5356,85 @@ class NovaPanel extends HTMLElement {
       const camToggle = root.getElementById("camToggle");
       if (camToggle) camToggle.textContent = this._camOpen ? "HIDE CAMERAS ▴" : `SHOW ${cams.length} CAMERA${cams.length === 1 ? "" : "S"} ▾`;
       camStrip.classList.toggle("open", this._camOpen);
-      camStrip.innerHTML = cams.map(c => `<div class="camera-slot">${this._esc(c.name || c.entity_id)}</div>`).join("");
+      camStrip.innerHTML = cams.map(c => {
+        const eid = c.entity_id;
+        const image = this._cameraImages[eid];
+        const diag = this._cameraDiagnostics[eid];
+        const body = image
+          ? `<img src="data:image/jpeg;base64,${image}" alt="${this._esc(c.name || eid)} snapshot">`
+          : `<div class="camera-empty">${this._cameraLoading[eid] ? "LOADING…" : "NO SNAPSHOT"}</div>`;
+        return `<div class="camera-slot" data-camera="${this._esc(eid)}">
+          ${body}<div class="camera-caption"><b>${this._esc(c.name || eid)}</b><span>${this._esc(eid)}</span></div>
+          <div class="camera-actions"><button class="mode-chip camera-refresh" data-camera="${this._esc(eid)}">REFRESH</button>
+            <button class="mode-chip camera-analyze" data-camera="${this._esc(eid)}">ANALYZE</button>
+            <button class="mode-chip camera-diagnose" data-camera="${this._esc(eid)}">DIAGNOSE</button></div>
+          ${diag ? `<div class="camera-diagnostic">${this._esc(diag)}</div>` : ""}
+        </div>`;
+      }).join("");
+      this._wireCameraActions();
+    }
+    this._localizeDOM(root);
+  }
+
+  async _refreshCameraSnapshot(entityId) {
+    if (!this._hass || !entityId || this._cameraLoading[entityId]) return;
+    this._cameraLoading[entityId] = true;
+    this._renderData();
+    try {
+      const res = await this._hass.callWS({ type: "nova/camera_snapshot", entity_id: entityId });
+      this._cameraImages[entityId] = res?.image || null;
+    } catch (err) {
+      this._cameraImages[entityId] = null;
+      this._cameraDiagnostics[entityId] = err?.message || "Snapshot failed";
+    } finally {
+      this._cameraLoading[entityId] = false;
+      this._renderData();
+    }
+  }
+
+  _wireCameraActions() {
+    const root = this.shadowRoot;
+    root.querySelectorAll(".camera-refresh").forEach(btn => btn.addEventListener("click", () =>
+      this._refreshCameraSnapshot(btn.getAttribute("data-camera"))));
+    root.querySelectorAll(".camera-analyze").forEach(btn => btn.addEventListener("click", async () => {
+      const entityId = btn.getAttribute("data-camera");
+      btn.disabled = true;
+      try {
+        await this._hass.callService("nova", "analyze_camera", { entity_id: entityId, announce: false });
+        this._cameraDiagnostics[entityId] = "Analysis requested. Results will appear in Activity.";
+      } catch (err) { this._cameraDiagnostics[entityId] = err?.message || "Analysis failed"; }
+      btn.disabled = false;
+      this._renderData();
+    }));
+    root.querySelectorAll(".camera-diagnose").forEach(btn => btn.addEventListener("click", async () => {
+      const entityId = btn.getAttribute("data-camera");
+      btn.disabled = true;
+      try {
+        const res = await this._hass.callWS({ type: "nova/camera_diagnostics", entity_id: entityId });
+        this._cameraDiagnostics[entityId] = res?.probe?.verdict || "No diagnostic result.";
+      } catch (err) { this._cameraDiagnostics[entityId] = err?.message || "Diagnostics failed"; }
+      btn.disabled = false;
+      this._renderData();
+    }));
+  }
+
+  _wireGoalActions() {
+    this.shadowRoot.querySelectorAll(".goal-action").forEach(btn => btn.addEventListener("click", async () => {
+      const action = btn.getAttribute("data-goal-action");
+      if (!window.confirm(`${action === "cancel" ? "Cancel" : "Delete"} this goal?`)) return;
+      await this._goalAction({ action, goal_id: Number(btn.getAttribute("data-goal-id")) });
+    }));
+  }
+
+  async _goalAction(payload) {
+    const out = this.shadowRoot.getElementById("goalResult");
+    try {
+      const res = await this._hass.callWS({ type: "nova/goal_action", ...payload });
+      if (this._liveData && Array.isArray(res?.goals)) this._liveData.goals = res.goals;
+      if (out) out.textContent = "Saved.";
+      this._renderData();
+    } catch (err) {
+      if (out) out.textContent = err?.message || "Goal action failed.";
     }
   }
 
@@ -5143,13 +5611,39 @@ class NovaPanel extends HTMLElement {
       camToggle.addEventListener("click", () => {
         this._camOpen = !this._camOpen;
         this._renderData();
+        if (this._camOpen) {
+          const refresh = () => (this._data()?.cameras || []).forEach(c =>
+            this._refreshCameraSnapshot(c.entity_id));
+          refresh();
+          if (!this._cameraInterval) this._cameraInterval = setInterval(refresh, 15000);
+        } else if (this._cameraInterval) {
+          clearInterval(this._cameraInterval);
+          this._cameraInterval = null;
+        }
       });
     }
+    const lockdownBtn = root.getElementById("lockdownControl");
+    if (lockdownBtn) lockdownBtn.addEventListener("click", async () => {
+      const active = !!this._data()?.lockdown?.active;
+      if (!window.confirm(`${active ? "Lift" : "Engage"} Nova lockdown?`)) return;
+      lockdownBtn.disabled = true;
+      try {
+        const res = await this._hass.callWS({ type: "nova/set_lockdown", on: !active });
+        if (this._liveData && res?.lockdown) {
+          this._liveData.lockdown = res.lockdown;
+          if (this._liveData.config) this._liveData.config.lockdown = res.lockdown;
+        }
+      } catch (err) { console.error("Nova: lockdown change failed", err); }
+      lockdownBtn.disabled = false;
+      this._renderData();
+    });
     // Top nav: Command Center / Settings
     root.querySelectorAll(".nav-tab").forEach(btn => {
       btn.addEventListener("click", () => {
         const tab = btn.getAttribute("data-tab");
         if (tab === this._currentTab) return;
+        if (this._cameraInterval) { clearInterval(this._cameraInterval); this._cameraInterval = null; }
+        this._camOpen = false;
         this._currentTab = tab;
         this._render();
       });
@@ -5187,6 +5681,16 @@ class NovaPanel extends HTMLElement {
     }
     if (this._currentTab === "dashboard") {
       this._wireAnalyzeButton("qaRunAnalysis", "qaAnalysisResult");
+      const createGoal = root.getElementById("goalCreate");
+      const goalOutcome = root.getElementById("goalOutcome");
+      if (createGoal && goalOutcome) createGoal.addEventListener("click", async () => {
+        const outcome = goalOutcome.value.trim();
+        if (!outcome) { goalOutcome.focus(); return; }
+        createGoal.disabled = true;
+        await this._goalAction({ action: "create", outcome });
+        goalOutcome.value = "";
+        createGoal.disabled = false;
+      });
       root.querySelectorAll(".panel [data-svc]").forEach(btn => {
         if (btn._wired) return;
         btn._wired = true;
@@ -5207,6 +5711,36 @@ class NovaPanel extends HTMLElement {
         });
       });
     }
+  }
+
+  _wireOnboarding() {
+    const root = this.shadowRoot;
+    root.getElementById("onboardingDismiss")?.addEventListener("click", async () => {
+      if (this._liveData?.onboarding) this._liveData.onboarding.show = false;
+      if (this._liveData?.config?.onboarding) this._liveData.config.onboarding.show = false;
+      this._renderData();
+      try { await this._hass.callWS({ type: "nova/update_config", key: "onboarding_dismissed", value: true }); } catch (_) {}
+    });
+    root.querySelector(".onboarding-settings")?.addEventListener("click", () => {
+      this._currentTab = "settings";
+      this._render();
+    });
+    root.querySelectorAll(".onboarding-jump").forEach(btn => btn.addEventListener("click", () =>
+      this._openSettingsCard(btn.getAttribute("data-settings-title"))));
+  }
+
+  _openSettingsCard(title) {
+    this._currentTab = "settings";
+    this._render();
+    const cards = Array.from(this.shadowRoot.querySelectorAll(".settings-card"));
+    const needle = String(title || "").toLowerCase();
+    const card = cards.find(c => (c.getAttribute("data-search") || "").includes(needle));
+    if (!card) return;
+    this._settingsSection = card.getAttribute("data-settings-group") || "general";
+    this._applySettingsFilter();
+    this.shadowRoot.querySelectorAll(".settings-nav-btn").forEach(b =>
+      b.classList.toggle("active", b.getAttribute("data-settings-section") === this._settingsSection));
+    if (typeof card.scrollIntoView === "function") card.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   _wireSettings() {
@@ -5242,7 +5776,12 @@ class NovaPanel extends HTMLElement {
     });
     root.querySelectorAll("select.cfg-field[data-cfg-key]").forEach(sel => {
       sel.addEventListener("change", async () => {
-        await this._saveSetting(sel.getAttribute("data-cfg-key"), sel.value);
+        const key = sel.getAttribute("data-cfg-key");
+        await this._saveSetting(key, sel.value);
+        if (key === "ui_language") {
+          this._uiLangLoaded = null;
+          await this._loadUiStrings(true);
+        }
       });
     });
     root.querySelectorAll("input.cfg-field[data-cfg-key]").forEach(inp => {
@@ -7127,6 +7666,25 @@ class NovaPanel extends HTMLElement {
       .panel-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px}
       .panel-title{font-family:var(--font-display);font-size:15px;font-weight:600}
       .panel-meta{font-family:var(--font-mono);font-size:10px;color:var(--ink-faint);letter-spacing:.05em}
+      .lockdown-control{margin-left:auto;font-family:var(--font-mono);font-size:10px;font-weight:600;letter-spacing:.06em;
+        padding:8px 12px;border-radius:9px;border:1px solid var(--line-soft);background:var(--surface);color:var(--ink-faint);cursor:pointer}
+      .lockdown-control.active{color:#ffd7d7;background:#7d2028;border-color:#d95b65;box-shadow:0 0 16px #d95b6533}
+      .onboarding-card{max-width:1100px;margin:0 auto 16px;background:linear-gradient(135deg,#f4b86012,var(--surface));border:1px solid #f4b86066;border-radius:16px;padding:16px}
+      .onboarding-progress{position:relative;height:20px;background:var(--surface-2);border-radius:8px;overflow:hidden;margin:12px 0}
+      .onboarding-progress i{position:absolute;inset:0 auto 0 0;background:#f4b86033}.onboarding-progress span{position:relative;z-index:1;display:block;padding:4px 8px;font-family:var(--font-mono);font-size:9px}
+      .onboarding-steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:7px;margin-bottom:10px}
+      .onboarding-step{display:grid;grid-template-columns:18px 1fr auto;align-items:center;gap:7px;background:var(--surface-2);border:1px solid var(--line-soft);border-radius:9px;padding:8px;color:var(--ink-dim)}
+      .onboarding-step.done{opacity:.62}.onboarding-step b{display:block;font-size:11px}.onboarding-step small{display:block;font-size:9px;color:var(--ink-faint);margin-top:2px}
+      .dashboard-pair{max-width:1100px;margin:16px auto 0;display:grid;grid-template-columns:1fr 1fr;gap:16px}
+      @media (max-width:760px){.dashboard-pair{grid-template-columns:1fr}}
+      .metric-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px}
+      .metric{background:var(--surface-2);border:1px solid var(--line-soft);border-radius:9px;padding:9px;display:flex;flex-direction:column;gap:2px}
+      .metric b{font-family:var(--font-mono);font-size:14px}.metric span{font-size:10px;color:var(--ink-faint)}
+      .goal-list{display:flex;flex-direction:column;gap:7px;max-height:300px;overflow:auto}
+      .goal-row{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--surface-2);border:1px solid var(--line-soft);border-radius:9px;padding:9px}
+      .goal-copy{min-width:0;display:flex;flex-direction:column;gap:2px}.goal-copy b{font-size:12px}.goal-copy span{font-size:11px;color:var(--ink-dim);overflow-wrap:anywhere}
+      .goal-copy small{font-family:var(--font-mono);font-size:9px;color:var(--ink-faint)}
+      .goal-create{display:flex;gap:8px;margin-top:10px}.goal-create .cfg-field{flex:1;min-width:0}.empty-state{font-size:12px;color:var(--ink-faint);padding:12px 0}
       .feed{max-height:420px;overflow-y:auto}
       .feed::-webkit-scrollbar{width:3px}
       .feed::-webkit-scrollbar-track{background:var(--surface-2)}
@@ -7171,10 +7729,13 @@ class NovaPanel extends HTMLElement {
       .camera-note{font-size:11.5px;color:var(--ink-dim);max-width:46ch}
       .camera-toggle{font-family:var(--font-mono);font-size:10.5px;color:var(--ink-faint);background:var(--surface-2);
         border:1px solid var(--line-soft);border-radius:8px;padding:6px 10px;cursor:pointer}
-      .camera-strip{display:none;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;margin-top:12px}
+      .camera-strip{display:none;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;margin-top:12px}
       .camera-strip.open{display:grid}
-      .camera-slot{aspect-ratio:16/10;border-radius:9px;background:var(--surface-2);border:1px solid var(--line-soft);
-        display:flex;align-items:center;justify-content:center;font-family:var(--font-mono);font-size:10px;color:var(--ink-faint);text-align:center;padding:6px}
+      .camera-slot{border-radius:10px;background:var(--surface-2);border:1px solid var(--line-soft);overflow:hidden;padding-bottom:9px}
+      .camera-slot img,.camera-empty{width:100%;aspect-ratio:16/9;object-fit:cover;display:flex;align-items:center;justify-content:center;background:#080706;color:var(--ink-faint);font-family:var(--font-mono);font-size:10px}
+      .camera-caption{padding:8px 9px 4px;display:flex;flex-direction:column;gap:2px}.camera-caption b{font-size:12px}.camera-caption span{font-family:var(--font-mono);font-size:9px;color:var(--ink-faint)}
+      .camera-actions{display:flex;flex-wrap:wrap;gap:5px;padding:4px 9px}.camera-actions .mode-chip{padding:4px 7px;font-size:9px}
+      .camera-diagnostic{font-size:10px;color:var(--ink-dim);line-height:1.35;padding:5px 9px 0;overflow-wrap:anywhere}
       .footnote{max-width:1100px;margin:20px auto 0;text-align:center;font-family:var(--font-mono);font-size:10px;color:var(--ink-faint);letter-spacing:.05em}
       .new-log-entries{max-height:65vh;overflow-y:auto;display:flex;flex-direction:column;gap:1px;margin-top:8px}
       .intr-snap{margin-bottom:10px}

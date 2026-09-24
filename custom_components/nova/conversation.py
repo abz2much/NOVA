@@ -16,7 +16,6 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
     ALL_SPEAKERS_VALUE,
-    CONF_API_KEY,
     CONF_BROADCAST_SPEAKERS,
     CONF_CAST_ANNOUNCE,
     CONF_CAST_SPEAKERS,
@@ -40,7 +39,11 @@ from .const import (
 )
 from .audio_routing import reply_targets
 from .database import save_message
-from .llm_provider import create_provider
+from .llm_provider import (
+    create_provider,
+    resolve_provider_credential,
+    resolve_provider_endpoint,
+)
 from .presence import presence_context_string
 from .tts_helper import resolve_tts_entity, async_announce
 
@@ -289,10 +292,10 @@ class NovaAgent(conversation.ConversationEntity):
             from . import nova_config as _jc
             _eff = _jc.effective_config(entry)
             provider_name = _eff.get("llm_provider", "groq")
-            base_url = _eff.get("llm_base_url", "") or None
+            base_url = resolve_provider_endpoint(_eff, provider_name)
             self._client = _cp(
                 provider_name,
-                _eff.get(CONF_API_KEY, "") or entry.data.get(CONF_API_KEY, ""),
+                resolve_provider_credential(_eff, provider_name),
                 self._model(),
                 base_url,
             )
@@ -932,17 +935,9 @@ class NovaAgent(conversation.ConversationEntity):
                     nova_log("AGENT", f"LLM needed (complexity={complexity}): {user_input.text[:60]}")
                     # Complex request — use LLM agent (Groq/Gemini fallback)
                     from .agent import run_agent
-                    from . import ha_secrets as _hs
                     from . import nova_config as _jc
                     provider_name = self._rt_opt("llm_provider", "groq")
-                    api_key_val = (
-                        await self.hass.async_add_executor_job(
-                            _hs.get_secret_sync, "nova_api_key", "")
-                        or self._rt_opt("api_key", "")
-                        or self.entry.data.get("api_key", "")
-                    )
                     model_val = self._rt_opt(CONF_MODEL, DEFAULT_MODEL)
-                    base_url_val = self._rt_opt("llm_base_url", "") or None
 
                     # The reasoning-tier fallback needs the FULL config, not
                     # entry.data|options — those are empty on panel-configured
@@ -962,6 +957,11 @@ class NovaAgent(conversation.ConversationEntity):
                                              if v not in (None, "")}}
                     except Exception:
                         pass
+
+                    api_key_val = resolve_provider_credential(
+                        eff_config, provider_name)
+                    base_url_val = resolve_provider_endpoint(
+                        eff_config, provider_name)
 
                     try:
                         response_text = await run_agent(

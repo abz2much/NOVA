@@ -2892,6 +2892,10 @@ def _make_followup_runner(hass, config):
     itself, so replies read as Nova reporting back, not answering a question."""
     async def _run(instruction: str, context: str) -> str:
         from .agent import run_agent
+        from .llm_provider import (
+            resolve_provider_credential,
+            resolve_provider_endpoint,
+        )
         try:
             from .const import CONF_MODEL, DEFAULT_MODEL
             model = config.get(CONF_MODEL, DEFAULT_MODEL)
@@ -2906,14 +2910,15 @@ def _make_followup_runner(hass, config):
             f"two spoken-style sentences. If everything is fine, say so briefly."
             + (f"\nContext you saved with it: {context}" if context else "")
         )
+        provider_name = config.get("llm_provider", "groq")
         return await run_agent(
             hass,
             messages=[{"role": "user", "content": instruction}],
             persona=persona,
-            provider_name=config.get("llm_provider", "groq"),
-            api_key=config.get("api_key", ""),
+            provider_name=provider_name,
+            api_key=resolve_provider_credential(config, provider_name),
             model=model,
-            base_url=config.get("llm_base_url") or None,
+            base_url=resolve_provider_endpoint(config, provider_name),
             temperature=0.4,
             config=config,
         )
