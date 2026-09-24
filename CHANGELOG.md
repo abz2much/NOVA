@@ -1,4 +1,4 @@
-## [Unreleased] — guided self-hosted AI and Command Center parity
+## [7.113.0] — guided self-hosted AI and Command Center parity
 
 - Ollama and custom OpenAI-compatible providers now have independent endpoints, validation, credentials, discovery caches, and migration behavior. A legacy shared endpoint is migrated once without allowing one self-hosted provider to bleed into the other.
 - Ollama uses its native `/api/chat` interface for text, tools, images, and explicit thinking control. Its context size is configurable and bounded; OpenAI SDK behavior is no longer assumed for an Ollama server.
