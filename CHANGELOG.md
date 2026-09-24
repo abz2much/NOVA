@@ -1,3 +1,8 @@
+## [Unreleased]
+
+- Ollama responses now keep model scratchpad text private even when a reasoning GGUF ignores `think: false` and leaks either a complete `<think>…</think>` envelope or Qwen's orphaned closing marker into normal response content. Inline literal text containing `</think>` is preserved.
+- Main Agent calls, tool iterations, retries, fallbacks, context summaries, and final summaries now pass through the same privacy-bounded Provider Activity recorder as Nova's classifier, so local Ollama use appears as `llm / local` without storing prompts, responses, tool arguments, or entity state.
+
 ## [7.113.0] — guided self-hosted AI and Command Center parity
 
 - Ollama and custom OpenAI-compatible providers now have independent endpoints, validation, credentials, discovery caches, and migration behavior. A legacy shared endpoint is migrated once without allowing one self-hosted provider to bleed into the other.

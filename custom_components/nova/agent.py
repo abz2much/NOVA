@@ -3503,14 +3503,19 @@ async def _maybe_summarize(
     )
 
     try:
-        from .llm_provider import create_provider
+        from .llm_provider import chat_with_activity, create_provider
         summarizer = await hass.async_add_executor_job(
             create_provider, provider_name, api_key, model, base_url,
         )
-        result = await hass.async_add_executor_job(
-            summarizer.chat,
+        result = await chat_with_activity(
+            hass,
+            summarizer,
             [{"role": "user", "content": prompt}],
-            None, 256, 0.3,
+            role="llm",
+            data_category="text",
+            tools=None,
+            max_tokens=256,
+            temperature=0.3,
         )
         summary = result.get("text", "")
         if summary:
@@ -3977,7 +3982,7 @@ async def run_agent(
       - Home context injection
       - Persistent learning
     """
-    from .llm_provider import create_provider
+    from .llm_provider import chat_with_activity
 
     # Build system prompt with home context
     home_context = await hass.async_add_executor_job(
@@ -4209,14 +4214,25 @@ async def run_agent(
     working = list(full_messages)
     slim_retried = False   # one-shot 413 recovery (drop HA tools + home-state)
 
+    async def _chat_agent(message_list, tool_list, max_tokens):
+        """One activity-recorded provider round trip for this agent loop."""
+        return await chat_with_activity(
+            hass,
+            client,
+            message_list,
+            role="llm",
+            data_category="text",
+            tools=tool_list,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+
     _cap = MAX_TOOL_ITERATIONS
     if max_iterations is not None:
         _cap = max(1, min(int(max_iterations), MAX_TOOL_ITERATIONS))
     for iteration in range(_cap):
         try:
-            result = await hass.async_add_executor_job(
-                client.chat, working, tools or None, 1024, temperature,
-            )
+            result = await _chat_agent(working, tools or None, 1024)
             # A real agent call round-tripped → LLM is genuinely up.
             try:
                 from .diagnostics.service_health import record_usage
@@ -4237,9 +4253,7 @@ async def run_agent(
                     iteration,
                 )
                 try:
-                    result = await hass.async_add_executor_job(
-                        client.chat, working, tools or None, 1024, temperature,
-                    )
+                    result = await _chat_agent(working, tools or None, 1024)
                 except Exception as exc2:
                     if _is_tool_format_error(exc2):
                         # Still malformed — drop tools to salvage a plain answer.
@@ -4249,9 +4263,7 @@ async def run_agent(
                             iteration,
                         )
                         try:
-                            result = await hass.async_add_executor_job(
-                                client.chat, working, None, 1024, temperature,
-                            )
+                            result = await _chat_agent(working, None, 1024)
                         except Exception:
                             return "I'm not sure I caught that, sir."
                     elif _is_connectivity_error(exc2):
@@ -4333,9 +4345,7 @@ async def run_agent(
                         # resolve another provider's dedicated credential or
                         # endpoint. Never reuse the primary key for Gemini.
                         raise RuntimeError("no configured fallback provider")
-                    result = await hass.async_add_executor_job(
-                        client.chat, working, tools or None, 1024, temperature,
-                    )
+                    result = await _chat_agent(working, tools or None, 1024)
                     # Fallback tier recovered — the reasoning backend is up.
                     try:
                         from .diagnostics.service_health import record_usage
@@ -4481,9 +4491,7 @@ async def run_agent(
         "content": "Summarize what you've done briefly.",
     })
     try:
-        result = await hass.async_add_executor_job(
-            client.chat, working, None, 512, temperature,
-        )
+        result = await _chat_agent(working, None, 512)
         return result.get("text", "")
     except Exception:
         try:
