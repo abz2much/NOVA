@@ -77,7 +77,7 @@ Proactive monitoring for freezing pipes, smoke, CO, water, unauthorized entry, a
 
 ### The dashboard
 
-**Command Center**: a warm ember/gold "stellar core" centerpiece — an animated particle core whose state (idle, reasoning, asleep) reflects what Nova is actually doing, so the dashboard looks and feels the same whether you have zero cameras or twelve. Areas show live capability icons, temperature/humidity sparklines, and a light toggle per room; Settings is reorganized around what you're doing rather than which subsystem it touches, right down to a per-person "who does Nova call whom" card. A Residence tab gives you a live, rotatable 3D house view built from the same floor plan you edit in Settings, plus an event feed and a doorbell-training view. The Logs tab has three subviews — **System Log**, **Decisions**, and **Spoken History** — and the diagnostics card holds **Setup Doctor** and **Provider Activity**; **Installed Automations** lives in the Suggestions tab, next to the automations Nova is still proposing.
+**Command Center**: a warm ember/gold "stellar core" centerpiece — an animated particle core whose state (idle, reasoning, asleep) reflects what Nova is actually doing, so the dashboard looks and feels the same whether you have zero cameras or twelve. Areas show live capability icons, temperature/humidity sparklines, and a light toggle per room; Cognitive Core and standing Goals are visible beside the activity feed; authenticated Camera Watch snapshots stay collapsed until requested. Settings is reorganized around what you're doing rather than which subsystem it touches, right down to a per-person "who does Nova call whom" card. A Residence tab gives you a live, rotatable 3D house view built from the same floor plan you edit in Settings, plus an event feed and a doorbell-training view. The Logs tab has four subviews — **System Log**, **Decisions**, **Spoken History**, and **Actions** — and the diagnostics card holds **Setup Doctor** and **Provider Activity**; **Installed Automations** lives in the Suggestions tab, next to the automations Nova is still proposing.
 
 <div align="center">
 <table border="0">
@@ -158,7 +158,7 @@ Optional add-ons unlock more, but none are required to begin:
 - *Voice*: HA OS / Supervised is recommended; Nova auto-installs the Piper, Whisper, and openWakeWord voice stack through the Supervisor. On Container/Core you'd add those yourself.
 - *Vision*: a Gemini API key for camera reasoning, plus cameras. Any HA camera works, but Frigate is the recommended backbone for detection and snapshots, and Nest cameras and doorbells are supported through it. A Eufy Security doorbell needs neither — it's detected natively, no plumbing required.
 - *Voice hardware*: ESP32-S3 satellites and a Piper TTS voice.
-- *Fully local inference*: a GPU box running Ollama. Point `llm_base_url` at it and Nova runs entirely on your own hardware, with no cloud account.
+- *Fully local inference*: a GPU box running Ollama. In Nova's **Settings → AI Models**, enter its Ollama URL, test the connection, choose a discovered model, and apply a Local Text or Hybrid profile. No cloud account is required.
 
 ## Installation
 
@@ -174,7 +174,7 @@ https://github.com/abz2much/NOVA
 
 **2. Install "Nova AI Assistant"** from HACS, then restart Home Assistant.
 
-**3. Add the integration.** Go to **Settings → Devices & Services → Add Integration → Nova**. Enter a cloud API key from Groq, Anthropic, OpenAI, or Gemini; Nova detects the provider from the key's own shape, so there's no separate picker. Or leave it blank and enter a local LLM URL (for example `http://homeassistant.local:11434/v1`) to run Ollama with no cloud account. Nova registers its conversation agent and appears in the sidebar.
+**3. Add the integration.** Go to **Settings → Devices & Services → Add Integration → Nova**. Enter a cloud API key from Groq, Anthropic, OpenAI, or Gemini; Nova detects the provider from the key's own shape, so there's no separate picker. Or leave it blank and enter a local Ollama URL (for example `http://ollama-host.local:11434`) to run without a cloud account. Nova registers its conversation agent and appears in the sidebar. You can also configure or change a self-hosted endpoint later under **Nova → Settings → AI Models**.
 
 **4. Set up voice (optional).** On Home Assistant OS / Supervised, Nova bootstraps the voice stack itself on first run: it installs and starts the Piper, Whisper, and openWakeWord add-ons, downloads the Nova voice, and creates an Assist pipeline with Nova as the conversation agent. On Container/Core installs, with no Supervisor, install those pieces yourself and create the pipeline through Settings → Voice Assistants.
 
@@ -286,8 +286,9 @@ A persistent problem (sustained past a configurable window, not a brief spike) c
 
 | Setting | What it does |
 | --- | --- |
-| `llm_provider` / per-role models | Choose Groq, Gemini, OpenAI, Anthropic, Ollama, or custom, independently for the main agent, classifier, reasoning, review, vision, and camera-reasoning roles. Each role shows only providers with a credential (or, for custom/Ollama, a saved endpoint) configured. A saved model missing from live discovery is kept, never silently replaced. |
-| `llm_base_url` | Point the Ollama/custom providers at your local GPU server (for example `http://gpu-server:11434/v1`). |
+| `llm_provider` / per-role models | Choose Groq, Gemini, OpenAI, Anthropic, Ollama, or custom independently for the Main Agent, Classifier, Reasoning, Vision, and Camera Reasoning roles. A saved model missing from live discovery is kept, never silently replaced. |
+| `ollama_base_url` | The Ollama server used by Ollama roles (for example `http://ollama-host.local:11434`). Nova uses Ollama's native chat API and can discover the server's models and reported capabilities. |
+| `custom_base_url` | A separate OpenAI-compatible endpoint used only by custom-provider roles. It never inherits the Ollama URL or another provider's credential. |
 | Provider credentials | Settings → AI Models (or Configure → Credentials) — one dedicated key per provider, stored only in `secrets.yaml`. Each role above uses only its own provider's key, never another's. |
 | `observer_enabled` | Let Nova watch the event stream and decide what's worth surfacing. |
 | `rich_reasoning` | Cloud-first judgment for medium/high-urgency events: costs a bit more, reasons better. |
@@ -302,9 +303,9 @@ A persistent problem (sustained past a configurable window, not a brief spike) c
 
 ## Languages
 
-Nova follows your Home Assistant language automatically, and you can override it under **Settings → General → Language** (or leave it on Auto). The setup and configuration dialogs are localized through Home Assistant's own translation system. The in-panel Command Center UI is intended to be localized by Nova the same way, using the translation files described below — see the Panel UI note just below for where that currently stands. Anything not yet translated falls back cleanly to English, so nothing breaks.
+Nova follows your Home Assistant language automatically, and you can override it under **Settings → General → Language** (or leave it on Auto). The setup and configuration dialogs are localized through Home Assistant's own translation system. The in-panel Command Center loads its own exact-string dictionaries. Regional tags try the full locale first and then the base language (`pt-BR` → `pt-br.json`, `fr-CA` → `fr.json`). Anything not translated falls back cleanly to English, so nothing breaks.
 
-**Panel UI:** translation files exist for 18 languages (`custom_components/nova/frontend/i18n/`), but the current Command Center panel does not yet load or apply them — the panel UI runs in English regardless of your Home Assistant language today. Broader Command Center localisation is planned as future work; until that ships, English is the dependable, fully working path for the panel. The translation files themselves are still worth contributing to ahead of that work.
+**Panel UI:** translation files currently exist for 18 languages under `custom_components/nova/frontend/i18n/`. Static labels, titles, and placeholders with a matching entry are translated; entity IDs, model names, counts, log content, and other live values are deliberately left unchanged. Missing and newly added strings remain English until their dictionaries are updated.
 
 **Setup dialog:** complete for French, German, Spanish, Italian, Portuguese, and Dutch. Other languages fall back to English here; this is Home Assistant's own translation layer, separate from the panel.
 
@@ -368,6 +369,8 @@ The list below covers Nova-specific differences. It is not a complete release-by
 - Arrival briefings address the person who just walked in directly ("Welcome home, sir") instead of a generic time-of-day greeting followed by a redundant restatement of their own name, and skip reporting the front door as "open" on the very briefing that opening it caused.
 
 **New capabilities**
+- Self-hosted model setup is now a first-class, guided workflow: Ollama and custom OpenAI-compatible servers have separate endpoints, connection tests and server-reported model discovery, capability-aware Local Text/Hybrid profiles, manual-model fallback, and one atomic Apply action that validates every role before changing the running configuration. Ollama uses its native `/api/chat` contract (including tools, images, and explicit thinking control) rather than pretending to be OpenAI-compatible. Legacy shared endpoints migrate without tying the public integration to any host, address, or model.
+- Command Center once again loads Nova's 18 shipped panel-language dictionaries, follows Home Assistant's locale automatically, supports a saved override under Settings → General → Language, falls back from regional to base-language files, and leaves missing strings safely in English. The same parity repair restores the first-run checklist, Cognitive Core status, standing Goals, guarded Lockdown control, authenticated Camera Watch snapshots/analysis/diagnostics, and settings that had disappeared when Classic was removed.
 - Live model discovery for Groq, OpenAI, Anthropic, Gemini, Ollama, and custom endpoints paginates the providers that officially support it (Gemini, Anthropic) with strict page/model-count bounds, briefly caches results per provider so switching tabs doesn't re-fetch every time, and never silently replaces a saved model just because a live list doesn't happen to include it — a real fix, since that used to happen on every Settings visit for any private, preview, or newly-released model.
 - Normal Nova push alerts can target multiple selected phones or notification services. Existing single device settings carry forward automatically, and one unavailable device cannot block delivery to the others. Critical intrusion and confirmation broadcasts remain household wide.
 - Native Eufy Security doorbell/camera support: doorbell press, stranger-vs-known-face detection, and package delivered/stranded/taken all use Eufy's own on-device sensors directly (discovered by unique_id, so a rename can't break it) instead of the Nest/Frigate-only pipeline jarvis-aio assumes. A known/regular face and routine package events cost zero vision-LLM calls — only an actual stranger triggers one.

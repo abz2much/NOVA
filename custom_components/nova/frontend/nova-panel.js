@@ -1131,6 +1131,9 @@ class NovaPanel extends HTMLElement {
     this._logSearch = "";
     this._settingsSection = "general";
     this._settingsSearch = "";
+    this._uiStrings = null;
+    this._uiLangLoaded = null;
+    this._uiLangRequest = 0;
   }
 
   // ─── HA property contract — same shape as Classic's, see nova-panel.js ──
@@ -1140,6 +1143,7 @@ class NovaPanel extends HTMLElement {
     if (first) {
       this._render();
       this._startIntervals();
+      this._loadUiStrings();
     }
   }
   get hass() { return this._hass; }
@@ -1227,6 +1231,7 @@ class NovaPanel extends HTMLElement {
       } catch (_) { this._cognitive = null; }
     }
     if (this._currentTab === "logs") this._fetchDebugLog();
+    this._loadUiStrings();
     this._detectFlare();
     this._renderData();
   }
@@ -1282,10 +1287,79 @@ class NovaPanel extends HTMLElement {
 
     const root = this.shadowRoot;
     root.innerHTML = this._html();
+    this._localizeDOM(root);
     this._renderedOnce = true;
     this._wire();
     this._initCore();
     this._renderData();
+  }
+
+  // Panel translations are keyed by exact English source strings. Dynamic
+  // values (entity ids, model names, counts) therefore remain untouched, and
+  // a missing key falls back to the English text already in the DOM.
+  _resolveUiLang() {
+    const override = this._liveData?.config?.ui_language;
+    if (override && override !== "auto") return String(override);
+    return String(this._hass?.language || "en");
+  }
+
+  async _loadUiStrings(force = false) {
+    const full = (this._resolveUiLang() || "en").toLowerCase().replace(/_/g, "-");
+    const base = full.split("-")[0];
+    if (!force && this._uiLangLoaded === full) return;
+    const request = ++this._uiLangRequest;
+    this._uiLangLoaded = full;
+    if (base === "en") {
+      this._uiStrings = null;
+      if (this._renderedOnce) this._render();
+      return;
+    }
+    const grab = async (lang) => {
+      const response = await fetch(`/nova_panel_static/i18n/${encodeURIComponent(lang)}.json`);
+      if (!response.ok) return null;
+      const value = await response.json();
+      if (!value || Array.isArray(value) || typeof value !== "object") return null;
+      return Object.fromEntries(Object.entries(value).filter(([k, v]) =>
+        typeof k === "string" && typeof v === "string"));
+    };
+    try {
+      let dict = await grab(full);
+      if (!dict && full !== base) dict = await grab(base);
+      if (request !== this._uiLangRequest) return;
+      this._uiStrings = dict || null;
+    } catch (_) {
+      if (request !== this._uiLangRequest) return;
+      this._uiStrings = null;
+    }
+    if (this._renderedOnce) this._render();
+  }
+
+  _localizeDOM(root) {
+    const dict = this._uiStrings;
+    if (!dict || !root) return;
+    try {
+      const walker = document.createTreeWalker(root, 4, null);
+      const swaps = [];
+      let node;
+      while ((node = walker.nextNode())) {
+        const raw = node.nodeValue;
+        if (!raw) continue;
+        const key = raw.trim();
+        if (key && Object.prototype.hasOwnProperty.call(dict, key)) {
+          swaps.push([node, raw.replace(key, dict[key])]);
+        }
+      }
+      swaps.forEach(([textNode, value]) => { textNode.nodeValue = value; });
+      root.querySelectorAll("[title],[placeholder]").forEach(el => {
+        ["title", "placeholder"].forEach(attr => {
+          const raw = el.getAttribute(attr);
+          const key = raw?.trim();
+          if (key && Object.prototype.hasOwnProperty.call(dict, key)) {
+            el.setAttribute(attr, raw.replace(key, dict[key]));
+          }
+        });
+      });
+    } catch (_) { /* English DOM remains usable if localization fails. */ }
   }
 
   _html() {
@@ -3153,6 +3227,20 @@ ${this._htmlDashboardBody()}`;
         </button>
       </div>`;
     return `
+      <div class="cfg-row">
+        <label>Language</label>
+        <select id="uiLanguage" class="cfg-field" data-cfg-key="ui_language">
+          ${this._optSelect([
+            ["auto", "Auto (Home Assistant)"], ["en", "English"], ["cs", "Čeština"],
+            ["da", "Dansk"], ["de", "Deutsch"], ["es", "Español"], ["fi", "Suomi"],
+            ["fr", "Français"], ["it", "Italiano"], ["nb", "Norsk bokmål"],
+            ["nl", "Nederlands"], ["pl", "Polski"], ["pt", "Português"],
+            ["pt-br", "Português (Brasil)"], ["ro", "Română"], ["ru", "Русский"],
+            ["sk", "Slovenčina"], ["sv", "Svenska"], ["tr", "Türkçe"],
+            ["uk", "Українська"],
+          ], cfg.ui_language || "auto")}
+        </select>
+      </div>
       <div class="cfg-row">
         <label>Sleep state</label>
         <select class="cfg-field" data-cfg-key="sleep_override">
@@ -5285,6 +5373,7 @@ ${this._htmlDashboardBody()}`;
       }).join("");
       this._wireCameraActions();
     }
+    this._localizeDOM(root);
   }
 
   async _refreshCameraSnapshot(entityId) {
@@ -5644,7 +5733,8 @@ ${this._htmlDashboardBody()}`;
     this._currentTab = "settings";
     this._render();
     const cards = Array.from(this.shadowRoot.querySelectorAll(".settings-card"));
-    const card = cards.find(c => (c.querySelector(".panel-title")?.textContent || "").includes(title || ""));
+    const needle = String(title || "").toLowerCase();
+    const card = cards.find(c => (c.getAttribute("data-search") || "").includes(needle));
     if (!card) return;
     this._settingsSection = card.getAttribute("data-settings-group") || "general";
     this._applySettingsFilter();
@@ -5686,7 +5776,12 @@ ${this._htmlDashboardBody()}`;
     });
     root.querySelectorAll("select.cfg-field[data-cfg-key]").forEach(sel => {
       sel.addEventListener("change", async () => {
-        await this._saveSetting(sel.getAttribute("data-cfg-key"), sel.value);
+        const key = sel.getAttribute("data-cfg-key");
+        await this._saveSetting(key, sel.value);
+        if (key === "ui_language") {
+          this._uiLangLoaded = null;
+          await this._loadUiStrings(true);
+        }
       });
     });
     root.querySelectorAll("input.cfg-field[data-cfg-key]").forEach(inp => {

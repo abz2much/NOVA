@@ -31,6 +31,16 @@ window.confirm = () => true;
 // asks for a name, then a type).
 global.__promptQueue = [];
 window.prompt = () => (global.__promptQueue.length ? global.__promptQueue.shift() : null);
+const _translationFetches = [];
+const I18N_DIR = path.resolve(__dirname, "..", "custom_components", "nova", "frontend", "i18n");
+const translationFetch = async (url) => {
+  _translationFetches.push(String(url));
+  const match = String(url).match(/\/i18n\/([a-z0-9-]+)\.json$/i);
+  const file = match ? path.join(I18N_DIR, `${match[1].toLowerCase()}.json`) : "";
+  if (!file || !fs.existsSync(file)) return { ok: false, json: async () => null };
+  return { ok: true, json: async () => JSON.parse(fs.readFileSync(file, "utf8")) };
+};
+global.fetch = window.fetch = translationFetch;
 
 window.eval(fs.readFileSync(COMPONENT, "utf8"));
 
@@ -192,7 +202,11 @@ const hass = {
   states: { "assist_satellite.a": { state: "idle", attributes: {} }, "camera.front": { attributes: { access_token: "tok123" } }, "camera.back": { attributes: { access_token: "tok456" } },
     "binary_sensor.mailbox": { state: "off", attributes: { friendly_name: "Mailbox" } } },
   callWS: async (m) => {
-    if (m.type === "nova/update_config") { _updateConfigCalls.push({ key: m.key, value: m.value }); return {}; }
+    if (m.type === "nova/update_config") {
+      _updateConfigCalls.push({ key: m.key, value: m.value });
+      if (m.key === "ui_language") PANEL.config.ui_language = m.value;
+      return {};
+    }
     if (m.type === "nova/get_panel_data") return PANEL;
     if (m.type === "nova/get_activity_log") return { entries: [
       { ts: "08:59", urgency: "low", tag: "OBS", msg: "motion in kitchen" },
@@ -2438,6 +2452,35 @@ setTimeout(async () => {
   checks.push(["switching tabs cancels the previous core animation loop instead of leaking it",
     _cafCalls >= 1]);
   global.cancelAnimationFrame = _realCaf;
+
+  // Command Center localization was accidentally dropped when Classic was
+  // removed even though all 18 dictionaries and ui_language persisted.
+  elNew._currentTab = "settings";
+  elNew._render();
+  let langSelect = elNew.shadowRoot.getElementById("uiLanguage");
+  checks.push(["settings restores the panel Language selector for every shipped locale",
+    !!langSelect && langSelect.options.length === 20 && langSelect.value === "auto"]);
+  langSelect.value = "fr";
+  langSelect.dispatchEvent(new window.Event("change", { bubbles: true }));
+  await new Promise(r => setTimeout(r, 60));
+  checks.push(["panel language can switch at runtime and translates exact static labels",
+    _updateConfigCalls.some(c => c.key === "ui_language" && c.value === "fr")
+    && Array.from(elNew.shadowRoot.querySelectorAll(".nav-tab")).some(b => b.textContent === "Paramètres")]);
+
+  PANEL.config.ui_language = "fr-ca";
+  elNew._uiLangLoaded = null;
+  _translationFetches.length = 0;
+  await elNew._loadUiStrings(true);
+  checks.push(["regional language tags fall back to the shipped base dictionary",
+    _translationFetches.some(u => /fr-ca\.json$/.test(u))
+    && _translationFetches.some(u => /fr\.json$/.test(u))
+    && Array.from(elNew.shadowRoot.querySelectorAll(".nav-tab")).some(b => b.textContent === "Paramètres")]);
+
+  PANEL.config.ui_language = "en";
+  elNew._uiLangLoaded = null;
+  await elNew._loadUiStrings(true);
+  checks.push(["English fallback restores the source UI without a translation request",
+    Array.from(elNew.shadowRoot.querySelectorAll(".nav-tab")).some(b => b.textContent === "Settings")]);
 
   if (elNew._fetchInterval) clearInterval(elNew._fetchInterval);
   if (elNew._sparklineInterval) clearInterval(elNew._sparklineInterval);

@@ -1,3 +1,13 @@
+## [Unreleased] — guided self-hosted AI and Command Center parity
+
+- Ollama and custom OpenAI-compatible providers now have independent endpoints, validation, credentials, discovery caches, and migration behavior. A legacy shared endpoint is migrated once without allowing one self-hosted provider to bleed into the other.
+- Ollama uses its native `/api/chat` interface for text, tools, images, and explicit thinking control. Its context size is configurable and bounded; OpenAI SDK behavior is no longer assumed for an Ollama server.
+- Settings → AI Models is now a guided, transactional workflow: test an endpoint, inspect models and capabilities reported by the server, choose a capability-aware Hybrid or Local Text profile (or configure five real roles manually), then apply the entire validated configuration atomically. Failed validation changes nothing. Credentials remain in their separate administrator-only secret flow.
+- Restored Command Center settings lost in the Classic-dashboard retirement: cognition, rich reasoning, dashboard light control, package watch, adaptive interruption/suggestion tuning, prompt size, motion-vs-doorbell camera analysis, and calendar tight-gap control.
+- Restored the dashboard features whose backend commands survived but whose UI did not: first-run onboarding, Cognitive Core status, standing Goals, guarded Lockdown, and authenticated Camera Watch snapshots with refresh, analysis, diagnostics, and bounded live polling.
+- Restored panel localization. Command Center follows Home Assistant's language or a Settings → General override, tries a full regional tag before its base language, applies the 18 shipped exact-string dictionaries to static text and placeholders, and falls back safely to English for missing entries. Technical and live values are not translated.
+- Self-hosted setup and migration are provider-neutral and contain no private IP address, hardware assumption, or required model name.
+
 ## [7.112.0] — Home Assistant host-health awareness (Phase 10)
 
 Nova can now read the health of the machine it runs on, entirely through Home Assistant's own built-in System Monitor integration — no `/proc`/`/sys` access, no shell, no SSH, no Supervisor API, and no host-control/restart/remediation action anywhere in the implementation. Off by default.
