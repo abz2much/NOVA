@@ -1,4 +1,4 @@
-## [Unreleased]
+## [7.113.1] — Ollama response privacy and activity diagnostics
 
 - Ollama responses now keep model scratchpad text private even when a reasoning GGUF ignores `think: false` and leaks either a complete `<think>…</think>` envelope or Qwen's orphaned closing marker into normal response content. Inline literal text containing `</think>` is preserved.
 - Main Agent calls, tool iterations, retries, fallbacks, context summaries, and final summaries now pass through the same privacy-bounded Provider Activity recorder as Nova's classifier, so local Ollama use appears as `llm / local` without storing prompts, responses, tool arguments, or entity state.
