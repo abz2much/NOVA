@@ -3106,6 +3106,9 @@ class NovaPanel extends HTMLElement {
         ${onOff("announcements_enabled", "Announcements", "Master switch — all proactive speech")}
         ${onOff("sentinel_enabled", "Sentinel", "Door/garage/lock-left-open alerts")}
         ${onOff("observer_enabled", "Observer", "AI event awareness (uses API)")}
+        ${onOff("cognition_enabled", "Cognition", "Local triage — sees telemetry and decides what deserves deeper reasoning")}
+        ${onOff("rich_reasoning", "Rich Reasoning", "Use the configured reasoning model first for medium and high-priority events")}
+        ${onOff("light_control_enabled", "Dashboard Light Control", "Allow room light toggles on the dashboard; status remains visible when off")}
       </div>`;
   }
 
@@ -3483,6 +3486,10 @@ class NovaPanel extends HTMLElement {
         <label>Ollama context length</label>
         <input class="cfg-field" id="aiOllamaNumCtx" type="number" min="512" max="262144" step="512" value="${this._esc(cfg.ollama_num_ctx || 8192)}">
       </div>
+      <div class="cfg-row">
+        <label>Prompt size <span class="toggle-desc">entity names per type; 0 = counts only</span></label>
+        <input class="cfg-field" id="aiHomeContextMaxEntities" type="number" min="0" max="50" step="1" value="${this._esc(cfg.home_context_max_entities ?? 15)}">
+      </div>
       <div class="new-model-list">${rows}</div>
       <div class="cfg-row" style="margin-top:14px">
         <button class="mode-chip" id="aiApply">APPLY</button>
@@ -3680,6 +3687,7 @@ class NovaPanel extends HTMLElement {
       });
     });
     root.getElementById("aiOllamaNumCtx")?.addEventListener("input", () => markDirty());
+    root.getElementById("aiHomeContextMaxEntities")?.addEventListener("input", () => markDirty());
 
     root.querySelectorAll(".ai-endpoint-test").forEach(button => {
       button.addEventListener("click", async () => {
@@ -3763,6 +3771,7 @@ class NovaPanel extends HTMLElement {
         ollama_base_url: (root.querySelector('.ai-endpoint[data-endpoint-provider="ollama"]')?.value || "").trim(),
         custom_base_url: (root.querySelector('.ai-endpoint[data-endpoint-provider="custom"]')?.value || "").trim(),
         ollama_num_ctx: Number(root.getElementById("aiOllamaNumCtx")?.value || 8192),
+        home_context_max_entities: Number(root.getElementById("aiHomeContextMaxEntities")?.value ?? 15),
       };
       root.querySelectorAll(".new-model-row").forEach(row => {
         const provSel = row.querySelector(".new-prov-select");
@@ -4380,6 +4389,8 @@ class NovaPanel extends HTMLElement {
       ${onOff("routine_alerts_enabled", false, { label: "Routine alerts" })}
       ${onOff("memory_threading_enabled", false, { label: "Memory threading" })}
       ${onOff("pattern_learn_motion", false, { label: "Learn motion/presence triggers" })}
+      ${onOff("adaptive_interruption_budget", false, { label: "Adaptive interruptions", sub: "speak less after alerts are repeatedly marked unhelpful" })}
+      ${onOff("adaptive_suggestion_threshold", false, { label: "Adaptive suggestions", sub: "adjust the suggestion bar from past feedback" })}
       ${num("observer_group_debounce", "Sibling-burst coalescing (sec)", "90", 0, 600, 10)}
       ${onOff("continued_conversation_enabled", false, { label: "Continued conversation" })}
       ${onOff("continued_conversation_multi_satellite", false, { label: "Follow me between rooms", sub: "reopen the mic where you moved to (needs 2+ satellites)" })}
@@ -4602,8 +4613,16 @@ class NovaPanel extends HTMLElement {
     return `
       <div class="stub-body">Names are Nova-only (HA untouched; blank reverts). Location governs intrusion + outdoor-event filtering — AUTO shows what the heuristics resolve.</div>
       <div class="cfg-row">
-        <label>Camera Watch — auto-analyze doorbell/motion events</label>
+        <label>Camera Watch — auto-analyze doorbell and person events</label>
         <button class="toggle-btn ${cfg.camera_auto_analyze !== false ? "on" : "off"}" data-cfg-key="camera_auto_analyze" data-cfg-val="${cfg.camera_auto_analyze !== false ? "false" : "true"}">${cfg.camera_auto_analyze !== false ? "ON" : "OFF"}</button>
+      </div>
+      <div class="cfg-row">
+        <label>Also analyze motion events <span class="toggle-desc">noisier; off by default</span></label>
+        <button class="toggle-btn ${cfg.camera_auto_analyze_motion === true ? "on" : "off"}" data-cfg-key="camera_auto_analyze_motion" data-cfg-val="${cfg.camera_auto_analyze_motion === true ? "false" : "true"}">${cfg.camera_auto_analyze_motion === true ? "ON" : "OFF"}</button>
+      </div>
+      <div class="cfg-row">
+        <label>Package Watch — detect packages and mail at the door</label>
+        <button class="toggle-btn ${cfg.package_detection !== false ? "on" : "off"}" data-cfg-key="package_detection" data-cfg-val="${cfg.package_detection !== false ? "false" : "true"}">${cfg.package_detection !== false ? "ON" : "OFF"}</button>
       </div>
       <div class="cfg-row">
         <label>Visitor Learning — silently log strangers seen at the door</label>
@@ -4802,6 +4821,10 @@ class NovaPanel extends HTMLElement {
       <div class="cfg-row">
         <label>SearXNG URL</label>
         <input class="cfg-field" type="text" data-cfg-key="searxng_url" value="${this._esc(cfg.searxng_url || "")}" placeholder="http://searxng.local:8080" autocomplete="off">
+      </div>
+      <div class="cfg-row">
+        <label>Calendar tight gap <span class="toggle-desc">minutes between events treated as back-to-back</span></label>
+        <input class="cfg-field cfg-num" type="number" min="0" max="120" step="5" data-cfg-key="calendar_tight_gap_min" value="${this._esc(cfg.calendar_tight_gap_min ?? 15)}">
       </div>`;
   }
 

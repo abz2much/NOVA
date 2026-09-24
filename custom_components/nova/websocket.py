@@ -2616,7 +2616,10 @@ _AI_ROLE_FIELDS = (
 _AI_APPLY_KEYS = frozenset({
     key for _label, provider_key, model_key in _AI_ROLE_FIELDS
     for key in (provider_key, model_key)
-} | {"ollama_base_url", "custom_base_url", "ollama_num_ctx"})
+} | {
+    "ollama_base_url", "custom_base_url", "ollama_num_ctx",
+    "home_context_max_entities",
+})
 _AI_PROVIDERS = frozenset({"groq", "openai", "gemini", "anthropic", "ollama", "custom"})
 _AI_CLOUD_PROVIDERS = frozenset({"groq", "openai", "gemini", "anthropic"})
 
@@ -2657,6 +2660,16 @@ def _prepare_ai_config_updates(updates: dict) -> dict:
                 raise ValueError("Ollama context length must be a number") from exc
             if not 512 <= number <= 262144:
                 raise ValueError("Ollama context length must be between 512 and 262144")
+            clean[key] = number
+        elif key == "home_context_max_entities":
+            if isinstance(value, bool):
+                raise ValueError("Prompt size must be a number")
+            try:
+                number = int(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Prompt size must be a number") from exc
+            if not 0 <= number <= 50:
+                raise ValueError("Prompt size must be between 0 and 50")
             clean[key] = number
     return clean
 

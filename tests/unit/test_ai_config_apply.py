@@ -66,6 +66,15 @@ def test_prepare_rejects_unknown_keys_and_bad_context(ai_config):
         prepare({"api_key": "must-not-be-accepted"})
     with pytest.raises(ValueError):
         prepare({"ollama_num_ctx": 128})
+    with pytest.raises(ValueError):
+        prepare({"home_context_max_entities": 51})
+
+
+def test_prepare_accepts_counts_only_prompt_mode(ai_config):
+    prepare = ai_config["_prepare_ai_config_updates"]
+    assert prepare({"home_context_max_entities": 0}) == {
+        "home_context_max_entities": 0,
+    }
 
 
 def test_candidate_requires_each_cloud_providers_own_credential(ai_config):

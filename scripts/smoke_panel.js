@@ -494,6 +494,10 @@ setTimeout(async () => {
     ["settings tab has every setting card, General real",
       sRoot.querySelectorAll(".settings-card").length === 29
       && /Sleep state/.test(sRoot.innerHTML) && /Announcements/.test(sRoot.innerHTML)],
+    ["settings tab: General restores cognition, rich reasoning, and dashboard light controls",
+      !!sRoot.querySelector('.toggle-btn[data-cfg-key="cognition_enabled"]')
+      && !!sRoot.querySelector('.toggle-btn[data-cfg-key="rich_reasoning"]')
+      && !!sRoot.querySelector('.toggle-btn[data-cfg-key="light_control_enabled"]')],
     ["settings tab: Room Speakers card is real, not a stub",
       (() => {
         const rs = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Room Speakers/.test(c.querySelector(".panel-title")?.textContent || ""));
@@ -1192,6 +1196,7 @@ setTimeout(async () => {
     _applyAiCalls.length === 1
     && _applyAiCalls[0].updates.ollama_base_url === "http://ollama.lan:11434"
     && _applyAiCalls[0].updates.classifier_provider === "ollama"
+    && _applyAiCalls[0].updates.home_context_max_entities === 15
     && _updateConfigCalls.length === updatesBeforeProviderChange]);
 
   // Phase 3, v7.108.0: a saved model absent from the live list must be kept
@@ -1517,6 +1522,8 @@ setTimeout(async () => {
         const amCard = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Anticipation & Memory/.test(c.querySelector(".panel-title")?.textContent || ""));
         return !!amCard && !amCard.querySelector(".stub-tag")
           && !!amCard.querySelector('button[data-cfg-key="continued_conversation_enabled"]')
+          && !!amCard.querySelector('button[data-cfg-key="adaptive_interruption_budget"]')
+          && !!amCard.querySelector('button[data-cfg-key="adaptive_suggestion_threshold"]')
           && !!amCard.querySelector('input[data-cfg-key="memory_threading_hours"]');
       })()],
   );
@@ -1657,6 +1664,8 @@ setTimeout(async () => {
   // camera_auto_analyze from his actual settings screen.
   checks.push(["settings tab: Camera Watch and Visitor Learning toggles are real, not stubs",
     !!sRoot.querySelector('.toggle-btn[data-cfg-key="camera_auto_analyze"]')
+    && !!sRoot.querySelector('.toggle-btn[data-cfg-key="camera_auto_analyze_motion"]')
+    && !!sRoot.querySelector('.toggle-btn[data-cfg-key="package_detection"]')
     && !!sRoot.querySelector('.toggle-btn[data-cfg-key="visitor_learning"]')]);
   const camWatchBtn = sRoot.querySelector('.toggle-btn[data-cfg-key="camera_auto_analyze"]');
   camWatchBtn.click();
@@ -1731,15 +1740,17 @@ setTimeout(async () => {
     })()]);
 
   // Nova Character & Research: fully generic .cfg-field card, same as
-  // Anticipation & Memory — banter level, search backend, SearXNG URL.
+  // Anticipation & Memory — banter level, search backend, SearXNG URL,
+  // and the restored calendar tight-gap control.
   checks.push(
-    ["settings tab: Nova Character & Research card is real with its three fields",
+    ["settings tab: Nova Character & Research card restores all four fields",
       (() => {
         const crc = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Nova Character & Research/.test(c.querySelector(".panel-title")?.textContent || ""));
         return !!crc && !crc.querySelector(".stub-tag")
           && !!crc.querySelector('select[data-cfg-key="banter_level"]')
           && !!crc.querySelector('select[data-cfg-key="search_backend"]')
           && !!crc.querySelector('input[data-cfg-key="searxng_url"]')
+          && !!crc.querySelector('input[data-cfg-key="calendar_tight_gap_min"]')
           && crc.querySelector('input[data-cfg-key="searxng_url"]').value === "http://sx.local:8080";
       })()],
   );
