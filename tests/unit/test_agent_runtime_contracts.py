@@ -1,0 +1,93 @@
+"""Characterization of the agent's public and compatibility surface.
+
+These pin what the agent package split must not change: the exact tool
+definitions the model sees (order and descriptions included), every name
+that production code and tests import from ``agent``, run_agent's signature,
+and the static, authoritative part of the main and HOMER system prompts.
+Regenerate a fixture only for a deliberate, reviewed change."""
+import inspect
+import json
+
+import pytest
+
+import contract_extract as ce
+from fakes import FakeHass
+
+
+@pytest.fixture
+def agent(load):
+    return load("agent")
+
+
+def test_tool_specs_are_byte_identical(agent):
+    pinned = ce.load_fixture("agent_tool_specs")
+    current = json.loads(json.dumps(ce.agent_tool_specs(agent)))
+    assert [t["function"]["name"] for t in current["tools"]] == \
+        [t["function"]["name"] for t in pinned["tools"]], "tool order changed"
+    for want, got in zip(pinned["tools"], current["tools"]):
+        assert got == want, f"tool definition changed: {want['function']['name']}"
+    assert current["slim_tools"] == pinned["slim_tools"]
+    assert current["homer_directive"] == pinned["homer_directive"]
+
+
+def test_tool_names_are_unique(agent):
+    names = [t["function"]["name"] for t in agent.NOVA_TOOLS]
+    assert len(names) == len(set(names)) == 49
+
+
+def test_facade_symbols_still_importable(agent):
+    pinned = ce.load_fixture("agent_facade")
+    missing = [n for n in pinned["symbols"] if not hasattr(agent, n)]
+    assert not missing, f"agent no longer exports: {missing}"
+
+
+def test_run_agent_signature_is_frozen(agent):
+    pinned = ce.load_fixture("agent_facade")
+    assert str(inspect.signature(agent.run_agent)) == pinned["run_agent_signature"]
+    assert inspect.iscoroutinefunction(agent.run_agent)
+
+
+class _CapturingClient:
+    def __init__(self):
+        self.calls = []
+
+    def chat(self, messages, tools, max_tokens, temperature):
+        self.calls.append({"messages": messages, "tools": tools})
+        return {"text": "ok", "tool_calls": []}
+
+
+async def _system_prompt(agent, monkeypatch, **kw):
+    client = _CapturingClient()
+
+    async def fake_create_provider(*a, **k):
+        return client
+
+    monkeypatch.setattr(agent, "_create_provider_with_fallback", fake_create_provider)
+    monkeypatch.setattr(agent, "_load_learned", lambda: {"alias": {}})
+    hass = FakeHass()
+    await agent.run_agent(
+        hass, messages=[{"role": "user", "content": "hello"}],
+        persona="PERSONA", provider_name="ollama", api_key="", model="m",
+        hass_api=None, user_input=None, config={}, **kw)
+    hass.close_pending()
+    return client.calls[0]["messages"][0]["content"]
+
+
+def _static_tail(prompt: str) -> str:
+    # From the authoritative tools/rules section to the end: server-written
+    # text only, independent of live home state or the clock.
+    return prompt[prompt.index("## Tools\n"):]
+
+
+async def test_main_prompt_static_sections_unchanged(agent, monkeypatch):
+    prompt = await _system_prompt(agent, monkeypatch)
+    assert prompt.startswith("PERSONA\n\n")
+    assert _static_tail(prompt) == ce.load_fixture("agent_prompts")["main"]
+
+
+async def test_homer_prompt_static_sections_unchanged(agent, monkeypatch):
+    tools, _, _, directive = agent._resolve_profile("homer")
+    prompt = await _system_prompt(agent, monkeypatch, allowed_tools=tools, depth=1,
+                                  profile_directive=directive)
+    assert prompt.startswith(directive)
+    assert _static_tail(prompt) == ce.load_fixture("agent_prompts")["homer"]

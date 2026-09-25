@@ -333,6 +333,18 @@ def agent_contract(agent) -> dict:
     })
 
 
+def agent_tool_specs(agent) -> dict:
+    """The exact tool definitions the model is offered, in order — names,
+    descriptions and schemas — plus the slim-retry subset and HOMER's
+    directive. Stricter than agent_contract(): a reworded description or a
+    reordered tool list is a prompt-behaviour change and must show up here."""
+    return {
+        "tools": [dict(t) for t in agent.NOVA_TOOLS],
+        "slim_tools": sorted(agent._SLIM_TOOLS),
+        "homer_directive": agent._HOMER_DIRECTIVE,
+    }
+
+
 # ── Storage identity ────────────────────────────────────────────────────────
 
 _CONFIG_ROOT = "/config/"
