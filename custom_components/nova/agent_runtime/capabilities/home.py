@@ -55,15 +55,27 @@ def _dedupe_candidates(items: list[dict]) -> list[dict]:
 
 
 def _build_clarification(candidates: list[dict], hass=None) -> str:
-    """Fixed, deterministic clarification question — no LLM call. If two or
-    more candidates share the same friendly_name, the entity_id is appended
-    to disambiguate (never "did you mean Kitchen Light or Kitchen Light?")."""
+    """Fixed, deterministic clarification question — no LLM call. Candidates
+    are named by friendly name; when two share one, the area tells them
+    apart, and the entity_id only when there is no area or it is the same
+    (never "did you mean Kitchen Light or Kitchen Light?")."""
+    from ..presentation import _area_name
     names = [c.get("friendly_name") or c["entity_id"] for c in candidates]
     counts: dict = {}
     for n in names:
         counts[n] = counts.get(n, 0) + 1
-    labels = [f"{n} ({c['entity_id']})" if counts[n] > 1 else n
-              for c, n in zip(candidates, names)]
+    labels = []
+    for c, n in zip(candidates, names):
+        if counts[n] > 1:
+            area = _area_name(hass, c["entity_id"]) if hass is not None else None
+            labels.append(f"{n} ({area})" if area else f"{n} ({c['entity_id']})")
+        else:
+            labels.append(n)
+    seen: dict = {}
+    for label in labels:
+        seen[label] = seen.get(label, 0) + 1
+    labels = [f"{label} ({c['entity_id']})" if seen[label] > 1 and c["entity_id"] not in label
+              else label for c, label in zip(candidates, labels)]
     if len(labels) >= 2:
         return f"I found more than one match — did you mean {labels[0]} or {labels[1]}?"
     return "I found more than one possible match — could you be more specific about which one you mean?"

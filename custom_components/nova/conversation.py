@@ -617,9 +617,11 @@ class NovaAgent(conversation.ConversationEntity):
         from .websocket import nova_log
         device_id = getattr(user_input, 'device_id', None)
         nova_log("CONV", f"ENTRY text='{user_input.text[:60]}' device={device_id}")
-        _LOGGER.warning(
-            "Nova async_process ENTRY: text='%s' device_id='%s'",
-            user_input.text[:60], device_id,
+        # Never the user's words in the Home Assistant log: the length is
+        # enough to diagnose routing.
+        _LOGGER.debug(
+            "Nova async_process ENTRY: %d chars, device_id='%s'",
+            len(user_input.text or ""), device_id,
         )
         # A loaded entry that lost its NovaRuntime must fail this turn before
         # the local engine, the provider, any tool or TTS routing runs. The
@@ -645,8 +647,7 @@ class NovaAgent(conversation.ConversationEntity):
         if is_dup:
             _LOGGER.warning(
                 "Nova dedup: suppressing duplicate from device=%s "
-                "(already handled), text='%s'",
-                device_id, user_input.text[:40],
+                "(already handled)", device_id,
             )
             nova_log("DEDUP", f"suppressed duplicate from {device_id}")
             ir = intent.IntentResponse(language=user_input.language)
@@ -733,7 +734,8 @@ class NovaAgent(conversation.ConversationEntity):
 
         if not relevant:
             nova_log("GATE", f"ignored ambient input: '{user_input.text.strip()[:60]}'")
-            _LOGGER.info("Nova relevance gate: ignored '%s'", user_input.text.strip()[:80])
+            _LOGGER.info("Nova relevance gate: ignored ambient input (%d chars)",
+                         len(user_input.text.strip()))
             ir = intent.IntentResponse(language=user_input.language)
             ir.async_set_speech("")  # silence — do not respond to ambient speech
             return conversation.ConversationResult(response=ir, conversation_id=cid)
@@ -900,7 +902,8 @@ class NovaAgent(conversation.ConversationEntity):
         # can never disagree.
         if gate_enabled and not is_addressed:
             nova_log("GATE", f"ignored ambient input: '{user_input.text.strip()[:60]}'")
-            _LOGGER.info("Nova relevance gate: ignored '%s'", user_input.text.strip()[:80])
+            _LOGGER.info("Nova relevance gate: ignored ambient input (%d chars)",
+                         len(user_input.text.strip()))
             ir = intent.IntentResponse(language=user_input.language)
             ir.async_set_speech("")  # silence — do not respond to ambient speech
             return conversation.ConversationResult(response=ir, conversation_id=cid)

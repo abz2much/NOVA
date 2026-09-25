@@ -156,14 +156,15 @@ async def _create_provider_with_fallback(
     try:
         return await providers.primary(provider_name, api_key, model, base_url)
     except Exception as exc:
-        _LOGGER.warning("Primary provider '%s' failed: %s — trying Gemini", provider_name, exc)
+        _LOGGER.warning("Primary provider '%s' failed: %s — trying the reasoning tier",
+                        provider_name, exc)
 
     # Fallback to the reasoning tier
     if config:
         try:
             return await providers.tier(config, "reasoning")
         except Exception as exc2:
-            _LOGGER.warning("Gemini fallback also failed: %s", exc2)
+            _LOGGER.warning("Reasoning-tier fallback also failed: %s", exc2)
 
     raise RuntimeError(f"No LLM providers available (tried {provider_name} + Gemini)")
 

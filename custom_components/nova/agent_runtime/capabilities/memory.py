@@ -71,7 +71,7 @@ async def _exec_remember(hass: HomeAssistant, args: dict) -> str:
         data = await hass.async_add_executor_job(_load_learned)
         data.setdefault("alias", {})[name] = value
         await hass.async_add_executor_job(_save_learned, data)
-        _LOGGER.info("Nova learned: alias['%s'] = '%s'", name, value)
+        _LOGGER.info("Nova learned an alias")
         return json.dumps({"success": True, "learned": f"alias: '{name}' → '{value}'"})
 
     # preference/routine: stage as pending in the knowledge store (the single
@@ -97,8 +97,7 @@ async def _exec_remember(hass: HomeAssistant, args: dict) -> str:
     if not fact:
         return json.dumps({"error": "failed to stage fact for confirmation"})
 
-    _LOGGER.info("Nova staged pending %s: '%s' = '%s' (fact_id=%s)",
-                key, name, value, fact["id"])
+    _LOGGER.info("Nova staged a pending %s (fact_id=%s)", key, fact["id"])
     return json.dumps({
         "success": True,
         "status": "pending",

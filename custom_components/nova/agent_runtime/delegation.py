@@ -94,7 +94,6 @@ async def _run_delegated(hass, args: dict, *, persona: str, provider_name: str,
         # back into the model's context (and potentially gets narrated to
         # the user) — it can carry a provider error string with more detail
         # than should leave the server. Full detail goes to the log only.
-        _LOGGER.warning("delegate_task sub-agent failed (objective=%r): %s",
-                        objective[:120], exc)
+        _LOGGER.warning("delegate_task sub-agent failed: %s", exc)
         return json.dumps({"error": "sub-agent failed — could not complete "
                                     "the delegated objective"})

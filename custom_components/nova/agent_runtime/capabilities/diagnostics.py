@@ -50,7 +50,10 @@ async def _exec_root_cause(hass: HomeAssistant, args: dict) -> str:
         lambda: rca.analyze(entity_id, event_time, window))
 
     ev = result.get("event") or {}
-    lines = [f"Root cause analysis for {entity_id}:"]
+    from ..presentation import display_name
+    shown = display_name(hass, entity_id)
+    lines = [f"Root cause analysis for {shown}"
+             + (f" ({entity_id}):" if shown != entity_id else ":")]
     if ev.get("timestamp"):
         lines.append(f"Event: {ev.get('old_state')} → {ev.get('new_state')} "
                      f"at {ev['timestamp']}"

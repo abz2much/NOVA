@@ -23,7 +23,9 @@ N8N_WEBHOOK_SECRET_KEY = "nova_specialist_webhook_key"
 N8N_WEBHOOK_HEADER = "X-Nova-Key"
 
 
-_N8N_DEFAULT_BASE_URL = "http://10.0.4.111:5678/webhook"
+# The webhook base URL (nova_config "n8n_webhook_base_url") has no default:
+# a specialist is inert until both it and the secret are configured.
+N8N_WEBHOOK_BASE_URL_KEY = "n8n_webhook_base_url"
 
 
 _N8N_SSH_TIMEOUT = 90     # Executive Assistant / Marketing: SSH -> claude -p, can be slow
@@ -37,7 +39,13 @@ async def _ask_n8n_specialist(hass: HomeAssistant, path: str, message: str,
     """POST an objective to one of the surviving n8n specialists' webhooks and
     return its reply as a JSON string. Never raises — a network failure,
     timeout, or non-200 comes back as an honest {"error": ...}, never a
-    fabricated reply."""
+    fabricated reply.
+
+    Inert unless both the webhook base URL and the shared secret are
+    explicitly configured; the URL must be a plain http(s) URL (no embedded
+    credentials, no metadata host). Redirects are not followed, so the secret
+    header only ever goes to the configured origin. Nothing here logs the
+    message, the secret or the reply."""
     import aiohttp
     from homeassistant.helpers.aiohttp_client import async_get_clientsession
     from ... import nova_config, ha_secrets
@@ -46,6 +54,21 @@ async def _ask_n8n_specialist(hass: HomeAssistant, path: str, message: str,
     if not message:
         return json.dumps({"error": "a message is required"})
 
+    base_url = str(nova_config.get(N8N_WEBHOOK_BASE_URL_KEY, "") or "").strip()
+    if not base_url:
+        return json.dumps({
+            "error": f"{N8N_WEBHOOK_BASE_URL_KEY} is not configured — "
+                     "this specialist can't be reached until it is",
+        })
+    try:
+        from ...providers.destinations import check_url
+        check_url(base_url)
+    except Exception:
+        return json.dumps({
+            "error": f"{N8N_WEBHOOK_BASE_URL_KEY} is not a usable http(s) URL — "
+                     "this specialist can't be reached until it is fixed",
+        })
+
     secret = await ha_secrets.async_get_secret(hass, N8N_WEBHOOK_SECRET_KEY, "")
     if not secret:
         return json.dumps({
@@ -53,8 +76,7 @@ async def _ask_n8n_specialist(hass: HomeAssistant, path: str, message: str,
                      "this specialist can't be reached until it is",
         })
 
-    base_url = nova_config.get("n8n_webhook_base_url", _N8N_DEFAULT_BASE_URL)
-    url = f"{str(base_url).rstrip('/')}/{path}"
+    url = f"{base_url.rstrip('/')}/{path}"
 
     session = async_get_clientsession(hass)
     try:
@@ -63,6 +85,7 @@ async def _ask_n8n_specialist(hass: HomeAssistant, path: str, message: str,
             json={"message": message},
             headers={N8N_WEBHOOK_HEADER: secret},
             timeout=aiohttp.ClientTimeout(total=timeout),
+            allow_redirects=False,
         ) as resp:
             if resp.status != 200:
                 body = await resp.text()
