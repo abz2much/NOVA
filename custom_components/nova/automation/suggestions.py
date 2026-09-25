@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from .models import DetectedPattern
+from .models import SUGGESTION_PENDING, DetectedPattern, loads_json
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -402,6 +402,79 @@ def generate_automation(pattern: DetectedPattern) -> str:
     return json.dumps({"note": p.description}, indent=2)
 
 
+def suggestion_identity(pattern_type: str, entity_ids, details) -> Optional[tuple]:
+    """The stable identity of a suggestion's behaviour, or None when the
+    pattern type (or a legacy row without details) has none.
+
+    It names what triggers the behaviour and what the behaviour does. Measured
+    values that drift between analyses (counts, coverage, a sequence's mean
+    delay, a learned time window or sun condition, a numeric threshold, the
+    probable owner) are deliberately not part of it: the same behaviour
+    measured again is the same suggestion, and a dismissed one stays
+    dismissed. A different trigger, target, state or hour is a different
+    behaviour and so a different suggestion."""
+    d = details if isinstance(details, dict) else {}
+    ents = [str(e) for e in (entity_ids or [])]
+    try:
+        if pattern_type == "time_routine":
+            if not ents or d.get("hour") is None or d.get("state") is None:
+                return None
+            return (pattern_type, ents[0], str(d["state"]), int(d["hour"]))
+        if pattern_type == "repeated_command":
+            if not d.get("command") or d.get("hour") is None:
+                return None
+            return (pattern_type, str(d["command"]), int(d["hour"]))
+        if pattern_type == "sequence":
+            trig, act = d.get("trigger") or {}, d.get("action") or {}
+            if not trig.get("entity") or not act.get("entity"):
+                return None
+            return (pattern_type, str(trig["entity"]), str(trig.get("state")),
+                    str(act["entity"]), str(act.get("state")))
+        if pattern_type == "numeric_trigger":
+            act = d.get("action") or {}
+            if not d.get("trigger_sensor") or not act.get("entity"):
+                return None
+            return (pattern_type, str(d["trigger_sensor"]), str(d.get("op")),
+                    str(act["entity"]), str(act.get("state")))
+        if pattern_type == "presence":
+            if not d.get("trigger_person") or not d.get("action_entity"):
+                return None
+            return (pattern_type, str(d["trigger_person"]),
+                    str(d.get("trigger_state")), str(d["action_entity"]),
+                    str(d.get("action_state")))
+    except (TypeError, ValueError):
+        return None
+    return None
+
+
+def _find_existing(conn: sqlite3.Connection, pattern: DetectedPattern):
+    """(id, status) of the stored suggestion for this pattern, or None.
+
+    A pending row wins over decided ones so a refresh lands where the
+    reviewer will see it; any decided row still means "not new"."""
+    same_text = conn.execute(
+        "SELECT id, status FROM suggestions WHERE description = ?",
+        (pattern.description,)).fetchall()
+    key = suggestion_identity(pattern.pattern_type, pattern.entity_ids,
+                              pattern.details)
+    matches = [(int(r[0]), str(r[1] or "")) for r in same_text]
+    if key is not None:
+        rows = conn.execute(
+            "SELECT id, status, entity_ids, details FROM suggestions "
+            "WHERE pattern_type = ? ORDER BY id", (pattern.pattern_type,)).fetchall()
+        for rid, status, ents, details in rows:
+            if suggestion_identity(pattern.pattern_type,
+                                   loads_json(ents, []),
+                                   loads_json(details, {})) == key:
+                matches.append((int(rid), str(status or "")))
+    if not matches:
+        return None
+    for match in matches:
+        if match[1] == SUGGESTION_PENDING:
+            return match
+    return matches[0]
+
+
 class SuggestionStore:
     """SQL access to the suggestions table. Stateless: every call opens and
     closes its own connection in the calling thread."""
@@ -427,17 +500,31 @@ class SuggestionStore:
             conn = sqlite3.connect(self._db)
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA busy_timeout=10000")
-            # Check if similar suggestion already exists
-            existing = conn.execute(
-                "SELECT id FROM suggestions WHERE description = ?",
-                (pattern.description,)
-            ).fetchone()
+            # The same behaviour is ONE suggestion however its counts drift.
+            # Match on the pattern's stable identity (what triggers it and
+            # what it does), never on the description, which embeds counts.
+            existing = _find_existing(conn, pattern)
             if existing:
-                # Update occurrence count and confidence
-                conn.execute(
-                    "UPDATE suggestions SET confidence = ?, pattern_count = ? WHERE id = ?",
-                    (pattern.confidence, pattern.occurrences, existing[0]),
-                )
+                sid, status = existing
+                if status == SUGGESTION_PENDING:
+                    # Still under review: refresh the evidence and payload so
+                    # the reviewer sees (and installs) the latest measurement.
+                    conn.execute(
+                        "UPDATE suggestions SET confidence = ?, pattern_count = ?, "
+                        "description = ?, details = ?, automation_yaml = ? "
+                        "WHERE id = ?",
+                        (pattern.confidence, pattern.occurrences,
+                         pattern.description, json.dumps(pattern.details or {}),
+                         (generate or generate_automation)(pattern), sid),
+                    )
+                else:
+                    # Decided (dismissed, installed, covered, approved): keep
+                    # the decision; only the counts move, as they always have.
+                    conn.execute(
+                        "UPDATE suggestions SET confidence = ?, pattern_count = ? "
+                        "WHERE id = ?",
+                        (pattern.confidence, pattern.occurrences, sid),
+                    )
                 conn.commit()
                 conn.close()
                 return False

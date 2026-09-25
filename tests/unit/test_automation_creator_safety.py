@@ -107,7 +107,10 @@ async def test_successful_write_preserves_existing_automations(
 
     assert result["success"] is True
     data = yaml.safe_load(path.read_text())
-    assert [item["id"] for item in data] == [
-        "existing", "nova_auto_test_rule"]
+    # Phase 5 (D2): the readable slug is kept and a behaviour digest makes
+    # the id collision-resistant.
+    assert [item["id"] for item in data][0] == "existing"
+    assert data[1]["id"].startswith("nova_auto_test_rule_")
+    assert data[1]["id"] == result["automation_id"]
     assert hass.services.calls == 1
     assert not list(tmp_path.glob(".nova-automations-*.tmp"))

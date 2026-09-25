@@ -2834,7 +2834,8 @@ async def _tick():
     try:
         from .automation.patterns import get_analyzer, set_thresholds
         analyzer = get_analyzer()
-        if analyzer.should_analyze():
+        # should_analyze reads patterns.db: keep SQLite off the event loop.
+        if await hass.async_add_executor_job(analyzer.should_analyze):
             # Loosened-reins defaults (occurrences 4, confidence 0.55) — API spend
             # is no longer the constraint; user can tune via panel-saved keys.
             try:
@@ -2851,7 +2852,8 @@ async def _tick():
                 from .websocket import nova_log
                 nova_log("LEARN", f"Pattern analysis: {len(patterns)} patterns found")
                 # Notify about new high-confidence suggestions
-                pending = analyzer.get_pending_suggestions()
+                pending = await hass.async_add_executor_job(
+                    analyzer.get_pending_suggestions)
                 if pending:
                     honorific = config.get("honorific", "sir")
                     nova_log(

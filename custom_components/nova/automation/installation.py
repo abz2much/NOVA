@@ -11,11 +11,15 @@ Assistant process, whichever config entry asks.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import os
 import tempfile
 import yaml
 from typing import TYPE_CHECKING, Any, Optional
+
+from .matching import fingerprint
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -27,6 +31,38 @@ _WRITE_LOCK = asyncio.Lock()
 
 class AutomationWriteError(Exception):
     """Raised when the HA automation file cannot be changed safely."""
+
+
+class _AlreadyInstalled(Exception):
+    """The exact automation is already in automations.yaml."""
+
+
+_ID_PREFIX = "nova_auto_"
+_ID_SLUG_CHARS = 40
+_ID_DIGEST_CHARS = 12
+
+
+def automation_id_for(alias: str, config: dict[str, Any]) -> str:
+    """Deterministic, collision-resistant id for a Nova automation.
+
+    The readable part is the alias slug Nova has always used (truncated to 40
+    characters); the suffix is a digest of the full alias and the canonical
+    behaviour (trigger, condition, action, mode), so two automations whose
+    aliases share a long prefix, or whose behaviour differs, never share an
+    id. Ids of automations Nova already installed are never recomputed."""
+    slug = alias.lower().replace(" ", "_")[:_ID_SLUG_CHARS]
+    behaviour = fingerprint(config) or json.dumps(
+        config, sort_keys=True, default=str)
+    digest = hashlib.sha256(
+        f"{alias}\n{behaviour}".encode("utf-8")).hexdigest()[:_ID_DIGEST_CHARS]
+    return f"{_ID_PREFIX}{slug}_{digest}"
+
+
+def _existing_with_id(items: list[dict[str, Any]], automation_id: str):
+    for item in items:
+        if str(item.get("id", "")) == automation_id:
+            return item
+    return None
 
 
 def _read_automations(path: str) -> tuple[list[dict[str, Any]], bytes | None]:
@@ -214,9 +250,7 @@ async def create_automation(
         condition = [condition]
 
     # Build the automation config
-    automation_id = f"nova_auto_{alias.lower().replace(' ', '_')[:40]}"
     auto_config = {
-        "id": automation_id,
         "alias": f"Nova · {alias}",
         "description": description or f"Created by Nova: {alias}",
         "mode": mode,
@@ -225,6 +259,8 @@ async def create_automation(
     }
     if condition:
         auto_config["conditions"] = condition
+    automation_id = automation_id_for(alias, auto_config)
+    auto_config = {"id": automation_id, **auto_config}
 
     # Validate serialization first, then use HA's own automation validator.
     try:
@@ -253,8 +289,17 @@ async def create_automation(
         async with _WRITE_LOCK:
             existing, original = await hass.async_add_executor_job(
                 _read_automations, automations_path)
-            updated = [item for item in existing
-                       if item.get("id") != automation_id]
+            # Never replace another automation: an entry that already holds
+            # this id is either this exact automation (a duplicate) or a
+            # different one Nova must not overwrite.
+            clash = _existing_with_id(existing, automation_id)
+            if clash is not None:
+                if fingerprint(clash) == fingerprint(auto_config):
+                    raise _AlreadyInstalled(str(clash.get("alias") or automation_id))
+                raise AutomationWriteError(
+                    f"automations.yaml already has a different automation with id "
+                    f"{automation_id}; no changes were made")
+            updated = list(existing)
             updated.append(auto_config)
             await hass.async_add_executor_job(
                 _atomic_write_yaml, automations_path, updated)
@@ -288,6 +333,12 @@ async def create_automation(
             "alias": f"Nova · {alias}",
         }
 
+    except _AlreadyInstalled as exc:
+        await hass.async_add_executor_job(
+            lambda: action_log.set_execution(
+                action_id, "failed", reason_code="duplicate_automation"))
+        return {"success": False,
+                "error": f"Equivalent automation already exists: {exc}"}
     except Exception as exc:
         _LOGGER.error("Nova automation creation failed: %s", exc)
         await hass.async_add_executor_job(

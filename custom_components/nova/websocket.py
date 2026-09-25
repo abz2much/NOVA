@@ -800,7 +800,8 @@ async def ws_get_panel_data(
             "lockdown":       _get_lockdown_status(),
             "intrusion":      _get_intrusion_status(),
             "knowledge":      _get_knowledge_stats(),
-            "suggestions":    _get_suggestions(),
+            # Reads patterns.db: run it off the event loop.
+            "suggestions":    await hass.async_add_executor_job(_get_suggestions),
             "goals":          _get_goals(),
             "config": {
                 "announcements_enabled": announcements_on,

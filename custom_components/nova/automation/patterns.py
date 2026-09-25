@@ -419,40 +419,29 @@ class PatternAnalyzer:
     async def analyze(self, hass: HomeAssistant) -> list[DetectedPattern]:
         """Run full pattern analysis. Returns detected patterns."""
         self._last_analysis = time.time()
-        patterns = []
 
-        conn = self._connect()
-        if not conn:
-            return patterns
-
+        # Everything that needs the event loop (the state machine, the
+        # recorder's own executor) is gathered first; every SQLite read then
+        # runs in ONE executor job that opens, uses and closes its own
+        # connection, so a connection never crosses threads.
+        person_map = self._person_entity_map(hass)
         try:
-            person_map = self._person_entity_map(hass)
-            patterns.extend(await hass.async_add_executor_job(
-                self._find_time_routines, conn, person_map))
-            patterns.extend(await hass.async_add_executor_job(
-                self._find_repeated_commands, conn))
-            try:
-                _sensor_hist = await self._fetch_numeric_sensor_history(hass)
-            except Exception:
-                _sensor_hist = {}
-            _lat = getattr(hass.config, "latitude", None)
-            _lon = getattr(hass.config, "longitude", None)
-            patterns.extend(await hass.async_add_executor_job(
-                self._find_sequence_patterns, conn, _lat, _lon, _sensor_hist))
-            patterns.extend(await hass.async_add_executor_job(
-                self._find_numeric_triggers, conn, _sensor_hist))
-            patterns.extend(await hass.async_add_executor_job(
-                self._find_presence_patterns, conn))
-        except Exception as exc:
-            _LOGGER.warning("Pattern analysis error: %s", exc)
-        finally:
-            conn.close()
+            _sensor_hist = await self._fetch_numeric_sensor_history(hass)
+        except Exception:
+            _sensor_hist = {}
+        _lat = getattr(hass.config, "latitude", None)
+        _lon = getattr(hass.config, "longitude", None)
+        patterns = await hass.async_add_executor_job(
+            self._detect_patterns, person_map, _lat, _lon, _sensor_hist)
+        if patterns is None:          # no patterns.db yet
+            return []
 
         # Store high-confidence patterns as suggestions
         new_suggestions = 0
         already_automated = 0
         new_person_patterns = 0
-        _eff_threshold = _effective_threshold()
+        # The adaptive delta reads decisions.db, so resolve it off the loop.
+        _eff_threshold = await hass.async_add_executor_job(_effective_threshold)
         near_misses: list = []
         # A sequence stores when count/(MIN_OCCURRENCES*3) >= threshold; surface
         # how many recurrences a not-yet-stored one still needs.
@@ -516,6 +505,30 @@ class PatternAnalyzer:
                 _eff_threshold * 100,
             )
 
+        return patterns
+
+    def _detect_patterns(self, person_map: dict, lat, lon,
+                         sensor_hist: dict) -> Optional[list[DetectedPattern]]:
+        """Run every detector over one connection. SYNC — executor only.
+
+        The connection is created, used and closed in this one thread
+        (sqlite3 refuses a connection used from another thread). Returns None
+        when patterns.db does not exist yet. A detector error keeps the
+        patterns found before it, as analysis always has."""
+        conn = self._connect()
+        if not conn:
+            return None
+        patterns: list[DetectedPattern] = []
+        try:
+            patterns.extend(self._find_time_routines(conn, person_map))
+            patterns.extend(self._find_repeated_commands(conn))
+            patterns.extend(self._find_sequence_patterns(conn, lat, lon, sensor_hist))
+            patterns.extend(self._find_numeric_triggers(conn, sensor_hist))
+            patterns.extend(self._find_presence_patterns(conn))
+        except Exception as exc:
+            _LOGGER.warning("Pattern analysis error: %s", exc)
+        finally:
+            conn.close()
         return patterns
 
     def _automation_match(self, hass, pattern: DetectedPattern) -> dict:
