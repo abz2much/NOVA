@@ -1044,6 +1044,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             await cognitive_core.stop()
         except Exception as exc:
             _LOGGER.debug("Cognitive core stop failed: %s", exc)
+    # Release the stopped core's hass/config/lockdown manager so a reload
+    # builds lockdown from the new instance and config, not this entry's.
+    try:
+        from . import cognitive_core
+        cognitive_core.release_runtime()
+    except Exception as exc:
+        _LOGGER.debug("Cognitive core release failed: %s", exc)
 
     # Clear the voice-fingerprint provider registered at setup.
     try:

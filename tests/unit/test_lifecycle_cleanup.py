@@ -118,6 +118,68 @@ async def test_reload_reregisters_lockdown_after_stop(core, fake_hass):
     assert bus.listening == 1
 
 
+# ── reload gets a fresh lockdown runtime (observer disabled) ────────────────
+
+async def _unload_core(core):
+    """What async_unload_entry does for the core with the observer off."""
+    await core.stop()
+    core.release_runtime()
+
+
+async def test_reload_builds_lockdown_from_new_hass_and_config(core):
+    """Observer disabled: setup A, unload, setup B with a different hass and
+    changed lockdown config. The core fixture stubs the alarm sync, so no
+    lockdown action can run against either fake."""
+    import json
+    from fakes import FakeHass
+
+    hass_a, hass_b = FakeHass(), FakeHass()
+    bus_a, bus_b = _CountingBus(), _CountingBus()
+    hass_a.bus, hass_b.bus = bus_a, bus_b
+    config_a = {"security_alarm_entity": "alarm_control_panel.first"}
+    config_b = {"security_alarm_entity": "alarm_control_panel.second"}
+
+    await core.ensure_lockdown(hass_a, config_a)
+    mgr_a = core._CORE.lockdown_mgr
+    assert mgr_a.hass is hass_a and mgr_a.config is config_a
+
+    # Lockdown was engaged before unload; its persisted state must survive.
+    with open(core.LOCKDOWN_STATE_PATH, "w") as fh:
+        json.dump({"active": True, "reason": "test", "since": 1.0}, fh)
+
+    await _unload_core(core)
+    assert core._CORE.lockdown_mgr is None and core._CORE.hass is None
+    assert core._CORE.config == {}
+    assert bus_a.listening == 0
+
+    await core.ensure_lockdown(hass_b, config_b)
+    mgr_b = core._CORE.lockdown_mgr
+    assert mgr_b is not mgr_a
+    assert mgr_b.hass is hass_b and core._CORE.hass is hass_b
+    assert mgr_b.config is config_b and core._CORE.config is config_b
+    assert mgr_b.active is True          # restored from disk, not reset
+    assert bus_a.listening == 0 and bus_b.listening == 1
+
+    # Cleanup never actuated anything on either instance.
+    assert hass_a.service_calls == [] and hass_b.service_calls == []
+
+    # Repeated stop/release stays safe and leaves nothing registered.
+    await _unload_core(core)
+    await _unload_core(core)
+    assert bus_b.listening == 0 and bus_b.removed == 1
+    assert core._CORE.lockdown_mgr is None
+
+
+async def test_stop_alone_keeps_loaded_lockdown_manager(core, fake_hass):
+    """stop() also runs for nova.observer_stop while Nova stays loaded; it
+    must not drop the lockdown manager there (only unload releases it)."""
+    fake_hass.bus = _CountingBus()
+    await core.ensure_lockdown(fake_hass, {})
+    mgr = core._CORE.lockdown_mgr
+    await core.stop()
+    assert core._CORE.lockdown_mgr is mgr and core._CORE.hass is fake_hass
+
+
 # ── bootstrap: owned start listener and task ────────────────────────────────
 
 class _Task:

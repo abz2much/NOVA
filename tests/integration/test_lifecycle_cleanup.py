@@ -113,6 +113,41 @@ async def test_observer_enabled_unload_stops_core_once(hass, stop_calls):
     assert len(stop_calls) == 1   # observer.stop owned it; unload didn't repeat it
 
 
+async def test_reload_rebuilds_lockdown_with_new_config(hass, stop_calls):
+    """Observer disabled. The alarm entity named here doesn't exist, so the
+    startup alarm sync finds nothing to act on; no lockdown action runs."""
+    from custom_components.nova import cognitive_core
+    entry = await _setup(hass, security_alarm_entity="alarm_control_panel.first")
+    mgr_first = cognitive_core._CORE.lockdown_mgr
+    assert mgr_first.config.get("security_alarm_entity") == "alarm_control_panel.first"
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert cognitive_core._CORE.lockdown_mgr is None
+    assert cognitive_core._CORE.hass is None
+    listeners_unloaded = hass.bus.async_listeners().get("state_changed", 0)
+
+    # Changed the way the panel changes it: config.json is Nova's source of
+    # truth and wins over entry options (nova_config.py).
+    from custom_components.nova import nova_config
+    await hass.async_add_executor_job(
+        nova_config.set, "security_alarm_entity", "alarm_control_panel.second")
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    mgr_second = cognitive_core._CORE.lockdown_mgr
+    assert mgr_second is not mgr_first
+    assert mgr_second.hass is hass and cognitive_core._CORE.hass is hass
+    assert mgr_second.config.get("security_alarm_entity") == "alarm_control_panel.second"
+    assert cognitive_core._CORE.alarm_unsub is not None
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert hass.bus.async_listeners().get("state_changed", 0) == listeners_unloaded
+    assert cognitive_core._CORE.lockdown_mgr is None
+    assert len(stop_calls) == 2   # once per unload
+
+
 async def test_repeated_unload_is_safe(hass, stop_calls):
     from custom_components.nova import async_unload_entry, cognitive_core
     entry = await _setup(hass)
