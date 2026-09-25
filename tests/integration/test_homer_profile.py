@@ -18,6 +18,14 @@ attempt to actuate it would genuinely fire, and the real Action Audit Log
 written by a HOMER delegation end to end.
 """
 from unittest.mock import patch
+from types import SimpleNamespace
+
+
+def _conversation_turn():
+    """A live conversation turn (the agent treats a run with no user_input
+    as headless scheduled work, which cannot act)."""
+    return SimpleNamespace(text="", language="en", device_id=None,
+                           context=SimpleNamespace(user_id="user-1"))
 
 import pytest
 
@@ -57,7 +65,7 @@ async def _run_agent(hass, script, objective="why is the hallway light unavailab
         result = await agent.run_agent(
             hass, messages=[{"role": "user", "content": objective}],
             persona="p", provider_name="ollama", api_key="", model="m",
-            hass_api=None, user_input=None, config={},
+            hass_api=None, user_input=_conversation_turn(), config={},
         )
     await hass.async_block_till_done()
     return result, client

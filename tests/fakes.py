@@ -254,3 +254,18 @@ class FakeAutomationInventory:
 
     def records(self) -> list:
         return list(self._records)
+
+
+class FakeUserInput:
+    """A live conversation turn's ConversationInput: the parts the agent reads
+    (text, language, device_id and the requesting user's context). The agent
+    treats a run with no user_input as headless scheduled work."""
+
+    def __init__(self, text: str = "", *, device_id=None, user_id="user-1",
+                 language: str = "en", conversation_id=None):
+        import types as _types
+        self.text = text
+        self.language = language
+        self.device_id = device_id
+        self.conversation_id = conversation_id
+        self.context = _types.SimpleNamespace(user_id=user_id)

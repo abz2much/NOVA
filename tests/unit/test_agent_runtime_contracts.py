@@ -11,7 +11,7 @@ import json
 import pytest
 
 import contract_extract as ce
-from fakes import FakeHass
+from fakes import FakeHass, FakeUserInput
 
 
 @pytest.fixture
@@ -68,7 +68,7 @@ async def _system_prompt(agent, monkeypatch, **kw):
     await agent.run_agent(
         hass, messages=[{"role": "user", "content": "hello"}],
         persona="PERSONA", provider_name="ollama", api_key="", model="m",
-        hass_api=None, user_input=None, config={}, **kw)
+        hass_api=None, config={}, **kw)
     hass.close_pending()
     return client.calls[0]["messages"][0]["content"]
 
@@ -80,14 +80,14 @@ def _static_tail(prompt: str) -> str:
 
 
 async def test_main_prompt_static_sections_unchanged(agent, monkeypatch):
-    prompt = await _system_prompt(agent, monkeypatch)
+    prompt = await _system_prompt(agent, monkeypatch, user_input=FakeUserInput())
     assert prompt.startswith("PERSONA\n\n")
     assert _static_tail(prompt) == ce.load_fixture("agent_prompts")["main"]
 
 
 async def test_homer_prompt_static_sections_unchanged(agent, monkeypatch):
     tools, _, _, directive = agent._resolve_profile("homer")
-    prompt = await _system_prompt(agent, monkeypatch, allowed_tools=tools, depth=1,
+    prompt = await _system_prompt(agent, monkeypatch, allowed_tools=tools, depth=1, user_input=None,
                                   profile_directive=directive)
     assert prompt.startswith(directive)
     assert _static_tail(prompt) == ce.load_fixture("agent_prompts")["homer"]

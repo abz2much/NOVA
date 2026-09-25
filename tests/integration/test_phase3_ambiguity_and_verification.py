@@ -15,6 +15,14 @@ only shows up against genuine HA state/service machinery (not a fake) would
 be caught here.
 """
 from unittest.mock import patch
+from types import SimpleNamespace
+
+
+def _conversation_turn():
+    """A live conversation turn (the agent treats a run with no user_input
+    as headless scheduled work, which cannot act)."""
+    return SimpleNamespace(text="", language="en", device_id=None,
+                           context=SimpleNamespace(user_id="user-1"))
 
 import pytest
 
@@ -53,7 +61,7 @@ async def _run_agent(hass, script):
                return_value={"alias": {}}):
         result = await agent.run_agent(
             hass, messages=[], persona="p", provider_name="ollama",
-            api_key="", model="m", hass_api=None, user_input=None, config={},
+            api_key="", model="m", hass_api=None, user_input=_conversation_turn(), config={},
         )
     await hass.async_block_till_done()
     return result, client

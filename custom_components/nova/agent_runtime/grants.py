@@ -6,6 +6,7 @@ import logging
 from typing import Optional
 
 
+from .models import ToolGrant
 from .tool_specs import NOVA_TOOLS
 
 # One logger for the whole agent, named as it always was (…nova.agent), so
@@ -69,7 +70,10 @@ _LEGACY_CAPABILITY_PROFILE_ALIASES: dict = {
 
 
 # Never granted to a sub-agent, even if a group lists one (defense in depth):
-# actuators, persistent-store writers, management, and delegate_task itself.
+# actuators, persistent-store writers (pending facts included), management,
+# camera vision (it can announce), the external specialist webhooks, and
+# delegate_task itself. registry._check_registry() fails the load if a
+# mutating, persisting or specialist tool is ever missing here.
 _SUBAGENT_DENY: set = {
     "control_device", "bulk_control", "run_scene_or_script", "execute_plan",
     "set_mode", "dismiss_intrusion", "acknowledge_alert",
@@ -78,6 +82,10 @@ _SUBAGENT_DENY: set = {
     "schedule_followup", "manage_followups",
     "approve_suggestion", "dismiss_suggestion", "review_suggestions",
     "manage_autonomy", "remember", "ingest_documents",
+    "confirm_pending_fact", "reject_pending_fact",
+    "look_at_camera",
+    "ask_executive_assistant", "ask_marketing_agent", "ask_security_privacy_agent",
+    "ask_homelab_infra_agent", "ask_house_manager_agent",
     "delegate_task",
 }
 
@@ -168,3 +176,45 @@ _SLIM_TOOLS = {
     "run_scene_or_script", "get_area_devices", "bulk_control",
     "get_home_summary",
 }
+
+
+# ── Grants for a whole run ───────────────────────────────────────────────────
+# The dispatcher enforces the run's grant on every call; the offered tool list
+# and the prompt's tool guidance are built from the same grant.
+
+# A live conversation: every Nova tool plus Home Assistant's own LLM API tools.
+MAIN_GRANT = ToolGrant("main", None, include_ha_tools=True)
+
+# Scheduled work with no person behind it (self-scheduled follow-ups, goal
+# engagements): look, check, diagnose and report — never act. A job that
+# decides something needs doing says so in its report. update_goal is the
+# one write: it records progress on the goal being engaged (the goal prompt
+# requires it) and cannot create, cancel or act on anything else.
+HEADLESS_TOOLS: frozenset = frozenset({
+    "get_entity_state", "search_entities", "get_area_devices", "get_home_summary",
+    "activity_history", "cognitive_status", "connectivity_status",
+    "system_diagnostics", "root_cause", "energy_status", "solar_status",
+    "energy_report", "hazard_report", "weather_forecast", "wellbeing_context",
+    "calendar_agenda", "who_do_you_see", "look_at_camera", "update_goal",
+})
+HEADLESS_GRANT = ToolGrant("headless", HEADLESS_TOOLS)
+
+
+def resolve_grant(allowed_tools, *, depth: int, headless: bool) -> ToolGrant:
+    """The grant for one run. Server-side only: nothing a model emits can
+    widen it.
+
+    * a sub-agent (depth > 0) gets exactly its granted set minus the deny
+      list — never Home Assistant's tools, never everything by default;
+    * a headless run gets HEADLESS_TOOLS, narrowed further by an explicit
+      ``allowed_tools`` but never widened by it;
+    * a conversation gets the main grant, or an explicit scoped set."""
+    if depth > 0:
+        return ToolGrant("delegated", frozenset(allowed_tools or ()) - _SUBAGENT_DENY)
+    if headless:
+        if allowed_tools is None:
+            return HEADLESS_GRANT
+        return ToolGrant("headless", frozenset(allowed_tools) & HEADLESS_TOOLS)
+    if allowed_tools is None:
+        return MAIN_GRANT
+    return ToolGrant("scoped", frozenset(allowed_tools))

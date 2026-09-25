@@ -21,7 +21,7 @@ import json
 
 import pytest
 
-from fakes import FakeHass
+from fakes import FakeHass, FakeUserInput
 
 
 @pytest.fixture
@@ -61,8 +61,10 @@ async def _run_scoped(agent, monkeypatch, script, allowed_tools):
     result = await agent.run_agent(
         hass, messages=[{"role": "user", "content": "investigate"}],
         persona="p", provider_name="ollama", api_key="", model="m",
-        hass_api=None, user_input=None, config={},
-        allowed_tools=allowed_tools, depth=1,
+        # allowed_tools=None is the main agent: a top-level conversation turn.
+        hass_api=None,
+        user_input=FakeUserInput() if allowed_tools is None else None, config={},
+        allowed_tools=allowed_tools, depth=0 if allowed_tools is None else 1,
     )
     hass.close_pending()
     turn_on_calls = [c for c in hass.service_calls if c[:2] == ("light", "turn_on")]

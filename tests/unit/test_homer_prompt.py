@@ -12,7 +12,7 @@ message sent to the LLM, not a re-implementation of the prompt logic.
 """
 import pytest
 
-from fakes import FakeHass
+from fakes import FakeHass, FakeUserInput
 
 
 @pytest.fixture
@@ -30,7 +30,7 @@ class _CapturingClient:
 
 
 async def _capture_system_prompt(agent, monkeypatch, *, profile_directive=None,
-                                  allowed_tools=None):
+                                  allowed_tools=None, depth=1, user_input=None):
     client = _CapturingClient()
 
     async def fake_create_provider(*a, **kw):
@@ -43,8 +43,8 @@ async def _capture_system_prompt(agent, monkeypatch, *, profile_directive=None,
     await agent.run_agent(
         hass, messages=[{"role": "user", "content": "why is the lock unavailable?"}],
         persona="You are Nova.", provider_name="ollama", api_key="", model="m",
-        hass_api=None, user_input=None, config={},
-        allowed_tools=allowed_tools, depth=1, profile_directive=profile_directive,
+        hass_api=None, user_input=user_input, config={},
+        allowed_tools=allowed_tools, depth=depth, profile_directive=profile_directive,
     )
     hass.close_pending()
     system_msg = client.calls[0]["messages"][0]
@@ -89,17 +89,22 @@ async def test_normal_agent_prompt_unaffected_when_no_profile(agent, monkeypatch
     """Regression: the main agent (profile_directive=None) still gets the
     full standard prompt — this phase must not remove anything from the
     everyday conversational path."""
-    content = await _capture_system_prompt(agent, monkeypatch, profile_directive=None)
+    content = await _capture_system_prompt(agent, monkeypatch, profile_directive=None,
+                                           depth=0, user_input=FakeUserInput())
     assert "You have tools to control devices" in content
     assert "this household's AI steward" in content
     assert "## Who you are" in content
 
 
-async def test_generic_capability_subagent_also_unaffected(agent, monkeypatch):
-    """A non-HOMER delegate (e.g. capability='scheduling') passes no
-    profile_directive at all, so it still gets the standard prompt exactly
-    as before this phase — only a named profile takes the new branch."""
+async def test_generic_capability_subagent_prompt_matches_its_grant(agent, monkeypatch):
+    """A non-HOMER delegate (e.g. capability='scheduling') has no named
+    profile, but its prompt still matches its read-only grant: it lists
+    exactly the granted tools and never claims it can control devices."""
     content = await _capture_system_prompt(
         agent, monkeypatch, profile_directive=None,
         allowed_tools={"calendar_agenda", "read_email"})
-    assert "You have tools to control devices" in content
+    for phrase in _CONTRADICTORY_PHRASES:
+        assert phrase not in content
+    assert "- calendar_agenda:" in content and "- read_email:" in content
+    assert "- control_device:" not in content
+    assert "You cannot do any of those things" in content

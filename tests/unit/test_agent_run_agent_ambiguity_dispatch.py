@@ -9,7 +9,7 @@ import json
 
 import pytest
 
-from fakes import FakeHass
+from fakes import FakeHass, FakeUserInput
 
 
 @pytest.fixture
@@ -61,7 +61,7 @@ async def _run(agent, monkeypatch, script, service_sink=None):
 
     result = await agent.run_agent(
         hass, messages=[], persona="p", provider_name="ollama",
-        api_key="", model="m", hass_api=None, user_input=None, config={},
+        api_key="", model="m", hass_api=None, user_input=FakeUserInput(), config={},
     )
     hass.close_pending()  # any scheduled background verify task, unrelated to this test
     return result, client, hass

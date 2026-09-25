@@ -130,7 +130,7 @@ def test_system_prompt_instructs_the_enforcement_response_boundary():
     reach one string literal."""
     import pathlib
     src = (pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova"
-           / "agent_runtime" / "loop.py")
+           / "agent_runtime" / "context.py")
     text = src.read_text(encoding="utf-8")
     assert "enforced: true" in text
     assert "enforced: false" in text

@@ -54,7 +54,7 @@ def _dedupe_candidates(items: list[dict]) -> list[dict]:
     return list(seen.values())
 
 
-def _build_clarification(candidates: list[dict]) -> str:
+def _build_clarification(candidates: list[dict], hass=None) -> str:
     """Fixed, deterministic clarification question — no LLM call. If two or
     more candidates share the same friendly_name, the entity_id is appended
     to disambiguate (never "did you mean Kitchen Light or Kitchen Light?")."""
