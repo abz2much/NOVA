@@ -51,7 +51,9 @@ def _install_voice(bootstrap, quality):
 
 
 def _set_ha_voice(hass, on):
-    hass.data.setdefault(DOMAIN, {})["e1"] = {"runtime_config": {"tts_use_ha_voice": on}}
+    """The flag lives in the Nova entry's NovaRuntime.runtime_config."""
+    from conftest import _install_nova_runtime
+    _install_nova_runtime(hass, {"tts_use_ha_voice": on})
 
 
 def _play_media_call(hass):

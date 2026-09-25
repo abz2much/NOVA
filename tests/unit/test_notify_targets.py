@@ -157,15 +157,20 @@ async def test_send_fans_out_and_isolates_device_failure(monkeypatch):
 async def test_runtime_panel_selection_overrides_started_component_config(monkeypatch):
     module = _load_module(monkeypatch, _ActionLog())
     hass = _Hass()
-    hass.data = {
-        "nova": {
-            "entry-1": {
-                "runtime_config": {
-                    "notify_services": '["notify.mobile_app_new"]',
-                }
-            }
-        }
-    }
+    # The panel selection lives in the loaded entry's NovaRuntime.
+    rt = importlib.import_module("custom_components.nova.runtime")
+    monkeypatch.setitem(sys.modules, rt.__name__, rt)
+    entry = types.SimpleNamespace(
+        entry_id="entry-1",
+        state=sys.modules["homeassistant.config_entries"].ConfigEntryState.LOADED,
+        runtime_data=rt.NovaRuntime(
+            client=object(), llm_provider_name="groq", sentinel=object(),
+            reminder_watcher=object(), scheduler=object(), resources=object(),
+            automation_contexts=object(),
+            runtime_config={"notify_services": '["notify.mobile_app_new"]'},
+        ),
+    )
+    hass.config_entries = types.SimpleNamespace(async_entries=lambda domain: [entry])
 
     await module.async_send_configured_notifications(
         hass,

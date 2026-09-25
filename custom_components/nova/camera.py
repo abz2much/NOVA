@@ -63,7 +63,8 @@ def _camera_entry(hass: HomeAssistant):
 
 def _cfg_opt(hass: HomeAssistant, key: str, default=None):
     """Runtime-aware config read via the canonical resolver (runtime_config →
-    config.json → options → data → default)."""
+    config.json → options → data → default). Reads the entry's live
+    NovaRuntime.runtime_config, so call it on the event loop only."""
     from . import nova_config
     return nova_config.runtime_get(hass, _camera_entry(hass), key, default)
 
@@ -91,7 +92,22 @@ def _resolve_credential(hass: HomeAssistant, provider: str) -> str:
     return resolve_provider_credential(cfg, provider)
 
 
-def _make_client(hass: HomeAssistant, provider: str, model: str, fallback):
+def _client_settings(hass: HomeAssistant, provider: str) -> dict:
+    """The credential and endpoints _make_client needs for `provider`, read
+    on the event loop. The result is a new dict of plain values, so it is
+    safe to hand to an executor job: the live runtime_config never crosses
+    into the worker thread. Take it right before each job; never reuse it
+    for a later analysis, so that one sees newer panel values."""
+    return {
+        "api_key": _resolve_credential(hass, provider),
+        "ollama_base_url": _cfg_opt(hass, "ollama_base_url", ""),
+        "custom_base_url": _cfg_opt(hass, "custom_base_url", ""),
+        "llm_base_url": _cfg_opt(hass, "llm_base_url", ""),
+    }
+
+
+def _make_client(hass: HomeAssistant, provider: str, model: str, fallback,
+                 settings: dict | None = None):
     """
     Create an LLM provider for the given provider/model from current config.
     Returns `fallback` if creation isn't possible (missing key, error) so the
@@ -101,19 +117,25 @@ def _make_client(hass: HomeAssistant, provider: str, model: str, fallback):
     so repeated camera analyses reuse one client — constructing a provider does
     blocking SSL setup, so callers run this in an executor (see call sites) and
     the cache keeps that off the hot path.
+
+    Executor callers must pass `settings` from _client_settings(), taken on
+    the event loop; without it the config is read here, which is only safe
+    on the event loop.
     """
     try:
         if not provider or not model:
             return fallback
-        api_key = _resolve_credential(hass, provider)
+        if settings is None:
+            settings = _client_settings(hass, provider)
+        api_key = settings.get("api_key", "")
         # Self-hosted endpoints may be intentionally unauthenticated.
         if not api_key and provider not in ("ollama", "custom"):
             return fallback
         from .llm_provider import create_provider, resolve_provider_endpoint
         endpoint_config = {
-            "ollama_base_url": _cfg_opt(hass, "ollama_base_url", ""),
-            "custom_base_url": _cfg_opt(hass, "custom_base_url", ""),
-            "llm_base_url": _cfg_opt(hass, "llm_base_url", ""),
+            "ollama_base_url": settings.get("ollama_base_url", ""),
+            "custom_base_url": settings.get("custom_base_url", ""),
+            "llm_base_url": settings.get("llm_base_url", ""),
         }
         base_url = resolve_provider_endpoint(endpoint_config, provider)
         key = (provider, model, api_key, base_url or "")
@@ -1034,7 +1056,8 @@ async def async_analyze_camera(
     vision_model = _cfg_opt(hass, "vision_model", VISION_MODEL) or VISION_MODEL
     # Construct off the event loop — creating a provider does blocking SSL setup.
     vision_client = await hass.async_add_executor_job(
-        _make_client, hass, vision_provider, vision_model, groq_client)
+        _make_client, hass, vision_provider, vision_model, groq_client,
+        _client_settings(hass, vision_provider))
     try:
         result = await hass.async_add_executor_job(
             lambda: vision_client.chat(
@@ -1088,7 +1111,8 @@ async def async_analyze_camera(
     rsn_provider = _cfg_opt(hass, "camera_reasoning_provider", "groq") or "groq"
     rsn_model = _cfg_opt(hass, "camera_reasoning_model", "openai/gpt-oss-120b") or "openai/gpt-oss-120b"
     rsn_client = await hass.async_add_executor_job(
-        _make_client, hass, rsn_provider, rsn_model, groq_client)
+        _make_client, hass, rsn_provider, rsn_model, groq_client,
+        _client_settings(hass, rsn_provider))
     judgment = await _reason_about_scene(
         hass, rsn_client, rsn_model, camera_name, analysis, det_type,
     )

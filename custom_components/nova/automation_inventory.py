@@ -230,17 +230,14 @@ class AutomationInventory:
 
 
 def get_inventory(hass: Any) -> Optional[AutomationInventory]:
-    """Find Nova's per-entry inventory without adding a global singleton."""
-    try:
-        from .const import DOMAIN
-        for value in hass.data.get(DOMAIN, {}).values():
-            if isinstance(value, dict):
-                inventory = value.get("automation_inventory")
-                if isinstance(inventory, AutomationInventory):
-                    return inventory
-    except Exception:
-        pass
-    return None
+    """Nova's per-entry inventory, owned by the entry's NovaRuntime.
+
+    None when no Nova entry is loaded or the inventory was never built; a
+    loaded entry without its runtime raises NovaRuntimeUnavailable."""
+    from .runtime import domain_runtime
+    runtime = domain_runtime(hass)
+    inventory = runtime.automation_inventory if runtime is not None else None
+    return inventory if isinstance(inventory, AutomationInventory) else None
 
 
 @dataclass(frozen=True, slots=True)

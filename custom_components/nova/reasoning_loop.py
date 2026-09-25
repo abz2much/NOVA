@@ -508,16 +508,10 @@ def _parse_reasoning_json(raw: str) -> dict:
 def _rich_mode(hass) -> bool:
     """Live read of the panel's Rich Reasoning toggle (runtime_config), with the
     persisted store as fallback. Defaults off — efficiency stays the baseline."""
-    try:
-        from .const import DOMAIN
-        for data in (hass.data.get(DOMAIN) or {}).values():
-            if isinstance(data, dict) and isinstance(data.get("runtime_config"), dict):
-                v = data["runtime_config"].get("rich_reasoning")
-                if v is not None:
-                    return v if isinstance(v, bool) else str(v).lower() in ("1", "true", "yes", "on")
-                break
-    except Exception:
-        pass
+    from .runtime import domain_runtime_config
+    v = domain_runtime_config(hass).get("rich_reasoning")
+    if v is not None:
+        return v if isinstance(v, bool) else str(v).lower() in ("1", "true", "yes", "on")
     return False
 
 

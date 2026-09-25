@@ -63,7 +63,8 @@ async def test_refresh_rebuilds_both_tier_providers_when_running(obs, fake_hass,
     assert obs._STATE.reasoning_provider.name == "reasoning-provider"
 
 
-async def test_refresh_merges_latest_runtime_config(obs, fake_hass, monkeypatch):
+async def test_refresh_merges_latest_runtime_config(obs, fake_hass, monkeypatch,
+                                                   nova_runtime):
     """The rebuilt providers must see the NEW provider/model, not the config
     Observer started with — mirrors start()'s own runtime_config merge."""
     seen_configs = []
@@ -73,9 +74,9 @@ async def test_refresh_merges_latest_runtime_config(obs, fake_hass, monkeypatch)
     )
     obs._STATE.running = True
     obs._STATE.config = {"reasoning_provider": "groq"}
-    fake_hass.data["nova"] = {
-        "entry1": {"runtime_config": {"reasoning_provider": "anthropic", "reasoning_model": "claude-sonnet-5"}},
-    }
+    # The observer's owning entry supplies the live settings.
+    monkeypatch.setattr(obs._STATE, "entry", nova_runtime(fake_hass, {
+        "reasoning_provider": "anthropic", "reasoning_model": "claude-sonnet-5"}))
 
     await obs.refresh_tier_providers(fake_hass, {"reasoning_provider": "anthropic"})
 

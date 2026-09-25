@@ -2461,6 +2461,9 @@ class _CoreState:
         self.autonomy_mgr: Optional[AutonomyManager] = None
         self.state_logger: Optional[StateLogger] = None
         self.automation_contexts = None
+        # The config entry that started the core; its NovaRuntime owns the
+        # live panel settings read when an action is announced.
+        self.entry = None
         self.tick_count: int = 0
         self.actions_taken: int = 0
         self.offers_made: int = 0
@@ -2959,6 +2962,18 @@ def _make_followup_runner(hass, config):
     return _run
 
 
+def _live_runtime_config() -> dict:
+    """The owning entry's live runtime_config, read on the event loop. {}
+    when the core has no owning entry or that entry is not loaded; a loaded
+    entry that has lost its runtime raises NovaRuntimeUnavailable. Never
+    reads the hass.data bridge."""
+    entry = _CORE.entry
+    if entry is None:
+        return {}
+    from .runtime import lifecycle_runtime_config
+    return lifecycle_runtime_config(entry)
+
+
 async def _emit_action(hass, config, action, sleeping):
     """Announce / push a single cognitive action via the standard routing."""
     _CORE.actions_taken += 1
@@ -3006,17 +3021,13 @@ async def _emit_action(hass, config, action, sleeping):
         else:
             # Get announcement speakers from config
             ann_speakers = None
+            rc = _live_runtime_config()
             try:
-                from .const import DOMAIN
-                for eid, data in hass.data.get(DOMAIN, {}).items():
-                    if isinstance(data, dict):
-                        rc = data.get("runtime_config", {})
-                        raw = rc.get("announcement_speakers")
-                        if raw:
-                            parsed = json.loads(raw) if isinstance(raw, str) else raw
-                            if isinstance(parsed, list) and parsed:
-                                ann_speakers = parsed
-                                break
+                raw = rc.get("announcement_speakers")
+                if raw:
+                    parsed = json.loads(raw) if isinstance(raw, str) else raw
+                    if isinstance(parsed, list) and parsed:
+                        ann_speakers = parsed
             except Exception:
                 pass
 
@@ -3876,8 +3887,21 @@ def revoke_autonomy(pattern_key: str) -> dict:
 
 # ── Start / Stop ────────────────────────────────────────────────────────────
 
-async def start(hass: HomeAssistant, config: dict) -> None:
-    """Start the cognitive core."""
+async def start(hass: HomeAssistant, config: dict, entry=None) -> None:
+    """Start the cognitive core.
+
+    `entry` is the config entry that owns the core (the observer passes its
+    own): its NovaRuntime supplies the automation-context tracker and the
+    live panel settings."""
+    # Ownership first: a loaded entry that has lost its runtime raises here,
+    # before the core changes any state.
+    contexts = None
+    if entry is not None:
+        from .runtime import current_runtime
+        runtime = current_runtime(entry)
+        if runtime is not None:
+            contexts = runtime.automation_contexts
+
     if _CORE.running:
         await stop()
 
@@ -3890,17 +3914,10 @@ async def start(hass: HomeAssistant, config: dict) -> None:
     _CORE.offers_made = 0
     _CORE.autonomous_actions = 0
     _CORE.pending_offer = None
-    _CORE.automation_contexts = None
-    try:
-        # The integration owns one config entry in normal use. Pick the first
-        # live tracker once at startup; state changes never scan this mapping.
-        from .const import DOMAIN
-        for value in hass.data.get(DOMAIN, {}).values():
-            if isinstance(value, dict) and value.get("automation_contexts") is not None:
-                _CORE.automation_contexts = value["automation_contexts"]
-                break
-    except Exception:
-        pass
+    # The owning entry's tracker, resolved above before any state changed;
+    # state changes never look it up again.
+    _CORE.automation_contexts = contexts
+    _CORE.entry = entry
 
     _CORE.ignore_mgr = await hass.async_add_executor_job(IgnoreManager)
     _CORE.safety_mgr = SafetyManager(hass, config)
@@ -3958,6 +3975,7 @@ async def stop() -> None:
     _CORE.running = False
     _CORE.pending_offer = None  # don't let a stale offer survive a restart
     _CORE.automation_contexts = None
+    _CORE.entry = None
     if _CORE.task:
         _CORE.task.cancel()
         try:

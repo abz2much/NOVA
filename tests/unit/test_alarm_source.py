@@ -48,7 +48,7 @@ def test_single_alarmo_source_is_discovered(load, fake_hass, monkeypatch):
 
 
 def test_runtime_clear_reenables_alarmo_auto_detection(
-        load, fake_hass, monkeypatch):
+        load, fake_hass, monkeypatch, nova_runtime):
     alarm_source = load("alarm_source")
     _registry(monkeypatch, {
         "alarm_control_panel.alarmo": "alarmo",
@@ -56,9 +56,7 @@ def test_runtime_clear_reenables_alarmo_auto_detection(
     })
     fake_hass.states.set("alarm_control_panel.alarmo", "disarmed")
     fake_hass.states.set("alarm_control_panel.ring", "armed_home")
-    fake_hass.data["nova"] = {
-        "entry": {"runtime_config": {"security_alarm_entity": ""}},
-    }
+    nova_runtime(fake_hass, {"security_alarm_entity": ""})
 
     assert alarm_source.entity_ids(
         fake_hass, {"security_alarm_entity": "alarm_control_panel.ring"}

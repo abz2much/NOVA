@@ -214,8 +214,10 @@ def effective_config(entry=None) -> dict:
 def effective_config_with_runtime(entry=None, runtime_config: dict | None = None) -> dict:
     """:func:`effective_config` with live panel ``runtime_config`` overlaid.
 
-    ``runtime_config`` (held in ``hass.data`` and written by the panel for
-    no-reload changes) carries the freshest values; this returns the full merged
+    ``runtime_config`` (owned by the entry's NovaRuntime and written by the
+    panel for no-reload changes) carries the freshest values. Callers on the
+    event loop pass a fresh ``runtime_config_snapshot()``, never the live
+    dict, because this runs in an executor. Returns the full merged
     view a subsystem should act on. Use it anywhere a subsystem is (re)started
     from the current config — a panel install has empty entry.data/options, so
     building config from the entry alone would drop every config.json setting.
@@ -238,18 +240,23 @@ def runtime_get(hass, entry, key: str, default=None):
     Use this instead of reading ``entry.options``/``entry.data`` directly — on a
     panel-configured install those are empty, so a direct read silently returns
     the default for anything set via the panel or config.json (the recurring
-    divergence class behind several past bugs). Never raises.
+    divergence class behind several past bugs).
+
+    runtime_config is the entry's live NovaRuntime.runtime_config, never the
+    hass.data bridge, read on the event loop: never call this with ``hass``
+    from an executor thread. Pass ``hass=None`` to skip runtime_config (the
+    caller has none, or already checked it). An entry that is not loaded
+    (setup still running, failed, or unloaded) has no runtime_config and
+    reads the lower layers. A loaded entry without its runtime raises
+    NovaRuntimeUnavailable rather than answering from lower-precedence
+    defaults; nothing else raises.
     """
     # runtime_config — the panel's live, no-reload values.
-    try:
-        from .const import DOMAIN
-        if hass is not None and entry is not None:
-            data = hass.data.get(DOMAIN, {}).get(getattr(entry, "entry_id", None), {})
-            rc = data.get("runtime_config", {}) if isinstance(data, dict) else {}
-            if key in rc and rc[key] not in (None, ""):
-                return rc[key]
-    except Exception:
-        pass
+    if hass is not None and entry is not None:
+        from .runtime import lifecycle_runtime_config
+        rc = lifecycle_runtime_config(entry)   # raises for a loaded entry without runtime
+        if key in rc and rc[key] not in (None, ""):
+            return rc[key]
     # config.json — the persisted panel config (wins over the entry, per
     # effective_config); cached in-memory after boot.
     try:

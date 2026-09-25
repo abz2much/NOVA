@@ -23,14 +23,20 @@ from .const import (
 )
 
 
-def resolve_directive(entry: ConfigEntry | None) -> str:
-    """Get the directive text based on this config entry."""
+def resolve_directive(
+    entry: ConfigEntry | None, hass: HomeAssistant | None = None,
+) -> str:
+    """Get the directive text based on this config entry.
+
+    With hass, the entry's live runtime_config (panel changes, no reload)
+    is read first, like every other nova_config.runtime_get caller. Without
+    hass, runtime_config is skipped: config.json → options → data."""
     if entry is None:
         return get_directive(DEFAULT_DIRECTIVE_PRESET, "")
     from . import nova_config
-    preset = nova_config.runtime_get(None, entry, CONF_DIRECTIVE_PRESET,
+    preset = nova_config.runtime_get(hass, entry, CONF_DIRECTIVE_PRESET,
                                        DEFAULT_DIRECTIVE_PRESET)
-    custom = nova_config.runtime_get(None, entry, CONF_DIRECTIVE, "")
+    custom = nova_config.runtime_get(hass, entry, CONF_DIRECTIVE, "")
     return get_directive(preset, custom)
 
 
@@ -82,7 +88,7 @@ def build_system_prompt(
     briefing instructions, sentinel prompt, etc.).
     """
     entry = get_entry(hass)
-    directive = resolve_directive(entry)
+    directive = resolve_directive(entry, hass)
     persona = NOVA_PERSONA
 
     combined = f"{directive}\n\n---\n\n{persona}"

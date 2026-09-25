@@ -85,16 +85,10 @@ def tts_use_ha_voice(hass: HomeAssistant) -> bool:
     voice" in the panel (config key ``tts_use_ha_voice``, read from the live
     runtime_config the same way :func:`async_announce` already did inline).
     Shared by :func:`resolve_tts_entity` and :func:`async_announce` so both
-    agree on the same flag."""
-    try:
-        from .const import DOMAIN
-        for _ed in (hass.data.get(DOMAIN) or {}).values():
-            if isinstance(_ed, dict) and (
-                    _ed.get("runtime_config") or {}).get("tts_use_ha_voice"):
-                return True
-    except Exception:
-        pass
-    return False
+    agree on the same flag. runtime_config belongs to the Nova entry's
+    NovaRuntime."""
+    from .runtime import domain_runtime_config
+    return bool(domain_runtime_config(hass).get("tts_use_ha_voice"))
 
 
 def _ha_pipeline_tts_entity(hass: HomeAssistant) -> str | None:

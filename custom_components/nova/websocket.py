@@ -1814,7 +1814,7 @@ async def ws_reload_appliances(
             cfg = await hass.async_add_executor_job(
                 nova_config.effective_config_with_runtime, entry,
                 _executor_runtime_config(entry))
-        await appliance_monitor.start(hass, cfg)
+        await appliance_monitor.start(hass, cfg, entry=entry)
         connection.send_result(msg["id"], {
             "ok": True, "appliances": _get_appliance_status(),
         })
@@ -2145,7 +2145,7 @@ async def ws_update_config(
                     candidate[key] = value
                     observer_config = await hass.async_add_executor_job(
                         nova_config.effective_config_with_runtime, entry, candidate)
-                    await observer_mod.start(hass, observer_config)
+                    await observer_mod.start(hass, observer_config, entry=entry)
                 # start() can return without the observer running; confirm
                 # the requested state before anything is recorded.
                 if not observer_mod.is_running():

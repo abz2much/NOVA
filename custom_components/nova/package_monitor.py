@@ -139,7 +139,8 @@ async def detect_on_camera(hass, groq_client, entity_id: str) -> Optional[dict]:
     # Construct off the event loop — creating a provider does blocking SSL
     # setup (same reason the two camera.py call sites do this).
     client = await hass.async_add_executor_job(
-        cam._make_client, hass, provider, model, groq_client)
+        cam._make_client, hass, provider, model, groq_client,
+        cam._client_settings(hass, provider))
     b64 = base64.b64encode(img).decode()
     try:
         result = await hass.async_add_executor_job(
@@ -166,17 +167,10 @@ async def detect_on_camera(hass, groq_client, entity_id: str) -> Optional[dict]:
 # ── Gating helpers ───────────────────────────────────────────────────────────
 
 def _runtime(hass, key, default):
-    try:
-        from .const import DOMAIN
-        for data in (hass.data.get(DOMAIN) or {}).values():
-            if isinstance(data, dict) and isinstance(data.get("runtime_config"), dict):
-                rc = data["runtime_config"]
-                if key in rc:
-                    return rc[key]
-                break
-    except Exception:
-        pass
-    return default
+    """Live runtime_config value (NovaRuntime), else `default`."""
+    from .runtime import domain_runtime_config
+    rc = domain_runtime_config(hass)
+    return rc[key] if key in rc else default
 
 
 def _announcements_on(hass) -> bool:

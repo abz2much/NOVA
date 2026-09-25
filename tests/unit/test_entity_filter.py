@@ -4,12 +4,14 @@ import json
 import re
 import types
 
+from conftest import _install_nova_runtime
 from fakes import FakeHass
 
 
 def _hass(const, **rc):
+    """Exclusions live in the Nova entry's NovaRuntime.runtime_config."""
     h = FakeHass()
-    h.data = {const.DOMAIN: {"e1": {"runtime_config": dict(rc)}}}
+    _install_nova_runtime(h, dict(rc))
     return h
 
 
@@ -67,8 +69,7 @@ def test_presence_summary_skips_excluded_occupancy(load):
     register as room presence."""
     presence, const = load("presence"), load("const")
     h = FakeHass()
-    h.data = {const.DOMAIN: {"e1": {"runtime_config": {
-        "excluded_entities": ["binary_sensor.ghost_occupancy"]}}}}
+    _install_nova_runtime(h, {"excluded_entities": ["binary_sensor.ghost_occupancy"]})
     h.states.set("binary_sensor.kitchen_presence", "on",
                  device_class="occupancy", friendly_name="Kitchen Presence")
     h.states.set("binary_sensor.ghost_occupancy", "on",
@@ -81,7 +82,7 @@ def test_presence_summary_skips_excluded_occupancy(load):
 def test_presence_summary_includes_sensor_when_not_excluded(load):
     presence, const = load("presence"), load("const")
     h = FakeHass()
-    h.data = {const.DOMAIN: {"e1": {"runtime_config": {}}}}
+    _install_nova_runtime(h, {})
     h.states.set("binary_sensor.ghost_occupancy", "on",
                  device_class="occupancy", friendly_name="Ghost Occupancy")
     rooms = presence.get_presence_summary(h).get("rooms", {})
