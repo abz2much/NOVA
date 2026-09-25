@@ -725,4 +725,3 @@ class SuggestionStore:
             return {"available": False}
         finally:
             conn.close()
-
