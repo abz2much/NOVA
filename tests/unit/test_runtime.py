@@ -26,7 +26,7 @@ COMP = pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova
 FIELDS = [
     "client", "llm_provider_name", "sentinel", "reminder_watcher",
     "scheduler", "resources", "automation_contexts", "automation_inventory",
-    "runtime_config", "schema_version",
+    "runtime_config", "schema_version", "observer_running",
 ]
 
 
@@ -59,7 +59,7 @@ def test_runtime_uses_slots(rt):
     runtime = _runtime(rt)
     assert not hasattr(runtime, "__dict__")
     with pytest.raises(AttributeError):
-        runtime.observer_running = True   # not a runtime field in Phase 3A
+        runtime.not_a_field = True
 
 
 def test_runtime_defaults(rt, load):
@@ -83,7 +83,7 @@ def test_bridge_values_are_the_runtime_objects(rt):
     assert bridge["camera_unsubs"] is cam
     assert bridge["recognition_unsubs"] is rec
     assert "automation_inventory" not in bridge   # absent until built, as before
-    assert "observer_running" not in bridge       # setup still writes it itself
+    assert bridge["observer_running"] is False    # seeded from the runtime
 
 
 def test_bridge_includes_inventory_by_identity_when_built(rt):

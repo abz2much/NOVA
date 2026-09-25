@@ -49,6 +49,9 @@ from .runtime import (
     NovaRuntime,
     build_compat_bridge,
     clear_runtime,
+    get_runtime,
+    lifecycle_runtime,
+    set_observer_running,
 )
 from .panel_register import async_register_panel, async_unregister_panel
 from .websocket import async_register as async_register_ws
@@ -947,14 +950,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
             # Same rule as the block above: a setup exception gets no
             # async_unload_entry from HA, so tear down what's registered.
             # Marked running so unload's observer.stop() clears a partial start.
-            hass.data[DOMAIN][entry.entry_id]["observer_running"] = True
+            set_observer_running(hass, entry, True)
             await async_unload_entry(hass, entry)
             clear_runtime(hass, entry)
             raise
-        hass.data[DOMAIN][entry.entry_id]["observer_running"] = True
+        set_observer_running(hass, entry, True)
         _LOGGER.info("Nova Observer mode ENABLED — watching for interesting events")
     else:
-        hass.data[DOMAIN][entry.entry_id]["observer_running"] = False
+        # A fresh runtime (and its bridge) already starts with False.
         _LOGGER.info(
             "Nova Observer mode disabled. Enable via addon config → observer_enabled=true"
         )
@@ -1026,7 +1029,25 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
 
 async def async_unload_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool:
     """Unload Nova."""
-    data = hass.data[DOMAIN].get(entry.entry_id, {})
+    # NovaRuntime owns the entry's live objects. It is absent only after a
+    # partial setup that failed before it was assigned, or on a repeated
+    # unload; then read whatever the bridge still holds (usually nothing).
+    runtime = lifecycle_runtime(entry)
+    if runtime is not None:
+        data: dict = {}
+        sentinel: NovaSentinel | None = runtime.sentinel
+        reminder_watcher = runtime.reminder_watcher
+        resources = runtime.resources
+        observer_running = runtime.observer_running
+    else:
+        store = hass.data.get(DOMAIN)
+        data = store.get(entry.entry_id) if isinstance(store, dict) else None
+        if not isinstance(data, dict):
+            data = {}
+        sentinel = data.get("sentinel")
+        reminder_watcher = data.get("reminder_watcher")
+        resources = data.get("resources")
+        observer_running = bool(data.get("observer_running"))
 
     # Unregister the panel early — best effort
     try:
@@ -1034,11 +1055,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> boo
     except Exception as exc:
         _LOGGER.debug("Panel unregister note: %s", exc)
 
-    sentinel: NovaSentinel | None = data.get("sentinel")
     if sentinel:
         await sentinel.async_stop()
 
-    reminder_watcher = data.get("reminder_watcher")
     if reminder_watcher:
         await reminder_watcher.async_stop()
 
@@ -1048,11 +1067,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> boo
     # alarm listener must not outlive the entry. cognitive_core.stop() is
     # idempotent, so a partial observer stop followed by this is safe.
     core_stopped = False
-    if data.get("observer_running"):
+    if observer_running:
         try:
             from . import observer as observer_mod
             await observer_mod.stop()
             core_stopped = True
+            if runtime is not None:
+                set_observer_running(hass, entry, False)
         except Exception as exc:
             _LOGGER.debug("Observer stop failed: %s", exc)
     if not core_stopped:
@@ -1077,7 +1098,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> boo
         _LOGGER.debug("Voice recognition unregister failed: %s", exc)
 
     # Tear down listeners, timers, and the scheduler in one fail-safe call.
-    resources = data.get("resources")
     if resources is not None:
         try:
             summary = resources.close_all()
@@ -1085,7 +1105,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> boo
         except Exception as exc:
             _LOGGER.debug("Resource teardown note: %s", exc)
     else:
-        # Legacy entries (set up before the resource registry existed).
+        # No runtime and no registry: a partial or legacy bridge entry.
         sched = data.get("scheduler")
         if sched is not None:
             try:
@@ -1590,11 +1610,12 @@ def _register_services(
     async def _observer_start(call: ServiceCall) -> None:
         """Start the observer manually (even if config has it disabled)."""
         from . import observer as observer_mod, nova_config as _jc
+        get_runtime(entry)   # ownership first: never start an unowned observer
         # Fresh effective config (data + options + panel, panel winning) so a
         # manual start honors current panel settings, not stale entry data.
         observer_config = await hass.async_add_executor_job(_jc.effective_config, entry)
         await observer_mod.start(hass, observer_config)
-        hass.data[DOMAIN][entry.entry_id]["observer_running"] = True
+        set_observer_running(hass, entry, True)
         _LOGGER.info("Observer started via service call")
 
     hass.services.async_register(DOMAIN, "observer_start", _observer_start)
@@ -1658,8 +1679,9 @@ def _register_services(
     async def _observer_stop(call: ServiceCall) -> None:
         """Stop the observer."""
         from . import observer as observer_mod
+        get_runtime(entry)   # ownership first: never stop an unowned observer
         await observer_mod.stop()
-        hass.data[DOMAIN][entry.entry_id]["observer_running"] = False
+        set_observer_running(hass, entry, False)
         _LOGGER.info("Observer stopped via service call")
 
     hass.services.async_register(DOMAIN, "observer_stop", _observer_stop)
