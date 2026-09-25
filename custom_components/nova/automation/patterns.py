@@ -17,6 +17,7 @@ nova_automation) never train a pattern. Each pattern gets a confidence score
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import sqlite3
 import time
@@ -332,7 +333,14 @@ class PatternAnalyzer:
     def __init__(self):
         self._last_analysis: float = 0.0
         self._last_result: dict = {}
+        self._last_patterns: list[DetectedPattern] = []
         self._db = DB_PATH
+        # Single flight: a manual run and the scheduled run never overlap.
+        self._analysis_lock = asyncio.Lock()
+
+    @property
+    def analysis_running(self) -> bool:
+        return self._analysis_lock.locked()
 
     def _connect(self) -> Optional[sqlite3.Connection]:
         try:
@@ -417,7 +425,19 @@ class PatternAnalyzer:
         return out
 
     async def analyze(self, hass: HomeAssistant) -> list[DetectedPattern]:
-        """Run full pattern analysis. Returns detected patterns."""
+        """Run full pattern analysis. Returns detected patterns.
+
+        Single flight: a caller that arrives while an analysis is running
+        waits for it and gets its result instead of starting a second one."""
+        if self._analysis_lock.locked():
+            async with self._analysis_lock:
+                return list(self._last_patterns)
+        async with self._analysis_lock:
+            patterns = await self._analyze_once(hass)
+            self._last_patterns = list(patterns)
+            return patterns
+
+    async def _analyze_once(self, hass: HomeAssistant) -> list[DetectedPattern]:
         self._last_analysis = time.time()
 
         # Everything that needs the event loop (the state machine, the

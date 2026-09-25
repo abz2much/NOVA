@@ -1,9 +1,12 @@
 """Deterministic matching between Nova suggestions and loaded HA automations.
 
 No model call is used here. Exact matches compare a canonical form of trigger,
-condition, and action. Configurations Nova cannot safely interpret (notably
-blueprints and metadata-only compatibility records) are reported as possible
-overlaps instead of being guessed equivalent.
+condition, and action. Configurations Nova cannot safely interpret (blueprints,
+metadata-only compatibility records and Jinja templates, which are never
+evaluated) stay explicitly uncertain: they are reported as unknown overlaps,
+never guessed equivalent and never counted as proof that a candidate is new.
+The one exception is literal identity: two configs whose canonical text is
+identical, templates included, are the same automation.
 """
 from __future__ import annotations
 
@@ -99,10 +102,61 @@ def fingerprint(config: Any) -> str | None:
     return hashlib.sha256(encoded).hexdigest()
 
 
+_TEMPLATE_MARKERS = ("{{", "{%")
+
+
+def _is_template(value: Any) -> bool:
+    return isinstance(value, str) and any(m in value for m in _TEMPLATE_MARKERS)
+
+
+def _has_template(value: Any) -> bool:
+    """True when any string anywhere in ``value`` is a Jinja template."""
+    if isinstance(value, Mapping):
+        return any(_has_template(v) for v in value.values())
+    if isinstance(value, (list, tuple, set)):
+        return any(_has_template(v) for v in value)
+    return _is_template(value)
+
+
 def _entity_values(value: Any) -> set[str]:
+    """Literal entity ids only; a templated target is not an entity id."""
     values = _list(value)
     return {str(item) for item in values
-            if isinstance(item, str) and "." in item}
+            if isinstance(item, str) and "." in item and not _is_template(item)}
+
+
+def _templated_targets(config: Any) -> bool:
+    """True when an action's target is a template, so Nova cannot know what
+    the automation controls."""
+    canonical = canonical_config(config)
+    if canonical is None:
+        return False
+    found = False
+
+    def walk(node: Any) -> None:
+        nonlocal found
+        if found:
+            return
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+            return
+        if not isinstance(node, Mapping):
+            return
+        for key in ("entity_id", "target", "device_id", "area_id"):
+            if _has_template(node.get(key)):
+                found = True
+                return
+        data = node.get("data")
+        if isinstance(data, Mapping) and _has_template(data.get("entity_id")):
+            found = True
+            return
+        for value in node.values():
+            if isinstance(value, (Mapping, list, tuple)):
+                walk(value)
+
+    walk(canonical["actions"])
+    return found
 
 
 def action_effects(config: Any) -> set[tuple[str, str]]:
@@ -140,10 +194,16 @@ def action_effects(config: Any) -> set[tuple[str, str]]:
 
 
 def classify_result(candidate: Any, records: Iterable[Any]) -> MatchResult:
-    """Classify a candidate as new, exact, overlapping, or opaque-related."""
+    """Classify a candidate as new, exact, overlapping, or opaque-related.
+
+    A candidate is "new" only when it is fully comparable and no loaded
+    automation could be doing the same thing; a blueprint, metadata-only or
+    templated automation Nova cannot see into makes the result uncertain."""
     candidate_fp = fingerprint(candidate)
     candidate_effects = action_effects(candidate)
     candidate_targets = {entity for _service, entity in candidate_effects}
+    candidate_opaque = candidate_fp is None or _has_template(
+        canonical_config(candidate))
     exact: list[MatchRef] = []
     overlaps: list[MatchRef] = []
     unknown: list[MatchRef] = []
@@ -162,8 +222,13 @@ def classify_result(candidate: Any, records: Iterable[Any]) -> MatchResult:
             overlaps.append(label)
             continue
         refs = set(getattr(record, "referenced_entities", ()) or ())
+        record_opaque = existing_fp is None or _templated_targets(raw)
         if candidate_targets.intersection(refs):
-            (overlaps if existing_fp else unknown).append(label)
+            (unknown if record_opaque else overlaps).append(label)
+        elif record_opaque and (not refs or _templated_targets(raw)):
+            # Nothing Nova can read says what this automation controls, so it
+            # cannot be ruled out.
+            unknown.append(label)
 
     if exact:
         return MatchResult(MATCH_EXACT, tuple(exact),
@@ -173,7 +238,10 @@ def classify_result(candidate: Any, records: Iterable[Any]) -> MatchResult:
                            "a loaded automation controls the same target")
     if unknown:
         return MatchResult(MATCH_OPAQUE, tuple(unknown),
-                           "an opaque automation references the same target")
+                           "an opaque automation may control the same target")
+    if candidate_opaque:
+        return MatchResult(MATCH_OPAQUE, (),
+                           "the automation uses a template or blueprint Nova cannot compare")
     return MatchResult(MATCH_NEW, (), "no overlap found")
 
 

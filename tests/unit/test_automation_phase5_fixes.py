@@ -461,3 +461,181 @@ def test_d7_panel_keeps_a_failed_suggestion_actionable():
     assert "if (res && res.ok)" in wire
     assert "buttons.forEach(b => b.disabled = false)" in wire
     assert "res.reason" in wire
+
+
+# ── D8: the panel names the automation the backend actually matched ─────────
+
+def test_d8_panel_reads_the_matched_automation():
+    import contract_extract as ce
+    js = (ce.COMP / "frontend" / "nova-panel.js").read_text(encoding="utf-8")
+    block = js[js.index("const match = s.automation_match"):js.index("return `", js.index("const match = s.automation_match"))]
+    assert "(match.matches || [])[0]" in block
+    assert "match.name" not in block and "match.entity_id" not in block
+
+
+def test_d8_match_payload_carries_names_only_in_matches(load):
+    matcher = load("automation.matching")
+    existing = _record("automation.sunset", {
+        "triggers": [{"trigger": "sun", "event": "sunset"}],
+        "actions": [{"action": "light.turn_on", "entity_id": "light.porch"}]})
+    out = matcher.classify({"triggers": [{"trigger": "time", "at": "20:00:00"}],
+                            "actions": [{"action": "light.turn_on",
+                                         "entity_id": "light.porch"}]}, [existing])
+    assert set(out) == {"status", "matches", "reason"}
+    assert out["matches"] == [{"entity_id": "automation.sunset",
+                               "name": "automation.sunset"}]
+
+
+# ── D9: agent approval carries the real request identity ────────────────────
+
+async def test_d9_agent_approval_passes_the_real_user_and_device(load, monkeypatch):
+    agent = load("agent")
+    installation = load("automation.installation")
+    seen = {}
+
+    async def fake_install(hass, sid, **kw):
+        seen.update(kw, sid=sid)
+        return {"ok": True, "installed": False, "reason": "advisory"}
+
+    monkeypatch.setattr(installation, "install_approved_suggestion", fake_install)
+    user_input = types.SimpleNamespace(
+        device_id="device-kitchen", context=types.SimpleNamespace(user_id="user-abi"))
+    await agent._execute_tool(FakeHass(), "approve_suggestion",
+                              {"suggestion_id": 5}, None, user_input)
+    assert seen == {"sid": 5, "requested_by_user_id": "user-abi",
+                    "request_device_id": "device-kitchen"}
+
+
+async def test_d9_agent_approval_never_invents_a_user(load, monkeypatch):
+    agent = load("agent")
+    installation = load("automation.installation")
+    seen = {}
+
+    async def fake_install(hass, sid, **kw):
+        seen.update(kw)
+        return {"ok": True}
+
+    monkeypatch.setattr(installation, "install_approved_suggestion", fake_install)
+    user_input = types.SimpleNamespace(device_id=None,
+                                       context=types.SimpleNamespace(user_id=None))
+    await agent._execute_tool(FakeHass(), "approve_suggestion",
+                              {"suggestion_id": 5}, None, user_input)
+    assert seen == {"requested_by_user_id": None, "request_device_id": None}
+    await agent._execute_tool(FakeHass(), "approve_suggestion",
+                              {"suggestion_id": 5}, None, None)
+    assert seen == {"requested_by_user_id": None, "request_device_id": None}
+
+
+async def test_d9_device_reaches_the_audit_row(installation, home):
+    hass = InstallHass(home.path, Services(home.inventory))
+    await installation.install_approved_suggestion(
+        hass, 1, requested_by_user_id="user-abi", request_device_id="device-kitchen")
+    _args, kwargs = home.audit["start"][-1]
+    assert kwargs["requested_by_user_id"] == "user-abi"
+    assert kwargs["request_device_id"] == "device-kitchen"
+
+
+# ── D10: templates and blueprints stay explicitly uncertain ─────────────────
+
+def _record(entity_id, raw_config, refs=()):
+    return types.SimpleNamespace(entity_id=entity_id, name=entity_id,
+                                 raw_config=raw_config, referenced_entities=tuple(refs))
+
+
+_PORCH = {"triggers": [{"trigger": "time", "at": "20:00:00"}],
+          "actions": [{"action": "light.turn_on", "entity_id": "light.porch"}]}
+
+
+def test_d10_templated_target_is_never_proof_of_new(load):
+    matcher = load("automation.matching")
+    templated = _record("automation.dynamic", {
+        "triggers": [{"trigger": "sun", "event": "sunset"}],
+        "actions": [{"action": "light.turn_on",
+                     "target": {"entity_id": "{{ states.light | map(attribute='entity_id') | list }}"}}]})
+    out = matcher.classify(_PORCH, [templated])
+    assert out["status"] == "unknown_overlap"
+    assert out["matches"][0]["entity_id"] == "automation.dynamic"
+
+
+def test_d10_template_strings_are_not_entity_ids(load):
+    matcher = load("automation.matching")
+    effects = matcher.action_effects({
+        "triggers": [{"trigger": "sun"}],
+        "actions": [{"action": "light.turn_on",
+                     "entity_id": "{{ 'light.porch' if is_state('sun.sun', 'below_horizon') else 'light.hall' }}"}]})
+    assert effects == set()
+
+
+def test_d10_opaque_blueprint_with_no_references_is_uncertain(load):
+    matcher = load("automation.matching")
+    blueprint = _record("automation.bp", {"use_blueprint": {"path": "x.yaml", "input": {}}})
+    assert matcher.classify(_PORCH, [blueprint])["status"] == "unknown_overlap"
+    metadata_only = _record("automation.meta", None)
+    assert matcher.classify(_PORCH, [metadata_only])["status"] == "unknown_overlap"
+
+
+def test_d10_templated_candidate_is_never_new_or_a_duplicate(load):
+    matcher = load("automation.matching")
+    candidate = {"triggers": [{"trigger": "template",
+                               "value_template": "{{ is_state('sun.sun', 'below_horizon') }}"}],
+                 "actions": [{"action": "light.turn_on", "entity_id": "light.porch"}]}
+    similar = _record("automation.other", {
+        "triggers": [{"trigger": "template",
+                      "value_template": "{{ states('sun.sun') == 'below_horizon' }}"}],
+        "actions": [{"action": "light.turn_off", "entity_id": "light.hall"}]})
+    assert matcher.classify(candidate, [])["status"] == "unknown_overlap"
+    assert matcher.classify(candidate, [similar])["status"] == "unknown_overlap"
+
+
+def test_d10_unrelated_plain_automation_is_still_new(load):
+    matcher = load("automation.matching")
+    other = _record("automation.hall", {
+        "triggers": [{"trigger": "sun", "event": "sunset"}],
+        "actions": [{"action": "light.turn_on", "entity_id": "light.hall"}]},
+        refs=("light.hall",))
+    assert matcher.classify(_PORCH, [other])["status"] == "new"
+
+
+async def test_d10_installation_never_blocks_on_template_similarity(
+        installation, load, audit, tmp_path, monkeypatch):
+    path = tmp_path / "automations.yaml"
+    path.write_text(yaml.safe_dump([{
+        "id": "templated", "alias": "Templated",
+        "triggers": [{"trigger": "sun", "event": "sunset"}],
+        "actions": [{"action": "light.turn_on",
+                     "target": {"entity_id": "{{ 'light.porch' }}"}}]}]))
+    inventory = FileInventory(path)
+    _use_inventory(load, monkeypatch, inventory)
+    hass = InstallHass(path, Services(inventory))
+    result = await installation.create_automation(hass, alias="Porch", **_light())
+    assert result["success"] is True
+
+
+# ── D11: pattern analysis is single-flight ──────────────────────────────────
+
+async def test_d11_manual_and_scheduled_analysis_never_overlap(load, monkeypatch):
+    patterns = load("automation.patterns")
+    an = patterns.PatternAnalyzer()
+    running = {"now": 0, "max": 0, "runs": 0}
+
+    async def slow_once(hass):
+        running["now"] += 1
+        running["runs"] += 1
+        running["max"] = max(running["max"], running["now"])
+        await asyncio.sleep(0.02)
+        running["now"] -= 1
+        return ["pattern"]
+
+    monkeypatch.setattr(an, "_analyze_once", slow_once)
+    first, second = await asyncio.gather(an.analyze(None), an.analyze(None))
+    assert running["max"] == 1 and running["runs"] == 1
+    assert first == second == ["pattern"]
+    assert not an.analysis_running
+
+
+async def test_d11_scheduled_tick_skips_while_an_analysis_runs(load):
+    import contract_extract as ce
+    src = (ce.COMP / "cognitive_core.py").read_text(encoding="utf-8")
+    tick = src[src.index("# Run pattern analysis periodically"):]
+    tick = tick[:tick.index("patterns = await analyzer.analyze(hass)")]
+    assert "not analyzer.analysis_running" in tick

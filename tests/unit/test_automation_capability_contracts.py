@@ -41,6 +41,8 @@ SIGNATURES = {
             ("source", "KEYWORD_ONLY", "'ha_service'"),
             ("requested_by_user_id", "KEYWORD_ONLY", "None"),
             ("requested_by_name", "KEYWORD_ONLY", "None"),
+            # Phase 5 (D9): additive, so every existing call is unchanged.
+            ("request_device_id", "KEYWORD_ONLY", "None"),
         ],
     },
     "automation_inventory": {

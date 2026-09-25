@@ -2571,12 +2571,14 @@ ${this._htmlDashboardBody()}`;
         ? `<div class="mode-grid">${(s.entities || []).map(e => `<span class="area-cap" style="width:auto;padding:3px 8px;font-family:var(--font-mono);font-size:10px">${this._esc(e)}</span>`).join("")}</div>`
         : "";
       const match = s.automation_match || {};
-      const matchName = match.name || match.entity_id || "an existing automation";
+      // The backend names the automations it matched in match.matches.
+      const matched = (match.matches || [])[0] || {};
+      const matchName = matched.name || matched.entity_id || "an existing automation";
       let overlap = "";
       if (match.status === "possible_overlap") {
         overlap = `<div class="stub-body" style="color:var(--warn)">⚠ Possible overlap with <b>${this._esc(matchName)}</b>. Review both before creating this automation.</div>`;
       } else if (match.status === "unknown_overlap") {
-        overlap = `<div class="stub-body" style="color:var(--warn)">⚠ <b>${this._esc(matchName)}</b> uses the same device, but Nova cannot fully compare its blueprint or template.</div>`;
+        overlap = `<div class="stub-body" style="color:var(--warn)">⚠ ${(match.matches || []).length ? `<b>${this._esc(matchName)}</b> may control the same device, but Nova cannot fully compare its blueprint or template.` : "Nova cannot fully compare this automation's template or blueprint with existing automations."}</div>`;
       } else if (match.status === "inventory_unavailable") {
         overlap = `<div class="stub-body" style="color:var(--warn)">⚠ Nova could not check existing automations. Review Home Assistant before creating this one.</div>`;
       }

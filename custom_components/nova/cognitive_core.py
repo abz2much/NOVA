@@ -2835,7 +2835,9 @@ async def _tick():
         from .automation.patterns import get_analyzer, set_thresholds
         analyzer = get_analyzer()
         # should_analyze reads patterns.db: keep SQLite off the event loop.
-        if await hass.async_add_executor_job(analyzer.should_analyze):
+        # A manual analysis already running covers this tick (single flight).
+        if not analyzer.analysis_running and await hass.async_add_executor_job(
+                analyzer.should_analyze):
             # Loosened-reins defaults (occurrences 4, confidence 0.55) — API spend
             # is no longer the constraint; user can tune via panel-saved keys.
             try:

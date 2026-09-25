@@ -274,6 +274,7 @@ async def create_automation(
     source: str = "ha_service",
     requested_by_user_id: Optional[str] = None,
     requested_by_name: Optional[str] = None,
+    request_device_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     Create and register a new HA automation programmatically.
@@ -308,6 +309,7 @@ async def create_automation(
             request_id, "create_automation", source,
             requested_by_user_id=requested_by_user_id,
             requested_by_name=requested_by_name,
+            request_device_id=request_device_id,
         )
     )
 
@@ -541,6 +543,7 @@ async def install_approved_suggestion(
                 request_id=request_id, source="suggestion",
                 requested_by_user_id=requested_by_user_id,
                 requested_by_name=requested_by_name,
+                request_device_id=request_device_id,
             )
             if not result.get("success"):
                 # Nothing was installed: the suggestion stays retryable.
