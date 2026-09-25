@@ -40,11 +40,11 @@ from .const import (
 from .audio_routing import reply_targets
 from .database import save_message
 from .llm_provider import (
-    create_provider,
     resolve_provider_credential,
     resolve_provider_endpoint,
 )
 from .presence import presence_context_string
+from .runtime import get_runtime
 from .tts_helper import resolve_tts_entity, async_announce
 
 
@@ -264,6 +264,10 @@ class NovaAgent(conversation.ConversationEntity):
     _attr_supported_features = ConversationEntityFeature.CONTROL
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        # The entry's NovaRuntime owns the LLM client. A loaded entry without
+        # one is broken, so construction fails here (NovaRuntimeUnavailable)
+        # rather than building a second provider from stored config.
+        runtime = get_runtime(entry)
         self.hass  = hass
         self.entry = entry
         self._attr_unique_id = entry.entry_id
@@ -278,27 +282,10 @@ class NovaAgent(conversation.ConversationEntity):
         self._last_seen: dict[str, float] = {}   # cid -> epoch seconds of its last turn, for gap-based reseed
         self._fallback_idx = 0
 
-        # Pull the shared LLM provider from hass.data (created in async_setup_entry).
-        # This way conversation automatically honours the user's chosen backend
-        # (Groq/OpenAI/Anthropic/Ollama/custom) without any code changes here.
-        shared = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
-        self._client = shared.get("client")
-        if self._client is None:
-            # Fallback — create a provider directly (should only happen in unusual
-            # setup order cases; the shared client is normally always present).
-            # Resolve from the single source of truth so this cannot diverge from
-            # the panel (nova_config wins over stale entry data/options).
-            from .llm_provider import create_provider as _cp
-            from . import nova_config as _jc
-            _eff = _jc.effective_config(entry)
-            provider_name = _eff.get("llm_provider", "groq")
-            base_url = resolve_provider_endpoint(_eff, provider_name)
-            self._client = _cp(
-                provider_name,
-                resolve_provider_credential(_eff, provider_name),
-                self._model(),
-                base_url,
-            )
+        # The shared LLM client setup built for this entry (same object as
+        # entry.runtime_data.client), so conversation honours the chosen
+        # backend (Groq/OpenAI/Anthropic/Ollama/custom) with no code here.
+        self._client = runtime.client
         _LOGGER.info(
             "Nova agent initialised — provider=%s, model=%s",
             getattr(self._client, "name", "unknown"),
@@ -307,21 +294,50 @@ class NovaAgent(conversation.ConversationEntity):
 
     # ── Config helpers ────────────────────────────────────────────────────────
 
+    def _runtime_config(self) -> dict:
+        """The panel's live runtime_config: NovaRuntime's own dict, read on
+        every call and never copied, so in-place panel writes apply to the
+        next turn. Raises NovaRuntimeUnavailable when the entry has no
+        runtime. Never reads the compatibility bridge."""
+        return get_runtime(self.entry).runtime_config
+
     def _opt(self, key: str, default=None):
-        """Config read via the canonical resolver (runtime_config → config.json →
-        options → data → default)."""
+        """Config read with the canonical precedence: runtime_config →
+        config.json → options → data → default.
+
+        A set (not None/"") runtime value wins, as in nova_config.runtime_get.
+        Otherwise runtime_get resolves the rest; hass=None skips its bridge
+        lookup, so config.json/options/data/default behave exactly as before."""
+        rc = self._runtime_config()
+        if key in rc and rc[key] not in (None, ""):
+            return rc[key]
         from . import nova_config
-        return nova_config.runtime_get(self.hass, self.entry, key, default)
+        return nova_config.runtime_get(None, self.entry, key, default)
 
     def _rt_opt(self, key: str, default=None):
         """
-        Runtime-aware read via the canonical resolver: panel runtime_config →
+        Runtime-aware read, same precedence as _opt: panel runtime_config →
         config.json → options → data → default. The panel writes model/provider
         changes to runtime_config, so those take effect on the next request
         without a restart (run_agent re-resolves provider/model per call).
         """
-        from . import nova_config
-        return nova_config.runtime_get(self.hass, self.entry, key, default)
+        return self._opt(key, default)
+
+    def _satellite_pairings(self) -> dict | None:
+        """The panel's satellite → speaker pairings from the live
+        runtime_config (a dict, or its JSON string). Returns a non-empty dict,
+        or None when unset, empty, malformed or not a mapping. Not cached."""
+        raw = self._runtime_config().get("satellite_pairings")
+        if not raw:
+            return None
+        try:
+            import json as _json
+            parsed = _json.loads(raw) if isinstance(raw, str) else raw
+        except Exception:
+            return None
+        if isinstance(parsed, dict) and parsed:
+            return parsed
+        return None
 
     def _model(self) -> str:
         return self._opt(CONF_MODEL, DEFAULT_MODEL)
@@ -373,19 +389,7 @@ class NovaAgent(conversation.ConversationEntity):
           - falls back to legacy cast_speakers for backward compatibility
           - satellite_pairings from panel Settings override area registry
         """
-        # Read satellite_pairings from runtime_config
-        sat_pairings = None
-        try:
-            import json as _json
-            _data = self.hass.data.get(DOMAIN, {}).get(self.entry.entry_id, {})
-            _rc = _data.get("runtime_config", {}) if isinstance(_data, dict) else {}
-            _raw = _rc.get("satellite_pairings")
-            if _raw:
-                _parsed = _json.loads(_raw) if isinstance(_raw, str) else _raw
-                if isinstance(_parsed, dict) and _parsed:
-                    sat_pairings = _parsed
-        except Exception:
-            pass
+        sat_pairings = self._satellite_pairings()
 
         return reply_targets(
             self.hass,
@@ -617,6 +621,10 @@ class NovaAgent(conversation.ConversationEntity):
             "Nova async_process ENTRY: text='%s' device_id='%s'",
             user_input.text[:60], device_id,
         )
+        # A loaded entry that lost its NovaRuntime must fail this turn before
+        # the local engine, the provider, any tool or TTS routing runs. The
+        # wrapper in _async_handle_message logs it and speaks its error reply.
+        get_runtime(self.entry)
 
         # Transcribed voice text arriving here means STT just worked (HA's
         # pipeline transcribed speech and routed it to us). Record it as a real
@@ -946,19 +954,12 @@ class NovaAgent(conversation.ConversationEntity):
                     # installs, which left the fallback unable to resolve a
                     # provider and forced the "offline" message even when a
                     # working tier was configured. Use the single source of
-                    # truth (nova_config) plus live panel runtime_config.
+                    # truth (nova_config) plus the live panel runtime_config
+                    # (non-empty values win), read from NovaRuntime this turn.
                     eff_config = await self.hass.async_add_executor_job(
-                        _jc.effective_config, self.entry
+                        _jc.effective_config_with_runtime, self.entry,
+                        self._runtime_config(),
                     )
-                    try:
-                        _rc = self.hass.data.get(DOMAIN, {}).get(
-                            self.entry.entry_id, {}).get("runtime_config", {})
-                        if isinstance(_rc, dict):
-                            eff_config = {**eff_config,
-                                          **{k: v for k, v in _rc.items()
-                                             if v not in (None, "")}}
-                    except Exception:
-                        pass
 
                     api_key_val = resolve_provider_credential(
                         eff_config, provider_name)
@@ -1051,19 +1052,7 @@ class NovaAgent(conversation.ConversationEntity):
                 device_id_route = getattr(user_input, 'device_id', None)
                 if device_id_route:
                     from .audio_routing import reply_target
-                    # Read satellite_pairings from runtime_config
-                    sat_pairings = None
-                    try:
-                        import json as _json
-                        _data = self.hass.data.get(DOMAIN, {}).get(self.entry.entry_id, {})
-                        _rc = _data.get("runtime_config", {}) if isinstance(_data, dict) else {}
-                        _raw = _rc.get("satellite_pairings")
-                        if _raw:
-                            _parsed = _json.loads(_raw) if isinstance(_raw, str) else _raw
-                            if isinstance(_parsed, dict) and _parsed:
-                                sat_pairings = _parsed
-                    except Exception:
-                        pass
+                    sat_pairings = self._satellite_pairings()
 
                     speaker = reply_target(
                         self.hass,
