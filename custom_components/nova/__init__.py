@@ -925,7 +925,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # options + panel, panel winning), not bare entry, for the same reason.
         observer_config = dict(_eff)
         from . import observer as observer_mod
-        await observer_mod.start(hass, observer_config)
+        try:
+            await observer_mod.start(hass, observer_config)
+        except Exception:
+            # Same rule as the block above: a setup exception gets no
+            # async_unload_entry from HA, so tear down what's registered.
+            # Marked running so unload's observer.stop() clears a partial start.
+            hass.data[DOMAIN][entry.entry_id]["observer_running"] = True
+            await async_unload_entry(hass, entry)
+            raise
         hass.data[DOMAIN][entry.entry_id]["observer_running"] = True
         _LOGGER.info("Nova Observer mode ENABLED — watching for interesting events")
     else:
@@ -973,7 +981,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # No-ops cleanly off-Supervisor; runs once per version as a background task.
     try:
         from . import bootstrap
-        bootstrap.schedule_bootstrap(hass)
+        # The returned handle cancels a pending start listener or a running
+        # bootstrap task on unload, so neither outlives this entry.
+        resources.add_closeable(bootstrap.schedule_bootstrap(hass))
     except Exception as exc:
         _LOGGER.warning("Nova bootstrap scheduling failed (non-fatal): %s", exc)
 
@@ -1015,13 +1025,39 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if reminder_watcher:
         await reminder_watcher.async_stop()
 
-    # Stop observer if it's running
+    # Stop observer if it's running. observer.stop() also stops the cognitive
+    # core; otherwise stop the core here. Setup always wires lockdown
+    # (cognitive_core.ensure_lockdown) even with the observer off, and its
+    # alarm listener must not outlive the entry. cognitive_core.stop() is
+    # idempotent, so a partial observer stop followed by this is safe.
+    core_stopped = False
     if data.get("observer_running"):
         try:
             from . import observer as observer_mod
             await observer_mod.stop()
+            core_stopped = True
         except Exception as exc:
             _LOGGER.debug("Observer stop failed: %s", exc)
+    if not core_stopped:
+        try:
+            from . import cognitive_core
+            await cognitive_core.stop()
+        except Exception as exc:
+            _LOGGER.debug("Cognitive core stop failed: %s", exc)
+    # Release the stopped core's hass/config/lockdown manager so a reload
+    # builds lockdown from the new instance and config, not this entry's.
+    try:
+        from . import cognitive_core
+        cognitive_core.release_runtime()
+    except Exception as exc:
+        _LOGGER.debug("Cognitive core release failed: %s", exc)
+
+    # Clear the voice-fingerprint provider registered at setup.
+    try:
+        from . import voice_recognition
+        voice_recognition.unregister()
+    except Exception as exc:
+        _LOGGER.debug("Voice recognition unregister failed: %s", exc)
 
     # Tear down listeners, timers, and the scheduler in one fail-safe call.
     resources = data.get("resources")
@@ -1066,7 +1102,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     "nap", "shush", "unshush",
                     "observer_start", "observer_stop", "observer_status",
                     "replay_policy", "create_automation", "diagnose_doorbell",
-                    "test_notify", "test_tts", "lockdown",
+                    "test_notify", "test_tts", "test_routing", "lockdown",
                     "train_doorbell_backlog", "check_packages", "speak",
                     "process_intent", "remember", "forget",
                     "backup", "restore"):

@@ -382,6 +382,10 @@ test_tts:
   name: Test TTS
   description: "Play a Nova voice test tone on the broadcast group."
 
+test_routing:
+  name: Test Routing
+  description: "Diagnostic only: write Nova's current speaker and satellite routing (TTS entity, broadcast target, occupied areas, per-room reply targets) to the Home Assistant log. Changes no devices and speaks nothing."
+
 lockdown:
   name: Lockdown
   description: "Engage or lift the formal lockdown state — locks all locks and closes all open doors. Windows already open at engage are left as-is; new windows opening during lockdown are flagged as a breach."

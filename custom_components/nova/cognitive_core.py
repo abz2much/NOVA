@@ -3964,11 +3964,15 @@ async def stop() -> None:
             await _CORE.task
         except (asyncio.CancelledError, Exception):
             pass
+        _CORE.task = None
     if _CORE.unsub:
         try:
             _CORE.unsub()
         except Exception:
             pass
+        # Cleared so a second stop() (unload after a failed setup, repeated
+        # unload) can't call Home Assistant's remove-listener twice.
+        _CORE.unsub = None
     if _CORE.alarm_unsub:
         try:
             _CORE.alarm_unsub()
@@ -3979,3 +3983,19 @@ async def stop() -> None:
         "Nova Cognitive Core stopped — %d ticks, %d actions taken",
         _CORE.tick_count, _CORE.actions_taken,
     )
+
+
+def release_runtime() -> None:
+    """Drop the Home Assistant reference, config and lockdown manager owned by
+    an unloaded entry, so the next setup's ensure_lockdown() builds a fresh
+    manager from the new hass and current config.
+
+    Called by async_unload_entry after stop(), never while Nova is loaded
+    (stop() alone also runs for nova.observer_stop and a core restart, where
+    the manager must stay). Touches no device and writes nothing: the
+    persisted lockdown state stays on disk and the next LockdownManager
+    restores it. Idempotent.
+    """
+    _CORE.lockdown_mgr = None
+    _CORE.hass = None
+    _CORE.config = {}

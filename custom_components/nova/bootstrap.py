@@ -29,7 +29,7 @@ from typing import Optional
 
 import aiohttp
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 _LOGGER = logging.getLogger(__name__)
@@ -567,12 +567,38 @@ async def async_ensure_pipeline_agent(hass: HomeAssistant) -> None:
                 getattr(p, "name", "?"), exc)
 
 
-def schedule_bootstrap(hass: HomeAssistant) -> None:
+class BootstrapHandle:
+    """Owns the bootstrap's pending start listener and its background task so
+    unloading Nova can stop both. shutdown() is idempotent and never raises;
+    after it, a start event that still arrives schedules nothing."""
+
+    def __init__(self) -> None:
+        self.unsub_start = None   # listen_once remover, until the event fires
+        self.task = None          # the running bootstrap task, once started
+        self.closed = False
+
+    def shutdown(self) -> None:
+        self.closed = True
+        unsub, self.unsub_start = self.unsub_start, None
+        if unsub is not None:
+            try:
+                unsub()
+            except Exception as exc:
+                _LOGGER.debug("Nova bootstrap: start listener removal: %s", exc)
+        task, self.task = self.task, None
+        if task is not None and not task.done():
+            task.cancel()
+
+
+def schedule_bootstrap(hass: HomeAssistant) -> BootstrapHandle:
     """
     Launch the bootstrap as a background task once HA has finished starting.
     The pipeline-agent repair runs on every start (everywhere); the add-on/voice
-    bootstrap is Supervisor-only and marker-gated. Called from async_setup_entry.
+    bootstrap is Supervisor-only and marker-gated. Called from async_setup_entry,
+    which registers the returned handle so unload cancels whatever is pending.
     """
+    handle = BootstrapHandle()
+
     async def _runner(_event=None) -> None:
         # Always, first: point Nova's voice pipeline at Nova's own agent so its
         # reply routing runs. Not marker-gated and not behind the add-on phases, so
@@ -587,8 +613,19 @@ def schedule_bootstrap(hass: HomeAssistant) -> None:
             except Exception as exc:
                 _LOGGER.warning("Nova bootstrap: unexpected error: %s", exc)
 
+    def _start() -> None:
+        if not handle.closed:
+            handle.task = hass.async_create_background_task(_runner(), "nova_bootstrap")
+
+    @callback
+    def _on_started(_event) -> None:
+        handle.unsub_start = None   # listen_once has already removed itself
+        _start()
+
     if hass.is_running:
-        hass.async_create_background_task(_runner(), "nova_bootstrap")
+        _start()
     else:
         from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
-        hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _runner)
+        handle.unsub_start = hass.bus.async_listen_once(
+            EVENT_HOMEASSISTANT_STARTED, _on_started)
+    return handle
