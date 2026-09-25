@@ -108,16 +108,19 @@ def can_announce(
     """
     Decide whether this announcement can proceed.
 
-    Blanket mute (`_STATE.mute_all`) blocks EVERYTHING including critical.
-    Use sparingly. Cleared by unshush().
+    Critical urgency bypasses every gate check: blanket mute, entity and
+    category mutes, the rate limit and dedup. A safety alert must never be
+    silenced by a shush.
 
-    Otherwise critical urgency bypasses every gate check.
+    Blanket mute (`_STATE.mute_all`) blocks every non-critical announcement
+    until unshush() is called (or Home Assistant restarts).
     """
-    if _STATE.mute_all:
-        return False, "blanket shush active"
-
+    # Critical first, so no mute of any kind can suppress a safety alert.
     if urgency == "critical":
         return True, "critical bypass"
+
+    if _STATE.mute_all:
+        return False, "blanket shush active"
 
     # Explicit mute check
     if entity_id in _STATE.muted_entities:
@@ -192,7 +195,8 @@ def shush(
     Arguments:
       - entity_id: mute only this entity
       - category: mute only this category
-      - all: mute EVERYTHING — blanket kill switch until unshush is called
+      - all: mute every non-critical announcement until unshush is called;
+        critical safety announcements still pass
       - (no args): mute the most recent announcement's entity (targeted)
     """
     result = {"muted_entities": [], "muted_categories": [], "all": False}
@@ -201,8 +205,8 @@ def shush(
         _STATE.mute_all = True
         result["all"] = True
         _LOGGER.warning(
-            "Nova BLANKET SHUSH engaged — all announcements suppressed "
-            "until nova.unshush is called"
+            "Nova BLANKET SHUSH engaged — non-critical announcements "
+            "suppressed until nova.unshush is called; critical still pass"
         )
         return result
 

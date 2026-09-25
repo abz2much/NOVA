@@ -319,7 +319,7 @@ shush:
             - schedule
     all:
       name: Mute everything
-      description: "Blanket mute: suppress every Nova announcement, including critical ones, until nova.unshush is called or Home Assistant restarts. Use sparingly."
+      description: "Suppress every non-critical Nova announcement until nova.unshush is called or Home Assistant restarts. Critical safety announcements always pass."
       required: false
       selector:
         boolean:

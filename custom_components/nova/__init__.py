@@ -1534,7 +1534,8 @@ def _register_services(
     )
 
     async def _shush(call: ServiceCall) -> None:
-        """Tell Nova to stop announcing. Pass all=true for blanket kill switch."""
+        """Tell Nova to stop announcing. Pass all=true to mute every
+        non-critical announcement; critical safety alerts always pass."""
         from . import output_gate
         entity_id = call.data.get("entity_id")
         category  = call.data.get("category")
