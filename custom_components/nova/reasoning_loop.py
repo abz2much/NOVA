@@ -656,19 +656,23 @@ async def decide(
     ]
 
     try:
-        # provider.chat is SYNC — wrap in executor to avoid blocking event loop.
+        # The activity boundary runs the blocking SDK call in the executor.
         # Retry on transient 503 (Gemini "high demand") — 2 retries with backoff.
+        from .providers.activity import execute_chat
+        from .providers.errors import error_text
         response = None
         last_err = None
         for attempt in range(3):
             try:
-                response = await hass.async_add_executor_job(
-                    lambda: provider.chat(messages, temperature=0.4, max_tokens=200)
+                response = await execute_chat(
+                    hass, provider, messages,
+                    role="reasoning", data_category="text",
+                    temperature=0.4, max_tokens=200,
                 )
                 break
             except Exception as exc:
                 last_err = exc
-                err_str = str(exc)
+                err_str = error_text(exc)
                 # Transient errors worth retrying: 503 (overloaded), 429 (rate limit),
                 # 500 (internal), timeout. Others fail fast.
                 is_transient = (
@@ -685,7 +689,7 @@ async def decide(
                 backoff = 2 ** attempt  # 1s, 2s
                 _LOGGER.info(
                     "Reasoning loop transient error (attempt %d), backing off %ds: %s",
-                    attempt + 1, backoff, err_str[:120],
+                    attempt + 1, backoff, str(exc)[:120],
                 )
                 await asyncio.sleep(backoff)
 
@@ -695,13 +699,7 @@ async def decide(
         # Network call succeeded — close the breaker.
         connectivity.record_success()
 
-        # chat() returns {"text": ..., "tool_calls": [...], "raw": ...}
-        content = (
-            response.get("text") if isinstance(response, dict)
-            else (getattr(response, "content", None)
-                  or getattr(response, "text", None)
-                  or str(response))
-        )
+        content = response.text
         result = _parse_reasoning_json(content)
 
         if not isinstance(result, dict):

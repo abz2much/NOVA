@@ -52,7 +52,7 @@ async def test_blank_frame_returns_none(pm, load, fake_hass, monkeypatch):
     monkeypatch.setattr(cam, "_get_best_image", _fake_img)
     monkeypatch.setattr(cam, "_looks_blank", lambda b: True)
     called = {"vision": False}
-    monkeypatch.setattr(cam, "_make_client",
+    monkeypatch.setattr(cam, "_camera_client",
                         lambda *a, **k: called.__setitem__("vision", True))
     det = await pm.detect_on_camera(fake_hass, None, "camera.front_door")
     assert det is None

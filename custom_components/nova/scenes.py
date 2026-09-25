@@ -75,17 +75,18 @@ async def async_activate_by_intent(
     )
 
     try:
-        result = await hass.async_add_executor_job(
-            lambda: groq_client.chat(
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-                max_tokens=40,
-                temperature=0.2,
-            )
+        from .providers.activity import execute_chat
+        result = await execute_chat(
+            hass, groq_client,
+            [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            role="scenes", data_category="text",
+            max_tokens=40,
+            temperature=0.2,
         )
-        pick = result["text"].strip().lower()
+        pick = result.text.strip().lower()
     except Exception as exc:
         _LOGGER.error("Nova scene-pick error: %s", exc)
         return {"success": False, "error": str(exc)}

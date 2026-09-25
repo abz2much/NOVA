@@ -4,6 +4,8 @@ async_setup_entry builds one NovaRuntime and stores it on entry.runtime_data.
 It names the entry-scoped live objects setup constructs and who owns them:
 
 * NovaResources owns disposables (unsubs, tasks, closeables),
+* the ProviderManager (``providers``) owns every provider client; ``client``
+  is a non-owning reference to the one bound as "primary",
 * NovaScheduler owns recurring sweeps (and is itself a NovaResources closeable),
 * async_unload_entry owns teardown.
 
@@ -33,6 +35,7 @@ if TYPE_CHECKING:
     from .boot_guard import AlertBuffer
     from .intent import LocalIntentRouter
     from .llm_provider import LLMProvider
+    from .providers.manager import ProviderManager
     from .reminders import ReminderWatcher
     from .resources import NovaResources
     from .scheduler import NovaScheduler
@@ -52,6 +55,8 @@ class NovaRuntime:
     resources: NovaResources
     automation_contexts: AutomationContextTracker
     automation_inventory: AutomationInventory | None = None
+    # Owns every provider client (closed through NovaResources on unload).
+    providers: ProviderManager | None = None
     # Panel-live settings. One live dict, changed in place by panel writes.
     runtime_config: dict[str, Any] = field(default_factory=dict)
     schema_version: int = CURRENT_SCHEMA_VERSION

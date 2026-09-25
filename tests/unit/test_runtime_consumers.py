@@ -504,14 +504,15 @@ def test_no_executor_job_is_handed_a_live_runtime_config():
     assert offenders == []
 
 
-def test_camera_client_jobs_take_settings_from_the_loop():
+def test_camera_clients_resolve_from_an_executor_config_snapshot():
+    """Phase 6: the camera roles build their configuration in the executor
+    from a runtime_config snapshot taken on the loop, never the live dict."""
+    body = ast.unparse(_func("camera.py", "_camera_config"))
+    assert "runtime_config_snapshot(entry)" in body
+    assert "effective_config_with_runtime" in body
     jobs = [(rel, c) for rel, c in _executor_calls()
-            if c.args and ast.unparse(c.args[0]).endswith("_make_client")]
-    assert len(jobs) == 3            # vision + camera reasoning + packages
-    for rel, call in jobs:
-        last = call.args[-1]
-        assert isinstance(last, ast.Call) and ast.unparse(last.func).endswith(
-            "_client_settings"), (rel, call.lineno)
+            if c.args and "_make_client" in ast.unparse(c.args[0])]
+    assert jobs == []
 
 
 def test_appliance_discovery_job_takes_an_exclusion_snapshot():
@@ -529,42 +530,14 @@ def test_observer_executor_config_is_merged_from_a_snapshot(fn):
     assert "lifecycle_runtime_config" not in body
 
 
-def test_make_client_reads_settings_not_config():
-    body = ast.unparse(_func("camera.py", "_make_client"))
-    assert "_cfg_opt" not in body and "_resolve_credential" not in body
-    assert "settings = _client_settings(hass, provider)" in body   # loop-only fallback
-
-
-def test_camera_client_settings(load, monkeypatch):
+def test_client_spec_is_pure(load, monkeypatch):
+    """_client_spec resolves only from the config it is handed."""
     if "aiohttp" not in sys.modules:
         monkeypatch.setitem(sys.modules, "aiohttp", types.ModuleType("aiohttp"))
     cam = load("camera")
-    hass = FakeHass()
-    live = {"ollama_base_url": "http://gpu:11434"}
-    _install_nova_runtime(hass, live)
-    first = cam._client_settings(hass, "ollama")
-    assert first["ollama_base_url"] == "http://gpu:11434"
-    assert first is not live
-    live["ollama_base_url"] = "http://other:11434"
-    assert cam._client_settings(hass, "ollama")["ollama_base_url"] == "http://other:11434"
-    assert first["ollama_base_url"] == "http://gpu:11434"     # never re-read
-
-
-def test_make_client_with_settings_never_reads_config(load, monkeypatch):
-    if "aiohttp" not in sys.modules:
-        monkeypatch.setitem(sys.modules, "aiohttp", types.ModuleType("aiohttp"))
-    cam = load("camera")
-    cam._PROVIDER_CACHE.clear()
-    import importlib
-    lp = importlib.import_module(cam.__name__.rsplit(".", 1)[0] + ".llm_provider")
-    monkeypatch.setattr(lp, "create_provider",
-                        lambda provider, key, model, base: types.SimpleNamespace(base=base))
-    monkeypatch.setattr(cam, "_cfg_opt", lambda *a, **k: pytest.fail("read config in a thread"))
-    client = cam._make_client(None, "ollama", "llava", "FB",
-                              {"api_key": "", "ollama_base_url": "http://gpu:11434",
-                               "custom_base_url": "", "llm_base_url": ""})
-    assert client != "FB"
-    cam._PROVIDER_CACHE.clear()
+    monkeypatch.setattr(cam, "_cfg_opt", lambda *a, **k: pytest.fail("read live config"))
+    spec = cam._client_spec({"ollama_base_url": "http://gpu:11434"}, "ollama", "llava")
+    assert spec.base_url == "http://gpu:11434"
 
 
 # ── Directive helper, sentinel and solar go through runtime_get ─────────────

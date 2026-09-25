@@ -14,8 +14,10 @@ and a digest of the credential):
 * named bindings ("primary", "vision", "observer_reasoning", ...) point at a
   fingerprint; rebinding to a new configuration is a single synchronous
   step on the event loop, so no caller ever sees a half-replaced binding;
-* a client no binding references any more is retired and closed exactly
-  once, after its in-flight calls finish;
+* a lease() pins a client for the duration of one operation (an agent
+  turn, a camera analysis) without binding it;
+* a client no binding or lease references any more is retired and closed
+  exactly once, after its in-flight calls finish;
 * closing the manager closes every client it built, exactly once, whether
   its SDK closes synchronously, asynchronously or not at all.
 
@@ -49,6 +51,8 @@ class ProviderManager:
         self._clients: dict[str, Any] = {}            # fingerprint -> client
         self._bindings: dict[str, str] = {}           # binding -> fingerprint
         self._building: dict[str, asyncio.Future] = {}
+        self._waiters: dict[str, int] = {}            # fingerprint -> callers awaiting a build
+        self._leases: dict[str, int] = {}             # fingerprint -> open leases
         self._inflight: dict[int, int] = {}           # id(client) -> calls
         self._retired: dict[int, Any] = {}            # id(client) -> client
         self._closed_ids: set[int] = set()
@@ -76,37 +80,106 @@ class ProviderManager:
 
     # ── Acquisition ─────────────────────────────────────────────────────────
 
-    async def async_acquire(self, spec: ProviderSpec, *, binding: str) -> Any:
+    async def async_acquire(self, spec: ProviderSpec, *, binding: str,
+                            factory: Optional[Callable[[], Any]] = None) -> Any:
         """Return the client for ``spec`` and bind it under ``binding``.
 
         Reuses a pooled client with the same fingerprint, otherwise builds
         one in the executor (one build per fingerprint however many callers
-        ask at once). Rebinding retires the previously bound client when
-        nothing else references it."""
-        self._ensure_open()
-        fp = spec.fingerprint()
-        client = self._clients.get(fp)
-        if client is None:
-            task = self._building.get(fp)
-            if task is None:
-                task = asyncio.ensure_future(self._build(spec, fp))
-                self._building[fp] = task
-            try:
-                client = await asyncio.shield(task)
-            except asyncio.CancelledError:
-                # The build keeps running; if nothing binds its client by the
-                # time it finishes, it is retired instead of leaking.
-                task.add_done_callback(lambda _t: self._schedule_prune())
-                raise
-        self._ensure_open()
+        ask at once). ``factory`` builds the client instead of the manager's
+        builder; it must build the client ``spec`` describes. Rebinding
+        retires the previously bound client when nothing else uses it."""
+        fp, client = await self._obtain(spec, factory)
         self._bind(binding, fp)
         return client
 
-    async def _build(self, spec: ProviderSpec, fp: str) -> Any:
+    async def async_acquire_all(
+        self,
+        requests: dict[str, tuple[ProviderSpec, Optional[Callable[[], Any]]]],
+    ) -> dict[str, Any]:
+        """Acquire several bindings as one step: every client is obtained
+        first, and only when all succeed are the bindings moved, together.
+        On any failure no binding changes (clients built for the attempt are
+        retired) and the error propagates."""
+        obtained: dict[str, tuple[str, Any]] = {}
+        pinned: list[str] = []
         try:
-            client = await self._hass.async_add_executor_job(self._builder, spec)
+            for binding, (spec, factory) in requests.items():
+                fp, client = await self._obtain(spec, factory)
+                self._leases[fp] = self._leases.get(fp, 0) + 1
+                pinned.append(fp)
+                obtained[binding] = (fp, client)
+            self._ensure_open()
+            for binding, (fp, _client) in obtained.items():
+                self._bind(binding, fp)
+            return {binding: client for binding, (_fp, client) in obtained.items()}
+        finally:
+            for fp in pinned:
+                self._unpin(fp)
+
+    def _unpin(self, fp: str) -> None:
+        remaining = self._leases.get(fp, 0) - 1
+        if remaining > 0:
+            self._leases[fp] = remaining
+            return
+        self._leases.pop(fp, None)
+        if not self._closed:
+            self._retire_if_unbound(fp)
+
+    @asynccontextmanager
+    async def lease(self, spec: ProviderSpec, *, binding: Optional[str] = None,
+                    factory: Optional[Callable[[], Any]] = None) -> AsyncIterator[Any]:
+        """Hold the client for ``spec`` for the duration of the block.
+
+        A leased client is never closed while the lease is held, even if a
+        binding moves away from it meanwhile. With ``binding`` it is also
+        bound (kept pooled after the block); without one it is retired when
+        the last lease on it ends."""
+        fp, client = await self._obtain(spec, factory)
+        if binding is not None:
+            self._bind(binding, fp)
+        self._leases[fp] = self._leases.get(fp, 0) + 1
+        try:
+            yield client
+        finally:
+            self._unpin(fp)
+
+    async def _obtain(self, spec: ProviderSpec,
+                      factory: Optional[Callable[[], Any]]) -> tuple[str, Any]:
+        self._ensure_open()
+        fp = spec.fingerprint()
+        client = self._clients.get(fp)
+        if client is not None:
+            return fp, client
+        task = self._building.get(fp)
+        if task is None:
+            task = asyncio.ensure_future(self._build(spec, fp, factory))
+            self._building[fp] = task
+        self._waiters[fp] = self._waiters.get(fp, 0) + 1
+        try:
+            # Shielded: one caller's cancellation never cancels a build other
+            # callers are waiting on. A build nobody is waiting for any more
+            # retires its client as soon as it finishes (see _build).
+            client = await asyncio.shield(task)
+        finally:
+            remaining = self._waiters.get(fp, 0) - 1
+            if remaining > 0:
+                self._waiters[fp] = remaining
+            else:
+                self._waiters.pop(fp, None)
+        self._ensure_open()
+        return fp, client
+
+    async def _build(self, spec: ProviderSpec, fp: str,
+                     factory: Optional[Callable[[], Any]]) -> Any:
+        build = factory if factory is not None else (lambda: self._builder(spec))
+        try:
+            client = await self._hass.async_add_executor_job(build)
         finally:
             self._building.pop(fp, None)
+        if client is None:
+            raise ProviderError(ProviderErrorKind.PROVIDER_UNAVAILABLE, spec.provider,
+                                detail="the provider could not be built")
         if self._closed:
             await self._close_client(client)
             raise ProviderError(ProviderErrorKind.PROVIDER_UNAVAILABLE, spec.provider,
@@ -120,6 +193,9 @@ class ProviderManager:
             setattr(client, _TRACKER_ATTR, self)
         except Exception:
             pass
+        if not self._waiters.get(fp):
+            # Every caller was cancelled while it was being built.
+            self._retire_if_unbound(fp)
         return client
 
     def _bind(self, binding: str, fp: str) -> None:
@@ -135,12 +211,12 @@ class ProviderManager:
             self._retire_if_unbound(fp)
         await self._drain()
 
-    def _schedule_prune(self) -> None:
-        for fp in list(self._clients):
-            self._retire_if_unbound(fp)
+    def _in_use(self, fp: str) -> bool:
+        return (fp in self._bindings.values() or bool(self._leases.get(fp))
+                or bool(self._waiters.get(fp)))
 
     def _retire_if_unbound(self, fp: str) -> None:
-        if fp in self._bindings.values():
+        if self._in_use(fp):
             return
         client = self._clients.pop(fp, None)
         if client is None:
@@ -198,6 +274,7 @@ class ProviderManager:
         self._clients.clear()
         self._retired.clear()
         self._bindings.clear()
+        self._leases.clear()
         for task in list(self._building.values()):
             # A build still running closes its own client when it finishes
             # (see _build); wait for it so nothing outlives the manager.

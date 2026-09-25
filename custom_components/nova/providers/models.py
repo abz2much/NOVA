@@ -105,11 +105,12 @@ def _part_from_openai(part: Any) -> ContentPart | None:
 
 @dataclass(frozen=True, slots=True)
 class ToolCall:
-    """One tool call the model asked for. ``args`` is always a JSON object."""
+    """One tool call the model asked for. ``args`` is always a JSON object,
+    kept out of repr() so logging a response never prints tool arguments."""
 
     id: str
     name: str
-    args: Mapping[str, Any]
+    args: Mapping[str, Any] = field(repr=False)
     # Set only on a call parsed from caller-built history whose arguments were
     # not a JSON object: "invalid_json" or "not_object". Adapters decide
     # whether that is an error (native Ollama) or an empty object (Anthropic).
@@ -329,18 +330,21 @@ class ChatResponse:
     @classmethod
     def from_legacy(cls, value: Any, *, provider: str = "", model: str = "") -> "ChatResponse":
         """Normalize a legacy dictionary (or a test double's reply). The
-        caller's ``raw`` is dropped, never carried forward."""
+        caller's ``raw`` is dropped, never carried forward, and a hidden
+        reasoning envelope is stripped from the text like any adapter's."""
+        from .reasoning import visible_text
+
         if not isinstance(value, dict):
             text = (getattr(value, "content", None) or getattr(value, "text", None)
                     or ("" if value is None else str(value)))
-            return cls(text=str(text), provider=provider, model=model)
+            return cls(text=visible_text(str(text)), provider=provider, model=model)
         usage = value.get("usage") or {}
         calls = tuple(
             ToolCall.from_legacy(c, i)
             for i, c in enumerate(value.get("tool_calls") or [])
             if isinstance(c, dict))
         return cls(
-            text=str(value.get("text") or ""),
+            text=visible_text(str(value.get("text") or "")),
             tool_calls=calls,
             usage=Usage(
                 input_tokens=_int_or_none(usage.get("input_tokens")),

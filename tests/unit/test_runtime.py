@@ -27,7 +27,7 @@ COMP = pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova
 FIELDS = [
     "client", "llm_provider_name", "sentinel", "reminder_watcher",
     "scheduler", "resources", "automation_contexts", "automation_inventory",
-    "runtime_config", "schema_version", "observer_running",
+    "providers", "runtime_config", "schema_version", "observer_running",
     "intent_router", "state_ledger", "entity_locks", "alert_buffer",
     "audit_running",
 ]

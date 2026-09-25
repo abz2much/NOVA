@@ -70,16 +70,17 @@ async def async_summarise(
     system = build_system_prompt(hass, honorific, task)
 
     try:
-        result = await hass.async_add_executor_job(
-            lambda: groq_client.chat(
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": f"Transcript:\n\n{transcript}"},
-                ],
-                max_tokens=300,
-            )
+        from .providers.activity import execute_chat
+        result = await execute_chat(
+            hass, groq_client,
+            [
+                {"role": "system", "content": system},
+                {"role": "user", "content": f"Transcript:\n\n{transcript}"},
+            ],
+            role="summary", data_category="text",
+            max_tokens=300, temperature=0.7,
         )
-        summary = result["text"].strip()
+        summary = result.text.strip()
     except Exception as exc:  # pylint: disable=broad-except
         _LOGGER.error("Nova summary Groq error: %s", exc)
         return {"success": False, "error": str(exc)}

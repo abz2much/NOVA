@@ -142,15 +142,23 @@ async def infer_coverage(hass, config: dict, cam_ctx: dict) -> dict:
         return {"covered": [], "reason": "Nothing in view.", "source": "geometry", "ts": int(time.time())}
     fallback = _geometry_result(candidates)
     try:
-        from .llm_provider import create_tier_provider
-        client = await hass.async_add_executor_job(create_tier_provider, config, "reasoning")
+        from . import llm_provider
+        from .providers.activity import execute_chat
+        from .providers.manager import provider_scope
+        from .providers.routing import tier_spec
         sys_p, usr_p = _build_prompt(cam_ctx)
-        result = await hass.async_add_executor_job(
-            lambda: client.chat(
-                messages=[{"role": "system", "content": sys_p},
-                          {"role": "user", "content": usr_p}],
-                max_tokens=400, temperature=0.3))
-        parsed = _parse((result.get("text") or ""), candidates)
+        async with provider_scope(hass) as providers:
+            async with providers.lease(
+                tier_spec(config, "reasoning"),
+                factory=lambda: llm_provider.create_tier_provider(config, "reasoning"),
+            ) as client:
+                result = await execute_chat(
+                    hass, client,
+                    [{"role": "system", "content": sys_p},
+                     {"role": "user", "content": usr_p}],
+                    role="coverage", data_category="text",
+                    max_tokens=400, temperature=0.3)
+        parsed = _parse((result.text or ""), candidates)
         return parsed or fallback
     except Exception as exc:
         _LOGGER.debug("camera coverage LLM failed, using geometry: %s", exc)

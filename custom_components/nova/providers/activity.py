@@ -94,8 +94,11 @@ async def execute_chat(
     category = data_category if data_category in DATA_CATEGORIES else "text"
     role = role if role in ROLES else "llm"
     request = ChatRequest.from_legacy(messages, tools, max_tokens, temperature, model_override)
-    kwargs: dict[str, Any] = {"tools": tools, "max_tokens": max_tokens,
-                              "temperature": temperature}
+    # Only what the call uses is passed on, so a provider-shaped object with
+    # a narrower chat() signature (a test double) still works.
+    kwargs: dict[str, Any] = {"max_tokens": max_tokens, "temperature": temperature}
+    if tools:
+        kwargs["tools"] = tools
     if model_override is not None:
         kwargs["model_override"] = model_override
 
@@ -108,23 +111,34 @@ async def execute_chat(
         # The owning manager defers closing a replaced client until its
         # in-flight calls finish.
         tracker = call_tracker(provider)
+        if limiter is not None:
+            await limiter.acquire()
         if tracker is not None:
             tracker.call_started(provider)
+
+        def _job_done(job: asyncio.Future) -> None:
+            # Runs when the executor job really ends, which after a
+            # cancellation can be later than the caller: the client stays
+            # counted as in flight (and the slot held) until then.
+            if tracker is not None:
+                tracker.call_finished(provider)
+            if limiter is not None:
+                limiter.release()
+            if not job.cancelled():
+                job.exception()     # retrieved here; re-raised by the await below
+
+        job = asyncio.ensure_future(hass.async_add_executor_job(runner))
+        job.add_done_callback(_job_done)
         try:
-            if limiter is None:
-                response = await hass.async_add_executor_job(runner)
-            else:
-                async with limiter:
-                    response = await hass.async_add_executor_job(runner)
+            # Shielded so cancelling the caller propagates at once without
+            # pretending the blocking SDK call stopped.
+            response = await asyncio.shield(job)
         except asyncio.CancelledError:
             raise
         except ProviderError:
             raise
         except Exception as exc:
             raise normalize_error(exc, provider_name) from exc
-        finally:
-            if tracker is not None:
-                tracker.call_finished(provider)
         success = True
         return response
     except asyncio.CancelledError:
