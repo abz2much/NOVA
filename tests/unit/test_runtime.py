@@ -2,7 +2,7 @@
 
 The integration tests (tests/integration/test_runtime_data.py) drive the real
 setup and unload path. This file proves the runtime module with fakes, plus
-static checks on how __init__.py and proactive_audio.py wire it:
+static checks on how __init__.py, proactive_audio.py and services.py wire it:
 
 * NovaRuntime is a slots dataclass with exactly the reviewed fields,
 * the compatibility bridge helpers are gone (Phase 3C),
@@ -209,15 +209,19 @@ def test_proactive_audio_objects_live_on_the_runtime():
 
 
 def test_proactive_audio_service_handlers_resolve_the_entry_runtime():
-    reg = _func(COMP / "proactive_audio.py", "async_register_services")
+    """Phase 4: services.py owns the speak / process_intent handlers. Each
+    resolves the loaded entry and its runtime per call; proactive_audio.py
+    registers nothing and has no domain-level runtime lookup left."""
+    reg = _func(COMP / "services.py", "async_setup_services")
     handlers = {n.name: n for n in ast.walk(reg)
                 if isinstance(n, ast.AsyncFunctionDef)}
-    for name in ("_handle_speak", "_handle_process_intent"):
+    for name in ("_speak", "_process_intent"):
         body = ast.unparse(handlers[name])
-        assert "runtime = _service_runtime(hass)" in body, name
-    helper = ast.unparse(_func(COMP / "proactive_audio.py", "_service_runtime"))
-    assert "domain_runtime(hass)" in helper
-    assert "raise NovaRuntimeUnavailable" in helper
+        assert "entry, runtime = async_resolve_loaded(hass)" in body, name
+    src = (COMP / "proactive_audio.py").read_text(encoding="utf-8")
+    for gone in ("async_register_services", "_service_runtime", "domain_runtime",
+                 "async_register(", "async_remove("):
+        assert gone not in src, gone
 
 
 def test_proactive_audio_unsubs_are_owned_by_resources():

@@ -86,39 +86,58 @@ def services_contract() -> dict:
     return out
 
 
-def registered_services() -> list:
-    """Service names passed to hass.services.async_register(DOMAIN, ...)."""
-    names, consts = set(), {}
-    for path in (COMP / "__init__.py", COMP / "proactive_audio.py"):
-        tree = _tree(path)
-        for node in ast.walk(tree):
+# Since Phase 4 every Nova service is registered by services.py, once, through
+# its _register(name, handler, schema) helper (which wraps
+# hass.services.async_register with a has_service guard). speak and
+# process_intent pass proactive_audio's SERVICE_* names and SPEAK_SCHEMA /
+# PROCESS_INTENT_SCHEMA, which live in proactive_audio.py.
+_SERVICES_MODULE = COMP / "services.py"
+_SERVICE_NAME_MODULES = (COMP / "services.py", COMP / "proactive_audio.py")
+
+
+def _string_consts() -> dict:
+    consts = {}
+    for path in _SERVICE_NAME_MODULES:
+        for node in ast.walk(_tree(path)):
             if (isinstance(node, ast.Assign) and len(node.targets) == 1
                     and isinstance(node.targets[0], ast.Name)
                     and isinstance(node.value, ast.Constant)
                     and isinstance(node.value.value, str)):
                 consts[node.targets[0].id] = node.value.value
-        for node in ast.walk(tree):
-            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-                    and node.func.attr == "async_register" and len(node.args) >= 2
-                    and ast.unparse(node.func.value).endswith("services")):
-                arg = node.args[1]
-                names.add(arg.value if isinstance(arg, ast.Constant) else consts[arg.id])
-    return sorted(names)
+    return consts
+
+
+def service_registrations() -> list:
+    """(name, schema node or None) for every _register(...) call in
+    services.py, in source order."""
+    consts, out = _string_consts(), []
+    for node in ast.walk(_tree(_SERVICES_MODULE)):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "_register" and len(node.args) >= 2):
+            arg = node.args[0]
+            name = arg.value if isinstance(arg, ast.Constant) else consts[arg.id]
+            schema = node.args[2] if len(node.args) > 2 else next(
+                (k.value for k in node.keywords if k.arg == "schema"), None)
+            out.append((name, schema))
+    return out
+
+
+def registered_services() -> list:
+    """Every nova service name services.py registers."""
+    return sorted({name for name, _ in service_registrations()})
 
 
 def service_schema_keys() -> dict:
-    """{service: {field: "required"|"optional"}} from the vol.Schema passed to
-    each async_register call in __init__.py. Services registered without a
-    schema map to None."""
+    """{service: {field: "required"|"optional"}} from the vol.Schema each
+    service is registered with in services.py; services registered without
+    a schema map to None. speak and process_intent are left out, as before
+    Phase 4: their schemas are proactive_audio's SPEAK_SCHEMA and
+    PROCESS_INTENT_SCHEMA, pinned by the PHACC contract test instead."""
     out = {}
-    tree = _tree(COMP / "__init__.py")
-    for node in ast.walk(tree):
-        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-                and node.func.attr == "async_register" and len(node.args) >= 2
-                and isinstance(node.args[1], ast.Constant)):
+    for name, schema in service_registrations():
+        if isinstance(schema, ast.Name):
             continue
-        schema = next((k.value for k in node.keywords if k.arg == "schema"), None)
-        out[node.args[1].value] = _vol_keys(schema) if schema is not None else None
+        out[name] = _vol_keys(schema) if schema is not None else None
     return dict(sorted(out.items()))
 
 

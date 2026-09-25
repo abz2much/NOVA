@@ -9,7 +9,8 @@ and the real unload to prove:
 * the domain-level service handlers resolve the loaded entry's runtime and
   fail with NovaRuntimeUnavailable when it is gone, without building
   anything outside the entry,
-* nova.speak buffers into the entry's own alert buffer until ready,
+* nova.speak buffers into the entry's own alert buffer until ready, but
+  only while the entry is still setting up (Phase 4),
 * the audit timers' unsubs belong to NovaResources, and the audit flag is
   the runtime's,
 * Nova-shaped data planted in hass.data has no effect, and nothing is
@@ -127,17 +128,30 @@ async def test_objects_are_reused_within_one_loaded_entry(hass, routed):
 
 
 async def test_speak_buffers_in_the_entry_buffer_until_ready(hass, spoken):
+    from homeassistant.config_entries import ConfigEntryState
     from custom_components.nova import proactive_audio
     entry = await _setup(hass)
     runtime = entry.runtime_data
     runtime.alert_buffer.begin()                  # re-gate, as a reload does
+    entry.mock_state(hass, ConfigEntryState.SETUP_IN_PROGRESS)
 
     await _speak(hass, "queued")
     assert spoken == []
     assert runtime.alert_buffer._queue.qsize() == 1
 
+    entry.mock_state(hass, ConfigEntryState.LOADED)
     await proactive_audio.mark_boot_ready(hass, runtime)
     assert [(c[0], c[1]) for c in spoken] == [(runtime, "queued")]
+    assert runtime.alert_buffer._queue.qsize() == 0
+
+
+async def test_loaded_speak_never_buffers(hass, spoken):
+    """Phase 4: a LOADED entry speaks at once, even with a gated buffer."""
+    entry = await _setup(hass)
+    runtime = entry.runtime_data
+    runtime.alert_buffer.begin()
+    await _speak(hass, "now")
+    assert [(c[0], c[1]) for c in spoken] == [(runtime, "now")]
     assert runtime.alert_buffer._queue.qsize() == 0
 
 
@@ -269,8 +283,9 @@ async def test_unload_releases_everything_and_repeats_safely(hass, routed):
         assert getattr(runtime, field) is None, field
     assert runtime.audit_running is False
     assert runtime.resources._unsubs == []        # audit timers cancelled
-    assert not hass.services.has_service(DOMAIN, "speak")
-    assert not hass.services.has_service(DOMAIN, "process_intent")
+    # Phase 4: the services outlive the entry.
+    assert hass.services.has_service(DOMAIN, "speak")
+    assert hass.services.has_service(DOMAIN, "process_intent")
     assert not hasattr(entry, "runtime_data")
     _no_domain_level_objects(hass)
 

@@ -9,8 +9,9 @@ file proves the accessor with fakes, plus static checks over __init__.py:
   and never reads the hass.data bridge,
 * it gives {} only for an entry that is not loaded, and raises for a loaded
   entry with no runtime,
-* every migrated reader calls the accessor inside its own body, so each
-  call reads live values and nothing captures a copy at setup,
+* every migrated reader (in __init__.py, or services.py since Phase 4)
+  calls the accessor inside its own body, so each call reads live values
+  and nothing captures a copy at setup,
 * no runtime_config read through hass.data remains in __init__.py, and the
   remaining hass.data uses are exactly the approved bridge and lifecycle ones.
 
@@ -27,6 +28,8 @@ import pytest
 
 COMP = pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova"
 INIT = COMP / "__init__.py"
+# Phase 4 moved the service handlers and _get_speakers into services.py.
+SERVICES = COMP / "services.py"
 
 
 class _State(enum.Enum):
@@ -114,15 +117,18 @@ def test_accessor_never_reads_hass_data():
     assert "dict(" not in src and ".copy(" not in src
 
 
-# ── Static checks over __init__.py ──────────────────────────────────────────
+# ── Static checks over __init__.py and services.py ──────────────────────────
 
 _TREE = ast.parse(INIT.read_text(encoding="utf-8"))
+_SERVICES_TREE = ast.parse(SERVICES.read_text(encoding="utf-8"))
 
 
 def _func(name: str) -> ast.AST:
-    return next(n for n in ast.walk(_TREE)
-                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-                and n.name == name)
+    found = [n for tree in (_TREE, _SERVICES_TREE) for n in ast.walk(tree)
+             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+             and n.name == name]
+    assert len(found) == 1, (name, len(found))
+    return found[0]
 
 
 def _calls(node: ast.AST, name: str) -> list[ast.Call]:
@@ -218,12 +224,14 @@ def test_test_notify_merges_data_then_options_then_runtime():
 
 def test_no_runtime_config_is_read_through_hass_data():
     """runtime_config is only ever reached as runtime.runtime_config."""
-    consts = [n for n in ast.walk(_TREE) if isinstance(n, ast.Constant)
-              and n.value == "runtime_config"]
+    consts = [n for tree in (_TREE, _SERVICES_TREE) for n in ast.walk(tree)
+              if isinstance(n, ast.Constant) and n.value == "runtime_config"]
     assert consts == []
 
 
 def test_init_has_no_hass_data_access():
     """Phase 3C: __init__.py neither creates, writes, reads nor deletes
-    anything in hass.data. Setup stores state only on entry.runtime_data."""
+    anything in hass.data. Setup stores state only on entry.runtime_data.
+    Phase 4: nor does services.py."""
     assert list(_hass_data_nodes(_TREE)) == []
+    assert list(_hass_data_nodes(_SERVICES_TREE)) == []

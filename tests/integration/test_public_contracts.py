@@ -74,7 +74,7 @@ async def _analyze_camera_calls(hass, data):
     async def _record(hass_, call, *a, **k):
         seen.append(dict(call.data))
 
-    with patch("custom_components.nova.async_analyze_camera", _record):
+    with patch("custom_components.nova.services.async_analyze_camera", _record):
         await hass.services.async_call(DOMAIN, "analyze_camera", data, blocking=True)
     return seen
 

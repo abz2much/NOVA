@@ -66,7 +66,7 @@ def test_services_documented_contract():
     })
     _diff_keys(pinned["documented"], current["documented"], "service (services.yaml)")
     _diff_keys(pinned["registered_schemas"], current["registered_schemas"],
-               "service schema (__init__.py)")
+               "service schema (services.py)")
 
 
 def test_service_inventories_agree():
@@ -74,8 +74,8 @@ def test_service_inventories_agree():
     registered = set(lc._registered_services())
     assert registered == set(ce.registered_services())
     assert registered == set(ce.services_contract()), "services.yaml out of step with registrations"
-    # speak / process_intent are removed by proactive_audio's own unload.
-    assert registered - {"speak", "process_intent"} <= lc._unloaded_services()
+    # Phase 4: services live for the process lifetime; nothing removes one.
+    assert lc._unloaded_services() == set()
 
 
 @pytest.mark.parametrize("service", sorted(

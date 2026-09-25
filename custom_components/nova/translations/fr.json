@@ -138,5 +138,22 @@
       "title": "Nova : un identifiant enregistré doit être attribué à un fournisseur",
       "description": "Nova a trouvé un identifiant partagé datant d'avant l'existence d'identifiants séparés par fournisseur, mais n'a pas pu déterminer à quel fournisseur il appartient. Rien n'a été modifié ni supprimé. Ouvrez Paramètres → Appareils et services → Nova → Configurer → Identifiants et saisissez-le sous le bon fournisseur."
     }
+  },
+  "exceptions": {
+    "no_entry": {
+      "message": "Nova n'est pas configuré. Ajoutez l'intégration Nova, puis réessayez."
+    },
+    "not_loaded": {
+      "message": "Nova n'est pas chargé. Activez ou rechargez l'intégration Nova, puis réessayez."
+    },
+    "reloading": {
+      "message": "Nova est en cours de démarrage ou de rechargement. Réessayez dans un instant."
+    },
+    "setup_failed": {
+      "message": "Nova n'a pas pu démarrer. Consultez le journal de Home Assistant, corrigez le problème et rechargez Nova."
+    },
+    "multiple_entries": {
+      "message": "Plusieurs entrées Nova sont configurées. Supprimez l'entrée en trop, puis réessayez."
+    }
   }
 }
