@@ -192,23 +192,25 @@ def fake_provider_activity(monkeypatch):
     afterward regardless of pass/fail."""
     import sys
     calls = []
-    fake = types.SimpleNamespace(record=lambda *a, **k: calls.append(a) or True)
+    fake = types.SimpleNamespace(record=lambda *a, **k: calls.append(a) or True,
+                                 db_path_for=lambda hass: "unused.db")
     monkeypatch.setitem(sys.modules, "jc.provider_activity", fake)
     return calls
 
 
-def test_chat_with_activity_returns_result_unchanged(lp, fake_provider_activity):
-    expected = {"text": "hi", "tool_calls": [], "raw": None,
-                "usage": {"input_tokens": 1, "output_tokens": 2}}
+def test_chat_with_activity_returns_the_standard_dictionary(lp, fake_provider_activity):
+    expected = {"text": "hi", "tool_calls": [{"id": "c1", "name": "t", "args": {"a": 1}}],
+                "raw": None, "usage": {"input_tokens": 1, "output_tokens": 2}}
     provider = types.SimpleNamespace(
         name="groq", model="m", base_url=None,
-        chat=lambda *a, **k: expected)
+        chat=lambda *a, **k: dict(expected, raw={"private": "provider object"}))
 
     import asyncio
     result = asyncio.run(lp.chat_with_activity(
         _FakeHass(), provider, [{"role": "user", "content": "hi"}],
         role="llm", data_category="text"))
-    assert result is expected
+    # Same shape and values; a foreign raw value is never carried forward.
+    assert result == expected
 
 
 def test_chat_with_activity_records_success_with_correct_fields(lp, fake_provider_activity):
@@ -235,17 +237,22 @@ def test_chat_with_activity_records_success_with_correct_fields(lp, fake_provide
     assert isinstance(latency, int) and latency >= 0
 
 
-def test_chat_with_activity_reraises_original_exception_and_records_failure(lp, fake_provider_activity):
+def test_chat_with_activity_raises_normalized_error_chained_to_original(lp, fake_provider_activity):
     def _boom(*a, **k):
         raise RuntimeError("provider exploded")
 
     provider = types.SimpleNamespace(name="groq", model="m", base_url=None, chat=_boom)
 
     import asyncio
-    with pytest.raises(RuntimeError, match="provider exploded"):
+    import sys
+    errors = sys.modules["jc.providers.errors"]
+    with pytest.raises(errors.ProviderError) as exc:
         asyncio.run(lp.chat_with_activity(
             _FakeHass(), provider, [{"role": "user", "content": "hi"}],
             role="llm", data_category="text"))
+    assert isinstance(exc.value.__cause__, RuntimeError)
+    assert str(exc.value.__cause__) == "provider exploded"
+    assert "provider exploded" not in str(exc.value)
 
     calls = fake_provider_activity
     assert len(calls) == 1
@@ -260,10 +267,11 @@ def test_chat_with_activity_recording_failure_does_not_affect_result(lp, monkeyp
 
     def _boom_record(*a, **k):
         raise RuntimeError("db down")
-    fake_pa = types.SimpleNamespace(record=_boom_record)
+    fake_pa = types.SimpleNamespace(record=_boom_record, db_path_for=lambda hass: "x.db")
     monkeypatch.setitem(sys.modules, "jc.provider_activity", fake_pa)
 
-    expected = {"text": "hi", "tool_calls": [], "raw": None, "usage": {}}
+    expected = {"text": "hi", "tool_calls": [], "raw": None,
+                "usage": {"input_tokens": None, "output_tokens": None}}
     provider = types.SimpleNamespace(name="groq", model="m", base_url=None,
                                      chat=lambda *a, **k: expected)
 
@@ -271,7 +279,7 @@ def test_chat_with_activity_recording_failure_does_not_affect_result(lp, monkeyp
     result = asyncio.run(lp.chat_with_activity(
         _FakeHass(), provider, [{"role": "user", "content": "hi"}],
         role="llm", data_category="text"))
-    assert result is expected
+    assert result == expected
 
 
 def test_chat_with_activity_recording_failure_does_not_mask_original_exception(lp, monkeypatch):
@@ -281,7 +289,7 @@ def test_chat_with_activity_recording_failure_does_not_mask_original_exception(l
 
     def _boom_record(*a, **k):
         raise RuntimeError("db down")
-    fake_pa = types.SimpleNamespace(record=_boom_record)
+    fake_pa = types.SimpleNamespace(record=_boom_record, db_path_for=lambda hass: "x.db")
     monkeypatch.setitem(sys.modules, "jc.provider_activity", fake_pa)
 
     def _boom_chat(*a, **k):
@@ -289,10 +297,12 @@ def test_chat_with_activity_recording_failure_does_not_mask_original_exception(l
     provider = types.SimpleNamespace(name="groq", model="m", base_url=None, chat=_boom_chat)
 
     import asyncio
-    with pytest.raises(ValueError, match="the real failure"):
+    errors = sys.modules["jc.providers.errors"]
+    with pytest.raises(errors.ProviderError) as exc:
         asyncio.run(lp.chat_with_activity(
             _FakeHass(), provider, [{"role": "user", "content": "hi"}],
             role="llm", data_category="text"))
+    assert str(exc.value.__cause__) == "the real failure"
 
 
 def test_chat_with_activity_invalid_category_falls_back_to_text(lp, fake_provider_activity):

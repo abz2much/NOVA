@@ -1,7 +1,7 @@
 """Nova Provider Activity (Phase 5) — bounded daily aggregates of LLM calls.
 
-Recorded by llm_provider.chat_with_activity() for every call routed through
-it. Deliberately narrow: this answers "how much is each provider/model/role
+Recorded by providers.activity.execute_chat() for every chat call Nova
+makes. Deliberately narrow: this answers "how much is each provider/model/role
 actually being used, from where, and how successfully" — never "what was
 asked or answered."
 
@@ -10,8 +10,8 @@ by policy: record() accepts only scalar identifiers and counters (provider,
 model, role, location, data_category, success, two optional token ints, one
 latency int). There is no parameter through which a prompt, response, tool
 argument, image, entity state, credential, or the provider's raw response
-object could be passed — as long as callers keep going through
-chat_with_activity() rather than writing to this table directly.
+object could be passed — and providers.activity is the only caller (a
+static test enforces that).
 
 One row per (day, provider, model, role, location, data_category) — calls
 accumulate into the same row via an upsert, so growth is bounded by that
@@ -51,6 +51,20 @@ CREATE TABLE IF NOT EXISTS provider_activity_daily (
 
 def _resolve(db_path: Optional[str]) -> str:
     return db_path or _DEFAULT_DB
+
+
+def db_path_for(hass) -> Optional[str]:
+    """This Home Assistant instance's Provider Activity database, under its
+    own config directory (nova/provider_activity.db, the same file as
+    before on a standard install). None when `hass` has no config directory,
+    so nothing is written outside one."""
+    path = getattr(getattr(hass, "config", None), "path", None)
+    if not callable(path):
+        return None
+    try:
+        return str(path("nova", "provider_activity.db"))
+    except Exception:
+        return None
 
 
 def _connect(db_path: str) -> sqlite3.Connection:
