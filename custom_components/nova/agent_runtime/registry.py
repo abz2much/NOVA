@@ -193,7 +193,9 @@ _CLASSIFICATION = {
     "ask_security_privacy_agent": ("specialists", False, False, True, _X),
     "ask_homelab_infra_agent":    ("specialists", False, False, True, _X),
     "ask_house_manager_agent":    ("specialists", False, False, True, _X),
-    "delegate_task":              ("delegation", False, False, False, Trust.TRUSTED),
+    # A sub-agent's report is model-written and may relay text it read
+    # (web pages, email, calendars): the parent receives it as quoted data.
+    "delegate_task":              ("delegation", False, False, False, _X),
 }
 
 TOOL_REGISTRY: dict = {

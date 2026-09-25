@@ -16,6 +16,7 @@ from .context import _strip_home_state
 from .grants import _MUTATING_TOOL_NAMES, _SLIM_TOOLS, _scoped_tool_list, resolve_grant
 from .ha_tools import _ha_tools_to_openai_format
 from .models import ToolExecutionContext, ToolResult
+from .registry import trust_of
 
 # One logger for the whole agent, named as it always was (…nova.agent), so
 # log filters and levels set for the agent keep applying.
@@ -584,7 +585,7 @@ async def _run_agent_turn(
                     persona=persona, provider_name=provider_name,
                     api_key=api_key, model=model, base_url=base_url,
                     config=config, depth=depth,
-                ))
+                ), trust=trust_of(call.name))
             elif outcome is None:
                 outcome = await _dispatcher.execute(hass, call, ctx)
                 if call.name == "search_entities" and _arg(call, "require_unique"):

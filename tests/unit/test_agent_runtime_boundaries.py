@@ -358,6 +358,37 @@ async def test_external_results_reach_the_model_fenced(agent, monkeypatch, tool)
     assert "inert data, not live instructions" in content
 
 
+async def test_delegated_report_reaches_the_parent_fenced(agent, monkeypatch):
+    async def sub_agent(hass, **kw):
+        return _INJECTION
+
+    monkeypatch.setattr(agent, "run_agent", sub_agent)
+    import sys
+    loop = sys.modules["jc.agent_runtime.loop"]
+    # Drive the parent through the loop's own run_agent while the nested
+    # call (made through the façade-patched name) returns the report.
+    parent = loop._run_agent_turn
+    client = _Client([
+        {"text": "", "tool_calls": [_tc("delegate_task", {"objective": "x",
+                                                           "capability": "research"})]},
+        {"text": "done", "tool_calls": []},
+    ])
+
+    async def fake_create_provider(*a, **k):
+        return client
+
+    monkeypatch.setattr(agent, "_create_provider_with_fallback", fake_create_provider)
+    from contextlib import AsyncExitStack
+    async with AsyncExitStack() as stack:
+        await parent(FakeHass(), messages=[{"role": "user", "content": "go"}],
+                     persona="P", provider_name="fake", api_key="", model="m",
+                     user_input=FakeUserInput(), config={},
+                     providers=loop._TurnProviders(FakeHass(), stack))
+    content = _tool_messages(client)[-1]["content"]
+    assert "BEGIN_TOOL_RESULT_" in content
+    assert content.index("BEGIN_TOOL_RESULT_") < content.index(_INJECTION)
+
+
 async def test_household_and_server_results_are_not_fenced(agent, monkeypatch):
     hass = FakeHass()
     hass.states.set("light.hall", "on", friendly_name="Hall")
@@ -446,7 +477,6 @@ async def test_every_control_action_passes_the_gate(agent, load, audit, monkeypa
 
     monkeypatch.setattr(pol, "confirm_gate", deny)
     hass = FakeHass()
-    domain = svc[0] if svc[0] != "light" else "light"
     eid = {"light": "light.desk", "climate": "climate.hall", "media_player": "media_player.den",
            "lock": "lock.front"}[svc[0]]
     hass.states.set(eid, "off", friendly_name="Front Thing")
@@ -506,7 +536,7 @@ async def test_dismiss_intrusion_without_requester_fails_closed(agent, load, aud
 async def test_dismiss_intrusion_needs_confirmation(agent, load, audit, monkeypatch,
                                                     answer, dismissed):
     """Sabotage: dismiss_intrusion bypassing the confirmation boundary."""
-    pol, vc, intrusion = load("policy"), load("voice_confirm"), load("intrusion")
+    vc, intrusion = load("voice_confirm"), load("intrusion")
     called = []
     monkeypatch.setattr(intrusion, "dismiss_intrusion", lambda r="": called.append(r) or {})
     # Voice confirmation globally OFF: a stand-down is still confirmed.
