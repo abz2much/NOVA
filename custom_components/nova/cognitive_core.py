@@ -2832,7 +2832,7 @@ async def _tick():
 
     # Run pattern analysis periodically
     try:
-        from .pattern_analyzer import get_analyzer, set_thresholds
+        from .automation.patterns import get_analyzer, set_thresholds
         analyzer = get_analyzer()
         if analyzer.should_analyze():
             # Loosened-reins defaults (occurrences 4, confidence 0.55) — API spend
@@ -3632,7 +3632,7 @@ def status() -> dict:
         stats = _CORE.state_logger.get_pattern_stats()
     last_analysis = {}
     try:
-        from .pattern_analyzer import get_analyzer
+        from .automation.patterns import get_analyzer
         last_analysis = dict(get_analyzer()._last_result)
     except Exception:
         last_analysis = {}
@@ -3780,7 +3780,7 @@ async def run_analysis_now(hass: HomeAssistant) -> dict:
     dict the panel can show: whether it ran, and if not, why; if it did, how many
     patterns were found and suggestions stored.
     """
-    from .pattern_analyzer import get_analyzer, set_thresholds
+    from .automation.patterns import get_analyzer, set_thresholds
     analyzer = get_analyzer()
     analyzer._last_analysis = 0.0  # bypass the 6h throttle for this manual run
 

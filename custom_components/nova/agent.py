@@ -2449,7 +2449,7 @@ async def _exec_cognitive_status(hass: HomeAssistant, args: dict) -> str:
     """Get cognitive core status and learning stats."""
     try:
         from . import cognitive_core
-        from .pattern_analyzer import get_analyzer
+        from .automation.patterns import get_analyzer
         status = cognitive_core.status()
         analyzer = get_analyzer()
         status["pattern_analysis"] = await hass.async_add_executor_job(
@@ -2488,7 +2488,7 @@ async def _exec_manage_autonomy(hass: HomeAssistant, args: dict) -> str:
 async def _exec_review_suggestions(hass: HomeAssistant, args: dict) -> str:
     """List pending automation suggestions."""
     try:
-        from .pattern_analyzer import get_analyzer
+        from .automation.patterns import get_analyzer
         suggestions = await hass.async_add_executor_job(
             get_analyzer().get_pending_suggestions)
         if not suggestions:
@@ -2501,7 +2501,7 @@ async def _exec_review_suggestions(hass: HomeAssistant, args: dict) -> str:
 async def _exec_approve_suggestion(hass: HomeAssistant, args: dict) -> str:
     """Approve a suggestion — and install its automation into HA (v6.52.0)."""
     try:
-        from .pattern_analyzer import install_approved_suggestion
+        from .automation.installation import install_approved_suggestion
         sid = int(args.get("suggestion_id", 0))
         res = await install_approved_suggestion(hass, sid)
         return json.dumps(res)
@@ -2512,7 +2512,7 @@ async def _exec_approve_suggestion(hass: HomeAssistant, args: dict) -> str:
 async def _exec_dismiss_suggestion(hass: HomeAssistant, args: dict) -> str:
     """Dismiss a suggestion."""
     try:
-        from .pattern_analyzer import get_analyzer
+        from .automation.patterns import get_analyzer
         sid = int(args.get("suggestion_id", 0))
         ok = await hass.async_add_executor_job(
             get_analyzer().dismiss_suggestion, sid)

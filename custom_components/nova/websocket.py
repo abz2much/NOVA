@@ -1059,35 +1059,9 @@ def _get_suggestions() -> list[dict]:
     Includes the EVIDENCE behind each one (v6.80.0) so review shows why.
     Never raises."""
     try:
-        import json as _json
-        from .pattern_analyzer import get_analyzer, explain_suggestion
-        out = []
-        for s in get_analyzer().get_pending_suggestions():
-            ptype = s.get("pattern_type", "") or ""
-            try:
-                details = _json.loads(s.get("details") or "{}")
-            except Exception:
-                details = {}
-            try:
-                entities = _json.loads(s.get("entity_ids") or "[]")
-            except Exception:
-                entities = []
-            count = s.get("pattern_count", 0) or 0
-            why = explain_suggestion(ptype, details, count)
-            out.append({
-                "id": s.get("id"),
-                "created": s.get("created", ""),
-                "description": s.get("description", ""),
-                "yaml": s.get("automation_yaml", ""),
-                "confidence": round(float(s.get("confidence", 0) or 0), 2),
-                "count": count,
-                "pattern_type": ptype,
-                "entities": entities,
-                "why_headline": why.get("headline", ""),
-                "evidence": why.get("evidence", []),
-                "automation_match": details.get("automation_match") or {},
-            })
-        return out
+        from .automation.api import panel_suggestion_items
+        from .automation.patterns import get_analyzer
+        return panel_suggestion_items(get_analyzer().get_pending_suggestions())
     except Exception:
         return []
 
@@ -1122,7 +1096,7 @@ def _get_person_routines() -> dict:
     """Per-person learned routines from the pattern engine, grouped by
     person for the Memory panel. Never raises."""
     try:
-        from .pattern_analyzer import get_analyzer
+        from .automation.patterns import get_analyzer
         rows = get_analyzer().get_person_patterns()
         grouped: dict[str, list[dict]] = {}
         for r in rows:
@@ -3149,7 +3123,7 @@ async def ws_get_calibration(
             "suggestion": decision_record.outcome_rate("suggestion"),
         }
         try:
-            from . import pattern_analyzer
+            from .automation import patterns as pattern_analyzer
             payload["suggestion_threshold"] = {
                 "base": round(pattern_analyzer.CONFIDENCE_THRESHOLD, 3),
                 "effective": round(pattern_analyzer._effective_threshold(), 3),
@@ -3367,7 +3341,8 @@ async def ws_suggestion_action(
     """Approve or dismiss a pattern-engine automation suggestion. Approval now
     installs the automation into HA, not just flags it (v6.52.0)."""
     try:
-        from .pattern_analyzer import get_analyzer, install_approved_suggestion
+        from .automation.installation import install_approved_suggestion
+        from .automation.patterns import get_analyzer
         analyzer = get_analyzer()
         sid = int(msg["suggestion_id"])
         if msg["action"] == "approve":
@@ -3416,7 +3391,7 @@ async def ws_list_automation_inventory(
     scan to Home Assistant's normal dashboard polling.
     """
     try:
-        from .automation_inventory import get_inventory
+        from .automation.inventory import get_inventory
         inventory = get_inventory(hass)
         connection.send_result(msg["id"], {
             "available": inventory is not None,
@@ -3443,7 +3418,7 @@ async def ws_list_automation_trials(
     tab. Installation only means the suggestion was accepted — this reports
     what's actually observed running, never a claim that it works."""
     try:
-        from . import automation_trials
+        from .automation import trials as automation_trials
         trials = await hass.async_add_executor_job(automation_trials.list_trials)
         connection.send_result(msg["id"], {"trials": trials})
     except Exception as exc:
@@ -3466,7 +3441,7 @@ async def ws_automation_trial_feedback(
     """Manual Working / Needs adjustment feedback — never inferred, only ever
     what the household actually reports."""
     try:
-        from . import automation_trials
+        from .automation import trials as automation_trials
         ok = await hass.async_add_executor_job(
             automation_trials.set_manual_outcome, msg["trial_id"], msg["verdict"])
         connection.send_result(msg["id"], {"ok": bool(ok)})

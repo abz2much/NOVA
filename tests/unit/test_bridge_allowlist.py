@@ -37,7 +37,7 @@ FOREIGN_ALLOWLIST = {
     ("doorbell_training.py", "_iter_nest_doorbell_devices",
      'data = (hass.data.get("nest") or {}).get(getattr(entry, "entry_id", ""), None)'):
         "the Nest integration's own data",
-    ("automation_inventory.py", "_runtime_entities",
+    ("automation/inventory.py", "_runtime_entities",
      "component = hass.data.get(DATA_COMPONENT)"):
         "the automation integration's entity component",
 }

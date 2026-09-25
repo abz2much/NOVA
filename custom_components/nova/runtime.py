@@ -28,7 +28,8 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
     from .automation import EntityLockRegistry
-    from .automation_inventory import AutomationContextTracker, AutomationInventory
+    from .automation.attribution import AutomationContextTracker
+    from .automation.inventory import AutomationInventory
     from .boot_guard import AlertBuffer
     from .intent import LocalIntentRouter
     from .llm_provider import LLMProvider

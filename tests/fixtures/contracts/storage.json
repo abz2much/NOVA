@@ -13,19 +13,25 @@
     ],
     "tables": []
   },
+  "automation.installation": {
+    "paths": [
+      "automations.yaml"
+    ],
+    "tables": []
+  },
   "automation.predictor": {
     "paths": [
       "nova/habit_matrix.json"
     ],
     "tables": []
   },
-  "automation_creator": {
+  "automation.suggestions": {
     "paths": [
-      "automations.yaml"
+      "nova/patterns.db"
     ],
     "tables": []
   },
-  "automation_trials": {
+  "automation.trials": {
     "paths": [
       "nova/patterns.db"
     ],
@@ -191,12 +197,6 @@
   "nova_config": {
     "paths": [
       "nova/config.json"
-    ],
-    "tables": []
-  },
-  "pattern_analyzer": {
-    "paths": [
-      "nova/patterns.db"
     ],
     "tables": []
   },

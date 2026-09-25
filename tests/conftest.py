@@ -217,6 +217,11 @@ def _load(modname: str):
     that defeat monkeypatching. As plain modules their __package__ is "jc", so
     `from . import X` resolves to jc.X via the jc package __path__."""
     key = f"jc.{modname}"
+    if "." in modname:
+        # A package submodule (e.g. "automation.patterns"): import it through
+        # the normal machinery so its parent package and its relative imports
+        # resolve under the same synthetic package as everything else.
+        return importlib.import_module(key)
     if key not in sys.modules:
         spec = importlib.util.spec_from_file_location(key, COMP / f"{modname}.py")
         mod = importlib.util.module_from_spec(spec)
