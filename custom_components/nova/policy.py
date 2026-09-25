@@ -90,7 +90,9 @@ def _voice_satellite_request(hass, device_id: str) -> bool:
         return False
     try:
         from . import voice_confirm
-        return bool(voice_confirm.is_voice_satellite_device(hass, device_id))
+        # strict: a lookup that can't be completed raises (below) rather than
+        # reading as "not a satellite", so an unknown origin fails closed.
+        return bool(voice_confirm.is_voice_satellite_device(hass, device_id, strict=True))
     except Exception as exc:
         _LOGGER.warning("policy: voice-satellite check failed (%s); treating as voice "
                         "for safety", exc)

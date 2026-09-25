@@ -112,14 +112,14 @@ async def test_confirm_via_phone_only_never_touches_satellite_tiers(vc, monkeypa
 # ── policy.confirm_gate / requires_confirmation ──────────────────────────────
 
 def test_voice_satellite_request_true_for_paired_device(pol, vc, monkeypatch):
-    monkeypatch.setattr(vc, "is_voice_satellite_device", lambda hass, did: did == "dev-sat-1")
+    monkeypatch.setattr(vc, "is_voice_satellite_device", lambda hass, did, **k: did == "dev-sat-1")
     assert pol._voice_satellite_request(_Hass(), "dev-sat-1") is True
     assert pol._voice_satellite_request(_Hass(), "dev-other") is False
     assert pol._voice_satellite_request(_Hass(), "") is False
 
 
 async def test_confirm_gate_blocks_voice_unlock_until_phone_confirmed(pol, vc, monkeypatch):
-    monkeypatch.setattr(vc, "is_voice_satellite_device", lambda hass, did: True)
+    monkeypatch.setattr(vc, "is_voice_satellite_device", lambda hass, did, **k: True)
 
     async def deny(hass, question, timeout=None):
         return "rejected"
@@ -133,7 +133,7 @@ async def test_confirm_gate_blocks_voice_unlock_until_phone_confirmed(pol, vc, m
 
 
 async def test_confirm_gate_allows_voice_unlock_once_phone_confirmed(pol, vc, monkeypatch):
-    monkeypatch.setattr(vc, "is_voice_satellite_device", lambda hass, did: True)
+    monkeypatch.setattr(vc, "is_voice_satellite_device", lambda hass, did, **k: True)
 
     async def approve(hass, question, timeout=None):
         return "approved"
@@ -150,7 +150,7 @@ async def test_confirm_gate_uses_phone_only_not_spoken_confirm(pol, vc, monkeypa
     """The load-bearing assertion: voice_confirm.confirm() (which can use a
     spoken channel) must never be the function consulted for a voice-sourced
     unlock -- only confirm_via_phone_only."""
-    monkeypatch.setattr(vc, "is_voice_satellite_device", lambda hass, did: True)
+    monkeypatch.setattr(vc, "is_voice_satellite_device", lambda hass, did, **k: True)
 
     async def _must_not_run(*a, **k):
         raise AssertionError("voice_confirm.confirm (a voice-capable channel) must not run here")
@@ -174,7 +174,7 @@ async def test_confirm_gate_lock_is_never_blocked_by_voice_rule(pol, vc, monkeyp
     """Locking is safe by design -- the voice rule must not add friction to it,
     even from a voice satellite, even if it were (hypothetically) misconfigured
     as protected elsewhere."""
-    monkeypatch.setattr(vc, "is_voice_satellite_device", lambda hass, did: True)
+    monkeypatch.setattr(vc, "is_voice_satellite_device", lambda hass, did, **k: True)
 
     async def _must_not_run(*a, **k):
         raise AssertionError("confirm_via_phone_only must not run for a lock (safe direction)")
@@ -191,7 +191,7 @@ async def test_confirm_gate_text_request_unaffected_by_voice_rule(pol, vc, monke
     """No device_id (text/chat, or a non-satellite device) -- falls through to
     the pre-existing opt-in behaviour untouched. With the toggle off (today's
     default), an unlock proceeds exactly as it did before this change."""
-    monkeypatch.setattr(vc, "is_voice_satellite_device", lambda hass, did: False)
+    monkeypatch.setattr(vc, "is_voice_satellite_device", lambda hass, did, **k: False)
     monkeypatch.setattr(vc, "action_is_protected", lambda hass, d, s, e="": False)
 
     async def _must_not_run(*a, **k):
@@ -207,14 +207,14 @@ async def test_confirm_gate_text_request_unaffected_by_voice_rule(pol, vc, monke
 def test_requires_confirmation_true_for_voice_unlock_regardless_of_toggle(pol, vc, monkeypatch):
     """bulk_control's skip-and-report path relies on this being True even when
     voice_confirm_enabled is off -- the general opt-in must not gate this."""
-    monkeypatch.setattr(vc, "is_voice_satellite_device", lambda hass, did: True)
+    monkeypatch.setattr(vc, "is_voice_satellite_device", lambda hass, did, **k: True)
     monkeypatch.setattr(vc, "action_is_protected", lambda hass, d, s, e="": False)  # opt-in OFF
     assert pol.requires_confirmation(_Hass(), "lock", "unlock", "lock.front_door",
                                      device_id="dev-sat-1") is True
 
 
 def test_requires_confirmation_lock_stays_false_when_unprotected(pol, vc, monkeypatch):
-    monkeypatch.setattr(vc, "is_voice_satellite_device", lambda hass, did: True)
+    monkeypatch.setattr(vc, "is_voice_satellite_device", lambda hass, did, **k: True)
     monkeypatch.setattr(vc, "action_is_protected", lambda hass, d, s, e="": False)
     assert pol.requires_confirmation(_Hass(), "lock", "lock", "lock.front_door",
                                      device_id="dev-sat-1") is False

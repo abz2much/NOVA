@@ -651,32 +651,55 @@ def _service_for(action, entity_id):
     return fixed.get(action)
 
 
-def _needs_confirmation(hass, action, entity_id="") -> bool:
+def _policy_requires_confirmation(hass, domain, service, entity_id="",
+                                  device_id=None) -> bool:
+    """policy.requires_confirmation for the fast path, passing the request's
+    device so the voice-satellite rule (unlock/open needs a phone tap) applies
+    here exactly as it does on the agent path. device_id is only passed when
+    there is one, so typed/chat calls are unchanged.
+
+    If the policy check itself fails, anything above low risk is deferred to
+    the agent (fail closed): the agent runs the real confirmation gate, so
+    deferring can never actuate a protected action unconfirmed. Low-risk
+    convenience actions keep running locally."""
+    try:
+        from . import policy
+    except Exception:
+        return True
+    try:
+        if device_id:
+            return bool(policy.requires_confirmation(
+                hass, domain, service, entity_id, device_id=device_id))
+        return bool(policy.requires_confirmation(hass, domain, service, entity_id))
+    except Exception as exc:
+        _LOGGER.warning("Local: confirmation check failed for %s.%s (%s)",
+                        domain, service, exc)
+        try:
+            risk, _ = policy.classify(domain, service, entity_id)
+        except Exception:
+            return True
+        return risk != "low"
+
+
+def _needs_confirmation(hass, action, entity_id="", device_id=None) -> bool:
     """Whether this fast-path action would require confirmation. Protected
     actions (unlock, open a garage/cover, disarm, …) are deferred to the agent
     rather than actuated here, so the same authorization gate that guards the
     agent's tools also guards the fast-path — the fast-path never becomes a
-    second, unguarded way to unlock a door."""
+    second, unguarded way to unlock a door. `device_id` is the requesting
+    device (a voice satellite for spoken requests)."""
     svc = _service_for(action, entity_id)
     if not svc:
         return False
-    try:
-        from . import policy
-        return bool(policy.requires_confirmation(hass, svc[0], svc[1], entity_id))
-    except Exception:
-        return False
+    return _policy_requires_confirmation(hass, svc[0], svc[1], entity_id, device_id)
 
 
-def _needs_confirmation_domain(hass, domain, service, entity_id="") -> bool:
+def _needs_confirmation_domain(hass, domain, service, entity_id="", device_id=None) -> bool:
     """Like _needs_confirmation, but for callers that already know the
     (domain, service) pair rather than a fast-path action name — scene/script/
     automation activation doesn't go through _service_for's action mapping, so
     it needs its own entry point onto the same policy check."""
-    try:
-        from . import policy
-        return bool(policy.requires_confirmation(hass, domain, service, entity_id))
-    except Exception:
-        return False
+    return _policy_requires_confirmation(hass, domain, service, entity_id, device_id)
 
 
 async def _execute_action(hass, action, entity_id, args):
@@ -1082,7 +1105,7 @@ def _ctx_query(hass, qtype, h="sir", area_match=""):
 
 # ── Main entry point ─────────────────────────────────────────────────────────
 
-async def try_local(hass, text, honorific="sir", force=False):
+async def try_local(hass, text, honorific="sir", force=False, device_id=None):
     """
     PRIMARY handler. Returns LocalResult if handled, None for LLM fallback.
 
@@ -1092,6 +1115,12 @@ async def try_local(hass, text, honorific="sir", force=False):
     to the cloud LLM is not an option. Conversational/creative requests that
     have no local handler still return None — the caller supplies an honest
     offline response.
+
+    device_id is the requesting device (conversation.py passes the voice
+    satellite's). Every confirmation pre-check below receives it, so a spoken
+    unlock/open defers to the agent's guarded path (phone tap) instead of
+    actuating here — including in force/offline mode, where deferring means
+    the protected action does not run at all.
     """
     # honorific may be "" once nobody specific is home to address (see
     # honorific.py) — addr collapses the trailing ", {honorific}" to
@@ -1137,7 +1166,7 @@ async def try_local(hass, text, honorific="sir", force=False):
         if not match:
             continue
         area_name = match.group(1) if scope == "area" and match.lastindex else None
-        if _needs_confirmation(hass, action, ""):
+        if _needs_confirmation(hass, action, "", device_id):
             _LOGGER.info("Local: bulk '%s' needs confirmation — deferring to agent", action)
             return None   # protected bulk → agent skips/confirms per device
         from . import action_log
@@ -1218,7 +1247,7 @@ async def try_local(hass, text, honorific="sir", force=False):
             # alarm just as easily as dim a light. Defer to the agent the same
             # way a protected single-entity action does, rather than actuating
             # it directly from the fast path.
-            if _needs_confirmation_domain(hass, dtype, "turn_on", eid):
+            if _needs_confirmation_domain(hass, dtype, "turn_on", eid, device_id):
                 _LOGGER.info("Local: scene/script '%s' needs confirmation — deferring to agent", eid)
                 return None   # protected activation → the agent runs the confirmation gate
             from . import action_log
@@ -1248,7 +1277,7 @@ async def try_local(hass, text, honorific="sir", force=False):
         found = _find_scene_or_script(hass, "goodnight") or _find_scene_or_script(hass, "good night")
         if found:
             eid, fname, dtype = found
-            if _needs_confirmation_domain(hass, dtype, "turn_on", eid):
+            if _needs_confirmation_domain(hass, dtype, "turn_on", eid, device_id):
                 _LOGGER.info("Local: goodnight scene '%s' needs confirmation — deferring to agent", eid)
                 return None   # protected activation → the agent runs the confirmation gate
             from . import action_log
@@ -1402,7 +1431,7 @@ async def try_local(hass, text, honorific="sir", force=False):
             if resp:
                 return LocalResult(text=resp, success=True)
             continue
-        if _needs_confirmation(hass, action, entity_id):
+        if _needs_confirmation(hass, action, entity_id, device_id):
             _LOGGER.info("Local: '%s' on %s needs confirmation — deferring to agent",
                          action, entity_id)
             return None   # protected action → the agent runs the confirmation gate
@@ -1494,7 +1523,8 @@ async def try_local(hass, text, honorific="sir", force=False):
     # Follow-up ("also turn off the kitchen")
     if _ctx_fresh() and re.search(r"^(?:also|and|now)\s+", normalized):
         stripped = re.sub(r"^(?:also|and|now)\s+", "", normalized)
-        result = await try_local(hass, stripped, honorific, force=force)
+        result = await try_local(hass, stripped, honorific, force=force,
+                                 device_id=device_id)
         if result and result.handled:
             return result
 
