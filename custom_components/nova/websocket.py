@@ -113,8 +113,8 @@ def async_register(hass: HomeAssistant) -> None:
 
 def _get_entry(hass: HomeAssistant):
     """Return the first Nova config entry's ConfigEntry object, or None."""
-    # hass.data[DOMAIN] is keyed by entry_id, values are dicts of runtime state.
-    # We need the actual ConfigEntry object for options/data lookups.
+    # The ConfigEntry carries options/data and, once loaded, its NovaRuntime
+    # (entry.runtime_data), which owns the live panel runtime_config.
     for entry in hass.config_entries.async_entries(DOMAIN):
         return entry
     return None
@@ -127,11 +127,37 @@ def _entry_opt(entry, key: str, default=None):
     return nova_config.runtime_get(None, entry, key, default)
 
 
+def _live_runtime_config(entry) -> dict:
+    """The entry's live NovaRuntime.runtime_config, for synchronous reads on
+    the event loop. {} when there is no entry or it is not loaded (setup still
+    running, failed, or unloaded), so callers keep their defaults. Raises
+    NovaRuntimeUnavailable for a loaded entry without a runtime rather than
+    showing made-up defaults. Never reads the compatibility bridge."""
+    if entry is None:
+        return {}
+    from .runtime import lifecycle_runtime_config
+    return lifecycle_runtime_config(entry)
+
+
+def _executor_runtime_config(entry) -> dict:
+    """A fresh runtime_config snapshot to hand to one executor job. Same
+    ownership rules as _live_runtime_config. Take it right before the
+    async_add_executor_job call and never keep it for a later command."""
+    if entry is None:
+        return {}
+    from .runtime import runtime_config_snapshot
+    return runtime_config_snapshot(entry)
+
+
 def _runtime_opt(hass: HomeAssistant, entry, key: str, default=None):
-    """Runtime-aware config read via the canonical resolver (runtime_config →
-    config.json → options → data → default)."""
+    """Runtime-aware config read: live NovaRuntime.runtime_config first, then
+    the canonical resolver for the rest (config.json → options → data →
+    default). A None or blank runtime value falls through, as before."""
     from . import nova_config
-    return nova_config.runtime_get(hass, entry, key, default)
+    rc = _live_runtime_config(entry)
+    if key in rc and rc[key] not in (None, ""):
+        return rc[key]
+    return nova_config.runtime_get(None, entry, key, default)
 
 
 def _int_opt(hass: HomeAssistant, entry, key: str, default: int) -> int:
@@ -1207,8 +1233,7 @@ def _get_disabled_rules(hass: HomeAssistant, entry) -> list[str]:
     """Return list of disabled sentinel rule IDs from runtime config."""
     if entry is None:
         return []
-    data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
-    rc = data.get("runtime_config", {}) if isinstance(data, dict) else {}
+    rc = _live_runtime_config(entry)
     raw = rc.get("disabled_sentinel_rules", _entry_opt(entry, "disabled_sentinel_rules", "[]"))
     if isinstance(raw, list):
         return raw
@@ -1786,10 +1811,9 @@ async def ws_reload_appliances(
         entry = _get_entry(hass)
         cfg: dict = {}
         if entry:
-            data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
-            rc = data.get("runtime_config", {}) if isinstance(data, dict) else {}
             cfg = await hass.async_add_executor_job(
-                nova_config.effective_config_with_runtime, entry, rc)
+                nova_config.effective_config_with_runtime, entry,
+                _executor_runtime_config(entry))
         await appliance_monitor.start(hass, cfg)
         connection.send_result(msg["id"], {
             "ok": True, "appliances": _get_appliance_status(),
@@ -2042,10 +2066,16 @@ async def ws_update_config(
     """
     Update a config toggle from the panel.
 
-    Stores in hass.data runtime_config (NOT entry.options) to avoid
+    Stores in NovaRuntime.runtime_config (NOT entry.options) to avoid
     triggering an entry reload which would navigate the browser away
     from the panel. Sentinel and observer check runtime_config first,
     then fall back to entry.options.
+
+    The runtime is resolved before anything is written or applied, so an
+    entry without one fails with update_failed and nothing changes.
+    observer_enabled is transactional: the observer is started or stopped
+    first, and only a successful transition updates the observer state,
+    runtime_config and config.json.
     """
     key = msg["key"]
     value = msg["value"]
@@ -2085,12 +2115,40 @@ async def ws_update_config(
         return
 
     try:
-        # Store in runtime_config — does NOT trigger entry reload
-        data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
-        if data is None:
+        from .runtime import get_runtime
+        # Ownership first: resolve the runtime before any write, save, cache
+        # invalidation or side effect. Raises (→ update_failed) without one.
+        runtime = get_runtime(entry)
+        rc = runtime.runtime_config
+        if not isinstance(rc, dict):
             connection.send_error(msg["id"], "no_data", "Nova runtime data not found")
             return
-        rc = data.setdefault("runtime_config", {})
+
+        # observer_enabled: change the observer first. A failed start or stop
+        # raises here, before runtime_config, observer state or config.json
+        # are touched. No rollback afterwards, so there is never a second
+        # observer transition.
+        if key == "observer_enabled":
+            from . import observer as observer_mod
+            from .runtime import set_observer_running
+            # Never start or stop an unowned observer.
+            get_runtime(entry)
+            if value:
+                from . import nova_config
+                # The candidate is this operation's own snapshot plus the
+                # requested value; the executor never sees the live dict.
+                from .runtime import runtime_config_snapshot
+                candidate = runtime_config_snapshot(entry, strict=True)
+                candidate[key] = value
+                observer_config = await hass.async_add_executor_job(
+                    nova_config.effective_config_with_runtime, entry, candidate)
+                await observer_mod.start(hass, observer_config)
+                set_observer_running(hass, entry, True)
+            else:
+                await observer_mod.stop()
+                set_observer_running(hass, entry, False)
+
+        # Store in runtime_config — does NOT trigger entry reload
         rc[key] = value
         _LOGGER.info("Nova panel: set %s = %s", key, str(value)[:80])
 
@@ -2133,22 +2191,6 @@ async def ws_update_config(
                     sleep_detection.set_override, value, quiet_end)
             except Exception as exc:
                 _LOGGER.warning("sleep_override apply failed: %s", exc)
-
-        # If toggling observer, start/stop immediately
-        if key == "observer_enabled":
-            from . import observer as observer_mod
-            from .runtime import get_runtime, set_observer_running
-            # Ownership first: never start or stop an unowned observer.
-            get_runtime(entry)
-            if value:
-                from . import nova_config
-                observer_config = await hass.async_add_executor_job(
-                    nova_config.effective_config_with_runtime, entry, rc)
-                await observer_mod.start(hass, observer_config)
-                set_observer_running(hass, entry, True)
-            else:
-                await observer_mod.stop()
-                set_observer_running(hass, entry, False)
 
         if key in ("security_alarm_entity", "lockdown_auto_on_arm"):
             from . import cognitive_core
@@ -2568,15 +2610,10 @@ async def ws_list_models(hass: HomeAssistant, connection, msg) -> None:
     url = ""
     try:
         from . import nova_config
-        runtime_config: dict = {}
-        if entry is not None:
-            data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
-            if isinstance(data, dict):
-                runtime_config = data.get("runtime_config", {}) or {}
         config = await hass.async_add_executor_job(
             nova_config.effective_config_with_runtime,
             entry,
-            runtime_config,
+            _executor_runtime_config(entry),
         )
         url = _resolve_model_discovery_request(config, provider)[0]
         cache_key = _model_cache_key(provider, url)
@@ -2770,8 +2807,15 @@ async def ws_apply_ai_config(hass: HomeAssistant, connection, msg) -> None:
                 "ok": False, "error": "no_entry", "message": "Nova is not loaded.",
             })
             return
+        from .runtime import get_runtime, runtime_config_snapshot
+        # Ownership first: no endpoint test or save for an entry without a
+        # runtime (raises → apply_failed).
+        runtime = get_runtime(entry)
+        # The current view includes live panel values; the executor gets a
+        # snapshot, never the live dict.
         current = await hass.async_add_executor_job(
-            nova_config.effective_config, entry)
+            nova_config.effective_config_with_runtime, entry,
+            runtime_config_snapshot(entry, strict=True))
         candidate = dict(current)
         candidate.update(updates)
         # A successful staged apply migrates off the legacy shared endpoint.
@@ -2825,9 +2869,7 @@ async def ws_apply_ai_config(hass: HomeAssistant, connection, msg) -> None:
             })
             return
 
-        data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
-        if isinstance(data, dict):
-            data.setdefault("runtime_config", {}).update(persisted_updates)
+        runtime.runtime_config.update(persisted_updates)
         invalidate_model_cache()
         connection.send_result(msg["id"], {
             "ok": True,
@@ -2881,13 +2923,9 @@ async def ws_get_credential_status(hass: HomeAssistant, connection, msg) -> None
         from . import ha_secrets, nova_config
         status = await ha_secrets.async_credential_status(hass)
         entry = _get_entry(hass)
-        runtime_config: dict = {}
-        if entry is not None:
-            data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
-            if isinstance(data, dict):
-                runtime_config = data.get("runtime_config", {}) or {}
         config = await hass.async_add_executor_job(
-            nova_config.effective_config_with_runtime, entry, runtime_config)
+            nova_config.effective_config_with_runtime, entry,
+            _executor_runtime_config(entry))
         endpoint_status = {}
         for provider in ("ollama", "custom"):
             try:
@@ -2978,10 +3016,9 @@ def _available_labels(hass: HomeAssistant) -> list:
 def _get_runtime_json(hass: HomeAssistant, entry, key: str, default):
     """Read a JSON-encoded value from runtime_config → nova_config → entry options."""
     import json as _json
-    # 1. In-memory runtime_config (fastest)
+    # 1. Live NovaRuntime.runtime_config (fastest)
     if entry is not None:
-        data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
-        rc = data.get("runtime_config", {}) if isinstance(data, dict) else {}
+        rc = _live_runtime_config(entry)
         raw = rc.get(key)
         if raw is not None:
             if isinstance(raw, (dict, list)):
@@ -3021,10 +3058,9 @@ def _get_runtime_json(hass: HomeAssistant, entry, key: str, default):
 
 def _get_runtime_str(hass: HomeAssistant, entry, key: str, default: str) -> str:
     """Read a plain string from runtime_config → nova_config → entry options."""
-    # 1. In-memory runtime_config
+    # 1. Live NovaRuntime.runtime_config
     if entry is not None:
-        data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
-        rc = data.get("runtime_config", {}) if isinstance(data, dict) else {}
+        rc = _live_runtime_config(entry)
         raw = rc.get(key)
         if raw is not None:
             return str(raw)
