@@ -3384,6 +3384,18 @@ async def _execute_tool(
     # Fallback to HA's built-in LLM API tools
     if hass_api:
         from .const import DOMAIN
+        # Nova's policy gate applies to Assist tools too (assist_policy.py):
+        # a mutating call is classified and confirmed before it reaches Home
+        # Assistant, and refused when it can't be classified safely. HA still
+        # runs the call itself below, with its own context and permissions.
+        from . import assist_policy
+        decision = await assist_policy.async_authorize(
+            hass, hass_api, tool_name, tool_args,
+            device_id=getattr(user_input, "device_id", None) or "",
+            user_id=getattr(getattr(user_input, "context", None), "user_id", None),
+        )
+        if not decision.allowed:
+            return json.dumps(decision.tool_result())
         for attempt in range(MAX_TOOL_RETRIES + 1):
             try:
                 tool_input = llm.ToolInput(**_ha_kwargs(
@@ -3398,9 +3410,11 @@ async def _execute_tool(
                     device_id=user_input.device_id if user_input else None,
                 ))
                 result = await hass_api.async_call_tool(tool_input)
+                await assist_policy.async_record_execution(hass, decision, True)
                 return json.dumps(result) if isinstance(result, dict) else str(result)
             except Exception as exc:
                 if attempt >= MAX_TOOL_RETRIES:
+                    await assist_policy.async_record_execution(hass, decision, False)
                     return json.dumps({"error": f"{tool_name} failed: {exc}"})
 
     return json.dumps({"error": f"Unknown tool: {tool_name}"})
