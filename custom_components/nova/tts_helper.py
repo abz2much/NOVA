@@ -99,7 +99,7 @@ def tts_use_ha_voice(hass: HomeAssistant) -> bool:
 
 def _ha_pipeline_tts_entity(hass: HomeAssistant) -> str | None:
     """The TTS entity configured on HA's preferred Assist pipeline (Settings
-    → Voice Assistants), e.g. ``tts.jarvis_jarvis`` on a cloud voice-clone
+    → Voice Assistants), e.g. ``tts.custom_voice`` on a cloud voice-clone
     install. Returns None if assist_pipeline isn't available, has no
     preferred pipeline, or that pipeline's TTS entity no longer exists —
     any of which sends the caller back to the free/local auto-pick."""

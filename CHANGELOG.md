@@ -40,7 +40,7 @@ Nova's existing `delegate_task` sub-agent machinery (capability groups, the dept
 - `delegate_task` accepts `profile: "homer"` (case-insensitive) alongside the existing `capability` groups. HOMER gets its own fixed tool set — `system_diagnostics`, `cognitive_status`, `connectivity_status`, `energy_status`, `activity_history`, `get_entity_state`, `search_entities`, `root_cause` — resolved entirely server-side, with an unrecognized profile name rejected outright rather than silently falling back to a capability group.
 - The old `"diagnostics"` capability group (which also included `solar_status`/`energy_report`) is gone as a separate definition — it survives only as a compatibility alias for the `homer` profile, so an existing caller using `capability="diagnostics"` gets HOMER's exact tool grant, 4-turn cap, and directive, not a second, independently-maintained list. `solar_status`/`energy_report` report totals and forecasts, not fault evidence, so they were dropped from the diagnostic grant; they remain ordinary tools the main agent already has directly.
 - Capped at 4 tool turns regardless of what's requested, subject to the same delegation-depth-of-1 limit as every other sub-agent, and — since `delegate_task` itself is on the denylist — HOMER can never delegate further.
-- A genuine gap found while reviewing the upstream jarvis-aio reference for this feature: its HOMER layers a diagnostic directive on top of the standard system prompt, but that prompt still unconditionally says "you have tools to control devices..." and frames the agent as the household's persona — contradictory claims for a strictly read-only sub-agent. Nova's HOMER takes a genuinely separate system-prompt path instead (a new `run_agent(profile_directive=...)` branch) that never emits those claims.
+- A genuine gap closed while designing this feature: simply layering a diagnostic directive on top of the standard system prompt would leave that prompt still unconditionally saying "you have tools to control devices..." and framing the agent as the household's persona — contradictory claims for a strictly read-only sub-agent. Nova's HOMER takes a genuinely separate system-prompt path instead (a new `run_agent(profile_directive=...)` branch) that never emits those claims.
 - Security correction: the tool-schema offered to a model was never itself the enforcement boundary — nothing previously stopped the dispatch loop from executing a tool name outside a scoped sub-agent's actual grant if a model emitted one anyway. The dispatch loop now refuses any tool call outside the sub-agent's granted set at execution time, fails closed with a generic message (no allowlist/denylist contents, no raw exception text), and applies to every scoped sub-agent — not just HOMER.
 - HOMER's directive requires it to separate what it observed (an actual tool result) from what it inferred, state a likely cause only when the evidence supports one, and report a recommended next step to the parent agent — it never addresses a device directly and never claims to have fixed, repaired, or changed anything. It has no tool that could create an Action Audit Log entry, send a notification, or speak via TTS directly.
 - Settings → Diagnostics now shows HOMER as an always-available, read-only diagnostic sub-agent — no enable toggle, since there's nothing to turn off.
@@ -320,9 +320,9 @@ New tests cover placing/removing a camera, the compute-coverage call, and saving
 
 Ported Classic's property-line boundary and outdoor-zone editing into the new Command Center Floor Plan Editor — straight port, same `floor_plan_property` config and polygon-room representation, same geometry helpers (`_zonePoints`/`_ensureZonePoints`/`_syncRoomBBox`/`_propertyArea`). "+ Outdoor Zone" adds a draggable 4-corner polygon; "+ Property Line" draws a boundary around existing rooms and shows lot size, with drag-to-reshape corners, click-an-edge-midpoint to add a corner, right-click a corner to remove it, and a second click to clear it. New tests cover placing a zone, placing/saving/clearing a property line. Only camera placement and the AI camera-coverage feature remain Classic-only now — updated the card's bridge note accordingly.
 
-## [7.101.18] — Floor Plan Editor Phase 2: device pins + background opacity (from jarvis-aio)
+## [7.101.18] — Floor Plan Editor Phase 2: device pins + background opacity
 
-Ported jarvis-aio's two Floor Plan Editor enhancements (found in the upstream comparison) into Classic and the new Command Center port alike: place any Home Assistant device on the plan as a pin showing its live state (lights, doors/windows, locks, motion, presence, sensor readings, climate) — drag to reposition, tap to open its full HA controls, right-click to remove. The imported floor-plan background image now has an opacity slider instead of a fixed 20%. New config keys `floor_plan_entities` and `floor_plan_bg_opacity`, saved the same way as the rest of the floor plan. New tests cover placing/removing a pin and saving the opacity slider in Command Center; the pin's drag-vs-tap distinction (same jsdom limitation as Phase 1's room drag) needs a live browser to verify.
+Added two Floor Plan Editor enhancements to Classic and the new Command Center port alike: place any Home Assistant device on the plan as a pin showing its live state (lights, doors/windows, locks, motion, presence, sensor readings, climate) — drag to reposition, tap to open its full HA controls, right-click to remove. The imported floor-plan background image now has an opacity slider instead of a fixed 20%. New config keys `floor_plan_entities` and `floor_plan_bg_opacity`, saved the same way as the rest of the floor plan. New tests cover placing/removing a pin and saving the opacity slider in Command Center; the pin's drag-vs-tap distinction (same jsdom limitation as Phase 1's room drag) needs a live browser to verify.
 
 ## [7.101.17] — fix: energy cost-entity fields missing from New Look
 
@@ -501,7 +501,7 @@ Closes the write-path half of the memory-injection work below: previously, anyth
 
 ## [7.88.0] — curated facts fenced against prompt injection too
 
-Extends the memory-injection hardening below to a fourth store: facts saved via "remember that…" were already scoped correctly per person, but the text reaching the model's system prompt had no fencing at all. Now wrapped the same way as the other memory stores. Also added the "What's different from upstream" section to the README, tracking where Nova has genuinely diverged from jarvis-aio.
+Extends the memory-injection hardening below to a fourth store: facts saved via "remember that…" were already scoped correctly per person, but the text reaching the model's system prompt had no fencing at all. Now wrapped the same way as the other memory stores. Also added a README section summarising Nova's own security hardening and capabilities (now "Nova's architecture and capabilities").
 
 ## [7.87.0] — security hardening: memory injection, execute_plan allowlist, voice-unlock protection, biometric privacy
 
@@ -2153,7 +2153,7 @@ setting (Frigate side). 12 new tests; tool surface now 33.
 ## [6.65.0] — fix settings that reset after saving; pick your recognition source
 **Bug fix:** several Settings controls saved your choice but snapped back to
 the default on the next render — most visibly the Nova Character banter level
-(pick "Full — MCU Nova," watch it revert to "Dry"). The save was working
+(pick "Full," watch it revert to "Dry"). The save was working
 fine; the problem was that `get_panel_data` never sent these values back to the
 panel, so every re-render re-read the default. Fixed for the whole affected
 set: banter level, web-research backend, SearXNG URL, calendar tight-gap, and —
@@ -2589,7 +2589,7 @@ configurable gap. Email is deliberately untouched; reading an inbox from
 inside HA is privacy weight better handled by exposing specific mail as an
 entity.
 
-**MCU-Nova persona.** The voice now leans into Stark's Nova — dry,
+**Nova persona.** The voice now leans into Nova's own character — dry,
 clever, unflappable — with an engineered safety valve: full wit only at
 light/neutral register, automatically silenced at urgent/grave. Nova
 does not quip during a smoke alarm, and that's now structurally guaranteed
@@ -4084,7 +4084,7 @@ its fault-history role already lives in `diagnostics/fault_log.py`).
 - The isometric house lights rooms by occupancy: idle wireframe, occupied cyan
   glow, dominant room pulsing.
 
-## [5.9.43] — Iron Man HUD radial gauges
+## [5.9.43] — HUD radial gauges
 - Temperature, humidity, and lighting for the dominant room rendered as SVG donut
   gauges.
 

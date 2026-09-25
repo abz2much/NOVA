@@ -37,11 +37,11 @@ from typing import Optional
 # Full variety by default. Flip off for minimal, consistent phrasing.
 _VARIETY = True
 
-# Banter level (v6.51.0): how much MCU-JARVIS dry wit surfaces at LIGHT/NEUTRAL
+# Banter level (v6.51.0): how much of Nova's dry wit surfaces at LIGHT/NEUTRAL
 # register. Set from config at speak-time via set_banter(). Levels:
 #   0 = off (plain, the pre-6.51 phrasing)
 #   1 = dry (occasional wit — the tasteful default)
-#   2 = full (Stark's Nova — witty asides, more character)
+#   2 = full (Nova's full character — witty asides, more personality)
 # URGENT/GRAVE are never affected: Nova does not quip during a smoke alarm.
 _BANTER = 1
 
@@ -170,7 +170,7 @@ _UNABLE = {
     ],
 }
 
-# ── Full-banter overlays (v6.51.0), MCU-JARVIS register ──────────────────────
+# ── Full-banter overlays (v6.51.0), Nova's full register ─────────────────────
 # Merged onto the LIGHT pool only when _BANTER == 2. Dry, clever, still
 # unmistakably deferential — never sarcastic toward the user, never during
 # anything urgent. These are the lines that make Nova sound like Nova.
@@ -190,7 +190,7 @@ _DONE_FULL = [
 _UNABLE_FULL = [
     "I'm afraid that's beyond even my talents, {h} — and they are not modest.",
     "Would that I could, {h}. Alas, I have limits. Few, but real.",
-    "That one's outside my remit, {h}. Do tell Mr. Stark I said so.",
+    "That one's outside my remit, {h}. I'd rather decline than overpromise.",
     "I must decline, {h} — not from reluctance, from incapacity.",
 ]
 # Occasional dry asides the agent LLM may append (level 2 only). Kept short.

@@ -3,7 +3,7 @@ Nova — Cognitive Core (v5.8.03).
 
 The autonomous AI brain. Runs continuously in the background,
 monitoring home state, managing safety, learning patterns, and making
-decisions — emulating Tony Stark's JARVIS from the MCU.
+decisions on the household's behalf as Nova's always-on steward.
 
 Architecture:
   - 30-second evaluation loop: reviews full home state each tick

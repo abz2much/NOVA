@@ -1,4 +1,4 @@
-"""Tests for the MCU-JARVIS persona banter valve (v6.51.0). The load-bearing
+"""Tests for Nova's persona banter valve (v6.51.0). The load-bearing
 guarantee: wit widens the phrase pools at LIGHT register when banter is maxed,
 but URGENT/GRAVE are NEVER widened — Nova does not quip during a smoke
 alarm, and that must be structurally impossible, not merely discouraged."""

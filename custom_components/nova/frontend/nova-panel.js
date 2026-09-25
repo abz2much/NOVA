@@ -5033,7 +5033,7 @@ ${this._htmlDashboardBody()}`;
       <div class="cfg-row">
         <label>Banter level</label>
         <select class="cfg-field" data-cfg-key="banter_level">
-          ${this._optSelect([["0", "Plain — no wit"], ["1", "Dry — occasional wit (default)"], ["2", "Full — MCU Nova"]], String(cfg.banter_level ?? "1"))}
+          ${this._optSelect([["0", "Plain — no wit"], ["1", "Dry — occasional wit (default)"], ["2", "Full — expressive wit"]], String(cfg.banter_level ?? "1"))}
         </select>
       </div>
       <div class="cfg-row">
@@ -6476,8 +6476,8 @@ ${this._htmlDashboardBody()}`;
   }
   _fpDim(u) { return this._fpToReal(u) + (this._fpUnits() === "metric" ? "m" : "'"); }
 
-  // Devices pinned on the floor plan (ported from jarvis-aio v7.86.0, same as
-  // Classic) — live-state markers, drag to move, tap to open HA's more-info.
+  // Devices pinned on the floor plan (Floor Plan Editor Phase 2, v7.101.18) —
+  // live-state markers, drag to move, tap to open HA's more-info.
   _getFloorEntities() {
     const raw = this._data()?.config?.floor_plan_entities;
     let e = {};

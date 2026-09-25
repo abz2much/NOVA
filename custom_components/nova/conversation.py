@@ -270,7 +270,7 @@ class NovaAgent(conversation.ConversationEntity):
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
             name="Nova",
-            manufacturer="Stark Industries",
+            manufacturer="Nova",
             model="Nova AI Assistant",
             sw_version="4.0.0",
         )

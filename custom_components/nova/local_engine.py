@@ -32,7 +32,7 @@ _LOGGER = logging.getLogger(__name__)
 
 # Rolling memory of the last few acknowledgment lead-ins used, so Nova does
 # not repeat the same opener twice in a row — variety without randomness that
-# feels chaotic. MCU JARVIS rarely says the same confirmation back-to-back.
+# feels chaotic. Nova rarely says the same confirmation back-to-back.
 _recent_acks: list[str] = []
 
 
@@ -914,7 +914,7 @@ def _resp(action, fname, success, args=None, h="sir", status=None):
     # status == "verified": the state was actually confirmed, so completion
     # wording is accurate here -- the only actions that ever reach "verified"
     # are turn_on/turn_off/toggle on a fast domain, and dim/brighten.
-    # Understated lead-ins, MCU style. Varied so confirmations never sound
+    # Understated lead-ins in Nova's own voice. Varied so confirmations never sound
     # canned. Each is something Nova would actually say.
     ack = _pick(["Done", "Right away", "As you wish", "Consider it done", "At once"])
 
