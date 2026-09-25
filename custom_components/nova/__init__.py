@@ -1207,6 +1207,11 @@ def _register_services(
             vol.Required("entity_id"): cv.entity_id,
             vol.Optional("prompt"): cv.string,
             vol.Optional("announce", default=True): cv.boolean,
+            # Short clip capture (documented in services.yaml). No schema
+            # default: an omitted value keeps the handler's own fallback
+            # (1 frame, 1.2 s apart).
+            vol.Optional("frames"): vol.All(vol.Coerce(int), vol.Range(min=1, max=6)),
+            vol.Optional("interval"): vol.All(vol.Coerce(float), vol.Range(min=0.5, max=5)),
         }),
     )
 

@@ -16,6 +16,7 @@
     "version"
   ],
   "config_fallbacks": [
+    "available_labels",
     "cameras",
     "lockdown",
     "onboarding"

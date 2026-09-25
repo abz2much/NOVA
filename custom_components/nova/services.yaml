@@ -317,6 +317,12 @@ shush:
             - climate
             - lights
             - schedule
+    all:
+      name: Mute everything
+      description: "Blanket mute: suppress every Nova announcement, including critical ones, until nova.unshush is called or Home Assistant restarts. Use sparingly."
+      required: false
+      selector:
+        boolean:
 
 unshush:
   name: Unshush (clear mutes)
