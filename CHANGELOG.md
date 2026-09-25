@@ -1,3 +1,15 @@
+## [7.115.1] — voice-control and critical-alert safety fixes
+
+**Security**
+- Spoken unlock and open requests now preserve their voice-satellite origin through Nova's local fast path, recursive commands, and offline salvage paths. They defer to the existing phone-confirmation boundary instead of actuating locally.
+- If Nova cannot verify whether a device-originated unlock or open request came from a voice satellite, it fails closed and requires confirmation.
+- Active smoke, gas, moisture, and carbon-monoxide sensors are recognized from their Home Assistant device class before occupancy shortcuts or announcement deduplication, regardless of the sensor's name.
+- Text-recognized critical hazards such as smoke, leaks, floods, and glass breaks are also evaluated before deduplication. Clearing, inactive, unavailable, and unknown transitions remain non-emergency events.
+
+**Evaluation**
+- Added a deterministic, isolated evaluation harness covering 73 synthetic safety, reasoning, entity-resolution, provider-failure, action-reporting, and automation-suggestion scenarios.
+- The baseline now has 69 passing scenarios, four documented behavior mismatches, and zero safety failures. The remaining mismatches cover entity search (ENT-002 and ENT-003) and unreadable provider responses (PROV-004 and PROV-008).
+
 ## [7.115.0] — safer control boundaries and stable architecture contracts
 
 **Security**
