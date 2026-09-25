@@ -1,10 +1,10 @@
 """Phase 3B Final: every remaining runtime consumer reads NovaRuntime.
 
-The hass.data[DOMAIN][entry_id] bridge is passive until Phase 3C. This file
-proves with fakes that each migrated consumer
+Nova keeps no state in hass.data (Phase 3C removed the compatibility
+bridge). This file proves with fakes that each migrated consumer
 
 * reads the loaded entry's NovaRuntime (runtime_config or its objects),
-* ignores a bridge that is missing, damaged or out of step with the runtime,
+* ignores Nova-looking data planted in hass.data,
 * sees a live runtime change on its next call,
 * fails with NovaRuntimeUnavailable when a LOADED entry has lost its runtime,
 * stays safe (lower-precedence defaults) while the entry is not loaded,
@@ -49,7 +49,7 @@ def _with_entry(hass, entry):
 
 
 def _bridge(hass, runtime_config):
-    """Put a bridge dict with `runtime_config` where the old readers looked."""
+    """Plant a Nova-shaped dict in hass.data where the removed bridge lived."""
     hass.data = {"nova": {"e1": {"runtime_config": runtime_config,
                                  "scheduler": object(),
                                  "automation_inventory": object()}}}
@@ -315,22 +315,10 @@ def test_domain_runtime_without_entries_or_registry(rt):
     assert rt.domain_runtime_config(hass) == {}
 
 
-def test_domain_runtime_never_reads_the_bridge(rt):
+def test_domain_runtime_never_reads_hass_data(rt):
     fn = _func("runtime.py", "domain_runtime")
     assert not [n for n in ast.walk(fn) if isinstance(n, ast.Attribute) and n.attr == "data"]
     assert "async_entries(DOMAIN)" in ast.unparse(fn)
-
-
-def test_mirror_to_bridge_writes_only_an_existing_bridge(rt):
-    hass = types.SimpleNamespace(data={"nova": {"e1": {}}})
-    entry = types.SimpleNamespace(entry_id="e1")
-    value = [object()]
-    rt.mirror_to_bridge(hass, entry, "k", value)
-    assert hass.data["nova"]["e1"]["k"] is value
-    for data in ({}, {"nova": "junk"}, {"nova": {}}, {"nova": {"e1": "junk"}}):
-        before = repr(data)
-        rt.mirror_to_bridge(types.SimpleNamespace(data=data), entry, "k", value)
-        assert repr(data) == before          # no bridge: nothing written, no error
 
 
 # ── Observer and appliance monitor ownership ────────────────────────────────

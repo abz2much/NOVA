@@ -29,6 +29,11 @@ from .conftest import MockConfigEntry  # noqa: E402
 DOMAIN = "nova"
 
 
+def _has_runtime(entry) -> bool:
+    from custom_components.nova.runtime import NovaRuntime
+    return isinstance(getattr(entry, "runtime_data", None), NovaRuntime)
+
+
 def _make_entry() -> MockConfigEntry:
     return MockConfigEntry(
         domain=DOMAIN,
@@ -39,8 +44,8 @@ def _make_entry() -> MockConfigEntry:
 
 
 async def test_setup_entry_registers_integration(hass):
-    """Setting up a config entry should leave the integration loaded and its
-    runtime data registered under hass.data[DOMAIN]."""
+    """Setting up a config entry should leave the integration loaded, its
+    runtime on entry.runtime_data and nothing of Nova's in hass.data."""
     # Nova registers a conversation agent, which needs the base
     # `homeassistant` component's exposed-entities tracking already set up.
     assert await async_setup_component(hass, "homeassistant", {})
@@ -53,8 +58,8 @@ async def test_setup_entry_registers_integration(hass):
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    assert DOMAIN in hass.data
-    assert entry.entry_id in hass.data[DOMAIN]
+    assert _has_runtime(entry)
+    assert DOMAIN not in hass.data
 
 
 async def test_conversation_agent_is_registered(hass):
@@ -148,15 +153,18 @@ async def test_unload_then_resetup_entry(hass):
 
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    assert entry.entry_id in hass.data[DOMAIN]
+    assert _has_runtime(entry)
+    assert DOMAIN not in hass.data
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
-    assert entry.entry_id not in hass.data[DOMAIN]
+    assert not _has_runtime(entry)
+    assert DOMAIN not in hass.data
 
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    assert entry.entry_id in hass.data[DOMAIN]
+    assert _has_runtime(entry)
+    assert DOMAIN not in hass.data
 
 
 async def test_setup_failure_before_resource_acquisition_leaves_no_state(hass):
@@ -174,7 +182,8 @@ async def test_setup_failure_before_resource_acquisition_leaves_no_state(hass):
         result = await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     assert result is False
-    assert entry.entry_id not in hass.data.get(DOMAIN, {})
+    assert not _has_runtime(entry)
+    assert DOMAIN not in hass.data
 
     # A failed setup leaves the entry in SETUP_ERROR, not NOT_LOADED — HA
     # itself refuses a bare async_setup from that state, same as it would
@@ -183,4 +192,5 @@ async def test_setup_failure_before_resource_acquisition_leaves_no_state(hass):
     # Reload), and must still succeed once the provider works again.
     await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
-    assert entry.entry_id in hass.data[DOMAIN]
+    assert _has_runtime(entry)
+    assert DOMAIN not in hass.data

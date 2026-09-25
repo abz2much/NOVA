@@ -242,8 +242,8 @@ def runtime_get(hass, entry, key: str, default=None):
     the default for anything set via the panel or config.json (the recurring
     divergence class behind several past bugs).
 
-    runtime_config is the entry's live NovaRuntime.runtime_config, never the
-    hass.data bridge, read on the event loop: never call this with ``hass``
+    runtime_config is the entry's live NovaRuntime.runtime_config, never
+    hass.data, read on the event loop: never call this with ``hass``
     from an executor thread. Pass ``hass=None`` to skip runtime_config (the
     caller has none, or already checked it). An entry that is not loaded
     (setup still running, failed, or unloaded) has no runtime_config and

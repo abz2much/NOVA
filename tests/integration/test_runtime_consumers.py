@@ -2,10 +2,11 @@
 Assistant (PHACC).
 
 After the real setup, each consumer's panel setting is put in the entry's
-NovaRuntime.runtime_config, and the bridge's runtime_config is replaced with
-different, drifted values. Every consumer must answer from the runtime. The
-same consumers then fail with NovaRuntimeUnavailable while the loaded entry
-has lost its runtime, and fall back to their defaults once it is unloaded.
+NovaRuntime.runtime_config, and a Nova-shaped dict with different, drifted
+values is planted in hass.data where the removed bridge used to live. Every
+consumer must answer from the runtime. The same consumers then fail with
+NovaRuntimeUnavailable while the loaded entry has lost its runtime, and fall
+back to their defaults once it is unloaded.
 
 Covers nova_config.runtime_get, the directive helper, camera, Sentinel,
 solar, the TTS helper, audio routing, entity filtering, the alarm source,
@@ -100,18 +101,19 @@ def _sentinel_tts(hass, entry):
     return NovaSentinel(hass, None, "sir", entry=entry)._tts_entity()
 
 
-async def _loaded_with_drifted_bridge(hass):
+async def _loaded_with_stale_hass_data(hass):
     entry = await _setup(hass)
     _states(hass)
     entry.runtime_data.runtime_config.update(RUNTIME)
-    hass.data[DOMAIN][entry.entry_id]["runtime_config"] = dict(DRIFTED)
+    hass.data.setdefault(DOMAIN, {}).setdefault(
+        entry.entry_id, {})["runtime_config"] = dict(DRIFTED)
     return entry
 
 
 async def test_consumers_answer_from_the_runtime(hass):
     from custom_components.nova import solar
     from custom_components.nova.const import get_directive
-    entry = await _loaded_with_drifted_bridge(hass)
+    entry = await _loaded_with_stale_hass_data(hass)
     runtime = entry.runtime_data
     got = {name: call() for name, call in _probes(hass, entry).items()}
     assert got == {
@@ -134,7 +136,7 @@ async def test_consumers_answer_from_the_runtime(hass):
 
 
 async def test_live_runtime_change_is_seen_next_time(hass):
-    entry = await _loaded_with_drifted_bridge(hass)
+    entry = await _loaded_with_stale_hass_data(hass)
     probes = _probes(hass, entry)
     rc = entry.runtime_data.runtime_config
     rc["vision_model"] = "runtime/second"
@@ -154,7 +156,7 @@ async def test_directive_without_runtime_value_is_unchanged(hass):
     rc = entry.runtime_data.runtime_config
     rc.pop("directive", None)
     rc.pop("directive_preset", None)
-    hass.data[DOMAIN][entry.entry_id]["runtime_config"] = {"directive": "BRIDGE DIRECTIVE"}
+    hass.data[DOMAIN] = {entry.entry_id: {"runtime_config": {"directive": "BRIDGE DIRECTIVE"}}}
     prompt = directive_helper.build_system_prompt(hass, "sir", "task")
     assert prompt.startswith(directive_helper.resolve_directive(entry))
     assert "BRIDGE DIRECTIVE" not in prompt
@@ -167,7 +169,7 @@ async def test_directive_without_runtime_value_is_unchanged(hass):
     "automation_inventory", "service_health", "sentinel"])
 async def test_loaded_entry_without_runtime_fails_visibly(hass, name):
     from custom_components.nova.runtime import NovaRuntimeUnavailable
-    entry = await _loaded_with_drifted_bridge(hass)
+    entry = await _loaded_with_stale_hass_data(hass)
     probe = _probes(hass, entry)[name]
     with _runtime_missing(entry):
         with pytest.raises(NovaRuntimeUnavailable):
@@ -177,7 +179,7 @@ async def test_loaded_entry_without_runtime_fails_visibly(hass, name):
 async def test_solar_without_runtime_fails_visibly(hass):
     from custom_components.nova import solar
     from custom_components.nova.runtime import NovaRuntimeUnavailable
-    entry = await _loaded_with_drifted_bridge(hass)
+    entry = await _loaded_with_stale_hass_data(hass)
     with _runtime_missing(entry):
         with pytest.raises(NovaRuntimeUnavailable):
             await solar._cost_today(hass, None, None)
@@ -185,16 +187,16 @@ async def test_solar_without_runtime_fails_visibly(hass):
 
 async def test_consumers_are_safe_after_unload(hass):
     from custom_components.nova import solar
-    entry = await _loaded_with_drifted_bridge(hass)
+    entry = await _loaded_with_stale_hass_data(hass)
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
-    # A stale bridge left behind would still be ignored.
+    # Stale data planted in hass.data would still be ignored.
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {"runtime_config": dict(DRIFTED)}
     try:
         got = {name: call() for name, call in _probes(hass, entry).items()
                if name not in ("runtime_get", "camera", "directive", "sentinel")}
     finally:
-        hass.data[DOMAIN].pop(entry.entry_id, None)
+        hass.data.pop(DOMAIN, None)
     assert got == {
         "tts_helper": False,
         "audio_routing": ["media_player.speaker", "media_player.projector"],

@@ -6,11 +6,11 @@ Drives the real setup and the real WebSocket commands to prove:
 * the panel readers (_runtime_opt, _get_runtime_json, _get_runtime_str,
   _get_disabled_rules) read the live NovaRuntime.runtime_config, keep the
   runtime → config.json → options → data → default precedence and their
-  parsing, ignore a missing, damaged or drifted bridge, and fail visibly for
-  a loaded entry without a runtime,
+  parsing, ignore missing, damaged or drifted Nova-shaped data planted in
+  hass.data, and fail visibly for a loaded entry without a runtime,
 * every executor job that merges runtime_config gets its own snapshot: an
   in-flight job keeps a coherent view and the next command sees new values,
-* nova/update_config writes the runtime, never needs the bridge, and does
+* nova/update_config writes the runtime, never touches hass.data, and does
   nothing at all without a runtime,
 * observer_enabled is transactional: the observer changes first, and only a
   successful change updates the observer state, runtime_config and
@@ -149,30 +149,26 @@ def _runtime_missing(entry):
 
 
 @contextmanager
-def _bridge(hass, entry, damage):
-    """Break the compatibility bridge one way, then restore it."""
-    store = hass.data[DOMAIN]
-    saved = store[entry.entry_id]
-    if damage == "missing":
-        del store[entry.entry_id]
-    elif damage == "none":
-        store[entry.entry_id] = None
+def _planted(hass, entry, damage):
+    """Plant Nova-shaped data where the removed bridge used to live, one way,
+    then remove it. Nova itself keeps nothing in hass.data."""
+    assert DOMAIN not in hass.data
+    if damage == "none":
+        hass.data[DOMAIN] = {entry.entry_id: None}
     elif damage == "no_runtime_config":
-        store[entry.entry_id] = {k: v for k, v in saved.items() if k != "runtime_config"}
+        hass.data[DOMAIN] = {entry.entry_id: {"observer_running": True}}
     elif damage == "drifted":
-        store[entry.entry_id] = {**saved, "runtime_config": {
+        hass.data[DOMAIN] = {entry.entry_id: {"runtime_config": {
             "chimney_side": "bridge", "floor_plan_elements": {"bridge": 1},
             "disabled_sentinel_rules": ["bridge"], "ollama_base_url": "http://bridge:11434",
-            "custom_base_url": "http://bridge:8000/v1", MARK: "bridge"}}
-    elif damage == "no_bucket":
-        hass.data.pop(DOMAIN)
+            "custom_base_url": "http://bridge:8000/v1", MARK: "bridge"}}}
     try:
         yield
     finally:
-        hass.data.setdefault(DOMAIN, store)[entry.entry_id] = saved
+        hass.data.pop(DOMAIN, None)
 
 
-DAMAGE = ["missing", "none", "no_runtime_config", "drifted", "no_bucket"]
+DAMAGE = ["nothing", "none", "no_runtime_config", "drifted"]
 
 
 async def _ws(hass, hass_ws_client, payload) -> dict:
@@ -188,7 +184,7 @@ async def _update(hass, hass_ws_client, key, value) -> dict:
 
 def _assert_observer(hass, entry, running: bool):
     assert entry.runtime_data.observer_running is running
-    assert hass.data[DOMAIN][entry.entry_id]["observer_running"] is running
+    assert DOMAIN not in hass.data
 
 
 # ── Runtime readers ─────────────────────────────────────────────────────────
@@ -279,14 +275,14 @@ async def test_disabled_rules_read_runtime(hass):
 
 
 @pytest.mark.parametrize("damage", DAMAGE)
-async def test_readers_ignore_the_bridge(hass, damage):
+async def test_readers_ignore_hass_data(hass, damage):
     from custom_components.nova.websocket import (
         _get_disabled_rules, _get_runtime_json, _get_runtime_str, _runtime_opt)
     entry = await _setup(hass)
     rc = entry.runtime_data.runtime_config
     rc.update({"chimney_side": "left", "floor_plan_elements": {"live": 1},
                "disabled_sentinel_rules": ["live"]})
-    with _bridge(hass, entry, damage):
+    with _planted(hass, entry, damage):
         assert _runtime_opt(hass, entry, "chimney_side", "right") == "left"
         assert _get_runtime_str(hass, entry, "chimney_side", "right") == "left"
         assert _get_runtime_json(hass, entry, "floor_plan_elements", {}) == {"live": 1}
@@ -310,7 +306,7 @@ async def test_panel_request_sees_in_place_runtime_changes(
 
     rc.update({"chimney_side": "left", "disabled_sentinel_rules": ["co_alarm"],
                "floor_plan_elements": {"door": 1}})
-    with _bridge(hass, entry, "drifted"):
+    with _planted(hass, entry, "drifted"):
         second = await _config()
     assert second["chimney_side"] == "left"
     assert second["disabled_sentinel_rules"] == ["co_alarm"]
@@ -432,7 +428,7 @@ async def test_observer_start_gets_the_merged_candidate(
 # ── nova/update_config: generic keys ────────────────────────────────────────
 
 @pytest.mark.parametrize("damage", [None] + DAMAGE)
-async def test_update_config_writes_runtime_without_the_bridge(
+async def test_update_config_writes_runtime_and_never_hass_data(
     hass, hass_ws_client, damage,
 ):
     from custom_components.nova import nova_config
@@ -440,15 +436,13 @@ async def test_update_config_writes_runtime_without_the_bridge(
     runtime = entry.runtime_data
     if damage is None:
         resp = await _update(hass, hass_ws_client, "chimney_side", "left")
-        assert hass.data[DOMAIN][entry.entry_id]["runtime_config"] is runtime.runtime_config
+        assert DOMAIN not in hass.data
     else:
-        with _bridge(hass, entry, damage):
-            before = hass.data.get(DOMAIN, {}).get(entry.entry_id)
-            before = dict(before) if isinstance(before, dict) else before
+        with _planted(hass, entry, damage):
+            before = repr(hass.data.get(DOMAIN))
             resp = await _update(hass, hass_ws_client, "chimney_side", "left")
-            after = hass.data.get(DOMAIN, {}).get(entry.entry_id)
-            # The bridge is neither recreated nor repaired.
-            assert (dict(after) if isinstance(after, dict) else after) == before
+            # Planted data is neither read, repaired nor written.
+            assert repr(hass.data.get(DOMAIN)) == before
     assert resp["success"], resp
     assert resp["result"] == {"key": "chimney_side", "value": "left", "persisted": True}
     assert runtime.runtime_config["chimney_side"] == "left"
@@ -491,7 +485,7 @@ async def test_update_config_without_runtime_changes_nothing(
         assert side_effects == []                            # no side effect
         assert events == []                                  # observer untouched
         assert runtime.observer_running is running_before
-        assert hass.data[DOMAIN][entry.entry_id]["observer_running"] is running_before
+        assert DOMAIN not in hass.data
 
 
 @pytest.mark.parametrize("raise_", [False, True])
@@ -602,7 +596,7 @@ async def test_failed_transition_changes_nothing(
     observer_fake.fail_start = enable
     observer_fake.fail_stop = not enable
     rc_before = dict(entry.runtime_data.runtime_config)
-    bridge_rc = hass.data[DOMAIN][entry.entry_id]["runtime_config"]
+    live_rc = entry.runtime_data.runtime_config
     json_before = nova_config.get("observer_enabled")
     events.clear()
 
@@ -613,7 +607,8 @@ async def test_failed_transition_changes_nothing(
     assert persist_spy.calls == []
     assert nova_config.get("observer_enabled") == json_before
     assert entry.runtime_data.runtime_config == rc_before
-    assert bridge_rc is entry.runtime_data.runtime_config
+    assert live_rc is entry.runtime_data.runtime_config
+    assert DOMAIN not in hass.data
     _assert_observer(hass, entry, not enable)
 
 
@@ -641,9 +636,9 @@ def state_spy(monkeypatch):
     real = runtime.set_observer_running
     calls: list[bool] = []
 
-    def _spy(hass, entry, running):
+    def _spy(entry, running):
         calls.append(running)
-        return real(hass, entry, running)
+        return real(entry, running)
 
     monkeypatch.setattr(runtime, "set_observer_running", _spy)
     return calls
@@ -783,7 +778,7 @@ async def test_apply_uses_live_runtime_via_a_snapshot_then_updates_runtime(
     live = entry.runtime_data.runtime_config
     # Only the live runtime knows this endpoint; the update omits it.
     live["ollama_base_url"] = "http://live-gpu:11434"
-    with _bridge(hass, entry, "drifted"):
+    with _planted(hass, entry, "drifted"):
         result = await _apply(hass, hass_ws_client, _ollama_roles("qwen"))
     assert result == {"ok": True, "message": "AI settings saved. Nova is reloading."}
     given, when_given = gate.seen[-1]
@@ -794,7 +789,7 @@ async def test_apply_uses_live_runtime_via_a_snapshot_then_updates_runtime(
     assert saved["llm_base_url"] == "" and saved["self_hosted_endpoints_migrated"] is True
     for key, value in saved.items():
         assert live[key] == value                        # live runtime updated
-    assert hass.data[DOMAIN][entry.entry_id]["runtime_config"] is live
+    assert DOMAIN not in hass.data
     assert ai_fakes.invalidations == [None]
     assert ai_fakes.reloads == [entry.entry_id]
 
@@ -831,7 +826,7 @@ async def test_list_models_uses_live_runtime_endpoint(
 ):
     entry = await _setup(hass)
     entry.runtime_data.runtime_config["ollama_base_url"] = "http://live-gpu:11434"
-    with _bridge(hass, entry, "drifted"):
+    with _planted(hass, entry, "drifted"):
         resp = await _ws(hass, hass_ws_client,
                          {"type": "nova/list_models", "provider": "ollama"})
     assert resp["success"], resp
@@ -858,8 +853,8 @@ async def test_credential_status_uses_live_runtime_endpoints(hass, hass_ws_clien
     rc = entry.runtime_data.runtime_config
     rc["self_hosted_endpoints_migrated"] = True
     rc["ollama_base_url"] = "http://live-gpu:11434"
-    # The drifted bridge has a custom endpoint; the runtime does not.
-    with _bridge(hass, entry, "drifted"):
+    # The planted stale data has a custom endpoint; the runtime does not.
+    with _planted(hass, entry, "drifted"):
         resp = await _ws(hass, hass_ws_client, {"type": "nova/get_credential_status"})
     assert resp["success"], resp
     result = resp["result"]

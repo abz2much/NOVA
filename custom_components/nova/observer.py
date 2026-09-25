@@ -176,7 +176,7 @@ def _live_runtime_config() -> dict:
     event loop. {} when the observer has no owning entry (stopped, or
     started without one) or that entry is not loaded; a loaded entry that
     has lost its runtime raises NovaRuntimeUnavailable instead of letting
-    the observer act on defaults. Never reads the hass.data bridge."""
+    the observer act on defaults. Never reads hass.data."""
     entry = _STATE.entry
     if entry is None:
         return {}

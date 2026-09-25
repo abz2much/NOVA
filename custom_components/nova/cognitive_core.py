@@ -2966,7 +2966,7 @@ def _live_runtime_config() -> dict:
     """The owning entry's live runtime_config, read on the event loop. {}
     when the core has no owning entry or that entry is not loaded; a loaded
     entry that has lost its runtime raises NovaRuntimeUnavailable. Never
-    reads the hass.data bridge."""
+    reads hass.data."""
     entry = _CORE.entry
     if entry is None:
         return {}

@@ -117,7 +117,6 @@ def test_accessor_never_reads_hass_data():
 # ── Static checks over __init__.py ──────────────────────────────────────────
 
 _TREE = ast.parse(INIT.read_text(encoding="utf-8"))
-_LINES = INIT.read_text(encoding="utf-8").splitlines()
 
 
 def _func(name: str) -> ast.AST:
@@ -218,41 +217,13 @@ def test_test_notify_merges_data_then_options_then_runtime():
 
 
 def test_no_runtime_config_is_read_through_hass_data():
-    """runtime_config is only ever reached as runtime.runtime_config now; the
-    bridge key is written by runtime.build_compat_bridge alone."""
+    """runtime_config is only ever reached as runtime.runtime_config."""
     consts = [n for n in ast.walk(_TREE) if isinstance(n, ast.Constant)
               and n.value == "runtime_config"]
     assert consts == []
 
 
-def _enclosing(tree: ast.AST) -> dict[int, str]:
-    owner: dict[int, str] = {}
-
-    def visit(node, name):
-        for child in ast.iter_child_nodes(node):
-            n = child.name if isinstance(
-                child, (ast.FunctionDef, ast.AsyncFunctionDef)) else name
-            owner[id(child)] = n
-            visit(child, n)
-    visit(tree, "<module>")
-    return owner
-
-
-def test_remaining_hass_data_uses_are_the_approved_set():
-    owner = _enclosing(_TREE)
-    found = sorted(
-        (owner[id(n)], _LINES[n.lineno - 1].strip())
-        for n in _hass_data_nodes(_TREE))
-    assert found == sorted([
-        # Domain store for the bridge.
-        ("async_setup_entry", "hass.data.setdefault(DOMAIN, {})"),
-        # Compatibility-bridge creation, and its automation_inventory key
-        # while the bridge exists (until Phase 3C).
-        ("async_setup_entry",
-         "hass.data[DOMAIN][entry.entry_id] = build_compat_bridge("),
-        ("async_setup_entry",
-         'hass.data[DOMAIN][entry.entry_id]["automation_inventory"] = '
-         "automation_inventory"),
-        # Unload fallback, only when runtime_data is absent.
-        ("async_unload_entry", "store = hass.data.get(DOMAIN)"),
-    ])
+def test_init_has_no_hass_data_access():
+    """Phase 3C: __init__.py neither creates, writes, reads nor deletes
+    anything in hass.data. Setup stores state only on entry.runtime_data."""
+    assert list(_hass_data_nodes(_TREE)) == []

@@ -43,7 +43,7 @@ from .const import CONF_BROADCAST_GROUP, CONF_HONORIFIC, DEFAULT_HONORIFIC, DOMA
 from .diagnostics import FaultLog, InfrastructureTriage
 from .intent import LocalIntentRouter
 from .runtime import NovaRuntime, NovaRuntimeUnavailable, domain_runtime, get_runtime
-from .runtime import lifecycle_runtime, mirror_to_bridge
+from .runtime import lifecycle_runtime
 from .state_ledger import StateLedger
 from .vision import SpatialContextEngine
 
@@ -646,9 +646,6 @@ async def async_setup_proactive_audio(hass: HomeAssistant, entry: ConfigEntry) -
     )
     unsubs = [unsub_interval, unsub_startup]
     runtime.resources.add_unsubs(unsubs)
-    # Passive copy: the bridge keeps its proactive_audio_unsubs key until
-    # Phase 3C. Nothing reads or calls it; NovaResources owns the callbacks.
-    mirror_to_bridge(hass, entry, "proactive_audio_unsubs", unsubs)
     _LOGGER.debug("Proactive audio scheduled (audit every %s)", AUDIT_INTERVAL)
 
     # Recover from any high-stakes action interrupted by a crash before opening

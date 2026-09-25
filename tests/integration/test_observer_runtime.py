@@ -9,10 +9,11 @@ Drives the real setup, services, WebSocket commands and unload to prove:
   observer_enabled toggle update the runtime,
 * nova/get_panel_data reports the runtime's state, and fails loudly for a
   loaded entry with no runtime instead of reporting "off",
-* the hass.data bridge copy matches the runtime after every transition,
+* no transition writes observer state into hass.data,
 * unload tears down the runtime's own sentinel, reminder watcher, resources
-  and observer even when the bridge is missing or damaged,
-* repeated unload and unload after a partial setup stay safe,
+  and observer, and ignores anything planted in hass.data,
+* repeated unload and unload after a partial setup stay safe, and unload
+  never falls back to hass.data when the runtime is missing,
 * reload builds a fresh runtime with fresh observer state.
 
 The observer is faked: no state listener, classifier or LLM runs. No device
@@ -72,9 +73,9 @@ def no_panel_databases(monkeypatch):
 
 
 def _assert_state(hass, entry, running: bool):
-    """The runtime holds the state; the bridge copy matches it."""
+    """The runtime holds the state; nothing is mirrored into hass.data."""
     assert entry.runtime_data.observer_running is running
-    assert hass.data[DOMAIN][entry.entry_id]["observer_running"] is running
+    assert DOMAIN not in hass.data
 
 
 async def _panel_observer_state(hass, hass_ws_client) -> dict:
@@ -108,7 +109,7 @@ async def test_observer_enabled_at_setup_turns_runtime_on(hass, fake_observer):
 
 
 async def test_failed_observer_start_leaves_no_state(hass, monkeypatch):
-    """The partial start is stopped by unload, then runtime and bridge go."""
+    """The partial start is stopped by unload, then the runtime goes."""
     from custom_components.nova import cognitive_core, observer
     calls, seen = [], []
 
@@ -173,7 +174,7 @@ async def test_observer_service_refuses_without_runtime(
             await hass.services.async_call(DOMAIN, service, {}, blocking=True)
         assert fake_observer == calls_before          # observer untouched
         assert runtime.observer_running is start_running
-        assert hass.data[DOMAIN][entry.entry_id]["observer_running"] is start_running
+        assert DOMAIN not in hass.data
 
 
 # ── WebSocket ───────────────────────────────────────────────────────────────
@@ -185,12 +186,12 @@ async def test_panel_status_reads_runtime(
     entry = await _setup(hass)
     assert (await _panel_observer_state(hass, hass_ws_client))["level"] != "live"
 
-    set_observer_running(hass, entry, True)
+    set_observer_running(entry, True)
     assert await _panel_observer_state(hass, hass_ws_client) == {
         "state": "RUNNING", "level": "live"}
 
-    # The runtime wins over a drifted bridge copy (forced here, test only).
-    hass.data[DOMAIN][entry.entry_id]["observer_running"] = False
+    # A stale value planted in hass.data is never read (test only).
+    hass.data[DOMAIN] = {entry.entry_id: {"observer_running": False}}
     assert (await _panel_observer_state(hass, hass_ws_client))["state"] == "RUNNING"
 
 
@@ -236,24 +237,32 @@ async def test_panel_toggle_refuses_without_runtime(
         assert resp["error"]["code"] == "update_failed"
         assert fake_observer == calls_before          # observer untouched
         assert runtime.observer_running is (not value)
-        assert hass.data[DOMAIN][entry.entry_id]["observer_running"] is (not value)
+        assert DOMAIN not in hass.data
 
 
 # ── Unload ──────────────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("damage", ["missing", "not_a_dict", "emptied", "no_bucket"])
-async def test_unload_uses_runtime_when_bridge_is_damaged(hass, fake_observer, damage):
+class _Stoppable:
+    stopped = 0
+
+    async def async_stop(self):
+        self.stopped += 1
+
+
+@pytest.mark.parametrize("planted", ["nothing", "not_a_dict", "empty", "stray_objects"])
+async def test_unload_uses_runtime_and_ignores_hass_data(hass, fake_observer, planted):
     entry = await _setup(hass, observer_enabled=True)
     runtime = entry.runtime_data
     assert runtime.sentinel._active is True
-    if damage == "missing":
-        del hass.data[DOMAIN][entry.entry_id]
-    elif damage == "not_a_dict":
-        hass.data[DOMAIN][entry.entry_id] = None
-    elif damage == "emptied":
-        hass.data[DOMAIN][entry.entry_id].clear()
-    else:
-        hass.data.pop(DOMAIN)
+    assert DOMAIN not in hass.data
+    stray = _Stoppable()
+    if planted == "not_a_dict":
+        hass.data[DOMAIN] = {entry.entry_id: None}
+    elif planted == "empty":
+        hass.data[DOMAIN] = {entry.entry_id: {}}
+    elif planted == "stray_objects":
+        hass.data[DOMAIN] = {entry.entry_id: {
+            "sentinel": stray, "observer_running": False}}
 
     with patch.object(runtime.reminder_watcher, "async_stop",
                       wraps=runtime.reminder_watcher.async_stop) as watcher_stop:
@@ -263,6 +272,8 @@ async def test_unload_uses_runtime_when_bridge_is_damaged(hass, fake_observer, d
     assert watcher_stop.await_count == 1
     assert fake_observer == ["start", "stop"]
     assert runtime.observer_running is False
+    assert stray.stopped == 0                # planted objects never touched
+    hass.data.pop(DOMAIN, None)              # test-planted, not Nova's
     _assert_released(hass, entry, runtime)   # sentinel, scheduler, resources
 
 
@@ -282,29 +293,27 @@ async def test_repeated_unload_does_not_repeat_teardown(hass, fake_observer):
 
 
 async def test_unload_after_partial_setup_without_runtime(hass, fake_observer):
-    """Setup failed before the runtime was assigned: nothing to read but
-    whatever the bridge holds (here: nothing, then a stray bridge dict)."""
+    """Setup failed before the runtime was assigned: there is nothing
+    entry-owned to stop, and unload never falls back to hass.data, even when
+    something Nova-shaped was left there."""
     from custom_components.nova import async_unload_entry
     entry = await _add_entry(hass)
     assert not hasattr(entry, "runtime_data")
 
-    await async_unload_entry(hass, entry)          # no bucket, no bridge
+    await async_unload_entry(hass, entry)
     assert fake_observer == []
-
-    class _Stoppable:
-        stopped = 0
-
-        async def async_stop(self):
-            self.stopped += 1
+    assert DOMAIN not in hass.data
 
     sentinel = _Stoppable()
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
-        "sentinel": sentinel, "observer_running": True}
+    stray = {"sentinel": sentinel, "observer_running": True}
+    hass.data[DOMAIN] = {entry.entry_id: stray}
     await async_unload_entry(hass, entry)
-    assert sentinel.stopped == 1
-    assert fake_observer == ["stop"]
+    await async_unload_entry(hass, entry)          # repeated: still safe
+    assert sentinel.stopped == 0
+    assert fake_observer == []
     assert not hasattr(entry, "runtime_data")
-    assert entry.entry_id not in hass.data.get(DOMAIN, {})
+    # Not Nova's: left exactly as planted, neither read nor removed.
+    assert hass.data[DOMAIN] == {entry.entry_id: stray}
 
 
 # ── Reload ──────────────────────────────────────────────────────────────────

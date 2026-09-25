@@ -84,7 +84,8 @@ async def _setup(hass, **options):
 async def test_observer_disabled_unload_removes_lockdown_listener(hass, stop_calls):
     from custom_components.nova import cognitive_core
     entry = await _setup(hass)
-    assert hass.data[DOMAIN][entry.entry_id]["observer_running"] is False
+    assert entry.runtime_data.observer_running is False
+    assert DOMAIN not in hass.data
     assert cognitive_core._CORE.alarm_unsub is not None
     listeners_loaded = hass.bus.async_listeners().get("state_changed", 0)
 
@@ -104,7 +105,8 @@ async def test_observer_enabled_unload_stops_core_once(hass, stop_calls):
 
     with patch.object(observer, "start", _fake_start):
         entry = await _setup(hass, observer_enabled=True)
-    assert hass.data[DOMAIN][entry.entry_id]["observer_running"] is True
+    assert entry.runtime_data.observer_running is True
+    assert DOMAIN not in hass.data
 
     with patch.object(observer, "stop", wraps=observer.stop) as obs_stop:
         assert await hass.config_entries.async_unload(entry.entry_id)
@@ -176,7 +178,8 @@ async def test_failed_observer_start_leaves_nothing_behind(hass, stop_calls):
 
     assert result is False
     assert entry.state is ConfigEntryState.SETUP_ERROR
-    assert entry.entry_id not in hass.data.get(DOMAIN, {})
+    assert not hasattr(entry, "runtime_data")
+    assert DOMAIN not in hass.data
     assert not hass.services.has_service(DOMAIN, "test_routing")
     assert not hass.services.has_service(DOMAIN, "analyze_camera")
     assert not identity.has_voice_provider()
