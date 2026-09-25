@@ -483,7 +483,7 @@ def _get_onboarding_state(hass: HomeAssistant, entry, current_notify: str) -> di
          "hint": "On HA OS/Supervised Nova installs the voice stack for you — or just talk to it in chat.",
          "done": has_voice},
         {"id": "banter", "label": "Pick a personality level",
-         "hint": "Plain, dry, or full MCU-JARVIS wit — Settings \u2192 Character.",
+         "hint": "Plain, dry, or full — how much of Nova's quiet wit comes through. Settings \u2192 Character.",
          "jump": "Nova Character", "done": banter_set},
         {"id": "briefings", "label": "Turn on daily briefings",
          "hint": "Morning and evening summaries of weather, calendar, overnight "
@@ -1513,7 +1513,7 @@ PANEL_WRITABLE_KEYS = {
     "searxng_url",               # str: SearXNG base URL when backend=searxng
     "calendar_tight_gap_min",    # int: back-to-back gap flagged as "tight"
     # Persona (v6.51.0)
-    "banter_level",              # int: 0 plain · 1 dry (default) · 2 full MCU wit
+    "banter_level",              # int: 0 plain · 1 dry (default) · 2 full wit
     # Local semantic search via Ollama embeddings (v6.57.0)
     "semantic_search",           # bool: use Ollama embeddings for doc retrieval
     "embed_model",               # str: Ollama embed model (default nomic-embed-text)

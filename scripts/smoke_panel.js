@@ -709,7 +709,7 @@ setTimeout(async () => {
   checks.push(["floor plan editor: Import loads a layout file into the working copy",
     /IMPORTED ROOM/.test(fpeCardNow.textContent)]);
 
-  // Devices on plan (jarvis-aio port, Phase 2): add a device, see its pin,
+  // Devices on plan (Floor Plan Editor Phase 2): add a device, see its pin,
   // save it, remove it, and confirm the opacity slider persists.
   fpeCardNow = sRoot.getElementById("settings-card-floor_plan_editor");
   fpeCardNow.querySelector("#fpnEntInput").value = "camera.front";

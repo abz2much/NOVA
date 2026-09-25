@@ -8,9 +8,9 @@ fixed tool set (and that every mutating tool stays denied even if a profile
 dict were tampered with), the 4-turn cap regardless of what a caller
 requests, that a caller can't smuggle in extra tools via args/objective/
 model output, the deterministic diagnostic instruction, and — the concrete
-gap found by comparing against the upstream jarvis-aio reference — that
-HOMER's effective system prompt does NOT carry the standard prompt's
-unconditional device-control claims.
+gap a directive layered on the standard prompt would leave — that HOMER's
+effective system prompt does NOT carry the standard prompt's unconditional
+device-control claims.
 """
 import json
 
@@ -41,7 +41,7 @@ def test_resolve_profile_case_insensitive(agent, spelling):
     assert resolved[2] == "HOMER"
 
 
-@pytest.mark.parametrize("bogus", ["friday", "FRIDAY", "nonsense", "", "homer2", " "])
+@pytest.mark.parametrize("bogus", ["automator", "AUTOMATOR", "nonsense", "", "homer2", " "])
 def test_resolve_profile_unknown_rejected(agent, bogus):
     assert agent._resolve_profile(bogus) is None
 

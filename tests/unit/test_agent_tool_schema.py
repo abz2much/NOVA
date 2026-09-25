@@ -1,8 +1,8 @@
 """Regression test: schema conversion must stay JSON-serializable even when
 voluptuous_openapi.convert() returns *successfully* but still leaves a
 non-serializable sentinel (UNSUPPORTED / _Unsupported) embedded somewhere
-inside the schema it hands back. This is the actual bug fixed in
-"Fix persistent tool-schema crash, and two hidden JARVIS leftovers"
+inside the schema it hands back. This is the actual bug fixed by the
+persistent tool-schema crash fix
 (agent.py's _json_safe): the try/except around convert() only catches convert()
 *raising*, not convert() succeeding with a broken value buried inside its
 result - that surfaced later, opaquely, as "Object of type _Unsupported is
@@ -65,7 +65,7 @@ def test_json_safe_neutralises_embedded_sentinels():
     json.dumps(out)  # must not raise
     assert out["properties"]["a"] == {"type": "string"}
     # Nova's _json_safe nulls a bad value in place rather than dropping the
-    # key (different from upstream's drop-the-key approach) - either is a
+    # key (rather than dropping the key entirely) - either is a
     # valid fix for "not JSON serializable"; assert Nova's actual contract.
     assert out["properties"]["b"] is None
     assert out["c"] == [1, None, "x"]

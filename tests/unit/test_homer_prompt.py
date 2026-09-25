@@ -1,10 +1,9 @@
 """HOMER's profile-aware system prompt (Phase 7).
 
-The concrete gap found while inspecting the upstream jarvis-aio reference for
-this phase: its own HOMER just prepends a directive on top of the standard
-system prompt, which still unconditionally says "you have tools to control
-devices..." and frames the agent as "Nova/JARVIS... serving this household"
-— contradictory claims for a strictly read-only sub-agent. Nova's HOMER
+The concrete gap this phase closes: simply prepending a directive on top of
+the standard system prompt would still unconditionally say "you have tools
+to control devices..." and frame the agent as the household's steward —
+contradictory claims for a strictly read-only sub-agent. Nova's HOMER
 instead takes a genuinely separate prompt-building branch (run_agent's new
 `profile_directive` param) that never emits those claims. These tests drive
 the REAL run_agent() with a scripted client (same technique as
@@ -55,7 +54,7 @@ async def _capture_system_prompt(agent, monkeypatch, *, profile_directive=None,
 
 _CONTRADICTORY_PHRASES = [
     "You have tools to control devices",
-    "Tony Stark's Nova",
+    "this household's AI steward",
     "## Who you are",
     "When you act, confirm crisply",
 ]
@@ -92,7 +91,7 @@ async def test_normal_agent_prompt_unaffected_when_no_profile(agent, monkeypatch
     everyday conversational path."""
     content = await _capture_system_prompt(agent, monkeypatch, profile_directive=None)
     assert "You have tools to control devices" in content
-    assert "Tony Stark's Nova" in content
+    assert "this household's AI steward" in content
     assert "## Who you are" in content
 
 

@@ -145,7 +145,7 @@ async def test_announce_requests_installed_fallback_quality(tts, bootstrap, fake
 # Issue: tts_use_ha_voice ("use Home Assistant's configured TTS voice") only
 # ever suppressed Nova's own Piper voice option — it never actually changed
 # *which* TTS entity got used, so a user with a cloud voice-clone engine set
-# on their Assist pipeline (e.g. tts.jarvis_jarvis) still got Piper for every
+# on their Assist pipeline (e.g. tts.custom_voice) still got Piper for every
 # proactive announcement, because "auto" always prefers a Piper entity first.
 # resolve_tts_entity() now checks the flag and, when it's on, prefers the
 # preferred Assist pipeline's tts_engine before falling back to the old
@@ -176,17 +176,17 @@ def _install_fake_pipeline(tts_engine: str | None):
 
 def test_resolve_auto_prefers_piper_when_ha_voice_off(tts, fake_hass):
     fake_hass.states.set("tts.piper", "idle")
-    fake_hass.states.set("tts.jarvis_jarvis", "idle")
+    fake_hass.states.set("tts.custom_voice", "idle")
     assert tts.resolve_tts_entity(fake_hass, "auto") == "tts.piper"
 
 
 def test_resolve_auto_uses_pipeline_voice_when_ha_voice_on(tts, fake_hass):
     _set_ha_voice(fake_hass, True)
     fake_hass.states.set("tts.piper", "idle")
-    fake_hass.states.set("tts.jarvis_jarvis", "idle")
-    cleanup = _install_fake_pipeline("tts.jarvis_jarvis")
+    fake_hass.states.set("tts.custom_voice", "idle")
+    cleanup = _install_fake_pipeline("tts.custom_voice")
     try:
-        assert tts.resolve_tts_entity(fake_hass, "auto") == "tts.jarvis_jarvis"
+        assert tts.resolve_tts_entity(fake_hass, "auto") == "tts.custom_voice"
     finally:
         cleanup()
 
@@ -212,5 +212,5 @@ def test_resolve_auto_ha_voice_on_falls_back_when_pipeline_unavailable(tts, fake
 def test_explicit_configured_entity_wins_regardless_of_ha_voice_flag(tts, fake_hass):
     _set_ha_voice(fake_hass, True)
     fake_hass.states.set("tts.google_ai_tts", "idle")
-    fake_hass.states.set("tts.jarvis_jarvis", "idle")
+    fake_hass.states.set("tts.custom_voice", "idle")
     assert tts.resolve_tts_entity(fake_hass, "tts.google_ai_tts") == "tts.google_ai_tts"
