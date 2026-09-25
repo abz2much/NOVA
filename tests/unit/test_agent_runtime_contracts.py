@@ -91,3 +91,55 @@ async def test_homer_prompt_static_sections_unchanged(agent, monkeypatch):
                                   profile_directive=directive)
     assert prompt.startswith(directive)
     assert _static_tail(prompt) == ce.load_fixture("agent_prompts")["homer"]
+
+
+# ── Façade: one object per name, and patches reach the implementation ─────
+
+_OWNED = {
+    "run_agent": "agent_runtime.loop",
+    "_create_provider_with_fallback": "agent_runtime.loop",
+    "_execute_tool": "agent_runtime.dispatcher",
+    "_run_delegated": "agent_runtime.delegation",
+    "_build_home_context": "agent_runtime.context",
+    "_load_learned": "agent_runtime.capabilities.memory",
+    "_LEARN_FILE": "agent_runtime.capabilities.memory",
+    "_VERIFY_SLEEP": "agent_runtime.capabilities.control",
+    "_state_ok": "agent_runtime.capabilities.control",
+    "_verify_control": "agent_runtime.capabilities.control",
+    "NOVA_TOOLS": "agent_runtime.tool_specs",
+    "_TOOL_MAP": "agent_runtime.registry",
+    "_SUBAGENT_DENY": "agent_runtime.grants",
+}
+
+
+@pytest.mark.parametrize("name,owner", sorted(_OWNED.items()))
+def test_facade_exports_the_owning_object(agent, load, name, owner):
+    assert getattr(agent, name) is getattr(load(owner), name)
+
+
+@pytest.mark.parametrize("name,owner", sorted(_OWNED.items()))
+def test_facade_patch_reaches_the_owner_and_is_restored(agent, load, monkeypatch, name, owner):
+    impl = load(owner)
+    original = getattr(impl, name)
+    marker = object()
+    with monkeypatch.context() as m:
+        m.setattr(agent, name, marker)
+        assert getattr(impl, name) is marker
+    assert getattr(impl, name) is original
+    assert getattr(agent, name) is original
+
+
+async def test_patched_run_agent_is_what_delegation_calls(agent, monkeypatch):
+    seen = {}
+
+    async def fake(hass, **kw):
+        seen.update(kw)
+        return "sub-result"
+
+    monkeypatch.setattr(agent, "run_agent", fake)
+    out = await agent._run_delegated(
+        FakeHass(), {"objective": "check", "capability": "home_state"},
+        persona="p", provider_name="x", api_key="", model="m", base_url=None,
+        config={}, depth=0)
+    assert json.loads(out)["result"] == "sub-result"
+    assert seen["depth"] == 1

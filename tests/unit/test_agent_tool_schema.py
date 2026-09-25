@@ -15,7 +15,10 @@ two miss - "convert() succeeds but hands back a poisoned schema".
 import json
 from pathlib import Path
 
-AGENT = Path(__file__).resolve().parents[2] / "custom_components" / "nova" / "agent.py"
+# _json_safe and _ha_tools_to_openai_format live in the agent package's
+# Home Assistant tool translation module (agent.py re-exports them).
+AGENT = (Path(__file__).resolve().parents[2] / "custom_components" / "nova"
+         / "agent_runtime" / "ha_tools.py")
 
 
 def _load_fns():

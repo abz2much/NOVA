@@ -1,6 +1,8 @@
 {
   "run_agent_signature": "(hass: 'HomeAssistant', *, messages: 'list[dict]', persona: 'str', provider_name: 'str', api_key: 'str', model: 'str', base_url: 'Optional[str]' = None, hass_api: 'Optional[Any]' = None, user_input: 'Optional[Any]' = None, temperature: 'float' = 0.7, config: 'Optional[dict]' = None, allowed_tools: 'Optional[set]' = None, max_iterations: 'Optional[int]' = None, depth: 'int' = 0, profile_directive: 'Optional[str]' = None) -> 'str'",
   "symbols": [
+    "AGENT_PROFILES",
+    "CAPABILITY_GROUPS",
     "MAX_DELEGATION_DEPTH",
     "MAX_TOOL_ITERATIONS",
     "MAX_TOOL_RETRIES",
@@ -16,12 +18,14 @@
     "_HOMER_DIRECTIVE",
     "_LANG_NAMES",
     "_LEARN_FILE",
+    "_LEGACY_CAPABILITY_PROFILE_ALIASES",
     "_LOGGER",
     "_MUTATING_TOOL_NAMES",
     "_N8N_AGENT_TIMEOUT",
     "_N8N_DEFAULT_BASE_URL",
     "_N8N_SSH_TIMEOUT",
     "_SLIM_TOOLS",
+    "_SUBAGENT_DENY",
     "_TOOL_MAP",
     "_TRANSITIONAL",
     "_TurnProviders",
