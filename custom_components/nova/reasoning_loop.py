@@ -185,10 +185,10 @@ def _try_local_reasoning(
     Expanded to cover 95%+ of observer events locally — LLM fallback
     is now rare (genuinely ambiguous multi-factor decisions only).
 
-    A critical hazard sensor (by structured device_class) is decided first,
-    before recent-announcement dedup and the someone-home security shortcut,
-    so an active smoke/gas/leak/CO alarm is always voiced whatever the
-    sensor is called or who is home.
+    A critical hazard sensor is decided first, by structured device_class and
+    then by the name-based fallback, before recent-announcement dedup and the
+    someone-home security shortcut, so an active smoke/gas/leak/CO alarm is
+    always voiced whatever the sensor is called or who is home.
 
     Returns a decision dict or None (fall through to LLM).
     """
@@ -200,12 +200,10 @@ def _try_local_reasoning(
     if hazard is not None:
         return hazard
 
-    # Don't repeat recent announcements
-    for ann in recent_announcements[-5:]:
-        if ann.lower()[:40] in evt[:40]:
-            return {"speak": False, "reason": "recently announced similar event"}
-
     # ── Safety-critical (only when actually TRIGGERED) ───────────────
+    # Name-based fallback for a hazard sensor without a device_class. Like
+    # the structured check above, it runs before recent-announcement dedup,
+    # so an active alarm is never held back by an earlier announcement.
     for kw in ("smoke", "carbon_monoxide", "co_alarm", "gas", "leak",
                "moisture", "flood", "glass_break"):
         if kw in evt:
@@ -225,6 +223,11 @@ def _try_local_reasoning(
                 "message": persona.lead_in(honorific, f"a {kw.replace('_', ' ')} alert{src} — immediate attention required."),
                 "urgency": "critical",
             }
+
+    # Don't repeat recent announcements
+    for ann in recent_announcements[-5:]:
+        if ann.lower()[:40] in evt[:40]:
+            return {"speak": False, "reason": "recently announced similar event"}
 
     # ── Alarm triggered ──────────────────────────────────────────────
     if category == "security" and urgency == "critical":

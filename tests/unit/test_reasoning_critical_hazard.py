@@ -170,3 +170,35 @@ def test_existing_positional_callers_still_work(reasoning_loop):
         "Kitchen Smoke (binary_sensor.kitchen_smoke) changed from off to on",
         "critical", "security", "sir", [], True, from_state="off", to_state="on")
     assert out["speak"] is True and out["urgency"] == "critical"
+
+
+# ── Name-based fallback runs before recent-announcement dedup too ──────────
+
+TEXT_HAZARDS = [
+    ("Kitchen Smoke", "binary_sensor.kitchen_smoke", "smoke"),
+    ("Cellar Leak", "binary_sensor.cellar_leak", "leak"),
+    ("Patio Glass", "binary_sensor.patio_glass_break", "glass break"),
+]
+
+
+@pytest.mark.parametrize("name, eid, word", TEXT_HAZARDS)
+def test_active_text_hazard_is_not_suppressed_by_a_matching_announcement(
+        reasoning_loop, name, eid, word):
+    summary = f"{name} ({eid}) changed from off to on"
+    out = _local(reasoning_loop, "", entity_id=eid, friendly_name=name,
+                 summary=summary, recent=[summary, f"Sir, a {word} alert from {name}."])
+    assert out["speak"] is True and out["urgency"] == "critical"
+    assert word in out["message"]
+
+
+@pytest.mark.parametrize("name, eid, word", TEXT_HAZARDS)
+@pytest.mark.parametrize("state", ["off", "clear", "unavailable", "unknown"])
+@pytest.mark.parametrize("recent", [False, True])
+def test_inactive_text_hazard_stays_silent(reasoning_loop, name, eid, word, state, recent):
+    summary = f"{name} ({eid}) changed from on to {state}"
+    out = _local(reasoning_loop, "", state, from_state="on", entity_id=eid,
+                 friendly_name=name, summary=summary,
+                 recent=[summary] if recent else [])
+    assert out["speak"] is False and out.get("urgency") != "critical"
+    # decided by the hazard check's own active-state test, not by dedup
+    assert "not in triggered state" in out["reason"]
