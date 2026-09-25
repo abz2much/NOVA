@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import time
+from contextlib import AsyncExitStack
 from typing import Any, Optional, Sequence
 
 from homeassistant.core import HomeAssistant
@@ -3503,6 +3504,7 @@ def _build_home_context(hass: HomeAssistant) -> str:
 async def _maybe_summarize(
     hass: HomeAssistant, messages: list[dict],
     provider_name: str, api_key: str, model: str, base_url: Optional[str],
+    *, providers: Optional["_TurnProviders"] = None,
 ) -> list[dict]:
     """Compress old messages when context grows too long."""
     if len(messages) <= SUMMARIZE_THRESHOLD:
@@ -3530,21 +3532,21 @@ async def _maybe_summarize(
     )
 
     try:
-        from .llm_provider import chat_with_activity, create_provider
-        summarizer = await hass.async_add_executor_job(
-            create_provider, provider_name, api_key, model, base_url,
-        )
-        result = await chat_with_activity(
-            hass,
-            summarizer,
-            [{"role": "user", "content": prompt}],
-            role="llm",
-            data_category="text",
-            tools=None,
-            max_tokens=256,
-            temperature=0.3,
-        )
-        summary = result.get("text", "")
+        from .providers.activity import execute_chat
+        async with AsyncExitStack() as stack:
+            turn = providers or _TurnProviders(hass, stack)
+            summarizer = await turn.primary(provider_name, api_key, model, base_url)
+            result = await execute_chat(
+                hass,
+                summarizer,
+                [{"role": "user", "content": prompt}],
+                role="llm",
+                data_category="text",
+                tools=None,
+                max_tokens=256,
+                temperature=0.3,
+            )
+        summary = result.text
         if summary:
             return system_msgs + [
                 {"role": "system", "content": f"[Previous conversation: {summary}]"}
@@ -3556,28 +3558,62 @@ async def _maybe_summarize(
 
 # ── Provider cascade ────────────────────────────────────────────────────────
 
+class _TurnProviders:
+    """The provider clients one agent turn uses.
+
+    Each is leased from the loaded entry's ProviderManager (a client with the
+    primary's configuration is the primary itself, not a second one) or,
+    without a loaded entry, from a transient manager. Everything is released
+    when the turn's exit stack closes, so a turn never leaves a client
+    behind and never loses one to a concurrent configuration change."""
+
+    def __init__(self, hass: HomeAssistant, stack: AsyncExitStack):
+        self._hass = hass
+        self._stack = stack
+        self._manager = None
+
+    async def lease(self, spec, factory):
+        if self._manager is None:
+            from .providers.manager import provider_scope
+            self._manager = await self._stack.enter_async_context(
+                provider_scope(self._hass))
+        return await self._stack.enter_async_context(
+            self._manager.lease(spec, factory=factory))
+
+    async def primary(self, provider_name: str, api_key: str, model: str,
+                      base_url: Optional[str]):
+        from . import llm_provider
+        from .providers.routing import ProviderSpec
+        spec = ProviderSpec(provider=str(provider_name or ""), model=str(model or ""),
+                            api_key=api_key or "", base_url=base_url)
+        return await self.lease(spec, lambda: llm_provider.create_provider(
+            provider_name, api_key, model, base_url))
+
+    async def tier(self, config: dict, tier: str):
+        from . import llm_provider
+        from .providers.routing import tier_spec
+        return await self.lease(tier_spec(config, tier),
+                                lambda: llm_provider.create_tier_provider(config, tier))
+
+
 async def _create_provider_with_fallback(
     hass: HomeAssistant,
     provider_name: str, api_key: str, model: str,
     base_url: Optional[str],
     config: Optional[dict] = None,
+    *,
+    providers: "_TurnProviders",
 ):
-    """Create provider with fallback chain: primary → gemini → error."""
-    from .llm_provider import create_provider, create_tier_provider
-
+    """Create provider with fallback chain: primary → reasoning tier → error."""
     try:
-        return await hass.async_add_executor_job(
-            create_provider, provider_name, api_key, model, base_url,
-        )
+        return await providers.primary(provider_name, api_key, model, base_url)
     except Exception as exc:
         _LOGGER.warning("Primary provider '%s' failed: %s — trying Gemini", provider_name, exc)
 
-    # Fallback to Gemini
+    # Fallback to the reasoning tier
     if config:
         try:
-            return await hass.async_add_executor_job(
-                create_tier_provider, config, "reasoning",
-            )
+            return await providers.tier(config, "reasoning")
         except Exception as exc2:
             _LOGGER.warning("Gemini fallback also failed: %s", exc2)
 
@@ -3655,6 +3691,13 @@ def _ha_tools_to_openai_format(ha_tools: Sequence, custom_serializer=None) -> li
     return tools
 
 
+def _error_text(exc: BaseException) -> str:
+    """The text the failure heuristics below match on: a normalized
+    ProviderError's message plus the provider's original error it chains."""
+    from .providers.errors import error_text
+    return error_text(exc)
+
+
 def _is_tool_format_error(exc: Exception) -> bool:
     """
     True when the LLM was REACHABLE but emitted a malformed tool call.
@@ -3666,7 +3709,7 @@ def _is_tool_format_error(exc: Exception) -> bool:
     or trip the circuit breaker (the cloud is fine; the model just fumbled the
     syntax). The correct response is to retry, not to go offline.
     """
-    s = str(exc).lower()
+    s = _error_text(exc).lower()
     return (
         "tool_use_failed" in s
         or "tool call validation failed" in s
@@ -3680,7 +3723,7 @@ def _is_model_not_found(exc: Exception) -> bool:
     """True when the provider was reachable but the MODEL doesn't exist there
     — a settings mismatch, not connectivity. Retrying the same model anywhere
     is guaranteed to fail; the fallback must switch models (v6.47.1)."""
-    s = str(exc).lower()
+    s = _error_text(exc).lower()
     return ("not_found" in s or "404" in s) and (
         "model" in s or "is not found" in s or "does not exist" in s
     )
@@ -3688,7 +3731,7 @@ def _is_model_not_found(exc: Exception) -> bool:
 
 def _is_connectivity_error(exc: Exception) -> bool:
     """True when the failure looks like the LLM being genuinely unreachable."""
-    s = str(exc).lower()
+    s = _error_text(exc).lower()
     return any(k in s for k in (
         "timeout", "timed out", "connection", "connect", "unreachable",
         "name resolution", "dns", "getaddrinfo",
@@ -3701,7 +3744,7 @@ def _is_too_large(exc: Exception) -> bool:
     """True for a provider 'request too large' / context-length error (an HTTP
     413 or equivalent). Common on size-limited tiers when many entities are
     exposed and the HA tool schemas balloon the request."""
-    s = str(exc).lower()
+    s = _error_text(exc).lower()
     return any(k in s for k in (
         "request too large", "too large for model", "context length",
         "maximum context", "reduce the length", "prompt is too long",
@@ -4000,6 +4043,39 @@ async def run_agent(
     depth: int = 0,
     profile_directive: Optional[str] = None,
 ) -> str:
+    """Run the Nova agentic LLM loop (see _run_agent_turn). Every provider
+    client the turn leases is released when it ends, however it ends."""
+    async with AsyncExitStack() as stack:
+        return await _run_agent_turn(
+            hass, messages=messages, persona=persona,
+            provider_name=provider_name, api_key=api_key, model=model,
+            base_url=base_url, hass_api=hass_api, user_input=user_input,
+            temperature=temperature, config=config,
+            allowed_tools=allowed_tools, max_iterations=max_iterations,
+            depth=depth, profile_directive=profile_directive,
+            providers=_TurnProviders(hass, stack),
+        )
+
+
+async def _run_agent_turn(
+    hass: HomeAssistant,
+    *,
+    messages: list[dict],
+    persona: str,
+    provider_name: str,
+    api_key: str,
+    model: str,
+    base_url: Optional[str] = None,
+    hass_api: Optional[Any] = None,
+    user_input: Optional[Any] = None,
+    temperature: float = 0.7,
+    config: Optional[dict] = None,
+    allowed_tools: Optional[set] = None,
+    max_iterations: Optional[int] = None,
+    depth: int = 0,
+    profile_directive: Optional[str] = None,
+    providers: "_TurnProviders",
+) -> str:
     """
     Run the Nova agentic LLM loop (v5.7.07).
 
@@ -4009,7 +4085,7 @@ async def run_agent(
       - Home context injection
       - Persistent learning
     """
-    from .llm_provider import chat_with_activity
+    from .providers.activity import execute_chat
 
     # Build system prompt with home context
     home_context = await hass.async_add_executor_job(
@@ -4220,6 +4296,7 @@ async def run_agent(
     # Summarize if needed
     full_messages = await _maybe_summarize(
         hass, full_messages, provider_name, api_key, model, base_url,
+        providers=providers,
     )
 
     # Build tool list: custom Nova tools + HA LLM API tools. A scoped
@@ -4234,6 +4311,7 @@ async def run_agent(
     try:
         client = await _create_provider_with_fallback(
             hass, provider_name, api_key, model, base_url, config,
+            providers=providers,
         )
     except RuntimeError as exc:
         return f"I'm having trouble connecting to my reasoning systems, sir. {exc}"
@@ -4242,8 +4320,9 @@ async def run_agent(
     slim_retried = False   # one-shot 413 recovery (drop HA tools + home-state)
 
     async def _chat_agent(message_list, tool_list, max_tokens):
-        """One activity-recorded provider round trip for this agent loop."""
-        return await chat_with_activity(
+        """One activity-recorded provider round trip for this agent loop.
+        Returns the normalized ChatResponse."""
+        return await execute_chat(
             hass,
             client,
             message_list,
@@ -4363,10 +4442,7 @@ async def run_agent(
                     pass
                 try:
                     if config:
-                        from .llm_provider import create_tier_provider
-                        client = await hass.async_add_executor_job(
-                            create_tier_provider, config, "reasoning",
-                        )
+                        client = await providers.tier(config, "reasoning")
                     else:
                         # Without the full config there is no safe way to
                         # resolve another provider's dedicated credential or
@@ -4403,8 +4479,8 @@ async def run_agent(
                         "systems, sir. Please try again in a moment."
                     )
 
-        text = result.get("text", "")
-        tool_calls = result.get("tool_calls", [])
+        text = result.text
+        tool_calls = [call.to_legacy() for call in result.tool_calls]
 
         if not tool_calls:
             return text
@@ -4415,40 +4491,9 @@ async def run_agent(
             ", ".join(tc["name"] for tc in tool_calls),
         )
 
-        # Build assistant message
-        raw_msg = result.get("raw")
-        if raw_msg and hasattr(raw_msg, "tool_calls") and raw_msg.tool_calls:
-            working.append({
-                "role": "assistant",
-                "content": raw_msg.content or "",
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments,
-                        },
-                    }
-                    for tc in raw_msg.tool_calls
-                ],
-            })
-        else:
-            working.append({
-                "role": "assistant",
-                "content": text or "",
-                "tool_calls": [
-                    {
-                        "id": call.get("id", f"call_{i}"),
-                        "type": "function",
-                        "function": {
-                            "name": call["name"],
-                            "arguments": json.dumps(call["args"]),
-                        },
-                    }
-                    for i, call in enumerate(tool_calls)
-                ],
-            })
+        # The assistant turn for the history, built only from the normalized
+        # text and ToolCall values (never from the provider's own objects).
+        working.append(result.assistant_message())
 
         # Execute tools. A search_entities(require_unique=true) call must
         # resolve before any mutating tool call from the SAME batch — if the

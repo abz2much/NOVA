@@ -1,3 +1,25 @@
+## [7.118.0] — provider architecture
+
+**Architecture**
+- Nova's AI provider code now lives in one package: typed request, response, tool, usage, model and discovery models, one normalized error taxonomy, one descriptor registry and factory, and isolated Groq, OpenAI-compatible (OpenAI, Gemini, custom), native Ollama and Anthropic adapters. `llm_provider` remains as a complete compatibility view, so every existing import, signature and response dictionary keeps working.
+- Each loaded entry owns its provider clients. Clients with the same configuration are shared, a client whose settings change is replaced and closed once its in-flight calls finish, and unload and reload close every client exactly once.
+
+**Fixes**
+- Gemini and custom providers now report their own names instead of "openai", so Provider Activity and logs attribute their calls correctly.
+- The vision and camera-reasoning roles now use credentials stored in secrets.yaml and honour the self-hosted endpoint split, so a stale legacy endpoint is no longer used.
+- A custom provider with no endpoint configured now fails with a clear error instead of sending the request to OpenAI.
+- Every AI call is now recorded in Provider Activity: briefings, summaries, scenes, sentinel alerts, camera analysis, package checks, camera coverage and observer reasoning were previously missing.
+- The camera no longer keeps a process-wide cache of provider clients that outlived unload and kept stale clients alive.
+- A model list fetched before a credential or endpoint change can no longer be cached after that change.
+- The assistant builds its tool-call history from Nova's own normalized tool calls instead of provider SDK objects.
+
+**Security**
+- Model discovery and the endpoint test follow redirects one hop at a time, check every destination, and never forward credentials to a different origin. Link-local and cloud metadata addresses are refused; LAN and private servers keep working. Requests are bounded in time, pages, models and response size.
+- Hidden reasoning is stripped from every reply, and the compatibility `raw` value now holds only the visible text and tool calls: never reasoning, credentials, headers, request bodies or images. Provider Activity records only provider, model, role, location, category, success, token counts and latency.
+- Provider errors carry fixed, safe messages that never include credentials, headers or response bodies.
+
+Service, WebSocket, panel and config-flow contracts are unchanged, and no stored data moves.
+
 ## [7.117.0] — automation capability package
 
 **Architecture**

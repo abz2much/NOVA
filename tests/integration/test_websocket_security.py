@@ -128,6 +128,72 @@ async def test_endpoint_test_schema_rejects_browser_supplied_credential(
     assert resp["error"]["code"] == "invalid_format"
 
 
+@pytest.mark.parametrize("endpoint", [
+    "http://169.254.169.254/v1",
+    "http://metadata.google.internal/v1",
+    "http://[fe80::1]:11434",
+])
+async def test_endpoint_test_refuses_metadata_and_link_local_destinations(
+    hass, hass_ws_client, aioclient_mock, endpoint,
+):
+    """A staged endpoint must not reach cloud metadata or link-local
+    addresses; nothing is sent and the safe invalid_endpoint shape returns."""
+    await _setup_nova(hass)
+    client = await hass_ws_client(hass)
+
+    await client.send_json_auto_id({
+        "type": "nova/test_provider_endpoint",
+        "provider": "custom",
+        "endpoint": endpoint,
+    })
+    resp = await client.receive_json()
+
+    assert resp["success"] is True
+    assert resp["result"]["ok"] is False
+    assert resp["result"]["error"] == "invalid_endpoint"
+    assert aioclient_mock.call_count == 0
+
+
+async def test_endpoint_test_keeps_lan_endpoints_working(
+    hass, hass_ws_client, aioclient_mock,
+):
+    await _setup_nova(hass)
+    aioclient_mock.get("http://192.168.1.50:11434/api/tags",
+                       json={"models": [{"name": "llama3:8b"}]})
+    client = await hass_ws_client(hass)
+
+    await client.send_json_auto_id({
+        "type": "nova/test_provider_endpoint",
+        "provider": "ollama",
+        "endpoint": "http://192.168.1.50:11434",
+    })
+    resp = await client.receive_json()
+
+    assert resp["result"]["ok"] is True
+    assert resp["result"]["models"] == ["llama3:8b"]
+
+
+async def test_endpoint_test_redirect_to_metadata_is_refused(
+    hass, hass_ws_client, aioclient_mock,
+):
+    await _setup_nova(hass)
+    aioclient_mock.get("http://192.168.1.50:8000/v1/models", status=302,
+                       headers={"Location": "http://169.254.169.254/latest/meta-data/"})
+    client = await hass_ws_client(hass)
+
+    await client.send_json_auto_id({
+        "type": "nova/test_provider_endpoint",
+        "provider": "custom",
+        "endpoint": "http://192.168.1.50:8000/v1",
+    })
+    resp = await client.receive_json()
+
+    assert resp["result"]["ok"] is False
+    assert resp["result"]["error"] == "invalid_endpoint"
+    assert [str(call[1]) for call in aioclient_mock.mock_calls] == [
+        "http://192.168.1.50:8000/v1/models"]
+
+
 async def test_list_models_schema_rejects_browser_supplied_base_url(
     hass, hass_ws_client,
 ):

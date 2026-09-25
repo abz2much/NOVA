@@ -262,17 +262,18 @@ async def async_briefing(
     system = build_system_prompt(hass, honorific, task)
 
     try:
-        result = await hass.async_add_executor_job(
-            lambda: groq_client.chat(
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": f"Context:\n{context}"},
-                ],
-                max_tokens=1500,
-                temperature=0.6,
-            )
+        from .providers.activity import execute_chat
+        result = await execute_chat(
+            hass, groq_client,
+            [
+                {"role": "system", "content": system},
+                {"role": "user", "content": f"Context:\n{context}"},
+            ],
+            role="briefing", data_category="text",
+            max_tokens=1500,
+            temperature=0.6,
         )
-        briefing_text = (result.get("text") or "").strip()
+        briefing_text = (result.text or "").strip()
     except Exception as exc:
         _LOGGER.error("Nova briefing error: %s", exc)
         briefing_text = ""

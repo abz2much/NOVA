@@ -1,60 +1,28 @@
 """Security and parsing coverage for ``nova/list_models``."""
 from __future__ import annotations
 
-import ast
 import logging
-from pathlib import Path
-from urllib.parse import urlparse
 
 import pytest
 
 
-SRC = Path(__file__).resolve().parents[2] / "custom_components" / "nova" / "websocket.py"
-
-
-def _load_model_discovery_functions():
-    """Load only the pure model discovery helpers from websocket.py."""
-    wanted = {
-        "_CLOUD_MODEL_ENDPOINTS",
-        "_PROVIDER_CREDENTIAL_KEYS",
-        "_SAFE_MODEL_DISCOVERY_ERROR",
-        "_resolve_model_discovery_request",
-        "_parse_model_list",
-        "_parse_model_details",
-        "_log_model_discovery_failure",
-    }
-    tree = ast.parse(SRC.read_text())
-    nodes = []
-    found = set()
-    for node in tree.body:
-        if isinstance(node, (ast.Assign, ast.AnnAssign)):
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            names = {t.id for t in targets if isinstance(t, ast.Name)}
-            if names & wanted:
-                nodes.append(node)
-                found.update(names & wanted)
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in wanted:
-            nodes.append(node)
-            found.add(node.name)
-
-    missing = wanted - found
-    assert not missing, f"model discovery helpers missing: {sorted(missing)}"
-
-    namespace = {
-        "logging": logging,
-        "urlparse": urlparse,
-        "Any": __import__("typing").Any,
-        "resolve_provider_endpoint": lambda config, provider: (
-            config.get(f"{provider}_base_url") or config.get("llm_base_url")
-        ),
-    }
-    exec(compile(ast.Module(body=nodes, type_ignores=[]), str(SRC), "exec"), namespace)
-    return namespace
-
-
 @pytest.fixture
-def discovery():
-    return _load_model_discovery_functions()
+def discovery(load):
+    """The model discovery helpers, now in providers.discovery, under the
+    names this suite has always exercised."""
+    mod = load("providers.discovery")
+
+    def resolve(config, provider):
+        request = mod.resolve_discovery_request(config, provider)
+        return request.url, dict(request.headers)
+
+    return {
+        "_SAFE_MODEL_DISCOVERY_ERROR": mod.SAFE_MODEL_DISCOVERY_ERROR,
+        "_resolve_model_discovery_request": resolve,
+        "_parse_model_list": mod.parse_model_list,
+        "_parse_model_details": mod.parse_model_details,
+        "_log_model_discovery_failure": mod.log_discovery_failure,
+    }
 
 
 @pytest.mark.parametrize(

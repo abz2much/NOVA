@@ -396,3 +396,46 @@ async def test_proactive_audio_objects_are_entry_owned(hass):
     assert fresh.state_ledger is not ledger
     assert fresh.alert_buffer is not buffer
     assert fresh.alert_buffer.ready is True
+
+
+async def test_provider_clients_close_exactly_once_on_unload_and_reload(hass):
+    """Phase 6: the runtime's ProviderManager owns the primary client;
+    unload and reload close it exactly once, and a reload builds a new one."""
+    from custom_components import nova
+    from custom_components.nova import llm_provider
+
+    real_create = llm_provider.create_provider
+    closes: dict[int, int] = {}
+    built = []
+
+    def _create(*a, **kw):
+        client = real_create(*a, **kw)
+        real_close = client.close
+
+        def _counted_close():
+            closes[id(client)] = closes.get(id(client), 0) + 1
+            return real_close()
+
+        client.close = _counted_close
+        built.append(client)
+        return client
+
+    with patch.object(nova, "create_provider", _create):
+        entry = await _setup(hass)
+        first = entry.runtime_data.client
+        manager = entry.runtime_data.providers
+        assert manager.primary is first
+
+        assert await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done()
+        second = entry.runtime_data.client
+        assert second is not first
+        assert closes.get(id(first)) == 1
+        assert manager.closed
+
+        assert await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert closes.get(id(first)) == 1
+    assert closes.get(id(second)) == 1
+    assert len(built) == 2

@@ -483,35 +483,45 @@ async def _trigger_briefing(
         )
         system = build_system_prompt(hass, honorific, task)
 
-        # Generate briefing via LLM
-        from .llm_provider import create_provider, create_tier_provider
-        try:
-            provider = await hass.async_add_executor_job(
-                create_tier_provider, config, "reasoning",
-            )
-        except Exception:
-            from .llm_provider import (
-                resolve_provider_credential,
-                resolve_provider_endpoint,
-            )
-            provider_name = config.get("llm_provider", "groq")
-            provider = await hass.async_add_executor_job(
-                create_provider,
-                provider_name,
-                resolve_provider_credential(config, provider_name),
-                config.get("model", "openai/gpt-oss-120b"),
-                resolve_provider_endpoint(config, provider_name),
-            )
+        # Generate briefing via LLM: the reasoning tier, or the primary
+        # provider when the tier can't be built. The entry's ProviderManager
+        # owns the client (a transient one closes it without a loaded entry).
+        from contextlib import AsyncExitStack
+        from . import llm_provider
+        from .providers.activity import execute_chat
+        from .providers.manager import provider_scope
+        from .providers.routing import ProviderSpec, tier_spec
+        async with AsyncExitStack() as stack:
+            providers = await stack.enter_async_context(provider_scope(hass))
+            try:
+                provider = await stack.enter_async_context(providers.lease(
+                    tier_spec(config, "reasoning"),
+                    factory=lambda: llm_provider.create_tier_provider(config, "reasoning"),
+                ))
+            except Exception:
+                provider_name = config.get("llm_provider", "groq")
+                primary = ProviderSpec(
+                    provider=provider_name,
+                    model=config.get("model", "openai/gpt-oss-120b"),
+                    api_key=llm_provider.resolve_provider_credential(config, provider_name),
+                    base_url=llm_provider.resolve_provider_endpoint(config, provider_name),
+                )
+                provider = await stack.enter_async_context(providers.lease(
+                    primary,
+                    factory=lambda: llm_provider.create_provider(
+                        primary.provider, primary.api_key, primary.model, primary.base_url),
+                ))
 
-        result = await hass.async_add_executor_job(
-            provider.chat,
-            [
-                {"role": "system", "content": system},
-                {"role": "user", "content": context},
-            ],
-            None, 300, 0.6,
-        )
-        briefing_text = result.get("text", "").strip()
+            reply = await execute_chat(
+                hass, provider,
+                [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": context},
+                ],
+                role="briefing", data_category="text",
+                tools=None, max_tokens=300, temperature=0.6,
+            )
+        briefing_text = (reply.text or "").strip()
         if not briefing_text:
             return
 

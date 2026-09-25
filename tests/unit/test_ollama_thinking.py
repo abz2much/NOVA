@@ -7,23 +7,23 @@ an empty answer. Nova asks Ollama to skip thinking and answer directly.
 import re
 
 
-def _src():
-    with open("custom_components/nova/llm_provider.py") as f:
+def _src(name):
+    with open(f"custom_components/nova/providers/{name}.py") as f:
         return f.read()
 
 
 def test_ollama_extra_body_disables_thinking():
-    src = _src()
-    # OllamaProvider._extra_body must send think=False through the request
+    src = _src("ollama")
+    # The native Ollama request must send think=False
     ob = src[src.index("class OllamaProvider"):]
-    ob = ob[:ob.index("class ", 5)] if "class " in ob[5:] else ob
+    ob = ob[:ob.index("\nclass ", 5)] if "\nclass " in ob[5:] else ob
     assert '"think": False' in ob, "OllamaProvider must disable thinking (think=False)"
     assert "num_ctx" in ob      # existing tuning preserved
 
 
 def test_extra_body_is_applied_in_chat():
-    src = _src()
-    # chat() still forwards extra_body to the request
+    src = _src("openai_compatible")
+    # OpenAI-compatible chat still forwards provider extra_body to the request
     assert "extra_body" in src and "_extra_body()" in src
 
 

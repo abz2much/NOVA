@@ -355,6 +355,8 @@ This section summarises how Nova is built and what it does, grouped by area: its
 - Voice model downloads verify file size before installing, and reject a checksum mismatch outright when one is configured; the upstream voice repository is currently access-gated, so no checksum is populated for it today (an optional cosmetic TTS voice — not required for Nova to function).
 - Confirmed intrusion snapshots are stored privately under Nova's config directory and retrieved through the admin-gated websocket command. Temporary notification copies use signed URLs and are deleted after expiry.
 - Every LLM provider (Groq, OpenAI, Anthropic, Gemini, a custom OpenAI-compatible endpoint, and an optional Bearer key for a protected Ollama endpoint) gets its own dedicated credential in Home Assistant's `secrets.yaml`, so a key configured for one provider can never be sent to another — a role (a tier, vision, camera-reasoning) pointed at a different provider than the Main Agent used to be able to receive the Main Agent's key by mistake. Credential values are never returned to any UI, only whether a provider is configured; migrating an existing shared key never guesses which provider it belongs to, and leaves it in place untouched if that can't be determined safely.
+- Model discovery and endpoint tests for self-hosted servers check every redirect before following it, refuse link-local and cloud-metadata destinations, and never forward a credential to a different origin, while LAN and private endpoints keep working. Cloud providers are only ever contacted at their fixed addresses.
+- Every chat request passes through one bounded Provider Activity boundary. Hidden reasoning, SDK response objects, credentials, request bodies, images and headers are kept out of both the activity records and the responses older integrations receive.
 
 **Smarter, less noisy home awareness**
 - Nova reads Home Assistant's already-loaded automation runtime inventory (UI, YAML, packages, and blueprints) at startup and automation reload, not on each event. Automation-trigger contexts are matched to resulting state changes in a bounded in-memory map, so existing automations cannot teach Nova their own output as if it were a new human routine. New suggestions are compared deterministically against the inventory; exact duplicates are suppressed, opaque blueprints/templates and same-target rules are shown as review warnings, and no LLM call or continuous scan is added.
@@ -394,6 +396,7 @@ This section summarises how Nova is built and what it does, grouped by area: its
 - Runtime paths use Home Assistant's reported configuration directory instead of assuming `/config`.
 - A partial setup failure cleans up registered services, listeners, entities, scheduler jobs, and other resources before the setup error is returned.
 - Configuration and database write failures are reported instead of silently treated as successful.
+- Provider clients belong to the loaded Nova runtime. Roles with identical settings share one client, and a client that is replaced, reloaded or unloaded is closed exactly once, after its in-flight work finishes.
 - A PHACC integration suite now tests setup, reload, config flow, websocket permissions, snapshot retrieval, and setup-failure cleanup in CI.
 
 This list grows as real fixes ship — see `CHANGELOG.md` for the full history.

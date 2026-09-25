@@ -15,7 +15,10 @@ import pytest
 
 @pytest.fixture
 def obs(load):
-    return load("observer")
+    mod = load("observer")
+    mod._STATE.reset()
+    yield mod
+    mod._STATE.reset()
 
 
 def _fake_provider(name):
@@ -52,7 +55,8 @@ async def test_refresh_rebuilds_both_tier_providers_when_running(obs, fake_hass,
 
     monkeypatch.setattr(obs, "create_tier_provider", fake_create)
     obs._STATE.running = True
-    obs._STATE.config = {"classifier_provider": "groq"}
+    obs._STATE.config = {"classifier_provider": "groq", "classifier_model": "small",
+                         "reasoning_model": "large"}
     obs._STATE.classifier_provider = _fake_provider("stale-classifier")
     obs._STATE.reasoning_provider = _fake_provider("stale-reasoning")
 
@@ -103,3 +107,18 @@ async def test_refresh_failure_keeps_the_previous_provider_live(obs, fake_hass, 
 
     assert obs._STATE.classifier_provider is stale_classifier
     assert obs._STATE.reasoning_provider is stale_reasoning
+
+
+async def test_tiers_with_the_same_configuration_share_one_client(obs, fake_hass, monkeypatch):
+    """Phase 6: identical tier configurations are pooled by the provider
+    manager, so one client serves both instead of two being built."""
+    calls = []
+    monkeypatch.setattr(obs, "create_tier_provider",
+                        lambda cfg, tier: calls.append(tier) or _fake_provider(tier))
+    obs._STATE.running = True
+    obs._STATE.config = {}
+
+    await obs.refresh_tier_providers(fake_hass, {"classifier_model": "x"})
+
+    assert len(calls) == 1
+    assert obs._STATE.classifier_provider is obs._STATE.reasoning_provider

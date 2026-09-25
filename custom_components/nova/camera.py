@@ -18,6 +18,7 @@ import asyncio
 import base64
 import logging
 import re
+from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -69,95 +70,92 @@ def _cfg_opt(hass: HomeAssistant, key: str, default=None):
     return nova_config.runtime_get(hass, _camera_entry(hass), key, default)
 
 
-_PROVIDER_CACHE: dict = {}
+async def _camera_config(hass: HomeAssistant) -> dict:
+    """The full effective configuration the camera roles resolve their
+    provider from: entry, panel config, the secrets.yaml credential overlay,
+    the self-hosted endpoint migration flag and the live panel values. Built
+    in the executor from a snapshot taken on the event loop; built fresh for
+    every analysis so a changed setting applies to the next one."""
+    from . import nova_config
+    from .runtime import runtime_config_snapshot
+
+    entry = _camera_entry(hass)
+    snapshot = runtime_config_snapshot(entry) if entry is not None else {}
+    return await hass.async_add_executor_job(
+        nova_config.effective_config_with_runtime, entry, snapshot)
 
 
-def _resolve_credential(hass: HomeAssistant, provider: str) -> str:
-    """The credential `provider` should use — its own dedicated field, with
-    the same narrow legacy-shared-key fallback every role uses (Phase 2,
-    v7.107.0). Fixes a cross-provider leak: the vision/camera-reasoning
-    roles used to always send the shared primary key (or its groq_api_key
-    alias) regardless of which provider was actually configured for them —
-    e.g. a Groq primary key being sent to OpenAI if vision_provider=openai."""
-    from .const import PROVIDER_API_KEY_FIELDS
-    from .llm_provider import resolve_provider_credential
+def _client_spec(config: dict, provider: str, model: str):
+    """The ProviderSpec a camera role should use, or None when the camera
+    pipeline should degrade to its fallback client (no provider or model,
+    or a cloud provider without its own credential).
 
-    field = PROVIDER_API_KEY_FIELDS.get(provider)
-    cfg = {
-        "llm_provider": _cfg_opt(hass, "llm_provider", "groq"),
-        "api_key": _cfg_opt(hass, "api_key", ""),
-    }
-    if field:
-        cfg[field] = _cfg_opt(hass, field, "")
-    return resolve_provider_credential(cfg, provider)
+    Each provider gets only its own dedicated credential (with the same
+    narrow legacy fallback every role uses) and its own endpoint; a stale
+    legacy endpoint is ignored once the installation has migrated."""
+    from .providers.registry import descriptor
+    from .providers.routing import (
+        ProviderSpec,
+        resolve_provider_credential,
+        resolve_provider_endpoint,
+    )
 
-
-def _client_settings(hass: HomeAssistant, provider: str) -> dict:
-    """The credential and endpoints _make_client needs for `provider`, read
-    on the event loop. The result is a new dict of plain values, so it is
-    safe to hand to an executor job: the live runtime_config never crosses
-    into the worker thread. Take it right before each job; never reuse it
-    for a later analysis, so that one sees newer panel values."""
-    return {
-        "api_key": _resolve_credential(hass, provider),
-        "ollama_base_url": _cfg_opt(hass, "ollama_base_url", ""),
-        "custom_base_url": _cfg_opt(hass, "custom_base_url", ""),
-        "llm_base_url": _cfg_opt(hass, "llm_base_url", ""),
-    }
+    provider = str(provider or "").strip().lower()
+    desc = descriptor(provider)
+    if desc is None or not model:
+        return None
+    api_key = resolve_provider_credential(config, provider)
+    # Self-hosted endpoints may be intentionally unauthenticated.
+    if not api_key and not desc.self_hosted:
+        return None
+    return ProviderSpec(provider=provider, model=str(model), api_key=api_key,
+                        base_url=resolve_provider_endpoint(config, provider))
 
 
-def _make_client(hass: HomeAssistant, provider: str, model: str, fallback,
-                 settings: dict | None = None):
-    """
-    Create an LLM provider for the given provider/model from current config.
-    Returns `fallback` if creation isn't possible (missing key, error) so the
-    camera pipeline degrades gracefully rather than failing.
+@asynccontextmanager
+async def _camera_client(hass: HomeAssistant, provider: str, model: str,
+                         fallback, *, binding: str):
+    """Hold the client for a camera role (``binding`` is "vision" or
+    "camera_reasoning") for one analysis.
 
-    Successfully-created providers are cached by (provider, model, key, base_url)
-    so repeated camera analyses reuse one client — constructing a provider does
-    blocking SSL setup, so callers run this in an executor (see call sites) and
-    the cache keeps that off the hot path.
+    The loaded entry's ProviderManager owns it: the client stays pooled
+    under ``binding`` between analyses, is replaced (and the old one closed
+    once idle) when the role's configuration changes, and is closed on
+    unload. Without a loaded entry a transient manager closes it when the
+    analysis ends. Yields ``fallback`` when no client can be built, so the
+    camera pipeline degrades gracefully rather than failing."""
+    from . import llm_provider
+    from .providers.manager import provider_scope
 
-    Executor callers must pass `settings` from _client_settings(), taken on
-    the event loop; without it the config is read here, which is only safe
-    on the event loop.
-    """
-    try:
-        if not provider or not model:
-            return fallback
-        if settings is None:
-            settings = _client_settings(hass, provider)
-        api_key = settings.get("api_key", "")
-        # Self-hosted endpoints may be intentionally unauthenticated.
-        if not api_key and provider not in ("ollama", "custom"):
-            return fallback
-        from .llm_provider import create_provider, resolve_provider_endpoint
-        endpoint_config = {
-            "ollama_base_url": settings.get("ollama_base_url", ""),
-            "custom_base_url": settings.get("custom_base_url", ""),
-            "llm_base_url": settings.get("llm_base_url", ""),
-        }
-        base_url = resolve_provider_endpoint(endpoint_config, provider)
-        key = (provider, model, api_key, base_url or "")
-        cached = _PROVIDER_CACHE.get(key)
-        if cached is not None:
-            return cached
-        client = create_provider(provider, api_key, model, base_url)
-        _PROVIDER_CACHE[key] = client
-        return client
-    except Exception as exc:
-        _LOGGER.warning(
-            "camera: could not create %s/%s provider (%s) — using fallback",
-            provider, model, exc,
-        )
-        return fallback
+    async with AsyncExitStack() as stack:
+        client = fallback
+        try:
+            spec = _client_spec(await _camera_config(hass), provider, model)
+            if spec is not None:
+                manager = await stack.enter_async_context(
+                    provider_scope(hass, entry=_camera_entry(hass)))
+                client = await stack.enter_async_context(manager.lease(
+                    spec, binding=binding,
+                    factory=lambda: llm_provider.create_provider(
+                        spec.provider, spec.api_key, spec.model, spec.base_url),
+                ))
+        except Exception as exc:
+            _LOGGER.warning(
+                "camera: could not create %s/%s provider (%s) — using fallback",
+                provider, model, type(exc).__name__,
+            )
+            client = fallback
+        yield client
 
 
 def _vision_model_rejects_images(exc) -> bool:
     """True when the error is the API refusing our image content because the
     configured vision model is text-only — e.g. Groq's
     'messages[1].content must be a string' 400 for gpt-oss / other LLMs."""
-    return "must be a string" in str(exc)
+    from .providers.errors import ProviderErrorKind, error_text
+    if getattr(exc, "kind", None) is ProviderErrorKind.UNSUPPORTED_CAPABILITY:
+        return True
+    return "must be a string" in error_text(exc)
 
 
 def _parse_json_obj(raw: str):
@@ -262,18 +260,19 @@ async def _reason_about_scene(
         + (f"\nRecent home activity:\n{context}" if context and context != "quiet — no notable recent activity" else "")
     )
     try:
-        result = await hass.async_add_executor_job(
-            lambda: reasoning_client.chat(
-                messages=[
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ],
-                max_tokens=220,
-                temperature=0.3,
-                model_override=reasoning_model or None,
-            )
+        from .providers.activity import execute_chat
+        result = await execute_chat(
+            hass, reasoning_client,
+            [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            role="camera_reasoning", data_category="text",
+            max_tokens=220,
+            temperature=0.3,
+            model_override=reasoning_model or None,
         )
-        data = _parse_json_obj((result.get("text") or "").strip())
+        data = _parse_json_obj((result.text or "").strip())
         if isinstance(data, dict):
             speak = str(data.get("speak", "") or "").strip()
             return {
@@ -1054,14 +1053,13 @@ async def async_analyze_camera(
     system = build_system_prompt(hass, honorific, task)
     vision_provider = _cfg_opt(hass, "vision_provider", "groq") or "groq"
     vision_model = _cfg_opt(hass, "vision_model", VISION_MODEL) or VISION_MODEL
-    # Construct off the event loop — creating a provider does blocking SSL setup.
-    vision_client = await hass.async_add_executor_job(
-        _make_client, hass, vision_provider, vision_model, groq_client,
-        _client_settings(hass, vision_provider))
     try:
-        result = await hass.async_add_executor_job(
-            lambda: vision_client.chat(
-                messages=[
+        from .providers.activity import execute_chat
+        async with _camera_client(hass, vision_provider, vision_model, groq_client,
+                                  binding="vision") as vision_client:
+            result = await execute_chat(
+                hass, vision_client,
+                [
                     {"role": "system", "content": system},
                     {
                         "role": "user",
@@ -1075,11 +1073,11 @@ async def async_analyze_camera(
                         ),
                     },
                 ],
-                max_tokens=300,
+                role="vision", data_category="vision",
+                max_tokens=300, temperature=0.7,
                 model_override=vision_model or None,
             )
-        )
-        analysis = result["text"].strip()
+        analysis = result.text.strip()
     except Exception as exc:
         # A text-only model rejects the image content array with a 400 like
         # "messages[1].content must be a string". Surface the real cause and the
@@ -1110,12 +1108,11 @@ async def async_analyze_camera(
     det_type = _guess_detection_type(prompt, analysis)
     rsn_provider = _cfg_opt(hass, "camera_reasoning_provider", "groq") or "groq"
     rsn_model = _cfg_opt(hass, "camera_reasoning_model", "openai/gpt-oss-120b") or "openai/gpt-oss-120b"
-    rsn_client = await hass.async_add_executor_job(
-        _make_client, hass, rsn_provider, rsn_model, groq_client,
-        _client_settings(hass, rsn_provider))
-    judgment = await _reason_about_scene(
-        hass, rsn_client, rsn_model, camera_name, analysis, det_type,
-    )
+    async with _camera_client(hass, rsn_provider, rsn_model, groq_client,
+                              binding="camera_reasoning") as rsn_client:
+        judgment = await _reason_about_scene(
+            hass, rsn_client, rsn_model, camera_name, analysis, det_type,
+        )
     summary = judgment["summary"]
 
     # Surface the review in the Nova Logs tab (this is what the Diagnostics

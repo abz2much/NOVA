@@ -136,16 +136,15 @@ async def detect_on_camera(hass, groq_client, entity_id: str) -> Optional[dict]:
     img = cam._downscale_jpeg(img)
     provider = cam._cfg_opt(hass, "vision_provider", "groq") or "groq"
     model = cam._cfg_opt(hass, "vision_model", cam.VISION_MODEL) or cam.VISION_MODEL
-    # Construct off the event loop — creating a provider does blocking SSL
-    # setup (same reason the two camera.py call sites do this).
-    client = await hass.async_add_executor_job(
-        cam._make_client, hass, provider, model, groq_client,
-        cam._client_settings(hass, provider))
     b64 = base64.b64encode(img).decode()
     try:
-        result = await hass.async_add_executor_job(
-            lambda: client.chat(
-                messages=[
+        from .providers.activity import execute_chat
+        # The same runtime-owned vision client camera.py uses.
+        async with cam._camera_client(hass, provider, model, groq_client,
+                                      binding="vision") as client:
+            result = await execute_chat(
+                hass, client,
+                [
                     {"role": "system", "content": _PKG_PROMPT},
                     {"role": "user", "content": [
                         {"type": "image_url",
@@ -153,11 +152,11 @@ async def detect_on_camera(hass, groq_client, entity_id: str) -> Optional[dict]:
                         {"type": "text", "text": "Classify per the instructions. JSON only."},
                     ]},
                 ],
-                max_tokens=120,
+                role="package", data_category="vision",
+                max_tokens=120, temperature=0.7,
                 model_override=model or None,
             )
-        )
-        text = (result.get("text") or "").strip()
+        text = (result.text or "").strip()
     except Exception as exc:
         _LOGGER.debug("Nova package vision error on %s: %s", entity_id, exc)
         return None

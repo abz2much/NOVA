@@ -550,16 +550,17 @@ class NovaSentinel:
                 "anticipate. Deliver the alert directly, no preamble."
             )
             system = build_system_prompt(self.hass, honorific, task)
-            result = await self.hass.async_add_executor_job(
-                lambda: self._groq.chat(
-                    messages=[
-                        {"role": "system", "content": system},
-                        {"role": "user", "content": prompt},
-                    ],
-                    max_tokens=60,
-                )
+            from .providers.activity import execute_chat
+            result = await execute_chat(
+                self.hass, self._groq,
+                [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": prompt},
+                ],
+                role="sentinel", data_category="text",
+                max_tokens=60, temperature=0.7,
             )
-            return result["text"].strip()
+            return result.text.strip()
         except Exception as exc:  # pylint: disable=broad-except
             _LOGGER.warning("Nova Sentinel LLM error: %s", exc)
             if honorific:

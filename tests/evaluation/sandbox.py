@@ -130,6 +130,20 @@ def _database_module(rec: dict) -> types.ModuleType:
     return mod
 
 
+def _provider_activity_module(rec: dict) -> types.ModuleType:
+    """Provider Activity samples are kept in memory: the activity boundary
+    still runs and records, but nothing is written to disk."""
+    mod = types.ModuleType("jc.provider_activity")
+    mod.db_path_for = lambda hass: "evaluation-in-memory"
+
+    def record(provider, model, role, location, data_category, success, *a, **k):
+        rec["provider_activity"].append((provider, model, role, location, data_category, success))
+
+    mod.record = record
+    mod.list_days = lambda *a, **k: []
+    return mod
+
+
 class Sandbox:
     """Context manager: `with Sandbox(load, scenario) as box: ...`."""
 
@@ -141,7 +155,7 @@ class Sandbox:
         self.satellites = list(satellites or [])
         self.clock = Clock()
         self.records = {"action_log": [], "activity": [], "confirmations": [], "network": [],
-                        "config_probes": []}
+                        "config_probes": [], "provider_activity": []}
         self.violations: list[str] = []
         self._undo: list = []
         self.tmp = ""
@@ -217,6 +231,7 @@ class Sandbox:
         self.setmodule("jc.nova_config", _config_module(self.config))
         self.setmodule("jc.action_log", _action_log_module(rec))
         self.setmodule("jc.database", _database_module(rec))
+        self.setmodule("jc.provider_activity", _provider_activity_module(rec))
 
         # No network, and no /config, for anything evaluated here.
         def _blocked(*a, **k):

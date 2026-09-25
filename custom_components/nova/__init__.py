@@ -166,10 +166,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
     llm_model         = _eff.get("model", "openai/gpt-oss-120b")
     llm_base_url      = resolve_provider_endpoint(_eff, llm_provider_name)
 
+    # Central scheduler for periodic sweeps + a resource registry for one-call,
+    # fail-safe teardown on unload/reload (v7.43.0). Built before the first
+    # provider client so the ProviderManager that owns every client is
+    # registered for teardown from the start.
+    from .scheduler import NovaScheduler
+    from .resources import NovaResources
+    from .automation.attribution import AutomationContextTracker
+    from .providers.manager import ProviderManager
+    from .providers.routing import ProviderSpec
+    resources = NovaResources()
+    providers = ProviderManager(hass)
+    resources.add_async_closeable(providers)
+
     try:
-        llm_client = await hass.async_add_executor_job(
-            create_provider,
-            llm_provider_name, api_key, llm_model, llm_base_url,
+        llm_client = await providers.async_acquire(
+            ProviderSpec(provider=llm_provider_name, model=llm_model,
+                         api_key=api_key, base_url=llm_base_url),
+            binding="primary",
+            factory=lambda: create_provider(
+                llm_provider_name, api_key, llm_model, llm_base_url),
         )
         _LOGGER.info(
             "Nova: LLM provider '%s' initialised (model=%s)",
@@ -177,6 +193,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
         )
     except Exception as exc:
         _LOGGER.error("Nova: LLM provider init failed: %s", exc)
+        await providers.async_close()
         return False
 
     sentinel = NovaSentinel(hass, llm_client, honorific, entry=entry)
@@ -184,13 +201,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
     # Register camera event listeners (nest_event, frigate_event)
     camera_unsubs = register_event_listeners(hass)
 
-    # Central scheduler for periodic sweeps + a resource registry for one-call,
-    # fail-safe teardown on unload/reload (v7.43.0).
-    from .scheduler import NovaScheduler
-    from .resources import NovaResources
-    from .automation.attribution import AutomationContextTracker
     sched = NovaScheduler(hass)
-    resources = NovaResources()
     automation_contexts = AutomationContextTracker()
     resources.add_closeable(automation_contexts)
 
@@ -792,6 +803,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
         scheduler=sched,
         resources=resources,
         automation_contexts=automation_contexts,
+        providers=providers,
     )
     entry.runtime_data = runtime
 
@@ -1081,7 +1093,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> boo
     # Tear down listeners, timers, and the scheduler in one fail-safe call.
     if resources is not None:
         try:
-            summary = resources.close_all()
+            summary = await resources.async_close_all()
             _LOGGER.debug("Nova: resource teardown %s", summary)
         except Exception as exc:
             _LOGGER.debug("Resource teardown note: %s", exc)

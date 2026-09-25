@@ -82,14 +82,19 @@ def test_unset_llm_provider_defaults_to_groq_like_the_rest_of_the_codebase(lp):
 
 # ── create_tier_provider uses the resolver, per-tier, independently ──────────
 
+def _routing():
+    import sys
+    return sys.modules["jc.providers.routing"]
+
+
 def test_create_tier_provider_resolves_each_providers_own_key(lp, monkeypatch):
     seen = []
 
-    def _fake_create(provider_name, api_key, model, base_url=None):
-        seen.append((provider_name, api_key))
+    def _fake_build(spec):
+        seen.append((spec.provider, spec.api_key))
         return object()
 
-    monkeypatch.setattr(lp, "create_provider", _fake_create)
+    monkeypatch.setattr(_routing(), "build_provider", _fake_build)
 
     config = {
         "llm_provider": "groq", "api_key": "GROQ-SECRET",
@@ -111,8 +116,8 @@ def test_create_tier_provider_does_not_leak_primary_key_to_unmigrated_other_prov
     dedicated key of its own yet, gets nothing — not the primary's key."""
     seen = []
     monkeypatch.setattr(
-        lp, "create_provider",
-        lambda provider_name, api_key, model, base_url=None: seen.append((provider_name, api_key)),
+        _routing(), "build_provider",
+        lambda spec: seen.append((spec.provider, spec.api_key)),
     )
     config = {
         "llm_provider": "groq", "api_key": "GROQ-SECRET",

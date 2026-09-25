@@ -12,6 +12,13 @@ def llm(load):
     return load("llm_provider")
 
 
+@pytest.fixture
+def transport():
+    """The native adapter's single network seam."""
+    import sys
+    return sys.modules["jc.providers.ollama"]
+
+
 class _Response:
     def __init__(self, payload):
         self.payload = payload
@@ -22,13 +29,14 @@ class _Response:
     def __exit__(self, *args):
         return False
 
-    def read(self):
+    def read(self, limit=-1):
         if isinstance(self.payload, bytes):
             return self.payload
         return json.dumps(self.payload).encode()
 
 
 def _provider(llm, monkeypatch, response, *, api_key=""):
+    import sys
     captured = {}
 
     def _urlopen(request, timeout):
@@ -36,7 +44,7 @@ def _provider(llm, monkeypatch, response, *, api_key=""):
         captured["timeout"] = timeout
         return _Response(response)
 
-    monkeypatch.setattr(llm, "urlopen", _urlopen)
+    monkeypatch.setattr(sys.modules["jc.providers.ollama"], "_urlopen", _urlopen)
     monkeypatch.setattr(llm.OllamaProvider, "_num_ctx", staticmethod(lambda: 16384))
     return llm.OllamaProvider(
         api_key, "qwen", "http://gpu.local:11434/v1"
@@ -207,24 +215,29 @@ def test_remote_image_url_is_rejected(llm):
         }])
 
 
-def test_http_error_surfaces_status_without_headers(llm, monkeypatch):
+def test_http_error_surfaces_status_without_headers_or_body(llm, monkeypatch, transport):
+    from urllib.error import HTTPError
+
     provider = llm.OllamaProvider(
         "endpoint-secret", "qwen", "http://gpu.local:11434"
     )
 
     def _raise(*args, **kwargs):
-        raise llm.HTTPError(
+        raise HTTPError(
             "http://gpu.local:11434/api/chat",
             401,
             "Unauthorized",
             {},
-            BytesIO(b'{"error":"unauthorized"}'),
+            BytesIO(b'{"error":"unauthorized body text"}'),
         )
 
-    monkeypatch.setattr(llm, "urlopen", _raise)
-    with pytest.raises(RuntimeError, match="Ollama HTTP 401: unauthorized") as exc:
+    monkeypatch.setattr(transport, "_urlopen", _raise)
+    with pytest.raises(RuntimeError, match="ollama: .*HTTP 401") as exc:
         provider.chat([{"role": "user", "content": "hi"}])
+    assert exc.value.kind.value == "authentication_failed"
     assert "endpoint-secret" not in str(exc.value)
+    # Response bodies never reach an error message.
+    assert "unauthorized body text" not in str(exc.value)
 
 
 def test_invalid_json_response_is_rejected(llm, monkeypatch):

@@ -147,8 +147,12 @@ class _ObserverState:
         self.unsub = None
         self.last_seen: dict[str, float] = {}
         self.recent_events: deque = deque(maxlen=50)
+        # Non-owning references to the clients bound as "observer_classifier"
+        # and "observer_reasoning" in the owning ProviderManager.
         self.classifier_provider = None
         self.reasoning_provider = None
+        self.providers = None          # the ProviderManager those bindings live in
+        self.owns_providers = False    # True only when no entry runtime supplied one
         self.hass = None
         self.config: dict = {}
         # The config entry that started the observer. Its NovaRuntime owns
@@ -162,6 +166,10 @@ class _ObserverState:
         self.running = False
         self.unsub = None
         self.entry = None
+        self.classifier_provider = None
+        self.reasoning_provider = None
+        self.providers = None
+        self.owns_providers = False
         self.last_seen.clear()
         self.recent_events.clear()
         self.classifier_timestamps.clear()
@@ -939,6 +947,54 @@ async def _send_notification(message: str, *, urgency: str) -> None:
 
 # ─── Lifecycle ──────────────────────────────────────────────────────────────
 
+_CLASSIFIER_BINDING = "observer_classifier"
+_REASONING_BINDING = "observer_reasoning"
+
+
+def _tier_manager(hass: HomeAssistant, entry):
+    """The ProviderManager that owns the observer's tier clients: the
+    entry's (or the loaded entry's) runtime manager, or — only when the
+    observer runs without a loaded entry — one the observer owns and closes
+    in stop(). Returns (manager, owned)."""
+    from .providers.manager import ProviderManager, entry_manager, runtime_manager
+    manager = entry_manager(entry) if entry is not None else None
+    if manager is None:
+        manager = runtime_manager(hass)
+    if manager is not None:
+        return manager, False
+    return ProviderManager(hass), True
+
+
+def _tier_requests(config: dict) -> dict:
+    from .providers.routing import tier_spec
+    return {
+        _CLASSIFIER_BINDING: (tier_spec(config, "classifier"),
+                              lambda: create_tier_provider(config, "classifier")),
+        _REASONING_BINDING: (tier_spec(config, "reasoning"),
+                             lambda: create_tier_provider(config, "reasoning")),
+    }
+
+
+async def _release_tier_providers() -> None:
+    """Hand the tier clients back: drop the observer's bindings in a shared
+    manager, or close the observer's own manager."""
+    manager = _STATE.providers
+    _STATE.classifier_provider = None
+    _STATE.reasoning_provider = None
+    _STATE.providers = None
+    owned, _STATE.owns_providers = _STATE.owns_providers, False
+    if manager is None:
+        return
+    try:
+        if owned:
+            await manager.async_close()
+        else:
+            await manager.async_release(_CLASSIFIER_BINDING)
+            await manager.async_release(_REASONING_BINDING)
+    except Exception as exc:
+        _LOGGER.debug("Observer: releasing tier providers failed: %s", exc)
+
+
 async def start(hass: HomeAssistant, config: dict, entry=None) -> None:
     """Begin observing. Safe to call multiple times.
 
@@ -972,16 +1028,16 @@ async def start(hass: HomeAssistant, config: dict, entry=None) -> None:
     _STATE.config = config
 
     try:
-        # Both providers instantiate HTTPS clients which load SSL certs from
-        # disk — a blocking operation. Must run in executor, not event loop.
-        _STATE.classifier_provider = await hass.async_add_executor_job(
-            create_tier_provider, config, "classifier"
-        )
-        _STATE.reasoning_provider = await hass.async_add_executor_job(
-            create_tier_provider, config, "reasoning"
-        )
+        # Both clients are built off the event loop (SDK construction loads
+        # SSL certificates from disk) and owned by the entry's ProviderManager.
+        manager, owned = _tier_manager(hass, entry)
+        _STATE.providers, _STATE.owns_providers = manager, owned
+        clients = await manager.async_acquire_all(_tier_requests(config))
+        _STATE.classifier_provider = clients[_CLASSIFIER_BINDING]
+        _STATE.reasoning_provider = clients[_REASONING_BINDING]
     except Exception as exc:
         _LOGGER.error("Observer: failed to create tier providers: %s", exc)
+        await _release_tier_providers()
         return
 
     _STATE.running = True
@@ -1047,15 +1103,20 @@ async def refresh_tier_providers(hass: HomeAssistant, updates: Optional[dict] = 
             if k == "llm_base_url" or k.endswith(("_provider", "_model", "_base_url"))
         }}
 
+    manager = _STATE.providers
+    if manager is None or manager.closed:
+        manager, owned = _tier_manager(hass, _STATE.entry)
+        _STATE.providers, _STATE.owns_providers = manager, owned
     try:
-        classifier = await hass.async_add_executor_job(
-            create_tier_provider, config, "classifier")
-        reasoning = await hass.async_add_executor_job(
-            create_tier_provider, config, "reasoning")
+        # All-or-nothing: the bindings move together only when both new
+        # clients were built; the replaced clients close once idle.
+        clients = await manager.async_acquire_all(_tier_requests(config))
     except Exception as exc:
         _LOGGER.warning("Observer: tier provider refresh failed (keeping the "
                         "previous provider live): %s", exc)
         return
+    classifier = clients[_CLASSIFIER_BINDING]
+    reasoning = clients[_REASONING_BINDING]
 
     _STATE.config = config
     _STATE.classifier_provider = classifier
@@ -1091,6 +1152,7 @@ async def stop() -> None:
         await cognitive_core.stop()
     except Exception:
         pass
+    await _release_tier_providers()
     _STATE.reset()
     _LOGGER.info("Nova Observer stopped")
 
