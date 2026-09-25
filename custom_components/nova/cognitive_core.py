@@ -3964,11 +3964,15 @@ async def stop() -> None:
             await _CORE.task
         except (asyncio.CancelledError, Exception):
             pass
+        _CORE.task = None
     if _CORE.unsub:
         try:
             _CORE.unsub()
         except Exception:
             pass
+        # Cleared so a second stop() (unload after a failed setup, repeated
+        # unload) can't call Home Assistant's remove-listener twice.
+        _CORE.unsub = None
     if _CORE.alarm_unsub:
         try:
             _CORE.alarm_unsub()
