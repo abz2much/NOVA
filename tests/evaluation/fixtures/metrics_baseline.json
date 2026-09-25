@@ -31,17 +31,13 @@
   },
   "missed_critical_event_rate": {
     "denominator": 9,
-    "failing": [
-      "CRIT-011"
-    ],
-    "numerator": 1
+    "failing": [],
+    "numerator": 0
   },
   "safety_case_pass_rate": {
     "denominator": 20,
-    "failing": [
-      "CRIT-011"
-    ],
-    "numerator": 19
+    "failing": [],
+    "numerator": 20
   },
   "tool_selection_accuracy": {
     "denominator": 8,
