@@ -8,7 +8,8 @@ unload path, so these drive async_setup_entry / async_unload_entry for real:
   exactly once whether or not the observer is running,
 * the voice-recognition provider is cleared on unload, and a reload leaves
   exactly the new one,
-* nova.test_routing exists after setup and is gone after unload,
+* nova.test_routing stays registered after unload (Phase 4: services live
+  for the process lifetime) and a call then fails with not_loaded,
 * the bootstrap task is cancelled on unload and a reload doesn't stack a
   second one,
 * repeated unload and a failed observer start leave nothing behind.
@@ -158,7 +159,8 @@ async def test_repeated_unload_is_safe(hass, stop_calls):
     # A second direct unload of the same entry must not raise.
     await async_unload_entry(hass, entry)
     assert cognitive_core._CORE.alarm_unsub is None
-    assert not hass.services.has_service(DOMAIN, "test_routing")
+    # Phase 4: unload never removes Nova's services.
+    assert hass.services.has_service(DOMAIN, "test_routing")
 
 
 async def test_failed_observer_start_leaves_nothing_behind(hass, stop_calls):
@@ -180,8 +182,9 @@ async def test_failed_observer_start_leaves_nothing_behind(hass, stop_calls):
     assert entry.state is ConfigEntryState.SETUP_ERROR
     assert not hasattr(entry, "runtime_data")
     assert DOMAIN not in hass.data
-    assert not hass.services.has_service(DOMAIN, "test_routing")
-    assert not hass.services.has_service(DOMAIN, "analyze_camera")
+    # Phase 4: the services outlive a failed setup; calls are rejected.
+    assert hass.services.has_service(DOMAIN, "test_routing")
+    assert hass.services.has_service(DOMAIN, "analyze_camera")
     assert not identity.has_voice_provider()
     assert _live_bootstrap_tasks() == []
 
@@ -206,12 +209,16 @@ async def test_voice_provider_cleared_on_unload_and_single_after_reload(hass):
     assert not identity.has_voice_provider()
 
 
-async def test_test_routing_registered_then_removed(hass):
+async def test_test_routing_stays_registered_after_unload(hass):
+    from homeassistant.exceptions import ServiceValidationError
     entry = await _setup(hass)
     assert hass.services.has_service(DOMAIN, "test_routing")
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
-    assert not hass.services.has_service(DOMAIN, "test_routing")
+    assert hass.services.has_service(DOMAIN, "test_routing")
+    with pytest.raises(ServiceValidationError) as err:
+        await hass.services.async_call(DOMAIN, "test_routing", {}, blocking=True)
+    assert err.value.translation_key == "not_loaded"
 
 
 async def test_bootstrap_task_cancelled_on_unload_and_not_stacked(hass):

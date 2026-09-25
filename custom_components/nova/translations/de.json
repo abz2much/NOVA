@@ -138,5 +138,22 @@
       "title": "Nova: Ein gespeicherter Anmeldedatensatz muss einem Anbieter zugeordnet werden",
       "description": "Nova hat einen gemeinsamen Anmeldedatensatz aus der Zeit vor separaten Anbieter-Anmeldedaten gefunden, konnte aber nicht feststellen, zu welchem Anbieter er gehört. Es wurde nichts geändert oder gelöscht. Öffnen Sie Einstellungen → Geräte & Dienste → Nova → Konfigurieren → Anmeldedaten und geben Sie ihn beim richtigen Anbieter ein."
     }
+  },
+  "exceptions": {
+    "no_entry": {
+      "message": "Nova ist nicht eingerichtet. Füge die Nova-Integration hinzu und versuche es dann erneut."
+    },
+    "not_loaded": {
+      "message": "Nova ist nicht geladen. Aktiviere die Nova-Integration oder lade sie neu und versuche es dann erneut."
+    },
+    "reloading": {
+      "message": "Nova wird gerade gestartet oder neu geladen. Versuche es gleich noch einmal."
+    },
+    "setup_failed": {
+      "message": "Nova konnte nicht starten. Prüfe das Home-Assistant-Protokoll, behebe das Problem und lade Nova neu."
+    },
+    "multiple_entries": {
+      "message": "Es ist mehr als ein Nova-Eintrag eingerichtet. Entferne den zusätzlichen Eintrag und versuche es dann erneut."
+    }
   }
 }

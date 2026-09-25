@@ -1,8 +1,10 @@
 """Proactive audio + infrastructure audit bridge for the Nova integration.
 
-This module owns the ``nova.speak`` service (area-aware, prosody-shaped TTS
-with media ducking) and the 15-minute infrastructure audit. It is wired into the
-existing integration via two calls from ``__init__.py``:
+This module owns what ``nova.speak`` does (area-aware, prosody-shaped TTS
+with media ducking), what ``nova.process_intent`` routes through, and the
+15-minute infrastructure audit. services.py registers both services once for
+the process lifetime and calls into the helpers here; config-entry setup and
+unload wire the rest via two calls from ``__init__.py``:
 
     async_setup_entry   →  await async_setup_proactive_audio(hass, entry)
     async_unload_entry  →  await async_unload_proactive_audio(hass, entry)
@@ -14,9 +16,9 @@ Ownership: everything here belongs to the loaded Nova config entry. Its
 NovaRuntime holds the intent router, state ledger, entity-lock registry and
 alert buffer (each built lazily on first use, dropped on unload, rebuilt fresh
 on reload) and the audit-in-progress flag. The entry's NovaResources owns the
-audit timers' unsubscribe callbacks. The domain-level nova.speak and
-nova.process_intent handlers resolve the loaded entry's runtime on every call
-and fail with NovaRuntimeUnavailable when there is none.
+audit timers' unsubscribe callbacks. The service handlers in services.py
+resolve the loaded entry's runtime on every call and never build any of these
+objects outside the entry lifecycle.
 """
 from __future__ import annotations
 
@@ -27,7 +29,7 @@ from datetime import timedelta
 import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, ServiceCall, callback
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import (
     area_registry as ar,
@@ -42,8 +44,7 @@ from .boot_guard import AlertBuffer
 from .const import CONF_BROADCAST_GROUP, CONF_HONORIFIC, DEFAULT_HONORIFIC, DOMAIN
 from .diagnostics import FaultLog, InfrastructureTriage
 from .intent import LocalIntentRouter
-from .runtime import NovaRuntime, NovaRuntimeUnavailable, domain_runtime, get_runtime
-from .runtime import lifecycle_runtime
+from .runtime import NovaRuntime, get_runtime, lifecycle_runtime
 from .state_ledger import StateLedger
 from .vision import SpatialContextEngine
 
@@ -403,7 +404,6 @@ async def _run_predictor(hass: HomeAssistant, predictor: PredictiveHabitMatrix) 
             )
 
 
-# ── Service registration ──────────────────────────────────────────────────────
 # ── Entry-owned proactive objects ─────────────────────────────────────────────
 # Each lives on the loaded entry's NovaRuntime, is built on first use, and is
 # dropped by async_unload_proactive_audio, so a reload starts with new ones.
@@ -429,17 +429,6 @@ def _intent_router(hass: HomeAssistant, runtime: NovaRuntime) -> LocalIntentRout
             hass, ledger=_state_ledger(runtime), mutex=_entity_locks(runtime)
         )
     return runtime.intent_router
-
-
-def _service_runtime(hass: HomeAssistant) -> NovaRuntime:
-    """The runtime of the loaded Nova entry, for the domain-level service
-    handlers. Raises NovaRuntimeUnavailable when no entry owns one (a loaded
-    entry that lost it, or a call racing an unload): never builds objects
-    outside an entry."""
-    runtime = domain_runtime(hass)   # raises for a loaded entry without runtime
-    if runtime is None:
-        raise NovaRuntimeUnavailable("Nova is not loaded")
-    return runtime
 
 
 async def _reconcile_state_ledger(
@@ -534,57 +523,14 @@ async def mark_boot_ready(hass: HomeAssistant, runtime: NovaRuntime) -> None:
         _LOGGER.info("Nova ready — replayed %d buffered alert(s)", replayed)
 
 
-async def async_register_services(hass: HomeAssistant) -> None:
-    """Register nova.speak and nova.process_intent. Idempotent — safe across
-    multiple config entries."""
-    if hass.services.has_service(DOMAIN, SERVICE_SPEAK):
-        return
-
-    async def _handle_speak(call: ServiceCall) -> None:
-        runtime = _service_runtime(hass)
-        # Boot guard: buffer until the integration is fully initialised.
-        buffer = _alert_buffer(runtime)
-        if not buffer.ready:
-            buffer.enqueue(dict(call.data))
-            _LOGGER.info("nova.speak buffered — Nova still initialising")
-            return
-        await _dispatch_speak(hass, runtime, call.data)
-
-    async def _handle_process_intent(call: ServiceCall) -> None:
-        phrase: str = call.data["phrase"]
-        target: str = call.data["target_area"]
-        user_id: str | None = call.data.get("user_id")
-
-        runtime = _service_runtime(hass)
-        area_id = _resolve_area_id(hass, target) or target
-        router = _intent_router(hass, runtime)
-
-        # If a confirmation window is open, an affirmative completes the pending
-        # action; otherwise treat the phrase as a fresh local command.
-        handled = await router.handle_voice_response(phrase)
-        if handled.get("handled"):
-            _LOGGER.info("nova.process_intent: confirmed → %s", handled)
-            return
-        result = await router.route(phrase, area_id, user_id=user_id)
-        _LOGGER.info("nova.process_intent: %r → %s", phrase, result)
-
-    hass.services.async_register(DOMAIN, SERVICE_SPEAK, _handle_speak, schema=SPEAK_SCHEMA)
-    hass.services.async_register(
-        DOMAIN, SERVICE_PROCESS_INTENT, _handle_process_intent, schema=PROCESS_INTENT_SCHEMA
-    )
-    _LOGGER.info(
-        "Registered services %s.%s and %s.%s",
-        DOMAIN, SERVICE_SPEAK, DOMAIN, SERVICE_PROCESS_INTENT,
-    )
-
-
 # ── Entry wiring (called from __init__.py) ────────────────────────────────────
 async def async_setup_proactive_audio(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Register the speak service and schedule the infrastructure audit. The
-    audit timers' unsubs go to the entry's NovaResources, which cancels them
-    alongside the integration's other listeners on unload."""
+    """Gate nova.speak on this entry's boot buffer and schedule the
+    infrastructure audit. The services themselves are registered once by
+    services.py. The audit timers' unsubs go to the entry's NovaResources,
+    which cancels them alongside the integration's other listeners on
+    unload."""
     runtime = get_runtime(entry)   # ownership first; setup built it already
-    await async_register_services(hass)
 
     # Boot guard: gate nova.speak until this setup completes (reload-safe).
     _boot_begin(runtime)
@@ -658,19 +604,10 @@ async def async_setup_proactive_audio(hass: HomeAssistant, entry: ConfigEntry) -
 
 
 async def async_unload_proactive_audio(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Remove the services if no other entry needs them, and release this
-    entry's proactive objects. The audit timers are NovaResources' to cancel
+    """Release this entry's proactive objects. The services stay registered
+    (services.py); the audit timers are NovaResources' to cancel
     (async_unload_entry closes it before calling this). Safe to repeat, and
     safe for an entry whose setup never built a runtime."""
-    others = [
-        other for other in hass.config_entries.async_entries(DOMAIN)
-        if other.entry_id != entry.entry_id and lifecycle_runtime(other) is not None
-    ]
-    if not others:
-        for svc in (SERVICE_SPEAK, SERVICE_PROCESS_INTENT):
-            if hass.services.has_service(DOMAIN, svc):
-                hass.services.async_remove(DOMAIN, svc)
-
     runtime = lifecycle_runtime(entry)
     if runtime is not None:
         runtime.intent_router = None

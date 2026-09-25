@@ -8,7 +8,8 @@ async_unload_entry removes. This file proves the pieces with fakes:
 * the lockdown alarm listener ensure_lockdown() registers is removed by stop(),
 * bootstrap.schedule_bootstrap() returns a handle that cancels a pending
   start listener or a running task, and schedules nothing once shut down,
-* every public service Nova registers is documented in services.yaml.
+* every public service Nova registers is documented in services.yaml, and
+  none is removed on unload (Phase 4).
 
 No device is touched: the bus, tasks and alarm sync are all fakes.
 
@@ -285,38 +286,22 @@ def test_bootstrap_handle_is_a_resources_closeable(bootstrap, load):
 # ── services.yaml parity ────────────────────────────────────────────────────
 
 def _registered_services() -> set:
-    """Service names passed to hass.services.async_register(DOMAIN, ...)."""
-    names = set()
-    consts = {}
-    for path in (COMP / "__init__.py", COMP / "proactive_audio.py"):
-        tree = ast.parse(path.read_text())
-        for node in ast.walk(tree):
-            if (isinstance(node, ast.Assign) and len(node.targets) == 1
-                    and isinstance(node.targets[0], ast.Name)
-                    and isinstance(node.value, ast.Constant)
-                    and isinstance(node.value.value, str)):
-                consts[node.targets[0].id] = node.value.value
-        for node in ast.walk(tree):
-            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-                    and node.func.attr == "async_register" and len(node.args) >= 2
-                    and ast.unparse(node.func.value).endswith("services")):
-                arg = node.args[1]
-                if isinstance(arg, ast.Constant):
-                    names.add(arg.value)
-                elif isinstance(arg, ast.Name):
-                    names.add(consts[arg.id])
-    return names
+    """Service names services.py registers (Phase 4: its only registrar)."""
+    import contract_extract
+    return set(contract_extract.registered_services())
 
 
 def _unloaded_services() -> set:
-    """Service names in async_unload_entry's removal tuple."""
-    tree = ast.parse((COMP / "__init__.py").read_text())
-    for node in ast.walk(tree):
-        if isinstance(node, ast.AsyncFunctionDef) and node.name == "async_unload_entry":
-            for sub in ast.walk(node):
-                if isinstance(sub, ast.For) and isinstance(sub.iter, ast.Tuple):
-                    return {e.value for e in sub.iter.elts if isinstance(e, ast.Constant)}
-    return set()
+    """Nova service names any production module removes. Since Phase 4 the
+    services live for the process lifetime, so this is empty."""
+    removed = set()
+    for path in COMP.rglob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "async_remove"
+                    and ast.unparse(node.func.value).endswith("services")):
+                removed.add(ast.unparse(node.args[1]) if len(node.args) > 1 else "?")
+    return removed
 
 
 def test_services_yaml_documents_test_routing():
@@ -332,7 +317,6 @@ def test_every_registered_service_is_in_services_yaml():
     assert registered == set(doc)
 
 
-def test_every_init_service_is_removed_on_unload():
-    # speak / process_intent are removed by proactive_audio's own unload.
-    registered = _registered_services() - {"speak", "process_intent"}
-    assert registered <= _unloaded_services()
+def test_no_service_is_removed_on_unload():
+    """Phase 4: unload, reload and setup failure never remove a service."""
+    assert _unloaded_services() == set()

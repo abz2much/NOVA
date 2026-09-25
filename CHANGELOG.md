@@ -1,3 +1,14 @@
+## [7.116.0] — persistent service registration
+
+**Lifecycle**
+- Nova's 32 services are now registered once, when Home Assistant loads the integration, instead of being added and removed on every config-entry load. They stay registered through reload, unload and setup failure, so automations, scripts and blueprints that call `nova.*` services keep validating.
+- Every service call now checks Nova's state first. When Nova is not set up, not loaded, starting, reloading or failed to set up, the call fails with a clear, translated error and does nothing. Translations are included for all seven languages.
+- Each call uses the loaded entry's current provider client, sentinel and settings, so a reload can never leave a service using an old one.
+- Calls made during that window can no longer rebuild lockdown or proactive-audio objects after unload. `nova.speak` still queues announcements made while Nova is starting and replays them in order once it is ready.
+- `nova.diagnose_doorbell` now reports `nova.analyze_on_event` as ready only when the service is registered and Nova is loaded.
+
+Service names, fields, defaults and safety behaviour are unchanged.
+
 ## [7.115.1] — voice-control and critical-alert safety fixes
 
 **Security**

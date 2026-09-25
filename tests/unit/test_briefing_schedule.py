@@ -8,6 +8,7 @@ import re
 
 COMP = pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova"
 INIT = (COMP / "__init__.py").read_text()
+SERVICES = (COMP / "services.py").read_text()
 WS = (COMP / "websocket.py").read_text()
 BRIEF = (COMP / "briefing.py").read_text()
 PANEL = (COMP / "frontend" / "nova-panel.js").read_text()
@@ -77,19 +78,20 @@ def test_panel_has_manual_trigger():
 
 def test_scheduler_uses_the_real_llm_client_name():
     """The scheduled briefing must reference llm_client (which exists in
-    async_setup_entry), not groq_client (a parameter of _register_services).
+    async_setup_entry), not groq_client (a parameter of the service
+    registration that Phase 4 replaced with per-call runtime.client).
     Referencing the wrong name raised NameError on every scheduled run and was
     swallowed by the handler's except."""
     assert "async_briefing(hass, call, llm_client," in INIT
     # and the wrong name must not appear inside the setup-scope scheduler
-    sched = INIT.split("Scheduled briefings", 1)[1].split("def _register_services", 1)[0]
+    sched = INIT.split("Scheduled briefings", 1)[1].split("async def _async_update_listener", 1)[0]
     assert "groq_client" not in sched
 
 
 def test_briefing_failures_are_logged_visibly():
     """A scheduled briefing that fails must warn, not whisper at debug — the
     debug level is what hid the NameError."""
-    sched = INIT.split("Scheduled briefings", 1)[1].split("def _register_services", 1)[0]
+    sched = INIT.split("Scheduled briefings", 1)[1].split("async def _async_update_listener", 1)[0]
     assert "_LOGGER.warning" in sched
     assert 'briefing failed' in sched
 
@@ -119,9 +121,10 @@ def test_briefing_tts_and_speakers_use_effective_config():
     # Briefing TTS/speaker resolution must read the effective config
     # (nova_config wins), not the empty entry.options — otherwise the
     # announce silently bails before reaching TTS (v6.96.0).
-    tts_body = INIT[INIT.index("def _get_tts"):INIT.index("def _get_speakers")]
-    spk_start = INIT.index("def _get_speakers")
-    spk_body = INIT[spk_start:spk_start + 1400]
+    # Phase 4: both helpers live in services.py (re-exported by __init__).
+    tts_body = SERVICES[SERVICES.index("def _get_tts"):SERVICES.index("def _get_speakers")]
+    spk_start = SERVICES.index("def _get_speakers")
+    spk_body = SERVICES[spk_start:spk_start + 1400]
     assert "effective_config" in tts_body, "_get_tts must use effective_config"
     assert "effective_config" in spk_body, "_get_speakers must use effective_config"
     # and must NOT resolve these keys from bare entry.options anymore

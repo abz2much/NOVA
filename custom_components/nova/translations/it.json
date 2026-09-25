@@ -138,5 +138,22 @@
       "title": "Nova: una credenziale salvata deve essere assegnata a un provider",
       "description": "Nova ha trovato una credenziale condivisa risalente a prima dell'esistenza di credenziali separate per provider, ma non è riuscita a determinare a quale provider appartenga. Non è stato modificato né eliminato nulla. Apri Impostazioni → Dispositivi e servizi → Nova → Configura → Credenziali e inseriscila sotto il provider corretto."
     }
+  },
+  "exceptions": {
+    "no_entry": {
+      "message": "Nova non è configurato. Aggiungi l'integrazione Nova e riprova."
+    },
+    "not_loaded": {
+      "message": "Nova non è caricato. Attiva o ricarica l'integrazione Nova e riprova."
+    },
+    "reloading": {
+      "message": "Nova si sta avviando o ricaricando. Riprova tra un momento."
+    },
+    "setup_failed": {
+      "message": "Nova non è riuscito ad avviarsi. Controlla il registro di Home Assistant, risolvi il problema e ricarica Nova."
+    },
+    "multiple_entries": {
+      "message": "È configurata più di una voce Nova. Rimuovi la voce in eccesso e riprova."
+    }
   }
 }

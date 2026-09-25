@@ -138,5 +138,22 @@
       "title": "Nova: a saved credential needs to be assigned to a provider",
       "description": "Nova found a shared credential from before separate provider credentials existed, but couldn't tell which provider it belongs to (no saved provider, and the key's shape didn't match a known provider). Nothing was changed or deleted — the old credential still works. To finish migrating it, open Settings → Devices & Services → Nova → Configure → Credentials and enter it under the correct provider. This notice clears automatically once that's done."
     }
+  },
+  "exceptions": {
+    "no_entry": {
+      "message": "Nova is not set up. Add the Nova integration, then try again."
+    },
+    "not_loaded": {
+      "message": "Nova is not loaded. Enable or reload the Nova integration, then try again."
+    },
+    "reloading": {
+      "message": "Nova is starting or reloading. Try again in a moment."
+    },
+    "setup_failed": {
+      "message": "Nova could not start. Check the Home Assistant log, fix the problem and reload Nova."
+    },
+    "multiple_entries": {
+      "message": "More than one Nova entry is configured. Remove the extra entry, then try again."
+    }
   }
 }

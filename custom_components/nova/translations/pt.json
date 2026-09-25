@@ -138,5 +138,22 @@
       "title": "Nova: uma credencial guardada precisa de ser atribuída a um fornecedor",
       "description": "O Nova encontrou uma credencial partilhada de antes de existirem credenciais separadas por fornecedor, mas não conseguiu determinar a que fornecedor pertence. Nada foi alterado ou eliminado. Abra Definições → Dispositivos e serviços → Nova → Configurar → Credenciais e introduza-a no fornecedor correto."
     }
+  },
+  "exceptions": {
+    "no_entry": {
+      "message": "O Nova não está configurado. Adicione a integração Nova e tente novamente."
+    },
+    "not_loaded": {
+      "message": "O Nova não está carregado. Ative ou recarregue a integração Nova e tente novamente."
+    },
+    "reloading": {
+      "message": "O Nova está a iniciar ou a recarregar. Tente novamente dentro de momentos."
+    },
+    "setup_failed": {
+      "message": "O Nova não conseguiu iniciar. Verifique o registo do Home Assistant, corrija o problema e recarregue o Nova."
+    },
+    "multiple_entries": {
+      "message": "Existe mais do que uma entrada do Nova configurada. Remova a entrada a mais e tente novamente."
+    }
   }
 }

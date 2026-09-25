@@ -180,10 +180,14 @@ def test_only_the_helper_writes_observer_running():
 
 def test_every_known_writer_uses_the_helper():
     init_src = (COMP / "__init__.py").read_text(encoding="utf-8")
+    svc_src = (COMP / "services.py").read_text(encoding="utf-8")
     ws_src = (COMP / "websocket.py").read_text(encoding="utf-8")
-    # setup enabled + setup failure + observer_start + observer_stop + unload
-    assert init_src.count("set_observer_running(entry, True)") == 3
-    assert init_src.count("set_observer_running(entry, False)") == 2
+    # setup enabled + setup failure, and unload
+    assert init_src.count("set_observer_running(entry, True)") == 2
+    assert init_src.count("set_observer_running(entry, False)") == 1
+    # nova.observer_start and nova.observer_stop (services.py since Phase 4)
+    assert svc_src.count("set_observer_running(entry, True)") == 1
+    assert svc_src.count("set_observer_running(entry, False)") == 1
     # nova/update_config observer_enabled on and off
     assert ws_src.count("set_observer_running(entry, True)") == 1
     assert ws_src.count("set_observer_running(entry, False)") == 1
@@ -212,10 +216,20 @@ def _is_call(node: ast.AST, dotted: str) -> bool:
             and f"{f.value.id}.{f.attr}" == dotted)
 
 
+def _is_ownership_check(stmt: ast.stmt) -> bool:
+    """A bare get_runtime(...) statement, or the Phase 4 service resolver
+    `entry, runtime = async_resolve_loaded(hass)` (which ends in
+    get_runtime and raises before returning without a runtime)."""
+    if isinstance(stmt, ast.Expr) and _is_call(stmt.value, "get_runtime"):
+        return True
+    return (isinstance(stmt, ast.Assign)
+            and _is_call(stmt.value, "async_resolve_loaded"))
+
+
 def _guarded_by_get_runtime(func: ast.AST, target: ast.Call) -> bool:
-    """True when a bare get_runtime(...) statement runs on every path before
-    target: it sits earlier in target's own block or in an enclosing block,
-    not inside a sibling branch."""
+    """True when an ownership check (_is_ownership_check) runs on every path
+    before target: it sits earlier in target's own block or in an enclosing
+    block, not inside a sibling branch."""
     parents = {c: p for p in ast.walk(func) for c in ast.iter_child_nodes(p)}
     node = target
     while node is not func:
@@ -224,15 +238,15 @@ def _guarded_by_get_runtime(func: ast.AST, target: ast.Call) -> bool:
             block = getattr(parent, field, None)
             if isinstance(block, list) and node in block:
                 for stmt in block[:block.index(node)]:
-                    if isinstance(stmt, ast.Expr) and _is_call(stmt.value, "get_runtime"):
+                    if _is_ownership_check(stmt):
                         return True
         node = parent
     return False
 
 
 @pytest.mark.parametrize("path,func,expected", [
-    ("__init__.py", "_observer_start", 1),
-    ("__init__.py", "_observer_stop", 1),
+    ("services.py", "_observer_start", 1),
+    ("services.py", "_observer_stop", 1),
     ("websocket.py", "ws_update_config", 2),   # toggle on and off
 ])
 def test_ownership_is_checked_before_any_observer_change(path, func, expected):

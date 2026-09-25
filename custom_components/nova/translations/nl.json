@@ -138,5 +138,22 @@
       "title": "Nova: een opgeslagen inloggegeven moet aan een provider worden toegewezen",
       "description": "Nova heeft een gedeeld inloggegeven gevonden van vóór aparte providersleutels, maar kon niet vaststellen bij welke provider het hoort. Er is niets gewijzigd of verwijderd. Open Instellingen → Apparaten en diensten → Nova → Configureren → Inloggegevens en voer het in bij de juiste provider."
     }
+  },
+  "exceptions": {
+    "no_entry": {
+      "message": "Nova is niet ingesteld. Voeg de Nova-integratie toe en probeer het opnieuw."
+    },
+    "not_loaded": {
+      "message": "Nova is niet geladen. Schakel de Nova-integratie in of laad deze opnieuw en probeer het dan opnieuw."
+    },
+    "reloading": {
+      "message": "Nova wordt gestart of opnieuw geladen. Probeer het zo meteen opnieuw."
+    },
+    "setup_failed": {
+      "message": "Nova kon niet starten. Controleer het Home Assistant-logboek, los het probleem op en laad Nova opnieuw."
+    },
+    "multiple_entries": {
+      "message": "Er is meer dan één Nova-item ingesteld. Verwijder het extra item en probeer het opnieuw."
+    }
   }
 }
