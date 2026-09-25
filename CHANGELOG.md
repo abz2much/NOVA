@@ -1,3 +1,26 @@
+## [7.115.0] — safer control boundaries and stable architecture contracts
+
+**Security**
+- Home Assistant Assist actions now pass through Nova's own policy classification, confirmation and action-audit boundary before Home Assistant runs them. Home Assistant still applies its own permissions and exposure rules on top.
+- Unknown or malformed Assist actions that could change something fail closed instead of running.
+- Critical safety announcements now bypass the announcement rate limit, entity and category mutes, and a blanket `nova.shush`.
+
+**Lifecycle**
+- Unloading or reloading Nova now cleans up the Observer and Cognitive Core listeners, lockdown runtime references, the voice-recognition provider, every Nova service and pending bootstrap work.
+- A reload builds lockdown from the current Home Assistant instance and configuration instead of reusing stale state.
+
+**Identity and project language**
+- Nova's source, prompts, interface and documentation now describe Nova directly, in its own identity and persona. The neutral MIT attribution and the LICENSE are unchanged.
+
+**Contract foundation**
+- Public services, WebSocket commands, configuration keys, agent tool schemas, storage identities, the conversation entity's identity and the panel/backend boundary are now pinned by deterministic characterization fixtures and Home Assistant integration tests.
+- This protects existing installs through the upcoming runtime-ownership and logging refactors.
+
+**Contract fixes**
+- `nova.analyze_camera` now accepts its documented `frames` (1–6) and `interval` (0.5–5 seconds) fields.
+- `nova.shush` now documents its optional blanket mute, which silences every non-critical announcement; critical safety announcements always pass.
+- The panel's excluded-label field now offers the labels Home Assistant already supplies.
+
 ## [7.114.0] — automation-aware learning
 
 - Nova now inventories every automation Home Assistant has loaded, regardless of whether it came from the UI, YAML, a package, or a blueprint. The Suggestions page separates that read-only inventory from new learned opportunities and automations created by Nova.
