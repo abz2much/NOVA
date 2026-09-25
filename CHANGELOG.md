@@ -13,7 +13,7 @@
 - A suggestion whose install fails stays pending and can be retried; the panel shows why and keeps its buttons. Advisory suggestions are acknowledged as before.
 - Overlap warnings in the panel now name the automation that actually overlaps.
 - Approving a suggestion through the assistant records the real requesting user and device in the action audit log; neither is invented when the request has none.
-- Templated, blueprint and metadata-only automations stay explicitly uncertain. A template is never read as an entity id, and they are never treated as proven duplicates or as proof that a suggestion is new.
+- Templated, blueprint and metadata-only automations stay explicitly uncertain. A template is never read as an entity id, and only a fully inspectable, non-templated automation can help show that a suggestion is new; unrelated references on an opaque automation are never taken as proof. Two automations with identical text, templates included, still count as duplicates.
 - A manual pattern analysis and the scheduled one can no longer run at the same time.
 
 Service, WebSocket, panel and assistant-tool schemas are unchanged. No stored data moves: patterns.db, automations.yaml and their tables keep their paths and shapes.

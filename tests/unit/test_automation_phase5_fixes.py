@@ -596,6 +596,55 @@ def test_d10_unrelated_plain_automation_is_still_new(load):
     assert matcher.classify(_PORCH, [other])["status"] == "new"
 
 
+def test_d10_blueprint_with_unrelated_references_stays_uncertain(load):
+    matcher = load("automation.matching")
+    blueprint = _record("automation.bp_hall",
+                        {"use_blueprint": {"path": "motion_light.yaml",
+                                           "input": {"light": "light.hall"}}},
+                        refs=("light.hall", "binary_sensor.hall_motion"))
+    out = matcher.classify(_PORCH, [blueprint])
+    assert out["status"] == "unknown_overlap"
+    assert out["matches"] == [{"entity_id": "automation.bp_hall",
+                               "name": "automation.bp_hall"}]
+
+
+def test_d10_blueprint_with_only_device_or_area_references_stays_uncertain(load):
+    matcher = load("automation.matching")
+    blueprint = types.SimpleNamespace(
+        entity_id="automation.bp_area", name="Area lights", referenced_entities=(),
+        referenced_devices=("device-porch-light",), referenced_areas=("porch",),
+        raw_config={"use_blueprint": {"path": "area_lights.yaml",
+                                      "input": {"area": "porch"}}})
+    assert matcher.classify(_PORCH, [blueprint])["status"] == "unknown_overlap"
+
+
+def test_d10_metadata_only_record_with_unrelated_references_stays_uncertain(load):
+    matcher = load("automation.matching")
+    meta = _record("automation.meta_hall", None, refs=("light.hall",))
+    assert matcher.classify(_PORCH, [meta])["status"] == "unknown_overlap"
+
+
+def test_d10_templated_record_with_literal_targets_stays_uncertain(load):
+    matcher = load("automation.matching")
+    templated = _record("automation.hall_if", {
+        "triggers": [{"trigger": "template", "value_template": "{{ is_state('sun.sun', 'below_horizon') }}"}],
+        "actions": [{"action": "light.turn_on", "entity_id": "light.hall"}]},
+        refs=("light.hall",))
+    assert matcher.classify(_PORCH, [templated])["status"] == "unknown_overlap"
+
+
+def test_d10_identical_template_text_is_an_exact_duplicate(load):
+    matcher = load("automation.matching")
+    config = {"triggers": [{"trigger": "template",
+                            "value_template": "{{ is_state('sun.sun', 'below_horizon') }}"}],
+              "actions": [{"action": "light.turn_on", "entity_id": "light.porch"}]}
+    existing = _record("automation.porch_dark", {
+        "id": "x", "alias": "Porch after dark", "mode": "single", **config})
+    out = matcher.classify(config, [existing])
+    assert out["status"] == "already_automated"
+    assert out["matches"][0]["entity_id"] == "automation.porch_dark"
+
+
 async def test_d10_installation_never_blocks_on_template_similarity(
         installation, load, audit, tmp_path, monkeypatch):
     path = tmp_path / "automations.yaml"

@@ -125,40 +125,6 @@ def _entity_values(value: Any) -> set[str]:
             if isinstance(item, str) and "." in item and not _is_template(item)}
 
 
-def _templated_targets(config: Any) -> bool:
-    """True when an action's target is a template, so Nova cannot know what
-    the automation controls."""
-    canonical = canonical_config(config)
-    if canonical is None:
-        return False
-    found = False
-
-    def walk(node: Any) -> None:
-        nonlocal found
-        if found:
-            return
-        if isinstance(node, list):
-            for item in node:
-                walk(item)
-            return
-        if not isinstance(node, Mapping):
-            return
-        for key in ("entity_id", "target", "device_id", "area_id"):
-            if _has_template(node.get(key)):
-                found = True
-                return
-        data = node.get("data")
-        if isinstance(data, Mapping) and _has_template(data.get("entity_id")):
-            found = True
-            return
-        for value in node.values():
-            if isinstance(value, (Mapping, list, tuple)):
-                walk(value)
-
-    walk(canonical["actions"])
-    return found
-
-
 def action_effects(config: Any) -> set[tuple[str, str]]:
     """Return simple ``(service, entity_id)`` effects from an automation."""
     canonical = canonical_config(config)
@@ -196,9 +162,10 @@ def action_effects(config: Any) -> set[tuple[str, str]]:
 def classify_result(candidate: Any, records: Iterable[Any]) -> MatchResult:
     """Classify a candidate as new, exact, overlapping, or opaque-related.
 
-    A candidate is "new" only when it is fully comparable and no loaded
-    automation could be doing the same thing; a blueprint, metadata-only or
-    templated automation Nova cannot see into makes the result uncertain."""
+    A candidate is "new" only when it is fully comparable and every loaded
+    automation it is not an exact or concrete-effect match for is fully
+    inspectable and non-templated. Any blueprint, metadata-only or templated
+    automation Nova cannot see into makes the result uncertain."""
     candidate_fp = fingerprint(candidate)
     candidate_effects = action_effects(candidate)
     candidate_targets = {entity for _service, entity in candidate_effects}
@@ -221,14 +188,16 @@ def classify_result(candidate: Any, records: Iterable[Any]) -> MatchResult:
         if candidate_effects and effects and candidate_effects.intersection(effects):
             overlaps.append(label)
             continue
+        # Only a fully inspectable, non-templated automation can help prove a
+        # candidate is new. A blueprint, a metadata-only record or a templated
+        # config is never ruled out: referenced_entities is not proof of
+        # completeness, and device and area references are not resolved here.
+        record_opaque = existing_fp is None or _has_template(canonical_config(raw))
         refs = set(getattr(record, "referenced_entities", ()) or ())
-        record_opaque = existing_fp is None or _templated_targets(raw)
-        if candidate_targets.intersection(refs):
-            (unknown if record_opaque else overlaps).append(label)
-        elif record_opaque and (not refs or _templated_targets(raw)):
-            # Nothing Nova can read says what this automation controls, so it
-            # cannot be ruled out.
+        if record_opaque:
             unknown.append(label)
+        elif candidate_targets.intersection(refs):
+            overlaps.append(label)
 
     if exact:
         return MatchResult(MATCH_EXACT, tuple(exact),
