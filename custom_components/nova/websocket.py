@@ -2138,9 +2138,10 @@ async def ws_update_config(
         if key == "observer_enabled":
             from . import observer as observer_mod
             from .runtime import get_runtime, set_observer_running
+            # Ownership first: never start or stop an unowned observer.
+            get_runtime(entry)
             if value:
                 from . import nova_config
-                get_runtime(entry)   # never start an observer nobody owns
                 observer_config = await hass.async_add_executor_job(
                     nova_config.effective_config_with_runtime, entry, rc)
                 await observer_mod.start(hass, observer_config)

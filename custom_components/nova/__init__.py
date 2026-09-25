@@ -1610,10 +1610,10 @@ def _register_services(
     async def _observer_start(call: ServiceCall) -> None:
         """Start the observer manually (even if config has it disabled)."""
         from . import observer as observer_mod, nova_config as _jc
+        get_runtime(entry)   # ownership first: never start an unowned observer
         # Fresh effective config (data + options + panel, panel winning) so a
         # manual start honors current panel settings, not stale entry data.
         observer_config = await hass.async_add_executor_job(_jc.effective_config, entry)
-        get_runtime(entry)   # never start an observer this entry can't own
         await observer_mod.start(hass, observer_config)
         set_observer_running(hass, entry, True)
         _LOGGER.info("Observer started via service call")
@@ -1679,6 +1679,7 @@ def _register_services(
     async def _observer_stop(call: ServiceCall) -> None:
         """Stop the observer."""
         from . import observer as observer_mod
+        get_runtime(entry)   # ownership first: never stop an unowned observer
         await observer_mod.stop()
         set_observer_running(hass, entry, False)
         _LOGGER.info("Observer stopped via service call")

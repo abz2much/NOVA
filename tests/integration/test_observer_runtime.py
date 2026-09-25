@@ -18,6 +18,7 @@ Drives the real setup, services, WebSocket commands and unload to prove:
 The observer is faked: no state listener, classifier or LLM runs. No device
 is touched: there are no lock, alarm or cover entities here.
 """
+from contextlib import contextmanager
 from unittest.mock import patch
 
 import pytest
@@ -55,14 +56,15 @@ def fake_observer(monkeypatch):
 
 @pytest.fixture
 def no_panel_databases(monkeypatch):
-    """nova/get_panel_data also reads stats from SQLite files at fixed
-    /config paths. Those tiles are not under test here, so stub them and
+    """nova/get_panel_data also reads stats from SQLite and log files at
+    fixed /config paths. Those tiles are not under test here, so stub them and
     keep this file off the real /config."""
     from custom_components.nova import websocket
     for name, value in (("_get_knowledge_stats", {}), ("_get_observer_stats", {}),
                         ("_get_announcements_today", 0), ("_get_memory_stats", {}),
-                        ("_get_suggestions", []), ("_get_goals", [])):
-        monkeypatch.setattr(websocket, name, lambda value=value: value)
+                        ("_get_suggestions", []), ("_get_goals", []),
+                        ("_get_doorbell_training", {})):
+        monkeypatch.setattr(websocket, name, lambda *_a, value=value: value)
 
 
 def _assert_state(hass, entry, running: bool):
@@ -141,20 +143,33 @@ async def test_observer_services_update_runtime(hass, fake_observer):
     assert fake_observer == ["start", "stop", "start"]
 
 
-async def test_observer_start_service_refuses_without_runtime(hass, fake_observer):
-    """A loaded entry that lost its runtime is an internal error: the
-    service fails and never starts an observer nobody owns."""
-    from custom_components.nova.runtime import NovaRuntimeUnavailable
-    entry = await _setup(hass)
+@contextmanager
+def _runtime_missing(entry):
+    """Simulate a loaded entry that lost its runtime, then put it back."""
     runtime = entry.runtime_data
     object.__delattr__(entry, "runtime_data")
     try:
-        with pytest.raises(NovaRuntimeUnavailable):
-            await hass.services.async_call(DOMAIN, "observer_start", {}, blocking=True)
-        assert fake_observer == []
-        assert hass.data[DOMAIN][entry.entry_id]["observer_running"] is False
+        yield runtime
     finally:
         entry.runtime_data = runtime
+
+
+@pytest.mark.parametrize("service,start_running", [
+    ("observer_start", False), ("observer_stop", True)])
+async def test_observer_service_refuses_without_runtime(
+    hass, fake_observer, service, start_running,
+):
+    """A loaded entry that lost its runtime is an internal error: the
+    service fails before it starts or stops the (global) observer."""
+    from custom_components.nova.runtime import NovaRuntimeUnavailable
+    entry = await _setup(hass, observer_enabled=start_running)
+    calls_before = list(fake_observer)
+    with _runtime_missing(entry) as runtime:
+        with pytest.raises(NovaRuntimeUnavailable):
+            await hass.services.async_call(DOMAIN, service, {}, blocking=True)
+        assert fake_observer == calls_before          # observer untouched
+        assert runtime.observer_running is start_running
+        assert hass.data[DOMAIN][entry.entry_id]["observer_running"] is start_running
 
 
 # ── WebSocket ───────────────────────────────────────────────────────────────
@@ -202,6 +217,22 @@ async def test_panel_toggle_updates_runtime(hass, hass_ws_client, fake_observer)
     assert resp["success"], resp
     _assert_state(hass, entry, False)
     assert fake_observer == ["start", "stop"]
+
+
+@pytest.mark.parametrize("value", [True, False])
+async def test_panel_toggle_refuses_without_runtime(
+    hass, hass_ws_client, fake_observer, value,
+):
+    """nova/update_config fails before it starts or stops the observer."""
+    entry = await _setup(hass, observer_enabled=not value)
+    calls_before = list(fake_observer)
+    with _runtime_missing(entry) as runtime:
+        resp = await _update_config(hass, hass_ws_client, "observer_enabled", value)
+        assert resp["success"] is False
+        assert resp["error"]["code"] == "update_failed"
+        assert fake_observer == calls_before          # observer untouched
+        assert runtime.observer_running is (not value)
+        assert hass.data[DOMAIN][entry.entry_id]["observer_running"] is (not value)
 
 
 # ── Unload ──────────────────────────────────────────────────────────────────

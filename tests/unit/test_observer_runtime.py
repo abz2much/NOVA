@@ -216,3 +216,54 @@ def test_panel_status_reads_the_runtime():
     ws_src = (COMP / "websocket.py").read_text(encoding="utf-8")
     assert "observer_running = observer_status(entry)" in ws_src
     assert 'data.get("observer_running"' not in ws_src
+
+
+def _nested(path: pathlib.Path, name: str) -> ast.AST:
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.AsyncFunctionDef | ast.FunctionDef) and node.name == name:
+            return node
+    raise AssertionError(name)
+
+
+def _is_call(node: ast.AST, dotted: str) -> bool:
+    if not isinstance(node, ast.Call):
+        return False
+    f = node.func
+    if isinstance(f, ast.Name):
+        return f.id == dotted
+    return (isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name)
+            and f"{f.value.id}.{f.attr}" == dotted)
+
+
+def _guarded_by_get_runtime(func: ast.AST, target: ast.Call) -> bool:
+    """True when a bare get_runtime(...) statement runs on every path before
+    target: it sits earlier in target's own block or in an enclosing block,
+    not inside a sibling branch."""
+    parents = {c: p for p in ast.walk(func) for c in ast.iter_child_nodes(p)}
+    node = target
+    while node is not func:
+        parent = parents[node]
+        for field in ("body", "orelse", "finalbody"):
+            block = getattr(parent, field, None)
+            if isinstance(block, list) and node in block:
+                for stmt in block[:block.index(node)]:
+                    if isinstance(stmt, ast.Expr) and _is_call(stmt.value, "get_runtime"):
+                        return True
+        node = parent
+    return False
+
+
+@pytest.mark.parametrize("path,func,expected", [
+    ("__init__.py", "_observer_start", 1),
+    ("__init__.py", "_observer_stop", 1),
+    ("websocket.py", "ws_update_config", 2),   # toggle on and off
+])
+def test_ownership_is_checked_before_any_observer_change(path, func, expected):
+    """All four live paths (both services, the panel toggle on and off)
+    resolve the runtime before observer.start()/stop() can run."""
+    fn = _nested(COMP / path, func)
+    changes = [n for n in ast.walk(fn)
+               if _is_call(n, "observer_mod.start") or _is_call(n, "observer_mod.stop")]
+    assert len(changes) == expected
+    for call in changes:
+        assert _guarded_by_get_runtime(fn, call), (func, call.lineno)
