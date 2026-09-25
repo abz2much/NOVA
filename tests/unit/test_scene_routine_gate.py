@@ -36,7 +36,8 @@ def policy(load):
 async def test_run_scene_script_blocked_when_gate_denies(agent, policy, monkeypatch, fake_hass):
     calls = []
 
-    async def fake_confirm_gate(hass, domain, service, entity_id="", action_label=""):
+    async def fake_confirm_gate(hass, domain, service, entity_id="", action_label="",
+                                device_id="", target_name=""):
         calls.append((domain, service, entity_id))
         return False, "asked for spoken confirmation; not yet confirmed", "rejected"
 
@@ -54,7 +55,8 @@ async def test_run_scene_script_blocked_when_gate_denies(agent, policy, monkeypa
 
 
 async def test_run_scene_script_runs_when_gate_allows(agent, policy, monkeypatch, fake_hass):
-    async def fake_confirm_gate(hass, domain, service, entity_id="", action_label=""):
+    async def fake_confirm_gate(hass, domain, service, entity_id="", action_label="",
+                                device_id="", target_name=""):
         return True, "", "not_required"
 
     monkeypatch.setattr(policy, "confirm_gate", fake_confirm_gate)
@@ -67,7 +69,8 @@ async def test_run_scene_script_runs_when_gate_allows(agent, policy, monkeypatch
 
 
 async def test_run_scene_script_uses_trigger_for_automation(agent, policy, monkeypatch, fake_hass):
-    async def fake_confirm_gate(hass, domain, service, entity_id="", action_label=""):
+    async def fake_confirm_gate(hass, domain, service, entity_id="", action_label="",
+                                device_id="", target_name=""):
         return True, "", "not_required"
 
     monkeypatch.setattr(policy, "confirm_gate", fake_confirm_gate)
@@ -90,7 +93,8 @@ async def test_routine_step_blocked_when_confirmation_required_and_denied(
         routines, policy, monkeypatch, fake_hass):
     monkeypatch.setattr(policy, "requires_confirmation", lambda hass, d, s, e="": True)
 
-    async def fake_confirm_gate(hass, domain, service, entity_id="", action_label=""):
+    async def fake_confirm_gate(hass, domain, service, entity_id="", action_label="",
+                                device_id="", target_name=""):
         return False, "not yet confirmed", "rejected"
 
     monkeypatch.setattr(policy, "confirm_gate", fake_confirm_gate)
@@ -137,7 +141,8 @@ async def test_routine_optional_protected_step_skipped_not_errored(
     confirmation is skipped quietly, not counted as a routine failure."""
     monkeypatch.setattr(policy, "requires_confirmation", lambda hass, d, s, e="": True)
 
-    async def fake_confirm_gate(hass, domain, service, entity_id="", action_label=""):
+    async def fake_confirm_gate(hass, domain, service, entity_id="", action_label="",
+                                device_id="", target_name=""):
         return False, "not yet confirmed", "rejected"
 
     monkeypatch.setattr(policy, "confirm_gate", fake_confirm_gate)

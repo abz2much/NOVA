@@ -86,8 +86,18 @@ async def _maybe_summarize(
             )
         summary = result.text
         if summary:
+            # The summary is model-written from user, assistant and tool text
+            # (email, web pages, ...), so it sits in its system slot fenced
+            # as quoted history, never as instructions.
+            from ..prompt_fence import fence
+            fenced = fence(
+                summary,
+                label="EARLIER_CONVERSATION",
+                noun="is a summary of the earlier part of this conversation",
+                callback_noun="summarised history",
+            )
             return system_msgs + [
-                {"role": "system", "content": f"[Previous conversation: {summary}]"}
+                {"role": "system", "content": f"[Previous conversation: {fenced}]"}
             ] + to_keep
     except Exception:
         pass

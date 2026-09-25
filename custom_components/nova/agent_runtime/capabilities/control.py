@@ -9,6 +9,7 @@ from typing import Optional
 
 from homeassistant.core import HomeAssistant
 
+from ..presentation import display_name
 from .home import _exec_get_area_devices
 
 # One logger for the whole agent, named as it always was (…nova.agent), so
@@ -18,7 +19,8 @@ _LOGGER = logging.getLogger(__name__.partition(".agent_runtime")[0] + ".agent")
 
 # ── Tool execution ──────────────────────────────────────────────────────────
 
-async def _exec_control_device(hass: HomeAssistant, args: dict, device_id: Optional[str] = None) -> str:
+async def _exec_control_device(hass: HomeAssistant, args: dict, device_id: Optional[str] = None,
+                               user_id: Optional[str] = None) -> str:
     """Execute a device control action.
 
     Phase 3 status contract (alongside the existing `success`/error shape,
@@ -46,7 +48,9 @@ async def _exec_control_device(hass: HomeAssistant, args: dict, device_id: Optio
     domain = entity_id.split(".")[0]
     svc_data = {"entity_id": entity_id}
     pre_state = state.state
-    fname = state.attributes.get("friendly_name", entity_id)
+    # The name a person hears or reads (friendly name, with the area when
+    # another entity shares it); service calls and policy keep entity_id.
+    fname = display_name(hass, entity_id)
 
     # Action Audit Log (top-level boundary: this tool call IS the user's/
     # system's intended action — it owns request_id for everything it does,
@@ -59,6 +63,7 @@ async def _exec_control_device(hass: HomeAssistant, args: dict, device_id: Optio
     action_id = await hass.async_add_executor_job(
         lambda: action_log.start(
             request_id, "control_device", log_source,
+            requested_by_user_id=user_id or None,
             request_device_id=device_id or None,
             domain=domain, entity_id=entity_id, requested_state=str(value) if value is not None else action,
         )
@@ -84,18 +89,26 @@ async def _exec_control_device(hass: HomeAssistant, args: dict, device_id: Optio
         message = None
         requested_pct = None
 
+        # Every action — the valued ones (brightness, temperature, volume)
+        # included — resolves to one service and passes the same
+        # authorization gate before it runs, so a per-entity protection
+        # override applies whatever the action.
         if action == "set_brightness":
             requested_pct = int(value or 50)
             svc_data["brightness_pct"] = requested_pct
-            await hass.services.async_call("light", "turn_on", svc_data, blocking=True)
+            svc_domain, svc_name = "light", "turn_on"
         elif action == "set_temperature":
             svc_data["temperature"] = float(value or 72)
-            await hass.services.async_call("climate", "set_temperature", svc_data, blocking=True)
+            svc_domain, svc_name = "climate", "set_temperature"
         elif action == "volume_set":
             svc_data["volume_level"] = (value or 50) / 100.0
-            await hass.services.async_call("media_player", "volume_set", svc_data, blocking=True)
+            svc_domain, svc_name = "media_player", "volume_set"
         elif action in action_map:
             svc_domain, svc_name = action_map[action]
+        else:
+            svc_domain = svc_name = None
+
+        if svc_domain is not None:
             # Authorization gate (v7.41.0). Protected actions (lock/unlock,
             # garage, disarm) are voice-confirmed when that's enabled, and the
             # gate FAILS CLOSED: if the confirmation path errors, the action
@@ -110,7 +123,7 @@ async def _exec_control_device(hass: HomeAssistant, args: dict, device_id: Optio
             from ... import policy
             ok, note, approval_result = await policy.confirm_gate(
                 hass, svc_domain, svc_name, entity_id, action.replace("_", " "),
-                device_id=device_id or "")
+                device_id=device_id or "", target_name=display_name(hass, entity_id))
             await hass.async_add_executor_job(
                 lambda: action_log.set_approval(
                     action_id, approval_result,
@@ -124,7 +137,8 @@ async def _exec_control_device(hass: HomeAssistant, args: dict, device_id: Optio
                 return json.dumps({
                     "status": "awaiting_confirmation",
                     "entity_id": entity_id,
-                    "message": note or f"Confirmation required before {action} on {entity_id}.",
+                    "message": note or (f"Confirmation required before "
+                                        f"{action.replace('_', ' ')} on {display_name(hass, entity_id)}."),
                 })
             await hass.services.async_call(svc_domain, svc_name, svc_data, blocking=True)
         else:
@@ -255,7 +269,8 @@ async def _exec_control_device(hass: HomeAssistant, args: dict, device_id: Optio
         })
 
 
-async def _exec_run_scene_script(hass: HomeAssistant, args: dict) -> str:
+async def _exec_run_scene_script(hass: HomeAssistant, args: dict, device_id: Optional[str] = None,
+                                 user_id: Optional[str] = None) -> str:
     """Activate a scene or script."""
     entity_id = args.get("entity_id", "")
     domain = entity_id.split(".")[0] if "." in entity_id else ""
@@ -274,15 +289,15 @@ async def _exec_run_scene_script(hass: HomeAssistant, args: dict) -> str:
     # classification had no enforcement point. Same fail-closed gate as
     # every other actuation path.
     from ... import action_log
-    # Note: this tool's dispatch signature carries no device_id, so voice vs.
-    # chat can't be distinguished here the way _exec_control_device does —
-    # a known, disclosed limitation rather than a guess; source stays "chat"
-    # until device_id is threaded into this call site.
+    from ...voice_confirm import is_voice_satellite_device
     request_id = action_log.new_request_id()
-    label = entity_id.split(".", 1)[-1].replace("_", " ").strip()
+    log_source = "voice" if is_voice_satellite_device(hass, device_id or "") else "chat"
+    label = display_name(hass, entity_id)
     action_id = await hass.async_add_executor_job(
         lambda: action_log.start(
-            request_id, "run_scene_or_script", "chat",
+            request_id, "run_scene_or_script", log_source,
+            requested_by_user_id=user_id or None,
+            request_device_id=device_id or None,
             domain=domain, service=svc, entity_id=entity_id,
         )
     )
@@ -292,7 +307,8 @@ async def _exec_run_scene_script(hass: HomeAssistant, args: dict) -> str:
         lambda: action_log.mark_awaiting_approval(action_id)
     )
     ok_gate, gate_note, approval_result = await policy.confirm_gate(
-        hass, domain, svc, entity_id, f"activate {label}")
+        hass, domain, svc, entity_id, "activate",
+        device_id=device_id or "", target_name=label)
     await hass.async_add_executor_job(
         lambda: action_log.set_approval(
             action_id, approval_result,
@@ -306,7 +322,7 @@ async def _exec_run_scene_script(hass: HomeAssistant, args: dict) -> str:
         return json.dumps({
             "status": "awaiting_confirmation",
             "entity_id": entity_id,
-            "message": gate_note or f"Confirmation required before activating {entity_id}.",
+            "message": gate_note or f"Confirmation required before activating {label}.",
         })
 
     try:
@@ -329,7 +345,8 @@ async def _exec_run_scene_script(hass: HomeAssistant, args: dict) -> str:
                             "entity_id": entity_id})
 
 
-async def _exec_bulk_control(hass: HomeAssistant, args: dict, device_id: Optional[str] = None) -> str:
+async def _exec_bulk_control(hass: HomeAssistant, args: dict, device_id: Optional[str] = None,
+                             user_id: Optional[str] = None) -> str:
     """Control multiple devices in a domain/area."""
     domain = args.get("domain", "")
     action = args.get("action", "")
@@ -397,6 +414,7 @@ async def _exec_bulk_control(hass: HomeAssistant, args: dict, device_id: Optiona
     row_ids = await hass.async_add_executor_job(
         lambda: action_log.start_many(
             request_id, "bulk_control", log_source, targets_for_log,
+            requested_by_user_id=user_id or None,
             request_device_id=device_id or None,
         )
     )
@@ -518,7 +536,8 @@ _EXECUTE_PLAN_ALLOWED_DOMAINS = {
 }
 
 
-async def _exec_execute_plan(hass: HomeAssistant, args: dict, device_id: Optional[str] = None) -> str:
+async def _exec_execute_plan(hass: HomeAssistant, args: dict, device_id: Optional[str] = None,
+                             user_id: Optional[str] = None) -> str:
     """
     Execute a multi-step plan (v5.9.07).
 
@@ -554,6 +573,7 @@ async def _exec_execute_plan(hass: HomeAssistant, args: dict, device_id: Optiona
     row_ids = await hass.async_add_executor_job(
         lambda: action_log.start_many(
             request_id, "execute_plan", log_source, step_targets,
+            requested_by_user_id=user_id or None,
             request_device_id=device_id or None,
         )
     )
@@ -566,7 +586,8 @@ async def _exec_execute_plan(hass: HomeAssistant, args: dict, device_id: Optiona
         service = step.get("service", "")
         entity_id = step.get("entity_id", "")
         extra = step.get("service_data", {}) or {}
-        desc = step.get("description", f"{service} {entity_id}")
+        desc = step.get("description") or (
+            f"{service.replace('_', ' ')} {display_name(hass, entity_id)}".strip())
 
         if not domain or not service or not entity_id:
             results.append({"step": i + 1, "description": desc,
@@ -610,7 +631,7 @@ async def _exec_execute_plan(hass: HomeAssistant, args: dict, device_id: Optiona
         )
         ok_gate, gate_note, approval_result = await policy.confirm_gate(
             hass, domain, service, entity_id, service.replace("_", " "),
-            device_id=device_id or "")
+            device_id=device_id or "", target_name=display_name(hass, entity_id))
         await hass.async_add_executor_job(
             lambda rid=row_id, ar=approval_result: action_log.set_approval(
                 rid, ar, approval_required=(ar != "not_required"))
@@ -737,7 +758,7 @@ async def _verify_control(hass: HomeAssistant, entity_id: str, action: str,
         if ok:
             database.save_activity(
                 entity_id=entity_id, category="verify", urgency="low",
-                message=f"{entity_id} needed a second attempt to {action} — "
+                message=f"{display_name(hass, entity_id)} needed a second attempt to {action} — "
                         f"succeeded on retry.", source=source)
             await hass.async_add_executor_job(
                 lambda: action_log.set_execution(
@@ -747,7 +768,7 @@ async def _verify_control(hass: HomeAssistant, entity_id: str, action: str,
             st = hass.states.get(entity_id)
             database.save_activity(
                 entity_id=entity_id, category="verify", urgency="medium",
-                message=f"{entity_id} did not respond to {action} "
+                message=f"{display_name(hass, entity_id)} did not respond to {action} "
                         f"(state: {st.state if st else 'unknown'}) even after a "
                         f"retry — it may be jammed, obstructed, or offline.",
                 source=source)

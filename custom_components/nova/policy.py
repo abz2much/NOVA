@@ -99,6 +99,16 @@ def _voice_satellite_request(hass, device_id: str) -> bool:
         return True  # fail closed: an unknown answer is treated as "could be voice"
 
 
+# Standing down Nova's own intrusion response lowers the home's security
+# posture as surely as disarming the alarm. It is always confirmed —
+# whatever voice_confirm_enabled says — and, when asked for by voice, only by
+# a phone tap, exactly like _VOICE_BLOCKED_OPENING. (domain "nova" names
+# Nova's own action; it is not a Home Assistant service.)
+_SECURITY_STANDDOWN = {
+    ("nova", "dismiss_intrusion"),
+}
+
+
 def classify(domain: str, service: str, entity_id: str = "") -> Tuple[str, str]:
     """Return ``(risk, reason)`` for an action.
 
@@ -120,6 +130,8 @@ def classify(domain: str, service: str, entity_id: str = "") -> Tuple[str, str]:
 
     if key in _CRITICAL:
         return "critical", f"{dom}.{svc} disarms security"
+    if key in _SECURITY_STANDDOWN:
+        return "critical", f"{dom}.{svc} stands down an active security response"
     if key in _HIGH:
         return "high", f"{dom}.{svc} unlocks a door"
     if key in _MEDIUM:
@@ -162,6 +174,8 @@ def requires_confirmation(hass, domain: str, service: str, entity_id: str = "",
     """
     if (domain, service) in _VOICE_BLOCKED_OPENING and _voice_satellite_request(hass, device_id):
         return True
+    if (domain, service) in _SECURITY_STANDDOWN:
+        return True
     try:
         from . import voice_confirm
         return bool(voice_confirm.action_is_protected(hass, domain, service, entity_id))
@@ -182,6 +196,7 @@ async def confirm_gate(
     entity_id: str = "",
     action_label: str = "",
     device_id: str = "",
+    target_name: str = "",
 ) -> Tuple[bool, str, str]:
     """May this action proceed now? Returns ``(allowed, note, approval_result)``.
 
@@ -206,18 +221,28 @@ async def confirm_gate(
     the fail-closed guarantee: an error anywhere in the confirmation
     subsystem can never let a protected action through.
 
+    ``target_name`` is only for the question a person hears or reads; it
+    never takes part in the decision.
+
     ``device_id`` (v7.87.0): when given and it's a voice satellite, an
     unlock/open action is ALWAYS gated behind a phone tap — never a spoken
     confirmation — regardless of ``voice_confirm_enabled``. See
     _VOICE_BLOCKED_OPENING above for why.
     """
     label = (action_label or service.replace("_", " ")).strip()
-    ent = entity_id.split(".")[-1].replace("_", " ").strip() if entity_id else ""
-    if (domain, service) in _VOICE_BLOCKED_OPENING and _voice_satellite_request(hass, device_id):
+    # The question names the entity the way a person knows it (the caller's
+    # friendly name); the decision itself only ever uses entity_id.
+    ent = (str(target_name).strip() if target_name else
+           (entity_id.split(".")[-1].replace("_", " ").strip() if entity_id else ""))
+    standdown = (domain, service) in _SECURITY_STANDDOWN
+    if (((domain, service) in _VOICE_BLOCKED_OPENING or standdown)
+            and _voice_satellite_request(hass, device_id)):
         try:
             from . import voice_confirm
             question = (f"{label} {ent} was requested by voice — confirm on your phone "
-                       f"to proceed. Voice alone can't unlock or open this.").strip()
+                        f"to proceed. Voice alone can't "
+                        f"{'stand down a security alert' if standdown else 'unlock or open this'}."
+                        ).strip()
             result = await voice_confirm.confirm_via_phone_only_typed(hass, question)
         except Exception as exc:
             _LOGGER.warning("policy: voice-unlock phone-confirm failed for %s.%s (%s); denying",
@@ -242,7 +267,8 @@ async def confirm_gate(
 
     # Does this action need confirmation at all?
     try:
-        protected = bool(voice_confirm.action_is_protected(hass, domain, service, entity_id))
+        protected = standdown or bool(
+            voice_confirm.action_is_protected(hass, domain, service, entity_id))
     except Exception as exc:
         risk, _ = classify(domain, service, entity_id)
         if risk == "low":
@@ -266,4 +292,4 @@ async def confirm_gate(
     if result == "approved":
         return True, "", "approved"
     return False, (f"asked for spoken confirmation before {label} "
-                   f"on {entity_id}; not yet confirmed"), result
+                   f"on {ent or entity_id}; not yet confirmed"), result

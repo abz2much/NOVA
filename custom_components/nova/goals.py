@@ -305,8 +305,10 @@ def build_prompt(goal: dict, *, deadline_passed: bool = False) -> str:
         for p in goal["progress"][-PROGRESS_TAIL:]:
             lines.append(f"  {p['t']}: {p['note']}")
     lines.append(
-        "Advance this goal now: check the relevant states, act where needed, "
-        "and verify. Before you finish you MUST call update_goal(goal_id="
+        "Advance this goal now: check the relevant states and verify what "
+        "you can — a scheduled run can look and report but cannot control "
+        "devices or change anything, so if something needs doing, say what in "
+        "your note. Before you finish you MUST call update_goal(goal_id="
         f"{goal['id']}, ...) exactly once to record what happened — mark step "
         "statuses, add a progress_note, and EITHER set next_check_minutes for "
         "when you should re-engage OR set status='done'/'failed' with a result "
