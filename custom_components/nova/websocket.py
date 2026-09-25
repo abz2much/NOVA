@@ -620,8 +620,8 @@ async def ws_get_panel_data(
         # ── Status flags ────────────────────────────────────────────────────
         observer_running = False
         if entry is not None:
-            data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
-            observer_running = bool(data.get("observer_running", False))
+            from .runtime import observer_status
+            observer_running = observer_status(entry)
 
         bedroom_areas = _entry_opt(entry, CONF_BEDROOM_AREAS, []) or []
         quiet_start = _entry_opt(entry, CONF_OBSERVER_QUIET_START, DEFAULT_OBSERVER_QUIET_START)
@@ -2137,15 +2137,17 @@ async def ws_update_config(
         # If toggling observer, start/stop immediately
         if key == "observer_enabled":
             from . import observer as observer_mod
+            from .runtime import get_runtime, set_observer_running
             if value:
                 from . import nova_config
+                get_runtime(entry)   # never start an observer nobody owns
                 observer_config = await hass.async_add_executor_job(
                     nova_config.effective_config_with_runtime, entry, rc)
                 await observer_mod.start(hass, observer_config)
-                data["observer_running"] = True
+                set_observer_running(hass, entry, True)
             else:
                 await observer_mod.stop()
-                data["observer_running"] = False
+                set_observer_running(hass, entry, False)
 
         if key in ("security_alarm_entity", "lockdown_auto_on_arm"):
             from . import cognitive_core

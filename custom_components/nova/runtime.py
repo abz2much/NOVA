@@ -7,9 +7,13 @@ It names the entry-scoped live objects setup constructs and who owns them:
 * NovaScheduler owns recurring sweeps (and is itself a NovaResources closeable),
 * async_unload_entry owns teardown.
 
-During Phase 3A the old hass.data[DOMAIN][entry_id] dict stays as a
+Until Phase 3C the old hass.data[DOMAIN][entry_id] dict stays as a
 compatibility bridge. build_compat_bridge() fills it with the SAME objects the
 runtime holds, never copies, so readers of either see one live state.
+
+observer_running is a bool, so it cannot be shared by identity. The runtime
+owns it, set_observer_running() is its only writer, and that helper mirrors
+the value into the bridge on every change.
 """
 from __future__ import annotations
 
@@ -47,6 +51,9 @@ class NovaRuntime:
     # panel write through either path is seen by both.
     runtime_config: dict[str, Any] = field(default_factory=dict)
     schema_version: int = CURRENT_SCHEMA_VERSION
+    # Whether this entry started the observer. Change it only through
+    # set_observer_running(), which keeps the bridge in step.
+    observer_running: bool = False
 
 
 # String form keeps the alias lazy: nothing subscripts ConfigEntry at import
@@ -79,10 +86,11 @@ def build_compat_bridge(
 ) -> dict[str, Any]:
     """The hass.data[DOMAIN][entry_id] dict existing readers still use.
 
-    Every runtime-backed value is the runtime's own object. The unsub lists
-    are bridge-only (NovaResources owns the same callables); keys other
-    modules add later (observer_running, proactive-audio unsubs) stay
-    bridge-only too."""
+    Every runtime-backed value is the runtime's own object, except
+    observer_running: a bool copy that set_observer_running() keeps in step.
+    The unsub lists are bridge-only (NovaResources owns the same callables);
+    keys other modules add later (proactive-audio unsubs) stay bridge-only
+    too."""
     bridge: dict[str, Any] = {
         "client":              runtime.client,
         "sentinel":            runtime.sentinel,
@@ -95,10 +103,53 @@ def build_compat_bridge(
         "schema_version":      runtime.schema_version,
         "automation_contexts": runtime.automation_contexts,
         "runtime_config":      runtime.runtime_config,
+        "observer_running":    runtime.observer_running,
     }
     if runtime.automation_inventory is not None:
         bridge["automation_inventory"] = runtime.automation_inventory
     return bridge
+
+
+def lifecycle_runtime(entry: ConfigEntry) -> NovaRuntime | None:
+    """The entry's runtime, or None when it has none.
+
+    Only for lifecycle code where a missing runtime is a valid state: unload
+    after a partial setup, a repeated unload, or an entry that is not loaded.
+    Normal loaded operation uses get_runtime(), which raises instead."""
+    runtime = getattr(entry, "runtime_data", None)
+    return runtime if isinstance(runtime, NovaRuntime) else None
+
+
+def set_observer_running(
+    hass: HomeAssistant, entry: ConfigEntry, running: bool,
+) -> None:
+    """Record whether this entry's observer is running. The only writer.
+
+    NovaRuntime is authoritative. The bridge copy is updated in the same
+    call while the bridge exists, so unmigrated readers never see a stale
+    value. Raises NovaRuntimeUnavailable when the entry has no runtime."""
+    runtime = get_runtime(entry)
+    runtime.observer_running = bool(running)
+    store = hass.data.get(DOMAIN)
+    bridge = store.get(entry.entry_id) if isinstance(store, dict) else None
+    if isinstance(bridge, dict):
+        bridge["observer_running"] = runtime.observer_running
+
+
+def observer_status(entry: ConfigEntry) -> bool:
+    """Whether the entry's observer is running, for status readers.
+
+    An entry that is not loaded (setup still running, failed, or unloaded)
+    has no observer, so a missing runtime reads as False there. A loaded
+    entry must have a runtime: that case raises NovaRuntimeUnavailable
+    rather than reporting a made-up False."""
+    runtime = lifecycle_runtime(entry)
+    if runtime is not None:
+        return runtime.observer_running
+    from homeassistant.config_entries import ConfigEntryState
+    if getattr(entry, "state", None) is ConfigEntryState.LOADED:
+        return get_runtime(entry).observer_running   # raises
+    return False
 
 
 def clear_runtime(hass: HomeAssistant, entry: ConfigEntry) -> None:
