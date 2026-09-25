@@ -1,0 +1,1120 @@
+{
+  "capability_groups": {
+    "environment": [
+      "hazard_report",
+      "weather_forecast"
+    ],
+    "home_state": [
+      "activity_history",
+      "get_area_devices",
+      "get_entity_state",
+      "get_home_summary",
+      "search_entities"
+    ],
+    "inbox": [
+      "calendar_agenda",
+      "read_email"
+    ],
+    "research": [
+      "search_documents",
+      "search_entities",
+      "web_research"
+    ],
+    "scheduling": [
+      "calendar_agenda",
+      "get_home_summary",
+      "read_email",
+      "weather_forecast"
+    ]
+  },
+  "capability_profile_aliases": {
+    "diagnostics": "homer"
+  },
+  "delegation_max_turns": 6,
+  "dispatch_names": [
+    "acknowledge_alert",
+    "activity_history",
+    "approve_suggestion",
+    "ask_executive_assistant",
+    "ask_homelab_infra_agent",
+    "ask_house_manager_agent",
+    "ask_marketing_agent",
+    "ask_security_privacy_agent",
+    "bulk_control",
+    "calendar_agenda",
+    "cognitive_status",
+    "confirm_pending_fact",
+    "connectivity_status",
+    "control_device",
+    "create_goal",
+    "dismiss_intrusion",
+    "dismiss_suggestion",
+    "energy_report",
+    "energy_status",
+    "execute_plan",
+    "get_area_devices",
+    "get_entity_state",
+    "get_home_summary",
+    "hazard_report",
+    "ignore_entity",
+    "ingest_documents",
+    "look_at_camera",
+    "manage_autonomy",
+    "manage_followups",
+    "manage_goals",
+    "read_email",
+    "reject_pending_fact",
+    "remember",
+    "review_suggestions",
+    "root_cause",
+    "run_scene_or_script",
+    "schedule_followup",
+    "search_documents",
+    "search_entities",
+    "set_mode",
+    "solar_status",
+    "system_diagnostics",
+    "unignore_entity",
+    "update_goal",
+    "weather_forecast",
+    "web_research",
+    "wellbeing_context",
+    "who_do_you_see"
+  ],
+  "max_delegation_depth": 1,
+  "max_tool_iterations": 10,
+  "mutating_tools": [
+    "bulk_control",
+    "control_device",
+    "execute_plan",
+    "run_scene_or_script"
+  ],
+  "profiles": {
+    "homer": {
+      "label": "HOMER",
+      "max_turns": 4,
+      "tools": [
+        "activity_history",
+        "cognitive_status",
+        "connectivity_status",
+        "energy_status",
+        "get_entity_state",
+        "root_cause",
+        "search_entities",
+        "system_diagnostics"
+      ]
+    }
+  },
+  "subagent_denied_tools": [
+    "acknowledge_alert",
+    "approve_suggestion",
+    "bulk_control",
+    "control_device",
+    "create_goal",
+    "delegate_task",
+    "dismiss_intrusion",
+    "dismiss_suggestion",
+    "execute_plan",
+    "ignore_entity",
+    "ingest_documents",
+    "manage_autonomy",
+    "manage_followups",
+    "manage_goals",
+    "remember",
+    "review_suggestions",
+    "run_scene_or_script",
+    "schedule_followup",
+    "set_mode",
+    "unignore_entity",
+    "update_goal"
+  ],
+  "tools": {
+    "acknowledge_alert": {
+      "parameters": {
+        "properties": {
+          "reason": {
+            "description": "Optional note.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "required": []
+    },
+    "activity_history": {
+      "parameters": {
+        "properties": {
+          "area": {
+            "description": "Area/room name to look up all entities in (history kind only).",
+            "type": "string"
+          },
+          "entity": {
+            "description": "Entity name or entity_id to look up (e.g. 'front door', 'binary_sensor.garage').",
+            "type": "string"
+          },
+          "hours": {
+            "description": "How many hours back to look (default 24).",
+            "type": "number"
+          },
+          "kind": {
+            "description": "'history' for the device timeline/counts, 'logbook' for the readable narrative.",
+            "enum": [
+              "history",
+              "logbook"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "kind"
+      ]
+    },
+    "approve_suggestion": {
+      "parameters": {
+        "properties": {
+          "suggestion_id": {
+            "description": "Suggestion ID",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "suggestion_id"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "suggestion_id"
+      ]
+    },
+    "ask_executive_assistant": {
+      "parameters": {
+        "properties": {
+          "message": {
+            "description": "What to ask it, stated plainly as if talking to it directly.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "message"
+      ]
+    },
+    "ask_homelab_infra_agent": {
+      "parameters": {
+        "properties": {
+          "message": {
+            "description": "What to ask it, stated plainly as if talking to it directly.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "message"
+      ]
+    },
+    "ask_house_manager_agent": {
+      "parameters": {
+        "properties": {
+          "message": {
+            "description": "What to ask it, stated plainly as if talking to it directly.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "message"
+      ]
+    },
+    "ask_marketing_agent": {
+      "parameters": {
+        "properties": {
+          "message": {
+            "description": "What to ask it, stated plainly as if talking to it directly.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "message"
+      ]
+    },
+    "ask_security_privacy_agent": {
+      "parameters": {
+        "properties": {
+          "message": {
+            "description": "What to ask it, stated plainly as if talking to it directly.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "message"
+      ]
+    },
+    "bulk_control": {
+      "parameters": {
+        "properties": {
+          "action": {
+            "description": "Action to perform",
+            "enum": [
+              "turn_on",
+              "turn_off",
+              "lock",
+              "unlock",
+              "open",
+              "close"
+            ],
+            "type": "string"
+          },
+          "area_name": {
+            "description": "Optional: limit to specific area (e.g. 'kitchen')",
+            "type": "string"
+          },
+          "domain": {
+            "description": "Device domain to control",
+            "enum": [
+              "light",
+              "switch",
+              "fan",
+              "lock",
+              "cover"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "domain",
+          "action"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "action",
+        "domain"
+      ]
+    },
+    "calendar_agenda": {
+      "parameters": {
+        "properties": {
+          "horizon_hours": {
+            "description": "How far ahead to look (default 24).",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "required": []
+    },
+    "cognitive_status": {
+      "parameters": {
+        "properties": {},
+        "type": "object"
+      },
+      "required": []
+    },
+    "confirm_pending_fact": {
+      "parameters": {
+        "properties": {
+          "fact_id": {
+            "description": "The fact_id returned by the `remember` call being confirmed.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "fact_id"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "fact_id"
+      ]
+    },
+    "connectivity_status": {
+      "parameters": {
+        "properties": {},
+        "type": "object"
+      },
+      "required": []
+    },
+    "control_device": {
+      "parameters": {
+        "properties": {
+          "action": {
+            "description": "The action to perform",
+            "enum": [
+              "turn_on",
+              "turn_off",
+              "toggle",
+              "lock",
+              "unlock",
+              "open",
+              "close",
+              "set_brightness",
+              "set_temperature",
+              "media_play",
+              "media_pause",
+              "media_next",
+              "volume_up",
+              "volume_down",
+              "volume_set"
+            ],
+            "type": "string"
+          },
+          "entity_id": {
+            "description": "The HA entity_id (e.g. light.kitchen, lock.front_door)",
+            "type": "string"
+          },
+          "value": {
+            "description": "Optional numeric value: brightness (0-100), temperature (degrees), volume (0-100)",
+            "type": "number"
+          }
+        },
+        "required": [
+          "entity_id",
+          "action"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "action",
+        "entity_id"
+      ]
+    },
+    "create_goal": {
+      "parameters": {
+        "properties": {
+          "check_interval_minutes": {
+            "description": "How often to re-engage (default 30).",
+            "type": "number"
+          },
+          "deadline_minutes": {
+            "description": "Optional: minutes until the goal must close.",
+            "type": "number"
+          },
+          "outcome": {
+            "description": "The concrete end state to achieve.",
+            "type": "string"
+          },
+          "steps": {
+            "description": "Ordered concrete steps toward the outcome.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": {
+            "description": "Short name, e.g. 'Guest prep Saturday'.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "outcome"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "outcome",
+        "title"
+      ]
+    },
+    "delegate_task": {
+      "parameters": {
+        "properties": {
+          "capability": {
+            "description": "Which curated read-only tool group the sub-agent gets. Ignored if 'profile' is also set. 'diagnostics' is kept as an accepted name for compatibility but is not a separate group — it resolves to the exact same HOMER specialist as profile='homer'; prefer 'profile': 'homer' directly for a fault/diagnosis request.",
+            "enum": [
+              "scheduling",
+              "inbox",
+              "home_state",
+              "diagnostics",
+              "research",
+              "environment"
+            ],
+            "type": "string"
+          },
+          "max_turns": {
+            "description": "Optional cap on the sub-agent's tool steps (default/max depends on the capability or profile; a profile's own cap is never exceeded regardless of this value).",
+            "type": "integer"
+          },
+          "objective": {
+            "description": "The self-contained goal for the sub-agent, stated plainly.",
+            "type": "string"
+          },
+          "profile": {
+            "description": "A named specialist sub-agent instead of a generic capability group. 'homer': Nova's read-only System Diagnostic Specialist — investigates a fault (an unavailable device, a failed automation, slow responses, connectivity/host health, 'what caused X to change') using diagnostic and state-reading tools only, and reports the likely cause, evidence, and a recommended next step. It never controls anything and cannot delegate further.",
+            "enum": [
+              "homer"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "objective"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "objective"
+      ]
+    },
+    "dismiss_intrusion": {
+      "parameters": {
+        "properties": {
+          "reason": {
+            "description": "Optional short reason (e.g. 'it was the cat').",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "required": []
+    },
+    "dismiss_suggestion": {
+      "parameters": {
+        "properties": {
+          "suggestion_id": {
+            "description": "Suggestion ID",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "suggestion_id"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "suggestion_id"
+      ]
+    },
+    "energy_report": {
+      "parameters": {
+        "properties": {},
+        "type": "object"
+      },
+      "required": []
+    },
+    "energy_status": {
+      "parameters": {
+        "properties": {},
+        "type": "object"
+      },
+      "required": []
+    },
+    "execute_plan": {
+      "parameters": {
+        "properties": {
+          "goal": {
+            "description": "The high-level goal in plain language (used for the spoken summary).",
+            "type": "string"
+          },
+          "steps": {
+            "description": "Ordered list of actions to perform.",
+            "items": {
+              "properties": {
+                "description": {
+                  "description": "Human summary of this step.",
+                  "type": "string"
+                },
+                "domain": {
+                  "description": "Entity domain, e.g. light, climate, lock, media_player, cover, switch.",
+                  "type": "string"
+                },
+                "entity_id": {
+                  "description": "Target entity_id. Use search_entities first if unsure.",
+                  "type": "string"
+                },
+                "service": {
+                  "description": "Service to call, e.g. turn_on, turn_off, lock, set_temperature.",
+                  "type": "string"
+                },
+                "service_data": {
+                  "description": "Optional extra params (brightness_pct, temperature, etc.).",
+                  "type": "object"
+                }
+              },
+              "required": [
+                "domain",
+                "service",
+                "entity_id"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "goal",
+          "steps"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "goal",
+        "steps"
+      ]
+    },
+    "get_area_devices": {
+      "parameters": {
+        "properties": {
+          "area_name": {
+            "description": "The area/room name (e.g. 'kitchen', 'master bedroom')",
+            "type": "string"
+          }
+        },
+        "required": [
+          "area_name"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "area_name"
+      ]
+    },
+    "get_entity_state": {
+      "parameters": {
+        "properties": {
+          "entity_ids": {
+            "description": "List of entity_ids to query",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "entity_ids"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "entity_ids"
+      ]
+    },
+    "get_home_summary": {
+      "parameters": {
+        "properties": {},
+        "type": "object"
+      },
+      "required": []
+    },
+    "hazard_report": {
+      "parameters": {
+        "properties": {},
+        "type": "object"
+      },
+      "required": []
+    },
+    "ignore_entity": {
+      "parameters": {
+        "properties": {
+          "duration_minutes": {
+            "description": "How long to ignore in minutes. 0 = until manually cleared.",
+            "type": "integer"
+          },
+          "entity_pattern": {
+            "description": "Entity ID or glob pattern to ignore (e.g. 'binary_sensor.garage_door', 'sensor.backyard*')",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why it's being ignored (e.g. 'maintenance', 'false alarm')",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity_pattern"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "entity_pattern"
+      ]
+    },
+    "ingest_documents": {
+      "parameters": {
+        "properties": {},
+        "type": "object"
+      },
+      "required": []
+    },
+    "look_at_camera": {
+      "parameters": {
+        "properties": {
+          "announce": {
+            "description": "Speak the result aloud. Default false — for a quiet background monitor, leave false and only speak if the finding warrants it.",
+            "type": "boolean"
+          },
+          "entity_id": {
+            "description": "The camera entity_id (e.g. camera.workshop).",
+            "type": "string"
+          },
+          "question": {
+            "description": "What to check for, as a direct question the vision model should answer.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity_id",
+          "question"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "entity_id",
+        "question"
+      ]
+    },
+    "manage_autonomy": {
+      "parameters": {
+        "properties": {
+          "action": {
+            "description": "list grants or revoke one",
+            "enum": [
+              "list",
+              "revoke"
+            ],
+            "type": "string"
+          },
+          "pattern_key": {
+            "description": "For revoke: the pattern_key to revoke (get it from 'list').",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "action"
+      ]
+    },
+    "manage_followups": {
+      "parameters": {
+        "properties": {
+          "action": {
+            "description": "What to do.",
+            "enum": [
+              "list",
+              "cancel"
+            ],
+            "type": "string"
+          },
+          "followup_id": {
+            "description": "The follow-up to cancel (from list).",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "action"
+      ]
+    },
+    "manage_goals": {
+      "parameters": {
+        "properties": {
+          "action": {
+            "enum": [
+              "list",
+              "status",
+              "cancel"
+            ],
+            "type": "string"
+          },
+          "goal_id": {
+            "description": "Required for status/cancel.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "action"
+      ]
+    },
+    "read_email": {
+      "parameters": {
+        "properties": {
+          "folder": {
+            "description": "Mailbox folder (default INBOX).",
+            "type": "string"
+          },
+          "limit": {
+            "description": "How many recent messages to read (default 5, max 20).",
+            "type": "integer"
+          },
+          "unread_only": {
+            "description": "Only unread messages (default false).",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "required": []
+    },
+    "reject_pending_fact": {
+      "parameters": {
+        "properties": {
+          "fact_id": {
+            "description": "The fact_id returned by the `remember` call being rejected.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "fact_id"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "fact_id"
+      ]
+    },
+    "remember": {
+      "parameters": {
+        "properties": {
+          "key": {
+            "description": "Category: 'alias' (device nickname), 'preference' (user preference), 'routine' (command pattern)",
+            "enum": [
+              "alias",
+              "preference",
+              "routine"
+            ],
+            "type": "string"
+          },
+          "name": {
+            "description": "The name/label (e.g. 'chase lamp', 'bedtime')",
+            "type": "string"
+          },
+          "value": {
+            "description": "The mapping value (e.g. entity_id for alias, description for preference, action list for routine)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "name",
+          "value"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "key",
+        "name",
+        "value"
+      ]
+    },
+    "review_suggestions": {
+      "parameters": {
+        "properties": {},
+        "type": "object"
+      },
+      "required": []
+    },
+    "root_cause": {
+      "parameters": {
+        "properties": {
+          "entity_id": {
+            "description": "The entity to investigate, e.g. light.kitchen",
+            "type": "string"
+          },
+          "event_time": {
+            "description": "Optional ISO timestamp of the event (e.g. '2026-07-12 03:00:00'). Omit to analyze the most recent change.",
+            "type": "string"
+          },
+          "window_minutes": {
+            "description": "How far back to look for causes (default 30).",
+            "type": "number"
+          }
+        },
+        "required": [
+          "entity_id"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "entity_id"
+      ]
+    },
+    "run_scene_or_script": {
+      "parameters": {
+        "properties": {
+          "entity_id": {
+            "description": "The scene/script entity_id (e.g. scene.movie_time)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity_id"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "entity_id"
+      ]
+    },
+    "schedule_followup": {
+      "parameters": {
+        "properties": {
+          "context": {
+            "description": "Optional extra context to carry along.",
+            "type": "string"
+          },
+          "delay_minutes": {
+            "description": "How many minutes from now to run it.",
+            "type": "number"
+          },
+          "instruction": {
+            "description": "The self-contained instruction to execute later, e.g. 'Check cover.garage_door is closed; if not, close it and report.'",
+            "type": "string"
+          }
+        },
+        "required": [
+          "delay_minutes",
+          "instruction"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "delay_minutes",
+        "instruction"
+      ]
+    },
+    "search_documents": {
+      "parameters": {
+        "properties": {
+          "query": {
+            "description": "What to look up in the documents.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "query"
+      ]
+    },
+    "search_entities": {
+      "parameters": {
+        "properties": {
+          "domain": {
+            "description": "Optional domain filter: light, switch, lock, cover, climate, fan, media_player, sensor, binary_sensor, scene, script, automation, person",
+            "type": "string"
+          },
+          "query": {
+            "description": "Search term: entity name, area name, or keyword (e.g. 'chase', 'kitchen lights', 'garage door')",
+            "type": "string"
+          },
+          "require_unique": {
+            "description": "Set true when you need exactly one target entity resolved before acting on it. Set false (default) for general browsing/discovery where multiple results are expected.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "query"
+      ]
+    },
+    "set_mode": {
+      "parameters": {
+        "properties": {
+          "mode": {
+            "description": "The mode to activate (e.g. 'party', 'movie', 'away', 'normal').",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Optional short reason/context.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "mode"
+      ]
+    },
+    "solar_status": {
+      "parameters": {
+        "properties": {},
+        "type": "object"
+      },
+      "required": []
+    },
+    "system_diagnostics": {
+      "parameters": {
+        "properties": {},
+        "type": "object"
+      },
+      "required": []
+    },
+    "unignore_entity": {
+      "parameters": {
+        "properties": {
+          "entity_pattern": {
+            "description": "The entity pattern to stop ignoring",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity_pattern"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "entity_pattern"
+      ]
+    },
+    "update_goal": {
+      "parameters": {
+        "properties": {
+          "goal_id": {
+            "type": "integer"
+          },
+          "next_check_minutes": {
+            "type": "number"
+          },
+          "progress_note": {
+            "type": "string"
+          },
+          "result": {
+            "description": "Closing report the user will hear.",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "done",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "step_updates": {
+            "items": {
+              "properties": {
+                "n": {
+                  "type": "integer"
+                },
+                "note": {
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "pending",
+                    "done",
+                    "failed",
+                    "skipped"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "n"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "goal_id"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "goal_id"
+      ]
+    },
+    "weather_forecast": {
+      "parameters": {
+        "properties": {
+          "entity_id": {
+            "description": "Optional specific weather.* entity; defaults to the first one found.",
+            "type": "string"
+          },
+          "kind": {
+            "description": "'hourly' for today/when-will-it-rain questions (default), 'daily' for the multi-day outlook.",
+            "enum": [
+              "hourly",
+              "daily",
+              "twice_daily"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "required": []
+    },
+    "web_research": {
+      "parameters": {
+        "properties": {
+          "query": {
+            "description": "What to look up, as a search query.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "query"
+      ]
+    },
+    "wellbeing_context": {
+      "parameters": {
+        "properties": {},
+        "type": "object"
+      },
+      "required": []
+    },
+    "who_do_you_see": {
+      "parameters": {
+        "properties": {},
+        "type": "object"
+      },
+      "required": []
+    }
+  }
+}

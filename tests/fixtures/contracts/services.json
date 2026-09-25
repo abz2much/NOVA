@@ -1,0 +1,512 @@
+{
+  "documented": {
+    "add_reminder": {
+      "fields": {
+        "label": {
+          "required": true,
+          "selector": "text"
+        },
+        "repeat": {
+          "options": [
+            "daily",
+            "weekly",
+            "hourly"
+          ],
+          "required": false,
+          "selector": "select"
+        },
+        "require_home": {
+          "default": true,
+          "required": false,
+          "selector": "boolean"
+        },
+        "respect_quiet": {
+          "default": true,
+          "required": false,
+          "selector": "boolean"
+        },
+        "trigger_at": {
+          "required": true,
+          "selector": "text"
+        }
+      }
+    },
+    "analyze_camera": {
+      "fields": {
+        "announce": {
+          "required": false,
+          "selector": "boolean"
+        },
+        "entity_id": {
+          "domain": "camera",
+          "required": true,
+          "selector": "entity"
+        },
+        "frames": {
+          "max": 6,
+          "min": 1,
+          "required": false,
+          "selector": "number"
+        },
+        "interval": {
+          "max": 5,
+          "min": 0.5,
+          "required": false,
+          "selector": "number"
+        },
+        "prompt": {
+          "required": false,
+          "selector": "text"
+        }
+      }
+    },
+    "analyze_on_event": {
+      "fields": {
+        "entity_id": {
+          "domain": "camera",
+          "required": true,
+          "selector": "entity"
+        },
+        "reason": {
+          "required": false,
+          "selector": "text"
+        }
+      }
+    },
+    "backup": {
+      "fields": {}
+    },
+    "briefing": {
+      "fields": {
+        "announce": {
+          "required": false,
+          "selector": "boolean"
+        },
+        "hours": {
+          "default": 12,
+          "max": 48,
+          "min": 1,
+          "required": false,
+          "selector": "number"
+        },
+        "include_calendar": {
+          "default": true,
+          "required": false,
+          "selector": "boolean"
+        },
+        "include_energy": {
+          "default": true,
+          "required": false,
+          "selector": "boolean"
+        },
+        "include_events": {
+          "default": true,
+          "required": false,
+          "selector": "boolean"
+        },
+        "include_presence": {
+          "default": true,
+          "required": false,
+          "selector": "boolean"
+        },
+        "include_weather": {
+          "default": true,
+          "required": false,
+          "selector": "boolean"
+        }
+      }
+    },
+    "check_packages": {
+      "fields": {
+        "entity_id": {
+          "domain": "camera",
+          "required": false,
+          "selector": "entity"
+        }
+      }
+    },
+    "conversation_summary": {
+      "fields": {
+        "announce": {
+          "required": false,
+          "selector": "boolean"
+        },
+        "device_id": {
+          "required": false,
+          "selector": "text"
+        },
+        "hours": {
+          "default": 24,
+          "max": 168,
+          "min": 1,
+          "required": false,
+          "selector": "number"
+        },
+        "store": {
+          "required": false,
+          "selector": "boolean"
+        }
+      }
+    },
+    "create_automation": {
+      "fields": {
+        "action": {
+          "required": true,
+          "selector": "object"
+        },
+        "alias": {
+          "required": true,
+          "selector": "text"
+        },
+        "trigger": {
+          "required": true,
+          "selector": "object"
+        }
+      }
+    },
+    "database_purge": {
+      "fields": {
+        "days": {
+          "default": 30,
+          "max": 365,
+          "min": 1,
+          "required": false,
+          "selector": "number"
+        }
+      }
+    },
+    "database_stats": {
+      "fields": {}
+    },
+    "diagnose_doorbell": {
+      "fields": {}
+    },
+    "forget": {
+      "fields": {
+        "id": {
+          "min": 0,
+          "required": false,
+          "selector": "number"
+        },
+        "key": {
+          "required": false,
+          "selector": "text"
+        },
+        "subject": {
+          "required": false,
+          "selector": "text"
+        }
+      }
+    },
+    "lockdown": {
+      "fields": {
+        "reason": {
+          "required": false,
+          "selector": "text"
+        },
+        "state": {
+          "options": [
+            "on",
+            "off"
+          ],
+          "required": true,
+          "selector": "select"
+        }
+      }
+    },
+    "nap": {
+      "fields": {
+        "duration_minutes": {
+          "default": 30,
+          "max": 480,
+          "min": 1,
+          "required": false,
+          "selector": "number"
+        }
+      }
+    },
+    "observer_start": {
+      "fields": {}
+    },
+    "observer_status": {
+      "fields": {}
+    },
+    "observer_stop": {
+      "fields": {}
+    },
+    "process_intent": {
+      "fields": {
+        "phrase": {
+          "required": true,
+          "selector": "text"
+        },
+        "target_area": {
+          "required": true,
+          "selector": "area"
+        },
+        "user_id": {
+          "required": false,
+          "selector": "text"
+        }
+      }
+    },
+    "remember": {
+      "fields": {
+        "key": {
+          "required": true,
+          "selector": "text"
+        },
+        "kind": {
+          "options": [
+            "fact",
+            "preference",
+            "event",
+            "profile"
+          ],
+          "required": false,
+          "selector": "select"
+        },
+        "subject": {
+          "options": [
+            "household",
+            "primary"
+          ],
+          "required": false,
+          "selector": "select"
+        },
+        "ttl_seconds": {
+          "max": 31536000,
+          "min": 0,
+          "required": false,
+          "selector": "number"
+        },
+        "value": {
+          "required": true,
+          "selector": "text"
+        }
+      }
+    },
+    "replay_policy": {
+      "fields": {
+        "kind": {
+          "required": true,
+          "selector": "text"
+        },
+        "min_samples": {
+          "max": 100000,
+          "min": 1,
+          "required": false,
+          "selector": "number"
+        }
+      }
+    },
+    "restore": {
+      "fields": {
+        "archive": {
+          "required": false,
+          "selector": "text"
+        }
+      }
+    },
+    "routine": {
+      "fields": {
+        "name": {
+          "options": [
+            "goodnight",
+            "goodmorning",
+            "leaving",
+            "arriving"
+          ],
+          "required": true,
+          "selector": "select"
+        }
+      }
+    },
+    "scene_by_intent": {
+      "fields": {
+        "announce": {
+          "default": true,
+          "required": false,
+          "selector": "boolean"
+        },
+        "intent": {
+          "required": true,
+          "selector": "text"
+        }
+      }
+    },
+    "sentinel_start": {
+      "fields": {}
+    },
+    "sentinel_stop": {
+      "fields": {}
+    },
+    "shush": {
+      "fields": {
+        "category": {
+          "options": [
+            "appliances",
+            "doors_windows",
+            "presence",
+            "energy",
+            "security",
+            "climate",
+            "lights",
+            "schedule"
+          ],
+          "required": false,
+          "selector": "select"
+        },
+        "entity_id": {
+          "required": false,
+          "selector": "text"
+        }
+      }
+    },
+    "speak": {
+      "fields": {
+        "confirm_intent": {
+          "required": false,
+          "selector": "text"
+        },
+        "critical": {
+          "default": false,
+          "required": false,
+          "selector": "boolean"
+        },
+        "expect_response": {
+          "default": false,
+          "required": false,
+          "selector": "boolean"
+        },
+        "message": {
+          "required": true,
+          "selector": "text"
+        },
+        "target_area": {
+          "required": true,
+          "selector": "area"
+        },
+        "user_id": {
+          "required": false,
+          "selector": "text"
+        }
+      }
+    },
+    "test_notify": {
+      "fields": {}
+    },
+    "test_routing": {
+      "fields": {}
+    },
+    "test_tts": {
+      "fields": {}
+    },
+    "train_doorbell_backlog": {
+      "fields": {
+        "limit": {
+          "default": 40,
+          "max": 500,
+          "min": 1,
+          "required": false,
+          "selector": "number"
+        }
+      }
+    },
+    "unshush": {
+      "fields": {
+        "category": {
+          "required": false,
+          "selector": "text"
+        },
+        "entity_id": {
+          "required": false,
+          "selector": "text"
+        }
+      }
+    }
+  },
+  "registered_schemas": {
+    "add_reminder": {
+      "label": "required",
+      "repeat": "optional",
+      "require_home": "optional",
+      "respect_quiet": "optional",
+      "trigger_at": "required"
+    },
+    "analyze_camera": {
+      "announce": "optional",
+      "entity_id": "required",
+      "prompt": "optional"
+    },
+    "analyze_on_event": {
+      "entity_id": "required",
+      "reason": "optional"
+    },
+    "backup": null,
+    "briefing": {
+      "announce": "optional",
+      "hours": "optional",
+      "include_calendar": "optional",
+      "include_energy": "optional",
+      "include_events": "optional",
+      "include_presence": "optional",
+      "include_weather": "optional"
+    },
+    "check_packages": {
+      "entity_id": "optional"
+    },
+    "conversation_summary": {
+      "announce": "optional",
+      "device_id": "optional",
+      "hours": "optional",
+      "store": "optional"
+    },
+    "create_automation": null,
+    "database_purge": {
+      "days": "optional"
+    },
+    "database_stats": null,
+    "diagnose_doorbell": null,
+    "forget": null,
+    "lockdown": null,
+    "nap": {
+      "duration_minutes": "optional"
+    },
+    "observer_start": null,
+    "observer_status": null,
+    "observer_stop": null,
+    "remember": null,
+    "replay_policy": {
+      "kind": "required",
+      "min_samples": "optional"
+    },
+    "restore": {
+      "archive": "optional"
+    },
+    "routine": {
+      "name": "required"
+    },
+    "scene_by_intent": {
+      "announce": "optional",
+      "intent": "required"
+    },
+    "sentinel_start": null,
+    "sentinel_stop": null,
+    "shush": {
+      "all": "optional",
+      "category": "optional",
+      "entity_id": "optional"
+    },
+    "test_notify": null,
+    "test_routing": null,
+    "test_tts": null,
+    "train_doorbell_backlog": {
+      "limit": "optional"
+    },
+    "unshush": {
+      "category": "optional",
+      "entity_id": "optional"
+    }
+  }
+}
