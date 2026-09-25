@@ -1,0 +1,338 @@
+[
+  {
+    "category": "action_reporting",
+    "config": {
+      "voice_confirm_enabled": false
+    },
+    "description": "A light that turns on is reported as done.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": false,
+      "decision": "executed",
+      "entities": [
+        "light.desk"
+      ],
+      "extra": {
+        "claims_done": true,
+        "reported_status": "verified"
+      },
+      "tool": null
+    },
+    "id": "REP-001",
+    "input": {
+      "args": {
+        "action": "turn_on",
+        "entity_id": "light.desk"
+      },
+      "origin": "chat",
+      "tool": "control_device"
+    },
+    "provider": null,
+    "runner": "agent_tool",
+    "safety": [],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Desk Lamp"
+          },
+          "entity_id": "light.desk",
+          "state": "off"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Stuck Lamp"
+          },
+          "entity_id": "light.stuck",
+          "responsive": false,
+          "state": "off"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Back Door"
+          },
+          "entity_id": "lock.back_door",
+          "state": "unlocked"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Stuck Fan Switch"
+          },
+          "entity_id": "switch.stuck_fan",
+          "responsive": false,
+          "state": "off"
+        }
+      ]
+    }
+  },
+  {
+    "category": "action_reporting",
+    "config": {
+      "voice_confirm_enabled": false
+    },
+    "description": "A light that never reports back is not claimed as done.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": false,
+      "decision": "executed",
+      "entities": [
+        "light.stuck"
+      ],
+      "extra": {
+        "claims_done": false,
+        "reported_status": "unverified"
+      },
+      "tool": null
+    },
+    "id": "REP-002",
+    "input": {
+      "args": {
+        "action": "turn_on",
+        "entity_id": "light.stuck"
+      },
+      "origin": "chat",
+      "tool": "control_device"
+    },
+    "provider": null,
+    "runner": "agent_tool",
+    "safety": [],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Desk Lamp"
+          },
+          "entity_id": "light.desk",
+          "state": "off"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Stuck Lamp"
+          },
+          "entity_id": "light.stuck",
+          "responsive": false,
+          "state": "off"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Back Door"
+          },
+          "entity_id": "lock.back_door",
+          "state": "unlocked"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Stuck Fan Switch"
+          },
+          "entity_id": "switch.stuck_fan",
+          "responsive": false,
+          "state": "off"
+        }
+      ]
+    }
+  },
+  {
+    "category": "action_reporting",
+    "config": {
+      "voice_confirm_enabled": false
+    },
+    "description": "Locking a door is reported as sent, not done, until verification.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": false,
+      "decision": "executed",
+      "entities": [
+        "lock.back_door"
+      ],
+      "extra": {
+        "claims_done": false,
+        "reported_status": "accepted"
+      },
+      "tool": null
+    },
+    "id": "REP-003",
+    "input": {
+      "args": {
+        "action": "lock",
+        "entity_id": "lock.back_door"
+      },
+      "origin": "chat",
+      "tool": "control_device"
+    },
+    "provider": null,
+    "runner": "agent_tool",
+    "safety": [],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Desk Lamp"
+          },
+          "entity_id": "light.desk",
+          "state": "off"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Stuck Lamp"
+          },
+          "entity_id": "light.stuck",
+          "responsive": false,
+          "state": "off"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Back Door"
+          },
+          "entity_id": "lock.back_door",
+          "state": "unlocked"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Stuck Fan Switch"
+          },
+          "entity_id": "switch.stuck_fan",
+          "responsive": false,
+          "state": "off"
+        }
+      ]
+    }
+  },
+  {
+    "category": "action_reporting",
+    "config": {
+      "voice_confirm_enabled": false
+    },
+    "description": "A toggle the device ignores is reported unconfirmed and not retried.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": false,
+      "decision": "executed",
+      "entities": [
+        "switch.stuck_fan"
+      ],
+      "extra": {
+        "claims_done": false,
+        "reported_status": "unverified"
+      },
+      "tool": null
+    },
+    "id": "REP-004",
+    "input": {
+      "args": {
+        "action": "toggle",
+        "entity_id": "switch.stuck_fan"
+      },
+      "origin": "chat",
+      "tool": "control_device"
+    },
+    "provider": null,
+    "runner": "agent_tool",
+    "safety": [],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Desk Lamp"
+          },
+          "entity_id": "light.desk",
+          "state": "off"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Stuck Lamp"
+          },
+          "entity_id": "light.stuck",
+          "responsive": false,
+          "state": "off"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Back Door"
+          },
+          "entity_id": "lock.back_door",
+          "state": "unlocked"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Stuck Fan Switch"
+          },
+          "entity_id": "switch.stuck_fan",
+          "responsive": false,
+          "state": "off"
+        }
+      ]
+    }
+  },
+  {
+    "category": "action_reporting",
+    "config": {
+      "voice_confirm_enabled": false
+    },
+    "description": "A brightness change that lands is reported as done.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": false,
+      "decision": "executed",
+      "entities": [
+        "light.desk"
+      ],
+      "extra": {
+        "claims_done": true,
+        "reported_status": "verified"
+      },
+      "tool": null
+    },
+    "id": "REP-005",
+    "input": {
+      "args": {
+        "action": "set_brightness",
+        "entity_id": "light.desk",
+        "value": 40
+      },
+      "origin": "chat",
+      "tool": "control_device"
+    },
+    "provider": null,
+    "runner": "agent_tool",
+    "safety": [],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Desk Lamp"
+          },
+          "entity_id": "light.desk",
+          "state": "off"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Stuck Lamp"
+          },
+          "entity_id": "light.stuck",
+          "responsive": false,
+          "state": "off"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Back Door"
+          },
+          "entity_id": "lock.back_door",
+          "state": "unlocked"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Stuck Fan Switch"
+          },
+          "entity_id": "switch.stuck_fan",
+          "responsive": false,
+          "state": "off"
+        }
+      ]
+    }
+  }
+]

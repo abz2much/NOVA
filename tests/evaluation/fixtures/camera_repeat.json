@@ -1,0 +1,275 @@
+[
+  {
+    "category": "camera_repeat",
+    "description": "Three person detections at the front door within a minute, from two integrations, are learned as one event.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "recorded_1",
+      "entities": null,
+      "tool": null
+    },
+    "id": "CAM-001",
+    "input": {
+      "duplicate_risk": true,
+      "events": [
+        {
+          "advance": 20,
+          "camera": "camera.front_door",
+          "confidence": 90,
+          "label": "person",
+          "source": "eufy"
+        },
+        {
+          "advance": 20,
+          "camera": "camera.front_door_frigate",
+          "confidence": 88,
+          "label": "person",
+          "source": "frigate"
+        },
+        {
+          "camera": "camera.front_door",
+          "confidence": 91,
+          "label": "person",
+          "source": "eufy"
+        }
+      ],
+      "location": "front_door"
+    },
+    "provider": null,
+    "runner": "camera_learning",
+    "safety": [],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Front Door Camera"
+          },
+          "entity_id": "camera.front_door",
+          "state": "idle"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Front Door (Frigate)"
+          },
+          "entity_id": "camera.front_door_frigate",
+          "state": "idle"
+        }
+      ]
+    }
+  },
+  {
+    "category": "camera_repeat",
+    "description": "Detections more than the dedup window apart are both learned.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "recorded_2",
+      "entities": null,
+      "tool": null
+    },
+    "id": "CAM-002",
+    "input": {
+      "events": [
+        {
+          "advance": 301,
+          "camera": "camera.front_door",
+          "confidence": 90,
+          "label": "person",
+          "source": "eufy"
+        },
+        {
+          "camera": "camera.front_door",
+          "confidence": 90,
+          "label": "person",
+          "source": "eufy"
+        }
+      ],
+      "location": "front_door"
+    },
+    "provider": null,
+    "runner": "camera_learning",
+    "safety": [],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Front Door Camera"
+          },
+          "entity_id": "camera.front_door",
+          "state": "idle"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Front Door (Frigate)"
+          },
+          "entity_id": "camera.front_door_frigate",
+          "state": "idle"
+        }
+      ]
+    }
+  },
+  {
+    "category": "camera_repeat",
+    "description": "The same camera announcement a minute after the first is held as a duplicate.",
+    "expected": {
+      "announcement_allowed": false,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "hold",
+      "entities": null,
+      "tool": null
+    },
+    "id": "CAM-003",
+    "input": {
+      "category": "camera",
+      "entity_id": "camera.front_door",
+      "message": "Someone is at the front door.",
+      "setup": {
+        "prior_announcements": [
+          {
+            "advance": 60,
+            "category": "camera",
+            "entity_id": "camera.front_door",
+            "message": "Someone is at the front door.",
+            "urgency": "medium"
+          }
+        ]
+      },
+      "urgency": "medium"
+    },
+    "provider": null,
+    "runner": "output_gate",
+    "safety": [],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Front Door Camera"
+          },
+          "entity_id": "camera.front_door",
+          "state": "idle"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Front Door (Frigate)"
+          },
+          "entity_id": "camera.front_door_frigate",
+          "state": "idle"
+        }
+      ]
+    }
+  },
+  {
+    "category": "camera_repeat",
+    "description": "Three identical camera announcements in a row: only the first is spoken.",
+    "expected": {
+      "announcement_allowed": false,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "hold",
+      "entities": null,
+      "extra": {
+        "gate_results": [
+          true,
+          false,
+          false
+        ]
+      },
+      "tool": null
+    },
+    "id": "CAM-004",
+    "input": {
+      "asks": [
+        {
+          "advance": 15,
+          "category": "camera",
+          "entity_id": "camera.front_door",
+          "message": "Someone is at the front door.",
+          "urgency": "medium"
+        },
+        {
+          "advance": 15,
+          "category": "camera",
+          "entity_id": "camera.front_door",
+          "message": "Someone is at the front door.",
+          "urgency": "medium"
+        },
+        {
+          "advance": 15,
+          "category": "camera",
+          "entity_id": "camera.front_door",
+          "message": "Someone is at the front door.",
+          "urgency": "medium"
+        }
+      ]
+    },
+    "provider": null,
+    "runner": "output_gate",
+    "safety": [],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Front Door Camera"
+          },
+          "entity_id": "camera.front_door",
+          "state": "idle"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Front Door (Frigate)"
+          },
+          "entity_id": "camera.front_door_frigate",
+          "state": "idle"
+        }
+      ]
+    }
+  },
+  {
+    "category": "camera_repeat",
+    "description": "The Local Mind stays quiet about a camera it announced moments ago.",
+    "expected": {
+      "announcement_allowed": false,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "silent",
+      "entities": null,
+      "tool": null
+    },
+    "id": "CAM-005",
+    "input": {
+      "device_class": "occupancy",
+      "entity_id": "binary_sensor.front_door_camera_person",
+      "friendly_name": "Front Door Camera",
+      "recent_announcements": [
+        "Sir, Front Door Camera sees someone at the door."
+      ],
+      "to_state": "on",
+      "urgency": "medium"
+    },
+    "provider": null,
+    "runner": "local_mind",
+    "safety": [],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Front Door Camera"
+          },
+          "entity_id": "camera.front_door",
+          "state": "idle"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Front Door (Frigate)"
+          },
+          "entity_id": "camera.front_door_frigate",
+          "state": "idle"
+        }
+      ]
+    }
+  }
+]

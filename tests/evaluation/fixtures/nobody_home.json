@@ -1,0 +1,174 @@
+[
+  {
+    "category": "nobody_home",
+    "description": "A medium urgency announcement with nobody home is not spoken into an empty house.",
+    "expected": {
+      "announcement_allowed": false,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "notify_only",
+      "entities": [],
+      "tool": null
+    },
+    "id": "HOME-001",
+    "input": {
+      "announcement_speakers": [
+        "media_player.kitchen"
+      ],
+      "anyone_home": false,
+      "urgency": "medium"
+    },
+    "provider": null,
+    "runner": "routing",
+    "safety": [],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Kitchen Speaker"
+          },
+          "entity_id": "media_player.kitchen",
+          "state": "idle"
+        }
+      ]
+    }
+  },
+  {
+    "category": "nobody_home",
+    "description": "A high urgency announcement with nobody home is not spoken into an empty house.",
+    "expected": {
+      "announcement_allowed": false,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "notify_only",
+      "entities": [],
+      "tool": null
+    },
+    "id": "HOME-002",
+    "input": {
+      "announcement_speakers": [
+        "media_player.kitchen"
+      ],
+      "anyone_home": false,
+      "urgency": "high"
+    },
+    "provider": null,
+    "runner": "routing",
+    "safety": [],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Kitchen Speaker"
+          },
+          "entity_id": "media_player.kitchen",
+          "state": "idle"
+        }
+      ]
+    }
+  },
+  {
+    "category": "nobody_home",
+    "description": "A low urgency announcement with nobody home is not spoken into an empty house.",
+    "expected": {
+      "announcement_allowed": false,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "suppressed",
+      "entities": [],
+      "tool": null
+    },
+    "id": "HOME-003",
+    "input": {
+      "announcement_speakers": [
+        "media_player.kitchen"
+      ],
+      "anyone_home": false,
+      "urgency": "low"
+    },
+    "provider": null,
+    "runner": "routing",
+    "safety": [],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Kitchen Speaker"
+          },
+          "entity_id": "media_player.kitchen",
+          "state": "idle"
+        }
+      ]
+    }
+  },
+  {
+    "category": "nobody_home",
+    "description": "A critical announcement is still broadcast when nobody is home.",
+    "expected": {
+      "announcement_allowed": true,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "broadcast",
+      "entities": [
+        "media_player.kitchen"
+      ],
+      "tool": null
+    },
+    "id": "HOME-004",
+    "input": {
+      "announcement_speakers": [
+        "media_player.kitchen"
+      ],
+      "anyone_home": false,
+      "urgency": "critical"
+    },
+    "provider": null,
+    "runner": "routing",
+    "safety": [
+      "critical_not_suppressed"
+    ],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Kitchen Speaker"
+          },
+          "entity_id": "media_player.kitchen",
+          "state": "idle"
+        }
+      ]
+    }
+  },
+  {
+    "category": "nobody_home",
+    "description": "The last person leaving is not announced to the empty house.",
+    "expected": {
+      "announcement_allowed": false,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "silent",
+      "entities": null,
+      "tool": null
+    },
+    "id": "HOME-005",
+    "input": {
+      "anyone_home": false,
+      "category": "presence",
+      "entity_id": "person.alex",
+      "event_summary": "Alex (person.alex) changed from home to not_home",
+      "friendly_name": "Alex",
+      "from_state": "home",
+      "to_state": "not_home",
+      "urgency": "medium"
+    },
+    "provider": {
+      "error": null,
+      "replies": []
+    },
+    "runner": "reasoning",
+    "safety": [],
+    "state": {
+      "entities": []
+    }
+  }
+]
