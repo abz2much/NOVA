@@ -169,7 +169,7 @@ def log(load, monkeypatch):
     monkeypatch.setattr(al, "start_many", _start_many)
     monkeypatch.setattr(al, "set_execution",
                         lambda aid, outcome, **kw: rec["executions"].append((aid, outcome)))
-    monkeypatch.setattr(vc, "is_voice_satellite_device", lambda hass, d: d == "satellite")
+    monkeypatch.setattr(vc, "is_voice_satellite_device", lambda hass, d, **k: d == "satellite")
     return rec
 
 

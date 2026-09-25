@@ -276,3 +276,89 @@ def test_needs_confirmation_passes_the_device_only_when_there_is_one(load, monke
     assert seen == [("lock", "unlock", {"device_id": SAT_DEVICE}),
                     ("lock", "unlock", {}),
                     ("scene", "turn_on", {"device_id": SAT_DEVICE})]
+
+
+# ── Unknown origin: a failed satellite lookup fails closed for unlock/open ──
+
+def _break_registry(monkeypatch, how):
+    er = sys.modules["homeassistant.helpers.entity_registry"]
+    if how == "raises":
+        def boom(hass):
+            raise RuntimeError("entity registry lookup failed")
+        monkeypatch.setattr(er, "async_get", boom)
+    else:   # unavailable
+        monkeypatch.setattr(er, "async_get", lambda hass: None)
+
+
+@pytest.mark.parametrize("how", ["raises", "unavailable"])
+@pytest.mark.parametrize("text", ["unlock the front door", "open the garage door",
+                                  "unlock all doors"])
+async def test_failed_origin_lookup_defers_a_device_opening(home, monkeypatch, how, text):
+    _break_registry(monkeypatch, how)
+    assert await home.le.try_local(home.hass, text, "sir", device_id=PHONE_DEVICE) is None
+    assert home.hass.service_calls == []
+
+
+@pytest.mark.parametrize("text, call", [
+    ("turn on the porch light", ("light", "turn_on", "light.porch")),
+    ("lock the front door", ("lock", "lock", "lock.front_door")),
+])
+async def test_failed_origin_lookup_leaves_safe_actions_running(home, monkeypatch, text, call):
+    _break_registry(monkeypatch, "raises")
+    result = await home.le.try_local(home.hass, text, "sir", device_id=PHONE_DEVICE)
+    assert result is not None and result.handled
+    assert _calls(home.hass) == [call]
+    assert home.asked == []
+
+
+async def test_failed_origin_lookup_without_a_device_keeps_typed_behaviour(home, monkeypatch):
+    """No device_id means typed/chat: nothing to look up, so a broken
+    registry changes nothing (voice confirmation off → unlock runs)."""
+    _break_registry(monkeypatch, "raises")
+    result = await home.le.try_local(home.hass, "unlock the front door", "sir")
+    assert result is not None and result.handled
+    assert _calls(home.hass) == [("lock", "unlock", "lock.front_door")]
+
+
+async def test_known_non_satellite_device_keeps_its_behaviour(home):
+    result = await home.le.try_local(home.hass, "open the garage door", "sir",
+                                     device_id=PHONE_DEVICE)
+    assert result is not None and result.handled
+    assert _calls(home.hass) == [("cover", "open_cover", "cover.garage_door")]
+
+
+@pytest.mark.parametrize("how", ["raises", "unavailable"])
+def test_origin_lookup_modes(load, home, monkeypatch, how):
+    vc, pol = load("voice_confirm"), load("policy")
+    # working registry: confirmed answers in both modes
+    assert vc.is_voice_satellite_device(home.hass, SAT_DEVICE, strict=True) is True
+    assert vc.is_voice_satellite_device(home.hass, PHONE_DEVICE, strict=True) is False
+    assert pol._voice_satellite_request(home.hass, PHONE_DEVICE) is False
+    assert pol._voice_satellite_request(home.hass, "") is False
+    _break_registry(monkeypatch, how)
+    assert vc.is_voice_satellite_device(home.hass, PHONE_DEVICE) is False   # labelling callers
+    with pytest.raises(Exception):
+        vc.is_voice_satellite_device(home.hass, PHONE_DEVICE, strict=True)
+    assert pol._voice_satellite_request(home.hass, PHONE_DEVICE) is True    # could be voice
+    assert pol._voice_satellite_request(home.hass, "") is False             # typed/chat
+    assert pol.requires_confirmation(home.hass, "lock", "unlock", "lock.front_door",
+                                     device_id=PHONE_DEVICE) is True
+    assert pol.requires_confirmation(home.hass, "cover", "open_cover", "cover.garage_door",
+                                     device_id=PHONE_DEVICE) is True
+    assert pol.requires_confirmation(home.hass, "light", "turn_on", "light.porch",
+                                     device_id=PHONE_DEVICE) is False
+
+
+async def test_agent_logging_survives_a_failed_origin_lookup(home, monkeypatch):
+    """agent.py labels the action log source with the tolerant lookup; a
+    broken registry must not crash control_device. The safe action runs,
+    and the unlock is held for a phone tap that is refused."""
+    _break_registry(monkeypatch, "raises")
+    light = json.loads(await home.agent._exec_control_device(
+        home.hass, {"entity_id": "light.porch", "action": "turn_on"}, device_id=PHONE_DEVICE))
+    assert light.get("success") is True
+    unlock = json.loads(await home.agent._exec_control_device(
+        home.hass, {"entity_id": "lock.front_door", "action": "unlock"}, device_id=PHONE_DEVICE))
+    assert unlock["status"] == "awaiting_confirmation"
+    assert home.asked == ["phone"]
+    assert _calls(home.hass) == [("light", "turn_on", "light.porch")]

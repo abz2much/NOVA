@@ -264,22 +264,31 @@ async def confirm(hass, question: str, *, entity_id: str = "",
                                 timeout=timeout)) == "approved"
 
 
-def is_voice_satellite_device(hass, device_id: str) -> bool:
+def is_voice_satellite_device(hass, device_id: str, *, strict: bool = False) -> bool:
     """True if device_id belongs to a device with a paired assist_satellite
     entity (v7.87.0) — Nova's signal that a request was spoken, not typed.
     Used to require a non-voice (phone) confirmation for actions where a
     spoken confirmation would be exactly as spoofable as the spoken request
-    itself (unlock/open — see policy.py's voice-blocked-opening gate)."""
+    itself (unlock/open — see policy.py's voice-blocked-opening gate).
+
+    By default a failed lookup reads as False, which is fine for callers that
+    only label a request (action log source). strict=True raises instead, so
+    the authorization boundary (policy._voice_satellite_request) can tell a
+    confirmed non-satellite from an origin it couldn't check, and fail closed."""
     if not device_id:
         return False
     try:
         from homeassistant.helpers import entity_registry as er
         reg = er.async_get(hass)
+        if reg is None:
+            raise RuntimeError("entity registry unavailable")
         for st in hass.states.async_all("assist_satellite"):
             ent = reg.async_get(st.entity_id)
             if ent and ent.device_id == device_id:
                 return True
     except Exception as exc:
+        if strict:
+            raise
         _LOGGER.debug("voice_confirm.is_voice_satellite_device check failed: %s", exc)
     return False
 
