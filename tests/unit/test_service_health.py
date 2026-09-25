@@ -408,11 +408,22 @@ class _SchedStub:
 
 
 def _hass_with(rec):
-    return types.SimpleNamespace(data={"nova": {"e1": rec}})
+    """A loaded Nova entry whose NovaRuntime owns `rec`'s scheduler."""
+    from conftest import _install_nova_runtime
+    hass = types.SimpleNamespace(data={"nova": {}})
+    _install_nova_runtime(hass, scheduler=rec["scheduler"])
+    return hass
 
 
 def test_scheduler_check_off_when_absent(sh):
     out = sh._check_scheduler(types.SimpleNamespace(data={"nova": {}}))
+    assert out["status"] == "off"
+
+
+def test_scheduler_check_ignores_the_bridge(sh):
+    # A scheduler only in the hass.data bridge is not the entry's: OFF.
+    sched = _SchedStub([{"name": "health", "consecutive_errors": 0}])
+    out = sh._check_scheduler(types.SimpleNamespace(data={"nova": {"e1": {"scheduler": sched}}}))
     assert out["status"] == "off"
 
 

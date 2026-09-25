@@ -106,6 +106,14 @@ def _install_ha_stubs() -> None:
 
     cfg = types.ModuleType("homeassistant.config_entries")
     cfg.ConfigEntry = type("ConfigEntry", (), {})
+    # runtime.current_runtime() compares an entry's state with LOADED.
+    import enum as _enum
+    cfg.ConfigEntryState = _enum.Enum("ConfigEntryState", {
+        "LOADED": "loaded", "SETUP_IN_PROGRESS": "setup_in_progress",
+        "SETUP_ERROR": "setup_error", "SETUP_RETRY": "setup_retry",
+        "NOT_LOADED": "not_loaded", "FAILED_UNLOAD": "failed_unload",
+        "UNLOAD_IN_PROGRESS": "unload_in_progress",
+    })
 
     components = types.ModuleType("homeassistant.components")
     comp_camera = types.ModuleType("homeassistant.components.camera")
@@ -262,3 +270,35 @@ def reasoning_loop():
 @pytest.fixture
 def connectivity():
     return _load("connectivity")
+
+
+def _install_nova_runtime(hass, runtime_config=None, *, entry_id="e1", **fields):
+    """Give `hass` one LOADED Nova config entry that owns a NovaRuntime, the
+    way async_setup_entry leaves it, and return that entry.
+
+    Production code reads panel settings from entry.runtime_data (never the
+    hass.data bridge), so this is how a unit test sets them. The runtime's
+    runtime_config is `runtime_config` itself (not a copy), so a test can
+    change it in place later, like a panel write."""
+    rt = _load("runtime")
+    cfg = sys.modules["homeassistant.config_entries"]
+    kwargs = dict(
+        client=object(), llm_provider_name="groq", sentinel=object(),
+        reminder_watcher=object(), scheduler=object(), resources=object(),
+        automation_contexts=object(),
+        runtime_config={} if runtime_config is None else runtime_config,
+    )
+    kwargs.update(fields)
+    entry = types.SimpleNamespace(
+        entry_id=entry_id, state=cfg.ConfigEntryState.LOADED,
+        options={}, data={}, runtime_data=rt.NovaRuntime(**kwargs))
+    hass.config_entries = types.SimpleNamespace(
+        async_entries=lambda domain=None: [entry])
+    return entry
+
+
+@pytest.fixture
+def nova_runtime():
+    """install(hass, runtime_config=None, **fields) -> entry. See
+    _install_nova_runtime."""
+    return _install_nova_runtime

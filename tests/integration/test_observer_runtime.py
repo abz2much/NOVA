@@ -44,7 +44,7 @@ def fake_observer(monkeypatch):
     # Like the real observer, is_running() reflects start/stop.
     monkeypatch.setattr(observer._STATE, "running", False)
 
-    async def _start(hass, config):
+    async def _start(hass, config, entry=None):
         calls.append("start")
         observer._STATE.running = True
 
@@ -112,7 +112,7 @@ async def test_failed_observer_start_leaves_no_state(hass, monkeypatch):
     from custom_components.nova import cognitive_core, observer
     calls, seen = [], []
 
-    async def _boom(hass_, config):
+    async def _boom(hass_, config, entry=None):
         seen.append(entry.runtime_data)
         raise RuntimeError("observer failed to start")
 

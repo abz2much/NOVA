@@ -10,8 +10,9 @@ Drives the real async_setup_entry / async_unload_entry to prove:
 * setup -> unload -> setup builds a fresh runtime from the changed config,
 * a partial setup failure clears runtime_data and the bridge, even when the
   platform unload inside the failure path reports failure,
-* the proactive-audio shared objects stay domain-level and are dropped with
-  the last entry.
+* the proactive-audio objects belong to the entry's runtime (Phase 3B) and
+  are dropped with it; tests/integration/test_proactive_audio_runtime.py
+  covers them in detail.
 
 No device is touched: there are no lock, alarm or cover entities here.
 """
@@ -26,7 +27,8 @@ from .test_wiring_smoke import DOMAIN, _make_entry
 BRIDGED = ("client", "sentinel", "reminder_watcher", "scheduler", "resources",
            "automation_contexts", "automation_inventory", "runtime_config",
            "llm_provider_name", "schema_version")
-SHARED_AUDIO_KEYS = ("_intent_router", "_state_ledger", "_entity_locks", "_alert_buffer")
+PROACTIVE_FIELDS = ("intent_router", "state_ledger", "entity_locks", "alert_buffer")
+LEGACY_AUDIO_KEYS = ("_intent_router", "_state_ledger", "_entity_locks", "_alert_buffer")
 
 
 @pytest.fixture(autouse=True)
@@ -324,7 +326,7 @@ async def test_partial_setup_failure_clears_runtime_even_if_platform_unload_fail
 async def test_failed_observer_start_clears_runtime_and_bridge(hass):
     from custom_components.nova import observer
 
-    async def _boom(hass_, config):
+    async def _boom(hass_, config, entry=None):
         raise RuntimeError("observer failed to start")
 
     entry = await _add_entry(hass, observer_enabled=True)
@@ -337,34 +339,38 @@ async def test_failed_observer_start_clears_runtime_and_bridge(hass):
     assert entry.entry_id not in hass.data.get(DOMAIN, {})
 
 
-async def test_proactive_audio_shared_objects_are_domain_level(hass):
-    """Chosen design: the four shared objects stay lazily-built, domain-level
-    keys (not NovaRuntime fields, not in the entry bridge) and are dropped
-    when the last entry unloads. A reload builds new ones."""
+async def test_proactive_audio_objects_are_entry_owned(hass):
+    """Phase 3B: the four proactive-audio objects are the entry's NovaRuntime
+    fields, never domain-level hass.data keys or bridge values. Unload drops
+    them; a reload builds new ones."""
     from custom_components.nova import proactive_audio
 
     entry = await _setup(hass)
     runtime = entry.runtime_data
-    store = hass.data[DOMAIN]
-    router = proactive_audio._intent_router(hass)   # built lazily, on first use
-    ledger, locks, buffer = (store["_state_ledger"], store["_entity_locks"],
-                             store["_alert_buffer"])
-    assert store["_intent_router"] is router
+    router = proactive_audio._intent_router(hass, runtime)   # built lazily, on first use
+    ledger, locks, buffer = runtime.state_ledger, runtime.entity_locks, runtime.alert_buffer
+    assert runtime.intent_router is router
+    assert router is not None and ledger is not None and locks is not None
     assert buffer.ready is True
 
-    held = {id(getattr(runtime, f)) for f in runtime.__slots__}
+    store = hass.data[DOMAIN]
+    for key in LEGACY_AUDIO_KEYS:
+        assert key not in store, key
     bridge = store[entry.entry_id]
     for obj in (router, ledger, locks, buffer):
-        assert id(obj) not in held
         assert all(v is not obj for v in bridge.values())
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
-    for key in SHARED_AUDIO_KEYS:
+    for field in PROACTIVE_FIELDS:
+        assert getattr(runtime, field) is None, field
+    for key in LEGACY_AUDIO_KEYS:
         assert key not in hass.data.get(DOMAIN, {}), key
 
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    assert hass.data[DOMAIN]["_state_ledger"] is not ledger
-    assert hass.data[DOMAIN]["_alert_buffer"] is not buffer
-    assert hass.data[DOMAIN]["_alert_buffer"].ready is True
+    fresh = entry.runtime_data
+    assert fresh is not runtime
+    assert fresh.state_ledger is not ledger
+    assert fresh.alert_buffer is not buffer
+    assert fresh.alert_buffer.ready is True

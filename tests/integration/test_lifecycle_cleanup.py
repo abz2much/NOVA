@@ -99,7 +99,7 @@ async def test_observer_disabled_unload_removes_lockdown_listener(hass, stop_cal
 async def test_observer_enabled_unload_stops_core_once(hass, stop_calls):
     from custom_components.nova import observer
 
-    async def _fake_start(hass_, config):
+    async def _fake_start(hass_, config, entry=None):
         observer._STATE.running = True
 
     with patch.object(observer, "start", _fake_start):
@@ -162,7 +162,7 @@ async def test_repeated_unload_is_safe(hass, stop_calls):
 async def test_failed_observer_start_leaves_nothing_behind(hass, stop_calls):
     from custom_components.nova import identity, observer
 
-    async def _boom(hass_, config):
+    async def _boom(hass_, config, entry=None):
         raise RuntimeError("observer failed to start")
 
     assert await async_setup_component(hass, "homeassistant", {})

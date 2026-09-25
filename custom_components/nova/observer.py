@@ -151,6 +151,9 @@ class _ObserverState:
         self.reasoning_provider = None
         self.hass = None
         self.config: dict = {}
+        # The config entry that started the observer. Its NovaRuntime owns
+        # the live panel settings (runtime_config) the pipeline reads.
+        self.entry = None
         # Global rate limit tracking for classifier calls
         self.classifier_timestamps: deque = deque(maxlen=5000)
         self.rate_limit_warn_logged: bool = False
@@ -158,6 +161,7 @@ class _ObserverState:
     def reset(self):
         self.running = False
         self.unsub = None
+        self.entry = None
         self.last_seen.clear()
         self.recent_events.clear()
         self.classifier_timestamps.clear()
@@ -165,6 +169,19 @@ class _ObserverState:
 
 
 _STATE = _ObserverState()
+
+
+def _live_runtime_config() -> dict:
+    """The owning entry's live runtime_config (panel settings), read on the
+    event loop. {} when the observer has no owning entry (stopped, or
+    started without one) or that entry is not loaded; a loaded entry that
+    has lost its runtime raises NovaRuntimeUnavailable instead of letting
+    the observer act on defaults. Never reads the hass.data bridge."""
+    entry = _STATE.entry
+    if entry is None:
+        return {}
+    from .runtime import lifecycle_runtime_config
+    return lifecycle_runtime_config(entry)
 
 
 def _live_honorific(hass: HomeAssistant) -> str:
@@ -274,17 +291,12 @@ def _effective_rate_limit() -> int:
     (or negative) means UNLIMITED — appropriate for local LLMs (Ollama) or paid
     tiers with high quotas, where throttling at 30/hr makes no sense.
     """
-    from .const import DOMAIN
-    hass = _STATE.hass
-    if hass:
-        for _eid, data in hass.data.get(DOMAIN, {}).items():
-            if isinstance(data, dict):
-                rc = data.get("runtime_config", {})
-                if "classifier_rate_limit" in rc:
-                    try:
-                        return int(rc["classifier_rate_limit"])
-                    except (TypeError, ValueError):
-                        break
+    rc = _live_runtime_config()
+    if "classifier_rate_limit" in rc:
+        try:
+            return int(rc["classifier_rate_limit"])
+        except (TypeError, ValueError):
+            pass
     try:
         return int((_STATE.config or {}).get(
             "classifier_rate_limit", GLOBAL_CLASSIFIER_RATE_LIMIT_PER_HOUR))
@@ -387,30 +399,20 @@ def record_camera_event(
 
 def _cognition_enabled() -> bool:
     """Whether the local cognition layer is active (runtime_config → config → default ON)."""
-    from .const import DOMAIN
-    hass = _STATE.hass
-    if hass:
-        for _eid, data in hass.data.get(DOMAIN, {}).items():
-            if isinstance(data, dict):
-                rc = data.get("runtime_config", {})
-                if "cognition_enabled" in rc:
-                    return bool(rc["cognition_enabled"])
+    rc = _live_runtime_config()
+    if "cognition_enabled" in rc:
+        return bool(rc["cognition_enabled"])
     return bool((_STATE.config or {}).get("cognition_enabled", True))
 
 
 def _cognition_threshold() -> float:
     """Salience threshold for cognition anomaly escalation (default 0.6)."""
-    from .const import DOMAIN
-    hass = _STATE.hass
-    if hass:
-        for _eid, data in hass.data.get(DOMAIN, {}).items():
-            if isinstance(data, dict):
-                rc = data.get("runtime_config", {})
-                if "cognition_threshold" in rc:
-                    try:
-                        return float(rc["cognition_threshold"])
-                    except (TypeError, ValueError):
-                        break
+    rc = _live_runtime_config()
+    if "cognition_threshold" in rc:
+        try:
+            return float(rc["cognition_threshold"])
+        except (TypeError, ValueError):
+            pass
     try:
         return float((_STATE.config or {}).get("cognition_threshold", 0.6))
     except (TypeError, ValueError):
@@ -453,17 +455,12 @@ def _group_debounce_s() -> float:
     """Coalescing window for a burst of numbered siblings. Configurable via
     `observer_group_debounce`: runtime_config (panel) → entry config → default.
     0 (or negative) disables sibling coalescing entirely."""
-    from .const import DOMAIN
-    hass = _STATE.hass
-    if hass:
-        for _eid, data in hass.data.get(DOMAIN, {}).items():
-            if isinstance(data, dict):
-                rc = data.get("runtime_config", {})
-                if "observer_group_debounce" in rc:
-                    try:
-                        return float(rc["observer_group_debounce"])
-                    except (TypeError, ValueError):
-                        break
+    rc = _live_runtime_config()
+    if "observer_group_debounce" in rc:
+        try:
+            return float(rc["observer_group_debounce"])
+        except (TypeError, ValueError):
+            pass
     try:
         return float((_STATE.config or {}).get("observer_group_debounce", GROUP_DEBOUNCE_S))
     except (TypeError, ValueError):
@@ -843,16 +840,13 @@ def _is_announcements_enabled() -> bool:
     Check whether announcements are globally enabled.
     Reads from runtime_config (panel toggles) first, then config (addon/entry).
     """
-    from .const import DOMAIN
     hass = _STATE.hass
     if not hass:
         return False
     # Check runtime_config first (set by panel Settings toggles)
-    for eid, data in hass.data.get(DOMAIN, {}).items():
-        if isinstance(data, dict):
-            rc = data.get("runtime_config", {})
-            if "announcements_enabled" in rc:
-                return bool(rc["announcements_enabled"])
+    rc = _live_runtime_config()
+    if "announcements_enabled" in rc:
+        return bool(rc["announcements_enabled"])
     # Fall back to _STATE.config (from addon config / entry options)
     return bool((_STATE.config or {}).get("announcements_enabled", True))
 
@@ -863,19 +857,16 @@ def _get_announcement_speakers() -> list[str] | None:
     Returns the list if set and non-empty, else None (let audio_routing decide).
     """
     import json as _json
-    from .const import DOMAIN
     hass = _STATE.hass
     if not hass:
         return None
+    rc = _live_runtime_config()
     try:
-        for eid, data in hass.data.get(DOMAIN, {}).items():
-            if isinstance(data, dict):
-                rc = data.get("runtime_config", {})
-                raw = rc.get("announcement_speakers")
-                if raw:
-                    speakers = _json.loads(raw) if isinstance(raw, str) else raw
-                    if isinstance(speakers, list) and speakers:
-                        return speakers
+        raw = rc.get("announcement_speakers")
+        if raw:
+            speakers = _json.loads(raw) if isinstance(raw, str) else raw
+            if isinstance(speakers, list) and speakers:
+                return speakers
     except Exception as exc:
         _LOGGER.debug("Error reading announcement_speakers: %s", exc)
     return None
@@ -937,16 +928,7 @@ async def _speak(message: str, *, targets: list[str]) -> list[str]:
 async def _send_notification(message: str, *, urgency: str) -> None:
     """Send push notification to every configured normal target."""
     config = dict(_STATE.config or {})
-    try:
-        from .const import DOMAIN
-        for eid, data in _STATE.hass.data.get(DOMAIN, {}).items():
-            if isinstance(data, dict):
-                rc = data.get("runtime_config", {})
-                if isinstance(rc, dict):
-                    config.update(rc)
-                    break
-    except Exception:
-        pass
+    config.update(_live_runtime_config())
     from .notify_targets import async_send_configured_notifications
     title = "Nova" if urgency != "critical" else "⚠ Nova URGENT"
     await async_send_configured_notifications(
@@ -957,30 +939,36 @@ async def _send_notification(message: str, *, urgency: str) -> None:
 
 # ─── Lifecycle ──────────────────────────────────────────────────────────────
 
-async def start(hass: HomeAssistant, config: dict) -> None:
-    """Begin observing. Safe to call multiple times."""
+async def start(hass: HomeAssistant, config: dict, entry=None) -> None:
+    """Begin observing. Safe to call multiple times.
+
+    `entry` is the config entry that owns this observer: its NovaRuntime
+    supplies the live panel settings. Without one the observer runs on
+    `config` alone."""
+    if entry is not None:
+        # Ownership first: a loaded entry that has lost its runtime raises
+        # here, before the observer changes any state.
+        from .runtime import current_runtime
+        current_runtime(entry)
     if _STATE.running:
         await stop()
 
     _STATE.hass = hass
     _STATE.config = config
+    _STATE.entry = entry
 
     # The boot-time observer config is built from entry.data/options only, which
     # predates anything saved from the panel (the appliance-profile lesson). Merge
     # the live runtime AI-model keys in so tier providers honor panel selections —
-    # critically llm_base_url for the Ollama/GPU-server migration.
-    try:
-        from .const import DOMAIN as _DOM
-        for _data in (hass.data.get(_DOM) or {}).values():
-            if isinstance(_data, dict) and isinstance(_data.get("runtime_config"), dict):
-                _rc = _data["runtime_config"]
-                config = {**config, **{
-                    k: v for k, v in _rc.items()
-                    if k == "llm_base_url" or k.endswith(("_provider", "_model", "_base_url"))
-                }}
-                break
-    except Exception as _exc:
-        _LOGGER.debug("Observer: runtime AI-key merge note: %s", _exc)
+    # critically llm_base_url for the Ollama/GPU-server migration. The config
+    # goes to executor jobs below, so merge from a fresh snapshot taken now.
+    if entry is not None:
+        from .runtime import runtime_config_snapshot
+        _rc = runtime_config_snapshot(entry)
+        config = {**config, **{
+            k: v for k, v in _rc.items()
+            if k == "llm_base_url" or k.endswith(("_provider", "_model", "_base_url"))
+        }}
     _STATE.config = config
 
     try:
@@ -1008,7 +996,7 @@ async def start(hass: HomeAssistant, config: dict) -> None:
     # v5.7.00: Start appliance cycle monitor alongside observer
     try:
         from . import appliance_monitor
-        await appliance_monitor.start(hass, config)
+        await appliance_monitor.start(hass, config, entry=entry)
     except Exception as exc:
         _LOGGER.warning("Appliance monitor start failed (non-fatal): %s", exc)
 
@@ -1022,7 +1010,7 @@ async def start(hass: HomeAssistant, config: dict) -> None:
     # v5.8.03: Start cognitive core
     try:
         from . import cognitive_core
-        await cognitive_core.start(hass, config)
+        await cognitive_core.start(hass, config, entry=entry)
     except Exception as exc:
         _LOGGER.warning("Cognitive core start failed (non-fatal): %s", exc)
 
@@ -1049,18 +1037,15 @@ async def refresh_tier_providers(hass: HomeAssistant, updates: Optional[dict] = 
             return
 
     config = dict(_STATE.config or {})
-    try:
-        from .const import DOMAIN as _DOM
-        for _data in (hass.data.get(_DOM) or {}).values():
-            if isinstance(_data, dict) and isinstance(_data.get("runtime_config"), dict):
-                rc = _data["runtime_config"]
-                config = {**config, **{
-                    k: v for k, v in rc.items()
-                    if k == "llm_base_url" or k.endswith(("_provider", "_model", "_base_url"))
-                }}
-                break
-    except Exception as exc:
-        _LOGGER.debug("Observer: refresh runtime-key merge note: %s", exc)
+    # The owning entry's live AI keys, from a fresh snapshot: the merged
+    # config goes to the executor jobs below.
+    if _STATE.entry is not None:
+        from .runtime import runtime_config_snapshot
+        rc = runtime_config_snapshot(_STATE.entry)   # raises for a loaded entry without runtime
+        config = {**config, **{
+            k: v for k, v in rc.items()
+            if k == "llm_base_url" or k.endswith(("_provider", "_model", "_base_url"))
+        }}
 
     try:
         classifier = await hass.async_add_executor_job(

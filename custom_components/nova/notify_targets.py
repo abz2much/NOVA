@@ -68,20 +68,12 @@ async def async_send_configured_notifications(
 ) -> list[str]:
     """Send one payload to every selected service, isolating failures."""
     effective_config = dict(config or {})
-    try:
-        for entry_data in hass.data.get("nova", {}).values():
-            if not isinstance(entry_data, dict):
-                continue
-            runtime = entry_data.get("runtime_config")
-            if not isinstance(runtime, dict):
-                continue
-            if CONF_NOTIFY_SERVICE in runtime:
-                effective_config[CONF_NOTIFY_SERVICE] = runtime[CONF_NOTIFY_SERVICE]
-            if CONF_NOTIFY_SERVICES in runtime:
-                effective_config[CONF_NOTIFY_SERVICES] = runtime[CONF_NOTIFY_SERVICES]
-            break
-    except Exception:
-        pass
+    from .runtime import domain_runtime_config
+    runtime = domain_runtime_config(hass)
+    if CONF_NOTIFY_SERVICE in runtime:
+        effective_config[CONF_NOTIFY_SERVICE] = runtime[CONF_NOTIFY_SERVICE]
+    if CONF_NOTIFY_SERVICES in runtime:
+        effective_config[CONF_NOTIFY_SERVICES] = runtime[CONF_NOTIFY_SERVICES]
     services = configured_notify_services(effective_config)
     if not services:
         return []

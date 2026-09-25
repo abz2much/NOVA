@@ -9,7 +9,8 @@ static checks on how __init__.py and proactive_audio.py wire it:
 * get_runtime() fails loudly instead of inventing a default,
 * clear_runtime() drops runtime_data and the bridge, idempotently,
 * setup builds each owner once and releases the runtime on every failure path,
-* the proactive-audio shared objects stay domain-level and outside the runtime.
+* the proactive-audio objects are NovaRuntime fields (Phase 3B), built lazily
+  by proactive_audio.py and never kept in hass.data.
 
 Focused run:
     python -m pytest tests/unit/test_runtime.py -q
@@ -27,6 +28,8 @@ FIELDS = [
     "client", "llm_provider_name", "sentinel", "reminder_watcher",
     "scheduler", "resources", "automation_contexts", "automation_inventory",
     "runtime_config", "schema_version", "observer_running",
+    "intent_router", "state_ledger", "entity_locks", "alert_buffer",
+    "audit_running",
 ]
 
 
@@ -211,14 +214,50 @@ def test_unload_releases_runtime():
     assert "clear_runtime" in _call_names(_func(COMP / "__init__.py", "async_unload_entry"))
 
 
-# ── Proactive-audio shared objects: domain-level, outside the runtime ───────
+# ── Proactive-audio objects: entry-owned, on NovaRuntime (Phase 3B) ─────────
 
-def test_proactive_audio_shared_objects_stay_outside_runtime(rt):
-    src = (COMP / "proactive_audio.py").read_text(encoding="utf-8")
-    assert "runtime_data" not in src and "NovaRuntime" not in src
+def test_proactive_audio_objects_default_to_unbuilt(rt):
+    runtime = _runtime(rt)
     for name in ("intent_router", "state_ledger", "entity_locks", "alert_buffer"):
-        assert name not in FIELDS
-    # Released when the last entry unloads, exactly as before Phase 3A.
+        assert getattr(runtime, name) is None, name
+    assert runtime.audit_running is False
+
+
+def test_proactive_audio_objects_live_on_the_runtime():
+    src = (COMP / "proactive_audio.py").read_text(encoding="utf-8")
+    # No domain-level bucket: nothing reads or writes hass.data here.
+    assert "hass.data" not in src
+    for key in ("'_intent_router'", "'_state_ledger'", "'_entity_locks'",
+                "'_alert_buffer'", "ALERT_BUFFER_KEY", "'_audit_running'"):
+        assert key not in src, key
+    # Each object is built lazily on its runtime field.
+    for field, cls in (("state_ledger", "StateLedger"),
+                       ("entity_locks", "EntityLockRegistry"),
+                       ("alert_buffer", "AlertBuffer")):
+        assert f"if runtime.{field} is None:\n        runtime.{field} = {cls}()" in src, field
+    assert "if runtime.intent_router is None:" in src
+    # Unload forgets all four.
     unload = ast.unparse(_func(COMP / "proactive_audio.py", "async_unload_proactive_audio"))
-    for key in ("'_intent_router'", "'_state_ledger'", "'_entity_locks'", "ALERT_BUFFER_KEY"):
-        assert f"store.pop({key}, None)" in unload, key
+    for field in ("intent_router", "state_ledger", "entity_locks", "alert_buffer"):
+        assert f"runtime.{field} = None" in unload, field
+
+
+def test_proactive_audio_service_handlers_resolve_the_entry_runtime():
+    reg = _func(COMP / "proactive_audio.py", "async_register_services")
+    handlers = {n.name: n for n in ast.walk(reg)
+                if isinstance(n, ast.AsyncFunctionDef)}
+    for name in ("_handle_speak", "_handle_process_intent"):
+        body = ast.unparse(handlers[name])
+        assert "runtime = _service_runtime(hass)" in body, name
+    helper = ast.unparse(_func(COMP / "proactive_audio.py", "_service_runtime"))
+    assert "domain_runtime(hass)" in helper
+    assert "raise NovaRuntimeUnavailable" in helper
+
+
+def test_proactive_audio_unsubs_are_owned_by_resources():
+    setup = ast.unparse(_func(COMP / "proactive_audio.py", "async_setup_proactive_audio"))
+    assert "runtime.resources.add_unsubs(unsubs)" in setup
+    assert "runtime = get_runtime(entry)" in setup
+    unload = ast.unparse(_func(COMP / "proactive_audio.py", "async_unload_proactive_audio"))
+    # Unload never calls them itself: NovaResources already did.
+    assert "cancel()" not in unload and "proactive_audio_unsubs" not in unload

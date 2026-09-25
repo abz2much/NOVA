@@ -185,21 +185,12 @@ def drop_display_targets(hass: HomeAssistant, targets, context: str = "") -> lis
     Any drop is logged at WARNING with the caller context, so an unexpected TV
     target is immediately traceable to the feature that produced it.
     """
-    # Read the designated movie player from the in-memory runtime_config (seeded
-    # from config.json at setup) — NOT via nova_config.get(), whose lazy load()
-    # mutates shared module state and would perturb unrelated code/tests.
-    movie = ""
-    try:
-        from .const import DOMAIN
-        for _ed in (hass.data.get(DOMAIN) or {}).values():
-            if isinstance(_ed, dict):
-                rc = _ed.get("runtime_config") or {}
-                mv = rc.get("movie_media_player")
-                if mv:
-                    movie = mv
-                    break
-    except Exception:
-        movie = ""
+    # Read the designated movie player from the in-memory runtime_config (the
+    # Nova entry's NovaRuntime, seeded from config.json at setup) — NOT via
+    # nova_config.get(), whose lazy load() mutates shared module state and
+    # would perturb unrelated code/tests.
+    from .runtime import domain_runtime_config
+    movie = domain_runtime_config(hass).get("movie_media_player") or ""
     kept, dropped = [], []
     for t in list(targets or []):
         (dropped if _is_display_target(hass, t, movie) else kept).append(t)

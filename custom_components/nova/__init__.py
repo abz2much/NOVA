@@ -956,7 +956,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
         observer_config = dict(_eff)
         from . import observer as observer_mod
         try:
-            await observer_mod.start(hass, observer_config)
+            await observer_mod.start(hass, observer_config, entry=entry)
         except Exception:
             # Same rule as the block above: a setup exception gets no
             # async_unload_entry from HA, so tear down what's registered.
@@ -1627,7 +1627,7 @@ def _register_services(
         # Fresh effective config (data + options + panel, panel winning) so a
         # manual start honors current panel settings, not stale entry data.
         observer_config = await hass.async_add_executor_job(_jc.effective_config, entry)
-        await observer_mod.start(hass, observer_config)
+        await observer_mod.start(hass, observer_config, entry=entry)
         set_observer_running(hass, entry, True)
         _LOGGER.info("Observer started via service call")
 

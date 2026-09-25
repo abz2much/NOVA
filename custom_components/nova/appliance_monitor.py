@@ -324,6 +324,9 @@ class _MonitorState:
     def __init__(self):
         self.hass: Optional[HomeAssistant] = None
         self.config: dict = {}
+        # The config entry that started the monitor; its NovaRuntime owns the
+        # live panel settings read when announcing.
+        self.entry = None
         self.sensors: dict[str, _SensorState] = {}      # power-based tracking
         self.natives: dict[str, _NativeAppliance] = {}   # native status tracking
         self.delta: Optional[_DeltaTracker] = None       # whole-home delta
@@ -334,6 +337,18 @@ class _MonitorState:
         self.running = False
 
 _MON = _MonitorState()
+
+
+def _live_runtime_config() -> dict:
+    """The owning entry's live runtime_config, read on the event loop. {}
+    when the monitor has no owning entry or that entry is not loaded; a
+    loaded entry that has lost its runtime raises NovaRuntimeUnavailable.
+    Never reads the hass.data bridge."""
+    entry = _MON.entry
+    if entry is None:
+        return {}
+    from .runtime import lifecycle_runtime_config
+    return lifecycle_runtime_config(entry)
 
 
 # ── Discovery ───────────────────────────────────────────────────────────────
@@ -397,9 +412,14 @@ def _get_entity_area(hass: HomeAssistant, entity_id: str) -> Optional[str]:
     return None
 
 
-def _discover_sensors(hass: HomeAssistant) -> dict[str, _SensorState]:
+def _discover_sensors(hass: HomeAssistant,
+                      exclusions: Optional[tuple] = None) -> dict[str, _SensorState]:
     """
     Find power sensors that might be appliances using multiple methods.
+
+    Runs in an executor: `exclusions` is the entity_filter.exclusion_snapshot()
+    the caller took on the event loop, so the live runtime_config is never
+    read from this thread.
 
     Discovery priority:
       1. Direct keyword match on entity_id / friendly_name
@@ -421,7 +441,7 @@ def _discover_sensors(hass: HomeAssistant) -> dict[str, _SensorState]:
         eid = state.entity_id
         try:
             from .entity_filter import is_excluded
-            if is_excluded(hass, eid):
+            if is_excluded(hass, eid, exclusions):
                 continue
         except Exception:
             pass
@@ -1077,17 +1097,10 @@ async def _announce_done(sensor: _SensorState, appliance_label: str) -> None:
         return
 
     # Check announcements_enabled
-    from .const import DOMAIN
+    rc = _live_runtime_config()
     announcements_on = True
-    try:
-        for eid, data in hass.data.get(DOMAIN, {}).items():
-            if isinstance(data, dict):
-                rc = data.get("runtime_config", {})
-                if "announcements_enabled" in rc:
-                    announcements_on = bool(rc["announcements_enabled"])
-                    break
-    except Exception:
-        pass
+    if "announcements_enabled" in rc:
+        announcements_on = bool(rc["announcements_enabled"])
 
     if not announcements_on:
         _LOGGER.debug("Appliance: announcements disabled, logging only")
@@ -1117,15 +1130,11 @@ async def _announce_done(sensor: _SensorState, appliance_label: str) -> None:
         ann_speakers = None
         try:
             import json as _json
-            for eid, data in hass.data.get(DOMAIN, {}).items():
-                if isinstance(data, dict):
-                    rc = data.get("runtime_config", {})
-                    raw = rc.get("announcement_speakers")
-                    if raw:
-                        parsed = _json.loads(raw) if isinstance(raw, str) else raw
-                        if isinstance(parsed, list) and parsed:
-                            ann_speakers = parsed
-                            break
+            raw = rc.get("announcement_speakers")
+            if raw:
+                parsed = _json.loads(raw) if isinstance(raw, str) else raw
+                if isinstance(parsed, list) and parsed:
+                    ann_speakers = parsed
         except Exception:
             pass
 
@@ -1182,12 +1191,17 @@ async def _announce_done(sensor: _SensorState, appliance_label: str) -> None:
 
 # ── Start / stop ────────────────────────────────────────────────────────────
 
-async def start(hass: HomeAssistant, config: dict) -> None:
-    """Begin monitoring. Auto-discovers appliance power sensors."""
+async def start(hass: HomeAssistant, config: dict, entry=None) -> None:
+    """Begin monitoring. Auto-discovers appliance power sensors.
+
+    `entry` is the config entry that owns the monitor: its NovaRuntime
+    supplies the live panel settings. Without one the monitor runs on
+    `config` and the persisted profile alone."""
     if _MON.running:
         await stop()
 
     _MON.hass = hass
+    _MON.entry = entry
 
     # Always honor the latest panel-saved appliance profile. The observer starts
     # us at boot with a config built from entry.data/options only — which predates
@@ -1196,16 +1210,9 @@ async def start(hass: HomeAssistant, config: dict) -> None:
     # home meter (the "Washer cycle complete" false positives). runtime_config
     # holds the live panel values; the persisted config is the boot-time fallback.
     _prof_val = None
-    try:
-        from .const import DOMAIN as _DOM
-        for _eid, _data in (hass.data.get(_DOM) or {}).items():
-            if isinstance(_data, dict) and isinstance(_data.get("runtime_config"), dict):
-                _rc = _data["runtime_config"]
-                if "appliance_profile" in _rc:
-                    _prof_val = _rc["appliance_profile"]
-                break
-    except Exception as _exc:
-        _LOGGER.debug("Appliance profile runtime read note: %s", _exc)
+    _rc = _live_runtime_config()
+    if "appliance_profile" in _rc:
+        _prof_val = _rc["appliance_profile"]
     if _prof_val is None:
         try:
             from . import nova_config
@@ -1220,7 +1227,9 @@ async def start(hass: HomeAssistant, config: dict) -> None:
     _MON.config = config
 
     # Discover sensors
-    _MON.sensors = await hass.async_add_executor_job(_discover_sensors, hass)
+    from .entity_filter import exclusion_snapshot
+    _MON.sensors = await hass.async_add_executor_job(
+        _discover_sensors, hass, exclusion_snapshot(hass))
 
     # Discover native smart appliance status entities
     _MON.natives = await hass.async_add_executor_job(
@@ -1378,6 +1387,7 @@ async def stop() -> None:
     _MON.natives.clear()
     _MON.delta = None
     _MON.running = False
+    _MON.entry = None
     _LOGGER.info("Nova Appliance Monitor stopped")
 
 

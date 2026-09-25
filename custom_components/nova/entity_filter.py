@@ -18,7 +18,9 @@ still act on it if you ask for it by name.
 Config is read from the in-memory ``runtime_config`` (seeded from config.json at
 setup, kept current by the panel), never via ``nova_config.get()``, because
 ``is_excluded()`` runs on the hot state-change path and a lazy config load there
-both costs time and mutates shared module state.
+both costs time and mutates shared module state. runtime_config belongs to the
+Nova entry's NovaRuntime and is read on the event loop; code running in an
+executor passes an ``exclusion_snapshot()`` taken on the loop instead.
 """
 from __future__ import annotations
 
@@ -33,8 +35,6 @@ try:  # label registry is present on modern HA; degrade gracefully if not
     from homeassistant.helpers import label_registry as _lr
 except Exception:  # pragma: no cover - very old HA
     _lr = None
-
-from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -58,44 +58,52 @@ def _as_list(value) -> list:
 
 
 def _exclusion_config(hass: HomeAssistant):
-    """Return (entities:set, domains:set, labels:set) from runtime_config."""
+    """Return (entities:set, domains:set, labels:set) from runtime_config.
+
+    Reads the Nova entry's live runtime_config, so call it on the event
+    loop. The sets are new on every call."""
+    from .runtime import domain_runtime_config
+    rc = domain_runtime_config(hass) or {}
     ents: set[str] = set()
     doms: set[str] = set()
     labs: set[str] = set()
     try:
-        for entry_data in (hass.data.get(DOMAIN) or {}).values():
-            if not isinstance(entry_data, dict):
-                continue
-            rc = entry_data.get("runtime_config") or {}
-            got = False
-            for e in _as_list(rc.get("excluded_entities")):
-                if e:
-                    ents.add(str(e))
-                    got = True
-            for d in _as_list(rc.get("excluded_domains")):
-                if d:
-                    doms.add(str(d).strip().lower())
-                    got = True
-            for lab in _as_list(rc.get("excluded_labels")):
-                if lab:
-                    labs.add(str(lab))
-                    got = True
-            if got:
-                break
+        for e in _as_list(rc.get("excluded_entities")):
+            if e:
+                ents.add(str(e))
+        for d in _as_list(rc.get("excluded_domains")):
+            if d:
+                doms.add(str(d).strip().lower())
+        for lab in _as_list(rc.get("excluded_labels")):
+            if lab:
+                labs.add(str(lab))
     except Exception:
         pass
     return ents, doms, labs
 
 
-def is_excluded(hass: HomeAssistant, entity_id: Optional[str]) -> bool:
+def exclusion_snapshot(hass: HomeAssistant) -> tuple[set, set, set]:
+    """The current exclusions as new sets, for handing to an executor job.
+
+    Take it on the event loop right before the job and pass it to
+    is_excluded(..., exclusions=...), so the worker thread never reads the
+    live runtime_config. Never reuse it for a later operation."""
+    return _exclusion_config(hass)
+
+
+def is_excluded(hass: HomeAssistant, entity_id: Optional[str],
+                exclusions: Optional[tuple] = None) -> bool:
     """True if the user has excluded this entity (by id, domain, or label).
 
     Cheap and safe to call on the hot state-change path: a tiny dict read plus,
-    only when labels are configured, an in-memory registry lookup.
+    only when labels are configured, an in-memory registry lookup. From an
+    executor thread, pass `exclusions` (an exclusion_snapshot() taken on the
+    event loop) so the live runtime_config is never read there.
     """
     if not entity_id:
         return False
-    ents, doms, labs = _exclusion_config(hass)
+    ents, doms, labs = (exclusions if exclusions is not None
+                        else _exclusion_config(hass))
     if not ents and not doms and not labs:
         return False
     if entity_id in ents:

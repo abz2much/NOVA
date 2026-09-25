@@ -414,18 +414,17 @@ async def test_no_tts_entity_is_a_noop(tts):
     assert hass.calls == []
 
 
-def test_drop_display_targets_filters_tv_and_movie(routing, load):
+def test_drop_display_targets_filters_tv_and_movie(routing, load, nova_runtime):
     # The output choke point strips TVs + the movie player from ANY target list,
     # regardless of how they were resolved — the safety net for TV takeovers.
-    # movie_media_player is read from runtime_config (hass.data), not nova_config.
-    const = load("const")
+    # movie_media_player is read from the entry's NovaRuntime.runtime_config,
+    # not nova_config.
     spk = _State("media_player.living_room_speaker", "idle")
     tv = _State("media_player.samsung_tv", "on"); tv.attributes = {"device_class": "tv"}
     movie = _State("media_player.projector", "idle")
     players = {s.entity_id: s for s in (spk, tv, movie)}
     hass = _Hass(players)
-    hass.data = {const.DOMAIN: {"e1": {"runtime_config": {
-        "movie_media_player": "media_player.projector"}}}}
+    nova_runtime(hass, {"movie_media_player": "media_player.projector"})
     kept = routing.drop_display_targets(
         hass,
         ["media_player.living_room_speaker", "media_player.samsung_tv", "media_player.projector"],

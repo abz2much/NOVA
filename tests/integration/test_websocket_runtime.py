@@ -69,7 +69,7 @@ def observer_fake(monkeypatch, events):
                 entry.runtime_data.observer_running if entry else None,
                 nova_config.get("observer_enabled"))
 
-    async def _start(hass, config):
+    async def _start(hass, config, entry=None):
         events.append(("start",) + _seen())
         ctl.configs.append(config)
         if ctl.fail_start:
@@ -355,7 +355,7 @@ def executor_fakes(monkeypatch, observer_fake):
     from custom_components.nova import appliance_monitor, websocket
     seen: dict[str, list] = {"appliances": [], "models": []}
 
-    async def _appliances(hass, cfg):
+    async def _appliances(hass, cfg, entry=None):
         seen["appliances"].append(cfg)
 
     async def _models(hass, provider, config, cache_key):

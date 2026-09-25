@@ -388,14 +388,9 @@ def _check_scheduler(hass) -> dict:
     """Periodic-sweep scheduler health — informational. WARN if any task has been
     failing repeatedly; OFF if the scheduler isn't running yet (fresh boot)."""
     out = {"name": "Scheduler", "key": "scheduler", "status": _OFF, "detail": ""}
-    sched = None
-    try:
-        for rec in hass.data.get("nova", {}).values():   # our own domain bucket
-            if isinstance(rec, dict) and rec.get("scheduler") is not None:
-                sched = rec["scheduler"]
-                break
-    except Exception:
-        sched = None
+    from ..runtime import domain_runtime
+    runtime = domain_runtime(hass)   # the Nova entry's own scheduler
+    sched = runtime.scheduler if runtime is not None else None
     if sched is None:
         out["detail"] = "not running"
         return out

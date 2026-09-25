@@ -15,16 +15,10 @@ CONF_SECURITY_ALARM_ENTITY = "security_alarm_entity"
 
 
 def _configured(hass, config: dict | None) -> str:
-    try:
-        from .const import DOMAIN
-        for data in hass.data.get(DOMAIN, {}).values():
-            if not isinstance(data, dict):
-                continue
-            runtime = data.get("runtime_config", {})
-            if CONF_SECURITY_ALARM_ENTITY in runtime:
-                return str(runtime[CONF_SECURITY_ALARM_ENTITY] or "").strip()
-    except Exception:
-        pass
+    from .runtime import domain_runtime_config
+    runtime = domain_runtime_config(hass)
+    if CONF_SECURITY_ALARM_ENTITY in runtime:
+        return str(runtime[CONF_SECURITY_ALARM_ENTITY] or "").strip()
     if config and config.get(CONF_SECURITY_ALARM_ENTITY):
         return str(config[CONF_SECURITY_ALARM_ENTITY]).strip()
     try:

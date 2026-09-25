@@ -323,13 +323,17 @@ async def _cost_today(hass, imported_kwh: Optional[float], exported_kwh: Optiona
     minus exported kWh x export price) from the Energy dashboard's own price
     fields, clearly labeled as an estimate since it can't account for a price
     that changed during the day. (None, "unavailable") if neither is possible.
-    Never raises."""
+    Never raises, except NovaRuntimeUnavailable when the Nova entry is loaded
+    but has lost its runtime (its settings would otherwise be made up)."""
+    from .runtime import NovaRuntimeUnavailable
     try:
         from .const import DOMAIN
         from . import nova_config
         entry = next(iter(hass.config_entries.async_entries(DOMAIN)), None)
         today_eid = nova_config.runtime_get(hass, entry, "energy_cost_today_entity", "") or ""
         net_eid = nova_config.runtime_get(hass, entry, "energy_cost_net_entity", "") or ""
+    except NovaRuntimeUnavailable:
+        raise
     except Exception:
         today_eid = net_eid = ""
 
