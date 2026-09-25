@@ -44,6 +44,12 @@ from .llm_provider import (
     resolve_provider_endpoint,
 )
 from .migrations import migrate_config, CURRENT_SCHEMA_VERSION
+from .runtime import (
+    NovaConfigEntry,
+    NovaRuntime,
+    build_compat_bridge,
+    clear_runtime,
+)
 from .panel_register import async_register_panel, async_unregister_panel
 from .websocket import async_register as async_register_ws
 from .proactive_audio import (
@@ -106,7 +112,7 @@ CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 # reconcile block were all paths for an add-on that no longer exists.
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool:
     """Set up Nova from a config entry."""
     hass.data.setdefault(DOMAIN, {})
 
@@ -777,18 +783,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     resources.add_unsubs(recognition_unsubs)
     resources.add_closeable(sched)
 
-    hass.data[DOMAIN][entry.entry_id] = {
-        "client":             llm_client,
-        "sentinel":           sentinel,
-        "camera_unsubs":      camera_unsubs,
-        "recognition_unsubs": recognition_unsubs,
-        "resources":          resources,
-        "scheduler":          sched,
-        "reminder_watcher":   reminder_watcher,
-        "llm_provider_name":  llm_provider_name,
-        "schema_version":     CURRENT_SCHEMA_VERSION,
-        "automation_contexts": automation_contexts,
-    }
+    # Typed runtime (Phase 3A): every field exists by now, so the runtime is
+    # never exposed half-built. The hass.data dict is a compatibility bridge
+    # holding the same objects, for readers not yet migrated.
+    runtime = NovaRuntime(
+        client=llm_client,
+        llm_provider_name=llm_provider_name,
+        sentinel=sentinel,
+        reminder_watcher=reminder_watcher,
+        scheduler=sched,
+        resources=resources,
+        automation_contexts=automation_contexts,
+    )
+    entry.runtime_data = runtime
+    hass.data[DOMAIN][entry.entry_id] = build_compat_bridge(
+        runtime,
+        camera_unsubs=camera_unsubs,
+        recognition_unsubs=recognition_unsubs,
+    )
 
     # Read-only inventory of every automation Home Assistant has actually
     # loaded (UI, YAML, packages, and blueprints).  Build once now and refresh
@@ -798,6 +810,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         automation_inventory = AutomationInventory(hass)
         automation_inventory.start()
         automation_contexts.inventory = automation_inventory
+        runtime.automation_inventory = automation_inventory
         hass.data[DOMAIN][entry.entry_id]["automation_inventory"] = automation_inventory
         resources.add_closeable(automation_inventory)
     except Exception as exc:
@@ -847,7 +860,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         }
         rc = {k: cfg[k] for k in restore_keys if k in cfg}
         if rc:
-            hass.data[DOMAIN][entry.entry_id]["runtime_config"] = rc
+            # Fill the shared dict in place; the bridge holds the same object.
+            runtime.runtime_config.update(rc)
             _LOGGER.info(
                 "Restored %d panel settings from nova_config (%d total keys in file)",
                 len(rc), len(cfg),
@@ -910,8 +924,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # NovaResources.close_all() is for) and tolerates a partial setup —
         # it defaults hass.data lookups to {} and unloading a platform that
         # was never forwarded is a no-op — so reuse it instead of duplicating
-        # its teardown.
+        # its teardown. clear_runtime() then drops runtime_data and the
+        # bridge even if the platform unload reported failure.
         await async_unload_entry(hass, entry)
+        clear_runtime(hass, entry)
         raise
 
     # ── v5.2 Observer Mode ──────────────────────────────────────────────────
@@ -933,6 +949,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             # Marked running so unload's observer.stop() clears a partial start.
             hass.data[DOMAIN][entry.entry_id]["observer_running"] = True
             await async_unload_entry(hass, entry)
+            clear_runtime(hass, entry)
             raise
         hass.data[DOMAIN][entry.entry_id]["observer_running"] = True
         _LOGGER.info("Nova Observer mode ENABLED — watching for interesting events")
@@ -1007,7 +1024,7 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
     await hass.config_entries.async_reload(entry.entry_id)
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool:
     """Unload Nova."""
     data = hass.data[DOMAIN].get(entry.entry_id, {})
 
@@ -1110,7 +1127,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if ok:
-        hass.data[DOMAIN].pop(entry.entry_id, None)
+        # Drop both the typed runtime and its hass.data bridge.
+        clear_runtime(hass, entry)
     return ok
 
 
