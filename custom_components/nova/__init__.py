@@ -49,8 +49,10 @@ from .runtime import (
     NovaRuntime,
     build_compat_bridge,
     clear_runtime,
+    NovaRuntimeUnavailable,
     get_runtime,
     lifecycle_runtime,
+    lifecycle_runtime_config,
     set_observer_running,
 )
 from .panel_register import async_register_panel, async_unregister_panel
@@ -221,9 +223,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
     _chime_cd: dict[str, float] = {}     # doorbell-press anti-double, per entity
 
     def _auto_flag(key: str, default: bool) -> bool:
+        # Live panel value from NovaRuntime. An event that arrives during
+        # setup, before the runtime exists, gets {} and so the default. A
+        # loaded entry with no runtime raises here instead of using defaults.
+        _rc = lifecycle_runtime_config(entry)
         try:
-            _d = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
-            _rc = _d.get("runtime_config", {}) if isinstance(_d, dict) else {}
             if key in _rc:
                 _v = _rc[key]
                 return _v if isinstance(_v, bool) else str(_v).lower() in ("1", "true", "yes", "on")
@@ -566,12 +570,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
     async def _host_health_tick(_now) -> None:
         try:
             from . import host_health, nova_config as _jc3
-            rc = hass.data.get(DOMAIN, {}).get(
-                entry.entry_id, {}).get("runtime_config", {})
+            # Read live each tick: panel changes apply on the next sample.
+            rc = lifecycle_runtime_config(entry)
             cfg = await hass.async_add_executor_job(
                 _jc3.effective_config_with_runtime, entry, rc)
             res = await host_health.tick(hass, cfg)
             _LOGGER.debug("Nova host-health tick: %s", res)
+        except NovaRuntimeUnavailable as exc:
+            _LOGGER.warning("Nova host-health tick skipped: %s", exc)
         except Exception as exc:
             _LOGGER.debug("Nova host-health tick error: %s", exc)
 
@@ -628,11 +634,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
     async def _sleep_prompt_tick(_now) -> None:
         try:
             from . import sleep_detection as sd, nova_config as _jc2
-            rc = hass.data.get(DOMAIN, {}).get(
-                entry.entry_id, {}).get("runtime_config", {})
+            # Read live each tick: panel changes apply on the next check.
+            rc = lifecycle_runtime_config(entry)
             cfg = await hass.async_add_executor_job(
                 _jc2.effective_config_with_runtime, entry, rc)
             await sd.maybe_prompt_sleep(hass, cfg)
+        except NovaRuntimeUnavailable as exc:
+            _LOGGER.warning("Nova sleep-prompt tick skipped: %s", exc)
         except Exception as exc:
             _LOGGER.debug("Nova sleep-prompt tick error: %s", exc)
 
@@ -968,8 +976,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
     # event-driven alarm→lockdown sync here, regardless of the above.
     try:
         from . import cognitive_core, nova_config
-        rc = hass.data.get(DOMAIN, {}).get(
-            entry.entry_id, {}).get("runtime_config", {})
+        # The runtime is assigned above, so a missing one is a real fault;
+        # get_runtime() raises into this block's non-fatal warning.
+        rc = get_runtime(entry).runtime_config
         lockdown_config = await hass.async_add_executor_job(
             nova_config.effective_config_with_runtime, entry, rc)
         await cognitive_core.ensure_lockdown(hass, lockdown_config)
@@ -1198,10 +1207,10 @@ def _get_speakers(hass: HomeAssistant, entry: ConfigEntry) -> list[str]:
         except Exception:
             return None
 
-    # Panel-live value first (runtime_config)
+    # Panel-live value first, from NovaRuntime. A loaded entry with no
+    # runtime raises here rather than hiding behind the fallback below.
+    rc = lifecycle_runtime_config(entry)
     try:
-        data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
-        rc = data.get("runtime_config", {}) if isinstance(data, dict) else {}
         live = _as_list(rc.get("announcement_speakers"))
         if live:
             _LOGGER.debug("Announcement speakers from panel config: %s", live)
@@ -1788,8 +1797,7 @@ def _register_services(
     # v5.6.5: Test notification service
     async def _test_notify(call: ServiceCall) -> None:
         """Send a test notification to every configured normal target."""
-        data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
-        rc = data.get("runtime_config", {}) if isinstance(data, dict) else {}
+        rc = lifecycle_runtime_config(entry)
         notify_config = dict(entry.data)
         notify_config.update(entry.options)
         notify_config.update(rc)
@@ -1859,12 +1867,12 @@ def _register_services(
         home = anyone_home(hass)
         sat_areas = all_areas_with_satellite(hass)
 
-        # Read announcement_speakers from runtime_config
+        # Read announcement_speakers and satellite_pairings from the one
+        # live runtime_config dict.
+        import json as _json
+        rc = lifecycle_runtime_config(entry)
         ann_spk = None
         try:
-            import json as _json
-            data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
-            rc = data.get("runtime_config", {}) if isinstance(data, dict) else {}
             raw = rc.get("announcement_speakers")
             if raw:
                 parsed = _json.loads(raw) if isinstance(raw, str) else raw
