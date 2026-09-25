@@ -12,7 +12,8 @@ and the real unload to prove:
 * nova.speak buffers into the entry's own alert buffer until ready,
 * the audit timers' unsubs belong to NovaResources, and the audit flag is
   the runtime's,
-* a damaged bridge has no effect,
+* Nova-shaped data planted in hass.data has no effect, and nothing is
+  mirrored into hass.data,
 * unload releases every object, repeated unload is safe, and a reload
   builds new ones.
 
@@ -25,7 +26,6 @@ import pytest
 
 from .test_runtime_data import (  # noqa: F401  (autouse fixtures)
     DOMAIN,
-    LEGACY_AUDIO_KEYS,
     PROACTIVE_FIELDS,
     _no_real_config,
     _restore_nova_config,
@@ -78,8 +78,7 @@ def _runtime_missing(entry):
 
 
 def _no_domain_level_objects(hass):
-    for key in LEGACY_AUDIO_KEYS:
-        assert key not in hass.data.get(DOMAIN, {}), key
+    assert DOMAIN not in hass.data
 
 
 async def _intent(hass, phrase="lights on"):
@@ -166,35 +165,50 @@ async def test_services_fail_visibly_without_the_runtime(hass, spoken, routed, s
         _no_domain_level_objects(hass)
 
 
-async def test_damaged_bridge_has_no_effect(hass, spoken, routed):
+async def test_planted_hass_data_has_no_effect(hass, spoken, routed):
     entry = await _setup(hass)
     runtime = entry.runtime_data
-    bridge = hass.data[DOMAIN][entry.entry_id]
-    hass.data[DOMAIN][entry.entry_id] = "damaged"
+    hass.data[DOMAIN] = {entry.entry_id: "damaged", "_intent_router": object()}
     try:
         await _speak(hass, "still works")
         await _intent(hass)
     finally:
-        hass.data[DOMAIN][entry.entry_id] = bridge
+        hass.data.pop(DOMAIN)
     assert [(c[0], c[1]) for c in spoken] == [(runtime, "still works")]
     assert routed[-1][1] is runtime.intent_router
 
 
 # ── Timers and the audit flag ───────────────────────────────────────────────
 
-async def test_audit_unsubs_are_owned_by_resources(hass):
+async def test_audit_unsubs_are_owned_by_resources(hass, monkeypatch):
+    """Both audit timer unsubs go to NovaResources and are not mirrored
+    anywhere in hass.data."""
+    from custom_components.nova import proactive_audio
+    made = []
+
+    def _recording(real):
+        def _wrapper(*args, **kwargs):
+            unsub = real(*args, **kwargs)
+            made.append(unsub)
+            return unsub
+        return _wrapper
+
+    monkeypatch.setattr(proactive_audio, "async_track_time_interval",
+                        _recording(proactive_audio.async_track_time_interval))
+    monkeypatch.setattr(proactive_audio, "async_call_later",
+                        _recording(proactive_audio.async_call_later))
     entry = await _setup(hass)
     runtime = entry.runtime_data
-    mirrored = hass.data[DOMAIN][entry.entry_id]["proactive_audio_unsubs"]
-    assert len(mirrored) == 2
-    for unsub in mirrored:
+    assert len(made) == 2
+    for unsub in made:
         assert unsub in runtime.resources._unsubs
+    assert DOMAIN not in hass.data
 
 
 async def test_audit_tick_uses_the_runtime_flag(hass, monkeypatch):
     """The audit callback is run directly (no clock jump, so no other timer
     fires): it holds the runtime's flag while it runs and skips a tick while
-    one is in progress. A bridge flag has no effect."""
+    one is in progress. A flag planted in hass.data has no effect."""
     from custom_components.nova import proactive_audio
     seen = []
     ticks = []
@@ -220,7 +234,7 @@ async def test_audit_tick_uses_the_runtime_flag(hass, monkeypatch):
     monkeypatch.setattr(proactive_audio, "_run_predictor", _no_predictor)
     entry = await _setup(hass)
     runtime = entry.runtime_data
-    hass.data[DOMAIN][entry.entry_id]["_audit_running"] = True
+    hass.data[DOMAIN] = {entry.entry_id: {"_audit_running": True}}
     (run_audit,) = ticks
 
     await run_audit()
@@ -262,7 +276,7 @@ async def test_unload_releases_everything_and_repeats_safely(hass, routed):
 
     # Repeating the release is safe.
     await proactive_audio.async_unload_proactive_audio(hass, entry)
-    clear_runtime(hass, entry)
+    clear_runtime(entry)
     _no_domain_level_objects(hass)
 
 

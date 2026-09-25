@@ -5,9 +5,9 @@ setup and unload path. This file proves the runtime module with fakes, plus
 static checks on how __init__.py and proactive_audio.py wire it:
 
 * NovaRuntime is a slots dataclass with exactly the reviewed fields,
-* the hass.data bridge holds the runtime's own objects (identity, not copies),
+* the compatibility bridge helpers are gone (Phase 3C),
 * get_runtime() fails loudly instead of inventing a default,
-* clear_runtime() drops runtime_data and the bridge, idempotently,
+* clear_runtime() drops runtime_data, idempotently, without touching hass.data,
 * setup builds each owner once and releases the runtime on every failure path,
 * the proactive-audio objects are NovaRuntime fields (Phase 3B), built lazily
   by proactive_audio.py and never kept in hass.data.
@@ -48,10 +48,6 @@ def _runtime(rt, **overrides):
     return rt.NovaRuntime(**kwargs)
 
 
-def _hass(store=None):
-    return types.SimpleNamespace(data={} if store is None else store)
-
-
 # ── NovaRuntime shape ───────────────────────────────────────────────────────
 
 def test_runtime_fields_are_the_reviewed_set(rt):
@@ -73,38 +69,11 @@ def test_runtime_defaults(rt, load):
     assert a.runtime_config is not b.runtime_config   # never shared across entries
 
 
-# ── Compatibility bridge ────────────────────────────────────────────────────
+# ── No compatibility bridge (Phase 3C) ──────────────────────────────────────
 
-def test_bridge_values_are_the_runtime_objects(rt):
-    runtime = _runtime(rt)
-    cam, rec = [lambda: None], [lambda: None]
-    bridge = rt.build_compat_bridge(runtime, camera_unsubs=cam, recognition_unsubs=rec)
-    for key in ("client", "sentinel", "reminder_watcher", "scheduler", "resources",
-                "automation_contexts", "runtime_config", "llm_provider_name",
-                "schema_version"):
-        assert bridge[key] is getattr(runtime, key), key
-    assert bridge["camera_unsubs"] is cam
-    assert bridge["recognition_unsubs"] is rec
-    assert "automation_inventory" not in bridge   # absent until built, as before
-    assert bridge["observer_running"] is False    # seeded from the runtime
-
-
-def test_bridge_includes_inventory_by_identity_when_built(rt):
-    inventory = object()
-    runtime = _runtime(rt, automation_inventory=inventory)
-    bridge = rt.build_compat_bridge(runtime, camera_unsubs=[], recognition_unsubs=[])
-    assert bridge["automation_inventory"] is inventory
-
-
-def test_panel_write_through_bridge_is_seen_by_runtime(rt):
-    """websocket.py writes panel settings with setdefault("runtime_config", {});
-    that must land in the runtime's own dict, not a new one."""
-    runtime = _runtime(rt)
-    bridge = rt.build_compat_bridge(runtime, camera_unsubs=[], recognition_unsubs=[])
-    bridge.setdefault("runtime_config", {})["announcement_speakers"] = ["media_player.a"]
-    assert runtime.runtime_config == {"announcement_speakers": ["media_player.a"]}
-    runtime.runtime_config["proactive_tts_entity"] = "tts.x"
-    assert bridge["runtime_config"]["proactive_tts_entity"] == "tts.x"
+def test_bridge_helpers_are_gone(rt):
+    for name in ("build_compat_bridge", "mirror_to_bridge"):
+        assert not hasattr(rt, name), name
 
 
 # ── get_runtime ─────────────────────────────────────────────────────────────
@@ -128,31 +97,27 @@ def test_get_runtime_raises_when_missing_or_wrong(rt, entry):
 
 # ── clear_runtime ───────────────────────────────────────────────────────────
 
-def test_release_drops_runtime_and_bridge_only(rt):
+def test_release_drops_runtime_only(rt):
     runtime = _runtime(rt)
-    buffer = object()
-    other = {"client": object()}
-    store = {"e1": rt.build_compat_bridge(runtime, camera_unsubs=[], recognition_unsubs=[]),
-             "e2": other, "_alert_buffer": buffer}
-    hass = _hass({"nova": store})
     entry = types.SimpleNamespace(entry_id="e1", runtime_data=runtime)
 
-    rt.clear_runtime(hass, entry)
+    rt.clear_runtime(entry)
 
     assert not hasattr(entry, "runtime_data")
-    assert "e1" not in store
-    assert store["e2"] is other              # another entry's bridge untouched
-    assert store["_alert_buffer"] is buffer  # domain-level key untouched
     with pytest.raises(rt.NovaRuntimeUnavailable):
         rt.get_runtime(entry)
 
 
+def test_release_takes_no_hass():
+    """clear_runtime() cannot reach hass.data: it is not handed hass."""
+    fn = _func(COMP / "runtime.py", "clear_runtime")
+    assert [a.arg for a in fn.args.args] == ["entry"]
+
+
 def test_release_is_idempotent(rt):
-    hass = _hass({"nova": {}})
     entry = types.SimpleNamespace(entry_id="e1", runtime_data=_runtime(rt))
-    rt.clear_runtime(hass, entry)
-    rt.clear_runtime(hass, entry)
-    rt.clear_runtime(_hass(), entry)       # no nova bucket at all
+    rt.clear_runtime(entry)
+    rt.clear_runtime(entry)
     assert not hasattr(entry, "runtime_data")
 
 
@@ -184,8 +149,9 @@ def _call_names(node: ast.AST) -> list[str]:
 def test_setup_constructs_each_owner_once():
     calls = _call_names(_func(COMP / "__init__.py", "async_setup_entry"))
     for owner in ("NovaRuntime", "NovaScheduler", "NovaResources", "NovaSentinel",
-                  "ReminderWatcher", "AutomationContextTracker", "build_compat_bridge"):
+                  "ReminderWatcher", "AutomationContextTracker"):
         assert calls.count(owner) == 1, owner
+    assert "build_compat_bridge" not in calls
 
 
 def test_setup_assigns_runtime_data_once():

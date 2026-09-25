@@ -7,18 +7,13 @@ It names the entry-scoped live objects setup constructs and who owns them:
 * NovaScheduler owns recurring sweeps (and is itself a NovaResources closeable),
 * async_unload_entry owns teardown.
 
-Until Phase 3C the old hass.data[DOMAIN][entry_id] dict stays as a
-compatibility bridge. build_compat_bridge() fills it with the SAME objects the
-runtime holds, never copies, so readers of either see one live state.
+NovaRuntime is the only owner of Nova's runtime state. Nova keeps nothing
+in hass.data: every consumer reaches its entry's runtime through
+get_runtime(), current_runtime() or, for domain-level code that is not handed
+an entry, domain_runtime(). A missing runtime raises NovaRuntimeUnavailable
+instead of falling back to another store.
 
-observer_running is a bool, so it cannot be shared by identity. The runtime
-owns it, set_observer_running() is its only writer, and that helper mirrors
-the value into the bridge on every change.
-
-No production code reads the bridge any more (Phase 3B). Every consumer
-reaches its entry's runtime through get_runtime(), current_runtime() or, for
-domain-level code that is not handed an entry, domain_runtime(). The bridge
-is written only here and in async_setup_entry, so Phase 3C can delete it.
+observer_running is changed only through set_observer_running().
 """
 from __future__ import annotations
 
@@ -56,12 +51,11 @@ class NovaRuntime:
     resources: NovaResources
     automation_contexts: AutomationContextTracker
     automation_inventory: AutomationInventory | None = None
-    # Panel-live settings. One dict, shared by identity with the bridge, so a
-    # panel write through either path is seen by both.
+    # Panel-live settings. One live dict, changed in place by panel writes.
     runtime_config: dict[str, Any] = field(default_factory=dict)
     schema_version: int = CURRENT_SCHEMA_VERSION
     # Whether this entry started the observer. Change it only through
-    # set_observer_running(), which keeps the bridge in step.
+    # set_observer_running().
     observer_running: bool = False
     # Proactive audio (nova.speak / nova.process_intent). proactive_audio.py
     # builds each object lazily on first use and drops them on unload, so a
@@ -97,38 +91,6 @@ def get_runtime(entry: ConfigEntry) -> NovaRuntime:
     return runtime
 
 
-def build_compat_bridge(
-    runtime: NovaRuntime,
-    *,
-    camera_unsubs: list,
-    recognition_unsubs: list,
-) -> dict[str, Any]:
-    """The hass.data[DOMAIN][entry_id] dict existing readers still use.
-
-    Every runtime-backed value is the runtime's own object, except
-    observer_running: a bool copy that set_observer_running() keeps in step.
-    The unsub lists are passive copies: NovaResources owns and calls the same
-    callables. Keys added after construction (automation_inventory,
-    proactive_audio_unsubs) go through mirror_to_bridge()."""
-    bridge: dict[str, Any] = {
-        "client":              runtime.client,
-        "sentinel":            runtime.sentinel,
-        "camera_unsubs":       camera_unsubs,
-        "recognition_unsubs":  recognition_unsubs,
-        "resources":           runtime.resources,
-        "scheduler":           runtime.scheduler,
-        "reminder_watcher":    runtime.reminder_watcher,
-        "llm_provider_name":   runtime.llm_provider_name,
-        "schema_version":      runtime.schema_version,
-        "automation_contexts": runtime.automation_contexts,
-        "runtime_config":      runtime.runtime_config,
-        "observer_running":    runtime.observer_running,
-    }
-    if runtime.automation_inventory is not None:
-        bridge["automation_inventory"] = runtime.automation_inventory
-    return bridge
-
-
 def lifecycle_runtime(entry: ConfigEntry) -> NovaRuntime | None:
     """The entry's runtime, or None when it has none.
 
@@ -139,20 +101,11 @@ def lifecycle_runtime(entry: ConfigEntry) -> NovaRuntime | None:
     return runtime if isinstance(runtime, NovaRuntime) else None
 
 
-def set_observer_running(
-    hass: HomeAssistant, entry: ConfigEntry, running: bool,
-) -> None:
+def set_observer_running(entry: ConfigEntry, running: bool) -> None:
     """Record whether this entry's observer is running. The only writer.
 
-    NovaRuntime is authoritative. The bridge copy is updated in the same
-    call while the bridge exists, so unmigrated readers never see a stale
-    value. Raises NovaRuntimeUnavailable when the entry has no runtime."""
-    runtime = get_runtime(entry)
-    runtime.observer_running = bool(running)
-    store = hass.data.get(DOMAIN)
-    bridge = store.get(entry.entry_id) if isinstance(store, dict) else None
-    if isinstance(bridge, dict):
-        bridge["observer_running"] = runtime.observer_running
+    Raises NovaRuntimeUnavailable when the entry has no runtime."""
+    get_runtime(entry).observer_running = bool(running)
 
 
 def current_runtime(entry: ConfigEntry) -> NovaRuntime | None:
@@ -162,8 +115,7 @@ def current_runtime(entry: ConfigEntry) -> NovaRuntime | None:
     after setup failed, or after unload: there a missing runtime is a valid
     state and the caller uses its lower-precedence defaults. A LOADED entry
     must have a runtime, so that case raises NovaRuntimeUnavailable instead
-    of letting the caller act on made-up defaults. Never reads the hass.data
-    bridge."""
+    of letting the caller act on made-up defaults. Never reads hass.data."""
     runtime = lifecycle_runtime(entry)
     if runtime is not None:
         return runtime
@@ -178,8 +130,8 @@ def domain_runtime(hass: HomeAssistant) -> NovaRuntime | None:
     is not handed an entry (domain-level services and shared helpers).
 
     Nova allows one config entry (its unique_id is the domain). It is found
-    through Home Assistant's config-entry registry, never the hass.data
-    bridge, and checked like current_runtime(): None when no Nova entry is
+    through Home Assistant's config-entry registry, never hass.data, and
+    checked like current_runtime(): None when no Nova entry is
     loaded (none configured, setup has not built the runtime yet, setup
     failed, or it was unloaded), NovaRuntimeUnavailable when the entry is
     LOADED but has no runtime."""
@@ -211,19 +163,6 @@ def domain_runtime_config_snapshot(hass: HomeAssistant) -> dict[str, Any]:
     return dict(domain_runtime_config(hass))
 
 
-def mirror_to_bridge(
-    hass: HomeAssistant, entry: ConfigEntry, key: str, value: Any,
-) -> None:
-    """Copy a value the runtime (or NovaResources) already owns into the
-    entry's bridge dict, so the bridge keeps the keys it has always had
-    until Phase 3C deletes it. Nothing reads these copies. A no-op when the
-    entry has no bridge."""
-    store = hass.data.get(DOMAIN)
-    bridge = store.get(entry.entry_id) if isinstance(store, dict) else None
-    if isinstance(bridge, dict):
-        bridge[key] = value
-
-
 def observer_status(entry: ConfigEntry) -> bool:
     """Whether the entry's observer is running, for status readers.
 
@@ -245,7 +184,7 @@ def lifecycle_runtime_config(entry: ConfigEntry) -> dict[str, Any]:
     no panel settings yet, so it gets an empty dict and the caller's
     defaults. A loaded entry must have a runtime: that case raises
     NovaRuntimeUnavailable rather than acting on made-up defaults. Never
-    reads the hass.data bridge."""
+    reads hass.data."""
     runtime = current_runtime(entry)
     return runtime.runtime_config if runtime is not None else {}
 
@@ -267,20 +206,17 @@ def runtime_config_snapshot(
     behaves like get_runtime() and raises NovaRuntimeUnavailable whenever
     the entry has no runtime; strict=False behaves like
     lifecycle_runtime_config() ({} for an entry that is not loaded, raise
-    for a loaded entry with no runtime). Never reads the hass.data bridge."""
+    for a loaded entry with no runtime). Never reads hass.data."""
     if strict:
         return dict(get_runtime(entry).runtime_config)
     return dict(lifecycle_runtime_config(entry))
 
 
-def clear_runtime(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Drop the entry's runtime_data and its bridge entry. Idempotent.
+def clear_runtime(entry: ConfigEntry) -> None:
+    """Drop the entry's runtime_data. Idempotent.
 
     Only forgets references; disposing the objects is async_unload_entry's
     job (NovaResources.close_all() and the explicit stops)."""
-    store = hass.data.get(DOMAIN)
-    if isinstance(store, dict):
-        store.pop(entry.entry_id, None)
     if hasattr(entry, "runtime_data"):
         # ConfigEntry.__setattr__ is guarded; this mirrors how Home Assistant
         # itself drops runtime_data after a successful unload.

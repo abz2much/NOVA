@@ -3,13 +3,13 @@
 Drives the real async_setup_entry / async_unload_entry to prove:
 
 * setup stores one NovaRuntime on entry.runtime_data, bound to this hass,
-* the hass.data bridge holds the very same objects (identity, not copies),
+  and nothing of Nova's in hass.data (Phase 3C removed the bridge),
 * each owner (provider client, sentinel, scheduler, resources) is built once,
-* unload tears the runtime down and leaves no runtime_data or bridge behind,
-  and repeating unload/release is safe,
+* unload tears the runtime down and leaves no runtime_data behind, and
+  repeating unload/release is safe,
 * setup -> unload -> setup builds a fresh runtime from the changed config,
-* a partial setup failure clears runtime_data and the bridge, even when the
-  platform unload inside the failure path reports failure,
+* a partial setup failure clears runtime_data, even when the platform unload
+  inside the failure path reports failure,
 * the proactive-audio objects belong to the entry's runtime (Phase 3B) and
   are dropped with it; tests/integration/test_proactive_audio_runtime.py
   covers them in detail.
@@ -24,9 +24,9 @@ from homeassistant.setup import async_setup_component
 
 from .test_wiring_smoke import DOMAIN, _make_entry
 
-BRIDGED = ("client", "sentinel", "reminder_watcher", "scheduler", "resources",
-           "automation_contexts", "automation_inventory", "runtime_config",
-           "llm_provider_name", "schema_version")
+RUNTIME_OBJECTS = ("client", "sentinel", "reminder_watcher", "scheduler", "resources",
+                   "automation_contexts", "automation_inventory", "runtime_config",
+                   "intent_router", "state_ledger", "entity_locks", "alert_buffer")
 PROACTIVE_FIELDS = ("intent_router", "state_ledger", "entity_locks", "alert_buffer")
 LEGACY_AUDIO_KEYS = ("_intent_router", "_state_ledger", "_entity_locks", "_alert_buffer")
 
@@ -93,10 +93,25 @@ async def _setup(hass, **options):
     return entry
 
 
+def assert_no_nova_state_in_hass_data(hass, runtime=None):
+    """Nova keeps nothing in hass.data: no domain bucket, and none of the
+    runtime's objects anywhere in its top two levels."""
+    from custom_components.nova.runtime import NovaRuntime
+    assert DOMAIN not in hass.data
+    owned = [] if runtime is None else [
+        getattr(runtime, name) for name in RUNTIME_OBJECTS
+        if getattr(runtime, name) is not None]
+    for value in hass.data.values():
+        nested = list(value.values()) if isinstance(value, dict) else []
+        for item in [value, *nested]:
+            assert not isinstance(item, NovaRuntime)
+            assert all(item is not obj for obj in owned)
+
+
 def _assert_released(hass, entry, runtime=None):
     from custom_components.nova.runtime import NovaRuntimeUnavailable, get_runtime
     assert not hasattr(entry, "runtime_data")
-    assert entry.entry_id not in hass.data.get(DOMAIN, {})
+    assert_no_nova_state_in_hass_data(hass, runtime)
     with pytest.raises(NovaRuntimeUnavailable):
         get_runtime(entry)
     if runtime is not None:
@@ -147,25 +162,35 @@ async def test_setup_creates_runtime_with_live_objects(hass):
     assert runtime.automation_inventory in runtime.resources._closeables
 
 
-async def test_bridge_values_are_identical_objects(hass):
+async def test_setup_creates_no_hass_data_bridge(hass):
+    """Setup stores runtime state only on entry.runtime_data."""
     entry = await _setup(hass)
     runtime = entry.runtime_data
-    bridge = hass.data[DOMAIN][entry.entry_id]
+    assert_no_nova_state_in_hass_data(hass, runtime)
 
-    for key in BRIDGED:
-        assert bridge[key] is getattr(runtime, key), key
-    # Bridge-only keys are unchanged.
-    assert bridge["observer_running"] is False
-    assert isinstance(bridge["camera_unsubs"], list)
-    assert isinstance(bridge["recognition_unsubs"], list)
-    assert bridge["proactive_audio_unsubs"]
-
-    # A panel write the way websocket.py does it reaches the runtime.
-    bridge.setdefault("runtime_config", {})["announcement_speakers"] = ["media_player.x"]
-    assert runtime.runtime_config["announcement_speakers"] == ["media_player.x"]
+    # A panel write lands in the runtime's own dict and nowhere else.
+    runtime.runtime_config["announcement_speakers"] = ["media_player.x"]
     from custom_components.nova import nova_config
     assert nova_config.runtime_get(
         hass, entry, "announcement_speakers", None) == ["media_player.x"]
+    assert_no_nova_state_in_hass_data(hass, runtime)
+
+
+async def test_runtime_mutations_never_write_hass_data(hass):
+    """Observer state, the automation inventory and the proactive-audio
+    objects all change on the runtime alone."""
+    from custom_components.nova import proactive_audio
+    from custom_components.nova.runtime import set_observer_running
+
+    entry = await _setup(hass)
+    runtime = entry.runtime_data
+    set_observer_running(entry, True)
+    assert runtime.observer_running is True
+    set_observer_running(entry, False)
+    proactive_audio._intent_router(hass, runtime)
+    assert runtime.automation_inventory is not None
+    assert runtime.alert_buffer is not None and runtime.intent_router is not None
+    assert_no_nova_state_in_hass_data(hass, runtime)
 
 
 async def test_each_owner_is_built_once_per_setup(hass):
@@ -207,7 +232,7 @@ async def test_each_owner_is_built_once_per_setup(hass):
     assert built["client"] == [runtime.client]
 
 
-async def test_unload_releases_runtime_and_bridge(hass):
+async def test_unload_releases_runtime(hass):
     entry = await _setup(hass)
     runtime = entry.runtime_data
 
@@ -228,8 +253,8 @@ async def test_repeated_unload_and_release_are_safe(hass):
     await hass.async_block_till_done()
 
     await async_unload_entry(hass, entry)
-    clear_runtime(hass, entry)
-    clear_runtime(hass, entry)
+    clear_runtime(entry)
+    clear_runtime(entry)
     _assert_released(hass, entry, runtime)
 
 
@@ -261,7 +286,7 @@ async def test_setup_unload_setup_builds_fresh_runtime_from_changed_config(hass)
     assert second.client.model == "llama3.1"
     assert second.runtime_config["briefing_morning_time"] == "06:45"
     assert second.sentinel.hass is hass and second.scheduler._hass is hass
-    assert hass.data[DOMAIN][entry.entry_id]["runtime_config"] is second.runtime_config
+    assert_no_nova_state_in_hass_data(hass, second)
     # The released runtime stays torn down.
     assert first.scheduler.task_names() == []
 
@@ -278,13 +303,16 @@ async def test_reload_replaces_runtime(hass):
 
     second = entry.runtime_data
     assert second is not first
-    assert hass.data[DOMAIN][entry.entry_id]["scheduler"] is second.scheduler
+    for key in ("client", "sentinel", "reminder_watcher", "scheduler", "resources",
+                "automation_contexts", "automation_inventory", "runtime_config"):
+        assert getattr(second, key) is not getattr(first, key), key
+    assert_no_nova_state_in_hass_data(hass, second)
     assert first.scheduler.task_names() == []
     assert first.sentinel._active is False
 
 
-async def test_partial_setup_failure_clears_runtime_and_bridge(hass):
-    """sentinel.async_start() fails after the runtime and bridge exist."""
+async def test_partial_setup_failure_clears_runtime(hass):
+    """sentinel.async_start() fails after the runtime exists."""
     entry = await _add_entry(hass)
     seen = []
     from custom_components.nova.sentinel import NovaSentinel
@@ -304,12 +332,12 @@ async def test_partial_setup_failure_clears_runtime_and_bridge(hass):
     assert runtime.scheduler.task_names() == []
     assert runtime.resources._unsubs == [] and runtime.resources._closeables == []
     assert not hasattr(entry, "runtime_data")
-    assert entry.entry_id not in hass.data.get(DOMAIN, {})
+    assert DOMAIN not in hass.data
 
 
 async def test_partial_setup_failure_clears_runtime_even_if_platform_unload_fails(hass):
-    """Before Phase 3A a failed platform unload inside the failure path left
-    the bridge behind. clear_runtime() now clears it regardless."""
+    """A failed platform unload inside the failure path must not leave
+    runtime_data behind: clear_runtime() clears it regardless."""
     entry = await _add_entry(hass)
     with patch.object(hass.config_entries, "async_forward_entry_setups",
                       side_effect=RuntimeError("boom")), \
@@ -320,10 +348,10 @@ async def test_partial_setup_failure_clears_runtime_even_if_platform_unload_fail
 
     assert result is False
     assert not hasattr(entry, "runtime_data")
-    assert entry.entry_id not in hass.data.get(DOMAIN, {})
+    assert DOMAIN not in hass.data
 
 
-async def test_failed_observer_start_clears_runtime_and_bridge(hass):
+async def test_failed_observer_start_clears_runtime(hass):
     from custom_components.nova import observer
 
     async def _boom(hass_, config, entry=None):
@@ -336,12 +364,12 @@ async def test_failed_observer_start_clears_runtime_and_bridge(hass):
 
     assert result is False
     assert not hasattr(entry, "runtime_data")
-    assert entry.entry_id not in hass.data.get(DOMAIN, {})
+    assert DOMAIN not in hass.data
 
 
 async def test_proactive_audio_objects_are_entry_owned(hass):
     """Phase 3B: the four proactive-audio objects are the entry's NovaRuntime
-    fields, never domain-level hass.data keys or bridge values. Unload drops
+    fields, never hass.data keys or values. Unload drops
     them; a reload builds new ones."""
     from custom_components.nova import proactive_audio
 
@@ -353,19 +381,13 @@ async def test_proactive_audio_objects_are_entry_owned(hass):
     assert router is not None and ledger is not None and locks is not None
     assert buffer.ready is True
 
-    store = hass.data[DOMAIN]
-    for key in LEGACY_AUDIO_KEYS:
-        assert key not in store, key
-    bridge = store[entry.entry_id]
-    for obj in (router, ledger, locks, buffer):
-        assert all(v is not obj for v in bridge.values())
+    assert_no_nova_state_in_hass_data(hass, runtime)
 
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
     for field in PROACTIVE_FIELDS:
         assert getattr(runtime, field) is None, field
-    for key in LEGACY_AUDIO_KEYS:
-        assert key not in hass.data.get(DOMAIN, {}), key
+    assert DOMAIN not in hass.data
 
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()

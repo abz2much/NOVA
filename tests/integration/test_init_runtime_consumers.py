@@ -4,8 +4,9 @@ real Home Assistant (PHACC).
 Drives the real setup, camera event listeners, scheduled ticks and services
 to prove each migrated reader:
 
-* reads the runtime's own runtime_config, not the hass.data bridge,
-* is not affected by a drifted, missing or damaged bridge,
+* reads the runtime's own runtime_config, never hass.data,
+* is not affected by stale, missing or damaged Nova-shaped data planted in
+  hass.data where the removed bridge used to live,
 * sees in-place changes on the next event, tick or service call,
 * fails visibly for a loaded entry with no runtime instead of using
   defaults, and stays safe during setup and after unload.
@@ -33,11 +34,12 @@ from .test_runtime_data import (  # noqa: F401  (autouse fixtures)
 )
 
 
-def _drift_bridge(hass, entry, values: dict) -> dict:
-    """Point the bridge at a different, stale dict. A migrated reader must
-    not see it."""
+def _plant_stale(hass, entry, values: dict) -> dict:
+    """Plant a different, stale dict where the removed bridge lived. A
+    reader must not see it."""
     stale = dict(values)
-    hass.data[DOMAIN][entry.entry_id]["runtime_config"] = stale
+    planted = hass.data.setdefault(DOMAIN, {}).setdefault(entry.entry_id, {})
+    planted["runtime_config"] = stale
     return stale
 
 
@@ -171,25 +173,25 @@ async def test_frigate_motion_flag_defaults_off_and_is_live(hass, camera_calls):
     assert camera_calls == [("analyze", "camera.drive")]
 
 
-async def test_auto_flag_ignores_a_drifted_bridge(hass, camera_calls):
+async def test_auto_flag_ignores_stale_hass_data(hass, camera_calls):
     entry = await _setup(hass)
     entry.runtime_data.runtime_config["camera_auto_analyze"] = False
-    _drift_bridge(hass, entry, {"camera_auto_analyze": True})
+    _plant_stale(hass, entry, {"camera_auto_analyze": True})
     await _chime(hass, "d1")
     assert camera_calls == []
 
 
 @pytest.mark.parametrize("damage", ["missing", "not_a_dict", "no_key"])
-async def test_auto_flag_ignores_a_missing_or_damaged_bridge(
+async def test_auto_flag_ignores_missing_or_damaged_hass_data(
         hass, camera_calls, damage):
     entry = await _setup(hass)
     entry.runtime_data.runtime_config["camera_auto_analyze"] = False
     if damage == "missing":
-        hass.data[DOMAIN].pop(entry.entry_id)
+        hass.data.pop(DOMAIN, None)
     elif damage == "not_a_dict":
-        hass.data[DOMAIN][entry.entry_id] = "garbage"
+        hass.data.setdefault(DOMAIN, {})[entry.entry_id] = "garbage"
     else:
-        hass.data[DOMAIN][entry.entry_id].pop("runtime_config")
+        hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {}
     await _chime(hass, "d1")
     assert camera_calls == []
     entry.runtime_data.runtime_config["camera_auto_analyze"] = True
@@ -201,8 +203,8 @@ async def test_auto_flag_fails_visibly_for_loaded_entry_without_runtime(
         hass, camera_calls, caplog):
     entry = await _setup(hass)
     entry.runtime_data.runtime_config["camera_auto_analyze"] = False
-    # The bridge would say "analyze"; defaults would say "analyze" too.
-    _drift_bridge(hass, entry, {"camera_auto_analyze": True})
+    # Planted data would say "analyze"; defaults would say "analyze" too.
+    _plant_stale(hass, entry, {"camera_auto_analyze": True})
     _drop_runtime(entry)
     with caplog.at_level(logging.ERROR):
         await _chime(hass, "d1")
@@ -285,16 +287,16 @@ async def test_tick_reads_live_runtime_each_time(
 
 
 @pytest.mark.parametrize(("name", "key"), TICKS)
-async def test_tick_ignores_a_drifted_or_missing_bridge(
+async def test_tick_ignores_stale_or_missing_hass_data(
         hass, tick_calls, name, key):
     entry = await _setup(hass)
     runtime = entry.runtime_data
     tick = _tick(entry, name)
     runtime.runtime_config[key] = "runtime"
 
-    _drift_bridge(hass, entry, {key: "bridge"})
+    _plant_stale(hass, entry, {key: "bridge"})
     await tick(None)
-    hass.data[DOMAIN].pop(entry.entry_id)
+    hass.data.pop(DOMAIN, None)
     await tick(None)
     assert [c[key] for c in tick_calls[name]] == ["runtime", "runtime"]
 
@@ -304,7 +306,7 @@ async def test_tick_without_runtime_on_loaded_entry_warns_and_skips(
         hass, tick_calls, caplog, name, key):
     entry = await _setup(hass)
     tick = _tick(entry, name)          # the scheduler still holds it
-    _drift_bridge(hass, entry, {key: "bridge"})
+    _plant_stale(hass, entry, {key: "bridge"})
     _drop_runtime(entry)
     with caplog.at_level(logging.WARNING):
         await tick(None)                # contained: never raises
@@ -368,7 +370,7 @@ async def test_lockdown_gets_current_runtime_values(
         runtime = entry_.runtime_data
         seen["runtime"] = runtime
         runtime.runtime_config["lockdown_on_alarm"] = "runtime"
-        _drift_bridge(hass, entry_, {"lockdown_on_alarm": "bridge"})
+        _plant_stale(hass, entry_, {"lockdown_on_alarm": "bridge"})
 
     before_lockdown.append(_hook)
     entry = await _setup(hass)
@@ -383,14 +385,14 @@ async def test_lockdown_without_runtime_is_non_fatal_and_visible(
         hass, lockdown_calls, before_lockdown, caplog):
     def _hook():
         entry_ = hass.config_entries.async_entries(DOMAIN)[0]
-        _drift_bridge(hass, entry_, {"lockdown_on_alarm": "bridge"})
+        _plant_stale(hass, entry_, {"lockdown_on_alarm": "bridge"})
         object.__delattr__(entry_, "runtime_data")
 
     before_lockdown.append(_hook)
     with caplog.at_level(logging.WARNING):
         entry = await _setup(hass)
     assert entry.state is ConfigEntryState.LOADED       # setup still finished
-    assert lockdown_calls == []                          # no bridge fallback
+    assert lockdown_calls == []                          # no hass.data fallback
     assert any("lockdown wiring failed" in r.getMessage()
                and "Nova runtime is not available" in r.getMessage()
                for r in caplog.records)
@@ -409,13 +411,13 @@ async def test_get_speakers_reads_live_runtime(hass):
     assert nova._get_speakers(hass, entry) == ["media_player.lounge"]
 
 
-async def test_get_speakers_ignores_a_drifted_or_missing_bridge(hass):
+async def test_get_speakers_ignores_stale_or_missing_hass_data(hass):
     import custom_components.nova as nova
     entry = await _setup(hass)
     entry.runtime_data.runtime_config["announcement_speakers"] = ["media_player.a"]
-    _drift_bridge(hass, entry, {"announcement_speakers": ["media_player.stale"]})
+    _plant_stale(hass, entry, {"announcement_speakers": ["media_player.stale"]})
     assert nova._get_speakers(hass, entry) == ["media_player.a"]
-    hass.data[DOMAIN].pop(entry.entry_id)
+    hass.data.pop(DOMAIN, None)
     assert nova._get_speakers(hass, entry) == ["media_player.a"]
 
 
@@ -434,7 +436,7 @@ async def test_get_speakers_raises_for_loaded_entry_without_runtime(hass, monkey
     from custom_components.nova import nova_config
     from custom_components.nova.runtime import NovaRuntimeUnavailable
     entry = await _setup(hass)
-    _drift_bridge(hass, entry, {"announcement_speakers": ["media_player.stale"]})
+    _plant_stale(hass, entry, {"announcement_speakers": ["media_player.stale"]})
     monkeypatch.setattr(nova_config, "effective_config",
                         lambda e: {"announcement_speakers": ["media_player.cfg"]})
     _drop_runtime(entry)
@@ -507,12 +509,12 @@ async def test_test_notify_precedence_is_data_then_options_then_runtime(
     assert notify_configs[0]["options_only"] == "options"
 
 
-async def test_test_notify_ignores_a_drifted_or_missing_bridge(hass, notify_configs):
+async def test_test_notify_ignores_stale_or_missing_hass_data(hass, notify_configs):
     entry = await _setup(hass)
     entry.runtime_data.runtime_config["notify_service"] = "notify.runtime"
-    _drift_bridge(hass, entry, {"notify_service": "notify.stale"})
+    _plant_stale(hass, entry, {"notify_service": "notify.stale"})
     await _notify(hass)
-    hass.data[DOMAIN].pop(entry.entry_id)
+    hass.data.pop(DOMAIN, None)
     await _notify(hass)
     assert [c["notify_service"] for c in notify_configs] == [
         "notify.runtime", "notify.runtime"]
@@ -521,7 +523,7 @@ async def test_test_notify_ignores_a_drifted_or_missing_bridge(hass, notify_conf
 async def test_test_notify_fails_for_loaded_entry_without_runtime(hass, notify_configs):
     from custom_components.nova.runtime import NovaRuntimeUnavailable
     entry = await _setup(hass)
-    _drift_bridge(hass, entry, {"notify_service": "notify.stale"})
+    _plant_stale(hass, entry, {"notify_service": "notify.stale"})
     _drop_runtime(entry)
     with pytest.raises(NovaRuntimeUnavailable):
         await _notify(hass)
@@ -547,7 +549,7 @@ async def test_test_routing_reads_runtime_values(hass, caplog):
     rc = entry.runtime_data.runtime_config
     rc["announcement_speakers"] = '["media_player.a"]'
     rc["satellite_pairings"] = '{"assist_satellite.k": "media_player.k"}'
-    _drift_bridge(hass, entry, {"announcement_speakers": ["media_player.stale"],
+    _plant_stale(hass, entry, {"announcement_speakers": ["media_player.stale"],
                                 "satellite_pairings": {"x": "y"}})
     out = await _routing(hass, caplog)
     assert out["speakers"] == "Announcement speakers (panel): ['media_player.a']"
@@ -556,7 +558,7 @@ async def test_test_routing_reads_runtime_values(hass, caplog):
 
     rc["announcement_speakers"] = ["media_player.b"]           # live change
     rc["satellite_pairings"] = {"assist_satellite.l": "media_player.l"}
-    hass.data[DOMAIN].pop(entry.entry_id)                      # bridge gone
+    hass.data.pop(DOMAIN, None)                      # planted data gone
     out = await _routing(hass, caplog)
     assert out["speakers"] == "Announcement speakers (panel): ['media_player.b']"
     assert out["pairings"] == (
@@ -576,7 +578,7 @@ async def test_test_routing_output_with_no_or_bad_values(hass, caplog):
 async def test_test_routing_fails_for_loaded_entry_without_runtime(hass, caplog):
     from custom_components.nova.runtime import NovaRuntimeUnavailable
     entry = await _setup(hass)
-    _drift_bridge(hass, entry, {"announcement_speakers": ["media_player.stale"]})
+    _plant_stale(hass, entry, {"announcement_speakers": ["media_player.stale"]})
     _drop_runtime(entry)
     with pytest.raises(NovaRuntimeUnavailable):
         await hass.services.async_call(DOMAIN, "test_routing", {}, blocking=True)

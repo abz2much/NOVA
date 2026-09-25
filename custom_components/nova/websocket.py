@@ -132,7 +132,7 @@ def _live_runtime_config(entry) -> dict:
     the event loop. {} when there is no entry or it is not loaded (setup still
     running, failed, or unloaded), so callers keep their defaults. Raises
     NovaRuntimeUnavailable for a loaded entry without a runtime rather than
-    showing made-up defaults. Never reads the compatibility bridge."""
+    showing made-up defaults. Never reads hass.data."""
     if entry is None:
         return {}
     from .runtime import lifecycle_runtime_config
@@ -2150,14 +2150,14 @@ async def ws_update_config(
                 # the requested state before anything is recorded.
                 if not observer_mod.is_running():
                     raise RuntimeError("Observer did not start")
-                set_observer_running(hass, entry, True)
+                set_observer_running(entry, True)
             else:
                 # Already stopped: never stop it again.
                 if observer_mod.is_running():
                     await observer_mod.stop()
                 if observer_mod.is_running():
                     raise RuntimeError("Observer did not stop")
-                set_observer_running(hass, entry, False)
+                set_observer_running(entry, False)
 
         # Store in runtime_config — does NOT trigger entry reload
         rc[key] = value

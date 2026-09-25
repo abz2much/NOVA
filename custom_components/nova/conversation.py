@@ -298,7 +298,7 @@ class NovaAgent(conversation.ConversationEntity):
         """The panel's live runtime_config: NovaRuntime's own dict, read on
         every call and never copied, so in-place panel writes apply to the
         next turn. Raises NovaRuntimeUnavailable when the entry has no
-        runtime. Never reads the compatibility bridge."""
+        runtime. Never falls back to another store."""
         return get_runtime(self.entry).runtime_config
 
     def _opt(self, key: str, default=None):
@@ -306,7 +306,7 @@ class NovaAgent(conversation.ConversationEntity):
         config.json → options → data → default.
 
         A set (not None/"") runtime value wins, as in nova_config.runtime_get.
-        Otherwise runtime_get resolves the rest; hass=None skips its bridge
+        Otherwise runtime_get resolves the rest; hass=None skips its runtime
         lookup, so config.json/options/data/default behave exactly as before."""
         rc = self._runtime_config()
         if key in rc and rc[key] not in (None, ""):

@@ -3,7 +3,7 @@ async_setup_entry (__init__.py): async_forward_entry_setups, sentinel.
 async_start(), and reminder_watcher.async_start(). By the time any of these
 three runs, __init__.py has already: registered camera/Eufy bus listeners,
 scheduled every periodic sweep on NovaScheduler, stored the resource
-registry + scheduler in hass.data[DOMAIN][entry_id], and registered the
+registry + scheduler on the entry's NovaRuntime, and registered the
 services set up by _register_services() (analyze_camera, briefing, routine,
 etc.) — but NOT the "speak" service, which async_setup_proactive_audio()
 registers even later, after all three of these steps. None of it was
@@ -20,6 +20,7 @@ re-raising, so the entry still ends up SETUP_ERROR (unchanged from HA's
 point of view) but nothing is left behind. These tests now lock in that
 corrected contract; do not weaken them back to describing the leak.
 """
+from contextlib import contextmanager
 from unittest.mock import patch
 
 from homeassistant.helpers import entity_registry as er
@@ -28,7 +29,8 @@ from homeassistant.setup import async_setup_component
 from .test_wiring_smoke import DOMAIN, _make_entry
 
 _CLEAN = {
-    "hass_data_entry_present": False,
+    "runtime_data_present": False,
+    "nova_hass_data_present": False,
     "service_registered": False,
     "camera_listeners": 0,
     "automation_trigger_listeners": 0,
@@ -38,23 +40,46 @@ _CLEAN = {
 }
 
 
-def _left_behind(hass, entry) -> dict:
+@contextmanager
+def _capture_owners():
+    """Record the NovaResources and NovaScheduler setup builds, so the
+    snapshot can inspect them after the failed setup has released the
+    runtime that held them."""
+    from custom_components.nova.resources import NovaResources
+    from custom_components.nova.scheduler import NovaScheduler
+    owners: dict[str, list] = {"resources": [], "scheduler": []}
+
+    def _recording(cls, key):
+        real = cls.__init__
+
+        def _init(self, *a, **kw):
+            real(self, *a, **kw)
+            owners[key].append(self)
+        return _init
+
+    with patch.object(NovaResources, "__init__", _recording(NovaResources, "resources")), \
+         patch.object(NovaScheduler, "__init__", _recording(NovaScheduler, "scheduler")):
+        yield owners
+
+
+def _left_behind(hass, entry, owners) -> dict:
     """Snapshot of everything __init__.py registers before the three late
     steps, so each test can confirm none of it survives a failure there."""
-    data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
-    resources = data.get("resources") if isinstance(data, dict) else None
-    sched = data.get("scheduler") if isinstance(data, dict) else None
+    assert len(owners["resources"]) == 1 and len(owners["scheduler"]) == 1
+    resources = owners["resources"][0]
+    sched = owners["scheduler"][0]
     return {
-        "hass_data_entry_present": data is not None,
+        "runtime_data_present": hasattr(entry, "runtime_data"),
+        "nova_hass_data_present": DOMAIN in hass.data,
         "service_registered": hass.services.has_service(DOMAIN, "analyze_camera"),
         "camera_listeners": hass.bus.async_listeners().get("nest_event", 0),
         # Phase 3: the automation probation listener registers alongside the
         # camera listeners, before all three late steps below — it must be
         # torn down by the same async_unload_entry-on-failure path.
         "automation_trigger_listeners": hass.bus.async_listeners().get("automation_triggered", 0),
-        "resource_unsubs": len(getattr(resources, "_unsubs", [])) if resources else 0,
-        "resource_closeables": len(getattr(resources, "_closeables", [])) if resources else 0,
-        "scheduler_jobs": sched.task_names() if sched else [],
+        "resource_unsubs": len(resources._unsubs),
+        "resource_closeables": len(resources._closeables),
+        "scheduler_jobs": sched.task_names(),
     }
 
 
@@ -66,12 +91,12 @@ async def test_forward_entry_setups_failure_leaves_nothing_behind(hass):
     entry.add_to_hass(hass)
 
     with patch.object(hass.config_entries, "async_forward_entry_setups",
-                       side_effect=RuntimeError("boom")):
+                       side_effect=RuntimeError("boom")), _capture_owners() as owners:
         result = await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
     assert result is False
-    assert _left_behind(hass, entry) == _CLEAN
+    assert _left_behind(hass, entry, owners) == _CLEAN
 
 
 async def test_sentinel_async_start_failure_leaves_nothing_behind(hass):
@@ -84,12 +109,12 @@ async def test_sentinel_async_start_failure_leaves_nothing_behind(hass):
     entry.add_to_hass(hass)
 
     with patch("custom_components.nova.sentinel.NovaSentinel.async_start",
-               side_effect=RuntimeError("boom")):
+               side_effect=RuntimeError("boom")), _capture_owners() as owners:
         result = await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
     assert result is False
-    assert _left_behind(hass, entry) == _CLEAN
+    assert _left_behind(hass, entry, owners) == _CLEAN
 
     # The conversation platform, forwarded just before this step, must be
     # unloaded too. Its entity-registry record legitimately survives unload
@@ -124,12 +149,13 @@ async def test_reminder_watcher_async_start_failure_leaves_nothing_behind(hass):
 
     with patch("custom_components.nova.reminders.ReminderWatcher.async_start",
                side_effect=RuntimeError("boom")), \
-         patch.object(NovaSentinel, "__init__", _capture_init):
+         patch.object(NovaSentinel, "__init__", _capture_init), \
+         _capture_owners() as owners:
         result = await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
     assert result is False
-    assert _left_behind(hass, entry) == _CLEAN
+    assert _left_behind(hass, entry, owners) == _CLEAN
 
     # Sentinel, started just before this step, must be stopped too.
     assert sentinels and sentinels[0]._active is False

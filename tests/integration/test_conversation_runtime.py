@@ -5,8 +5,8 @@ Drives the real setup and real conversation turns to prove the agent:
 
 * holds the runtime's own client, never builds a second provider, and
   cannot be constructed for a loaded entry without a runtime,
-* reads runtime_config from NovaRuntime, not the hass.data bridge, so a
-  missing, damaged or drifted bridge changes nothing,
+* reads runtime_config from NovaRuntime, never hass.data, so Nova-shaped
+  data planted there (damaged or drifted) changes nothing,
 * sees in-place runtime_config changes on the next turn (no stale copy),
 * gives the reasoning fallback the persisted config overlaid with the
   current runtime values, keeping the None/"" overlay rule,
@@ -189,10 +189,10 @@ def _speech(result) -> str:
     return result.response.speech.get("plain", {}).get("speech", "")
 
 
-def _drift_bridge(hass, entry, **values):
-    bridge = hass.data[DOMAIN][entry.entry_id]
-    bridge["client"] = object()
-    bridge["runtime_config"] = dict(values)
+def _plant_stale(hass, entry, **values):
+    """Plant a stale Nova-shaped dict where the removed bridge lived."""
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = {
+        "client": object(), "runtime_config": dict(values)}
 
 
 def _drop_runtime(entry):
@@ -212,7 +212,7 @@ async def test_agent_client_is_runtime_client(hass, agents):
     assert len(agents) == 1
     agent = agents[0]
     assert agent._client is entry.runtime_data.client
-    assert agent._client is hass.data[DOMAIN][entry.entry_id]["client"]
+    assert DOMAIN not in hass.data
 
 
 async def test_construction_does_not_build_a_provider(hass, providers_built):
@@ -242,18 +242,18 @@ async def test_missing_runtime_prevents_construction(hass, providers_built):
 
 
 @pytest.mark.parametrize("damage", ["missing", "damaged", "drifted"])
-async def test_bridge_state_does_not_affect_construction(hass, providers_built, damage):
+async def test_hass_data_does_not_affect_construction(hass, providers_built, damage):
     from custom_components.nova.conversation import NovaAgent
     built, arm = providers_built
     entry = await _setup(hass)
     arm()
     entry.runtime_data.runtime_config["model"] = "live-model"
     if damage == "missing":
-        hass.data[DOMAIN].pop(entry.entry_id)
+        assert DOMAIN not in hass.data
     elif damage == "damaged":
-        hass.data[DOMAIN][entry.entry_id] = "not a dict"
+        hass.data[DOMAIN] = {entry.entry_id: "not a dict"}
     else:
-        _drift_bridge(hass, entry, model="stale-model")
+        _plant_stale(hass, entry, model="stale-model")
     agent = NovaAgent(hass, entry)
     assert agent._client is entry.runtime_data.client
     assert agent._model() == "live-model"
@@ -262,13 +262,13 @@ async def test_bridge_state_does_not_affect_construction(hass, providers_built, 
 
 # ── Configuration on real turns ─────────────────────────────────────────────
 
-async def test_turn_uses_live_runtime_config_and_ignores_drifted_bridge(
+async def test_turn_uses_live_runtime_config_and_ignores_planted_data(
         hass, fakes, effective_calls):
     entry = await _setup(hass)
     live = entry.runtime_data.runtime_config
     live.update({"model": "live-model", "llm_provider": "ollama",
                  "ollama_base_url": "http://live-a:11434"})
-    _drift_bridge(hass, entry, model="stale-model", llm_provider="groq",
+    _plant_stale(hass, entry, model="stale-model", llm_provider="groq",
                   ollama_base_url="http://stale:11434")
     effective_calls.clear()   # setup's own calls
 
@@ -295,13 +295,13 @@ async def test_turn_uses_live_runtime_config_and_ignores_drifted_bridge(
 
 
 @pytest.mark.parametrize("damage", ["missing", "damaged"])
-async def test_turn_works_without_a_usable_bridge(hass, fakes, damage):
+async def test_turn_ignores_hass_data(hass, fakes, damage):
     entry = await _setup(hass)
     entry.runtime_data.runtime_config["model"] = "live-model"
     if damage == "missing":
-        hass.data[DOMAIN].pop(entry.entry_id)
+        assert DOMAIN not in hass.data
     else:
-        hass.data[DOMAIN][entry.entry_id] = ["not", "a", "dict"]
+        hass.data[DOMAIN] = {entry.entry_id: ["not", "a", "dict"]}
     result = await _converse(hass, entry, _text())
     assert _speech(result) == "Here is your poem."
     assert fakes.agent_kwargs["model"] == "live-model"
@@ -354,7 +354,7 @@ async def test_reasoning_credentials_and_endpoint_match_effective_config(hass, f
 ])
 async def test_both_routing_sites_read_live_pairings(hass, fakes, raw, expected):
     entry = await _setup(hass)
-    _drift_bridge(hass, entry, satellite_pairings={"sat1": "media_player.stale"})
+    _plant_stale(hass, entry, satellite_pairings={"sat1": "media_player.stale"})
     entry.runtime_data.runtime_config["satellite_pairings"] = raw
     await _converse(hass, entry, _text(), device_id="sat1")
     # Final routing resolves nothing, so it falls back to _speakers().

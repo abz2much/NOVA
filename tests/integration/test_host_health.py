@@ -182,8 +182,7 @@ async def test_get_panel_data_includes_host_health_status(hass, hass_ws_client):
 
 async def test_host_health_scheduler_task_registers_on_setup(hass):
     entry = await _setup_nova(hass)
-    data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
-    sched = data.get("scheduler")
+    sched = entry.runtime_data.scheduler
     assert sched is not None
     task_names = {t.get("name") for t in sched.status()}
     assert "host_health" in task_names
