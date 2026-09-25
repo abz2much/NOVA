@@ -50,12 +50,17 @@ def events():
 @pytest.fixture
 def observer_fake(monkeypatch, events):
     """observer.start/stop that log what runtime_config, the observer state
-    and config.json looked like at the moment they ran. Set .fail_start or
-    .fail_stop to make the next call raise."""
+    and config.json looked like at the moment they ran. Like the real
+    observer, is_running() follows them. Set .fail_start or .fail_stop to
+    make the call raise, or .noop_start or .noop_stop to make it return
+    normally without changing is_running() (the real start() does this when
+    its tier providers cannot be built)."""
     from custom_components.nova import cognitive_core, nova_config, observer
 
     ctl = type("Ctl", (), {"fail_start": False, "fail_stop": False,
+                           "noop_start": False, "noop_stop": False,
                            "entry": None, "configs": []})()
+    monkeypatch.setattr(observer._STATE, "running", False)
 
     def _seen():
         entry = ctl.entry
@@ -69,12 +74,16 @@ def observer_fake(monkeypatch, events):
         ctl.configs.append(config)
         if ctl.fail_start:
             raise RuntimeError("observer start failed")
+        if not ctl.noop_start:
+            observer._STATE.running = True
 
     async def _stop():
         events.append(("stop",) + _seen())
         if ctl.fail_stop:
             raise RuntimeError("observer stop failed")
         await cognitive_core.stop()
+        if not ctl.noop_stop:
+            observer._STATE.running = False
 
     monkeypatch.setattr(observer, "start", _start)
     monkeypatch.setattr(observer, "stop", _stop)
@@ -625,6 +634,83 @@ async def test_save_failure_after_transition_keeps_session_state(
     assert "will revert on restart" in caplog.text
 
 
+@pytest.fixture
+def state_spy(monkeypatch):
+    """Record set_observer_running calls (it is imported at call time)."""
+    from custom_components.nova import runtime
+    real = runtime.set_observer_running
+    calls: list[bool] = []
+
+    def _spy(hass, entry, running):
+        calls.append(running)
+        return real(hass, entry, running)
+
+    monkeypatch.setattr(runtime, "set_observer_running", _spy)
+    return calls
+
+
+@pytest.mark.parametrize("enable", [True, False])
+async def test_unconfirmed_transition_changes_nothing(
+    hass, hass_ws_client, observer_fake, persist_spy, state_spy, events, enable,
+):
+    """start() or stop() returns normally but is_running() did not change."""
+    from custom_components.nova import nova_config, observer
+    entry = await _setup(hass, observer_enabled=not enable)
+    observer_fake.entry = persist_spy.entry = entry
+    assert observer.is_running() is (not enable)
+    observer_fake.noop_start = enable
+    observer_fake.noop_stop = not enable
+    rc_before = dict(entry.runtime_data.runtime_config)
+    json_before = nova_config.get("observer_enabled")
+    events.clear()
+    state_spy.clear()
+
+    resp = await _update(hass, hass_ws_client, "observer_enabled", enable)
+    assert resp["success"] is False
+    assert resp["error"]["code"] == "update_failed"
+    assert [e[0] for e in events] == ["start" if enable else "stop"]
+    assert observer.is_running() is (not enable)
+    assert state_spy == []                                   # never recorded
+    assert persist_spy.calls == []
+    assert nova_config.get("observer_enabled") == json_before
+    assert entry.runtime_data.runtime_config == rc_before
+    _assert_observer(hass, entry, not enable)
+
+
+async def test_enable_when_already_running_does_not_restart(
+    hass, hass_ws_client, observer_fake, persist_spy, events,
+):
+    from custom_components.nova import nova_config, observer
+    entry = await _setup(hass)
+    observer_fake.entry = persist_spy.entry = entry
+    observer._STATE.running = True       # running, e.g. started elsewhere
+    events.clear()
+    resp = await _update(hass, hass_ws_client, "observer_enabled", True)
+    assert resp["success"], resp
+    assert resp["result"] == {"key": "observer_enabled", "value": True, "persisted": True}
+    assert [e[0] for e in events] == ["persist"]             # no start
+    _assert_observer(hass, entry, True)
+    assert entry.runtime_data.runtime_config["observer_enabled"] is True
+    assert nova_config.get("observer_enabled") is True
+
+
+async def test_disable_when_already_stopped_does_not_stop_again(
+    hass, hass_ws_client, observer_fake, persist_spy, events,
+):
+    from custom_components.nova import nova_config, observer
+    entry = await _setup(hass, observer_enabled=True)
+    observer_fake.entry = persist_spy.entry = entry
+    observer._STATE.running = False      # stopped, e.g. by the service
+    events.clear()
+    resp = await _update(hass, hass_ws_client, "observer_enabled", False)
+    assert resp["success"], resp
+    assert resp["result"] == {"key": "observer_enabled", "value": False, "persisted": True}
+    assert [e[0] for e in events] == ["persist"]             # no stop
+    _assert_observer(hass, entry, False)
+    assert entry.runtime_data.runtime_config["observer_enabled"] is False
+    assert nova_config.get("observer_enabled") is False
+
+
 # ── nova/apply_ai_config ────────────────────────────────────────────────────
 
 def _ollama_roles(model="llama3"):
@@ -791,4 +877,3 @@ async def test_credential_status_without_runtime_returns_empty(hass, hass_ws_cli
         resp = await _ws(hass, hass_ws_client, {"type": "nova/get_credential_status"})
     assert resp["success"], resp
     assert resp["result"] == {"status": {}, "available": {}}
-

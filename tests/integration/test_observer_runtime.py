@@ -41,13 +41,17 @@ def fake_observer(monkeypatch):
     lockdown listener never outlives a test."""
     from custom_components.nova import cognitive_core, observer
     calls: list[str] = []
+    # Like the real observer, is_running() reflects start/stop.
+    monkeypatch.setattr(observer._STATE, "running", False)
 
     async def _start(hass, config):
         calls.append("start")
+        observer._STATE.running = True
 
     async def _stop():
         calls.append("stop")
         await cognitive_core.stop()
+        observer._STATE.running = False
 
     monkeypatch.setattr(observer, "start", _start)
     monkeypatch.setattr(observer, "stop", _stop)

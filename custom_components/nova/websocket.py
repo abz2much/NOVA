@@ -2124,9 +2124,10 @@ async def ws_update_config(
             connection.send_error(msg["id"], "no_data", "Nova runtime data not found")
             return
 
-        # observer_enabled: change the observer first. A failed start or stop
-        # raises here, before runtime_config, observer state or config.json
-        # are touched. No rollback afterwards, so there is never a second
+        # observer_enabled: change the observer first and confirm the result
+        # with is_running(). A failed or unconfirmed start or stop raises
+        # here, before runtime_config, observer state or config.json are
+        # touched. No rollback afterwards, so there is never a second
         # observer transition.
         if key == "observer_enabled":
             from . import observer as observer_mod
@@ -2134,18 +2135,28 @@ async def ws_update_config(
             # Never start or stop an unowned observer.
             get_runtime(entry)
             if value:
-                from . import nova_config
-                # The candidate is this operation's own snapshot plus the
-                # requested value; the executor never sees the live dict.
-                from .runtime import runtime_config_snapshot
-                candidate = runtime_config_snapshot(entry, strict=True)
-                candidate[key] = value
-                observer_config = await hass.async_add_executor_job(
-                    nova_config.effective_config_with_runtime, entry, candidate)
-                await observer_mod.start(hass, observer_config)
+                # Already running: never restart it.
+                if not observer_mod.is_running():
+                    from . import nova_config
+                    # The candidate is this operation's own snapshot plus the
+                    # requested value; the executor never sees the live dict.
+                    from .runtime import runtime_config_snapshot
+                    candidate = runtime_config_snapshot(entry, strict=True)
+                    candidate[key] = value
+                    observer_config = await hass.async_add_executor_job(
+                        nova_config.effective_config_with_runtime, entry, candidate)
+                    await observer_mod.start(hass, observer_config)
+                # start() can return without the observer running; confirm
+                # the requested state before anything is recorded.
+                if not observer_mod.is_running():
+                    raise RuntimeError("Observer did not start")
                 set_observer_running(hass, entry, True)
             else:
-                await observer_mod.stop()
+                # Already stopped: never stop it again.
+                if observer_mod.is_running():
+                    await observer_mod.stop()
+                if observer_mod.is_running():
+                    raise RuntimeError("Observer did not stop")
                 set_observer_running(hass, entry, False)
 
         # Store in runtime_config — does NOT trigger entry reload
