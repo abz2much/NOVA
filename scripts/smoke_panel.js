@@ -141,8 +141,9 @@ const PANEL = {
       learned_patterns: 14, llm_breaker: "closed",
     },
     pattern_include_entities: ["binary_sensor.garage_bay_occupied"],
-    excluded_entities: ["light.spare_bedroom"], excluded_domains: [], excluded_labels: [] },
-  available_labels: [{ name: "guest_visible" }, { name: "noisy" }],
+    excluded_entities: ["light.spare_bedroom"], excluded_domains: [], excluded_labels: [],
+    // Sent inside config by the backend (websocket.py _available_labels).
+    available_labels: [{ id: "guest_visible", name: "guest_visible" }, { id: "noisy", name: "noisy" }] },
   suggestions: [
     { id: 11, description: "Turn porch light on at 18:00 (6 days running)", confidence: 0.82, count: 6, yaml: "{}",
       pattern_type: "time_routine", entities: ["light.porch"],
@@ -2535,6 +2536,24 @@ setTimeout(async () => {
       && !/appliance_power_guessing/.test(panelSrc)
       && !/newApplianceUnknown/.test(panelSrc)
       && !/generic power guesses/.test(panelSrc)]);
+
+  // Exclusion label suggestions: the backend sends labels in
+  // config.available_labels, and the exclusions datalist must offer them,
+  // escaped; an absent list must give an empty datalist, not an error.
+  const cfgLive = elNew._liveData.config;
+  const savedLabels = cfgLive.available_labels;
+  const labelOpts = elNew._labelDatalist();
+  checks.push(["exclusion label datalist offers the labels sent in config.available_labels",
+    /value="guest_visible"/.test(labelOpts) && /value="noisy"/.test(labelOpts)]);
+  cfgLive.available_labels = [{ id: "x", name: '"><img src=x onerror=alert(1)>' }];
+  const hostileOpts = elNew._labelDatalist();
+  checks.push(["exclusion label names are HTML-escaped in the datalist",
+    !/<img/.test(hostileOpts) && /&lt;img/.test(hostileOpts)]);
+  delete cfgLive.available_labels;
+  let emptyOpts = null;
+  try { emptyOpts = elNew._labelDatalist(); } catch (_) { emptyOpts = null; }
+  checks.push(["an absent label list gives an empty datalist without throwing", emptyOpts === ""]);
+  cfgLive.available_labels = savedLabels;
 
   let ok = true;
   for (const [n, p] of checks) { console.log((p ? "  PASS  " : "  FAIL  ") + n); if (!p) ok = false; }

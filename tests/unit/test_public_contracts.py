@@ -78,20 +78,12 @@ def test_service_inventories_agree():
     assert registered - {"speak", "process_intent"} <= lc._unloaded_services()
 
 
-_KNOWN_SCHEMA_GAPS = {
-    # Documented and read by camera.async_analyze_camera, but the registered
-    # vol.Schema doesn't list them, so a call using them is rejected.
-    "analyze_camera": "services.yaml documents frames/interval; schema rejects them",
-    # Accepted by the schema and handler but missing from services.yaml.
-    "shush": "schema accepts `all`, services.yaml doesn't document it",
-}
-
-
 @pytest.mark.parametrize("service", sorted(
     s for s, keys in ce.service_schema_keys().items() if keys is not None))
-def test_documented_fields_match_registered_schema(service, request):
-    if service in _KNOWN_SCHEMA_GAPS:
-        request.applymarker(pytest.mark.xfail(strict=True, reason=_KNOWN_SCHEMA_GAPS[service]))
+def test_documented_fields_match_registered_schema(service):
+    """Every field services.yaml documents is accepted by the registered
+    schema, and every schema field is documented (analyze_camera's clip
+    fields and shush's `all` were the gaps this used to record)."""
     documented = {f: ("required" if v["required"] else "optional")
                   for f, v in ce.services_contract()[service]["fields"].items()}
     assert documented == ce.service_schema_keys()[service], service
@@ -239,11 +231,11 @@ def test_panel_data_sections_are_sent_by_backend():
     assert unmet == [], f"panel reads get_panel_data sections the backend never sends: {unmet}"
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "Defect: the backend sends config.available_labels, but the panel's _data() "
-    "mapping never exposes it, so the exclude-labels suggestion list is always empty"))
 def test_panel_label_suggestions_reach_the_panel():
+    """The backend sends labels in config.available_labels; the panel's
+    _data() mapping must expose them to the exclusions datalist (the panel
+    smoke test checks the rendered, escaped options)."""
     src = (ce.COMP / "frontend" / "nova-panel.js").read_text(encoding="utf-8")
     start = src.index("  _data() {\n    const live = this._liveData;")
     body = src[start:src.index("\n  }\n", start)]
-    assert "available_labels" in body
+    assert "available_labels: live.config?.available_labels || []" in body

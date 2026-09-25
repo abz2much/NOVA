@@ -1268,6 +1268,7 @@ class NovaPanel extends HTMLElement {
       goals: live.goals || [],
       lockdown: live.lockdown || live.config?.lockdown || {},
       onboarding: live.onboarding || live.config?.onboarding || null,
+      available_labels: live.config?.available_labels || [],
     };
   }
 

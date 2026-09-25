@@ -344,6 +344,7 @@ What leaves your network is only what the features you actually enable need: you
 This section summarises how Nova is built and what it does, grouped by area: its security controls, how it stays aware of the home without nagging, its capabilities, how it reports its own decisions, and how it fits Home Assistant's lifecycle. It is not a release-by-release history; see `CHANGELOG.md` for that.
 
 **Security hardening**
+- Critical safety announcements can't be silenced by the announcement rate limit, targeted entity or category mutes, or a blanket `nova.shush` — they always pass Nova's output gate.
 - Voice commands can lock a door instantly, but can never unlock one or open a garage — that always requires a tap on your phone, so a spoofed or deepfaked voice can't grant physical access on its own.
 - Nova uses one explicit household alarm for security decisions instead of trusting every alarm-shaped entity exposed by camera hubs and vendor bridges. A single Alarmo panel is detected automatically, other setups can select their source, and automatic lockdown is opt in rather than silently enabled.
 - The `execute_plan` tool (multi-step device automation from a single request) is restricted to an explicit allowlist of home-control domains, so a hallucinated or injected plan step can't reach a system-level service like `homeassistant.restart` or `shell_command`.

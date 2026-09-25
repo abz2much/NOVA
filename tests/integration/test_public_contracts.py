@@ -66,19 +66,50 @@ async def test_registered_services_match_contract(hass):
             assert _schema_keys(schema) == keys, f"service {name} schema changed"
 
 
-@pytest.mark.xfail(strict=True, raises=vol.Invalid, reason=(
-    "Defect: services.yaml documents analyze_camera frames/interval and the "
-    "handler reads them, but the registered schema rejects them"))
-async def test_documented_analyze_camera_clip_fields_are_accepted(hass):
+async def _analyze_camera_calls(hass, data):
+    """Call nova.analyze_camera with the analysis handler patched out (no
+    camera, vision provider or speaker is touched) and return what reached it."""
+    seen = []
+
+    async def _record(hass_, call, *a, **k):
+        seen.append(dict(call.data))
+
+    with patch("custom_components.nova.async_analyze_camera", _record):
+        await hass.services.async_call(DOMAIN, "analyze_camera", data, blocking=True)
+    return seen
+
+
+async def test_documented_analyze_camera_clip_fields_reach_the_handler(hass):
     await _setup(hass)
+    seen = await _analyze_camera_calls(
+        hass, {"entity_id": "camera.front", "frames": 3, "interval": 1.0})
+    assert len(seen) == 1
+    assert seen[0]["frames"] == 3 and seen[0]["interval"] == 1.0
 
-    async def _no_analysis(*a, **k):
-        return None
 
-    with patch("custom_components.nova.async_analyze_camera", _no_analysis):
-        await hass.services.async_call(
-            DOMAIN, "analyze_camera",
-            {"entity_id": "camera.front", "frames": 3, "interval": 1.0}, blocking=True)
+async def test_analyze_camera_clip_fields_coerce_home_assistant_input(hass):
+    await _setup(hass)
+    seen = await _analyze_camera_calls(
+        hass, {"entity_id": "camera.front", "frames": "2", "interval": "0.5"})
+    assert seen[0]["frames"] == 2 and seen[0]["interval"] == 0.5
+
+
+async def test_analyze_camera_omitted_clip_fields_keep_handler_defaults(hass):
+    """No schema default is injected, so the handler's own fallback (1 frame,
+    1.2 s) still applies."""
+    await _setup(hass)
+    seen = await _analyze_camera_calls(hass, {"entity_id": "camera.front"})
+    assert len(seen) == 1
+    assert "frames" not in seen[0] and "interval" not in seen[0]
+
+
+@pytest.mark.parametrize("bad", [
+    {"frames": 0}, {"frames": 7}, {"interval": 0.4}, {"interval": 5.1}, {"frames": "many"},
+])
+async def test_analyze_camera_out_of_range_clip_fields_are_rejected(hass, bad):
+    await _setup(hass)
+    with pytest.raises(vol.Invalid):
+        await _analyze_camera_calls(hass, {"entity_id": "camera.front", **bad})
 
 
 async def test_registered_websocket_commands_match_contract(hass):

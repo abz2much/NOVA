@@ -1207,6 +1207,11 @@ def _register_services(
             vol.Required("entity_id"): cv.entity_id,
             vol.Optional("prompt"): cv.string,
             vol.Optional("announce", default=True): cv.boolean,
+            # Short clip capture (documented in services.yaml). No schema
+            # default: an omitted value keeps the handler's own fallback
+            # (1 frame, 1.2 s apart).
+            vol.Optional("frames"): vol.All(vol.Coerce(int), vol.Range(min=1, max=6)),
+            vol.Optional("interval"): vol.All(vol.Coerce(float), vol.Range(min=0.5, max=5)),
         }),
     )
 
@@ -1529,7 +1534,8 @@ def _register_services(
     )
 
     async def _shush(call: ServiceCall) -> None:
-        """Tell Nova to stop announcing. Pass all=true for blanket kill switch."""
+        """Tell Nova to stop announcing. Pass all=true to mute every
+        non-critical announcement; critical safety alerts always pass."""
         from . import output_gate
         entity_id = call.data.get("entity_id")
         category  = call.data.get("category")
