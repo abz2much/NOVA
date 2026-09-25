@@ -152,6 +152,26 @@ def observer_status(entry: ConfigEntry) -> bool:
     return False
 
 
+def lifecycle_runtime_config(entry: ConfigEntry) -> dict[str, Any]:
+    """The entry's live runtime_config, for readers that may run outside a
+    loaded entry.
+
+    With a runtime, returns runtime.runtime_config itself, never a copy, so
+    every call sees the latest panel writes. An entry that is not loaded
+    (setup still running before the runtime exists, failed, or unloaded) has
+    no panel settings yet, so it gets an empty dict and the caller's
+    defaults. A loaded entry must have a runtime: that case raises
+    NovaRuntimeUnavailable rather than acting on made-up defaults. Never
+    reads the hass.data bridge."""
+    runtime = lifecycle_runtime(entry)
+    if runtime is not None:
+        return runtime.runtime_config
+    from homeassistant.config_entries import ConfigEntryState
+    if getattr(entry, "state", None) is ConfigEntryState.LOADED:
+        return get_runtime(entry).runtime_config   # raises
+    return {}
+
+
 def clear_runtime(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Drop the entry's runtime_data and its bridge entry. Idempotent.
 
