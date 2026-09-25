@@ -27,6 +27,7 @@ import logging
 import re
 from typing import Optional
 
+from .const import URGENCY_CEILINGS, URGENCY_CRITICAL
 from .directive_helper import build_system_prompt
 
 _LOGGER = logging.getLogger(__name__)
@@ -34,6 +35,43 @@ _LOGGER = logging.getLogger(__name__)
 # A safety sensor is only a genuine emergency when it ENTERS an active state.
 # Going unavailable/unknown or returning to normal (off/dry/clear) is not.
 _ACTIVE_TRIGGER_STATES = {"on", "detected", "wet", "triggered", "unsafe"}
+
+# Device classes whose urgency ceiling is critical (smoke, gas, moisture,
+# carbon monoxide). Derived from the canonical ceilings, so the two can't
+# drift; high/medium classes (tamper, safety, door, …) are never promoted.
+_CRITICAL_HAZARD_CLASSES = frozenset(
+    dc for dc, ceiling in URGENCY_CEILINGS.items() if ceiling == URGENCY_CRITICAL)
+_HAZARD_WORDS = {"moisture": "a water leak", "carbon_monoxide": "carbon monoxide"}
+
+
+def _structured_hazard(device_class: str, to_state: str, event_summary: str,
+                       entity_id: str, friendly_name: str,
+                       honorific: str) -> Optional[dict]:
+    """Decision for a critical hazard sensor, from structured fields only —
+    never from words in its name. Returns None when device_class isn't a
+    critical hazard class, or when there's no new state to judge (the
+    existing logic then decides, unchanged)."""
+    dc = (device_class or "").strip().lower()
+    if dc not in _CRITICAL_HAZARD_CLASSES:
+        return None
+    new_st = (str(to_state or "").strip().lower()
+              or _summary_new_state(event_summary.lower()))
+    if not new_st:
+        return None
+    if new_st not in _ACTIVE_TRIGGER_STATES:
+        # Cleared, back to normal, unavailable or unknown: not an emergency.
+        return {"speak": False,
+                "reason": f"{dc} sensor not in triggered state ({new_st})"}
+    from . import persona
+    hazard = _HAZARD_WORDS.get(dc, dc.replace("_", " "))
+    source = friendly_name or entity_id or "a sensor"
+    return {
+        "speak": True,
+        "message": persona.lead_in(
+            honorific, f"{hazard} detected by {source} — immediate attention required."),
+        "urgency": "critical",
+        "reason": f"active {dc} hazard",
+    }
 
 
 def _summary_new_state(evt: str):
@@ -138,23 +176,34 @@ def _try_local_reasoning(
     anyone_home: bool = False,
     from_state: str = "",
     to_state: str = "",
+    entity_id: str = "",
+    friendly_name: str = "",
+    device_class: str = "",
 ) -> Optional[dict]:
     """
     Handle common events with templated responses (v5.7.00).
     Expanded to cover 95%+ of observer events locally — LLM fallback
     is now rare (genuinely ambiguous multi-factor decisions only).
 
+    A critical hazard sensor is decided first, by structured device_class and
+    then by the name-based fallback, before recent-announcement dedup and the
+    someone-home security shortcut, so an active smoke/gas/leak/CO alarm is
+    always voiced whatever the sensor is called or who is home.
+
     Returns a decision dict or None (fall through to LLM).
     """
     from . import persona
     evt = event_summary.lower()
 
-    # Don't repeat recent announcements
-    for ann in recent_announcements[-5:]:
-        if ann.lower()[:40] in evt[:40]:
-            return {"speak": False, "reason": "recently announced similar event"}
+    hazard = _structured_hazard(device_class, to_state, event_summary,
+                                entity_id, friendly_name, honorific)
+    if hazard is not None:
+        return hazard
 
     # ── Safety-critical (only when actually TRIGGERED) ───────────────
+    # Name-based fallback for a hazard sensor without a device_class. Like
+    # the structured check above, it runs before recent-announcement dedup,
+    # so an active alarm is never held back by an earlier announcement.
     for kw in ("smoke", "carbon_monoxide", "co_alarm", "gas", "leak",
                "moisture", "flood", "glass_break"):
         if kw in evt:
@@ -174,6 +223,11 @@ def _try_local_reasoning(
                 "message": persona.lead_in(honorific, f"a {kw.replace('_', ' ')} alert{src} — immediate attention required."),
                 "urgency": "critical",
             }
+
+    # Don't repeat recent announcements
+    for ann in recent_announcements[-5:]:
+        if ann.lower()[:40] in evt[:40]:
+            return {"speak": False, "reason": "recently announced similar event"}
 
     # ── Alarm triggered ──────────────────────────────────────────────
     if category == "security" and urgency == "critical":
@@ -523,6 +577,8 @@ async def decide(
             event_summary, classifier_urgency, classifier_category,
             honorific, recent_announcements, anyone_home,
             from_state=from_state, to_state=to_state,
+            entity_id=entity_id, friendly_name=friendly_name,
+            device_class=device_class,
         )
         if local is not None:
             _LOGGER.info("Reasoning local: %s", local.get("message", local.get("reason", ""))[:80])

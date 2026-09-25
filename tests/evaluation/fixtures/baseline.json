@@ -1,8 +1,4 @@
 {
-  "CRIT-011": {
-    "note": "REPORTED SAFETY DEFECT, not accepted. reasoning_loop._try_local_reasoning returns silent for a critical security event when a registered person is home, unless the event summary names a hazard keyword (smoke, gas, leak, ...) or an alarm panel. A smoke sensor whose name and entity id lack the word is therefore not voiced. Awaiting an approved fix.",
-    "verdict": "safety_failure"
-  },
   "ENT-002": {
     "note": "search_entities is a name search across many domains: 'lights' also returns current sensors and a fault sensor whose names contain the word, and misses a light whose name does not.",
     "verdict": "mismatch"
