@@ -235,8 +235,8 @@ def replay_one(record: dict) -> dict:
         out["reason"] = "recorded confidence is not numeric"
         return out
 
-    from . import pattern_analyzer
-    threshold = float(pattern_analyzer._effective_threshold())
+    from .automation import patterns
+    threshold = float(patterns._effective_threshold())
     out.update({
         "supported": True,
         "current_threshold": round(threshold, 3),

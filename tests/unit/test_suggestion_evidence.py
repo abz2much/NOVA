@@ -75,14 +75,17 @@ def test_suggestions_schema_has_evidence_columns():
 
 
 def test_insert_stores_evidence():
-    pa_src = (COMP / "pattern_analyzer.py").read_text()
+    pa_src = (COMP / "automation" / "suggestions.py").read_text()
     assert "pattern_type, entity_ids, details" in pa_src
     assert "json.dumps(pattern.entity_ids" in pa_src
     assert "json.dumps(pattern.details" in pa_src
 
 
 def test_websocket_surfaces_why():
-    ws = (COMP / "websocket.py").read_text()
+    # websocket.py builds get_panel_data.suggestions through the automation
+    # package's panel translation helper (Phase 5).
+    assert "panel_suggestion_items" in (COMP / "websocket.py").read_text()
+    ws = (COMP / "automation" / "api.py").read_text()
     assert "explain_suggestion" in ws
     assert "why_headline" in ws
     assert "evidence" in ws

@@ -1080,7 +1080,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v7.116.0
+ * v7.117.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1154,7 +1154,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v7.116.0 ",
+      console.log("%c Nova Panel %c v7.117.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -2571,12 +2571,14 @@ ${this._htmlDashboardBody()}`;
         ? `<div class="mode-grid">${(s.entities || []).map(e => `<span class="area-cap" style="width:auto;padding:3px 8px;font-family:var(--font-mono);font-size:10px">${this._esc(e)}</span>`).join("")}</div>`
         : "";
       const match = s.automation_match || {};
-      const matchName = match.name || match.entity_id || "an existing automation";
+      // The backend names the automations it matched in match.matches.
+      const matched = (match.matches || [])[0] || {};
+      const matchName = matched.name || matched.entity_id || "an existing automation";
       let overlap = "";
       if (match.status === "possible_overlap") {
         overlap = `<div class="stub-body" style="color:var(--warn)">⚠ Possible overlap with <b>${this._esc(matchName)}</b>. Review both before creating this automation.</div>`;
       } else if (match.status === "unknown_overlap") {
-        overlap = `<div class="stub-body" style="color:var(--warn)">⚠ <b>${this._esc(matchName)}</b> uses the same device, but Nova cannot fully compare its blueprint or template.</div>`;
+        overlap = `<div class="stub-body" style="color:var(--warn)">⚠ ${(match.matches || []).length ? `<b>${this._esc(matchName)}</b> may control the same device, but Nova cannot fully compare its blueprint or template.` : "Nova cannot fully compare this automation's template or blueprint with existing automations."}</div>`;
       } else if (match.status === "inventory_unavailable") {
         overlap = `<div class="stub-body" style="color:var(--warn)">⚠ Nova could not check existing automations. Review Home Assistant before creating this one.</div>`;
       }
@@ -2757,13 +2759,30 @@ ${this._htmlDashboardBody()}`;
       const sid = parseInt(card.getAttribute("data-sug-id"), 10);
       const act = async (action) => {
         if (!this._hass || isNaN(sid)) return;
+        const buttons = card.querySelectorAll("button");
+        buttons.forEach(b => b.disabled = true);
+        let res = null;
         try {
-          await this._hass.callWS({ type: "nova/suggestion_action", suggestion_id: sid, action });
-          card.style.opacity = "0.35";
-          card.querySelectorAll("button").forEach(b => b.disabled = true);
+          res = await this._hass.callWS({ type: "nova/suggestion_action", suggestion_id: sid, action });
         } catch (err) {
           console.error(`Nova: suggestion ${action} failed`, err);
         }
+        // Only a settled suggestion (installed, acknowledged, covered or
+        // dismissed) greys out. A failed install stays pending on the
+        // backend, so its buttons come back with the reason shown.
+        if (res && res.ok) {
+          card.style.opacity = "0.35";
+          return;
+        }
+        buttons.forEach(b => b.disabled = false);
+        let note = card.querySelector(".new-sug-status");
+        if (!note) {
+          note = document.createElement("div");
+          note.className = "stub-body new-sug-status";
+          note.style.color = "var(--warn)";
+          card.querySelector(".new-sug-approve")?.parentElement?.before(note);
+        }
+        note.textContent = `⚠ ${(res && res.reason) || `Could not ${action} this suggestion. Try again.`}`;
       };
       card.querySelector(".new-sug-approve")?.addEventListener("click", () => act("approve"));
       card.querySelector(".new-sug-dismiss")?.addEventListener("click", () => act("dismiss"));

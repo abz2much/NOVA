@@ -2832,9 +2832,12 @@ async def _tick():
 
     # Run pattern analysis periodically
     try:
-        from .pattern_analyzer import get_analyzer, set_thresholds
+        from .automation.patterns import get_analyzer, set_thresholds
         analyzer = get_analyzer()
-        if analyzer.should_analyze():
+        # should_analyze reads patterns.db: keep SQLite off the event loop.
+        # A manual analysis already running covers this tick (single flight).
+        if not analyzer.analysis_running and await hass.async_add_executor_job(
+                analyzer.should_analyze):
             # Loosened-reins defaults (occurrences 4, confidence 0.55) — API spend
             # is no longer the constraint; user can tune via panel-saved keys.
             try:
@@ -2851,7 +2854,8 @@ async def _tick():
                 from .websocket import nova_log
                 nova_log("LEARN", f"Pattern analysis: {len(patterns)} patterns found")
                 # Notify about new high-confidence suggestions
-                pending = analyzer.get_pending_suggestions()
+                pending = await hass.async_add_executor_job(
+                    analyzer.get_pending_suggestions)
                 if pending:
                     honorific = config.get("honorific", "sir")
                     nova_log(
@@ -3632,7 +3636,7 @@ def status() -> dict:
         stats = _CORE.state_logger.get_pattern_stats()
     last_analysis = {}
     try:
-        from .pattern_analyzer import get_analyzer
+        from .automation.patterns import get_analyzer
         last_analysis = dict(get_analyzer()._last_result)
     except Exception:
         last_analysis = {}
@@ -3780,7 +3784,7 @@ async def run_analysis_now(hass: HomeAssistant) -> dict:
     dict the panel can show: whether it ran, and if not, why; if it did, how many
     patterns were found and suggestions stored.
     """
-    from .pattern_analyzer import get_analyzer, set_thresholds
+    from .automation.patterns import get_analyzer, set_thresholds
     analyzer = get_analyzer()
     analyzer._last_analysis = 0.0  # bypass the 6h throttle for this manual run
 

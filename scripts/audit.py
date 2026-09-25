@@ -152,6 +152,11 @@ def import_gate(files: list[pathlib.Path]) -> list[str]:
                 for a in node.names:
                     if a.name == "*":
                         continue
+                    # `from .package import submodule` imports the submodule.
+                    if target.name == "__init__.py" and (
+                            (target.parent / f"{a.name}.py").exists()
+                            or (target.parent / a.name / "__init__.py").exists()):
+                        continue
                     if a.name not in valid:
                         problems.append(
                             f"{f}: from {'.' * node.level}{node.module} import {a.name} → not found in {target.name}"

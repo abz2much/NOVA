@@ -188,7 +188,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
     # fail-safe teardown on unload/reload (v7.43.0).
     from .scheduler import NovaScheduler
     from .resources import NovaResources
-    from .automation_inventory import AutomationContextTracker
+    from .automation.attribution import AutomationContextTracker
     sched = NovaScheduler(hass)
     resources = NovaResources()
     automation_contexts = AutomationContextTracker()
@@ -754,7 +754,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
     # a single cheap subscription rather than one per installed automation.
     @callback
     def _on_automation_triggered(event) -> None:
-        from . import automation_trials
+        from .automation import trials as automation_trials
         # Record provenance synchronously before the automation's action state
         # changes arrive. The lookup is in-memory and constant-time.
         automation_contexts.record_trigger(event)
@@ -799,7 +799,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
     # loaded (UI, YAML, packages, and blueprints).  Build once now and refresh
     # only on automation_reloaded; live state events never rescan config.
     try:
-        from .automation_inventory import AutomationInventory
+        from .automation.inventory import AutomationInventory
         automation_inventory = AutomationInventory(hass)
         automation_inventory.start()
         automation_contexts.inventory = automation_inventory

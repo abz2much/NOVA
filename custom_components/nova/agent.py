@@ -2449,7 +2449,7 @@ async def _exec_cognitive_status(hass: HomeAssistant, args: dict) -> str:
     """Get cognitive core status and learning stats."""
     try:
         from . import cognitive_core
-        from .pattern_analyzer import get_analyzer
+        from .automation.patterns import get_analyzer
         status = cognitive_core.status()
         analyzer = get_analyzer()
         status["pattern_analysis"] = await hass.async_add_executor_job(
@@ -2488,7 +2488,7 @@ async def _exec_manage_autonomy(hass: HomeAssistant, args: dict) -> str:
 async def _exec_review_suggestions(hass: HomeAssistant, args: dict) -> str:
     """List pending automation suggestions."""
     try:
-        from .pattern_analyzer import get_analyzer
+        from .automation.patterns import get_analyzer
         suggestions = await hass.async_add_executor_job(
             get_analyzer().get_pending_suggestions)
         if not suggestions:
@@ -2498,12 +2498,19 @@ async def _exec_review_suggestions(hass: HomeAssistant, args: dict) -> str:
         return json.dumps({"error": str(exc)})
 
 
-async def _exec_approve_suggestion(hass: HomeAssistant, args: dict) -> str:
-    """Approve a suggestion — and install its automation into HA (v6.52.0)."""
+async def _exec_approve_suggestion(
+    hass: HomeAssistant, args: dict, *,
+    user_id: Optional[str] = None, device_id: Optional[str] = None,
+) -> str:
+    """Approve a suggestion — and install its automation into HA (v6.52.0).
+    The request's real user and device go to the audit log; neither is
+    invented when the request has none."""
     try:
-        from .pattern_analyzer import install_approved_suggestion
+        from .automation.installation import install_approved_suggestion
         sid = int(args.get("suggestion_id", 0))
-        res = await install_approved_suggestion(hass, sid)
+        res = await install_approved_suggestion(
+            hass, sid, requested_by_user_id=user_id or None,
+            request_device_id=device_id or None)
         return json.dumps(res)
     except Exception as exc:
         return json.dumps({"error": str(exc)})
@@ -2512,7 +2519,7 @@ async def _exec_approve_suggestion(hass: HomeAssistant, args: dict) -> str:
 async def _exec_dismiss_suggestion(hass: HomeAssistant, args: dict) -> str:
     """Dismiss a suggestion."""
     try:
-        from .pattern_analyzer import get_analyzer
+        from .automation.patterns import get_analyzer
         sid = int(args.get("suggestion_id", 0))
         ok = await hass.async_add_executor_job(
             get_analyzer().dismiss_suggestion, sid)
@@ -3369,15 +3376,21 @@ async def _execute_tool(
             # Most tools don't need to know the request's device_id; only pass
             # it to the handful that actuate locks/covers (v7.87.0's
             # voice-blocked-opening gate needs it) so nothing else changes.
+            # The few tools that act on someone's behalf also accept user_id,
+            # the request's real Home Assistant user (None when there is none);
+            # Nova never invents one.
             import inspect
             try:
-                accepts_device_id = "device_id" in inspect.signature(fn).parameters
+                params = inspect.signature(fn).parameters
             except (TypeError, ValueError):
-                accepts_device_id = False
-            if accepts_device_id:
-                device_id = getattr(user_input, "device_id", None)
-                return await fn(hass, tool_args, device_id=device_id)
-            return await fn(hass, tool_args)
+                params = {}
+            extra = {}
+            if "device_id" in params:
+                extra["device_id"] = getattr(user_input, "device_id", None)
+            if "user_id" in params:
+                extra["user_id"] = getattr(
+                    getattr(user_input, "context", None), "user_id", None)
+            return await fn(hass, tool_args, **extra)
         except Exception as exc:
             return json.dumps({"error": str(exc)})
 

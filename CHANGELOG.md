@@ -1,3 +1,23 @@
+## [7.117.0] — automation capability package
+
+**Architecture**
+- Nova's automation code now lives in one package: inventory, attribution, matching, suggestions, pattern analysis, installation, trials and panel translation each have their own module with enforced import boundaries. The five original modules remain as complete, write-through compatibility views, so every existing import keeps working.
+
+**Fixes**
+- Pattern learning works again. Every SQLite read in an analysis now runs in the thread that opened its connection, so routines are found under Home Assistant's real executor instead of nothing.
+- Nova automation ids are now deterministic and collision-resistant (a readable name plus a behaviour digest). Nova never replaces an existing automation that already has the same id, and ids of automations Nova already installed are unchanged.
+- Suggestions are deduplicated by what the pattern does, not by its changing counts. A dismissed suggestion stays dismissed unless its behaviour changes.
+- Installing a suggestion is one serialized transaction: the status check, duplicate recheck, write, reload, load confirmation and final state cannot interleave, so two approvals install once and a dismissed suggestion is never installed.
+- Cancelling an installation restores the exact original automations.yaml, reloads it and then cancels. A second cancellation cannot skip that rollback.
+- Installation fails closed when Home Assistant's automation list is unavailable or the new automation cannot be confirmed as loaded. The rollback reload is checked, and a failed rollback is reported.
+- A suggestion whose install fails stays pending and can be retried; the panel shows why and keeps its buttons. Advisory suggestions are acknowledged as before.
+- Overlap warnings in the panel now name the automation that actually overlaps.
+- Approving a suggestion through the assistant records the real requesting user and device in the action audit log; neither is invented when the request has none.
+- Templated, blueprint and metadata-only automations stay explicitly uncertain. A template is never read as an entity id, and only a fully inspectable, non-templated automation can help show that a suggestion is new; unrelated references on an opaque automation are never taken as proof. Two automations with identical text, templates included, still count as duplicates.
+- A manual pattern analysis and the scheduled one can no longer run at the same time.
+
+Service, WebSocket, panel and assistant-tool schemas are unchanged. No stored data moves: patterns.db, automations.yaml and their tables keep their paths and shapes.
+
 ## [7.116.0] — persistent service registration
 
 **Lifecycle**
