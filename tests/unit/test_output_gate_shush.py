@@ -13,7 +13,14 @@ import pytest
 
 
 @pytest.fixture
-def og(load, monkeypatch):
+def og(load, monkeypatch, tmp_path):
+    """A fresh in-memory gate. can_announce() reads the adaptive-budget
+    setting through nova_config, so point that at an empty temp config
+    directory: nothing here touches the real /config."""
+    nc = load("nova_config")
+    monkeypatch.setattr(nc, "CONFIG_PATH", tmp_path / "nova" / "config.json")
+    monkeypatch.setattr(nc, "_cache", {})
+    monkeypatch.setattr(nc, "_loaded", False)
     mod = load("output_gate")
     monkeypatch.setattr(mod, "_STATE", mod.GateState())
     return mod
@@ -48,9 +55,16 @@ def test_critical_passes_every_mute_and_the_rate_limit_together(og):
     og.shush(all=True)
     og.shush(entity_id="binary_sensor.smoke")
     og.shush(category="security")
+    # Exhaust the rate limit and seed dedup straight into the fresh in-memory
+    # state (the module's recording helper would also write the activity
+    # database, so it isn't used here).
+    now = og._now()
     for i in range(og.DEFAULT_MAX_PER_HOUR + 5):
-        og.record_announcement(entity_id=f"sensor.n{i}", category="appliances",
-                               urgency="low", message=f"note {i}", was_spoken=True)
+        og._STATE.history.append(og.Announcement(
+            timestamp=now, entity_id=f"sensor.n{i}", category="appliances",
+            urgency="low", message=f"note {i}", was_spoken=True))
+        og._STATE.recent_messages.append({"timestamp": now, "message": f"note {i}"})
+    assert len(og._recent_within(og._STATE.history, 3600)) > og.DEFAULT_MAX_PER_HOUR
     assert _ask(og, urgency="critical", entity_id="binary_sensor.smoke",
                 category="security", message="note 1") == (True, "critical bypass")
 
