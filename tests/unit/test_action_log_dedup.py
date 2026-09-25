@@ -37,9 +37,21 @@ def isolated_db(al, monkeypatch):
 class _Services:
     def __init__(self):
         self.calls = []
+        self.inventory = None  # set when a test models HA's loaded automations
 
     async def async_call(self, domain, service, data=None, blocking=False, target=None, **kw):
         self.calls.append((domain, service, dict(data or {})))
+        if self.inventory is not None and (domain, service) == ("automation", "reload"):
+            self.inventory.reload()
+
+
+def _loaded_automations(load, monkeypatch, hass, path):
+    """Give hass a loaded-automation list that follows reloads; automation
+    installation fails closed without one (Phase 5)."""
+    from fakes import FakeAutomationInventory
+    hass.services.inventory = FakeAutomationInventory(path)
+    monkeypatch.setattr(load("automation.inventory"), "get_inventory",
+                        lambda _hass: hass.services.inventory)
 
 
 class _States:
@@ -105,6 +117,7 @@ async def test_suggestion_install_and_automation_create_share_one_request(
             })()
 
     hass = _Hass()
+    _loaded_automations(load, monkeypatch, hass, automations_file)
     result = await pattern_analyzer.install_approved_suggestion(hass, 42)
     assert result["ok"] is True
     assert result["installed"] is True
@@ -125,7 +138,7 @@ async def test_suggestion_install_and_automation_create_share_one_request(
 
 
 async def test_create_automation_as_direct_top_level_call_gets_its_own_request(
-        load, isolated_db, al, tmp_path):
+        load, isolated_db, al, tmp_path, monkeypatch):
     """The SAME function, called directly (not via a suggestion), is a
     genuine top-level action and mints its own request_id — this is not a
     duplicate-prevention violation, it's the correct behavior for an
@@ -139,6 +152,7 @@ async def test_create_automation_as_direct_top_level_call_gets_its_own_request(
             self.config = type("Cfg", (), {"path": lambda self, *p: str(automations_file)})()
 
     hass = _Hass()
+    _loaded_automations(load, monkeypatch, hass, automations_file)
     result = await automation_creator.create_automation(
         hass, alias="Direct Test", trigger={"platform": "state"},
         action={"service": "light.turn_on"}, source="ha_service",

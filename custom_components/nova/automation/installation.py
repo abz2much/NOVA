@@ -11,6 +11,8 @@ Assistant process, whichever config entry asks.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import contextvars
 import hashlib
 import json
 import logging
@@ -20,6 +22,9 @@ import yaml
 from typing import TYPE_CHECKING, Any, Optional
 
 from .matching import fingerprint
+from .models import (
+    MATCH_EXACT, MATCH_UNAVAILABLE, SUGGESTION_APPROVED, SUGGESTION_PENDING,
+)
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -30,7 +35,12 @@ _WRITE_LOCK = asyncio.Lock()
 
 
 class AutomationWriteError(Exception):
-    """Raised when the HA automation file cannot be changed safely."""
+    """Raised when the HA automation file cannot be changed safely.
+    reason_code goes to the action audit log only."""
+
+    def __init__(self, message: str, *, reason_code: str = "write_or_reload_failed"):
+        super().__init__(message)
+        self.reason_code = reason_code
 
 
 class _AlreadyInstalled(Exception):
@@ -154,24 +164,57 @@ async def _validate_with_home_assistant(
         raise AutomationWriteError("Home Assistant rejected the automation configuration")
 
 
-def _duplicate_automation(hass: HomeAssistant, config: dict[str, Any],
-                          automation_id: str) -> str:
-    """Return the name of an equivalent automation with a different ID."""
-    try:
-        from .inventory import get_inventory
-        from .matching import classify
-        inventory = get_inventory(hass)
-        if inventory is None:
-            return ""
-        records = [record for record in inventory.records()
-                   if getattr(record, "unique_id", "") != automation_id]
-        match = classify(config, records)
-        if match.get("status") != "already_automated":
-            return ""
-        first = (match.get("matches") or [{}])[0]
-        return str(first.get("name") or first.get("entity_id") or "another automation")
-    except Exception:
+
+# ── The installation transaction ────────────────────────────────────────────
+# One serialized transaction covers everything that must not interleave:
+# the suggestion status check, the duplicate recheck, the file write, the
+# reload, the load confirmation and the final suggestion state. A suggestion
+# install opens the transaction and create_automation joins it; a direct
+# ``nova.create_automation`` call opens its own.
+_IN_TRANSACTION: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "nova_automation_transaction", default=False)
+
+_INSTALLABLE_STATUSES = (SUGGESTION_PENDING, SUGGESTION_APPROVED)
+
+
+@contextlib.asynccontextmanager
+async def installation_transaction():
+    """Hold the process-wide automation write lock (re-entrant per task)."""
+    if _IN_TRANSACTION.get():
+        yield
+        return
+    async with _WRITE_LOCK:
+        token = _IN_TRANSACTION.set(True)
+        try:
+            yield
+        finally:
+            _IN_TRANSACTION.reset(token)
+
+
+async def _run_to_completion(awaitable) -> tuple[Any, bool]:
+    """Await ``awaitable`` to the end even if the caller is cancelled.
+
+    Returns ``(result, cancelled)``; the caller re-raises the cancellation
+    once its cleanup is done, so cleanup can never be skipped."""
+    task = asyncio.ensure_future(awaitable)
+    cancelled = False
+    while True:
+        try:
+            return await asyncio.shield(task), cancelled
+        except asyncio.CancelledError:
+            if task.cancelled():
+                raise
+            cancelled = True
+
+
+def _duplicate_automation(config: dict[str, Any], records: list[Any]) -> str:
+    """Return the name of a loaded automation proven equivalent to ``config``."""
+    from .matching import classify
+    match = classify(config, records)
+    if match.get("status") != MATCH_EXACT:
         return ""
+    first = (match.get("matches") or [{}])[0]
+    return str(first.get("name") or first.get("entity_id") or "another automation")
 
 
 def _confirm_loaded(hass: HomeAssistant, automation_id: str) -> Optional[bool]:
@@ -186,6 +229,36 @@ def _confirm_loaded(hass: HomeAssistant, automation_id: str) -> Optional[bool]:
                    for record in inventory.records())
     except Exception:
         return None
+
+
+async def _rollback(hass: HomeAssistant, path: str, original: bytes | None,
+                    automation_id: str) -> str:
+    """Restore the exact original bytes, reload them and check the new
+    automation is gone. Returns "" when the rollback is confirmed, otherwise
+    what went wrong."""
+    try:
+        await hass.async_add_executor_job(_restore_original, path, original)
+    except Exception as exc:
+        return f"the original automations.yaml could not be restored ({exc})"
+    try:
+        await hass.services.async_call("automation", "reload", blocking=True)
+    except Exception as exc:
+        return f"the restored automations.yaml could not be reloaded ({exc})"
+    loaded = _confirm_loaded(hass, automation_id)
+    if loaded is None:
+        return "Nova could not confirm that Home Assistant unloaded the new automation"
+    if loaded:
+        return "Home Assistant still has the new automation loaded"
+    return ""
+
+
+def _rollback_error(cause: str, problem: str) -> AutomationWriteError:
+    if problem:
+        _LOGGER.error("Nova automation rollback failed: %s", problem)
+        return AutomationWriteError(
+            f"{cause}; rollback failed: {problem}", reason_code="rollback_failed")
+    return AutomationWriteError(
+        f"{cause}; the original automations.yaml was restored and reloaded")
 
 
 async def create_automation(
@@ -223,6 +296,9 @@ async def create_automation(
     Returns:
         {"success": True, "automation_id": "...", "alias": "..."}
         or {"success": False, "error": "..."}
+
+    Cancellation after the write starts restores the exact original bytes,
+    reloads them, and then re-raises the cancellation.
     """
     from .. import action_log
     if request_id is None:
@@ -235,10 +311,12 @@ async def create_automation(
         )
     )
 
-    if not trigger or not action:
+    async def _audit_failure(reason_code: str) -> None:
         await hass.async_add_executor_job(
-            lambda: action_log.set_execution(action_id, "failed", reason_code="missing_trigger_or_action")
-        )
+            lambda: action_log.set_execution(action_id, "failed", reason_code=reason_code))
+
+    if not trigger or not action:
+        await _audit_failure("missing_trigger_or_action")
         return {"success": False, "error": "Both trigger and action are required"}
 
     # Normalize to lists
@@ -268,25 +346,15 @@ async def create_automation(
         _LOGGER.debug("Nova automation YAML:\n%s", yaml_str)
         await _validate_with_home_assistant(hass, automation_id, auto_config)
     except Exception as exc:
-        await hass.async_add_executor_job(
-            lambda: action_log.set_execution(
-                action_id, "failed", reason_code="invalid_automation"))
+        await _audit_failure("invalid_automation")
         return {"success": False, "error": f"Automation validation failed: {exc}"}
-
-    duplicate = _duplicate_automation(hass, auto_config, automation_id)
-    if duplicate:
-        await hass.async_add_executor_job(
-            lambda: action_log.set_execution(
-                action_id, "failed", reason_code="duplicate_automation"))
-        return {"success": False,
-                "error": f"Equivalent automation already exists: {duplicate}"}
 
     # HA's config editor also edits automations.yaml. Serialize Nova writes so
     # two Nova requests cannot race, use HA's atomic writer, and restore the
     # exact old bytes if reload or runtime confirmation fails.
     try:
         automations_path = hass.config.path("automations.yaml")
-        async with _WRITE_LOCK:
+        async with installation_transaction():
             existing, original = await hass.async_add_executor_job(
                 _read_automations, automations_path)
             # Never replace another automation: an entry that already holds
@@ -299,29 +367,62 @@ async def create_automation(
                 raise AutomationWriteError(
                     f"automations.yaml already has a different automation with id "
                     f"{automation_id}; no changes were made")
+
+            # Fail closed: without Home Assistant's loaded automations Nova can
+            # neither rule out a duplicate nor confirm the new one loaded.
+            from .inventory import get_inventory
+            inventory = get_inventory(hass)
+            if inventory is None:
+                raise AutomationWriteError(
+                    "Home Assistant's automation list is unavailable; no changes were made",
+                    reason_code=MATCH_UNAVAILABLE)
+            try:
+                records = inventory.refresh()
+                duplicate = _duplicate_automation(auto_config, records)
+            except Exception as exc:
+                raise AutomationWriteError(
+                    f"Nova could not check existing automations ({exc}); "
+                    "no changes were made", reason_code=MATCH_UNAVAILABLE) from exc
+            if duplicate:
+                raise _AlreadyInstalled(duplicate)
+
             updated = list(existing)
             updated.append(auto_config)
-            await hass.async_add_executor_job(
-                _atomic_write_yaml, automations_path, updated)
-
+            write = asyncio.ensure_future(hass.async_add_executor_job(
+                _atomic_write_yaml, automations_path, updated))
             try:
+                await asyncio.shield(write)
                 # Supporting work for the existing action-log row, never a
                 # second row of its own (ownership rule).
                 await hass.services.async_call(
                     "automation", "reload", blocking=True)
-                if _confirm_loaded(hass, automation_id) is False:
+                loaded = _confirm_loaded(hass, automation_id)
+                if loaded is None:
+                    raise AutomationWriteError(
+                        "Nova could not confirm Home Assistant loaded the new automation")
+                if not loaded:
                     raise AutomationWriteError(
                         "Home Assistant reloaded but did not load the new automation")
-            except Exception:
-                await hass.async_add_executor_job(
-                    _restore_original, automations_path, original)
-                try:
-                    await hass.services.async_call(
-                        "automation", "reload", blocking=True)
-                except Exception:
-                    _LOGGER.exception(
-                        "Automation rollback restored the file but reload failed")
+            except asyncio.CancelledError:
+                # The write may still be running in its thread: let it end,
+                # then undo it. Neither step may be skipped by a second cancel.
+                await _run_to_completion(asyncio.gather(write, return_exceptions=True))
+                problem, _ = await _run_to_completion(
+                    _rollback(hass, automations_path, original, automation_id))
+                if problem:
+                    _LOGGER.error("Nova automation rollback after cancellation "
+                                  "failed: %s", problem)
+                await _run_to_completion(_audit_failure(
+                    "rollback_failed" if problem else "installation_cancelled"))
                 raise
+            except Exception as exc:
+                problem, cancelled = await _run_to_completion(
+                    _rollback(hass, automations_path, original, automation_id))
+                if cancelled:
+                    await _run_to_completion(_audit_failure(
+                        "rollback_failed" if problem else "installation_cancelled"))
+                    raise asyncio.CancelledError from exc
+                raise _rollback_error(str(exc), problem) from exc
 
         _LOGGER.info("Nova created automation: %s (id=%s)", alias, automation_id)
         await hass.async_add_executor_job(
@@ -334,16 +435,12 @@ async def create_automation(
         }
 
     except _AlreadyInstalled as exc:
-        await hass.async_add_executor_job(
-            lambda: action_log.set_execution(
-                action_id, "failed", reason_code="duplicate_automation"))
+        await _audit_failure("duplicate_automation")
         return {"success": False,
                 "error": f"Equivalent automation already exists: {exc}"}
     except Exception as exc:
         _LOGGER.error("Nova automation creation failed: %s", exc)
-        await hass.async_add_executor_job(
-            lambda: action_log.set_execution(action_id, "failed", reason_code="write_or_reload_failed")
-        )
+        await _audit_failure(getattr(exc, "reason_code", "") or "write_or_reload_failed")
         return {"success": False, "error": str(exc)}
 
 
@@ -351,15 +448,22 @@ async def install_approved_suggestion(
     hass, suggestion_id: int, *,
     requested_by_user_id: Optional[str] = None,
     requested_by_name: Optional[str] = None,
+    request_device_id: Optional[str] = None,
 ) -> dict:
     """
-    Close the pattern-engine loop (v6.52.0): approve a suggestion AND actually
-    install its automation into Home Assistant, instead of only flagging it
-    approved. Returns a dict the caller relays:
+    Close the pattern-engine loop (v6.52.0): install an approved suggestion's
+    automation into Home Assistant. Returns a dict the caller relays:
 
         {"ok": True, "installed": True, "automation_id": "...", "alias": "..."}
-        {"ok": True, "installed": False, "reason": "..."}   # approved, advisory
-        {"ok": False, "error": "..."}                        # not found / failed
+        {"ok": True, "installed": False, "reason": "..."}   # advisory / covered
+        {"ok": False, "installed": False, "error": "...", "reason": "..."}
+                                                             # refused / failed
+        {"ok": False, "error": "..."}                        # not found
+
+    An installable suggestion stays pending (retryable) until Home Assistant
+    confirms its automation loaded; only then is it marked installed. The
+    status check, duplicate recheck, write, reload, confirmation and final
+    state all run in one serialized installation transaction.
 
     Advisory suggestions (repeated-command notes with no concrete trigger) are
     still marked approved — the user acknowledged them — but nothing is written
@@ -370,81 +474,94 @@ async def install_approved_suggestion(
     action (a person clicked Approve in the panel) — it generates the
     request_id and passes it into create_automation() below so the whole
     "approve suggestion -> install automation" flow logs as ONE request,
-    not two.
+    not two. ``request_device_id`` is accepted so callers can pass the real
+    request identity they have; Nova never invents one.
     """
     from .. import action_log
     request_id = action_log.new_request_id()
     from . import patterns
     analyzer = patterns.get_analyzer()
+
+    def _refused(message: str) -> dict:
+        return {"ok": False, "installed": False, "error": message,
+                "reason": message, "suggestion_id": suggestion_id}
+
     try:
-        sug = await hass.async_add_executor_job(analyzer.get_suggestion, suggestion_id)
-        if not sug:
-            return {"ok": False, "error": f"suggestion #{suggestion_id} not found"}
+        async with installation_transaction():
+            sug = await hass.async_add_executor_job(analyzer.get_suggestion, suggestion_id)
+            if not sug:
+                return {"ok": False, "error": f"suggestion #{suggestion_id} not found"}
 
-        from .suggestions import normalize_suggestion_automation
-        norm = normalize_suggestion_automation(sug.get("automation_yaml", ""))
-        if not norm.get("installable"):
-            await hass.async_add_executor_job(analyzer.approve_suggestion, suggestion_id)
-            return {"ok": True, "installed": False,
-                    "reason": norm.get("reason", "not installable"),
-                    "suggestion_id": suggestion_id}
+            status = sug.get("status") or SUGGESTION_PENDING
+            if status not in _INSTALLABLE_STATUSES:
+                return _refused(f"suggestion #{suggestion_id} is {status} "
+                                "and cannot be installed")
 
-        # The home may have changed since this suggestion was created. Repeat
-        # duplicate detection immediately before writing so a newly-added HA
-        # automation cannot race Nova into creating an equivalent rule.
-        try:
-            from .inventory import get_inventory
-            from .matching import classify
-            inventory = get_inventory(hass)
-            if inventory is not None:
+            from .suggestions import normalize_suggestion_automation
+            norm = normalize_suggestion_automation(sug.get("automation_yaml", ""))
+            if not norm.get("installable"):
+                await hass.async_add_executor_job(analyzer.approve_suggestion, suggestion_id)
+                return {"ok": True, "installed": False,
+                        "reason": norm.get("reason", "not installable"),
+                        "suggestion_id": suggestion_id}
+
+            # The home may have changed since this suggestion was created.
+            # Repeat duplicate detection inside the transaction so a newly
+            # added HA automation cannot race Nova into an equivalent rule.
+            # create_automation repeats the check and fails closed when the
+            # automation list is unavailable.
+            try:
+                from .inventory import get_inventory
+                from .matching import classify
+                inventory = get_inventory(hass)
                 match = classify({
                     "triggers": norm["trigger"],
                     "conditions": norm.get("condition") or [],
                     "actions": norm["action"],
-                }, inventory.records())
-                if match.get("status") == "already_automated":
-                    await hass.async_add_executor_job(
-                        analyzer.mark_covered, suggestion_id)
-                    names = ", ".join(m.get("name") or m.get("entity_id", "")
-                                      for m in match.get("matches", []))
-                    return {"ok": True, "installed": False,
-                            "reason": "already automated" + (f" by {names}" if names else ""),
-                            "suggestion_id": suggestion_id,
-                            "automation_match": match}
-        except Exception:
-            # Inventory is an advisory guard. The fail-safe creator remains the
-            # final write boundary and will be hardened separately.
-            pass
-
-        await hass.async_add_executor_job(analyzer.approve_suggestion, suggestion_id)
-
-        result = await create_automation(
-            hass,
-            alias=norm["alias"],
-            description=sug.get("description", ""),
-            trigger=norm["trigger"],
-            condition=norm.get("condition"),
-            action=norm["action"],
-            request_id=request_id, source="suggestion",
-            requested_by_user_id=requested_by_user_id,
-            requested_by_name=requested_by_name,
-        )
-        if result.get("success"):
-            await hass.async_add_executor_job(
-                analyzer.mark_installed, suggestion_id, result["automation_id"])
-            try:
-                from ..websocket import nova_log
-                nova_log("LEARN", f"Installed learned automation "
-                                    f"'{result['alias']}' from suggestion "
-                                    f"#{suggestion_id}")
+                }, inventory.records()) if inventory is not None else {}
             except Exception:
-                pass
-            return {"ok": True, "installed": True,
-                    "automation_id": result["automation_id"],
-                    "alias": result["alias"], "suggestion_id": suggestion_id}
-        return {"ok": True, "installed": False,
-                "reason": f"automation write failed: {result.get('error')}",
-                "suggestion_id": suggestion_id}
+                match = {}
+            if match.get("status") == MATCH_EXACT:
+                await hass.async_add_executor_job(
+                    analyzer.mark_covered, suggestion_id)
+                names = ", ".join(m.get("name") or m.get("entity_id", "")
+                                  for m in match.get("matches", []))
+                return {"ok": True, "installed": False,
+                        "reason": "already automated" + (f" by {names}" if names else ""),
+                        "suggestion_id": suggestion_id,
+                        "automation_match": match}
+
+            result = await create_automation(
+                hass,
+                alias=norm["alias"],
+                description=sug.get("description", ""),
+                trigger=norm["trigger"],
+                condition=norm.get("condition"),
+                action=norm["action"],
+                request_id=request_id, source="suggestion",
+                requested_by_user_id=requested_by_user_id,
+                requested_by_name=requested_by_name,
+            )
+            if not result.get("success"):
+                # Nothing was installed: the suggestion stays retryable.
+                return _refused(f"automation write failed: {result.get('error')}")
+
+            # The automation is live; recording that must finish even if the
+            # caller is cancelled now, or a retry would see a stale pending row.
+            _, cancelled = await _run_to_completion(hass.async_add_executor_job(
+                analyzer.mark_installed, suggestion_id, result["automation_id"]))
+            if cancelled:
+                raise asyncio.CancelledError
+        try:
+            from ..websocket import nova_log
+            nova_log("LEARN", f"Installed learned automation "
+                                f"'{result['alias']}' from suggestion "
+                                f"#{suggestion_id}")
+        except Exception:
+            pass
+        return {"ok": True, "installed": True,
+                "automation_id": result["automation_id"],
+                "alias": result["alias"], "suggestion_id": suggestion_id}
     except Exception as exc:
         _LOGGER.exception("install_approved_suggestion failed: %s", exc)
         return {"ok": False, "error": str(exc)}

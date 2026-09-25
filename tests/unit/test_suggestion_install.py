@@ -172,7 +172,9 @@ async def test_installer_installs_concrete_suggestion(pa, ac, fake_hass, monkeyp
     res = await pa.install_approved_suggestion(fake_hass, 7)
     assert res["ok"] is True and res["installed"] is True
     assert res["automation_id"] == "nova_auto_porch"
-    assert stub.approved == 7                       # approval recorded
+    # Phase 5 (D7): an installable suggestion goes straight from pending to
+    # installed once the automation is confirmed; it is never "approved" first.
+    assert stub.approved is None
     assert stub.installed == (7, "nova_auto_porch")
     assert calls["alias"] == "porch on at 18:00"    # normalized args passed through
 
@@ -217,9 +219,11 @@ async def test_installer_reports_write_failure(pa, ac, fake_hass, monkeypatch):
     monkeypatch.setattr(ac, "create_automation", _fail_create)
 
     res = await pa.install_approved_suggestion(fake_hass, 3)
-    assert res["ok"] is True and res["installed"] is False
-    assert "disk full" in res["reason"]
-    assert stub.approved == 3        # approved, just not installed
+    # Phase 5 (D7): a failed install is reported as a failure and leaves the
+    # suggestion pending so it can be retried.
+    assert res["ok"] is False and res["installed"] is False
+    assert "disk full" in res["reason"] and "disk full" in res["error"]
+    assert stub.approved is None
     assert stub.installed is None
 
 

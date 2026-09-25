@@ -6,23 +6,34 @@ import types
 
 import yaml
 
+from fakes import FakeAutomationInventory
+
 
 class _Services:
-    def __init__(self, *, fail_first=False):
+    def __init__(self, inventory, *, fail_first=False):
         self.calls = 0
         self.fail_first = fail_first
+        self.inventory = inventory
 
     async def async_call(self, domain, service, data=None, blocking=False):
         self.calls += 1
         if self.fail_first and self.calls == 1:
             raise RuntimeError("reload failed")
+        self.inventory.reload()
 
 
 class _Hass:
-    def __init__(self, path, *, fail_first=False):
+    """Home Assistant with a loaded-automation list that follows reloads
+    (Phase 5, D6: without one, installation fails closed)."""
+
+    def __init__(self, path, *, fail_first=False, monkeypatch=None, load=None):
         self.config = types.SimpleNamespace(path=lambda name: str(path))
-        self.services = _Services(fail_first=fail_first)
+        self.inventory = FakeAutomationInventory(path)
+        self.services = _Services(self.inventory, fail_first=fail_first)
         self.data = {}
+        if monkeypatch is not None:
+            monkeypatch.setattr(load("automation.inventory"), "get_inventory",
+                                lambda hass: self.inventory)
 
     async def async_add_executor_job(self, func, *args):
         return func(*args)
@@ -82,13 +93,14 @@ async def test_reload_failure_restores_exact_original_bytes(
     path = tmp_path / "automations.yaml"
     original = b"# keep this comment\n- id: existing\n  alias: Existing\n"
     path.write_bytes(original)
-    hass = _Hass(path, fail_first=True)
+    hass = _Hass(path, fail_first=True, monkeypatch=monkeypatch, load=load)
 
     result = await creator.create_automation(
         hass, alias="Test", trigger={"trigger": "state"},
         action={"action": "light.turn_on"})
 
     assert result["success"] is False
+    assert "restored and reloaded" in result["error"]
     assert path.read_bytes() == original
     assert hass.services.calls == 2  # failed reload, then rollback reload
 
@@ -99,7 +111,7 @@ async def test_successful_write_preserves_existing_automations(
     _action_log(monkeypatch)
     path = tmp_path / "automations.yaml"
     path.write_text("- id: existing\n  alias: Existing\n")
-    hass = _Hass(path)
+    hass = _Hass(path, monkeypatch=monkeypatch, load=load)
 
     result = await creator.create_automation(
         hass, alias="Test Rule", trigger={"trigger": "state"},

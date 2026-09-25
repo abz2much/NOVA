@@ -2757,13 +2757,30 @@ ${this._htmlDashboardBody()}`;
       const sid = parseInt(card.getAttribute("data-sug-id"), 10);
       const act = async (action) => {
         if (!this._hass || isNaN(sid)) return;
+        const buttons = card.querySelectorAll("button");
+        buttons.forEach(b => b.disabled = true);
+        let res = null;
         try {
-          await this._hass.callWS({ type: "nova/suggestion_action", suggestion_id: sid, action });
-          card.style.opacity = "0.35";
-          card.querySelectorAll("button").forEach(b => b.disabled = true);
+          res = await this._hass.callWS({ type: "nova/suggestion_action", suggestion_id: sid, action });
         } catch (err) {
           console.error(`Nova: suggestion ${action} failed`, err);
         }
+        // Only a settled suggestion (installed, acknowledged, covered or
+        // dismissed) greys out. A failed install stays pending on the
+        // backend, so its buttons come back with the reason shown.
+        if (res && res.ok) {
+          card.style.opacity = "0.35";
+          return;
+        }
+        buttons.forEach(b => b.disabled = false);
+        let note = card.querySelector(".new-sug-status");
+        if (!note) {
+          note = document.createElement("div");
+          note.className = "stub-body new-sug-status";
+          note.style.color = "var(--warn)";
+          card.querySelector(".new-sug-approve")?.parentElement?.before(note);
+        }
+        note.textContent = `⚠ ${(res && res.reason) || `Could not ${action} this suggestion. Try again.`}`;
       };
       card.querySelector(".new-sug-approve")?.addEventListener("click", () => act("approve"));
       card.querySelector(".new-sug-dismiss")?.addEventListener("click", () => act("dismiss"));

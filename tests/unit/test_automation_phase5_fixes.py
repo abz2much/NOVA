@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 import pytest
 import yaml
 
-from fakes import FakeHass
+from fakes import FakeAutomationInventory as FileInventory, FakeHass
 
 
 # ── Shared harness ──────────────────────────────────────────────────────────
@@ -27,39 +27,6 @@ class ThreadedHass(FakeHass):
 
     async def async_add_executor_job(self, func, *args):
         return await asyncio.get_running_loop().run_in_executor(None, func, *args)
-
-
-class FileInventory:
-    """Home Assistant's loaded automations, as read from automations.yaml
-    at the last reload."""
-
-    def __init__(self, path, *, load_new=True):
-        self.path = path
-        self.load_new = load_new
-        self._records = []
-        self.refreshes = 0
-        self.reload()
-
-    def reload(self):
-        records_mod = sys.modules["jc.automation.models"]
-        try:
-            items = yaml.safe_load(self.path.read_text()) or []
-        except FileNotFoundError:
-            items = []
-        self._records = [
-            records_mod.AutomationRecord(
-                entity_id=f"automation.{i.get('id')}", unique_id=str(i.get("id")),
-                name=str(i.get("alias", "")), raw_config=i)
-            for i in items
-            if self.load_new or not str(i.get("id", "")).startswith("nova_auto_")
-        ]
-
-    def refresh(self):
-        self.refreshes += 1
-        return self.records()
-
-    def records(self):
-        return list(self._records)
 
 
 class Services:
@@ -333,3 +300,164 @@ def test_d3_sequence_identity_ignores_measured_delay_and_conditions(load):
     other = suggestions.suggestion_identity(
         "sequence", [], {**base, "action": {"entity": "light.hall", "state": "off"}})
     assert other != one
+
+
+# ── D4–D7: the installation transaction ─────────────────────────────────────
+
+@pytest.fixture
+def home(load, audit, store_db, tmp_path, monkeypatch):
+    """A real suggestion store with one pending routine, an automations.yaml,
+    and Home Assistant's loaded automations following each reload."""
+    suggestions, models = load("automation.suggestions"), load("automation.models")
+    patterns = load("automation.patterns")
+    an = patterns.PatternAnalyzer()
+    an._db = store_db
+    an._store_suggestion(_routine(models, 12))
+    monkeypatch.setattr(patterns, "get_analyzer", lambda: an)
+    path = tmp_path / "automations.yaml"
+    path.write_bytes(b"# household automations\n- id: legacy\n  alias: Legacy\n")
+    inventory = FileInventory(path)
+    _use_inventory(load, monkeypatch, inventory)
+    return types.SimpleNamespace(analyzer=an, path=path, inventory=inventory,
+                                 store=suggestions.SuggestionStore(store_db),
+                                 original=path.read_bytes(), audit=audit)
+
+
+def _status(home, sid=1):
+    return home.store.get(sid)["status"]
+
+
+async def test_d4_concurrent_approvals_install_once(installation, home):
+    hass = InstallHass(home.path, Services(home.inventory, hang_on=1))
+    first, second = await asyncio.gather(
+        installation.install_approved_suggestion(hass, 1),
+        installation.install_approved_suggestion(hass, 1))
+    assert sorted([first["installed"], second["installed"]]) == [False, True]
+    ids = [i["id"] for i in yaml.safe_load(home.path.read_text())]
+    assert len(ids) == 2 and ids[0] == "legacy"
+    assert _status(home) == "installed"
+    loser = first if not first["installed"] else second
+    assert "installed" in loser["reason"]
+
+
+async def test_d4_dismissed_suggestion_is_never_installed(installation, home):
+    home.store.dismiss(1)
+    hass = InstallHass(home.path, Services(home.inventory))
+    result = await installation.install_approved_suggestion(hass, 1)
+    assert result["ok"] is False and result["installed"] is False
+    assert "dismissed" in result["reason"]
+    assert home.path.read_bytes() == home.original and hass.services.calls == []
+
+
+def test_d4_duplicate_check_runs_inside_the_write_lock():
+    import contract_extract as ce
+    src = (ce.COMP / "automation" / "installation.py").read_text(encoding="utf-8")
+    body = src[src.index("async with installation_transaction():"):]
+    lock_block = body[:body.index("_LOGGER.info(\"Nova created automation")]
+    assert "_duplicate_automation(auto_config" in lock_block
+    assert "inventory.refresh()" in lock_block
+
+
+async def test_d5_cancellation_restores_bytes_reloads_and_reraises(installation, home):
+    hass = InstallHass(home.path, Services(home.inventory, hang_on=1))
+    task = asyncio.ensure_future(installation.install_approved_suggestion(hass, 1))
+    await hass.services.started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert home.path.read_bytes() == home.original
+    assert hass.services.calls == [("automation", "reload")] * 2
+    assert [r.unique_id for r in home.inventory.records()] == ["legacy"]
+    assert _status(home) == "pending"
+    assert home.audit["execution"][-1][1]["reason_code"] == "installation_cancelled"
+
+
+async def test_d5_a_second_cancel_cannot_skip_the_rollback(installation, home):
+    hass = InstallHass(home.path, Services(home.inventory, hang_on=1))
+    task = asyncio.ensure_future(installation.install_approved_suggestion(hass, 1))
+    await hass.services.started.wait()
+    task.cancel()
+    await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert home.path.read_bytes() == home.original
+    assert len(hass.services.calls) == 2
+
+
+async def test_d6_unavailable_inventory_fails_closed(installation, home, load, monkeypatch):
+    _use_inventory(load, monkeypatch, None)
+    hass = InstallHass(home.path, Services())
+    result = await installation.install_approved_suggestion(hass, 1)
+    assert result["ok"] is False and "unavailable" in result["reason"]
+    assert home.path.read_bytes() == home.original and hass.services.calls == []
+    assert _status(home) == "pending"
+    assert home.audit["execution"][-1][1]["reason_code"] == "inventory_unavailable"
+
+
+async def test_d6_unconfirmed_load_rolls_back_and_says_so(installation, home):
+    home.inventory.load_new = False
+    hass = InstallHass(home.path, Services(home.inventory))
+    result = await installation.install_approved_suggestion(hass, 1)
+    assert result["ok"] is False
+    assert "did not load" in result["reason"]
+    assert "restored and reloaded" in result["reason"]
+    assert home.path.read_bytes() == home.original
+    assert len(hass.services.calls) == 2
+    assert _status(home) == "pending"
+
+
+async def test_d6_unconfirmable_load_fails_closed(installation, home, load, monkeypatch):
+    hass = InstallHass(home.path, Services(home.inventory))
+    real_refresh = home.inventory.refresh
+    calls = {"n": 0}
+
+    def flaky_refresh():
+        calls["n"] += 1
+        if calls["n"] == 2:        # the post-write confirmation
+            raise RuntimeError("automation component gone")
+        return real_refresh()
+
+    home.inventory.refresh = flaky_refresh
+    result = await installation.install_approved_suggestion(hass, 1)
+    assert result["ok"] is False and "could not confirm" in result["reason"]
+    assert home.path.read_bytes() == home.original
+
+
+async def test_d6_failed_rollback_reload_is_reported(installation, home):
+    hass = InstallHass(home.path, Services(home.inventory, fail={1, 2}))
+    result = await installation.install_approved_suggestion(hass, 1)
+    assert result["ok"] is False
+    assert "rollback failed" in result["reason"]
+    assert home.path.read_bytes() == home.original
+    assert home.audit["execution"][-1][1]["reason_code"] == "rollback_failed"
+
+
+async def test_d7_failed_install_stays_retryable(installation, home):
+    hass = InstallHass(home.path, Services(home.inventory, fail={1}))
+    failed = await installation.install_approved_suggestion(hass, 1)
+    assert failed["ok"] is False and _status(home) == "pending"
+    assert [s["id"] for s in home.analyzer.get_pending_suggestions()] == [1]
+    retried = await installation.install_approved_suggestion(hass, 1)
+    assert retried["installed"] is True and _status(home) == "installed"
+
+
+async def test_d7_advisory_approval_is_unchanged(installation, home, load):
+    conn = sqlite3.connect(home.store._db)
+    conn.execute("UPDATE suggestions SET automation_yaml = ? WHERE id = 1",
+                 ('{"note": "x", "type": "manual_review"}',))
+    conn.commit()
+    conn.close()
+    hass = InstallHass(home.path, Services(home.inventory))
+    result = await installation.install_approved_suggestion(hass, 1)
+    assert result["ok"] is True and result["installed"] is False
+    assert _status(home) == "approved" and hass.services.calls == []
+
+
+def test_d7_panel_keeps_a_failed_suggestion_actionable():
+    import contract_extract as ce
+    js = (ce.COMP / "frontend" / "nova-panel.js").read_text(encoding="utf-8")
+    wire = js[js.index("_wireSuggestions() {"):js.index("// ─── Settings")]
+    assert "if (res && res.ok)" in wire
+    assert "buttons.forEach(b => b.disabled = false)" in wire
+    assert "res.reason" in wire

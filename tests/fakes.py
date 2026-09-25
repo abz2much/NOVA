@@ -216,3 +216,41 @@ class FakeProvider:
             raise self.exc
         text = self.replies.pop(0) if self.replies else '{"speak": false, "reason": "routine"}'
         return {"text": text, "tool_calls": [], "raw": None}
+
+
+class FakeAutomationInventory:
+    """Home Assistant's loaded automations, as read from an automations.yaml
+    at the last reload. ``load_new=False`` models a reload that silently
+    skips Nova's new automation."""
+
+    def __init__(self, path, *, load_new: bool = True):
+        self.path = path
+        self.load_new = load_new
+        self._records: list = []
+        self.refreshes = 0
+        self.reload()
+
+    def reload(self) -> None:
+        import yaml
+        try:
+            with open(self.path, encoding="utf-8") as handle:
+                items = yaml.safe_load(handle) or []
+        except (FileNotFoundError, yaml.YAMLError):
+            items = []
+        if not isinstance(items, list):
+            items = []
+        self._records = [
+            types.SimpleNamespace(
+                entity_id=f"automation.{item.get('id')}", unique_id=str(item.get("id")),
+                name=str(item.get("alias", "")), raw_config=item,
+                referenced_entities=())
+            for item in items
+            if self.load_new or not str(item.get("id", "")).startswith("nova_auto_")
+        ]
+
+    def refresh(self) -> list:
+        self.refreshes += 1
+        return self.records()
+
+    def records(self) -> list:
+        return list(self._records)
