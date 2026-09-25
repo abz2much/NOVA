@@ -172,6 +172,29 @@ def lifecycle_runtime_config(entry: ConfigEntry) -> dict[str, Any]:
     return {}
 
 
+def runtime_config_snapshot(
+    entry: ConfigEntry, *, strict: bool = False,
+) -> dict[str, Any]:
+    """A fresh shallow copy of the entry's runtime_config, only for handing
+    to an executor job (or any other thread).
+
+    runtime.runtime_config is owned by the event loop, and panel writes
+    change it in place there, so a worker thread must never iterate the live
+    dict. Take one snapshot on the event loop right before each
+    async_add_executor_job call and pass that; never keep it for a later
+    operation, so the next one sees newer values. Synchronous event-loop
+    readers use the live dict (lifecycle_runtime_config / get_runtime).
+
+    Ownership is checked exactly like the live accessors: strict=True
+    behaves like get_runtime() and raises NovaRuntimeUnavailable whenever
+    the entry has no runtime; strict=False behaves like
+    lifecycle_runtime_config() ({} for an entry that is not loaded, raise
+    for a loaded entry with no runtime). Never reads the hass.data bridge."""
+    if strict:
+        return dict(get_runtime(entry).runtime_config)
+    return dict(lifecycle_runtime_config(entry))
+
+
 def clear_runtime(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Drop the entry's runtime_data and its bridge entry. Idempotent.
 

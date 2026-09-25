@@ -140,11 +140,20 @@ def _hass_data_nodes(node: ast.AST) -> list[ast.Attribute]:
 MIGRATED = ("_auto_flag", "_host_health_tick", "_sleep_prompt_tick",
             "_get_speakers", "_test_notify", "_test_routing")
 
+# The ticks hand their config to an executor job, so they take a fresh
+# snapshot (Phase 3B.3); the synchronous readers use the live dict.
+EXECUTOR_READERS = ("_host_health_tick", "_sleep_prompt_tick")
+
+
+def _accessor(name: str) -> str:
+    return ("runtime_config_snapshot" if name in EXECUTOR_READERS
+            else "lifecycle_runtime_config")
+
 
 @pytest.mark.parametrize("name", MIGRATED)
 def test_migrated_reader_uses_the_runtime_accessor(name):
     fn = _func(name)
-    assert _calls(fn, "lifecycle_runtime_config"), name
+    assert _calls(fn, _accessor(name)), name
     assert not _hass_data_nodes(fn), name
 
 
@@ -153,13 +162,13 @@ def test_migrated_reader_reads_on_every_call(name):
     """The accessor runs inside the function's own body (each event, tick or
     service call), not once in an enclosing scope that could hold a copy."""
     fn = _func(name)
-    for call in _calls(fn, "lifecycle_runtime_config"):
+    for call in _calls(fn, _accessor(name)):
         assert call.args and isinstance(call.args[0], ast.Name)
         assert call.args[0].id == "entry"
     inner = [n for n in ast.walk(fn) if n is not fn and isinstance(
         n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda))]
     for sub in inner:
-        assert not _calls(sub, "lifecycle_runtime_config")
+        assert not _calls(sub, _accessor(name))
 
 
 def test_missing_runtime_escapes_speaker_and_flag_fallbacks():
@@ -192,7 +201,7 @@ def test_lockdown_reads_the_strict_runtime_inside_its_non_fatal_block():
         t for t in ast.walk(setup) if isinstance(t, ast.Try)
         and "ensure_lockdown" in ast.unparse(ast.Module(body=t.body, type_ignores=[])))
     body = ast.unparse(ast.Module(body=lockdown_try.body, type_ignores=[]))
-    assert "get_runtime(entry).runtime_config" in body
+    assert "runtime_config_snapshot(entry, strict=True)" in body
     assert "hass.data" not in body
     assert [ast.unparse(h.type) for h in lockdown_try.handlers] == ["Exception"]
     assert "_LOGGER.warning" in ast.unparse(lockdown_try.handlers[0])
