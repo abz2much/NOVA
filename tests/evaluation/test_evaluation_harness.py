@@ -232,18 +232,27 @@ def test_nothing_under_config_is_created_by_a_full_run():
 
 # ── Premise of the voice fast path scenarios ────────────────────────────────
 
-def test_conversation_calls_the_fast_path_without_the_device():
-    """VOICE-003/004 model conversation.py calling try_local with text and
-    honorific only. If that call ever gains device context, those scenarios'
-    premise changes and must be revisited."""
+def test_every_conversation_fast_path_call_passes_the_device():
+    """The local_command runner passes the scenario's device the way
+    conversation.py does. Every try_local call there (fast path and each
+    salvage path) must pass device_id=device_id, the request's own device, so
+    the voice-satellite rule can apply on the fast path (VOICE-003/004)."""
     src = (pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova"
            / "conversation.py").read_text(encoding="utf-8")
-    calls = [n for n in ast.walk(ast.parse(src)) if isinstance(n, ast.Call)
+    tree = ast.parse(src)
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
              and getattr(n.func, "id", None) == "try_local"]
-    assert calls
+    assert len(calls) == 4
     for call in calls:
-        assert len(call.args) <= 3
-        assert {k.arg for k in call.keywords} <= {"force"}
+        passed = {k.arg: k.value for k in call.keywords}
+        assert "device_id" in passed, f"try_local call at line {call.lineno} drops the device"
+        assert getattr(passed["device_id"], "id", None) == "device_id", call.lineno
+    # ...and device_id there is the request's own device.
+    assigns = [n for n in ast.walk(tree) if isinstance(n, ast.Assign)
+               and any(getattr(t, "id", None) == "device_id" for t in n.targets)]
+    assert len(assigns) == 1
+    value = ast.unparse(assigns[0].value)
+    assert value == "getattr(user_input, 'device_id', None)", value
 
 
 # ── Developer command ───────────────────────────────────────────────────────

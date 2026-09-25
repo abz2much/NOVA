@@ -903,7 +903,8 @@ class NovaAgent(conversation.ConversationEntity):
             # API cost. Only genuinely complex/creative/analytical requests
             # fall through to the LLM agent (Groq/Gemini).
             from .local_engine import try_local, score_complexity
-            local_result = await try_local(self.hass, user_input.text, honorific)
+            local_result = await try_local(
+                self.hass, user_input.text, honorific, device_id=device_id)
 
             if local_result and local_result.handled:
                 response_text = local_result.text
@@ -918,7 +919,8 @@ class NovaAgent(conversation.ConversationEntity):
                 if not connectivity.allow_request():
                     nova_log("OFFLINE", f"LLM down — local salvage: {user_input.text[:60]}")
                     salvage = await try_local(
-                        self.hass, user_input.text, honorific, force=True
+                        self.hass, user_input.text, honorific, force=True,
+                        device_id=device_id,
                     )
                     if salvage and salvage.handled:
                         response_text = salvage.text
@@ -982,7 +984,8 @@ class NovaAgent(conversation.ConversationEntity):
                         if _is_connectivity_failure(response_text):
                             connectivity.record_failure()
                             salvage = await try_local(
-                                self.hass, user_input.text, honorific, force=True
+                                self.hass, user_input.text, honorific, force=True,
+                                device_id=device_id,
                             )
                             if salvage and salvage.handled:
                                 response_text = salvage.text
@@ -992,7 +995,8 @@ class NovaAgent(conversation.ConversationEntity):
                         _LOGGER.warning("Agent call raised: %s", agent_exc)
                         connectivity.record_failure()
                         salvage = await try_local(
-                            self.hass, user_input.text, honorific, force=True
+                            self.hass, user_input.text, honorific, force=True,
+                            device_id=device_id,
                         )
                         if salvage and salvage.handled:
                             response_text = salvage.text

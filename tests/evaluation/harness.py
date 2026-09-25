@@ -14,8 +14,10 @@ Verdicts, in order of precedence:
 """
 from __future__ import annotations
 
+import ast
 import asyncio
 import json
+import pathlib
 import sqlite3
 import types
 from datetime import datetime, timedelta
@@ -71,11 +73,30 @@ def _names_to_ids(hass, names) -> list:
     return sorted(out)
 
 
+_CONVERSATION = (pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova"
+                 / "conversation.py")
+
+
+def _fast_path_passes_device() -> bool:
+    """Whether conversation.py's main fast path call (the try_local call
+    without force) passes the request's device. Read from the source each
+    run, so the voice scenarios follow the real wiring."""
+    tree = ast.parse(_CONVERSATION.read_text(encoding="utf-8"))
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "try_local":
+            kw = {k.arg: k.value for k in n.keywords}
+            if "force" not in kw:
+                return getattr(kw.get("device_id"), "id", None) == "device_id"
+    return False
+
+
 async def run_local_command(ctx) -> dict:
-    """The conversation entity's first handler, called exactly as
-    conversation.py does: text and honorific only, no device context."""
+    """The conversation entity's first handler, called the way
+    conversation.py calls it: text, honorific and, when conversation.py
+    passes it, the request's device."""
     le = ctx.load("local_engine")
-    result = await le.try_local(ctx.hass, ctx.input["text"], "sir")
+    device_id = ctx.input.get("device_id") if _fast_path_passes_device() else None
+    result = await le.try_local(ctx.hass, ctx.input["text"], "sir", device_id=device_id)
     text = getattr(result, "text", "") if result is not None else ""
     listed = []
     if ctx.input.get("listing") and ":" in text:

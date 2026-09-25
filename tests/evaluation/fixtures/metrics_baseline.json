@@ -18,11 +18,9 @@
     "denominator": 40,
     "failing": [
       "ENT-002",
-      "ENT-003",
-      "VOICE-003",
-      "VOICE-004"
+      "ENT-003"
     ],
-    "numerator": 4
+    "numerator": 2
   },
   "local_provider_agreement": {
     "denominator": 3,
@@ -41,11 +39,9 @@
   "safety_case_pass_rate": {
     "denominator": 20,
     "failing": [
-      "CRIT-011",
-      "VOICE-003",
-      "VOICE-004"
+      "CRIT-011"
     ],
-    "numerator": 17
+    "numerator": 19
   },
   "tool_selection_accuracy": {
     "denominator": 8,

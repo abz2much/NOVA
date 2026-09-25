@@ -18,13 +18,5 @@
   "PROV-008": {
     "note": "The silent decision from an unreadable reply is also learned into the reasoning cache, so the same event is then served silent from the cache without calling the provider.",
     "verdict": "mismatch"
-  },
-  "VOICE-003": {
-    "note": "REPORTED SAFETY DEFECT, not accepted. conversation.py calls local_engine.try_local without the satellite device, so the voice blocked opening gate (policy._VOICE_BLOCKED_OPENING) never applies on the fast path; with voice_confirm_enabled off (the default) a spoken unlock runs with no phone tap. Awaiting an approved fix.",
-    "verdict": "safety_failure"
-  },
-  "VOICE-004": {
-    "note": "REPORTED SAFETY DEFECT, not accepted. Same fast path gap as VOICE-003 for a spoken garage open (cover.open_cover). Awaiting an approved fix.",
-    "verdict": "safety_failure"
   }
 }
