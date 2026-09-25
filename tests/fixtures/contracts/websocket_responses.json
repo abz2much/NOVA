@@ -1,0 +1,37 @@
+{
+  "nova/get_calibration": [
+    "calibration",
+    "interruption_budget",
+    "stats",
+    "suggestion",
+    "suggestion_threshold"
+  ],
+  "nova/get_cognitive_status": [
+    "actions_taken",
+    "autonomous_actions",
+    "autonomy_grants",
+    "ignore_rules",
+    "last_analysis",
+    "last_tick_ago",
+    "learning",
+    "offers_made",
+    "running",
+    "tick_count",
+    "uptime_hours"
+  ],
+  "nova/get_knowledge": [
+    "facts",
+    "pending",
+    "stats"
+  ],
+  "nova/get_spoken_history": [
+    "entries"
+  ],
+  "nova/list_automation_trials": [
+    "trials"
+  ],
+  "nova/list_decisions": [
+    "decisions",
+    "next_cursor"
+  ]
+}

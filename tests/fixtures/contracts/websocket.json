@@ -1,0 +1,974 @@
+{
+  "nova/add_knowledge": {
+    "admin": true,
+    "error_codes": [
+      "add_failed"
+    ],
+    "fields": {
+      "key": {
+        "required": true
+      },
+      "kind": {
+        "required": false
+      },
+      "subject": {
+        "required": false
+      },
+      "value": {
+        "required": true
+      }
+    },
+    "literal_response_keys": [
+      "facts",
+      "ok"
+    ],
+    "registered": true
+  },
+  "nova/apply_ai_config": {
+    "admin": true,
+    "error_codes": [],
+    "fields": {
+      "updates": {
+        "required": true
+      }
+    },
+    "literal_response_keys": [
+      "error",
+      "errors",
+      "message",
+      "ok"
+    ],
+    "registered": true
+  },
+  "nova/automation_trial_feedback": {
+    "admin": true,
+    "error_codes": [
+      "automation_trial_feedback_failed"
+    ],
+    "fields": {
+      "trial_id": {
+        "required": true
+      },
+      "verdict": {
+        "options": [
+          "needs_adjustment",
+          "working"
+        ],
+        "required": true
+      }
+    },
+    "literal_response_keys": [
+      "ok"
+    ],
+    "registered": true
+  },
+  "nova/biometrics": {
+    "admin": true,
+    "error_codes": [
+      "biometrics_failed"
+    ],
+    "fields": {
+      "action": {
+        "options": [
+          "disable",
+          "enable",
+          "status"
+        ],
+        "required": true
+      }
+    },
+    "literal_response_keys": [
+      "enabled",
+      "entities",
+      "found"
+    ],
+    "registered": true
+  },
+  "nova/camera_diagnostics": {
+    "admin": false,
+    "error_codes": [
+      "camera_diag_failed"
+    ],
+    "fields": {
+      "entity_id": {
+        "required": false
+      }
+    },
+    "literal_response_keys": [
+      "platforms",
+      "probe",
+      "summary"
+    ],
+    "registered": true
+  },
+  "nova/camera_location": {
+    "admin": true,
+    "error_codes": [
+      "camera_location_failed",
+      "unknown_camera"
+    ],
+    "fields": {
+      "entity_id": {
+        "required": true
+      },
+      "mode": {
+        "options": [
+          "auto",
+          "indoor",
+          "outdoor"
+        ],
+        "required": true
+      }
+    },
+    "literal_response_keys": [
+      "cameras",
+      "ok"
+    ],
+    "registered": true
+  },
+  "nova/camera_snapshot": {
+    "admin": true,
+    "error_codes": [
+      "snapshot_failed",
+      "unknown_camera"
+    ],
+    "fields": {
+      "entity_id": {
+        "required": true
+      }
+    },
+    "literal_response_keys": [
+      "image"
+    ],
+    "registered": true
+  },
+  "nova/compute_camera_coverage": {
+    "admin": false,
+    "error_codes": [
+      "coverage_failed"
+    ],
+    "fields": {
+      "camera": {
+        "required": true
+      }
+    },
+    "literal_response_keys": [],
+    "registered": true
+  },
+  "nova/delete_credential": {
+    "admin": true,
+    "error_codes": [],
+    "fields": {
+      "provider": {
+        "required": true
+      }
+    },
+    "literal_response_keys": [
+      "ok"
+    ],
+    "registered": true
+  },
+  "nova/diagnostics": {
+    "admin": false,
+    "error_codes": [
+      "diagnostics_failed"
+    ],
+    "fields": {},
+    "literal_response_keys": [],
+    "registered": true
+  },
+  "nova/documents": {
+    "admin": true,
+    "error_codes": [
+      "documents_failed"
+    ],
+    "fields": {
+      "action": {
+        "options": [
+          "delete",
+          "ingest",
+          "scan_watch",
+          "search",
+          "status",
+          "upload"
+        ],
+        "required": true
+      },
+      "content": {
+        "required": false
+      },
+      "filename": {
+        "required": false
+      },
+      "query": {
+        "required": false
+      }
+    },
+    "literal_response_keys": [],
+    "registered": true
+  },
+  "nova/edit_pending_fact": {
+    "admin": true,
+    "error_codes": [
+      "edit_pending_fact_failed"
+    ],
+    "fields": {
+      "fact_id": {
+        "required": true
+      },
+      "value": {
+        "required": true
+      }
+    },
+    "literal_response_keys": [
+      "ok",
+      "pending"
+    ],
+    "registered": true
+  },
+  "nova/energy": {
+    "admin": true,
+    "error_codes": [
+      "bad_agency",
+      "energy_failed"
+    ],
+    "fields": {
+      "action": {
+        "options": [
+          "set_agency",
+          "status"
+        ],
+        "required": true
+      },
+      "agency": {
+        "required": false
+      }
+    },
+    "literal_response_keys": [],
+    "registered": true
+  },
+  "nova/forget_knowledge": {
+    "admin": true,
+    "error_codes": [
+      "forget_failed"
+    ],
+    "fields": {
+      "fact_id": {
+        "required": false
+      },
+      "key": {
+        "required": false
+      },
+      "subject": {
+        "required": false
+      }
+    },
+    "literal_response_keys": [
+      "facts",
+      "removed"
+    ],
+    "registered": true
+  },
+  "nova/get_activity_log": {
+    "admin": false,
+    "error_codes": [
+      "activity_log_failed"
+    ],
+    "fields": {
+      "hours": {
+        "default": 24,
+        "required": false
+      },
+      "limit": {
+        "default": 50,
+        "required": false
+      }
+    },
+    "literal_response_keys": [
+      "entries"
+    ],
+    "registered": true
+  },
+  "nova/get_area_sparklines": {
+    "admin": false,
+    "error_codes": [
+      "sparklines_failed"
+    ],
+    "fields": {},
+    "literal_response_keys": [
+      "sparklines"
+    ],
+    "registered": true
+  },
+  "nova/get_calibration": {
+    "admin": false,
+    "error_codes": [],
+    "fields": {},
+    "literal_response_keys": [
+      "calibration",
+      "error",
+      "interruption_budget"
+    ],
+    "registered": true
+  },
+  "nova/get_cognitive_status": {
+    "admin": false,
+    "error_codes": [],
+    "fields": {},
+    "literal_response_keys": [
+      "error",
+      "learning",
+      "running"
+    ],
+    "registered": true
+  },
+  "nova/get_credential_status": {
+    "admin": true,
+    "error_codes": [],
+    "fields": {},
+    "literal_response_keys": [
+      "available",
+      "status"
+    ],
+    "registered": true
+  },
+  "nova/get_debug_log": {
+    "admin": true,
+    "error_codes": [],
+    "fields": {},
+    "literal_response_keys": [
+      "entries"
+    ],
+    "registered": true
+  },
+  "nova/get_decision": {
+    "admin": true,
+    "error_codes": [
+      "get_decision_failed",
+      "not_found"
+    ],
+    "fields": {
+      "decision_id": {
+        "required": true
+      }
+    },
+    "literal_response_keys": [
+      "decision"
+    ],
+    "registered": true
+  },
+  "nova/get_knowledge": {
+    "admin": false,
+    "error_codes": [
+      "knowledge_failed"
+    ],
+    "fields": {
+      "subject": {
+        "required": false
+      }
+    },
+    "literal_response_keys": [
+      "facts",
+      "pending",
+      "stats"
+    ],
+    "registered": true
+  },
+  "nova/get_panel_data": {
+    "admin": false,
+    "error_codes": [
+      "panel_data_failed"
+    ],
+    "fields": {},
+    "literal_response_keys": [],
+    "registered": true
+  },
+  "nova/get_person_routines": {
+    "admin": false,
+    "error_codes": [
+      "person_routines_failed"
+    ],
+    "fields": {},
+    "literal_response_keys": [
+      "routines"
+    ],
+    "registered": true
+  },
+  "nova/get_provider_activity": {
+    "admin": true,
+    "error_codes": [
+      "get_provider_activity_failed"
+    ],
+    "fields": {
+      "days": {
+        "default": 7,
+        "required": false
+      }
+    },
+    "literal_response_keys": [
+      "days"
+    ],
+    "registered": true
+  },
+  "nova/get_setup_health": {
+    "admin": true,
+    "error_codes": [
+      "get_setup_health_failed"
+    ],
+    "fields": {},
+    "literal_response_keys": [],
+    "registered": true
+  },
+  "nova/get_spoken_history": {
+    "admin": true,
+    "error_codes": [
+      "get_spoken_history_failed"
+    ],
+    "fields": {},
+    "literal_response_keys": [
+      "entries"
+    ],
+    "registered": true
+  },
+  "nova/goal_action": {
+    "admin": true,
+    "error_codes": [
+      "create_failed",
+      "empty_outcome",
+      "goal_action_failed",
+      "missing_goal_id"
+    ],
+    "fields": {
+      "action": {
+        "options": [
+          "cancel",
+          "create",
+          "delete"
+        ],
+        "required": true
+      },
+      "goal_id": {
+        "required": false
+      },
+      "interval_min": {
+        "required": false
+      },
+      "outcome": {
+        "required": false
+      },
+      "title": {
+        "required": false
+      }
+    },
+    "literal_response_keys": [
+      "goal",
+      "goals",
+      "ok"
+    ],
+    "registered": true
+  },
+  "nova/hazard": {
+    "admin": false,
+    "error_codes": [
+      "hazard_failed"
+    ],
+    "fields": {
+      "action": {
+        "options": [
+          "scan",
+          "status"
+        ],
+        "required": true
+      }
+    },
+    "literal_response_keys": [],
+    "registered": true
+  },
+  "nova/intrusion": {
+    "admin": true,
+    "error_codes": [
+      "intrusion_failed"
+    ],
+    "fields": {
+      "action": {
+        "options": [
+          "acknowledge",
+          "dismiss",
+          "label",
+          "learning",
+          "log",
+          "status"
+        ],
+        "required": true
+      },
+      "event_id": {
+        "required": false
+      },
+      "label": {
+        "required": false
+      },
+      "limit": {
+        "required": false
+      },
+      "reason": {
+        "required": false
+      }
+    },
+    "literal_response_keys": [
+      "events",
+      "learning"
+    ],
+    "registered": true
+  },
+  "nova/list_actions": {
+    "admin": true,
+    "error_codes": [
+      "list_actions_failed"
+    ],
+    "fields": {
+      "cursor_request_id": {
+        "required": false
+      },
+      "cursor_ts": {
+        "required": false
+      },
+      "limit": {
+        "default": 20,
+        "required": false
+      }
+    },
+    "literal_response_keys": [],
+    "registered": true
+  },
+  "nova/list_automation_inventory": {
+    "admin": true,
+    "error_codes": [
+      "list_automation_inventory_failed"
+    ],
+    "fields": {},
+    "literal_response_keys": [
+      "automations",
+      "available",
+      "refreshed_at"
+    ],
+    "registered": true
+  },
+  "nova/list_automation_trials": {
+    "admin": true,
+    "error_codes": [
+      "list_automation_trials_failed"
+    ],
+    "fields": {},
+    "literal_response_keys": [
+      "trials"
+    ],
+    "registered": true
+  },
+  "nova/list_decisions": {
+    "admin": true,
+    "error_codes": [
+      "list_decisions_failed"
+    ],
+    "fields": {
+      "cursor_id": {
+        "required": false
+      },
+      "cursor_ts": {
+        "required": false
+      },
+      "kind": {
+        "required": false
+      },
+      "limit": {
+        "default": 50,
+        "required": false
+      },
+      "only_unjudged": {
+        "default": false,
+        "required": false
+      }
+    },
+    "literal_response_keys": [
+      "decisions",
+      "next_cursor"
+    ],
+    "registered": true
+  },
+  "nova/list_models": {
+    "admin": true,
+    "error_codes": [],
+    "fields": {
+      "provider": {
+        "required": true
+      },
+      "refresh": {
+        "default": false,
+        "required": false
+      }
+    },
+    "literal_response_keys": [
+      "cached",
+      "error",
+      "model_details",
+      "models",
+      "provider",
+      "truncated"
+    ],
+    "registered": true
+  },
+  "nova/mmwave_overview": {
+    "admin": false,
+    "error_codes": [
+      "mmwave_overview_failed"
+    ],
+    "fields": {},
+    "literal_response_keys": [
+      "rooms",
+      "summary"
+    ],
+    "registered": true
+  },
+  "nova/mode": {
+    "admin": true,
+    "error_codes": [
+      "mode_failed"
+    ],
+    "fields": {
+      "action": {
+        "options": [
+          "set",
+          "status"
+        ],
+        "required": true
+      },
+      "mode": {
+        "required": false
+      },
+      "reason": {
+        "required": false
+      }
+    },
+    "literal_response_keys": [],
+    "registered": true
+  },
+  "nova/pending_fact_action": {
+    "admin": true,
+    "error_codes": [
+      "pending_fact_action_failed"
+    ],
+    "fields": {
+      "action": {
+        "options": [
+          "confirm",
+          "reject"
+        ],
+        "required": true
+      },
+      "fact_id": {
+        "required": true
+      }
+    },
+    "literal_response_keys": [
+      "facts",
+      "ok",
+      "pending"
+    ],
+    "registered": true
+  },
+  "nova/reload_appliances": {
+    "admin": true,
+    "error_codes": [
+      "reload_failed"
+    ],
+    "fields": {},
+    "literal_response_keys": [
+      "appliances",
+      "ok"
+    ],
+    "registered": true
+  },
+  "nova/rename_camera": {
+    "admin": true,
+    "error_codes": [
+      "rename_failed",
+      "unknown_camera"
+    ],
+    "fields": {
+      "entity_id": {
+        "required": true
+      },
+      "name": {
+        "required": true
+      }
+    },
+    "literal_response_keys": [
+      "camera_names",
+      "cameras",
+      "ok"
+    ],
+    "registered": true
+  },
+  "nova/repeat_spoken": {
+    "admin": true,
+    "error_codes": [
+      "no_speaker",
+      "no_tts_entity",
+      "not_found",
+      "repeat_spoken_failed"
+    ],
+    "fields": {
+      "spoken_id": {
+        "required": true
+      }
+    },
+    "literal_response_keys": [
+      "ok",
+      "spoken"
+    ],
+    "registered": true
+  },
+  "nova/replay_decision": {
+    "admin": true,
+    "error_codes": [
+      "not_found",
+      "replay_decision_failed"
+    ],
+    "fields": {
+      "decision_id": {
+        "required": true
+      }
+    },
+    "literal_response_keys": [],
+    "registered": true
+  },
+  "nova/root_cause": {
+    "admin": false,
+    "error_codes": [
+      "root_cause_failed"
+    ],
+    "fields": {
+      "entity_id": {
+        "required": true
+      },
+      "event_time": {
+        "required": false
+      },
+      "window_secs": {
+        "required": false
+      }
+    },
+    "literal_response_keys": [],
+    "registered": true
+  },
+  "nova/run_analysis": {
+    "admin": true,
+    "error_codes": [],
+    "fields": {},
+    "literal_response_keys": [
+      "error",
+      "ran"
+    ],
+    "registered": true
+  },
+  "nova/search_memory": {
+    "admin": false,
+    "error_codes": [
+      "search_failed"
+    ],
+    "fields": {
+      "k": {
+        "default": 5,
+        "required": false
+      },
+      "query": {
+        "required": true
+      }
+    },
+    "literal_response_keys": [
+      "results"
+    ],
+    "registered": true
+  },
+  "nova/semantic_search": {
+    "admin": true,
+    "error_codes": [
+      "semantic_search_failed"
+    ],
+    "fields": {
+      "action": {
+        "options": [
+          "disable",
+          "enable",
+          "status",
+          "test"
+        ],
+        "required": true
+      }
+    },
+    "literal_response_keys": [
+      "base",
+      "enabled",
+      "model",
+      "ok",
+      "ollama_configured",
+      "vector_count"
+    ],
+    "registered": true
+  },
+  "nova/set_credential": {
+    "admin": true,
+    "error_codes": [],
+    "fields": {
+      "provider": {
+        "required": true
+      },
+      "value": {
+        "required": true
+      }
+    },
+    "literal_response_keys": [
+      "ok"
+    ],
+    "registered": true
+  },
+  "nova/set_decision_outcome": {
+    "admin": true,
+    "error_codes": [
+      "set_decision_outcome_failed"
+    ],
+    "fields": {
+      "decision_id": {
+        "required": true
+      },
+      "verdict": {
+        "options": [
+          "good",
+          "unnecessary",
+          "wrong"
+        ],
+        "required": true
+      }
+    },
+    "literal_response_keys": [
+      "status"
+    ],
+    "registered": true
+  },
+  "nova/set_lockdown": {
+    "admin": true,
+    "error_codes": [
+      "lockdown_failed"
+    ],
+    "fields": {
+      "on": {
+        "required": true
+      }
+    },
+    "literal_response_keys": [
+      "lockdown",
+      "ok"
+    ],
+    "registered": true
+  },
+  "nova/solar": {
+    "admin": false,
+    "error_codes": [
+      "solar_failed"
+    ],
+    "fields": {
+      "action": {
+        "options": [
+          "status"
+        ],
+        "required": true
+      }
+    },
+    "literal_response_keys": [],
+    "registered": true
+  },
+  "nova/suggestion_action": {
+    "admin": true,
+    "error_codes": [
+      "suggestion_action_failed"
+    ],
+    "fields": {
+      "action": {
+        "options": [
+          "approve",
+          "dismiss"
+        ],
+        "required": true
+      },
+      "suggestion_id": {
+        "required": true
+      }
+    },
+    "literal_response_keys": [
+      "alias",
+      "installed",
+      "ok",
+      "reason"
+    ],
+    "registered": true
+  },
+  "nova/test_provider_endpoint": {
+    "admin": true,
+    "error_codes": [],
+    "fields": {
+      "endpoint": {
+        "required": true
+      },
+      "provider": {
+        "options": [
+          "custom",
+          "ollama"
+        ],
+        "required": true
+      }
+    },
+    "literal_response_keys": [
+      "endpoint",
+      "error",
+      "message",
+      "model_details",
+      "models",
+      "ok",
+      "provider",
+      "truncated"
+    ],
+    "registered": true
+  },
+  "nova/update_config": {
+    "admin": true,
+    "error_codes": [
+      "invalid_key",
+      "invalid_value",
+      "no_data",
+      "no_entry",
+      "update_failed"
+    ],
+    "fields": {
+      "key": {
+        "required": true
+      },
+      "value": {
+        "required": true
+      }
+    },
+    "literal_response_keys": [
+      "key",
+      "persisted",
+      "value"
+    ],
+    "registered": true
+  },
+  "nova/voice_confirm_test": {
+    "admin": true,
+    "error_codes": [
+      "test_failed"
+    ],
+    "fields": {},
+    "literal_response_keys": [],
+    "registered": true
+  }
+}

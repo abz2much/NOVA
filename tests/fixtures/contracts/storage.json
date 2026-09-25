@@ -1,0 +1,266 @@
+{
+  "action_log": {
+    "paths": [
+      "nova/conversations.db"
+    ],
+    "tables": [
+      "action_log"
+    ]
+  },
+  "agent": {
+    "paths": [
+      ".nova_learned.json"
+    ],
+    "tables": []
+  },
+  "automation.predictor": {
+    "paths": [
+      "nova/habit_matrix.json"
+    ],
+    "tables": []
+  },
+  "automation_creator": {
+    "paths": [
+      "automations.yaml"
+    ],
+    "tables": []
+  },
+  "automation_trials": {
+    "paths": [
+      "nova/patterns.db"
+    ],
+    "tables": [
+      "automation_trials"
+    ]
+  },
+  "bootstrap": {
+    "paths": [
+      "nova/.bootstrap_done"
+    ],
+    "tables": []
+  },
+  "briefing": {
+    "paths": [
+      "nova/conversations.db"
+    ],
+    "tables": []
+  },
+  "camera_awareness": {
+    "paths": [
+      "nova/patterns.db"
+    ],
+    "tables": []
+  },
+  "cognitive_core": {
+    "paths": [
+      ".nova_ignore_rules.json",
+      "nova/autonomy_grants.json",
+      "nova/lockdown_state.json",
+      "nova/patterns.db"
+    ],
+    "tables": [
+      "commands",
+      "person_patterns",
+      "state_changes",
+      "suggestions"
+    ]
+  },
+  "config_flow": {
+    "paths": [
+      "nova/config.json"
+    ],
+    "tables": []
+  },
+  "conversation": {
+    "paths": [
+      "nova_persona.txt"
+    ],
+    "tables": []
+  },
+  "database": {
+    "paths": [
+      "nova/conversations.db"
+    ],
+    "tables": [
+      "activity_log",
+      "conversations",
+      "sentinel_events"
+    ]
+  },
+  "decision_record": {
+    "paths": [
+      "nova/decisions.db"
+    ],
+    "tables": [
+      "decision_records"
+    ]
+  },
+  "diagnostics.fault_log": {
+    "paths": [
+      "nova/fault_history.json"
+    ],
+    "tables": []
+  },
+  "documents": {
+    "paths": [
+      "nova.db",
+      "nova/documents",
+      "nova_memory"
+    ],
+    "tables": [
+      "document_watch_seen"
+    ]
+  },
+  "doorbell_training": {
+    "paths": [
+      "nova"
+    ],
+    "tables": []
+  },
+  "embeddings": {
+    "paths": [
+      "nova.db"
+    ],
+    "tables": [
+      "doc_vectors"
+    ]
+  },
+  "followups": {
+    "paths": [
+      "nova/patterns.db"
+    ],
+    "tables": [
+      "followups"
+    ]
+  },
+  "goals": {
+    "paths": [
+      "nova/patterns.db"
+    ],
+    "tables": [
+      "goals"
+    ]
+  },
+  "ha_secrets": {
+    "paths": [
+      "secrets.yaml"
+    ],
+    "tables": []
+  },
+  "intrusion": {
+    "paths": [
+      "nova/intrusion",
+      "nova/intrusion_log.json",
+      "www/nova/intrusion"
+    ],
+    "tables": []
+  },
+  "knowledge": {
+    "paths": [
+      "nova/knowledge.db"
+    ],
+    "tables": [
+      "facts"
+    ]
+  },
+  "local_engine": {
+    "paths": [
+      ".nova_learned.json"
+    ],
+    "tables": []
+  },
+  "local_mind": {
+    "paths": [
+      "nova/patterns.db"
+    ],
+    "tables": []
+  },
+  "memory": {
+    "paths": [
+      "nova.db",
+      "nova_memory"
+    ],
+    "tables": []
+  },
+  "modes": {
+    "paths": [
+      "nova/mode_state.json"
+    ],
+    "tables": []
+  },
+  "nova_config": {
+    "paths": [
+      "nova/config.json"
+    ],
+    "tables": []
+  },
+  "pattern_analyzer": {
+    "paths": [
+      "nova/patterns.db"
+    ],
+    "tables": []
+  },
+  "person_patterns": {
+    "paths": [
+      "nova/patterns.db"
+    ],
+    "tables": [
+      "person_patterns"
+    ]
+  },
+  "provider_activity": {
+    "paths": [
+      "nova/provider_activity.db"
+    ],
+    "tables": [
+      "provider_activity_daily"
+    ]
+  },
+  "rca": {
+    "paths": [
+      "nova/conversations.db",
+      "nova/patterns.db"
+    ],
+    "tables": []
+  },
+  "reasoning_cache": {
+    "paths": [
+      "nova/reasoning_cache.json"
+    ],
+    "tables": []
+  },
+  "reminders": {
+    "paths": [
+      "nova/reminders.db"
+    ],
+    "tables": [
+      "reminders"
+    ]
+  },
+  "routines": {
+    "paths": [
+      "nova_routines.yaml"
+    ],
+    "tables": []
+  },
+  "spoken_history": {
+    "paths": [
+      "nova/conversations.db"
+    ],
+    "tables": [
+      "spoken_history"
+    ]
+  },
+  "state_ledger": {
+    "paths": [
+      "nova/state_ledger.jsonl"
+    ],
+    "tables": []
+  },
+  "websocket": {
+    "paths": [
+      "nova/nova.log"
+    ],
+    "tables": []
+  }
+}

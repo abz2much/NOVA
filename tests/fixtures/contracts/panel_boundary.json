@@ -1,0 +1,35 @@
+{
+  "backend_top_level": [
+    "areas",
+    "config",
+    "dominant",
+    "doorbell_training",
+    "doors",
+    "goals",
+    "intrusion",
+    "knowledge",
+    "lockdown",
+    "meta",
+    "sleep_reason",
+    "status",
+    "suggestions",
+    "version"
+  ],
+  "config_fallbacks": [
+    "cameras",
+    "lockdown",
+    "onboarding"
+  ],
+  "panel_reads": [
+    "areas",
+    "config",
+    "doorbell_training",
+    "doors",
+    "goals",
+    "lockdown",
+    "meta",
+    "onboarding",
+    "status",
+    "suggestions"
+  ]
+}
