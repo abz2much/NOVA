@@ -16,7 +16,8 @@ methods, pulled out of conversation.py with ast, against fakes:
 * one pairings parser serves both routing sites and keeps the old parsing
   result for dicts, JSON strings and malformed values,
 * static checks on the call order inside a turn and on the reasoning
-  fallback's config.
+  fallback's config (a fresh snapshot per executor job, never the live
+  dict).
 
 Focused run:
     python -m pytest tests/unit/test_conversation_runtime.py -q
@@ -426,14 +427,15 @@ def test_opt_reads_runtime_then_resolver_without_bridge():
         "return get_runtime(self.entry).runtime_config"
 
 
-def test_reasoning_fallback_uses_effective_config_with_live_runtime():
+def test_reasoning_fallback_uses_a_fresh_runtime_snapshot():
     impl = _method("_handle_message_impl")
     jobs = [n for n in ast.walk(impl) if isinstance(n, ast.Call)
             and ast.unparse(n.func) == "self.hass.async_add_executor_job"
             and n.args and "effective_config" in ast.unparse(n.args[0])]
     assert len(jobs) == 1
     assert [ast.unparse(a) for a in jobs[0].args] == [
-        "_jc.effective_config_with_runtime", "self.entry", "self._runtime_config()"]
+        "_jc.effective_config_with_runtime", "self.entry",
+        "runtime_config_snapshot(self.entry, strict=True)"]
 
 
 def _first_line(fn, needle: str) -> int:

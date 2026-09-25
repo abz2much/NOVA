@@ -54,8 +54,9 @@ def _unavailable_logged(caplog) -> bool:
 
 @pytest.fixture
 def effective_calls(monkeypatch):
-    """Record the runtime_config object handed to effective_config_with_runtime
-    (identity, not a copy) while still returning the real merge."""
+    """Record the runtime_config handed to effective_config_with_runtime
+    (a per-call snapshot of the live dict) while still returning the real
+    merge."""
     from custom_components.nova import nova_config
     real = nova_config.effective_config_with_runtime
     seen: list[dict] = []
@@ -276,8 +277,11 @@ async def test_tick_reads_live_runtime_each_time(
     await tick(None)
 
     assert [c[key] for c in tick_calls[name]] == ["first", "second"]
-    assert effective_calls and all(rc is runtime.runtime_config
-                                   for rc in effective_calls)
+    # The executor got a fresh snapshot each tick, never the live dict.
+    ticks = effective_calls[-2:]                    # after setup's own calls
+    assert [rc[key] for rc in ticks] == ["first", "second"]
+    assert all(rc is not runtime.runtime_config for rc in effective_calls)
+    assert ticks[0] is not ticks[1]
 
 
 @pytest.mark.parametrize(("name", "key"), TICKS)
@@ -370,7 +374,9 @@ async def test_lockdown_gets_current_runtime_values(
     entry = await _setup(hass)
     assert entry.state is ConfigEntryState.LOADED
     assert [c["lockdown_on_alarm"] for c in lockdown_calls] == ["runtime"]
-    assert effective_calls[-1] is seen["runtime"].runtime_config
+    live = seen["runtime"].runtime_config
+    assert effective_calls[-1] == live
+    assert effective_calls[-1] is not live       # a snapshot, not the live dict
 
 
 async def test_lockdown_without_runtime_is_non_fatal_and_visible(

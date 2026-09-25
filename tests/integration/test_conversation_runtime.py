@@ -133,8 +133,9 @@ def fakes(monkeypatch, isolated_memory):
 
 @pytest.fixture
 def effective_calls(monkeypatch):
-    """Record the runtime_config object handed to effective_config_with_runtime
-    (identity, not a copy) while still returning the real merge."""
+    """Record the runtime_config handed to effective_config_with_runtime
+    (a per-turn snapshot of the live dict) while still returning the real
+    merge."""
     from custom_components.nova import nova_config
     real = nova_config.effective_config_with_runtime
     seen: list = []
@@ -277,7 +278,8 @@ async def test_turn_uses_live_runtime_config_and_ignores_drifted_bridge(
     assert kw["model"] == "live-model"
     assert kw["provider_name"] == "ollama"
     assert kw["config"]["ollama_base_url"] == "http://live-a:11434"
-    assert effective_calls[-1] is live
+    assert effective_calls[-1] == live
+    assert effective_calls[-1] is not live       # a snapshot, not the live dict
 
     # In place, no reload: the next turn sees the new values.
     live["model"] = "live-model-2"
@@ -286,7 +288,9 @@ async def test_turn_uses_live_runtime_config_and_ignores_drifted_bridge(
     kw = fakes.agent_kwargs
     assert kw["model"] == "live-model-2"
     assert kw["config"]["ollama_base_url"] == "http://live-b:11434"
-    assert effective_calls[-1] is live
+    assert effective_calls[-1] == live
+    assert effective_calls[-1] is not live
+    assert effective_calls[0] is not effective_calls[1]
     assert len(effective_calls) == 2
 
 

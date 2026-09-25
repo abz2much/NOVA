@@ -44,7 +44,7 @@ from .llm_provider import (
     resolve_provider_endpoint,
 )
 from .presence import presence_context_string
-from .runtime import get_runtime
+from .runtime import get_runtime, runtime_config_snapshot
 from .tts_helper import resolve_tts_entity, async_announce
 
 
@@ -956,9 +956,11 @@ class NovaAgent(conversation.ConversationEntity):
                     # working tier was configured. Use the single source of
                     # truth (nova_config) plus the live panel runtime_config
                     # (non-empty values win), read from NovaRuntime this turn.
+                    # The executor gets a fresh snapshot, never the live
+                    # loop-owned dict.
                     eff_config = await self.hass.async_add_executor_job(
                         _jc.effective_config_with_runtime, self.entry,
-                        self._runtime_config(),
+                        runtime_config_snapshot(self.entry, strict=True),
                     )
 
                     api_key_val = resolve_provider_credential(

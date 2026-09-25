@@ -53,6 +53,7 @@ from .runtime import (
     get_runtime,
     lifecycle_runtime,
     lifecycle_runtime_config,
+    runtime_config_snapshot,
     set_observer_running,
 )
 from .panel_register import async_register_panel, async_unregister_panel
@@ -570,8 +571,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
     async def _host_health_tick(_now) -> None:
         try:
             from . import host_health, nova_config as _jc3
-            # Read live each tick: panel changes apply on the next sample.
-            rc = lifecycle_runtime_config(entry)
+            # Snapshot the live dict each tick for the executor: panel
+            # changes apply on the next sample.
+            rc = runtime_config_snapshot(entry)
             cfg = await hass.async_add_executor_job(
                 _jc3.effective_config_with_runtime, entry, rc)
             res = await host_health.tick(hass, cfg)
@@ -634,8 +636,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
     async def _sleep_prompt_tick(_now) -> None:
         try:
             from . import sleep_detection as sd, nova_config as _jc2
-            # Read live each tick: panel changes apply on the next check.
-            rc = lifecycle_runtime_config(entry)
+            # Snapshot the live dict each tick for the executor: panel
+            # changes apply on the next check.
+            rc = runtime_config_snapshot(entry)
             cfg = await hass.async_add_executor_job(
                 _jc2.effective_config_with_runtime, entry, rc)
             await sd.maybe_prompt_sleep(hass, cfg)
@@ -977,8 +980,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
     try:
         from . import cognitive_core, nova_config
         # The runtime is assigned above, so a missing one is a real fault;
-        # get_runtime() raises into this block's non-fatal warning.
-        rc = get_runtime(entry).runtime_config
+        # the strict snapshot raises into this block's non-fatal warning.
+        # The executor gets a copy, never the loop-owned live dict.
+        rc = runtime_config_snapshot(entry, strict=True)
         lockdown_config = await hass.async_add_executor_job(
             nova_config.effective_config_with_runtime, entry, rc)
         await cognitive_core.ensure_lockdown(hass, lockdown_config)
