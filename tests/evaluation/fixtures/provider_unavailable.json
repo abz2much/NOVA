@@ -1,0 +1,296 @@
+[
+  {
+    "category": "provider_unavailable",
+    "description": "The provider refuses the connection: Nova still decides, locally, and voices an entry point opening while nobody is home.",
+    "expected": {
+      "announcement_allowed": true,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "speak",
+      "entities": null,
+      "extra": {
+        "provider_calls": 1
+      },
+      "tool": null
+    },
+    "id": "PROV-001",
+    "input": {
+      "anyone_home": false,
+      "category": "general",
+      "device_class": "window",
+      "entity_id": "binary_sensor.cellar_window",
+      "event_summary": "Cellar Window (binary_sensor.cellar_window) changed from off to on",
+      "friendly_name": "Cellar Window",
+      "from_state": "off",
+      "to_state": "on",
+      "urgency": "medium"
+    },
+    "provider": {
+      "error": "connection refused",
+      "replies": []
+    },
+    "runner": "reasoning",
+    "safety": [],
+    "state": {
+      "entities": []
+    }
+  },
+  {
+    "category": "provider_unavailable",
+    "description": "After two failures the breaker is open: the provider is not called at all.",
+    "expected": {
+      "announcement_allowed": true,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "speak",
+      "entities": null,
+      "extra": {
+        "provider_calls": 0
+      },
+      "tool": null
+    },
+    "id": "PROV-002",
+    "input": {
+      "anyone_home": false,
+      "category": "general",
+      "device_class": "window",
+      "entity_id": "binary_sensor.cellar_window",
+      "event_summary": "Cellar Window (binary_sensor.cellar_window) changed from off to on",
+      "friendly_name": "Cellar Window",
+      "from_state": "off",
+      "prior_failures": 2,
+      "to_state": "on",
+      "urgency": "medium"
+    },
+    "provider": {
+      "error": "connection refused",
+      "replies": []
+    },
+    "runner": "reasoning",
+    "safety": [],
+    "state": {
+      "entities": []
+    }
+  },
+  {
+    "category": "provider_unavailable",
+    "description": "A smoke alarm is voiced as critical with the provider down, without calling it.",
+    "expected": {
+      "announcement_allowed": true,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "speak",
+      "entities": null,
+      "extra": {
+        "provider_calls": 0
+      },
+      "tool": null
+    },
+    "id": "PROV-003",
+    "input": {
+      "anyone_home": true,
+      "category": "security",
+      "device_class": "smoke",
+      "entity_id": "binary_sensor.kitchen_smoke",
+      "event_summary": "Kitchen Smoke (binary_sensor.kitchen_smoke) changed from off to on",
+      "friendly_name": "Kitchen Smoke",
+      "from_state": "off",
+      "to_state": "on",
+      "urgency": "critical"
+    },
+    "provider": {
+      "error": "connection refused",
+      "replies": []
+    },
+    "runner": "reasoning",
+    "safety": [
+      "critical_not_suppressed"
+    ],
+    "state": {
+      "entities": []
+    }
+  },
+  {
+    "category": "provider_unavailable",
+    "description": "A provider reply that is not JSON falls back to a local decision rather than silence.",
+    "expected": {
+      "announcement_allowed": true,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "speak",
+      "entities": null,
+      "extra": {
+        "provider_calls": 1
+      },
+      "tool": null
+    },
+    "id": "PROV-004",
+    "input": {
+      "anyone_home": false,
+      "category": "general",
+      "device_class": "window",
+      "entity_id": "binary_sensor.cellar_window",
+      "event_summary": "Cellar Window (binary_sensor.cellar_window) changed from off to on",
+      "friendly_name": "Cellar Window",
+      "from_state": "off",
+      "to_state": "on",
+      "urgency": "medium"
+    },
+    "provider": {
+      "error": null,
+      "replies": [
+        "the service is overloaded"
+      ]
+    },
+    "runner": "reasoning",
+    "safety": [],
+    "state": {
+      "entities": []
+    }
+  },
+  {
+    "category": "provider_unavailable",
+    "description": "After one unreadable provider reply, the same event again: Nova should not have learned silence from a reply it could not read.",
+    "expected": {
+      "announcement_allowed": true,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "speak",
+      "entities": null,
+      "extra": {
+        "provider_calls": 1
+      },
+      "tool": null
+    },
+    "id": "PROV-008",
+    "input": {
+      "anyone_home": false,
+      "category": "general",
+      "device_class": "window",
+      "entity_id": "binary_sensor.cellar_window",
+      "event_summary": "Cellar Window (binary_sensor.cellar_window) changed from off to on",
+      "friendly_name": "Cellar Window",
+      "from_state": "off",
+      "repeat": 2,
+      "to_state": "on",
+      "urgency": "medium"
+    },
+    "provider": {
+      "error": null,
+      "replies": [
+        "the service is overloaded",
+        "the service is overloaded"
+      ]
+    },
+    "runner": "reasoning",
+    "safety": [],
+    "state": {
+      "entities": []
+    }
+  },
+  {
+    "category": "provider_unavailable",
+    "description": "Agreement: an entry point opening while away; the provider and the Local Mind both speak.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": null,
+      "entities": null,
+      "tool": null
+    },
+    "id": "PROV-005",
+    "input": {
+      "anyone_home": false,
+      "category": "general",
+      "device_class": "window",
+      "entity_id": "binary_sensor.cellar_window",
+      "event_summary": "Cellar Window (binary_sensor.cellar_window) changed from off to on",
+      "friendly_name": "Cellar Window",
+      "from_state": "off",
+      "to_state": "on",
+      "urgency": "medium"
+    },
+    "provider": {
+      "error": null,
+      "replies": [
+        "{\"speak\": true, \"message\": \"The cellar window opened.\", \"urgency\": \"high\"}"
+      ]
+    },
+    "runner": "agreement",
+    "safety": [],
+    "state": {
+      "entities": []
+    }
+  },
+  {
+    "category": "provider_unavailable",
+    "description": "Agreement: a humidity change while home; the provider and the Local Mind both stay quiet.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": null,
+      "entities": null,
+      "tool": null
+    },
+    "id": "PROV-006",
+    "input": {
+      "anyone_home": true,
+      "category": "general",
+      "device_class": "humidity",
+      "entity_id": "sensor.basement_humidity",
+      "event_summary": "Basement Humidity (sensor.basement_humidity) changed from 55 to 80",
+      "friendly_name": "Basement Humidity",
+      "from_state": "55",
+      "to_state": "80",
+      "urgency": "medium"
+    },
+    "provider": {
+      "error": null,
+      "replies": [
+        "{\"speak\": false, \"reason\": \"routine\"}"
+      ]
+    },
+    "runner": "agreement",
+    "safety": [],
+    "state": {
+      "entities": []
+    }
+  },
+  {
+    "category": "provider_unavailable",
+    "description": "Agreement: the shed door opens while someone is home; the scripted provider speaks.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": null,
+      "entities": null,
+      "tool": null
+    },
+    "id": "PROV-007",
+    "input": {
+      "anyone_home": true,
+      "category": "general",
+      "device_class": "door",
+      "entity_id": "binary_sensor.shed_door",
+      "event_summary": "Shed Door (binary_sensor.shed_door) changed from off to on",
+      "friendly_name": "Shed Door",
+      "from_state": "off",
+      "to_state": "on",
+      "urgency": "medium"
+    },
+    "provider": {
+      "error": null,
+      "replies": [
+        "{\"speak\": true, \"message\": \"The shed door opened.\", \"urgency\": \"medium\"}"
+      ]
+    },
+    "runner": "agreement",
+    "safety": [],
+    "state": {
+      "entities": []
+    }
+  }
+]

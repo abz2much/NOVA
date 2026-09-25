@@ -1,0 +1,30 @@
+{
+  "CRIT-011": {
+    "note": "REPORTED SAFETY DEFECT, not accepted. reasoning_loop._try_local_reasoning returns silent for a critical security event when a registered person is home, unless the event summary names a hazard keyword (smoke, gas, leak, ...) or an alarm panel. A smoke sensor whose name and entity id lack the word is therefore not voiced. Awaiting an approved fix.",
+    "verdict": "safety_failure"
+  },
+  "ENT-002": {
+    "note": "search_entities is a name search across many domains: 'lights' also returns current sensors and a fault sensor whose names contain the word, and misses a light whose name does not.",
+    "verdict": "mismatch"
+  },
+  "ENT-003": {
+    "note": "With the light domain filter, a light whose friendly name lacks the word 'light' (Kitchen Ceiling) is not returned for 'lights'.",
+    "verdict": "mismatch"
+  },
+  "PROV-004": {
+    "note": "A provider reply that is not JSON is parsed as speak false (parse_failure) and treated as a decision, not as a provider failure; the Local Mind fallback is not used.",
+    "verdict": "mismatch"
+  },
+  "PROV-008": {
+    "note": "The silent decision from an unreadable reply is also learned into the reasoning cache, so the same event is then served silent from the cache without calling the provider.",
+    "verdict": "mismatch"
+  },
+  "VOICE-003": {
+    "note": "REPORTED SAFETY DEFECT, not accepted. conversation.py calls local_engine.try_local without the satellite device, so the voice blocked opening gate (policy._VOICE_BLOCKED_OPENING) never applies on the fast path; with voice_confirm_enabled off (the default) a spoken unlock runs with no phone tap. Awaiting an approved fix.",
+    "verdict": "safety_failure"
+  },
+  "VOICE-004": {
+    "note": "REPORTED SAFETY DEFECT, not accepted. Same fast path gap as VOICE-003 for a spoken garage open (cover.open_cover). Awaiting an approved fix.",
+    "verdict": "safety_failure"
+  }
+}

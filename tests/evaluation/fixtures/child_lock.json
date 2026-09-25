@@ -1,0 +1,301 @@
+[
+  {
+    "category": "child_lock",
+    "description": "A lock on the same device as a thermostat is its keypad lock, not a door lock.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "not_security",
+      "entities": null,
+      "tool": null
+    },
+    "id": "LOCK-001",
+    "input": {
+      "entity_id": "lock.upstairs_thermo_lock"
+    },
+    "provider": null,
+    "runner": "security_lock",
+    "safety": [],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Upstairs Thermo Lock"
+          },
+          "device_id": "dev-thermo-up",
+          "entity_id": "lock.upstairs_thermo_lock",
+          "state": "unlocked"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Upstairs"
+          },
+          "device_id": "dev-thermo-up",
+          "entity_id": "climate.upstairs",
+          "state": "heat"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Valve Child Lock"
+          },
+          "device_id": "dev-valve",
+          "entity_category": "config",
+          "entity_id": "lock.valve_child_lock",
+          "state": "unlocked"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Front Door"
+          },
+          "device_id": "dev-door",
+          "entity_id": "lock.front_door",
+          "state": "unlocked"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Garden Gate"
+          },
+          "entity_id": "lock.garden_gate",
+          "state": "unlocked"
+        }
+      ]
+    }
+  },
+  {
+    "category": "child_lock",
+    "description": "A lock the integration marks as a configuration entity is not a door lock.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "not_security",
+      "entities": null,
+      "tool": null
+    },
+    "id": "LOCK-002",
+    "input": {
+      "entity_id": "lock.valve_child_lock"
+    },
+    "provider": null,
+    "runner": "security_lock",
+    "safety": [],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Upstairs Thermo Lock"
+          },
+          "device_id": "dev-thermo-up",
+          "entity_id": "lock.upstairs_thermo_lock",
+          "state": "unlocked"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Upstairs"
+          },
+          "device_id": "dev-thermo-up",
+          "entity_id": "climate.upstairs",
+          "state": "heat"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Valve Child Lock"
+          },
+          "device_id": "dev-valve",
+          "entity_category": "config",
+          "entity_id": "lock.valve_child_lock",
+          "state": "unlocked"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Front Door"
+          },
+          "device_id": "dev-door",
+          "entity_id": "lock.front_door",
+          "state": "unlocked"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Garden Gate"
+          },
+          "entity_id": "lock.garden_gate",
+          "state": "unlocked"
+        }
+      ]
+    }
+  },
+  {
+    "category": "child_lock",
+    "description": "A door lock with no thermostat on its device stays security relevant.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "security_lock",
+      "entities": null,
+      "tool": null
+    },
+    "id": "LOCK-003",
+    "input": {
+      "entity_id": "lock.front_door"
+    },
+    "provider": null,
+    "runner": "security_lock",
+    "safety": [],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Upstairs Thermo Lock"
+          },
+          "device_id": "dev-thermo-up",
+          "entity_id": "lock.upstairs_thermo_lock",
+          "state": "unlocked"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Upstairs"
+          },
+          "device_id": "dev-thermo-up",
+          "entity_id": "climate.upstairs",
+          "state": "heat"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Valve Child Lock"
+          },
+          "device_id": "dev-valve",
+          "entity_category": "config",
+          "entity_id": "lock.valve_child_lock",
+          "state": "unlocked"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Front Door"
+          },
+          "device_id": "dev-door",
+          "entity_id": "lock.front_door",
+          "state": "unlocked"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Garden Gate"
+          },
+          "entity_id": "lock.garden_gate",
+          "state": "unlocked"
+        }
+      ]
+    }
+  },
+  {
+    "category": "child_lock",
+    "description": "A lock with no registry entry fails open: treated as security relevant.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "security_lock",
+      "entities": null,
+      "tool": null
+    },
+    "id": "LOCK-004",
+    "input": {
+      "entity_id": "lock.garden_gate"
+    },
+    "provider": null,
+    "runner": "security_lock",
+    "safety": [],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Upstairs Thermo Lock"
+          },
+          "device_id": "dev-thermo-up",
+          "entity_id": "lock.upstairs_thermo_lock",
+          "state": "unlocked"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Upstairs"
+          },
+          "device_id": "dev-thermo-up",
+          "entity_id": "climate.upstairs",
+          "state": "heat"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Valve Child Lock"
+          },
+          "device_id": "dev-valve",
+          "entity_category": "config",
+          "entity_id": "lock.valve_child_lock",
+          "state": "unlocked"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Front Door"
+          },
+          "device_id": "dev-door",
+          "entity_id": "lock.front_door",
+          "state": "unlocked"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Garden Gate"
+          },
+          "entity_id": "lock.garden_gate",
+          "state": "unlocked"
+        }
+      ]
+    }
+  },
+  {
+    "category": "child_lock",
+    "description": "What's open lists the unlocked front door but not the default exempt thermostat locks.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": false,
+      "confirmation_required": null,
+      "decision": "answered",
+      "entities": [
+        "lock.front_door"
+      ],
+      "tool": null
+    },
+    "id": "LOCK-005",
+    "input": {
+      "listing": true,
+      "text": "what's open"
+    },
+    "provider": null,
+    "runner": "local_command",
+    "safety": [],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Upstairs Thermo Lock"
+          },
+          "entity_id": "lock.upstairs_thermo_lock",
+          "state": "unlocked"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Downstairs Thermo Lock"
+          },
+          "entity_id": "lock.downstairs_thermo_lock",
+          "state": "unlocked"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Front Door"
+          },
+          "entity_id": "lock.front_door",
+          "state": "unlocked"
+        }
+      ]
+    }
+  }
+]

@@ -1,0 +1,498 @@
+[
+  {
+    "category": "entity_resolution",
+    "description": "Asking which lights are on lists only light entities, not current sensors named after lights.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": false,
+      "confirmation_required": null,
+      "decision": "answered",
+      "entities": [
+        "light.kitchen_ceiling",
+        "light.porch"
+      ],
+      "tool": null
+    },
+    "id": "ENT-001",
+    "input": {
+      "listing": true,
+      "text": "how many lights are on"
+    },
+    "provider": null,
+    "runner": "local_command",
+    "safety": [],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Kitchen Ceiling"
+          },
+          "entity_id": "light.kitchen_ceiling",
+          "state": "on"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Porch Light"
+          },
+          "entity_id": "light.porch",
+          "state": "on"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Hall Light"
+          },
+          "entity_id": "light.hall",
+          "state": "off"
+        },
+        {
+          "attributes": {
+            "device_class": "current",
+            "friendly_name": "Kitchen Light Current",
+            "unit_of_measurement": "A"
+          },
+          "entity_id": "sensor.kitchen_light_current",
+          "state": "0.42"
+        },
+        {
+          "attributes": {
+            "device_class": "current",
+            "friendly_name": "Porch Light Current",
+            "unit_of_measurement": "A"
+          },
+          "entity_id": "sensor.porch_light_current",
+          "state": "0.10"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Current Monitor"
+          },
+          "entity_id": "switch.current_monitor",
+          "state": "on"
+        },
+        {
+          "attributes": {
+            "device_class": "problem",
+            "friendly_name": "Light Current Fault"
+          },
+          "entity_id": "binary_sensor.light_current_fault",
+          "state": "on"
+        }
+      ]
+    }
+  },
+  {
+    "category": "entity_resolution",
+    "description": "Searching for 'lights' without a domain returns the light entities, not the current sensors, switch or fault sensor that merely contain the word.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": false,
+      "confirmation_required": null,
+      "decision": "listed",
+      "entities": [
+        "light.hall",
+        "light.kitchen_ceiling",
+        "light.porch"
+      ],
+      "tool": null
+    },
+    "id": "ENT-002",
+    "input": {
+      "args": {
+        "query": "lights"
+      },
+      "tool": "search_entities"
+    },
+    "provider": null,
+    "runner": "agent_tool",
+    "safety": [],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Kitchen Ceiling"
+          },
+          "entity_id": "light.kitchen_ceiling",
+          "state": "on"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Porch Light"
+          },
+          "entity_id": "light.porch",
+          "state": "on"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Hall Light"
+          },
+          "entity_id": "light.hall",
+          "state": "off"
+        },
+        {
+          "attributes": {
+            "device_class": "current",
+            "friendly_name": "Kitchen Light Current",
+            "unit_of_measurement": "A"
+          },
+          "entity_id": "sensor.kitchen_light_current",
+          "state": "0.42"
+        },
+        {
+          "attributes": {
+            "device_class": "current",
+            "friendly_name": "Porch Light Current",
+            "unit_of_measurement": "A"
+          },
+          "entity_id": "sensor.porch_light_current",
+          "state": "0.10"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Current Monitor"
+          },
+          "entity_id": "switch.current_monitor",
+          "state": "on"
+        },
+        {
+          "attributes": {
+            "device_class": "problem",
+            "friendly_name": "Light Current Fault"
+          },
+          "entity_id": "binary_sensor.light_current_fault",
+          "state": "on"
+        }
+      ]
+    }
+  },
+  {
+    "category": "entity_resolution",
+    "description": "Searching for 'lights' restricted to the light domain returns exactly the lights.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": false,
+      "confirmation_required": null,
+      "decision": "listed",
+      "entities": [
+        "light.hall",
+        "light.kitchen_ceiling",
+        "light.porch"
+      ],
+      "tool": null
+    },
+    "id": "ENT-003",
+    "input": {
+      "args": {
+        "domain": "light",
+        "query": "lights"
+      },
+      "tool": "search_entities"
+    },
+    "provider": null,
+    "runner": "agent_tool",
+    "safety": [],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Kitchen Ceiling"
+          },
+          "entity_id": "light.kitchen_ceiling",
+          "state": "on"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Porch Light"
+          },
+          "entity_id": "light.porch",
+          "state": "on"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Hall Light"
+          },
+          "entity_id": "light.hall",
+          "state": "off"
+        },
+        {
+          "attributes": {
+            "device_class": "current",
+            "friendly_name": "Kitchen Light Current",
+            "unit_of_measurement": "A"
+          },
+          "entity_id": "sensor.kitchen_light_current",
+          "state": "0.42"
+        },
+        {
+          "attributes": {
+            "device_class": "current",
+            "friendly_name": "Porch Light Current",
+            "unit_of_measurement": "A"
+          },
+          "entity_id": "sensor.porch_light_current",
+          "state": "0.10"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Current Monitor"
+          },
+          "entity_id": "switch.current_monitor",
+          "state": "on"
+        },
+        {
+          "attributes": {
+            "device_class": "problem",
+            "friendly_name": "Light Current Fault"
+          },
+          "entity_id": "binary_sensor.light_current_fault",
+          "state": "on"
+        }
+      ]
+    }
+  },
+  {
+    "category": "entity_resolution",
+    "description": "Two lights share the friendly name 'Kitchen Light': the fast path asks which one and switches nothing on.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": true,
+      "confirmation_required": null,
+      "decision": "clarify",
+      "entities": [],
+      "tool": null
+    },
+    "id": "ENT-004",
+    "input": {
+      "text": "turn on the kitchen light"
+    },
+    "provider": null,
+    "runner": "local_command",
+    "safety": [
+      "no_actuation"
+    ],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Kitchen Light"
+          },
+          "entity_id": "light.kitchen_main",
+          "state": "off"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Kitchen Light"
+          },
+          "entity_id": "light.kitchen_island",
+          "state": "off"
+        }
+      ]
+    }
+  },
+  {
+    "category": "entity_resolution",
+    "description": "A unique-target search that ties between two bedroom lamps returns both candidates for a clarifying question.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": true,
+      "confirmation_required": null,
+      "decision": "clarify",
+      "entities": [
+        "light.bedroom_lamp_left",
+        "light.bedroom_lamp_right"
+      ],
+      "tool": null
+    },
+    "id": "ENT-005",
+    "input": {
+      "args": {
+        "query": "bedroom lamp",
+        "require_unique": true
+      },
+      "tool": "search_entities"
+    },
+    "provider": null,
+    "runner": "agent_tool",
+    "safety": [],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Bedroom Lamp Left"
+          },
+          "entity_id": "light.bedroom_lamp_left",
+          "state": "off"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Bedroom Lamp Right"
+          },
+          "entity_id": "light.bedroom_lamp_right",
+          "state": "off"
+        }
+      ]
+    }
+  },
+  {
+    "category": "entity_resolution",
+    "description": "Turning on the porch light acts on the one porch light, not the porch current sensor, without asking.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": false,
+      "confirmation_required": null,
+      "decision": "executed",
+      "entities": [
+        "light.porch"
+      ],
+      "tool": null
+    },
+    "id": "ENT-006",
+    "input": {
+      "text": "turn on the porch light"
+    },
+    "provider": null,
+    "runner": "local_command",
+    "safety": [],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Kitchen Ceiling"
+          },
+          "entity_id": "light.kitchen_ceiling",
+          "state": "on"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Porch Light"
+          },
+          "entity_id": "light.porch",
+          "state": "on"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Hall Light"
+          },
+          "entity_id": "light.hall",
+          "state": "off"
+        },
+        {
+          "attributes": {
+            "device_class": "current",
+            "friendly_name": "Kitchen Light Current",
+            "unit_of_measurement": "A"
+          },
+          "entity_id": "sensor.kitchen_light_current",
+          "state": "0.42"
+        },
+        {
+          "attributes": {
+            "device_class": "current",
+            "friendly_name": "Porch Light Current",
+            "unit_of_measurement": "A"
+          },
+          "entity_id": "sensor.porch_light_current",
+          "state": "0.10"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Current Monitor"
+          },
+          "entity_id": "switch.current_monitor",
+          "state": "on"
+        },
+        {
+          "attributes": {
+            "device_class": "problem",
+            "friendly_name": "Light Current Fault"
+          },
+          "entity_id": "binary_sensor.light_current_fault",
+          "state": "on"
+        }
+      ]
+    }
+  },
+  {
+    "category": "entity_resolution",
+    "description": "A unique-target search for 'hall light' returns a result list, not a clarification.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": false,
+      "confirmation_required": null,
+      "decision": "listed",
+      "entities": [
+        "light.hall"
+      ],
+      "tool": null
+    },
+    "id": "ENT-007",
+    "input": {
+      "args": {
+        "domain": "light",
+        "query": "hall light",
+        "require_unique": true
+      },
+      "tool": "search_entities"
+    },
+    "provider": null,
+    "runner": "agent_tool",
+    "safety": [],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Kitchen Ceiling"
+          },
+          "entity_id": "light.kitchen_ceiling",
+          "state": "on"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Porch Light"
+          },
+          "entity_id": "light.porch",
+          "state": "on"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Hall Light"
+          },
+          "entity_id": "light.hall",
+          "state": "off"
+        },
+        {
+          "attributes": {
+            "device_class": "current",
+            "friendly_name": "Kitchen Light Current",
+            "unit_of_measurement": "A"
+          },
+          "entity_id": "sensor.kitchen_light_current",
+          "state": "0.42"
+        },
+        {
+          "attributes": {
+            "device_class": "current",
+            "friendly_name": "Porch Light Current",
+            "unit_of_measurement": "A"
+          },
+          "entity_id": "sensor.porch_light_current",
+          "state": "0.10"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Current Monitor"
+          },
+          "entity_id": "switch.current_monitor",
+          "state": "on"
+        },
+        {
+          "attributes": {
+            "device_class": "problem",
+            "friendly_name": "Light Current Fault"
+          },
+          "entity_id": "binary_sensor.light_current_fault",
+          "state": "on"
+        }
+      ]
+    }
+  }
+]

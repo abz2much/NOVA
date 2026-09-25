@@ -1,0 +1,362 @@
+[
+  {
+    "category": "suggestions",
+    "description": "Three evenings of the porch light is not enough evidence for a suggestion.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "no_suggestion",
+      "entities": [],
+      "tool": null
+    },
+    "id": "SUG-001",
+    "input": {
+      "history": [
+        {
+          "days_ago": [
+            1,
+            2,
+            3
+          ],
+          "entity_id": "light.porch",
+          "hour": 18,
+          "state": "on"
+        }
+      ]
+    },
+    "provider": null,
+    "runner": "pattern",
+    "safety": [],
+    "state": {
+      "entities": []
+    }
+  },
+  {
+    "category": "suggestions",
+    "description": "Eight evenings of the porch light at 18:00 becomes one routine.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "suggested",
+      "entities": [
+        "light.porch"
+      ],
+      "tool": null
+    },
+    "id": "SUG-002",
+    "input": {
+      "history": [
+        {
+          "days_ago": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8
+          ],
+          "entity_id": "light.porch",
+          "hour": 18,
+          "state": "on"
+        }
+      ]
+    },
+    "provider": null,
+    "runner": "pattern",
+    "safety": [],
+    "state": {
+      "entities": []
+    }
+  },
+  {
+    "category": "suggestions",
+    "description": "Running the detector twice over the same history does not produce a repeated routine within a run.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "suggested",
+      "entities": [
+        "light.porch"
+      ],
+      "extra": {
+        "duplicate_patterns": 0
+      },
+      "tool": null
+    },
+    "id": "SUG-003",
+    "input": {
+      "history": [
+        {
+          "days_ago": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8
+          ],
+          "entity_id": "light.porch",
+          "hour": 18,
+          "state": "on"
+        }
+      ]
+    },
+    "provider": null,
+    "runner": "pattern",
+    "safety": [],
+    "state": {
+      "entities": []
+    }
+  },
+  {
+    "category": "suggestions",
+    "description": "A suggestion equal to a loaded automation (different alias, old key names) is already automated.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "already_automated",
+      "entities": [
+        "automation.porch_evening"
+      ],
+      "tool": null
+    },
+    "id": "SUG-004",
+    "input": {
+      "candidate": {
+        "action": [
+          {
+            "service": "light.turn_on",
+            "target": {
+              "entity_id": "light.porch"
+            }
+          }
+        ],
+        "alias": "Nova \u00b7 Porch light at dusk",
+        "trigger": [
+          {
+            "at": "18:00:00",
+            "platform": "time"
+          }
+        ]
+      },
+      "duplicate_risk": true,
+      "existing": [
+        {
+          "config": {
+            "actions": [
+              {
+                "action": "light.turn_on",
+                "target": {
+                  "entity_id": "light.porch"
+                }
+              }
+            ],
+            "alias": "Porch evening",
+            "mode": "single",
+            "triggers": [
+              {
+                "at": "18:00:00",
+                "trigger": "time"
+              }
+            ]
+          },
+          "entity_id": "automation.porch_evening",
+          "name": "Porch evening"
+        }
+      ]
+    },
+    "provider": null,
+    "runner": "automation_match",
+    "safety": [],
+    "state": {
+      "entities": []
+    }
+  },
+  {
+    "category": "suggestions",
+    "description": "A suggestion controlling a light an existing automation already controls is an overlap.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "possible_overlap",
+      "entities": [
+        "automation.porch_motion"
+      ],
+      "tool": null
+    },
+    "id": "SUG-005",
+    "input": {
+      "candidate": {
+        "action": [
+          {
+            "service": "light.turn_on",
+            "target": {
+              "entity_id": "light.porch"
+            }
+          }
+        ],
+        "alias": "Nova \u00b7 Porch light at dusk",
+        "trigger": [
+          {
+            "at": "18:00:00",
+            "platform": "time"
+          }
+        ]
+      },
+      "duplicate_risk": true,
+      "existing": [
+        {
+          "config": {
+            "actions": [
+              {
+                "action": "light.turn_on",
+                "target": {
+                  "entity_id": "light.porch"
+                }
+              }
+            ],
+            "triggers": [
+              {
+                "entity_id": "binary_sensor.porch_motion",
+                "to": "on",
+                "trigger": "state"
+              }
+            ]
+          },
+          "entity_id": "automation.porch_motion",
+          "name": "Porch motion"
+        }
+      ]
+    },
+    "provider": null,
+    "runner": "automation_match",
+    "safety": [],
+    "state": {
+      "entities": []
+    }
+  },
+  {
+    "category": "suggestions",
+    "description": "A blueprint automation Nova can't read, referencing the same light, is an unknown overlap.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "unknown_overlap",
+      "entities": [
+        "automation.porch_blueprint"
+      ],
+      "tool": null
+    },
+    "id": "SUG-006",
+    "input": {
+      "candidate": {
+        "action": [
+          {
+            "service": "light.turn_on",
+            "target": {
+              "entity_id": "light.porch"
+            }
+          }
+        ],
+        "alias": "Nova \u00b7 Porch light at dusk",
+        "trigger": [
+          {
+            "at": "18:00:00",
+            "platform": "time"
+          }
+        ]
+      },
+      "duplicate_risk": true,
+      "existing": [
+        {
+          "config": {
+            "use_blueprint": {
+              "path": "motion_light.yaml"
+            }
+          },
+          "entity_id": "automation.porch_blueprint",
+          "name": "Porch blueprint",
+          "referenced_entities": [
+            "light.porch"
+          ]
+        }
+      ]
+    },
+    "provider": null,
+    "runner": "automation_match",
+    "safety": [],
+    "state": {
+      "entities": []
+    }
+  },
+  {
+    "category": "suggestions",
+    "description": "A suggestion for an unrelated light is new.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "new",
+      "entities": [],
+      "tool": null
+    },
+    "id": "SUG-007",
+    "input": {
+      "candidate": {
+        "action": [
+          {
+            "service": "light.turn_on",
+            "target": {
+              "entity_id": "light.porch"
+            }
+          }
+        ],
+        "alias": "Nova \u00b7 Porch light at dusk",
+        "trigger": [
+          {
+            "at": "18:00:00",
+            "platform": "time"
+          }
+        ]
+      },
+      "existing": [
+        {
+          "config": {
+            "actions": [
+              {
+                "action": "light.turn_on",
+                "target": {
+                  "entity_id": "light.garden"
+                }
+              }
+            ],
+            "triggers": [
+              {
+                "event": "sunset",
+                "trigger": "sun"
+              }
+            ]
+          },
+          "entity_id": "automation.garden_lights",
+          "name": "Garden lights"
+        }
+      ]
+    },
+    "provider": null,
+    "runner": "automation_match",
+    "safety": [],
+    "state": {
+      "entities": []
+    }
+  }
+]

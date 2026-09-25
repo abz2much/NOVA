@@ -1,0 +1,208 @@
+[
+  {
+    "category": "automation_attribution",
+    "description": "A state change whose parent context is an automation run Nova saw is attributed to that automation.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "automation",
+      "entities": [
+        "automation.porch_on_at_dusk"
+      ],
+      "tool": null
+    },
+    "id": "AUTO-001",
+    "input": {
+      "change": {
+        "context_id": "ctx-101",
+        "parent_id": "ctx-100"
+      },
+      "triggers": [
+        {
+          "automation": "automation.porch_on_at_dusk",
+          "context_id": "ctx-100"
+        }
+      ]
+    },
+    "provider": null,
+    "runner": "attribution",
+    "safety": [],
+    "state": {
+      "entities": []
+    }
+  },
+  {
+    "category": "automation_attribution",
+    "description": "A state change carrying a user id is attributed to the user.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "user",
+      "entities": [],
+      "tool": null
+    },
+    "id": "AUTO-002",
+    "input": {
+      "change": {
+        "context_id": "ctx-200",
+        "user_id": "user-synthetic-1"
+      },
+      "triggers": [
+        {
+          "automation": "automation.porch_on_at_dusk",
+          "context_id": "ctx-100"
+        }
+      ]
+    },
+    "provider": null,
+    "runner": "attribution",
+    "safety": [],
+    "state": {
+      "entities": []
+    }
+  },
+  {
+    "category": "automation_attribution",
+    "description": "A context Nova never saw is not claimed as an automation.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "device_or_integration",
+      "entities": [],
+      "tool": null
+    },
+    "id": "AUTO-003",
+    "input": {
+      "change": {
+        "context_id": "ctx-300"
+      },
+      "triggers": []
+    },
+    "provider": null,
+    "runner": "attribution",
+    "safety": [],
+    "state": {
+      "entities": []
+    }
+  },
+  {
+    "category": "automation_attribution",
+    "description": "An automation context older than the tracker TTL no longer attributes a change.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "device_or_integration",
+      "entities": [],
+      "tool": null
+    },
+    "id": "AUTO-004",
+    "input": {
+      "change": {
+        "context_id": "ctx-401",
+        "parent_id": "ctx-400"
+      },
+      "elapsed": 120,
+      "triggers": [
+        {
+          "automation": "automation.porch_on_at_dusk",
+          "context_id": "ctx-400"
+        }
+      ],
+      "ttl": 60
+    },
+    "provider": null,
+    "runner": "attribution",
+    "safety": [],
+    "state": {
+      "entities": []
+    }
+  },
+  {
+    "category": "automation_attribution",
+    "description": "Ten evenings of porch light changes made by an existing automation do not become a suggested routine.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "no_suggestion",
+      "entities": [],
+      "tool": null
+    },
+    "id": "AUTO-005",
+    "input": {
+      "duplicate_risk": true,
+      "history": [
+        {
+          "days_ago": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10
+          ],
+          "entity_id": "light.porch",
+          "hour": 18,
+          "state": "on",
+          "triggered_by": "automation"
+        }
+      ]
+    },
+    "provider": null,
+    "runner": "pattern",
+    "safety": [],
+    "state": {
+      "entities": []
+    }
+  },
+  {
+    "category": "automation_attribution",
+    "description": "Changes made by a Nova-installed automation do not train a new suggestion either.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "no_suggestion",
+      "entities": [],
+      "tool": null
+    },
+    "id": "AUTO-006",
+    "input": {
+      "duplicate_risk": true,
+      "history": [
+        {
+          "days_ago": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10
+          ],
+          "entity_id": "light.porch",
+          "hour": 18,
+          "state": "on",
+          "triggered_by": "nova_automation"
+        }
+      ]
+    },
+    "provider": null,
+    "runner": "pattern",
+    "safety": [],
+    "state": {
+      "entities": []
+    }
+  }
+]

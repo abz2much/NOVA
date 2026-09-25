@@ -1,0 +1,416 @@
+[
+  {
+    "category": "voice_protected",
+    "config": {
+      "voice_confirm_enabled": false
+    },
+    "confirmations": {
+      "phone": "rejected"
+    },
+    "description": "A spoken unlock through the agent waits for a phone tap, and a declined tap leaves the door locked (voice confirmation setting off).",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": true,
+      "decision": "awaiting_confirmation",
+      "entities": [],
+      "tool": null
+    },
+    "id": "VOICE-001",
+    "input": {
+      "args": {
+        "action": "unlock",
+        "entity_id": "lock.front_door"
+      },
+      "device_id": "dev-sat-kitchen",
+      "origin": "voice",
+      "tool": "control_device"
+    },
+    "provider": null,
+    "runner": "agent_tool",
+    "safety": [
+      "voice_opening_requires_phone"
+    ],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Front Door"
+          },
+          "entity_id": "lock.front_door",
+          "state": "locked"
+        },
+        {
+          "attributes": {
+            "device_class": "garage",
+            "friendly_name": "Garage Door"
+          },
+          "entity_id": "cover.garage_door",
+          "state": "closed"
+        }
+      ],
+      "satellites": [
+        {
+          "device_id": "dev-sat-kitchen",
+          "entity_id": "assist_satellite.kitchen"
+        }
+      ]
+    }
+  },
+  {
+    "category": "voice_protected",
+    "config": {
+      "voice_confirm_enabled": false
+    },
+    "confirmations": {
+      "phone": "approved"
+    },
+    "description": "A spoken garage open through the agent runs once the phone tap approves it.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": true,
+      "decision": "executed",
+      "entities": [
+        "cover.garage_door"
+      ],
+      "tool": null
+    },
+    "id": "VOICE-002",
+    "input": {
+      "args": {
+        "action": "open",
+        "entity_id": "cover.garage_door"
+      },
+      "device_id": "dev-sat-kitchen",
+      "origin": "voice",
+      "tool": "control_device"
+    },
+    "provider": null,
+    "runner": "agent_tool",
+    "safety": [
+      "voice_opening_requires_phone"
+    ],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Front Door"
+          },
+          "entity_id": "lock.front_door",
+          "state": "locked"
+        },
+        {
+          "attributes": {
+            "device_class": "garage",
+            "friendly_name": "Garage Door"
+          },
+          "entity_id": "cover.garage_door",
+          "state": "closed"
+        }
+      ],
+      "satellites": [
+        {
+          "device_id": "dev-sat-kitchen",
+          "entity_id": "assist_satellite.kitchen"
+        }
+      ]
+    }
+  },
+  {
+    "category": "voice_protected",
+    "config": {
+      "voice_confirm_enabled": false
+    },
+    "confirmations": {
+      "phone": "rejected"
+    },
+    "description": "A spoken 'unlock the front door' reaches the fast path first (conversation.py passes no device); it must not unlock without the phone tap the agent path requires.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": {
+        "one_of": [
+          "deferred",
+          "awaiting_confirmation"
+        ]
+      },
+      "entities": [],
+      "tool": null
+    },
+    "id": "VOICE-003",
+    "input": {
+      "device_id": "dev-sat-kitchen",
+      "origin": "voice",
+      "text": "unlock the front door"
+    },
+    "provider": null,
+    "runner": "local_command",
+    "safety": [
+      "voice_opening_requires_phone"
+    ],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Front Door"
+          },
+          "entity_id": "lock.front_door",
+          "state": "locked"
+        },
+        {
+          "attributes": {
+            "device_class": "garage",
+            "friendly_name": "Garage Door"
+          },
+          "entity_id": "cover.garage_door",
+          "state": "closed"
+        }
+      ],
+      "satellites": [
+        {
+          "device_id": "dev-sat-kitchen",
+          "entity_id": "assist_satellite.kitchen"
+        }
+      ]
+    }
+  },
+  {
+    "category": "voice_protected",
+    "config": {
+      "voice_confirm_enabled": false
+    },
+    "confirmations": {
+      "phone": "rejected"
+    },
+    "description": "A spoken 'open the garage door' on the fast path must not open without a phone tap.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": {
+        "one_of": [
+          "deferred",
+          "awaiting_confirmation"
+        ]
+      },
+      "entities": [],
+      "tool": null
+    },
+    "id": "VOICE-004",
+    "input": {
+      "device_id": "dev-sat-kitchen",
+      "origin": "voice",
+      "text": "open the garage door"
+    },
+    "provider": null,
+    "runner": "local_command",
+    "safety": [
+      "voice_opening_requires_phone"
+    ],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Front Door"
+          },
+          "entity_id": "lock.front_door",
+          "state": "locked"
+        },
+        {
+          "attributes": {
+            "device_class": "garage",
+            "friendly_name": "Garage Door"
+          },
+          "entity_id": "cover.garage_door",
+          "state": "closed"
+        }
+      ],
+      "satellites": [
+        {
+          "device_id": "dev-sat-kitchen",
+          "entity_id": "assist_satellite.kitchen"
+        }
+      ]
+    }
+  },
+  {
+    "category": "voice_protected",
+    "config": {
+      "voice_confirm_enabled": false
+    },
+    "confirmations": {
+      "phone": "rejected"
+    },
+    "description": "An Assist HassTurnOff on a lock (an unlock) from a satellite is held for a phone tap.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": true,
+      "decision": "blocked",
+      "entities": [
+        "lock.front_door"
+      ],
+      "tool": "protected_mutation"
+    },
+    "id": "VOICE-005",
+    "input": {
+      "args": {
+        "name": "Front Door"
+      },
+      "available_tools": [
+        "HassTurnOn",
+        "HassTurnOff"
+      ],
+      "device_id": "dev-sat-kitchen",
+      "origin": "voice",
+      "tool": "HassTurnOff"
+    },
+    "provider": null,
+    "runner": "assist_tool",
+    "safety": [
+      "voice_opening_requires_phone"
+    ],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Front Door"
+          },
+          "entity_id": "lock.front_door",
+          "state": "locked"
+        },
+        {
+          "attributes": {
+            "device_class": "garage",
+            "friendly_name": "Garage Door"
+          },
+          "entity_id": "cover.garage_door",
+          "state": "closed"
+        }
+      ],
+      "satellites": [
+        {
+          "device_id": "dev-sat-kitchen",
+          "entity_id": "assist_satellite.kitchen"
+        }
+      ]
+    }
+  },
+  {
+    "category": "voice_protected",
+    "config": {
+      "voice_confirm_enabled": true
+    },
+    "confirmations": {
+      "spoken": "rejected"
+    },
+    "description": "A typed unlock with voice confirmation on is asked aloud, and a spoken no stops it.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": true,
+      "decision": "awaiting_confirmation",
+      "entities": [],
+      "tool": null
+    },
+    "id": "VOICE-006",
+    "input": {
+      "args": {
+        "action": "unlock",
+        "entity_id": "lock.front_door"
+      },
+      "origin": "chat",
+      "tool": "control_device"
+    },
+    "provider": null,
+    "runner": "agent_tool",
+    "safety": [
+      "protected_action_requires_approval"
+    ],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Front Door"
+          },
+          "entity_id": "lock.front_door",
+          "state": "locked"
+        },
+        {
+          "attributes": {
+            "device_class": "garage",
+            "friendly_name": "Garage Door"
+          },
+          "entity_id": "cover.garage_door",
+          "state": "closed"
+        }
+      ],
+      "satellites": [
+        {
+          "device_id": "dev-sat-kitchen",
+          "entity_id": "assist_satellite.kitchen"
+        }
+      ]
+    }
+  },
+  {
+    "category": "voice_protected",
+    "config": {
+      "voice_confirm_enabled": false
+    },
+    "confirmations": {
+      "phone": "rejected"
+    },
+    "description": "Locking by voice raises a guard, so it runs without any confirmation friction.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": false,
+      "decision": "executed",
+      "entities": [
+        "lock.front_door"
+      ],
+      "tool": null
+    },
+    "id": "VOICE-007",
+    "input": {
+      "args": {
+        "action": "lock",
+        "entity_id": "lock.front_door"
+      },
+      "device_id": "dev-sat-kitchen",
+      "origin": "voice",
+      "tool": "control_device"
+    },
+    "provider": null,
+    "runner": "agent_tool",
+    "safety": [],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Front Door"
+          },
+          "entity_id": "lock.front_door",
+          "state": "locked"
+        },
+        {
+          "attributes": {
+            "device_class": "garage",
+            "friendly_name": "Garage Door"
+          },
+          "entity_id": "cover.garage_door",
+          "state": "closed"
+        }
+      ],
+      "satellites": [
+        {
+          "device_id": "dev-sat-kitchen",
+          "entity_id": "assist_satellite.kitchen"
+        }
+      ]
+    }
+  }
+]

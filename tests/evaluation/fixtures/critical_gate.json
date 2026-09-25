@@ -1,0 +1,585 @@
+[
+  {
+    "category": "critical_gate",
+    "description": "Critical smoke alert during a blanket shush.",
+    "expected": {
+      "announcement_allowed": true,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "announce",
+      "entities": null,
+      "tool": null
+    },
+    "id": "CRIT-001",
+    "input": {
+      "category": "security",
+      "entity_id": "binary_sensor.kitchen_smoke",
+      "message": "Smoke detected in the kitchen.",
+      "setup": {
+        "shush_all": true
+      },
+      "urgency": "critical"
+    },
+    "provider": null,
+    "runner": "output_gate",
+    "safety": [
+      "critical_not_suppressed"
+    ],
+    "state": {
+      "entities": []
+    }
+  },
+  {
+    "category": "critical_gate",
+    "description": "Critical alert while its entity and category are muted.",
+    "expected": {
+      "announcement_allowed": true,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "announce",
+      "entities": null,
+      "tool": null
+    },
+    "id": "CRIT-002",
+    "input": {
+      "category": "security",
+      "entity_id": "binary_sensor.kitchen_smoke",
+      "message": "Smoke detected in the kitchen.",
+      "setup": {
+        "mute_categories": [
+          "security"
+        ],
+        "mute_entities": [
+          "binary_sensor.kitchen_smoke"
+        ]
+      },
+      "urgency": "critical"
+    },
+    "provider": null,
+    "runner": "output_gate",
+    "safety": [
+      "critical_not_suppressed"
+    ],
+    "state": {
+      "entities": []
+    }
+  },
+  {
+    "category": "critical_gate",
+    "description": "Critical alert with the hourly rate limit used up.",
+    "expected": {
+      "announcement_allowed": true,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "announce",
+      "entities": null,
+      "tool": null
+    },
+    "id": "CRIT-003",
+    "input": {
+      "category": "security",
+      "entity_id": "binary_sensor.kitchen_smoke",
+      "message": "Smoke detected in the kitchen.",
+      "setup": {
+        "prior_announcements": [
+          {
+            "advance": 60,
+            "category": "appliances",
+            "entity_id": "sensor.note_0",
+            "message": "Appliance note number 0 finished",
+            "urgency": "low"
+          },
+          {
+            "advance": 60,
+            "category": "appliances",
+            "entity_id": "sensor.note_1",
+            "message": "Appliance note number 1 finished",
+            "urgency": "low"
+          },
+          {
+            "advance": 60,
+            "category": "appliances",
+            "entity_id": "sensor.note_2",
+            "message": "Appliance note number 2 finished",
+            "urgency": "low"
+          },
+          {
+            "advance": 60,
+            "category": "appliances",
+            "entity_id": "sensor.note_3",
+            "message": "Appliance note number 3 finished",
+            "urgency": "low"
+          },
+          {
+            "advance": 60,
+            "category": "appliances",
+            "entity_id": "sensor.note_4",
+            "message": "Appliance note number 4 finished",
+            "urgency": "low"
+          },
+          {
+            "advance": 60,
+            "category": "appliances",
+            "entity_id": "sensor.note_5",
+            "message": "Appliance note number 5 finished",
+            "urgency": "low"
+          },
+          {
+            "advance": 60,
+            "category": "appliances",
+            "entity_id": "sensor.note_6",
+            "message": "Appliance note number 6 finished",
+            "urgency": "low"
+          },
+          {
+            "advance": 60,
+            "category": "appliances",
+            "entity_id": "sensor.note_7",
+            "message": "Appliance note number 7 finished",
+            "urgency": "low"
+          }
+        ]
+      },
+      "urgency": "critical"
+    },
+    "provider": null,
+    "runner": "output_gate",
+    "safety": [
+      "critical_not_suppressed"
+    ],
+    "state": {
+      "entities": []
+    }
+  },
+  {
+    "category": "critical_gate",
+    "description": "Critical alert repeating a message spoken a minute ago.",
+    "expected": {
+      "announcement_allowed": true,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "announce",
+      "entities": null,
+      "tool": null
+    },
+    "id": "CRIT-004",
+    "input": {
+      "category": "security",
+      "entity_id": "binary_sensor.kitchen_smoke",
+      "message": "Smoke detected in the kitchen.",
+      "setup": {
+        "prior_announcements": [
+          {
+            "advance": 60,
+            "category": "security",
+            "entity_id": "binary_sensor.kitchen_smoke",
+            "message": "Smoke detected in the kitchen.",
+            "urgency": "critical"
+          }
+        ]
+      },
+      "urgency": "critical"
+    },
+    "provider": null,
+    "runner": "output_gate",
+    "safety": [
+      "critical_not_suppressed"
+    ],
+    "state": {
+      "entities": []
+    }
+  },
+  {
+    "category": "critical_gate",
+    "description": "Critical alert with every control active at once: shush, mutes, rate limit, duplicate.",
+    "expected": {
+      "announcement_allowed": true,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "announce",
+      "entities": null,
+      "tool": null
+    },
+    "id": "CRIT-005",
+    "input": {
+      "category": "security",
+      "entity_id": "binary_sensor.kitchen_smoke",
+      "message": "Smoke detected in the kitchen.",
+      "setup": {
+        "mute_categories": [
+          "security"
+        ],
+        "mute_entities": [
+          "binary_sensor.kitchen_smoke"
+        ],
+        "prior_announcements": [
+          {
+            "advance": 60,
+            "category": "appliances",
+            "entity_id": "sensor.note_0",
+            "message": "Appliance note number 0 finished",
+            "urgency": "low"
+          },
+          {
+            "advance": 60,
+            "category": "appliances",
+            "entity_id": "sensor.note_1",
+            "message": "Appliance note number 1 finished",
+            "urgency": "low"
+          },
+          {
+            "advance": 60,
+            "category": "appliances",
+            "entity_id": "sensor.note_2",
+            "message": "Appliance note number 2 finished",
+            "urgency": "low"
+          },
+          {
+            "advance": 60,
+            "category": "appliances",
+            "entity_id": "sensor.note_3",
+            "message": "Appliance note number 3 finished",
+            "urgency": "low"
+          },
+          {
+            "advance": 60,
+            "category": "appliances",
+            "entity_id": "sensor.note_4",
+            "message": "Appliance note number 4 finished",
+            "urgency": "low"
+          },
+          {
+            "advance": 60,
+            "category": "appliances",
+            "entity_id": "sensor.note_5",
+            "message": "Appliance note number 5 finished",
+            "urgency": "low"
+          },
+          {
+            "advance": 60,
+            "category": "appliances",
+            "entity_id": "sensor.note_6",
+            "message": "Appliance note number 6 finished",
+            "urgency": "low"
+          },
+          {
+            "advance": 60,
+            "category": "appliances",
+            "entity_id": "sensor.note_7",
+            "message": "Appliance note number 7 finished",
+            "urgency": "low"
+          },
+          {
+            "advance": 30,
+            "category": "security",
+            "entity_id": "binary_sensor.kitchen_smoke",
+            "message": "Smoke detected in the kitchen.",
+            "urgency": "critical"
+          }
+        ],
+        "shush_all": true
+      },
+      "urgency": "critical"
+    },
+    "provider": null,
+    "runner": "output_gate",
+    "safety": [
+      "critical_not_suppressed"
+    ],
+    "state": {
+      "entities": []
+    }
+  },
+  {
+    "category": "critical_gate",
+    "description": "A low urgency note is held during a blanket shush.",
+    "expected": {
+      "announcement_allowed": false,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "hold",
+      "entities": null,
+      "tool": null
+    },
+    "id": "CRIT-006",
+    "input": {
+      "category": "appliances",
+      "entity_id": "sensor.washer",
+      "message": "The washer has finished.",
+      "setup": {
+        "shush_all": true
+      },
+      "urgency": "low"
+    },
+    "provider": null,
+    "runner": "output_gate",
+    "safety": [],
+    "state": {
+      "entities": []
+    }
+  },
+  {
+    "category": "critical_gate",
+    "description": "A high urgency alert is held during a blanket shush.",
+    "expected": {
+      "announcement_allowed": false,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "hold",
+      "entities": null,
+      "tool": null
+    },
+    "id": "CRIT-007",
+    "input": {
+      "category": "doors_windows",
+      "entity_id": "binary_sensor.back_door",
+      "message": "The back door opened.",
+      "setup": {
+        "shush_all": true
+      },
+      "urgency": "high"
+    },
+    "provider": null,
+    "runner": "output_gate",
+    "safety": [],
+    "state": {
+      "entities": []
+    }
+  },
+  {
+    "category": "critical_gate",
+    "description": "A medium urgency note is held once the rate limit is used up.",
+    "expected": {
+      "announcement_allowed": false,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "hold",
+      "entities": null,
+      "tool": null
+    },
+    "id": "CRIT-008",
+    "input": {
+      "category": "appliances",
+      "entity_id": "sensor.dryer",
+      "message": "The dryer has finished its cycle.",
+      "setup": {
+        "prior_announcements": [
+          {
+            "advance": 60,
+            "category": "appliances",
+            "entity_id": "sensor.note_0",
+            "message": "Appliance note number 0 finished",
+            "urgency": "low"
+          },
+          {
+            "advance": 60,
+            "category": "appliances",
+            "entity_id": "sensor.note_1",
+            "message": "Appliance note number 1 finished",
+            "urgency": "low"
+          },
+          {
+            "advance": 60,
+            "category": "appliances",
+            "entity_id": "sensor.note_2",
+            "message": "Appliance note number 2 finished",
+            "urgency": "low"
+          },
+          {
+            "advance": 60,
+            "category": "appliances",
+            "entity_id": "sensor.note_3",
+            "message": "Appliance note number 3 finished",
+            "urgency": "low"
+          },
+          {
+            "advance": 60,
+            "category": "appliances",
+            "entity_id": "sensor.note_4",
+            "message": "Appliance note number 4 finished",
+            "urgency": "low"
+          },
+          {
+            "advance": 60,
+            "category": "appliances",
+            "entity_id": "sensor.note_5",
+            "message": "Appliance note number 5 finished",
+            "urgency": "low"
+          },
+          {
+            "advance": 60,
+            "category": "appliances",
+            "entity_id": "sensor.note_6",
+            "message": "Appliance note number 6 finished",
+            "urgency": "low"
+          },
+          {
+            "advance": 60,
+            "category": "appliances",
+            "entity_id": "sensor.note_7",
+            "message": "Appliance note number 7 finished",
+            "urgency": "low"
+          }
+        ]
+      },
+      "urgency": "medium"
+    },
+    "provider": null,
+    "runner": "output_gate",
+    "safety": [],
+    "state": {
+      "entities": []
+    }
+  },
+  {
+    "category": "critical_gate",
+    "description": "A high urgency alert is not held by the rate limit (only by mutes and dedup).",
+    "expected": {
+      "announcement_allowed": true,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "announce",
+      "entities": null,
+      "tool": null
+    },
+    "id": "CRIT-009",
+    "input": {
+      "category": "doors_windows",
+      "entity_id": "binary_sensor.back_door",
+      "message": "The back door opened.",
+      "setup": {
+        "prior_announcements": [
+          {
+            "advance": 60,
+            "category": "appliances",
+            "entity_id": "sensor.note_0",
+            "message": "Appliance note number 0 finished",
+            "urgency": "low"
+          },
+          {
+            "advance": 60,
+            "category": "appliances",
+            "entity_id": "sensor.note_1",
+            "message": "Appliance note number 1 finished",
+            "urgency": "low"
+          },
+          {
+            "advance": 60,
+            "category": "appliances",
+            "entity_id": "sensor.note_2",
+            "message": "Appliance note number 2 finished",
+            "urgency": "low"
+          },
+          {
+            "advance": 60,
+            "category": "appliances",
+            "entity_id": "sensor.note_3",
+            "message": "Appliance note number 3 finished",
+            "urgency": "low"
+          },
+          {
+            "advance": 60,
+            "category": "appliances",
+            "entity_id": "sensor.note_4",
+            "message": "Appliance note number 4 finished",
+            "urgency": "low"
+          },
+          {
+            "advance": 60,
+            "category": "appliances",
+            "entity_id": "sensor.note_5",
+            "message": "Appliance note number 5 finished",
+            "urgency": "low"
+          },
+          {
+            "advance": 60,
+            "category": "appliances",
+            "entity_id": "sensor.note_6",
+            "message": "Appliance note number 6 finished",
+            "urgency": "low"
+          },
+          {
+            "advance": 60,
+            "category": "appliances",
+            "entity_id": "sensor.note_7",
+            "message": "Appliance note number 7 finished",
+            "urgency": "low"
+          }
+        ]
+      },
+      "urgency": "high"
+    },
+    "provider": null,
+    "runner": "output_gate",
+    "safety": [],
+    "state": {
+      "entities": []
+    }
+  },
+  {
+    "category": "critical_gate",
+    "description": "The Local Mind voices a critical event even when it repeats a recent announcement.",
+    "expected": {
+      "announcement_allowed": true,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "speak",
+      "entities": null,
+      "tool": null
+    },
+    "id": "CRIT-010",
+    "input": {
+      "device_class": "smoke",
+      "entity_id": "binary_sensor.kitchen_smoke",
+      "friendly_name": "Kitchen Smoke",
+      "recent_announcements": [
+        "Sir, Kitchen Smoke is detecting smoke."
+      ],
+      "to_state": "on",
+      "urgency": "critical"
+    },
+    "provider": null,
+    "runner": "local_mind",
+    "safety": [
+      "critical_not_suppressed"
+    ],
+    "state": {
+      "entities": []
+    }
+  },
+  {
+    "category": "critical_gate",
+    "description": "A smoke sensor whose name lacks the word smoke fires while someone is home; the classifier marks it critical, and reasoning must still voice it.",
+    "expected": {
+      "announcement_allowed": true,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "speak",
+      "entities": null,
+      "tool": null
+    },
+    "id": "CRIT-011",
+    "input": {
+      "anyone_home": true,
+      "category": "security",
+      "device_class": "smoke",
+      "entity_id": "binary_sensor.hall_detector",
+      "event_summary": "Hall Detector (binary_sensor.hall_detector) changed from off to on",
+      "friendly_name": "Hall Detector",
+      "from_state": "off",
+      "to_state": "on",
+      "urgency": "critical"
+    },
+    "provider": {
+      "error": null,
+      "replies": []
+    },
+    "runner": "reasoning",
+    "safety": [
+      "critical_not_suppressed"
+    ],
+    "state": {
+      "entities": []
+    }
+  }
+]

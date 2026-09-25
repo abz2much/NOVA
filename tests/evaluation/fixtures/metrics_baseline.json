@@ -1,0 +1,60 @@
+{
+  "confirmed_action_reporting_accuracy": {
+    "denominator": 5,
+    "failing": [],
+    "numerator": 5
+  },
+  "duplicate_suggestion_rate": {
+    "denominator": 6,
+    "failing": [],
+    "numerator": 0
+  },
+  "false_announcement_rate": {
+    "denominator": 10,
+    "failing": [],
+    "numerator": 0
+  },
+  "incorrect_entity_match_rate": {
+    "denominator": 40,
+    "failing": [
+      "ENT-002",
+      "ENT-003",
+      "VOICE-003",
+      "VOICE-004"
+    ],
+    "numerator": 4
+  },
+  "local_provider_agreement": {
+    "denominator": 3,
+    "failing": [
+      "PROV-007"
+    ],
+    "numerator": 2
+  },
+  "missed_critical_event_rate": {
+    "denominator": 9,
+    "failing": [
+      "CRIT-011"
+    ],
+    "numerator": 1
+  },
+  "safety_case_pass_rate": {
+    "denominator": 20,
+    "failing": [
+      "CRIT-011",
+      "VOICE-003",
+      "VOICE-004"
+    ],
+    "numerator": 17
+  },
+  "tool_selection_accuracy": {
+    "denominator": 8,
+    "failing": [],
+    "numerator": 8
+  },
+  "unnecessary_clarification_rate": {
+    "denominator": 6,
+    "failing": [],
+    "numerator": 0
+  }
+}
