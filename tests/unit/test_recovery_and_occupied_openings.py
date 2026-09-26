@@ -72,7 +72,11 @@ def test_other_transitions_are_not_entry_recovery(ev, eid, dc, old, new):
 
 @pytest.mark.parametrize("people,alarms,occupied,expected", [
     (["home"], [], [], "home"),                                  # person home
-    (["home", "not_home"], ["armed_away"], [], "home"),          # person home stays authoritative
+    (["home"], ["disarmed"], [], "home"),
+    (["home"], ["armed_home"], [], "home"),                      # armed home keeps home
+    (["home"], ["armed_night"], [], "home"),
+    (["home", "not_home"], ["armed_away"], [], "away"),          # armed away is authoritative
+    (["home"], ["armed_vacation"], ["kitchen"], "away"),
     (["unknown"], [], ["kitchen"], "home"),                      # inconclusive + occupancy
     (["unavailable", "unknown"], ["disarmed"], ["lounge"], "home"),
     ([], [], ["kitchen"], "home"),                               # no registered people
@@ -214,7 +218,7 @@ def test_entry_recovery_is_ignored_by_the_observer(front, eid, dc, old, new):
 
 @pytest.mark.parametrize("eid,dc,old,new", [
     ("binary_sensor.front_door", "door", "off", "on"),
-    ("binary_sensor.landing_casement", "window", "off", "on"),
+    ("binary_sensor.first_floor_windows", "window", "off", "on"),
     ("binary_sensor.loft_hatch", "opening", "off", "on"),
     ("lock.front_door", None, "locked", "unlocked"),
 ])
@@ -465,3 +469,73 @@ def test_sentinel_still_alerts_on_a_real_opening(sentinel_mod, fake_hass):
     s._handle_state_change(_event(*DOOR_OPEN))
     assert len(fake_hass._tasks) == 1
     fake_hass._tasks.pop().close()
+
+
+@pytest.mark.parametrize("mode", ["armed_away", "armed_vacation"])
+def test_armed_away_beats_a_person_reading_home(pipeline, mode):
+    _, run, rec = pipeline
+    run(_event(*DOOR_OPEN), persons=["home"], alarm_states=[mode], areas=["kitchen"])
+    assert rec["decide"] == ["binary_sensor.front_door"]
+
+
+def test_armed_home_keeps_a_person_home_silent(pipeline):
+    _, run, rec = pipeline
+    run(_event(*DOOR_OPEN), persons=["home"], alarm_states=["armed_home"])
+    assert _no_effects(rec)
+
+
+# ── Observer noise filter: `_w` is a suffix only ────────────────────────────
+
+@pytest.mark.parametrize("eid,noisy", [
+    ("sensor.device_w", True),
+    ("binary_sensor.first_floor_windows", False),
+    ("binary_sensor.basement_window", False),
+    ("binary_sensor.kitchen_water_leak", False),
+    ("sensor.fridge_kwh", True),
+    ("sensor.fridge_wh", True),
+    ("sensor.mains_voltage", True),
+    ("sensor.dryer_power", True),
+    ("sensor.dryer_energy", True),
+    ("binary_sensor.door_battery", True),
+    ("sensor.hall_temp_sensor", True),
+    ("sensor.office_wifi", True),
+    ("sensor.office_wlan_rssi", True),
+    ("binary_sensor.front_door", False),
+])
+def test_noise_filter(load, eid, noisy):
+    assert load("observer")._entity_id_looks_noisy(eid) is noisy
+
+
+def test_suffix_w_entity_is_still_filtered_on_the_observer_path(front, monkeypatch):
+    o, hass, _ = front
+    monkeypatch.setattr(o, "_cognition_enabled", lambda: False)
+    o._on_state_changed(_event("binary_sensor.device_w", "door", "off", "on"))
+    assert hass.tasks == []
+
+
+@pytest.mark.parametrize("cognition_on", [True, False])
+def test_windows_entity_real_opening_reaches_the_pipeline(front, monkeypatch, cognition_on):
+    o, hass, _ = front
+    monkeypatch.setattr(o, "_cognition_enabled", lambda: cognition_on)
+    o._on_state_changed(_event("binary_sensor.first_floor_windows", "window", "off", "on"))
+    assert len(hass.tasks) == 1
+
+
+@pytest.mark.parametrize("cognition_on", [True, False])
+def test_windows_entity_recovery_stays_suppressed(front, monkeypatch, cognition_on):
+    o, hass, _ = front
+    monkeypatch.setattr(o, "_cognition_enabled", lambda: cognition_on)
+    o._on_state_changed(_event("binary_sensor.first_floor_windows", "window",
+                               "unavailable", "on"))
+    assert hass.tasks == []
+
+
+@pytest.mark.parametrize("cognition_on", [True, False])
+def test_water_leak_recovery_is_critical_and_reaches_the_pipeline(front, monkeypatch,
+                                                                 cognition_on):
+    o, hass, _ = front
+    monkeypatch.setattr(o, "_cognition_enabled", lambda: cognition_on)
+    event = _event("binary_sensor.kitchen_water_leak", "moisture", "unavailable", "on")
+    assert o._critical_hazard(event)
+    o._on_state_changed(event)
+    assert len(hass.tasks) == 1

@@ -125,18 +125,15 @@ GLOBAL_CLASSIFIER_RATE_LIMIT_PER_HOUR = 30
 def _entity_id_looks_noisy(entity_id: str) -> bool:
     """Cheap substring check against known-noisy entity patterns."""
     eid_lower = entity_id.lower()
-    # Special case: _w suffix only (not e.g. "basement_window")
+    # Special case: _w is a suffix only (not e.g. "basement_window" or
+    # "kitchen_water_leak"), so it is checked here and nowhere else.
     if eid_lower.endswith("_w"):
         return True
     for needle in ENTITY_ID_NOISE_SUBSTRINGS:
-        if needle.startswith("_") and needle.endswith("_"):
-            if needle in eid_lower:
-                return True
-        elif needle.startswith("_"):
-            if needle in eid_lower:
-                # But skip suffix check we did above to avoid double-match
-                if not (needle == "_w" and eid_lower.endswith("_w")):
-                    return True
+        if needle == "_w":
+            continue
+        if needle in eid_lower:
+            return True
     return False
 
 

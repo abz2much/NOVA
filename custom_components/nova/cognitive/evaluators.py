@@ -218,18 +218,19 @@ def is_entry_state_recovery(entity_id: str, device_class: str,
 def household_presence(person_states, alarm_states, occupied_areas) -> str:
     """Whether the household is present, for ordinary opening events, from
     structured evidence only. In order:
-      1. a registered person reading home: home;
-      2. the security alarm armed away or on vacation: away;
+      1. the security alarm armed away or on vacation: away, whatever any
+         person or occupancy reads;
+      2. a registered person reading home: home;
       3. any other readable person state (not_home, a zone): away, which
          occupancy never overrides;
       4. no readable person state: current occupied areas mean home;
       5. otherwise unknown.
     A disarmed alarm is not evidence either way."""
     people = [str(s or "").strip().lower() for s in person_states or ()]
-    if "home" in people:
-        return PRESENCE_HOME
     if any(str(s or "").strip().lower() in AWAY_ALARM_STATES for s in alarm_states or ()):
         return PRESENCE_AWAY
+    if "home" in people:
+        return PRESENCE_HOME
     if any(p not in UNREADABLE_STATES for p in people):
         return PRESENCE_AWAY
     return PRESENCE_HOME if occupied_areas else PRESENCE_UNKNOWN
