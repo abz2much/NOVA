@@ -22,6 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, TypeAlias
 
+from .cognitive.holds import ProviderHolds
 from .const import DOMAIN
 from .migrations import CURRENT_SCHEMA_VERSION
 
@@ -73,6 +74,10 @@ class NovaRuntime:
     # True while a proactive-audio infrastructure audit is in progress, so a
     # slow announcement never overlaps the next tick.
     audit_running: bool = False
+    # Reasoning signatures whose provider reply was unusable, held briefly
+    # so a repeat doesn't ask the same provider again (cognitive/holds.py).
+    # Per runtime: a reload starts empty and never inherits the old ones.
+    provider_holds: ProviderHolds = field(default_factory=ProviderHolds)
 
 
 # String form keeps the alias lazy: nothing subscripts ConfigEntry at import
@@ -222,7 +227,12 @@ def clear_runtime(entry: ConfigEntry) -> None:
     """Drop the entry's runtime_data. Idempotent.
 
     Only forgets references; disposing the objects is async_unload_entry's
-    job (NovaResources.close_all() and the explicit stops)."""
+    job (NovaResources.close_all() and the explicit stops). The provider
+    holds are cleared too, so nothing held survives the runtime even if a
+    stale reference to it lingers."""
+    runtime = lifecycle_runtime(entry)
+    if runtime is not None:
+        runtime.provider_holds.clear()
     if hasattr(entry, "runtime_data"):
         # ConfigEntry.__setattr__ is guarded; this mirrors how Home Assistant
         # itself drops runtime_data after a successful unload.

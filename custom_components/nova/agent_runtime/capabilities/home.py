@@ -81,28 +81,52 @@ def _build_clarification(candidates: list[dict], hass=None) -> str:
     return "I found more than one possible match — could you be more specific about which one you mean?"
 
 
-async def _exec_search_entities(hass: HomeAssistant, args: dict) -> str:
-    """Search for entities by name, area, or domain with fuzzy matching.
+def _search_candidates(hass: HomeAssistant, domains) -> list:
+    """The entities a search may match, read once: id, domain, friendly name,
+    state and area. Bounded by the domains searched."""
+    from ..entity_resolution import Candidate
+    from ..presentation import _area_name
+    out = []
+    for domain in domains:
+        for state in hass.states.async_all(domain):
+            out.append(Candidate(
+                entity_id=state.entity_id, domain=state.entity_id.split(".", 1)[0],
+                friendly_name=str(state.attributes.get("friendly_name") or ""),
+                state=str(state.state), area=_area_name(hass, state.entity_id) or ""))
+    return out
 
-    `require_unique` (Phase 3): when true, this search is resolving exactly
-    ONE target entity before an action. If two or more plausible candidates
-    remain after scoring (ratio of runner-up/top score >= 0.85, empirically
-    derived — see Phase 3 design notes), returns an `{"ambiguous": true,
-    "candidates": [...]}` marker instead of a plain list, which run_agent's
-    tool-dispatch loop intercepts to stop the turn with a fixed clarification
-    question rather than letting the model guess. Default false preserves
-    ordinary multi-result discovery exactly as before — no marker, no forced
-    clarification, ever.
+
+async def _exec_search_entities(hass: HomeAssistant, args: dict) -> str:
+    """Search for entities by entity_id, name, alias, area or domain.
+
+    Resolution is deterministic first (agent_runtime.entity_resolution): an
+    explicit entity_id, an exact learned alias or friendly name, an exact
+    object name, then a domain the request names ("lights", "locks"),
+    optionally with a state ("lights that are on") or an area or name; only
+    then bounded fuzzy scoring. An explicit `domain` restricts every stage.
+
+    `require_unique`: when true, this search is resolving exactly ONE target
+    entity before an action. Several exact matches, a near tie
+    (runner-up/top score >= 0.85) or no fuzzy candidate strong enough to act
+    on returns an `{"ambiguous": true, "candidates": [...]}` marker instead
+    of a plain list, which run_agent's tool-dispatch loop intercepts to stop
+    the turn with a fixed clarification question rather than letting the
+    model guess. Default false is discovery: a plain list, never a forced
+    clarification. Read only: never calls a service.
     """
+    from ..entity_resolution import DEFAULT_DOMAINS, resolve
+
     query = args.get("query", "").lower().strip()
     domain_filter = args.get("domain")
     require_unique = bool(args.get("require_unique", False))
 
-    # Check learned aliases first — an exact key maps to exactly one entity,
-    # so this is always inherently unique regardless of require_unique.
+    def _in_domain(eid: str) -> bool:
+        return not domain_filter or eid.split(".", 1)[0] == domain_filter
+
+    # A learned alias names exactly one entity, so it is inherently unique.
     learned = _memory._load_learned()
     aliases = learned.get("alias", {})
-    if query in aliases:
+    if query in aliases and _in_domain(aliases[query]):
         resolved_id = aliases[query]
         state = hass.states.get(resolved_id)
         if state:
@@ -113,16 +137,18 @@ async def _exec_search_entities(hass: HomeAssistant, args: dict) -> str:
                 "matched_by": f"learned alias: '{query}'",
             }])
 
-    # Partial alias matches — collect ALL matches (deduped by entity_id),
-    # not just the first. Multiple *different* entities matching partially
-    # is genuine ambiguity when require_unique is set; require_unique=false
-    # now returns every plausible partial-alias match instead of silently
-    # hiding all but the first (closest honest match to "discovery" intent —
-    # the old single-item return was an accident of early-return, not a
-    # deliberate one-result contract).
+    domains = [domain_filter] if domain_filter else list(DEFAULT_DOMAINS)
+    result = resolve(query, _search_candidates(hass, domains), domain=domain_filter,
+                     require_unique=require_unique)
+    if result.stage != "fuzzy":
+        return json.dumps(result.as_payload())
+
+    # Partial alias matches — ALL of them (deduped by entity_id), before
+    # fuzzy name scoring. Several different entities matching partially is
+    # genuine ambiguity when require_unique is set.
     alias_matches: dict = {}
-    for alias_name, alias_id in aliases.items():
-        if query in alias_name or alias_name in query:
+    for alias_name, alias_id in sorted(aliases.items()):
+        if (query in alias_name or alias_name in query) and _in_domain(alias_id):
             state = hass.states.get(alias_id)
             if state and alias_id not in alias_matches:
                 alias_matches[alias_id] = {
@@ -140,81 +166,7 @@ async def _exec_search_entities(hass: HomeAssistant, args: dict) -> str:
             })
         return json.dumps(alias_results)
 
-    domains = [domain_filter] if domain_filter else [
-        "light", "switch", "lock", "cover", "climate", "fan",
-        "media_player", "sensor", "binary_sensor", "scene",
-        "script", "automation", "person",
-    ]
-
-    # Fuzzy bigram scorer (inline — no external deps)
-    def _bigrams(s):
-        return set(s[i:i+2] for i in range(len(s)-1)) if len(s) > 1 else {s}
-
-    def _fuzzy(a, b):
-        if a == b: return 100.0
-        if not a or not b: return 0.0
-        bg_a, bg_b = _bigrams(a), _bigrams(b)
-        overlap = len(bg_a & bg_b)
-        dice = (2.0 * overlap) / (len(bg_a) + len(bg_b)) * 100 if bg_a and bg_b else 0
-        contain = len(a) / len(b) * 80 if a in b else (len(b) / len(a) * 80 if b in a else 0)
-        return max(dice, contain)
-
-    results = []
-    query_words = set(query.split())
-
-    for domain in domains:
-        for state in hass.states.async_all(domain):
-            fname = (state.attributes.get("friendly_name") or "").lower()
-            eid = state.entity_id.lower()
-            score = 0
-
-            if query == fname:
-                score = 100
-            elif query in fname:
-                score = 80
-            elif query.replace(" ", "_") in eid:
-                score = 70
-            elif query_words and query_words.issubset(set(fname.split())):
-                score = 65
-            else:
-                # Fuzzy matching
-                fuzz = _fuzzy(query, fname)
-                if fuzz > 45:
-                    score = fuzz * 0.7  # Scale down fuzzy scores
-
-                # Word-level fuzzy — check each query word
-                if not score and query_words:
-                    fname_words = set(fname.split())
-                    word_matches = 0
-                    for qw in query_words:
-                        for fw in fname_words:
-                            if _fuzzy(qw, fw) > 60:
-                                word_matches += 1
-                                break
-                    if word_matches > 0:
-                        score = (word_matches / len(query_words)) * 50
-
-            if score > 25:
-                results.append({
-                    "entity_id": state.entity_id,
-                    "friendly_name": state.attributes.get("friendly_name", ""),
-                    "state": state.state,
-                    "score": round(score, 1),
-                })
-
-    results.sort(key=lambda r: r["score"], reverse=True)
-    results = results[:15]
-
-    if require_unique and len(results) >= 2 and results[0]["score"] > 0:
-        ratio = results[1]["score"] / results[0]["score"]
-        if ratio >= 0.85:
-            near_tie = [r for r in results if r["score"] / results[0]["score"] >= 0.85][:4]
-            return json.dumps({
-                "ambiguous": True,
-                "candidates": _dedupe_candidates(near_tie),
-            })
-
-    return json.dumps(results)
+    return json.dumps(result.as_payload())
 
 
 async def _exec_get_area_devices(hass: HomeAssistant, args: dict) -> str:

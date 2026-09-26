@@ -18,6 +18,7 @@ import ast
 import asyncio
 import json
 import pathlib
+import re
 import sqlite3
 import types
 from datetime import datetime, timedelta
@@ -112,8 +113,11 @@ async def run_local_command(ctx) -> dict:
         decision = "executed"
     else:
         decision = "answered"
+    normalized = le._normalize(ctx.input["text"])
+    routes = [q for p, q in le._QUERY_PATTERNS if re.search(p, normalized)]
     return {"decision": decision, "clarification": clarify,
             "entities": listed if ctx.input.get("listing") else _call_entities(ctx.hass),
+            "query_route": routes[0] if routes else None,
             "response": text}
 
 
@@ -305,9 +309,23 @@ def _decide_kwargs(inp) -> dict:
         to_state=inp.get("to_state", ""), friendly_name=inp.get("friendly_name", ""))
 
 
+def _load_nova(ctx):
+    """Give the scenario's Home Assistant one loaded Nova entry with a fresh
+    runtime, so runtime-owned state (such as provider holds) starts empty
+    in every scenario and is reached through the real runtime boundary."""
+    runtime = ctx.load("runtime").NovaRuntime(
+        client=None, llm_provider_name="scripted", sentinel=None, reminder_watcher=None,
+        scheduler=None, resources=None, automation_contexts=None)
+    ctx.hass.config_entries = types.SimpleNamespace(
+        async_entries=lambda domain=None: [types.SimpleNamespace(
+            domain="nova", entry_id="eval", state=None, runtime_data=runtime)])
+    return runtime
+
+
 async def run_reasoning(ctx) -> dict:
     """reasoning_loop.decide with a scripted provider."""
     rl, conn = ctx.load("reasoning_loop"), ctx.load("connectivity")
+    _load_nova(ctx)
     for _ in range(ctx.input.get("prior_failures", 0)):
         conn.record_failure()
     for _ in range(ctx.input.get("repeat", 1)):
@@ -321,6 +339,7 @@ async def run_agreement(ctx) -> dict:
     """The same event decided twice: once with the scripted provider
     reachable, once with the provider unavailable (Local Mind)."""
     rl, conn = ctx.load("reasoning_loop"), ctx.load("connectivity")
+    _load_nova(ctx)
     kwargs = _decide_kwargs(ctx.input)
     cloud = await rl.decide(ctx.hass, ctx.provider, **kwargs)
     ctx.load("reasoning_cache")._cache.clear()
@@ -430,6 +449,101 @@ async def run_pattern(ctx) -> dict:
             "entities": sorted({e for p in found for e in p.entity_ids})}
 
 
+_SUGGESTIONS_SCHEMA = """
+CREATE TABLE suggestions (id INTEGER PRIMARY KEY AUTOINCREMENT, created TEXT NOT NULL,
+  description TEXT NOT NULL, automation_yaml TEXT, status TEXT DEFAULT 'pending',
+  confidence REAL DEFAULT 0.0, pattern_count INTEGER DEFAULT 0, approved_at TEXT,
+  dismissed_at TEXT, pattern_type TEXT DEFAULT '', entity_ids TEXT DEFAULT '',
+  details TEXT DEFAULT '{}');
+"""
+
+
+def _history_rows(history, today):
+    """(timestamp, entity, state, hour, source) for each synthetic event.
+    A row gives either `times` ([days_ago, hour, minute] triples) or
+    `days_ago` with one `hour` and optional `minute`."""
+    for row in history:
+        times = row.get("times") or [[d, row["hour"], row.get("minute", 0)]
+                                     for d in row["days_ago"]]
+        for d, h, mi in times:
+            dt = (today - timedelta(days=d)).replace(hour=h, minute=mi)
+            yield dt, row["entity_id"], row["state"], row.get("triggered_by", "user")
+
+
+async def run_pattern_quality(ctx) -> dict:
+    """The whole suggestion decision for a synthetic history: detection and
+    scoring (time routines and sequences), the store threshold, the loaded
+    automation comparison, and the stored-suggestion identity that keeps a
+    dismissed or pending suggestion from coming back as new. All in memory."""
+    pa = ctx.load("pattern_analyzer")
+    sugg = ctx.load("automation.suggestions")
+    matching = ctx.load("automation_matcher")
+    conn = sqlite3.connect(":memory:")
+    decisions, suggested, new = [], [], 0
+    best = 0.0
+    try:
+        conn.executescript(_SCHEMA + _SUGGESTIONS_SCHEMA)
+        conn.row_factory = sqlite3.Row
+        today = datetime.now().replace(second=0, microsecond=0)
+        for dt, eid, state, source in sorted(_history_rows(ctx.input["history"], today)):
+            conn.execute(
+                "INSERT INTO state_changes (timestamp, entity_id, domain, old_state, new_state, "
+                "area_id, hour, day_of_week, triggered_by) VALUES (?,?,?,?,?,?,?,?,?)",
+                (dt.isoformat(), eid, eid.split(".")[0], "off", state, "", dt.hour,
+                 dt.weekday(), source))
+        for st in ctx.input.get("stored", []):
+            conn.execute(
+                "INSERT INTO suggestions (created, description, status, pattern_type, "
+                "entity_ids, details) VALUES (?,?,?,?,?,?)",
+                ("2026-01-01T00:00:00", st["description"], st["status"], st["pattern_type"],
+                 json.dumps(st["entity_ids"]), json.dumps(st["details"])))
+        conn.commit()
+        records = [types.SimpleNamespace(entity_id=r["entity_id"], name=r.get("name", ""),
+                                         raw_config=r.get("config"),
+                                         referenced_entities=tuple(r.get("referenced_entities", ())))
+                   for r in ctx.input.get("existing", [])]
+        analyzer = pa.PatternAnalyzer()
+        for _ in range(ctx.input.get("runs", 1)):
+            found = (analyzer._find_time_routines(conn)
+                     + analyzer._find_sequence_patterns(conn))
+            for p in found:
+                best = max(best, p.confidence)
+                if p.confidence < pa.CONFIDENCE_THRESHOLD:
+                    continue
+                norm = sugg.normalize_suggestion_automation(sugg.generate_automation(p))
+                status = "advisory"
+                if norm.get("installable"):
+                    status = matching.classify({"triggers": norm["trigger"],
+                                                "conditions": norm.get("condition") or [],
+                                                "actions": norm["action"]}, records)["status"]
+                if status == "already_automated":
+                    decisions.append(status)
+                    continue
+                existing = sugg._find_existing(conn, p)
+                if existing is not None:
+                    decisions.append("kept_" + existing[1] if existing[1] != "pending"
+                                     else "refreshed")
+                    continue
+                conn.execute(
+                    "INSERT INTO suggestions (created, description, status, pattern_type, "
+                    "entity_ids, details) VALUES (?,?,?,?,?,?)",
+                    ("2026-01-02T00:00:00", p.description, "pending", p.pattern_type,
+                     json.dumps(p.entity_ids), json.dumps(p.details)))
+                new += 1
+                suggested.append(p)
+                decisions.append("suggested" if status == "new" else status)
+    finally:
+        conn.close()
+    order = ("suggested", "unknown_overlap", "possible_overlap", "advisory",
+             "already_automated", "kept_dismissed", "kept_installed", "refreshed")
+    decision = next((d for d in order if d in decisions), "no_suggestion")
+    keys = [sugg.suggestion_identity(p.pattern_type, p.entity_ids, p.details) for p in suggested]
+    return {"decision": decision, "new_suggestions": new,
+            "duplicate_patterns": len(keys) - len(set(keys)),
+            "best_confidence": round(best, 3),
+            "entities": sorted({e for p in suggested for e in p.entity_ids})}
+
+
 async def run_automation_match(ctx) -> dict:
     am = ctx.load("automation_matcher")
     records = [types.SimpleNamespace(entity_id=r["entity_id"], name=r.get("name", ""),
@@ -457,6 +571,7 @@ RUNNERS = {
     "camera_learning": run_camera_learning,
     "pattern": run_pattern,
     "automation_match": run_automation_match,
+    "pattern_quality": run_pattern_quality,
 }
 
 

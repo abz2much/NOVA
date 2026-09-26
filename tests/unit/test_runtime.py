@@ -29,7 +29,7 @@ FIELDS = [
     "scheduler", "resources", "automation_contexts", "automation_inventory",
     "providers", "runtime_config", "schema_version", "observer_running",
     "intent_router", "state_ledger", "entity_locks", "alert_buffer",
-    "audit_running",
+    "audit_running", "provider_holds",
 ]
 
 
@@ -112,6 +112,15 @@ def test_release_takes_no_hass():
     """clear_runtime() cannot reach hass.data: it is not handed hass."""
     fn = _func(COMP / "runtime.py", "clear_runtime")
     assert [a.arg for a in fn.args.args] == ["entry"]
+
+
+def test_release_clears_the_provider_holds(rt):
+    runtime = _runtime(rt)
+    runtime.provider_holds.hold("sig")
+    entry = types.SimpleNamespace(entry_id="e1", runtime_data=runtime)
+    rt.clear_runtime(entry)
+    assert len(runtime.provider_holds) == 0
+    rt.clear_runtime(entry)
 
 
 def test_release_is_idempotent(rt):

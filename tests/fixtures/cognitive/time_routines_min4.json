@@ -1,0 +1,10 @@
+{
+"automation_caused": [],
+"daily_20": [["light.porch", "on", 18, 1.0, 20, 20, 20]],
+"daily_8": [["light.porch", "on", 18, 1.0, 8, 8, 8]],
+"same_day_burst": [["light.porch", "on", 18, 0.25, 10, 1, 1]],
+"sparse_over_busy_month": [["sensor.noise", "1", 12, 1.0, 29, 29, 29]],
+"split_hours": [["light.porch", "on", 18, 0.5, 6, 6, 12], ["light.porch", "on", 19, 0.5, 6, 6, 12]],
+"stale_routine": [["light.porch", "on", 18, 0.379, 11, 11, 29], ["sensor.noise", "1", 12, 1.0, 29, 29, 29]],
+"three_days": []
+}

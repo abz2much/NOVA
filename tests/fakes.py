@@ -269,3 +269,38 @@ class FakeUserInput:
         self.device_id = device_id
         self.conversation_id = conversation_id
         self.context = _types.SimpleNamespace(user_id=user_id)
+
+
+class FakeConfigEntry:
+    """A loaded config entry carrying a runtime (entry.runtime_data)."""
+
+    def __init__(self, runtime, domain: str = "nova", entry_id: str = "nova-test"):
+        self.domain = domain
+        self.entry_id = entry_id
+        self.runtime_data = runtime
+        self.state = None
+
+
+class FakeConfigEntries:
+    def __init__(self, entries=()):
+        self._entries = list(entries)
+
+    def async_entries(self, domain=None):
+        return [e for e in self._entries if domain is None or e.domain == domain]
+
+
+def make_runtime(load, **overrides):
+    """A NovaRuntime with inert placeholders for the setup-built owners."""
+    kwargs = dict(client=None, llm_provider_name="test", sentinel=None,
+                  reminder_watcher=None, scheduler=None, resources=None,
+                  automation_contexts=None)
+    kwargs.update(overrides)
+    return load("runtime").NovaRuntime(**kwargs)
+
+
+def attach_runtime(hass, runtime):
+    """Make `runtime` this hass's loaded Nova entry, found through the
+    runtime boundary (domain_runtime) exactly as in production."""
+    entry = FakeConfigEntry(runtime)
+    hass.config_entries = FakeConfigEntries([entry])
+    return entry

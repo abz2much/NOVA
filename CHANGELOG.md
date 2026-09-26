@@ -1,3 +1,24 @@
+## [7.120.0] — cognitive architecture
+
+**Architecture**
+- Proactive decisions now run through one typed cognitive package: immutable event snapshots and decisions, pure rule evaluators (no Home Assistant, storage, provider or speech access), explicit arbitration, provider-reply validation, one cache policy, and presentation kept apart from the decision. `reasoning_loop` and `local_mind` remain the public entry points with the same signatures and results, and every announcement still passes the existing output gate.
+- The reasoning cache is written from exactly one place, and only for a validated provider decision.
+- Entity search resolves through one deterministic resolver shared by the agent: entity ID, exact name or learned alias, exact object name, an explicit domain, a domain the request names ("lights", "locks"), then bounded fuzzy matching with a minimum score and margin. Ties sort by entity ID.
+
+**Safety**
+- A critical hazard turning on (smoke, gas, carbon monoxide, water leak) is no longer dropped by a targeted mute, a debounce, the sibling-group debounce, the classifier rate limit or the flap hold. An entity you excluded is still skipped, and a repeated triggered alarm is never deduplicated away.
+- A request that says not to change anything ("List the lights that are currently on. Do not change anything.") is answered without any device action.
+
+**Fixes**
+- A provider reply that is not a valid decision (not JSON, no `speak`, a non-boolean `speak`, or speech with no message) is now a provider failure: the Local Mind decides, nothing is cached, the same event is not sent to the provider again for a minute, and the log records only the failure kind and length, never the reply. It counts against the provider's connection health the same way a network failure does, and only a valid decision counts as a success. The one-minute hold belongs to the loaded integration, so reloading Nova or changing the provider starts with none.
+- "Lights" now means the light domain: sensors and switches whose names contain the word are no longer returned, and every light is listed even when its name lacks the word. "Lights that are on" lists only lights that are on.
+- An exact name or entity ID resolves one target alone, and a clarification shows each candidate's name and area.
+- "Can you reach Home Assistant?" and similar questions about the Home Assistant platform no longer get a who's-home answer. They get a status answer from what Nova can observe (whether Home Assistant is running, its version and how many entities it serves). Presence questions now need presence wording ("who is home", "is anyone home", "is Abi home", "how many people are home"), so a bare "home" in a sentence no longer triggers them. "Is <person> home?" answers for that person, and "how many people are home?" gives a count. This applies to every channel that uses the local engine.
+- Asking which lights are on answers locally, naming each light by its Home Assistant name (with the area when two share a name).
+- Routine suggestions are scored on distinct days, coverage, timing concentration, recency and provenance; sequences on how often the trigger is actually followed, counting each follow-up once. Same-day repeats, stopped routines, spread-out timing, mostly automation-caused behaviour and busy triggers that are rarely followed are no longer proposed. Strong routines keep exactly the confidence they had, no threshold was lowered, and each stored suggestion carries its evidence.
+
+Service, WebSocket, panel and assistant-tool schemas, config keys, storage and the scheduler are unchanged, and no stored data moves.
+
 ## [7.119.0] — agent capability boundaries
 
 **Architecture**

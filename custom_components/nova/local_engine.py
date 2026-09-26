@@ -194,11 +194,29 @@ _BULK_PATTERNS = [
 
 # ── Contextual queries ──────────────────────────────────────────────────────
 
+_HOME = r"(?:at\s+)?home\b(?!\s*assistant)"
+_NOW = r"(?:currently\s+|still\s+|right\s+now\s+)?"
+_PLATFORM_HEALTH = (
+    r"^(?=.*\bhome\s?assistant\b)(?=.*\b(?:reach|reachable|connect|connected|connection|access|"
+    r"available|online|offline|up(?!\s+to\s+date)|down|running|responding|respond|working|"
+    r"alive|status|health|healthy|talk\s+to)\b)")
+
 _QUERY_PATTERNS = [
     (r"(?:repeat\s+that|say\s+that\s+again|what\s+did\s+you\s+just\s+say|"
      r"repeat\s+(?:your\s+)?last\s+announcement)\b",       "repeat_last"),
-    (r"(?:who(?:'s| is)\s+)?home\b",                     "who_home"),
-    (r"(?:is\s+)?(?:anyone|anybody)\s+home",              "who_home"),
+    # "Home Assistant" is the platform, never a presence question: a
+    # question about reaching or the health of Home Assistant gets a status
+    # answer from live evidence, and every presence pattern below refuses
+    # "home" when "assistant" follows it.
+    (_PLATFORM_HEALTH,                                   "platform_status"),
+    # Presence needs presence grammar: who is home, is anyone home, how many
+    # people are home, is <person> home. A bare "home" anywhere in a
+    # sentence ("welcome home", "Home Assistant") is not a presence request.
+    (rf"^(?:so\s+|and\s+)?who(?:'s|s|\s+is|\s+are)\s+{_NOW}{_HOME}",   "who_home"),
+    (rf"^(?:is\s+|are\s+)?(?:there\s+)?(?:anyone|anybody|someone|somebody|everyone|everybody)"
+     rf"\s+{_NOW}{_HOME}",                                "who_home"),
+    (rf"^how\s+many\s+(?:people|persons|of\s+us)\s+(?:are\s+)?{_NOW}{_HOME}", "count_home"),
+    (rf"^is\s+([a-z][a-z'\- ]{{0,40}}?)\s+{_NOW}{_HOME}$",     "person_home"),
     # The "what's/what is" lead-in is REQUIRED (not optional) — a bare
     # "open"/"unlocked" occurring anywhere in a longer sentence used to
     # match this via re.search, so an explanation, complaint, or quoted
@@ -211,6 +229,9 @@ _QUERY_PATTERNS = [
     # that merely mentions the word.
     (r"(?:what(?:'s| is)\s+)(?:open|unlocked)\b",          "what_open"),
     (r"(?:are\s+)?(?:any|which)\s+(?:doors?|windows?)\s+open", "what_open"),
+    (r"(?:list|show(?:\s+me)?|tell\s+me(?:\s+which)?|name|which|what)\s+(?:all\s+)?(?:of\s+)?(?:the\s+)?lights?\s+"
+     r"(?:that\s+|which\s+)?(?:are\s+)?(?:currently\s+|still\s+|now\s+)?(?:turned\s+)?on\b",
+     "lights_on"),
     (r"(?:are\s+)?(?:any|which)\s+(?:lights?)\s+on",     "lights_on"),
     (r"(?:how\s+many)\s+lights?\s+(?:are\s+)?on",        "lights_on"),
     (r"(?:what(?:'s| is)\s+(?:the\s+)?)?(?:energy|power)\s+(?:usage|consumption)", "energy"),
@@ -219,6 +240,14 @@ _QUERY_PATTERNS = [
     (r"(?:how\s+(?:warm|cold|hot))\s+is\s+it",           "weather"),
     (r"(?:what\s+)?(?:devices?|entities?)\s+(?:are\s+)?(?:in|at)\s+(?:the\s+)?(.+)", "area_devices"),
 ]
+
+
+# "Do not change anything", "don't turn anything off", "without changing
+# it": the person asked for information only.
+_READ_ONLY_RE = re.compile(
+    r"\b(?:do\s+not|don'?t|dont|without)\s+(?:change|changing|touch|touching|turn|turning|"
+    r"switch|switching|adjust|adjusting|alter|altering)\b"
+    r"|\b(?:read[\s-]?only|just\s+(?:list|tell|show))\b")
 
 
 # ── Complexity scoring ──────────────────────────────────────────────────────
@@ -1011,8 +1040,84 @@ def _home_status(hass, h="sir"):
 
 # ── Contextual queries ──────────────────────────────────────────────────────
 
+_CORE_STATE_WORDS = {"not_running": "not running", "final_write": "shutting down",
+                     "stopping": "stopping", "stopped": "stopped", "starting": "starting"}
+
+
+def _core_state_name(state) -> str:
+    """Home Assistant's CoreState as its lowercase member name.
+
+    The real enum's members are lowercase names with UPPERCASE values
+    (CoreState.running.value == "RUNNING"), so neither the value nor str()
+    compares equal to "running". Normalize whatever is there: an enum member
+    by its name, a plain string case-insensitively. None (no state exposed)
+    counts as running, since this code is executing inside it."""
+    if state is None:
+        return "running"
+    name = getattr(state, "name", None)
+    if not isinstance(name, str):
+        name = str(getattr(state, "value", state))
+    return name.strip().lower()
+
+
+def _platform_status(hass, addr: str) -> str:
+    """A bounded, truthful answer about Home Assistant itself, from what
+    this running instance can observe: its run state, version and how many
+    entities it serves. Nova runs inside Home Assistant, so answering at all
+    means the platform is up; nothing here claims more than that."""
+    try:
+        from homeassistant.const import __version__ as ha_version
+        ver = f" {ha_version}" if re.match(r"^\d", str(ha_version)) else ""
+    except Exception:
+        ver = ""
+    try:
+        count = hass.states.async_entity_ids_count()
+    except Exception:
+        try:
+            count = len(hass.states.async_all())
+        except Exception:
+            count = None
+    state = _core_state_name(getattr(hass, "state", None))
+    if state != "running":
+        shown = _CORE_STATE_WORDS.get(state, state.replace("_", " "))
+        return (f"Home Assistant{ver} is {shown} right now{addr}, so some devices may not "
+                f"respond until it finishes.")
+    if not count:
+        return f"Home Assistant{ver} is running{addr}, but I can't see any entities right now."
+    noun = "entity" if count == 1 else "entities"
+    return (f"Home Assistant{ver} is running and responding{addr}. I'm connected to it "
+            f"and can see {count} {noun}.")
+
+
 def _ctx_query(hass, qtype, h="sir", area_match=""):
     addr = f", {h}" if h else ""
+    if qtype == "platform_status":
+        return _platform_status(hass, addr)
+
+    if qtype in ("count_home", "person_home"):
+        people = list(hass.states.async_all("person"))
+        if qtype == "count_home":
+            home = sorted(s.attributes.get("friendly_name", s.entity_id)
+                          for s in people if s.state == "home")
+            if not home:
+                return f"No one appears to be home at the moment{addr}."
+            if len(home) == 1:
+                return f"One person is home{addr}: {home[0]}."
+            return f"{len(home)} people are home{addr}: {', '.join(home[:-1])} and {home[-1]}."
+        wanted = " ".join(area_match.replace("_", " ").split())
+        for s in sorted(people, key=lambda p: p.entity_id):
+            name = str(s.attributes.get("friendly_name") or "")
+            if wanted and wanted in (name.lower(), s.entity_id.split(".", 1)[1].replace("_", " ")):
+                shown = name or s.entity_id
+                if s.state == "home":
+                    return f"{shown} is home{addr}."
+                if s.state == "not_home":
+                    return f"{shown} is away{addr}."
+                if s.state in ("unknown", "unavailable"):
+                    return f"I can't tell where {shown} is right now{addr}."
+                return f"{shown} is at {s.state}{addr}."
+        return None     # not a known person: let the agent handle it
+
     if qtype == "who_home":
         ppl = [s.attributes.get("friendly_name", s.entity_id)
                for s in hass.states.async_all("person") if s.state == "home"]
@@ -1041,8 +1146,12 @@ def _ctx_query(hass, qtype, h="sir", area_match=""):
         return f"Currently open or unlocked: {', '.join(items)}."
 
     if qtype == "lights_on":
-        on = [s.attributes.get("friendly_name", s.entity_id)
-              for s in hass.states.async_all("light") if s.state == "on"]
+        # Read-only: names come from the presentation helper (friendly name,
+        # area added when two lights share a name); no service is called.
+        from .agent_runtime.presentation import display_names
+        on_ids = [s.entity_id for s in hass.states.async_all("light") if s.state == "on"]
+        names = display_names(hass, on_ids)
+        on = [names.get(eid, eid) for eid in on_ids]
         if not on:
             return f"All lights are off{addr}."
         c = len(on)
@@ -1159,6 +1268,12 @@ async def try_local(hass, text, honorific="sir", force=False, device_id=None):
             if resp:
                 _LOGGER.info("Local contextual: %s", qtype)
                 return LocalResult(text=resp, success=True)
+
+    # A request that says not to change anything is read-only: the local
+    # engine never actuates for it. Unanswered here, it goes to the agent.
+    if _READ_ONLY_RE.search(normalized):
+        _LOGGER.debug("Local: read-only request, no local action")
+        return None
 
     # Bulk/multi-entity
     for pattern, action, domain, scope in _BULK_PATTERNS:

@@ -33,6 +33,7 @@ from homeassistant.core import HomeAssistant, Event, callback
 from homeassistant.util import dt as dt_util
 
 from . import audio_routing, classifier, output_gate, reasoning_loop, sleep_detection
+from .cognitive import evaluators as cognitive_rules
 from .const import (
     DEFAULT_OBSERVER_QUIET_END, DEFAULT_OBSERVER_QUIET_START,
 )
@@ -223,6 +224,21 @@ def _is_person_home_transition(event: Event) -> bool:
     return (new_state.state == "home") != (old_state.state == "home")
 
 
+def _critical_hazard(event: Event) -> bool:
+    """A critical hazard (smoke, CO, gas, water leak...) turning on. It
+    takes precedence over the noise and cost shortcuts below; only the
+    user's own entity exclusion still applies."""
+    try:
+        old_state = event.data.get("old_state")
+        new_state = event.data.get("new_state")
+        if old_state is None or new_state is None:
+            return False
+        return cognitive_rules.is_critical_hazard_activation(
+            new_state.attributes.get("device_class") or "", old_state.state, new_state.state)
+    except Exception:
+        return False
+
+
 def _should_pre_filter(event: Event) -> bool:
     """Return True if this event should be dropped before any LLM call."""
     entity_id = event.data.get("entity_id", "")
@@ -281,7 +297,10 @@ def _should_pre_filter(event: Event) -> bool:
         return True  # startup transitions, not real events
 
     # Drop flapping sensors — if previous state held < MIN_PREVIOUS_STATE_HOLD_S,
-    # this is noise (e.g. a presence sensor oscillating)
+    # this is noise (e.g. a presence sensor oscillating). Never for a
+    # critical hazard: a detector that re-trips quickly is still a hazard.
+    if _critical_hazard(event):
+        return False
     try:
         prev_held_s = (new_state.last_changed - old_state.last_changed).total_seconds()
         if prev_held_s < MIN_PREVIOUS_STATE_HOLD_S:
@@ -530,10 +549,16 @@ def _on_state_changed(event: Event) -> None:
 
     entity_id = event.data.get("entity_id", "")
 
+    # Critical safety precedence (Phase 8): a critical hazard activation is
+    # never dropped by a targeted mute, a debounce or the classifier rate
+    # limit. The output gate still decides delivery, and it lets critical
+    # through.
+    critical = _critical_hazard(event)
+
     # v5.8.03: Cognitive core ignore check
     try:
         from . import cognitive_core
-        if cognitive_core.is_ignored(entity_id):
+        if not critical and cognitive_core.is_ignored(entity_id):
             return
     except Exception:
         pass
@@ -543,14 +568,14 @@ def _on_state_changed(event: Event) -> None:
     # entity_id, so the per-entity debounce below can't catch them and each would
     # trigger its own classifier call — flooding the LLM and evicting the activity
     # log. Intrusion detection is unaffected (separate periodic check).
-    if _group_debounced(entity_id, _group_debounce_s()):
+    if not critical and _group_debounced(entity_id, _group_debounce_s()):
         return
 
     # Longer debounce for motion/occupancy — they fire very often
     new_state = event.data.get("new_state")
     dclass = new_state.attributes.get("device_class") if new_state else None
     interval = DEBOUNCE_MOTION_S if dclass in HIGH_FREQ_BINARY_CLASSES else DEBOUNCE_DEFAULT_S
-    if _debounced(entity_id, interval):
+    if not critical and _debounced(entity_id, interval):
         return
 
     # Hourly rate limit — user-configurable cap to bound API cost. Person
@@ -558,7 +583,7 @@ def _on_state_changed(event: Event) -> None:
     # per-sensor chatter) but high-value, and a busy morning of routine
     # sensor noise burning the budget shouldn't be able to silently eat the
     # one event a household actually cares about hearing.
-    if _classifier_rate_limited() and not _is_person_home_transition(event):
+    if not critical and _classifier_rate_limited() and not _is_person_home_transition(event):
         if not _STATE.rate_limit_warn_logged:
             _LOGGER.warning(
                 "Nova Observer: hit rate limit of %d classifier calls/hour. "
@@ -714,18 +739,19 @@ async def _process_event(event: Event) -> None:
         # against URGENCY_CEILINGS — smoke/CO/gas/moisture/glass_break) also
         # said critical. Otherwise downgrade to high. This prevents the
         # "critical bypasses sleep" path from firing on door/motion events.
-        if final_urgency == "critical" and urgency_hint != "critical":
+        capped = cognitive_rules.cap_reasoned_urgency(final_urgency, urgency_hint)
+        if capped != final_urgency:
             _LOGGER.info(
                 "Observer: downgrading urgency critical→high for %s "
                 "(reasoning said critical but classifier said %s)",
                 entity_id, urgency_hint,
             )
-            final_urgency = "high"
+            final_urgency = capped
 
         # EXTRA SAFETY: during sleep, suppress anything below critical that
         # would broadcast. HIGH during sleep already routes to notify_only,
         # so this is redundant but defensive.
-        if sleeping and final_urgency not in ("critical",):
+        if cognitive_rules.held_for_sleep(final_urgency, sleeping):
             _LOGGER.info(
                 "Observer: user sleeping, suppressing %s urgency message '%s'",
                 final_urgency, message[:80],

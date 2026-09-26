@@ -1,18 +1,1 @@
-{
-  "ENT-002": {
-    "note": "search_entities is a name search across many domains: 'lights' also returns current sensors and a fault sensor whose names contain the word, and misses a light whose name does not.",
-    "verdict": "mismatch"
-  },
-  "ENT-003": {
-    "note": "With the light domain filter, a light whose friendly name lacks the word 'light' (Kitchen Ceiling) is not returned for 'lights'.",
-    "verdict": "mismatch"
-  },
-  "PROV-004": {
-    "note": "A provider reply that is not JSON is parsed as speak false (parse_failure) and treated as a decision, not as a provider failure; the Local Mind fallback is not used.",
-    "verdict": "mismatch"
-  },
-  "PROV-008": {
-    "note": "The silent decision from an unreadable reply is also learned into the reasoning cache, so the same event is then served silent from the cache without calling the provider.",
-    "verdict": "mismatch"
-  }
-}
+{}
