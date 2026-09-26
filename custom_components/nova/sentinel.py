@@ -270,13 +270,21 @@ class NovaSentinel:
 
         state_val = new_state.state
         now = dt_util.utcnow().replace(tzinfo=None)
+        # A door, window, opening, garage door or lock coming back from
+        # unknown/unavailable is not a physical action: no instant alert, but
+        # the current state still counts for duration rules (v7.120.1).
+        old_state = event.data.get("old_state")
+        from .cognitive.evaluators import is_entry_state_recovery
+        recovery = is_entry_state_recovery(
+            entity_id, (getattr(new_state, "attributes", None) or {}).get("device_class") or "",
+            old_state.state if old_state is not None else "unknown", state_val)
 
         for rule in self._rules:
             key = f"{entity_id}:{rule['id']}"
             if self._entity_matches_rule(entity_id, rule) and state_val == rule.get("state"):
                 self._state_start.setdefault(key, now)
                 # Instant time-window rules (no duration)
-                if "time_window" in rule and "for_minutes" not in rule:
+                if "time_window" in rule and "for_minutes" not in rule and not recovery:
                     if self._in_time_window(rule["time_window"]):
                         self.hass.async_create_task(
                             self._announce_rule(entity_id, rule, minutes=0)

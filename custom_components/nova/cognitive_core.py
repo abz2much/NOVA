@@ -2601,6 +2601,12 @@ def _on_state_changed(event: Event) -> None:
     except Exception:
         _dc = ""
 
+    # A door, window, opening, garage door or lock coming back from
+    # unknown/unavailable is not a physical action: never a pattern (v7.120.1).
+    from .cognitive.evaluators import is_entry_state_recovery
+    if is_entry_state_recovery(entity_id, _dc, old_val, new_val):
+        return
+
     # Event entities are stateless pulses — HA puts a timestamp in `.state`, but
     # the meaningful value is the `event_type` attribute (e.g. "single",
     # "double"). Substitute it so "button single-press → scene" is minable, and

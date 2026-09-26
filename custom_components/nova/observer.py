@@ -239,6 +239,30 @@ def _critical_hazard(event: Event) -> bool:
         return False
 
 
+def _entry_state_recovery(event: Event) -> bool:
+    """An ordinary door, window, opening, garage door or lock coming back
+    from unknown/unavailable (restart, integration or device recovery). Not
+    a physical action, so it is never classified, reasoned about, voiced or
+    learned from."""
+    old_state = event.data.get("old_state")
+    new_state = event.data.get("new_state")
+    if new_state is None:
+        return False
+    return cognitive_rules.is_entry_state_recovery(
+        event.data.get("entity_id", ""), new_state.attributes.get("device_class") or "",
+        old_state.state if old_state is not None else "unknown", new_state.state)
+
+
+def _household_presence(hass: HomeAssistant) -> str:
+    """Household presence for ordinary openings, from the registered people,
+    the selected security alarm and the currently occupied areas."""
+    from . import alarm_source
+    return cognitive_rules.household_presence(
+        [s.state for s in hass.states.async_all("person")],
+        [s.state for s in alarm_source.states(hass, _STATE.config)],
+        audio_routing.currently_occupied_areas(hass))
+
+
 def _should_pre_filter(event: Event) -> bool:
     """Return True if this event should be dropped before any LLM call."""
     entity_id = event.data.get("entity_id", "")
@@ -291,16 +315,20 @@ def _should_pre_filter(event: Event) -> bool:
         return True
     if old_state.state == new_state.state:
         return True
+    # Critical safety first (v7.120.1): a hazard turning on, or the selected
+    # alarm triggering, passes even straight out of unknown/unavailable, and
+    # is never dropped as flapping — a detector that re-trips quickly is
+    # still a hazard.
+    if _critical_hazard(event) or (
+            domain == "alarm_control_panel" and new_state.state == "triggered"):
+        return False
     if new_state.state in ("unknown", "unavailable", "none"):
         return True
     if old_state.state in ("unknown", "unavailable", "none"):
         return True  # startup transitions, not real events
 
     # Drop flapping sensors — if previous state held < MIN_PREVIOUS_STATE_HOLD_S,
-    # this is noise (e.g. a presence sensor oscillating). Never for a
-    # critical hazard: a detector that re-trips quickly is still a hazard.
-    if _critical_hazard(event):
-        return False
+    # this is noise (e.g. a presence sensor oscillating).
     try:
         prev_held_s = (new_state.last_changed - old_state.last_changed).total_seconds()
         if prev_held_s < MIN_PREVIOUS_STATE_HOLD_S:
@@ -555,6 +583,11 @@ def _on_state_changed(event: Event) -> None:
     # through.
     critical = _critical_hazard(event)
 
+    # State recovery (v7.120.1), after critical-hazard recognition and before
+    # anything classifies the event as an ordinary opening or unlock.
+    if not critical and _entry_state_recovery(event):
+        return
+
     # v5.8.03: Cognitive core ignore check
     try:
         from . import cognitive_core
@@ -647,6 +680,24 @@ async def _process_event(event: Event) -> None:
 
         urgency_hint = classification["urgency"]
         category = classification["category"]
+
+        # An ordinary opening while the household is present is normal
+        # household activity: silent, decided here without the provider.
+        if (category == "doors_windows" and urgency_hint != "critical"
+                and _household_presence(_STATE.hass) == cognitive_rules.PRESENCE_HOME):
+            try:
+                from .database import save_activity
+                save_activity(
+                    entity_id=entity_id,
+                    category=category,
+                    urgency="low",
+                    message=f"{friendly_name}: {old_state.state} → {new_state.state} — household present, not announced",
+                    was_spoken=False,
+                    source="observer",
+                )
+            except Exception:
+                pass
+            return
 
         # Log the flagged event to activity feed
         try:
