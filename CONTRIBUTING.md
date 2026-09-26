@@ -12,11 +12,13 @@ nova-aio/                         repo root (HACS integration repository)
 ├── icon.png  logo.png               branding (for home-assistant/brands)
 ├── .github/                         funding, issue templates, CI
 ├── scripts/bump_version.sh          one-command version bump
-│   └── legacy_addon_bootstrap.py    reference for the in-progress in-integration bootstrap
+├── scripts/build_panel.py           builds the dashboard from frontend/src/
+├── frontend/src/                    dashboard source (NOVA3D engine + panel parts)
+├── frontend/dev/                    3D model viewer and renderer (not shipped)
 └── custom_components/nova/        the integration (domain: nova)
     ├── manifest.json
-    ├── __init__.py + 47 modules
-    └── frontend/nova-panel.js     the dashboard
+    ├── __init__.py and modules
+    └── frontend/nova-panel.js     the built dashboard (generated, do not edit)
 ```
 
 HACS installs `custom_components/nova/` into Home Assistant. The integration
@@ -41,8 +43,9 @@ This project holds to senior+ engineering output:
 cd custom_components/nova
 for f in *.py; do python3 -c "import ast; ast.parse(open('$f').read())" || echo "FAIL $f"; done
 
-# Dashboard JavaScript parses
-node -e "const fs=require('fs');new Function(fs.readFileSync('frontend/nova-panel.js','utf8'))"
+# Dashboard: edit frontend/src/, rebuild, then check the built file
+python3 ../../scripts/build_panel.py
+node --check frontend/nova-panel.js
 
 # Add-on shell script
 bash -n ../run.sh
@@ -56,8 +59,8 @@ Bump the version everywhere it appears with one command:
 ./scripts/bump_version.sh 6.3.3
 ```
 
-This updates `config.yaml`, `build.yaml`, `Dockerfile`, `run.sh`, the integration
-`manifest.json`, and the version string in `nova-panel.js`. Then commit, tag
+This updates the integration `manifest.json` and the panel version in
+`frontend/src/panel/core.js`, then rebuilds `nova-panel.js`. Then commit, tag
 (`git tag v6.3.3`), and push the tag — the validation workflow runs on every push.
 
 After updating on a live system, hard-refresh the browser (`Ctrl+Shift+R`) so the

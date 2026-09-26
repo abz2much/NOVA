@@ -1,3 +1,5 @@
+/* GENERATED FILE: do not edit. Built by scripts/build_panel.py from
+ * frontend/src/. Edit the sources there, then run the build. */
 /* ===================================================================
  * NOVA3D — rotatable axonometric 3D residence model (SVG).
  * Self-contained, no build/CDN. The DEFAULT HOUSE spec (dimensions,
@@ -1080,7 +1082,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v7.121.0
+ * v7.122.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1154,7 +1156,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v7.121.0 ",
+      console.log("%c Nova Panel %c v7.122.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -1970,7 +1972,7 @@ ${this._htmlDashboardBody()}`;
     const first = ordered[0];
     const last = ordered[ordered.length - 1];
     const sig = ordered.length + "|" + (first ? first.ts + first.msg : "") + "|" + (last ? last.ts + last.msg : "");
-    const renderSig = sig + " " + activeFilter + " " + search;
+    const renderSig = sig + "\0" + activeFilter + "\0" + search;
     if (renderSig === container.dataset.renderSig) {
       return;
     }
