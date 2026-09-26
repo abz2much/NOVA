@@ -119,13 +119,13 @@ const PANEL = {
     cast_devices: [{ entity_id: "media_player.living_room_speaker", name: "Living Room Speaker" }, { entity_id: "media_player.kitchen_speaker", name: "Kitchen Speaker" }],
     speaker_areas: [{ area_id: "living_room", name: "Living Room" }, { area_id: "kitchen", name: "Kitchen" }],
     room_speakers: { living_room: "media_player.living_room_speaker" },
-    all_people: [{ entity_id: "person.abi", name: "Abi" }, { entity_id: "person.rachel", name: "Rachel" }],
-    person_honorifics: { "person.rachel": "boss", "person.abi": "captain" },
+    all_people: [{ entity_id: "person.alex", name: "Alex" }, { entity_id: "person.morgan", name: "Morgan" }],
+    person_honorifics: { "person.morgan": "boss", "person.alex": "captain" },
     general_speaker: "media_player.kitchen_speaker",
     satellites: [{ entity_id: "assist_satellite.basement_nova", name: "Basement Nova", area: "Basement" }],
     satellite_pairings: { "assist_satellite.basement_nova": "media_player.living_room_speaker" },
-    notify_services_available: ["notify.mobile_app_abi_phone", "notify.mobile_app_spouse_phone"],
-    notify_service: "notify.mobile_app_abi_phone",
+    notify_services_available: ["notify.mobile_app_alex_phone", "notify.mobile_app_morgan_phone"],
+    notify_service: "notify.mobile_app_alex_phone",
     sentinel_rules: [
       { id: "door_left_open", desc: "A door has been open for a while" },
       { id: "garage_left_open", desc: "The garage has been open overnight" },
@@ -136,7 +136,7 @@ const PANEL = {
     observer_stats: {
       running: true, calls_last_hour: 4, rate_limit: 30, events_24h: 112, flagged_24h: 9,
       spoken_24h: 3, cognition_enabled: true, cog_entities: 88, cog_predictable: 61,
-      cog_routines: 14, cog_presence: 2, presence: [{ name: "Abi", zone: "home", gps: true, distance_km: 0 }],
+      cog_routines: 14, cog_presence: 2, presence: [{ name: "Alex", zone: "home", gps: true, distance_km: 0 }],
       cog_escalated: 1, local_rate: 92, local_decisions: 103, cloud_calls: 9,
       learned_patterns: 14, llm_breaker: "closed",
     },
@@ -484,8 +484,8 @@ setTimeout(async () => {
       !!newRoot.getElementById("cameraPanel")],
   );
 
-  // Real gap Abi caught live: the Areas grid hard-capped at 6 tiles, so 8 of
-  // his 14 real areas never rendered at all. Also covers the redesign that
+  // Regression: the Areas grid hard-capped at 6 tiles, so an installation
+  // with 14 areas rendered only 6. Also covers the redesign that
   // shipped alongside the fix: capability icons (canonical order, capped at
   // 5 per Classic's own convention), sparkline trends, and a light toggle.
   checks.push(
@@ -599,14 +599,14 @@ setTimeout(async () => {
         if (!ph || ph.querySelector(".stub-tag")) return false;
         const rows = ph.querySelectorAll(".person-honorific-row");
         if (rows.length !== 2) return false;
-        // person.rachel -> "boss", a preset option, selected directly, custom input hidden
-        const rachelSel = ph.querySelector('select[data-person-id="person.rachel"]');
-        const rachelCustom = ph.querySelector('input[data-person-id="person.rachel"]');
-        if (!rachelSel || rachelSel.value !== "boss" || !rachelCustom.hidden) return false;
-        // person.abi -> "captain", not a preset -> select shows "__custom__", input visible & prefilled
-        const abiSel = ph.querySelector('select[data-person-id="person.abi"]');
-        const abiCustom = ph.querySelector('input[data-person-id="person.abi"]');
-        return abiSel && abiSel.value === "__custom__" && !abiCustom.hidden && abiCustom.value === "captain";
+        // person.morgan -> "boss", a preset option, selected directly, custom input hidden
+        const morganSel = ph.querySelector('select[data-person-id="person.morgan"]');
+        const morganCustom = ph.querySelector('input[data-person-id="person.morgan"]');
+        if (!morganSel || morganSel.value !== "boss" || !morganCustom.hidden) return false;
+        // person.alex -> "captain", not a preset -> select shows "__custom__", input visible & prefilled
+        const alexSel = ph.querySelector('select[data-person-id="person.alex"]');
+        const alexCustom = ph.querySelector('input[data-person-id="person.alex"]');
+        return alexSel && alexSel.value === "__custom__" && !alexCustom.hidden && alexCustom.value === "captain";
       })()],
     ["settings tab: Residence / Home card is real, not a stub",
       (() => {
@@ -866,7 +866,7 @@ setTimeout(async () => {
   checks.push(["residence tab: switching floor tabs updates the active floor",
     elNew._currentFloor === "1f" && floor1fBtn.classList.contains("active")]);
 
-  // Scroll-to-zoom on the 3D scene (v7.101.27) — Abi caught trying to zoom in on
+  // Scroll-to-zoom on the 3D scene (v7.101.27) — regression found while zooming in on
   // the model and finding only rotate was wired, so any drag just spun the house.
   const priorZoomSceneHtml = resRoot.getElementById("resIso")?.innerHTML || "";
   const zoomInEvt = new resRoot.ownerDocument.defaultView.WheelEvent("wheel", { deltaY: -100, bubbles: true, cancelable: true });
@@ -907,32 +907,32 @@ setTimeout(async () => {
 
   // Person Honorifics: picking "Custom…" reveals the text input without saving
   // yet (nothing to save), then typing+blurring the custom input saves it.
-  const rachelSel = sRoot.querySelector('select[data-person-id="person.rachel"]');
+  const morganSel = sRoot.querySelector('select[data-person-id="person.morgan"]');
   const priorPersonHonorificSaves = _updateConfigCalls.filter(c => c.key === "person_honorifics").length;
-  rachelSel.value = "__custom__";
-  rachelSel.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+  morganSel.value = "__custom__";
+  morganSel.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
   // No `await` here on purpose: revealing the custom input is synchronous
   // (no save, so nothing to wait on) — waiting risks a still-in-flight
   // re-render from an earlier test's save landing here and clobbering this
   // synchronous DOM mutation before it's asserted.
-  const rachelCustomAfterPick = sRoot.querySelector('input[data-person-id="person.rachel"]');
+  const morganCustomAfterPick = sRoot.querySelector('input[data-person-id="person.morgan"]');
   checks.push(["settings tab: Person Honorifics — picking Custom… reveals the input without an unwanted save",
-    !rachelCustomAfterPick.hidden
+    !morganCustomAfterPick.hidden
     && _updateConfigCalls.filter(c => c.key === "person_honorifics").length === priorPersonHonorificSaves]);
-  rachelCustomAfterPick.value = "boss lady";
-  rachelCustomAfterPick.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+  morganCustomAfterPick.value = "boss lady";
+  morganCustomAfterPick.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
   await new Promise(r => setTimeout(r, 20));
   checks.push(["settings tab: Person Honorifics — custom text input autosaves into the per-person JSON dict",
     _updateConfigCalls.some(c => c.key === "person_honorifics"
-      && JSON.parse(c.value)["person.rachel"] === "boss lady"
-      && JSON.parse(c.value)["person.abi"] === "captain")]);  // Abi's existing override untouched
+      && JSON.parse(c.value)["person.morgan"] === "boss lady"
+      && JSON.parse(c.value)["person.alex"] === "captain")]);  // Existing override untouched
   sRoot = elNew.shadowRoot;
-  const abiSelForDefault = sRoot.querySelector('select[data-person-id="person.abi"]');
-  abiSelForDefault.value = "";
-  abiSelForDefault.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+  const alexSelForDefault = sRoot.querySelector('select[data-person-id="person.alex"]');
+  alexSelForDefault.value = "";
+  alexSelForDefault.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
   await new Promise(r => setTimeout(r, 20));
   checks.push(["settings tab: Person Honorifics — picking “— use default —” removes that person's override entirely",
-    _updateConfigCalls.some(c => c.key === "person_honorifics" && !("person.abi" in JSON.parse(c.value)))]);
+    _updateConfigCalls.some(c => c.key === "person_honorifics" && !("person.alex" in JSON.parse(c.value)))]);
   sRoot = elNew.shadowRoot;
 
   // Diagnostics card: fetched once on entering Settings (async), so give it
@@ -1470,22 +1470,22 @@ setTimeout(async () => {
     ["settings tab: Notifications card preserves the legacy selected device",
       (() => {
         const nc = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /^Notifications$/.test(c.querySelector(".panel-title")?.textContent?.trim() || ""));
-        const abi = nc?.querySelector('.new-notify-service-toggle[data-notify-service="notify.mobile_app_abi_phone"]');
-        return !!nc && !nc.querySelector(".stub-tag") && !!abi
-          && abi.classList.contains("on") && abi.textContent.trim() === "ON"
+        const alex = nc?.querySelector('.new-notify-service-toggle[data-notify-service="notify.mobile_app_alex_phone"]');
+        return !!nc && !nc.querySelector(".stub-tag") && !!alex
+          && alex.classList.contains("on") && alex.textContent.trim() === "ON"
           && nc.querySelectorAll(".new-notify-service-toggle").length === 2;
       })()],
   );
-  const notifyToggle = sRoot.querySelector('.new-notify-service-toggle[data-notify-service="notify.mobile_app_spouse_phone"]');
+  const notifyToggle = sRoot.querySelector('.new-notify-service-toggle[data-notify-service="notify.mobile_app_morgan_phone"]');
   notifyToggle.click();
-  const abiNotifyToggle = sRoot.querySelector('.new-notify-service-toggle[data-notify-service="notify.mobile_app_abi_phone"]');
-  abiNotifyToggle.click();
+  const alexNotifyToggle = sRoot.querySelector('.new-notify-service-toggle[data-notify-service="notify.mobile_app_alex_phone"]');
+  alexNotifyToggle.click();
   await new Promise(r => setTimeout(r, 20));
   checks.push(["settings tab: rapid Notifications toggles preserve both changes in order",
     _updateConfigCalls.some(c => c.key === "notify_services" && c.value === JSON.stringify([
-      "notify.mobile_app_abi_phone", "notify.mobile_app_spouse_phone",
+      "notify.mobile_app_alex_phone", "notify.mobile_app_morgan_phone",
     ])) && _updateConfigCalls.some(c => c.key === "notify_services" && c.value === JSON.stringify([
-      "notify.mobile_app_spouse_phone",
+      "notify.mobile_app_morgan_phone",
     ]))]);
   sRoot = elNew.shadowRoot;
 
@@ -1750,8 +1750,8 @@ setTimeout(async () => {
       })()],
   );
   // Camera Watch / Visitor Learning (v7.101.5) — previously Classic-only,
-  // parity gap Abi caught: he's on the new look and had no way to flip
-  // camera_auto_analyze from his actual settings screen.
+  // parity gap: the new look had no way to flip camera_auto_analyze from
+  // its settings screen.
   checks.push(["settings tab: Camera Watch and Visitor Learning toggles are real, not stubs",
     !!sRoot.querySelector('.toggle-btn[data-cfg-key="camera_auto_analyze"]')
     && !!sRoot.querySelector('.toggle-btn[data-cfg-key="camera_auto_analyze_motion"]')
@@ -1897,13 +1897,13 @@ setTimeout(async () => {
       && !sRoot.querySelector('.new-log-filter[data-filter="ROUTE"]')], // dead category, dropped
   );
 
-  // Real gap Abi caught live from a screenshot: a genuine "LEARN" category
+  // Regression found in a screenshot: a genuine "LEARN" category
   // (anticipation entries) appeared in the log with a bare "•" bullet and
   // no way to filter for it — neither the filter-chip list nor the color
   // map had ever been updated to match nova_log()'s real category set.
   const originalCallWSForLearn = hass.callWS;
   hass.callWS = async (m) => (m.type === "nova/get_debug_log"
-    ? { entries: [{ ts: "15:44:58", cat: "LEARN", msg: "anticipation: Rachel is heading home — about 0.8 km out." }] }
+    ? { entries: [{ ts: "15:44:58", cat: "LEARN", msg: "anticipation: Morgan is heading home — about 0.8 km out." }] }
     : originalCallWSForLearn(m));
   await elNew._fetchDebugLog();
   sRoot = elNew.shadowRoot;

@@ -39,10 +39,10 @@ def safety(cognitive_core, fake_hass):
 async def test_freeze_alert_uses_solo_persons_own_honorific(
     cognitive_core, safety, fake_hass, monkeypatch
 ):
-    fake_hass.states.set("person.rachel", "home", friendly_name="Rachel")
+    fake_hass.states.set("person.morgan", "home", friendly_name="Morgan")
     fake_hass.states.set("weather.home", "cloudy", temperature=15)
     _set_nova_config(cognitive_core, monkeypatch, {
-        "person_honorifics": {"person.rachel": "boss"},
+        "person_honorifics": {"person.morgan": "boss"},
         "honorific": "sir",
     })
     action = await safety._check_freeze()
@@ -53,7 +53,7 @@ async def test_freeze_alert_uses_solo_persons_own_honorific(
 async def test_freeze_alert_falls_back_to_global_default_for_solo_person_without_override(
     cognitive_core, safety, fake_hass, monkeypatch
 ):
-    fake_hass.states.set("person.jianna", "home", friendly_name="Jianna")
+    fake_hass.states.set("person.casey", "home", friendly_name="Casey")
     fake_hass.states.set("weather.home", "cloudy", temperature=15)
     _set_nova_config(cognitive_core, monkeypatch, {"honorific": "boss"})
     action = await safety._check_freeze()
@@ -63,8 +63,8 @@ async def test_freeze_alert_falls_back_to_global_default_for_solo_person_without
 async def test_freeze_alert_drops_honorific_when_multiple_home(
     cognitive_core, safety, fake_hass, monkeypatch
 ):
-    fake_hass.states.set("person.abi", "home", friendly_name="Abi")
-    fake_hass.states.set("person.rachel", "home", friendly_name="Rachel")
+    fake_hass.states.set("person.alex", "home", friendly_name="Alex")
+    fake_hass.states.set("person.morgan", "home", friendly_name="Morgan")
     fake_hass.states.set("weather.home", "cloudy", temperature=15)
     _set_nova_config(cognitive_core, monkeypatch, {"honorific": "sir"})
     action = await safety._check_freeze()
@@ -92,10 +92,10 @@ def lockdown(cognitive_core, fake_hass, tmp_path, monkeypatch):
 async def test_lockdown_engage_uses_solo_persons_own_honorific(
     cognitive_core, lockdown, fake_hass, monkeypatch
 ):
-    fake_hass.states.set("person.rachel", "home", friendly_name="Rachel")
+    fake_hass.states.set("person.morgan", "home", friendly_name="Morgan")
     fake_hass.states.set("lock.front", "locked")
     _set_nova_config(cognitive_core, monkeypatch, {
-        "person_honorifics": {"person.rachel": "boss"},
+        "person_honorifics": {"person.morgan": "boss"},
         "honorific": "sir",
     })
     action = await lockdown.engage("test")
@@ -106,8 +106,8 @@ async def test_lockdown_engage_uses_solo_persons_own_honorific(
 async def test_lockdown_engage_drops_honorific_when_multiple_home(
     cognitive_core, lockdown, fake_hass, monkeypatch
 ):
-    fake_hass.states.set("person.abi", "home", friendly_name="Abi")
-    fake_hass.states.set("person.rachel", "home", friendly_name="Rachel")
+    fake_hass.states.set("person.alex", "home", friendly_name="Alex")
+    fake_hass.states.set("person.morgan", "home", friendly_name="Morgan")
     fake_hass.states.set("lock.front", "locked")
     _set_nova_config(cognitive_core, monkeypatch, {"honorific": "sir"})
     action = await lockdown.engage("test")

@@ -1,3 +1,8 @@
+## [7.120.3] — public fixture hygiene
+
+- Replaced installation-specific names, entity IDs, notification targets and network addresses in public tests, examples, comments and historical notes with neutral synthetic data.
+- Runtime behavior, configuration, storage and public schemas are unchanged.
+
 ## [7.120.2] — anticipation after restart
 
 **Fixes**
@@ -32,7 +37,7 @@ Service, WebSocket, panel and assistant-tool schemas, config keys and storage ar
 - A provider reply that is not a valid decision (not JSON, no `speak`, a non-boolean `speak`, or speech with no message) is now a provider failure: the Local Mind decides, nothing is cached, the same event is not sent to the provider again for a minute, and the log records only the failure kind and length, never the reply. It counts against the provider's connection health the same way a network failure does, and only a valid decision counts as a success. The one-minute hold belongs to the loaded integration, so reloading Nova or changing the provider starts with none.
 - "Lights" now means the light domain: sensors and switches whose names contain the word are no longer returned, and every light is listed even when its name lacks the word. "Lights that are on" lists only lights that are on.
 - An exact name or entity ID resolves one target alone, and a clarification shows each candidate's name and area.
-- "Can you reach Home Assistant?" and similar questions about the Home Assistant platform no longer get a who's-home answer. They get a status answer from what Nova can observe (whether Home Assistant is running, its version and how many entities it serves). Presence questions now need presence wording ("who is home", "is anyone home", "is Abi home", "how many people are home"), so a bare "home" in a sentence no longer triggers them. "Is <person> home?" answers for that person, and "how many people are home?" gives a count. This applies to every channel that uses the local engine.
+- "Can you reach Home Assistant?" and similar questions about the Home Assistant platform no longer get a who's-home answer. They get a status answer from what Nova can observe (whether Home Assistant is running, its version and how many entities it serves). Presence questions now need presence wording ("who is home", "is anyone home", "is Alex home", "how many people are home"), so a bare "home" in a sentence no longer triggers them. "Is <person> home?" answers for that person, and "how many people are home?" gives a count. This applies to every channel that uses the local engine.
 - Asking which lights are on answers locally, naming each light by its Home Assistant name (with the area when two share a name).
 - Routine suggestions are scored on distinct days, coverage, timing concentration, recency and provenance; sequences on how often the trigger is actually followed, counting each follow-up once. Same-day repeats, stopped routines, spread-out timing, mostly automation-caused behaviour and busy triggers that are rarely followed are no longer proposed. Strong routines keep exactly the confidence they had, no threshold was lowered, and each stored suggestion carries its evidence.
 
@@ -306,7 +311,7 @@ Nova still supports the same six provider families (Groq, OpenAI, Anthropic, Gem
 
 ## [7.104.1] — fix: arrival/departure briefing wording, ignore thermostat locks
 
-- Arrival briefing no longer restates the arriving person's name when addressing them directly by honorific ("Good afternoon, sir. Abi has just arrived home." → "Welcome home, sir."), and drops the open-door line from the briefing context since the arrival trigger IS a door opening.
+- Arrival briefing no longer restates the arriving person's name when addressing them directly by honorific ("Good afternoon, sir. Alex has just arrived home." → "Welcome home, sir."), and drops the open-door line from the briefing context since the arrival trigger is a door opening.
 - Departure announcements now escalate to medium urgency when the last person home leaves, so routing correctly pushes a phone notification instead of speaking into an empty house — low-urgency routing was trusting room occupancy sensors, which can still read "on" briefly after someone physically walks out.
 - Thermostat keypad/child locks (already exempt from the lockdown auto-lock sweep) are now also excluded everywhere else Nova talks about or acts on "unlocked locks": briefings, home state summary, the status/what's-open/goodnight local intents, and the agent's home-state context.
 
@@ -358,11 +363,11 @@ Nova still supports the same six provider families (Groq, OpenAI, Anthropic, Gem
 
 ## [7.101.37] — fix: routine arrivals silently dropped, no greeting or log entry
 
-Abi: went out, came back, got no welcome-home greeting, and the activity log had no record of the arrival at all — not even the front door. Root-caused against his live instance, not guessed:
+Routine arrivals could be dropped entirely, producing neither a welcome-home greeting nor an activity record:
 
-- Home Assistant's own history confirmed `person.abi` genuinely transitioned `not_home → home` — the arrival was real and HA saw it. But it produced zero Nova reaction.
+- Home Assistant could record a genuine `person.alex` transition from `not_home → home` while Nova produced no reaction.
 - **Root cause, structural, not new tonight**: `observer.py`'s `IGNORED_DOMAINS` blanket-excludes the `person` domain (deliberately — raw location-string/GPS-jitter changes are noisy). `classifier.py` has dedicated `person.*` arrived/left handling ready to categorize these as `"presence"` events, but with no carve-out in the pre-filter, that logic was only ever reachable when `cognition.py`'s local anomaly model judged the *timing* unusual enough to escalate past the domain block. A routine, expected arrival — like this one, right after a school drop-off — never triggers that escalation, so it was dropped before either the greeting or the activity log ever saw it.
-- **Second, compounding issue also found and fixed**: even when an arrival does escalate, `observer.py` also enforces an hourly classifier-call cap (`classifier_rate_limit`, currently 40/hr on this install) with no exemptions and no fallback — a busy morning of ordinary sensor chatter can exhaust the budget before the one event a household actually wants to hear about ever gets a turn. Confirmed via the actual warning log: the cap was hit 27 minutes before this specific arrival.
+- **Second, compounding issue also found and fixed**: even when an arrival escalated, `observer.py` enforced its hourly classifier-call cap with no exemptions or fallback, so ordinary sensor chatter could exhaust the budget before an arrival.
 
 Fixed both: `person.*` events crossing the home/away boundary (either direction) now pass the pre-filter unconditionally rather than needing an anomaly score, and are exempt from the classifier rate limit specifically (routine sensor chatter still gets capped normally). Added regression tests (`test_observer_arrival.py`) covering the new carve-out and confirming it stays narrow — non-boundary person-entity changes and `device_tracker.*` (which classifier.py has no handling for) remain fully filtered as before.
 
@@ -370,13 +375,13 @@ Raising `classifier_rate_limit` yourself (Settings → Devices & Services → No
 
 ## [7.101.36] — fix: touch drag on the 3D house blocked page scroll entirely
 
-Abi reported "moving around the 3D is sluggish, but scrolling at the edge is smooth" — that phrasing was the tell. The drag-to-rotate handler committed to a rotate gesture on `touchstart` unconditionally and called `preventDefault()` on every `touchmove` while dragging, regardless of swipe direction. A vertical swipe intended to scroll the page — if it happened to start on top of the house — got captured as a (visually jerky, unwanted) rotate instead, and the page couldn't scroll at all until the touch lifted. Fixed by checking the first ~6px of movement: a mostly-vertical swipe now releases the drag and lets the browser scroll normally; only a mostly-horizontal swipe commits to rotating. Mouse drag is unaffected (no ambiguity there — always rotates immediately, same as before).
+A vertical swipe starting over the 3D house was incorrectly captured as rotation and blocked page scrolling. The first ~6px of movement now distinguish vertical page scrolling from horizontal rotation. Mouse drag is unchanged.
 
-Also directly verified, on Abi's actual live instance via DOM inspection (not a guess): at 7.101.35 the Residence tab's door-mapping select and its container genuinely have zero overflow at a forced 390px width with real entity data — the fix from 7.101.35 is working correctly server-side. If the overflow is still visible, it's very likely the phone browser serving a cached copy of the old `nova-panel.js` — worth a hard-refresh or clearing site data for the Home Assistant domain before assuming the code is still wrong.
+The Residence tab's door-mapping controls were also verified at a forced 390px width with representative entity data.
 
 ## [7.101.35] — fix: Residence tab overflow on phones; 3D house retheme to match Command Center
 
-Abi caught two things I missed in the mobile audit and one older cosmetic mismatch:
+The mobile audit found two layout issues and one older cosmetic mismatch:
 
 **Residence tab overflow on phones**: door-mapping `<select>` elements had zero CSS — no `min-width`, no `max-width` — so a native select sizes to its widest option text with nothing constraining it. My earlier mobile audit used empty door mappings (short "— auto-detect —" placeholder text), which is exactly why it never surfaced: real entity friendly names ("Front Door Contact Sensor") are long enough to force the whole row wider than the phone screen, dragging the entire page into horizontal scroll — the same failure mode as the earlier nav/button-row fixes, just triggered by real data rather than button count. Added `.door-map-sel-new{flex:1;min-width:0;max-width:220px}`.
 
@@ -393,13 +398,13 @@ Added a `.cfg-row-wrap` modifier class (flex-wrap without disturbing the many ot
 
 ## [7.101.33] — fix: top nav overflowed off-screen on phones
 
-Abi caught this live on a real phone: the 7-tab nav row (`Command Center`/`Residence`/`Intrusion`/`Suggestions`/`Settings`/`Logs`/`Memory`) had no `flex-wrap` of its own, so on a narrow screen it just kept extending past the edge instead of wrapping — the whole page scrolled sideways. Pre-existing, not something tonight's changes introduced; Command Center had never actually been checked at phone width before (all prior live verification was on desktop browser). Added `flex-wrap:wrap` to `.top-nav` so it drops to a second row instead of overflowing. Verified at a 390px width by rendering the real component and screenshotting it inside a fixed-width test container — confirmed no content crosses the boundary.
+The 7-tab navigation row had no `flex-wrap`, so narrow screens could scroll sideways. `.top-nav` now wraps onto a second row and is verified at a 390px viewport.
 
 Only checked the header for this pass, not the rest of the dashboard/settings tabs at phone width — a fuller mobile pass is still worth doing separately if other cramped spots turn up.
 
 ## [7.101.32] — fix: header layout broke when the Look selector was removed
 
-Caught live by Abi right after updating: the top bar looked "off" — the nav moved and the logo read as smaller. Real cause: `.topbar` used `justify-content:space-between` across three children (brand, nav, the "Look" selector); deleting the selector's wrapper div in 7.101.30 left only two children, which `space-between` then stretched to opposite edges of the 1100px-wide bar instead of grouping them together like before. Changed to `justify-content:flex-start` with an explicit gap so brand and nav sit together on the left again. Verified visually (rendered the actual component and screenshotted it) before shipping, not just reasoned about the CSS.
+Removing the Look selector left `.topbar` with two children that `space-between` pushed to opposite edges. The bar now uses `justify-content:flex-start` with an explicit gap.
 
 ## [7.101.31] — Floor Plan Editor: JSON export/import ported to Command Center
 
@@ -409,7 +414,7 @@ Along the way, found and fixed a real gap in `scripts/smoke_panel.js`'s own test
 
 ## [7.101.30] — Classic dashboard deleted; Command Center is now Nova's only panel
 
-Command Center reached full feature parity with Classic (Floor Plan Editor in 7.101.21, Residence 3D in 7.101.24, the background-image upload gap in 7.101.29) — Abi's stated goal since starting the Command Center work was to delete Classic once nothing was left behind, rather than maintain two dashboards indefinitely. Deleted it.
+Command Center reached full feature parity with Classic (Floor Plan Editor in 7.101.21, Residence 3D in 7.101.24, and background-image upload in 7.101.29), so the redundant Classic dashboard was deleted.
 
 **What changed:**
 - `nova-panel.js` (the old ~10,600-line Classic implementation) is gone. What's now `nova-panel.js` is Command Center's former `nova-panel-new.js` content, with the shared `NOVA3D` 3D-rendering engine (~1,050 lines) moved into it directly — that engine is what the Residence 3D tab has always used, so it had to move rather than delete. No more style switcher, no more dynamic `import()` of a second file; `panel_custom` registers this one file directly.
@@ -447,7 +452,7 @@ This is Phase A: static render, rotation, live presence/door state, and settings
 
 ## [7.101.23] — fix: openings/camera rows still overflowed after 7.101.22's flex-wrap-only fix
 
-7.101.22's `flex-wrap` fix wasn't enough — Abi caught it still overflowing live. Root cause: a native `<input type="range">`/`<select>` has no intrinsic width limit, so two of them are already wider than a settings-card's column before wrapping even has a reason to trigger. Gave every control in the openings/camera rows an explicit width cap (range sliders 70px, number inputs 44px, selects capped at 110px) so the row actually has narrow-enough pieces to wrap onto multiple lines within its column.
+7.101.22's `flex-wrap` fix was insufficient because native range and select controls had no intrinsic width limit. Openings and camera controls now have explicit width caps so the rows can wrap within their column.
 
 ## [7.101.22] — fix: openings/camera rows overflowed into the next settings column
 
@@ -495,19 +500,19 @@ Caught live: "door open 10 minutes" repeated every 10 minutes forever instead of
 
 ## [7.101.13] — new: daily solar/energy report ("how much solar today", forecast remaining, cost)
 
-New `energy_report` voice/chat tool, distinct from the existing live-instant `solar_status`/`energy_status`: today's solar generated, self-consumed/exported/imported, whole-home consumption today, forecast remaining today + tomorrow, and cost. Built from the same Home Assistant Energy dashboard config `solar_status` already reads, so it needs no separate setup on installs that have that configured. Generated/imported/exported/battery totals use a reset-safe sum of positive deltas over the day's recorder history (handles a meter reset/reboot mid-day without misreporting). Forecast figures are discovered by platform + stable unique_id suffix (works with Forecast.Solar or Open-Meteo Solar Forecast) rather than the Energy dashboard's own `config_entry_solar_forecast` link — found live to have gone stale on this install after switching forecast providers. Cost prefers two new optional settings (`energy_cost_today_entity` / `energy_cost_net_entity`) pointing at an install's own tariff-cost sensors when it has them (exact); falls back to an estimate (import kWh × price, minus export kWh × export rate) from the Energy dashboard's own price fields otherwise, clearly labeled as an estimate.
+New `energy_report` voice/chat tool reports today's solar generation, import, export, consumption, forecast, and cost. It uses the Home Assistant Energy dashboard config, reset-safe recorder deltas, stable forecast entity identifiers that survive provider changes, and clearly labeled cost estimates when exact tariff sensors are unavailable.
 
 ## [7.101.12] — fix: appliance job_state detection missed "finish" spelling and misclassified dishwashers as washers
 
 Two bugs caught live diagnosing a dryer false-alert. First: LG ThinQ dryers report `job_state` "finished" on completion, but washers/dishwashers report "finish" (no "ed") — Nova's native-completion matcher only ever recognized "finished", so washer/dishwasher completion via `job_state` was silently never detected at all. Both spellings are now accepted. Second: `_classify_appliance`/`_type_to_appliance` matched keywords in dict-insertion order, and "washer" is both a key and a substring of "dishwasher" — so every dishwasher was classified (and threshold-tuned) as a washer. Keywords are now matched longest-first so a specific match always wins over one it happens to contain. New tests lock in both.
 
-## [7.101.11] — fix: vehicle detection now uses Abi's proven entity, not the untested one
+## [7.101.11] — fix: vehicle detection now uses the proven event source
 
-Follow-up to 7.101.10: switched the "vehicle" role from the `vehicleDetected` binary_sensor (ships disabled by the integration, no track record) to the `motionDetectionTypeVehicle` switch — the entity Abi's own pre-existing "Announce Car In Driveway" automation already used successfully as an event trigger. Both entities exist on the same physical device; only one is mapped to "vehicle" now, deterministically, so there's no ambiguity about which one Nova watches. New test locks this in (both present, only the switch wins) against an accidental future re-add of the other mapping.
+Follow-up to 7.101.10: switched the vehicle role from the integration-disabled `vehicleDetected` binary sensor to the proven `motionDetectionTypeVehicle` event switch. Both entities can exist on the same device; only the switch is mapped so selection remains deterministic.
 
 ## [7.101.10] — Eufy vehicle detection wired up and announced
 
-New `vehicle` role in `eufy.py`'s discovery map (unique_id suffix `_device_vehicleDetected`, verified live) and a new direct-announce branch in the Eufy state-change listener — no vision call, same cost reasoning as the package/known-visitor paths. A car detected at any Eufy camera with the sensor (currently Driveway and Backyard) gets a spoken "a vehicle was detected at {camera name}" with a 5-minute per-camera cooldown. **Note:** Eufy ships `vehicle_detected` disabled by default on both this install's cameras (`disabled_by: "integration"`) — it needs enabling in Home Assistant's entity settings before this does anything; the code alone can't turn it on.
+New `vehicle` role in `eufy.py`'s discovery map and a direct-announce branch in the Eufy state-change listener — no vision call, with a 5-minute per-camera cooldown. Eufy can ship the vehicle entity disabled by the integration, so it may need enabling in Home Assistant's entity settings.
 
 ## [7.101.9] — welcome briefing now waits for the front door to actually open
 
@@ -523,11 +528,11 @@ Caught live on the first real doorbell press with the Eufy rebuild: Nova said "S
 
 ## [7.101.6] — Camera Watch and Visitor Learning toggles ported to the new look
 
-Real parity gap Abi caught live testing the Eufy rebuild: `camera_auto_analyze` ("Camera Watch," gates doorbell/motion auto-analysis) and `visitor_learning` (silent stranger logging) only ever existed in Classic's Settings — someone on the new look had no way to turn Camera Watch on at all, meaning a doorbell press could never fire regardless of how correctly the Eufy pipeline itself was wired. Both toggles now render in the new look's Settings → Cameras card via the existing generic autosave (no new wiring needed).
+`camera_auto_analyze` (Camera Watch) and `visitor_learning` existed only in Classic's Settings, leaving the new look unable to enable Camera Watch. Both toggles now render in Settings → Cameras through the existing autosave path.
 
 ## [7.101.5] — fix: Eufy package detection was wrongly gated on Camera Watch
 
-Caught before it bit anyone real: the new Eufy listener (v7.101.4) checked `camera_auto_analyze` ("Camera Watch") before dispatching *any* role, including package delivered/stranded/taken. The periodic vision-sweep it replaces for Eufy cameras never had that dependency — it only ever checked `package_detection` ("Package Watch") — so a house with Camera Watch off and Package Watch on (a real, supported combination; this is this install's own default) would have seen package events silently swallowed. Package roles now check `package_detection` only, matching the pre-existing behavior exactly; ringing/stranger/person still require Camera Watch, unchanged.
+The Eufy listener checked `camera_auto_analyze` before dispatching every role, including package events. Package roles now depend only on `package_detection`, preserving the supported Camera Watch-off, Package Watch-on configuration; ringing, stranger, and person roles still require Camera Watch.
 
 ## [7.101.4] — doorbell/package pipeline rebuilt around Eufy Security
 
@@ -538,11 +543,11 @@ Nova's entire doorbell-press and visitor-detection pipeline was built for Nest/F
 - `package_monitor.py` gains `note_from_eufy()`, feeding Eufy's native delivered/taken states through the *same* state machine (`evaluate()`) the old vision-sweep used — identical announce/log behavior regardless of source — plus a dedicated one-shot nag for `package_stranded`. The 15-minute vision-sweep now skips any camera with native Eufy package sensors instead of redundantly re-guessing what Eufy's own model already tells us for free.
 - `camera.py`'s Nest-only "recorded event media" fallback (used when a doorbell press's live frame missed the subject) now dispatches per-integration, adding Eufy's `image.*_event_image` entity alongside the existing Nest path.
 
-Net effect: doorbell press, stranger, and package detection now actually fire on this install; the two "for free" cases (known face, package delivered/taken) cost zero LLM calls instead of the roughly 96/day the old vision-sweep design implied.
+Net effect: doorbell press, stranger, and package detection now fire on supported Eufy installations; known-face and package delivered/taken events cost zero LLM calls.
 
 ## [7.101.3] — doorbell visitor-pattern mining + Camera Watch moved to the bottom
 
-New `doorbell_training.find_patterns()`: mines the existing doorbell training log for recurring visitor patterns — e.g. "a delivery at camera.front_door, mostly around 15:00, seen on 4 of the last 5 days" — grouped by camera and the vision model's own category label (delivery/package/mail/person/known_resident/vehicle/animal/other), guarding against mistaking one chatty day for a routine (occurrences must span distinct days, not just repeat presses in one visit). This is explicitly **not** face recognition — Nova has no local face model of its own; identity only ever comes from Frigate or DoubleTake (`recognition.py`), and neither is configured on this install. It's timing/category pattern-matching only, surfaced in the new look's Doorbell Training settings card. On the Command Center dashboard, Camera Watch moved from the top grid to the bottom, below Quick Actions.
+New `doorbell_training.find_patterns()` mines the existing doorbell training log for recurring timing and category patterns across distinct days. This is not face recognition; identity comes only from Frigate or DoubleTake when configured.
 
 ## [7.101.2] — new-look dashboard: Solar, Quick Actions, wider Areas, longer Activity
 
@@ -576,7 +581,7 @@ With this, only **Residence** (the 3D house view) remains Classic-only — a pla
 
 ## [7.97.1] — fix + redesign: the Areas card was capped at 6 and looked thin
 
-Abi caught it live from a screenshot: the new look's Areas grid hard-capped at 6 tiles, so 8 of his 14 real areas never rendered at all — the cap is gone, and the grid now reflows to fit however many areas exist. Alongside the fix, redesigned the card itself (approved from a mockup first): capability icons per room (speaker/mmwave/light/switch/lock/camera/door/leak/alarm, in the same canonical order and 5-icon cap Classic uses), live sparkline trends for temperature and humidity — not just the current reading — and a light on/off toggle right on the card, all reading from the same data and websocket calls Classic already uses (`nova/get_area_sparklines`, `light.turn_on`/`turn_off` targeted by area). One touch that isn't from Classic: a thin top-edge color bar per card (cool blue → gold → ember) as a quick ambient temperature read at a glance.
+The Areas grid hard-capped at 6 tiles, so larger installations lost rooms from view. The cap is gone and the grid now reflows for every area. The cards also gained capability icons, climate sparklines, a light toggle, and a temperature accent using existing data and WebSocket calls.
 
 ## [7.97.0] — the new look gets a Memory tab
 
@@ -584,7 +589,7 @@ A fourth top-level tab: Classic's own Memory tab, ported over — "What Nova Kno
 
 ## [7.96.1] — fix: "LEARN" and 9 other real log categories had no filter chip
 
-Abi spotted it live: anticipation log entries ("Rachel is heading home…") showed up tagged `LEARN`, with a plain bullet instead of an icon and no way to filter for them — in both Classic and the new look. The category filter chips and color map had drifted from the real set of categories the backend actually logs under; `LEARN` plus 9 others (`AUTO`, `BIO`, `CONFIG`, `ENERGY`, `MODE`, `OFFER`, `REPLY`, `SAFETY`, `WARNING`) were missing entirely, while `ROUTE`, `REASON`, and `TTS` sat there as dead chips nothing has logged under in a long time. Rebuilt both lists from every literal category string actually passed to `nova_log()` in the backend, with a distinct icon and color for each of the 19 real categories.
+Anticipation entries such as "Morgan is heading home…" appeared under `LEARN` with no matching icon or filter. The category filters and color map now cover all 19 categories currently written by `nova_log()` and remove obsolete categories.
 
 ## [7.96.0] — the new look gets a Logs tab
 

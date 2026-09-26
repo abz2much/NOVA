@@ -8,7 +8,7 @@ a carve-out, a routine arrival could only reach that logic via
 cognition.py's anomaly escalation (i.e. only when the *timing* was
 unusual) -- an ordinary arrival on an ordinary day was silently dropped
 before either the greeting or the activity log ever saw it. Confirmed live:
-person.abi went not_home -> home with zero corresponding Nova reaction.
+person.alex went not_home -> home with zero corresponding Nova reaction.
 These load just the pure helpers to avoid the observer's heavy imports.
 """
 import ast
@@ -47,24 +47,24 @@ def _event(entity_id, old, new):
 def test_arrived_and_left_are_transitions():
     ns = _load()
     f = ns["_is_person_home_transition"]
-    assert f(_event("person.abi", "not_home", "home")) is True
-    assert f(_event("person.abi", "home", "not_home")) is True
-    assert f(_event("person.abi", "Jianna School", "home")) is True
+    assert f(_event("person.alex", "not_home", "home")) is True
+    assert f(_event("person.alex", "home", "not_home")) is True
+    assert f(_event("person.alex", "Casey School", "home")) is True
 
 
 def test_non_boundary_person_changes_are_not_transitions():
     ns = _load()
     f = ns["_is_person_home_transition"]
     # A zone-to-zone move never touching "home" isn't an arrival/departure.
-    assert f(_event("person.abi", "work", "Jianna School")) is False
+    assert f(_event("person.alex", "work", "Casey School")) is False
     # Missing old/new state (startup) can't be judged a transition.
-    assert f(_event("person.abi", None, "home")) is False
+    assert f(_event("person.alex", None, "home")) is False
 
 
 def test_non_person_domain_is_never_a_transition():
     ns = _load()
     f = ns["_is_person_home_transition"]
-    assert f(_event("device_tracker.abi_phone", "not_home", "home")) is False
+    assert f(_event("device_tracker.alex_phone", "not_home", "home")) is False
     assert f(_event("binary_sensor.front_door", "off", "on")) is False
 
 
@@ -73,8 +73,8 @@ def test_person_home_transition_passes_the_prefilter():
     should_drop = ns["_should_pre_filter"]
     # This used to return True (dropped) for every person.* event, arrival
     # included -- person is in IGNORED_DOMAINS with no carve-out.
-    assert should_drop(_event("person.abi", "not_home", "home")) is False
-    assert should_drop(_event("person.abi", "home", "not_home")) is False
+    assert should_drop(_event("person.alex", "not_home", "home")) is False
+    assert should_drop(_event("person.alex", "home", "not_home")) is False
 
 
 def test_person_non_transition_still_prefiltered():
@@ -83,7 +83,7 @@ def test_person_non_transition_still_prefiltered():
     # A person entity's state changing without crossing the home boundary
     # (e.g. one away-zone to another) stays ignored -- this carve-out is
     # deliberately narrow, not a blanket re-admit of the whole domain.
-    assert should_drop(_event("person.abi", "work", "Jianna School")) is True
+    assert should_drop(_event("person.alex", "work", "Casey School")) is True
 
 
 def test_device_tracker_still_fully_ignored():
@@ -91,4 +91,4 @@ def test_device_tracker_still_fully_ignored():
     should_drop = ns["_should_pre_filter"]
     # classifier.py has no device_tracker-specific handling, so there's
     # nothing to re-admit it for -- this carve-out is person-only.
-    assert should_drop(_event("device_tracker.abi_phone", "not_home", "home")) is True
+    assert should_drop(_event("device_tracker.alex_phone", "not_home", "home")) is True

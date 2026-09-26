@@ -557,7 +557,7 @@ async def test_disabling_cognition_restarts_the_observation_window(hass, hass_ws
     from custom_components.nova import cognition
 
     entry = await _setup(hass)
-    eid = "binary_sensor.sun_solar_rising"
+    eid = "binary_sensor.example_morning_activity"
     now = datetime.datetime.now().replace(hour=3, minute=0, second=0,
                                           microsecond=0).timestamp()
     today = cognition._local_day(now)

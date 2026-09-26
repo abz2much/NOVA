@@ -127,7 +127,7 @@ async def test_spoken_history_link_resolved_for_matching_request(
     monkeypatch.setattr(spoken_history, "_DEFAULT_DB", db_path)
 
     rid = action_log.new_request_id()
-    action_log.start(rid, "notify", "proactive", domain="notify", service="mobile_app_abi",
+    action_log.start(rid, "notify", "proactive", domain="notify", service="mobile_app_alex",
                       db_path=db_path)
     spoken_id = spoken_history.record(
         "Welcome home, sir.", "welcome", ["media_player.kitchen"],

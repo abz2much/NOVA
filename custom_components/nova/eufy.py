@@ -54,12 +54,12 @@ _ROLE_SUFFIXES = {
     "packageStranded": "package_stranded",
     "packageTaken": "package_taken",
     "snooze": "snooze",
-    # NOT "vehicleDetected" — that binary_sensor exists on this install but
-    # ships disabled by the integration and is unproven. "vehicle" maps to
-    # the switch instead: Abi's own pre-existing automation already uses
+    # NOT "vehicleDetected" — that binary_sensor can exist but ships disabled
+    # by the integration and is not a reliable event source. "vehicle" maps
+    # to the switch instead; supported installations use
     # switch.*_motion_detection_type_vehicle (a config-shaped entity that, in
     # this eufy_security build, pulses on/off per detection rather than
-    # staying static) as an event trigger, with a real track record. Only one
+    # staying static) as an event trigger. Only one
     # of the two is mapped here on purpose — both exist on the same device,
     # and mapping both would make which one wins nondeterministic.
     "motionDetectionTypeVehicle": "vehicle",

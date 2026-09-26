@@ -250,15 +250,15 @@ def test_attribute_resident_none_without_recognition_cache(cs, fake_hass, load, 
 def test_attribute_resident_fresh_and_confident(cs, fake_hass, load, monkeypatch):
     rec = load("recognition")
     monkeypatch.setattr(rec, "last_seen_at", lambda hass, cam:
-                        {"name": "Abi", "confidence": 95.0, "age_seconds": 5})
+                        {"name": "Alex", "confidence": 95.0, "age_seconds": 5})
     result = cs.attribute_resident(fake_hass, "camera.front_door")
-    assert result == ("Abi", 95.0)
+    assert result == ("Alex", 95.0)
 
 
 def test_attribute_resident_below_confidence_threshold_is_none(cs, fake_hass, load, monkeypatch):
     rec = load("recognition")
     monkeypatch.setattr(rec, "last_seen_at", lambda hass, cam:
-                        {"name": "Abi", "confidence": 10.0, "age_seconds": 5})
+                        {"name": "Alex", "confidence": 10.0, "age_seconds": 5})
     assert cs.attribute_resident(fake_hass, "camera.front_door") is None
 
 
@@ -356,7 +356,7 @@ async def test_record_event_deduplicates_within_window(cs, fake_hass, cc_stub, l
 async def test_record_event_never_attributes_vehicle_animal_package(cs, fake_hass, cc_stub, load, monkeypatch):
     rec = load("recognition")
     monkeypatch.setattr(rec, "last_seen_at", lambda hass, cam:
-                        {"name": "Abi", "confidence": 99.0, "age_seconds": 1})
+                        {"name": "Alex", "confidence": 99.0, "age_seconds": 1})
     for label in ("vehicle", "animal"):
         await cs.record_event(fake_hass, label=label, camera_entity="camera.driveway", source="eufy")
     await cs.record_event(fake_hass, label="package", camera_entity="camera.driveway",
@@ -371,7 +371,7 @@ async def test_record_event_never_attributes_vehicle_animal_package(cs, fake_has
 async def test_record_event_attribute_false_skips_attribution_even_for_person(cs, fake_hass, cc_stub, load, monkeypatch):
     rec = load("recognition")
     monkeypatch.setattr(rec, "last_seen_at", lambda hass, cam:
-                        {"name": "Abi", "confidence": 99.0, "age_seconds": 1})
+                        {"name": "Alex", "confidence": 99.0, "age_seconds": 1})
     await cs.record_event(fake_hass, label="person", camera_entity="camera.front_door",
                           source="eufy", attribute=False)
     assert cc_stub[0][0][3] == "unknown"  # person arg

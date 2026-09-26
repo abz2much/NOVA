@@ -158,7 +158,7 @@ async def test_eufy_taken_while_home_updates_state_silently(pm, load, fake_hass,
     monkeypatch.setattr(pm, "_announcements_on", lambda h: True)
     pm._STATE.clear()
     pm._STATE["camera.front_door_bell"] = {"package": True, "mail": False, "count": 1}
-    fake_hass.states.set("person.abi", "home")
+    fake_hass.states.set("person.alex", "home")
 
     await pm.note_from_eufy(fake_hass, "Sir", "tts.x", ["media_player.y"],
                             "camera.front_door_bell", "package_taken")
@@ -178,7 +178,7 @@ async def test_eufy_taken_while_away_announces_concern(pm, load, fake_hass, monk
     monkeypatch.setattr(pm, "_announcements_on", lambda h: True)
     pm._STATE.clear()
     pm._STATE["camera.front_door_bell"] = {"package": True, "mail": False, "count": 1}
-    fake_hass.states.set("person.abi", "not_home")
+    fake_hass.states.set("person.alex", "not_home")
 
     await pm.note_from_eufy(fake_hass, "Sir", "tts.x", ["media_player.y"],
                             "camera.front_door_bell", "package_taken")

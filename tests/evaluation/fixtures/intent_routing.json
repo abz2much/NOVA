@@ -26,9 +26,9 @@
       "entities": [
         {
           "attributes": {
-            "friendly_name": "Abi"
+            "friendly_name": "Alex"
           },
-          "entity_id": "person.abi",
+          "entity_id": "person.alex",
           "state": "home"
         },
         {
@@ -75,9 +75,9 @@
       "entities": [
         {
           "attributes": {
-            "friendly_name": "Abi"
+            "friendly_name": "Alex"
           },
-          "entity_id": "person.abi",
+          "entity_id": "person.alex",
           "state": "home"
         },
         {
@@ -124,9 +124,9 @@
       "entities": [
         {
           "attributes": {
-            "friendly_name": "Abi"
+            "friendly_name": "Alex"
           },
-          "entity_id": "person.abi",
+          "entity_id": "person.alex",
           "state": "home"
         },
         {
@@ -173,9 +173,9 @@
       "entities": [
         {
           "attributes": {
-            "friendly_name": "Abi"
+            "friendly_name": "Alex"
           },
-          "entity_id": "person.abi",
+          "entity_id": "person.alex",
           "state": "home"
         },
         {
@@ -222,9 +222,9 @@
       "entities": [
         {
           "attributes": {
-            "friendly_name": "Abi"
+            "friendly_name": "Alex"
           },
-          "entity_id": "person.abi",
+          "entity_id": "person.alex",
           "state": "home"
         },
         {
@@ -271,9 +271,9 @@
       "entities": [
         {
           "attributes": {
-            "friendly_name": "Abi"
+            "friendly_name": "Alex"
           },
-          "entity_id": "person.abi",
+          "entity_id": "person.alex",
           "state": "home"
         },
         {
@@ -320,9 +320,9 @@
       "entities": [
         {
           "attributes": {
-            "friendly_name": "Abi"
+            "friendly_name": "Alex"
           },
-          "entity_id": "person.abi",
+          "entity_id": "person.alex",
           "state": "home"
         },
         {
@@ -369,9 +369,9 @@
       "entities": [
         {
           "attributes": {
-            "friendly_name": "Abi"
+            "friendly_name": "Alex"
           },
-          "entity_id": "person.abi",
+          "entity_id": "person.alex",
           "state": "home"
         },
         {
@@ -393,7 +393,7 @@
   },
   {
     "category": "intent_routing",
-    "description": "'Is Abi home?' is a genuine presence question.",
+    "description": "'Is Alex home?' is a genuine presence question.",
     "expected": {
       "announcement_allowed": null,
       "clarification_required": false,
@@ -407,7 +407,7 @@
     },
     "id": "PLAT-009",
     "input": {
-      "text": "Is Abi home?"
+      "text": "Is Alex home?"
     },
     "provider": null,
     "runner": "local_command",
@@ -418,9 +418,9 @@
       "entities": [
         {
           "attributes": {
-            "friendly_name": "Abi"
+            "friendly_name": "Alex"
           },
-          "entity_id": "person.abi",
+          "entity_id": "person.alex",
           "state": "home"
         },
         {
@@ -467,9 +467,9 @@
       "entities": [
         {
           "attributes": {
-            "friendly_name": "Abi"
+            "friendly_name": "Alex"
           },
-          "entity_id": "person.abi",
+          "entity_id": "person.alex",
           "state": "home"
         },
         {

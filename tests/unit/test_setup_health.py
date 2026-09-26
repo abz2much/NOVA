@@ -51,9 +51,9 @@ def test_entity_references_off_when_unconfigured(sh, nova_config, fake_hass, mon
 
 
 def test_entity_references_ok_when_resolved(sh, nova_config, fake_hass, monkeypatch):
-    fake_hass.states.set("device_tracker.abi", "home")
+    fake_hass.states.set("device_tracker.alex", "home")
     monkeypatch.setattr(nova_config, "get", _cfg_get(nova_config, {
-        "departure_origin_entity": "device_tracker.abi",
+        "departure_origin_entity": "device_tracker.alex",
     }))
     out = sh._check_entity_references(fake_hass)
     assert out["status"] == "ok"
@@ -149,9 +149,9 @@ def test_notify_service_warn_when_malformed(sh, nova_config, fake_hass, monkeypa
 
 
 def test_notify_service_ok_when_registered(sh, nova_config, fake_hass, monkeypatch):
-    fake_hass.services.register("notify", "mobile_app_abi")
+    fake_hass.services.register("notify", "mobile_app_alex")
     monkeypatch.setattr(nova_config, "get", _cfg_get(nova_config, {
-        "notify_service": "notify.mobile_app_abi",
+        "notify_service": "notify.mobile_app_alex",
     }))
     assert sh._check_notify_service(fake_hass)["status"] == "ok"
 
@@ -167,11 +167,11 @@ def test_notify_service_warn_when_not_registered(sh, nova_config, fake_hass, mon
 def test_notify_services_ok_when_every_selected_service_is_registered(
         sh, nova_config, fake_hass, monkeypatch):
     monkeypatch.setattr(nova_config, "get", _cfg_get(nova_config, {
-        "notify_services": '["notify.mobile_app_abi", "notify.mobile_app_rachel"]',
+        "notify_services": '["notify.mobile_app_alex", "notify.mobile_app_morgan"]',
     }))
     fake_hass.services.has_service = lambda domain, service: (
         f"{domain}.{service}" in {
-            "notify.mobile_app_abi", "notify.mobile_app_rachel"})
+            "notify.mobile_app_alex", "notify.mobile_app_morgan"})
 
     out = sh._check_notify_service(fake_hass)
 
@@ -182,15 +182,15 @@ def test_notify_services_ok_when_every_selected_service_is_registered(
 def test_notify_services_warn_and_name_only_missing_services(
         sh, nova_config, fake_hass, monkeypatch):
     monkeypatch.setattr(nova_config, "get", _cfg_get(nova_config, {
-        "notify_services": '["notify.mobile_app_abi", "notify.mobile_app_gone"]',
+        "notify_services": '["notify.mobile_app_alex", "notify.mobile_app_gone"]',
     }))
-    fake_hass.services.has_service = lambda domain, service: service == "mobile_app_abi"
+    fake_hass.services.has_service = lambda domain, service: service == "mobile_app_alex"
 
     out = sh._check_notify_service(fake_hass)
 
     assert out["status"] == "warn"
     assert "notify.mobile_app_gone" in out["detail"]
-    assert "notify.mobile_app_abi" not in out["detail"]
+    assert "notify.mobile_app_alex" not in out["detail"]
     assert "not registered" in out["detail"]
 
 
@@ -224,9 +224,9 @@ def test_person_entities_warn_when_stale(sh, nova_config, fake_hass, monkeypatch
 
 
 def test_person_entities_ok_when_resolved(sh, nova_config, fake_hass, monkeypatch):
-    fake_hass.states.set("person.abi", "home")
+    fake_hass.states.set("person.alex", "home")
     monkeypatch.setattr(nova_config, "get", _cfg_get(nova_config, {
-        "person_honorifics": {"person.abi": "sir"},
+        "person_honorifics": {"person.alex": "sir"},
     }))
     assert sh._check_person_entities(fake_hass)["status"] == "ok"
 
@@ -238,9 +238,9 @@ def test_person_entities_ok_when_resolved_and_stored_as_json_string(sh, nova_con
     unlike the fixture above. A prior bug's isinstance(honorifics, dict)
     check failed on the string and reported this check OFF even when
     honorifics were genuinely configured and resolved."""
-    fake_hass.states.set("person.abi", "home")
+    fake_hass.states.set("person.alex", "home")
     monkeypatch.setattr(nova_config, "get", _cfg_get(nova_config, {
-        "person_honorifics": '{"person.abi": "sir"}',
+        "person_honorifics": '{"person.alex": "sir"}',
     }))
     assert sh._check_person_entities(fake_hass)["status"] == "ok"
 

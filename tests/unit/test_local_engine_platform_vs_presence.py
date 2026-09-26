@@ -31,7 +31,7 @@ PRESENCE = {
     "Who is home?": "who_home",
     "Who's home?": "who_home",
     "Is anyone home?": "who_home",
-    "Is Abi home?": "person_home",
+    "Is Alex home?": "person_home",
     "How many people are home?": "count_home",
     "who is at home right now": "who_home",
     "is anybody still home": "who_home",
@@ -39,7 +39,7 @@ PRESENCE = {
 NOT_PRESENCE = ["welcome home", "I'm home", "going home now", "restart home assistant",
                 "open the home assistant app", "is the home assistant update ready"]
 CHANNELS = [None, "telegram-chat-1", "voice-satellite-kitchen", "panel-browser"]
-HONORIFICS = ["sir", "", "Abi"]
+HONORIFICS = ["sir", "", "Alex"]
 
 
 @pytest.fixture
@@ -49,7 +49,7 @@ def le(load):
 
 def _home():
     hass = FakeHass()
-    hass.states.set("person.abi", "home", friendly_name="Abi")
+    hass.states.set("person.alex", "home", friendly_name="Alex")
     hass.states.set("person.sam", "not_home", friendly_name="Sam")
     hass.states.set("light.porch", "on", friendly_name="Porch Light")
     return hass
@@ -76,7 +76,7 @@ async def test_platform_questions_never_take_the_presence_route(le, text, device
     assert out is not None and out.success
     assert out.text.startswith("Home Assistant") and "running and responding" in out.text
     assert "can see 3 entities" in out.text
-    assert not any(o in out.text for o in _OCCUPANCY) and "Abi" not in out.text.split(",")[0]
+    assert not any(o in out.text for o in _OCCUPANCY) and "Alex" not in out.text.split(",")[0]
     assert hass.service_calls == []
 
 
@@ -134,7 +134,7 @@ async def test_genuine_presence_questions_still_use_the_presence_route(le, text,
     assert _routes(le, text)[0] == route
     hass = _home()
     out = await le.try_local(hass, text, "sir", device_id=device_id)
-    assert out is not None and "Abi" in out.text and "Home Assistant" not in out.text
+    assert out is not None and "Alex" in out.text and "Home Assistant" not in out.text
     assert "Sam" not in out.text
     assert hass.service_calls == []
 
@@ -143,7 +143,7 @@ async def test_person_presence_answers_for_that_person(le):
     hass = _home()
     assert (await le.try_local(hass, "Is Sam home?", "")).text == "Sam is away."
     assert (await le.try_local(hass, "How many people are home?", "")).text == \
-        "One person is home: Abi."
+        "One person is home: Alex."
     # Not a known person: no presence answer is invented.
     assert "person_home" in _routes(le, "is the dog home")
     out = await le.try_local(hass, "is the dog home", "")

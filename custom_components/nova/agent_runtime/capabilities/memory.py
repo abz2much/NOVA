@@ -53,7 +53,7 @@ async def _exec_remember(hass: HomeAssistant, args: dict) -> str:
     confirm in its reply — the same conversation the fact came up in, whether
     that's voice, the chat panel, or Telegram, all of which reach Nova
     through this same tool-calling loop. If the user doesn't respond, the
-    fact just stays pending — visible in the panel's Memory tab for Abi to
+    fact just stays pending — visible in the panel's Memory tab for the user to
     confirm, reject, or edit later.
 
     Aliases (an entity-name lookup for search_entities, not a "fact" the
