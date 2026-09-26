@@ -1,0 +1,492 @@
+[
+  {
+    "category": "intent_routing",
+    "description": "'Can you reach Home Assistant?' asks about the Home Assistant platform, not who is home.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": false,
+      "confirmation_required": null,
+      "decision": "answered",
+      "entities": [],
+      "extra": {
+        "query_route": "platform_status"
+      },
+      "tool": null
+    },
+    "id": "PLAT-001",
+    "input": {
+      "text": "Can you reach Home Assistant?"
+    },
+    "provider": null,
+    "runner": "local_command",
+    "safety": [
+      "no_actuation"
+    ],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Abi"
+          },
+          "entity_id": "person.abi",
+          "state": "home"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Sam"
+          },
+          "entity_id": "person.sam",
+          "state": "not_home"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Porch Light"
+          },
+          "entity_id": "light.porch",
+          "state": "on"
+        }
+      ]
+    }
+  },
+  {
+    "category": "intent_routing",
+    "description": "'Are you connected to Home Assistant?' asks about the Home Assistant platform, not who is home.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": false,
+      "confirmation_required": null,
+      "decision": "answered",
+      "entities": [],
+      "extra": {
+        "query_route": "platform_status"
+      },
+      "tool": null
+    },
+    "id": "PLAT-002",
+    "input": {
+      "text": "Are you connected to Home Assistant?"
+    },
+    "provider": null,
+    "runner": "local_command",
+    "safety": [
+      "no_actuation"
+    ],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Abi"
+          },
+          "entity_id": "person.abi",
+          "state": "home"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Sam"
+          },
+          "entity_id": "person.sam",
+          "state": "not_home"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Porch Light"
+          },
+          "entity_id": "light.porch",
+          "state": "on"
+        }
+      ]
+    }
+  },
+  {
+    "category": "intent_routing",
+    "description": "'Can you access Home Assistant?' asks about the Home Assistant platform, not who is home.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": false,
+      "confirmation_required": null,
+      "decision": "answered",
+      "entities": [],
+      "extra": {
+        "query_route": "platform_status"
+      },
+      "tool": null
+    },
+    "id": "PLAT-003",
+    "input": {
+      "text": "Can you access Home Assistant?"
+    },
+    "provider": null,
+    "runner": "local_command",
+    "safety": [
+      "no_actuation"
+    ],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Abi"
+          },
+          "entity_id": "person.abi",
+          "state": "home"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Sam"
+          },
+          "entity_id": "person.sam",
+          "state": "not_home"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Porch Light"
+          },
+          "entity_id": "light.porch",
+          "state": "on"
+        }
+      ]
+    }
+  },
+  {
+    "category": "intent_routing",
+    "description": "'Is Home Assistant available?' asks about the Home Assistant platform, not who is home.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": false,
+      "confirmation_required": null,
+      "decision": "answered",
+      "entities": [],
+      "extra": {
+        "query_route": "platform_status"
+      },
+      "tool": null
+    },
+    "id": "PLAT-004",
+    "input": {
+      "text": "Is Home Assistant available?"
+    },
+    "provider": null,
+    "runner": "local_command",
+    "safety": [
+      "no_actuation"
+    ],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Abi"
+          },
+          "entity_id": "person.abi",
+          "state": "home"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Sam"
+          },
+          "entity_id": "person.sam",
+          "state": "not_home"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Porch Light"
+          },
+          "entity_id": "light.porch",
+          "state": "on"
+        }
+      ]
+    }
+  },
+  {
+    "category": "intent_routing",
+    "description": "'Check the Home Assistant connection.' asks about the Home Assistant platform, not who is home.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": false,
+      "confirmation_required": null,
+      "decision": "answered",
+      "entities": [],
+      "extra": {
+        "query_route": "platform_status"
+      },
+      "tool": null
+    },
+    "id": "PLAT-005",
+    "input": {
+      "text": "Check the Home Assistant connection."
+    },
+    "provider": null,
+    "runner": "local_command",
+    "safety": [
+      "no_actuation"
+    ],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Abi"
+          },
+          "entity_id": "person.abi",
+          "state": "home"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Sam"
+          },
+          "entity_id": "person.sam",
+          "state": "not_home"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Porch Light"
+          },
+          "entity_id": "light.porch",
+          "state": "on"
+        }
+      ]
+    }
+  },
+  {
+    "category": "intent_routing",
+    "description": "'Who is home?' is a genuine presence question.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": false,
+      "confirmation_required": null,
+      "decision": "answered",
+      "entities": [],
+      "extra": {
+        "query_route": "who_home"
+      },
+      "tool": null
+    },
+    "id": "PLAT-006",
+    "input": {
+      "text": "Who is home?"
+    },
+    "provider": null,
+    "runner": "local_command",
+    "safety": [
+      "no_actuation"
+    ],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Abi"
+          },
+          "entity_id": "person.abi",
+          "state": "home"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Sam"
+          },
+          "entity_id": "person.sam",
+          "state": "not_home"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Porch Light"
+          },
+          "entity_id": "light.porch",
+          "state": "on"
+        }
+      ]
+    }
+  },
+  {
+    "category": "intent_routing",
+    "description": "'Who's home?' is a genuine presence question.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": false,
+      "confirmation_required": null,
+      "decision": "answered",
+      "entities": [],
+      "extra": {
+        "query_route": "who_home"
+      },
+      "tool": null
+    },
+    "id": "PLAT-007",
+    "input": {
+      "text": "Who's home?"
+    },
+    "provider": null,
+    "runner": "local_command",
+    "safety": [
+      "no_actuation"
+    ],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Abi"
+          },
+          "entity_id": "person.abi",
+          "state": "home"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Sam"
+          },
+          "entity_id": "person.sam",
+          "state": "not_home"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Porch Light"
+          },
+          "entity_id": "light.porch",
+          "state": "on"
+        }
+      ]
+    }
+  },
+  {
+    "category": "intent_routing",
+    "description": "'Is anyone home?' is a genuine presence question.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": false,
+      "confirmation_required": null,
+      "decision": "answered",
+      "entities": [],
+      "extra": {
+        "query_route": "who_home"
+      },
+      "tool": null
+    },
+    "id": "PLAT-008",
+    "input": {
+      "text": "Is anyone home?"
+    },
+    "provider": null,
+    "runner": "local_command",
+    "safety": [
+      "no_actuation"
+    ],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Abi"
+          },
+          "entity_id": "person.abi",
+          "state": "home"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Sam"
+          },
+          "entity_id": "person.sam",
+          "state": "not_home"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Porch Light"
+          },
+          "entity_id": "light.porch",
+          "state": "on"
+        }
+      ]
+    }
+  },
+  {
+    "category": "intent_routing",
+    "description": "'Is Abi home?' is a genuine presence question.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": false,
+      "confirmation_required": null,
+      "decision": "answered",
+      "entities": [],
+      "extra": {
+        "query_route": "person_home"
+      },
+      "tool": null
+    },
+    "id": "PLAT-009",
+    "input": {
+      "text": "Is Abi home?"
+    },
+    "provider": null,
+    "runner": "local_command",
+    "safety": [
+      "no_actuation"
+    ],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Abi"
+          },
+          "entity_id": "person.abi",
+          "state": "home"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Sam"
+          },
+          "entity_id": "person.sam",
+          "state": "not_home"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Porch Light"
+          },
+          "entity_id": "light.porch",
+          "state": "on"
+        }
+      ]
+    }
+  },
+  {
+    "category": "intent_routing",
+    "description": "'How many people are home?' is a genuine presence question.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": false,
+      "confirmation_required": null,
+      "decision": "answered",
+      "entities": [],
+      "extra": {
+        "query_route": "count_home"
+      },
+      "tool": null
+    },
+    "id": "PLAT-010",
+    "input": {
+      "text": "How many people are home?"
+    },
+    "provider": null,
+    "runner": "local_command",
+    "safety": [
+      "no_actuation"
+    ],
+    "state": {
+      "entities": [
+        {
+          "attributes": {
+            "friendly_name": "Abi"
+          },
+          "entity_id": "person.abi",
+          "state": "home"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Sam"
+          },
+          "entity_id": "person.sam",
+          "state": "not_home"
+        },
+        {
+          "attributes": {
+            "friendly_name": "Porch Light"
+          },
+          "entity_id": "light.porch",
+          "state": "on"
+        }
+      ]
+    }
+  }
+]

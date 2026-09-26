@@ -132,3 +132,12 @@ def test_a_chattering_trigger_does_not_multiply_support(load):
             ("light.hall", "on", range(1, 9), 20, 1, "user")]
     found = pa.PatternAnalyzer()._find_sequence_patterns(_conn(rows))
     assert [p.occurrences for p in found if p.entity_ids[0] == "switch.hall_button"] == [8]
+
+
+def test_recency_counts_calendar_days_whatever_the_time_of_day(load):
+    pa = load("automation.patterns")
+    seen = "2026-09-08T18:00:00"
+    for hh, mm in [(0, 5), (6, 30), (17, 59), (23, 55)]:
+        now = datetime(2026, 9, 26, hh, mm)
+        assert pa._days_since(seen, now) == 18.0
+    assert pa._days_since("not a time", datetime(2026, 9, 26)) == 0.0

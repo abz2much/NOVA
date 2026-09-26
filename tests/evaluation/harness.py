@@ -18,6 +18,7 @@ import ast
 import asyncio
 import json
 import pathlib
+import re
 import sqlite3
 import types
 from datetime import datetime, timedelta
@@ -112,8 +113,11 @@ async def run_local_command(ctx) -> dict:
         decision = "executed"
     else:
         decision = "answered"
+    normalized = le._normalize(ctx.input["text"])
+    routes = [q for p, q in le._QUERY_PATTERNS if re.search(p, normalized)]
     return {"decision": decision, "clarification": clarify,
             "entities": listed if ctx.input.get("listing") else _call_entities(ctx.hass),
+            "query_route": routes[0] if routes else None,
             "response": text}
 
 

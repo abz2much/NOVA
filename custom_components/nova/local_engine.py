@@ -194,11 +194,29 @@ _BULK_PATTERNS = [
 
 # ── Contextual queries ──────────────────────────────────────────────────────
 
+_HOME = r"(?:at\s+)?home\b(?!\s*assistant)"
+_NOW = r"(?:currently\s+|still\s+|right\s+now\s+)?"
+_PLATFORM_HEALTH = (
+    r"^(?=.*\bhome\s?assistant\b)(?=.*\b(?:reach|reachable|connect|connected|connection|access|"
+    r"available|online|offline|up(?!\s+to\s+date)|down|running|responding|respond|working|"
+    r"alive|status|health|healthy|talk\s+to)\b)")
+
 _QUERY_PATTERNS = [
     (r"(?:repeat\s+that|say\s+that\s+again|what\s+did\s+you\s+just\s+say|"
      r"repeat\s+(?:your\s+)?last\s+announcement)\b",       "repeat_last"),
-    (r"(?:who(?:'s| is)\s+)?home\b",                     "who_home"),
-    (r"(?:is\s+)?(?:anyone|anybody)\s+home",              "who_home"),
+    # "Home Assistant" is the platform, never a presence question: a
+    # question about reaching or the health of Home Assistant gets a status
+    # answer from live evidence, and every presence pattern below refuses
+    # "home" when "assistant" follows it.
+    (_PLATFORM_HEALTH,                                   "platform_status"),
+    # Presence needs presence grammar: who is home, is anyone home, how many
+    # people are home, is <person> home. A bare "home" anywhere in a
+    # sentence ("welcome home", "Home Assistant") is not a presence request.
+    (rf"^(?:so\s+|and\s+)?who(?:'s|s|\s+is|\s+are)\s+{_NOW}{_HOME}",   "who_home"),
+    (rf"^(?:is\s+|are\s+)?(?:there\s+)?(?:anyone|anybody|someone|somebody|everyone|everybody)"
+     rf"\s+{_NOW}{_HOME}",                                "who_home"),
+    (rf"^how\s+many\s+(?:people|persons|of\s+us)\s+(?:are\s+)?{_NOW}{_HOME}", "count_home"),
+    (rf"^is\s+([a-z][a-z'\- ]{{0,40}}?)\s+{_NOW}{_HOME}$",     "person_home"),
     # The "what's/what is" lead-in is REQUIRED (not optional) — a bare
     # "open"/"unlocked" occurring anywhere in a longer sentence used to
     # match this via re.search, so an explanation, complaint, or quoted
@@ -1022,8 +1040,64 @@ def _home_status(hass, h="sir"):
 
 # ── Contextual queries ──────────────────────────────────────────────────────
 
+def _platform_status(hass, addr: str) -> str:
+    """A bounded, truthful answer about Home Assistant itself, from what
+    this running instance can observe: its run state, version and how many
+    entities it serves. Nova runs inside Home Assistant, so answering at all
+    means the platform is up; nothing here claims more than that."""
+    try:
+        from homeassistant.const import __version__ as ha_version
+        ver = f" {ha_version}" if re.match(r"^\d", str(ha_version)) else ""
+    except Exception:
+        ver = ""
+    try:
+        count = hass.states.async_entity_ids_count()
+    except Exception:
+        try:
+            count = len(hass.states.async_all())
+        except Exception:
+            count = None
+    state = getattr(getattr(hass, "state", None), "value", getattr(hass, "state", None))
+    state = str(state) if state is not None else "running"
+    if state != "running":
+        return (f"Home Assistant{ver} is {state} right now{addr}, so some devices may not "
+                f"respond until it finishes.")
+    if not count:
+        return f"Home Assistant{ver} is running{addr}, but I can't see any entities right now."
+    noun = "entity" if count == 1 else "entities"
+    return (f"Home Assistant{ver} is running and responding{addr}. I'm connected to it "
+            f"and can see {count} {noun}.")
+
+
 def _ctx_query(hass, qtype, h="sir", area_match=""):
     addr = f", {h}" if h else ""
+    if qtype == "platform_status":
+        return _platform_status(hass, addr)
+
+    if qtype in ("count_home", "person_home"):
+        people = list(hass.states.async_all("person"))
+        if qtype == "count_home":
+            home = sorted(s.attributes.get("friendly_name", s.entity_id)
+                          for s in people if s.state == "home")
+            if not home:
+                return f"No one appears to be home at the moment{addr}."
+            if len(home) == 1:
+                return f"One person is home{addr}: {home[0]}."
+            return f"{len(home)} people are home{addr}: {', '.join(home[:-1])} and {home[-1]}."
+        wanted = " ".join(area_match.replace("_", " ").split())
+        for s in sorted(people, key=lambda p: p.entity_id):
+            name = str(s.attributes.get("friendly_name") or "")
+            if wanted and wanted in (name.lower(), s.entity_id.split(".", 1)[1].replace("_", " ")):
+                shown = name or s.entity_id
+                if s.state == "home":
+                    return f"{shown} is home{addr}."
+                if s.state == "not_home":
+                    return f"{shown} is away{addr}."
+                if s.state in ("unknown", "unavailable"):
+                    return f"I can't tell where {shown} is right now{addr}."
+                return f"{shown} is at {s.state}{addr}."
+        return None     # not a known person: let the agent handle it
+
     if qtype == "who_home":
         ppl = [s.attributes.get("friendly_name", s.entity_id)
                for s in hass.states.async_all("person") if s.state == "home"]

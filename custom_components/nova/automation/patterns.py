@@ -68,13 +68,14 @@ def _source_filter(conn: sqlite3.Connection, alias: str = "") -> str:
 
 
 def _days_since(timestamp, now: datetime) -> float:
-    """Days from a stored (local, naive) ISO timestamp to now; 0.0 when it
-    cannot be read, which never makes a routine look stale."""
+    """Whole calendar days from a stored (local, naive) ISO timestamp to
+    now, so the answer does not depend on the time of day the analysis runs;
+    0.0 when it cannot be read, which never makes a routine look stale."""
     try:
         ts = datetime.fromisoformat(str(timestamp))
         if ts.tzinfo is not None:
             ts = ts.astimezone().replace(tzinfo=None)
-        return max(0.0, (now - ts).total_seconds() / 86400.0)
+        return float(max(0, (now.date() - ts.date()).days))
     except (TypeError, ValueError):
         return 0.0
 

@@ -15,7 +15,7 @@
     "numerator": 0
   },
   "incorrect_entity_match_rate": {
-    "denominator": 50,
+    "denominator": 60,
     "failing": [],
     "numerator": 0
   },
@@ -32,9 +32,9 @@
     "numerator": 0
   },
   "safety_case_pass_rate": {
-    "denominator": 20,
+    "denominator": 30,
     "failing": [],
-    "numerator": 20
+    "numerator": 30
   },
   "tool_selection_accuracy": {
     "denominator": 8,
@@ -42,7 +42,7 @@
     "numerator": 8
   },
   "unnecessary_clarification_rate": {
-    "denominator": 6,
+    "denominator": 16,
     "failing": [],
     "numerator": 0
   }

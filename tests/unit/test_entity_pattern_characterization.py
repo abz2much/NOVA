@@ -202,7 +202,7 @@ INTENDED_ROUTINE_CHANGES = {
     "split_hours": ([["light.porch", "on", 18, 0.312, 6, 6, 12],
                      ["light.porch", "on", 19, 0.312, 6, 6, 12]],
                     "timing split across two hours is not a clean hourly trigger"),
-    "stale_routine": ([["light.porch", "on", 18, 0.095, 11, 11, 29],
+    "stale_routine": ([["light.porch", "on", 18, 0.081, 11, 11, 29],
                        ["sensor.noise", "1", 12, 1.0, 29, 29, 29]],
                       "a routine last seen 18 days ago is mostly not current"),
 }
