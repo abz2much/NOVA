@@ -22,18 +22,21 @@ upgrade_existing(config_dir)
 from __future__ import annotations
 
 import logging
+import os
 import sqlite3
 import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 from .schema import COMPONENTS, LEDGER_DDL, LEDGER_TABLE, STORES, Component, Store
 
 _LOGGER = logging.getLogger(__name__)
 
 BUSY_TIMEOUT_MS = 10000
+
+StrPath = Union[str, "os.PathLike[str]"]
 
 
 @dataclass(frozen=True)
@@ -54,7 +57,7 @@ _path_locks_guard = threading.Lock()
 _last_upgrade: dict[str, StoreStatus] = {}
 
 
-def connect(path, *, timeout: float = 5.0,
+def connect(path: StrPath, *, timeout: float = 5.0,
             busy_timeout_ms: Optional[int] = BUSY_TIMEOUT_MS,
             wal: bool = True, row_factory: bool = True,
             mkdir: bool = True) -> sqlite3.Connection:
@@ -73,11 +76,11 @@ def connect(path, *, timeout: float = 5.0,
     return conn
 
 
-def _columns(conn, table: str) -> set:
+def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
     return {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
 
 
-def ensure_column(conn, table: str, column: str, ddl: str) -> bool:
+def ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str) -> bool:
     """Add one nullable or defaulted column if it is missing. Returns True
     when this call added it. A concurrent connection adding the same column
     first is success, proven by a second PRAGMA; any other failure raises."""
@@ -93,7 +96,7 @@ def ensure_column(conn, table: str, column: str, ddl: str) -> bool:
     return True
 
 
-def _apply(conn, component: Component) -> None:
+def _apply(conn: sqlite3.Connection, component: Component) -> None:
     for sql in component.statements:
         conn.execute(sql)
     for col in component.columns:
@@ -102,19 +105,19 @@ def _apply(conn, component: Component) -> None:
         conn.execute(sql)
 
 
-def ensure(conn, *names: str) -> None:
+def ensure(conn: sqlite3.Connection, *names: str) -> None:
     """Apply the named components' schema to an open connection."""
     for name in names:
         _apply(conn, COMPONENTS[name])
 
 
-def _table_exists(conn, table: str) -> bool:
+def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
     return conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,),
     ).fetchone() is not None
 
 
-def verify(conn, *names: str) -> list[str]:
+def verify(conn: sqlite3.Connection, *names: str) -> list[str]:
     """What the real schema is missing for these components (empty when
     complete). Reads PRAGMA/sqlite_master, never the ledger."""
     missing = []
@@ -129,7 +132,7 @@ def verify(conn, *names: str) -> list[str]:
     return missing
 
 
-def ledger(conn) -> dict[str, int]:
+def ledger(conn: sqlite3.Connection) -> dict[str, int]:
     """Recorded component versions, {} when the ledger does not exist."""
     if not _table_exists(conn, LEDGER_TABLE):
         return {}
@@ -142,7 +145,7 @@ def _lock_for(path: str) -> threading.Lock:
         return _path_locks.setdefault(path, threading.Lock())
 
 
-def upgrade_store(path, store: Store) -> StoreStatus:
+def upgrade_store(path: StrPath, store: Store) -> StoreStatus:
     """Upgrade one existing database file in a single transaction."""
     path = str(path)
     if not Path(path).is_file():
@@ -190,7 +193,7 @@ def upgrade_store(path, store: Store) -> StoreStatus:
                 conn.close()
 
 
-def upgrade_existing(config_dir) -> dict[str, StoreStatus]:
+def upgrade_existing(config_dir: StrPath) -> dict[str, StoreStatus]:
     """Setup-time upgrade of every existing store. Never raises."""
     results: dict[str, StoreStatus] = {}
     for store in STORES:

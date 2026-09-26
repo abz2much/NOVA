@@ -399,6 +399,7 @@ This section summarises how Nova is built and what it does, grouped by area: its
 - Configuration and database write failures are reported instead of silently treated as successful.
 - Nova's SQLite schema has a single owner. Existing databases are upgraded once at startup, one file at a time and all or nothing, and are checked against the real schema before the upgrade is recorded. A store that fails to upgrade is logged and retried at the next start without stopping Nova, and older releases can still open an upgraded file.
 - The dashboard is built from ordered source files into the single `nova-panel.js` HACS installs, by a dependency free build that CI checks is current. The 3D residence engine has one source, and its output is pinned by a test.
+- CI enforces the architecture: type checks for the capability packages (strict for persistence), no import cycles, a pinned package dependency direction, compatibility modules that can't grow, and per package coverage floors. Unit tests run fully isolated from `/config`.
 - Provider clients belong to the loaded Nova runtime. Roles with identical settings share one client, and a client that is replaced, reloaded or unloaded is closed exactly once, after its in-flight work finishes.
 - A PHACC integration suite now tests setup, reload, config flow, websocket permissions, snapshot retrieval, and setup-failure cleanup in CI.
 

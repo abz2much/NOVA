@@ -206,6 +206,121 @@ if "jc" not in sys.modules:
     sys.modules["jc.directive_helper"] = _dh
 
 
+# ── Keep tests out of the real /config ────────────────────────────────────────
+# Nova's modules default their stores to hard-coded /config paths. For each
+# unit test, every loaded module's /config path constants point into that
+# test's own temporary directory, restored afterwards. Tests that set a path
+# themselves still win, because their monkeypatch runs after this one.
+_REDIRECT = {"patch": None, "root": None, "writes": None}
+
+
+def _config_write_hook(event, args):
+    writes = _REDIRECT["writes"]
+    if writes is None or not args:
+        return
+    target = args[0]
+    if not isinstance(target, (str, bytes, os.PathLike)):
+        return
+    path = os.fsdecode(target)
+    if not (path == "/config" or path.startswith("/config/")):
+        return
+    if event == "open":
+        mode = args[1] if len(args) > 1 else "r"
+        flags = args[2] if len(args) > 2 else 0
+        if (isinstance(mode, str) and any(c in mode for c in "wax+")) or (
+                isinstance(flags, int) and flags & (os.O_WRONLY | os.O_RDWR | os.O_CREAT)):
+            writes.append(path)
+    elif event in ("sqlite3.connect", "os.mkdir", "os.rename", "os.replace", "os.remove"):
+        writes.append(path)
+
+
+sys.addaudithook(_config_write_hook)
+
+
+def _config_targets(mod):
+    """(attribute names, functions with /config defaults) for one module
+    object, found once and cached on it."""
+    cached = mod.__dict__.get("__nova_config_targets__")
+    if cached is not None:
+        return cached
+    names = [n for n, v in vars(mod).items() if _is_config(v)]
+    funcs = [v for v in vars(mod).values() if isinstance(v, types.FunctionType)]
+    for cls in (v for v in vars(mod).values() if isinstance(v, type)):
+        funcs += [v for v in vars(cls).values() if isinstance(v, types.FunctionType)]
+    funcs = [fn for fn in funcs if getattr(fn, "__module__", None) == mod.__name__ and (
+        (fn.__defaults__ and any(_is_config(d) for d in fn.__defaults__))
+        or (fn.__kwdefaults__ and any(_is_config(d) for d in fn.__kwdefaults__.values())))]
+    cached = (names, funcs)
+    mod.__dict__["__nova_config_targets__"] = cached
+    return cached
+
+
+def _redirect_config_paths(mod) -> None:
+    patch, root = _REDIRECT["patch"], _REDIRECT["root"]
+    if patch is None:
+        return
+    names, funcs = _config_targets(mod)
+    for name in names:
+        value = mod.__dict__.get(name)
+        if _is_config(value):
+            patch.setattr(mod, name, _moved(value, root))
+    # Defaults such as `db_path: str = DB_PATH` were fixed at definition time.
+    for fn in funcs:
+        if fn.__defaults__ and any(_is_config(d) for d in fn.__defaults__):
+            patch.setattr(fn, "__defaults__",
+                          tuple(_moved(d, root) if _is_config(d) else d for d in fn.__defaults__))
+        if fn.__kwdefaults__ and any(_is_config(d) for d in fn.__kwdefaults__.values()):
+            patch.setattr(fn, "__kwdefaults__",
+                          {k: _moved(d, root) if _is_config(d) else d
+                           for k, d in fn.__kwdefaults__.items()})
+
+
+def _is_config(value) -> bool:
+    if not isinstance(value, (str, pathlib.PurePath)):
+        return False
+    text = str(value)
+    return text == "/config" or text.startswith("/config/")
+
+
+def _moved(value, root: str):
+    new = root + str(value)[len("/config"):]
+    return type(value)(new) if isinstance(value, pathlib.PurePath) else new
+
+
+class _RedirectingLoader:
+    """Wraps a Nova module's loader so a module first imported during a test
+    (for example lazily, from inside another module's function) gets the
+    same /config redirect as one loaded through _load()."""
+
+    def __init__(self, loader):
+        self._loader = loader
+
+    def create_module(self, spec):
+        return self._loader.create_module(spec)
+
+    def exec_module(self, module):
+        self._loader.exec_module(module)
+        _redirect_config_paths(module)
+
+    def __getattr__(self, name):
+        return getattr(self._loader, name)
+
+
+class _RedirectingFinder:
+    @staticmethod
+    def find_spec(fullname, path=None, target=None):
+        if not fullname.startswith("jc.") or _REDIRECT["patch"] is None:
+            return None
+        from importlib.machinery import PathFinder
+        spec = PathFinder.find_spec(fullname, path, target)
+        if spec is not None and spec.loader is not None:
+            spec.loader = _RedirectingLoader(spec.loader)
+        return spec
+
+
+sys.meta_path.insert(0, _RedirectingFinder)
+
+
 def _load(modname: str):
     """Import a component module under the synthetic `jc` package, so its
     relative imports (`from .websocket import …`, `from . import reasoning_cache`)
@@ -221,13 +336,16 @@ def _load(modname: str):
         # A package submodule (e.g. "automation.patterns"): import it through
         # the normal machinery so its parent package and its relative imports
         # resolve under the same synthetic package as everything else.
-        return importlib.import_module(key)
+        mod = importlib.import_module(key)
+        _redirect_config_paths(mod)
+        return mod
     if key not in sys.modules:
         spec = importlib.util.spec_from_file_location(key, COMP / f"{modname}.py")
         mod = importlib.util.module_from_spec(spec)
         sys.modules[key] = mod
         spec.loader.exec_module(mod)
     mod = sys.modules[key]
+    _redirect_config_paths(mod)
     # Keep the `jc` package's own attribute in sync with sys.modules. A plain
     # `from . import X` resolves via getattr(jc_pkg, "X") first and only
     # falls back to sys.modules if that's unset — so a real (non-_load())
@@ -241,6 +359,41 @@ def _load(modname: str):
 # ── 3. Fixtures ───────────────────────────────────────────────────────────────
 import pytest  # noqa: E402
 from fakes import FakeHass, FakeProvider  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _isolated_config(request, tmp_path_factory):
+    # Evaluation scenarios sandbox /config themselves; integration tests run
+    # the real package under Home Assistant, whose own paths are outside
+    # this redirect.
+    if {"evaluation", "integration"} & set(pathlib.Path(str(request.fspath)).parts):
+        yield
+        return
+    mp = pytest.MonkeyPatch()
+    _REDIRECT["patch"] = mp
+    _REDIRECT["root"] = str(tmp_path_factory.mktemp("config"))
+    try:
+        seen = set()
+        loaded = [m for k, m in list(sys.modules.items()) if k.startswith("jc.") and m is not None]
+        # A test may pop a module from sys.modules; the jc package can still
+        # hold the old object, which `from . import x` then returns.
+        pkg = sys.modules.get("jc")
+        if pkg is not None:
+            loaded += [v for v in vars(pkg).values() if isinstance(v, types.ModuleType)]
+        for mod in loaded:
+            if id(mod) not in seen:
+                seen.add(id(mod))
+                _redirect_config_paths(mod)
+        _REDIRECT["writes"] = writes = []
+        yield
+        _REDIRECT["writes"] = None
+        if writes:
+            pytest.fail("test touched the real /config: " + ", ".join(sorted(set(writes))))
+    finally:
+        _REDIRECT["writes"] = None
+        _REDIRECT["patch"] = None
+        _REDIRECT["root"] = None
+        mp.undo()
 
 
 @pytest.fixture

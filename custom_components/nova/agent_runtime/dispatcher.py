@@ -53,6 +53,7 @@ async def _execute_tool(
             # device_id and/or Home Assistant user_id (None when there is
             # none — Nova never invents one); every other tool gets neither.
             import inspect
+            params: Any
             try:
                 params = inspect.signature(fn).parameters
             except (TypeError, ValueError):

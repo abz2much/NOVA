@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 
 # One logger for the whole agent, named as it always was (…nova.agent), so
@@ -13,7 +14,7 @@ _LOGGER = logging.getLogger(__name__.partition(".agent_runtime")[0] + ".agent")
 # These give the LLM clear, well-documented tools for controlling HA.
 # Much better than the generic HA LLM API tools which confuse the model.
 
-NOVA_TOOLS = [
+NOVA_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
