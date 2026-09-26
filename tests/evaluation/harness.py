@@ -309,9 +309,23 @@ def _decide_kwargs(inp) -> dict:
         to_state=inp.get("to_state", ""), friendly_name=inp.get("friendly_name", ""))
 
 
+def _load_nova(ctx):
+    """Give the scenario's Home Assistant one loaded Nova entry with a fresh
+    runtime, so runtime-owned state (such as provider holds) starts empty
+    in every scenario and is reached through the real runtime boundary."""
+    runtime = ctx.load("runtime").NovaRuntime(
+        client=None, llm_provider_name="scripted", sentinel=None, reminder_watcher=None,
+        scheduler=None, resources=None, automation_contexts=None)
+    ctx.hass.config_entries = types.SimpleNamespace(
+        async_entries=lambda domain=None: [types.SimpleNamespace(
+            domain="nova", entry_id="eval", state=None, runtime_data=runtime)])
+    return runtime
+
+
 async def run_reasoning(ctx) -> dict:
     """reasoning_loop.decide with a scripted provider."""
     rl, conn = ctx.load("reasoning_loop"), ctx.load("connectivity")
+    _load_nova(ctx)
     for _ in range(ctx.input.get("prior_failures", 0)):
         conn.record_failure()
     for _ in range(ctx.input.get("repeat", 1)):
@@ -325,6 +339,7 @@ async def run_agreement(ctx) -> dict:
     """The same event decided twice: once with the scripted provider
     reachable, once with the provider unavailable (Local Mind)."""
     rl, conn = ctx.load("reasoning_loop"), ctx.load("connectivity")
+    _load_nova(ctx)
     kwargs = _decide_kwargs(ctx.input)
     cloud = await rl.decide(ctx.hass, ctx.provider, **kwargs)
     ctx.load("reasoning_cache")._cache.clear()

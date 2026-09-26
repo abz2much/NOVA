@@ -17,16 +17,17 @@ For one flagged event it:
      notifications, policy) stays with the observer, which calls the
      existing output gate for every announcement.
 
-After an unreadable reply the event's signature is held for a short,
-bounded time so a repeat of the same event goes straight to the fallback
-instead of asking the same provider again. The hold stores no decision and
-is never persisted. Cancellation always propagates.
+After an unusable reply the provider is marked failed with the breaker and
+the event's signature is held for a short, bounded time in the loaded
+runtime (NovaRuntime.provider_holds), so a repeat of the same event goes
+straight to the fallback without asking the provider or using breaker
+capacity. Only a validated decision records provider success. The hold
+stores no decision, is never persisted and dies with the runtime.
+Cancellation always propagates.
 """
 from __future__ import annotations
 
 import logging
-import time
-from collections import OrderedDict
 from typing import Any, Callable, NamedTuple, Optional
 
 from . import cache_policy, presentation
@@ -50,39 +51,16 @@ from .provider import parse_reply
 
 _LOGGER = logging.getLogger(__name__.rpartition(".cognitive")[0] + ".reasoning_loop")
 
-# How long a signature whose provider reply was unreadable skips the
-# provider, and how many signatures are remembered. Matches the
-# connectivity breaker's cooldown; bounded so it can never grow.
-UNREADABLE_HOLD_S = 60.0
-UNREADABLE_HOLD_MAX = 64
-
-_holds: "OrderedDict[str, float]" = OrderedDict()
-_monotonic: Callable[[], float] = time.monotonic
-
-
-def reset_provider_holds() -> None:
-    _holds.clear()
-
-
-def provider_held(sig: str) -> bool:
-    now = _monotonic()
-    until = _holds.get(sig)
-    if until is None:
-        return False
-    if until <= now:
-        _holds.pop(sig, None)
-        return False
-    return True
-
-
-def _hold(sig: str) -> None:
-    now = _monotonic()
-    for key in [k for k, until in _holds.items() if until <= now]:
-        _holds.pop(key, None)
-    _holds[sig] = now + UNREADABLE_HOLD_S
-    _holds.move_to_end(sig)
-    while len(_holds) > UNREADABLE_HOLD_MAX:
-        _holds.popitem(last=False)
+def _provider_holds(hass):
+    """This loaded runtime's provider holds (cognitive/holds.py), through
+    the runtime boundary; None when no Nova entry is loaded (then nothing
+    is held). Never a module-level store and never hass.data."""
+    try:
+        from ..runtime import domain_runtime
+        runtime = domain_runtime(hass)
+    except Exception:
+        return None
+    return runtime.provider_holds if runtime is not None else None
 
 
 class Hooks(NamedTuple):
@@ -239,18 +217,21 @@ async def decide(hass, provider, *, hooks: Hooks, honorific: str, event_summary:
         _LOGGER.info("Reasoning cache hit [%s]: speak=%s", sig, dec.get("speak"))
         return dec
 
+    # The provider just returned an unusable reply for this same event:
+    # don't ask it again yet, decide as for any provider failure. Checked
+    # before the breaker so a held event never consumes a request or the
+    # half-open probe.
+    holds = _provider_holds(hass)
+    if holds is not None and holds.held(sig):
+        reasoning_cache.note_hit(sig)
+        _LOGGER.info("Reasoning: recent unusable reply — fallback for [%s]", sig)
+        return await _provider_failure_fallback(hass, sig, snapshot, honorific)
+
     # No fresh cache → we'd call the provider. Respect the breaker.
     if not connectivity.allow_request():
         reasoning_cache.note_hit(sig)
         _LOGGER.info("Reasoning: breaker OPEN — Local Mind for [%s]", sig)
         return await _local_mind(hass, snapshot, honorific)
-
-    # The provider just returned an unreadable reply for this same event:
-    # don't ask it again yet, decide as for any provider failure.
-    if provider_held(sig):
-        reasoning_cache.note_hit(sig)
-        _LOGGER.info("Reasoning: recent unreadable reply — fallback for [%s]", sig)
-        return await _provider_failure_fallback(hass, sig, snapshot, honorific)
 
     reasoning_cache.note_cloud_call()
     system = hooks.build_system_prompt(
@@ -297,25 +278,28 @@ async def decide(hass, provider, *, hooks: Hooks, honorific: str, event_summary:
                 await asyncio.sleep(backoff)
         if response is None:
             raise last_err or RuntimeError("no response after retries")
-        # The network call succeeded — close the breaker.
-        connectivity.record_success()
-        outcome = parse_reply(getattr(response, "text", None),
-                              classifier_urgency=classifier_urgency)
     except Exception as exc:
         _LOGGER.warning("Reasoning loop failed: %s", exc)
         connectivity.record_failure()
         return await _provider_failure_fallback(hass, sig, snapshot, honorific)
 
+    # Provider health follows the validated outcome, not the transport: a
+    # reply that isn't a valid decision counts against the breaker.
+    outcome = parse_reply(getattr(response, "text", None),
+                          classifier_urgency=classifier_urgency)
     if isinstance(outcome, ProviderFailure):
         # A reply Nova can't read is a provider failure, never a decision.
+        connectivity.record_failure()
         _LOGGER.warning(
             "Reasoning: provider reply not usable (%s: %s, %d chars) — fallback",
             outcome.kind, outcome.detail, outcome.reply_length)
-        _hold(sig)
+        if holds is not None:
+            holds.hold(sig)
         out = await _provider_failure_fallback(hass, sig, snapshot, honorific)
         out = dict(out)
         out.setdefault("provider_failure", outcome.kind)
         return out
 
+    connectivity.record_success()
     _learn(sig, outcome, classifier_urgency)
     return outcome.as_dict()

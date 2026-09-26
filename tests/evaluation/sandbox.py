@@ -283,11 +283,6 @@ class Sandbox:
         conn = load("connectivity")
         conn.reset()
 
-        # The coordinator's short hold after an unreadable provider reply
-        # is module state a decision depends on: start every scenario clear.
-        coord = load("cognitive.coordinator")
-        self.setattr(coord, "_holds", type(coord._holds)())
-
         rc = load("reasoning_cache")
         self.setattr(rc, "_cache", {})
         self.setattr(rc, "_loaded", True)
