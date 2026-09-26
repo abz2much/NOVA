@@ -217,3 +217,31 @@ def test_pattern_analysis_is_not_on_the_state_change_hot_path():
                 for forbidden in ("analyze", "score_time_routine", "routine_evidence",
                                   "cognitive.patterns", "_find_time_routines"):
                     assert forbidden not in src, (mod, forbidden)
+
+
+def test_display_names_never_reach_a_service_call():
+    """Friendly names and areas are for people; a service call's target is
+    always the entity_id. No value produced by the presentation helpers is
+    passed to hass.services.async_call."""
+    helpers = {"display_name", "display_names", "entity_label"}
+    checked = 0
+    for p in sorted(ROOT.rglob("*.py")):
+        tree = _tree(p)
+        for fn in ast.walk(tree):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            tainted = set()
+            for node in ast.walk(fn):
+                if isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+                    f = node.value.func
+                    name = f.attr if isinstance(f, ast.Attribute) else getattr(f, "id", None)
+                    if name in helpers:
+                        tainted |= {t.id for t in node.targets if isinstance(t, ast.Name)}
+            for call in _calls(fn, "async_call"):
+                checked += 1
+                used = {n.id for n in ast.walk(call) if isinstance(n, ast.Name)}
+                src = ast.unparse(call)
+                assert not (used & tainted), (str(p.relative_to(ROOT)), fn.name)
+                assert not any(h + "(" in src for h in helpers), (str(p.relative_to(ROOT)),
+                                                                  fn.name)
+    assert checked > 20

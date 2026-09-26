@@ -16,11 +16,8 @@
   },
   "incorrect_entity_match_rate": {
     "denominator": 40,
-    "failing": [
-      "ENT-002",
-      "ENT-003"
-    ],
-    "numerator": 2
+    "failing": [],
+    "numerator": 0
   },
   "local_provider_agreement": {
     "denominator": 3,

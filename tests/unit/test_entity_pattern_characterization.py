@@ -67,7 +67,44 @@ QUERIES = [
     ("kitchen lights", None, False), ("lights on", None, False),
 ]
 
-INTENDED_CHANGES: dict = {}
+_LIGHTS = ["light.bedroom_lamp_left", "light.bedroom_lamp_right", "light.hall",
+           "light.kitchen_ceiling", "light.office", "light.office_desk", "light.porch"]
+_TIE = "equal scores now sort by entity_id, not by state-machine order"
+_EXACT = "an exact friendly name, object name or entity_id resolves one target alone"
+
+# Phase 8: pinned case -> (result now, why it changed).
+INTENDED_CHANGES: dict = {
+    "lights|None|0": (_LIGHTS, "ENT-002: 'lights' is the light domain; sensors whose "
+                               "names contain the word are not lights"),
+    "lights|light|0": (_LIGHTS, "ENT-003: with the light domain, every light is listed, "
+                                "including ones whose name lacks the word"),
+    "lights on|None|0": (["light.kitchen_ceiling", "light.porch"],
+                         "a plural domain with a state lists the lights that are on"),
+    "kitchen lights|None|0": (["light.kitchen_ceiling"],
+                              "the light domain, then the remaining name"),
+    "locks|None|0": (["lock.back_door", "lock.front_door"], "'locks' is the lock domain"),
+    "light|None|0": (["binary_sensor.light_current_fault", "light.hall", "light.porch",
+                      "sensor.kitchen_light_current", "sensor.porch_light_current",
+                      "switch.garden_lights", "light.bedroom_lamp_left",
+                      "light.bedroom_lamp_right", "light.kitchen_ceiling", "light.office",
+                      "light.office_desk"], _TIE),
+    "current|None|0": (["binary_sensor.light_current_fault", "sensor.kitchen_light_current",
+                        "sensor.porch_light_current", "switch.current_monitor"], _TIE),
+    "bedroom|None|0": (["fan.bedroom", "light.bedroom_lamp_left", "light.bedroom_lamp_right"],
+                       "an exact object name leads a browsing list"),
+    "porch light|None|1": (["light.porch"], _EXACT),
+    "kitchen ceiling|None|1": (["light.kitchen_ceiling"], _EXACT),
+    "hall light|light|1": (["light.hall"], _EXACT),
+    "office|None|1": (["light.office"], _EXACT),
+    "front door|None|1": (["lock.front_door"], _EXACT),
+    "front door|lock|1": (["lock.front_door"], _EXACT),
+    "garden lights|None|1": (["switch.garden_lights"], _EXACT),
+    "light.porch|None|1": (["light.porch"], "an explicit entity_id resolves itself"),
+    "porch|None|1": (["light.porch"], "an exact object name is not ambiguous with a sensor "
+                                      "that merely contains the word"),
+    "porch_light|None|1": (["light.porch"], "'porch_light' normalizes to the friendly name "
+                                            "Porch Light; the current sensor was picked before"),
+}
 
 
 def _home():
@@ -108,8 +145,10 @@ async def test_search_entities_matches_the_characterization(load, monkeypatch):
     assert sorted(pinned) == sorted(current)
     drift = {k: {"pinned": pinned[k], "now": current[k]}
              for k in sorted(current) if pinned[k] != current[k]}
-    unexpected = {k: v for k, v in drift.items() if k not in INTENDED_CHANGES}
+    unexpected = {k: v for k, v in drift.items()
+                  if k not in INTENDED_CHANGES or v["now"] != INTENDED_CHANGES[k][0]}
     assert unexpected == {}, json.dumps(unexpected, indent=1)
+    assert sorted(drift) == sorted(INTENDED_CHANGES)
 
 
 # ── Time routines ───────────────────────────────────────────────────────────

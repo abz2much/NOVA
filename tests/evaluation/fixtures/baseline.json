@@ -1,10 +1,1 @@
-{
-  "ENT-002": {
-    "note": "search_entities is a name search across many domains: 'lights' also returns current sensors and a fault sensor whose names contain the word, and misses a light whose name does not.",
-    "verdict": "mismatch"
-  },
-  "ENT-003": {
-    "note": "With the light domain filter, a light whose friendly name lacks the word 'light' (Kitchen Ceiling) is not returned for 'lights'.",
-    "verdict": "mismatch"
-  }
-}
+{}

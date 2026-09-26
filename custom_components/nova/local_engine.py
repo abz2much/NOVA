@@ -211,6 +211,9 @@ _QUERY_PATTERNS = [
     # that merely mentions the word.
     (r"(?:what(?:'s| is)\s+)(?:open|unlocked)\b",          "what_open"),
     (r"(?:are\s+)?(?:any|which)\s+(?:doors?|windows?)\s+open", "what_open"),
+    (r"(?:list|show(?:\s+me)?|tell\s+me(?:\s+which)?|name|which|what)\s+(?:all\s+)?(?:of\s+)?(?:the\s+)?lights?\s+"
+     r"(?:that\s+|which\s+)?(?:are\s+)?(?:currently\s+|still\s+|now\s+)?(?:turned\s+)?on\b",
+     "lights_on"),
     (r"(?:are\s+)?(?:any|which)\s+(?:lights?)\s+on",     "lights_on"),
     (r"(?:how\s+many)\s+lights?\s+(?:are\s+)?on",        "lights_on"),
     (r"(?:what(?:'s| is)\s+(?:the\s+)?)?(?:energy|power)\s+(?:usage|consumption)", "energy"),
@@ -219,6 +222,14 @@ _QUERY_PATTERNS = [
     (r"(?:how\s+(?:warm|cold|hot))\s+is\s+it",           "weather"),
     (r"(?:what\s+)?(?:devices?|entities?)\s+(?:are\s+)?(?:in|at)\s+(?:the\s+)?(.+)", "area_devices"),
 ]
+
+
+# "Do not change anything", "don't turn anything off", "without changing
+# it": the person asked for information only.
+_READ_ONLY_RE = re.compile(
+    r"\b(?:do\s+not|don'?t|dont|without)\s+(?:change|changing|touch|touching|turn|turning|"
+    r"switch|switching|adjust|adjusting|alter|altering)\b"
+    r"|\b(?:read[\s-]?only|just\s+(?:list|tell|show))\b")
 
 
 # ── Complexity scoring ──────────────────────────────────────────────────────
@@ -1041,8 +1052,12 @@ def _ctx_query(hass, qtype, h="sir", area_match=""):
         return f"Currently open or unlocked: {', '.join(items)}."
 
     if qtype == "lights_on":
-        on = [s.attributes.get("friendly_name", s.entity_id)
-              for s in hass.states.async_all("light") if s.state == "on"]
+        # Read-only: names come from the presentation helper (friendly name,
+        # area added when two lights share a name); no service is called.
+        from .agent_runtime.presentation import display_names
+        on_ids = [s.entity_id for s in hass.states.async_all("light") if s.state == "on"]
+        names = display_names(hass, on_ids)
+        on = [names.get(eid, eid) for eid in on_ids]
         if not on:
             return f"All lights are off{addr}."
         c = len(on)
@@ -1159,6 +1174,12 @@ async def try_local(hass, text, honorific="sir", force=False, device_id=None):
             if resp:
                 _LOGGER.info("Local contextual: %s", qtype)
                 return LocalResult(text=resp, success=True)
+
+    # A request that says not to change anything is read-only: the local
+    # engine never actuates for it. Unanswered here, it goes to the agent.
+    if _READ_ONLY_RE.search(normalized):
+        _LOGGER.debug("Local: read-only request, no local action")
+        return None
 
     # Bulk/multi-entity
     for pattern, action, domain, scope in _BULK_PATTERNS:
