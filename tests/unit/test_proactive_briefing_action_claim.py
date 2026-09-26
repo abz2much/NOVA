@@ -236,12 +236,12 @@ def test_unsafe_claim_uses_deterministic_fallback_for_speech_and_push(briefing_m
     )
     hass = _FakeHass()
     briefing_mod._STATE.hass = hass
-    briefing_mod._STATE.config = {"notify_service": "notify.mobile_app_abi_s26"}
+    briefing_mod._STATE.config = {"notify_service": "notify.mobile_app_alex_phone"}
     briefing_mod._STATE.last_briefing_time = 0
 
     import asyncio
     asyncio.run(
-        briefing_mod._trigger_briefing("arrival", person_name="Abi")
+        briefing_mod._trigger_briefing("arrival", person_name="Alex")
     )
 
     spoken = briefing_mod._async_announce_calls
@@ -271,12 +271,12 @@ def test_unsafe_offer_uses_deterministic_fallback_for_speech_and_push(briefing_m
     )
     hass = _FakeHass()
     briefing_mod._STATE.hass = hass
-    briefing_mod._STATE.config = {"notify_service": "notify.mobile_app_abi_s26"}
+    briefing_mod._STATE.config = {"notify_service": "notify.mobile_app_alex_phone"}
     briefing_mod._STATE.last_briefing_time = 0
 
     import asyncio
     asyncio.run(
-        briefing_mod._trigger_briefing("arrival", person_name="Abi")
+        briefing_mod._trigger_briefing("arrival", person_name="Alex")
     )
 
     spoken = briefing_mod._async_announce_calls
@@ -300,12 +300,12 @@ def test_safe_generated_text_passes_through_unchanged(briefing_mod, monkeypatch)
     provider = _wire_provider(monkeypatch, briefing_mod, safe_text)
     hass = _FakeHass()
     briefing_mod._STATE.hass = hass
-    briefing_mod._STATE.config = {"notify_service": "notify.mobile_app_abi_s26"}
+    briefing_mod._STATE.config = {"notify_service": "notify.mobile_app_alex_phone"}
     briefing_mod._STATE.last_briefing_time = 0
 
     import asyncio
     asyncio.run(
-        briefing_mod._trigger_briefing("arrival", person_name="Abi")
+        briefing_mod._trigger_briefing("arrival", person_name="Alex")
     )
 
     spoken = briefing_mod._async_announce_calls

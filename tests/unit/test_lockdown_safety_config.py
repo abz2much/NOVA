@@ -27,7 +27,7 @@ def test_panel_validation_accepts_only_notify_service_lists(load):
 
     assert safety_config.valid_panel_value(
         "notify_services",
-        '["notify.mobile_app_abi", "notify.mobile_app_rachel"]',
+        '["notify.mobile_app_alex", "notify.mobile_app_morgan"]',
     ) is True
     assert safety_config.valid_panel_value("notify_services", "[]") is True
     for value in (

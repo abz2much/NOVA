@@ -24,9 +24,9 @@ benefit.
 
 Reaffirmed 13 Sept 2026: an external review flagged get_panel_data,
 get_activity_log, search_memory, and get_person_routines specifically as
-readable by any signed-in user, admin or not. Abi confirmed this stays as
-designed — accepted risk, not an oversight. Don't re-gate these without
-checking with him first; it silently breaks the panel for non-admin
+readable by any signed-in user, admin or not. This remains a deliberate
+design — an accepted risk, not an oversight. Don't re-gate these without
+an explicit compatibility decision; it silently breaks the panel for non-admin
 household members, not just narrows what they can see.
 """
 from pathlib import Path

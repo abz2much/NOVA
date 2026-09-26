@@ -200,10 +200,9 @@ def test_discover_roles_survives_a_rename(eufy, fake_hass):
 def test_discover_roles_picks_up_vehicle_on_a_driveway_style_camera(eufy, fake_hass):
     # Real-world case: an outdoor camera with no doorbell/package hardware but
     # with vehicle detection — via the motionDetectionTypeVehicle switch, not
-    # the vehicleDetected binary_sensor (verified live: both exist on Abi's
-    # actual driveway camera, but the binary_sensor ships disabled and
-    # unproven, while the switch is what his own working automation already
-    # used as an event trigger).
+    # the vehicleDetected binary_sensor (both can exist on a supported
+    # driveway camera, but the binary_sensor ships disabled and is not a
+    # reliable event source, while the switch produces event transitions).
     driveway = [
         _Entry("camera.driveway", "eufy_security", DEVICE, _uid("camera")),
         _Entry("binary_sensor.driveway_person_detected", "eufy_security", DEVICE, _uid("personDetected")),

@@ -178,7 +178,7 @@ class _HassWithNotify(_Hass):
     """Adds services.async_services() so _confirm_via_notification can find
     a notify.mobile_app_* target, and a controllable bus for firing the
     confirm/deny action event."""
-    def __init__(self, notify_names=("mobile_app_abi",)):
+    def __init__(self, notify_names=("mobile_app_alex",)):
         super().__init__()
         self._notify_names = notify_names
         self._bus_listener = None

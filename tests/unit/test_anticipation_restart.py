@@ -13,7 +13,7 @@ import sqlite3
 import pytest
 
 COMPONENT = pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova"
-EID = "binary_sensor.sun_solar_rising"
+EID = "binary_sensor.example_morning_activity"
 USUAL = 1 * 3600 + 18 * 60          # 01:18
 
 

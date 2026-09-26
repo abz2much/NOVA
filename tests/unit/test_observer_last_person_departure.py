@@ -1,12 +1,12 @@
 """End-to-end: a genuine last-person departure must stay fully silent.
 
-Reproduces the 2026-09-18 08:30 incident: person.abi went home -> not_home
+Reproduces the 2026-09-18 08:30 incident: person.alex went home -> not_home
 while a phone-presence binary_sensor (device_class="presence") was still
 "on" for ~63s after the person entity had already gone not_home (a
 clear-delay). audio_routing.anyone_home(hass) — called independently at
 routing time, before the fix — counted that stale sensor and returned True,
 so the MEDIUM branch's "if not home: notify_only" guard never triggered and
-Nova spoke "Abi has left the premises." into an empty house with no phone
+Nova spoke "Alex has left the premises." into an empty house with no phone
 backup at all.
 
 This test drives observer.py's real _process_event() pipeline (the actual
@@ -38,7 +38,7 @@ class _States:
             return [SimpleNamespace(
                 state="on",
                 attributes={"device_class": "presence"},
-                entity_id="binary_sensor.abi_s26_ultra_presence",
+                entity_id="binary_sensor.alex_phone_presence",
             )]
         return []
 
@@ -68,9 +68,9 @@ class _FakeHass:
 
 
 def _departure_event(observer):
-    mk = lambda s: SimpleNamespace(state=s, attributes={"friendly_name": "Abi"})
+    mk = lambda s: SimpleNamespace(state=s, attributes={"friendly_name": "Alex"})
     return SimpleNamespace(data={
-        "entity_id": "person.abi",
+        "entity_id": "person.alex",
         "old_state": mk("home"),
         "new_state": mk("not_home"),
     })
@@ -107,7 +107,7 @@ def test_last_person_departure_is_fully_silent_with_fixed_tracker_home(load, mon
     captured = _wire_fakes(observer, monkeypatch)
     hass = _FakeHass(presence_sensor_on=True)
     observer._STATE.hass = hass
-    observer._STATE.config = {"notify_service": "notify.mobile_app_abi_s26"}
+    observer._STATE.config = {"notify_service": "notify.mobile_app_alex_phone"}
     observer._STATE.classifier_provider = None
     observer._STATE.reasoning_provider = None
 
@@ -127,7 +127,7 @@ def test_last_person_departure_without_presence_sensor_is_fully_silent(load, mon
     captured = _wire_fakes(observer, monkeypatch)
     hass = _FakeHass(presence_sensor_on=False)
     observer._STATE.hass = hass
-    observer._STATE.config = {"notify_service": "notify.mobile_app_abi_s26"}
+    observer._STATE.config = {"notify_service": "notify.mobile_app_alex_phone"}
     observer._STATE.classifier_provider = None
     observer._STATE.reasoning_provider = None
 

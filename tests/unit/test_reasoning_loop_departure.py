@@ -21,7 +21,7 @@ whenever nobody is left home.
 
 def test_not_home_to_home_is_arrival(reasoning_loop):
     decision = reasoning_loop._try_local_reasoning(
-        event_summary="Abi (person.abi) changed from not_home to home",
+        event_summary="Alex (person.alex) changed from not_home to home",
         urgency="medium",
         category="presence",
         honorific="sir",
@@ -38,7 +38,7 @@ def test_not_home_to_home_is_arrival(reasoning_loop):
 
 def test_home_to_not_home_is_departure(reasoning_loop):
     decision = reasoning_loop._try_local_reasoning(
-        event_summary="Abi (person.abi) changed from home to not_home",
+        event_summary="Alex (person.alex) changed from home to not_home",
         urgency="low",
         category="presence",
         honorific="ma'am",
@@ -49,12 +49,12 @@ def test_home_to_not_home_is_departure(reasoning_loop):
     )
     assert decision["speak"] is True
     assert decision["urgency"] == "low"
-    assert "Abi has left the premises" in decision["message"]
+    assert "Alex has left the premises" in decision["message"]
 
 
 def test_departure_stays_silent_when_house_now_empty(reasoning_loop):
     decision = reasoning_loop._try_local_reasoning(
-        event_summary="Abi (person.abi) changed from home to not_home",
+        event_summary="Alex (person.alex) changed from home to not_home",
         urgency="low",
         category="presence",
         honorific="",
@@ -70,14 +70,14 @@ def test_non_home_zone_transition_is_neither_arrival_nor_departure(reasoning_loo
     """not_home -> a named zone (e.g. school) is neither direction — only a
     transition touching the literal "home" state counts."""
     decision = reasoning_loop._try_local_reasoning(
-        event_summary="Abi (person.abi) changed from not_home to Jianna School",
+        event_summary="Alex (person.alex) changed from not_home to Casey School",
         urgency="low",
         category="presence",
         honorific="sir",
         recent_announcements=[],
         anyone_home=True,
         from_state="not_home",
-        to_state="Jianna School",
+        to_state="Casey School",
     )
     # Falls through the presence-arrival/departure branch entirely; low
     # urgency with no other matching template stays silent.
@@ -88,13 +88,13 @@ def test_zone_to_not_home_is_neither_arrival_nor_departure(reasoning_loop):
     """Leaving a named zone (e.g. school) for not_home is neither direction —
     this is in-transit, not a house departure."""
     decision = reasoning_loop._try_local_reasoning(
-        event_summary="Abi (person.abi) changed from Jianna School to not_home",
+        event_summary="Alex (person.alex) changed from Casey School to not_home",
         urgency="low",
         category="presence",
         honorific="sir",
         recent_announcements=[],
         anyone_home=True,
-        from_state="Jianna School",
+        from_state="Casey School",
         to_state="not_home",
     )
     assert decision == {"speak": False, "reason": "low urgency — logged but not announced"}
@@ -109,7 +109,7 @@ def test_arbitrary_event_summary_wording_cannot_reverse_direction(reasoning_loop
     because the substring "not_home" is present in that very sentence."""
     decision = reasoning_loop._try_local_reasoning(
         event_summary=(
-            "Abi (person.abi) left not_home and changed from not_home to home"
+            "Alex (person.alex) left not_home and changed from not_home to home"
         ),
         urgency="medium",
         category="presence",
@@ -129,7 +129,7 @@ def test_no_from_to_state_supplied_does_not_guess_direction(reasoning_loop):
     arrival/departure template match — it must not fall back to guessing
     from prose. It falls through toward the cloud/cache path (None)."""
     decision = reasoning_loop._try_local_reasoning(
-        event_summary="Abi (person.abi) changed from home to not_home",
+        event_summary="Alex (person.alex) changed from home to not_home",
         urgency="medium",
         category="presence",
         honorific="sir",
@@ -154,17 +154,17 @@ def test_no_from_to_state_supplied_does_not_guess_direction(reasoning_loop):
 def _decide_kwargs(**over):
     kwargs = dict(
         honorific="sir",
-        event_summary="Abi (person.abi) changed from not_home to home",
+        event_summary="Alex (person.alex) changed from not_home to home",
         home_state_summary="",
         classifier_urgency="medium",
         classifier_category="presence",
         recent_announcements=[],
         anyone_home=True,
-        entity_id="person.abi",
+        entity_id="person.alex",
         device_class="",
         from_state="not_home",
         to_state="home",
-        friendly_name="Abi",
+        friendly_name="Alex",
     )
     kwargs.update(over)
     return kwargs
@@ -177,7 +177,7 @@ async def test_rich_reasoning_enabled_arrival_is_still_deterministic(
     out = await reasoning_loop.decide(
         fake_hass, provider,
         **_decide_kwargs(
-            event_summary="Abi (person.abi) changed from not_home to home",
+            event_summary="Alex (person.alex) changed from not_home to home",
             from_state="not_home", to_state="home", anyone_home=True,
         ),
     )
@@ -194,7 +194,7 @@ async def test_rich_reasoning_enabled_departure_is_still_deterministic(
     out = await reasoning_loop.decide(
         fake_hass, provider,
         **_decide_kwargs(
-            event_summary="Abi (person.abi) changed from home to not_home",
+            event_summary="Alex (person.alex) changed from home to not_home",
             from_state="home", to_state="not_home", anyone_home=False,
         ),
     )
@@ -244,7 +244,7 @@ async def test_rich_reasoning_disabled_uses_same_presence_rules(
     arrival = await reasoning_loop.decide(
         fake_hass, provider,
         **_decide_kwargs(
-            event_summary="Abi (person.abi) changed from not_home to home",
+            event_summary="Alex (person.alex) changed from not_home to home",
             from_state="not_home", to_state="home", anyone_home=True,
         ),
     )
@@ -254,7 +254,7 @@ async def test_rich_reasoning_disabled_uses_same_presence_rules(
     departure = await reasoning_loop.decide(
         fake_hass, provider,
         **_decide_kwargs(
-            event_summary="Abi (person.abi) changed from home to not_home",
+            event_summary="Alex (person.alex) changed from home to not_home",
             from_state="home", to_state="not_home", anyone_home=False,
         ),
     )
@@ -278,8 +278,8 @@ async def test_rich_reasoning_enabled_non_home_zone_transition_unaffected(
     out = await reasoning_loop.decide(
         fake_hass, provider,
         **_decide_kwargs(
-            event_summary="Abi (person.abi) changed from not_home to Jianna School",
-            from_state="not_home", to_state="Jianna School", anyone_home=True,
+            event_summary="Alex (person.alex) changed from not_home to Casey School",
+            from_state="not_home", to_state="Casey School", anyone_home=True,
         ),
     )
     # Reached the cloud path (not the deterministic arrival/departure

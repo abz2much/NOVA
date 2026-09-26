@@ -69,8 +69,8 @@ def test_selected_services_preserve_legacy_single_target(monkeypatch):
     module = _load_module(monkeypatch, _ActionLog())
 
     assert module.configured_notify_services({
-        "notify_service": "notify.mobile_app_abi",
-    }) == ["notify.mobile_app_abi"]
+        "notify_service": "notify.mobile_app_alex",
+    }) == ["notify.mobile_app_alex"]
 
 
 def test_selected_services_parse_json_and_remove_duplicates(monkeypatch):
@@ -78,11 +78,11 @@ def test_selected_services_parse_json_and_remove_duplicates(monkeypatch):
 
     assert module.configured_notify_services({
         "notify_services": (
-            '["notify.mobile_app_abi", "notify.mobile_app_rachel", '
-            '"notify.mobile_app_abi", "light.not_a_phone", 4]'
+            '["notify.mobile_app_alex", "notify.mobile_app_morgan", '
+            '"notify.mobile_app_alex", "light.not_a_phone", 4]'
         ),
         "notify_service": "notify.legacy_must_not_return",
-    }) == ["notify.mobile_app_abi", "notify.mobile_app_rachel"]
+    }) == ["notify.mobile_app_alex", "notify.mobile_app_morgan"]
 
 
 def test_selected_services_reject_malformed_service_identifiers(monkeypatch):
@@ -101,7 +101,7 @@ def test_explicit_empty_selection_does_not_restore_legacy_target(monkeypatch):
 
     assert module.configured_notify_services({
         "notify_services": "[]",
-        "notify_service": "notify.mobile_app_abi",
+        "notify_service": "notify.mobile_app_alex",
     }) == []
 
 
@@ -109,11 +109,11 @@ def test_explicit_empty_selection_does_not_restore_legacy_target(monkeypatch):
 async def test_send_fans_out_and_isolates_device_failure(monkeypatch):
     action_log = _ActionLog()
     module = _load_module(monkeypatch, action_log)
-    hass = _Hass(failing={"notify.mobile_app_abi"})
+    hass = _Hass(failing={"notify.mobile_app_alex"})
     config = {
         "notify_services": [
-            "notify.mobile_app_abi",
-            "notify.mobile_app_rachel",
+            "notify.mobile_app_alex",
+            "notify.mobile_app_morgan",
         ]
     }
 
@@ -127,22 +127,22 @@ async def test_send_fans_out_and_isolates_device_failure(monkeypatch):
     )
 
     assert [call[0] for call in hass.services.calls] == [
-        "notify.mobile_app_abi",
-        "notify.mobile_app_rachel",
+        "notify.mobile_app_alex",
+        "notify.mobile_app_morgan",
     ]
-    assert sent == ["notify.mobile_app_rachel"]
+    assert sent == ["notify.mobile_app_morgan"]
     assert action_log.started[0][3] == [
         {
-            "key": "notify.mobile_app_abi",
+            "key": "notify.mobile_app_alex",
             "domain": "notify",
-            "service": "mobile_app_abi",
+            "service": "mobile_app_alex",
             "entity_id": None,
             "requested_state": "high",
         },
         {
-            "key": "notify.mobile_app_rachel",
+            "key": "notify.mobile_app_morgan",
             "domain": "notify",
-            "service": "mobile_app_rachel",
+            "service": "mobile_app_morgan",
             "entity_id": None,
             "requested_state": "high",
         },

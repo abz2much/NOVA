@@ -127,8 +127,8 @@ def stats() -> dict:
 # ── Pattern mining (no names, no face data — see module docstring) ──────────
 # What this is NOT: face recognition. Nova has no local face model of its
 # own — identity ("that's Username") comes only from Frigate's face model or
-# DoubleTake (see recognition.py), neither of which this install has
-# configured. This only clusters the vision model's own category label
+# DoubleTake (see recognition.py), when either is configured. This only
+# clusters the vision model's own category label
 # (delivery/package/mail/person/known_resident/vehicle/animal/other) by
 # camera and time of day, the same "seen on N of M days" honesty framing
 # pattern_analyzer.py uses for state-change routines — just applied to the

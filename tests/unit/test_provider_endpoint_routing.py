@@ -11,8 +11,8 @@ def llm(load):
 
 @pytest.mark.parametrize(("raw", "expected"), [
     ("gpu.local", "http://gpu.local:11434"),
-    ("10.0.4.96", "http://10.0.4.96:11434"),
-    ("10.0.4.96:11500", "http://10.0.4.96:11500"),
+    ("192.0.2.10", "http://192.0.2.10:11434"),
+    ("192.0.2.10:11500", "http://192.0.2.10:11500"),
     ("2001:db8::10", "http://[2001:db8::10]:11434"),
     ("https://models.example.test/ollama/", "https://models.example.test/ollama"),
 ])

@@ -1,8 +1,8 @@
 """The arrival briefing used to tell the LLM two things that collided:
-"Begin with 'Good afternoon, sir.'" and, separately, "Abi just arrived
-home" — producing redundant lines like "Good afternoon, sir. Abi has just
+"Begin with 'Good afternoon, sir.'" and, separately, "Alex just arrived
+home" — producing redundant lines like "Good afternoon, sir. Alex has just
 arrived home." when the person being addressed (via their own honorific,
-see honorific.py) IS Abi. It also always included open doors/windows in
+see honorific.py) IS Alex. It also always included open doors/windows in
 the prompt context, even though the arrival trigger IS a door opening —
 stating the obvious ("the front door is open") on the very briefing that
 door-open caused.
@@ -27,7 +27,7 @@ def pb(load, monkeypatch, fake_hass):
     mod._STATE.running = True
     mod._STATE.last_briefing_time = 0.0
 
-    # Force the honorific to belong to the one person who's home (Abi) —
+    # Force the honorific to belong to the one person who's home (Alex) —
     # simulates honorific.effective_honorific() resolving to his own
     # configured honorific because he's home alone.
     monkeypatch.setattr(honorific_mod, "effective_honorific", lambda hass: "sir")
@@ -65,12 +65,12 @@ def pb(load, monkeypatch, fake_hass):
 
 def test_arrival_briefing_does_not_restate_name_when_addressing_directly(pb, fake_hass):
     import asyncio
-    asyncio.run(pb._trigger_briefing("arrival", person_name="Abi"))
+    asyncio.run(pb._trigger_briefing("arrival", person_name="Alex"))
     system_msg = pb._captured["messages"][0]["content"]
     user_msg = pb._captured["messages"][1]["content"]
     assert "Welcome home, sir." in system_msg
-    assert "Abi just arrived home" not in system_msg
-    assert "Abi just arrived home" not in user_msg
+    assert "Alex just arrived home" not in system_msg
+    assert "Alex just arrived home" not in user_msg
 
 
 def test_arrival_briefing_drops_open_door_from_context(pb, fake_hass):
@@ -78,7 +78,7 @@ def test_arrival_briefing_drops_open_door_from_context(pb, fake_hass):
     fake_hass.states.set("binary_sensor.front_door", "on",
                           friendly_name="Front Door Contact Sensor", device_class="door")
     fake_hass.states.set("lock.garage", "unlocked", friendly_name="Garage")
-    asyncio.run(pb._trigger_briefing("arrival", person_name="Abi"))
+    asyncio.run(pb._trigger_briefing("arrival", person_name="Alex"))
     user_msg = pb._captured["messages"][1]["content"]
     assert "Front Door Contact Sensor is open" not in user_msg
     assert "Garage is unlocked" in user_msg

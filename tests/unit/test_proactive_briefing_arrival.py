@@ -55,7 +55,7 @@ def _set_front_door(pb, entity_id):
 
 def test_no_front_door_configured_person_arrival_stays_silent(pb, fake_hass):
     pb._on_state_changed(_FakeEvent(
-        "person.abi", _FakeState("home", {"friendly_name": "Abi"}),
+        "person.alex", _FakeState("home", {"friendly_name": "Alex"}),
         _FakeState("not_home"),
     ))
     assert pb._STATE.pending_arrival_person == ""
@@ -65,31 +65,31 @@ def test_no_front_door_configured_person_arrival_stays_silent(pb, fake_hass):
 def test_person_arrival_with_door_configured_does_not_brief_immediately(pb, fake_hass):
     _set_front_door(pb, "binary_sensor.front_door")
     pb._on_state_changed(_FakeEvent(
-        "person.abi", _FakeState("home", {"friendly_name": "Abi"}),
+        "person.alex", _FakeState("home", {"friendly_name": "Alex"}),
         _FakeState("not_home"),
     ))
-    assert pb._STATE.pending_arrival_person == "Abi"
+    assert pb._STATE.pending_arrival_person == "Alex"
     assert pb._briefed == []  # not yet -- waiting for the door
 
 
 async def test_door_opening_after_pending_arrival_triggers_briefing(pb, fake_hass):
     _set_front_door(pb, "binary_sensor.front_door")
     pb._on_state_changed(_FakeEvent(
-        "person.abi", _FakeState("home", {"friendly_name": "Abi"}),
+        "person.alex", _FakeState("home", {"friendly_name": "Alex"}),
         _FakeState("not_home"),
     ))
     pb._on_state_changed(_FakeEvent(
         "binary_sensor.front_door", _FakeState("on"), _FakeState("off"),
     ))
     await fake_hass.drain()
-    assert pb._briefed == [("arrival", "Abi")]
+    assert pb._briefed == [("arrival", "Alex")]
     assert pb._STATE.pending_arrival_person == ""
 
 
 async def test_unrelated_door_opening_does_not_consume_pending_arrival(pb, fake_hass):
     _set_front_door(pb, "binary_sensor.front_door")
     pb._on_state_changed(_FakeEvent(
-        "person.abi", _FakeState("home", {"friendly_name": "Abi"}),
+        "person.alex", _FakeState("home", {"friendly_name": "Alex"}),
         _FakeState("not_home"),
     ))
     pb._on_state_changed(_FakeEvent(
@@ -97,13 +97,13 @@ async def test_unrelated_door_opening_does_not_consume_pending_arrival(pb, fake_
     ))
     await fake_hass.drain()
     assert pb._briefed == []
-    assert pb._STATE.pending_arrival_person == "Abi"  # still pending
+    assert pb._STATE.pending_arrival_person == "Alex"  # still pending
 
 
 async def test_stale_pending_arrival_does_not_brief(pb, fake_hass, monkeypatch):
     _set_front_door(pb, "binary_sensor.front_door")
     pb._on_state_changed(_FakeEvent(
-        "person.abi", _FakeState("home", {"friendly_name": "Abi"}),
+        "person.alex", _FakeState("home", {"friendly_name": "Alex"}),
         _FakeState("not_home"),
     ))
     # Simulate 11 minutes passing (> ARRIVAL_DOOR_WINDOW_S) before the door opens.
@@ -119,7 +119,7 @@ async def test_stale_pending_arrival_does_not_brief(pb, fake_hass, monkeypatch):
 async def test_second_door_open_without_new_arrival_does_not_rebrief(pb, fake_hass):
     _set_front_door(pb, "binary_sensor.front_door")
     pb._on_state_changed(_FakeEvent(
-        "person.abi", _FakeState("home", {"friendly_name": "Abi"}),
+        "person.alex", _FakeState("home", {"friendly_name": "Alex"}),
         _FakeState("not_home"),
     ))
     pb._on_state_changed(_FakeEvent(
@@ -144,7 +144,7 @@ async def test_changing_front_door_entity_is_read_live_not_cached(pb, fake_hass)
     # reload.
     _set_front_door(pb, "binary_sensor.old_door")
     pb._on_state_changed(_FakeEvent(
-        "person.abi", _FakeState("home", {"friendly_name": "Abi"}),
+        "person.alex", _FakeState("home", {"friendly_name": "Alex"}),
         _FakeState("not_home"),
     ))
     _set_front_door(pb, "binary_sensor.new_door")
@@ -158,4 +158,4 @@ async def test_changing_front_door_entity_is_read_live_not_cached(pb, fake_hass)
         "binary_sensor.new_door", _FakeState("on"), _FakeState("off"),
     ))
     await fake_hass.drain()
-    assert pb._briefed == [("arrival", "Abi")]
+    assert pb._briefed == [("arrival", "Alex")]

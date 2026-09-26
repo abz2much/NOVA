@@ -394,7 +394,7 @@ async def _trigger_briefing(
             # (see honorific.py) — that's the person who just walked in, so
             # this briefing is spoken directly to them. Telling the model
             # their name AND instructing it to greet "sir"/"ma'am" produced
-            # redundant lines like "Good afternoon, sir. Abi has just
+            # redundant lines like "Good afternoon, sir. Alex has just
             # arrived home." Drop the name restatement; the greeting alone
             # already addresses them.
             extra_context = (
