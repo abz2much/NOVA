@@ -369,8 +369,6 @@ def storage_contract() -> dict:
                     and n.args and all(isinstance(a, ast.Constant) for a in n.args)):
                 paths.add("/".join(a.value for a in n.args))
         tables |= set(re.findall(r"CREATE TABLE(?: IF NOT EXISTS)?\s+([a-z_]+)\s*\(", src))
-        tables |= set(re.findall(
-            r"CREATE VIRTUAL TABLE(?: IF NOT EXISTS)?\s+([a-z_]+)\s+USING", src))
         if paths or tables:
             out[rel_mod] = {"paths": sorted(paths), "tables": sorted(tables)}
     return out

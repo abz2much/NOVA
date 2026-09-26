@@ -1,17 +1,3 @@
-## [7.122.0] — panel source structure
-
-- The dashboard is now maintained as separate source files under `frontend/src/` and built into the same single `nova-panel.js` that HACS installs. Apart from a generated file banner and one equivalent string escape, the built panel is the same code as before, so nothing changes on screen.
-- CI and the tests fail if the built panel is out of date, and the version bump rebuilds it, so a release can't ship a stale dashboard.
-- The Residence 3D engine now has one source file, used by both the panel and its developer viewer. The outdated copy was removed, and the viewer tools moved out of the installed package.
-
-## [7.121.0] — persistence boundaries
-
-- Every table Nova stores in SQLite is now defined in one place, and existing databases are upgraded once at startup, one file at a time and all or nothing. If a file can't be upgraded, only that store is affected: it is logged, left unchanged, and retried at the next start. Nova keeps loading.
-- Fixed decision history failing to open on installs whose `decisions.db` predates the `ref` column.
-- Learned aliases, ignore rules and autonomy grants are now saved atomically, and an unreadable state file is logged as corrupt instead of looking empty.
-
-Paths, table and column names, stored data, backends and service, WebSocket, panel and assistant tool schemas are unchanged. Databases gain a small `nova_schema_components` table, which older releases ignore.
-
 ## [7.120.3] — public fixture hygiene
 
 - Replaced installation-specific names, entity IDs, notification targets and network addresses in public tests, examples, comments and historical notes with neutral synthetic data.

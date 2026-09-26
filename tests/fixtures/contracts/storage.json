@@ -3,7 +3,9 @@
     "paths": [
       "nova/conversations.db"
     ],
-    "tables": []
+    "tables": [
+      "action_log"
+    ]
   },
   "agent_runtime.capabilities.memory": {
     "paths": [
@@ -33,7 +35,9 @@
     "paths": [
       "nova/patterns.db"
     ],
-    "tables": []
+    "tables": [
+      "automation_trials"
+    ]
   },
   "bootstrap": {
     "paths": [
@@ -60,7 +64,12 @@
       "nova/lockdown_state.json",
       "nova/patterns.db"
     ],
-    "tables": []
+    "tables": [
+      "commands",
+      "person_patterns",
+      "state_changes",
+      "suggestions"
+    ]
   },
   "config_flow": {
     "paths": [
@@ -78,13 +87,19 @@
     "paths": [
       "nova/conversations.db"
     ],
-    "tables": []
+    "tables": [
+      "activity_log",
+      "conversations",
+      "sentinel_events"
+    ]
   },
   "decision_record": {
     "paths": [
       "nova/decisions.db"
     ],
-    "tables": []
+    "tables": [
+      "decision_records"
+    ]
   },
   "diagnostics.fault_log": {
     "paths": [
@@ -98,7 +113,9 @@
       "nova/documents",
       "nova_memory"
     ],
-    "tables": []
+    "tables": [
+      "document_watch_seen"
+    ]
   },
   "doorbell_training": {
     "paths": [
@@ -110,19 +127,25 @@
     "paths": [
       "nova.db"
     ],
-    "tables": []
+    "tables": [
+      "doc_vectors"
+    ]
   },
   "followups": {
     "paths": [
       "nova/patterns.db"
     ],
-    "tables": []
+    "tables": [
+      "followups"
+    ]
   },
   "goals": {
     "paths": [
       "nova/patterns.db"
     ],
-    "tables": []
+    "tables": [
+      "goals"
+    ]
   },
   "ha_secrets": {
     "paths": [
@@ -142,7 +165,9 @@
     "paths": [
       "nova/knowledge.db"
     ],
-    "tables": []
+    "tables": [
+      "facts"
+    ]
   },
   "local_engine": {
     "paths": [
@@ -175,45 +200,21 @@
     ],
     "tables": []
   },
-  "persistence.schema": {
-    "paths": [],
-    "tables": [
-      "action_log",
-      "activity_log",
-      "automation_trials",
-      "cognition_alerted",
-      "cognition_model",
-      "commands",
-      "conversations",
-      "decision_records",
-      "doc_vectors",
-      "document_fts",
-      "document_watch_seen",
-      "facts",
-      "followups",
-      "goals",
-      "memory_fts",
-      "nova_schema_components",
-      "person_patterns",
-      "provider_activity_daily",
-      "reminders",
-      "sentinel_events",
-      "spoken_history",
-      "state_changes",
-      "suggestions"
-    ]
-  },
   "person_patterns": {
     "paths": [
       "nova/patterns.db"
     ],
-    "tables": []
+    "tables": [
+      "person_patterns"
+    ]
   },
   "provider_activity": {
     "paths": [
       "nova/provider_activity.db"
     ],
-    "tables": []
+    "tables": [
+      "provider_activity_daily"
+    ]
   },
   "rca": {
     "paths": [
@@ -232,7 +233,9 @@
     "paths": [
       "nova/reminders.db"
     ],
-    "tables": []
+    "tables": [
+      "reminders"
+    ]
   },
   "routines": {
     "paths": [
@@ -244,7 +247,9 @@
     "paths": [
       "nova/conversations.db"
     ],
-    "tables": []
+    "tables": [
+      "spoken_history"
+    ]
   },
   "state_ledger": {
     "paths": [

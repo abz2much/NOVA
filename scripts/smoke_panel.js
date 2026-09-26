@@ -849,18 +849,6 @@ setTimeout(async () => {
       resRoot.querySelectorAll(".door-map-sel-new").length === elNew._doorSlots().length],
   );
 
-  // NOVA3D output is pinned: the engine is built from frontend/src/nova3d.js,
-  // and any change to its geometry or SVG text must be deliberate (update the
-  // hash in the same change, after checking the model in frontend/dev).
-  {
-    const N = window.NOVA3D, lit = { "master bedroom": "dom", kitchen: "on", garage: "on" };
-    const out = [35, 160, 290].map(t => N.renderSVG({ theta: t, floor: "all", lit })).join("|")
-      + "|" + N.renderSVG({ theta: 35, floor: "1f", lit }) + "|" + JSON.stringify(N.fixedBox({ floor: "all" }));
-    const hash = require("crypto").createHash("sha256").update(out).digest("hex");
-    checks.push(["NOVA3D engine output matches the pinned hash",
-      hash === "3073a7225ac19e39c063b2325776c882d5a4b280710a0b8e7f02f3c368cc7c73"]);
-  }
-
   await elNew._fetchMmwaveNew();
   resRoot = elNew.shadowRoot;
   checks.push(["residence tab: mmWave list renders live per-room presence after fetch",

@@ -3,10 +3,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 
 from homeassistant.core import HomeAssistant
-
-from ...persistence.files import CORRUPT, OK, read_json, write_json_atomic
 
 # One logger for the whole agent, named as it always was (…nova.agent), so
 # log filters and levels set for the agent keep applying.
@@ -20,18 +19,20 @@ _LEARN_FILE = "/config/.nova_learned.json"
 
 def _load_learned() -> dict:
     """Load persistent learned data."""
-    read = read_json(_LEARN_FILE)
-    if read.status == CORRUPT:
-        _LOGGER.warning("Learned data unreadable, starting empty: %s", read.error)
-    if read.status == OK and read.value is not None:
-        return read.value
+    try:
+        if os.path.exists(_LEARN_FILE):
+            with open(_LEARN_FILE) as f:
+                return json.load(f)
+    except Exception:
+        pass
     return {"alias": {}, "preference": {}, "routine": {}}
 
 
 def _save_learned(data: dict) -> None:
     """Save learned data to disk."""
     try:
-        write_json_atomic(_LEARN_FILE, data, indent=2)
+        with open(_LEARN_FILE, "w") as f:
+            json.dump(data, f, indent=2)
     except Exception as exc:
         _LOGGER.warning("Failed to save learned data: %s", exc)
 

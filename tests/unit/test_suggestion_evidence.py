@@ -65,15 +65,13 @@ def test_explainer_is_pure_no_exceptions_on_missing_keys(pa):
 # ── evidence is persisted and surfaced ───────────────────────────────────────
 
 def test_suggestions_schema_has_evidence_columns():
-    # Phase 9: patterns.db's schema lives in the persistence package.
-    cc = (COMP / "persistence" / "schema.py").read_text()
+    cc = (COMP / "cognitive_core.py").read_text()
     # fresh-DB schema
     assert "pattern_type TEXT" in cc
     assert "entity_ids TEXT" in cc
     assert "details TEXT" in cc
     # migration for existing DBs
-    for col in ("pattern_type", "entity_ids", "details"):
-        assert f'Column("suggestions", "{col}"' in cc
+    assert 'ALTER TABLE suggestions ADD COLUMN' in cc
 
 
 def test_insert_stores_evidence():

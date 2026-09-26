@@ -88,7 +88,7 @@ def test_concurrent_duplicate_column_race_is_tolerated(load, tmp_path, monkeypat
     monkeypatch.setattr(db, "DB_PATH", tmp_path / "conversations.db")
 
     # Ensure the column already exists (as if a concurrent connection just
-    # added it), then force the shared ensure_column's ALTER TABLE to hit
+    # added it), then force _migrate_subject_column's own ALTER TABLE to hit
     # the real "duplicate column" error, proving the recovery path runs for
     # real rather than being reasoned about.
     with db._connect() as conn:
@@ -100,10 +100,10 @@ def test_concurrent_duplicate_column_race_is_tolerated(load, tmp_path, monkeypat
             raise AssertionError("expected a duplicate-column OperationalError")
         except db.sqlite3.OperationalError as exc:
             assert "duplicate column" in str(exc).lower()
-        # The shared migration helper, called again on an already-migrated
+        # Our own migration helper, called again on an already-migrated
         # table, must return cleanly (early "already present" branch) —
         # the actual code path a repeated _connect() takes.
-        assert db._store.ensure_column(conn, "conversations", "subject", "TEXT") is False
+        db._migrate_subject_column(conn)
 
 
 def test_genuine_migration_failure_surfaces_through_health(load, tmp_path, monkeypatch):
@@ -112,10 +112,10 @@ def test_genuine_migration_failure_surfaces_through_health(load, tmp_path, monke
     db = load("database")
     monkeypatch.setattr(db, "DB_PATH", tmp_path / "conversations.db")
 
-    def _boom(conn, *components):
+    def _boom(conn):
         raise db.sqlite3.OperationalError("simulated genuine migration failure")
 
-    monkeypatch.setattr(db._store, "ensure", _boom)
+    monkeypatch.setattr(db, "_migrate_subject_column", _boom)
     result = db.health()
     assert result["ok"] is False
     assert "simulated genuine migration failure" in result["error"]
@@ -148,7 +148,7 @@ def test_migrate_subject_column_reraises_when_column_still_missing_after_race_ch
     class _FailAlterProxy:
         """sqlite3.Connection.execute is a read-only C-level attribute, so
         it can't be monkeypatched directly on an instance — wrap it instead.
-        ensure_column() only ever calls .execute() on what it's
+        _migrate_subject_column() only ever calls .execute() on what it's
         given, so a thin proxy is sufficient."""
         def __init__(self, real_conn):
             self._real = real_conn
@@ -161,7 +161,7 @@ def test_migrate_subject_column_reraises_when_column_still_missing_after_race_ch
             return self._real.execute(sql, *a, **kw)
 
     try:
-        db._store.ensure_column(_FailAlterProxy(conn), "conversations", "subject", "TEXT")
+        db._migrate_subject_column(_FailAlterProxy(conn))
         raised = False
     except db.sqlite3.OperationalError:
         raised = True

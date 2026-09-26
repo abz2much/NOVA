@@ -22,12 +22,11 @@ All DB functions are SYNC — call them via hass.async_add_executor_job(...).
 from __future__ import annotations
 
 import logging
+import os
 import re
 import sqlite3
 import time
 from typing import Optional
-
-from .persistence import sqlite as _store
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -48,13 +47,47 @@ _STOPWORDS = {
 
 def _connect() -> Optional[sqlite3.Connection]:
     try:
-        conn = _store.connect(DB_PATH, timeout=10)
-        _store.ensure(conn, "facts")
-        conn.commit()
+        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+        conn = sqlite3.connect(DB_PATH, timeout=10)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=10000")
+        conn.row_factory = sqlite3.Row
+        _ensure_schema(conn)
         return conn
     except Exception as exc:
         _LOGGER.warning("knowledge: connect failed: %s", exc)
         return None
+
+
+def _ensure_schema(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS facts (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind            TEXT NOT NULL DEFAULT 'fact',
+            subject         TEXT NOT NULL DEFAULT 'household',
+            key             TEXT NOT NULL,
+            value           TEXT NOT NULL,
+            source          TEXT NOT NULL DEFAULT 'stated',
+            confidence      REAL NOT NULL DEFAULT 1.0,
+            salience        REAL NOT NULL DEFAULT 1.0,
+            status          TEXT NOT NULL DEFAULT 'confirmed',
+            created_at      REAL NOT NULL,
+            updated_at      REAL NOT NULL,
+            last_referenced REAL,
+            expires_at      REAL,
+            UNIQUE(subject, key)
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_facts_subject ON facts(subject)")
+    # v7.88.0: existing installs won't have the `status` column yet -- add it
+    # without disturbing any already-stored fact. New rows default via the
+    # CREATE TABLE above; this only matters for a DB that predates this change.
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(facts)")}
+    if "status" not in cols:
+        conn.execute("ALTER TABLE facts ADD COLUMN status TEXT NOT NULL DEFAULT 'confirmed'")
+    conn.commit()
 
 
 def _row_to_fact(row: sqlite3.Row) -> dict:

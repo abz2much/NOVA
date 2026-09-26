@@ -28,8 +28,6 @@ import sqlite3
 import struct
 from typing import Optional
 
-from .persistence import sqlite as _store
-
 _LOGGER = logging.getLogger(__name__)
 
 _DB_PATH = "/config/nova.db"
@@ -91,7 +89,20 @@ def init_store() -> bool:
     """Create the vector table if absent. Returns True on success."""
     try:
         conn = sqlite3.connect(_DB_PATH)
-        _store.ensure(conn, "doc_vectors")
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS doc_vectors ("
+            "  id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "  source TEXT NOT NULL,"
+            "  chunk INTEGER NOT NULL,"
+            "  content TEXT NOT NULL,"
+            "  dim INTEGER NOT NULL,"
+            "  vec BLOB NOT NULL,"
+            "  model TEXT NOT NULL,"
+            "  ingested TEXT NOT NULL"
+            ")"
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_doc_vectors_source "
+                     "ON doc_vectors(source)")
         conn.commit()
         conn.close()
         return True

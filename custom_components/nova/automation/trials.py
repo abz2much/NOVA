@@ -35,16 +35,36 @@ from typing import Optional
 
 _DEFAULT_DB = "/config/nova/patterns.db"
 
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS automation_trials (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    suggestion_id        INTEGER NOT NULL,
+    automation_id        TEXT NOT NULL,
+    automation_entity_id TEXT,
+    installed_at         REAL NOT NULL,
+    run_count            INTEGER NOT NULL DEFAULT 0,
+    last_run             REAL,
+    manual_outcome       TEXT,
+    manual_outcome_ts    REAL
+);
+CREATE INDEX IF NOT EXISTS idx_at_automation_id ON automation_trials (automation_id);
+CREATE INDEX IF NOT EXISTS idx_at_entity_id     ON automation_trials (automation_entity_id);
+CREATE INDEX IF NOT EXISTS idx_at_suggestion_id ON automation_trials (suggestion_id);
+"""
+
 
 def _resolve(db_path: Optional[str]) -> str:
     return db_path or _DEFAULT_DB
 
 
 def _connect(db_path: str) -> sqlite3.Connection:
-    from ..persistence import sqlite as _store   # lazy: package layering rule
-    conn = _store.connect(db_path)
-    _store.ensure(conn, "automation_trials")  # idempotent — adds the table without
-                                              # touching patterns.db's other tables
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=10000")
+    conn.executescript(_SCHEMA)  # idempotent — adds the table without touching
+                                 # patterns.db's existing tables or their data
     return conn
 
 

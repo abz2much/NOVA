@@ -1,12 +1,5 @@
-// Render the NOVA3D engine (frontend/src/nova3d.js) to an SVG file:
-//   node frontend/dev/render3d.js <theta> <out.svg> <floor>
+const J = require('./house3d_core.js');
 const fs = require('fs');
-const path = require('path');
-const vm = require('vm');
-const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'nova3d.js'), 'utf8');
-const ctx = {};
-vm.runInNewContext(src + '\nthis.NOVA3D = NOVA3D;', ctx);
-const J = ctx.NOVA3D;
 const theta = Number(process.argv[2] || 35);
 const out = process.argv[3] || '/tmp/h3d.svg';
 const floor = process.argv[4] || 'all';

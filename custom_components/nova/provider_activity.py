@@ -27,10 +27,26 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
-from .persistence import sqlite as _store
-
 _DEFAULT_DB = "/config/nova/provider_activity.db"
 _SCHEMA_LOCK = threading.Lock()
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS provider_activity_daily (
+    day            TEXT NOT NULL,
+    provider       TEXT NOT NULL,
+    model          TEXT NOT NULL,
+    role           TEXT NOT NULL,
+    location       TEXT NOT NULL,
+    data_category  TEXT NOT NULL,
+    success_count  INTEGER NOT NULL DEFAULT 0,
+    failure_count  INTEGER NOT NULL DEFAULT 0,
+    input_tokens   INTEGER,
+    output_tokens  INTEGER,
+    latency_ms_sum INTEGER NOT NULL DEFAULT 0,
+    call_count     INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (day, provider, model, role, location, data_category)
+);
+"""
 
 
 def _resolve(db_path: Optional[str]) -> str:
@@ -52,13 +68,16 @@ def db_path_for(hass) -> Optional[str]:
 
 
 def _connect(db_path: str) -> sqlite3.Connection:
-    conn = _store.connect(db_path, timeout=10.0, wal=False)
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path, timeout=10.0)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout=10000")
     # WAL negotiation and first-time schema creation themselves take a write
     # lock. Serialize only that tiny setup boundary; the aggregate UPSERTs
     # remain concurrent and are protected by SQLite's own busy timeout.
     with _SCHEMA_LOCK:
         conn.execute("PRAGMA journal_mode=WAL")
-        _store.ensure(conn, "provider_activity")
+        conn.executescript(_SCHEMA)
     return conn
 
 

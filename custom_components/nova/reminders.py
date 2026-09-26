@@ -10,6 +10,7 @@ Unlike phone alarms, Nova reminders:
 from __future__ import annotations
 
 import logging
+import sqlite3
 from datetime import datetime, time, timezone
 from pathlib import Path
 from typing import Optional
@@ -19,7 +20,6 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.util import dt as dt_util
 from datetime import timedelta
 
-from .persistence import sqlite as _store
 from .presence import get_presence_summary
 from .tts_helper import async_announce
 
@@ -29,9 +29,27 @@ DB_PATH = Path("/config/nova/reminders.db")
 QUIET_START = time(22, 0)
 QUIET_END   = time(7, 0)
 
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS reminders (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    created     TEXT NOT NULL,
+    label       TEXT NOT NULL,
+    trigger_at  TEXT NOT NULL,  -- ISO timestamp
+    repeat      TEXT,            -- 'daily', 'weekly:MON', etc. (optional)
+    require_home   INTEGER NOT NULL DEFAULT 1,  -- 1 = only fire when someone home
+    respect_quiet  INTEGER NOT NULL DEFAULT 1,  -- 1 = skip during quiet hours
+    acknowledged   INTEGER NOT NULL DEFAULT 0,
+    last_fired     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_trigger_at ON reminders(trigger_at);
+"""
+
+
 def _connect():
-    conn = _store.connect(DB_PATH, wal=False, busy_timeout_ms=None)
-    _store.ensure(conn, "reminders")
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.row_factory = sqlite3.Row
+    conn.executescript(SCHEMA)
     conn.commit()
     return conn
 

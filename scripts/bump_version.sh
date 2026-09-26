@@ -15,8 +15,7 @@ fi
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMP="$ROOT/custom_components/nova"
-PANEL_SRC="$ROOT/frontend/src/panel/core.js"   # version lives in the source
-PANEL="$COMP/frontend/nova-panel.js"             # rebuilt from frontend/src/
+PANEL="$COMP/frontend/nova-panel.js"
 
 # Current version from the integration manifest (source of truth).
 OLD="$(python3 -c "import json;print(json.load(open('$COMP/manifest.json'))['version'])")"
@@ -31,15 +30,12 @@ echo "Bumping $OLD → $NEW"
 # whose in-place flag and \b word-boundary support both differ between BSD
 # sed (macOS) and GNU sed (Linux, what CI runs) — this way works on both.
 #
-# The panel version lives in frontend/src/panel/core.js; the built
-# nova-panel.js is regenerated from it, so it can never be left stale.
-#
 # The two panel replacements are anchored on the fixed text surrounding each
 # real version display, not a bare `vOLD` match — nova-panel.js also has
 # dozens of comments like "(v7.101.28)" noting when unrelated code was
 # written, and a bare match silently rewrote all of those on every past
 # release, making them lie about when that code was actually added.
-python3 - "$OLD" "$NEW" "$COMP/manifest.json" "$PANEL_SRC" <<'PYEOF'
+python3 - "$OLD" "$NEW" "$COMP/manifest.json" "$PANEL" <<'PYEOF'
 import re, sys
 old, new, manifest_path, panel_path = sys.argv[1:5]
 
@@ -54,8 +50,6 @@ replace(manifest_path, re.compile(r"\b" + re.escape(old) + r"\b"), new)
 replace(panel_path, re.compile(re.escape(f" * v{old}\n")), f" * v{new}\n")
 replace(panel_path, re.compile(re.escape(f"%c v{old} ")), f"%c v{new} ")
 PYEOF
-
-python3 "$ROOT/scripts/build_panel.py" >/dev/null
 
 echo "Updated:"
 echo "  manifest.json   -> $(python3 -c "import json;print(json.load(open('$COMP/manifest.json'))['version'])")"
