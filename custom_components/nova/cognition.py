@@ -108,6 +108,13 @@ APPROACH_MIN_CLOSE_KM = 0.05    # must be ≥50 m closer than last reading to co
 
 _PREDICT_COOLDOWNS: dict = {}
 _RECUR_ALERTED: dict = {}       # entity_id -> local-day-ordinal last alerted
+                                # (persisted in patterns.db, v7.120.2)
+RECUR_ALERT_KEEP_DAYS = 2       # persisted ledger keeps today and yesterday only
+RECUR_ALERT_MAX = 512           # hard cap on ledger entries
+# Continuous-observation start (epoch). 0 = not observing / unknown. Set by the
+# first processed event, cleared when the observer stops or cognition is off, so
+# "none yet today" is only claimed for a period Nova actually watched (v7.120.2).
+_OBSERVING_SINCE = 0.0
 _LAST_DIST: dict = {}           # entity_id -> last distance-to-home (km)
 _APPROACH_ALERTED: dict = {}    # entity_id -> already flagged this approach
 
@@ -158,7 +165,7 @@ _LAST_ANOMALY: dict = {}         # entity_id -> last anomaly-escalation time
 
 def reset() -> None:
     """Clear the learned model (called on observer restart)."""
-    global _EVENTS_SEEN, _ANOMALIES_ESCALATED
+    global _EVENTS_SEEN, _ANOMALIES_ESCALATED, _OBSERVING_SINCE
     _MODEL.clear()
     _PREDICT_COOLDOWNS.clear()
     _RECUR_ALERTED.clear()
@@ -167,6 +174,13 @@ def reset() -> None:
     _LAST_ANOMALY.clear()
     _EVENTS_SEEN = 0
     _ANOMALIES_ESCALATED = 0
+    _OBSERVING_SINCE = 0.0
+
+
+def mark_unobserved() -> None:
+    """Record an observation gap (observer stopped, cognition disabled)."""
+    global _OBSERVING_SINCE
+    _OBSERVING_SINCE = 0.0
 
 
 def _to_float(value):
@@ -329,8 +343,10 @@ def process(event, threshold: float = DEFAULT_THRESHOLD) -> Decision:
     The returned Decision.escalate is the *anomaly* signal — the observer ORs it
     with the static pre-filter, so escalate=True here only ever ADDS coverage.
     """
-    global _EVENTS_SEEN, _ANOMALIES_ESCALATED
+    global _EVENTS_SEEN, _ANOMALIES_ESCALATED, _OBSERVING_SINCE
     _EVENTS_SEEN += 1
+    if not _OBSERVING_SINCE:
+        _OBSERVING_SINCE = time.time()
 
     try:
         entity_id = event.data.get("entity_id", "")
@@ -735,11 +751,19 @@ def predict_overdue(hass, now: float = None) -> list:
     Flag recurring daily events that haven't happened yet today by their usual
     time ('the front door usually has activity by 07:45 — none yet today'). One
     alert per entity per day. Returns action dicts for the gated announce path.
+
+    Fails uncertain: "none yet today" is only claimed when Nova has observed
+    continuously since local midnight. After a start, reload or observation gap
+    today, the earlier period is unknown, so nothing is flagged (v7.120.2).
     """
     now = now or time.time()
     out = []
     today = _local_day(now)
     now_secs = _secs_since_midnight(now)
+    midnight = datetime.datetime.fromtimestamp(now).replace(
+        hour=0, minute=0, second=0, microsecond=0).timestamp()
+    if not _OBSERVING_SINCE or _OBSERVING_SINCE > midnight:
+        return out
     try:
         for eid, entry in list(_MODEL.items()):
             if eid.split(".", 1)[0] not in RECUR_DOMAINS:
@@ -1192,22 +1216,48 @@ def _entry_from_dict(d: dict) -> _Entry:
     return e
 
 
-def save_to_db(db_path: str) -> int:
-    """Persist the model to patterns.db. SYNC — call via executor."""
+def _prune_alerted(today: int) -> list:
+    """Drop ledger entries older than RECUR_ALERT_KEEP_DAYS, cap the rest at
+    RECUR_ALERT_MAX (newest kept) and return the surviving (key, day) pairs."""
+    keep, floor = [], today - RECUR_ALERT_KEEP_DAYS + 1
+    for key, day in list(_RECUR_ALERTED.items()):
+        if isinstance(key, str) and isinstance(day, int) and floor <= day <= today:
+            keep.append((key, day))
+        elif _RECUR_ALERTED.get(key) == day:
+            _RECUR_ALERTED.pop(key, None)
+    keep.sort(key=lambda kv: kv[1], reverse=True)
+    for key, day in keep[RECUR_ALERT_MAX:]:
+        if _RECUR_ALERTED.get(key) == day:
+            _RECUR_ALERTED.pop(key, None)
+    return keep[:RECUR_ALERT_MAX]
+
+
+def save_to_db(db_path: str, now: float = None) -> int:
+    """Persist the model and the once-per-day anticipation ledger to
+    patterns.db. SYNC — call via executor."""
     import json
     import sqlite3
     try:
+        alerted = _prune_alerted(_local_day(now or time.time()))
         with sqlite3.connect(db_path, timeout=10) as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS cognition_model "
                 "(entity_id TEXT PRIMARY KEY, data TEXT, updated REAL)"
             )
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS cognition_alerted "
+                "(key TEXT PRIMARY KEY, day INTEGER)"
+            )
             rows = [(eid, json.dumps(_entry_to_dict(e)), time.time())
                     for eid, e in list(_MODEL.items())]
             conn.executemany(
                 "INSERT OR REPLACE INTO cognition_model (entity_id, data, updated) "
                 "VALUES (?, ?, ?)", rows,
+            )
+            conn.execute("DELETE FROM cognition_alerted")
+            conn.executemany(
+                "INSERT INTO cognition_alerted (key, day) VALUES (?, ?)", alerted,
             )
             conn.commit()
         return len(rows)
@@ -1216,8 +1266,9 @@ def save_to_db(db_path: str) -> int:
         return 0
 
 
-def load_from_db(db_path: str) -> int:
-    """Load the model from patterns.db. SYNC — call via executor."""
+def load_from_db(db_path: str, now: float = None) -> int:
+    """Load the model and the anticipation ledger from patterns.db. SYNC —
+    call via executor. A missing or corrupt ledger restores nothing."""
     import json
     import sqlite3
     n = 0
@@ -1238,4 +1289,14 @@ def load_from_db(db_path: str) -> int:
         _LOGGER.info("cognition: loaded %d entity models from patterns.db", n)
     except Exception as exc:
         _LOGGER.debug("cognition load_from_db failed: %s", exc)
+    try:
+        with sqlite3.connect(db_path, timeout=10) as conn:
+            rows = conn.execute("SELECT key, day FROM cognition_alerted").fetchall()
+        for key, day in rows:
+            if isinstance(key, str) and isinstance(day, int) \
+                    and day > _RECUR_ALERTED.get(key, 0):
+                _RECUR_ALERTED[key] = day
+        _prune_alerted(_local_day(now or time.time()))
+    except Exception as exc:
+        _LOGGER.debug("cognition alert ledger load failed: %s", exc)
     return n

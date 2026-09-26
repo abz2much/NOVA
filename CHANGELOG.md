@@ -1,3 +1,11 @@
+## [7.120.2] — anticipation after restart
+
+**Fixes**
+- "Usually has activity by around HH:MM, but there's been none yet today" is now only said when Nova has been observing continuously since local midnight. After Home Assistant or Nova starts or reloads, the observer stops, or the cognition layer is turned off, the rest of that day's period is treated as unknown and nothing is claimed. Once Nova has watched a full day, the anticipation works as before.
+- Anticipations Nova delivers once per day (overdue activity, still home or not back yet, routine start and leave-time heads-ups) are now remembered in `patterns.db` alongside the learned model, so a restart or reload on the same day no longer repeats one already delivered. A new day can deliver each one again. The record keeps only today and yesterday, at most 512 entries, and a missing or unreadable record restores nothing.
+
+Safety alerts are unchanged. `patterns.db` gains one small `cognition_alerted` table, created on first save; service, WebSocket, panel and assistant-tool schemas, config keys and the scheduler are unchanged.
+
 ## [7.120.1] — restart recovery and occupied-home openings
 
 **Fixes**

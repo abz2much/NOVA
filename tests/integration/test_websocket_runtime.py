@@ -542,6 +542,57 @@ async def test_update_config_sleep_lockdown_and_provider_effects_unchanged(
     ]
 
 
+# ── nova/update_config: cognition_enabled observation gap (v7.120.2) ───────
+
+async def test_disabling_cognition_restarts_the_observation_window(hass, hass_ws_client):
+    """Turning cognition off through nova/update_config opens an observation
+    gap at once, with no entity event in between. After it is turned back on,
+    the window restarts at the next processed event, so predict_overdue never
+    claims the period before re-enabling was watched."""
+    import datetime
+    import time
+
+    from homeassistant.core import Event, State
+
+    from custom_components.nova import cognition
+
+    entry = await _setup(hass)
+    eid = "binary_sensor.sun_solar_rising"
+    now = datetime.datetime.now().replace(hour=3, minute=0, second=0,
+                                          microsecond=0).timestamp()
+    today = cognition._local_day(now)
+    cognition.reset()
+    try:
+        routine = cognition._Entry(now - 20 * 86400)
+        for d in range(today - 10, today):
+            routine.daily_first.append((d, 1 * 3600 + 18 * 60))   # usually 01:18
+        routine.last_first_day = today - 1
+        cognition._MODEL[eid] = routine
+        cognition._OBSERVING_SINCE = now - 86400        # watching since yesterday
+        assert len(cognition.predict_overdue(hass, now)) == 1
+        cognition._RECUR_ALERTED.clear()
+
+        resp = await _update(hass, hass_ws_client, "cognition_enabled", False)
+        assert resp["success"], resp
+        assert entry.runtime_data.runtime_config["cognition_enabled"] is False
+        assert cognition._OBSERVING_SINCE == 0.0       # no entity event needed
+
+        resp = await _update(hass, hass_ws_client, "cognition_enabled", True)
+        assert resp["success"], resp
+        assert cognition._OBSERVING_SINCE == 0.0       # re-enabling claims nothing
+
+        before = time.time()
+        cognition.process(Event("state_changed", {
+            "entity_id": "sensor.next", "old_state": State("sensor.next", "1"),
+            "new_state": State("sensor.next", "2")}))
+        assert cognition._OBSERVING_SINCE >= before     # window restarts here
+        assert cognition.predict_overdue(hass, now) == []
+        assert cognition.predict_overdue(hass, time.time()) == []
+        assert eid not in cognition._RECUR_ALERTED
+    finally:
+        cognition.reset()
+
+
 # ── nova/update_config: observer_enabled transaction ────────────────────────
 
 async def test_enable_starts_first_then_updates_state_config_and_saves(
