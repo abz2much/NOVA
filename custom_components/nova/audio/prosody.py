@@ -169,5 +169,5 @@ class ProsodyController:
 
         result = profile.as_dict()
         if skip_preamble:
-            result["speech_rate"] = round(max(0.5, result["speech_rate"] - 0.05), 2)
+            result["speech_rate"] = round(max(0.5, float(result["speech_rate"]) - 0.05), 2)
         return result

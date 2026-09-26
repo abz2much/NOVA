@@ -43,6 +43,18 @@ This project holds to senior+ engineering output:
 cd custom_components/nova
 for f in *.py; do python3 -c "import ast; ast.parse(open('$f').read())" || echo "FAIL $f"; done
 
+# Architecture: cycles, package dependency direction, compatibility modules
+python3 ../../scripts/audit.py
+
+# Types (from the repo root; needs `pip install mypy`)
+(cd ../.. && python3 -m mypy)
+
+# Architecture: cycles, package dependency direction, compatibility modules
+python3 ../../scripts/audit.py
+
+# Types (from the repo root; needs `pip install mypy`)
+(cd ../.. && python3 -m mypy)
+
 # Dashboard: edit frontend/src/, rebuild, then check the built file
 python3 ../../scripts/build_panel.py
 node --check frontend/nova-panel.js

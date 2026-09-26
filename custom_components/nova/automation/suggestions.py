@@ -13,7 +13,7 @@ import logging
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional, cast
 
 from .models import SUGGESTION_PENDING, DetectedPattern, loads_json
 
@@ -297,7 +297,7 @@ def generate_automation(pattern: DetectedPattern) -> str:
     d = p.details
 
     if p.pattern_type == "time_routine" and d.get("state") in ("on", "off"):
-        auto = {
+        auto: dict[str, Any] = {
             "alias": f"Nova Learned: {p.entity_ids[0]} {d['state']} at {d['hour']:02d}:00",
             "trigger": {"platform": "time", "at": f"{d['hour']:02d}:00:00"},
             "action": {
@@ -556,7 +556,7 @@ class SuggestionStore:
                     decision="propose automation",
                     reason="recurring observed behavior",
                     confidence=pattern.confidence,
-                    ref="suggestion:%d" % _new_sid,
+                    ref="suggestion:%d" % cast(int, _new_sid),
                 )
             except Exception:
                 pass

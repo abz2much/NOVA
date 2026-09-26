@@ -13,6 +13,7 @@ imports no HA modules, so it stays a pure, directly-testable leaf.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ DEFAULT_PROFILES: dict[str, float] = {
 }
 
 
-def _as_float(value: object) -> float | None:
+def _as_float(value: Any) -> float | None:
     if value is None or isinstance(value, bool):
         return None
     try:

@@ -266,9 +266,9 @@ async def create_automation(
     *,
     alias: str,
     description: str = "",
-    trigger: list[dict] | dict = None,
+    trigger: list[dict] | dict | None = None,
     condition: list[dict] | dict | None = None,
-    action: list[dict] | dict = None,
+    action: list[dict] | dict | None = None,
     mode: str = "single",
     request_id: Optional[str] = None,
     source: str = "ha_service",
@@ -330,7 +330,7 @@ async def create_automation(
         condition = [condition]
 
     # Build the automation config
-    auto_config = {
+    auto_config: dict[str, Any] = {
         "alias": f"Nova · {alias}",
         "description": description or f"Created by Nova: {alias}",
         "mode": mode,
