@@ -1,6 +1,7 @@
 """Tests for intrusion snapshots + false-alarm call-off (v6.68.0). Covers the
 call-off suppression window (safety-relevant: a call-off must actually suppress
 escalation), false-alarm recording, snapshot capture, and the status shape."""
+import pathlib
 import time
 
 import pytest
@@ -101,11 +102,12 @@ async def test_capture_snapshot_writes_file(intr, tmp_path):
 def test_snapshot_dir_is_not_under_config_www(load):
     """The real (unpatched) SNAPSHOT_DIR must never be under /config/www —
     Home Assistant serves that whole tree at /local/... with no
-    authentication at all. Checked against the actual module constant, not
-    a test's monkeypatched tmp_path, so this can't pass by accident."""
+    authentication at all. Checked against the module's own source constant,
+    not a test's redirected path, so this can't pass by accident."""
     m = load("intrusion")
     assert "/www/" not in m.SNAPSHOT_DIR
-    assert m.SNAPSHOT_DIR == "/config/nova/intrusion"
+    src = pathlib.Path(m.__file__).read_text(encoding="utf-8")
+    assert 'SNAPSHOT_DIR = "/config/nova/intrusion"' in src
 
 
 async def test_capture_snapshot_no_entity_returns_none(intr):

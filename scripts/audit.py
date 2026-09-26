@@ -194,6 +194,166 @@ def undefined_names_gate(files: list[pathlib.Path]) -> list[str]:
     return problems
 
 
+# ── Architecture ───────────────────────────────────────────────────────────
+# Which capability package may import which. Every package may import the
+# top-level core modules; leaf packages may import nothing else in Nova.
+# A new edge fails the audit: add it here deliberately, in the same change,
+# only when the dependency direction is intended.
+ALLOWED_PACKAGE_DEPS = {
+    "agent_runtime": {"automation", "diagnostics", "persistence", "providers"},
+    "automation": {"cognitive", "persistence"},
+    "cognitive": {"providers"},
+    "diagnostics": set(),
+    "intent": {"automation"},
+    "providers": set(),
+}
+LEAF_PACKAGES = {"persistence", "audio", "vision"}
+
+# Root compatibility modules keep public imports and patch points alive.
+# They may shrink but must not grow: no new top-level definitions and no
+# more lines than today. New behaviour belongs in its package.
+FACADE_LIMITS = {
+    "agent": (424, ("_Facade",)),
+    "llm_provider": (181, ("_classify_conn_error", "_openai_style_usage",
+                           "chat_with_activity", "test_connection")),
+    "reasoning_loop": (248, ("_decision_from_cache", "_lm_compose", "_local_fallback",
+                             "_parse_reasoning_json", "_rich_mode", "_snapshot",
+                             "_structured_hazard", "_try_local_reasoning", "decide")),
+    "local_mind": (370, ("_case_prior", "_compose", "_connect", "_data_days", "_ev",
+                         "_is_duplicate", "_note_event", "_pick", "_security_relevant",
+                         "_state_phrase", "assess", "assess_core", "compose_announcement",
+                         "history_profile", "stats")),
+    "automation_creator": (34, ()),
+    "automation_inventory": (50, ()),
+    "automation_matcher": (34, ()),
+    "automation_trials": (35, ()),
+    "pattern_analyzer": (95, ()),
+}
+
+
+def _module_name(root: pathlib.Path, f: pathlib.Path) -> str:
+    parts = list(f.relative_to(root).with_suffix("").parts)
+    if parts[-1] == "__init__":
+        parts = parts[:-1]
+    return ".".join(parts)
+
+
+def _module_level_nodes(body: list) -> list:
+    """Statements that run at import time, including inside top-level
+    if/try blocks (but not function or class bodies)."""
+    out = []
+    for node in body:
+        out.append(node)
+        if isinstance(node, (ast.If, ast.Try)):
+            nested = list(node.body) + list(node.orelse) + list(getattr(node, "finalbody", []))
+            for handler in getattr(node, "handlers", []):
+                nested += handler.body
+            out += _module_level_nodes(nested)
+    return out
+
+
+def _import_edges(root: pathlib.Path, files: list[pathlib.Path]):
+    """(import-time edges, all edges) between Nova modules. `from . import x`
+    where x is a submodule points at x, not at the package."""
+    mods = {_module_name(root, f): f for f in files}
+    eager: dict[str, set[str]] = {m: set() for m in mods}
+    every: dict[str, set[str]] = {m: set() for m in mods}
+    for name, f in mods.items():
+        tree = _parse(f)
+        top = {id(n) for n in _module_level_nodes(tree.body)}
+        base = name.split(".") if name else []
+        if f.name != "__init__.py":
+            base = base[:-1]
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.ImportFrom) and node.level):
+                continue
+            anchor = base[:len(base) - (node.level - 1)] if node.level > 1 else base
+            target = ".".join(anchor + (node.module.split(".") if node.module else []))
+            for alias in node.names:
+                sub = f"{target}.{alias.name}".strip(".")
+                dest = sub if sub in mods else target
+                if dest in mods and dest != name:
+                    every[name].add(dest)
+                    if id(node) in top:
+                        eager[name].add(dest)
+    return eager, every
+
+
+def _cycles(edges: dict[str, set[str]]) -> list[list[str]]:
+    index: dict[str, int] = {}
+    low: dict[str, int] = {}
+    stack: list[str] = []
+    on_stack: set[str] = set()
+    found: list[list[str]] = []
+    counter = [0]
+
+    def visit(v: str) -> None:
+        index[v] = low[v] = counter[0]
+        counter[0] += 1
+        stack.append(v)
+        on_stack.add(v)
+        for w in edges[v]:
+            if w not in index:
+                visit(w)
+                low[v] = min(low[v], low[w])
+            elif w in on_stack:
+                low[v] = min(low[v], index[w])
+        if low[v] == index[v]:
+            comp = []
+            while True:
+                w = stack.pop()
+                on_stack.discard(w)
+                comp.append(w)
+                if w == v:
+                    break
+            if len(comp) > 1:
+                found.append(sorted(comp))
+
+    for v in sorted(edges):
+        if v not in index:
+            visit(v)
+    return found
+
+
+def architecture_gate(root: pathlib.Path, files: list[pathlib.Path]) -> list[str]:
+    problems = []
+    eager, every = _import_edges(root, files)
+    for comp in _cycles(eager):
+        problems.append("import-time cycle: " + " -> ".join(m or "<package>" for m in comp))
+
+    def package(m: str) -> str:
+        head = m.split(".")[0]
+        return head if "." in m or (root / head).is_dir() else ""
+
+    for src, dests in sorted(every.items()):
+        sp = package(src)
+        for dest in sorted(dests):
+            dp = package(dest)
+            if sp == dp or not sp:
+                continue
+            if sp in LEAF_PACKAGES:
+                problems.append(f"leaf package {sp} imports {dest or '<package>'} ({src})")
+            elif not dp:
+                continue
+            elif dp not in ALLOWED_PACKAGE_DEPS.get(sp, set()):
+                problems.append(f"{sp} may not import {dp} ({src} -> {dest})")
+
+    for facade, (max_lines, allowed) in sorted(FACADE_LIMITS.items()):
+        f = root / f"{facade}.py"
+        if not f.is_file():
+            problems.append(f"compatibility module {facade}.py is missing")
+            continue
+        lines = f.read_text(encoding="utf-8").count("\n")
+        if lines > max_lines:
+            problems.append(f"compatibility module {facade}.py grew to {lines} lines (limit {max_lines})")
+        defs = {n.name for n in _parse(f).body
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+        extra = sorted(defs - set(allowed))
+        if extra:
+            problems.append(f"compatibility module {facade}.py gained definitions: {extra}")
+    return problems
+
+
 def main() -> int:
     root = _component_dir()
     if not root.is_dir():
@@ -204,6 +364,7 @@ def main() -> int:
     compile_problems = compile_gate(files)
     import_problems = import_gate(files)
     undefined_problems = undefined_names_gate(files)
+    architecture_problems = architecture_gate(root, files)
 
     print(f"COMPILE  : {'OK (' + str(len(files)) + ' modules)' if not compile_problems else 'FAIL'}")
     for p in compile_problems:
@@ -214,8 +375,11 @@ def main() -> int:
     print(f"NAMES    : {'OK' if not undefined_problems else 'FAIL'}")
     for p in undefined_problems:
         print(f"  ✗ {p}")
+    print(f"ARCHITECTURE: {'OK' if not architecture_problems else 'FAIL'}")
+    for p in architecture_problems:
+        print(f"  ✗ {p}")
 
-    if compile_problems or import_problems or undefined_problems:
+    if compile_problems or import_problems or undefined_problems or architecture_problems:
         print("\nAUDIT FAILED")
         return 1
     print("\nAUDIT CLEAN")

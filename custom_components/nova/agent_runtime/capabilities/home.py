@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Any
 
 from homeassistant.core import HomeAssistant
 
@@ -215,7 +216,7 @@ async def _exec_get_area_devices(hass: HomeAssistant, args: dict) -> str:
 
 async def _exec_home_summary(hass: HomeAssistant, args: dict) -> str:
     """Build a comprehensive home summary."""
-    summary = {}
+    summary: dict[str, Any] = {}
 
     # People
     people = []

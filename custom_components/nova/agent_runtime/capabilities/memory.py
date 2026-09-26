@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Any
 
 from homeassistant.core import HomeAssistant
 
@@ -119,7 +120,8 @@ async def _exec_confirm_pending_fact(hass: HomeAssistant, args: dict) -> str:
     """Promote a pending fact (from `remember`) to confirmed, once the user
     has actually approved it in conversation (v7.88.0)."""
     try:
-        fact_id = int(args.get("fact_id"))
+        raw_id: Any = args.get("fact_id")
+        fact_id = int(raw_id)
     except (TypeError, ValueError):
         return json.dumps({"error": "fact_id is required and must be an integer"})
     from ... import knowledge
@@ -138,7 +140,8 @@ async def _exec_reject_pending_fact(hass: HomeAssistant, args: dict) -> str:
     """Discard a pending fact (from `remember`) the user did not confirm, or
     explicitly said was wrong (v7.88.0)."""
     try:
-        fact_id = int(args.get("fact_id"))
+        raw_id: Any = args.get("fact_id")
+        fact_id = int(raw_id)
     except (TypeError, ValueError):
         return json.dumps({"error": "fact_id is required and must be an integer"})
     from ... import knowledge

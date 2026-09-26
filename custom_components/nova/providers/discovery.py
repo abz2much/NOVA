@@ -160,7 +160,9 @@ def parse_model_infos(provider: str, url: str, data: dict) -> list[ModelInfo]:
             for cap in raw_caps
             if isinstance(cap, str) and str(cap).strip()
         })[:32]
-        details = item.get("details") if isinstance(item.get("details"), dict) else {}
+        details = item.get("details")
+        if not isinstance(details, dict):
+            details = {}
         family = str(details.get("family") or "").strip()
         quantization = str(details.get("quantization_level") or "").strip()
         size = item.get("size")

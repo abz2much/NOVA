@@ -210,6 +210,7 @@ INTRUSION_RESPONSE_TIMEOUT_SECS = 120
 AUTONOMY_TRUST_THRESHOLD = 3     # approvals of same pattern → auto-execute tier
 AUTONOMY_MIN_CONFIDENCE = 0.80   # confidence floor for auto-execution
 AUTONOMY_FILE = "/config/nova/autonomy_grants.json"
+PATTERNS_DB = "/config/nova/patterns.db"   # learned patterns and the cognition model
 
 
 # ── Ignore System ───────────────────────────────────────────────────────────
@@ -2173,7 +2174,7 @@ class StateLogger:
 
     def __init__(self, db_path=None):
         self._last_states: dict[str, str] = {}
-        self._db_path = db_path or "/config/nova/patterns.db"
+        self._db_path = db_path or PATTERNS_DB
         self._init_db()
 
     def _init_db(self):
@@ -2777,7 +2778,7 @@ async def _tick():
                     from .websocket import nova_log
                     nova_log("LEARN", f"anticipation: {pred.get('message','')[:80]}")
                 await hass.async_add_executor_job(
-                    cognition.save_to_db, "/config/nova/patterns.db"
+                    cognition.save_to_db, PATTERNS_DB
                 )
     except Exception as exc:
         _LOGGER.debug("Cognition anticipation tick error: %s", exc)
@@ -3837,7 +3838,7 @@ async def start(hass: HomeAssistant, config: dict, entry=None) -> None:
     # restarts and keeps accumulating across days.
     try:
         from . import cognition
-        await hass.async_add_executor_job(cognition.load_from_db, "/config/nova/patterns.db")
+        await hass.async_add_executor_job(cognition.load_from_db, PATTERNS_DB)
     except Exception as exc:
         _LOGGER.debug("cognition load on start failed: %s", exc)
 

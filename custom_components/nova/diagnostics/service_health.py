@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from typing import Any
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -113,7 +114,7 @@ def _cfg(key: str, default=None):
 # ── individual checks ────────────────────────────────────────────────────────
 
 async def _check_llm(hass) -> dict:
-    out = {"name": "LLM", "key": "llm", "status": _OFF, "detail": ""}
+    out: dict[str, Any] = {"name": "LLM", "key": "llm", "status": _OFF, "detail": ""}
     provider = str(_cfg("llm_provider", "") or _cfg("provider", "") or "").strip()
     base = None
     if provider in ("ollama", "custom"):
@@ -200,7 +201,7 @@ async def _ping_ollama(hass, base: str) -> tuple[bool, str]:
 
 
 async def _check_embeddings(hass) -> dict:
-    out = {"name": "Embeddings", "key": "embeddings", "status": _OFF, "detail": ""}
+    out: dict[str, Any] = {"name": "Embeddings", "key": "embeddings", "status": _OFF, "detail": ""}
     try:
         from .. import embeddings
         if not embeddings.is_enabled():
@@ -250,7 +251,7 @@ def _check_stt(hass) -> dict:
 
 
 def _check_speech_entity(hass, domain: str, name: str, configured: str) -> dict:
-    out = {"name": name, "key": domain, "status": _OFF, "detail": ""}
+    out: dict[str, Any] = {"name": name, "key": domain, "status": _OFF, "detail": ""}
 
     # A real transcription/synthesis failure during use is authoritative → DOWN.
     real_fail = _recent_real_failure(domain)
@@ -329,7 +330,7 @@ def _check_cameras(hass) -> dict:
     """Camera availability — informational (a WARN, never the alarming DOWN),
     since cameras are a feature, not the core brain. OFF when none are
     configured (they're optional)."""
-    out = {"name": "Cameras", "key": "cameras", "status": _OFF, "detail": ""}
+    out: dict[str, Any] = {"name": "Cameras", "key": "cameras", "status": _OFF, "detail": ""}
     try:
         states = hass.states.async_all("camera")
     except Exception:
@@ -356,7 +357,7 @@ def _check_database(hass) -> dict:
     """Conversation store health. Probes the DB only if it already exists — a
     failed schema/migration on an existing store is a real failure (DOWN), while
     a not-yet-created store is simply OFF (nothing to fail on a fresh install)."""
-    out = {"name": "Conversation store", "key": "database", "status": _OFF, "detail": ""}
+    out: dict[str, Any] = {"name": "Conversation store", "key": "database", "status": _OFF, "detail": ""}
     try:
         from .. import database
     except Exception:
@@ -387,7 +388,7 @@ def _check_database(hass) -> dict:
 def _check_scheduler(hass) -> dict:
     """Periodic-sweep scheduler health — informational. WARN if any task has been
     failing repeatedly; OFF if the scheduler isn't running yet (fresh boot)."""
-    out = {"name": "Scheduler", "key": "scheduler", "status": _OFF, "detail": ""}
+    out: dict[str, Any] = {"name": "Scheduler", "key": "scheduler", "status": _OFF, "detail": ""}
     from ..runtime import domain_runtime
     runtime = domain_runtime(hass)   # the Nova entry's own scheduler
     sched = runtime.scheduler if runtime is not None else None
@@ -417,7 +418,7 @@ def _check_host_health(hass) -> dict:
     """Host-health summary (Phase 10) — folded in from host_health.py's own
     snapshot(), never a second diagnostics implementation. OFF when the
     feature isn't enabled (nothing to report on a fresh install)."""
-    out = {"name": "Host health", "key": "host_health", "status": _OFF, "detail": ""}
+    out: dict[str, Any] = {"name": "Host health", "key": "host_health", "status": _OFF, "detail": ""}
     try:
         from .. import host_health, nova_config
         snap = host_health.snapshot(hass, nova_config.get_all())
@@ -452,7 +453,7 @@ def _check_host_health(hass) -> dict:
 def _check_routines(hass) -> dict:
     """Config sanity: a very high identity-confidence bar starves per-person
     routine attribution (few observations ever clear it), so surface it here."""
-    out = {"name": "Routines", "key": "routines", "status": _OK, "detail": ""}
+    out: dict[str, Any] = {"name": "Routines", "key": "routines", "status": _OK, "detail": ""}
     try:
         conf = float(_cfg("identity_min_confidence", 0.45))
         if conf >= 0.85:
@@ -470,7 +471,7 @@ def _check_routines(hass) -> dict:
 async def run_service_health(hass) -> dict:
     """Run all core dependency checks. Returns
     {overall, services: [...], summary}. Never raises."""
-    services = []
+    services: list[dict[str, Any]] = []
     for label, key, fn, is_async in (
         ("LLM", "llm", _check_llm, True),
         ("Embeddings", "embeddings", _check_embeddings, True),
@@ -483,7 +484,8 @@ async def run_service_health(hass) -> dict:
         ("Host health", "host_health", _check_host_health, False),
     ):
         try:
-            services.append(await fn(hass) if is_async else fn(hass))
+            result: Any = fn(hass)
+            services.append(await result if is_async else result)
         except Exception as exc:
             services.append({"name": label, "key": key, "status": _DOWN,
                              "detail": str(exc)})

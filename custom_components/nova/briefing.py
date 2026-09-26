@@ -27,6 +27,8 @@ from .tts_helper import async_announce
 
 _LOGGER = logging.getLogger(__name__)
 
+CONVERSATIONS_DB = "/config/nova/conversations.db"   # sentinel events (read only here)
+
 BRIEFING_MODEL = "openai/gpt-oss-120b"
 
 
@@ -114,7 +116,7 @@ def _gather_overnight_events(hass: HomeAssistant, hours: int = 12) -> list[str]:
     """Sentinel events from the database in the last N hours."""
     import sqlite3
     from pathlib import Path
-    db = Path("/config/nova/conversations.db")
+    db = Path(CONVERSATIONS_DB)
     events = []
     try:
         if not db.exists():

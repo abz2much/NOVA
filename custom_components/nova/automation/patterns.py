@@ -23,7 +23,7 @@ import sqlite3
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from .models import DetectedPattern
 from .suggestions import (  # DB_PATH / MIN_DAYS are shared with stats
@@ -400,7 +400,7 @@ class PatternAnalyzer:
         coverage — so a near-miss (seen on almost enough days, or split across
         adjacent hours) is visible instead of just "0 found". Pure DB read.
         """
-        out = {"top_sources": [], "candidates": [], "total_days": 0,
+        out: dict[str, Any] = {"top_sources": [], "candidates": [], "total_days": 0,
                "min_days": 0, "min_occurrences": MIN_OCCURRENCES}
         conn = self._connect()
         if not conn:
@@ -599,8 +599,8 @@ class PatternAnalyzer:
         try:
             from ..identity import normalize
         except Exception:
-            def normalize(n):
-                return "_".join((n or "").strip().lower().split())
+            def normalize(name: str) -> str:
+                return "_".join((name or "").strip().lower().split())
         try:
             for st in hass.states.async_all("person"):
                 ent = st.entity_id
@@ -613,7 +613,7 @@ class PatternAnalyzer:
         return out
 
     def _find_time_routines(self, conn: sqlite3.Connection,
-                            person_map: dict = None) -> list[DetectedPattern]:
+                            person_map: Optional[dict] = None) -> list[DetectedPattern]:
         """Find entities that change state at similar times each day."""
         from ..cognitive import patterns as scoring
         patterns = []
@@ -746,7 +746,7 @@ class PatternAnalyzer:
 
     def _find_repeated_commands(self, conn: sqlite3.Connection) -> list[DetectedPattern]:
         """Find voice commands that repeat at similar times."""
-        patterns = []
+        patterns: list[DetectedPattern] = []
 
         try:
             rows = conn.execute("""
@@ -1027,8 +1027,8 @@ class PatternAnalyzer:
             series: list = []
             for s in states:
                 try:
-                    val = getattr(s, "state", None)
-                    when = (getattr(s, "last_changed", None)
+                    val: Any = getattr(s, "state", None)
+                    when: Any = (getattr(s, "last_changed", None)
                             or getattr(s, "last_updated", None))
                     if val is None and isinstance(s, dict):
                         val = s.get("state")
@@ -1045,7 +1045,7 @@ class PatternAnalyzer:
 
     def _find_presence_patterns(self, conn: sqlite3.Connection) -> list[DetectedPattern]:
         """Find state changes correlated with person arrivals/departures."""
-        patterns = []
+        patterns: list[DetectedPattern] = []
 
         # Look for state changes that happen within 5 min of person state changes
         try:

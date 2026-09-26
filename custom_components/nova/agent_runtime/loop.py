@@ -28,7 +28,7 @@ MAX_TOOL_ITERATIONS = 10
 
 def _arg(call, key: str):
     """One argument of a ToolCall, or None when its arguments are unusable."""
-    args = getattr(call, "args", None)
+    args: Any = getattr(call, "args", None)
     return args.get(key) if hasattr(args, "get") else None
 
 
@@ -365,7 +365,7 @@ async def _run_agent_turn(
     # Build tool list from the grant: the main grant offers every Nova tool
     # plus Home Assistant's LLM API tools; any other grant offers exactly its
     # own tools and no HA API tools. The dispatcher enforces the same grant.
-    tools = _scoped_tool_list(None if grant.is_main else set(grant.tools))
+    tools = _scoped_tool_list(None if grant.tools is None else set(grant.tools))
     if hass_api and grant.include_ha_tools:
         tools.extend(_ha_tools_to_openai_format(
             hass_api.tools, getattr(hass_api, "custom_serializer", None)))
@@ -612,9 +612,9 @@ async def _run_agent_turn(
         return result.text
     except Exception:
         try:
-            from .. import persona
+            from .. import persona as persona_mod
             from .. import honorific as honorific_mod
             hon = honorific_mod.effective_honorific(hass)  # Phase C: presence-aware
-            return persona.completed(hon)
+            return persona_mod.completed(hon)
         except Exception:
             return "I've completed the requested actions, sir."

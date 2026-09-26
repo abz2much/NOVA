@@ -13,7 +13,9 @@ import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Union
+
+StrPath = Union[str, "os.PathLike[str]"]
 
 MISSING = "missing"
 OK = "ok"
@@ -27,7 +29,7 @@ class JsonRead:
     error: str = ""
 
 
-def read_json(path, *, encoding: Optional[str] = None) -> JsonRead:
+def read_json(path: StrPath, *, encoding: Optional[str] = None) -> JsonRead:
     # Check first, as every owner did: an absent file is never opened.
     if not os.path.exists(path):
         return JsonRead(MISSING)
@@ -40,7 +42,7 @@ def read_json(path, *, encoding: Optional[str] = None) -> JsonRead:
         return JsonRead(CORRUPT, error=f"{type(exc).__name__}: {exc}")
 
 
-def write_json_atomic(path, data, *, indent: Optional[int] = None,
+def write_json_atomic(path: StrPath, data: Any, *, indent: Optional[int] = None,
                       encoding: Optional[str] = None) -> None:
     """Write `data` to a temporary file beside `path`, then rename it into
     place, so readers only ever see the old or the new complete file.

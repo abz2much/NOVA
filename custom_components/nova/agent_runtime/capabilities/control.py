@@ -86,8 +86,10 @@ async def _exec_control_device(hass: HomeAssistant, args: dict, device_id: Optio
         }
 
         status = "accepted"
-        message = None
+        message: Optional[str] = None
         requested_pct = None
+        svc_domain: Optional[str]
+        svc_name: Optional[str]
 
         # Every action — the valued ones (brightness, temperature, volume)
         # included — resolves to one service and passes the same
@@ -108,7 +110,7 @@ async def _exec_control_device(hass: HomeAssistant, args: dict, device_id: Optio
         else:
             svc_domain = svc_name = None
 
-        if svc_domain is not None:
+        if svc_domain is not None and svc_name is not None:
             # Authorization gate (v7.41.0). Protected actions (lock/unlock,
             # garage, disarm) are voice-confirmed when that's enabled, and the
             # gate FAILS CLOSED: if the confirmation path errors, the action
@@ -180,11 +182,12 @@ async def _exec_control_device(hass: HomeAssistant, args: dict, device_id: Optio
                     _verify_control(hass, entity_id, action, v_dom, v_svc, svc_data,
                                     action_id=action_id))
         elif action == "toggle" and domain in entity_verify.FAST_VERIFY_DOMAINS:
-            expected = {"on": "off", "off": "on"}.get(pre_state)
-            if expected is None:
+            toggle_to = {"on": "off", "off": "on"}.get(pre_state)
+            if toggle_to is None:
                 status = "accepted"
                 message = f"I've sent the toggle command to {fname}."
             else:
+                expected = toggle_to
                 verified = await entity_verify.wait_until(
                     lambda: entity_verify.check_state_once(hass, entity_id, expected))
                 if verified:
@@ -355,8 +358,8 @@ async def _exec_bulk_control(hass: HomeAssistant, args: dict, device_id: Optiona
     entities = []
     if area_name:
         # Get area-specific entities
-        result = await _exec_get_area_devices(hass, {"area_name": area_name})
-        area_data = json.loads(result)
+        area_json = await _exec_get_area_devices(hass, {"area_name": area_name})
+        area_data = json.loads(area_json)
         if "devices" in area_data:
             entities = [
                 d["entity_id"] for d in area_data["devices"]

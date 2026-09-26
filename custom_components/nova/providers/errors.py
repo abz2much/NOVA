@@ -155,7 +155,9 @@ def _code_of(exc: BaseException) -> Optional[str]:
             return code
     body = getattr(exc, "body", None)
     if isinstance(body, dict):
-        error = body.get("error") if isinstance(body.get("error"), dict) else body
+        error = body.get("error")
+        if not isinstance(error, dict):
+            error = body
         for key in ("code", "type"):
             code = _safe_code(error.get(key))
             if code:

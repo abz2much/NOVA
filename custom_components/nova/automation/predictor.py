@@ -132,7 +132,7 @@ class PredictiveHabitMatrix:
         target = now + lead_minutes * 60
         with self._lock:
             events = self._load()
-        keys = {e.get("key") for e in events if e.get("key")}
+        keys: set[str] = {e["key"] for e in events if e.get("key")}
         out: list[dict] = []
         for key in keys:
             prob = self.probability(key, target)

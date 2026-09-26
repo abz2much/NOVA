@@ -74,7 +74,8 @@ def create(
             ),
         )
         conn.commit()
-        return int(cur.lastrowid)
+        rowid = cur.lastrowid
+        return int(rowid) if rowid is not None else None
     except Exception:
         return None
     finally:

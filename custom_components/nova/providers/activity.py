@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 from .base import LLMProvider
 from .errors import ProviderError, normalize_error
@@ -102,7 +102,7 @@ async def execute_chat(
     if model_override is not None:
         kwargs["model_override"] = model_override
 
-    start = time.monotonic()
+    start: Optional[float] = time.monotonic()
     response: Optional[ChatResponse] = None
     success = False
     try:
@@ -140,7 +140,7 @@ async def execute_chat(
         except Exception as exc:
             raise normalize_error(exc, provider_name) from exc
         success = True
-        return response
+        return cast(ChatResponse, response)
     except asyncio.CancelledError:
         # Propagate cancellation at once; a cancelled call is not recorded.
         start = None
