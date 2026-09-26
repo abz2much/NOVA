@@ -33,6 +33,7 @@ from homeassistant.core import HomeAssistant, Event, callback
 from homeassistant.util import dt as dt_util
 
 from . import audio_routing, classifier, output_gate, reasoning_loop, sleep_detection
+from .cognitive import evaluators as cognitive_rules
 from .const import (
     DEFAULT_OBSERVER_QUIET_END, DEFAULT_OBSERVER_QUIET_START,
 )
@@ -714,18 +715,19 @@ async def _process_event(event: Event) -> None:
         # against URGENCY_CEILINGS — smoke/CO/gas/moisture/glass_break) also
         # said critical. Otherwise downgrade to high. This prevents the
         # "critical bypasses sleep" path from firing on door/motion events.
-        if final_urgency == "critical" and urgency_hint != "critical":
+        capped = cognitive_rules.cap_reasoned_urgency(final_urgency, urgency_hint)
+        if capped != final_urgency:
             _LOGGER.info(
                 "Observer: downgrading urgency critical→high for %s "
                 "(reasoning said critical but classifier said %s)",
                 entity_id, urgency_hint,
             )
-            final_urgency = "high"
+            final_urgency = capped
 
         # EXTRA SAFETY: during sleep, suppress anything below critical that
         # would broadcast. HIGH during sleep already routes to notify_only,
         # so this is redundant but defensive.
-        if sleeping and final_urgency not in ("critical",):
+        if cognitive_rules.held_for_sleep(final_urgency, sleeping):
             _LOGGER.info(
                 "Observer: user sleeping, suppressing %s urgency message '%s'",
                 final_urgency, message[:80],

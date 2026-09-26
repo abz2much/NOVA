@@ -25,7 +25,10 @@ Honest scope: this replicates the decision procedure and, for the event
 taxonomy a household actually produces, lands where the cloud would land the
 great majority of the time. It does not replicate open-ended understanding of
 genuinely novel situations — that remains the cloud's job, and soon the GPU
-server's. The module is a dependency-free leaf (sqlite3 + stdlib only).
+server's. The decision procedure itself is the pure
+cognitive.evaluators.evaluate_local_mind; this module keeps the history
+lookup, flap memory, counters and voice (sqlite3 + stdlib, plus Nova's own
+cognitive package).
 """
 
 from __future__ import annotations
@@ -155,51 +158,33 @@ def _note_event(entity_id: str) -> bool:
     return len(recent) >= _FLAP_COUNT
 
 
+# The pure checks live in cognitive.evaluators; these names stay for callers.
 def _is_duplicate(friendly_name: str, entity_id: str,
                   recent_announcements: list[str]) -> bool:
     """Have we already told the user about this device very recently?"""
-    needles = set()
-    if friendly_name:
-        needles.add(friendly_name.lower())
-    if entity_id and "." in entity_id:
-        needles.add(entity_id.split(".", 1)[1].replace("_", " ").lower())
-    if not needles:
-        return False
-    for ann in (recent_announcements or [])[-6:]:
-        a = str(ann).lower()
-        if any(n in a for n in needles):
-            return True
-    return False
+    return _ev().is_duplicate(friendly_name, entity_id, recent_announcements)
 
 
 # ── 4. Situational judgment ──────────────────────────────────────────────────
 
-_SECURITY_CLASSES = {"door", "window", "garage_door", "lock", "opening", "motion"}
-_SECURITY_DOMAINS = {"lock", "cover"}
-_OPENING_STATES = {"on", "open", "opening", "unlocked", "detected", "true"}
-
-
 def _security_relevant(domain: str, device_class: str, to_state: str,
                        entity_id: str) -> bool:
-    s = str(to_state or "").lower()
-    if s not in _OPENING_STATES:
-        return False
-    if (device_class or "").lower() in _SECURITY_CLASSES:
-        return True
-    if (domain or "").lower() in _SECURITY_DOMAINS:
-        return True
-    eid = (entity_id or "").lower()
-    return any(k in eid for k in ("door", "window", "garage", "lock", "gate"))
+    return _ev().security_relevant(domain, device_class, to_state, entity_id)
 
 
 def _case_prior(domain: str, device_class: str, category: str,
                 anyone_home: bool) -> tuple[int, int]:
-    """Case-based memory: tally past cloud decisions for similar events."""
+    """Case-based memory: tally past provider decisions for similar events."""
     try:
         from . import reasoning_cache
         return reasoning_cache.similar(domain, device_class, category, anyone_home)
     except Exception:
         return (0, 0)
+
+
+def _ev():
+    from .cognitive import evaluators
+    return evaluators
 
 
 # ── 5. Persona verbalization ─────────────────────────────────────────────────
@@ -330,76 +315,24 @@ def assess_core(*, honorific: str, entity_id: str, domain: str,
                 anyone_home: bool, recent_announcements: list[str],
                 hour: int, history: dict,
                 prior: tuple[int, int]) -> dict:
-    """Pure decision core (no I/O) — unit-testable."""
-    urgency = (urgency or "medium").lower()
-    grade = history.get("grade", "unknown")
-    away = not anyone_home
+    """The Local Mind decision for one event. The procedure itself is the
+    pure cognitive.evaluators.evaluate_local_mind; this façade keeps the
+    flap memory and the decision counters it always kept, and voices the
+    result."""
+    from .cognitive.models import EventSnapshot
+    from .cognitive.presentation import voiced
     flapping = _note_event(entity_id or friendly_name or "?")
-    duplicate = _is_duplicate(friendly_name, entity_id, recent_announcements)
-    security = _security_relevant(domain, device_class, to_state, entity_id)
-    speak_n, silent_n = prior
-
-    def decision(speak: bool, out_urgency: str, why: str,
-                 escalated: bool = False) -> dict:
-        _stats["decisions"] += 1
-        _stats["spoke" if speak else "silent"] += 1
-        d = {"speak": speak, "urgency": out_urgency,
-             "reason": f"local mind: {why}"}
-        if speak:
-            d["message"] = _compose(
-                honorific, friendly_name, entity_id, to_state, hour,
-                novelty=grade, away=away, escalated=escalated,
-                device_class=device_class)
-        return d
-
-    # Critical always surfaces — even repetition is worth hearing at critical.
-    if urgency == "critical":
-        return decision(True, "critical", "critical urgency — always voiced",
-                        escalated=True)
-
-    # Self-awareness gates.
-    if duplicate:
-        return decision(False, urgency, "already announced this device recently")
-    if flapping:
-        return decision(False, urgency,
-                        f"{friendly_name or entity_id} is flapping "
-                        f"(≥{_FLAP_COUNT} events in {int(_FLAP_WINDOW/60)}m) — suppressed")
-
-    # Security escalation: an entry point opening while the house is empty
-    # outranks the classifier's 'medium'.
-    if security and away and urgency in ("medium", "high"):
-        return decision(True, "high",
-                        f"entry point active while away ({grade}) — escalated",
-                        escalated=True)
-
-    if urgency == "high":
-        return decision(True, "high", f"high urgency ({grade})", escalated=True)
-
-    if urgency == "medium":
-        # Case-based memory first — actual past cloud judgments outrank heuristics.
-        if silent_n >= 2 and speak_n == 0:
-            return decision(False, "medium",
-                            f"{silent_n} similar past events judged routine (case memory)")
-        if speak_n >= 2 and silent_n == 0:
-            return decision(True, "medium",
-                            f"{speak_n} similar past events voiced (case memory)")
-        # Historical grounding.
-        if grade == "novel":
-            return decision(True, "medium", "novel event — never observed before")
-        if grade == "unusual_hour":
-            return decision(True, "medium",
-                            f"out of hourly pattern (seen {history.get('total', 0)}× "
-                            f"overall, never near this hour)")
-        if grade in ("routine", "common"):
-            return decision(False, "medium",
-                            f"{grade} at this hour "
-                            f"(~{history.get('at_hour', 0)}× in {history.get('days', 0)}d)")
-        # occasional / unknown: quiet at home, surfaced when away (routes to push).
-        if away:
-            return decision(True, "medium", f"{grade} while away — surfaced")
-        return decision(False, "medium", f"{grade} while home — not worth voicing")
-
-    return decision(False, "low", "low urgency — silent")
+    snap = EventSnapshot.build(
+        entity_id=entity_id, domain=domain, device_class=device_class,
+        from_state=from_state, to_state=to_state, friendly_name=friendly_name,
+        category=category, urgency=urgency, anyone_home=anyone_home,
+        recent_announcements=recent_announcements)
+    d = _ev().evaluate_local_mind(snap, history=history, prior=prior, flapping=flapping,
+                                  hour=hour, flap_count=_FLAP_COUNT,
+                                  flap_window_s=_FLAP_WINDOW)
+    _stats["decisions"] += 1
+    _stats["spoke" if d.speak else "silent"] += 1
+    return voiced(d, honorific).as_dict()
 
 
 async def assess(hass, *, honorific: str, entity_id: str = "", domain: str = "",
