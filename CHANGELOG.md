@@ -4,12 +4,6 @@
 - The unit tests no longer read or write the real `/config`, so local runs match CI, and a test that touches it now fails.
 - Fixed a handful of type inconsistencies found by the checks. No change in behaviour.
 
-## [7.123.0] — quality gates
-
-- CI now type checks Nova's architecture packages, fails on import cycles, unintended dependencies between packages or growth in the compatibility modules, and holds each package's test coverage above a floor.
-- The unit tests no longer read or write the real `/config`, so local runs match CI, and a test that touches it now fails.
-- Fixed a handful of type inconsistencies found by the checks. No change in behaviour.
-
 ## [7.122.0] — panel source structure
 
 - The dashboard is now maintained as separate source files under `frontend/src/` and built into the same single `nova-panel.js` that HACS installs. Apart from a generated file banner and one equivalent string escape, the built panel is the same code as before, so nothing changes on screen.
