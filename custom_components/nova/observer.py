@@ -558,6 +558,12 @@ def _on_state_changed(event: Event) -> None:
             cog_reason = _decision.reason
         except Exception:
             cog_escalate = False
+    else:
+        try:
+            from . import cognition
+            cognition.mark_unobserved()
+        except Exception:
+            pass
 
     if _should_pre_filter(event):
         # Static filter would drop this; escalate only on a cognition anomaly.
@@ -1227,6 +1233,11 @@ async def stop() -> None:
     except Exception:
         pass
     await _release_tier_providers()
+    try:
+        from . import cognition
+        cognition.mark_unobserved()
+    except Exception:
+        pass
     _STATE.reset()
     _LOGGER.info("Nova Observer stopped")
 
