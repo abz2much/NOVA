@@ -39,6 +39,9 @@ from typing import Iterable, Optional
 from homeassistant.core import HomeAssistant, Event, callback
 from homeassistant.util import dt as dt_util
 
+from .persistence import sqlite as _store
+from .persistence.files import write_json_atomic
+
 _LOGGER = logging.getLogger(__name__)
 
 TICK_INTERVAL = 30  # seconds between evaluations
@@ -258,8 +261,7 @@ class IgnoreManager:
                 }
                 for r in self._rules if not r.is_expired()
             ]
-            with open(IGNORE_FILE, "w") as f:
-                json.dump(data, f, indent=2)
+            write_json_atomic(IGNORE_FILE, data, indent=2)
         except Exception as exc:
             _LOGGER.warning("Failed to save ignore rules: %s", exc)
 
@@ -1388,18 +1390,14 @@ class LockdownManager:
 
     def _persist_sync(self) -> None:
         try:
-            os.makedirs(os.path.dirname(LOCKDOWN_STATE_PATH), exist_ok=True)
-            tmp = LOCKDOWN_STATE_PATH + ".tmp"
-            with open(tmp, "w") as f:
-                json.dump({
-                    "active": self.active,
-                    "since": self.since,
-                    "reason": self.reason,
-                    "auto": self.auto,
-                    "exempt_windows": sorted(self.exempt_windows),
-                    "auto_suppressed": self._auto_suppressed,
-                }, f)
-            os.replace(tmp, LOCKDOWN_STATE_PATH)
+            write_json_atomic(LOCKDOWN_STATE_PATH, {
+                "active": self.active,
+                "since": self.since,
+                "reason": self.reason,
+                "auto": self.auto,
+                "exempt_windows": sorted(self.exempt_windows),
+                "auto_suppressed": self._auto_suppressed,
+            })
         except Exception as exc:
             _LOGGER.debug("Lockdown state persist failed: %s", exc)
 
@@ -2089,9 +2087,7 @@ class AutonomyManager:
 
     def _save(self) -> None:
         try:
-            os.makedirs(os.path.dirname(AUTONOMY_FILE), exist_ok=True)
-            with open(AUTONOMY_FILE, "w", encoding="utf-8") as f:
-                json.dump(self._grants, f, indent=2)
+            write_json_atomic(AUTONOMY_FILE, self._grants, indent=2, encoding="utf-8")
         except Exception as exc:
             _LOGGER.warning("Autonomy grants save failed: %s", exc)
 
@@ -2186,129 +2182,7 @@ class StateLogger:
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
         try:
             with sqlite3.connect(self._db_path) as conn:
-                conn.executescript("""
-                    CREATE TABLE IF NOT EXISTS state_changes (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        timestamp TEXT NOT NULL,
-                        entity_id TEXT NOT NULL,
-                        domain TEXT NOT NULL,
-                        old_state TEXT,
-                        new_state TEXT NOT NULL,
-                        area_id TEXT,
-                        hour INTEGER,
-                        day_of_week INTEGER,
-                        triggered_by TEXT DEFAULT 'system',
-                        source_entity_id TEXT DEFAULT '',
-                        source_confidence REAL DEFAULT 0.0,
-                        person TEXT DEFAULT 'unknown',
-                        person_confidence REAL DEFAULT 0.0
-                    );
-                    CREATE INDEX IF NOT EXISTS idx_sc_entity
-                        ON state_changes(entity_id);
-                    CREATE INDEX IF NOT EXISTS idx_sc_ts
-                        ON state_changes(timestamp);
-                    CREATE INDEX IF NOT EXISTS idx_sc_hour_dow
-                        ON state_changes(hour, day_of_week);
-
-                    CREATE TABLE IF NOT EXISTS commands (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        timestamp TEXT NOT NULL,
-                        text TEXT NOT NULL,
-                        handled_by TEXT DEFAULT 'agent',
-                        entity_ids TEXT DEFAULT '[]',
-                        person TEXT DEFAULT 'unknown',
-                        hour INTEGER,
-                        day_of_week INTEGER
-                    );
-                    CREATE INDEX IF NOT EXISTS idx_cmd_ts
-                        ON commands(timestamp);
-
-                    CREATE TABLE IF NOT EXISTS suggestions (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        created TEXT NOT NULL,
-                        description TEXT NOT NULL,
-                        automation_yaml TEXT,
-                        status TEXT DEFAULT 'pending',
-                        confidence REAL DEFAULT 0.0,
-                        pattern_count INTEGER DEFAULT 0,
-                        approved_at TEXT,
-                        dismissed_at TEXT,
-                        pattern_type TEXT DEFAULT '',
-                        entity_ids TEXT DEFAULT '',
-                        details TEXT DEFAULT '{}'
-                    );
-
-                    CREATE TABLE IF NOT EXISTS person_patterns (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        person TEXT NOT NULL,
-                        pattern_type TEXT NOT NULL,
-                        description TEXT NOT NULL,
-                        data TEXT DEFAULT '{}',
-                        confidence REAL DEFAULT 0.0,
-                        last_seen TEXT,
-                        occurrences INTEGER DEFAULT 1
-                    );
-                    CREATE INDEX IF NOT EXISTS idx_pp_person
-                        ON person_patterns(person);
-                """)
-                # v6.41.0: state_changes predates the person column — the
-                # CREATE TABLE IF NOT EXISTS above only helps fresh DBs.
-                # Existing installs need an explicit migration.
-                cols = {row[1] for row in
-                        conn.execute("PRAGMA table_info(state_changes)")}
-                if "person" not in cols:
-                    conn.execute(
-                        "ALTER TABLE state_changes "
-                        "ADD COLUMN person TEXT DEFAULT 'unknown'")
-                    conn.commit()
-                    _LOGGER.info("Pattern DB: migrated state_changes.person")
-                # v6.77.0: store HOW SURE we are of the attribution, so the
-                # analyzer can use probable matches instead of discarding
-                # everything that isn't certain.
-                if "person_confidence" not in cols:
-                    conn.execute("ALTER TABLE state_changes "
-                                 "ADD COLUMN person_confidence REAL DEFAULT 0.0")
-                    conn.commit()
-                    _LOGGER.info("Pattern DB: migrated state_changes.person_confidence")
-                conn.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_sc_person "
-                    "ON state_changes(person)")
-                conn.commit()
-                # v7.109.0 (Phase 4): the source's own DETECTION confidence —
-                # distinct from person_confidence, which is the confidence of
-                # WHO it was, not confidence the event happened at all. NULL
-                # (not 0.0) when the source supplied none, so "no score" and
-                # "score of zero" stay distinguishable — camera_semantic.py
-                # is the only writer today, but the column is generic.
-                if "detection_confidence" not in cols:
-                    conn.execute("ALTER TABLE state_changes "
-                                 "ADD COLUMN detection_confidence REAL DEFAULT NULL")
-                    conn.commit()
-                    _LOGGER.info("Pattern DB: migrated state_changes.detection_confidence")
-                # Automation-awareness: retain how a state transition happened.
-                # Old rows remain honestly generic; no provenance is invented.
-                for col, ddl in (("source_entity_id", "TEXT DEFAULT ''"),
-                                 ("source_confidence", "REAL DEFAULT 0.0")):
-                    if col not in cols:
-                        conn.execute(f"ALTER TABLE state_changes ADD COLUMN {col} {ddl}")
-                        conn.commit()
-                        _LOGGER.info("Pattern DB: migrated state_changes.%s", col)
-                conn.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_sc_source "
-                    "ON state_changes(triggered_by, source_entity_id)")
-                conn.commit()
-                # v6.80.0: carry the EVIDENCE behind a suggestion through to the
-                # panel — which pattern, which entities, and the observation
-                # details — so reviewing a suggestion shows *why*, not just what.
-                scols = {row[1] for row in
-                         conn.execute("PRAGMA table_info(suggestions)")}
-                for col, ddl in (("pattern_type", "TEXT DEFAULT ''"),
-                                 ("entity_ids", "TEXT DEFAULT ''"),
-                                 ("details", "TEXT DEFAULT '{}'")):
-                    if col not in scols:
-                        conn.execute(f"ALTER TABLE suggestions ADD COLUMN {col} {ddl}")
-                        conn.commit()
-                        _LOGGER.info("Pattern DB: migrated suggestions.%s", col)
+                _store.ensure(conn, "pattern_log", "person_patterns")
         except Exception as exc:
             _LOGGER.warning("Pattern DB init failed: %s", exc)
 

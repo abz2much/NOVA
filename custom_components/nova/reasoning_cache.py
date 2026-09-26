@@ -22,12 +22,13 @@ reasoning_loop import it lazily. Persists to /config/nova/reasoning_cache.json.
 """
 from __future__ import annotations
 
-import json
 import logging
 import re
 import time
 from pathlib import Path
 from threading import Lock
+
+from .persistence.files import CORRUPT, OK, read_json, write_json_atomic
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -72,34 +73,25 @@ def load() -> int:
     with _lock:
         if _loaded:                      # re-check under the lock
             return len(_cache)
-        try:
-            if CACHE_PATH.exists():
-                with open(CACHE_PATH) as f:
-                    _cache = json.load(f)
-            else:
-                _cache = {}
-            _loaded = True
+        read = read_json(CACHE_PATH)
+        if read.status == CORRUPT:
+            _LOGGER.warning("Reasoning cache load error: %s", read.error)
+        _cache = read.value if read.status == OK and isinstance(read.value, dict) else {}
+        _loaded = True
+        if read.status == OK:
             _LOGGER.info("Reasoning cache: loaded %d learned patterns", len(_cache))
-        except Exception as exc:
-            _LOGGER.warning("Reasoning cache load error: %s", exc)
-            _cache = {}
-            _loaded = True
     return len(_cache)
 
 
 def save() -> None:
     try:
-        CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
         with _lock:
             # Evict oldest-refreshed entries if over the cap
             if len(_cache) > MAX_ENTRIES:
                 items = sorted(_cache.items(), key=lambda kv: kv[1].get("refreshed", 0))
                 for sig, _v in items[: len(_cache) - MAX_ENTRIES]:
                     _cache.pop(sig, None)
-            tmp = CACHE_PATH.with_suffix(".tmp")
-            with open(tmp, "w") as f:
-                json.dump(_cache, f)
-            tmp.replace(CACHE_PATH)
+            write_json_atomic(CACHE_PATH, _cache)
     except Exception as exc:
         _LOGGER.debug("Reasoning cache save error: %s", exc)
 

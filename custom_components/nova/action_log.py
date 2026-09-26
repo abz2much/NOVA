@@ -55,8 +55,9 @@ import random
 import sqlite3
 import time
 import uuid
-from pathlib import Path
 from typing import Any, Callable, Optional, TypeVar
+
+from .persistence import sqlite as _store
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -150,30 +151,6 @@ def _run_with_retry(attempt: Callable[[], _T]) -> _T:
 # ends; a quiet day keeps far more than a day's worth.
 _KEEP_REQUESTS = 200
 
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS action_log (
-    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-    request_id            TEXT    NOT NULL,
-    ts_created            REAL    NOT NULL,
-    ts_updated            REAL    NOT NULL,
-    action                TEXT    NOT NULL,
-    source                TEXT    NOT NULL,
-    requested_by_user_id  TEXT,
-    requested_by_name     TEXT,
-    request_device_id     TEXT,
-    domain                TEXT,
-    service               TEXT,
-    entity_id             TEXT,
-    requested_state       TEXT,
-    approval_required     INTEGER NOT NULL DEFAULT 0,
-    approval_result       TEXT    NOT NULL DEFAULT 'not_required',
-    execution_result      TEXT    NOT NULL DEFAULT 'pending',
-    reason_code           TEXT,
-    reason_text           TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_action_log_keyset  ON action_log(ts_created, id);
-CREATE INDEX IF NOT EXISTS idx_action_log_request ON action_log(request_id);
-"""
 
 # ── Permitted transitions (two independent state machines) ──────────────────
 # Each maps a NEW value to the set of prior values it may legally come from.
@@ -227,12 +204,9 @@ def _resolve(db_path: Optional[str]) -> str:
 
 
 def _connect(db_path: str) -> sqlite3.Connection:
-    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path, timeout=_BUSY_TIMEOUT_MS / 1000.0)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute(f"PRAGMA busy_timeout={_BUSY_TIMEOUT_MS}")
-    conn.row_factory = sqlite3.Row
-    conn.executescript(_SCHEMA)
+    conn = _store.connect(db_path, timeout=_BUSY_TIMEOUT_MS / 1000.0,
+                          busy_timeout_ms=_BUSY_TIMEOUT_MS)
+    _store.ensure(conn, "action_log")
     conn.commit()
     return conn
 

@@ -29,6 +29,8 @@ import time
 from collections import deque, namedtuple
 from typing import Optional
 
+from .persistence import sqlite as _store
+
 _LOGGER = logging.getLogger(__name__)
 
 # ── Tunables ─────────────────────────────────────────────────────────────────
@@ -1241,14 +1243,7 @@ def save_to_db(db_path: str, now: float = None) -> int:
         alerted = _prune_alerted(_local_day(now or time.time()))
         with sqlite3.connect(db_path, timeout=10) as conn:
             conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS cognition_model "
-                "(entity_id TEXT PRIMARY KEY, data TEXT, updated REAL)"
-            )
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS cognition_alerted "
-                "(key TEXT PRIMARY KEY, day INTEGER)"
-            )
+            _store.ensure(conn, "cognition")
             rows = [(eid, json.dumps(_entry_to_dict(e)), time.time())
                     for eid, e in list(_MODEL.items())]
             conn.executemany(
@@ -1275,10 +1270,7 @@ def load_from_db(db_path: str, now: float = None) -> int:
     try:
         with sqlite3.connect(db_path, timeout=10) as conn:
             conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute(
-                "CREATE TABLE IF NOT EXISTS cognition_model "
-                "(entity_id TEXT PRIMARY KEY, data TEXT, updated REAL)"
-            )
+            _store.ensure(conn, "cognition")
             cur = conn.execute("SELECT entity_id, data FROM cognition_model")
             for eid, data in cur.fetchall():
                 try:

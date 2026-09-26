@@ -33,6 +33,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
+from .persistence import sqlite as _store
+
 _LOGGER = logging.getLogger(__name__)
 
 MEMORY_DIR = "/config/nova_memory"
@@ -75,10 +77,7 @@ def _init_fts():
         import sqlite3
         db_path = DB_PATH
         conn = sqlite3.connect(db_path)
-        conn.execute("""
-            CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts
-            USING fts5(content, metadata, timestamp)
-        """)
+        _store.ensure(conn, "memory_fts")
         conn.commit()
         conn.close()
         _fts_available = True

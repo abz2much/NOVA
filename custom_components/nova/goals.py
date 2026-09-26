@@ -33,6 +33,8 @@ import sqlite3
 from datetime import datetime, timedelta
 from typing import Awaitable, Callable, Optional
 
+from .persistence import sqlite as _store
+
 _LOGGER = logging.getLogger(__name__)
 
 DB_PATH = "/config/nova/patterns.db"
@@ -45,27 +47,8 @@ STATUSES = ("active", "done", "failed", "cancelled")
 
 
 def _connect(db_path: str) -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=10000")
-    conn.row_factory = sqlite3.Row
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS goals (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            created_ts TEXT NOT NULL,
-            updated_ts TEXT NOT NULL,
-            title TEXT NOT NULL,
-            outcome TEXT NOT NULL,
-            steps TEXT NOT NULL DEFAULT '[]',
-            status TEXT NOT NULL DEFAULT 'active',
-            progress TEXT NOT NULL DEFAULT '[]',
-            next_check_ts TEXT NOT NULL,
-            check_interval_min REAL NOT NULL DEFAULT 30,
-            deadline_ts TEXT,
-            runs INTEGER NOT NULL DEFAULT 0,
-            last_result TEXT DEFAULT ''
-        )""")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_goal_due ON goals(status, next_check_ts)")
+    conn = _store.connect(db_path, mkdir=False)
+    _store.ensure(conn, "goals")
     return conn
 
 

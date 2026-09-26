@@ -35,6 +35,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from .persistence import sqlite as _store
+
 _LOGGER = logging.getLogger(__name__)
 
 DOCS_DIR = "/config/nova/documents"
@@ -80,10 +82,7 @@ def _init_fts() -> bool:
     try:
         import sqlite3
         conn = sqlite3.connect(_DB_PATH)
-        conn.execute(
-            "CREATE VIRTUAL TABLE IF NOT EXISTS document_fts "
-            "USING fts5(content, source, chunk_id, ingested)"
-        )
+        _store.ensure(conn, "document_fts")
         conn.commit()
         conn.close()
         _fts_ok = True
@@ -457,8 +456,7 @@ async def auto_ingest_new(hass) -> dict:
 
     try:
         conn = sqlite3.connect(_DB_PATH)
-        conn.execute("CREATE TABLE IF NOT EXISTS document_watch_seen ("
-                     "path TEXT PRIMARY KEY, mtime REAL, ingested TEXT)")
+        _store.ensure(conn, "document_watch_seen")
         conn.commit()
         seen = {r[0]: r[1] for r in
                 conn.execute("SELECT path, mtime FROM document_watch_seen")}
@@ -510,8 +508,7 @@ async def scan_watch_folders(hass) -> dict:
     # remember ingested watch-file paths+mtimes in a tiny table
     try:
         conn = sqlite3.connect(_DB_PATH)
-        conn.execute("CREATE TABLE IF NOT EXISTS document_watch_seen ("
-                     "path TEXT PRIMARY KEY, mtime REAL, ingested TEXT)")
+        _store.ensure(conn, "document_watch_seen")
         conn.commit()
         seen = {r[0]: r[1] for r in
                 conn.execute("SELECT path, mtime FROM document_watch_seen")}

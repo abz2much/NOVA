@@ -8,7 +8,6 @@ from .automation import (
     trials as _trials,
 )
 from .automation.trials import (
-    _SCHEMA,
     _connect,
     _resolve,
     async_handle_triggered,
@@ -19,7 +18,6 @@ from .automation.trials import (
 )
 
 __all__ = [
-    "_SCHEMA",
     "_connect",
     "_resolve",
     "async_handle_triggered",

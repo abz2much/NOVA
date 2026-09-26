@@ -31,8 +31,9 @@ import json
 import logging
 import sqlite3
 import time
-from pathlib import Path
 from typing import Optional
+
+from .persistence import sqlite as _store
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -42,36 +43,6 @@ _LOGGER = logging.getLogger(__name__)
 _DEFAULT_DB = "/config/nova/conversations.db"
 
 _MAX_ENTRIES = 100
-
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS spoken_history (
-    id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp      REAL    NOT NULL,
-    text           TEXT    NOT NULL,
-    source         TEXT    NOT NULL,
-    speakers       TEXT    NOT NULL,
-    delivery_state TEXT    NOT NULL DEFAULT 'sent',
-    repeat_of_id   INTEGER
-);
-CREATE INDEX IF NOT EXISTS idx_spoken_history_ts ON spoken_history(timestamp);
-"""
-
-
-def _migrate_action_request_id_column(conn: sqlite3.Connection) -> None:
-    """Additive migration: nullable action_request_id, linking a spoken row
-    back to the Action Audit Log request it narrates (if any) — same
-    convention as database.py::_migrate_subject_column. Re-checked on every
-    connect, no cached flag. Never stores the action row's text or any
-    other action_log field, only the request_id string."""
-    cols = {row["name"] for row in conn.execute("PRAGMA table_info(spoken_history)")}
-    if "action_request_id" in cols:
-        return
-    try:
-        conn.execute("ALTER TABLE spoken_history ADD COLUMN action_request_id TEXT")
-    except sqlite3.OperationalError:
-        cols_after = {row["name"] for row in conn.execute("PRAGMA table_info(spoken_history)")}
-        if "action_request_id" not in cols_after:
-            raise
 
 # In-memory mirror of the most recent successfully recorded entry, e.g.
 # {"id": 42, "text": "...", "source": "reminder", "speakers": [...], "repeat_of_id": None}.
@@ -92,13 +63,8 @@ def _resolve(db_path: Optional[str]) -> str:
 
 
 def _connect(db_path: str) -> sqlite3.Connection:
-    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA busy_timeout=10000")
-    conn.row_factory = sqlite3.Row
-    conn.executescript(_SCHEMA)
-    _migrate_action_request_id_column(conn)
+    conn = _store.connect(db_path)
+    _store.ensure(conn, "spoken_history")
     conn.commit()
     return conn
 
