@@ -1040,6 +1040,26 @@ def _home_status(hass, h="sir"):
 
 # ── Contextual queries ──────────────────────────────────────────────────────
 
+_CORE_STATE_WORDS = {"not_running": "not running", "final_write": "shutting down",
+                     "stopping": "stopping", "stopped": "stopped", "starting": "starting"}
+
+
+def _core_state_name(state) -> str:
+    """Home Assistant's CoreState as its lowercase member name.
+
+    The real enum's members are lowercase names with UPPERCASE values
+    (CoreState.running.value == "RUNNING"), so neither the value nor str()
+    compares equal to "running". Normalize whatever is there: an enum member
+    by its name, a plain string case-insensitively. None (no state exposed)
+    counts as running, since this code is executing inside it."""
+    if state is None:
+        return "running"
+    name = getattr(state, "name", None)
+    if not isinstance(name, str):
+        name = str(getattr(state, "value", state))
+    return name.strip().lower()
+
+
 def _platform_status(hass, addr: str) -> str:
     """A bounded, truthful answer about Home Assistant itself, from what
     this running instance can observe: its run state, version and how many
@@ -1057,10 +1077,10 @@ def _platform_status(hass, addr: str) -> str:
             count = len(hass.states.async_all())
         except Exception:
             count = None
-    state = getattr(getattr(hass, "state", None), "value", getattr(hass, "state", None))
-    state = str(state) if state is not None else "running"
+    state = _core_state_name(getattr(hass, "state", None))
     if state != "running":
-        return (f"Home Assistant{ver} is {state} right now{addr}, so some devices may not "
+        shown = _CORE_STATE_WORDS.get(state, state.replace("_", " "))
+        return (f"Home Assistant{ver} is {shown} right now{addr}, so some devices may not "
                 f"respond until it finishes.")
     if not count:
         return f"Home Assistant{ver} is running{addr}, but I can't see any entities right now."

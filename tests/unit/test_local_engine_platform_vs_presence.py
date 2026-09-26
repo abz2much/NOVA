@@ -11,6 +11,7 @@ not depend on who asked or from which device.
 Focused run:
     python -m pytest tests/unit/test_local_engine_platform_vs_presence.py -q
 """
+import enum
 import re
 
 import pytest
@@ -89,11 +90,41 @@ async def test_the_status_answer_is_the_same_on_every_channel(le):
     assert len(answers) == 1
 
 
-async def test_the_status_answer_reports_a_platform_that_is_not_running(le):
+class _CoreState(enum.Enum):
+    """Mirror of homeassistant.core.CoreState: lowercase member names with
+    UPPERCASE values, so neither .value nor str() equals "running". A
+    lowercase string fake would hide exactly the bug this guards."""
+    not_running = "NOT_RUNNING"
+    starting = "STARTING"
+    running = "RUNNING"
+    stopping = "STOPPING"
+    final_write = "FINAL_WRITE"
+    stopped = "STOPPED"
+
+
+@pytest.mark.parametrize("state", [_CoreState.running, "RUNNING", "running", None])
+async def test_a_running_instance_is_reported_healthy(le, state):
     hass = _home()
-    hass.state = "starting"
+    hass.state = state
     out = await le.try_local(hass, "Is Home Assistant available?", "sir")
-    assert "starting right now" in out.text and "responding" not in out.text
+    assert "running and responding" in out.text and "RUNNING" not in out.text
+
+
+def test_the_enum_mirror_matches_home_assistant_semantics():
+    assert _CoreState.running.value != "running" and str(_CoreState.running) != "running"
+
+
+@pytest.mark.parametrize("state,word", [
+    (_CoreState.starting, "starting"), (_CoreState.stopping, "stopping"),
+    (_CoreState.not_running, "not running"), (_CoreState.final_write, "shutting down"),
+    (_CoreState.stopped, "stopped"), ("STARTING", "starting"),
+])
+async def test_the_status_answer_reports_a_platform_that_is_not_running(le, state, word):
+    hass = _home()
+    hass.state = state
+    out = await le.try_local(hass, "Is Home Assistant available?", "sir")
+    assert f"is {word} right now" in out.text and "responding" not in out.text
+    assert hass.service_calls == []
 
 
 @pytest.mark.parametrize("text,route", sorted(PRESENCE.items()))
