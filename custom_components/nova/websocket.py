@@ -2137,6 +2137,12 @@ async def ws_update_config(
         rc[key] = value
         _LOGGER.info("Nova panel: set %s = %s", key, str(value)[:80])
 
+        # Disabling cognition opens an observation gap now, not at the next
+        # state change: "none yet today" must never span it (v7.120.2).
+        if key == "cognition_enabled" and not value:
+            from . import cognition
+            cognition.mark_unobserved()
+
         # llm_base_url is the saved endpoint identity custom/ollama discovery
         # is cached under (Phase 3, v7.108.0) — a stale cached list for the
         # old endpoint must not survive the endpoint changing.

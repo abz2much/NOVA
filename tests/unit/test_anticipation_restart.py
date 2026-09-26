@@ -79,6 +79,12 @@ def test_first_processed_event_starts_observation_and_gap_clears_it(cog, fake_ha
     assert cog._OBSERVING_SINCE == 0.0
 
 
+def test_reset_clears_observation_window(cog):
+    cog._OBSERVING_SINCE = _at(day_offset=-1)
+    cog.reset()
+    assert cog._OBSERVING_SINCE == 0.0
+
+
 def test_observer_marks_gaps():
     src = (COMPONENT / "observer.py").read_text()
     stop = src[src.index("async def stop()"):src.index("def is_running()")]
