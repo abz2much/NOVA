@@ -29,6 +29,8 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from .persistence import sqlite as _store
+
 _DEFAULT_DB = "/config/nova/decisions.db"
 
 # Recognised outcome verdicts (set by the outcome-capture layer in a later phase).
@@ -36,47 +38,14 @@ OUTCOME_GOOD = "good"            # the decision was useful / acted upon
 OUTCOME_UNNECESSARY = "unnecessary"  # dismissed as not needed (not wrong, just noise)
 OUTCOME_WRONG = "wrong"          # false alarm / incorrect
 
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS decision_records (
-    id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    ts             REAL NOT NULL,
-    kind           TEXT NOT NULL,
-    observation    TEXT NOT NULL DEFAULT '{}',
-    interpretation TEXT NOT NULL DEFAULT '{}',
-    evidence       TEXT NOT NULL DEFAULT '{}',
-    decision       TEXT NOT NULL DEFAULT '',
-    reason         TEXT NOT NULL DEFAULT '',
-    model          TEXT,
-    tokens         INTEGER,
-    latency_ms     INTEGER,
-    confidence     REAL,
-    outcome        TEXT,
-    outcome_ts     REAL,
-    outcome_source TEXT,
-    ref            TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_dr_ts      ON decision_records (ts);
-CREATE INDEX IF NOT EXISTS idx_dr_kind    ON decision_records (kind);
-CREATE INDEX IF NOT EXISTS idx_dr_outcome ON decision_records (outcome);
-CREATE INDEX IF NOT EXISTS idx_dr_ref     ON decision_records (ref);
-"""
-
 
 def _resolve(db_path: Optional[str]) -> str:
     return db_path or _DEFAULT_DB
 
 
 def _connect(db_path: str) -> sqlite3.Connection:
-    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    conn.executescript(_SCHEMA)   # idempotent; keeps every entry point self-contained
-    try:  # migrate: add columns introduced after the initial schema
-        cols = {r[1] for r in conn.execute("PRAGMA table_info(decision_records)").fetchall()}
-        if "ref" not in cols:
-            conn.execute("ALTER TABLE decision_records ADD COLUMN ref TEXT")
-    except Exception:
-        pass
+    conn = _store.connect(db_path, wal=False, busy_timeout_ms=None)
+    _store.ensure(conn, "decision_records")   # every entry point self-contained
     return conn
 
 

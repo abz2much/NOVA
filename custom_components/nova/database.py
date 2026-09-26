@@ -7,79 +7,20 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
+from .persistence import sqlite as _store
+
 _LOGGER = logging.getLogger(__name__)
 
 DB_PATH = Path("/config/nova/conversations.db")
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS conversations (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp   TEXT    NOT NULL,
-    device_id   TEXT    NOT NULL DEFAULT 'unknown',
-    role        TEXT    NOT NULL CHECK(role IN ('user','assistant')),
-    content     TEXT    NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_timestamp ON conversations(timestamp);
-CREATE INDEX IF NOT EXISTS idx_device    ON conversations(device_id);
-
-CREATE TABLE IF NOT EXISTS sentinel_events (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp   TEXT    NOT NULL,
-    entity_id   TEXT    NOT NULL,
-    event_type  TEXT    NOT NULL,
-    detail      TEXT
-);
-
-CREATE TABLE IF NOT EXISTS activity_log (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp   TEXT    NOT NULL,
-    entity_id   TEXT    NOT NULL DEFAULT '',
-    category    TEXT    NOT NULL DEFAULT 'other',
-    urgency     TEXT    NOT NULL DEFAULT 'low',
-    message     TEXT    NOT NULL DEFAULT '',
-    was_spoken  INTEGER NOT NULL DEFAULT 0,
-    source      TEXT    NOT NULL DEFAULT 'observer'
-);
-CREATE INDEX IF NOT EXISTS idx_activity_ts ON activity_log(timestamp);
-"""
-
-
 _last_error: Optional[str] = None   # last connect/schema failure, for diagnostics
-
-
-def _migrate_subject_column(conn: sqlite3.Connection) -> None:
-    """Additive migration: nullable `subject` column on conversations, for
-    person-scoped episodic continuity (Phase 2). Re-checked on every connect,
-    no cached flag — matches this file's existing schema-application
-    convention (conn.executescript(SCHEMA) above). No backfill: existing rows
-    read back as NULL.
-
-    Only a PROVEN concurrent duplicate-column race (confirmed by a second,
-    fresh PRAGMA showing the column already present) is treated as success —
-    every other failure propagates to _connect()'s own except block below,
-    which already logs to _last_error and re-raises, so health() reports the
-    degraded state. Never swallowed here."""
-    cols = {row["name"] for row in conn.execute("PRAGMA table_info(conversations)")}
-    if "subject" in cols:
-        return
-    try:
-        conn.execute("ALTER TABLE conversations ADD COLUMN subject TEXT")
-    except sqlite3.OperationalError:
-        cols_after = {row["name"] for row in conn.execute("PRAGMA table_info(conversations)")}
-        if "subject" not in cols_after:
-            raise
 
 
 def _connect() -> sqlite3.Connection:
     global _last_error
     try:
-        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(str(DB_PATH))
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA busy_timeout=10000")
-        conn.row_factory = sqlite3.Row
-        conn.executescript(SCHEMA)
-        _migrate_subject_column(conn)
+        conn = _store.connect(DB_PATH)
+        _store.ensure(conn, "conversations")
         conn.commit()
         _last_error = None
         return conn

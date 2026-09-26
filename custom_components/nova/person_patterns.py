@@ -20,23 +20,11 @@ import sqlite3
 from datetime import datetime
 from typing import Optional
 
+from .persistence import sqlite as _store
+
 _LOGGER = logging.getLogger(__name__)
 
 DB_PATH = "/config/nova/patterns.db"
-
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS person_patterns (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    person TEXT NOT NULL,
-    pattern_type TEXT NOT NULL,
-    description TEXT NOT NULL,
-    data TEXT DEFAULT '{}',
-    confidence REAL DEFAULT 0.0,
-    last_seen TEXT,
-    occurrences INTEGER DEFAULT 1
-);
-CREATE INDEX IF NOT EXISTS idx_pp_person ON person_patterns(person);
-"""
 
 
 def _normalize(person: str) -> str:
@@ -52,7 +40,7 @@ def ensure_schema(db_path: str = DB_PATH) -> None:
     (cognitive_core also creates it at init; this keeps the module standalone.)"""
     try:
         with sqlite3.connect(db_path) as conn:
-            conn.executescript(_SCHEMA)
+            _store.ensure(conn, "person_patterns")
     except Exception as exc:
         _LOGGER.debug("person_patterns ensure_schema failed: %s", exc)
 

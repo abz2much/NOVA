@@ -38,7 +38,8 @@ ALLOWED_INTERNAL = {
 # lazily inside a function (never at import time).
 ALLOWED_OUTSIDE = {"action_log", "decision_record", "nova_config", "identity",
                    "knowledge", "person_patterns", "runtime", "websocket",
-                   "cognitive"}   # Phase 8: pure routine scoring
+                   "cognitive",   # Phase 8: pure routine scoring
+                   "persistence"}   # Phase 9: schema owner
 FORBIDDEN_TIMERS = {"async_track_time_interval", "async_call_later",
                     "async_track_point_in_time", "async_create_background_task",
                     "async_track_time_change"}
@@ -204,10 +205,11 @@ def test_storage_paths_and_tables_are_unchanged():
         "automation.installation": {"paths": ["automations.yaml"], "tables": []},
         "automation.predictor": {"paths": ["nova/habit_matrix.json"], "tables": []},
         "automation.suggestions": {"paths": ["nova/patterns.db"], "tables": []},
-        "automation.trials": {"paths": ["nova/patterns.db"],
-                              "tables": ["automation_trials"]},
+        "automation.trials": {"paths": ["nova/patterns.db"], "tables": []},
     }
-    assert "suggestions" in current["cognitive_core"]["tables"]
+    # Phase 9: every Nova-owned table is declared once, in persistence.schema.
+    owned = current["persistence.schema"]["tables"]
+    assert {"automation_trials", "suggestions", "state_changes"} <= set(owned)
 
 
 def test_no_root_module_was_deleted():

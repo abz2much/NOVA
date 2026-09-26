@@ -137,6 +137,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
     # trip Home Assistant's blocking-I/O detector on first access.
     await hass.async_add_executor_job(_prewarm_persisted_state)
 
+    # Upgrade Nova's existing SQLite stores once, before anything reads them.
+    # Each file upgrades in one transaction; a failure rolls that file back,
+    # is logged, and leaves only that store degraded. Never blocks setup.
+    try:
+        from .persistence import sqlite as _persistence
+        await hass.async_add_executor_job(
+            _persistence.upgrade_existing, hass.config.path())
+    except Exception as exc:
+        _LOGGER.warning("Nova: storage upgrade skipped (non-fatal): %s", exc)
+
     # Spoken History (v7.104.0): point the store at this instance's own
     # config directory, then load the most recent entry into memory so a
     # voice "repeat that" works right after a restart without Nova needing
