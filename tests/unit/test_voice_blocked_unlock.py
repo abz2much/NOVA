@@ -223,7 +223,8 @@ def test_requires_confirmation_lock_stays_false_when_unprotected(pol, vc, monkey
 # ── agent._exec_control_device wiring ─────────────────────────────────────────
 
 async def test_control_device_voice_unlock_needs_phone_confirmation(agent, pol, monkeypatch):
-    async def fake_gate(hass, domain, service, entity_id="", action_label="", device_id=""):
+    async def fake_gate(hass, domain, service, entity_id="", action_label="", device_id="",
+                        target_name=""):
         assert device_id == "dev-sat-1"
         return False, "voice alone can't authorize this", "rejected"
     monkeypatch.setattr(pol, "confirm_gate", fake_gate)
@@ -236,7 +237,8 @@ async def test_control_device_voice_unlock_needs_phone_confirmation(agent, pol, 
 
 
 async def test_control_device_voice_unlock_proceeds_once_confirmed(agent, pol, monkeypatch):
-    async def fake_gate(hass, domain, service, entity_id="", action_label="", device_id=""):
+    async def fake_gate(hass, domain, service, entity_id="", action_label="", device_id="",
+                        target_name=""):
         return True, "", "approved"
     monkeypatch.setattr(pol, "confirm_gate", fake_gate)
 
@@ -252,7 +254,8 @@ async def test_control_device_voice_unlock_proceeds_once_confirmed(agent, pol, m
 async def test_execute_tool_extracts_device_id_from_user_input(agent, pol, monkeypatch):
     seen = {}
 
-    async def fake_gate(hass, domain, service, entity_id="", action_label="", device_id=""):
+    async def fake_gate(hass, domain, service, entity_id="", action_label="", device_id="",
+                        target_name=""):
         seen["device_id"] = device_id
         return True, "", "not_required"
     monkeypatch.setattr(pol, "confirm_gate", fake_gate)
@@ -283,7 +286,8 @@ async def test_control_device_lock_action_not_gated_by_device_id(agent, pol, mon
     """Sanity: passing a device_id at all must not itself add friction to a
     lock action -- only confirm_gate's own logic (tested above) decides
     that, and here it's mocked to allow through unconditionally."""
-    async def fake_gate(hass, domain, service, entity_id="", action_label="", device_id=""):
+    async def fake_gate(hass, domain, service, entity_id="", action_label="", device_id="",
+                        target_name=""):
         return True, "", "not_required"
     monkeypatch.setattr(pol, "confirm_gate", fake_gate)
 

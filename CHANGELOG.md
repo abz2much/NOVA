@@ -1,3 +1,26 @@
+## [7.119.0] — agent capability boundaries
+
+**Architecture**
+- Nova's agent now lives in one package, `agent_runtime`: tool definitions, one registry that classifies every tool (what it may change, persist or reach, and how far its output is trusted), grants, the dispatcher, prompt and context construction, delegation, the model turn loop, and one module per capability (home state, device control, memory, automations, planning, diagnostics, safety modes, cameras, environment, communications, specialists). `agent` remains the public entry point: every existing import, signature and tool schema is unchanged, and patching a name on `agent` still reaches the code that uses it.
+- Every tool call now passes one dispatch check before anything runs, in a fixed order: a malformed call is refused, then anything outside the run's grant, then a mutating call waiting on an unresolved entity search. Results travel as a typed tool result, and the prompt's tool guidance is built from the same grant.
+
+**Security**
+- Scheduled follow-ups and goal engagements, which run with no one present, can now only look, check, diagnose and report (and record progress on the goal being engaged). They can no longer control devices, run scenes, scripts or plans, install automations, change modes or alerts, write memory, manage autonomy, call specialists, delegate, or create more goals or follow-ups. A run that finds something needs doing says so in its report instead.
+- Text from outside the house (web research, email, calendars, household documents, camera vision, hazard feeds, specialist replies and delegated sub-agent reports) is passed to the model as fenced, quoted data, never as instructions. A follow-up's saved context and the summary of a long conversation are fenced the same way.
+- Calling off an intrusion alert now needs a known requester and is always confirmed, by a phone tap when asked by voice, before Nova stands down. Every attempt is recorded in the action audit log.
+- The specialist bridges no longer have a built-in address: each stays off until both its webhook base URL and its secret are set, the URL must be a plain http(s) URL, and requests never follow a redirect.
+- Sub-agents are also denied pending-fact changes, camera vision and the specialist bridges. A prompt never claims a tool the run cannot use.
+- The Home Assistant log no longer records what people say to Nova, learned alias or fact values, or a delegated objective.
+
+**Fixes**
+- Setting brightness, temperature or volume now goes through the same confirmation check as every other device action, so an entity you have marked as protected is protected for those too.
+- A device action through Home Assistant's own Assist tools is no longer retried after a failure, so it can't run twice.
+- Scene, script, mode, bulk and plan actions now record the requesting user and device (voice or chat) in the action audit log, and acknowledging an alert is recorded too.
+- Replies, confirmation questions and clarifications name devices by their Home Assistant name, adding the area when two share a name.
+- When the agent reaches its tool limit, it summarises what it actually did again instead of a canned reply.
+
+Service, WebSocket, panel and assistant-tool schemas are unchanged, and no stored data moves.
+
 ## [7.118.0] — provider architecture
 
 **Architecture**

@@ -21,6 +21,10 @@ if "aiohttp" not in sys.modules:
     sys.modules["aiohttp"] = _aiohttp
 
 
+_BASE_KEY = "n8n_webhook_base_url"
+_BASE_URL = "http://n8n.test:5678/webhook"
+
+
 @pytest.fixture
 def agent(load):
     return load("agent")
@@ -46,6 +50,8 @@ def _isolate_nova_config(nova_config, tmp_path, monkeypatch):
     monkeypatch.setattr(nova_config, "_cache", {})
     monkeypatch.setattr(nova_config, "_loaded", False)
     monkeypatch.setattr(nova_config, "last_load_error", None)
+    # A specialist is inert until its base URL is explicitly configured.
+    nova_config.set(_BASE_KEY, _BASE_URL)
 
 
 @pytest.fixture(autouse=True)
@@ -85,8 +91,8 @@ class FakeSession:
         self.raises = raises
         self.last_call = None
 
-    def post(self, url, json=None, headers=None, timeout=None):
-        self.last_call = {"url": url, "json": json, "headers": headers}
+    def post(self, url, json=None, headers=None, timeout=None, **kwargs):
+        self.last_call = {"url": url, "json": json, "headers": headers, **kwargs}
         if self.raises:
             raise self.raises
         return self.response
@@ -137,7 +143,8 @@ async def test_each_specialist_hits_its_own_path(agent, fake_hass, patched_sessi
     sess = patched_session(FakeSession(response=FakeResponse(200, {"output": "ok"})))
     fn = getattr(agent, fn_name)
     await fn(fake_hass, {"message": "hi"})
-    assert sess.last_call["url"] == f"{agent._N8N_DEFAULT_BASE_URL}/{path}"
+    assert sess.last_call["url"] == f"{_BASE_URL}/{path}"
+    assert sess.last_call["allow_redirects"] is False
 
 
 # ── Failure handling: honest errors, never a fabricated reply ────────────────
@@ -199,3 +206,52 @@ def test_all_five_tools_registered_in_schema_and_dispatch(agent):
     for n in names:
         assert n in schema_names, f"{n} missing from NOVA_TOOLS"
         assert n in agent._TOOL_MAP, f"{n} missing from _TOOL_MAP"
+
+
+# ── Explicit configuration only ─────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_no_hard_coded_endpoint_remains(agent):
+    assert not hasattr(agent, "_N8N_DEFAULT_BASE_URL")
+    src = (Path(__file__).resolve().parents[2] / "custom_components" / "nova"
+           / "agent_runtime" / "capabilities" / "specialists.py").read_text()
+    import re
+    assert not re.search(r"https?://[\w.]+[:/]", src), "a literal endpoint address is back"
+
+
+@pytest.mark.asyncio
+async def test_unconfigured_base_url_is_inert(agent, fake_hass, patched_session, nova_config):
+    nova_config.set(_BASE_KEY, "")
+    sess = patched_session(FakeSession(response=FakeResponse(200, {"output": "never"})))
+    for fn_name in ("_exec_ask_executive_assistant", "_exec_ask_house_manager_agent"):
+        data = json.loads(await getattr(agent, fn_name)(fake_hass, {"message": "hi"}))
+        assert _BASE_KEY in data["error"] and "not configured" in data["error"]
+    assert sess.last_call is None
+
+
+@pytest.mark.parametrize("bad", [
+    "ftp://n8n.test/webhook",
+    "http://user:pw@n8n.test/webhook",
+    "http://169.254.169.254/latest",
+    "not a url",
+])
+@pytest.mark.asyncio
+async def test_unusable_base_url_is_inert(agent, fake_hass, patched_session, nova_config, bad):
+    nova_config.set(_BASE_KEY, bad)
+    sess = patched_session(FakeSession(response=FakeResponse(200, {"output": "never"})))
+    data = json.loads(await agent._exec_ask_marketing_agent(fake_hass, {"message": "hi"}))
+    assert "not a usable" in data["error"]
+    assert sess.last_call is None
+
+
+@pytest.mark.asyncio
+async def test_bridge_never_logs_message_secret_or_reply(agent, fake_hass, patched_session, caplog):
+    import logging
+    patched_session(FakeSession(response=FakeResponse(500, text_body="SECRET-BODY-TEXT")))
+    with caplog.at_level(logging.DEBUG):
+        await agent._exec_ask_house_manager_agent(fake_hass, {"message": "PRIVATE-MESSAGE"})
+    for record in caplog.records:
+        text = record.getMessage()
+        assert "PRIVATE-MESSAGE" not in text
+        assert "test-secret-123" not in text
+        assert "SECRET-BODY-TEXT" not in text

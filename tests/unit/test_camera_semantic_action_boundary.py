@@ -17,14 +17,15 @@ def agent_domains():
     uses for source-level guards."""
     import ast
     from pathlib import Path
-    src = Path(__file__).resolve().parents[2] / "custom_components" / "nova" / "agent.py"
+    src = (Path(__file__).resolve().parents[2] / "custom_components" / "nova"
+           / "agent_runtime" / "capabilities" / "control.py")
     tree = ast.parse(src.read_text())
     for node in tree.body:
         if isinstance(node, ast.Assign):
             for tgt in node.targets:
                 if isinstance(tgt, ast.Name) and tgt.id == "_EXECUTE_PLAN_ALLOWED_DOMAINS":
                     return {e.value for e in node.value.elts if isinstance(e, ast.Constant)}
-    raise AssertionError("_EXECUTE_PLAN_ALLOWED_DOMAINS not found in agent.py")
+    raise AssertionError("_EXECUTE_PLAN_ALLOWED_DOMAINS not found in the control capability")
 
 
 # ── pattern_analyzer.service_for: never an action mapping for camera_event ───

@@ -7,7 +7,7 @@
       "action_log"
     ]
   },
-  "agent": {
+  "agent_runtime.capabilities.memory": {
     "paths": [
       ".nova_learned.json"
     ],

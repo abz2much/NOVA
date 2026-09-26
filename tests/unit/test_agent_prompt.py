@@ -1,14 +1,17 @@
 """Static guards on the agent system prompt (v6.69.1).
 
-The prompt is assembled as an f-string in agent.py; these read the source and
+The prompt is assembled as an f-string in the agent package; these read the source and
 pin the sections that must survive future prompt edits — most importantly the
 reasoning-methodology block ("## How you reason"), which encodes the
 investigate→verify→act discipline. If someone reworks the prompt and drops it,
 this fails CI instead of silently degrading Nova's reasoning behavior."""
 import pathlib
 
-AGENT_SRC = (pathlib.Path(__file__).resolve().parents[2]
-             / "custom_components" / "nova" / "agent.py").read_text()
+# The prompt, the tool definitions and the executors live in the agent
+# package (agent.py is its façade); read the package as one source.
+_AGENT_PKG = (pathlib.Path(__file__).resolve().parents[2]
+              / "custom_components" / "nova" / "agent_runtime")
+AGENT_SRC = "\n".join(p.read_text() for p in sorted(_AGENT_PKG.rglob("*.py")))
 
 
 def test_prompt_has_reasoning_methodology_section():

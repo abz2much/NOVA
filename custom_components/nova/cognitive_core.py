@@ -2944,13 +2944,28 @@ def _make_followup_runner(hass, config):
             model = config.get("model", "")
         honorific = _live_honorific(hass)  # Phase C: presence-aware
         report_to = f"to {honorific} " if honorific else ""
+        # A scheduled run has no one present, so the agent gives it the
+        # headless grant (look, check and report — never act). The context
+        # was written by the model when it scheduled this, possibly from
+        # untrusted text it had read, so it goes in fenced as quoted data,
+        # never as instructions in the system prompt.
         persona = (
             f"You are Nova. You scheduled this follow-up yourself earlier and "
-            f"it is now due. Carry it out with your tools (check states, act if "
-            f"needed, verify), then report the outcome {report_to}in one or "
-            f"two spoken-style sentences. If everything is fine, say so briefly."
-            + (f"\nContext you saved with it: {context}" if context else "")
+            f"it is now due. No one is present for this scheduled run: you can "
+            f"check states, look and diagnose with your tools, but you cannot "
+            f"control devices or change anything. Check what the follow-up "
+            f"asks, then report the outcome {report_to}in one or two "
+            f"spoken-style sentences; if something needs doing, say what, so "
+            f"the household can decide. If everything is fine, say so briefly."
         )
+        if context:
+            from .prompt_fence import fence
+            persona += "\n\n" + fence(
+                context,
+                label="FOLLOWUP_CONTEXT",
+                noun="is a note you saved with this follow-up when you scheduled it",
+                callback_noun="a saved note",
+            )
         provider_name = config.get("llm_provider", "groq")
         return await run_agent(
             hass,

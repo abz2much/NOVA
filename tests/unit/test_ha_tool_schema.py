@@ -14,7 +14,9 @@ import pytest
 vol = pytest.importorskip("voluptuous")
 pytest.importorskip("voluptuous_openapi")
 
-AGENT = Path(__file__).resolve().parents[2] / "custom_components" / "nova" / "agent.py"
+# The translation lives in the agent package (agent.py re-exports it).
+AGENT = (Path(__file__).resolve().parents[2] / "custom_components" / "nova"
+         / "agent_runtime" / "ha_tools.py")
 
 
 def _load_fn():

@@ -16,7 +16,10 @@ from pathlib import Path
 
 import pytest
 
-_AGENT_PY = Path(__file__).resolve().parents[2] / "custom_components" / "nova" / "agent.py"
+# The tool executors live in the agent package's capability modules
+# (agent.py re-exports them); read them all as one source.
+_CAPABILITIES = (Path(__file__).resolve().parents[2] / "custom_components" / "nova"
+                 / "agent_runtime" / "capabilities")
 
 # name -> handler function name, for every tool HOMER is granted.
 _HOMER_HANDLERS = {
@@ -49,7 +52,7 @@ def _function_source(src: str, fn_name: str) -> str:
 
 @pytest.fixture(scope="module")
 def agent_src():
-    return _AGENT_PY.read_text()
+    return "\n".join(p.read_text() for p in sorted(_CAPABILITIES.glob("*.py")))
 
 
 @pytest.mark.parametrize("tool_name,fn_name", sorted(_HOMER_HANDLERS.items()))
