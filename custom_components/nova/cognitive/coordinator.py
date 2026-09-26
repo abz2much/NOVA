@@ -43,9 +43,10 @@ from .models import (
     Decision,
     EventSnapshot,
     ORIGIN_LOCAL_MIND,
+    ProviderFailure,
     R_LOCAL_MIND,
 )
-from .provider import extract_json_text
+from .provider import parse_reply
 
 _LOGGER = logging.getLogger(__name__.rpartition(".cognitive")[0] + ".reasoning_loop")
 
@@ -165,15 +166,6 @@ async def _provider_failure_fallback(hass, sig: str, snapshot: EventSnapshot,
     return await _local_mind(hass, snapshot, honorific)
 
 
-def legacy_parse(raw: str) -> dict:
-    """v7.119.0's lenient reply parse (replaced in this phase)."""
-    import json
-    try:
-        return json.loads(extract_json_text(raw))
-    except json.JSONDecodeError:
-        return {"speak": False, "reason": "parse_failure"}
-
-
 def _learn(sig: str, decision: Decision, classifier_urgency: str) -> None:
     """The only reasoning-cache write in the cognitive path."""
     if not cache_policy.may_cache(decision):
@@ -253,6 +245,13 @@ async def decide(hass, provider, *, hooks: Hooks, honorific: str, event_summary:
         _LOGGER.info("Reasoning: breaker OPEN — Local Mind for [%s]", sig)
         return await _local_mind(hass, snapshot, honorific)
 
+    # The provider just returned an unreadable reply for this same event:
+    # don't ask it again yet, decide as for any provider failure.
+    if provider_held(sig):
+        reasoning_cache.note_hit(sig)
+        _LOGGER.info("Reasoning: recent unreadable reply — fallback for [%s]", sig)
+        return await _provider_failure_fallback(hass, sig, snapshot, honorific)
+
     reasoning_cache.note_cloud_call()
     system = hooks.build_system_prompt(
         hass, honorific=honorific, task_context="observer") + "\n\n" + hooks.system_appendix
@@ -300,22 +299,23 @@ async def decide(hass, provider, *, hooks: Hooks, honorific: str, event_summary:
             raise last_err or RuntimeError("no response after retries")
         # The network call succeeded — close the breaker.
         connectivity.record_success()
-        result = legacy_parse(response.text)
-        if not isinstance(result, dict):
-            return {"speak": False, "reason": "invalid_response"}
-        if not result.get("speak"):
-            # Learn this "stay silent" decision so the pattern is handled locally next time.
-            reasoning_cache.remember(sig, False, classifier_urgency)
-            return {"speak": False, "reason": result.get("reason", "reasoning declined")}
-        message = (result.get("message") or "").strip()
-        if not message:
-            return {"speak": False, "reason": "empty_message"}
-        urgency = result.get("urgency", classifier_urgency)
-        if urgency not in ("low", "medium", "high", "critical"):
-            urgency = classifier_urgency
-        reasoning_cache.remember(sig, True, urgency)
-        return {"speak": True, "message": message, "urgency": urgency}
+        outcome = parse_reply(getattr(response, "text", None),
+                              classifier_urgency=classifier_urgency)
     except Exception as exc:
         _LOGGER.warning("Reasoning loop failed: %s", exc)
         connectivity.record_failure()
         return await _provider_failure_fallback(hass, sig, snapshot, honorific)
+
+    if isinstance(outcome, ProviderFailure):
+        # A reply Nova can't read is a provider failure, never a decision.
+        _LOGGER.warning(
+            "Reasoning: provider reply not usable (%s: %s, %d chars) — fallback",
+            outcome.kind, outcome.detail, outcome.reply_length)
+        _hold(sig)
+        out = await _provider_failure_fallback(hass, sig, snapshot, honorific)
+        out = dict(out)
+        out.setdefault("provider_failure", outcome.kind)
+        return out
+
+    _learn(sig, outcome, classifier_urgency)
+    return outcome.as_dict()
