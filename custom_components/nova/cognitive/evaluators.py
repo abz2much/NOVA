@@ -182,6 +182,60 @@ def evaluate_named_hazard(s: EventSnapshot) -> Optional[Decision]:
     return None
 
 
+# ── 1b. State recovery and household presence (v7.120.1) ────────────────────
+
+# What Home Assistant reports while it cannot read an entity: at startup, or
+# while a device or its integration is down.
+UNREADABLE_STATES = frozenset({"unknown", "unavailable", "none", ""})
+ENTRY_BINARY_CLASSES = frozenset({"door", "window", "garage_door", "opening"})
+ENTRY_COVER_CLASSES = frozenset({"garage", "door", "gate", "window"})
+AWAY_ALARM_STATES = frozenset({"armed_away", "armed_vacation"})
+PRESENCE_HOME, PRESENCE_AWAY, PRESENCE_UNKNOWN = "home", "away", "unknown"
+
+
+def is_entry_state_recovery(entity_id: str, device_class: str,
+                            from_state: str, to_state: str) -> bool:
+    """True when an ordinary door, window, opening, garage door or lock comes
+    back from unknown/unavailable into a readable state. That is Home
+    Assistant reading the entity again, not anyone opening or unlocking
+    anything. Hazard sensors and alarm panels are never entry points, so a
+    hazard or alarm recovering into an active state is unaffected."""
+    old = str(from_state or "").strip().lower()
+    new = str(to_state or "").strip().lower()
+    if old not in UNREADABLE_STATES or new in UNREADABLE_STATES:
+        return False
+    domain = str(entity_id or "").split(".", 1)[0].lower()
+    dc = str(device_class or "").strip().lower()
+    if domain == "lock":
+        return True
+    if domain == "binary_sensor":
+        return dc in ENTRY_BINARY_CLASSES
+    if domain == "cover":
+        return dc in ENTRY_COVER_CLASSES
+    return False
+
+
+def household_presence(person_states, alarm_states, occupied_areas) -> str:
+    """Whether the household is present, for ordinary opening events, from
+    structured evidence only. In order:
+      1. the security alarm armed away or on vacation: away, whatever any
+         person or occupancy reads;
+      2. a registered person reading home: home;
+      3. any other readable person state (not_home, a zone): away, which
+         occupancy never overrides;
+      4. no readable person state: current occupied areas mean home;
+      5. otherwise unknown.
+    A disarmed alarm is not evidence either way."""
+    people = [str(s or "").strip().lower() for s in person_states or ()]
+    if any(str(s or "").strip().lower() in AWAY_ALARM_STATES for s in alarm_states or ()):
+        return PRESENCE_AWAY
+    if "home" in people:
+        return PRESENCE_HOME
+    if any(p not in UNREADABLE_STATES for p in people):
+        return PRESENCE_AWAY
+    return PRESENCE_HOME if occupied_areas else PRESENCE_UNKNOWN
+
+
 # ── 2. Repetition (self-awareness) ──────────────────────────────────────────
 
 def evaluate_recent_repeat(s: EventSnapshot) -> Optional[Decision]:

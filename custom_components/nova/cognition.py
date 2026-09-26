@@ -342,6 +342,16 @@ def process(event, threshold: float = DEFAULT_THRESHOLD) -> Decision:
         domain = entity_id.split(".", 1)[0] if entity_id else ""
         now = time.time()
 
+        # A door, window, opening, garage door or lock coming back from
+        # unknown/unavailable is not a physical change: never escalated and
+        # never learned as a transition (v7.120.1).
+        from .cognitive.evaluators import is_entry_state_recovery
+        if is_entry_state_recovery(entity_id, dclass or "",
+                                   old_state.state if old_state else "unknown", new_value):
+            if entity_id in _MODEL:
+                _MODEL[entity_id].last_state = new_value
+            return Decision(escalate=False, salience=0.0, reason="state recovery")
+
         entry = observe(entity_id, old_state, new_value, now)
         score, reason = _salience(domain, dclass, new_value, entry, now, entity_id, unit)
         escalate = score >= threshold

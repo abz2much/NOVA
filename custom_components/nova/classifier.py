@@ -67,8 +67,8 @@ def _rule_classify(
         return {"worth_considering": True, "urgency": "critical",
                 "category": "security", "rule": "safety"}
 
-    # Doors/windows/garage
-    if dc in ("door", "window", "garage_door"):
+    # Doors/windows/garage/generic openings
+    if dc in ("door", "window", "garage_door", "opening"):
         if new_state == "on":
             try:
                 h = int(now_hhmm.split(":")[0])
