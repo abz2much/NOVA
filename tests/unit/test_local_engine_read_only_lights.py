@@ -75,5 +75,6 @@ async def test_a_read_only_request_never_actuates_locally(le, phrase):
 
 async def test_ordinary_commands_still_run_locally(le):
     hass = _home()
+    hass.async_create_task = lambda coro, name=None: coro.close()  # no verify-after-act
     await le.try_local(hass, "turn off the porch light")
     assert hass.service_calls

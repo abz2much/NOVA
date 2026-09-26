@@ -37,7 +37,8 @@ ALLOWED_INTERNAL = {
 # Nova modules outside the package that the package may reach, always
 # lazily inside a function (never at import time).
 ALLOWED_OUTSIDE = {"action_log", "decision_record", "nova_config", "identity",
-                   "knowledge", "person_patterns", "runtime", "websocket"}
+                   "knowledge", "person_patterns", "runtime", "websocket",
+                   "cognitive"}   # Phase 8: pure routine scoring
 FORBIDDEN_TIMERS = {"async_track_time_interval", "async_call_later",
                     "async_track_point_in_time", "async_create_background_task",
                     "async_track_time_change"}

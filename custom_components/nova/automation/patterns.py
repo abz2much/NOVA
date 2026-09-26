@@ -67,6 +67,22 @@ def _source_filter(conn: sqlite3.Connection, alias: str = "") -> str:
     return "1=1"
 
 
+def _days_since(timestamp, now: datetime) -> float:
+    """Days from a stored (local, naive) ISO timestamp to now; 0.0 when it
+    cannot be read, which never makes a routine look stale."""
+    try:
+        ts = datetime.fromisoformat(str(timestamp))
+        if ts.tzinfo is not None:
+            ts = ts.astimezone().replace(tzinfo=None)
+        return max(0.0, (now - ts).total_seconds() / 86400.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _near_hours(hour: int) -> tuple:
+    return ((hour - 1) % 24, hour, (hour + 1) % 24)
+
+
 def set_thresholds(min_occurrences: int | None = None,
                    confidence: float | None = None) -> None:
     """Loosen/tighten the pattern engine at runtime (panel-configurable). The
@@ -598,6 +614,7 @@ class PatternAnalyzer:
     def _find_time_routines(self, conn: sqlite3.Connection,
                             person_map: dict = None) -> list[DetectedPattern]:
         """Find entities that change state at similar times each day."""
+        from ..cognitive import patterns as scoring
         patterns = []
 
         # Group state changes by entity + action, look for time clustering
@@ -621,6 +638,10 @@ class PatternAnalyzer:
               AND {source_filter}
         """).fetchone()[0] or 1
 
+        automated_sql = ("COALESCE(triggered_by, 'system') IN " + _AUTOMATED_SOURCE_SQL
+                         if source_filter != "1=1" else "0")
+        now = datetime.now()
+
         for row in rows:
             entity = row["entity_id"]
             state = row["new_state"]
@@ -630,25 +651,52 @@ class PatternAnalyzer:
             # Positive days: distinct days this routine ACTUALLY happened. Using
             # distinct days (not raw event count) so several same-hour events on
             # one day count once — the honest "on N of M days" numerator.
-            positive_days = conn.execute(f"""
-                SELECT COUNT(DISTINCT date(timestamp)) FROM state_changes
+            positive_days, last_ts = conn.execute(f"""
+                SELECT COUNT(DISTINCT date(timestamp)), MAX(timestamp) FROM state_changes
                 WHERE entity_id = ? AND new_state = ? AND hour = ?
                   AND timestamp > datetime('now', '-30 days')
                   AND {source_filter}
-            """, (entity, state, hour)).fetchone()[0] or 0
+            """, (entity, state, hour)).fetchone()
+            positive_days = positive_days or 0
 
             # Coverage weighs the negative evidence: a routine on 42 of 45 days
             # (0.93) is far stronger than one on 42 of 120 days (0.35), even
-            # though both were "seen 42 times".
+            # though both were "seen 42 times". Cheap rejections first, so the
+            # extra evidence below is only read for plausible routines.
             coverage = positive_days / total_days if total_days else 0.0
             negative_days = max(0, total_days - positive_days)
-            if coverage < 0.3:
+            if coverage < scoring.MIN_COVERAGE or positive_days < scoring.MIN_DISTINCT_DAYS:
                 continue
 
+            # Time concentration: days this behaviour happened within an hour
+            # either side. Provenance: how much of it automations caused.
+            window_days = conn.execute(f"""
+                SELECT COUNT(DISTINCT date(timestamp)) FROM state_changes
+                WHERE entity_id = ? AND new_state = ? AND hour IN (?, ?, ?)
+                  AND timestamp > datetime('now', '-30 days')
+                  AND {source_filter}
+            """, (entity, state, *_near_hours(hour))).fetchone()[0] or 0
+            automated = conn.execute(f"""
+                SELECT COUNT(*) FROM state_changes
+                WHERE entity_id = ? AND new_state = ? AND hour = ?
+                  AND timestamp > datetime('now', '-30 days')
+                  AND {automated_sql}
+            """, (entity, state, hour)).fetchone()[0] or 0
+
             # Confidence = coverage, discounted for a small sample so a 3-of-3
-            # (1.0) can't outrank a 40-of-45 (0.89) on three data points.
-            sample_factor = min(1.0, positive_days / MIN_OCCURRENCES)
-            confidence = round(coverage * sample_factor, 3)
+            # (1.0) can't outrank a 40-of-45 (0.89) on three data points, then
+            # for spread-out timing and for a routine that has stopped
+            # (cognitive/patterns.py explains each factor).
+            score = scoring.score_time_routine(
+                scoring.RoutineEvidence(
+                    observations=count, positive_days=positive_days,
+                    eligible_days=total_days, window_days=window_days,
+                    days_since_last=_days_since(last_ts, now),
+                    automated_observations=automated),
+                min_occurrences=MIN_OCCURRENCES)
+            if not score.accepted:
+                continue
+            confidence = score.confidence
 
             time_str = f"{hour:02d}:00"
             details = {
@@ -658,6 +706,7 @@ class PatternAnalyzer:
                 "observed_days": positive_days,
                 "opportunity_days": total_days,
                 "skipped_days": negative_days,
+                "evidence": score.evidence(),
             }
 
             # v6.41.0: a single sole-occupant person can own this routine
@@ -760,6 +809,7 @@ class PatternAnalyzer:
         automation carries the real delay instead of a fixed guess.
         """
         from collections import deque, Counter
+        from ..cognitive import patterns as scoring
         patterns: list = []
         try:
             source_filter = _source_filter(conn)
@@ -777,6 +827,7 @@ class PatternAnalyzer:
         pair_counts: Counter = Counter()
         pair_lag: dict = {}     # (ea,sa,eb,sb) -> [sum_seconds, count] for mean lag
         pair_times: dict = {}   # (ea,sa,eb,sb) -> [action epochs] (capped) for time window
+        trigger_counts: Counter = Counter()   # (entity, state) -> occurrences
 
         for r in rows:
             try:
@@ -789,9 +840,18 @@ class PatternAnalyzer:
             cutoff = epoch - window_s
             while win and win[0][0] < cutoff:
                 win.popleft()
-            for a_epoch, a_ent, a_dom, a_st in win:
+            trigger_counts[(ent, st)] += 1
+            counted: set = set()
+            # Newest first, so the lag measured is from the closest trigger.
+            for a_epoch, a_ent, a_dom, a_st in reversed(win):
                 if a_ent != ent:                       # cross-domain allowed
                     key = (a_ent, a_st, ent, st)
+                    # One action is one follow-up, however many times the
+                    # trigger fired before it: a chattering sensor must not
+                    # multiply its apparent support.
+                    if key in counted:
+                        continue
+                    counted.add(key)
                     pair_counts[key] += 1
                     slot = pair_lag.get(key)
                     lag = epoch - a_epoch
@@ -815,6 +875,16 @@ class PatternAnalyzer:
             slot = pair_lag.get((ea, sa, eb, sb), [0.0, 1])
             mean_lag = int(round(slot[0] / max(1, slot[1])))
             times = pair_times.get((ea, sa, eb, sb), [])
+            # Association, not cause: how often the trigger is followed at
+            # all, and on how many different days (counted over the capped
+            # sample of action times).
+            score = scoring.score_sequence(
+                scoring.SequenceEvidence(
+                    support=count, trigger_count=trigger_counts.get((ea, sa), count),
+                    distinct_days=len({datetime.fromtimestamp(t).date() for t in times})),
+                min_occurrences=MIN_OCCURRENCES)
+            if not score.accepted:
+                continue
             # Accumulate every discriminator that consistently holds; HA ANDs a
             # list of conditions. Prefer a sun condition ("after dark") over a
             # fixed time window (it tracks the season), then add a numeric-state
@@ -835,12 +905,13 @@ class PatternAnalyzer:
                 pattern_type="sequence",
                 description=desc,
                 entity_ids=[ea, eb],
-                confidence=min(1.0, count / (MIN_OCCURRENCES * 3)),
+                confidence=score.confidence,
                 occurrences=count,
                 details={"trigger": {"entity": ea, "state": sa},
                          "action": {"entity": eb, "state": sb},
                          "delay_seconds": mean_lag,
-                         "condition": cond},
+                         "condition": cond,
+                         "evidence": score.evidence()},
             ))
 
         return patterns

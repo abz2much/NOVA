@@ -430,6 +430,101 @@ async def run_pattern(ctx) -> dict:
             "entities": sorted({e for p in found for e in p.entity_ids})}
 
 
+_SUGGESTIONS_SCHEMA = """
+CREATE TABLE suggestions (id INTEGER PRIMARY KEY AUTOINCREMENT, created TEXT NOT NULL,
+  description TEXT NOT NULL, automation_yaml TEXT, status TEXT DEFAULT 'pending',
+  confidence REAL DEFAULT 0.0, pattern_count INTEGER DEFAULT 0, approved_at TEXT,
+  dismissed_at TEXT, pattern_type TEXT DEFAULT '', entity_ids TEXT DEFAULT '',
+  details TEXT DEFAULT '{}');
+"""
+
+
+def _history_rows(history, today):
+    """(timestamp, entity, state, hour, source) for each synthetic event.
+    A row gives either `times` ([days_ago, hour, minute] triples) or
+    `days_ago` with one `hour` and optional `minute`."""
+    for row in history:
+        times = row.get("times") or [[d, row["hour"], row.get("minute", 0)]
+                                     for d in row["days_ago"]]
+        for d, h, mi in times:
+            dt = (today - timedelta(days=d)).replace(hour=h, minute=mi)
+            yield dt, row["entity_id"], row["state"], row.get("triggered_by", "user")
+
+
+async def run_pattern_quality(ctx) -> dict:
+    """The whole suggestion decision for a synthetic history: detection and
+    scoring (time routines and sequences), the store threshold, the loaded
+    automation comparison, and the stored-suggestion identity that keeps a
+    dismissed or pending suggestion from coming back as new. All in memory."""
+    pa = ctx.load("pattern_analyzer")
+    sugg = ctx.load("automation.suggestions")
+    matching = ctx.load("automation_matcher")
+    conn = sqlite3.connect(":memory:")
+    decisions, suggested, new = [], [], 0
+    best = 0.0
+    try:
+        conn.executescript(_SCHEMA + _SUGGESTIONS_SCHEMA)
+        conn.row_factory = sqlite3.Row
+        today = datetime.now().replace(second=0, microsecond=0)
+        for dt, eid, state, source in sorted(_history_rows(ctx.input["history"], today)):
+            conn.execute(
+                "INSERT INTO state_changes (timestamp, entity_id, domain, old_state, new_state, "
+                "area_id, hour, day_of_week, triggered_by) VALUES (?,?,?,?,?,?,?,?,?)",
+                (dt.isoformat(), eid, eid.split(".")[0], "off", state, "", dt.hour,
+                 dt.weekday(), source))
+        for st in ctx.input.get("stored", []):
+            conn.execute(
+                "INSERT INTO suggestions (created, description, status, pattern_type, "
+                "entity_ids, details) VALUES (?,?,?,?,?,?)",
+                ("2026-01-01T00:00:00", st["description"], st["status"], st["pattern_type"],
+                 json.dumps(st["entity_ids"]), json.dumps(st["details"])))
+        conn.commit()
+        records = [types.SimpleNamespace(entity_id=r["entity_id"], name=r.get("name", ""),
+                                         raw_config=r.get("config"),
+                                         referenced_entities=tuple(r.get("referenced_entities", ())))
+                   for r in ctx.input.get("existing", [])]
+        analyzer = pa.PatternAnalyzer()
+        for _ in range(ctx.input.get("runs", 1)):
+            found = (analyzer._find_time_routines(conn)
+                     + analyzer._find_sequence_patterns(conn))
+            for p in found:
+                best = max(best, p.confidence)
+                if p.confidence < pa.CONFIDENCE_THRESHOLD:
+                    continue
+                norm = sugg.normalize_suggestion_automation(sugg.generate_automation(p))
+                status = "advisory"
+                if norm.get("installable"):
+                    status = matching.classify({"triggers": norm["trigger"],
+                                                "conditions": norm.get("condition") or [],
+                                                "actions": norm["action"]}, records)["status"]
+                if status == "already_automated":
+                    decisions.append(status)
+                    continue
+                existing = sugg._find_existing(conn, p)
+                if existing is not None:
+                    decisions.append("kept_" + existing[1] if existing[1] != "pending"
+                                     else "refreshed")
+                    continue
+                conn.execute(
+                    "INSERT INTO suggestions (created, description, status, pattern_type, "
+                    "entity_ids, details) VALUES (?,?,?,?,?,?)",
+                    ("2026-01-02T00:00:00", p.description, "pending", p.pattern_type,
+                     json.dumps(p.entity_ids), json.dumps(p.details)))
+                new += 1
+                suggested.append(p)
+                decisions.append("suggested" if status == "new" else status)
+    finally:
+        conn.close()
+    order = ("suggested", "unknown_overlap", "possible_overlap", "advisory",
+             "already_automated", "kept_dismissed", "kept_installed", "refreshed")
+    decision = next((d for d in order if d in decisions), "no_suggestion")
+    keys = [sugg.suggestion_identity(p.pattern_type, p.entity_ids, p.details) for p in suggested]
+    return {"decision": decision, "new_suggestions": new,
+            "duplicate_patterns": len(keys) - len(set(keys)),
+            "best_confidence": round(best, 3),
+            "entities": sorted({e for p in suggested for e in p.entity_ids})}
+
+
 async def run_automation_match(ctx) -> dict:
     am = ctx.load("automation_matcher")
     records = [types.SimpleNamespace(entity_id=r["entity_id"], name=r.get("name", ""),
@@ -457,6 +552,7 @@ RUNNERS = {
     "camera_learning": run_camera_learning,
     "pattern": run_pattern,
     "automation_match": run_automation_match,
+    "pattern_quality": run_pattern_quality,
 }
 
 

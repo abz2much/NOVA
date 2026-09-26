@@ -195,6 +195,19 @@ def _db(history):
     return conn
 
 
+# Phase 8: history -> (routines now, why). Strong routines keep their exact
+# confidence; only these weaker cases moved, all downwards or out.
+INTENDED_ROUTINE_CHANGES = {
+    "same_day_burst": ([], "ten repeats on one day are one day, never a routine"),
+    "split_hours": ([["light.porch", "on", 18, 0.312, 6, 6, 12],
+                     ["light.porch", "on", 19, 0.312, 6, 6, 12]],
+                    "timing split across two hours is not a clean hourly trigger"),
+    "stale_routine": ([["light.porch", "on", 18, 0.095, 11, 11, 29],
+                       ["sensor.noise", "1", 12, 1.0, 29, 29, 29]],
+                      "a routine last seen 18 days ago is mostly not current"),
+}
+
+
 @pytest.mark.parametrize("min_occ", [4, 5])
 def test_time_routine_scores_match_the_characterization(load, monkeypatch, min_occ):
     pa = load("automation.patterns")
@@ -211,4 +224,8 @@ def test_time_routine_scores_match_the_characterization(load, monkeypatch, min_o
              p.occurrences, p.details["observed_days"], p.details["opportunity_days"]]
             for p in found)
     pinned = _golden(f"time_routines_min{min_occ}", current)
-    assert pinned == current
+    assert sorted(pinned) == sorted(current)
+    drift = {k for k in current if pinned[k] != current[k]}
+    assert drift == set(INTENDED_ROUTINE_CHANGES)
+    for k in drift:
+        assert current[k] == INTENDED_ROUTINE_CHANGES[k][0], k

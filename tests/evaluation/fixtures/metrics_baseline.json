@@ -5,7 +5,7 @@
     "numerator": 5
   },
   "duplicate_suggestion_rate": {
-    "denominator": 6,
+    "denominator": 8,
     "failing": [],
     "numerator": 0
   },
@@ -15,7 +15,7 @@
     "numerator": 0
   },
   "incorrect_entity_match_rate": {
-    "denominator": 40,
+    "denominator": 50,
     "failing": [],
     "numerator": 0
   },

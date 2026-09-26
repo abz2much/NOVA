@@ -213,3 +213,29 @@ async def test_a_transport_failure_is_unchanged(isolated, fake_hass, provider_fa
     assert "provider_failure" not in out
     assert connectivity.status()["consecutive_failures"] == 1
     assert dict(coord._holds) == {} and writes == []
+
+
+async def test_the_coordinator_collects_the_snapshot_from_the_summary(
+        isolated, fake_hass, provider_factory, monkeypatch, connectivity):
+    """With no structured fields, the snapshot is backfilled from the event
+    summary, frozen, and handed to the fallback unchanged."""
+    rl, cache, coord, writes = isolated
+    seen = []
+
+    async def _capture(hass, snapshot, honorific):
+        seen.append(snapshot)
+        return {"speak": False, "reason": "captured"}
+
+    monkeypatch.setattr(coord, "_local_mind", _capture)
+    monkeypatch.setattr(connectivity, "allow_request", lambda: False)   # breaker open
+    p = provider_factory(replies=[])
+    recent = ["Earlier announcement"]
+    out = await _decide(rl, fake_hass, p, entity_id="", device_class="", from_state="",
+                        to_state="", friendly_name="", recent_announcements=recent)
+    recent.append("later")
+    assert out == {"speak": False, "reason": "captured"} and p.calls == 0
+    s = seen[0]
+    assert (s.entity_id, s.domain, s.friendly_name, s.from_state, s.to_state) == (
+        "binary_sensor.cellar_window", "binary_sensor", "Cellar Window", "off", "on")
+    assert s.recent_announcements == ("Earlier announcement",)
+    assert s.category == "general" and s.urgency == "medium" and s.anyone_home is False
