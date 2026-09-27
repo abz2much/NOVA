@@ -476,6 +476,7 @@ async def run_pattern_quality(ctx) -> dict:
     automation comparison, and the stored-suggestion identity that keeps a
     dismissed or pending suggestion from coming back as new. All in memory."""
     pa = ctx.load("pattern_analyzer")
+    area_presence = ctx.load("automation.area_presence")
     sugg = ctx.load("automation.suggestions")
     matching = ctx.load("automation_matcher")
     conn = sqlite3.connect(":memory:")
@@ -502,10 +503,30 @@ async def run_pattern_quality(ctx) -> dict:
                                          raw_config=r.get("config"),
                                          referenced_entities=tuple(r.get("referenced_entities", ())))
                    for r in ctx.input.get("existing", [])]
+        presence_input = ctx.input.get("area_presence") or {}
+        presence_context = area_presence.EMPTY_CONTEXT
+        if presence_input:
+            sensor_id = presence_input["sensor_id"]
+            area_id = presence_input["area_id"]
+            presence_history = []
+            for row in presence_input.get("history", []):
+                for dt, _eid, state, _source in _history_rows(
+                        [{**row, "entity_id": sensor_id}], today):
+                    presence_history.append((dt.timestamp(), state == "on"))
+            entity_areas = {sensor_id: area_id}
+            entity_areas.update({entity_id: area_id for entity_id in
+                                 presence_input.get("action_entities", [])})
+            presence_context = area_presence.AreaPresenceContext(
+                sensor_history={sensor_id: tuple(sorted(presence_history))},
+                entity_areas=entity_areas,
+                area_sensors={area_id: (sensor_id,)},
+                area_names={area_id: presence_input.get("area_name", area_id)},
+            )
         analyzer = pa.PatternAnalyzer()
         for _ in range(ctx.input.get("runs", 1)):
             found = (analyzer._find_time_routines(conn)
-                     + analyzer._find_sequence_patterns(conn))
+                     + analyzer._find_sequence_patterns(
+                         conn, area_presence=presence_context))
             for p in found:
                 best = max(best, p.confidence)
                 if p.confidence < pa.CONFIDENCE_THRESHOLD:
@@ -515,7 +536,9 @@ async def run_pattern_quality(ctx) -> dict:
                 if norm.get("installable"):
                     status = matching.classify({"triggers": norm["trigger"],
                                                 "conditions": norm.get("condition") or [],
-                                                "actions": norm["action"]}, records)["status"]
+                                                "actions": norm["action"],
+                                                "mode": norm.get("mode", "single")},
+                                               records)["status"]
                 if status == "already_automated":
                     decisions.append(status)
                     continue
@@ -541,6 +564,10 @@ async def run_pattern_quality(ctx) -> dict:
     return {"decision": decision, "new_suggestions": new,
             "duplicate_patterns": len(keys) - len(set(keys)),
             "best_confidence": round(best, 3),
+            "presence_gates": sum(
+                isinstance(p.details.get("presence_gate"), dict) for p in suggested),
+            "presence_releases": sum(
+                isinstance(p.details.get("presence_release"), dict) for p in suggested),
             "entities": sorted({e for p in suggested for e in p.entity_ids})}
 
 

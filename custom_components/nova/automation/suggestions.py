@@ -88,6 +88,9 @@ def normalize_suggestion_automation(stored_yaml: str) -> dict:
     cond = data.get("condition")
     if cond:
         out["condition"] = [cond] if isinstance(cond, dict) else list(cond)
+    mode = data.get("mode")
+    if mode in ("single", "restart", "queued", "parallel"):
+        out["mode"] = mode
     return out
 
 
@@ -181,7 +184,13 @@ def explain_suggestion(pattern_type: str, details: dict, count: int) -> dict:
             first = d.get("first") or d.get("trigger")
             then = d.get("then") or d.get("action")
             if first and then:
-                ev.append(f"After {first}, {then} usually follows")
+                def _step(value):
+                    if not isinstance(value, dict):
+                        return str(value)
+                    entity = value.get("entity", "something")
+                    state = value.get("state")
+                    return f"{entity} → {state}" if state is not None else str(entity)
+                ev.append(f"After {_step(first)}, {_step(then)} usually follows")
             ev.append(f"Seen {count} times in 30 days")
             if d.get("window_seconds"):
                 ev.append(f"Usually within {int(d['window_seconds'])}s")
@@ -203,6 +212,20 @@ def explain_suggestion(pattern_type: str, details: dict, count: int) -> dict:
         else:
             headline = "A learned pattern"
             ev.append(f"Observed {count} times in 30 days")
+        gate = d.get("presence_gate")
+        if isinstance(gate, dict) and gate.get("area_name"):
+            ev.append(f"Only when presence is detected in {gate['area_name']}")
+        release = d.get("presence_release")
+        if isinstance(release, dict) and release.get("area_name"):
+            seconds = max(0, int(release.get("settle_seconds", 0) or 0))
+            if seconds and seconds % 60 == 0:
+                amount = seconds // 60
+                duration = f"{amount} minute" + ("s" if amount != 1 else "")
+            else:
+                duration = f"{seconds} seconds"
+            ev.append(
+                f"Turns off again once presence in {release['area_name']} "
+                f"has cleared for {duration}")
     except Exception:
         headline = headline or "A learned pattern"
         if not ev:
@@ -331,7 +354,51 @@ def generate_automation(pattern: DetectedPattern) -> str:
         if lag >= 15:
             lag = int(round(lag / 5.0) * 5)
             seq_action.append({"delay": f"00:{lag // 60:02d}:{lag % 60:02d}"})
-        seq_action.append(svc)
+        gate = d.get("presence_gate") if isinstance(d.get("presence_gate"), dict) else None
+        release = (d.get("presence_release")
+                   if isinstance(d.get("presence_release"), dict) else None)
+        off_svc = service_for(action.get("entity", ""), "off")
+        has_release = bool(
+            release and gate and off_svc
+            and release.get("entity_id") == gate.get("entity_id"))
+        mode = "single"
+        if has_release:
+            assert release is not None and off_svc is not None
+            sensor_id = str(release["entity_id"])
+            settle = max(0, min(600, int(release.get("settle_seconds", 0) or 0)))
+            duration = (
+                f"{settle // 3600:02d}:"
+                f"{(settle % 3600) // 60:02d}:{settle % 60:02d}")
+            # The top-level gate is evaluated at trigger time. Recheck after a
+            # learned action delay so an early clear cannot leave the following
+            # transition wait armed forever.
+            seq_action.extend([
+                {"condition": "state", "entity_id": sensor_id, "state": "on"},
+                svc,
+                {
+                    "choose": [{
+                        "conditions": [{
+                            "condition": "state", "entity_id": sensor_id,
+                            "state": "off",
+                        }],
+                        "sequence": [
+                            {"delay": duration},
+                            {"condition": "state", "entity_id": sensor_id,
+                             "state": "off", "for": duration},
+                        ],
+                    }],
+                    "default": [{
+                        "wait_for_trigger": [{
+                            "trigger": "state", "entity_id": sensor_id,
+                            "from": "on", "to": "off", "for": duration,
+                        }],
+                    }],
+                },
+                off_svc,
+            ])
+            mode = "restart"
+        else:
+            seq_action.append(svc)
         trig = _trigger_for(trigger["entity"], trigger["state"])
         extra = _trigger_extra_conditions(trigger["entity"], trigger["state"])
         if trig.get("platform") == "zone":
@@ -342,6 +409,10 @@ def generate_automation(pattern: DetectedPattern) -> str:
             alias = f"Nova Learned: {action['entity']} on {trigger['entity']} press"
         else:
             alias = f"Nova Learned: {action['entity']} after {trigger['entity']}"
+        if has_release:
+            alias += ", off when presence clears"
+        elif gate:
+            alias += " when presence is detected"
         auto = {
             "alias": alias,
             "trigger": trig,
@@ -352,6 +423,8 @@ def generate_automation(pattern: DetectedPattern) -> str:
                  if isinstance(c, dict) and c.get("condition")] + extra
         if conds:
             auto["condition"] = conds
+        if mode == "restart":
+            auto["mode"] = mode
         return json.dumps(auto, indent=2)
 
     if p.pattern_type == "numeric_trigger":
@@ -366,12 +439,20 @@ def generate_automation(pattern: DetectedPattern) -> str:
             }, indent=2)
         trig = {"platform": "numeric_state",
                 "entity_id": d["trigger_sensor"], d["op"]: d["threshold"]}
-        return json.dumps({
+        auto = {
             "alias": (f"Nova Learned: {action['entity']} when "
                       f"{d['trigger_sensor']} {d['op']} {d['threshold']:g}"),
             "trigger": trig,
             "action": [svc],
-        }, indent=2)
+        }
+        cond = d.get("condition")
+        conds = [c for c in (cond if isinstance(cond, list) else [cond])
+                 if isinstance(c, dict) and c.get("condition")]
+        if conds:
+            auto["condition"] = conds
+        if isinstance(d.get("presence_gate"), dict):
+            auto["alias"] += " when presence is detected"
+        return json.dumps(auto, indent=2)
 
     if p.pattern_type == "repeated_command":
         return json.dumps({
@@ -428,8 +509,11 @@ def suggestion_identity(pattern_type: str, entity_ids, details) -> Optional[tupl
             trig, act = d.get("trigger") or {}, d.get("action") or {}
             if not trig.get("entity") or not act.get("entity"):
                 return None
-            return (pattern_type, str(trig["entity"]), str(trig.get("state")),
-                    str(act["entity"]), str(act.get("state")))
+            identity = (pattern_type, str(trig["entity"]), str(trig.get("state")),
+                        str(act["entity"]), str(act.get("state")))
+            if isinstance(d.get("presence_release"), dict):
+                return identity + ("presence_release",)
+            return identity
         if pattern_type == "numeric_trigger":
             act = d.get("action") or {}
             if not d.get("trigger_sensor") or not act.get("entity"):
