@@ -446,6 +446,22 @@ async def create_automation(
         return {"success": False, "error": str(exc)}
 
 
+def _named_alias(hass: HomeAssistant, alias: str, details: Any) -> str:
+    """`alias` with known entity_ids replaced by friendly names (the names
+    learned with the suggestion first, then Home Assistant's current ones).
+    Never raises; returns `alias` unchanged on any problem."""
+    try:
+        from ..cognitive.naming import humanize_text, names_from_states
+        from .models import loads_json
+        learned = loads_json(details, {}) if isinstance(details, str) else details
+        learned = learned.get("names") if isinstance(learned, dict) else None
+        names = dict(learned) if isinstance(learned, dict) else {}
+        names.update(names_from_states(hass.states.async_all()))
+        return humanize_text(alias, names) if names else alias
+    except Exception:
+        return alias
+
+
 async def install_approved_suggestion(
     hass, suggestion_id: int, *,
     requested_by_user_id: Optional[str] = None,
@@ -506,6 +522,9 @@ async def install_approved_suggestion(
                 return {"ok": True, "installed": False,
                         "reason": norm.get("reason", "not installable"),
                         "suggestion_id": suggestion_id}
+            # A suggestion stored by an older release may carry entity_ids in
+            # its alias; the installed automation is named for a person.
+            norm["alias"] = _named_alias(hass, norm["alias"], sug.get("details"))
 
             # The home may have changed since this suggestion was created.
             # Repeat duplicate detection inside the transaction so a newly

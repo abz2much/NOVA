@@ -1082,7 +1082,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v7.125.0
+ * v7.125.1
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1156,7 +1156,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v7.125.0 ",
+      console.log("%c Nova Panel %c v7.125.1 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -5675,10 +5675,10 @@ ${this._htmlDashboardBody()}`;
                 const progress = remaining > 0
                   ? `${remaining} more qualifying day${remaining === 1 ? "" : "s"} needed`
                   : "day coverage met; confidence or evidence is still below the threshold";
-                msg += `<br>Closest routine: <b>${this._esc(cand.entity_id)}</b> → ${this._esc(cand.state)} ~${hr}:00, seen ${cand.days}/${dg.total_days} days (${progress}).`;
+                msg += `<br>Closest routine: <b>${this._esc(cand.name || cand.entity_id)}</b> → ${this._esc(cand.state)} ~${hr}:00, seen ${cand.days}/${dg.total_days} days (${progress}).`;
               }
               const src = (dg.top_sources || [])[0];
-              if (src) msg += `<br>Busiest source: ${this._esc(src.entity_id)} (${src.changes} changes).`;
+              if (src) msg += `<br>Busiest source: ${this._esc(src.name || src.entity_id)} (${src.changes} changes).`;
             }
             const nm = Array.isArray(res.near_misses) ? res.near_misses : [];
             if (nm.length) {

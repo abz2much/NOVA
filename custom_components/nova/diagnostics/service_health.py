@@ -250,6 +250,18 @@ def _check_stt(hass) -> dict:
         configured=str(_cfg("stt_engine", "auto") or "auto"))
 
 
+
+def _label(state) -> str:
+    """How a person reads this entity: "Piper (tts.piper)". The id stays
+    visible because this is a diagnostic."""
+    try:
+        name = (state.attributes or {}).get("friendly_name")
+    except Exception:
+        name = None
+    name = str(name).strip() if name else ""
+    return f"{name} ({state.entity_id})" if name and name != state.entity_id \
+        else str(state.entity_id)
+
 def _check_speech_entity(hass, domain: str, name: str, configured: str) -> dict:
     out: dict[str, Any] = {"name": name, "key": domain, "status": _OFF, "detail": ""}
 
@@ -302,14 +314,15 @@ def _check_speech_entity(hass, domain: str, name: str, configured: str) -> dict:
         out["status"] = _WARN
         out["detail"] = f"configured '{configured}' not found; {len(states)} other(s) present"
     elif match.state in ("unavailable", "unknown"):
+        label = _label(match)
         out["status"] = _OK if used_ok else _IDLE
-        out["detail"] = (f"{match.entity_id} idle (recent {domain} succeeded)"
+        out["detail"] = (f"{label} idle (recent {domain} succeeded)"
                          if used_ok else
-                         f"{match.entity_id} idle — comes available on demand")
+                         f"{label} idle — comes available on demand")
         out["entity"] = match.entity_id
     else:
         out["status"] = _OK
-        out["detail"] = f"{match.entity_id} available"
+        out["detail"] = f"{_label(match)} available"
         out["entity"] = match.entity_id
     return out
 

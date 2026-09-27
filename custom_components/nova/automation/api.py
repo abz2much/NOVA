@@ -8,15 +8,43 @@ shapes can be tested without Home Assistant.
 """
 from __future__ import annotations
 
-from typing import Iterable
+import json
+from typing import Iterable, Mapping, Optional
 
 from .models import loads_json
 from .suggestions import explain_suggestion
 
 
-def panel_suggestion_items(rows: Iterable[dict]) -> list[dict]:
+def _display_yaml(stored: str, names: Optional[Mapping]) -> str:
+    """The stored automation payload with its alias and note named for a
+    person. Triggers, conditions and actions keep their entity_ids, and a
+    payload that isn't a JSON object is shown exactly as stored."""
+    if not names or not stored:
+        return stored
+    from ..cognitive.naming import humanize_text
+    try:
+        data = json.loads(stored)
+    except Exception:
+        return stored
+    if not isinstance(data, dict):
+        return stored
+    changed = False
+    for key in ("alias", "note"):
+        if isinstance(data.get(key), str):
+            new = humanize_text(data[key], names)
+            if new != data[key]:
+                data[key] = new
+                changed = True
+    return json.dumps(data, indent=2) if changed else stored
+
+
+def panel_suggestion_items(rows: Iterable[dict],
+                           names: Optional[Mapping] = None) -> list[dict]:
     """Pending suggestion rows as ``get_panel_data.suggestions`` items,
-    including the evidence behind each one."""
+    including the evidence behind each one. With `names` (entity_id ->
+    friendly name), text stored with entity_ids by older releases is shown
+    with names; the stored rows are not changed."""
+    from ..cognitive.naming import humanize_text
     out = []
     for s in rows:
         ptype = s.get("pattern_type", "") or ""
@@ -24,17 +52,21 @@ def panel_suggestion_items(rows: Iterable[dict]) -> list[dict]:
         entities = loads_json(s.get("entity_ids") or "[]", [])
         count = s.get("pattern_count", 0) or 0
         why = explain_suggestion(ptype, details, count)
+        # Names learned with the suggestion first, then the live ones.
+        learned = details.get("names") if isinstance(details, dict) else None
+        shown = {**(learned if isinstance(learned, dict) else {}), **(names or {})}
         out.append({
             "id": s.get("id"),
             "created": s.get("created", ""),
-            "description": s.get("description", ""),
-            "yaml": s.get("automation_yaml", ""),
+            "description": humanize_text(s.get("description", ""), shown),
+            "yaml": _display_yaml(s.get("automation_yaml", ""), shown),
             "confidence": round(float(s.get("confidence", 0) or 0), 2),
             "count": count,
             "pattern_type": ptype,
             "entities": entities,
-            "why_headline": why.get("headline", ""),
-            "evidence": why.get("evidence", []),
-            "automation_match": details.get("automation_match") or {},
+            "why_headline": humanize_text(why.get("headline", ""), shown),
+            "evidence": [humanize_text(e, shown) for e in why.get("evidence", [])],
+            "automation_match": (details.get("automation_match") or {})
+            if isinstance(details, dict) else {},
         })
     return out
