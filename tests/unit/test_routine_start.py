@@ -27,9 +27,14 @@ def env(cog, load, monkeypatch):
     return holder, home, cfg
 
 
-def _routine(hour, person="username", desc="start the coffee", conf=0.8):
+def _routine(hour, person="username", conf=0.8):
+    # The shape the analyzer stores (a hand-written "start the coffee" row
+    # with no entity or state is something Nova never produces).
     return {"id": 1, "person": person, "pattern_type": "time_routine",
-            "description": desc, "data": json.dumps({"hour": hour}),
+            "description": ("light.kitchen_light turns on around %02d:00 on 8 of 9 "
+                            "days when %s is home" % (hour, person)),
+            "data": json.dumps({"hour": hour, "state": "on", "person": person,
+                                "entity_id": "light.kitchen_light"}),
             "confidence": conf, "occurrences": 8}
 
 
@@ -45,7 +50,7 @@ def test_prompts_at_usual_time(cog, env, fake_hass):
     preds = cog.predict_routine_start(fake_hass, now)
     assert len(preds) == 1
     assert preds[0]["type"] == "anticipation_routine"
-    assert "start the coffee" in preds[0]["message"]
+    assert preds[0]["message"] == "You usually turn the kitchen light on around now."
 
 
 def test_no_prompt_if_person_away(cog, env, fake_hass):

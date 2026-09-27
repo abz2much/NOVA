@@ -37,9 +37,11 @@ def test_trigger_for_nonpresence_stays_state(pa):
 
 
 def test_trigger_phrase(pa):
-    assert pa._trigger_phrase("person.username", "not_home") == "When person.username leaves home"
-    assert pa._trigger_phrase("person.username", "home") == "When person.username arrives home"
-    assert pa._trigger_phrase("light.hall", "on") == "When light.hall turns on"
+    assert pa._trigger_phrase("person.username", "not_home") == "When username leaves home"
+    assert pa._trigger_phrase("person.username", "home") == "When username arrives home"
+    assert pa._trigger_phrase("light.hall", "on") == "When hall turns on"
+    assert pa._trigger_phrase("person.username", "home",
+                              {"person.username": "Username"}) == "When Username arrives home"
 
 
 # ── emission ─────────────────────────────────────────────────────────────────

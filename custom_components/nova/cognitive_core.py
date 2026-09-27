@@ -2763,20 +2763,27 @@ async def _tick():
 
         if proactive_enabled and cog_on:
             now_t = time.time()
-            if now_t - getattr(_CORE, "_last_cog_cycle", 0.0) >= cognition.OCC_SAMPLE_INTERVAL:
+            cycle = now_t - getattr(_CORE, "_last_cog_cycle", 0.0) >= cognition.OCC_SAMPLE_INTERVAL
+            if cycle:
                 _CORE._last_cog_cycle = now_t
                 cognition.sample_occupancy(hass, now_t)
                 cognition.sample_presence(hass, now_t)
-                preds = (cognition.predict(hass, now_t)
-                         + cognition.predict_overdue(hass, now_t)
-                         + cognition.predict_presence(hass, now_t)
-                         + cognition.predict_proximity(hass, now_t)
-                         + cognition.predict_routine_start(hass, now_t))
+            # Departure reminders are due at a minute, not a 15-minute cycle,
+            # and are in-memory checks, so they run every tick.
+            preds = cognition.predict_presence(hass, now_t)
+            if cycle:
+                preds += (cognition.predict(hass, now_t)
+                          + cognition.predict_overdue(hass, now_t)
+                          + cognition.predict_proximity(hass, now_t)
+                          + cognition.predict_routine_start(hass, now_t))
                 preds += await cognition.predict_departure(hass, now_t)
-                for pred in preds:
-                    actions.append(pred)
-                    from .websocket import nova_log
-                    nova_log("LEARN", f"anticipation: {pred.get('message','')[:80]}")
+            for pred in preds:
+                actions.append(pred)
+                from .websocket import nova_log
+                nova_log("LEARN", f"anticipation: {pred.get('message','')[:80]}")
+            if cycle or preds:
+                # Persist the model and the once-a-day ledger; a reminder
+                # between cycles is saved at once so a restart can't repeat it.
                 await hass.async_add_executor_job(
                     cognition.save_to_db, PATTERNS_DB
                 )

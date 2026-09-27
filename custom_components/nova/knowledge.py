@@ -178,6 +178,34 @@ def remember(
         conn.close()
 
 
+def rename_observed(old_key: str, new_key: str, *,
+                    subject: str = DEFAULT_SUBJECT) -> bool:
+    """Move an OBSERVED fact to a new key (the pattern analyzer rewording
+    what it learned), keeping its value, confidence and history. A fact the
+    user stated, or a new key that already exists, is never touched. Returns
+    True when a fact moved. SYNC — call via executor. Never raises."""
+    old_key, new_key = (old_key or "").strip(), (new_key or "").strip()
+    subject = (subject or DEFAULT_SUBJECT).strip() or DEFAULT_SUBJECT
+    if not old_key or not new_key or old_key == new_key:
+        return False
+    conn = _connect()
+    if conn is None:
+        return False
+    try:
+        with conn:
+            cur = conn.execute(
+                "UPDATE facts SET key = ? WHERE subject = ? AND key = ? "
+                "AND source = 'observed' AND NOT EXISTS ("
+                "SELECT 1 FROM facts WHERE subject = ? AND key = ?)",
+                (new_key, subject, old_key, subject, new_key))
+            return cur.rowcount > 0
+    except Exception as exc:
+        _LOGGER.warning("knowledge: rename failed: %s", exc)
+        return False
+    finally:
+        conn.close()
+
+
 def confirm_fact(fact_id: int) -> bool:
     """Promote a pending fact to confirmed (v7.88.0) — the human-approval step
     for agent.py's `remember` tool. Returns True if a row was actually

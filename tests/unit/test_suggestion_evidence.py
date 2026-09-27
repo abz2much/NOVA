@@ -53,7 +53,7 @@ def test_sequence_explanation_formats_steps_and_presence(pa):
     }, 8)
     joined = " ".join(out["evidence"])
     assert "{'entity'" not in joined
-    assert "binary_sensor.front_door → on" in joined
+    assert "front door → on" in joined and "binary_sensor" not in joined
     assert "Only when presence is detected in Office" in joined
     assert "Turns off again once presence in Office has cleared for 1 minute" in joined
 

@@ -76,10 +76,12 @@ async def record_unverified(hass, entity_id: str, action: str, source: str,
     than agent.py's existing _verify_control's direct-call style, since this
     helper has no `hass`-bound event-loop assumptions of its own to match."""
     from . import database
+    from .cognitive.naming import name_for
     st = hass.states.get(entity_id)
     observed = st.state if st else "unknown"
+    names = {entity_id: st.attributes.get("friendly_name")} if st else {}
     message = (
-        f"{entity_id} could not be confirmed after {action} "
+        f"{name_for(entity_id, names)} could not be confirmed after {action} "
         f"(state: {observed}{detail}) — not retried automatically."
     )
     await hass.async_add_executor_job(

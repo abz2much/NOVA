@@ -11,6 +11,11 @@ schema steps for a component (1 = its original tables); it is what the
 setup upgrade records in the store's ledger once the real schema has been
 verified. Add a new step by appending a Column and bumping the version —
 never by editing or removing an earlier one.
+
+A DataStep rewrites existing rows once, when a database's ledger records an
+older version of the component than the step's. It runs in the same
+transaction as the column migrations, after them, and is written so that
+running it again changes nothing.
 """
 from __future__ import annotations
 
@@ -25,6 +30,12 @@ class Column:
 
 
 @dataclass(frozen=True)
+class DataStep:
+    version: int
+    statements: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class Component:
     name: str
     version: int
@@ -34,6 +45,7 @@ class Component:
     # Run after the column migrations, e.g. an index on an added column.
     post: tuple[str, ...] = ()
     virtual: bool = False
+    data: tuple[DataStep, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -54,6 +66,71 @@ LEDGER_DDL = (
     "component TEXT PRIMARY KEY, version INTEGER NOT NULL, "
     "applied_at TEXT NOT NULL)"
 )
+
+
+# Mirrors cognitive.routines.ROUTINE_DOMAINS (persistence may not import it;
+# test_routine_alerts.py checks they agree). None: any real state.
+_PERSON_ROUTINE_STATES: dict[str, tuple[str, ...] | None] = {
+    "light": ("on", "off"),
+    "switch": ("on", "off"),
+    "fan": ("on", "off"),
+    "cover": ("open", "closed"),
+    "lock": ("locked", "unlocked"),
+    "climate": None,
+    "media_player": ("playing",),
+}
+
+
+def _person_routines_v2() -> tuple[str, ...]:
+    """person_patterns v2: key every stored routine as
+    cognitive.routines.routine_key does, drop time routines that are not
+    something a person does (trackers, sensors, helpers), then keep only the
+    most recent row of each routine."""
+    entity = ("COALESCE(json_extract(data, '$.entity_id'), "
+              "substr(description, 1, instr(description, ' ') - 1))")
+    dom = "substr(routine_key, 1, instr(routine_key, '.') - 1)"
+    tail = "substr(routine_key, instr(routine_key, '|') + 1)"
+    state = f"lower(substr({tail}, 1, instr({tail}, '|') - 1))"
+    allowed = []
+    for domain, states in _PERSON_ROUTINE_STATES.items():
+        if states is None:
+            allowed.append(f"({dom} = '{domain}' AND {state} NOT IN "
+                           "('', 'unknown', 'unavailable', 'none'))")
+        else:
+            listed = ", ".join(f"'{st}'" for st in states)
+            allowed.append(f"({dom} = '{domain}' AND {state} IN ({listed}))")
+    return (
+        f"""UPDATE person_patterns
+SET routine_key = {entity} || '|' || json_extract(data, '$.state') || '|'
+                  || CAST(json_extract(data, '$.hour') AS INTEGER)
+WHERE (routine_key IS NULL OR routine_key = '')
+  AND pattern_type = 'time_routine' AND json_valid(data)
+  AND json_extract(data, '$.state') IS NOT NULL
+  AND json_extract(data, '$.hour') IS NOT NULL
+  AND instr({entity}, '.') > 1""",
+        """UPDATE person_patterns
+SET routine_key = 'cmd|' || json_extract(data, '$.command') || '|'
+                  || CAST(json_extract(data, '$.hour') AS INTEGER)
+WHERE (routine_key IS NULL OR routine_key = '')
+  AND pattern_type = 'repeated_command' AND json_valid(data)
+  AND json_extract(data, '$.command') IS NOT NULL
+  AND json_extract(data, '$.hour') IS NOT NULL""",
+        "DELETE FROM person_patterns WHERE pattern_type = 'time_routine' AND ("
+        "routine_key IS NULL OR routine_key = '' OR NOT ("
+        + " OR ".join(allowed) + "))",
+        """DELETE FROM person_patterns
+WHERE routine_key IS NOT NULL AND routine_key != '' AND EXISTS (
+  SELECT 1 FROM person_patterns AS newer
+  WHERE newer.person = person_patterns.person
+    AND newer.pattern_type = person_patterns.pattern_type
+    AND newer.routine_key = person_patterns.routine_key
+    AND (COALESCE(newer.last_seen, '') > COALESCE(person_patterns.last_seen, '')
+         OR (COALESCE(newer.last_seen, '') = COALESCE(person_patterns.last_seen, '')
+             AND newer.id > person_patterns.id)))""",
+    )
+
+
+_PERSON_ROUTINES_V2 = _person_routines_v2()
 
 
 _COMPONENTS = (
@@ -244,7 +321,7 @@ _COMPONENTS = (
     ),
     Component(
         name="person_patterns",
-        version=1,
+        version=2,
         tables=("person_patterns",),
         statements=(
             """CREATE TABLE IF NOT EXISTS person_patterns (
@@ -259,6 +336,11 @@ _COMPONENTS = (
 )""",
             "CREATE INDEX IF NOT EXISTS idx_pp_person ON person_patterns(person)",
         ),
+        # v2: routines are identified by what they are, not by their wording.
+        columns=(Column("person_patterns", "routine_key", "TEXT"),),
+        post=("CREATE INDEX IF NOT EXISTS idx_pp_key "
+              "ON person_patterns(person, pattern_type, routine_key)",),
+        data=(DataStep(2, _PERSON_ROUTINES_V2),),
     ),
     Component(
         name="cognition",

@@ -83,7 +83,10 @@ def test_generate_time_routine_emits_presence_condition(pa):
 def test_condition_phrase_state(pa):
     assert pa._condition_phrase(
         {"condition": "state", "entity_id": "person.username", "state": "home"}
-    ) == ", only when person.username is home"
+    ) == ", only when username is home"
+    assert pa._condition_phrase(
+        {"condition": "state", "entity_id": "person.username", "state": "home"},
+        {"person.username": "Username"}) == ", only when Username is home"
 
 
 class _FakeState:

@@ -162,6 +162,8 @@ def explain_suggestion(pattern_type: str, details: dict, count: int) -> dict:
     d = details or {}
     ev: list[str] = []
     headline = ""
+    raw_names = d.get("names")
+    names: dict = raw_names if isinstance(raw_names, dict) else {}
     try:
         if pattern_type == "time_routine":
             hour = d.get("hour")
@@ -187,7 +189,10 @@ def explain_suggestion(pattern_type: str, details: dict, count: int) -> dict:
             if consistency is not None:
                 ev.append(f"Consistent on about {int(float(consistency) * 100)}% of days")
             if person:
-                ev.append(f"Specifically when {person} is home")
+                cond = d.get("condition")
+                ent = cond.get("entity_id") if isinstance(cond, dict) else None
+                who = names.get(ent) if ent else None
+                ev.append(f"Specifically when {who or person} is home")
         elif pattern_type == "sequence":
             headline = "One action reliably follows another"
             first = d.get("first") or d.get("trigger")
@@ -196,9 +201,10 @@ def explain_suggestion(pattern_type: str, details: dict, count: int) -> dict:
                 def _step(value):
                     if not isinstance(value, dict):
                         return str(value)
-                    entity = value.get("entity", "something")
+                    entity = value.get("entity")
+                    name = _name_for(entity, names) if entity else "something"
                     state = value.get("state")
-                    return f"{entity} → {state}" if state is not None else str(entity)
+                    return f"{name} → {state}" if state is not None else name
                 ev.append(f"After {_step(first)}, {_step(then)} usually follows")
             ev.append(f"Seen {count} times in 30 days")
             if d.get("window_seconds"):
@@ -278,19 +284,27 @@ def _trigger_extra_conditions(entity: str, state: str) -> list:
     return []
 
 
-def _trigger_phrase(entity: str, state: str) -> str:
-    """Readable lead-in for a sequence description given its trigger."""
+def _name_for(entity_id: str, names: Optional[dict] = None) -> str:
+    """cognitive.naming.name_for, imported lazily (package layering)."""
+    from ..cognitive.naming import name_for
+    return name_for(entity_id, names)
+
+
+def _trigger_phrase(entity: str, state: str, names: Optional[dict] = None) -> str:
+    """Readable lead-in for a sequence description given its trigger, naming
+    the entity with `names` (friendly name, else a readable id)."""
     dom = entity.split(".")[0] if "." in entity else ""
+    name = _name_for(entity, names)
     if dom in ("person", "device_tracker"):
         if state == "not_home":
-            return f"When {entity} leaves home"
+            return f"When {name} leaves home"
         if state == "home":
-            return f"When {entity} arrives home"
+            return f"When {name} arrives home"
     if dom == "event":
-        return f"When {entity} is pressed ({state})"
+        return f"When {name} is pressed ({state})"
     if dom == "scene":
-        return f"When {entity} is activated"
-    return f"When {entity} turns {state}"
+        return f"When {name} is activated"
+    return f"When {name} turns {state}"
 
 
 
@@ -327,10 +341,15 @@ def generate_automation(pattern: DetectedPattern) -> str:
     """Generate HA automation YAML from a detected pattern."""
     p = pattern
     d = p.details
+    raw_names = d.get("names")
+    names: dict = raw_names if isinstance(raw_names, dict) else {}
+
+    def n(entity_id):
+        return _name_for(entity_id, names)
 
     if p.pattern_type == "time_routine" and d.get("state") in ("on", "off"):
         auto: dict[str, Any] = {
-            "alias": f"Nova Learned: {p.entity_ids[0]} {d['state']} at {d['hour']:02d}:00",
+            "alias": f"Nova Learned: {n(p.entity_ids[0])} {d['state']} at {d['hour']:02d}:00",
             "trigger": {"platform": "time", "at": f"{d['hour']:02d}:00:00"},
             "action": {
                 "service": f"{p.entity_ids[0].split('.')[0]}.turn_{d['state']}",
@@ -350,9 +369,9 @@ def generate_automation(pattern: DetectedPattern) -> str:
         svc = service_for(action.get("entity", ""), action.get("state", ""))
         if not svc:
             return json.dumps({
-                "note": f"Consider automating: {action.get('entity','?')} → "
+                "note": f"Consider automating: {n(action.get('entity', '?'))} → "
                         f"{action.get('state','?')} after "
-                        f"{trigger.get('entity','?')} "
+                        f"{n(trigger.get('entity', '?'))} "
                         f"{trigger.get('state','?')}",
                 "type": "manual_review",
             }, indent=2)
@@ -433,12 +452,13 @@ def generate_automation(pattern: DetectedPattern) -> str:
         extra = _trigger_extra_conditions(trigger["entity"], trigger["state"])
         if trig.get("platform") == "zone":
             verb = "leaves" if trig["event"] == "leave" else "arrives"
-            alias = f"Nova Learned: {action['entity']} when {trigger['entity']} {verb} home"
+            alias = (f"Nova Learned: {n(action['entity'])} when "
+                     f"{n(trigger['entity'])} {verb} home")
         elif (trigger["entity"].split(".")[0] if "." in trigger["entity"]
                 else "") == "event":
-            alias = f"Nova Learned: {action['entity']} on {trigger['entity']} press"
+            alias = f"Nova Learned: {n(action['entity'])} on {n(trigger['entity'])} press"
         else:
-            alias = f"Nova Learned: {action['entity']} after {trigger['entity']}"
+            alias = f"Nova Learned: {n(action['entity'])} after {n(trigger['entity'])}"
         if has_release:
             alias += ", off when presence clears"
         elif gate:
@@ -463,15 +483,15 @@ def generate_automation(pattern: DetectedPattern) -> str:
         if not svc:
             return json.dumps({
                 "type": "manual_review",
-                "note": (f"Consider: {action.get('entity','?')} when "
-                         f"{d.get('trigger_sensor','?')} {d.get('op','?')} "
+                "note": (f"Consider: {n(action.get('entity', '?'))} when "
+                         f"{n(d.get('trigger_sensor', '?'))} {d.get('op','?')} "
                          f"{d.get('threshold','?')}"),
             }, indent=2)
         trig = {"platform": "numeric_state",
                 "entity_id": d["trigger_sensor"], d["op"]: d["threshold"]}
         auto = {
-            "alias": (f"Nova Learned: {action['entity']} when "
-                      f"{d['trigger_sensor']} {d['op']} {d['threshold']:g}"),
+            "alias": (f"Nova Learned: {n(action['entity'])} when "
+                      f"{n(d['trigger_sensor'])} {d['op']} {d['threshold']:g}"),
             "trigger": trig,
             "action": [svc],
         }
@@ -494,14 +514,15 @@ def generate_automation(pattern: DetectedPattern) -> str:
         svc = service_for(d.get("action_entity", ""), d.get("action_state", ""))
         if not svc:
             return json.dumps({
-                "note": f"Consider automating: {d.get('action_entity','?')} → "
+                "note": f"Consider automating: {n(d.get('action_entity', '?'))} → "
                         f"{d.get('action_state','?')} when "
-                        f"{d.get('trigger_person','?')} "
+                        f"{n(d.get('trigger_person', '?'))} "
                         f"{d.get('trigger_state','?')}",
                 "type": "manual_review",
             }, indent=2)
         return json.dumps({
-            "alias": f"Nova Learned: {d['action_entity']} when {d['trigger_person']} {d['trigger_state']}",
+            "alias": (f"Nova Learned: {n(d['action_entity'])} when "
+                      f"{n(d['trigger_person'])} {d['trigger_state']}"),
             "trigger": {
                 "platform": "state",
                 "entity_id": d["trigger_person"],
@@ -580,9 +601,14 @@ def _find_existing(conn: sqlite3.Connection, pattern: DetectedPattern):
     retired as superseded is only returned when nothing else matches."""
     key = suggestion_identity(pattern.pattern_type, pattern.entity_ids,
                               pattern.details)
+    texts = [pattern.description]
+    if pattern.legacy_description and pattern.legacy_description != pattern.description:
+        # Rows stored before v7.125 were worded with entity ids.
+        texts.append(pattern.legacy_description)
     same_text = conn.execute(
         "SELECT id, status, pattern_type, entity_ids, details FROM suggestions "
-        "WHERE description = ?", (pattern.description,)).fetchall()
+        f"WHERE description IN ({', '.join('?' for _ in texts)})",
+        tuple(texts)).fetchall()
     matches = []
     for rid, status, ptype, ents, details in same_text:
         # The description is only a fallback for rows without an identity;

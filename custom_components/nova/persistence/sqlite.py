@@ -105,6 +105,17 @@ def _apply(conn: sqlite3.Connection, component: Component) -> None:
         conn.execute(sql)
 
 
+def _apply_data(conn: sqlite3.Connection, component: Component,
+                recorded: int) -> None:
+    """Run the component's data steps newer than the recorded version."""
+    for step in component.data:
+        if recorded < step.version:
+            for sql in step.statements:
+                conn.execute(sql)
+            _LOGGER.info("Nova storage: %s data step %d applied",
+                         component.name, step.version)
+
+
 def ensure(conn: sqlite3.Connection, *names: str) -> None:
     """Apply the named components' schema to an open connection."""
     for name in names:
@@ -167,6 +178,8 @@ def upgrade_store(path: StrPath, store: Store) -> StoreStatus:
                 if missing:
                     raise sqlite3.OperationalError(
                         "schema incomplete after upgrade: " + ", ".join(missing))
+                for name in store.components:
+                    _apply_data(conn, COMPONENTS[name], recorded.get(name, 0))
                 stamp = time.strftime("%Y-%m-%dT%H:%M:%S")
                 changed = False
                 for name in store.components:

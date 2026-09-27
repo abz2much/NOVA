@@ -213,8 +213,15 @@ def test_other_anticipation_types_keep_once_per_day_across_restart(
     pp, jc, idm = load("person_patterns"), load("nova_config"), load("identity")
     now_dt = datetime.datetime.now().replace(minute=5, second=0, microsecond=0)
     now = now_dt.timestamp()
-    routine = {"id": 1, "person": "username", "description": "start the coffee",
-               "data": json.dumps({"hour": now_dt.hour}), "confidence": 0.8}
+    # A stored routine in the shape the analyzer writes (the hand-written
+    # "start the coffee" row had no entity or state, which Nova never stores).
+    routine = {"id": 1, "person": "username", "pattern_type": "time_routine",
+               "description": "light.kitchen_light turns on around %02d:00 on 9 of 10 "
+                              "days when username is home" % now_dt.hour,
+               "data": json.dumps({"hour": now_dt.hour, "state": "on",
+                                   "person": "username",
+                                   "entity_id": "light.kitchen_light"}),
+               "confidence": 0.8}
     monkeypatch.setattr(pp, "read", lambda person=None, db_path=None: [routine])
     monkeypatch.setattr(idm, "_home_people", lambda hass: ["username"])
     monkeypatch.setattr(idm, "normalize", lambda n: n.strip().lower())
