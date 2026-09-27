@@ -1,3 +1,18 @@
+## [7.125.1] — friendly names everywhere, and restarts are not departures
+
+**Fixes**
+- Text written with entity IDs before 7.125.0 is now shown with friendly names: pending suggestions (description, evidence and the automation name in the preview), routines in the Memory tab, the System Log, the Activity feed, the Decisions tab, the Analyze Now diagnostic ("Closest routine", "Busiest source") and Service Health. Nothing stored is rewritten; the names are applied when the panel shows it, so they also follow a renamed entity.
+- A suggestion saved by an older release is installed under a friendly automation name ("Nova Learned: Hall Light after Front Door"), not its entity IDs. Its triggers and actions keep their entity IDs.
+- A Home Assistant restart while someone is out is no longer learned as a departure. Home Assistant gives every state a new change time when it restarts, so a restart at 13:30 during the school run was recorded as a 13:30 departure. A departure now counts only after the person has been seen home since the last one.
+
+**Caveats**
+- The Decisions tab and Service Health show "Name (entity_id)", because both are records you may need to trace back to a device.
+- The persisted log file and the diagnostics download keep entity IDs, so a problem can still be traced.
+- The first restart after updating, if someone is out at the time, can still record one extra departure, because models saved by 7.125.0 don't yet know whether the person was seen home.
+- Correction to 7.125.0: a departure's time is the moment the person's state changed, not the 15-minute sample. What sampling can miss is a trip shorter than the sampling interval.
+
+Stored data, services, WebSocket and assistant-tool schemas are unchanged. The saved presence model gains one field, which older releases ignore.
+
 ## [7.125.0] — routine alerts, departure reminders and friendly names
 
 **Fixes**
