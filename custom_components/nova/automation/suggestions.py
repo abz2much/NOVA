@@ -24,6 +24,10 @@ from .models import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# Longest a presence-release automation waits for presence to clear. A sensor
+# stuck on or unavailable past this leaves the device as it is.
+RELEASE_TIMEOUT = "04:00:00"
+
 DB_PATH = "/config/nova/patterns.db"
 MIN_DAYS = 7           # Don't analyze until we have this much data
 
@@ -377,28 +381,49 @@ def generate_automation(pattern: DetectedPattern) -> str:
             # The top-level gate is evaluated at trigger time. Recheck after a
             # learned action delay so an early clear cannot leave the following
             # transition wait armed forever.
+            present = {"condition": "state", "entity_id": sensor_id, "state": "on"}
+            cleared = {"condition": "state", "entity_id": sensor_id, "state": "off"}
             seq_action.extend([
-                {"condition": "state", "entity_id": sensor_id, "state": "on"},
+                present,
                 svc,
+                # Presence cleared while the device was turning on: give it
+                # the settling time to come back before deciding.
                 {
                     "choose": [{
-                        "conditions": [{
-                            "condition": "state", "entity_id": sensor_id,
-                            "state": "off",
-                        }],
-                        "sequence": [
-                            {"delay": duration},
-                            {"condition": "state", "entity_id": sensor_id,
-                             "state": "off", "for": duration},
-                        ],
-                    }],
-                    "default": [{
-                        "wait_for_trigger": [{
-                            "trigger": "state", "entity_id": sensor_id,
-                            "from": "on", "to": "off", "for": duration,
+                        "conditions": [cleared],
+                        "sequence": [{
+                            "wait_for_trigger": [{
+                                "trigger": "state", "entity_id": sensor_id,
+                                "to": "on",
+                            }],
+                            "timeout": duration,
+                            "continue_on_timeout": True,
                         }],
                     }],
                 },
+                # Unless presence has already been clear for the settling
+                # time, wait for it to clear from any state (an unavailable
+                # sensor returning as off counts), for at most RELEASE_TIMEOUT.
+                {
+                    "choose": [{
+                        "conditions": [{
+                            "condition": "not",
+                            "conditions": [dict(cleared, **{"for": duration})],
+                        }],
+                        "sequence": [{
+                            "wait_for_trigger": [{
+                                "trigger": "state", "entity_id": sensor_id,
+                                "to": "off", "for": duration,
+                            }],
+                            "timeout": RELEASE_TIMEOUT,
+                            "continue_on_timeout": True,
+                        }],
+                    }],
+                },
+                # Top level on purpose: a failed condition inside a choose
+                # only ends that branch, so this is what keeps the device on
+                # while presence is still (or again) detected.
+                cleared,
                 off_svc,
             ])
             mode = "restart"
