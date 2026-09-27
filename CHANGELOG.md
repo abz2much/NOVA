@@ -1,3 +1,27 @@
+## [7.125.0] — routine alerts, departure reminders and friendly names
+
+**Fixes**
+- A routine is now announced once. Nova stored each routine under a description that included its count, so "11 times" and "12 times" became two routines and two alerts for the same habit. Routines are now identified by the device, its state and the hour.
+- Only things a person does count as a routine: lights, switches and fans turned on or off, covers opened or closed, locks locked or unlocked, climate set to a mode, and media players started. Device trackers, sensors and other entities no longer become someone's "routine", and repeated voice commands are no longer announced as routines.
+- Routine alerts read naturally: "You usually turn the Kitchen Light on around now." When someone else is home, the person is named ("Abi, you usually ...").
+- Departure reminders are learned separately for weekdays and weekends, so a weekday school run no longer triggers a reminder on Saturday. Several regular departures in a day (for example 09:00 and 12:00) are each learned.
+- The reminder now arrives before the usual time: 15 minutes by default, set as "Leave reminder (min)" in Settings. The "you're still home" check still follows if you haven't left. A reminder is only given if the departure happened on at least one of the last three days of that type, so it goes quiet during school holidays.
+- Departures and arrivals follow `person` entities only. Device trackers are used only when a home has no person entities.
+- Suggestions, new automation names, review evidence, the Memory tab, learned facts, the activity feed and "why did it change" now use friendly names instead of entity IDs.
+
+**Upgrade**
+- On first start, existing routines are keyed the new way. Duplicates are merged into the most recent one, and tracker, sensor and other non-person routines are deleted. This runs once.
+- Facts Nova learned under the old entity-ID wording move to the new wording. Facts you told Nova are never changed. A suggestion you dismissed under the old wording stays dismissed.
+- Automations already installed keep their names.
+
+**Caveats**
+- A merged routine keeps its old wording until the next analysis rewrites it.
+- The holiday guard needs three missed days of that type before it goes quiet, so the first days of a holiday can still bring a reminder.
+- Presence is sampled every 15 minutes, so a learned departure time can be up to 15 minutes out. Reminders are checked every 30 seconds.
+- Wording uses each entity's current friendly name, so renaming an entity changes what Nova says. The routine itself isn't affected.
+
+`patterns.db` gains a `routine_key` column on `person_patterns`, and there is one new setting, `routine_departure_lead_minutes` (default 15). Services, WebSocket and assistant-tool schemas are otherwise unchanged.
+
 ## [7.124.1] — presence suggestion fixes
 
 **Fixes**
