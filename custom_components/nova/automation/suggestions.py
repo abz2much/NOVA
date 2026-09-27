@@ -15,9 +15,18 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional, cast
 
-from .models import SUGGESTION_PENDING, DetectedPattern, loads_json
+from .models import (
+    SUGGESTION_PENDING,
+    SUGGESTION_SUPERSEDED,
+    DetectedPattern,
+    loads_json,
+)
 
 _LOGGER = logging.getLogger(__name__)
+
+# Longest a presence-release automation waits for presence to clear. A sensor
+# stuck on or unavailable past this leaves the device as it is.
+RELEASE_TIMEOUT = "04:00:00"
 
 DB_PATH = "/config/nova/patterns.db"
 MIN_DAYS = 7           # Don't analyze until we have this much data
@@ -372,28 +381,49 @@ def generate_automation(pattern: DetectedPattern) -> str:
             # The top-level gate is evaluated at trigger time. Recheck after a
             # learned action delay so an early clear cannot leave the following
             # transition wait armed forever.
+            present = {"condition": "state", "entity_id": sensor_id, "state": "on"}
+            cleared = {"condition": "state", "entity_id": sensor_id, "state": "off"}
             seq_action.extend([
-                {"condition": "state", "entity_id": sensor_id, "state": "on"},
+                present,
                 svc,
+                # Presence cleared while the device was turning on: give it
+                # the settling time to come back before deciding.
                 {
                     "choose": [{
-                        "conditions": [{
-                            "condition": "state", "entity_id": sensor_id,
-                            "state": "off",
-                        }],
-                        "sequence": [
-                            {"delay": duration},
-                            {"condition": "state", "entity_id": sensor_id,
-                             "state": "off", "for": duration},
-                        ],
-                    }],
-                    "default": [{
-                        "wait_for_trigger": [{
-                            "trigger": "state", "entity_id": sensor_id,
-                            "from": "on", "to": "off", "for": duration,
+                        "conditions": [cleared],
+                        "sequence": [{
+                            "wait_for_trigger": [{
+                                "trigger": "state", "entity_id": sensor_id,
+                                "to": "on",
+                            }],
+                            "timeout": duration,
+                            "continue_on_timeout": True,
                         }],
                     }],
                 },
+                # Unless presence has already been clear for the settling
+                # time, wait for it to clear from any state (an unavailable
+                # sensor returning as off counts), for at most RELEASE_TIMEOUT.
+                {
+                    "choose": [{
+                        "conditions": [{
+                            "condition": "not",
+                            "conditions": [dict(cleared, **{"for": duration})],
+                        }],
+                        "sequence": [{
+                            "wait_for_trigger": [{
+                                "trigger": "state", "entity_id": sensor_id,
+                                "to": "off", "for": duration,
+                            }],
+                            "timeout": RELEASE_TIMEOUT,
+                            "continue_on_timeout": True,
+                        }],
+                    }],
+                },
+                # Top level on purpose: a failed condition inside a choose
+                # only ends that branch, so this is what keeps the device on
+                # while presence is still (or again) detected.
+                cleared,
                 off_svc,
             ])
             mode = "restart"
@@ -531,17 +561,36 @@ def suggestion_identity(pattern_type: str, entity_ids, details) -> Optional[tupl
     return None
 
 
+def _variant_family(key: Optional[tuple]) -> Optional[tuple]:
+    """Identity with the presence-release marker removed.
+
+    A gated sequence and the same sequence with "off when presence clears"
+    are separate suggestions (a dismissed one never hides the other) but one
+    behaviour, so only one of them is ever pending."""
+    if key and key[-1] == "presence_release":
+        return key[:-1]
+    return key
+
+
 def _find_existing(conn: sqlite3.Connection, pattern: DetectedPattern):
     """(id, status) of the stored suggestion for this pattern, or None.
 
     A pending row wins over decided ones so a refresh lands where the
-    reviewer will see it; any decided row still means "not new"."""
-    same_text = conn.execute(
-        "SELECT id, status FROM suggestions WHERE description = ?",
-        (pattern.description,)).fetchall()
+    reviewer will see it; any decided row still means "not new". A row
+    retired as superseded is only returned when nothing else matches."""
     key = suggestion_identity(pattern.pattern_type, pattern.entity_ids,
                               pattern.details)
-    matches = [(int(r[0]), str(r[1] or "")) for r in same_text]
+    same_text = conn.execute(
+        "SELECT id, status, pattern_type, entity_ids, details FROM suggestions "
+        "WHERE description = ?", (pattern.description,)).fetchall()
+    matches = []
+    for rid, status, ptype, ents, details in same_text:
+        # The description is only a fallback for rows without an identity;
+        # it must not join two variants whose text happens to coincide.
+        row_key = suggestion_identity(ptype, loads_json(ents, []),
+                                      loads_json(details, {}))
+        if key is None or row_key is None or row_key == key:
+            matches.append((int(rid), str(status or "")))
     if key is not None:
         rows = conn.execute(
             "SELECT id, status, entity_ids, details FROM suggestions "
@@ -556,7 +605,34 @@ def _find_existing(conn: sqlite3.Connection, pattern: DetectedPattern):
     for match in matches:
         if match[1] == SUGGESTION_PENDING:
             return match
+    for match in matches:
+        if match[1] != SUGGESTION_SUPERSEDED:
+            return match
     return matches[0]
+
+
+def _retire_other_variants(conn: sqlite3.Connection, pattern: DetectedPattern,
+                           keep_id: int) -> None:
+    """Mark other pending variants of this behaviour superseded.
+
+    Only pending rows move; dismissed, approved, installed and covered rows
+    are decisions and stay exactly as they are."""
+    key = suggestion_identity(pattern.pattern_type, pattern.entity_ids,
+                              pattern.details)
+    family = _variant_family(key)
+    if family is None:
+        return
+    rows = conn.execute(
+        "SELECT id, entity_ids, details FROM suggestions "
+        "WHERE pattern_type = ? AND status = ? AND id != ?",
+        (pattern.pattern_type, SUGGESTION_PENDING, keep_id)).fetchall()
+    for rid, ents, details in rows:
+        row_key = suggestion_identity(pattern.pattern_type, loads_json(ents, []),
+                                      loads_json(details, {}))
+        if row_key != key and _variant_family(row_key) == family:
+            conn.execute(
+                "UPDATE suggestions SET status = ? WHERE id = ? AND status = ?",
+                (SUGGESTION_SUPERSEDED, rid, SUGGESTION_PENDING))
 
 
 class SuggestionStore:
@@ -590,17 +666,21 @@ class SuggestionStore:
             existing = _find_existing(conn, pattern)
             if existing:
                 sid, status = existing
-                if status == SUGGESTION_PENDING:
-                    # Still under review: refresh the evidence and payload so
-                    # the reviewer sees (and installs) the latest measurement.
+                if status in (SUGGESTION_PENDING, SUGGESTION_SUPERSEDED):
+                    # Still under review (or retired only because another
+                    # variant was detected later): refresh the evidence and
+                    # payload so the reviewer sees (and installs) the latest
+                    # measurement, and make this the one pending variant.
                     conn.execute(
                         "UPDATE suggestions SET confidence = ?, pattern_count = ?, "
-                        "description = ?, details = ?, automation_yaml = ? "
-                        "WHERE id = ?",
+                        "description = ?, details = ?, automation_yaml = ?, "
+                        "status = ? WHERE id = ?",
                         (pattern.confidence, pattern.occurrences,
                          pattern.description, json.dumps(pattern.details or {}),
-                         (generate or generate_automation)(pattern), sid),
+                         (generate or generate_automation)(pattern),
+                         SUGGESTION_PENDING, sid),
                     )
+                    _retire_other_variants(conn, pattern, sid)
                 else:
                     # Decided (dismissed, installed, covered, approved): keep
                     # the decision; only the counts move, as they always have.
@@ -627,6 +707,7 @@ class SuggestionStore:
                  json.dumps(pattern.details or {})),
             )
             _new_sid = _cur.lastrowid
+            _retire_other_variants(conn, pattern, cast(int, _new_sid))
             conn.commit()
             conn.close()
             try:

@@ -232,13 +232,25 @@ def test_sequence_generation_adds_gate_and_safe_release(load):
     }]
     assert auto["alias"].endswith("off when presence clears")
     assert auto["action"][1]["condition"] == "state"  # post-delay recheck
-    choice = auto["action"][3]
-    wait = choice["default"][0]["wait_for_trigger"][0]
+    choice = auto["action"][4]["choose"][0]
+    assert choice["conditions"] == [{
+        "condition": "not", "conditions": [{
+            "condition": "state", "entity_id": "binary_sensor.office_presence",
+            "state": "off", "for": "00:01:00"}],
+    }]
+    wait = choice["sequence"][0]
     assert wait == {
-        "trigger": "state", "entity_id": "binary_sensor.office_presence",
-        "from": "on", "to": "off", "for": "00:01:00",
+        "wait_for_trigger": [{
+            "trigger": "state", "entity_id": "binary_sensor.office_presence",
+            "to": "off", "for": "00:01:00",
+        }],
+        "timeout": "04:00:00",
+        "continue_on_timeout": True,
     }
-    assert choice["choose"][0]["sequence"][-1]["for"] == "00:01:00"
+    assert auto["action"][-2] == {
+        "condition": "state", "entity_id": "binary_sensor.office_presence",
+        "state": "off",
+    }
     assert auto["action"][-1]["service"] == "light.turn_off"
 
 
