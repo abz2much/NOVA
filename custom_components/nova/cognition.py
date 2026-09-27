@@ -129,7 +129,7 @@ class _Entry:
         "last_state", "last_changed", "first_seen", "transitions",
         "n", "mean", "m2", "hours", "occ", "daily_first", "last_first_day",
         "depart_first", "return_first", "pres_depart_day", "pres_return_day",
-        "last_depart_ts",
+        "last_depart_ts", "home_since_depart",
     )
 
     def __init__(self, now: float):
@@ -158,6 +158,10 @@ class _Entry:
         self.pres_depart_day = 0
         self.pres_return_day = 0
         self.last_depart_ts = 0.0       # last_changed of the last recorded departure
+        # Seen home since the last recorded departure. Home Assistant gives a
+        # state a new last_changed when it restarts, so without this a restart
+        # while someone is out would look like another departure.
+        self.home_since_depart = True
 
 
 # ── Module state ─────────────────────────────────────────────────────────────
@@ -878,13 +882,16 @@ def sample_presence(hass, now: float = None) -> int:
             tsecs = _secs_since_midnight(ts)
             seen += 1
             if _is_away(cur):
-                if ts != entry.last_depart_ts:              # a departure not yet recorded
+                if ts != entry.last_depart_ts and entry.home_since_depart:
+                    # a departure not yet recorded, after being seen home
                     entry.last_depart_ts = ts
+                    entry.home_since_depart = False
                     point = (_local_day(ts), tsecs)
                     if not entry.depart_first or tuple(entry.depart_first[-1]) != point:
                         entry.depart_first.append(point)
                     entry.pres_depart_day = today
             elif _is_home(cur):
+                entry.home_since_depart = True
                 if entry.pres_depart_day == today:         # returned after leaving
                     if entry.pres_return_day == today and entry.return_first \
                             and entry.return_first[-1][0] == today:
@@ -1291,6 +1298,7 @@ def _entry_to_dict(e: _Entry) -> dict:
         "depart_first": list(e.depart_first), "return_first": list(e.return_first),
         "pres_depart_day": e.pres_depart_day, "pres_return_day": e.pres_return_day,
         "last_depart_ts": e.last_depart_ts,
+        "home_since_depart": e.home_since_depart,
     }
 
 
@@ -1311,6 +1319,7 @@ def _entry_from_dict(d: dict) -> _Entry:
     e.pres_depart_day = int(d.get("pres_depart_day", 0))
     e.pres_return_day = int(d.get("pres_return_day", 0))
     e.last_depart_ts = float(d.get("last_depart_ts", 0.0) or 0.0)
+    e.home_since_depart = bool(d.get("home_since_depart", True))
     return e
 
 

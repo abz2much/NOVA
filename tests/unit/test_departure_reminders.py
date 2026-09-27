@@ -215,3 +215,31 @@ def test_history_saved_before_this_change_is_reused(cog, tmp_path):
     assert house.check(sat.replace(hour=11, minute=45)) == []
     assert house.check(mon.replace(hour=11, minute=45)) == [
         "You usually leave around 12:00. It's 11:45 now."]
+
+
+def _depart_times(cog, entity="person.abi"):
+    return [s for (_d, s) in cog._MODEL[entity].depart_first]
+
+
+def test_restart_while_out_is_not_a_departure(cog, tmp_path):
+    """Home Assistant gives a state a new last_changed when it restarts. A
+    restart at 13:30 while someone is on the school run must not be learned
+    as a 13:30 departure, including across Nova's own save and reload."""
+    house = _learn(cog, school_run, days=5)
+    mon = MONDAY + dt.timedelta(days=7)
+    house.run(mon, mon.replace(hour=13), school_run)          # left at 12:00, still out
+    before = _depart_times(cog)
+    assert before[-1] == 12 * 3600
+    db = str(tmp_path / "patterns.db")
+    cog.save_to_db(db, mon.replace(hour=13).timestamp())
+    cog.reset()
+    cog.load_from_db(db, mon.replace(hour=13).timestamp())
+    # The restart: still not_home, but with a fresh last_changed.
+    house.last = ("not_home", mon.replace(hour=13, minute=30))
+    house.run(mon.replace(hour=13, minute=45), mon.replace(hour=14, minute=45),
+              lambda d: [])
+    assert _depart_times(cog) == before
+    # Home at 15:00, out again at 17:00: that one is a real departure.
+    house.run(mon.replace(hour=14, minute=45), mon.replace(hour=17, minute=45),
+              lambda d: [(15, 0, "home"), (17, 0, "not_home")])
+    assert _depart_times(cog)[-1] == 17 * 3600
