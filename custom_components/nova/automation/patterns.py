@@ -320,7 +320,20 @@ def _numeric_trigger_from(occ: list, baseline: list) -> Optional[dict]:
     return None
 
 
-def _numeric_condition(times: list, sensor_hist: dict) -> Optional[dict]:
+def _prepare_numeric_history(sensor_hist: dict) -> dict:
+    """``{sensor_id: (epochs, values)}`` sorted by time, numeric readings only,
+    for sensors with at least 10 of them. Built once per analysis so each
+    learned pattern does not re-filter and re-sort every sensor's series."""
+    prepared: dict = {}
+    for s_ent, events in (sensor_hist or {}).items():
+        ev = sorted((e, v) for e, v in events if isinstance(v, (int, float)))
+        if len(ev) >= 10:
+            prepared[s_ent] = ([e for e, _ in ev], [v for _, v in ev])
+    return prepared
+
+
+def _numeric_condition(times: list, sensor_hist: dict,
+                       prepared: Optional[dict] = None) -> Optional[dict]:
     """Best numeric_state *condition* for an action whose occurrences (``times``)
     consistently coincide with a sensor sitting on one side of a threshold — e.g.
     "…and only while the temperature is below 62". Returns a self-describing HA
@@ -329,14 +342,11 @@ def _numeric_condition(times: list, sensor_hist: dict) -> Optional[dict]:
     float)]``."""
     if not sensor_hist or len(times) < MIN_OCCURRENCES:
         return None
+    if prepared is None:
+        prepared = _prepare_numeric_history(sensor_hist)
     best = None
     best_cover = 0
-    for s_ent, events in sensor_hist.items():
-        ev = sorted((e, v) for e, v in events if isinstance(v, (int, float)))
-        if len(ev) < 10:
-            continue
-        epochs = [e for e, _ in ev]
-        values = [v for _, v in ev]
+    for s_ent, (epochs, values) in prepared.items():
         occ = [v for v in (_numeric_value_at(epochs, values, t) for t in times)
                if v is not None]
         if len(occ) < MIN_OCCURRENCES:
@@ -897,6 +907,7 @@ class PatternAnalyzer:
             if len(win) > window_cap:
                 win.popleft()
 
+        numeric_prepared = _prepare_numeric_history(sensor_hist or {})
         for (ea, sa, eb, sb), count in pair_counts.most_common(15):
             if count < MIN_OCCURRENCES:
                 break
@@ -923,7 +934,7 @@ class PatternAnalyzer:
             tw = _sun_condition(times, lat, lon) or _time_window_condition(times)
             if tw:
                 conds.append(tw)
-            nc = _numeric_condition(times, sensor_hist or {})
+            nc = _numeric_condition(times, sensor_hist or {}, numeric_prepared)
             if nc:
                 conds.append(nc)
             display_conds = list(conds)
@@ -998,12 +1009,7 @@ class PatternAnalyzer:
                 continue
             action_times.setdefault((r["entity_id"], st), []).append(ep)
 
-        prepared: dict = {}
-        for s_ent, events in sensor_hist.items():
-            ev = [(e, v) for e, v in events if isinstance(v, (int, float))]
-            if len(ev) >= 10:
-                ev.sort()
-                prepared[s_ent] = ([e for e, _ in ev], [v for _, v in ev])
+        prepared = _prepare_numeric_history(sensor_hist)
         if not prepared:
             return patterns
 
