@@ -1,3 +1,22 @@
+## [7.126.1] — the same standard for every learned suggestion
+
+7.126.0 fixed threshold suggestions. This release applies the same checks to every other kind of suggestion.
+
+**Fixes**
+- Action sequences ("after A, B"). The trigger must be followed by the action at least half the time; the old bar was 30%, so a door that opens three times a day and turns the light on once became an automation that switched the light on every time. A trigger and a device in different areas are only linked when the trigger is followed at least 80% of the time. With no area to compare, the bar is 70%. Leaving and arriving count from any room. Each device gets one sequence suggestion, from its strongest trigger. A sequence whose action is a sensor or tracker is not suggested.
+- Daily routines for a sensor or tracker no longer produce an automation that calls a service which doesn't exist (for example `binary_sensor.turn_on`). Daily routines for blinds, locks and scenes now become real automations; before, only on/off devices did.
+- The separate arrival and departure detector no longer runs. It paired every change within five minutes of someone arriving, without checking how often an arrival was followed by it, so it could link you to your own phone's tracker. It also duplicated what the sequence detector finds when presence learning is on.
+- Only suggestions Nova can install are shown. Repeated voice commands and routines for read-only devices no longer appear with a Create automation button that can't work. Voice-command routines are still learned for the Memory tab.
+- Any pending suggestion the detectors no longer support is retired after the next analysis: hidden, and pending again if it is detected later. This clears suggestions from before these releases without deleting anything.
+- A test added in 7.126.0 failed for 8 minutes of every hour, depending on when it ran; it is now midnight-aligned.
+
+**Caveats**
+- A real link between two areas that holds less than 80% of the time (for example the hall door and a kitchen light you only use some evenings) is not suggested.
+- Suggestions retired by this release come back if the stricter rules find them.
+- Learned facts in Memory (for example "home cloud set to not_home around 11:00") are unchanged by this release.
+
+Stored data, services, WebSocket commands, settings and assistant-tool schemas are unchanged.
+
 ## [7.126.0] — better threshold suggestions and an optional AI review
 
 **Fixes**

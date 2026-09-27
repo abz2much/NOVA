@@ -374,14 +374,22 @@ def generate_automation(pattern: DetectedPattern) -> str:
     def n(entity_id):
         return _name_for(entity_id, names)
 
-    if p.pattern_type == "time_routine" and d.get("state") in ("on", "off"):
+    if p.pattern_type == "time_routine" and d.get("state") is not None \
+            and d.get("hour") is not None:
+        # Only a controllable target is an automation (v7.126.1): building
+        # "<domain>.turn_on" for a sensor or tracker wrote a service that
+        # doesn't exist.
+        svc = service_for(p.entity_ids[0], d["state"]) if p.entity_ids else None
+        if not svc:
+            return json.dumps({
+                "type": "manual_review",
+                "note": (f"Consider automating: {n(p.entity_ids[0]) if p.entity_ids else '?'}"
+                         f" → {d['state']} around {d['hour']:02d}:00"),
+            }, indent=2)
         auto: dict[str, Any] = {
             "alias": f"Nova Learned: {n(p.entity_ids[0])} {d['state']} at {d['hour']:02d}:00",
             "trigger": {"platform": "time", "at": f"{d['hour']:02d}:00:00"},
-            "action": {
-                "service": f"{p.entity_ids[0].split('.')[0]}.turn_{d['state']}",
-                "entity_id": p.entity_ids[0],
-            },
+            "action": svc,
         }
         cond = d.get("condition")
         conds = [c for c in (cond if isinstance(cond, list) else [cond])
