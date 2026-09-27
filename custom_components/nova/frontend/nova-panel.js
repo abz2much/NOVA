@@ -4643,6 +4643,7 @@ ${this._htmlDashboardBody()}`;
       ${onOff("continued_conversation_speaker_reopen", true, { label: "Follow-up mic reopen (speaker-aware)" })}
       ${onOff("tts_use_ha_voice", false, { label: "Use Home Assistant default voice" })}
       ${num("departure_lead_minutes", "Departure lead (min)", "30", 0, 240, 5)}
+      ${num("routine_departure_lead_minutes", "Leave reminder (min)", "15", 0, 120, 5)}
       ${num("memory_threading_hours", "Memory window (hrs)", "48", 1, 336, 1)}
       ${num("memory_threading_max", "Memory max turns", "12", 1, 50, 1)}
       <div class="cfg-row">

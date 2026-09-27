@@ -101,6 +101,8 @@ RECUR_TOL_MAX = 3600            # overdue grace cap (60 min)
 
 # Presence routines (person / device_tracker)
 PRESENCE_DOMAINS = {"person", "device_tracker"}
+DEPART_HISTORY = 240            # every stable departure, ~60 days at 4 a day
+DEFAULT_ROUTINE_DEPART_LEAD_MIN = 15   # remind this long before the usual time
 PRESENCE_DEBOUNCE = 300         # router/bluetooth trackers must hold ≥5 min
                                 # (debounces Wi-Fi flap that plagues LAN trackers)
 PRESENCE_DEBOUNCE_GPS = 60      # GPS/location trackers report reliably off-network,
@@ -127,6 +129,7 @@ class _Entry:
         "last_state", "last_changed", "first_seen", "transitions",
         "n", "mean", "m2", "hours", "occ", "daily_first", "last_first_day",
         "depart_first", "return_first", "pres_depart_day", "pres_return_day",
+        "last_depart_ts",
     )
 
     def __init__(self, now: float):
@@ -146,12 +149,15 @@ class _Entry:
         # day (one per day), for "this usually happens by now" detection.
         self.daily_first: deque = deque(maxlen=45)
         self.last_first_day = 0
-        # presence routines (person/device_tracker): first DEBOUNCED departure
-        # and latest DEBOUNCED arrival each day, for "usually out/home by now".
-        self.depart_first: deque = deque(maxlen=45)
+        # presence routines: EVERY debounced departure (the name predates
+        # v7.125; it once held only the first of each day) and the latest
+        # debounced arrival each day, for departure reminders and "usually
+        # home by now".
+        self.depart_first: deque = deque(maxlen=DEPART_HISTORY)
         self.return_first: deque = deque(maxlen=45)
         self.pres_depart_day = 0
         self.pres_return_day = 0
+        self.last_depart_ts = 0.0       # last_changed of the last recorded departure
 
 
 # ── Module state ─────────────────────────────────────────────────────────────
@@ -403,8 +409,10 @@ def stats() -> dict:
         if any(sum(b.values()) >= OCC_MIN_SAMPLES_PER_HOUR for b in e.occ.values()):
             predictable += 1
         if eid.split(".", 1)[0] in PRESENCE_DOMAINS:
-            if _routine_of_pts(list(e.depart_first)):
-                presence_routines += 1
+            from .cognitive import presence_routines as _pr
+            today = _local_day(time.time())
+            presence_routines += sum(len(_pr.departures(e.depart_first, today, kind))
+                                     for kind in (_pr.WEEKDAY, _pr.WEEKEND))
             if _routine_of_pts(list(e.return_first)):
                 presence_routines += 1
         elif _routine_of(e) is not None:
@@ -817,19 +825,43 @@ def _presence_entities(hass):
     return out
 
 
+def _routine_presence_domains(hass) -> set:
+    """Whose departures and arrivals are routines: people. Device trackers
+    only in a household with no person entities (a phone, a router or a NAS
+    tracker is not someone leaving)."""
+    try:
+        if hass.states.async_all("person"):
+            return {"person"}
+    except Exception:
+        pass
+    return {"device_tracker"}
+
+
+def _routine_presence_entities(hass):
+    out = []
+    for dom in _routine_presence_domains(hass):
+        try:
+            out.extend(hass.states.async_all(dom))
+        except Exception:
+            pass
+    return out
+
+
 def sample_presence(hass, now: float = None) -> int:
     """
-    Record debounced departure/arrival times for person/device_tracker entities.
-    A state must have held ≥PRESENCE_DEBOUNCE to count, so brief Wi-Fi/GPS flaps
-    don't pollute the routine. Departure = first stable 'away' of the day;
-    arrival = the LATEST stable 'home' of the day (i.e. home-for-the-evening),
-    only counted on days the person actually left. Called periodically.
+    Record debounced departures and arrivals for people (device trackers
+    only when there are no person entities). A state must have held
+    ≥PRESENCE_DEBOUNCE to count, so brief Wi-Fi/GPS flaps don't pollute the
+    routine. Every stable departure is recorded once, as (local day,
+    time of day); arrival = the LATEST stable 'home' of the day (i.e.
+    home-for-the-evening), only counted on days the person actually left.
+    Called periodically.
     """
     now = now or time.time()
     today = _local_day(now)
     seen = 0
     try:
-        for st in _presence_entities(hass):
+        for st in _routine_presence_entities(hass):
             cur = st.state
             if cur in _DEAD_STATES:
                 continue
@@ -846,9 +878,12 @@ def sample_presence(hass, now: float = None) -> int:
             tsecs = _secs_since_midnight(ts)
             seen += 1
             if _is_away(cur):
-                if entry.pres_depart_day != today:        # first stable away today
+                if ts != entry.last_depart_ts:              # a departure not yet recorded
+                    entry.last_depart_ts = ts
+                    point = (_local_day(ts), tsecs)
+                    if not entry.depart_first or tuple(entry.depart_first[-1]) != point:
+                        entry.depart_first.append(point)
                     entry.pres_depart_day = today
-                    entry.depart_first.append((today, tsecs))
             elif _is_home(cur):
                 if entry.pres_depart_day == today:         # returned after leaving
                     if entry.pres_return_day == today and entry.return_first \
@@ -1076,17 +1111,34 @@ def predict_routine_start(hass, now: float = None) -> list:
 
 def predict_presence(hass, now: float = None) -> list:
     """
-    Presence-routine overdue checks: 'usually out by HH:MM but still home' and
-    'usually home by HH:MM but not back yet'. One alert per direction per entity
-    per day. Returns action dicts for the gated announce path.
+    Presence routines. Departures (cognitive.presence_routines): a reminder
+    `routine_departure_lead_minutes` before a person's usual departure time
+    for today's day type, and a later "you're still home" check, each once a
+    day and only while that person is home and hasn't left for it. Spoken to
+    the person ("You usually leave around 12:00."), with their name first
+    when someone else is home. Arrivals: 'usually home by HH:MM but not back
+    yet', once a day. People only; device trackers only in a household with
+    no person entities. Cheap (in memory), so the cognitive loop runs it
+    every tick. Returns action dicts for the gated announce path.
     """
+    from .cognitive import presence_routines as routines
     now = now or time.time()
     out = []
     today = _local_day(now)
     now_secs = _secs_since_midnight(now)
     try:
+        from . import nova_config
+        lead_min = float(nova_config.get("routine_departure_lead_minutes",
+                                         DEFAULT_ROUTINE_DEPART_LEAD_MIN))
+    except Exception:
+        lead_min = DEFAULT_ROUTINE_DEPART_LEAD_MIN
+    lead = max(0.0, min(lead_min, 240.0)) * 60
+    try:
+        domains = _routine_presence_domains(hass)
+        home_now = {st.entity_id for st in _routine_presence_entities(hass)
+                    if _is_home(st.state)}
         for eid, entry in list(_MODEL.items()):
-            if eid.split(".", 1)[0] not in PRESENCE_DOMAINS:
+            if eid.split(".", 1)[0] not in domains:
                 continue
             st = hass.states.get(eid)
             if st is None or st.state in _DEAD_STATES:
@@ -1094,26 +1146,36 @@ def predict_presence(hass, now: float = None) -> list:
             cur = st.state
             name = st.attributes.get("friendly_name", eid)
 
-            # Departure overdue — usually gone by now, still home, hasn't left today
-            dep = _routine_of_pts(list(entry.depart_first))
-            if dep and _is_home(cur) and entry.pres_depart_day != today:
-                m, sd = dep
-                tol = min(max(2 * sd, RECUR_TOL_MIN), RECUR_TOL_MAX)
-                key = "dep:" + eid
-                if now_secs > m + tol and _RECUR_ALERTED.get(key) != today:
+            if _is_home(cur):
+                who = name if (home_now - {eid}) else ""
+                today_deps = [s for (d, s) in entry.depart_first if d == today]
+                for r in routines.departures(entry.depart_first, today):
+                    if routines.left_for(r, today_deps):
+                        continue
+                    if routines.reminder_due(r, now_secs, lead):
+                        key, kind = "dep_soon:%s:%s" % (eid, r.key), "remind"
+                        msg = routines.reminder_text(r, now_secs, who)
+                    elif routines.late_due(r, now_secs):
+                        key, kind = "dep:%s:%s" % (eid, r.key), "late"
+                        msg = routines.late_text(r, who)
+                    else:
+                        continue
+                    if _RECUR_ALERTED.get(key) == today:
+                        continue
                     _RECUR_ALERTED[key] = today
                     _log_decision(
                         "anticipation_presence",
-                        {"person": name, "entity_id": eid, "usual_out_by": _hhmm(m)},
-                        {"predicted": "still home past the usual departure time"},
-                        "flag still-home",
+                        {"person": name, "entity_id": eid,
+                         "usual_out_by": routines.hhmm(r.mean), "day_type": r.day_type},
+                        {"predicted": ("usual departure coming up" if kind == "remind"
+                                       else "still home past the usual departure time")},
+                        "remind departure" if kind == "remind" else "flag still-home",
                         "recurring departure pattern",
                     )
                     out.append({
                         "type": "anticipation_presence", "urgency": "low",
-                        "message": (f"{name} is usually out by around {_hhmm(m)}, "
-                                    f"but is still home — thought you'd want to know."),
-                        "pattern_key": f"presence_depart:{eid}", "offer": False,
+                        "message": msg,
+                        "pattern_key": f"presence_depart:{eid}:{r.key}", "offer": False,
                     })
 
             # Arrival overdue — usually home by now, not home, did leave today
@@ -1228,6 +1290,7 @@ def _entry_to_dict(e: _Entry) -> dict:
         "daily_first": list(e.daily_first), "last_first_day": e.last_first_day,
         "depart_first": list(e.depart_first), "return_first": list(e.return_first),
         "pres_depart_day": e.pres_depart_day, "pres_return_day": e.pres_return_day,
+        "last_depart_ts": e.last_depart_ts,
     }
 
 
@@ -1242,10 +1305,12 @@ def _entry_from_dict(d: dict) -> _Entry:
     e.occ = {int(k): {s: int(c) for s, c in v.items()} for k, v in (d.get("occ") or {}).items()}
     e.daily_first = deque([tuple(x) for x in (d.get("daily_first") or [])], maxlen=45)
     e.last_first_day = int(d.get("last_first_day", 0))
-    e.depart_first = deque([tuple(x) for x in (d.get("depart_first") or [])], maxlen=45)
+    e.depart_first = deque([tuple(x) for x in (d.get("depart_first") or [])],
+                           maxlen=DEPART_HISTORY)
     e.return_first = deque([tuple(x) for x in (d.get("return_first") or [])], maxlen=45)
     e.pres_depart_day = int(d.get("pres_depart_day", 0))
     e.pres_return_day = int(d.get("pres_return_day", 0))
+    e.last_depart_ts = float(d.get("last_depart_ts", 0.0) or 0.0)
     return e
 
 

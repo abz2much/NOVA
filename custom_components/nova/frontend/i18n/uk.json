@@ -300,5 +300,6 @@
   "test a search": "перевірити пошук",
   "type to find an entity…": "введіть, щоб знайти сутність…",
   "watch folders": "відстежувані папки",
-  "window left open": "вікно залишено відчиненим"
+  "window left open": "вікно залишено відчиненим",
+  "Leave reminder (min)": "Нагадування перед виходом (хв)"
 }

@@ -190,6 +190,7 @@
     "rich_reasoning",
     "room_speakers",
     "routine_alerts_enabled",
+    "routine_departure_lead_minutes",
     "satellite_audio_out",
     "satellite_pairings",
     "satellite_start_action",

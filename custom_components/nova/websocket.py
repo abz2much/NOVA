@@ -849,6 +849,7 @@ async def ws_get_panel_data(
                 "departure_alerts_enabled": bool(_runtime_opt(hass, entry, "departure_alerts_enabled", True)),
                 "routine_alerts_enabled": bool(_runtime_opt(hass, entry, "routine_alerts_enabled", True)),
                 "departure_lead_minutes": _runtime_opt(hass, entry, "departure_lead_minutes", 30),
+                "routine_departure_lead_minutes": _runtime_opt(hass, entry, "routine_departure_lead_minutes", 15),
                 "departure_origin_entity": str(_runtime_opt(hass, entry, "departure_origin_entity", "") or ""),
                 "departure_osrm_url": str(_runtime_opt(hass, entry, "departure_osrm_url", "") or ""),
                 "departure_travel_sensor": str(_runtime_opt(hass, entry, "departure_travel_sensor", "") or ""),
@@ -1464,6 +1465,7 @@ PANEL_WRITABLE_KEYS = {
     "departure_alerts_enabled",
     "routine_alerts_enabled",
     "departure_lead_minutes",
+    "routine_departure_lead_minutes",  # int: remind this long before a usual departure
     "departure_origin_entity",
     "departure_osrm_url",
     "departure_travel_sensor",

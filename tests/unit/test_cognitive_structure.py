@@ -27,7 +27,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova
 COG = ROOT / "cognitive"
 
 PURE = ["models.py", "evaluators.py", "arbitration.py", "provider.py", "cache_policy.py",
-        "patterns.py", "naming.py", "routines.py"]
+        "patterns.py", "naming.py", "routines.py", "presence_routines.py"]
 ALLOWED_STDLIB = {"__future__", "re", "json", "math", "typing", "dataclasses",
                   "collections", "itertools", "functools", "statistics", "enum"}
 ALLOWED_RELATIVE = {(1, "models"), (1, "evaluators"), (2, "const"), (1, ""), (1, "naming")}
