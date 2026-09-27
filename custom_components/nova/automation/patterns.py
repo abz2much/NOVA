@@ -33,6 +33,7 @@ from .area_presence import (
     presence_release,
 )
 from .models import DetectedPattern
+from .recorder_time import recorder_epoch
 from .suggestions import (  # DB_PATH / MIN_DAYS are shared with stats
     DB_PATH,
     MIN_DAYS,
@@ -1125,8 +1126,7 @@ class PatternAnalyzer:
                     if value is None and isinstance(state, dict):
                         value = state.get("state")
                         changed = state.get("last_changed") or state.get("last_updated")
-                    timestamp = getattr(changed, "timestamp", None)
-                    epoch = timestamp() if callable(timestamp) else None
+                    epoch = recorder_epoch(changed)
                     if epoch is not None and value in ("on", "off"):
                         series.append((epoch, value == "on"))
                 except Exception:
@@ -1183,7 +1183,7 @@ class PatternAnalyzer:
                         val = s.get("state")
                         when = s.get("last_changed") or s.get("last_updated")
                     fv = float(val)
-                    ep = when.timestamp() if hasattr(when, "timestamp") else None
+                    ep = recorder_epoch(when)
                     if ep is not None:
                         series.append((ep, fv))
                 except (TypeError, ValueError):

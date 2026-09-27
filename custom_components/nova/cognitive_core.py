@@ -3589,10 +3589,11 @@ async def backfill_from_history(hass: HomeAssistant, days: int = 30) -> dict:
     try:
         from homeassistant.components.recorder import get_instance, history
         from homeassistant.util import dt as dt_util
+        from .automation.recorder_time import recorder_epoch
     except Exception:
         return out
 
-    _meta = ("automation", "script", "scene", "input_boolean", "input_number")
+    _meta =("automation", "script", "scene", "input_boolean", "input_number")
     _noisy = ("sensor", "binary_sensor", "weather", "sun", "update", "device_tracker")
     dc_by: dict = {}
     relevant: list = []
@@ -3653,7 +3654,7 @@ async def backfill_from_history(hass: HomeAssistant, days: int = 30) -> dict:
                     when = s.get("last_changed") or s.get("last_updated")
                 if st is None or when is None:
                     continue
-                epoch = when.timestamp() if hasattr(when, "timestamp") else None
+                epoch = recorder_epoch(when)
                 if epoch is not None:
                     events.append((epoch, st))
             except Exception:

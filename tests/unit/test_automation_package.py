@@ -18,13 +18,14 @@ import contract_extract as ce
 PKG = ce.COMP / "automation"
 NEW_MODULES = ("models", "inventory", "attribution", "matching", "suggestions",
                "patterns", "installation", "trials", "api", "area_presence",
-               "_compat")
+               "recorder_time", "_compat")
 
 # Package-internal import layering: a module may import only the modules
 # listed for it (function-level imports included).
 ALLOWED_INTERNAL = {
     "_compat": set(),
     "area_presence": set(),
+    "recorder_time": set(),
     "models": set(),
     "matching": {"models"},
     "trials": set(),
@@ -32,7 +33,7 @@ ALLOWED_INTERNAL = {
     "attribution": {"models", "inventory"},
     "suggestions": {"models", "trials", "matching"},
     "patterns": {"models", "suggestions", "inventory", "matching",
-                 "area_presence"},
+                 "area_presence", "recorder_time"},
     "installation": {"models", "inventory", "matching", "suggestions",
                      "patterns", "trials"},
     "api": {"models", "suggestions"},
