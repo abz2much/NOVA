@@ -25,6 +25,9 @@ SUGGESTION_APPROVED = "approved"
 SUGGESTION_DISMISSED = "dismissed"
 SUGGESTION_INSTALLED = "installed"
 SUGGESTION_COVERED = "already_automated"
+# Retired because another variant of the same behaviour (for example the
+# same sequence with "off when presence clears") was detected later.
+SUGGESTION_SUPERSEDED = "superseded"
 
 # ── Provenance of an observed state change (state_changes.triggered_by) ─────
 SOURCE_UNKNOWN = "unknown"

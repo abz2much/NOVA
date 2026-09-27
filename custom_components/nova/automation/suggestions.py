@@ -15,7 +15,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional, cast
 
-from .models import SUGGESTION_PENDING, DetectedPattern, loads_json
+from .models import (
+    SUGGESTION_PENDING,
+    SUGGESTION_SUPERSEDED,
+    DetectedPattern,
+    loads_json,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -531,17 +536,36 @@ def suggestion_identity(pattern_type: str, entity_ids, details) -> Optional[tupl
     return None
 
 
+def _variant_family(key: Optional[tuple]) -> Optional[tuple]:
+    """Identity with the presence-release marker removed.
+
+    A gated sequence and the same sequence with "off when presence clears"
+    are separate suggestions (a dismissed one never hides the other) but one
+    behaviour, so only one of them is ever pending."""
+    if key and key[-1] == "presence_release":
+        return key[:-1]
+    return key
+
+
 def _find_existing(conn: sqlite3.Connection, pattern: DetectedPattern):
     """(id, status) of the stored suggestion for this pattern, or None.
 
     A pending row wins over decided ones so a refresh lands where the
-    reviewer will see it; any decided row still means "not new"."""
-    same_text = conn.execute(
-        "SELECT id, status FROM suggestions WHERE description = ?",
-        (pattern.description,)).fetchall()
+    reviewer will see it; any decided row still means "not new". A row
+    retired as superseded is only returned when nothing else matches."""
     key = suggestion_identity(pattern.pattern_type, pattern.entity_ids,
                               pattern.details)
-    matches = [(int(r[0]), str(r[1] or "")) for r in same_text]
+    same_text = conn.execute(
+        "SELECT id, status, pattern_type, entity_ids, details FROM suggestions "
+        "WHERE description = ?", (pattern.description,)).fetchall()
+    matches = []
+    for rid, status, ptype, ents, details in same_text:
+        # The description is only a fallback for rows without an identity;
+        # it must not join two variants whose text happens to coincide.
+        row_key = suggestion_identity(ptype, loads_json(ents, []),
+                                      loads_json(details, {}))
+        if key is None or row_key is None or row_key == key:
+            matches.append((int(rid), str(status or "")))
     if key is not None:
         rows = conn.execute(
             "SELECT id, status, entity_ids, details FROM suggestions "
@@ -556,7 +580,34 @@ def _find_existing(conn: sqlite3.Connection, pattern: DetectedPattern):
     for match in matches:
         if match[1] == SUGGESTION_PENDING:
             return match
+    for match in matches:
+        if match[1] != SUGGESTION_SUPERSEDED:
+            return match
     return matches[0]
+
+
+def _retire_other_variants(conn: sqlite3.Connection, pattern: DetectedPattern,
+                           keep_id: int) -> None:
+    """Mark other pending variants of this behaviour superseded.
+
+    Only pending rows move; dismissed, approved, installed and covered rows
+    are decisions and stay exactly as they are."""
+    key = suggestion_identity(pattern.pattern_type, pattern.entity_ids,
+                              pattern.details)
+    family = _variant_family(key)
+    if family is None:
+        return
+    rows = conn.execute(
+        "SELECT id, entity_ids, details FROM suggestions "
+        "WHERE pattern_type = ? AND status = ? AND id != ?",
+        (pattern.pattern_type, SUGGESTION_PENDING, keep_id)).fetchall()
+    for rid, ents, details in rows:
+        row_key = suggestion_identity(pattern.pattern_type, loads_json(ents, []),
+                                      loads_json(details, {}))
+        if row_key != key and _variant_family(row_key) == family:
+            conn.execute(
+                "UPDATE suggestions SET status = ? WHERE id = ? AND status = ?",
+                (SUGGESTION_SUPERSEDED, rid, SUGGESTION_PENDING))
 
 
 class SuggestionStore:
@@ -590,17 +641,21 @@ class SuggestionStore:
             existing = _find_existing(conn, pattern)
             if existing:
                 sid, status = existing
-                if status == SUGGESTION_PENDING:
-                    # Still under review: refresh the evidence and payload so
-                    # the reviewer sees (and installs) the latest measurement.
+                if status in (SUGGESTION_PENDING, SUGGESTION_SUPERSEDED):
+                    # Still under review (or retired only because another
+                    # variant was detected later): refresh the evidence and
+                    # payload so the reviewer sees (and installs) the latest
+                    # measurement, and make this the one pending variant.
                     conn.execute(
                         "UPDATE suggestions SET confidence = ?, pattern_count = ?, "
-                        "description = ?, details = ?, automation_yaml = ? "
-                        "WHERE id = ?",
+                        "description = ?, details = ?, automation_yaml = ?, "
+                        "status = ? WHERE id = ?",
                         (pattern.confidence, pattern.occurrences,
                          pattern.description, json.dumps(pattern.details or {}),
-                         (generate or generate_automation)(pattern), sid),
+                         (generate or generate_automation)(pattern),
+                         SUGGESTION_PENDING, sid),
                     )
+                    _retire_other_variants(conn, pattern, sid)
                 else:
                     # Decided (dismissed, installed, covered, approved): keep
                     # the decision; only the counts move, as they always have.
@@ -627,6 +682,7 @@ class SuggestionStore:
                  json.dumps(pattern.details or {})),
             )
             _new_sid = _cur.lastrowid
+            _retire_other_variants(conn, pattern, cast(int, _new_sid))
             conn.commit()
             conn.close()
             try:
