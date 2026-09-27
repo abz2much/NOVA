@@ -2498,6 +2498,18 @@ setTimeout(async () => {
     _cafCalls >= 1]);
   global.cancelAnimationFrame = _realCaf;
 
+  // The hero types its state word (Hello / Thinking / Goodnight) next to the
+  // head and echoes it in the scrolling marquee behind it.
+  await new Promise(r => setTimeout(r, 1200));
+  {
+    const words = { idle: "Hello.", reasoning: "Thinking…", asleep: "Goodnight." };
+    const want = words[elNew._coreState()];
+    const wordText = elNew.shadowRoot.getElementById("heroWordText")?.textContent;
+    const marqueeText = elNew.shadowRoot.getElementById("heroMarquee")?.textContent || "";
+    checks.push(["hero types the state word and echoes it in the marquee",
+      wordText === want && marqueeText.startsWith(want.replace(/[.…]/g, "").toUpperCase() + " · ")]);
+  }
+
   // Command Center localization was accidentally dropped when Classic was
   // removed even though all 18 dictionaries and ui_language persisted.
   elNew._currentTab = "settings";

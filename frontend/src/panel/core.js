@@ -39,7 +39,8 @@ class NovaPanel extends HTMLElement {
     this._flareUntil = 0;
     this._animHandle = null;
     this._particles = [];
-    this._current = { speed: 0.20, count: 70, radiusMul: 1, glow: 0.55, hot: 0.35, flare: 0.05 };
+    this._current = { open: 1, wide: 0, brow: 0, smile: 0.45, mouth: 0, speed: 0.20, glow: 0.60, hot: 0.35, count: 60, sleep: 0 };
+    this._heroTypeTimer = null;
     this._camOpen = false;
     this._cameraImages = {};
     this._cameraLoading = {};
@@ -97,6 +98,7 @@ class NovaPanel extends HTMLElement {
     if (this._cameraInterval) clearInterval(this._cameraInterval);
     if (this._animHandle) cancelAnimationFrame(this._animHandle);
     if (this._resizeListener) window.removeEventListener("resize", this._resizeListener);
+    if (this._heroTypeTimer) { clearTimeout(this._heroTypeTimer); this._heroTypeTimer = null; }
   }
 
   _startIntervals() {

@@ -20,13 +20,33 @@
       .brand-name{font-family:var(--font-display);font-size:18px;font-weight:600}
       .brand-tag{font-family:var(--font-mono);font-size:10px;color:var(--ink-faint);letter-spacing:.1em;text-transform:uppercase}
       .hero{max-width:1100px;margin:0 auto;background:linear-gradient(180deg,var(--surface),#19140fdd);
-        border:1px solid var(--line-soft);border-radius:22px;padding:32px 20px 24px;
-        display:flex;flex-direction:column;align-items:center;text-align:center}
-      .core-wrap{width:min(70vw,280px);aspect-ratio:1/1;margin-bottom:4px}
-      canvas.core{width:100%;height:100%;display:block}
-      .state-line{font-family:var(--font-display);font-size:19px;font-weight:500;margin:4px 0 2px;text-wrap:balance}
-      .state-sub{font-family:var(--font-mono);font-size:10.5px;color:var(--ink-faint);letter-spacing:.05em;margin-bottom:18px}
-      .chips{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;padding-top:16px;border-top:1px solid var(--line-soft);width:100%}
+        border:1px solid var(--line-soft);border-radius:22px;overflow:hidden;container-type:inline-size;
+        display:flex;flex-direction:column;align-items:stretch}
+      .hero-stage{position:relative;height:clamp(300px,36cqw,440px)}
+      .hero-marquee{position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);overflow:hidden;pointer-events:none;
+        font-family:var(--font-display);font-weight:600;font-size:clamp(110px,20cqw,240px);line-height:1;white-space:nowrap;
+        color:#f4b8600d;letter-spacing:-.02em}
+      .hero-marquee span{display:inline-block;animation:hero-marquee 60s linear infinite}
+      @keyframes hero-marquee{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+      canvas.core{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:grab;touch-action:pan-y}
+      canvas.core:active{cursor:grabbing}
+      .hero-copy{position:absolute;left:50%;right:5%;top:50%;transform:translateY(-50%);pointer-events:none;
+        display:flex;flex-direction:column;gap:8px;text-align:left}
+      .hero-word{font-family:var(--font-display);font-weight:500;font-size:clamp(44px,8cqw,100px);line-height:1.05;letter-spacing:-.02em;min-height:1.05em;
+        background:linear-gradient(100deg,var(--gold-pale),var(--gold) 55%,var(--ember));-webkit-background-clip:text;background-clip:text;color:transparent;transition:filter .6s}
+      .hero-word.dim{filter:brightness(.62)}
+      .hero-caret{display:inline-block;width:.06em;height:.8em;margin-left:.06em;background:var(--gold);vertical-align:-.04em;animation:hero-caret 1s steps(1) infinite}
+      @keyframes hero-caret{50%{opacity:0}}
+      .state-line{font-family:var(--font-display);font-size:clamp(17px,2cqw,21px);font-weight:500;margin:0;text-wrap:balance}
+      .state-sub{font-family:var(--font-mono);font-size:10.5px;color:var(--ink-faint);letter-spacing:.05em}
+      @container (max-width:639px){
+        .hero-stage{height:auto;display:flex;flex-direction:column}
+        canvas.core{position:relative;height:300px}
+        .hero-marquee{top:150px}
+        .hero-copy{position:relative;left:auto;right:auto;top:auto;transform:none;align-items:center;text-align:center;padding:0 16px 20px}
+      }
+      @media (prefers-reduced-motion: reduce){.hero-marquee span,.hero-caret{animation:none}}
+      .chips{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;padding:16px 20px 20px;border-top:1px solid var(--line-soft);width:100%}
       .chip{display:flex;align-items:center;gap:6px;padding:6px 12px;border-radius:20px;background:var(--surface-2);
         font-family:var(--font-mono);font-size:10.5px;color:var(--ink-dim);border:1px solid var(--line-soft)}
       .chip .dot{width:6px;height:6px;border-radius:50%;background:#6fbf8a}
