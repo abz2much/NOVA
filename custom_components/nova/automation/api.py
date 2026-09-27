@@ -44,7 +44,7 @@ def panel_suggestion_items(rows: Iterable[dict],
     including the evidence behind each one. With `names` (entity_id ->
     friendly name), text stored with entity_ids by older releases is shown
     with names; the stored rows are not changed."""
-    from ..cognitive.naming import humanize_text
+    from ..cognitive.naming import humanize_text, name_for
     out = []
     for s in rows:
         ptype = s.get("pattern_type", "") or ""
@@ -64,9 +64,36 @@ def panel_suggestion_items(rows: Iterable[dict],
             "count": count,
             "pattern_type": ptype,
             "entities": entities,
+            "entity_labels": [name_for(str(e), shown) for e in entities]
+            if isinstance(entities, list) else [],
             "why_headline": humanize_text(why.get("headline", ""), shown),
             "evidence": [humanize_text(e, shown) for e in why.get("evidence", [])],
             "automation_match": (details.get("automation_match") or {})
             if isinstance(details, dict) else {},
+        })
+    return out
+
+
+def panel_rejected_items(rows: Iterable[dict],
+                         names: Optional[Mapping] = None) -> list[dict]:
+    """Suggestions the AI review turned down, as
+    ``get_panel_data.suggestions_filtered`` items: what it was and why it
+    was rejected."""
+    from ..cognitive.naming import humanize_text
+    out = []
+    for s in rows:
+        details = loads_json(s.get("details") or "{}", {})
+        details = details if isinstance(details, dict) else {}
+        learned = details.get("names")
+        shown = {**(learned if isinstance(learned, dict) else {}), **(names or {})}
+        raw_review = details.get("review")
+        review: dict = raw_review if isinstance(raw_review, dict) else {}
+        out.append({
+            "id": s.get("id"),
+            "pattern_type": s.get("pattern_type", "") or "",
+            "description": humanize_text(s.get("description", ""), shown),
+            "reason": str(review.get("reason") or ""),
+            "model": str(review.get("model") or ""),
+            "reviewed_at": str(review.get("ts") or ""),
         })
     return out

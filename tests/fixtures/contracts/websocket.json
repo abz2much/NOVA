@@ -895,7 +895,8 @@
       "action": {
         "options": [
           "approve",
-          "dismiss"
+          "dismiss",
+          "restore"
         ],
         "required": true
       },

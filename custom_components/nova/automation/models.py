@@ -28,6 +28,15 @@ SUGGESTION_COVERED = "already_automated"
 # Retired because another variant of the same behaviour (for example the
 # same sequence with "off when presence clears") was detected later.
 SUGGESTION_SUPERSEDED = "superseded"
+# Turned down by the AI suggestion review (v7.126.0). A decision like
+# "dismissed": never suggested again unless restored from the panel.
+SUGGESTION_REJECTED = "rejected"
+# No longer detected after the detector that produced it changed (v7.126.0).
+# Hidden, and made pending again if the pattern is detected later.
+SUGGESTION_RETIRED = "retired"
+# Statuses a re-detected pattern brings back to pending.
+REVIVABLE_STATUSES = frozenset({SUGGESTION_PENDING, SUGGESTION_SUPERSEDED,
+                                SUGGESTION_RETIRED})
 
 # ── Provenance of an observed state change (state_changes.triggered_by) ─────
 SOURCE_UNKNOWN = "unknown"
@@ -113,6 +122,9 @@ class MatchResult:
     status: str
     matches: tuple[MatchRef, ...] = ()
     reason: str = ""
+    # An overlapping automation already performs the same action on the same
+    # entity (not merely references it). v7.126.0.
+    same_effect: bool = False
 
     @property
     def is_exact(self) -> bool:

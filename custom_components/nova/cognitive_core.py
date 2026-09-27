@@ -2730,7 +2730,12 @@ async def _tick():
             except Exception:
                 _conf = 0.55
             set_thresholds(_occ, _conf)
-            patterns = await analyzer.analyze(hass)
+            from . import suggestion_review
+            _reviewer = await suggestion_review.reviewer_for(hass)
+            if _reviewer is not None:
+                patterns = await analyzer.analyze(hass, reviewer=_reviewer)
+            else:
+                patterns = await analyzer.analyze(hass)
             if patterns:
                 from .websocket import nova_log
                 nova_log("LEARN", f"Pattern analysis: {len(patterns)} patterns found")
@@ -3730,7 +3735,12 @@ async def run_analysis_now(hass: HomeAssistant) -> dict:
         _conf = 0.55
     set_thresholds(_occ, _conf)
 
-    patterns = await analyzer.analyze(hass)
+    from . import suggestion_review
+    _reviewer = await suggestion_review.reviewer_for(hass)
+    if _reviewer is not None:
+        patterns = await analyzer.analyze(hass, reviewer=_reviewer)
+    else:
+        patterns = await analyzer.analyze(hass)
     res = dict(analyzer._last_result)
     res["ran"] = True
     res.setdefault("patterns_found", len(patterns))

@@ -13,6 +13,7 @@
     "sleep_reason",
     "status",
     "suggestions",
+    "suggestions_filtered",
     "version"
   ],
   "config_fallbacks": [
@@ -31,6 +32,7 @@
     "meta",
     "onboarding",
     "status",
-    "suggestions"
+    "suggestions",
+    "suggestions_filtered"
   ]
 }

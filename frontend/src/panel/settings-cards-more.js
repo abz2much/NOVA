@@ -510,6 +510,7 @@
     return `
       ${onOff("departure_alerts_enabled", false, { label: "Departure alerts" })}
       ${onOff("routine_alerts_enabled", false, { label: "Routine alerts" })}
+      ${onOff("suggestion_review_enabled", false, { label: "Review suggestions with AI", sub: "checks each new learned suggestion with the Suggestion Review model (AI Models card) before showing it; sends device and room names to that provider, or keeps them at home with Ollama" })}
       ${onOff("memory_threading_enabled", false, { label: "Memory threading" })}
       ${onOff("pattern_learn_motion", false, { label: "Learn motion/presence triggers" })}
       ${onOff("adaptive_interruption_budget", false, { label: "Adaptive interruptions", sub: "speak less after alerts are repeatedly marked unhelpful" })}

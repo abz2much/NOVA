@@ -126,14 +126,22 @@ async def test_analyze_wires_numeric_trigger_from_sensor_history(pa, tmp_path, m
         action_eps.append(t.timestamp())
     conn.commit(); conn.close()
 
-    series = [(base.timestamp() - 3600 + i * 900, 72.0 + (i % 5)) for i in range(200)]
-    series += [(ep - 1, 61.0) for ep in action_eps]           # cold right before each
+    # Warm every 15 minutes across the span, crossing cold just before each
+    # heater-on (v7.126.0 needs a real crossing shortly before the action).
+    series = [(base.timestamp() - 3600 + i * 900, 72.0 + (i % 5)) for i in range(17 * 96)]
+    series += [(ep - 120, 61.0) for ep in action_eps]         # cold right before each
 
     async def _fake_fetch(hass):
         return {"sensor.living_room_temperature": series}
 
+    async def _fake_areas(hass, ids):
+        # v7.126.0: the sensor and the heater share an area.
+        return {"sensor.living_room_temperature": "living_room",
+                "switch.space_heater": "living_room"}
+
     an, stored = _capture(pa, db, monkeypatch)
     monkeypatch.setattr(an, "_fetch_numeric_sensor_history", _fake_fetch)
+    monkeypatch.setattr(an, "_fetch_entity_areas", _fake_areas)
     await an.analyze(fake_hass)
 
     nt = [p for p in stored if p.pattern_type == "numeric_trigger"]

@@ -93,15 +93,20 @@ def test_detector_learns_cold_then_heater(pa, tmp_path):
                       t.hour, t.weekday(), "unknown"))
         action_epochs.append(t.timestamp())
     conn.commit()
-    # synthetic temp history: mostly warm, but low right at each heater-on
+    # synthetic temp history: warm every 15 minutes across the whole span,
+    # dropping cold just before each heater-on (a real crossing each time;
+    # v7.126.0 requires the crossing, not just a low reading).
     series = []
     warm_t = base - timedelta(hours=1)
-    for i in range(200):                                    # baseline warm ~72
+    for i in range(13 * 96):                                # baseline warm ~72
         series.append((warm_t.timestamp() + i * 900, 72.0 + (i % 5)))
     for ep in action_epochs:                                # dip cold just before
-        series.append((ep - 1, 61.0))
+        series.append((ep - 120, 61.0))
     hist = {"sensor.living_room_temperature": series}
-    pats = pa.PatternAnalyzer()._find_numeric_triggers(conn, hist)
+    # v7.126.0: a sensor only explains a device in the same area.
+    areas = {"sensor.living_room_temperature": "living_room",
+             "switch.space_heater": "living_room"}
+    pats = pa.PatternAnalyzer()._find_numeric_triggers(conn, hist, entity_areas=areas)
     m = [p for p in pats if p.details["action"]["entity"] == "switch.space_heater"]
     assert m, "expected a numeric trigger for heater-when-cold"
     assert m[0].details["op"] == "below"

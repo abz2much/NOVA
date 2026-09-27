@@ -16,7 +16,10 @@ from pathlib import Path
 from typing import Any, Optional, cast
 
 from .models import (
+    REVIVABLE_STATUSES,
     SUGGESTION_PENDING,
+    SUGGESTION_REJECTED,
+    SUGGESTION_RETIRED,
     SUGGESTION_SUPERSEDED,
     DetectedPattern,
     loads_json,
@@ -221,6 +224,30 @@ def explain_suggestion(pattern_type: str, details: dict, count: int) -> dict:
             if d.get("target") is not None:
                 ev.append(f"Set to {d['target']}° repeatedly")
             ev.append(f"Observed {count} times")
+        elif pattern_type == "numeric_trigger":
+            sensor = _name_for(str(d.get("trigger_sensor") or ""), names)
+            raw_act = d.get("action")
+            act: dict = raw_act if isinstance(raw_act, dict) else {}
+            target = _name_for(str(act.get("entity") or ""), names)
+            op = str(d.get("op") or "")
+            threshold = d.get("threshold")
+            headline = "A threshold routine"
+            if threshold is not None and op in ("below", "above"):
+                word = "drops below" if op == "below" else "rises above"
+                ev.append(f"When {sensor} {word} {threshold:g}, "
+                          f"{target} turns {act.get('state', '')}")
+            followed, crossings = d.get("followed"), d.get("crossings")
+            if followed is not None and crossings:
+                window = int(d.get("window_seconds") or 600) // 60
+                ev.append(f"Followed within {window} minutes on {int(followed)} "
+                          f"of {int(crossings)} times it crossed")
+            else:
+                ev.append(f"Observed {count} times in 30 days")
+            if d.get("action_count"):
+                ev.append(f"{target} changed this way {int(d['action_count'])} "
+                          f"times in 30 days")
+            if d.get("distinct_days"):
+                ev.append(f"On {int(d['distinct_days'])} different days")
         elif pattern_type == "presence":
             headline = "A presence-linked pattern"
             ev.append(f"Correlated {count} times over 30 days")
@@ -632,7 +659,7 @@ def _find_existing(conn: sqlite3.Connection, pattern: DetectedPattern):
         if match[1] == SUGGESTION_PENDING:
             return match
     for match in matches:
-        if match[1] != SUGGESTION_SUPERSEDED:
+        if match[1] not in (SUGGESTION_SUPERSEDED, SUGGESTION_RETIRED):
             return match
     return matches[0]
 
@@ -680,8 +707,13 @@ class SuggestionStore:
         except Exception:
             return None
 
-    def store(self, pattern: DetectedPattern, generate=None) -> bool:
-        """Store a pattern as a suggestion in the DB. Returns True if new."""
+    def store(self, pattern: DetectedPattern, generate=None,
+              status: str = SUGGESTION_PENDING) -> bool:
+        """Store a pattern as a suggestion in the DB. Returns True if new.
+
+        ``status`` is the status a NEW row starts with: pending, or
+        rejected when the AI suggestion review turned it down (v7.126.0).
+        An existing row keeps its own status rules."""
         try:
             conn = sqlite3.connect(self._db)
             conn.execute("PRAGMA journal_mode=WAL")
@@ -692,17 +724,27 @@ class SuggestionStore:
             existing = _find_existing(conn, pattern)
             if existing:
                 sid, status = existing
-                if status in (SUGGESTION_PENDING, SUGGESTION_SUPERSEDED):
+                if status in REVIVABLE_STATUSES:
                     # Still under review (or retired only because another
                     # variant was detected later): refresh the evidence and
                     # payload so the reviewer sees (and installs) the latest
                     # measurement, and make this the one pending variant.
+                    # An AI review already recorded on the row is kept.
+                    details = dict(pattern.details or {})
+                    if "review" not in details:
+                        prior = conn.execute(
+                            "SELECT details FROM suggestions WHERE id = ?",
+                            (sid,)).fetchone()
+                        prior_d = loads_json(prior[0], {}) if prior else {}
+                        if isinstance(prior_d, dict) and isinstance(
+                                prior_d.get("review"), dict):
+                            details["review"] = prior_d["review"]
                     conn.execute(
                         "UPDATE suggestions SET confidence = ?, pattern_count = ?, "
                         "description = ?, details = ?, automation_yaml = ?, "
                         "status = ? WHERE id = ?",
                         (pattern.confidence, pattern.occurrences,
-                         pattern.description, json.dumps(pattern.details or {}),
+                         pattern.description, json.dumps(details),
                          (generate or generate_automation)(pattern),
                          SUGGESTION_PENDING, sid),
                     )
@@ -722,20 +764,27 @@ class SuggestionStore:
             # Generate automation YAML suggestion
             auto_yaml = (generate or generate_automation)(pattern)
 
+            status = (SUGGESTION_REJECTED if status == SUGGESTION_REJECTED
+                      else SUGGESTION_PENDING)
             _cur = conn.execute(
                 "INSERT INTO suggestions (created, description, automation_yaml, "
                 "confidence, pattern_count, pattern_type, entity_ids, details, "
-                "status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')",
+                "status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (datetime.now().isoformat(), pattern.description,
                  auto_yaml, pattern.confidence, pattern.occurrences,
                  pattern.pattern_type,
                  json.dumps(pattern.entity_ids or []),
-                 json.dumps(pattern.details or {})),
+                 json.dumps(pattern.details or {}), status),
             )
             _new_sid = _cur.lastrowid
-            _retire_other_variants(conn, pattern, cast(int, _new_sid))
+            if status == SUGGESTION_PENDING:
+                _retire_other_variants(conn, pattern, cast(int, _new_sid))
             conn.commit()
             conn.close()
+            if status == SUGGESTION_REJECTED:
+                # Not a proposal anyone saw: no "suggestion" record, so the
+                # adaptive threshold only ever learns from people's choices.
+                return False
             try:
                 from .. import decision_record
                 decision_record.record(
@@ -755,6 +804,129 @@ class SuggestionStore:
         except Exception as exc:
             _LOGGER.debug("Store suggestion error: %s", exc)
             return False
+
+    def lookup(self, pattern: DetectedPattern) -> Optional[dict]:
+        """The stored row for this pattern's behaviour as {"id", "status",
+        "reviewed"}, or None when it has never been stored."""
+        conn = self._connect()
+        if not conn:
+            return None
+        try:
+            found = _find_existing(conn, pattern)
+            if not found:
+                return None
+            sid, status = found
+            row = conn.execute("SELECT details FROM suggestions WHERE id = ?",
+                               (sid,)).fetchone()
+            details = loads_json(row[0], {}) if row else {}
+            reviewed = isinstance(details, dict) and isinstance(
+                details.get("review"), dict)
+            return {"id": sid, "status": status, "reviewed": reviewed}
+        except Exception:
+            return None
+        finally:
+            conn.close()
+
+    def reject(self, suggestion_id: int, review: dict) -> bool:
+        """Mark a pending suggestion rejected by the AI review, keeping the
+        review (verdict, reason, model) in its details."""
+        conn = self._connect()
+        if not conn:
+            return False
+        try:
+            row = conn.execute(
+                "SELECT details, status FROM suggestions WHERE id = ?",
+                (suggestion_id,)).fetchone()
+            if not row or row["status"] not in REVIVABLE_STATUSES:
+                return False
+            details = loads_json(row["details"], {})
+            details = details if isinstance(details, dict) else {}
+            details["review"] = dict(review or {})
+            conn.execute(
+                "UPDATE suggestions SET status = ?, details = ? WHERE id = ?",
+                (SUGGESTION_REJECTED, json.dumps(details), suggestion_id))
+            conn.commit()
+            return True
+        except Exception:
+            return False
+        finally:
+            conn.close()
+
+    def restore(self, suggestion_id: int) -> bool:
+        """Bring a suggestion the AI review rejected back for a person to
+        decide. It is not reviewed again."""
+        conn = self._connect()
+        if not conn:
+            return False
+        try:
+            row = conn.execute(
+                "SELECT details, status FROM suggestions WHERE id = ?",
+                (suggestion_id,)).fetchone()
+            if not row or row["status"] != SUGGESTION_REJECTED:
+                return False
+            details = loads_json(row["details"], {})
+            details = details if isinstance(details, dict) else {}
+            raw_review = details.get("review")
+            review: dict = raw_review if isinstance(raw_review, dict) else {}
+            details["review"] = dict(review, overridden=True)
+            conn.execute(
+                "UPDATE suggestions SET status = ?, details = ? WHERE id = ?",
+                (SUGGESTION_PENDING, json.dumps(details), suggestion_id))
+            conn.commit()
+            return True
+        except Exception:
+            return False
+        finally:
+            conn.close()
+
+    def rejected(self, limit: int = 20) -> list[dict]:
+        """Suggestions the AI review turned down, newest first."""
+        conn = self._connect()
+        if not conn:
+            return []
+        try:
+            rows = conn.execute(
+                "SELECT * FROM suggestions WHERE status = ? "
+                "ORDER BY id DESC LIMIT ?", (SUGGESTION_REJECTED, int(limit))
+            ).fetchall()
+            return [dict(r) for r in rows]
+        except Exception:
+            return []
+        finally:
+            conn.close()
+
+    def retire_missing(self, pattern_type: str, detected: list) -> int:
+        """Retire pending suggestions of `pattern_type` whose behaviour was
+        not among the `detected` patterns of this pass. Retired rows are
+        hidden and come back as pending if detected again. Returns how many
+        were retired."""
+        keys = {suggestion_identity(p.pattern_type, p.entity_ids, p.details)
+                for p in detected if p.pattern_type == pattern_type}
+        conn = self._connect()
+        if not conn:
+            return 0
+        try:
+            rows = conn.execute(
+                "SELECT id, entity_ids, details FROM suggestions "
+                "WHERE pattern_type = ? AND status = ?",
+                (pattern_type, SUGGESTION_PENDING)).fetchall()
+            retired = 0
+            for row in rows:
+                key = suggestion_identity(pattern_type,
+                                          loads_json(row["entity_ids"], []),
+                                          loads_json(row["details"], {}))
+                if key is None or key in keys:
+                    continue
+                conn.execute(
+                    "UPDATE suggestions SET status = ? WHERE id = ? AND status = ?",
+                    (SUGGESTION_RETIRED, row["id"], SUGGESTION_PENDING))
+                retired += 1
+            conn.commit()
+            return retired
+        except Exception:
+            return 0
+        finally:
+            conn.close()
 
     def pending(self) -> list[dict]:
         """Get all pending suggestions for the user to review."""

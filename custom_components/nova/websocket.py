@@ -802,6 +802,8 @@ async def ws_get_panel_data(
             # Reads patterns.db: run it off the event loop.
             "suggestions":    await hass.async_add_executor_job(
                 _get_suggestions, _entity_names(hass)),
+            "suggestions_filtered": await hass.async_add_executor_job(
+                _get_filtered_suggestions, _entity_names(hass)),
             "goals":          _get_goals(),
             "config": {
                 "announcements_enabled": announcements_on,
@@ -929,6 +931,11 @@ async def ws_get_panel_data(
                 "vision_model":        str(_runtime_opt(hass, entry, "vision_model", "") or ""),
                 "camera_reasoning_provider": str(_runtime_opt(hass, entry, "camera_reasoning_provider", "groq") or "groq"),
                 "camera_reasoning_model":    str(_runtime_opt(hass, entry, "camera_reasoning_model", "") or ""),
+                "suggestion_review_enabled": bool(_runtime_opt(hass, entry, "suggestion_review_enabled", False)),
+                "suggestion_review_provider": str(_runtime_opt(hass, entry, "suggestion_review_provider", "")
+                                                  or _runtime_opt(hass, entry, "llm_provider", "") or ""),
+                "suggestion_review_model":   str(_runtime_opt(hass, entry, "suggestion_review_model", "")
+                                                 or _runtime_opt(hass, entry, "model", "") or ""),
                 # Nova Character & Research — these must be surfaced here or
                 # the panel's selects snap back to their defaults on every
                 # re-render even though the value was saved (v6.64.1 fix).
@@ -1123,6 +1130,17 @@ def _get_goals() -> list[dict]:
                 "updated_ts": g.get("updated_ts", ""),
             })
         return out
+    except Exception:
+        return []
+
+
+def _get_filtered_suggestions(names: Optional[dict] = None) -> list[dict]:
+    """Suggestions the AI review turned down, panel-shaped. Never raises."""
+    try:
+        from .automation.api import panel_rejected_items
+        from .automation.patterns import get_analyzer
+        return panel_rejected_items(get_analyzer().get_rejected_suggestions(),
+                                    names)
     except Exception:
         return []
 
@@ -1619,6 +1637,9 @@ PANEL_WRITABLE_KEYS = {
     "vision_model",
     "camera_reasoning_provider",
     "camera_reasoning_model",
+    "suggestion_review_enabled",   # bool: AI review of learned suggestions (opt in)
+    "suggestion_review_provider",
+    "suggestion_review_model",
     "classifier_rate_limit",
     "intrusion_notify_image_ttl_minutes",  # minutes: signed notification-image copy lifetime (v7.102.0)
     "cognition_enabled",
@@ -2372,6 +2393,7 @@ _AI_ROLE_FIELDS = (
     ("Reasoning", "reasoning_provider", "reasoning_model"),
     ("Vision", "vision_provider", "vision_model"),
     ("Camera Reasoning", "camera_reasoning_provider", "camera_reasoning_model"),
+    ("Suggestion Review", "suggestion_review_provider", "suggestion_review_model"),
 )
 _AI_APPLY_KEYS = frozenset({
     key for _label, provider_key, model_key in _AI_ROLE_FIELDS
@@ -2440,6 +2462,11 @@ def _validate_ai_candidate(candidate: dict) -> list[str]:
 
     errors: list[str] = []
     for label, provider_key, model_key in _AI_ROLE_FIELDS:
+        # Suggestion Review (v7.126.0) uses the Main Agent's provider and
+        # model until one is chosen for it; unset, it is not checked alone.
+        if (provider_key == "suggestion_review_provider"
+                and not str(candidate.get(provider_key) or "").strip()):
+            continue
         provider = str(candidate.get(provider_key) or "").strip().lower()
         model = str(candidate.get(model_key) or "").strip()
         if provider not in _AI_PROVIDERS:
@@ -2574,10 +2601,10 @@ async def ws_apply_ai_config(hass: HomeAssistant, connection, msg) -> None:
 
         tested: set[tuple[str, str, str]] = set()
         for label, provider_key, model_key in _AI_ROLE_FIELDS:
-            provider = str(candidate[provider_key])
+            provider = str(candidate.get(provider_key) or "")
             if provider not in ("ollama", "custom"):
                 continue
-            model = str(candidate[model_key])
+            model = str(candidate.get(model_key) or "")
             endpoint = str(resolve_provider_endpoint(candidate, provider) or "")
             test_key = (provider, endpoint, model)
             if test_key in tested:
@@ -3108,7 +3135,7 @@ async def ws_get_cognitive_status(
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/suggestion_action",
     vol.Required("suggestion_id"): int,
-    vol.Required("action"): vol.In(["approve", "dismiss"]),
+    vol.Required("action"): vol.In(["approve", "dismiss", "restore"]),
 })
 @websocket_api.async_response
 async def ws_suggestion_action(
@@ -3117,7 +3144,8 @@ async def ws_suggestion_action(
     msg: dict,
 ) -> None:
     """Approve or dismiss a pattern-engine automation suggestion. Approval now
-    installs the automation into HA, not just flags it (v6.52.0)."""
+    installs the automation into HA, not just flags it (v6.52.0). "restore"
+    brings back a suggestion the AI review rejected (v7.126.0)."""
     try:
         from .automation.installation import install_approved_suggestion
         from .automation.patterns import get_analyzer
@@ -3141,6 +3169,11 @@ async def ws_suggestion_action(
                 "reason": res.get("reason"),
                 "alias": res.get("alias"),
             })
+            return
+        if msg["action"] == "restore":
+            ok = await hass.async_add_executor_job(analyzer.restore_suggestion, sid)
+            nova_log("LEARN", f"Suggestion #{sid} restored after AI review (ok={ok})")
+            connection.send_result(msg["id"], {"ok": bool(ok)})
             return
         ok = await hass.async_add_executor_job(analyzer.dismiss_suggestion, sid)
         nova_log("LEARN", f"Suggestion #{sid} dismissed (ok={ok})")

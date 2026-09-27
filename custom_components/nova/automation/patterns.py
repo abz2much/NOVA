@@ -32,7 +32,13 @@ from .area_presence import (
     presence_gate_condition,
     presence_release,
 )
-from .models import DetectedPattern
+from .models import (
+    MATCH_EXACT,
+    MATCH_OVERLAP,
+    SUGGESTION_PENDING,
+    SUGGESTION_REJECTED,
+    DetectedPattern,
+)
 from .recorder_time import recorder_epoch
 from .suggestions import (  # DB_PATH / MIN_DAYS are shared with stats
     DB_PATH,
@@ -334,6 +340,32 @@ def _numeric_trigger_from(occ: list, baseline: list) -> Optional[dict]:
     return None
 
 
+# Devices a numeric threshold may drive, and how soon after the crossing the
+# action has to follow for the sensor to count as its trigger (v7.126.0).
+NUMERIC_ACTION_DOMAINS = ("light", "switch", "cover", "lock", "climate", "fan",
+                          "media_player", "humidifier", "water_heater", "valve")
+NUMERIC_TRIGGER_WINDOW = 600.0
+# A threshold automation acts on every crossing, so a crossing must be
+# followed by the action at least this often (sequences use 0.3).
+NUMERIC_MIN_CONDITIONAL = 0.5
+# Most new suggestions the AI review judges in one analysis pass; the rest
+# wait for the next pass (bounds cost and time).
+REVIEW_MAX_PER_PASS = 10
+
+
+def _threshold_crossings(series: list, op: str, threshold: float) -> list:
+    """Epochs at which a numeric series crosses ``threshold`` in the
+    direction of ``op`` ("below" or "above"). Pure."""
+    events = sorted(series)
+    out: list = []
+    for (_t0, before), (t1, after) in zip(events, events[1:]):
+        if op == "below" and before >= threshold > after:
+            out.append(t1)
+        elif op == "above" and before <= threshold < after:
+            out.append(t1)
+    return out
+
+
 def _prepare_numeric_history(sensor_hist: dict) -> dict:
     """``{sensor_id: (epochs, values)}`` sorted by time, numeric readings only,
     for sensors with at least 10 of them. Built once per analysis so each
@@ -387,6 +419,7 @@ class PatternAnalyzer:
         # entity_id -> friendly name, read on the event loop at the start of
         # each analysis (the detectors run in an executor, away from states).
         self._names: dict = {}
+        self._numeric_ran = False
         # Single flight: a manual run and the scheduled run never overlap.
         self._analysis_lock = asyncio.Lock()
 
@@ -476,8 +509,15 @@ class PatternAnalyzer:
                 pass
         return out
 
-    async def analyze(self, hass: HomeAssistant) -> list[DetectedPattern]:
+    async def analyze(self, hass: HomeAssistant,
+                      reviewer=None) -> list[DetectedPattern]:
         """Run full pattern analysis. Returns detected patterns.
+
+        ``reviewer`` (v7.126.0) is an optional ``async (hass, pattern) ->
+        verdict | None`` that judges each NEW suggestion before it is stored
+        (the AI suggestion review, see suggestion_review.py). It can only
+        reject: a rejected suggestion is stored as rejected and never
+        suggested again; one it cannot judge is not stored this pass.
 
         Single flight: a caller that arrives while an analysis is running
         waits for it and gets its result instead of starting a second one."""
@@ -485,11 +525,14 @@ class PatternAnalyzer:
             async with self._analysis_lock:
                 return list(self._last_patterns)
         async with self._analysis_lock:
-            patterns = await self._analyze_once(hass)
+            # Without a reviewer, call exactly as before (a patch point).
+            patterns = await (self._analyze_once(hass, reviewer=reviewer)
+                              if reviewer is not None else self._analyze_once(hass))
             self._last_patterns = list(patterns)
             return patterns
 
-    async def _analyze_once(self, hass: HomeAssistant) -> list[DetectedPattern]:
+    async def _analyze_once(self, hass: HomeAssistant,
+                            reviewer=None) -> list[DetectedPattern]:
         self._last_analysis = time.time()
 
         # Everything that needs the event loop (the state machine, the
@@ -511,11 +554,21 @@ class PatternAnalyzer:
             _area_presence = await self._fetch_area_presence_context(hass)
         except Exception:
             _area_presence = EMPTY_CONTEXT
+        _entity_areas: dict = {}
+        if _sensor_hist:
+            try:
+                ids = list(_sensor_hist)
+                for dom in NUMERIC_ACTION_DOMAINS:
+                    ids.extend(st.entity_id for st in hass.states.async_all(dom))
+                _entity_areas = await self._fetch_entity_areas(hass, ids)
+            except Exception:
+                _entity_areas = {}
         _lat = getattr(hass.config, "latitude", None)
         _lon = getattr(hass.config, "longitude", None)
+        self._numeric_ran = False
         patterns = await hass.async_add_executor_job(
             self._detect_patterns, person_map, _lat, _lon, _sensor_hist,
-            _area_presence)
+            _area_presence, _entity_areas)
         if patterns is None:          # no patterns.db yet
             return []
 
@@ -531,13 +584,50 @@ class PatternAnalyzer:
         _seq_needed = int(_eff_threshold * MIN_OCCURRENCES * 3)
         if _eff_threshold * MIN_OCCURRENCES * 3 > _seq_needed:
             _seq_needed += 1
+        reviewed = rejected = deferred = 0
         for p in patterns:
             if p.confidence >= _eff_threshold:
                 match = self._automation_match(hass, p)
                 p.details["automation_match"] = match
                 if match.get("status") == "already_automated":
+                    # An automation already does this (exactly, or the same
+                    # action on the same device from another trigger).
                     already_automated += 1
                     continue
+                verdict = None
+                if reviewer is not None:
+                    found = await hass.async_add_executor_job(
+                        self._suggestions().lookup, p)
+                    needs = found is None or (
+                        found["status"] == SUGGESTION_PENDING
+                        and not found["reviewed"])
+                    if needs:
+                        if reviewed >= REVIEW_MAX_PER_PASS:
+                            deferred += 1
+                            if found is None:
+                                continue   # reviewed on a later pass
+                        else:
+                            reviewed += 1
+                            try:
+                                verdict = await reviewer(hass, p)
+                            except Exception:
+                                verdict = None
+                            if verdict is None:
+                                deferred += 1
+                                if found is None:
+                                    continue   # not judged: not shown yet
+                            else:
+                                p.details["review"] = verdict
+                                if verdict.get("verdict") == "reject":
+                                    rejected += 1
+                                    if found is None:
+                                        await hass.async_add_executor_job(
+                                            self._store_rejected, p)
+                                    else:
+                                        await hass.async_add_executor_job(
+                                            self._suggestions().reject,
+                                            found["id"], verdict)
+                                    continue
                 stored = await hass.async_add_executor_job(
                     self._store_suggestion, p)
                 if stored:
@@ -570,11 +660,24 @@ class PatternAnalyzer:
         # Record the outcome of this pass so the panel can show "last analysis:
         # ran at T, N found, M stored" — the difference between "never ran" and
         # "ran, found nothing worth surfacing".
+        # Threshold suggestions from the detector before v7.126.0 that the
+        # stricter one no longer finds are retired (hidden; they come back if
+        # detected again). Only when that detector actually ran this pass.
+        retired = 0
+        if self._numeric_ran:
+            retired = await hass.async_add_executor_job(
+                self._suggestions().retire_missing, "numeric_trigger",
+                [p for p in patterns if p.pattern_type == "numeric_trigger"])
+
         self._last_result = {
             "ts": time.time(),
             "patterns_found": len(patterns),
             "new_suggestions": new_suggestions,
             "already_automated": already_automated,
+            "reviewed": reviewed,
+            "rejected_by_review": rejected,
+            "review_deferred": deferred,
+            "retired": retired,
             "person_routines": new_person_patterns,
             "facts": promoted,
             "near_misses": near_misses,
@@ -593,6 +696,7 @@ class PatternAnalyzer:
     def _detect_patterns(
         self, person_map: dict, lat, lon, sensor_hist: dict,
         area_presence: AreaPresenceContext = EMPTY_CONTEXT,
+        entity_areas: Optional[dict] = None,
     ) -> Optional[list[DetectedPattern]]:
         """Run every detector over one connection. SYNC — executor only.
 
@@ -610,7 +714,8 @@ class PatternAnalyzer:
             patterns.extend(self._find_sequence_patterns(
                 conn, lat, lon, sensor_hist, area_presence))
             patterns.extend(self._find_numeric_triggers(
-                conn, sensor_hist, area_presence))
+                conn, sensor_hist, area_presence, entity_areas))
+            self._numeric_ran = bool(sensor_hist)
             patterns.extend(self._find_presence_patterns(conn))
         except Exception as exc:
             _LOGGER.warning("Pattern analysis error: %s", exc)
@@ -640,8 +745,16 @@ class PatternAnalyzer:
             if inventory is None:
                 return {"status": "inventory_unavailable", "matches": [],
                         "reason": "automation inventory unavailable"}
-            from .matching import classify
-            return classify(candidate, inventory.records())
+            from .matching import classify_result
+            result = classify_result(candidate, inventory.records())
+            if result.status == MATCH_OVERLAP and result.same_effect:
+                # Another automation already performs this action on this
+                # device from a different trigger: not a new automation.
+                return {"status": MATCH_EXACT,
+                        "matches": [m.to_dict() for m in result.matches],
+                        "reason": "a loaded automation already performs this "
+                                  "action on the same device"}
+            return result.to_dict()
         except Exception:
             return {"status": "inventory_unavailable", "matches": [],
                     "reason": "automation comparison failed"}
@@ -1047,25 +1160,38 @@ class PatternAnalyzer:
     def _find_numeric_triggers(self, conn: sqlite3.Connection,
                                sensor_hist: dict,
                                area_presence: AreaPresenceContext = EMPTY_CONTEXT,
+                               entity_areas: Optional[dict] = None,
                                ) -> list[DetectedPattern]:
         """Learn "when a sensor crosses a threshold, an action happens" from
         history. ``sensor_hist`` maps sensor_id -> chronological ``[(epoch,
         float)]`` (fetched from the recorder by the caller and passed in, so this
-        stays unit-testable without the recorder). Bounded: the most active
-        actions only, few numeric sensors, strong consistency in the scorer.
+        stays unit-testable without the recorder).
+
+        A sensor only explains an action when (v7.126.0):
+          * both are in the same Home Assistant area (``entity_areas``); a
+            light level in the landing says nothing about the kitchen light,
+            and every room gets dark in the evening;
+          * the sensor actually CROSSES the threshold shortly before the
+            action (within NUMERIC_TRIGGER_WINDOW), not merely reads low at
+            the time;
+          * a crossing is followed by the action often enough to automate
+            (scored like a sequence, with a higher bar: NUMERIC_MIN_CONDITIONAL).
+        Only the strongest sensor is kept for each action, so one light is
+        never suggested once per sensor in the house.
         """
+        from ..cognitive import patterns as scoring
         patterns: list = []
         if not sensor_hist:
             return patterns
-        _ACT = ("light", "switch", "cover", "lock", "climate", "fan",
-                "media_player", "humidifier", "water_heater", "valve")
+        areas = entity_areas or {}
         try:
             source_filter = _source_filter(conn)
             rows = conn.execute(
                 "SELECT entity_id, new_state, timestamp FROM state_changes "
                 "WHERE timestamp > datetime('now', '-30 days') AND domain IN ({}) "
                 "AND {} ORDER BY timestamp".format(
-                    ",".join("'%s'" % d for d in _ACT), source_filter)
+                    ",".join("'%s'" % d for d in NUMERIC_ACTION_DOMAINS),
+                    source_filter)
             ).fetchall()
         except Exception:
             return patterns
@@ -1085,13 +1211,19 @@ class PatternAnalyzer:
         if not prepared:
             return patterns
 
+        best: dict = {}   # (action entity, state) -> (confidence, pattern)
         # Most active actions only — bounds the sensor×action correlation work.
         ranked = sorted(action_times.items(), key=lambda kv: len(kv[1]),
                         reverse=True)[:20]
         for (a_ent, a_st), times in ranked:
             if len(times) < MIN_OCCURRENCES:
                 continue
+            a_area = areas.get(a_ent)
+            if not a_area:
+                continue
             for s_ent, (epochs, values) in prepared.items():
+                if areas.get(s_ent) != a_area:
+                    continue
                 occ = []
                 for t in times:
                     v = _numeric_value_at(epochs, values, t)
@@ -1103,34 +1235,75 @@ class PatternAnalyzer:
                 if not trig:
                     continue
                 op, T = next(iter(trig.items()))
+                series = list(zip(epochs, values))
+                crossings = _threshold_crossings(series, op, T)
                 crossing_times = numeric_trigger_times(
-                    list(zip(epochs, values)), op, T, times)
+                    series, op, T, times, window_seconds=NUMERIC_TRIGGER_WINDOW)
+                support = len(crossing_times)
+                days = len({datetime.fromtimestamp(t).date() for t in crossing_times})
+                score = scoring.score_sequence(
+                    scoring.SequenceEvidence(support=support,
+                                             trigger_count=len(crossings),
+                                             distinct_days=days),
+                    min_occurrences=MIN_OCCURRENCES)
+                conditional = support / max(support, len(crossings), 1)
+                if not score.accepted or conditional < NUMERIC_MIN_CONDITIONAL:
+                    continue
                 gate = presence_gate_condition(
                     a_ent, crossing_times, area_presence, exclude=(s_ent,))
                 gate_condition = gate["condition"] if gate else None
-                def _desc(s_name, a_name):
-                    text = (f"When {s_name} goes {op} {T:g}, {a_name} turns "
-                            f"{a_st} ({len(occ)} times in 30 days)")
-                    if gate:
+
+                def _desc(s_name, a_name, _op=op, _t=T, _gate=gate,
+                          _support=support):
+                    text = (f"When {s_name} goes {_op} {_t:g}, {a_name} turns "
+                            f"{a_st} ({_support} times in 30 days)")
+                    if _gate:
                         text += (f", only when presence is detected in "
-                                 f"{gate['area_name']}")
+                                 f"{_gate['area_name']}")
                     return text
-                patterns.append(DetectedPattern(
+                pattern = DetectedPattern(
                     pattern_type="numeric_trigger",
                     description=_desc(self._name(s_ent), self._name(a_ent)),
                     legacy_description=_desc(s_ent, a_ent),
                     entity_ids=[s_ent, a_ent],
-                    confidence=min(1.0, len(occ) / (MIN_OCCURRENCES * 3)),
-                    occurrences=len(occ),
+                    confidence=score.confidence,
+                    occurrences=support,
                     details={"trigger_sensor": s_ent, "op": op, "threshold": T,
                              "action": {"entity": a_ent, "state": a_st},
+                             "crossings": len(crossings),
+                             "followed": support,
+                             "action_count": len(times),
+                             "window_seconds": NUMERIC_TRIGGER_WINDOW,
+                             "distinct_days": days,
+                             "evidence": score.evidence(),
                              **({"condition": [gate_condition],
                                  "presence_gate": {
                                      name: gate[name] for name in
                                      ("entity_id", "area_id", "area_name")}}
                                 if gate else {})},
-                ))
+                )
+                key = (a_ent, a_st)
+                if key not in best or score.confidence > best[key][0]:
+                    best[key] = (score.confidence, pattern)
+        patterns.extend(p for _c, p in best.values())
         return patterns
+
+    async def _fetch_entity_areas(self, hass, entity_ids) -> dict:
+        """entity_id -> area_id (directly or via its device) for the given
+        entities, read on the event loop. Never raises."""
+        out: dict = {}
+        try:
+            from ..audio_routing import entity_area
+        except Exception:
+            return out
+        for entity_id in entity_ids:
+            try:
+                area = entity_area(hass, entity_id)
+            except Exception:
+                area = None
+            if area:
+                out[entity_id] = area
+        return out
 
     async def _fetch_area_presence_context(self, hass) -> AreaPresenceContext:
         """Collect bounded area-presence history without crossing HA threads."""
@@ -1522,6 +1695,13 @@ class PatternAnalyzer:
     def _suggestions(self) -> SuggestionStore:
         return SuggestionStore(self._db)
 
+    def _store_rejected(self, pattern: DetectedPattern) -> bool:
+        """Store a suggestion the AI review turned down, so it is never
+        suggested again (the panel can restore it)."""
+        return self._suggestions().store(
+            pattern, generate=self._generate_automation,
+            status=SUGGESTION_REJECTED)
+
     def _store_suggestion(self, pattern: DetectedPattern) -> bool:
         """Store a pattern as a suggestion in the DB. Returns True if new."""
         return self._suggestions().store(pattern, generate=self._generate_automation)
@@ -1545,6 +1725,14 @@ class PatternAnalyzer:
     def mark_covered(self, suggestion_id: int) -> None:
         """Retire a stale suggestion when HA now has an equivalent automation."""
         self._suggestions().mark_covered(suggestion_id)
+
+    def get_rejected_suggestions(self) -> list[dict]:
+        """Suggestions the AI review turned down (v7.126.0)."""
+        return self._suggestions().rejected()
+
+    def restore_suggestion(self, suggestion_id: int) -> bool:
+        """Bring an AI-rejected suggestion back to pending for a person."""
+        return self._suggestions().restore(suggestion_id)
 
     def approve_suggestion(self, suggestion_id: int) -> bool:
         """Mark a suggestion as approved."""

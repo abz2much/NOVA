@@ -20,6 +20,7 @@
           <div class="mode-grid"><button class="mode-chip" id="sugRunAnalysis">Analyze Now</button></div>
           <div class="toggle-desc" id="sugAnalysisResult" style="margin-top:8px">See why nothing has qualified yet, or force a fresh pass over your history.</div>
         </div>
+        ${this._htmlFilteredSuggestions()}
         ${this._htmlAutomationTrials()}`;
     }
     const rows = sugs.map(s => {
@@ -27,8 +28,9 @@
       const confColor = pct >= 80 ? "#5fbf7a" : pct >= 55 ? "var(--warn)" : "var(--ink-faint)";
       const label = NovaPanel.SUGGESTION_TYPE_LABEL[s.pattern_type] || "Learned pattern";
       const evidence = (s.evidence || []).map(e => `<li>${this._esc(e)}</li>`).join("");
-      const entities = (s.entities || []).length
-        ? `<div class="mode-grid">${(s.entities || []).map(e => `<span class="area-cap" style="width:auto;padding:3px 8px;font-family:var(--font-mono);font-size:10px">${this._esc(e)}</span>`).join("")}</div>`
+      const chips = (s.entity_labels && s.entity_labels.length) ? s.entity_labels : (s.entities || []);
+      const entities = chips.length
+        ? `<div class="mode-grid">${chips.map(e => `<span class="area-cap" style="width:auto;padding:3px 8px;font-size:11px">${this._esc(e)}</span>`).join("")}</div>`
         : "";
       const match = s.automation_match || {};
       // The backend names the automations it matched in match.matches.
@@ -72,7 +74,32 @@
         <div class="stub-body">Automations Nova has learned from watching your routines. Review each — approve to create it in Home Assistant, or dismiss it. Nothing runs until you approve, and you can see the exact automation before deciding.</div>
       </div>
       ${rows}
+      ${this._htmlFilteredSuggestions()}
       ${this._htmlAutomationTrials()}`;
+  }
+
+  // Suggestions the AI review turned down (v7.126.0). They are never
+  // suggested again; "Suggest anyway" brings one back for you to decide.
+  _htmlFilteredSuggestions() {
+    const items = this._data()?.suggestions_filtered || [];
+    if (!items.length) return "";
+    const rows = items.map(f => `
+      <div class="cfg-row new-sug-filtered" data-sug-id="${f.id}" style="align-items:flex-start;gap:10px">
+        <div style="flex:1">
+          <div class="stub-body" style="margin:0">${this._esc(f.description || "")}</div>
+          <div class="toggle-desc">Rejected: ${this._esc(f.reason || "no reason given")}${f.model ? ` (${this._esc(f.model)})` : ""}</div>
+        </div>
+        <button class="mode-chip new-sug-restore">Suggest anyway</button>
+      </div>`).join("");
+    return `
+      <details class="panel">
+        <summary class="panel-head" style="cursor:pointer">
+          <div class="panel-title">Filtered by AI review</div>
+          <div class="panel-meta">${items.length} not suggested</div>
+        </summary>
+        <div class="stub-body">These learned patterns were checked by the Suggestion Review model and turned down, so Nova won't suggest them again. Bring one back if you think the review got it wrong.</div>
+        ${rows}
+      </details>`;
   }
 
   _htmlAutomationInventory() {
@@ -249,6 +276,26 @@
       card.querySelector(".new-sug-yaml-btn")?.addEventListener("click", () => {
         const pre = card.querySelector(".new-sug-yaml");
         if (pre) pre.hidden = !pre.hidden;
+      });
+    });
+    root.querySelectorAll(".new-sug-filtered").forEach(row => {
+      const sid = parseInt(row.getAttribute("data-sug-id"), 10);
+      const btn = row.querySelector(".new-sug-restore");
+      btn?.addEventListener("click", async () => {
+        if (!this._hass || isNaN(sid)) return;
+        btn.disabled = true;
+        let res = null;
+        try {
+          res = await this._hass.callWS({ type: "nova/suggestion_action", suggestion_id: sid, action: "restore" });
+        } catch (err) {
+          console.error("Nova: suggestion restore failed", err);
+        }
+        if (res && res.ok) {
+          row.style.opacity = "0.35";
+          btn.textContent = "Back in suggestions";
+          return;
+        }
+        btn.disabled = false;
       });
     });
     root.querySelectorAll(".new-trial-fb").forEach(btn => {
