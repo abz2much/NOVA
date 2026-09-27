@@ -185,6 +185,7 @@ class NovaPanel extends HTMLElement {
       config: live.config || {},
       doorbellTraining: live.doorbell_training || {},
       suggestions: live.suggestions || [],
+      suggestions_filtered: live.suggestions_filtered || [],
       goals: live.goals || [],
       lockdown: live.lockdown || live.config?.lockdown || {},
       onboarding: live.onboarding || live.config?.onboarding || null,

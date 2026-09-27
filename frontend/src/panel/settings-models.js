@@ -120,8 +120,8 @@
           return;
         }
         const textRoles = profile === "hybrid"
-          ? ["classifier", "reasoning", "camrsn"]
-          : ["llm", "classifier", "reasoning", "camrsn"];
+          ? ["classifier", "reasoning", "camrsn", "sugrev"]
+          : ["llm", "classifier", "reasoning", "camrsn", "sugrev"];
         const missing = [];
         textRoles.forEach(role => {
           const row = root.querySelector(`.new-model-row[data-role="${role}"]`);

@@ -237,6 +237,8 @@ def test_panel_suggestion_items_shape(load):
         "id": 4, "created": "2026-09-01T10:00:00", "description": "d",
         "yaml": "{}", "confidence": 0.88, "count": 9,
         "pattern_type": "time_routine", "entities": ["light.porch"],
+        # v7.126.0: the chips show names ("porch" without a friendly name).
+        "entity_labels": ["porch"],
         "why_headline": "A daily routine around 18:00",
         "evidence": ["Observed turning on near 18:00",
                      "Happened 9 times in the last 30 days"],

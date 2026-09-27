@@ -47,6 +47,7 @@ ROLE_FIELDS = {
     "review": ("review_provider", "review_model"),
     "vision": ("vision_provider", "vision_model"),
     "camera_reasoning": ("camera_reasoning_provider", "camera_reasoning_model"),
+    "suggestion_review": ("suggestion_review_provider", "suggestion_review_model"),
 }
 TIERS = ("classifier", "reasoning", "review", "conversation")
 

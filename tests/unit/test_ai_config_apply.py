@@ -99,3 +99,27 @@ def test_candidate_requires_the_matching_self_hosted_endpoint(ai_config):
     candidate = _all_roles("custom", "private-model")
     candidate["self_hosted_endpoints_migrated"] = True
     assert validate(candidate) == ["Set the custom endpoint before applying"]
+
+
+def test_suggestion_review_follows_the_main_agent_until_chosen(ai_config):
+    """v7.126.0: an install that never chose a Suggestion Review model can
+    still apply; one that picks a provider must also pick a model."""
+    validate = ai_config["_validate_ai_candidate"]
+    candidate = _all_roles("ollama", "local-tools:latest")
+    candidate.update({"ollama_base_url": "http://ollama.lan:11434",
+                      "self_hosted_endpoints_migrated": True})
+    assert validate(candidate) == []
+    candidate["suggestion_review_provider"] = "ollama"
+    assert validate(candidate) == ["Suggestion Review needs a model"]
+    candidate["suggestion_review_model"] = "local-tools:latest"
+    assert validate(candidate) == []
+    candidate["suggestion_review_provider"] = "openai"
+    assert validate(candidate) == ["Add the openai credential before applying"]
+
+
+def test_suggestion_review_is_an_apply_key(ai_config):
+    prepare = ai_config["_prepare_ai_config_updates"]
+    assert prepare({"suggestion_review_provider": "ollama",
+                    "suggestion_review_model": "local-tools:latest"}) == {
+        "suggestion_review_provider": "ollama",
+        "suggestion_review_model": "local-tools:latest"}

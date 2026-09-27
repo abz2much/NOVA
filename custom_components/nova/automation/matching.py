@@ -174,6 +174,7 @@ def classify_result(candidate: Any, records: Iterable[Any]) -> MatchResult:
     exact: list[MatchRef] = []
     overlaps: list[MatchRef] = []
     unknown: list[MatchRef] = []
+    same_effect = False
 
     for record in records:
         entity_id = str(getattr(record, "entity_id", "") or "")
@@ -187,6 +188,7 @@ def classify_result(candidate: Any, records: Iterable[Any]) -> MatchResult:
         effects = action_effects(raw)
         if candidate_effects and effects and candidate_effects.intersection(effects):
             overlaps.append(label)
+            same_effect = True
             continue
         # Only a fully inspectable, non-templated automation can help prove a
         # candidate is new. A blueprint, a metadata-only record or a templated
@@ -204,7 +206,8 @@ def classify_result(candidate: Any, records: Iterable[Any]) -> MatchResult:
                            "an equivalent loaded Home Assistant automation exists")
     if overlaps:
         return MatchResult(MATCH_OVERLAP, tuple(overlaps),
-                           "a loaded automation controls the same target")
+                           "a loaded automation controls the same target",
+                           same_effect=same_effect)
     if unknown:
         return MatchResult(MATCH_OPAQUE, tuple(unknown),
                            "an opaque automation may control the same target")

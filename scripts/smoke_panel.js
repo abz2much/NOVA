@@ -150,6 +150,11 @@ const PANEL = {
       why_headline: "A daily routine around 18:00",
       evidence: ["Observed turning on near 18:00", "Happened 6 times in the last 30 days", "Consistent on about 82% of days"] },
   ],
+  suggestions_filtered: [
+    { id: 21, pattern_type: "numeric_trigger",
+      description: "When Landing goes below 70, Kitchen Light turns on <img src=x onerror=\"window.__xssFiltered=true\">",
+      reason: "The landing sensor is in a different room.", model: "gemma4:26b", reviewed_at: "" },
+  ],
   doorbell_training: {
     stats: { total: 18, notable: 3, by_source: { nest: 14, frigate: 4 } },
     recent: [
@@ -1228,13 +1233,14 @@ setTimeout(async () => {
   await new Promise(r => setTimeout(r, 30));
   sRoot = elNew.shadowRoot;
   checks.push(
-    ["settings tab: AI Models card has five real roles and self-hosted setup controls",
+    ["settings tab: AI Models card has six real roles (incl. Suggestion Review) and self-hosted setup controls",
       (() => {
         const aiCard = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /AI Models/.test(c.querySelector(".panel-title")?.textContent || ""));
         if (!aiCard || aiCard.querySelector(".stub-tag")) return false;
         const rows = aiCard.querySelectorAll(".new-model-row");
         const llmRow = aiCard.querySelector('.new-model-row[data-role="llm"] .new-model-select');
-        return rows.length === 5
+        return rows.length === 6
+          && !!aiCard.querySelector('.new-model-row[data-role="sugrev"]')
           && !!llmRow && /llama-3\.3-70b-versatile/.test(llmRow.innerHTML)
           && !aiCard.querySelector('.new-model-row[data-role="review"]')
           && !!aiCard.querySelector('.ai-endpoint[data-endpoint-provider="ollama"]')
@@ -2442,6 +2448,18 @@ setTimeout(async () => {
     _sugCalls.some(c => c.id === 11 && c.action === "approve")
     && sRoot.querySelector(".new-sug")?.style.opacity === "0.35"
     && Array.from(sRoot.querySelectorAll(".new-sug button")).every(b => b.disabled)]);
+
+  // v7.126.0: suggestions the AI review rejected are listed with the reason,
+  // escaped, and can be brought back.
+  checks.push(["suggestions tab: AI-filtered suggestions are listed with the review's reason, escaped",
+    /Filtered by AI review/.test(sRoot.textContent)
+    && /different room/.test(sRoot.textContent)
+    && !sRoot.querySelector(".new-sug-filtered img")
+    && window.__xssFiltered !== true]);
+  sRoot.querySelector(".new-sug-restore")?.click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["suggestions tab: 'Suggest anyway' calls nova/suggestion_action restore",
+    _sugCalls.some(c => c.id === 21 && c.action === "restore")]);
 
   // Post-v7.103.0 fix: the Nova-created section used to vanish entirely —
   // _htmlAutomationTrials() returned "" for an empty result, and the

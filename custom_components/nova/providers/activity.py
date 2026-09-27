@@ -34,6 +34,7 @@ ROLES = frozenset({
     "briefing",          # scheduled and on-demand briefings
     "vision",            # camera image analysis
     "camera_reasoning",  # judging a camera description
+    "suggestion_review", # vetting a learned automation suggestion
     "sentinel",          # sentinel alerts
     "summary",           # nova.summarise
     "scenes",            # scene-by-intent matching

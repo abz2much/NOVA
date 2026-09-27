@@ -404,6 +404,7 @@
       { role: "reasoning", label: "Reasoning", provKey: "reasoning_provider", modelKey: "reasoning_model" },
       { role: "vision", label: "Vision", provKey: "vision_provider", modelKey: "vision_model" },
       { role: "camrsn", label: "Camera Reasoning", provKey: "camera_reasoning_provider", modelKey: "camera_reasoning_model" },
+      { role: "sugrev", label: "Suggestion Review", provKey: "suggestion_review_provider", modelKey: "suggestion_review_model" },
     ];
   }
 
