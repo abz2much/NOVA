@@ -59,7 +59,7 @@ def test_sequence_detected_within_window(analyzer, tmp_path):
          and p.details["action"]["entity"] == "light.b"]
     assert m, "expected the light.a -> light.b sequence"
     assert m[0].occurrences >= 5
-    assert "light.a" in m[0].description and "light.b" in m[0].description
+    assert m[0].description.startswith("When a turns on, b turns on shortly after")
 
 
 def test_pairs_outside_window_not_counted(analyzer, tmp_path):
@@ -151,7 +151,7 @@ def test_camera_event_sequence_detected_within_window(analyzer, tmp_path):
          and p.details["action"]["entity"] == "light.porch"]
     assert m, "expected the camera_event.front_door -> light.porch sequence"
     assert m[0].occurrences >= 5
-    assert "camera_event.front_door" in m[0].description and "light.porch" in m[0].description
+    assert m[0].description.startswith("When front door turns person, porch turns on")
 
 
 def test_cross_domain_sequence_with_measured_delay(analyzer, tmp_path):

@@ -1989,11 +1989,13 @@ async def ws_root_cause(
     the panel."""
     try:
         from . import rca
+        names = rca.entity_names(hass)
         result = await hass.async_add_executor_job(
             lambda: rca.analyze(
                 msg["entity_id"],
                 msg.get("event_time"),
-                int(msg.get("window_secs") or rca.DEFAULT_WINDOW_SECS)))
+                int(msg.get("window_secs") or rca.DEFAULT_WINDOW_SECS),
+                names=names))
         connection.send_result(msg["id"], result)
     except Exception as exc:
         _LOGGER.exception("root_cause failed: %s", exc)

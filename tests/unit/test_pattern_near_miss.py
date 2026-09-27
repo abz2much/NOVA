@@ -66,7 +66,8 @@ async def test_below_bar_sequence_is_a_near_miss(pa, tmp_path, monkeypatch, fake
     an = _analyzer(pa, db, monkeypatch, store_result=False)
     await an.analyze(fake_hass)
     nm = an._last_result.get("near_misses", [])
-    m = [x for x in nm if "bay_occupancy" in (x.get("description") or "")]
+    # Descriptions name entities (a readable id here: the fake hass has no names).
+    m = [x for x in nm if "bay occupancy" in (x.get("description") or "")]
     assert m, f"expected a near-miss for the 6x sequence; got {nm}"
     assert m[0]["occurrences"] == 6
     assert m[0]["needed"] == 10        # ceil(0.65 * 5 * 3)

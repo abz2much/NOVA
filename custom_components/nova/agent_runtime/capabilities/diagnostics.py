@@ -46,8 +46,9 @@ async def _exec_root_cause(hass: HomeAssistant, args: dict) -> str:
         window = int(float(args.get("window_minutes") or 30) * 60)
     except (TypeError, ValueError):
         window = rca.DEFAULT_WINDOW_SECS
+    names = rca.entity_names(hass)
     result = await hass.async_add_executor_job(
-        lambda: rca.analyze(entity_id, event_time, window))
+        lambda: rca.analyze(entity_id, event_time, window, names=names))
 
     ev = result.get("event") or {}
     from ..presentation import display_name

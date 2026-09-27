@@ -167,9 +167,28 @@ def _secs_before(t0: datetime, ts) -> Optional[float]:
     return (t0 - d).total_seconds()
 
 
-def candidates(ev: dict) -> list[dict]:
+def _namer(names: Optional[dict]):
+    """How causes and the timeline name an entity: by `names` (friendly
+    names read on the event loop, see entity_names) when given, else by id."""
+    if names is None:
+        return lambda entity_id: entity_id
+    from .cognitive.naming import name_for
+    return lambda entity_id: name_for(entity_id, names)
+
+
+def entity_names(hass) -> dict:
+    """entity_id -> friendly name, read on the event loop for analyze()."""
+    try:
+        from .cognitive.naming import names_from_states
+        return names_from_states(hass.states.async_all())
+    except Exception:
+        return {}
+
+
+def candidates(ev: dict, names: Optional[dict] = None) -> list[dict]:
     """Ranked candidate causes with confidence + human-readable evidence."""
     out: list[dict] = []
+    name = _namer(names)
     focal, t0 = ev.get("focal"), ev.get("t0")
     if not focal or t0 is None:
         return [{"kind": "unknown", "confidence": 0.0,
@@ -202,7 +221,7 @@ def candidates(ev: dict) -> list[dict]:
             why = (f"shares the device name '{sorted(shared)[0]}'" if shared
                    else "same room")
             out.append({"kind": "cascade", "confidence": conf,
-                        "cause": f"{row['entity_id']} went {row['new_state']} "
+                        "cause": f"{name(row['entity_id'])} went {row['new_state']} "
                                  f"{int(secs)}s earlier",
                         "evidence": why + " — likely an upstream device or hub failure",
                         "timestamp": row["timestamp"]})
@@ -253,7 +272,7 @@ def candidates(ev: dict) -> list[dict]:
             if secs is None or secs > 120:
                 continue
             out.append({"kind": "area", "confidence": 0.5,
-                        "cause": f"{row['entity_id']} → {row['new_state']} "
+                        "cause": f"{name(row['entity_id'])} → {row['new_state']} "
                                  f"{int(secs)}s earlier in the same room",
                         "evidence": "related activity in the same area",
                         "timestamp": row["timestamp"]})
@@ -270,11 +289,12 @@ def candidates(ev: dict) -> list[dict]:
 
 # ── timeline + top-level analyze ─────────────────────────────────────────────
 
-def _timeline(ev: dict) -> list[dict]:
+def _timeline(ev: dict, names: Optional[dict] = None) -> list[dict]:
     items: list[dict] = []
+    name = _namer(names)
     for row in ev["changes"]:
         items.append({"t": row["timestamp"], "src": "change",
-                      "text": f"{row['entity_id']}: "
+                      "text": f"{name(row['entity_id'])}: "
                               f"{row.get('old_state')} → {row.get('new_state')}"})
     for cmd in ev["commands"]:
         items.append({"t": cmd["timestamp"], "src": "command",
@@ -291,15 +311,18 @@ def _timeline(ev: dict) -> list[dict]:
 def analyze(entity_id: str, event_time: Optional[str] = None,
             window_secs: int = DEFAULT_WINDOW_SECS,
             patterns_db: str = PATTERNS_DB,
-            activity_db: str = ACTIVITY_DB) -> dict:
-    """Full root-cause analysis for an entity's (latest or specified) change."""
+            activity_db: str = ACTIVITY_DB,
+            names: Optional[dict] = None) -> dict:
+    """Full root-cause analysis for an entity's (latest or specified) change.
+    `names` (see entity_names) words the summary, causes and timeline with
+    friendly names; entity_id fields stay as they are."""
     try:
         ev = gather(entity_id, event_time, window_secs, patterns_db, activity_db)
-        cands = candidates(ev)
+        cands = candidates(ev, names)
         focal = ev.get("focal") or {}
         top = cands[0]
         if top["kind"] == "unknown":
-            summary = (f"I couldn't determine why {entity_id} changed — "
+            summary = (f"I couldn't determine why {_namer(names)(entity_id)} changed — "
                        f"{top['evidence']}.")
         else:
             summary = (f"Most likely cause: {top['cause']} "
@@ -314,7 +337,7 @@ def analyze(entity_id: str, event_time: Optional[str] = None,
                 "area_id": focal.get("area_id"),
             },
             "candidates": cands,
-            "timeline": _timeline(ev),
+            "timeline": _timeline(ev, names),
             "summary": summary,
         }
     except Exception as exc:   # absolute backstop — RCA must never take Nova down

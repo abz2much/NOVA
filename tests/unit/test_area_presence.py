@@ -287,7 +287,7 @@ def test_no_presence_data_keeps_sequence_json_byte_identical(load):
     models = load("automation.models")
     pattern = _sequence(models, gate=False, release=False)
     expected = json.dumps({
-        "alias": "Nova Learned: light.office after binary_sensor.front_door",
+        "alias": "Nova Learned: office after front door",
         "trigger": {"platform": "state", "entity_id": "binary_sensor.front_door",
                     "to": "on"},
         "action": [

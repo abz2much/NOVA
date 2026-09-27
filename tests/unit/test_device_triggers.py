@@ -116,8 +116,8 @@ def test_trigger_helpers_event_and_scene(pa):
         "platform": "state", "entity_id": "event.remote"}
     assert pa._trigger_extra_conditions("event.remote", "double")[0]["condition"] == "template"
     assert pa._trigger_extra_conditions("light.hall", "on") == []
-    assert pa._trigger_phrase("event.remote", "double") == "When event.remote is pressed (double)"
-    assert pa._trigger_phrase("scene.movie", "activated") == "When scene.movie is activated"
+    assert pa._trigger_phrase("event.remote", "double") == "When remote is pressed (double)"
+    assert pa._trigger_phrase("scene.movie", "activated") == "When movie is activated"
 
 
 # ── end-to-end: a button→scene sequence is detected and emitted ──────────────

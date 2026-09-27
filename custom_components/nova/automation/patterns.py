@@ -38,6 +38,7 @@ from .suggestions import (  # DB_PATH / MIN_DAYS are shared with stats
     DB_PATH,
     MIN_DAYS,
     SuggestionStore,
+    _name_for,
     _trigger_phrase,
     generate_automation,
     normalize_suggestion_automation,
@@ -232,11 +233,24 @@ def _sun_condition(epochs: list, lat, lon) -> Optional[dict]:
     return None
 
 
-def _condition_phrase(cond) -> str:
+class _IdNames(dict):
+    """A names map that names every entity by its entity_id (the wording
+    Nova used before v7.125)."""
+
+    def get(self, key, default=None):
+        return key
+
+
+_AS_IDS = _IdNames()
+
+
+def _condition_phrase(cond, names: Optional[dict] = None) -> str:
     """Human tail for a pattern description given its learned condition(s).
-    Accepts a single condition dict, a list of them (ANDed), or None."""
+    Accepts a single condition dict, a list of them (ANDed), or None.
+    Entities are named with `names` (entity_id -> friendly name); pass
+    {entity_id: entity_id} for the pre-v7.125 wording."""
     if isinstance(cond, list):
-        return "".join(_condition_phrase(c) for c in cond)
+        return "".join(_condition_phrase(c, names) for c in cond)
     if not isinstance(cond, dict):
         return ""
     kind = cond.get("condition")
@@ -245,13 +259,13 @@ def _condition_phrase(cond) -> str:
     if kind == "time":
         return f", mostly between {cond.get('after', '')[:5]} and {cond.get('before', '')[:5]}"
     if kind == "numeric_state":
-        ent = cond.get("entity_id", "")
+        ent = _name_for(cond.get("entity_id", ""), names)
         if "below" in cond:
             return f", mostly while {ent} is below {cond['below']:g}"
         if "above" in cond:
             return f", mostly while {ent} is above {cond['above']:g}"
     if kind == "state":
-        ent = cond.get("entity_id", "")
+        ent = _name_for(cond.get("entity_id", ""), names)
         st = cond.get("state", "")
         return f", only when {ent} is {st}"
     return ""
@@ -370,6 +384,9 @@ class PatternAnalyzer:
         self._last_result: dict = {}
         self._last_patterns: list[DetectedPattern] = []
         self._db = DB_PATH
+        # entity_id -> friendly name, read on the event loop at the start of
+        # each analysis (the detectors run in an executor, away from states).
+        self._names: dict = {}
         # Single flight: a manual run and the scheduled run never overlap.
         self._analysis_lock = asyncio.Lock()
 
@@ -480,6 +497,12 @@ class PatternAnalyzer:
         # runs in ONE executor job that opens, uses and closes its own
         # connection, so a connection never crosses threads.
         person_map = self._person_entity_map(hass)
+        try:
+            from ..cognitive.naming import names_from_states
+            self._names = names_from_states(hass.states.async_all())
+        except Exception:
+            self._names = {}
+        self._person_map = person_map
         try:
             _sensor_hist = await self._fetch_numeric_sensor_history(hass)
         except Exception:
@@ -593,6 +616,10 @@ class PatternAnalyzer:
             _LOGGER.warning("Pattern analysis error: %s", exc)
         finally:
             conn.close()
+        for p in patterns:
+            names = self._names_for(p)
+            if names:
+                p.details["names"] = names
         return patterns
 
     def _automation_match(self, hass, pattern: DetectedPattern) -> dict:
@@ -639,6 +666,37 @@ class PatternAnalyzer:
         except Exception:
             return {}
         return out
+
+    def _name(self, entity_id: str) -> str:
+        """How a person reads this entity (friendly name, else readable id)."""
+        return _name_for(entity_id, getattr(self, "_names", None))
+
+    def _person_label(self, person: str) -> str:
+        """A recorded person ("abi") as their person entity's friendly name."""
+        ent = (getattr(self, "_person_map", None) or {}).get(person)
+        name = (getattr(self, "_names", None) or {}).get(ent) if ent else None
+        return str(name or person)
+
+    def _names_for(self, pattern: DetectedPattern) -> dict:
+        """The friendly names of every entity a pattern mentions, carried in
+        its details so wording built later (evidence, automation names) can
+        use them."""
+        names = getattr(self, "_names", None) or {}
+        found: dict = {}
+
+        def walk(value):
+            if isinstance(value, str):
+                if value in names:
+                    found[value] = names[value]
+            elif isinstance(value, dict):
+                for v in value.values():
+                    walk(v)
+            elif isinstance(value, (list, tuple)):
+                for v in value:
+                    walk(v)
+        walk(pattern.entity_ids)
+        walk(pattern.details)
+        return found
 
     def _find_time_routines(self, conn: sqlite3.Connection,
                             person_map: Optional[dict] = None) -> list[DetectedPattern]:
@@ -743,6 +801,14 @@ class PatternAnalyzer:
             person = self._dominant_person(conn, "state_changes", entity=entity,
                                             state=state, hour=hour)
             days_str = f"on {positive_days} of {total_days} days"
+
+            def _desc(name, who):
+                if person:
+                    return (f"{name} turns {state} around {time_str} {days_str} "
+                            f"when {who} is home")
+                if state in ("on", "off"):
+                    return f"{name} turns {state} around {time_str} {days_str}"
+                return f"{name} changes to '{state}' around {time_str} {days_str}"
             if person:
                 details["person"] = person
                 # If the owner resolves to a person entity, gate the routine on
@@ -753,12 +819,8 @@ class PatternAnalyzer:
                 if ent:
                     details["condition"] = {"condition": "state",
                                             "entity_id": ent, "state": "home"}
-                desc = (f"{entity} turns {state} around {time_str} {days_str} "
-                        f"when {person} is home")
-            elif state in ("on", "off"):
-                desc = f"{entity} turns {state} around {time_str} {days_str}"
-            else:
-                desc = f"{entity} changes to '{state}' around {time_str} {days_str}"
+            desc = _desc(self._name(entity), self._person_label(person or ""))
+            legacy = _desc(entity, person)
 
             patterns.append(DetectedPattern(
                 pattern_type="time_routine",
@@ -768,6 +830,7 @@ class PatternAnalyzer:
                 occurrences=count,
                 coverage=round(coverage, 3),
                 details=details,
+                legacy_description=legacy,
             ))
 
         return patterns[:20]  # Cap at 20
@@ -802,12 +865,14 @@ class PatternAnalyzer:
             details = {"command": text, "hour": hour}
 
             person = self._dominant_person(conn, "commands", text=text, hour=hour)
+            tail = f"says '{text}' around {hour:02d}:00 regularly ({count} times)"
             if person:
                 details["person"] = person
-                desc = (f"{person} says '{text}' around {hour:02d}:00 regularly "
-                        f"({count} times)")
+                desc = f"{self._person_label(person)} {tail}"
+                legacy = f"{person} {tail}"
             else:
-                desc = f"'{text}' is said around {hour:02d}:00 regularly ({count} times)"
+                desc = legacy = (f"'{text}' is said around {hour:02d}:00 regularly "
+                                 f"({count} times)")
 
             patterns.append(DetectedPattern(
                 pattern_type="repeated_command",
@@ -816,6 +881,7 @@ class PatternAnalyzer:
                 confidence=confidence,
                 occurrences=count,
                 details=details,
+                legacy_description=legacy,
             ))
 
         return patterns
@@ -947,14 +1013,20 @@ class PatternAnalyzer:
             if gate and str(sb).lower() == "on":
                 release = presence_release(
                     eb, off_times.get(eb, ()), area_presence, gate)
-            desc = (f"{_trigger_phrase(ea, sa)}, {eb} turns {sb} shortly after "
-                    f"({count} times in 30 days, ~{mean_lag}s later)"
-                    + _condition_phrase(display_conds))
-            if gate:
-                desc += f", only when presence is detected in {gate['area_name']}"
+            def _desc(names):
+                text = (f"{_trigger_phrase(ea, sa, names)}, {_name_for(eb, names)} "
+                        f"turns {sb} shortly after "
+                        f"({count} times in 30 days, ~{mean_lag}s later)"
+                        + _condition_phrase(display_conds, names))
+                if gate:
+                    text += f", only when presence is detected in {gate['area_name']}"
+                return text
+            desc = _desc(self._names)
+            legacy = _desc(_AS_IDS)
             patterns.append(DetectedPattern(
                 pattern_type="sequence",
                 description=desc,
+                legacy_description=legacy,
                 entity_ids=[ea, eb],
                 confidence=score.confidence,
                 occurrences=count,
@@ -1036,14 +1108,17 @@ class PatternAnalyzer:
                 gate = presence_gate_condition(
                     a_ent, crossing_times, area_presence, exclude=(s_ent,))
                 gate_condition = gate["condition"] if gate else None
-                description = (f"When {s_ent} goes {op} {T:g}, {a_ent} turns "
-                               f"{a_st} ({len(occ)} times in 30 days)")
-                if gate:
-                    description += (f", only when presence is detected in "
-                                    f"{gate['area_name']}")
+                def _desc(s_name, a_name):
+                    text = (f"When {s_name} goes {op} {T:g}, {a_name} turns "
+                            f"{a_st} ({len(occ)} times in 30 days)")
+                    if gate:
+                        text += (f", only when presence is detected in "
+                                 f"{gate['area_name']}")
+                    return text
                 patterns.append(DetectedPattern(
                     pattern_type="numeric_trigger",
-                    description=description,
+                    description=_desc(self._name(s_ent), self._name(a_ent)),
+                    legacy_description=_desc(s_ent, a_ent),
                     entity_ids=[s_ent, a_ent],
                     confidence=min(1.0, len(occ) / (MIN_OCCURRENCES * 3)),
                     occurrences=len(occ),
@@ -1241,6 +1316,10 @@ class PatternAnalyzer:
             patterns.append(DetectedPattern(
                 pattern_type="presence",
                 description=(
+                    f"When {self._name(person)} {action_word}, {self._name(device)} "
+                    f"turns {d_state} ({count} times)"
+                ),
+                legacy_description=(
                     f"When {person} {action_word}, {device} turns {d_state} "
                     f"({count} times)"
                 ),
@@ -1329,14 +1408,20 @@ class PatternAnalyzer:
         name = entity_id.split(".", 1)[1] if "." in entity_id else entity_id
         return name.replace("_", " ").strip()
 
-    def _fact_for(self, pattern: "DetectedPattern"):
+    def _fact_for(self, pattern: "DetectedPattern", legacy: bool = False):
         """
         Map a detected pattern to an observed knowledge fact, or None if it's not
         the kind of thing worth stating as butler-knowledge. Returns
-        (subject, kind, key, value). Deterministic so re-analysis upserts in place.
+        (subject, kind, key, value). Deterministic so re-analysis upserts in
+        place. The entity is named as a person knows it; `legacy` gives the
+        key Nova used before v7.125 (the entity_id without its domain).
         """
         if pattern.pattern_type == "time_routine" and pattern.entity_ids:
-            label = self._entity_label(pattern.entity_ids[0])
+            entity = pattern.entity_ids[0]
+            if legacy:
+                label = self._entity_label(entity)
+            else:
+                label = _name_for(entity, pattern.details.get("names") or {})
             state = str(pattern.details.get("state", "")).strip()
             hour = pattern.details.get("hour")
             if hour is None or not label:
@@ -1386,6 +1471,11 @@ class PatternAnalyzer:
                 continue
             subject, kind, key, value = mapped
             try:
+                # A fact learned under the old wording moves to the new one
+                # instead of being learned twice. Stated facts never move.
+                old = self._fact_for(p, legacy=True)
+                if old and old[2] != key:
+                    knowledge.rename_observed(old[2], key, subject=subject)
                 stored = knowledge.remember(
                     key, value, subject=subject, kind=kind, source="observed",
                     confidence=round(float(p.confidence), 3), salience=0.8,

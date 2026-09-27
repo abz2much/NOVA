@@ -25,7 +25,7 @@ def readable_id(entity_id: str) -> str:
 def name_for(entity_id: str, names: Optional[Mapping] = None) -> str:
     """The name to show a person for one entity."""
     try:
-        name = (names or {}).get(entity_id)
+        name = names.get(entity_id) if names is not None else None
     except Exception:
         name = None
     name = str(name).strip() if name else ""

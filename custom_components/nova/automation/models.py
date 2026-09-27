@@ -90,6 +90,9 @@ class DetectedPattern:
     occurrences: int
     coverage: float = 0.0  # positive days / opportunity days (0 = not computed)
     details: dict = field(default_factory=dict)
+    # The description in the entity-id wording used before v7.125, only to
+    # find suggestions stored without an identity (see suggestions._find_existing).
+    legacy_description: str = ""
 
 
 @dataclass(frozen=True, slots=True)
