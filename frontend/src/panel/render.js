@@ -125,9 +125,15 @@
     return `
         <div id="onboardingMount"></div>
         <div class="hero">
-          <div class="core-wrap"><canvas class="core" id="core"></canvas></div>
-          <div class="state-line" id="stateLine">Watching over the house.</div>
-          <div class="state-sub" id="stateSub">—</div>
+          <div class="hero-stage">
+            <div class="hero-marquee" aria-hidden="true"><span id="heroMarquee"></span></div>
+            <canvas class="core" id="core"></canvas>
+            <div class="hero-copy">
+              <div class="hero-word" id="heroWord"><span id="heroWordText"></span><span class="hero-caret" aria-hidden="true"></span></div>
+              <div class="state-line" id="stateLine">Watching over the house.</div>
+              <div class="state-sub" id="stateSub">—</div>
+            </div>
+          </div>
           <div class="chips" id="chips"></div>
         </div>
 ${this._htmlDashboardBody()}`;

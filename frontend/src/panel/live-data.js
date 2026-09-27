@@ -40,6 +40,13 @@
     };
     if (lineEl) lineEl.textContent = lines[state][0];
     if (subEl) subEl.textContent = lines[state][1];
+    const words = { idle: "Hello.", reasoning: "Thinking…", asleep: "Goodnight." };
+    const wordEl = root.getElementById("heroWord");
+    if (wordEl) wordEl.classList.toggle("dim", state === "asleep");
+    const marqueeEl = root.getElementById("heroMarquee");
+    const marquee = `${words[state].replace(/[.…]/g, "").toUpperCase()} · `.repeat(8);
+    if (marqueeEl && marqueeEl.textContent !== marquee) marqueeEl.textContent = marquee;
+    this._typeHeroWord(words[state]);
     this._targetCoreState(state);
 
     // status chips
