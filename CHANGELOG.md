@@ -1,3 +1,18 @@
+## [7.127.0] — Nova gets a face
+
+**New**
+- The Command Center hero now spans the full panel. The particle orb is replaced by a 3D head made of gold sparks, with a cloud of sparks orbiting it. It turns, blinks and looks around. You can drag it to turn it further, and it turns back on its own.
+- A state word types itself out beside the head: Hello, Thinking… when something just happened, and Goodnight when the house is asleep. The existing status lines sit under it, and a faint copy of the word scrolls behind the head. The head glances at the word when it changes.
+- The face follows the same three states as the old orb. When something happens, the eyes widen, the brows lift and the head looks down at the activity feed. When the house is asleep, the eyes close, the head droops and the light fades.
+- On a narrow panel the hero stacks, with the head on top and the word below.
+
+**Caveats**
+- The head is drawn with plain canvas 2D, so it adds no library or download, but it draws more per frame than the orb did. On a slow tablet it may run below 60 frames a second.
+- With reduced motion turned on, the hero shows one still frame, and the scrolling word and blinking cursor stop.
+- The state word is English only, like the status lines under it.
+
+Stored data, services, WebSocket commands, settings and assistant-tool schemas are unchanged.
+
 ## [7.126.1] — the same standard for every learned suggestion
 
 7.126.0 fixed threshold suggestions. This release applies the same checks to every other kind of suggestion.
