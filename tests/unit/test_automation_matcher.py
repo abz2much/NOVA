@@ -1,6 +1,7 @@
 """Semantic-enough, deterministic duplicate matching for learned automations."""
 from __future__ import annotations
 
+import json
 import types
 
 
@@ -95,3 +96,43 @@ def test_fingerprint_keeps_behavior_bearing_top_level_fields(load):
     changed = dict(base, mode="restart", variables={"brightness": 80})
 
     assert matcher.fingerprint(base) != matcher.fingerprint(changed)
+
+
+def test_installed_presence_release_is_exact(load):
+    matcher = _module(load)
+    suggestions = load("automation.suggestions")
+    models = load("automation.models")
+    pattern = models.DetectedPattern(
+        "sequence", "door then light",
+        ["binary_sensor.door", "light.office"], 0.9, 8,
+        details={
+            "trigger": {"entity": "binary_sensor.door", "state": "on"},
+            "action": {"entity": "light.office", "state": "on"},
+            "condition": [{
+                "condition": "state",
+                "entity_id": "binary_sensor.office_presence",
+                "state": "on",
+            }],
+            "presence_gate": {
+                "entity_id": "binary_sensor.office_presence",
+                "area_id": "office", "area_name": "Office",
+            },
+            "presence_release": {
+                "entity_id": "binary_sensor.office_presence",
+                "area_id": "office", "area_name": "Office",
+                "settle_seconds": 60,
+            },
+        },
+    )
+    generated = suggestions.generate_automation(pattern)
+    installed = suggestions.normalize_suggestion_automation(generated)
+    candidate = {
+        "triggers": installed["trigger"],
+        "conditions": installed["condition"],
+        "actions": installed["action"],
+        "mode": installed["mode"],
+    }
+    existing = {**json.loads(generated), "id": "nova_release"}
+
+    result = matcher.classify(candidate, [_record("automation.office", existing)])
+    assert result["status"] == "already_automated"

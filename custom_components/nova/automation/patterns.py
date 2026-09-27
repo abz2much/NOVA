@@ -25,6 +25,13 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
+from .area_presence import (
+    EMPTY_CONTEXT,
+    AreaPresenceContext,
+    numeric_trigger_times,
+    presence_gate_condition,
+    presence_release,
+)
 from .models import DetectedPattern
 from .suggestions import (  # DB_PATH / MIN_DAYS are shared with stats
     DB_PATH,
@@ -466,10 +473,15 @@ class PatternAnalyzer:
             _sensor_hist = await self._fetch_numeric_sensor_history(hass)
         except Exception:
             _sensor_hist = {}
+        try:
+            _area_presence = await self._fetch_area_presence_context(hass)
+        except Exception:
+            _area_presence = EMPTY_CONTEXT
         _lat = getattr(hass.config, "latitude", None)
         _lon = getattr(hass.config, "longitude", None)
         patterns = await hass.async_add_executor_job(
-            self._detect_patterns, person_map, _lat, _lon, _sensor_hist)
+            self._detect_patterns, person_map, _lat, _lon, _sensor_hist,
+            _area_presence)
         if patterns is None:          # no patterns.db yet
             return []
 
@@ -544,8 +556,10 @@ class PatternAnalyzer:
 
         return patterns
 
-    def _detect_patterns(self, person_map: dict, lat, lon,
-                         sensor_hist: dict) -> Optional[list[DetectedPattern]]:
+    def _detect_patterns(
+        self, person_map: dict, lat, lon, sensor_hist: dict,
+        area_presence: AreaPresenceContext = EMPTY_CONTEXT,
+    ) -> Optional[list[DetectedPattern]]:
         """Run every detector over one connection. SYNC — executor only.
 
         The connection is created, used and closed in this one thread
@@ -559,8 +573,10 @@ class PatternAnalyzer:
         try:
             patterns.extend(self._find_time_routines(conn, person_map))
             patterns.extend(self._find_repeated_commands(conn))
-            patterns.extend(self._find_sequence_patterns(conn, lat, lon, sensor_hist))
-            patterns.extend(self._find_numeric_triggers(conn, sensor_hist))
+            patterns.extend(self._find_sequence_patterns(
+                conn, lat, lon, sensor_hist, area_presence))
+            patterns.extend(self._find_numeric_triggers(
+                conn, sensor_hist, area_presence))
             patterns.extend(self._find_presence_patterns(conn))
         except Exception as exc:
             _LOGGER.warning("Pattern analysis error: %s", exc)
@@ -579,6 +595,7 @@ class PatternAnalyzer:
                 "triggers": norm["trigger"],
                 "conditions": norm.get("condition") or [],
                 "actions": norm["action"],
+                "mode": norm.get("mode", "single"),
             }
             from .inventory import get_inventory
             inventory = get_inventory(hass)
@@ -794,7 +811,9 @@ class PatternAnalyzer:
 
     def _find_sequence_patterns(self, conn: sqlite3.Connection,
                                 lat=None, lon=None,
-                                sensor_hist=None) -> list[DetectedPattern]:
+                                sensor_hist=None,
+                                area_presence: AreaPresenceContext = EMPTY_CONTEXT,
+                                ) -> list[DetectedPattern]:
         """Find state changes that consistently follow each other within 10 min.
 
         Single-pass sliding window. This replaced an O(N^2) SQL self-join whose
@@ -828,6 +847,8 @@ class PatternAnalyzer:
         pair_counts: Counter = Counter()
         pair_lag: dict = {}     # (ea,sa,eb,sb) -> [sum_seconds, count] for mean lag
         pair_times: dict = {}   # (ea,sa,eb,sb) -> [action epochs] (capped) for time window
+        pair_trigger_times: dict = {}  # pair -> unique trigger epochs (capped)
+        off_times: dict[str, list[float]] = {}
         trigger_counts: Counter = Counter()   # (entity, state) -> occurrences
 
         for r in rows:
@@ -838,6 +859,8 @@ class PatternAnalyzer:
             ent = r["entity_id"]
             dom = r["domain"]
             st = r["new_state"]
+            if st == "off":
+                off_times.setdefault(ent, []).append(epoch)
             cutoff = epoch - window_s
             while win and win[0][0] < cutoff:
                 win.popleft()
@@ -866,6 +889,9 @@ class PatternAnalyzer:
                         pair_times[key] = [epoch]
                     elif len(tl) < 40:
                         tl.append(epoch)
+                    trigger_slot = pair_trigger_times.setdefault(key, [])
+                    if a_epoch not in trigger_slot and len(trigger_slot) < 40:
+                        trigger_slot.append(a_epoch)
             win.append((epoch, ent, dom, st))
             if len(win) > window_cap:
                 win.popleft()
@@ -876,6 +902,7 @@ class PatternAnalyzer:
             slot = pair_lag.get((ea, sa, eb, sb), [0.0, 1])
             mean_lag = int(round(slot[0] / max(1, slot[1])))
             times = pair_times.get((ea, sa, eb, sb), [])
+            trigger_times = pair_trigger_times.get((ea, sa, eb, sb), [])
             # Association, not cause: how often the trigger is followed at
             # all, and on how many different days (counted over the capped
             # sample of action times).
@@ -898,10 +925,21 @@ class PatternAnalyzer:
             nc = _numeric_condition(times, sensor_hist or {})
             if nc:
                 conds.append(nc)
+            display_conds = list(conds)
+            gate = presence_gate_condition(
+                eb, trigger_times, area_presence, exclude=(ea,))
+            if gate:
+                conds.append(gate["condition"])
             cond = conds if conds else None
+            release = None
+            if gate and str(sb).lower() == "on":
+                release = presence_release(
+                    eb, off_times.get(eb, ()), area_presence, gate)
             desc = (f"{_trigger_phrase(ea, sa)}, {eb} turns {sb} shortly after "
                     f"({count} times in 30 days, ~{mean_lag}s later)"
-                    + _condition_phrase(cond))
+                    + _condition_phrase(display_conds))
+            if gate:
+                desc += f", only when presence is detected in {gate['area_name']}"
             patterns.append(DetectedPattern(
                 pattern_type="sequence",
                 description=desc,
@@ -912,13 +950,20 @@ class PatternAnalyzer:
                          "action": {"entity": eb, "state": sb},
                          "delay_seconds": mean_lag,
                          "condition": cond,
+                         **({"presence_gate": {
+                             name: gate[name] for name in
+                             ("entity_id", "area_id", "area_name")}}
+                            if gate else {}),
+                         **({"presence_release": release} if release else {}),
                          "evidence": score.evidence()},
             ))
 
         return patterns
 
     def _find_numeric_triggers(self, conn: sqlite3.Connection,
-                               sensor_hist: dict) -> list[DetectedPattern]:
+                               sensor_hist: dict,
+                               area_presence: AreaPresenceContext = EMPTY_CONTEXT,
+                               ) -> list[DetectedPattern]:
         """Learn "when a sensor crosses a threshold, an action happens" from
         history. ``sensor_hist`` maps sensor_id -> chronological ``[(epoch,
         float)]`` (fetched from the recorder by the caller and passed in, so this
@@ -979,17 +1024,121 @@ class PatternAnalyzer:
                 if not trig:
                     continue
                 op, T = next(iter(trig.items()))
+                crossing_times = numeric_trigger_times(
+                    list(zip(epochs, values)), op, T, times)
+                gate = presence_gate_condition(
+                    a_ent, crossing_times, area_presence, exclude=(s_ent,))
+                gate_condition = gate["condition"] if gate else None
+                description = (f"When {s_ent} goes {op} {T:g}, {a_ent} turns "
+                               f"{a_st} ({len(occ)} times in 30 days)")
+                if gate:
+                    description += (f", only when presence is detected in "
+                                    f"{gate['area_name']}")
                 patterns.append(DetectedPattern(
                     pattern_type="numeric_trigger",
-                    description=(f"When {s_ent} goes {op} {T:g}, {a_ent} turns "
-                                 f"{a_st} ({len(occ)} times in 30 days)"),
+                    description=description,
                     entity_ids=[s_ent, a_ent],
                     confidence=min(1.0, len(occ) / (MIN_OCCURRENCES * 3)),
                     occurrences=len(occ),
                     details={"trigger_sensor": s_ent, "op": op, "threshold": T,
-                             "action": {"entity": a_ent, "state": a_st}},
+                             "action": {"entity": a_ent, "state": a_st},
+                             **({"condition": [gate_condition],
+                                 "presence_gate": {
+                                     name: gate[name] for name in
+                                     ("entity_id", "area_id", "area_name")}}
+                                if gate else {})},
                 ))
         return patterns
+
+    async def _fetch_area_presence_context(self, hass) -> AreaPresenceContext:
+        """Collect bounded area-presence history without crossing HA threads."""
+        try:
+            from homeassistant.components.recorder import get_instance, history
+            from homeassistant.helpers import area_registry as ar
+            from homeassistant.util import dt as dt_util
+            from ..audio_routing import entity_area
+        except Exception:
+            return EMPTY_CONTEXT
+
+        candidates: list[tuple[str, str]] = []
+        try:
+            for state in hass.states.async_all("binary_sensor"):
+                device_class = state.attributes.get("device_class")
+                if device_class not in ("occupancy", "presence"):
+                    continue
+                area_id = entity_area(hass, state.entity_id)
+                if area_id:
+                    candidates.append((state.entity_id, area_id))
+        except Exception:
+            return EMPTY_CONTEXT
+        candidates = sorted(candidates)[:40]
+        if not candidates:
+            return EMPTY_CONTEXT
+
+        entity_areas: dict[str, str] = dict(candidates)
+        action_domains = (
+            "light", "switch", "fan", "input_boolean", "humidifier",
+            "siren", "lock", "cover", "scene",
+        )
+        try:
+            for domain in action_domains:
+                for state in hass.states.async_all(domain):
+                    area_id = entity_area(hass, state.entity_id)
+                    if area_id:
+                        entity_areas[state.entity_id] = area_id
+        except Exception:
+            return EMPTY_CONTEXT
+
+        area_sensors: dict[str, list[str]] = {}
+        for sensor_id, area_id in candidates:
+            area_sensors.setdefault(area_id, []).append(sensor_id)
+        area_names: dict[str, str] = {}
+        try:
+            registry = ar.async_get(hass)
+            for area_id in area_sensors:
+                area = registry.async_get_area(area_id)
+                area_names[area_id] = getattr(area, "name", None) or area_id
+        except Exception:
+            area_names = {area_id: area_id for area_id in area_sensors}
+
+        end = dt_util.utcnow()
+        start = end - timedelta(days=30)
+        sensor_ids = [sensor_id for sensor_id, _area_id in candidates]
+
+        def _fetch():
+            return history.get_significant_states(
+                hass, start, end, sensor_ids,
+                minimal_response=True, no_attributes=True)
+
+        try:
+            raw = await get_instance(hass).async_add_executor_job(_fetch)
+        except Exception:
+            return EMPTY_CONTEXT
+        sensor_history: dict[str, tuple[tuple[float, bool], ...]] = {}
+        for sensor_id, states in (raw or {}).items():
+            series: list[tuple[float, bool]] = []
+            for state in states:
+                try:
+                    value = getattr(state, "state", None)
+                    changed = (getattr(state, "last_changed", None)
+                               or getattr(state, "last_updated", None))
+                    if value is None and isinstance(state, dict):
+                        value = state.get("state")
+                        changed = state.get("last_changed") or state.get("last_updated")
+                    timestamp = getattr(changed, "timestamp", None)
+                    epoch = timestamp() if callable(timestamp) else None
+                    if epoch is not None and value in ("on", "off"):
+                        series.append((epoch, value == "on"))
+                except Exception:
+                    continue
+            if series:
+                sensor_history[sensor_id] = tuple(sorted(series))
+        return AreaPresenceContext(
+            sensor_history=sensor_history,
+            entity_areas=entity_areas,
+            area_sensors={key: tuple(value) for key, value in area_sensors.items()},
+            area_names=area_names,
+        )
 
     async def _fetch_numeric_sensor_history(self, hass) -> dict:
         """Fetch recent recorder history for numeric sensors likely to drive

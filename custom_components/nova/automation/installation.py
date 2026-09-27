@@ -520,6 +520,7 @@ async def install_approved_suggestion(
                     "triggers": norm["trigger"],
                     "conditions": norm.get("condition") or [],
                     "actions": norm["action"],
+                    "mode": norm.get("mode", "single"),
                 }, inventory.records()) if inventory is not None else {}
             except Exception:
                 match = {}
@@ -540,6 +541,7 @@ async def install_approved_suggestion(
                 trigger=norm["trigger"],
                 condition=norm.get("condition"),
                 action=norm["action"],
+                mode=norm.get("mode", "single"),
                 request_id=request_id, source="suggestion",
                 requested_by_user_id=requested_by_user_id,
                 requested_by_name=requested_by_name,

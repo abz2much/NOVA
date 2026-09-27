@@ -17,19 +17,22 @@ import contract_extract as ce
 
 PKG = ce.COMP / "automation"
 NEW_MODULES = ("models", "inventory", "attribution", "matching", "suggestions",
-               "patterns", "installation", "trials", "api", "_compat")
+               "patterns", "installation", "trials", "api", "area_presence",
+               "_compat")
 
 # Package-internal import layering: a module may import only the modules
 # listed for it (function-level imports included).
 ALLOWED_INTERNAL = {
     "_compat": set(),
+    "area_presence": set(),
     "models": set(),
     "matching": {"models"},
     "trials": set(),
     "inventory": {"models"},
     "attribution": {"models", "inventory"},
     "suggestions": {"models", "trials", "matching"},
-    "patterns": {"models", "suggestions", "inventory", "matching"},
+    "patterns": {"models", "suggestions", "inventory", "matching",
+                 "area_presence"},
     "installation": {"models", "inventory", "matching", "suggestions",
                      "patterns", "trials"},
     "api": {"models", "suggestions"},
@@ -38,6 +41,7 @@ ALLOWED_INTERNAL = {
 # lazily inside a function (never at import time).
 ALLOWED_OUTSIDE = {"action_log", "decision_record", "nova_config", "identity",
                    "knowledge", "person_patterns", "runtime", "websocket",
+                   "audio_routing",  # shared entity-to-area resolver
                    "cognitive",   # Phase 8: pure routine scoring
                    "persistence"}   # Phase 9: schema owner
 FORBIDDEN_TIMERS = {"async_track_time_interval", "async_call_later",

@@ -707,5 +707,109 @@
     "state": {
       "entities": []
     }
+  },
+  {
+    "category": "pattern_quality",
+    "description": "A sequence consistently triggered while presence is detected gains an area-presence gate.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "suggested",
+      "entities": ["binary_sensor.front_door", "light.office"],
+      "extra": {"presence_gates": 1},
+      "tool": null
+    },
+    "id": "PAT-011",
+    "input": {
+      "area_presence": {
+        "action_entities": ["light.office"],
+        "area_id": "office",
+        "area_name": "Office",
+        "history": [
+          {"days_ago": [1,2,3,4,5,6,7,8,9,10], "hour": 17, "minute": 59, "state": "on"},
+          {"days_ago": [1,2,3,4,5,6,7,8,9,10], "hour": 18, "minute": 5, "state": "off"}
+        ],
+        "sensor_id": "binary_sensor.office_presence"
+      },
+      "history": [
+        {"days_ago": [1,2,3,4,5,6,7,8,9,10], "entity_id": "binary_sensor.front_door", "hour": 18, "minute": 0, "state": "on"},
+        {"days_ago": [1,2,3,4,5,6,7,8,9,10], "entity_id": "light.office", "hour": 18, "minute": 1, "state": "on"}
+      ]
+    },
+    "provider": null,
+    "runner": "pattern_quality",
+    "safety": [],
+    "state": {"entities": []}
+  },
+  {
+    "category": "pattern_quality",
+    "description": "A gated on sequence whose manual off events follow presence clearing gains a release.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "suggested",
+      "entities": ["binary_sensor.front_door", "light.office"],
+      "extra": {"presence_releases": 1},
+      "tool": null
+    },
+    "id": "PAT-012",
+    "input": {
+      "area_presence": {
+        "action_entities": ["light.office"],
+        "area_id": "office",
+        "area_name": "Office",
+        "history": [
+          {"days_ago": [1,2,3,4,5,6,7,8,9,10], "hour": 17, "minute": 59, "state": "on"},
+          {"days_ago": [1,2,3,4,5,6,7,8,9,10], "hour": 18, "minute": 3, "state": "off"}
+        ],
+        "sensor_id": "binary_sensor.office_presence"
+      },
+      "history": [
+        {"days_ago": [1,2,3,4,5,6,7,8,9,10], "entity_id": "binary_sensor.front_door", "hour": 18, "minute": 0, "state": "on"},
+        {"days_ago": [1,2,3,4,5,6,7,8,9,10], "entity_id": "light.office", "hour": 18, "minute": 1, "state": "on"},
+        {"days_ago": [1,2,3,4,5,6,7,8,9,10], "entity_id": "light.office", "hour": 18, "minute": 4, "state": "off"}
+      ]
+    },
+    "provider": null,
+    "runner": "pattern_quality",
+    "safety": [],
+    "state": {"entities": []}
+  },
+  {
+    "category": "pattern_quality",
+    "description": "Presence beginning after the trigger but before the action does not create a gate.",
+    "expected": {
+      "announcement_allowed": null,
+      "clarification_required": null,
+      "confirmation_required": null,
+      "decision": "suggested",
+      "entities": ["binary_sensor.front_door", "light.office"],
+      "extra": {"presence_gates": 0},
+      "tool": null
+    },
+    "id": "PAT-013",
+    "input": {
+      "area_presence": {
+        "action_entities": ["light.office"],
+        "area_id": "office",
+        "area_name": "Office",
+        "history": [
+          {"days_ago": [1,2,3,4,5,6,7,8,9,10], "hour": 17, "minute": 59, "state": "off"},
+          {"days_ago": [1,2,3,4,5,6,7,8,9,10], "hour": 18, "minute": 1, "state": "on"},
+          {"days_ago": [1,2,3,4,5,6,7,8,9,10], "hour": 18, "minute": 3, "state": "off"}
+        ],
+        "sensor_id": "binary_sensor.office_presence"
+      },
+      "history": [
+        {"days_ago": [1,2,3,4,5,6,7,8,9,10], "entity_id": "binary_sensor.front_door", "hour": 18, "minute": 0, "state": "on"},
+        {"days_ago": [1,2,3,4,5,6,7,8,9,10], "entity_id": "light.office", "hour": 18, "minute": 2, "state": "on"}
+      ]
+    },
+    "provider": null,
+    "runner": "pattern_quality",
+    "safety": [],
+    "state": {"entities": []}
   }
 ]

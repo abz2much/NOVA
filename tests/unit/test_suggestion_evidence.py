@@ -44,6 +44,20 @@ def test_sequence_explanation(pa):
     assert "door opens" in joined and "hall light on" in joined
 
 
+def test_sequence_explanation_formats_steps_and_presence(pa):
+    out = pa.explain_suggestion("sequence", {
+        "trigger": {"entity": "binary_sensor.front_door", "state": "on"},
+        "action": {"entity": "light.office", "state": "on"},
+        "presence_gate": {"area_name": "Office"},
+        "presence_release": {"area_name": "Office", "settle_seconds": 60},
+    }, 8)
+    joined = " ".join(out["evidence"])
+    assert "{'entity'" not in joined
+    assert "binary_sensor.front_door → on" in joined
+    assert "Only when presence is detected in Office" in joined
+    assert "Turns off again once presence in Office has cleared for 1 minute" in joined
+
+
 def test_unknown_pattern_type_is_safe(pa):
     out = pa.explain_suggestion("something_new", {}, 5)
     assert out["headline"]

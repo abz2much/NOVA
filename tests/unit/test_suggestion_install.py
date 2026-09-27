@@ -179,6 +179,34 @@ async def test_installer_installs_concrete_suggestion(pa, ac, fake_hass, monkeyp
     assert calls["alias"] == "porch on at 18:00"    # normalized args passed through
 
 
+async def test_installer_passes_restart_mode(pa, ac, fake_hass, monkeypatch):
+    sug = {"id": 8, "description": "presence release",
+           "automation_yaml": json.dumps({
+               "alias": "office presence release",
+               "trigger": {"platform": "state", "entity_id": "binary_sensor.door",
+                           "to": "on"},
+               "action": [
+                   {"service": "light.turn_on", "entity_id": "light.office"},
+                   {"service": "light.turn_off", "entity_id": "light.office"},
+               ],
+               "mode": "restart",
+           })}
+    stub = _StubAnalyzer(sug)
+    monkeypatch.setattr(pa, "get_analyzer", lambda: stub)
+    calls = {}
+
+    async def _fake_create(hass, **kwargs):
+        calls.update(kwargs)
+        return {"success": True, "automation_id": "nova_auto_release",
+                "alias": "Nova · office presence release"}
+
+    monkeypatch.setattr(ac, "create_automation", _fake_create)
+    result = await pa.install_approved_suggestion(fake_hass, 8)
+
+    assert result["installed"] is True
+    assert calls["mode"] == "restart"
+
+
 async def test_installer_advisory_approves_without_install(pa, ac, fake_hass, monkeypatch):
     sug = {"id": 9, "description": "note",
            "automation_yaml": json.dumps({"note": "x", "type": "manual_review"})}
