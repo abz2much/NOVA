@@ -369,10 +369,10 @@
                 const progress = remaining > 0
                   ? `${remaining} more qualifying day${remaining === 1 ? "" : "s"} needed`
                   : "day coverage met; confidence or evidence is still below the threshold";
-                msg += `<br>Closest routine: <b>${this._esc(cand.entity_id)}</b> → ${this._esc(cand.state)} ~${hr}:00, seen ${cand.days}/${dg.total_days} days (${progress}).`;
+                msg += `<br>Closest routine: <b>${this._esc(cand.name || cand.entity_id)}</b> → ${this._esc(cand.state)} ~${hr}:00, seen ${cand.days}/${dg.total_days} days (${progress}).`;
               }
               const src = (dg.top_sources || [])[0];
-              if (src) msg += `<br>Busiest source: ${this._esc(src.entity_id)} (${src.changes} changes).`;
+              if (src) msg += `<br>Busiest source: ${this._esc(src.name || src.entity_id)} (${src.changes} changes).`;
             }
             const nm = Array.isArray(res.near_misses) ? res.near_misses : [];
             if (nm.length) {

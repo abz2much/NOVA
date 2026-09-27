@@ -800,7 +800,8 @@ async def ws_get_panel_data(
             "intrusion":      _get_intrusion_status(),
             "knowledge":      _get_knowledge_stats(),
             # Reads patterns.db: run it off the event loop.
-            "suggestions":    await hass.async_add_executor_job(_get_suggestions),
+            "suggestions":    await hass.async_add_executor_job(
+                _get_suggestions, _entity_names(hass)),
             "goals":          _get_goals(),
             "config": {
                 "announcements_enabled": announcements_on,
@@ -1055,14 +1056,47 @@ def _get_doorbell_training(hass: HomeAssistant) -> dict:
         return {"stats": {"total": 0}, "recent": [], "patterns": []}
 
 
-def _get_suggestions() -> list[dict]:
+def _entity_names(hass: HomeAssistant) -> dict:
+    """entity_id -> friendly name for every state, read on the event loop.
+    Used to show text written with entity_ids (older rows, log lines,
+    decision records) with names. Never raises."""
+    try:
+        from .cognitive.naming import names_from_states
+        return names_from_states(hass.states.async_all())
+    except Exception:
+        return {}
+
+
+# Decision Record fields that are words for a person; ids, kinds and
+# outcomes are left exactly as stored.
+_DECISION_TEXT_FIELDS = ("decision", "reason", "observation",
+                         "interpretation", "evidence")
+
+
+def _named_decision(rec, names: dict):
+    """A display copy of one decision with entities named. Never raises."""
+    try:
+        from .cognitive.naming import humanize_record
+        if not isinstance(rec, dict) or not names:
+            return rec
+        out = dict(rec)
+        for field in _DECISION_TEXT_FIELDS:
+            if field in out:
+                out[field] = humanize_record(out[field], names)
+        return out
+    except Exception:
+        return rec
+
+
+def _get_suggestions(names: Optional[dict] = None) -> list[dict]:
     """Pending automation suggestions from the pattern engine, panel-shaped.
     Includes the EVIDENCE behind each one (v6.80.0) so review shows why.
     Never raises."""
     try:
         from .automation.api import panel_suggestion_items
         from .automation.patterns import get_analyzer
-        return panel_suggestion_items(get_analyzer().get_pending_suggestions())
+        return panel_suggestion_items(get_analyzer().get_pending_suggestions(),
+                                      names)
     except Exception:
         return []
 
@@ -1093,11 +1127,13 @@ def _get_goals() -> list[dict]:
         return []
 
 
-def _get_person_routines() -> dict:
+def _get_person_routines(names: Optional[dict] = None) -> dict:
     """Per-person learned routines from the pattern engine, grouped by
-    person for the Memory panel. Never raises."""
+    person for the Memory panel. Descriptions stored with entity_ids by
+    older releases are shown with names. Never raises."""
     try:
         from .automation.patterns import get_analyzer
+        from .cognitive.naming import humanize_text
         rows = get_analyzer().get_person_patterns()
         grouped: dict[str, list[dict]] = {}
         for r in rows:
@@ -1107,7 +1143,7 @@ def _get_person_routines() -> dict:
             grouped.setdefault(person, []).append({
                 "id": r.get("id"),
                 "pattern_type": r.get("pattern_type", ""),
-                "description": r.get("description", ""),
+                "description": humanize_text(r.get("description", ""), names),
                 "confidence": round(float(r.get("confidence", 0) or 0), 2),
                 "occurrences": r.get("occurrences", 0),
                 "last_seen": r.get("last_seen", ""),
@@ -1418,6 +1454,8 @@ async def ws_get_activity_log(
             lambda: get_recent_activity(hours=msg["hours"], limit=msg["limit"])
         )
         # Format for the panel
+        from .cognitive.naming import humanize_text
+        names = _entity_names(hass)
         result = []
         for e in entries:
             ts_str = e.get("timestamp", "")
@@ -1434,8 +1472,10 @@ async def ws_get_activity_log(
             result.append({
                 "ts": hhmm,
                 "urgency": e.get("urgency", "low"),
-                "tag": (e.get("entity_id", "").split(".", 1)[-1][:20] or e.get("source", "")).upper(),
-                "msg": e.get("message", ""),
+                "tag": ((names.get(e.get("entity_id", "")) or
+                         e.get("entity_id", "").split(".", 1)[-1])[:20]
+                        or e.get("source", "")).upper(),
+                "msg": humanize_text(e.get("message", ""), names),
                 "source": e.get("source", "observer"),
             })
         connection.send_result(msg["id"], {"entries": result})
@@ -1752,6 +1792,18 @@ def nova_log(category: str, message: str) -> None:
     if category in _CONV_CATEGORIES:
         _CONV_LOG.append(entry)
     _persist_log_entry(entry)
+
+
+def _named_log_entries(entries: list, names: dict) -> list:
+    """Display copies of log entries with known entity_ids named."""
+    if not names:
+        return entries
+    try:
+        from .cognitive.naming import humanize_text
+        return [dict(e, msg=humanize_text(e.get("msg", ""), names))
+                if isinstance(e, dict) else e for e in entries]
+    except Exception:
+        return entries
 
 
 def recent_conversation_log(n: int = 80) -> list:
@@ -2804,8 +2856,10 @@ async def ws_get_debug_log(
     connection: websocket_api.ActiveConnection,
     msg: dict,
 ) -> None:
-    """Return Nova internal debug log entries."""
-    connection.send_result(msg["id"], {"entries": list(_DEBUG_LOG)})
+    """Return Nova internal debug log entries, with entities named. The
+    persisted log file and the diagnostics export keep the entity_ids."""
+    connection.send_result(msg["id"], {"entries": _named_log_entries(
+        list(_DEBUG_LOG), _entity_names(hass))})
 
 
 @websocket_api.websocket_command({
@@ -2875,8 +2929,10 @@ async def ws_list_decisions(
                 cursor_id=msg.get("cursor_id"),
             )
         )
+        names = _entity_names(hass)
         connection.send_result(msg["id"], {
-            "decisions": result["items"], "next_cursor": result["next_cursor"],
+            "decisions": [_named_decision(d, names) for d in result["items"]],
+            "next_cursor": result["next_cursor"],
         })
     except Exception as exc:
         _LOGGER.exception("ws_list_decisions failed: %s", exc)
@@ -2928,7 +2984,8 @@ async def ws_get_decision(
             connection.send_error(msg["id"], "not_found", "decision not found")
             return
         connection.send_result(
-            msg["id"], {"decision": _bound_decision_strings(_redact(rec))})
+            msg["id"], {"decision": _bound_decision_strings(
+                _named_decision(_redact(rec), _entity_names(hass)))})
     except Exception as exc:
         _LOGGER.exception("ws_get_decision failed: %s", exc)
         connection.send_error(msg["id"], "get_decision_failed", str(exc))
@@ -2989,6 +3046,22 @@ async def ws_replay_decision(
         connection.send_error(msg["id"], "replay_decision_failed", str(exc))
 
 
+def _name_diagnostic(res, names: dict) -> None:
+    """Add a `name` beside each entity_id in the analysis diagnostic, in
+    place. Never raises."""
+    try:
+        dg = res.get("diagnostic") if isinstance(res, dict) else None
+        if not isinstance(dg, dict):
+            return
+        from .cognitive.naming import name_for
+        for key in ("candidates", "top_sources"):
+            for row in dg.get(key) or []:
+                if isinstance(row, dict) and row.get("entity_id"):
+                    row["name"] = name_for(row["entity_id"], names)
+    except Exception:
+        pass
+
+
 @websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/run_analysis",
@@ -3003,6 +3076,7 @@ async def ws_run_analysis(
     try:
         from . import cognitive_core
         res = await cognitive_core.run_analysis_now(hass)
+        _name_diagnostic(res, _entity_names(hass))
         connection.send_result(msg["id"], res)
     except Exception as exc:
         connection.send_result(msg["id"], {"ran": False, "error": str(exc)})
@@ -4102,7 +4176,8 @@ async def ws_get_person_routines(
 ) -> None:
     """Per-person learned routines, grouped by person, for the Memory panel."""
     try:
-        routines = await hass.async_add_executor_job(_get_person_routines)
+        routines = await hass.async_add_executor_job(
+            _get_person_routines, _entity_names(hass))
         connection.send_result(msg["id"], {"routines": routines})
     except Exception as exc:
         _LOGGER.exception("get_person_routines failed: %s", exc)
