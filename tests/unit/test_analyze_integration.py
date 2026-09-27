@@ -118,7 +118,10 @@ async def test_analyze_wires_numeric_trigger_from_sensor_history(pa, tmp_path, m
     # sensor history: a heater that comes on while a temp sensor reads cold.
     db = str(tmp_path / "c.db")
     conn = sqlite3.connect(db); conn.executescript(_SCHEMA)
-    base = datetime.now() - timedelta(days=16)
+    # Midnight-aligned, so the 15-minute samples never fall between a dip and
+    # the heater-on whatever time the test runs.
+    base = (datetime.now() - timedelta(days=16)).replace(
+        hour=0, minute=0, second=0, microsecond=0)
     action_eps = []
     for d in range(12):   # 12 occ -> confidence 0.8, clears the store bar
         t = (base + timedelta(days=d)).replace(hour=6, minute=2, second=17)
@@ -128,7 +131,7 @@ async def test_analyze_wires_numeric_trigger_from_sensor_history(pa, tmp_path, m
 
     # Warm every 15 minutes across the span, crossing cold just before each
     # heater-on (v7.126.0 needs a real crossing shortly before the action).
-    series = [(base.timestamp() - 3600 + i * 900, 72.0 + (i % 5)) for i in range(17 * 96)]
+    series = [(base.timestamp() + i * 900, 72.0 + (i % 5)) for i in range(17 * 96)]
     series += [(ep - 120, 61.0) for ep in action_eps]         # cold right before each
 
     async def _fake_fetch(hass):

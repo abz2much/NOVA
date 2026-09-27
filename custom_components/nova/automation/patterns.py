@@ -48,6 +48,7 @@ from .suggestions import (  # DB_PATH / MIN_DAYS are shared with stats
     _trigger_phrase,
     generate_automation,
     normalize_suggestion_automation,
+    service_for,
 )
 
 if TYPE_CHECKING:
@@ -348,6 +349,32 @@ NUMERIC_TRIGGER_WINDOW = 600.0
 # A threshold automation acts on every crossing, so a crossing must be
 # followed by the action at least this often (sequences use 0.3).
 NUMERIC_MIN_CONDITIONAL = 0.5
+# Sequence rules (v7.126.1). A sequence becomes an automation that acts on
+# every trigger, so the trigger must be followed by the action at least this
+# often; with no area to compare, the bar is higher.
+SEQUENCE_MIN_CONDITIONAL = 0.5
+SEQUENCE_NO_AREA_CONDITIONAL = 0.7
+# Two different areas: only a link that holds almost every time (the hall
+# door and the kitchen light, every evening) is believable.
+SEQUENCE_CROSS_AREA_CONDITIONAL = 0.8
+SEQUENCE_CANDIDATES = 60
+# Triggers that are someone arriving or leaving: no area of their own.
+PRESENCE_TRIGGER_DOMAINS = ("person", "device_tracker")
+
+
+def _sequence_link_ok(trigger: str, action: str, conditional: float,
+                      areas: dict) -> bool:
+    """Whether a learned "after A, B" is a believable automation. Pure."""
+    if conditional < SEQUENCE_MIN_CONDITIONAL:
+        return False
+    if trigger.split(".", 1)[0] in PRESENCE_TRIGGER_DOMAINS:
+        return True
+    t_area, a_area = areas.get(trigger), areas.get(action)
+    if t_area and a_area:
+        return t_area == a_area or conditional >= SEQUENCE_CROSS_AREA_CONDITIONAL
+    return conditional >= SEQUENCE_NO_AREA_CONDITIONAL
+
+
 # Most new suggestions the AI review judges in one analysis pass; the rest
 # wait for the next pass (bounds cost and time).
 REVIEW_MAX_PER_PASS = 10
@@ -420,6 +447,7 @@ class PatternAnalyzer:
         # each analysis (the detectors run in an executor, away from states).
         self._names: dict = {}
         self._numeric_ran = False
+        self._completed_types: set = set()
         # Single flight: a manual run and the scheduled run never overlap.
         self._analysis_lock = asyncio.Lock()
 
@@ -554,18 +582,17 @@ class PatternAnalyzer:
             _area_presence = await self._fetch_area_presence_context(hass)
         except Exception:
             _area_presence = EMPTY_CONTEXT
-        _entity_areas: dict = {}
-        if _sensor_hist:
-            try:
-                ids = list(_sensor_hist)
-                for dom in NUMERIC_ACTION_DOMAINS:
-                    ids.extend(st.entity_id for st in hass.states.async_all(dom))
-                _entity_areas = await self._fetch_entity_areas(hass, ids)
-            except Exception:
-                _entity_areas = {}
+        # Areas of every entity (directly or via its device): the threshold
+        # and sequence detectors only link things in the same area.
+        try:
+            ids = list(_sensor_hist) + [st.entity_id for st in hass.states.async_all()]
+            _entity_areas = await self._fetch_entity_areas(hass, dict.fromkeys(ids))
+        except Exception:
+            _entity_areas = {}
         _lat = getattr(hass.config, "latitude", None)
         _lon = getattr(hass.config, "longitude", None)
         self._numeric_ran = False
+        self._completed_types = set()
         patterns = await hass.async_add_executor_job(
             self._detect_patterns, person_map, _lat, _lon, _sensor_hist,
             _area_presence, _entity_areas)
@@ -585,8 +612,19 @@ class PatternAnalyzer:
         if _eff_threshold * MIN_OCCURRENCES * 3 > _seq_needed:
             _seq_needed += 1
         reviewed = rejected = deferred = 0
+        kept: list = []
         for p in patterns:
             if p.confidence >= _eff_threshold:
+                if not self._installable(p):
+                    # Not something Nova can turn into an automation (a
+                    # read-only device, a voice command): not a suggestion.
+                    # A person's routine is still recorded below.
+                    if p.details.get("person"):
+                        if await hass.async_add_executor_job(
+                                self._store_person_pattern, p):
+                            new_person_patterns += 1
+                    continue
+                kept.append(p)
                 match = self._automation_match(hass, p)
                 p.details["automation_match"] = match
                 if match.get("status") == "already_automated":
@@ -660,14 +698,14 @@ class PatternAnalyzer:
         # Record the outcome of this pass so the panel can show "last analysis:
         # ran at T, N found, M stored" — the difference between "never ran" and
         # "ran, found nothing worth surfacing".
-        # Threshold suggestions from the detector before v7.126.0 that the
-        # stricter one no longer finds are retired (hidden; they come back if
-        # detected again). Only when that detector actually ran this pass.
+        # Pending suggestions this pass no longer supports (not detected, below
+        # the bar, or not automatable) are retired: hidden, and pending again
+        # if detected later. Only for detectors that completed this pass.
         retired = 0
-        if self._numeric_ran:
-            retired = await hass.async_add_executor_job(
-                self._suggestions().retire_missing, "numeric_trigger",
-                [p for p in patterns if p.pattern_type == "numeric_trigger"])
+        for ptype in sorted(self._completed_types):
+            retired += await hass.async_add_executor_job(
+                self._suggestions().retire_missing, ptype,
+                [p for p in kept if p.pattern_type == ptype])
 
         self._last_result = {
             "ts": time.time(),
@@ -709,14 +747,24 @@ class PatternAnalyzer:
             return None
         patterns: list[DetectedPattern] = []
         try:
+            done = self._completed_types
             patterns.extend(self._find_time_routines(conn, person_map))
+            done.add("time_routine")
             patterns.extend(self._find_repeated_commands(conn))
+            done.add("repeated_command")
             patterns.extend(self._find_sequence_patterns(
-                conn, lat, lon, sensor_hist, area_presence))
+                conn, lat, lon, sensor_hist, area_presence, entity_areas))
+            done.add("sequence")
             patterns.extend(self._find_numeric_triggers(
                 conn, sensor_hist, area_presence, entity_areas))
             self._numeric_ran = bool(sensor_hist)
-            patterns.extend(self._find_presence_patterns(conn))
+            if self._numeric_ran:
+                done.add("numeric_trigger")
+            # The old "presence" detector (v7.126.1: no longer run) paired
+            # every change within 5 minutes of an arrival, with no check of
+            # how often an arrival is followed by it, and duplicated what the
+            # sequence detector finds for person and tracker triggers.
+            done.add("presence")
         except Exception as exc:
             _LOGGER.warning("Pattern analysis error: %s", exc)
         finally:
@@ -1003,6 +1051,7 @@ class PatternAnalyzer:
                                 lat=None, lon=None,
                                 sensor_hist=None,
                                 area_presence: AreaPresenceContext = EMPTY_CONTEXT,
+                                entity_areas: Optional[dict] = None,
                                 ) -> list[DetectedPattern]:
         """Find state changes that consistently follow each other within 10 min.
 
@@ -1087,9 +1136,16 @@ class PatternAnalyzer:
                 win.popleft()
 
         numeric_prepared = _prepare_numeric_history(sensor_hist or {})
-        for (ea, sa, eb, sb), count in pair_counts.most_common(15):
+        areas = entity_areas or {}
+        best: dict = {}   # (action entity, state) -> (confidence, pattern)
+        # More candidates than are kept: the rules below reject many, and a
+        # chatty but meaningless pair must not crowd out a real one.
+        for (ea, sa, eb, sb), count in pair_counts.most_common(SEQUENCE_CANDIDATES):
             if count < MIN_OCCURRENCES:
                 break
+            # Only an action Nova can actually automate (v7.126.1).
+            if service_for(eb, sb) is None:
+                continue
             slot = pair_lag.get((ea, sa, eb, sb), [0.0, 1])
             mean_lag = int(round(slot[0] / max(1, slot[1])))
             times = pair_times.get((ea, sa, eb, sb), [])
@@ -1103,6 +1159,13 @@ class PatternAnalyzer:
                     distinct_days=len({datetime.fromtimestamp(t).date() for t in times})),
                 min_occurrences=MIN_OCCURRENCES)
             if not score.accepted:
+                continue
+            # v7.126.1: an automation acts every time the trigger fires, so the
+            # trigger must be followed by the action most of the time, and the
+            # two must plausibly be linked: the same area, or almost always
+            # together, unless the trigger is someone arriving or leaving.
+            conditional = count / max(count, trigger_counts.get((ea, sa), count), 1)
+            if not _sequence_link_ok(ea, eb, conditional, areas):
                 continue
             # Accumulate every discriminator that consistently holds; HA ANDs a
             # list of conditions. Prefer a sun condition ("after dark") over a
@@ -1136,7 +1199,7 @@ class PatternAnalyzer:
                 return text
             desc = _desc(self._names)
             legacy = _desc(_AS_IDS)
-            patterns.append(DetectedPattern(
+            pattern = (DetectedPattern(
                 pattern_type="sequence",
                 description=desc,
                 legacy_description=legacy,
@@ -1152,9 +1215,16 @@ class PatternAnalyzer:
                              ("entity_id", "area_id", "area_name")}}
                             if gate else {}),
                          **({"presence_release": release} if release else {}),
+                         "conditional": round(conditional, 3),
+                         "trigger_count": trigger_counts.get((ea, sa), count),
                          "evidence": score.evidence()},
             ))
+            # One suggestion per device action: its strongest trigger.
+            best_key = (eb, sb)
+            if best_key not in best or score.confidence > best[best_key][0]:
+                best[best_key] = (score.confidence, pattern)
 
+        patterns.extend(p for _c, p in best.values())
         return patterns
 
     def _find_numeric_triggers(self, conn: sqlite3.Connection,
@@ -1694,6 +1764,15 @@ class PatternAnalyzer:
     # ── Suggestions (stored in patterns.db by SuggestionStore) ──────────────
     def _suggestions(self) -> SuggestionStore:
         return SuggestionStore(self._db)
+
+    def _installable(self, pattern: DetectedPattern) -> bool:
+        """Whether the suggestion would be a real automation (a controllable
+        target and a complete trigger and action), not advice."""
+        try:
+            norm = normalize_suggestion_automation(self._generate_automation(pattern))
+            return bool(norm.get("installable"))
+        except Exception:
+            return False
 
     def _store_rejected(self, pattern: DetectedPattern) -> bool:
         """Store a suggestion the AI review turned down, so it is never
