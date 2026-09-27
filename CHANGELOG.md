@@ -1,3 +1,18 @@
+## [7.124.1] — presence suggestion fixes
+
+**Fixes**
+- Nova now reads every entry of Home Assistant's recorder history. Previously it kept only the first entry for each sensor, because Home Assistant returns later entries with the time as text. As a result, presence gates and "off when presence clears" were never learned on a real install, and the recorder history import behind Analyze Now brought in only one state per entity.
+- Numeric-threshold suggestions ("when the temperature drops below 18, turn on the heater"), and numeric conditions on "after A, B" suggestions, start working for the first time with this fix. They had never received real sensor history, so expect new temperature, humidity and light-level suggestions after the next analysis. The analysis also prepares each sensor's history once instead of once per pattern.
+- A gated sequence and the same sequence with "off when presence clears" are no longer both pending. The one detected most recently is pending and the other is marked `superseded`. The superseded one becomes pending again if Nova detects it later. Dismissed, approved, installed and already-automated suggestions are never changed, so a dismissed plain version stays dismissed while the release version can still be suggested. Two versions whose descriptions happen to match are no longer merged into one.
+- A generated "off when presence clears" automation now turns the device off when the presence sensor goes from unavailable to off, and gives up waiting after four hours. It turns the device off only if presence is off at that point. In 7.124.0, if presence cleared while the device was turning on and then came back within the settling time, the device was turned off anyway, because a failed condition inside a Home Assistant `choose` only ends that branch. It now stays on and waits for presence to clear again.
+
+**Caveats**
+- A presence sensor that stays on or unavailable for more than four hours leaves the device on until the automation is next triggered. A Home Assistant restart during the wait also ends it.
+- Release automations already installed from 7.124.0 keep their original behaviour. Pending release suggestions pick up the new automation at the next analysis.
+- Pattern timestamps are stored in local time, so for the one repeated hour when the clocks go back, times can be an hour out. This affects all of Nova's learned timing, not just this change.
+
+Stored data gains one suggestion status, `superseded`. Services, WebSocket and assistant-tool schemas, the panel, and suggestions without presence or numeric evidence are unchanged.
+
 ## [7.124.0] — presence-aware suggestions
 
 - Learned sequence and numeric-threshold suggestions can now include a same-area presence condition when at least 80% of their trigger-time samples support it. Only Home Assistant occupancy and presence sensors are used; motion sensors and the triggering entity itself are excluded.
