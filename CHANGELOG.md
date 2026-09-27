@@ -1,3 +1,25 @@
+## [7.126.0] — better threshold suggestions and an optional AI review
+
+**Fixes**
+- Threshold suggestions no longer link any dark room to any light. A sensor now only explains a device in the same Home Assistant area, has to cross the threshold within 10 minutes before the device changes, and a crossing has to be followed by the change at least half the time. In testing with evening history shaped like a real house, the old rule suggested the kitchen light three times, once each for the landing, living room and kitchen sensors. The new rule suggests it once, from the kitchen sensor.
+- Each device gets one threshold suggestion, from its strongest sensor, instead of one per sensor.
+- Threshold confidence is now a real score of how reliably the crossing is followed, not a count that reads 100% once something has happened 15 times. The review card explains the link: how often the crossing was followed, and on how many days.
+- A suggestion is treated as already automated when an existing automation already performs the same action on the same device, even from a different trigger. An automation that only uses the same device for something else is still shown as a possible overlap.
+- The chips under a suggestion show friendly names.
+- Threshold suggestions from the old rule that the new rule no longer finds are retired. They are hidden, and come back if they are detected again.
+
+**New**
+- Review suggestions with AI (Settings, off by default). Each new suggestion goes to the Suggestion Review model before it reaches the panel. The model can only turn a suggestion down, never create or change one. A rejected suggestion is never suggested again. Filtered by AI review, on the Suggestions tab, lists it with the model's reason, and Suggest anyway brings it back without another review. A suggestion the model can't judge (provider down, unreadable reply) isn't shown yet and is reviewed on the next analysis. At most 10 are reviewed per analysis.
+- Suggestion Review is a new role in the AI Models card, with the same provider and model choice as the other roles, including Local and Hybrid profiles. Until you choose one, it uses the Main Agent's provider and model.
+
+**Caveats**
+- The review sends each suggestion's device and room names and its evidence to the Suggestion Review provider. With a local Ollama model, nothing leaves the house.
+- A threshold suggestion now needs both the sensor and the device assigned to an area. Without areas, none is suggested.
+- If the review is on but its role has no usable provider (for example a cloud provider without its key), new suggestions wait, and the System Log says so.
+- Suggestions pending from before this release are reviewed once when they are next detected.
+
+`suggestions` gains two statuses, `rejected` and `retired`. There are three new settings (`suggestion_review_enabled`, `suggestion_review_provider`, `suggestion_review_model`), one new `get_panel_data` section (`suggestions_filtered`), and a `restore` action on `nova/suggestion_action`. Other services, WebSocket commands and assistant-tool schemas are unchanged.
+
 ## [7.125.1] — friendly names everywhere, and restarts are not departures
 
 **Fixes**
