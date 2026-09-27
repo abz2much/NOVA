@@ -1,3 +1,11 @@
+## [7.124.0] — presence-aware suggestions
+
+- Learned sequence and numeric-threshold suggestions can now include a same-area presence condition when at least 80% of their trigger-time samples support it. Only Home Assistant occupancy and presence sensors are used; motion sensors and the triggering entity itself are excluded.
+- A gated sequence that reliably ends after the same presence sensor clears can now suggest turning the device off again after its learned settling time. The generated automation safely handles presence clearing during its action delay and uses restart mode so a new trigger re-arms the wait.
+- Presence evidence uses the area's friendly name, approved release automations keep their restart mode, and installed releases are recognised as already automated. Sequence evidence also formats trigger and action steps clearly instead of showing raw dictionaries.
+
+Existing suggestions without presence evidence generate the same automation JSON as before. Stored data, services, WebSocket and assistant-tool schemas, panel behaviour and existing installed automations are unchanged.
+
 ## [7.123.0] — quality gates
 
 - CI now type checks Nova's architecture packages, fails on import cycles, unintended dependencies between packages or growth in the compatibility modules, and holds each package's test coverage above a floor.
