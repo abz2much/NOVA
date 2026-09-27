@@ -47,9 +47,12 @@ def ensure_schema(db_path: str = DB_PATH) -> None:
 
 def store(person: str, pattern_type: str, description: str, *,
           data: Optional[dict] = None, confidence: float = 0.0,
-          occurrences: int = 1, db_path: str = DB_PATH) -> bool:
-    """Upsert a person routine on (person, pattern_type, description). person is
-    normalized; re-analysis refreshes in place rather than duplicating. Returns
+          occurrences: int = 1, db_path: str = DB_PATH,
+          key: Optional[str] = None) -> bool:
+    """Upsert a person routine. With a `key` (cognitive.routines.routine_key)
+    the routine is found by (person, pattern_type, routine_key), so the same
+    habit measured again refreshes one row, wording included; without one it
+    falls back to matching the description. person is normalized. Returns
     True on success. Never raises."""
     if not person:
         return False
@@ -57,26 +60,38 @@ def store(person: str, pattern_type: str, description: str, *,
     try:
         ensure_schema(db_path)
         with sqlite3.connect(db_path) as conn:
-            row = conn.execute(
-                "SELECT id FROM person_patterns "
-                "WHERE person = ? AND pattern_type = ? AND description = ?",
-                (person, pattern_type, description),
-            ).fetchone()
+            if key:
+                rows = conn.execute(
+                    "SELECT id FROM person_patterns WHERE person = ? AND "
+                    "pattern_type = ? AND routine_key = ? ORDER BY id DESC",
+                    (person, pattern_type, key),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT id FROM person_patterns "
+                    "WHERE person = ? AND pattern_type = ? AND description = ?",
+                    (person, pattern_type, description),
+                ).fetchall()
             now_iso = datetime.now().isoformat()
             payload = json.dumps(data or {})
-            if row:
+            if rows:
                 conn.execute(
-                    "UPDATE person_patterns SET confidence = ?, occurrences = ?, "
-                    "last_seen = ?, data = ? WHERE id = ?",
-                    (confidence, occurrences, now_iso, payload, row[0]),
+                    "UPDATE person_patterns SET description = ?, confidence = ?, "
+                    "occurrences = ?, last_seen = ?, data = ? WHERE id = ?",
+                    (description, confidence, occurrences, now_iso, payload,
+                     rows[0][0]),
                 )
+                # A duplicate left by an interrupted upgrade: keep one row.
+                for (extra,) in rows[1:]:
+                    conn.execute("DELETE FROM person_patterns WHERE id = ?", (extra,))
             else:
                 conn.execute(
                     "INSERT INTO person_patterns "
                     "(person, pattern_type, description, data, confidence, "
-                    "last_seen, occurrences) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "last_seen, occurrences, routine_key) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     (person, pattern_type, description, payload, confidence,
-                     now_iso, occurrences),
+                     now_iso, occurrences, key),
                 )
         return True
     except Exception as exc:

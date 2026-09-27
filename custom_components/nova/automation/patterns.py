@@ -1399,16 +1399,27 @@ class PatternAnalyzer:
 
     def _store_person_pattern(self, pattern: DetectedPattern) -> bool:
         """Upsert a person-owned routine into the person_patterns store (now
-        owned by the person_patterns module). Deterministic key
-        (person, pattern_type, description) so re-analysis refreshes in place."""
+        owned by the person_patterns module), keyed on what the routine is
+        (cognitive.routines.routine_key) so re-analysis refreshes one row
+        however its counts drift. A time routine is only a person's when it is
+        something a person does (a light, a lock, the blinds), never a
+        tracker, sensor or helper changing state."""
         person = pattern.details.get("person")
         if not person:
             return False
+        from ..cognitive import routines
+        entity = pattern.entity_ids[0] if pattern.entity_ids else ""
+        data = dict(pattern.details or {})
+        if pattern.pattern_type == routines.TIME_ROUTINE:
+            if not routines.is_person_routine(entity, str(data.get("state", ""))):
+                return False
+            data["entity_id"] = entity
         from .. import person_patterns
         return person_patterns.store(
             person, pattern.pattern_type, pattern.description,
-            data=pattern.details, confidence=pattern.confidence,
+            data=data, confidence=pattern.confidence,
             occurrences=pattern.occurrences, db_path=self._db,
+            key=routines.routine_key(pattern.pattern_type, entity, data),
         )
 
     def get_person_patterns(self, person: Optional[str] = None) -> list[dict]:

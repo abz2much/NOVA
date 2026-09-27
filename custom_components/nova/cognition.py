@@ -978,11 +978,31 @@ ROUTINE_START_CONF_MIN = 0.65   # only surface reasonably-confident routines
 ROUTINE_START_TOL_MIN = 30      # fire within this many minutes past the usual time
 
 
+def _person_name(hass, person: str) -> str:
+    """The display name of a normalized person id ("abi" -> "Abi"): the
+    friendly name of the matching person entity, else the id title-cased."""
+    try:
+        from . import identity
+        for st in hass.states.async_all("person"):
+            fn = st.attributes.get("friendly_name") or ""
+            if person in (identity.normalize(fn),
+                          identity.normalize(st.entity_id.split(".", 1)[-1])):
+                return str(fn or person).strip()
+    except Exception:
+        pass
+    return str(person or "").replace("_", " ").title()
+
+
 def predict_routine_start(hass, now: float = None) -> list:
-    """Routine-start anticipation ("you usually start X around now"). Reads the
-    per-person routine store and, when it's about the usual time for a confident
-    time-based routine AND that person is currently home, surfaces it once.
-    Gated by routine_alerts_enabled. One prompt per routine per day. Never raises.
+    """Routine-start anticipation ("You usually turn the Kitchen Light on
+    around now."). Reads the per-person routine store and, when it's about
+    the usual time for a confident time routine that is something a person
+    does (cognitive.routines) AND that person is home, says it once. The
+    sentence is built from the routine's entity, state and the entity's
+    friendly name now, addressed to the person, and names them when someone
+    else is home too. Voice-command routines are kept for the Memory panel but
+    not announced. Gated by routine_alerts_enabled. One prompt per routine per
+    day, keyed on what the routine is. Never raises.
     """
     import json as _json
     now = now or time.time()
@@ -992,8 +1012,10 @@ def predict_routine_start(hass, now: float = None) -> list:
         if not bool(nova_config.get("routine_alerts_enabled", True)):
             return out
         from . import person_patterns
-        routines = person_patterns.read()
-        if not routines:
+        from .cognitive import naming
+        from .cognitive import routines as _routines
+        rows = person_patterns.read()
+        if not rows:
             return out
         try:
             from . import identity
@@ -1003,10 +1025,12 @@ def predict_routine_start(hass, now: float = None) -> list:
         today = _local_day(now)
         now_dt = datetime.datetime.fromtimestamp(now)
         now_min = now_dt.hour * 60 + now_dt.minute
-        for r in routines:
+        for r in rows:
             person = r.get("person")
             if not person or person not in home:
                 continue  # only prompt when that person is actually home
+            if r.get("pattern_type") != _routines.TIME_ROUTINE:
+                continue
             if float(r.get("confidence") or 0.0) < ROUTINE_START_CONF_MIN:
                 continue
             try:
@@ -1014,29 +1038,36 @@ def predict_routine_start(hass, now: float = None) -> list:
             except Exception:
                 data = {}
             hour = data.get("hour")
-            if hour is None:
-                continue  # no time-of-day — can't anticipate a start
+            state = str(data.get("state") or "")
+            entity = str(data.get("entity_id") or "")
+            if not entity:   # stored before entity_id was kept in data
+                entity = str(r.get("description") or "").split(" ", 1)[0]
+            if hour is None or not _routines.is_person_routine(entity, state):
+                continue
             delta = now_min - int(hour) * 60
             if not (0 <= delta <= ROUTINE_START_TOL_MIN):
                 continue  # only as we reach the usual time, not long after
-            desc = str(r.get("description") or "").strip()
-            if not desc:
-                continue
-            key = "routine:%s:%s" % (person, r.get("id") or desc)
+            rkey = _routines.routine_key(_routines.TIME_ROUTINE, entity, data)
+            key = "routine:%s:%s" % (person, rkey)
             if _RECUR_ALERTED.get(key) == today:
                 continue
             _RECUR_ALERTED[key] = today
+            st = hass.states.get(entity)
+            names = naming.names_from_states([st] if st is not None else [])
+            others_home = len(home - {person}) > 0
+            msg = _routines.routine_sentence(
+                entity, state, names,
+                person_name=_person_name(hass, person) if others_home else "")
             _log_decision(
                 "anticipation_routine",
-                {"person": person, "routine": desc},
+                {"person": person, "routine": rkey},
                 {"predicted": "routine usually starts around now"},
                 "prompt routine start",
                 "learned per-person routine",
             )
             out.append({
                 "type": "anticipation_routine", "urgency": "low",
-                "message": "Around this time you usually %s." % desc,
-                "pattern_key": key, "offer": False,
+                "message": msg, "pattern_key": key, "offer": False,
             })
     except Exception as exc:
         _LOGGER.debug("predict_routine_start error: %s", exc)
