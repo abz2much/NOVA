@@ -1250,14 +1250,16 @@ def presence_status(hass) -> list:
 
 def predict_proximity(hass, now: float = None) -> list:
     """
-    Detect a location-aware (GPS) tracker heading home and flag it ONCE per trip
+    Detect a location-aware (GPS) person heading home and flag it ONCE per trip
     when it crosses inside APPROACH_OUTER_KM while closing. Works entirely off
-    the local network. State resets when the person reaches home. Returns action
-    dicts for the gated announce path.
+    the local network. State resets when the person reaches home. People only;
+    device trackers only in a household with no person entities (a person and
+    their phone are one arrival, announced by name). Returns action dicts for
+    the gated announce path.
     """
     out = []
     try:
-        for st in _presence_entities(hass):
+        for st in _routine_presence_entities(hass):
             eid = st.entity_id
             if _is_home(st.state):
                 _LAST_DIST.pop(eid, None)
