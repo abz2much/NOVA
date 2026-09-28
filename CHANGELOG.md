@@ -1,3 +1,11 @@
+## [7.127.1] — speakers that stayed silent, briefings that made things up
+
+**Fixed**
+- Announcements now play on Google Cast speakers. Nova sent every announcement with the speaker's current volume, which only Sonos understands, and Cast rejected it. Now only Sonos speakers get the volume.
+- Spoken History no longer shows an announcement as sent when the speaker refused it. Nova now waits for the speaker to accept it, tries the backup way of speaking if it doesn't, and skips speakers that are offline.
+- Repeat uses your announcement speakers when the original speaker is offline.
+- Briefings only mention facts Nova actually gathered. They could invent messages, appointments, repairs, readings and an unlocked front door.
+
 ## [7.127.0] — Nova gets a face
 
 **New**
