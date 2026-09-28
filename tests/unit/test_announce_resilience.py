@@ -341,7 +341,8 @@ def test_callers_without_authoritative_argument_keep_existing_behaviour(routing,
 
 # ── per-speaker delivery: volume-pinned play_media, with tts.speak fallback ─
 
-async def test_announce_plays_via_play_media_pinned_to_current_volume(tts):
+async def test_announce_plays_via_play_media_pinned_to_current_volume(tts, monkeypatch):
+    monkeypatch.setattr(tts, "_is_sonos", lambda hass, eid: True)
     hass = _Hass({
         "media_player.a": _State("media_player.a", "idle", volume_level=0.3),
         "media_player.b": _State("media_player.b", "idle", volume_level=0.7),
@@ -357,6 +358,53 @@ async def test_announce_plays_via_play_media_pinned_to_current_volume(tts):
     assert play_calls[1][2]["extra"] == {"volume": 0.7}
     # No fallback needed — both speakers "responded".
     assert not any(c[0] == "tts.speak" for c in hass.calls)
+
+
+async def test_volume_is_pinned_on_sonos_only(tts, monkeypatch):
+    # Cast forwards `extra` straight to pychromecast, which rejects `volume`
+    # with a TypeError — every announcement to a Cast speaker failed (the
+    # Entry Speaker, 2026-09-28). Only Sonos gets the pinned volume.
+    monkeypatch.setattr(tts, "_is_sonos", lambda hass, eid: eid == "media_player.sonos")
+    hass = _Hass({
+        "media_player.sonos": _State("media_player.sonos", "idle", volume_level=0.3),
+        "media_player.cast": _State("media_player.cast", "off", volume_level=0.4),
+    })
+    await tts.async_announce(hass, "hello", "tts.piper",
+                             ["media_player.sonos", "media_player.cast"])
+    play = {c[1]: c[2] for c in hass.calls if c[0] == "play_media"}
+    assert play["media_player.sonos"]["extra"] == {"volume": 0.3}
+    assert "extra" not in play["media_player.cast"]
+
+
+async def test_play_media_is_awaited_so_its_errors_reach_the_fallback(tts):
+    # A fire-and-forget call can never raise, so a failing speaker was
+    # recorded as delivered. The call must be blocking.
+    seen = []
+    hass = _Hass({"media_player.a": _State("media_player.a", "idle")})
+    orig = hass.async_call
+
+    async def _spy(domain, service, data, target=None, blocking=False):
+        seen.append((domain, service, blocking))
+        return await orig(domain, service, data, target=target, blocking=blocking)
+
+    hass.async_call = _spy
+    assert await tts.async_announce(hass, "hello", "tts.piper", ["media_player.a"])
+    assert seen == [("media_player", "play_media", True)]
+
+
+async def test_unavailable_speaker_is_not_counted_as_delivered(tts, monkeypatch):
+    recorded = []
+    monkeypatch.setattr(tts, "_history_source", lambda ctx: "briefing")
+    import sys, types
+    fake = types.ModuleType("spoken_history")
+    fake.record = lambda *a, **k: recorded.append(a)
+    monkeypatch.setitem(sys.modules, tts.__name__.rsplit(".", 1)[0] + ".spoken_history", fake)
+    hass = _Hass({"media_player.a": _State("media_player.a", "unavailable")})
+    ok = await tts.async_announce(hass, "hello", "tts.piper", ["media_player.a"],
+                                  context="briefing")
+    assert ok is False
+    assert hass.calls == []
+    assert recorded == []
 
 
 async def test_unresponsive_speaker_is_trusted_not_double_announced(tts):

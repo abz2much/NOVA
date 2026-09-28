@@ -3780,8 +3780,8 @@ async def ws_repeat_spoken(
     `spoken_id` (never `id` — that field is reserved for websocket message
     correlation) names which row to repeat.
 
-    Sends to the original speaker(s) if they still resolve to a real
-    entity; otherwise falls back to Nova's configured default speakers
+    Sends to the original speaker(s) if they are still available;
+    otherwise falls back to Nova's configured default speakers
     (the same broadcast_target() the manual TTS test already uses).
     Delivery and recording both happen inside async_announce — this
     handler never calls spoken_history.record itself, so a repeat is
@@ -3797,7 +3797,11 @@ async def ws_repeat_spoken(
             connection.send_error(msg["id"], "not_found", "No spoken history entry with that id")
             return
 
-        speakers = [s for s in row["speakers"] if hass.states.get(s) is not None]
+        speakers = [
+            s for s in row["speakers"]
+            if (st := hass.states.get(s)) is not None
+            and st.state not in ("unavailable", "unknown")
+        ]
         entry = _get_entry(hass)
         cfg = await hass.async_add_executor_job(nova_config.effective_config, entry)
         if not speakers:

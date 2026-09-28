@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.util import dt as dt_util
 
-from .const import NOVA_PERSONA
+from .const import BRIEFING_GROUNDING_RULE, NOVA_PERSONA
 from .database import get_recent_messages, save_message
 from .directive_helper import build_system_prompt
 from .presence import get_presence_summary
@@ -259,7 +259,8 @@ async def async_briefing(
         f"Under 120 words. Be efficient — do not list trivia. "
         f"If nothing is noteworthy, say so briefly. "
         f"Your prime directive should inform what you surface — protect, steward, "
-        f"anticipate. Lead with anything that affects their safety or wellbeing."
+        f"anticipate. Lead with anything that affects their safety or wellbeing. "
+        f"{BRIEFING_GROUNDING_RULE}"
     )
     system = build_system_prompt(hass, honorific, task)
 
@@ -273,7 +274,7 @@ async def async_briefing(
             ],
             role="briefing", data_category="text",
             max_tokens=1500,
-            temperature=0.6,
+            temperature=0.2,
         )
         briefing_text = (result.text or "").strip()
     except Exception as exc:
