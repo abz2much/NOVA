@@ -40,8 +40,9 @@ def pb(load, tmp_path, monkeypatch, fake_hass):
 
     briefed = []
 
-    async def _fake_trigger(reason, person_name=""):
+    async def _fake_trigger(reason, person_name="", person_entity=""):
         briefed.append((reason, person_name))
+        mod._briefed_entity = person_entity
     monkeypatch.setattr(mod, "_trigger_briefing", _fake_trigger)
     mod._briefed = briefed  # stash for assertions
     return mod
@@ -83,6 +84,7 @@ async def test_door_opening_after_pending_arrival_triggers_briefing(pb, fake_has
     ))
     await fake_hass.drain()
     assert pb._briefed == [("arrival", "Alex")]
+    assert pb._briefed_entity == "person.alex"
     assert pb._STATE.pending_arrival_person == ""
 
 

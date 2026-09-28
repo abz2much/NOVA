@@ -1,3 +1,14 @@
+## [7.127.2] — people, not phones, and a proper welcome home
+
+**Fixed**
+- Nova announces only the person heading home, not their phone as well. A person and their phone tracker share the same GPS position, so both crossed the line at the same moment and Nova announced the phone and then the person a second later. Phone trackers are used only in a home with no people set up in Home Assistant, the same rule routine alerts follow.
+- The arrival briefing starts with "Welcome home" and the arriving person's own honorific, even when someone else is already home. Before, anyone else being home dropped both, so it opened with a plain "Good afternoon."
+- The arrival briefing only mentions camera detections and events from the last 30 minutes. It could describe a caller from hours earlier as if they were still at the door. Every briefing now gives the time of past detections and events and speaks of them in the past tense.
+- Event times in briefings are local time. They were read out in UTC.
+
+**Caveats**
+- With others home and no honorific set for the arriving person, the welcome is a plain "Welcome home." Nova won't guess from the global default in a shared house. Set it under per-person honorifics.
+
 ## [7.127.1] — speakers that stayed silent, briefings that made things up
 
 **Fixed**

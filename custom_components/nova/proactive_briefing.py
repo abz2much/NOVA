@@ -94,9 +94,12 @@ def get_snapshot_summary(hours: float = 12) -> str:
             types[s.detection_type] = types.get(s.detection_type, 0) + 1
         type_str = ", ".join(f"{count} {dtype}" for dtype, count in types.items())
         latest = snaps[-1]
+        # The time says it already happened, so a briefing never reports an
+        # old detection as something going on right now.
+        at = datetime.fromtimestamp(latest.timestamp).strftime("%H:%M")
         lines.append(
             f"  {cam}: {len(snaps)} detection(s) ({type_str}). "
-            f"Latest: {latest.analysis[:120]}"
+            f"Latest, at {at}: {latest.analysis[:120]}"
         )
 
     return "Camera detections:\n" + "\n".join(lines)
@@ -119,6 +122,7 @@ class _ProactiveState:
     # it fires while they're still in the driveway/car, before they've
     # actually walked in. Cleared on a matching door-open or once stale.
     pending_arrival_person: str = ""
+    pending_arrival_entity: str = ""
     pending_arrival_ts: float = 0.0
 
 _STATE = _ProactiveState()
@@ -128,6 +132,9 @@ BRIEFING_COOLDOWN = 30
 ARRIVAL_COOLDOWN = 60  # Don't re-brief on every presence toggle
 SECURITY_THRESHOLD = 3  # events in 30 min to trigger security briefing
 ARRIVAL_DOOR_WINDOW_S = 600  # give up waiting for the door after 10 min
+# A welcome home covers what is true now. Camera detections and events older
+# than this (a caller who rang hours ago) are no longer news on arrival.
+ARRIVAL_RECENT_HOURS = 0.5
 
 
 # ── Arrival detection ───────────────────────────────────────────────────────
@@ -184,6 +191,7 @@ def _on_state_changed(event: Event) -> None:
             _STATE.pending_arrival_person = new_state.attributes.get(
                 "friendly_name", entity_id.split(".")[-1].title()
             )
+            _STATE.pending_arrival_entity = entity_id
             _STATE.pending_arrival_ts = time.time()
             _LOGGER.info(
                 "Proactive: %s is home (presence) — waiting for %s to open before announcing",
@@ -196,6 +204,8 @@ def _on_state_changed(event: Event) -> None:
     if door_entity and entity_id == door_entity and new_state.state == "on":
         if _STATE.pending_arrival_person:
             person_name = _STATE.pending_arrival_person
+            person_entity = _STATE.pending_arrival_entity
+            _STATE.pending_arrival_entity = ""
             fresh = (time.time() - _STATE.pending_arrival_ts) <= ARRIVAL_DOOR_WINDOW_S
             _STATE.pending_arrival_person = ""
             if fresh:
@@ -207,7 +217,8 @@ def _on_state_changed(event: Event) -> None:
                         person_name,
                     )
                     _STATE.hass.async_create_task(
-                        _trigger_briefing("arrival", person_name=person_name)
+                        _trigger_briefing("arrival", person_name=person_name,
+                                          person_entity=person_entity)
                     )
             # else: stale (>10 min since presence flipped home) — drop it
             # silently rather than announce a late/wrong-context arrival.
@@ -342,9 +353,10 @@ def _deterministic_fallback_briefing(
     action at all, question or otherwise — this function only ever emits
     the greeting plus verified weather/security/event facts."""
     parts = []
-    if honorific:
-        parts.append(f"Welcome home, {honorific}." if reason == "arrival"
-                      else f"{greeting}, {honorific}.")
+    if reason == "arrival":
+        parts.append(f"Welcome home, {honorific}." if honorific else "Welcome home.")
+    elif honorific:
+        parts.append(f"{greeting}, {honorific}.")
     else:
         parts.append(f"{greeting}.")
     if weather:
@@ -361,6 +373,7 @@ def _deterministic_fallback_briefing(
 async def _trigger_briefing(
     reason: str,
     person_name: str = "",
+    person_entity: str = "",
 ) -> None:
     """Fire a proactive briefing through the existing briefing system."""
     hass = _STATE.hass
@@ -374,12 +387,17 @@ async def _trigger_briefing(
     _STATE.last_briefing_time = now
     try:
         from . import honorific as honorific_mod
-        honorific = honorific_mod.effective_honorific(hass)  # Phase C: presence-aware
+        if reason == "arrival" and person_entity:
+            # Spoken to the person walking in, even with others home.
+            honorific = honorific_mod.arrival_honorific(hass, person_entity)
+        else:
+            honorific = honorific_mod.effective_honorific(hass)  # Phase C: presence-aware
     except Exception:
         honorific = config.get("honorific", "sir")
 
     # Gather camera snapshot summary
-    snap_summary = get_snapshot_summary(hours=4)
+    recent_hours = ARRIVAL_RECENT_HOURS if reason == "arrival" else 4
+    snap_summary = get_snapshot_summary(hours=recent_hours)
 
     # Check if anyone is home
     anyone_home = any(
@@ -442,7 +460,7 @@ async def _trigger_briefing(
             open_things = [item for item in open_things if not item.endswith("is open")]
         if open_things:
             context_lines.append(f"Open/unlocked: {', '.join(open_things)}.")
-        events = _gather_overnight_events(hass, 4)
+        events = _gather_overnight_events(hass, recent_hours)
         if events:
             context_lines.append(f"Recent events: {'; '.join(events[:5])}.")
         if extra_context:
@@ -462,11 +480,16 @@ async def _trigger_briefing(
                 begin_with = f"Begin with '{greeting}, {honorific}.'"
         else:
             to_whom = "to the household"
-            begin_with = f"Begin with '{greeting}.'"
+            if reason == "arrival":
+                begin_with = "Begin with 'Welcome home.'"
+            else:
+                begin_with = f"Begin with '{greeting}.'"
         task = (
             f"You are delivering a proactive briefing ({reason}) {to_whom}. "
             f"{begin_with} "
             f"Cover only the important items. Under 100 words. Be direct. "
+            f"Anything listed with a time already happened: say so in the "
+            f"past tense with its time, never as if it is happening now. "
             f"This message has NO device-control tools — you cannot turn "
             f"anything on or off, lock or unlock anything, or adjust any "
             f"device right now, and nothing you say here can be followed up "
