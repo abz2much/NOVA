@@ -16,6 +16,7 @@ When the premium engine isn't set at all, everything uses regular.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import urllib.parse
@@ -24,6 +25,24 @@ from typing import Optional, Sequence
 from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
+
+# Seconds to wait for a speaker to accept an announcement before treating it
+# as delivered (it is then still busy fetching or playing the audio).
+_PLAY_MEDIA_TIMEOUT = 15
+
+
+def _is_sonos(hass: HomeAssistant, entity_id: str) -> bool:
+    """True when the entity comes from the Sonos integration — the only one
+    whose play_media understands `extra: {volume}`. Cast forwards unknown
+    extras straight to pychromecast, which rejects `volume` with a TypeError,
+    so sending it there made every announcement fail silently."""
+    try:
+        from homeassistant.helpers import entity_registry as er
+        ent = er.async_get(hass).async_get(entity_id)
+    except Exception:
+        return False
+    return ent is not None and ent.platform == "sonos"
+
 
 # Context labels — passed by each calling service to tell us what it is.
 # Services pass one of these strings via the 'context' parameter.
@@ -280,6 +299,12 @@ async def async_announce(
     `system_presence_based_announcement` already does for Sonos, and only
     fall back to `tts.speak` if the service call itself raises.
 
+    v7.127.1: the call is blocking (with a timeout) so it CAN raise — it was
+    fire-and-forget before, so a failure never reached the fallback and was
+    still recorded in Spoken History as sent. The pinned volume is sent to
+    Sonos speakers only (see :func:`_is_sonos`), and an unavailable speaker
+    counts as failed, since Home Assistant skips it without an error.
+
     The nova voice is requested via `tts_options` on the media-source URL. We
     deliberately do NOT send a `language` field alongside it: with some
     Piper/Wyoming builds, a language hint makes the engine fall back to a
@@ -347,19 +372,29 @@ async def async_announce(
                 one = {"media_player_entity_id": [spk], "message": text, "cache": True}
                 if opts:
                     one["options"] = opts
-                await hass.services.async_call(
-                    "tts", "speak", one, target={"entity_id": tts_entity}, blocking=False,
+                await asyncio.wait_for(
+                    hass.services.async_call(
+                        "tts", "speak", one, target={"entity_id": tts_entity}, blocking=True,
+                    ),
+                    timeout=_PLAY_MEDIA_TIMEOUT,
                 )
+                return True
+            except asyncio.TimeoutError:
                 return True
             except Exception as sub:
                 last_err = sub
         _LOGGER.warning("Nova TTS fallback failed on %s (%s): %s", spk, context, last_err)
         return False
 
-    media_content_id = _media_content_id(text)
-    delivered, failed, succeeded = 0, [], []
-    for spk in list(speakers):
+    async def _deliver(spk: str) -> bool:
         st = hass.states.get(spk)
+        # Home Assistant silently skips an unavailable entity in a service
+        # call, so play_media would "succeed" with nothing played. Count it
+        # as failed instead of recording it in Spoken History as sent.
+        if getattr(st, "state", None) in ("unavailable", "unknown"):
+            _LOGGER.warning("Nova TTS: %s is %s (%s) — not speaking there",
+                            spk, st.state, context)
+            return False
         vol = st.attributes.get("volume_level") if st is not None else None
         vol = float(vol) if isinstance(vol, (int, float)) else None
 
@@ -368,26 +403,33 @@ async def async_announce(
             "media_content_type": "music",
             "announce": True,
         }
-        if vol is not None:
+        if vol is not None and _is_sonos(hass, spk):
             data["extra"] = {"volume": vol}
 
         try:
-            await hass.services.async_call(
-                "media_player", "play_media", data,
-                target={"entity_id": spk}, blocking=False,
+            await asyncio.wait_for(
+                hass.services.async_call(
+                    "media_player", "play_media", data,
+                    target={"entity_id": spk}, blocking=True,
+                ),
+                timeout=_PLAY_MEDIA_TIMEOUT,
             )
-            ok = True
+            return True
+        except asyncio.TimeoutError:
+            return True  # accepted, still fetching or playing the audio
         except Exception as exc:
             _LOGGER.warning(
                 "Nova TTS: play_media failed on %s (%s): %s — falling back to tts.speak",
                 spk, context, exc)
-            ok = await _fallback_speak(spk)
+            return await _fallback_speak(spk)
 
-        if ok:
-            delivered += 1
-            succeeded.append(spk)
-        else:
-            failed.append(spk)
+    media_content_id = _media_content_id(text)
+    speakers = list(speakers)
+    # Every speaker at once, so a slow one doesn't hold up the rest.
+    results = await asyncio.gather(*(_deliver(spk) for spk in speakers))
+    succeeded = [spk for spk, ok in zip(speakers, results) if ok]
+    failed = [spk for spk, ok in zip(speakers, results) if not ok]
+    delivered = len(succeeded)
 
     try:
         from .diagnostics.service_health import record_usage

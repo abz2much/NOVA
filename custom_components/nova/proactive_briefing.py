@@ -423,6 +423,7 @@ async def _trigger_briefing(
         from .briefing import _gather_weather, _gather_open_things, _gather_overnight_events
         from .briefing import _gather_calendar, _gather_energy_anomalies, _time_greeting
         from .directive_helper import build_system_prompt
+        from .const import BRIEFING_GROUNDING_RULE
         from .tts_helper import resolve_tts_for_context, async_announce
         from .audio_routing import observer_speak_target
         from . import sleep_detection
@@ -476,10 +477,9 @@ async def _trigger_briefing(
             f"(never say things like \"Would you like me to raise the "
             f"thermostat?\" or \"Shall I turn off the lights?\") — if they "
             f"want a device changed, they can ask you directly by voice or "
-            f"chat afterward. Report verified current state only (e.g. "
-            f"\"the thermostat is at 18 degrees\"). Questions unrelated to "
-            f"device control — for example offering to read out the "
-            f"calendar — are fine."
+            f"chat afterward. Questions unrelated to device control — for "
+            f"example offering to read out the calendar — are fine. "
+            f"{BRIEFING_GROUNDING_RULE}"
         )
         system = build_system_prompt(hass, honorific, task)
 
@@ -519,7 +519,7 @@ async def _trigger_briefing(
                     {"role": "user", "content": context},
                 ],
                 role="briefing", data_category="text",
-                tools=None, max_tokens=300, temperature=0.6,
+                tools=None, max_tokens=300, temperature=0.2,
             )
         briefing_text = (reply.text or "").strip()
         if not briefing_text:

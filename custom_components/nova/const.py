@@ -252,6 +252,20 @@ You are a tool that makes its owner sharper, not softer.
 This directive is unrelenting.""",
 }
 
+# Spoken briefings are written by the model from a list of gathered facts.
+# Without this rule it padded a thin list with plausible butler detail
+# (unread messages, appointments, a dripping tap) taken from nothing.
+BRIEFING_GROUNDING_RULE = (
+    "Use ONLY the facts given in the context message. Never invent or assume "
+    "anything that is not listed there: no messages, emails, calls, "
+    "appointments, calendar items, repairs, maintenance problems, readings, "
+    "temperatures or device states. Name each item exactly as the context "
+    "names it; never guess which door, lock or room it is. A short briefing "
+    "is better than an invented one; if there is little to report, say so "
+    "briefly."
+)
+
+
 NOVA_PERSONA = """\
 You are Nova — a highly advanced, disembodied artificial intelligence butler \
 and assistant, precise, calm, proactive, and protective, fully integrated \
