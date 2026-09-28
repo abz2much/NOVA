@@ -108,3 +108,28 @@ def test_effective_honorific_falls_back_when_person_honorifics_is_malformed_json
         "honorific": "boss",
     })
     assert hon.effective_honorific(fake_hass) == "sir"
+
+
+def test_arrival_honorific_uses_arrivers_own_setting_with_others_home(hon, fake_hass, monkeypatch):
+    """A welcome home is spoken to the person walking in, so their own
+    honorific applies even when someone else is already home."""
+    fake_hass.states.set("person.alex", "home", friendly_name="Alex")
+    fake_hass.states.set("person.morgan", "home", friendly_name="Morgan")
+    _set_nova_config(hon, monkeypatch, {
+        "person_honorifics": '{"person.morgan": "ma\'am"}',
+        "honorific": "sir",
+    })
+    assert hon.arrival_honorific(fake_hass, "person.morgan") == "ma'am"
+
+
+def test_arrival_honorific_never_guesses_from_global_default_with_others_home(hon, fake_hass, monkeypatch):
+    fake_hass.states.set("person.alex", "home", friendly_name="Alex")
+    fake_hass.states.set("person.morgan", "home", friendly_name="Morgan")
+    _set_nova_config(hon, monkeypatch, {"honorific": "sir"})
+    assert hon.arrival_honorific(fake_hass, "person.morgan") == ""
+
+
+def test_arrival_honorific_home_alone_falls_back_to_global_default(hon, fake_hass, monkeypatch):
+    fake_hass.states.set("person.morgan", "home", friendly_name="Morgan")
+    _set_nova_config(hon, monkeypatch, {"honorific": "boss"})
+    assert hon.arrival_honorific(fake_hass, "person.morgan") == "boss"

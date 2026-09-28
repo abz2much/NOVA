@@ -82,3 +82,25 @@ def effective_honorific(hass: HomeAssistant) -> str:
     except Exception:
         return DEFAULT_HONORIFIC
     return per_person.get(entity_id) or global_default
+
+
+def arrival_honorific(hass: HomeAssistant, entity_id: str) -> str:
+    """The honorific for welcoming `entity_id` home, or "".
+
+    A welcome is spoken to the person who just walked in, even when someone
+    else is already home, so their own configured honorific applies. With
+    none configured, falls back to effective_honorific(): the global default
+    when they're home alone, "" otherwise (never guesses someone's
+    honorific from the global setting in a shared house).
+    """
+    try:
+        from . import nova_config
+        import json
+        per_person = nova_config.get("person_honorifics", {}) or {}
+        if isinstance(per_person, str):
+            per_person = json.loads(per_person)
+        if isinstance(per_person, dict) and per_person.get(entity_id):
+            return per_person[entity_id]
+    except Exception:
+        pass
+    return effective_honorific(hass)

@@ -129,7 +129,13 @@ def _gather_overnight_events(hass: HomeAssistant, hours: int = 12) -> list[str]:
                 (since,),
             ).fetchall()
         for ts, detail in rows:
-            events.append(f"{ts[11:16]}: {detail}")
+            # Stored as naive UTC; say the local time the household knows.
+            try:
+                at = (datetime.fromisoformat(ts).replace(tzinfo=timezone.utc)
+                      .astimezone().strftime("%H:%M"))
+            except (TypeError, ValueError):
+                at = ts[11:16]
+            events.append(f"{at}: {detail}")
     except Exception as exc:
         _LOGGER.debug("Nova briefing: could not read sentinel events: %s", exc)
     return events

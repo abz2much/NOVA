@@ -82,3 +82,47 @@ def test_arrival_briefing_drops_open_door_from_context(pb, fake_hass):
     user_msg = pb._captured["messages"][1]["content"]
     assert "Front Door Contact Sensor is open" not in user_msg
     assert "Garage is unlocked" in user_msg
+
+
+def test_arrival_welcomes_the_arriver_by_their_honorific_with_others_home(pb, fake_hass, monkeypatch):
+    """Someone else already home used to drop the honorific and the welcome,
+    so the briefing opened with a bare 'Good afternoon.'"""
+    import asyncio
+    honorific_mod = sys.modules[pb.__name__.rsplit(".", 1)[0] + ".honorific"]
+    monkeypatch.setattr(honorific_mod, "effective_honorific", lambda hass: "")
+    monkeypatch.setattr(honorific_mod, "arrival_honorific",
+                        lambda hass, eid: "ma'am" if eid == "person.morgan" else "")
+    asyncio.run(pb._trigger_briefing("arrival", person_name="Morgan",
+                                     person_entity="person.morgan"))
+    assert "Begin with 'Welcome home, ma'am.'" in pb._captured["messages"][0]["content"]
+
+
+def test_arrival_without_honorific_still_welcomes_home(pb, fake_hass, monkeypatch):
+    import asyncio
+    honorific_mod = sys.modules[pb.__name__.rsplit(".", 1)[0] + ".honorific"]
+    monkeypatch.setattr(honorific_mod, "arrival_honorific", lambda hass, eid: "")
+    asyncio.run(pb._trigger_briefing("arrival", person_name="Morgan",
+                                     person_entity="person.morgan"))
+    system_msg = pb._captured["messages"][0]["content"]
+    assert "Begin with 'Welcome home.'" in system_msg
+    assert "Good afternoon" not in system_msg and "Good morning" not in system_msg
+
+
+def test_arrival_leaves_out_camera_detections_from_hours_ago(pb, fake_hass):
+    import asyncio
+    import time as _time
+    pb._SNAPSHOTS.clear()
+    pb.record_snapshot("Doorbell", "camera.doorbell",
+                       "A delivery driver at the front door with a parcel.", "doorbell")
+    pb._SNAPSHOTS[-1].timestamp = _time.time() - 3 * 3600
+    asyncio.run(pb._trigger_briefing("arrival", person_name="Alex"))
+    assert "delivery driver" not in pb._captured["messages"][1]["content"]
+
+    pb._STATE.last_briefing_time = 0.0
+    pb.record_snapshot("Doorbell", "camera.doorbell",
+                       "A cat on the doorstep.", "motion")
+    asyncio.run(pb._trigger_briefing("arrival", person_name="Alex"))
+    user_msg = pb._captured["messages"][1]["content"]
+    assert "Latest, at " in user_msg and "A cat on the doorstep." in user_msg
+    assert "past tense" in pb._captured["messages"][0]["content"]
+    pb._SNAPSHOTS.clear()
