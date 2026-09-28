@@ -1,3 +1,8 @@
+## [7.127.2] — people, not phones, heading home
+
+**Fixed**
+- Nova announces only the person heading home, not their phone as well. A person and their phone tracker share the same GPS position, so both crossed the line at the same moment and Nova announced the phone and then the person a second later. Phone trackers are used only in a home with no people set up in Home Assistant, the same rule routine alerts follow.
+
 ## [7.127.1] — speakers that stayed silent, briefings that made things up
 
 **Fixed**

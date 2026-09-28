@@ -5,7 +5,7 @@ cross the approach line on the same tick. Only the person is announced.
 """
 import pytest
 
-HOME = (51.5000, -0.1000)
+HOME = (10.0000, 20.0000)
 
 
 @pytest.fixture
@@ -33,11 +33,11 @@ def _approach(cog, hass, entities):
 def test_person_is_announced_not_their_phone(cog, fake_hass):
     fake_hass.states.set("zone.home", "0", latitude=HOME[0], longitude=HOME[1])
     out = _approach(cog, fake_hass, [
-        ("person.rachel", "Rachel"),
-        ("device_tracker.rachel_phone_10xl", "Rachel Phone 10XL"),
+        ("person.alex", "Alex"),
+        ("device_tracker.alex_phone", "Alex Phone"),
     ])
-    assert [a["message"] for a in out] == ["Rachel is heading home — about 1.5 km out."]
-    assert out[0]["pattern_key"] == "arriving:person.rachel"
+    assert [a["message"] for a in out] == ["Alex is heading home — about 1.5 km out."]
+    assert out[0]["pattern_key"] == "arriving:person.alex"
 
 
 def test_trackers_are_used_when_there_are_no_people(cog, fake_hass):
@@ -48,6 +48,6 @@ def test_trackers_are_used_when_there_are_no_people(cog, fake_hass):
 
 def test_announced_once_per_trip(cog, fake_hass):
     fake_hass.states.set("zone.home", "0", latitude=HOME[0], longitude=HOME[1])
-    assert _approach(cog, fake_hass, [("person.rachel", "Rachel")])
-    _place(fake_hass, "person.rachel", "Rachel", HOME[0] + 0.005)
+    assert _approach(cog, fake_hass, [("person.alex", "Alex")])
+    _place(fake_hass, "person.alex", "Alex", HOME[0] + 0.005)
     assert cog.predict_proximity(fake_hass) == []
