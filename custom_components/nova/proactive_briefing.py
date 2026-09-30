@@ -440,6 +440,7 @@ async def _trigger_briefing(
     try:
         from .briefing import _gather_weather, _gather_open_things, _gather_overnight_events
         from .briefing import _gather_calendar, _gather_energy_anomalies, _time_greeting
+        from .briefing import ungrounded_briefing_fact
         from .directive_helper import build_system_prompt
         from .const import BRIEFING_GROUNDING_RULE
         from .tts_helper import resolve_tts_for_context, async_announce
@@ -560,6 +561,18 @@ async def _trigger_briefing(
             )
             if not briefing_text:
                 return
+        else:
+            bad = ungrounded_briefing_fact(briefing_text, context)
+            if bad:
+                _LOGGER.warning(
+                    "Proactive briefing (%s) rejected — %s is not in the "
+                    "gathered facts; using deterministic fallback: %s",
+                    reason, bad, briefing_text[:200],
+                )
+                briefing_text = _deterministic_fallback_briefing(
+                    honorific=honorific, greeting=greeting, reason=reason,
+                    weather=weather, open_things=open_things, events=events,
+                )
 
         _LOGGER.info("Proactive briefing (%s): %s", reason, briefing_text[:100])
 

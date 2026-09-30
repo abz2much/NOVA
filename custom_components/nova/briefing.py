@@ -14,6 +14,7 @@ and includes:
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -155,6 +156,49 @@ def _plain_briefing(greeting: str, honorific: str, context_lines: list[str]) -> 
     return f"{lead} " + " ".join(facts)
 
 
+# Device words a briefing may only use when the gathered context names that
+# kind of device too. The model has copied devices from prompt examples
+# before (a garage door in a home with no garage, an unlocked front door with
+# no front door lock), and the grounding rule alone did not stop it.
+_GROUNDED_DEVICE_WORDS = (
+    ("garage", re.compile(r"\bgarages?\b"), re.compile(r"garage")),
+    ("gate", re.compile(r"\bgates?\b"), re.compile(r"\bgate")),
+    ("door", re.compile(r"\bdoors?\b"), re.compile(r"door")),
+    ("window", re.compile(r"\bwindows?\b"), re.compile(r"window")),
+    ("lock", re.compile(r"\b(?:un)?lock(?:ed|s)?\b"), re.compile(r"lock")),
+    ("thermostat", re.compile(r"\b(?:thermostat|heating|setpoint)s?\b"),
+     re.compile(r"thermostat|heating|setpoint|climate")),
+)
+_CLOCK_TIME = re.compile(r"\b(\d{1,2}):(\d{2})\b")
+
+
+def _clock_times(text: str) -> set[tuple[int, int]]:
+    """Clock times in `text` as (hour on a 12-hour clock, minute), so 13:29
+    and 1:29 PM compare equal."""
+    return {(int(h) % 12, int(m)) for h, m in _CLOCK_TIME.findall(text)
+            if int(h) < 24 and int(m) < 60}
+
+
+def ungrounded_briefing_fact(text: str, context: str) -> str:
+    """What the generated briefing states that the gathered context does not
+    back, or "" when everything checked is grounded.
+
+    Checks two things deterministically: a device word (door, lock, garage,
+    ...) whose kind of device the context never names, and a clock time the
+    context never gives. A briefing that fails is replaced whole by the plain
+    facts, never edited sentence by sentence."""
+    said = (text or "").lower()
+    known = (context or "").lower()
+    for label, in_briefing, in_context in _GROUNDED_DEVICE_WORDS:
+        if in_briefing.search(said) and not in_context.search(known):
+            return label
+    extra = _clock_times(said) - _clock_times(known)
+    if extra:
+        h, m = sorted(extra)[0]
+        return f"time {h or 12}:{m:02d}"
+    return ""
+
+
 async def async_briefing(
     hass: HomeAssistant,
     call: ServiceCall,
@@ -293,6 +337,13 @@ async def async_briefing(
     if not briefing_text:
         _LOGGER.warning("Nova briefing: empty model output — reading gathered facts instead")
         briefing_text = _plain_briefing(greeting, honorific, context_lines)
+    else:
+        bad = ungrounded_briefing_fact(briefing_text, context)
+        if bad:
+            _LOGGER.warning(
+                "Nova briefing rejected — %s is not in the gathered facts; "
+                "reading the facts instead: %s", bad, briefing_text[:200])
+            briefing_text = _plain_briefing(greeting, honorific, context_lines)
 
     await hass.async_add_executor_job(
         save_message, "assistant", f"[Briefing] {briefing_text}", "briefing"

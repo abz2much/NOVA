@@ -1,3 +1,12 @@
+## [7.127.3] — briefings that name only real devices
+
+**Fixed**
+- Briefings no longer mention devices you don't have. A welcome home said a garage door had been open for hours and a front door had been left unlocked, in a home with no garage and no front door lock. Both lines were copied from example sentences in Nova's personality, and those examples are gone.
+- Nova now checks every briefing before speaking it. If it names a kind of device (door, window, gate, garage, lock, thermostat) or a clock time that isn't in what Nova actually gathered, the whole briefing is replaced by the plain facts. This covers the welcome home, security and scheduled briefings and the on-demand briefing.
+
+**Caveats**
+- The check is strict. If a briefing rounds a time (1:30 for 1:29) or names a device the facts only mention in passing, Nova reads the plain facts instead. That sounds less natural, but it is never invented.
+
 ## [7.127.2] — people, not phones, and a proper welcome home
 
 **Fixed**
