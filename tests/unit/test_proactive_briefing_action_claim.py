@@ -195,6 +195,7 @@ def briefing_mod(load, monkeypatch):
         _gather_calendar=lambda hass: "",
         _gather_energy_anomalies=lambda hass: "",
         _time_greeting=lambda: "Good morning",
+        ungrounded_briefing_fact=lambda text, context: "",
     )
     async_announce_calls = []
 
