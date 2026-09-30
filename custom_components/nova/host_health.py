@@ -583,6 +583,9 @@ async def _dispatch_alert(hass, config: dict, message: str, category: str) -> No
                 message=message, was_spoken=False,
             )
             return
+        message = output_gate.habit_note(
+            entity_id="host_health", category=category, urgency="medium", message=message,
+        )
 
         from .audio_routing import observer_speak_target
         from . import sleep_detection

@@ -276,6 +276,10 @@ class Sandbox:
         self.setattr(og, "_now", self.clock)
         self.setattr(og, "_BUDGET_CACHE", {"ts": 0.0, "mult": 1.0})
 
+        hab = load("habituation")
+        self.setattr(hab, "STATE_FILE", os.path.join(self.tmp, "habituation.json"))
+        self.setattr(hab, "_state", None)
+
         cs = load("camera_semantic")
         cs.reset_dedup_state()
         self.setattr(cs, "_now", self.clock)

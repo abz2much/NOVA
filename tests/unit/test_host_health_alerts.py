@@ -36,6 +36,7 @@ async def test_dispatch_routes_through_output_gate_can_announce(hh, monkeypatch)
     fake_mod = types.ModuleType("jc.output_gate")
     fake_mod.can_announce = FakeOutputGate.can_announce
     fake_mod.record_announcement = FakeOutputGate.record_announcement
+    fake_mod.habit_note = lambda **kw: kw["message"]
     monkeypatch.setitem(sys.modules, "jc.output_gate", fake_mod)
 
     audio_mod = types.ModuleType("jc.audio_routing")

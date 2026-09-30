@@ -1095,6 +1095,10 @@ async def _announce_done(sensor: _SensorState, appliance_label: str) -> None:
             urgency="medium", message=message, was_spoken=False,
         )
         return
+    message = output_gate.habit_note(
+        entity_id=sensor.entity_id, category="appliance",
+        urgency="medium", message=message,
+    )
 
     # Check announcements_enabled
     rc = _live_runtime_config()

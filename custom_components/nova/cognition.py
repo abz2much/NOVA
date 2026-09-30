@@ -1110,6 +1110,9 @@ def predict_routine_start(hass, now: float = None) -> list:
             out.append({
                 "type": "anticipation_routine", "urgency": "low",
                 "message": msg, "pattern_key": key, "offer": False,
+                # One habit per person and device, whatever the hour.
+                "habit_key": "routine:%s:%s:%s" % (person, entity, state),
+                "entity_id": entity,
             })
     except Exception as exc:
         _LOGGER.debug("predict_routine_start error: %s", exc)

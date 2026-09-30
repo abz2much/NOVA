@@ -1,3 +1,15 @@
+## [7.128.0] — Nova stops repeating what's normal for your home
+
+**Added**
+- If Nova gives the same notification three days in a row, it treats it as normal for your home. The third one ends with "This has come up three days running, so I'll stop mentioning it", and after that it stays quiet. A nightly backup that trips a disk sensor, or a light that switches itself on, stops being announced after three nights.
+- A missed day starts the count again. Repeats on the same day count once.
+- Emergencies never go quiet: anything critical (smoke, CO, gas, leaks, glass break), break-in and lockdown alerts, freeze alerts, locks and alarm panels.
+- To bring one back, ask Nova to stop ignoring it ("tell me about the disk sensor again"). Nova lists the quiet ones alongside its other ignore rules. The quiet list survives restarts.
+
+**Caveats**
+- Counting starts with this version, so a notification that already repeated before the update still needs three more days.
+- An observer alert that only went to your phone (not spoken) doesn't count toward the three days.
+
 ## [7.127.3] — briefings that name only real devices
 
 **Fixed**

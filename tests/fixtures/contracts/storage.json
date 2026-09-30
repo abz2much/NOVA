@@ -130,6 +130,12 @@
     ],
     "tables": []
   },
+  "habituation": {
+    "paths": [
+      "nova/habituation.json"
+    ],
+    "tables": []
+  },
   "intrusion": {
     "paths": [
       "nova/intrusion",
