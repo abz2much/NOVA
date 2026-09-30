@@ -828,6 +828,10 @@ async def _process_event(event: Event) -> None:
                 urgency=final_urgency, message=message, was_spoken=False,
             )
             return
+        message = output_gate.habit_note(
+            entity_id=entity_id, category=category,
+            urgency=final_urgency, message=message,
+        )
 
         # Route audio based on urgency + presence + sleep
         broadcast_group = _STATE.config.get("broadcast_group") or None

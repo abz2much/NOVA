@@ -392,7 +392,11 @@ NOVA_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "unignore_entity",
-            "description": "Stop ignoring an entity. Removes the ignore rule.",
+            "description": (
+                "Stop ignoring an entity. Removes the ignore rule, and brings back "
+                "notifications about it that Nova stopped giving after they came up "
+                "three days running."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {

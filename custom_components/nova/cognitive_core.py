@@ -2888,11 +2888,28 @@ def _live_runtime_config() -> dict:
 
 async def _emit_action(hass, config, action, sleeping):
     """Announce / push a single cognitive action via the standard routing."""
-    _CORE.actions_taken += 1
     message = action.get("message", "")
     urgency = action.get("urgency", "medium")
     action_type = action.get("type", "unknown")
     notify_all = bool(action.get("notify_all", False))
+
+    # Given three days running, it's normal for this home: the third says so,
+    # later ones stay quiet (habituation.py). Emergencies are exempt.
+    habit_key = action.get("habit_key") or action.get("pattern_key") or action.get("offer_key")
+    try:
+        from . import habituation
+        if habit_key and not habituation.exempt(
+                urgency=urgency, kind=action_type, entity_id=action.get("entity_id", "")):
+            if habituation.is_quiet(habit_key):
+                _LOGGER.info("Cognitive action [%s] quiet (normal for this home): %s",
+                             action_type, message[:100])
+                return
+            message = habituation.with_note(habit_key, message)
+            habituation.record(habit_key, action.get("entity_id", ""))
+    except Exception as exc:
+        _LOGGER.debug("habituation check failed: %s", exc)
+
+    _CORE.actions_taken += 1
 
     _LOGGER.info(
         "Cognitive action [%s] urgency=%s: %s",
@@ -3471,18 +3488,38 @@ def ignore(entity_pattern: str, duration_minutes: int = 0,
 
 
 def unignore(entity_pattern: str) -> dict:
-    """Remove an ignore rule."""
+    """Remove an ignore rule, and bring back any matching notification that
+    went quiet after three days running (habituation.py)."""
+    restored = []
+    try:
+        from . import habituation
+        restored = habituation.forget(entity_pattern)
+    except Exception as exc:
+        _LOGGER.debug("habituation forget failed: %s", exc)
     if _CORE.ignore_mgr:
         removed = _CORE.ignore_mgr.remove(entity_pattern)
-        return {"success": removed, "pattern": entity_pattern}
+        return {"success": bool(removed or restored), "pattern": entity_pattern,
+                "restored_notifications": len(restored)}
+    if restored:
+        return {"success": True, "pattern": entity_pattern,
+                "restored_notifications": len(restored)}
     return {"success": False, "error": "Cognitive core not running"}
 
 
 def list_ignores() -> list[dict]:
-    """List all active ignore rules."""
-    if _CORE.ignore_mgr:
-        return _CORE.ignore_mgr.list_rules()
-    return []
+    """List all active ignore rules, plus the notifications that went quiet
+    after three days running (remaining_min "normal for this home")."""
+    rules = _CORE.ignore_mgr.list_rules() if _CORE.ignore_mgr else []
+    try:
+        from . import habituation
+        rules += [{"pattern": q["entity_id"] or q["key"],
+                   "reason": "came up three days running",
+                   "expires_at": 0,
+                   "remaining_min": "normal for this home"}
+                  for q in habituation.quiet_list()]
+    except Exception:
+        pass
+    return rules
 
 
 def is_ignored(entity_id: str) -> bool:

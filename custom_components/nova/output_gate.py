@@ -6,6 +6,8 @@ The final line of defense before an announcement actually plays. Handles:
   - Rate limiting: max N announcements per rolling hour
   - Dedup: don't say the same thing within M minutes
   - Mute memory: entities the user has told Nova to stop announcing
+  - Habituation: an entity announced three days running goes quiet
+    (habituation.py); emergencies are exempt
   - Quiet hours integration (sleep_detection handles this mostly)
   - Announcement log for feedback learning
 
@@ -128,6 +130,9 @@ def can_announce(
     if category in _STATE.muted_categories:
         return False, f"category {category} is muted"
 
+    if _habituated(entity_id, urgency, category):
+        return False, f"{entity_id} is normal for this home (came up days running)"
+
     # Rate limit — tightened by the adaptive interruption budget when enabled
     # (a no-op multiplier of 1.0 keeps the base cap otherwise).
     eff_max = max(1, int(round(max_per_hour * _budget_multiplier())))
@@ -144,6 +149,27 @@ def can_announce(
             return False, "duplicate of recent message"
 
     return True, "ok"
+
+
+def _habituated(entity_id: str, urgency: str, category: str) -> bool:
+    try:
+        from . import habituation
+        return (not habituation.exempt(urgency=urgency, kind=category, entity_id=entity_id)
+                and habituation.is_quiet(entity_id))
+    except Exception:
+        return False
+
+
+def habit_note(*, entity_id: str, category: str, urgency: str, message: str) -> str:
+    """The message to speak: with a closing line saying Nova will stop
+    mentioning it when this is the third day running (habituation.py)."""
+    try:
+        from . import habituation
+        if habituation.exempt(urgency=urgency, kind=category, entity_id=entity_id):
+            return message
+        return habituation.with_note(entity_id, message)
+    except Exception:
+        return message
 
 
 def record_announcement(
@@ -169,6 +195,12 @@ def record_announcement(
             "timestamp": _now(),
             "message": message,
         })
+        try:
+            from . import habituation
+            if not habituation.exempt(urgency=urgency, kind=category, entity_id=entity_id):
+                habituation.record(entity_id, entity_id)
+        except Exception as exc:
+            _LOGGER.debug("habituation record failed: %s", exc)
     # v5.4.8: persist to SQLite for panel activity log
     try:
         from .database import save_activity

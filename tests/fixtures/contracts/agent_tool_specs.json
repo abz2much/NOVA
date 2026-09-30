@@ -351,7 +351,7 @@
     },
     {
       "function": {
-        "description": "Stop ignoring an entity. Removes the ignore rule.",
+        "description": "Stop ignoring an entity. Removes the ignore rule, and brings back notifications about it that Nova stopped giving after they came up three days running.",
         "name": "unignore_entity",
         "parameters": {
           "properties": {
