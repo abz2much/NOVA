@@ -146,13 +146,8 @@ def _learned_threshold_delta() -> float:
         from .. import decision_record
         r = decision_record.outcome_rate("suggestion", window_s=_ADAPT_WINDOW_S)
         if int(r.get("judged", 0)) >= _ADAPT_MIN_JUDGED:
-            uw = r.get("unwelcome_rate") or 0.0
-            if uw >= 0.5:
-                delta = 0.15        # mostly unwelcome → much more selective
-            elif uw >= 0.3:
-                delta = 0.07        # somewhat unwelcome → more selective
-            elif uw <= 0.1:
-                delta = -0.07       # almost all welcome → a little more generous
+            delta = decision_record.threshold_delta_from_rate(
+                r.get("unwelcome_rate"))
     except Exception:
         delta = 0.0
     _ADAPT_CACHE.update(ts=now, delta=delta)

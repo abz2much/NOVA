@@ -2824,6 +2824,13 @@ async def _tick():
                 _CORE._last_cog_cycle = now_t
                 cognition.sample_occupancy(hass, now_t)
                 cognition.sample_presence(hass, now_t)
+            # Keep the adaptive awareness adjustment warm from off the loop; the
+            # predictors below only read its cache.
+            try:
+                from . import adaptive_awareness
+                await adaptive_awareness.async_refresh(hass)
+            except Exception:
+                pass
             # Departure reminders are due at a minute, not a 15-minute cycle,
             # and are in-memory checks, so they run every tick.
             preds = cognition.predict_presence(hass, now_t)

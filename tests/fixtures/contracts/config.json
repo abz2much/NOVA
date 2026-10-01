@@ -50,6 +50,7 @@
     "iot_class": "cloud_polling"
   },
   "panel_writable_keys": [
+    "adaptive_awareness",
     "adaptive_interruption_budget",
     "adaptive_suggestion_threshold",
     "announcement_speakers",

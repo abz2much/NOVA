@@ -300,6 +300,49 @@ def set_outcome_recent(kind: str, verdict, source: str = "", max_age: float = 36
             pass
 
 
+def set_outcome_for_entity(pattern: str, verdict, source: str = "",
+                           kind_prefix: str = "anticipation",
+                           max_age: float = 86400.0,
+                           db_path: Optional[str] = None) -> int:
+    """Judge recent, still unjudged records whose ref names a matching entity.
+
+    Records link to an entity through ``ref`` = ``entity:<entity_id>``. ``pattern``
+    is an entity id or a glob ("binary_sensor.porch_*"). Only records of kinds
+    starting with ``kind_prefix`` from the last ``max_age`` seconds are judged.
+    Returns how many were judged. Never raises."""
+    import fnmatch
+    if not pattern:
+        return 0
+    db = _resolve(db_path)
+    try:
+        conn = _connect(db)
+    except Exception:
+        return 0
+    judged = 0
+    try:
+        esc = (str(kind_prefix).replace("\\", "\\\\").replace("%", "\\%")
+               .replace("_", "\\_"))
+        rows = conn.execute(
+            "SELECT id, ref FROM decision_records "
+            "WHERE kind LIKE ? ESCAPE '\\' AND outcome IS NULL AND ts >= ? "
+            "AND ref LIKE 'entity:%'",
+            (esc + "%", time.time() - float(max_age)),
+        ).fetchall()
+        for rid, ref in rows:
+            entity = str(ref)[len("entity:"):]
+            if fnmatch.fnmatchcase(entity, str(pattern)):
+                if _apply_outcome(conn, rid, verdict, source, None):
+                    judged += 1
+    except Exception:
+        return judged
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+    return judged
+
+
 def get(record_id: int, db_path: Optional[str] = None) -> Optional[dict]:
     db = _resolve(db_path)
     try:
@@ -577,10 +620,29 @@ def interruption_budget(db_path: Optional[str] = None,
     return out
 
 
+def threshold_delta_from_rate(unwelcome_rate) -> float:
+    """Map an unwelcome rate to a threshold delta in [-0.07, +0.15]: much
+    stricter when mostly unwelcome, a touch looser when almost everything lands
+    well. Shared by the adaptive suggestion bar and adaptive awareness."""
+    try:
+        rate = float(unwelcome_rate or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+    if rate >= 0.5:
+        return 0.15
+    if rate >= 0.3:
+        return 0.07
+    if rate <= 0.1:
+        return -0.07
+    return 0.0
+
+
 def outcome_rate(kind: str, window_s: Optional[float] = None,
-                 db_path: Optional[str] = None) -> dict:
+                 db_path: Optional[str] = None, prefix: bool = False) -> dict:
     """Outcome breakdown for judged records of one ``kind`` (optionally within
-    the last ``window_s`` seconds). Pure DB read; never raises.
+    the last ``window_s`` seconds). With ``prefix`` true, ``kind`` matches every
+    kind that starts with it ("anticipation" covers anticipation_overdue and the
+    rest). Pure DB read; never raises.
 
     Returns judged/good/unnecessary/wrong counts plus good_rate and
     unwelcome_rate (= (unnecessary + wrong) / judged), so a proactive surface can
@@ -596,9 +658,16 @@ def outcome_rate(kind: str, window_s: Optional[float] = None,
     except Exception:
         return out
     try:
-        sql = ("SELECT outcome, COUNT(*) FROM decision_records "
-               "WHERE outcome IS NOT NULL AND kind = ?")
-        params: list = [str(kind)]
+        if prefix:
+            sql = ("SELECT outcome, COUNT(*) FROM decision_records "
+                   "WHERE outcome IS NOT NULL AND kind LIKE ? ESCAPE '\\'")
+            esc = (str(kind).replace("\\", "\\\\").replace("%", "\\%")
+                   .replace("_", "\\_"))
+            params: list = [esc + "%"]
+        else:
+            sql = ("SELECT outcome, COUNT(*) FROM decision_records "
+                   "WHERE outcome IS NOT NULL AND kind = ?")
+            params = [str(kind)]
         if window_s is not None:
             sql += " AND ts >= ?"
             params.append(time.time() - float(window_s))

@@ -4701,6 +4701,7 @@ ${this._htmlDashboardBody()}`;
       ${onOff("pattern_learn_motion", false, { label: "Learn motion/presence triggers" })}
       ${onOff("adaptive_interruption_budget", false, { label: "Adaptive interruptions", sub: "speak less after alerts are repeatedly marked unhelpful" })}
       ${onOff("adaptive_suggestion_threshold", false, { label: "Adaptive suggestions", sub: "adjust the suggestion bar from past feedback" })}
+      ${onOff("adaptive_awareness", false, { label: "Adaptive awareness", sub: "wait longer before routine alerts you mute or mark unnecessary" })}
       ${num("observer_group_debounce", "Sibling-burst coalescing (sec)", "90", 0, 600, 10)}
       ${onOff("continued_conversation_enabled", false, { label: "Continued conversation" })}
       ${onOff("continued_conversation_multi_satellite", false, { label: "Follow me between rooms", sub: "reopen the mic where you moved to (needs 2+ satellites)" })}
