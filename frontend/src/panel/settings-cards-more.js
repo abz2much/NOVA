@@ -626,6 +626,12 @@
           <label>Minimum observations <span class="toggle-desc">across more than one day</span></label>
           <input class="cfg-field cfg-num" type="number" min="3" max="12" step="1" data-cfg-key="camera_awareness_min_observations" value="${awarenessMinimum}" ${awarenessAvailable ? "" : "disabled"}>
         </div>
+        ${onOff("scene_memory_enabled", "Scene memory", "Keep what the cameras describe so Nova can answer where it last saw something. Text only, no images. Off by default")}
+        <div class="cfg-row">
+          <label>Keep scene memory for <span class="toggle-desc">days (1 to 90)</span></label>
+          <input class="cfg-field cfg-num" type="number" min="1" max="90" step="1" data-cfg-key="scene_memory_retention_days" value="${Math.max(1, Math.min(90, Number(cfg.scene_memory_retention_days ?? 14) || 14))}" ${cfg.scene_memory_enabled ? "" : "disabled"}>
+          <button class="mode-chip" id="sceneMemoryClear">Forget everything</button>
+        </div>
         ${onOff("pattern_learn_doors", "Learn doors & windows", "Door, window and garage contact sensors")}
         ${onOff("pattern_learn_presence", "Learn presence & arrivals", "People and device trackers (home / away)")}
         ${onOff("pattern_learn_buttons", "Learn button & remote presses", "Suggest “press → scene / action” automations")}

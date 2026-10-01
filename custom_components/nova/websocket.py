@@ -57,6 +57,7 @@ def async_register(hass: HomeAssistant) -> None:
         websocket_api.async_register_command(hass, ws_get_knowledge)
         websocket_api.async_register_command(hass, ws_add_knowledge)
         websocket_api.async_register_command(hass, ws_forget_knowledge)
+        websocket_api.async_register_command(hass, ws_clear_scene_memory)
         websocket_api.async_register_command(hass, ws_pending_fact_action)
         websocket_api.async_register_command(hass, ws_edit_pending_fact)
         websocket_api.async_register_command(hass, ws_root_cause)
@@ -825,6 +826,11 @@ async def ws_get_panel_data(
                 )),
                 "camera_awareness_min_observations": _runtime_opt(
                     hass, entry, "camera_awareness_min_observations", 3,
+                ),
+                "scene_memory_enabled": _runtime_opt(
+                    hass, entry, "scene_memory_enabled", False) is True,
+                "scene_memory_retention_days": _runtime_opt(
+                    hass, entry, "scene_memory_retention_days", 14,
                 ),
                 # Phase 10 (v7.112.0) — off by default; auto-mapping only
                 # ever suggests, never enables a disabled System Monitor
@@ -1657,6 +1663,8 @@ PANEL_WRITABLE_KEYS = {
     "camera_event_dedup_window",    # float seconds: window collapsing duplicate camera events across sources
     "camera_historical_awareness",  # bool: add repeated camera history to interactive prompts (Phase 5)
     "camera_awareness_min_observations",  # int 3-12: historical evidence floor
+    "scene_memory_enabled",         # bool: keep camera descriptions so Nova can answer "where did I last see X"
+    "scene_memory_retention_days",  # int 1-90: how long scene memory keeps a description
     "host_health_enabled",           # bool: master on/off for Home Assistant host telemetry (Phase 10, v7.112.0)
     "host_health_alerts_enabled",    # bool: separate opt-in for spoken/pushed host-health alerts
     "host_health_recovery_announce", # bool: announce a stable recovery, bounded and optional
@@ -1959,6 +1967,27 @@ async def ws_add_knowledge(
     except Exception as exc:
         _LOGGER.exception("add_knowledge failed: %s", exc)
         connection.send_error(msg["id"], "add_failed", str(exc))
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "nova/clear_scene_memory",
+})
+@websocket_api.async_response
+async def ws_clear_scene_memory(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Forget every camera description scene memory has kept."""
+    try:
+        from . import scene_memory
+        removed = await hass.async_add_executor_job(scene_memory.forget_all)
+        stats = await hass.async_add_executor_job(scene_memory.stats)
+        connection.send_result(msg["id"], {"removed": removed, "stats": stats})
+    except Exception as exc:
+        _LOGGER.exception("clear_scene_memory failed: %s", exc)
+        connection.send_error(msg["id"], "clear_failed", str(exc))
 
 
 @websocket_api.require_admin

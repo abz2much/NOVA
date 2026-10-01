@@ -1313,4 +1313,55 @@ NOVA_TOOLS: list[dict[str, Any]] = [
             "parameters": {"type": "object", "properties": {}},
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "where_last_seen",
+            "description": (
+                "Find the last time something was described by a camera, from "
+                "Nova's scene memory — e.g. 'where did I last see my keys', "
+                "'when was the red bike last in the garage'. Searches past "
+                "camera descriptions, so the answer can be hours or days old "
+                "and is not a live view. Needs Scene memory turned on in "
+                "Settings. For what is there right now, use look_at_camera."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "term": {
+                        "type": "string",
+                        "description": "The thing to find, e.g. 'keys' or 'red bike'.",
+                    },
+                },
+                "required": ["term"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "what_changed",
+            "description": (
+                "Compare what a camera described most recently with what it "
+                "described earlier, from Nova's scene memory — e.g. 'what has "
+                "changed in the garage since yesterday'. Gives words that "
+                "appeared and words that went away, so treat it as a hint, not "
+                "proof. Needs Scene memory turned on in Settings."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "camera": {
+                        "type": "string",
+                        "description": "A camera entity_id or its area name, e.g. 'garage'.",
+                    },
+                    "hours": {
+                        "type": "number",
+                        "description": "How far back to compare with. Default 24.",
+                    },
+                },
+                "required": ["camera"],
+            },
+        },
+    },
 ]

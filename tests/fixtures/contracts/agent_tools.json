@@ -79,6 +79,8 @@
     "weather_forecast",
     "web_research",
     "wellbeing_context",
+    "what_changed",
+    "where_last_seen",
     "who_do_you_see"
   ],
   "max_delegation_depth": 1,
@@ -134,7 +136,9 @@
     "schedule_followup",
     "set_mode",
     "unignore_entity",
-    "update_goal"
+    "update_goal",
+    "what_changed",
+    "where_last_seen"
   ],
   "tools": {
     "acknowledge_alert": {
@@ -1116,6 +1120,44 @@
         "type": "object"
       },
       "required": []
+    },
+    "what_changed": {
+      "parameters": {
+        "properties": {
+          "camera": {
+            "description": "A camera entity_id or its area name, e.g. 'garage'.",
+            "type": "string"
+          },
+          "hours": {
+            "description": "How far back to compare with. Default 24.",
+            "type": "number"
+          }
+        },
+        "required": [
+          "camera"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "camera"
+      ]
+    },
+    "where_last_seen": {
+      "parameters": {
+        "properties": {
+          "term": {
+            "description": "The thing to find, e.g. 'keys' or 'red bike'.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "term"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "term"
+      ]
     },
     "who_do_you_see": {
       "parameters": {

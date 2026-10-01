@@ -142,6 +142,18 @@
     ],
     "registered": true
   },
+  "nova/clear_scene_memory": {
+    "admin": true,
+    "error_codes": [
+      "clear_failed"
+    ],
+    "fields": {},
+    "literal_response_keys": [
+      "removed",
+      "stats"
+    ],
+    "registered": true
+  },
   "nova/compute_camera_coverage": {
     "admin": false,
     "error_codes": [

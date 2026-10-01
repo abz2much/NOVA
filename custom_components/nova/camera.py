@@ -1137,6 +1137,19 @@ async def async_analyze_camera(
         )
     except Exception:
         pass
+    # Scene memory (opt in): keep the description so Nova can later answer
+    # "where did I last see X?". Question and answer looks are skipped, since
+    # an answer is not a description of the scene. Best effort, off the loop.
+    if call.data.get("record_scene", True):
+        try:
+            from . import camera_semantic
+            from . import scene_memory
+            if scene_memory.enabled():
+                await scene_memory.async_remember(
+                    hass, entity_id, analysis,
+                    camera_semantic.resolve_location(hass, entity_id))
+        except Exception:
+            pass
     # Semantic learning (Phase 4, v7.109.0): additive to the observer buffer
     # and briefing snapshot above, not a replacement for either. Recorded
     # regardless of `notable` — a known-resident arrival isn't announce-
