@@ -643,13 +643,31 @@ def predict(hass, now: float = None) -> list:
     return out
 
 
+def _adaptive_tol_scale() -> float:
+    """Learned grace multiplier (adaptive_awareness). 1.0 when off."""
+    try:
+        from . import adaptive_awareness
+        return adaptive_awareness.tolerance_scale()
+    except Exception:
+        return 1.0
+
+
+def _adaptive_extra_days() -> int:
+    """Learned extra days of history before a routine is trusted. 0 when off."""
+    try:
+        from . import adaptive_awareness
+        return adaptive_awareness.extra_min_days()
+    except Exception:
+        return 0
+
+
 def _routine_of_pts(pts):
     """
     Core routine test on a list of (day_ord, secs) points: enough days, low
     time-of-day spread, and occurring on most days in its span. Returns
     (mean_secs, std_secs) or None.
     """
-    if len(pts) < RECUR_MIN_DAYS:
+    if len(pts) < RECUR_MIN_DAYS + _adaptive_extra_days():
         return None
     secs = [s for (_d, s) in pts]
     m = sum(secs) / len(secs)
@@ -747,14 +765,15 @@ def distance_home_km(hass, st):
     return _haversine_km(ec[0], ec[1], hc[0], hc[1])
 
 
-def _log_decision(kind, observation, interpretation, decision, reason, confidence=None):
+def _log_decision(kind, observation, interpretation, decision, reason, confidence=None,
+                  ref=None):
     """Record a proactive decision to the immutable Decision Record (v7.32.0).
     Best-effort by design — a logging failure must never break the decision."""
     try:
         from . import decision_record
         decision_record.record(
             kind, observation=observation, interpretation=interpretation,
-            decision=decision, reason=reason, confidence=confidence,
+            decision=decision, reason=reason, confidence=confidence, ref=ref,
         )
     except Exception:
         pass
@@ -786,7 +805,8 @@ def predict_overdue(hass, now: float = None) -> list:
             if routine is None:
                 continue
             mean_s, std_s = routine
-            tol = min(max(2 * std_s, RECUR_TOL_MIN), RECUR_TOL_MAX)
+            tol = (min(max(2 * std_s, RECUR_TOL_MIN), RECUR_TOL_MAX)
+                   * _adaptive_tol_scale())
             if now_secs <= mean_s + tol:
                 continue                       # not past the usual time + grace yet
             if entry.last_first_day == today:
@@ -803,6 +823,7 @@ def predict_overdue(hass, now: float = None) -> list:
                 {"predicted": "no activity yet, past the usual time"},
                 "flag overdue activity",
                 "recurring daily activity pattern",
+                ref=f"entity:{eid}",
             )
             out.append({
                 "type": "anticipation_overdue",
@@ -1106,6 +1127,7 @@ def predict_routine_start(hass, now: float = None) -> list:
                 {"predicted": "routine usually starts around now"},
                 "prompt routine start",
                 "learned per-person routine",
+                ref=f"entity:{entity}",
             )
             out.append({
                 "type": "anticipation_routine", "urgency": "low",
@@ -1181,6 +1203,7 @@ def predict_presence(hass, now: float = None) -> list:
                                        else "still home past the usual departure time")},
                         "remind departure" if kind == "remind" else "flag still-home",
                         "recurring departure pattern",
+                        ref=f"entity:{eid}",
                     )
                     out.append({
                         "type": "anticipation_presence", "urgency": "low",
@@ -1193,7 +1216,8 @@ def predict_presence(hass, now: float = None) -> list:
             if ret and _is_away(cur) and entry.pres_depart_day == today \
                     and entry.pres_return_day != today:
                 m, sd = ret
-                tol = min(max(2 * sd, RECUR_TOL_MIN), RECUR_TOL_MAX)
+                tol = (min(max(2 * sd, RECUR_TOL_MIN), RECUR_TOL_MAX)
+                       * _adaptive_tol_scale())
                 key = "arr:" + eid
                 if now_secs > m + tol and _RECUR_ALERTED.get(key) != today:
                     _RECUR_ALERTED[key] = today
@@ -1203,6 +1227,7 @@ def predict_presence(hass, now: float = None) -> list:
                         {"predicted": "not home yet, past the usual arrival time"},
                         "flag not-back",
                         "recurring arrival pattern",
+                        ref=f"entity:{eid}",
                     )
                     out.append({
                         "type": "anticipation_presence", "urgency": "low",

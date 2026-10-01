@@ -867,6 +867,7 @@ async def ws_get_panel_data(
                 "observer_group_debounce": _runtime_opt(hass, entry, "observer_group_debounce", 90),
                 "adaptive_interruption_budget": bool(_runtime_opt(hass, entry, "adaptive_interruption_budget", False)),
                 "adaptive_suggestion_threshold": bool(_runtime_opt(hass, entry, "adaptive_suggestion_threshold", False)),
+                "adaptive_awareness": bool(_runtime_opt(hass, entry, "adaptive_awareness", False)),
                 "tts_use_ha_voice": bool(_runtime_opt(hass, entry, "tts_use_ha_voice", False)),
                 "pattern_learn_motion": bool(_runtime_opt(hass, entry, "pattern_learn_motion", False)),
                 "sleep_override": sleep_detection.current_override(),
@@ -1650,6 +1651,7 @@ PANEL_WRITABLE_KEYS = {
     "observer_group_debounce",      # seconds: coalesce a burst of numbered sibling entities (0 = off)
     "adaptive_interruption_budget",  # bool: scale the announcement cap down when recent proactive decisions were unwelcome
     "adaptive_suggestion_threshold", # bool: tune the suggestion confidence bar from how welcome recent suggestions were
+    "adaptive_awareness",            # bool: anticipation alerts learn from alerts the user mutes
     "tts_use_ha_voice",              # bool: use Home Assistant's configured TTS voice instead of the Nova Piper voice
     "pattern_learn_motion",          # bool: learn motion/occupancy triggers for "when X, do Y" suggestions (rate-limited)
     "camera_event_learning",        # bool: feed Eufy/Frigate/Nest/vision detections into pattern learning (Phase 4, v7.109.0)
@@ -2910,7 +2912,14 @@ async def ws_get_calibration(
             "interruption_budget": decision_record.interruption_budget(),
             "stats": decision_record.stats(),
             "suggestion": decision_record.outcome_rate("suggestion"),
+            "anticipation": decision_record.outcome_rate(
+                "anticipation", None, None, True),
         }
+        try:
+            from . import adaptive_awareness
+            payload["adaptive_awareness"] = adaptive_awareness.status()
+        except Exception:
+            pass
         try:
             from .automation import patterns as pattern_analyzer
             payload["suggestion_threshold"] = {
