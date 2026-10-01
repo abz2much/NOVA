@@ -567,6 +567,30 @@ setTimeout(async () => {
     !newRoot.getElementById("onboardingCard")
     && _updateConfigCalls.some(c => c.key === "onboarding_dismissed" && c.value === true)]);
 
+  // ── 8.0.1: the ember head survives being rebuilt (leaving the Command
+  // Center and coming back builds a new head; the old expression cache must
+  // not outlive it). A stand-in canvas context lets the real frame code run.
+  const _fakeCtx = new Proxy({}, {
+    get: (t, k) => (k in t ? t[k]
+      : /^create/.test(String(k)) ? () => ({ addColorStop() {} })
+      : k === "measureText" ? () => ({ width: 10 }) : () => {}),
+    set: (t, k, v) => { t[k] = v; return true; },
+  });
+  let _headError = null;
+  try {
+    elNew._ctx = _fakeCtx; elNew._canvas = newRoot.getElementById("core");
+    elNew._coreW = 900; elNew._coreH = 320;
+    elNew._makeHead();
+    let _t = performance.now();
+    // Let the expression settle, as it does in a real browser after a moment.
+    for (let i = 0; i < 400; i++) { _t += 50; elNew._coreFrame(_t); }
+    elNew._makeHead();
+    for (let i = 0; i < 3; i++) { _t += 50; elNew._coreFrame(_t); }
+  } catch (err) { _headError = err; }
+  elNew._ctx = null;
+  checks.push(["command center: the ember head can be rebuilt and drawn again without errors",
+    !_headError && elNew._headGeoKey !== null]);
+
   // ── 8.0.0: Operational Mode sits right under the hello, Activity is last ──
   const modePanel = newRoot.getElementById("operationalModePanel");
   const heroEl = newRoot.querySelector(".hero");

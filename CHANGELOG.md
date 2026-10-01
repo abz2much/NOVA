@@ -1,3 +1,12 @@
+## [8.0.1] — fix: an error in the animated head when you return to the Command Center
+
+**Fixed**
+- After visiting another tab and coming back to the Command Center, the animated head could stop drawing and Home Assistant's log would show "Cannot read properties of undefined (reading '0')" from `nova-panel.js`. Nova rebuilt the head but kept an old note saying its shape was already worked out, so the new head never got a shape. The note is now cleared whenever the head is rebuilt.
+- This was there since the animated head arrived in 7.127.0. It showed up more often once the Command Center and Diagnostics became tabs you move between.
+
+**Caveats**
+- Hard refresh the page (Ctrl+Shift+R) after updating.
+
 ## [8.0.0] — a calmer Command Center, and Diagnostics gets its own tab
 
 **Changed**
