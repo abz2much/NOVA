@@ -1,6 +1,6 @@
 /*
  * Nova Command Center Panel.
- * v7.133.0
+ * v8.0.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -47,7 +47,8 @@ class NovaPanel extends HTMLElement {
     this._cameraDiagnostics = {};
     this._cameraInterval = null;
     this._cognitive = null;
-    this._currentTab = "dashboard"; // "dashboard" | "settings" | "logs" | "memory" | "intrusion" | "suggestions"
+    this._modeBindingsOpen = false;
+    this._currentTab = "dashboard"; // "dashboard" | "settings" | "logs" | "diagnostics" | "memory" | "intrusion" | "suggestions" | "residence"
     this._logFilter = "all";
     this._logSearch = "";
     this._settingsSection = "general";
@@ -75,7 +76,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v7.133.0 ",
+      console.log("%c Nova Panel %c v8.0.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }

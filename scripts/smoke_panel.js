@@ -567,6 +567,48 @@ setTimeout(async () => {
     !newRoot.getElementById("onboardingCard")
     && _updateConfigCalls.some(c => c.key === "onboarding_dismissed" && c.value === true)]);
 
+  // ── 8.0.0: Operational Mode sits right under the hello, Activity is last ──
+  const modePanel = newRoot.getElementById("operationalModePanel");
+  const heroEl = newRoot.querySelector(".hero");
+  const footEl = newRoot.querySelector(".footnote");
+  checks.push(
+    ["command center: Operational Mode sits directly under the hello banner",
+      !!modePanel && !!heroEl && heroEl.nextElementSibling === modePanel
+      && /Operational Mode/.test(modePanel.querySelector(".panel-title")?.textContent || "")],
+    ["command center: Activity is the very last panel",
+      !!footEl && !!footEl.previousElementSibling?.querySelector("#feed")
+      && newRoot.getElementById("feedMeta")?.closest(".grid") === footEl.previousElementSibling
+      && newRoot.getElementById("cameraPanel").compareDocumentPosition(newRoot.getElementById("feed")) & 4],
+    ["command center: Operational Mode shows the modes, the active one and Auto",
+      (() => {
+        const body = newRoot.getElementById("operationalModeBody");
+        return !!body && !body.querySelector(".stub-tag")
+          && body.querySelectorAll(".mode-chip[data-mode]").length >= 2
+          && body.querySelectorAll(".mode-chip-on").length === 1
+          && !!body.querySelector('.toggle-btn[data-cfg-key="operational_mode_auto"]');
+      })()],
+    ["command center: Mode bindings (Lab and Movie) are tucked away until opened",
+      (() => {
+        const det = newRoot.querySelector("#operationalModeBody details.mode-bindings");
+        return !!det && !det.open && !!det.querySelector('select[data-cfg-key="movie_area"]')
+          && !!det.querySelector('input[data-cfg-key="movie_dim_pct"]');
+      })()],
+  );
+  newRoot.querySelector('#operationalModeBody .mode-chip[data-mode="party"]').click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["command center: clicking a mode calls nova/mode set",
+    _modeSetCalls.some(c => c.mode === "party")]);
+  newRoot.querySelector('#operationalModeBody .toggle-btn[data-cfg-key="operational_mode_auto"]').click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["command center: the Auto toggle saves through nova/update_config",
+    _updateConfigCalls.some(c => c.key === "operational_mode_auto" && c.value === false)]);
+  const bindDet = newRoot.querySelector("#operationalModeBody details.mode-bindings");
+  bindDet.open = true;
+  bindDet.dispatchEvent(new newRoot.ownerDocument.defaultView.Event("toggle"));
+  await elNew._fetchLiveData();
+  checks.push(["command center: an open Mode bindings section stays open after a refresh",
+    !!newRoot.querySelector("#operationalModeBody details.mode-bindings")?.open]);
+
   // ── New look: Settings tab (v7.94.0) ──
   // Patching `global`, not `window`: the component code runs via
   // window.eval() but this harness only copies specific globals once at
@@ -587,7 +629,7 @@ setTimeout(async () => {
     ["settings tab renders the search box and group nav",
       !!sRoot.getElementById("settingsSearch") && sRoot.querySelectorAll(".settings-nav-btn").length === 6],
     ["settings tab has every setting card, General real",
-      sRoot.querySelectorAll(".settings-card").length === 29
+      sRoot.querySelectorAll(".settings-card").length === 27
       && /Sleep state/.test(sRoot.innerHTML) && /Announcements/.test(sRoot.innerHTML)],
     ["settings tab: General restores cognition, rich reasoning, and dashboard light controls",
       !!sRoot.querySelector('.toggle-btn[data-cfg-key="cognition_enabled"]')
@@ -629,14 +671,10 @@ setTimeout(async () => {
         const call = _updateConfigCalls.find(c => c.key === "floor_plan_sqft");
         return !!call && call.value === 2200;
       })()],
-    ["settings tab: Operational Mode card is real and shows the active mode",
-      (() => {
-        const om = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Operational Mode/.test(c.querySelector(".panel-title")?.textContent || ""));
-        return !!om && !om.querySelector(".stub-tag")
-          && om.querySelectorAll(".mode-chip[data-mode]").length >= 2
-          && om.querySelectorAll(".mode-chip-on").length === 1;
-      })()],
-    ["settings tab: no card is silently missing (all 28 are real)",
+    ["settings tab: Operational Mode and Diagnostics moved out of Settings (8.0.0)",
+      !Array.from(sRoot.querySelectorAll(".settings-card")).some(c =>
+        /^(Operational Mode|Diagnostics)$/.test(c.querySelector(".panel-title")?.textContent?.trim() || ""))],
+    ["settings tab: no card is silently missing (every card is real)",
       Array.from(sRoot.querySelectorAll(".settings-card")).every(c => !c.querySelector(".stub-tag"))],
     ["settings tab: Security Alarm card exposes the source and opt in lockdown controls",
       (() => {
@@ -952,14 +990,18 @@ setTimeout(async () => {
     _updateConfigCalls.some(c => c.key === "person_honorifics" && !("person.alex" in JSON.parse(c.value)))]);
   sRoot = elNew.shadowRoot;
 
-  // Diagnostics card: fetched once on entering Settings (async), so give it
+  // Diagnostics tab (8.0.0): fetched once on first entry (async), so give it
   // a beat to land and re-render before asserting on its content.
+  const diagTabBtn = Array.from(elNew.shadowRoot.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === "diagnostics");
+  checks.push(["Diagnostics has its own tab in the top nav", !!diagTabBtn]);
+  diagTabBtn.click();
+  await new Promise(r => setTimeout(r, 20));
   await new Promise(r => setTimeout(r, 20));
   sRoot = elNew.shadowRoot;
   checks.push(
-    ["settings tab: Diagnostics card is real and merges Classic's two diagnostics cards",
+    ["diagnostics tab: the Diagnostics panel is real and merges Classic's two diagnostics cards",
       (() => {
-        const diagCard = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /^Diagnostics$/.test(c.querySelector(".panel-title")?.textContent?.trim() || ""));
+        const diagCard = sRoot.querySelector(".diag-panel");
         return !!diagCard && !diagCard.querySelector(".stub-tag")
           && /LLM/.test(diagCard.textContent) && /TTS — Nova voice test/.test(diagCard.textContent)
           && !!diagCard.querySelector('[data-svc="nova.test_tts"]');
@@ -988,8 +1030,7 @@ setTimeout(async () => {
   // inside the existing two-column .cfg-row pattern (the same one the
   // Core-services aggregate summary already used), instead of appending the
   // status into the label's own text.
-  const diagCardOf = (root) => Array.from(root.querySelectorAll(".settings-card"))
-    .find(c => /^Diagnostics$/.test(c.querySelector(".panel-title")?.textContent?.trim() || ""));
+  const diagCardOf = (root) => root.querySelector(".diag-panel");
   const rowFor = (diagCard, labelText) => Array.from(diagCard.querySelectorAll(".cfg-row"))
     .find(r => r.querySelector("label")?.textContent.trim() === labelText);
   checks.push(
@@ -1054,6 +1095,10 @@ setTimeout(async () => {
           && /never control anything/i.test(diagCard.textContent);
       })()],
   );
+  // Host Health is a Settings card: back to Settings for its checks.
+  Array.from(elNew.shadowRoot.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === "settings").click();
+  await new Promise(r => setTimeout(r, 20));
+  sRoot = elNew.shadowRoot;
 
   // Host Health (Phase 10, v7.112.0) — its own settings card.
   const hostHealthCardOf = (root) => Array.from(root.querySelectorAll(".settings-card"))
@@ -1156,6 +1201,10 @@ setTimeout(async () => {
           && masterBtn.classList.contains("off");
       })()],
   );
+  // Setup Doctor lives on the Diagnostics tab.
+  Array.from(elNew.shadowRoot.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === "diagnostics").click();
+  await new Promise(r => setTimeout(r, 20));
+  sRoot = elNew.shadowRoot;
   // Setup Doctor's own check rows only render once nova/get_setup_health
   // returns a non-core-service check; the default mock leaves it in its
   // "Loading…" state (exercised by the heading-pattern check above), so
@@ -1197,6 +1246,10 @@ setTimeout(async () => {
   hass.callWS = providerActivityCallWS;
   await elNew._fetchDiagnosticsData();
   sRoot = elNew.shadowRoot;
+  // Back to Settings for the checks that follow.
+  Array.from(sRoot.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === "settings").click();
+  await new Promise(r => setTimeout(r, 20));
+  sRoot = elNew.shadowRoot;
 
   // Toggling a real General setting saves through the same nova/update_config
   // contract Classic uses.
@@ -1205,15 +1258,6 @@ setTimeout(async () => {
   await new Promise(r => setTimeout(r, 20));
   checks.push(["settings tab toggle saves via nova/update_config",
     _updateConfigCalls.some(c => c.key === "announcements_enabled")]);
-  sRoot = elNew.shadowRoot;
-
-  // Clicking a mode chip calls nova/mode (not nova/update_config — a
-  // separate, pre-existing websocket contract Classic's own mode-grid uses).
-  const newPartyChip = Array.from(sRoot.querySelectorAll(".mode-chip[data-mode]")).find(b => b.getAttribute("data-mode") === "party");
-  newPartyChip.click();
-  await new Promise(r => setTimeout(r, 20));
-  checks.push(["settings tab: mode chip click calls nova/mode set",
-    _modeSetCalls.some(c => c.mode === "party")]);
   sRoot = elNew.shadowRoot;
 
   // Search crosses group boundaries

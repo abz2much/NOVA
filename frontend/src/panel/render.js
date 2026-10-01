@@ -99,7 +99,7 @@
             <div class="brand-mark"></div>
             <div>
               <div class="brand-name">Nova</div>
-              <div class="brand-tag">${tab === "settings" ? "Settings" : tab === "logs" ? "Logs" : tab === "memory" ? "Memory" : tab === "intrusion" ? "Intrusion" : tab === "suggestions" ? "Suggestions" : tab === "residence" ? "Residence" : "Command Center"}</div>
+              <div class="brand-tag">${tab === "settings" ? "Settings" : tab === "logs" ? "Logs" : tab === "memory" ? "Memory" : tab === "diagnostics" ? "Diagnostics" : tab === "intrusion" ? "Intrusion" : tab === "suggestions" ? "Suggestions" : tab === "residence" ? "Residence" : "Command Center"}</div>
             </div>
           </div>
           <nav class="top-nav">
@@ -109,12 +109,13 @@
             <button class="nav-tab${tab === "suggestions" ? " active" : ""}" data-tab="suggestions">Suggestions</button>
             <button class="nav-tab${tab === "settings" ? " active" : ""}" data-tab="settings">Settings</button>
             <button class="nav-tab${tab === "logs" ? " active" : ""}" data-tab="logs">Logs</button>
+            <button class="nav-tab${tab === "diagnostics" ? " active" : ""}" data-tab="diagnostics">Diagnostics</button>
             <button class="nav-tab${tab === "memory" ? " active" : ""}" data-tab="memory">Memory</button>
           </nav>
           <button class="lockdown-control" id="lockdownControl" hidden></button>
         </div>
 
-        ${tab === "settings" ? this._htmlSettings() : tab === "logs" ? this._htmlLogs() : tab === "memory" ? this._htmlMemory() : tab === "intrusion" ? this._htmlIntrusion() : tab === "suggestions" ? this._htmlSuggestions() : tab === "residence" ? this._htmlResidence() : this._htmlDashboard()}
+        ${tab === "settings" ? this._htmlSettings() : tab === "logs" ? this._htmlLogs() : tab === "memory" ? this._htmlMemory() : tab === "diagnostics" ? this._htmlDiagnostics() : tab === "intrusion" ? this._htmlIntrusion() : tab === "suggestions" ? this._htmlSuggestions() : tab === "residence" ? this._htmlResidence() : this._htmlDashboard()}
 
         <div class="footnote">NOVA COMMAND CENTER</div>
       </div>
@@ -136,6 +137,13 @@
           </div>
           <div class="chips" id="chips"></div>
         </div>
+
+        <div class="panel" id="operationalModePanel" style="max-width:1100px;margin:16px auto 0">
+          <div class="panel-head">
+            <div class="panel-title">Operational Mode</div>
+          </div>
+          <div id="operationalModeBody"></div>
+        </div>
 ${this._htmlDashboardBody()}`;
   }
 
@@ -155,16 +163,6 @@ ${this._htmlDashboardBody()}`;
 
   _htmlDashboardBody() {
     return `
-        <div class="grid">
-          <div class="panel">
-            <div class="panel-head">
-              <div class="panel-title">Activity</div>
-              <div class="panel-meta" id="feedMeta">—</div>
-            </div>
-            <div class="feed" id="feed"></div>
-          </div>
-        </div>
-
         <div class="panel" style="max-width:1100px;margin:16px auto 0">
           <div class="panel-head">
             <div class="panel-title">Areas</div>
@@ -229,6 +227,16 @@ ${this._htmlDashboardBody()}`;
             <button class="camera-toggle" id="camToggle">SHOW CAMERAS ▾</button>
           </div>
           <div class="camera-strip" id="camStrip"></div>
+        </div>
+
+        <div class="grid">
+          <div class="panel">
+            <div class="panel-head">
+              <div class="panel-title">Activity</div>
+              <div class="panel-meta" id="feedMeta">—</div>
+            </div>
+            <div class="feed" id="feed"></div>
+          </div>
         </div>
     `;
   }

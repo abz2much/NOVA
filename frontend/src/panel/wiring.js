@@ -61,6 +61,7 @@
         this._fetchDebugLog();
       }
     }
+    if (this._currentTab === "diagnostics") this._wireDiagnostics();
     if (this._currentTab === "memory") { this._wireMemory(); this._fetchKnowledge(); this._fetchPersonRoutines(); }
     if (this._currentTab === "intrusion") this._wireIntrusion();
     if (this._currentTab === "residence") {
@@ -295,32 +296,6 @@
       });
     }
 
-    // Operational Mode: mode chips call nova/mode directly (not update_config —
-    // same websocket contract Classic's own mode-grid already uses).
-    root.querySelectorAll(".mode-grid .mode-chip[data-mode]").forEach(btn => {
-      btn.addEventListener("click", async () => {
-        const mode = btn.getAttribute("data-mode");
-        if (!this._hass || !mode || btn.classList.contains("mode-chip-on")) return;
-        try {
-          await this._hass.callWS({ type: "nova/mode", action: "set", mode });
-        } catch (err) {
-          console.error("Nova: failed to set mode", err);
-        }
-        await this._fetchLiveData();
-        if (this._currentTab === "settings") this._render();
-      });
-    });
-    root.querySelectorAll(".mode-grid [data-lab-area]").forEach(btn => {
-      btn.addEventListener("click", async () => {
-        const id = btn.getAttribute("data-lab-area");
-        let cur = this._data()?.config?.lab_areas;
-        cur = Array.isArray(cur) ? cur.slice() : [];
-        const i = cur.indexOf(id);
-        if (i >= 0) cur.splice(i, 1); else cur.push(id);
-        await this._saveSetting("lab_areas", cur);
-      });
-    });
-
     this._wireAiModels();
     this._wireAppliances();
     this._wireCameraSettings();
@@ -474,14 +449,6 @@
       });
     }
 
-    // Diagnostics: fetch once per element lifetime (see _fetchDiagnosticsData
-    // for why this isn't on the live-data poll), then RUN CHECK re-fetches
-    // on demand and service-test buttons call the same HA services Classic's
-    // own Diagnostics card does.
-    if (!this._diagFetchedOnce) {
-      this._diagFetchedOnce = true;
-      this._fetchDiagnosticsData();
-    }
     if (!this._hazFetchedOnce) {
       this._hazFetchedOnce = true;
       this._fetchHazardStatus();
@@ -546,10 +513,6 @@
         }
       });
     }
-    const diagRefresh = root.getElementById("newDiagRefresh");
-    if (diagRefresh) {
-      diagRefresh.addEventListener("click", () => this._fetchDiagnosticsData());
-    }
     root.querySelectorAll(".settings-card [data-svc]").forEach(btn => {
       btn.addEventListener("click", async () => {
         const svcAttr = btn.getAttribute("data-svc");
@@ -562,21 +525,101 @@
         }
       });
     });
-    const camRun = root.getElementById("newDiagCameraRun");
-    if (camRun) {
-      camRun.addEventListener("click", async () => {
-        const sel = root.getElementById("newDiagCameraSelect");
-        const entity_id = sel ? sel.value : "";
-        if (!entity_id || !this._hass) return;
+    this._applySettingsFilter();
+  }
+
+  // Diagnostics tab: fetched once per element lifetime (see
+  // _fetchDiagnosticsData for why this isn't on the live-data poll), then RUN
+  // CHECK re-fetches on demand and the service-test buttons call the same HA
+  // services the old Settings card did.
+  _wireDiagnostics() {
+    const root = this.shadowRoot;
+    if (!this._diagFetchedOnce) {
+      this._diagFetchedOnce = true;
+      this._fetchDiagnosticsData();
+    }
+    root.getElementById("newDiagRefresh")?.addEventListener("click", () => this._fetchDiagnosticsData());
+    root.querySelectorAll(".diag-panel [data-svc]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const svcAttr = btn.getAttribute("data-svc");
+        if (!svcAttr || !this._hass) return;
+        const [domain, service] = svcAttr.split(".");
         try {
-          await this._hass.callService("nova", "analyze_camera", { entity_id, announce: true });
+          await this._hass.callService(domain, service, {});
         } catch (err) {
-          console.error("Nova: camera analyze failed", err);
+          console.error(`Nova: service ${svcAttr} failed`, err);
         }
       });
-    }
+    });
+    root.getElementById("newDiagCameraRun")?.addEventListener("click", async () => {
+      const sel = root.getElementById("newDiagCameraSelect");
+      const entity_id = sel ? sel.value : "";
+      if (!entity_id || !this._hass) return;
+      try {
+        await this._hass.callService("nova", "analyze_camera", { entity_id, announce: true });
+      } catch (err) {
+        console.error("Nova: camera analyze failed", err);
+      }
+    });
+  }
 
-    this._applySettingsFilter();
+  // Operational Mode on the Command Center (8.0.0). Redrawn only when its own
+  // content changed, so the 20 second poll never closes an open menu or the
+  // Mode bindings section. Handlers are wired to this block alone: the
+  // dashboard never runs the Settings wiring.
+  _renderOperationalMode() {
+    const body = this.shadowRoot.getElementById("operationalModeBody");
+    if (!body) return;
+    const html = this._operationalModeCardBody();
+    if (body._html === html) return;
+    body._html = html;
+    body.innerHTML = html;
+    this._wireOperationalMode(body);
+  }
+
+  _wireOperationalMode(scope) {
+    scope.querySelectorAll(".toggle-btn[data-cfg-key]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        await this._saveSetting(btn.getAttribute("data-cfg-key"), btn.getAttribute("data-cfg-val") === "true");
+      });
+    });
+    scope.querySelectorAll("select.cfg-field[data-cfg-key]").forEach(sel => {
+      sel.addEventListener("change", async () => {
+        await this._saveSetting(sel.getAttribute("data-cfg-key"), sel.value);
+      });
+    });
+    scope.querySelectorAll("input.cfg-field[data-cfg-key]").forEach(inp => {
+      inp.addEventListener("change", async () => {
+        let value = inp.value;
+        if (inp.type === "number") value = (value === "" ? null : Number(value));
+        await this._saveSetting(inp.getAttribute("data-cfg-key"), value);
+      });
+    });
+    // Mode chips call nova/mode directly (not update_config).
+    scope.querySelectorAll(".mode-chip[data-mode]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const mode = btn.getAttribute("data-mode");
+        if (!this._hass || !mode || btn.classList.contains("mode-chip-on")) return;
+        try {
+          await this._hass.callWS({ type: "nova/mode", action: "set", mode });
+        } catch (err) {
+          console.error("Nova: failed to set mode", err);
+        }
+        await this._fetchLiveData();
+      });
+    });
+    scope.querySelectorAll("[data-lab-area]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const id = btn.getAttribute("data-lab-area");
+        let cur = this._data()?.config?.lab_areas;
+        cur = Array.isArray(cur) ? cur.slice() : [];
+        const i = cur.indexOf(id);
+        if (i >= 0) cur.splice(i, 1); else cur.push(id);
+        await this._saveSetting("lab_areas", cur);
+      });
+    });
+    const det = scope.querySelector("details.mode-bindings");
+    if (det) det.addEventListener("toggle", () => { this._modeBindingsOpen = det.open; });
   }
 
   async _saveSetting(key, value) {

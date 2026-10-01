@@ -18,8 +18,6 @@
         : c.id === "person_honorifics" ? this._personHonorificsCardBody()
         : c.id === "room_speakers" ? this._roomSpeakersCardBody()
         : c.id === "residence_home" ? this._residenceHomeCardBody()
-        : c.id === "operational_mode" ? this._operationalModeCardBody()
-        : c.id === "diagnostics" ? this._diagnosticsCardBody()
         : c.id === "ai_models" ? this._aiModelsCardBody()
         : c.id === "briefings" ? this._briefingsCardBody()
         : c.id === "voice_confirmation" ? this._voiceConfirmationCardBody()
@@ -239,7 +237,8 @@
       </div>
       <div class="stub-body">Active: <strong>${this._esc(active.toUpperCase())}</strong>${m.description ? " — " + this._esc(m.description) : ""}. Safety always stays active.</div>
       <div class="mode-grid">${modeChips}</div>
-      <div class="mode-bind-head">Mode bindings — scope Lab &amp; Movie to specific rooms</div>
+      <details class="mode-bindings"${this._modeBindingsOpen ? " open" : ""}>
+      <summary class="mode-bind-head">Mode bindings — scope Lab &amp; Movie to specific rooms</summary>
       <div class="cfg-row"><label>Lab rooms (quiet only here)</label></div>
       <div class="mode-grid">${labChips}</div>
       <div class="cfg-row">
@@ -253,7 +252,8 @@
       <div class="cfg-row">
         <label>Movie dim %</label>
         <input class="cfg-field cfg-num" type="number" min="0" max="100" step="5" data-cfg-key="movie_dim_pct" value="${cfg.movie_dim_pct ?? ""}" placeholder="15">
-      </div>`;
+      </div>
+      </details>`;
   }
 
   // Merged from Classic's two separate diagnostics cards ("System
@@ -278,7 +278,7 @@
       const activity = await this._hass.callWS({ type: "nova/get_provider_activity", days: 7 });
       this._providerActivity = activity.days || [];
     } catch (_) { this._providerActivity = null; }
-    if (this._currentTab === "settings") this._render();
+    if (this._currentTab === "diagnostics") this._render();
   }
 
   _diagStatusCls(st) {
@@ -342,6 +342,16 @@
       return `<div class="cfg-row"><label>${this._esc(d.day)}</label></div>${entries}`;
     }).join("");
     return `<div class="panel-head"><div class="panel-title">Provider Activity</div></div>${rows}`;
+  }
+
+  // The Diagnostics tab (8.0.0): the card that used to sit in Settings,
+  // moved here whole. Its data is fetched on first entry (see _wireDiagnostics).
+  _htmlDiagnostics() {
+    return `
+        <div class="panel diag-panel" style="max-width:1100px;margin:16px auto 0">
+          <div class="panel-head"><div class="panel-title">Diagnostics</div></div>
+          ${this._diagnosticsCardBody()}
+        </div>`;
   }
 
   _diagnosticsCardBody() {
