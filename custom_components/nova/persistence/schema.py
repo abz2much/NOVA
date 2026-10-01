@@ -248,6 +248,21 @@ _COMPONENTS = (
         # keep it exactly.
         columns=(Column("facts", "status", "TEXT NOT NULL DEFAULT 'confirmed'"),),
     ),
+    Component(
+        name="fact_vectors",
+        version=1,
+        tables=("fact_vectors",),
+        statements=(
+            "CREATE TABLE IF NOT EXISTS fact_vectors ("
+            "fact_id INTEGER PRIMARY KEY, model TEXT NOT NULL, "
+            "dim INTEGER NOT NULL, vec BLOB NOT NULL, "
+            "text_hash TEXT NOT NULL, updated_at REAL NOT NULL)",
+            # A fact that is forgotten or expires takes its vector with it.
+            "CREATE TRIGGER IF NOT EXISTS trg_fact_vectors_cleanup "
+            "AFTER DELETE ON facts BEGIN "
+            "DELETE FROM fact_vectors WHERE fact_id = OLD.id; END",
+        ),
+    ),
     # ── nova/patterns.db ─────────────────────────────────────────────────
     Component(
         name="pattern_log",
@@ -558,7 +573,7 @@ COMPONENTS: dict[str, Component] = {c.name: c for c in _COMPONENTS}
 STORES: tuple[Store, ...] = (
     Store("conversations", "nova/conversations.db",
           ("conversations", "action_log", "spoken_history"), wal=True),
-    Store("knowledge", "nova/knowledge.db", ("facts",), wal=True),
+    Store("knowledge", "nova/knowledge.db", ("facts", "fact_vectors"), wal=True),
     Store("patterns", "nova/patterns.db",
           ("pattern_log", "person_patterns", "cognition", "automation_trials",
            "followups", "goals"), wal=True),

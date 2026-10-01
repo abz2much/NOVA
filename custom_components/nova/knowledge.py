@@ -49,7 +49,7 @@ _STOPWORDS = {
 def _connect() -> Optional[sqlite3.Connection]:
     try:
         conn = _store.connect(DB_PATH, timeout=10)
-        _store.ensure(conn, "facts")
+        _store.ensure(conn, "facts", "fact_vectors")
         conn.commit()
         return conn
     except Exception as exc:
@@ -456,6 +456,12 @@ def prompt_block(query: str = "", *, subject: Optional[str] = None,
                     subjects=subjects, status="confirmed")
              if query else all_facts(subject=subject, now=now, subjects=subjects,
                                      status="confirmed")[:limit])
+    return format_block(facts)
+
+
+def format_block(facts: list[dict]) -> str:
+    """The fenced "what you know" block for a list of facts. Callers pass
+    confirmed facts only. Returns "" when there are none."""
     if not facts:
         return ""
     by_subject: dict = {}

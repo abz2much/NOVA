@@ -195,6 +195,7 @@
       "doc_vectors",
       "document_fts",
       "document_watch_seen",
+      "fact_vectors",
       "facts",
       "followups",
       "goals",

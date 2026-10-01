@@ -1,3 +1,20 @@
+## [7.132.0] — saved facts are found by meaning
+
+**Added**
+- With Semantic search turned on, Nova now finds saved facts by meaning as well as by words. A question like "who runs cold at night" finds a fact saved as "sleep temperature: 17 degrees".
+- It reuses the Semantic search setting and the Ollama server you already set up. Nothing new to turn on.
+- Facts are embedded in the background, a minute after you chat, so your messages are not slowed by it. Only the question itself is embedded while you wait, and it gives up after three seconds.
+- If Ollama is slow or missing, Nova quietly uses the old word matching and pauses the meaning search for two minutes.
+
+**Unchanged**
+- Only confirmed facts are used. A fact waiting for your confirmation is never embedded or shown.
+- Facts are still fenced and still limited to you and the household.
+- A fact you edit, or a change of embedding model, is re-embedded automatically. A forgotten or expired fact takes its vector with it.
+
+**Caveats**
+- The fact text is sent to your Ollama server to be embedded, the same server your documents already use.
+- How well it matches depends on the embedding model. The default is nomic-embed-text.
+
 ## [7.131.0] — scene memory: where did I last see it?
 
 **Added**
