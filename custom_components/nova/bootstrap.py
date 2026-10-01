@@ -9,10 +9,10 @@ Supervisor (installing add-ons needs the Supervisor API). Every phase is
 idempotent and best-effort — failures are logged, never fatal.
 
   1. Ensure Piper / Whisper / openWakeWord add-ons installed + started  (Supervisor REST)
-  2. Download + verify the Nova voice into /share/piper               (HTTP)
-  3. Restart Piper so it rescans the voice                              (Supervisor REST)
-  4. Reload Wyoming config entries                                      (in-process)
-  5. Create/update the Nova Assist pipeline + set preferred           (in-process, best-effort)
+  2. Reload Wyoming config entries                                      (in-process)
+  3. Create/update the Nova Assist pipeline                           (in-process, best-effort)
+
+Nova speaks with whichever voice Home Assistant (Piper) provides by default.
 
 The HA-side steps the add-on did over a WebSocket are done in-process here (we
 have `hass`), which is both cleaner and more robust than talking to HA's own
@@ -36,29 +36,6 @@ _LOGGER = logging.getLogger(__name__)
 
 SUPERVISOR = "http://supervisor"
 PIPER_DIR = Path("/share/piper")
-# "main" is a moving branch ref, not a pinned artifact — anyone who can push to
-# (or compromise) that HF repo can silently swap the model any time an install
-# re-downloads it. Pin this to a specific commit SHA once one is captured (see
-# EXPECTED_SHA256 below for how); "main" stays the safe fallback until then so
-# a fresh install never breaks on a missing pin.
-HF_REVISION = "main"
-HF_BASE = f"https://huggingface.co/jgkawell/nova/resolve/{HF_REVISION}/en/en_GB/nova"
-MIN_ONNX_SIZE = 1_000_000  # smaller ⇒ corrupt download
-# SHA-256 of each voice file, keyed by its local filename. Empty until someone
-# with real network access to huggingface.co (this sandbox is blocked from it)
-# runs, once per quality:
-#   curl -sL "https://huggingface.co/jgkawell/nova/resolve/main/en/en_GB/nova/<quality>/en_GB-nova-<quality>.onnx" | shasum -a 256
-#   curl -sL "https://huggingface.co/jgkawell/nova/resolve/main/en/en_GB/nova/<quality>/en_GB-nova-<quality>.onnx.json" | shasum -a 256
-# and records the current commit SHA (huggingface.co/jgkawell/nova -> Files ->
-# History) as HF_REVISION above. Until filled in, downloads verify size only
-# (MIN_ONNX_SIZE), same as before — this dict makes the missing check visible
-# and ready, it doesn't silently claim protection that isn't there yet.
-EXPECTED_SHA256: dict[str, str] = {
-    # "en_GB-nova-high.onnx": "...",
-    # "en_GB-nova-high.onnx.json": "...",
-    # "en_GB-nova-medium.onnx": "...",
-    # "en_GB-nova-medium.onnx.json": "...",
-}
 MARKER_PATH = Path("/config/nova/.bootstrap_done")
 
 REQUIRED_ADDONS = {
@@ -151,113 +128,14 @@ async def _ensure_addon(hass: HomeAssistant, slug: str, friendly: str) -> bool:
     return await _wait_addon_state(hass, slug, "started")
 
 
-# ── Voice model download ─────────────────────────────────────────────────────
+# ── Legacy Nova voice ────────────────────────────────────────────────────────
 
-def _sha256(data: bytes) -> str:
-    import hashlib
-    return hashlib.sha256(data).hexdigest()
+LEGACY_VOICE_PREFIX = "en_GB-nova-"
 
 
-async def _download_file(hass: HomeAssistant, url: str, dest: Path) -> int:
-    """Download a file to dest (file I/O off-loop). Returns bytes written (0 on
-    fail, INCLUDING a checksum mismatch — a corrupt or tampered file must be
-    treated exactly like a failed download, never partially trusted)."""
-    session = async_get_clientsession(hass)
-    try:
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=180)) as resp:
-            if resp.status != 200:
-                return 0
-            data = await resp.read()
-        expected = EXPECTED_SHA256.get(dest.name)
-        if expected is not None:
-            actual = await hass.async_add_executor_job(_sha256, data)
-            if actual.lower() != expected.lower():
-                _LOGGER.error(
-                    "Nova bootstrap: checksum mismatch for %s — expected %s, got %s. "
-                    "Refusing to install (possible tampering or an upstream file "
-                    "change not yet reflected in EXPECTED_SHA256).",
-                    dest.name, expected, actual,
-                )
-                return 0
-        else:
-            _LOGGER.debug(
-                "Nova bootstrap: no pinned checksum for %s — verifying size only",
-                dest.name,
-            )
-        await hass.async_add_executor_job(dest.write_bytes, data)
-        return len(data)
-    except Exception as exc:
-        _LOGGER.warning("Nova bootstrap: download %s failed: %s", url, exc)
-        await hass.async_add_executor_job(lambda: dest.unlink(missing_ok=True))
-        return 0
-
-
-def _voice_present(quality: str) -> bool:
-    onnx = PIPER_DIR / f"en_GB-nova-{quality}.onnx"
-    js = PIPER_DIR / f"en_GB-nova-{quality}.onnx.json"
-    return onnx.exists() and js.exists() and onnx.stat().st_size > MIN_ONNX_SIZE
-
-
-def resolve_installed_quality(preferred: str = "high") -> str | None:
-    """Whichever Nova Piper voice quality is actually on disk right now —
-    `preferred` if present, else the other quality, else None. Disk-only,
-    never downloads. Shared by the bootstrap's pipeline setup and
-    tts_helper's on-demand announcements so both agree on what's really
-    installed instead of each assuming a fixed quality is there."""
-    other = "medium" if preferred == "high" else "high"
-    if _voice_present(preferred):
-        return preferred
-    if _voice_present(other):
-        return other
-    return None
-
-
-async def _try_quality(hass: HomeAssistant, quality: str) -> bool:
-    onnx = PIPER_DIR / f"en_GB-nova-{quality}.onnx"
-    js = PIPER_DIR / f"en_GB-nova-{quality}.onnx.json"
-    candidates = [
-        (f"{HF_BASE}/{quality}/nova-{quality}.onnx",
-         f"{HF_BASE}/{quality}/nova-{quality}.onnx.json"),
-        (f"{HF_BASE}/{quality}/en_GB-nova-{quality}.onnx",
-         f"{HF_BASE}/{quality}/en_GB-nova-{quality}.onnx.json"),
-    ]
-    for onnx_url, json_url in candidates:
-        if await _download_file(hass, onnx_url, onnx) > MIN_ONNX_SIZE:
-            if await _download_file(hass, json_url, js) > 0:
-                return True
-            await hass.async_add_executor_job(lambda: onnx.unlink(missing_ok=True))
-    return False
-
-
-async def _download_voice(hass: HomeAssistant, quality: str) -> str | None:
-    """Ensure a Nova voice is on disk. Returns the quality actually available
-    ('high'/'medium') or None — never just whether *some* download succeeded,
-    since a caller that assumes the requested quality is what landed can point
-    the Assist pipeline at a voice file that doesn't exist (VoiceNotFound).
-
-    Always tries the REQUESTED quality first, even if the other quality is
-    already installed (e.g. left over from a previous fallback) — an already-
-    present fallback must never stop Nova from getting the quality actually
-    asked for. Only after that attempt fails does an already-present fallback
-    short-circuit a further download attempt for it."""
-    await hass.async_add_executor_job(lambda: PIPER_DIR.mkdir(parents=True, exist_ok=True))
-    other = "medium" if quality == "high" else "high"
-    if await hass.async_add_executor_job(_voice_present, quality):
-        _LOGGER.info("Nova bootstrap: voice en_GB-nova-%s already present", quality)
-        return quality
-    if await _try_quality(hass, quality):
-        return quality
-    if await hass.async_add_executor_job(_voice_present, other):
-        _LOGGER.info("Nova bootstrap: '%s' unavailable; using already-present '%s'", quality, other)
-        return other
-    if await _try_quality(hass, other):
-        _LOGGER.info("Nova bootstrap: '%s' not hosted; installed '%s' instead", quality, other)
-        return other
-    _LOGGER.warning(
-        "Nova bootstrap: voice download failed. Manual: "
-        "https://huggingface.co/jgkawell/nova/tree/main/en/en_GB/nova/%s "
-        "→ copy both files to %s/", quality, PIPER_DIR)
-    return None
+def _legacy_voice_present(voice: str) -> bool:
+    """True if a leftover Nova voice file from an older release is still on disk."""
+    return (PIPER_DIR / f"{voice}.onnx").exists()
 
 
 # ── HA-side steps (in-process) ───────────────────────────────────────────────
@@ -311,23 +189,24 @@ async def _wait_for_agent(hass: HomeAssistant, tries: int = 40, delay: float = 3
     return None
 
 
-def _manual_pipeline_hint(voice_quality: str) -> None:
+def _manual_pipeline_hint() -> None:
     _LOGGER.info(
         "Nova bootstrap: set the pipeline up manually under Settings → Voice "
-        "Assistants — Conversation: Nova, STT: faster-whisper, TTS: piper / "
-        "en_GB-nova-%s, Wake word: hey_nova.", voice_quality)
+        "Assistants — Conversation: Nova, STT: faster-whisper, TTS: piper, "
+        "Wake word: openWakeWord.")
 
 
-async def _create_pipeline(hass: HomeAssistant, voice_quality: str) -> bool:
+async def _create_pipeline(hass: HomeAssistant) -> bool:
     """
     Create/update the Nova Assist pipeline and set it preferred. Best-effort:
     the assist_pipeline API varies across HA versions, so any failure logs clear
-    manual steps instead of raising.
+    manual steps instead of raising. The pipeline uses Home Assistant's default
+    voice for the TTS engine.
     """
     try:
         from homeassistant.components import assist_pipeline
     except Exception:
-        _manual_pipeline_hint(voice_quality)
+        _manual_pipeline_hint()
         return False
 
     agent = _find_nova_agent(hass)
@@ -336,10 +215,9 @@ async def _create_pipeline(hass: HomeAssistant, voice_quality: str) -> bool:
     if not agent or not stt or not tts:
         _LOGGER.warning("Nova bootstrap: agent=%s stt=%s tts=%s — can't build pipeline yet",
                         agent, stt, tts)
-        _manual_pipeline_hint(voice_quality)
+        _manual_pipeline_hint()
         return False
 
-    tts_voice = f"en_GB-nova-{voice_quality}"
     try:
         # Don't duplicate if a Nova pipeline already exists.
         existing = None
@@ -358,26 +236,22 @@ async def _create_pipeline(hass: HomeAssistant, voice_quality: str) -> bool:
             # — never runs, because the turn is handled by the wrong agent. Repair
             # it in place rather than leaving it as-is.
             #
-            # Also repair a Nova voice that points at a MISSING file — e.g.
-            # tts_voice is en_GB-nova-high while only medium is on disk, which
-            # is exactly the VoiceNotFoundError / no-speech case. Only touch it
-            # when the current voice is confirmed missing AND the quality we'd
-            # switch to is confirmed present — a deliberate, still-valid voice
-            # choice is never clobbered.
+            # Also clear a leftover Nova voice from an older release when its
+            # file is gone, so the pipeline falls back to Home Assistant's
+            # default voice instead of failing with VoiceNotFound.
             try:
                 updates: dict = {}
                 if getattr(existing, "conversation_engine", None) != agent:
                     updates["conversation_engine"] = agent
                 cur_voice = getattr(existing, "tts_voice", "") or ""
-                if cur_voice.startswith("en_GB-nova-") and cur_voice != tts_voice:
-                    cur_q = cur_voice.rsplit("-", 1)[-1]
-                    cur_ok = await hass.async_add_executor_job(_voice_present, cur_q)
-                    want_ok = await hass.async_add_executor_job(_voice_present, voice_quality)
-                    if not cur_ok and want_ok:
-                        updates["tts_voice"] = tts_voice
+                if cur_voice.startswith(LEGACY_VOICE_PREFIX):
+                    present = await hass.async_add_executor_job(
+                        _legacy_voice_present, cur_voice)
+                    if not present:
+                        updates["tts_voice"] = None
                         _LOGGER.info(
-                            "Nova bootstrap: pipeline voice '%s' is missing on disk; "
-                            "repointing to installed '%s'", cur_voice, tts_voice)
+                            "Nova bootstrap: pipeline voice '%s' is gone; "
+                            "using the Home Assistant default voice", cur_voice)
                 if updates:
                     await assist_pipeline.async_update_pipeline(hass, existing, **updates)
                     _LOGGER.info("Nova bootstrap: updated pipeline '%s' (%s)",
@@ -393,31 +267,24 @@ async def _create_pipeline(hass: HomeAssistant, voice_quality: str) -> bool:
             hass, stt_engine_id=stt, tts_engine_id=tts, pipeline_name="Nova")
         if pipeline is None:
             _LOGGER.warning("Nova bootstrap: default pipeline creation returned nothing")
-            _manual_pipeline_hint(voice_quality)
+            _manual_pipeline_hint()
             return False
-        # async_create_default_pipeline uses HA's default conversation agent AND
-        # whichever voice Piper happens to list first for the language — neither
-        # is guaranteed to be Nova's. Set both explicitly so Nova handles the turn
-        # and speaks in its own installed voice. tts_voice can be rejected on some
-        # HA versions, so fall back to agent-only rather than losing the pipeline.
+        # async_create_default_pipeline uses HA's default conversation agent, which
+        # is not guaranteed to be Nova's. Set it explicitly so Nova handles the
+        # turn. The voice stays on Home Assistant's default.
         try:
             await assist_pipeline.async_update_pipeline(
-                hass, pipeline, conversation_engine=agent, tts_voice=tts_voice)
+                hass, pipeline, conversation_engine=agent)
         except Exception as exc:
-            try:
-                await assist_pipeline.async_update_pipeline(
-                    hass, pipeline, conversation_engine=agent)
-            except Exception:
-                pass
             _LOGGER.warning(
-                "Nova bootstrap: created pipeline; agent set but voice '%s' not applied "
-                "(%s) — select it under Voice assistants if needed", tts_voice, exc)
-        _LOGGER.info("Nova bootstrap: created Nova pipeline (agent=%s stt=%s tts=%s/%s)",
-                     agent, stt, tts, tts_voice)
+                "Nova bootstrap: created pipeline but couldn't set the agent (%s) "
+                "— select Nova under Voice assistants", exc)
+        _LOGGER.info("Nova bootstrap: created Nova pipeline (agent=%s stt=%s tts=%s)",
+                     agent, stt, tts)
         return True
     except Exception as exc:
         _LOGGER.warning("Nova bootstrap: pipeline creation failed (%s)", exc)
-        _manual_pipeline_hint(voice_quality)
+        _manual_pipeline_hint()
         return False
 
 
@@ -457,7 +324,7 @@ async def async_run_bootstrap(hass: HomeAssistant, *, force: bool = False) -> di
     """
     from . import nova_config
 
-    status = {"supervised": False, "addons_ok": False, "voice_ok": False,
+    status = {"supervised": False, "addons_ok": False,
               "wyoming_ok": False, "pipeline_ok": False, "skipped": None}
 
     if not bool(nova_config.get("auto_bootstrap", True)):
@@ -472,15 +339,13 @@ async def async_run_bootstrap(hass: HomeAssistant, *, force: bool = False) -> di
 
     version = await hass.async_add_executor_job(_current_version)
     marker = await hass.async_add_executor_job(_read_marker)
-    if not force and marker.get("version") == version and marker.get("addons_ok") and marker.get("voice_ok"):
+    if not force and marker.get("version") == version and marker.get("addons_ok"):
         status["skipped"] = "already bootstrapped this version"
         return status
 
-    voice_quality = str(nova_config.get("voice_quality", "medium"))
-    tts_provider = str(nova_config.get("tts_provider", "piper_nova"))
     auto_pipeline = bool(nova_config.get("auto_pipeline", True))
 
-    _LOGGER.info("Nova bootstrap: starting (version=%s quality=%s)", version, voice_quality)
+    _LOGGER.info("Nova bootstrap: starting (version=%s)", version)
 
     # Phase 1 — prerequisite add-ons
     addons_ok = True
@@ -489,35 +354,21 @@ async def async_run_bootstrap(hass: HomeAssistant, *, force: bool = False) -> di
             addons_ok = False
     status["addons_ok"] = addons_ok
 
-    # Phase 2 — voice model
-    if tts_provider == "piper_nova":
-        installed_voice_q = await _download_voice(hass, voice_quality)
-        status["voice_ok"] = installed_voice_q is not None
-    else:
-        installed_voice_q = voice_quality
-        status["voice_ok"] = True
-
-    # Phase 3 — restart Piper to rescan the voice
-    if tts_provider == "piper_nova" and status["voice_ok"]:
-        if await _addon_action(hass, "core_piper", "restart", timeout=60):
-            await _wait_addon_state(hass, "core_piper", "started")
-        await asyncio.sleep(5)
-
-    # Phase 4 — reload Wyoming
+    # Phase 2 — reload Wyoming
     try:
         await _reload_wyoming(hass)
         status["wyoming_ok"] = True
     except Exception as exc:
         _LOGGER.debug("Nova bootstrap: wyoming reload error: %s", exc)
 
-    # Phase 5 — Assist pipeline (best-effort)
+    # Phase 3 — Assist pipeline (best-effort)
     if auto_pipeline:
         agent = await _wait_for_agent(hass)
         if agent:
-            status["pipeline_ok"] = await _create_pipeline(hass, installed_voice_q or voice_quality)
+            status["pipeline_ok"] = await _create_pipeline(hass)
         else:
             _LOGGER.warning("Nova bootstrap: conversation agent didn't register in time")
-            _manual_pipeline_hint(voice_quality)
+            _manual_pipeline_hint()
 
     await hass.async_add_executor_job(_write_marker, version, status)
     _LOGGER.info("Nova bootstrap: complete — %s", status)

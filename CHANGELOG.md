@@ -1,3 +1,22 @@
+## [8.1.0] — Nova uses Home Assistant's default voice
+
+**Changed**
+- Nova no longer downloads a custom voice from Hugging Face. That download is gone, along with the code that checked and installed it. Nova now speaks with whatever voice Home Assistant (for Piper, the add on) uses by default.
+- Spoken announcements no longer ask for a specific voice.
+- The Assist pipeline Nova creates leaves the voice on Home Assistant's default.
+- "Use Home Assistant default voice" still decides which speech engine is used: your preferred Assist pipeline's, instead of the free local one.
+
+**Fixed**
+- If your Nova pipeline still points at the old Nova voice and that file is missing, Nova clears it on start so the pipeline falls back to the default voice. A voice file that is still there is left alone, and so is any other voice you picked.
+- The bootstrap warning "voice download failed" no longer appears.
+
+**Removed**
+- The old add on era install script, `scripts/legacy_addon_bootstrap.py`, which also pointed at Hugging Face.
+
+**Caveats**
+- If you want a different Piper voice, choose it under Settings, Voice assistants, on your Nova pipeline.
+- Hard refresh the page (Ctrl+Shift+R) after updating.
+
 ## [8.0.2] — fix: Decisions rows overlapping in the Logs tab
 
 **Fixed**

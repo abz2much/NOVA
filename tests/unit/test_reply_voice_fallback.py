@@ -1,59 +1,19 @@
-"""Reply delivery must survive a broken/missing Piper voice — v7.50.0.
+"""Reply delivery must survive a failing play_media call.
 
-The conversation layer silences the satellite whenever it routes a reply to a
-Cast speaker, so if delivery is rejected (e.g. a custom Piper voice removed or
-renamed by a Piper update) the reply used to vanish entirely. async_announce now
-(a) reports whether it delivered, so the caller only silences the satellite on
-success, and (b) retries without the voice — falling back to the engine's
-default voice — so a missing custom voice can't cause total silence.
-
-Delivery (v7.86.0) is media_player.play_media with the voice requested via a
-`tts_options` query param on the media-source URL, not a `tts.speak` options
-dict — see test_announce_resilience.py for the primary play_media path. This
-file exercises the voice-fallback behaviour specifically: a play_media call
-carrying the voice is rejected (mimicking a missing custom voice), so delivery
-falls back — first to play_media without the voice, then to tts.speak — until
-one succeeds.
+async_announce reports whether it delivered, so the conversation layer only
+silences the satellite on success, and it falls back from play_media to
+tts.speak when the first call is rejected. No voice is requested: the TTS
+engine uses Home Assistant's default voice.
 """
 from __future__ import annotations
 
-import sys
-import types
 
 import pytest
-
-# tts_helper lazily imports bootstrap (for resolve_installed_quality), which
-# imports aiohttp at module level — stub it the same way test_bootstrap.py
-# does, so that import succeeds regardless of which test file collects first.
-if "aiohttp" not in sys.modules:
-    _aiohttp = types.ModuleType("aiohttp")
-    _aiohttp.ClientTimeout = lambda **kw: None
-    _aiohttp.ClientSession = object
-    sys.modules["aiohttp"] = _aiohttp
 
 
 @pytest.fixture
 def tts(load):
     return load("tts_helper")
-
-
-@pytest.fixture
-def bootstrap(load):
-    return load("bootstrap")
-
-
-@pytest.fixture(autouse=True)
-def _installed_nova_voice(tmp_path, monkeypatch, bootstrap):
-    """These fakes exercise the *delivery* fallback (voice rejected mid-call),
-    not the quality-resolution logic covered in test_bootstrap.py / test_tts_
-    voice_mode.py — so just make a Nova voice genuinely present on disk, same
-    as the real world when bootstrap has installed one."""
-    from pathlib import Path
-    monkeypatch.setattr(bootstrap, "PIPER_DIR", Path(tmp_path / "piper"))
-    bootstrap.PIPER_DIR.mkdir(parents=True, exist_ok=True)
-    (bootstrap.PIPER_DIR / "en_GB-nova-high.onnx").write_bytes(
-        b"x" * (bootstrap.MIN_ONNX_SIZE + 10))
-    (bootstrap.PIPER_DIR / "en_GB-nova-high.onnx.json").write_text("{}")
 
 
 class _State:
@@ -91,26 +51,18 @@ class _OKHass(_StatesMixin):
         raise AssertionError(f"unexpected call {domain}.{service}")
 
 
-class _VoiceFailHass(_StatesMixin):
-    """Rejects any delivery call (play_media or tts.speak) that carries the
-    missing custom voice; accepts it once the voice is dropped (default voice)."""
+class _PlayMediaFailHass(_StatesMixin):
+    """play_media is rejected; tts.speak accepts."""
     def __init__(self):
         super().__init__()
         self.calls = []
         self.services = self
     async def async_call(self, domain, service, data, target=None, blocking=False):
         if domain == "media_player" and service == "play_media":
-            has_voice = "tts_options" in data.get("media_content_id", "")
-            self.calls.append(("play_media", has_voice))
-            if has_voice:
-                raise RuntimeError("Invalid options: voice 'en_GB-nova-high' not found")
-            self._state.last_updated += 1
-            return
+            self.calls.append(("play_media", False))
+            raise RuntimeError("play_media rejected")
         if domain == "tts" and service == "speak":
-            has_opts = "options" in data
-            self.calls.append(("tts.speak", has_opts))
-            if has_opts:
-                raise RuntimeError("Invalid options: voice 'en_GB-nova-high' not found")
+            self.calls.append(("tts.speak", "options" in data))
             return
         raise AssertionError(f"unexpected call {domain}.{service}")
 
@@ -125,38 +77,28 @@ class _AllFailHass(_StatesMixin):
 
 async def test_returns_true_on_success(tts):
     hass = _OKHass()
-    ok = await tts.async_announce(hass, "hello", "tts.piper_nova",
+    ok = await tts.async_announce(hass, "hello", "tts.piper",
                                   ["media_player.kitchen"], context="reply")
     assert ok is True
-    assert hass.calls and hass.calls[0][1] is True     # sent the piper voice option
+    assert hass.calls and hass.calls[0][1] is False     # no voice option sent
 
 
 async def test_noop_returns_false(tts):
     hass = _OKHass()
-    assert await tts.async_announce(hass, "", "tts.piper_nova", ["m"]) is False
+    assert await tts.async_announce(hass, "", "tts.piper", ["m"]) is False
     assert await tts.async_announce(hass, "hi", None, ["m"]) is False
-    assert await tts.async_announce(hass, "hi", "tts.piper_nova", []) is False
+    assert await tts.async_announce(hass, "hi", "tts.piper", []) is False
     assert hass.calls == []                             # never called for a no-op
 
 
-async def test_missing_voice_falls_back_to_default(tts):
-    hass = _VoiceFailHass()
-    ok = await tts.async_announce(hass, "hello", "tts.piper_nova",
+async def test_play_media_failure_falls_back_to_tts_speak(tts):
+    hass = _PlayMediaFailHass()
+    ok = await tts.async_announce(hass, "hello", "tts.piper",
                                   ["media_player.kitchen"], context="reply")
-    assert ok is True                                   # delivered via default voice
-    # it tried with the voice option (failed) and again without it (succeeded)
-    assert any(has for _, has in hass.calls)
-    assert any(not has for _, has in hass.calls)
+    assert ok is True
+    assert hass.calls == [("play_media", False), ("tts.speak", False)]
 
 
 async def test_returns_false_when_all_fail(tts):
-    assert await tts.async_announce(_AllFailHass(), "hi", "tts.piper_nova",
+    assert await tts.async_announce(_AllFailHass(), "hi", "tts.piper",
                                     ["media_player.x"], context="reply") is False
-
-
-async def test_non_piper_has_no_voice_option(tts):
-    hass = _OKHass()
-    ok = await tts.async_announce(hass, "hello", "tts.home_assistant_cloud",
-                                  ["media_player.kitchen"], context="briefing")
-    assert ok is True
-    assert hass.calls[0][1] is False                   # no piper voice option for Cloud

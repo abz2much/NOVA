@@ -32,7 +32,7 @@ Everything past this point (vision, doorbell analysis, the live 3D floor plan, p
 
 ### Voice and conversation
 
-A pluggable LLM brain (Groq, Gemini, OpenAI, Anthropic, or a local Ollama server) drives natural conversation through the Home Assistant voice pipeline. When Nova bootstraps the voice stack itself (HA OS/Supervised), it installs a custom Nova Piper voice as the default. Piper is optional, not required: flip on "use Home Assistant's configured TTS voice" and Nova speaks through whichever HA TTS provider you've set up instead — Fish Audio, ElevenLabs, Home Assistant Cloud, or anything else exposed as a `tts.*` entity. Nova's own Piper voice-quality setting is only ever applied when Piper is the entity actually in use; it's never injected into another provider's request. Works with ESP32-S3 satellites, Wyoming, and Google speakers.
+A pluggable LLM brain (Groq, Gemini, OpenAI, Anthropic, or a local Ollama server) drives natural conversation through the Home Assistant voice pipeline. Nova speaks with Home Assistant's default voice and never forces one of its own. By default it picks a free local Piper entity; flip on "use Home Assistant's default voice" and it speaks through whichever TTS provider your preferred Assist pipeline uses — Fish Audio, ElevenLabs, Home Assistant Cloud, or anything else exposed as a `tts.*` entity. Works with ESP32-S3 satellites, Wyoming, and Google speakers.
 
 ### Web research and schedule awareness
 
@@ -157,7 +157,7 @@ Optional add-ons unlock more, but none are required to begin:
 
 - *Voice*: HA OS / Supervised is recommended; Nova auto-installs the Piper, Whisper, and openWakeWord voice stack through the Supervisor. On Container/Core you'd add those yourself.
 - *Vision*: a Gemini API key for camera reasoning, plus cameras. Any HA camera works, but Frigate is the recommended backbone for detection and snapshots, and Nest cameras and doorbells are supported through it. A Eufy Security doorbell needs neither — it's detected natively, no plumbing required.
-- *Voice hardware*: ESP32-S3 satellites and a Piper TTS voice.
+- *Voice hardware*: ESP32-S3 satellites and any Home Assistant TTS voice.
 - *Fully local inference*: a GPU box running Ollama. In Nova's **Settings → AI Models**, enter its Ollama URL, test the connection, choose a discovered model, and apply a Local Text or Hybrid profile. No cloud account is required.
 
 ## Installation
@@ -176,7 +176,7 @@ https://github.com/abz2much/NOVA
 
 **3. Add the integration.** Go to **Settings → Devices & Services → Add Integration → Nova**. Enter a cloud API key from Groq, Anthropic, OpenAI, or Gemini; Nova detects the provider from the key's own shape, so there's no separate picker. Or leave it blank and enter a local Ollama URL (for example `http://ollama-host.local:11434`) to run without a cloud account. Nova registers its conversation agent and appears in the sidebar. You can also configure or change a self-hosted endpoint later under **Nova → Settings → AI Models**.
 
-**4. Set up voice (optional).** On Home Assistant OS / Supervised, Nova bootstraps the voice stack itself on first run: it installs and starts the Piper, Whisper, and openWakeWord add-ons, downloads the Nova voice, and creates an Assist pipeline with Nova as the conversation agent. On Container/Core installs, with no Supervisor, install those pieces yourself and create the pipeline through Settings → Voice Assistants.
+**4. Set up voice (optional).** On Home Assistant OS / Supervised, Nova bootstraps the voice stack itself on first run: it installs and starts the Piper, Whisper, and openWakeWord add-ons, and creates an Assist pipeline with Nova as the conversation agent. On Container/Core installs, with no Supervisor, install those pieces yourself and create the pipeline through Settings → Voice Assistants.
 
 **5. Fine-tune (optional).** Advanced routing, observer mode, camera watching, and the AI-model-per-role assignments are all configured from the Nova panel under **Settings**.
 
@@ -354,7 +354,6 @@ This section summarises how Nova is built and what it does, grouped by area: its
 - Biometric/wellbeing data (heart rate, sleep stage) is withheld entirely from cloud LLM calls — it only ever reaches the model when you're running a local Ollama provider.
 - Every memory store Nova has — cross-session conversation recall, long-term semantic search, and curated facts/preferences from "remember that…" — is scoped to the right conversation or person rather than searched globally, and anything pulled back into a live conversation is wrapped against prompt injection rather than trusted verbatim.
 - A new preference or routine from "remember that…" isn't trusted immediately — Nova asks you to confirm it in the same conversation, and if you don't, it waits in the panel's Memory tab for you to approve, edit, or reject, rather than something Nova merely read (an email, a calendar invite) quietly becoming an accepted fact.
-- Voice model downloads verify file size before installing, and reject a checksum mismatch outright when one is configured; the upstream voice repository is currently access-gated, so no checksum is populated for it today (an optional cosmetic TTS voice — not required for Nova to function).
 - Confirmed intrusion snapshots are stored privately under Nova's config directory and retrieved through the admin-gated websocket command. Temporary notification copies use signed URLs and are deleted after expiry.
 - Every LLM provider (Groq, OpenAI, Anthropic, Gemini, a custom OpenAI-compatible endpoint, and an optional Bearer key for a protected Ollama endpoint) gets its own dedicated credential in Home Assistant's `secrets.yaml`, so a key configured for one provider can never be sent to another — a role (a tier, vision, camera-reasoning) pointed at a different provider than the Main Agent used to be able to receive the Main Agent's key by mistake. Credential values are never returned to any UI, only whether a provider is configured; migrating an existing shared key never guesses which provider it belongs to, and leaves it in place untouched if that can't be determined safely.
 - Model discovery and endpoint tests for self-hosted servers check every redirect before following it, refuse link-local and cloud-metadata destinations, and never forward a credential to a different origin, while LAN and private endpoints keep working. Cloud providers are only ever contacted at their fixed addresses.

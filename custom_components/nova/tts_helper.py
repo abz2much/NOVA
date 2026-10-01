@@ -17,7 +17,6 @@ When the premium engine isn't set at all, everything uses regular.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import urllib.parse
 from typing import Optional, Sequence
@@ -305,17 +304,8 @@ async def async_announce(
     Sonos speakers only (see :func:`_is_sonos`), and an unavailable speaker
     counts as failed, since Home Assistant skips it without an error.
 
-    The nova voice is requested via `tts_options` on the media-source URL. We
-    deliberately do NOT send a `language` field alongside it: with some
-    Piper/Wyoming builds, a language hint makes the engine fall back to a
-    language-default voice instead of honoring the explicit `voice`. The voice
-    string already encodes its language (en_GB), so Piper infers it correctly.
-
-    Which quality ("high"/"medium") to request is resolved from what's
-    actually on disk (:func:`bootstrap.resolve_installed_quality`) rather than
-    assumed — bootstrap's own voice download can fall back to medium when high
-    isn't hosted, and a hardcoded "high" here would then request a file that
-    doesn't exist on every single announcement.
+    No voice is requested: the TTS engine speaks with its own default voice,
+    which is whatever Home Assistant (for Piper, the add-on) is set up to use.
 
     `context` is accepted for logging; callers resolve the entity beforehand.
     """
@@ -334,55 +324,27 @@ async def async_announce(
 
     _LOGGER.debug("Nova announce [%s]: %s → %s", context, tts_entity, speakers)
 
-    is_piper = "piper" in tts_entity.lower()
-
-    # When the user prefers Home Assistant's configured voice, don't force the
-    # Nova Piper voice — omit the `voice` option entirely so the TTS entity
-    # uses its own default (e.g. a French fr_FR-tom voice on a French install).
-    # Default off keeps the Nova voice for everyone who has it. Read from the
-    # live runtime_config (seeded from config.json at setup, updated by the
-    # panel) so we don't import nova_config on this path.
-    use_ha_voice = tts_use_ha_voice(hass)
-
-    # Request whichever Nova Piper voice quality is actually installed. If
-    # neither is (resolve_installed_quality returns None), omit the option
-    # entirely and let the engine use its own default rather than naming a
-    # voice file that doesn't exist (VoiceNotFoundError).
-    tts_options: dict | None = None
-    if is_piper and not use_ha_voice:
-        try:
-            from .bootstrap import resolve_installed_quality
-            quality = await hass.async_add_executor_job(resolve_installed_quality)
-        except Exception:
-            quality = None
-        if quality:
-            tts_options = {"voice": f"en_GB-nova-{quality}"}
-
     def _media_content_id(message: str) -> str:
         params = {"message": message, "cache": "true"}
-        if tts_options:
-            params["tts_options"] = json.dumps(tts_options, separators=(",", ":"))
         return f"media-source://tts/{tts_entity}?{urllib.parse.urlencode(params)}"
 
     async def _fallback_speak(spk: str) -> bool:
         """Old tts.speak delivery — proven to play everywhere, used when the
         volume-pinned play_media delivery doesn't visibly do anything."""
-        for opts in ([tts_options, None] if tts_options is not None else [None]):
-            try:
-                one = {"media_player_entity_id": [spk], "message": text, "cache": True}
-                if opts:
-                    one["options"] = opts
-                await asyncio.wait_for(
-                    hass.services.async_call(
-                        "tts", "speak", one, target={"entity_id": tts_entity}, blocking=True,
-                    ),
-                    timeout=_PLAY_MEDIA_TIMEOUT,
-                )
-                return True
-            except asyncio.TimeoutError:
-                return True
-            except Exception as sub:
-                last_err = sub
+        last_err: Exception | None = None
+        try:
+            one = {"media_player_entity_id": [spk], "message": text, "cache": True}
+            await asyncio.wait_for(
+                hass.services.async_call(
+                    "tts", "speak", one, target={"entity_id": tts_entity}, blocking=True,
+                ),
+                timeout=_PLAY_MEDIA_TIMEOUT,
+            )
+            return True
+        except asyncio.TimeoutError:
+            return True
+        except Exception as sub:
+            last_err = sub
         _LOGGER.warning("Nova TTS fallback failed on %s (%s): %s", spk, context, last_err)
         return False
 
