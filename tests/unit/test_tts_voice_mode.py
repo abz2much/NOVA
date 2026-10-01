@@ -1,53 +1,19 @@
-"""TTS voice mode — use the Nova Piper voice, or Home Assistant's default.
+"""TTS voice mode: Nova never requests a voice, so the engine uses Home
+Assistant's default voice. tts_use_ha_voice only decides which TTS entity is
+used (the preferred Assist pipeline's, instead of the free local pick).
 
-Default keeps the Nova voice; with tts_use_ha_voice on (read from
-runtime_config), Nova omits the `voice` option so the TTS entity uses its
-configured default (e.g. a French Piper voice), resolving issue #16.
-
-Delivery is media_player.play_media (v7.86.0): the requested voice travels
-as a `tts_options` query param on the media_content_id URL, not as a
-tts.speak `options` dict — so these tests inspect the play_media call.
+Delivery is media_player.play_media, so these tests inspect that call.
 """
-import json
-import sys
-import types
 import urllib.parse
 
 import pytest
 
 DOMAIN = "nova"
 
-# tts_helper lazily imports bootstrap (for resolve_installed_quality), which
-# imports aiohttp at module level — stub it the same way test_bootstrap.py
-# does, so that import succeeds regardless of which test file collects first.
-if "aiohttp" not in sys.modules:
-    _aiohttp = types.ModuleType("aiohttp")
-    _aiohttp.ClientTimeout = lambda **kw: None
-    _aiohttp.ClientSession = object
-    sys.modules["aiohttp"] = _aiohttp
-
 
 @pytest.fixture
 def tts(load):
     return load("tts_helper")
-
-
-@pytest.fixture
-def bootstrap(load):
-    return load("bootstrap")
-
-
-@pytest.fixture(autouse=True)
-def _isolate_piper_dir(tmp_path, monkeypatch, bootstrap):
-    from pathlib import Path
-    monkeypatch.setattr(bootstrap, "PIPER_DIR", Path(tmp_path / "piper"))
-
-
-def _install_voice(bootstrap, quality):
-    bootstrap.PIPER_DIR.mkdir(parents=True, exist_ok=True)
-    (bootstrap.PIPER_DIR / f"en_GB-nova-{quality}.onnx").write_bytes(
-        b"x" * (bootstrap.MIN_ONNX_SIZE + 10))
-    (bootstrap.PIPER_DIR / f"en_GB-nova-{quality}.onnx.json").write_text("{}")
 
 
 def _set_ha_voice(hass, on):
@@ -62,84 +28,18 @@ def _play_media_call(hass):
     return calls[-1][2]
 
 
-def _requested_voice(hass):
-    """The `voice` from the play_media call's tts_options query param, or
-    None if no tts_options were sent at all."""
+def _query(hass):
     content_id = _play_media_call(hass)["media_content_id"]
-    query = urllib.parse.urlparse(content_id).query
-    params = urllib.parse.parse_qs(query)
-    raw = params.get("tts_options")
-    if not raw:
-        return None
-    return json.loads(raw[0]).get("voice")
+    return urllib.parse.parse_qs(urllib.parse.urlparse(content_id).query)
 
 
-async def test_default_requests_nova_voice_on_piper(tts, bootstrap, fake_hass):
-    _install_voice(bootstrap, "high")
-    ok = await tts.async_announce(fake_hass, "hello", "tts.piper", ["media_player.x"])
+@pytest.mark.parametrize("entity", ["tts.piper", "tts.google_ai_tts", "tts.fish_audio"])
+@pytest.mark.parametrize("ha_voice", [False, True])
+async def test_announce_never_requests_a_voice(tts, fake_hass, entity, ha_voice):
+    _set_ha_voice(fake_hass, ha_voice)
+    ok = await tts.async_announce(fake_hass, "hello", entity, ["media_player.x"])
     assert ok is True
-    assert _requested_voice(fake_hass) == "en_GB-nova-high"
-
-
-async def test_ha_voice_mode_omits_voice(tts, bootstrap, fake_hass):
-    _install_voice(bootstrap, "high")
-    _set_ha_voice(fake_hass, True)
-    ok = await tts.async_announce(fake_hass, "bonjour", "tts.piper", ["media_player.x"])
-    assert ok is True
-    assert _requested_voice(fake_hass) is None
-
-
-async def test_ha_voice_off_keeps_nova_voice(tts, bootstrap, fake_hass):
-    _install_voice(bootstrap, "high")
-    _set_ha_voice(fake_hass, False)
-    await tts.async_announce(fake_hass, "hi", "tts.piper", ["media_player.x"])
-    assert _requested_voice(fake_hass) == "en_GB-nova-high"
-
-
-async def test_non_piper_never_forces_voice(tts, fake_hass):
-    await tts.async_announce(fake_hass, "hi", "tts.google_ai_tts", ["media_player.x"])
-    assert _requested_voice(fake_hass) is None
-
-
-async def test_non_piper_fish_audio_never_resolves_or_injects_nova_voice(tts, bootstrap, fake_hass, monkeypatch):
-    """A non-Piper engine (e.g. a Fish Audio TTS entity) must never trigger
-    Nova's voice-quality resolution at all — not merely end up with no voice
-    by coincidence. Spies on resolve_installed_quality rather than relying on
-    the final tts_options value, so this fails if is_piper detection regresses
-    to calling the resolver unconditionally."""
-    _install_voice(bootstrap, "high")  # even with a Nova voice installed...
-    calls = []
-
-    def _spy(preferred="high"):
-        calls.append(preferred)
-        return preferred
-    monkeypatch.setattr(bootstrap, "resolve_installed_quality", _spy)
-
-    ok = await tts.async_announce(fake_hass, "hi", "tts.fish_audio", ["media_player.x"])
-    assert ok is True
-    assert calls == []  # ...the resolver is never even called for a non-Piper entity
-    assert _requested_voice(fake_hass) is None
-
-
-# ─── on-demand announcement quality resolution (v7.102.x) ────────────────────
-#
-# tts_options used to hardcode "en_GB-nova-high" unconditionally. If bootstrap
-# had fallen back to medium (high not hosted, or not yet downloaded), every
-# single announcement requested a voice file that doesn't exist. It's now
-# resolved from what's actually on disk, the same way bootstrap's own
-# pipeline setup is.
-
-async def test_announce_omits_voice_when_none_installed(tts, bootstrap, fake_hass):
-    ok = await tts.async_announce(fake_hass, "hi", "tts.piper", ["media_player.x"])
-    assert ok is True
-    assert _requested_voice(fake_hass) is None
-
-
-async def test_announce_requests_installed_fallback_quality(tts, bootstrap, fake_hass):
-    _install_voice(bootstrap, "medium")  # high not installed
-    ok = await tts.async_announce(fake_hass, "hi", "tts.piper", ["media_player.x"])
-    assert ok is True
-    assert _requested_voice(fake_hass) == "en_GB-nova-medium"
+    assert "tts_options" not in _query(fake_hass)
 
 
 # ─── resolve_tts_entity — routing to HA's configured Assist pipeline voice ───

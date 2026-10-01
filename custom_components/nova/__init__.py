@@ -1005,7 +1005,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
 
     # ── v6.28 In-process bootstrap ─────────────────────────────────────────
     # Re-homes the old add-on's voice-stack setup (Piper/Whisper/openWakeWord
-    # install, Nova voice download, Assist pipeline) into the integration.
+    # install, Assist pipeline) into the integration.
     # No-ops cleanly off-Supervisor; runs once per version as a background task.
     try:
         from . import bootstrap
