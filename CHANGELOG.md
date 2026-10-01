@@ -1,3 +1,11 @@
+## [8.0.2] — fix: Decisions rows overlapping in the Logs tab
+
+**Fixed**
+- The decision kind, such as ANTICIPATION_ROUTINE, ran into the decision text, and the outcome (UNJUDGED, HELPFUL and so on) dropped onto its own line. Each row now lays out properly on wide screens. On narrow screens the kind and outcome share a line with the text underneath.
+
+**Caveats**
+- Hard refresh the page (Ctrl+Shift+R) after updating.
+
 ## [8.0.1] — fix: an error in the animated head when you return to the Command Center
 
 **Fixed**
