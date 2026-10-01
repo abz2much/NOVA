@@ -1,3 +1,16 @@
+## [7.131.0] — scene memory: where did I last see it?
+
+**Added**
+- New opt in setting, "Scene memory" (Settings, Routine learning card). It is off by default, so nothing is stored unless you turn it on.
+- When it is on, Nova keeps a short text description of what each camera analysis saw. No images or faces are stored.
+- Two new questions Nova can answer: "where did I last see my keys?" and "what has changed in the garage since yesterday?". The answer says how old it is and that it comes from a past description, not a live view.
+- Descriptions are kept for 14 days by default. You can set 1 to 90 days. Each camera keeps at most 300. "Forget everything" in Settings wipes it.
+- A description that says something is missing ("no package visible", "the porch is empty") is never treated as seeing it.
+
+**Caveats**
+- Descriptions are free text from the vision model, so recall is only as good as what it wrote. "What changed" compares words, so treat it as a hint.
+- Questions you ask about a camera, such as "is the garage door open?", are never stored. Only scene descriptions are.
+- Only enabled cameras are analysed, as before.
 ## [7.130.0] — routine alerts learn from alerts you mute
 
 **Added**

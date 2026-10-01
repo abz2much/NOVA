@@ -490,6 +490,20 @@ _COMPONENTS = (
             "CREATE INDEX IF NOT EXISTS idx_trigger_at ON reminders(trigger_at)",
         ),
     ),
+    # ── nova/scene_memory.db ─────────────────────────────────────────────
+    Component(
+        name="scene_memory",
+        version=1,
+        tables=("sightings",),
+        statements=(
+            "CREATE TABLE IF NOT EXISTS sightings ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "camera TEXT NOT NULL, area TEXT, ts REAL NOT NULL, "
+            "description TEXT NOT NULL, objects TEXT NOT NULL DEFAULT '')",
+            "CREATE INDEX IF NOT EXISTS idx_sightings_camera ON sightings(camera, ts)",
+            "CREATE INDEX IF NOT EXISTS idx_sightings_ts ON sightings(ts)",
+        ),
+    ),
     # ── nova.db (keyword memory and document search) ─────────────────────
     Component(
         name="memory_fts",
@@ -552,6 +566,7 @@ STORES: tuple[Store, ...] = (
     Store("provider_activity", "nova/provider_activity.db",
           ("provider_activity",), wal=True),
     Store("reminders", "nova/reminders.db", ("reminders",), wal=False),
+    Store("scene_memory", "nova/scene_memory.db", ("scene_memory",), wal=True),
     Store("nova", "nova.db",
           ("memory_fts", "document_fts", "document_watch_seen", "doc_vectors"),
           wal=False, upgrade_at_setup=False),

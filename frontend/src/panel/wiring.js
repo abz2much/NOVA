@@ -341,6 +341,18 @@
       });
     }
 
+    const sceneClearBtn = root.getElementById("sceneMemoryClear");
+    if (sceneClearBtn) {
+      sceneClearBtn.addEventListener("click", async () => {
+        if (!window.confirm("Forget everything scene memory has kept?")) return;
+        try {
+          await this._hass.callWS({ type: "nova/clear_scene_memory" });
+        } catch (err) {
+          console.error("Nova: clearing scene memory failed", err);
+        }
+      });
+    }
+
     const plAddBtn = root.getElementById("newPlAddEntity");
     if (plAddBtn) {
       plAddBtn.addEventListener("click", async () => {

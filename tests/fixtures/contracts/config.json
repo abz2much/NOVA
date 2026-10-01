@@ -196,6 +196,8 @@
     "satellite_audio_out",
     "satellite_pairings",
     "satellite_start_action",
+    "scene_memory_enabled",
+    "scene_memory_retention_days",
     "search_backend",
     "searxng_url",
     "security_alarm_entity",

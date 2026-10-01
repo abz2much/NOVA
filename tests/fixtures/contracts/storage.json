@@ -204,6 +204,7 @@
       "provider_activity_daily",
       "reminders",
       "sentinel_events",
+      "sightings",
       "spoken_history",
       "state_changes",
       "suggestions"
@@ -243,6 +244,12 @@
   "routines": {
     "paths": [
       "nova_routines.yaml"
+    ],
+    "tables": []
+  },
+  "scene_memory": {
+    "paths": [
+      "nova/scene_memory.db"
     ],
     "tables": []
   },

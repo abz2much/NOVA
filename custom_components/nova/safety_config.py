@@ -41,6 +41,11 @@ _HOST_HEALTH_THRESHOLD_RANGES = {
 }
 
 
+SCENE_MEMORY_ENABLED_KEY = "scene_memory_enabled"
+SCENE_MEMORY_RETENTION_KEY = "scene_memory_retention_days"
+_SCENE_MEMORY_RETENTION_RANGE = (1, 90)
+
+
 def automatic_lockdown_enabled(config: dict | None) -> bool:
     """Only the literal JSON boolean true enables automatic device control."""
     return isinstance(config, dict) and config.get(LOCKDOWN_AUTO_KEY) is True
@@ -71,8 +76,11 @@ def valid_panel_value(key: str, value) -> bool:
     """Reject truthy strings and numbers for the automatic safety opt in."""
     if key in (LOCKDOWN_AUTO_KEY, INTRUSION_CONFINEMENT_KEY):
         return type(value) is bool
-    if key in ("camera_event_learning", "camera_historical_awareness"):
+    if key in ("camera_event_learning", "camera_historical_awareness",
+               SCENE_MEMORY_ENABLED_KEY):
         return type(value) is bool
+    if key == SCENE_MEMORY_RETENTION_KEY:
+        return _valid_bounded_integer(value, *_SCENE_MEMORY_RETENTION_RANGE)
     if key == CAMERA_AWARENESS_MIN_OBSERVATIONS_KEY:
         return _valid_bounded_integer(
             value, *_CAMERA_AWARENESS_MIN_OBSERVATIONS_RANGE,

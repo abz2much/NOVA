@@ -14,6 +14,8 @@ from .capabilities.automation import (
 )
 from .capabilities.cameras import (
     _exec_look_at_camera,
+    _exec_what_changed,
+    _exec_where_last_seen,
     _exec_who_do_you_see,
 )
 from .capabilities.communications import (
@@ -115,6 +117,8 @@ _TOOL_MAP = {
     "calendar_agenda":     _exec_calendar_agenda,
     "read_email":          _exec_read_email,
     "look_at_camera":      _exec_look_at_camera,
+    "where_last_seen":     _exec_where_last_seen,
+    "what_changed":        _exec_what_changed,
     "who_do_you_see":      _exec_who_do_you_see,
     "dismiss_intrusion":   _exec_dismiss_intrusion,
     "acknowledge_alert":   _exec_acknowledge_alert,
@@ -178,6 +182,8 @@ _CLASSIFICATION = {
     "acknowledge_alert":          ("safety_modes", True, True, False, _H),
     "dismiss_intrusion":          ("safety_modes", True, True, False, _H),
     "look_at_camera":             ("cameras", False, False, True, _X),
+    "where_last_seen":            ("cameras", False, False, False, _X),
+    "what_changed":               ("cameras", False, False, False, _X),
     "who_do_you_see":             ("cameras", False, False, False, _H),
     "wellbeing_context":          ("environment", False, False, False, _H),
     "energy_status":              ("environment", False, False, False, _H),
