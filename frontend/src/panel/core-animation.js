@@ -56,6 +56,11 @@
 
   _makeHead() {
     const rnd = Math.random;
+    // New particles have no surface points yet. Forget the cached expression
+    // key so the next frame rebuilds them; otherwise coming back to the
+    // Command Center after another tab left every particle without geometry
+    // and each animation frame threw.
+    this._headGeoKey = null;
     this._particles = [];                       // sparks on the head's surface, biased toward the face
     for (let i = 0; i < 3000; i++) {
       let th = (rnd() * 2 - 1) * Math.PI; if (rnd() < 0.6) th *= 0.45;
