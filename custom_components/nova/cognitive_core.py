@@ -365,10 +365,29 @@ class SafetyManager:
         # Only when residents are CONFIDENTLY away (tracked away / armed-away) or
         # asleep — never on the mere absence of occupancy, which falsely fires when
         # someone is home but untracked.
-        if self._residents_away() or sleeping or self._investigation is not None:
-            intrusion = await self._check_intrusion(anyone_home, sleeping)
-            if intrusion:
-                actions.append(intrusion)
+        # Opt in (intrusion_requires_confinement): confinement is the master
+        # switch instead. Monitoring runs only while a formal lockdown is
+        # engaged or the selected alarm is armed, and ending confinement stops
+        # it at once, dropping any investigation in progress.
+        from . import safety_config as _sc
+        if _sc.intrusion_requires_confinement(self.config):
+            if is_lockdown() or self._alarm_armed():
+                intrusion = await self._check_intrusion(
+                    anyone_home, sleeping, confined=True)
+                if intrusion:
+                    actions.append(intrusion)
+            else:
+                self._investigation = None
+        else:
+            # The setting was turned off mid investigation: drop one that only
+            # existed because of confinement.
+            if (self._investigation is not None
+                    and self._investigation.get("trigger") == "confined"):
+                self._investigation = None
+            if self._residents_away() or sleeping or self._investigation is not None:
+                intrusion = await self._check_intrusion(anyone_home, sleeping)
+                if intrusion:
+                    actions.append(intrusion)
 
         # ── Nighttime lockdown ──────────────────────────────────────
         # Skipped when a formal lockdown is already active (it handles securing).
@@ -444,6 +463,13 @@ class SafetyManager:
             if st.state in ALARM_ARMED_STATES:
                 return True
         return False
+
+    def _alarm_armed_away(self) -> bool:
+        """True only for the armed states that mean nobody is meant to be
+        moving about (away or vacation), not home or night."""
+        from . import alarm_source
+        return any(st.state in ("armed_away", "armed_vacation")
+                   for st in alarm_source.states(self.hass, self.config))
 
     def _friendly(self, eid: Optional[str]) -> Optional[str]:
         if not eid:
@@ -638,7 +664,9 @@ class SafetyManager:
             ctx = _i18n.message("intrusion_ctx_armed", _lang)
         else:
             ctx = ""
-        msg_key = "intrusion_alert" if trigger == "away" else "intrusion_alert_sleep"
+        msg_key = {"away": "intrusion_alert",
+                   "confined": "intrusion_alert_confined"}.get(
+                       trigger, "intrusion_alert_sleep")
         msg = _i18n.message(
             msg_key, _lang, honorific=honorific.title(),
             where=where, ctx=ctx)
@@ -686,8 +714,8 @@ class SafetyManager:
             "message": msg, "auto_act": True, "entity_id": eid,
         }
 
-    async def _check_intrusion(self, anyone_home: bool,
-                                sleeping: bool) -> Optional[dict]:
+    async def _check_intrusion(self, anyone_home: bool, sleeping: bool,
+                                confined: bool = False) -> Optional[dict]:
         """Detect unauthorized entry when away or asleep. Fires ONE alert, then
         investigates silently until it's a confirmed intrusion (escalated to the
         whole house + every device) or confirmed benign."""
@@ -731,6 +759,25 @@ class SafetyManager:
                 breach=entry, breach_name=breach_name, armed=armed,
                 eid=eid, where=where, honorific=honorific,
                 reason="motion while away with corroborating breach (open entry or armed alarm)",
+            )
+
+        if confined and not sleeping:
+            # Confined while residents are home and awake (armed home or night,
+            # or a lockdown). Movement is normal here, so the armed state alone
+            # is not corroboration: it takes an open entry, or an alarm armed
+            # away or on vacation.
+            armed = self._alarm_armed_away()
+            entry = None
+            if self.config.get("intrusion_require_corroboration", True):
+                entry = self._open_entry()
+                if not (armed or entry):
+                    return None
+            self._last_intrusion_alert = now
+            return self._begin_investigation(
+                now=now, trigger="confined", presence="home",
+                breach=entry, breach_name=self._friendly(entry) if entry else None,
+                armed=armed, eid=eid, where=where, honorific=honorific,
+                reason="motion while confined with a corroborating breach",
             )
 
         if sleeping:
@@ -831,7 +878,11 @@ class SafetyManager:
         # dicts have no "trigger" key — default to "away" so pre-existing
         # away-branch behaviour is unchanged.
         trigger = inv.get("trigger", "away")
-        situation_active = away if trigger == "away" else sleeping
+        if trigger == "confined":
+            # tick() already drops the investigation when confinement ends.
+            situation_active = True
+        else:
+            situation_active = away if trigger == "away" else sleeping
         if not situation_active:
             self._investigation = None
             return None
@@ -3036,7 +3087,8 @@ def lockdown_status() -> dict:
 
 async def apply_runtime_config(key: str, value) -> None:
     """Apply safety settings immediately without reloading the integration."""
-    if key not in ("lockdown_auto_on_arm", "security_alarm_entity"):
+    if key not in ("lockdown_auto_on_arm", "security_alarm_entity",
+                   "intrusion_requires_confinement"):
         return
     if not isinstance(_CORE.config, dict):
         _CORE.config = {}
@@ -3046,6 +3098,12 @@ async def apply_runtime_config(key: str, value) -> None:
         for component in (_CORE.safety_mgr, _CORE.lockdown_mgr):
             if component is not None:
                 component.set_automatic_lockdown(enabled)
+    elif key == "intrusion_requires_confinement":
+        enabled = value is True
+        _CORE.config[key] = enabled
+        for component in (_CORE.safety_mgr, _CORE.lockdown_mgr):
+            if component is not None and isinstance(component.config, dict):
+                component.config[key] = enabled
     else:
         _CORE.config[key] = value
         for component in (_CORE.safety_mgr, _CORE.lockdown_mgr):

@@ -132,6 +132,7 @@
       return [p.entity_id, `${p.name}${suffix}`];
     })];
     const automatic = !!cfg.lockdown_auto_on_arm;
+    const confined = cfg.intrusion_requires_confinement === true;
     return `
       <div class="stub-body">Nova ignores every other alarm panel for security alerts and lockdown decisions. If more than one Alarmo panel exists, choose the intended household alarm here.</div>
       <div class="cfg-row">
@@ -142,6 +143,11 @@
         <span class="toggle-label">Automatic lockdown</span>
         <span class="toggle-desc">Allow the selected alarm and sleep mode to lock doors and close covers</span>
         <button class="toggle-btn ${automatic ? "on" : "off"}" data-cfg-key="lockdown_auto_on_arm" data-cfg-val="${automatic ? "false" : "true"}">${automatic ? "ON" : "OFF"}</button>
+      </div>
+      <div class="toggle-row">
+        <span class="toggle-label">Require confinement for intrusion monitoring</span>
+        <span class="toggle-desc">Watch for intruders only while a lockdown is on or the alarm is armed. Off keeps the automatic away and asleep behaviour</span>
+        <button class="toggle-btn ${confined ? "on" : "off"}" data-cfg-key="intrusion_requires_confinement" data-cfg-val="${confined ? "false" : "true"}">${confined ? "ON" : "OFF"}</button>
       </div>`;
   }
 
