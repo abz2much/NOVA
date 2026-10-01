@@ -115,17 +115,27 @@ class ToolCall:
     # not a JSON object: "invalid_json" or "not_object". Adapters decide
     # whether that is an error (native Ollama) or an empty object (Anthropic).
     arguments_error: Optional[str] = field(default=None, compare=False)
+    # Opaque data the provider needs echoed back with this call on the next
+    # turn. Today only Gemini 3's thought signature
+    # (``{"google": {"thought_signature": ...}}``), which it rejects the follow
+    # up request without. Kept out of repr(), never shown to the user.
+    extra_content: Optional[Mapping[str, Any]] = field(
+        default=None, repr=False, compare=False)
 
     def to_legacy(self) -> dict:
         return {"id": self.id, "name": self.name, "args": dict(self.args)}
 
     def to_openai(self) -> dict:
         """The OpenAI-shaped history entry for this call."""
-        return {
+        out: dict[str, Any] = {
             "id": self.id,
             "type": "function",
             "function": {"name": self.name, "arguments": json.dumps(dict(self.args))},
         }
+        if self.extra_content:
+            out["extra_content"] = {k: dict(v) if isinstance(v, Mapping) else v
+                                    for k, v in self.extra_content.items()}
+        return out
 
     @classmethod
     def from_legacy(cls, value: Mapping[str, Any], index: int = 0) -> "ToolCall":

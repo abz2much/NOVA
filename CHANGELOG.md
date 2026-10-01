@@ -1,3 +1,13 @@
+## [7.133.0] — Gemini 3 tool calls no longer fail on the second step
+
+**Fixed**
+- Gemini 3 models attach a hidden "thought signature" to every tool call and refuse the next request if it is not sent back. Nova dropped it, so a chain of device actions on Gemini 3 (including the default model) could fail with an error 400 on its second step. Nova now keeps the signature and sends it back.
+- Only Gemini ever receives it. OpenAI, Groq, Ollama, Anthropic and custom endpoints are sent exactly what they were before, and the saved history is never changed.
+
+**Caveats**
+- I could not test this against live Gemini from the build environment, so it follows how Google documents the signature and the fixes other projects use. If a Gemini 3 tool chain still fails, check the Provider Activity log and report the error.
+- Only the signature is kept. No other hidden Gemini fields are stored or sent.
+
 ## [7.132.0] — saved facts are found by meaning
 
 **Added**
