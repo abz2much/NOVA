@@ -1,3 +1,19 @@
+## [8.0.0] — a calmer Command Center, and Diagnostics gets its own tab
+
+**Changed**
+- **Operational Mode moved to the Command Center.** It now sits directly under the "Hello." banner, with the Auto switch and the mode buttons. It is no longer in Settings.
+- The Lab and Movie settings (Lab rooms, Movie room, Movie player, Movie dim) moved with it, in a "Mode bindings" section that stays closed until you open it.
+- **Activity moved to the very bottom** of the Command Center.
+- **Diagnostics has its own tab**, between Logs and Memory. It holds everything the Diagnostics card did: core services, HOMER, Setup Doctor, Provider Activity and the service tests. It is no longer in Settings.
+
+**Unchanged**
+- Every setting, mode and service works exactly as before. Only where things live has changed, so this is a layout release and there is nothing to migrate.
+- The mode list and settings keep their names, so automations and scripts that use them are not affected.
+
+**Caveats**
+- If you had a bookmark or habit for finding Operational Mode or Diagnostics under Settings, they are now on the Command Center and the Diagnostics tab.
+- Hard refresh the page (Ctrl+Shift+R) after updating so the new panel loads.
+
 ## [7.133.0] — Gemini 3 tool calls no longer fail on the second step
 
 **Fixed**

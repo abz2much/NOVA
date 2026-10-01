@@ -29,6 +29,8 @@
       this._wireOnboarding();
     }
 
+    this._renderOperationalMode();
+
     // hero state line
     const state = this._coreState();
     const lineEl = root.getElementById("stateLine");

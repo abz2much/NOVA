@@ -178,6 +178,10 @@
         padding:6px 12px;border-radius:8px;border:1px solid var(--line-soft);background:var(--surface-2);color:var(--ink-dim);cursor:pointer}
       .mode-chip:hover{border-color:var(--gold)}
       .mode-chip-on{background:var(--ember);border-color:var(--ember);color:var(--gold-pale)}
+      .mode-bindings>summary{cursor:pointer;list-style:none}
+      .mode-bindings>summary::-webkit-details-marker{display:none}
+      .mode-bindings>summary::before{content:"▸ ";color:var(--ink-faint)}
+      .mode-bindings[open]>summary::before{content:"▾ "}
       .mode-bind-head{font-family:var(--font-mono);font-size:10.5px;color:var(--ink-faint);letter-spacing:.05em;
         text-transform:uppercase;margin:12px 0 8px;padding-top:12px;border-top:1px solid var(--line-soft)}
       .diag-ok{color:#5fbf7a} .diag-warn{color:var(--warn)} .diag-idle{color:var(--ink-dim)}

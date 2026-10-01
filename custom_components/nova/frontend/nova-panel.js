@@ -1082,7 +1082,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v7.133.0
+ * v8.0.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1129,7 +1129,8 @@ class NovaPanel extends HTMLElement {
     this._cameraDiagnostics = {};
     this._cameraInterval = null;
     this._cognitive = null;
-    this._currentTab = "dashboard"; // "dashboard" | "settings" | "logs" | "memory" | "intrusion" | "suggestions"
+    this._modeBindingsOpen = false;
+    this._currentTab = "dashboard"; // "dashboard" | "settings" | "logs" | "diagnostics" | "memory" | "intrusion" | "suggestions" | "residence"
     this._logFilter = "all";
     this._logSearch = "";
     this._settingsSection = "general";
@@ -1157,7 +1158,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v7.133.0 ",
+      console.log("%c Nova Panel %c v8.0.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -1378,7 +1379,7 @@ class NovaPanel extends HTMLElement {
             <div class="brand-mark"></div>
             <div>
               <div class="brand-name">Nova</div>
-              <div class="brand-tag">${tab === "settings" ? "Settings" : tab === "logs" ? "Logs" : tab === "memory" ? "Memory" : tab === "intrusion" ? "Intrusion" : tab === "suggestions" ? "Suggestions" : tab === "residence" ? "Residence" : "Command Center"}</div>
+              <div class="brand-tag">${tab === "settings" ? "Settings" : tab === "logs" ? "Logs" : tab === "memory" ? "Memory" : tab === "diagnostics" ? "Diagnostics" : tab === "intrusion" ? "Intrusion" : tab === "suggestions" ? "Suggestions" : tab === "residence" ? "Residence" : "Command Center"}</div>
             </div>
           </div>
           <nav class="top-nav">
@@ -1388,12 +1389,13 @@ class NovaPanel extends HTMLElement {
             <button class="nav-tab${tab === "suggestions" ? " active" : ""}" data-tab="suggestions">Suggestions</button>
             <button class="nav-tab${tab === "settings" ? " active" : ""}" data-tab="settings">Settings</button>
             <button class="nav-tab${tab === "logs" ? " active" : ""}" data-tab="logs">Logs</button>
+            <button class="nav-tab${tab === "diagnostics" ? " active" : ""}" data-tab="diagnostics">Diagnostics</button>
             <button class="nav-tab${tab === "memory" ? " active" : ""}" data-tab="memory">Memory</button>
           </nav>
           <button class="lockdown-control" id="lockdownControl" hidden></button>
         </div>
 
-        ${tab === "settings" ? this._htmlSettings() : tab === "logs" ? this._htmlLogs() : tab === "memory" ? this._htmlMemory() : tab === "intrusion" ? this._htmlIntrusion() : tab === "suggestions" ? this._htmlSuggestions() : tab === "residence" ? this._htmlResidence() : this._htmlDashboard()}
+        ${tab === "settings" ? this._htmlSettings() : tab === "logs" ? this._htmlLogs() : tab === "memory" ? this._htmlMemory() : tab === "diagnostics" ? this._htmlDiagnostics() : tab === "intrusion" ? this._htmlIntrusion() : tab === "suggestions" ? this._htmlSuggestions() : tab === "residence" ? this._htmlResidence() : this._htmlDashboard()}
 
         <div class="footnote">NOVA COMMAND CENTER</div>
       </div>
@@ -1415,6 +1417,13 @@ class NovaPanel extends HTMLElement {
           </div>
           <div class="chips" id="chips"></div>
         </div>
+
+        <div class="panel" id="operationalModePanel" style="max-width:1100px;margin:16px auto 0">
+          <div class="panel-head">
+            <div class="panel-title">Operational Mode</div>
+          </div>
+          <div id="operationalModeBody"></div>
+        </div>
 ${this._htmlDashboardBody()}`;
   }
 
@@ -1434,16 +1443,6 @@ ${this._htmlDashboardBody()}`;
 
   _htmlDashboardBody() {
     return `
-        <div class="grid">
-          <div class="panel">
-            <div class="panel-head">
-              <div class="panel-title">Activity</div>
-              <div class="panel-meta" id="feedMeta">—</div>
-            </div>
-            <div class="feed" id="feed"></div>
-          </div>
-        </div>
-
         <div class="panel" style="max-width:1100px;margin:16px auto 0">
           <div class="panel-head">
             <div class="panel-title">Areas</div>
@@ -1508,6 +1507,16 @@ ${this._htmlDashboardBody()}`;
             <button class="camera-toggle" id="camToggle">SHOW CAMERAS ▾</button>
           </div>
           <div class="camera-strip" id="camStrip"></div>
+        </div>
+
+        <div class="grid">
+          <div class="panel">
+            <div class="panel-head">
+              <div class="panel-title">Activity</div>
+              <div class="panel-meta" id="feedMeta">—</div>
+            </div>
+            <div class="feed" id="feed"></div>
+          </div>
         </div>
     `;
   }
@@ -2883,10 +2892,6 @@ ${this._htmlDashboardBody()}`;
       desc: "What Nova calls each person when they're home alone. Drops the address entirely the moment more than one person — or nobody — is home." },
     { id: "residence_home", group: "general", title: "Residence / Home", real: true,
       desc: "Home style, stories, and layout counts that feed the Residence 3D view." },
-    { id: "operational_mode", group: "general", title: "Operational Mode", real: true,
-      desc: "Party/movie/away modes and what each one changes while active." },
-    { id: "diagnostics", group: "general", title: "Diagnostics", real: true,
-      desc: "Service health checks and system status (merged from Classic's two separate diagnostics cards)." },
     { id: "room_speakers", group: "voice", title: "Room Speakers", real: true,
       desc: "Assign the one speaker Nova may use per room, plus a general fallback." },
     { id: "ai_models", group: "voice", title: "AI Models", real: true,
@@ -3337,8 +3342,6 @@ ${this._htmlDashboardBody()}`;
         : c.id === "person_honorifics" ? this._personHonorificsCardBody()
         : c.id === "room_speakers" ? this._roomSpeakersCardBody()
         : c.id === "residence_home" ? this._residenceHomeCardBody()
-        : c.id === "operational_mode" ? this._operationalModeCardBody()
-        : c.id === "diagnostics" ? this._diagnosticsCardBody()
         : c.id === "ai_models" ? this._aiModelsCardBody()
         : c.id === "briefings" ? this._briefingsCardBody()
         : c.id === "voice_confirmation" ? this._voiceConfirmationCardBody()
@@ -3558,7 +3561,8 @@ ${this._htmlDashboardBody()}`;
       </div>
       <div class="stub-body">Active: <strong>${this._esc(active.toUpperCase())}</strong>${m.description ? " — " + this._esc(m.description) : ""}. Safety always stays active.</div>
       <div class="mode-grid">${modeChips}</div>
-      <div class="mode-bind-head">Mode bindings — scope Lab &amp; Movie to specific rooms</div>
+      <details class="mode-bindings"${this._modeBindingsOpen ? " open" : ""}>
+      <summary class="mode-bind-head">Mode bindings — scope Lab &amp; Movie to specific rooms</summary>
       <div class="cfg-row"><label>Lab rooms (quiet only here)</label></div>
       <div class="mode-grid">${labChips}</div>
       <div class="cfg-row">
@@ -3572,7 +3576,8 @@ ${this._htmlDashboardBody()}`;
       <div class="cfg-row">
         <label>Movie dim %</label>
         <input class="cfg-field cfg-num" type="number" min="0" max="100" step="5" data-cfg-key="movie_dim_pct" value="${cfg.movie_dim_pct ?? ""}" placeholder="15">
-      </div>`;
+      </div>
+      </details>`;
   }
 
   // Merged from Classic's two separate diagnostics cards ("System
@@ -3597,7 +3602,7 @@ ${this._htmlDashboardBody()}`;
       const activity = await this._hass.callWS({ type: "nova/get_provider_activity", days: 7 });
       this._providerActivity = activity.days || [];
     } catch (_) { this._providerActivity = null; }
-    if (this._currentTab === "settings") this._render();
+    if (this._currentTab === "diagnostics") this._render();
   }
 
   _diagStatusCls(st) {
@@ -3661,6 +3666,16 @@ ${this._htmlDashboardBody()}`;
       return `<div class="cfg-row"><label>${this._esc(d.day)}</label></div>${entries}`;
     }).join("");
     return `<div class="panel-head"><div class="panel-title">Provider Activity</div></div>${rows}`;
+  }
+
+  // The Diagnostics tab (8.0.0): the card that used to sit in Settings,
+  // moved here whole. Its data is fetched on first entry (see _wireDiagnostics).
+  _htmlDiagnostics() {
+    return `
+        <div class="panel diag-panel" style="max-width:1100px;margin:16px auto 0">
+          <div class="panel-head"><div class="panel-title">Diagnostics</div></div>
+          ${this._diagnosticsCardBody()}
+        </div>`;
   }
 
   _diagnosticsCardBody() {
@@ -5407,6 +5422,8 @@ ${this._htmlDashboardBody()}`;
       this._wireOnboarding();
     }
 
+    this._renderOperationalMode();
+
     // hero state line
     const state = this._coreState();
     const lineEl = root.getElementById("stateLine");
@@ -5856,6 +5873,7 @@ ${this._htmlDashboardBody()}`;
         this._fetchDebugLog();
       }
     }
+    if (this._currentTab === "diagnostics") this._wireDiagnostics();
     if (this._currentTab === "memory") { this._wireMemory(); this._fetchKnowledge(); this._fetchPersonRoutines(); }
     if (this._currentTab === "intrusion") this._wireIntrusion();
     if (this._currentTab === "residence") {
@@ -6090,32 +6108,6 @@ ${this._htmlDashboardBody()}`;
       });
     }
 
-    // Operational Mode: mode chips call nova/mode directly (not update_config —
-    // same websocket contract Classic's own mode-grid already uses).
-    root.querySelectorAll(".mode-grid .mode-chip[data-mode]").forEach(btn => {
-      btn.addEventListener("click", async () => {
-        const mode = btn.getAttribute("data-mode");
-        if (!this._hass || !mode || btn.classList.contains("mode-chip-on")) return;
-        try {
-          await this._hass.callWS({ type: "nova/mode", action: "set", mode });
-        } catch (err) {
-          console.error("Nova: failed to set mode", err);
-        }
-        await this._fetchLiveData();
-        if (this._currentTab === "settings") this._render();
-      });
-    });
-    root.querySelectorAll(".mode-grid [data-lab-area]").forEach(btn => {
-      btn.addEventListener("click", async () => {
-        const id = btn.getAttribute("data-lab-area");
-        let cur = this._data()?.config?.lab_areas;
-        cur = Array.isArray(cur) ? cur.slice() : [];
-        const i = cur.indexOf(id);
-        if (i >= 0) cur.splice(i, 1); else cur.push(id);
-        await this._saveSetting("lab_areas", cur);
-      });
-    });
-
     this._wireAiModels();
     this._wireAppliances();
     this._wireCameraSettings();
@@ -6269,14 +6261,6 @@ ${this._htmlDashboardBody()}`;
       });
     }
 
-    // Diagnostics: fetch once per element lifetime (see _fetchDiagnosticsData
-    // for why this isn't on the live-data poll), then RUN CHECK re-fetches
-    // on demand and service-test buttons call the same HA services Classic's
-    // own Diagnostics card does.
-    if (!this._diagFetchedOnce) {
-      this._diagFetchedOnce = true;
-      this._fetchDiagnosticsData();
-    }
     if (!this._hazFetchedOnce) {
       this._hazFetchedOnce = true;
       this._fetchHazardStatus();
@@ -6341,10 +6325,6 @@ ${this._htmlDashboardBody()}`;
         }
       });
     }
-    const diagRefresh = root.getElementById("newDiagRefresh");
-    if (diagRefresh) {
-      diagRefresh.addEventListener("click", () => this._fetchDiagnosticsData());
-    }
     root.querySelectorAll(".settings-card [data-svc]").forEach(btn => {
       btn.addEventListener("click", async () => {
         const svcAttr = btn.getAttribute("data-svc");
@@ -6357,21 +6337,101 @@ ${this._htmlDashboardBody()}`;
         }
       });
     });
-    const camRun = root.getElementById("newDiagCameraRun");
-    if (camRun) {
-      camRun.addEventListener("click", async () => {
-        const sel = root.getElementById("newDiagCameraSelect");
-        const entity_id = sel ? sel.value : "";
-        if (!entity_id || !this._hass) return;
+    this._applySettingsFilter();
+  }
+
+  // Diagnostics tab: fetched once per element lifetime (see
+  // _fetchDiagnosticsData for why this isn't on the live-data poll), then RUN
+  // CHECK re-fetches on demand and the service-test buttons call the same HA
+  // services the old Settings card did.
+  _wireDiagnostics() {
+    const root = this.shadowRoot;
+    if (!this._diagFetchedOnce) {
+      this._diagFetchedOnce = true;
+      this._fetchDiagnosticsData();
+    }
+    root.getElementById("newDiagRefresh")?.addEventListener("click", () => this._fetchDiagnosticsData());
+    root.querySelectorAll(".diag-panel [data-svc]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const svcAttr = btn.getAttribute("data-svc");
+        if (!svcAttr || !this._hass) return;
+        const [domain, service] = svcAttr.split(".");
         try {
-          await this._hass.callService("nova", "analyze_camera", { entity_id, announce: true });
+          await this._hass.callService(domain, service, {});
         } catch (err) {
-          console.error("Nova: camera analyze failed", err);
+          console.error(`Nova: service ${svcAttr} failed`, err);
         }
       });
-    }
+    });
+    root.getElementById("newDiagCameraRun")?.addEventListener("click", async () => {
+      const sel = root.getElementById("newDiagCameraSelect");
+      const entity_id = sel ? sel.value : "";
+      if (!entity_id || !this._hass) return;
+      try {
+        await this._hass.callService("nova", "analyze_camera", { entity_id, announce: true });
+      } catch (err) {
+        console.error("Nova: camera analyze failed", err);
+      }
+    });
+  }
 
-    this._applySettingsFilter();
+  // Operational Mode on the Command Center (8.0.0). Redrawn only when its own
+  // content changed, so the 20 second poll never closes an open menu or the
+  // Mode bindings section. Handlers are wired to this block alone: the
+  // dashboard never runs the Settings wiring.
+  _renderOperationalMode() {
+    const body = this.shadowRoot.getElementById("operationalModeBody");
+    if (!body) return;
+    const html = this._operationalModeCardBody();
+    if (body._html === html) return;
+    body._html = html;
+    body.innerHTML = html;
+    this._wireOperationalMode(body);
+  }
+
+  _wireOperationalMode(scope) {
+    scope.querySelectorAll(".toggle-btn[data-cfg-key]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        await this._saveSetting(btn.getAttribute("data-cfg-key"), btn.getAttribute("data-cfg-val") === "true");
+      });
+    });
+    scope.querySelectorAll("select.cfg-field[data-cfg-key]").forEach(sel => {
+      sel.addEventListener("change", async () => {
+        await this._saveSetting(sel.getAttribute("data-cfg-key"), sel.value);
+      });
+    });
+    scope.querySelectorAll("input.cfg-field[data-cfg-key]").forEach(inp => {
+      inp.addEventListener("change", async () => {
+        let value = inp.value;
+        if (inp.type === "number") value = (value === "" ? null : Number(value));
+        await this._saveSetting(inp.getAttribute("data-cfg-key"), value);
+      });
+    });
+    // Mode chips call nova/mode directly (not update_config).
+    scope.querySelectorAll(".mode-chip[data-mode]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const mode = btn.getAttribute("data-mode");
+        if (!this._hass || !mode || btn.classList.contains("mode-chip-on")) return;
+        try {
+          await this._hass.callWS({ type: "nova/mode", action: "set", mode });
+        } catch (err) {
+          console.error("Nova: failed to set mode", err);
+        }
+        await this._fetchLiveData();
+      });
+    });
+    scope.querySelectorAll("[data-lab-area]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const id = btn.getAttribute("data-lab-area");
+        let cur = this._data()?.config?.lab_areas;
+        cur = Array.isArray(cur) ? cur.slice() : [];
+        const i = cur.indexOf(id);
+        if (i >= 0) cur.splice(i, 1); else cur.push(id);
+        await this._saveSetting("lab_areas", cur);
+      });
+    });
+    const det = scope.querySelector("details.mode-bindings");
+    if (det) det.addEventListener("toggle", () => { this._modeBindingsOpen = det.open; });
   }
 
   async _saveSetting(key, value) {
@@ -8218,6 +8278,10 @@ ${this._htmlDashboardBody()}`;
         padding:6px 12px;border-radius:8px;border:1px solid var(--line-soft);background:var(--surface-2);color:var(--ink-dim);cursor:pointer}
       .mode-chip:hover{border-color:var(--gold)}
       .mode-chip-on{background:var(--ember);border-color:var(--ember);color:var(--gold-pale)}
+      .mode-bindings>summary{cursor:pointer;list-style:none}
+      .mode-bindings>summary::-webkit-details-marker{display:none}
+      .mode-bindings>summary::before{content:"▸ ";color:var(--ink-faint)}
+      .mode-bindings[open]>summary::before{content:"▾ "}
       .mode-bind-head{font-family:var(--font-mono);font-size:10.5px;color:var(--ink-faint);letter-spacing:.05em;
         text-transform:uppercase;margin:12px 0 8px;padding-top:12px;border-top:1px solid var(--line-soft)}
       .diag-ok{color:#5fbf7a} .diag-warn{color:var(--warn)} .diag-idle{color:var(--ink-dim)}
