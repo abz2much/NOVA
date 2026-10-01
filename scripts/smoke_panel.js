@@ -591,6 +591,13 @@ setTimeout(async () => {
   checks.push(["command center: the ember head can be rebuilt and drawn again without errors",
     !_headError && elNew._headGeoKey !== null]);
 
+  // 8.0.1: Decisions rows have four parts (time, kind, decision, outcome), so
+  // they get their own grid. jsdom cannot lay anything out, so this pins the
+  // rule itself; the layout was checked in a real browser.
+  checks.push(["logs: Decisions rows use their own four column grid so the kind never overlaps the text",
+    /\.new-decision-row\{grid-template-columns:150px minmax\(150px,230px\) minmax\(0,1fr\) auto/.test(elNew._css())
+    && /\.new-decision-row \.new-log-cat\{white-space:normal/.test(elNew._css())]);
+
   // ── 8.0.0: Operational Mode sits right under the hello, Activity is last ──
   const modePanel = newRoot.getElementById("operationalModePanel");
   const heroEl = newRoot.querySelector(".hero");

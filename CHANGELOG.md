@@ -1,8 +1,10 @@
-## [8.0.1] — fix: an error in the animated head when you return to the Command Center
+## [8.0.1] — fixes: an error in the animated head, and Decisions rows overlapping
 
 **Fixed**
 - After visiting another tab and coming back to the Command Center, the animated head could stop drawing and Home Assistant's log would show "Cannot read properties of undefined (reading '0')" from `nova-panel.js`. Nova rebuilt the head but kept an old note saying its shape was already worked out, so the new head never got a shape. The note is now cleared whenever the head is rebuilt.
 - This was there since the animated head arrived in 7.127.0. It showed up more often once the Command Center and Diagnostics became tabs you move between.
+
+- **Decisions list (Logs tab):** the decision kind, such as ANTICIPATION_ROUTINE, ran into the decision text, and the outcome (UNJUDGED, HELPFUL and so on) dropped onto its own line. Each row now lays out properly on wide screens, and on narrow screens the kind and outcome share a line with the text underneath.
 
 **Caveats**
 - Hard refresh the page (Ctrl+Shift+R) after updating.
