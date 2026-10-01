@@ -1,3 +1,16 @@
+## [7.129.0] — intrusion monitoring can be a switch you control
+
+**Added**
+- New setting, "Require confinement for intrusion monitoring" (Settings, Security alarm card). It is off by default, so nothing changes unless you turn it on.
+- When it is on, Nova watches for intruders only while a lockdown is engaged or your selected alarm is armed. Being away or asleep no longer switches monitoring on by itself.
+- Turning the alarm or lockdown off stops monitoring at once and drops any investigation in progress.
+- If you are home and awake while confined (alarm on home or night, or a lockdown), movement alone does not start an investigation. It also needs an open door or window. An alarm armed away or on vacation is trusted on its own.
+- The alert in that case says "while the house is secured" instead of "while no one is home". It is translated into all seven alert languages.
+
+**Caveats**
+- With the setting on and nothing confined, intrusion alerts stay silent even when everyone is away or asleep.
+- Only the alarm you selected counts, as before.
+
 ## [7.128.0] — Nova stops repeating what's normal for your home
 
 **Added**

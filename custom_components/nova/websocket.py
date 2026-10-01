@@ -890,6 +890,8 @@ async def ws_get_panel_data(
                     hass, entry, "security_alarm_entity", "") or ""),
                 "lockdown_auto_on_arm": _runtime_opt(
                     hass, entry, "lockdown_auto_on_arm", False) is True,
+                "intrusion_requires_confinement": _runtime_opt(
+                    hass, entry, "intrusion_requires_confinement", False) is True,
                 "alarm_panels": _get_alarm_panels(hass),
                 "onboarding": _get_onboarding_state(hass, entry, current_notify),
                 "sentinel_rules": _get_sentinel_rules(),
@@ -1520,6 +1522,7 @@ PANEL_WRITABLE_KEYS = {
     "notify_services",             # JSON list: normal alert push targets
     "security_alarm_entity",       # str: authoritative household alarm panel
     "lockdown_auto_on_arm",        # bool: explicit opt in for automatic lockdown
+    "intrusion_requires_confinement",  # bool: intrusion monitoring only while locked down or alarm armed
     "departure_alerts_enabled",
     "routine_alerts_enabled",
     "departure_lead_minutes",
@@ -2260,7 +2263,8 @@ async def ws_update_config(
             except Exception as exc:
                 _LOGGER.warning("sleep_override apply failed: %s", exc)
 
-        if key in ("security_alarm_entity", "lockdown_auto_on_arm"):
+        if key in ("security_alarm_entity", "lockdown_auto_on_arm",
+                   "intrusion_requires_confinement"):
             from . import cognitive_core
             await cognitive_core.apply_runtime_config(key, value)
 

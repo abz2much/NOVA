@@ -5,6 +5,7 @@ import json
 import re
 
 LOCKDOWN_AUTO_KEY = "lockdown_auto_on_arm"
+INTRUSION_CONFINEMENT_KEY = "intrusion_requires_confinement"
 
 # Phase 4 (v7.109.0): camera semantic-learning tunables must stay within
 # their documented bounds — see camera_semantic.py's own clamp_* helpers,
@@ -45,6 +46,12 @@ def automatic_lockdown_enabled(config: dict | None) -> bool:
     return isinstance(config, dict) and config.get(LOCKDOWN_AUTO_KEY) is True
 
 
+def intrusion_requires_confinement(config: dict | None) -> bool:
+    """Only the literal JSON boolean true makes confinement the master switch
+    for intrusion monitoring. Anything else keeps the automatic behaviour."""
+    return isinstance(config, dict) and config.get(INTRUSION_CONFINEMENT_KEY) is True
+
+
 def _valid_bounded_number(value, lo: float, hi: float) -> bool:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return False
@@ -62,7 +69,7 @@ def _valid_bounded_integer(value, lo: int, hi: int) -> bool:
 
 def valid_panel_value(key: str, value) -> bool:
     """Reject truthy strings and numbers for the automatic safety opt in."""
-    if key == LOCKDOWN_AUTO_KEY:
+    if key in (LOCKDOWN_AUTO_KEY, INTRUSION_CONFINEMENT_KEY):
         return type(value) is bool
     if key in ("camera_event_learning", "camera_historical_awareness"):
         return type(value) is bool

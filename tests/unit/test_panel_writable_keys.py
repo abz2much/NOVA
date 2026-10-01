@@ -128,7 +128,8 @@ def test_onboarding_dismissed_is_writable():
 def test_security_alarm_settings_round_trip_through_panel_data():
     allow = _allowlist()
     surfaced = _panel_data_config_keys()
-    for key in ("security_alarm_entity", "lockdown_auto_on_arm"):
+    for key in ("security_alarm_entity", "lockdown_auto_on_arm",
+                "intrusion_requires_confinement"):
         assert key in allow
         assert key in surfaced
 

@@ -148,6 +148,7 @@
     "indoor_entities",
     "intrusion_inward_depth",
     "intrusion_notify_image_ttl_minutes",
+    "intrusion_requires_confinement",
     "intrusion_response_timeout",
     "intrusion_vision_confirm",
     "lab_areas",
