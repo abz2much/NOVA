@@ -1,5 +1,7 @@
 {
   "nova/get_calibration": [
+    "adaptive_awareness",
+    "anticipation",
     "calibration",
     "interruption_budget",
     "stats",

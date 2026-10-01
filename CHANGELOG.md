@@ -1,3 +1,17 @@
+## [7.130.0] — routine alerts learn from alerts you mute
+
+**Added**
+- New setting, "Adaptive awareness" (Settings, next to the other two adaptive switches). It is off by default, so nothing changes unless you turn it on.
+- When it is on, muting or ignoring something right after Nova's routine alert about it counts as that alert being unnecessary. Nova remembers this in its decision record.
+- Once at least five routine alerts have been judged, Nova adjusts in small steps. If most were unwelcome, it waits longer before saying "nothing yet today" or "not home yet" and asks for more days of history before trusting a routine. If almost all were welcome, it waits a little less.
+- The decision stats now show the anticipation results and the current adjustment.
+
+**Caveats**
+- It only affects routine style alerts (usually active by now, usually home by now, routines). Security, intrusion, lockdown and hazard alerts are never touched.
+- Only things linked to a device or person are matched when you ignore something. Calendar departure alerts can still be judged by hand in the decision browser.
+- An ignore only counts against alerts from the last 24 hours.
+- Nothing is recorded or changed while the setting is off.
+
 ## [7.129.0] — intrusion monitoring can be a switch you control
 
 **Added**
