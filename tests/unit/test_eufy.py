@@ -27,7 +27,7 @@ class _Registry:
 
 
 DEVICE = "e64f3b6aeec4e94fa8c46f473f2fe223"
-SERIAL = "T82145102549156A"
+SERIAL = "T0000000000000000"
 
 
 def _uid(role: str) -> str:

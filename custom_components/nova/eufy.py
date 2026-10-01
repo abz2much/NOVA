@@ -19,7 +19,7 @@ Discovery is unique_id-based, not entity_id-based. `unique_id` is the
 immutable half of HA's entity identity (entity_id is the mutable, renameable
 half) and eufy_security encodes each sensor's role directly in it:
   eufy_security_<serial>_device_<role>
-e.g. "eufy_security_T82145102549156A_device_strangerPersonDetected". Matching
+e.g. "eufy_security_T0000000000000000_device_strangerPersonDetected". Matching
 on this suffix means a rename ("Front Door" -> "Porch Camera") can never
 break discovery, unlike matching on entity_id text.
 """
