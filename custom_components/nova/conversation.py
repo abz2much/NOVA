@@ -824,8 +824,14 @@ class NovaAgent(conversation.ConversationEntity):
             try:
                 from . import knowledge
                 subjects = [identity_module.subject_for(ident), "household"]
-                kn_block = await self.hass.async_add_executor_job(
-                    lambda: knowledge.prompt_block(user_input.text, subjects=subjects))
+                # Meaning based recall when semantic search is on; None means
+                # off, paused or nothing found, so keyword recall runs as before.
+                from . import fact_recall
+                kn_block = await fact_recall.semantic_prompt_block(
+                    self.hass, user_input.text, subjects=subjects)
+                if kn_block is None:
+                    kn_block = await self.hass.async_add_executor_job(
+                        lambda: knowledge.prompt_block(user_input.text, subjects=subjects))
             except Exception as exc:
                 _LOGGER.debug("Knowledge inject: %s", exc)
         if kn_block:
