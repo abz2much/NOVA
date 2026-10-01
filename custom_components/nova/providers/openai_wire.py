@@ -3,19 +3,68 @@ the OpenAI-compatible adapter (OpenAI, Gemini, custom endpoints)."""
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Optional
 
 from .errors import ProviderError, ProviderErrorKind
 from .models import ChatRequest, ChatResponse, ToolCall, Usage
 from .reasoning import visible_text
 
 
-def build_openai_kwargs(request: ChatRequest, model: str) -> dict[str, Any]:
+# Largest thought signature kept. They are a few KB; anything bigger is not one.
+_MAX_SIGNATURE_CHARS = 65536
+
+
+def _without_extra_content(message: dict) -> dict:
+    """The message with provider specific ``extra_content`` removed from its
+    tool calls. A copy: the caller's history is never changed."""
+    calls = message.get("tool_calls")
+    if not isinstance(calls, list) or not any(
+            isinstance(c, dict) and "extra_content" in c for c in calls):
+        return message
+    cleaned = dict(message)
+    cleaned["tool_calls"] = [
+        {k: v for k, v in c.items() if k != "extra_content"} if isinstance(c, dict) else c
+        for c in calls]
+    return cleaned
+
+
+def thought_signature(tool_call: Any) -> Optional[dict]:
+    """Gemini's thought signature from a compatible endpoint's tool call, as
+    ``{"google": {"thought_signature": str}}``, or None. Only that one field is
+    kept; anything else a provider sends is dropped."""
+    extra: Any = getattr(tool_call, "extra_content", None)
+    if extra is None:
+        model_extra = getattr(tool_call, "model_extra", None)
+        extra = model_extra.get("extra_content") if isinstance(model_extra, dict) else None
+    if hasattr(extra, "model_dump"):
+        try:
+            extra = extra.model_dump()
+        except Exception:
+            return None
+    google: Any = extra.get("google") if isinstance(extra, dict) else None
+    if hasattr(google, "model_dump"):
+        try:
+            google = google.model_dump()
+        except Exception:
+            return None
+    sig = google.get("thought_signature") if isinstance(google, dict) else None
+    if isinstance(sig, str) and sig and len(sig) <= _MAX_SIGNATURE_CHARS:
+        return {"google": {"thought_signature": sig}}
+    return None
+
+
+def build_openai_kwargs(request: ChatRequest, model: str, *,
+                        keep_extra_content: bool = False) -> dict[str, Any]:
     """The chat.completions.create keyword arguments for a request. Caller-
-    built OpenAI message and tool dicts are sent exactly as built."""
+    built OpenAI message and tool dicts are sent exactly as built, except that
+    provider specific tool call ``extra_content`` (Gemini's thought signature)
+    is removed unless the adapter is the one that understands it."""
+    messages = [m.to_openai() for m in request.messages]
+    if not keep_extra_content:
+        messages = [_without_extra_content(m) for m in messages]
     kwargs: dict[str, Any] = {
         "model": model,
-        "messages": [m.to_openai() for m in request.messages],
+        "messages": messages,
         "max_tokens": request.max_tokens,
         "temperature": request.temperature,
     }
@@ -63,7 +112,8 @@ def parse_openai_completion(resp: Any, *, provider: str, model: str) -> ChatResp
         if not isinstance(args, dict):
             raise ProviderError(ProviderErrorKind.MALFORMED_RESPONSE, provider,
                                 detail="the provider returned non-object tool arguments")
-        calls.append(ToolCall(id=str(tc.id or ""), name=str(tc.function.name or ""), args=args))
+        calls.append(ToolCall(id=str(tc.id or ""), name=str(tc.function.name or ""), args=args,
+                              extra_content=thought_signature(tc)))
     text = visible_text(getattr(message, "content", None))
     tool_calls = tuple(calls)
     return ChatResponse(

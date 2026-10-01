@@ -35,6 +35,9 @@ class OpenAICompatibleProvider(LLMProvider):
 
     name: ClassVar[str] = "openai"
     concurrency = SDK_CLIENT_POLICY
+    # Whether tool call ``extra_content`` in the history is sent back. Only
+    # Gemini needs it (its thought signature); everyone else would reject it.
+    keeps_extra_content: ClassVar[bool] = False
 
     def __init__(self, api_key: str, model: str, base_url: Optional[str] = None):
         super().__init__(api_key, model, base_url)
@@ -56,7 +59,8 @@ class OpenAICompatibleProvider(LLMProvider):
 
     def complete(self, request: ChatRequest) -> ChatResponse:
         model = request.model or self.model
-        kwargs = build_openai_kwargs(request, model)
+        kwargs = build_openai_kwargs(
+            request, model, keep_extra_content=self.keeps_extra_content)
         extra = self._extra_body()
         if extra:
             kwargs["extra_body"] = extra
@@ -79,6 +83,9 @@ class GeminiProvider(OpenAICompatibleProvider):
 
     name: ClassVar[str] = "gemini"
     requires_credential = True
+    # Gemini 3 rejects a follow up tool call request unless the thought
+    # signature from its previous call is sent back unchanged.
+    keeps_extra_content = True
 
     def __init__(self, api_key: str, model: str, base_url: Optional[str] = None):
         super().__init__(api_key, model, base_url or GEMINI_OPENAI_BASE_URL)
