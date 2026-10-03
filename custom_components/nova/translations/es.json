@@ -5,10 +5,15 @@
         "title": "Configuración de Nova",
         "description": "{note}",
         "data": {
-          "api_key": "Clave API de LLM en la nube (p. ej. Groq)",
-          "llm_base_url": "URL base del LLM local — para Ollama usa el host homeassistant.local, puerto 11434, ruta /v1",
-          "model": "Modelo de conversación",
-          "honorific": "Diríjase a mí como"
+          "api_key": "Clave API (opcional)",
+          "llm_base_url": "Dirección de Ollama (opcional)"
+        }
+      },
+      "model": {
+        "title": "Elige un modelo",
+        "description": "Elige el modelo que Nova usará para conversar. Puedes cambiarlo más tarde en el panel de Nova.",
+        "data": {
+          "model": "Modelo"
         }
       }
     },

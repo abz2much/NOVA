@@ -58,6 +58,14 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
+_USER_NOTE = (
+    "Paste an API key from Anthropic, Groq, OpenAI or Gemini. Nova works out "
+    "the provider from the key. To run a model on your own machine instead, "
+    "leave the key blank and enter your Ollama address, for example "
+    "http://192.168.1.50:11434. You will pick the model on the next step. "
+    "Everything else can be set up later in the Nova panel."
+)
+
 def _find_config(config_path: str) -> dict | None:
     """Read an existing runtime config at config_path, if one with a usable
     LLM exists. This is the panel's runtime config — survives integration
@@ -87,6 +95,12 @@ class NovaConfigFlow(ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
+    _provider: str = "ollama"
+    _api_key: str = ""
+    _base_url: str = ""
+    _models: list[str] = []
+    _default_model: str = DEFAULT_MODEL
+
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None,
     ) -> dict:
@@ -100,78 +114,128 @@ class NovaConfigFlow(ConfigFlow, domain=DOMAIN):
         if cfg:
             return await self.async_step_import(cfg)
 
-        # Manual fallback — a cloud API key OR a local LLM endpoint.
+        # Manual fallback: a cloud API key OR a local LLM endpoint.
         errors: dict[str, str] = {}
         if user_input is not None:
             api_key = user_input.get(CONF_API_KEY, "").strip()
             base_url = user_input.get("llm_base_url", "").strip()
-            if api_key or base_url:
-                # No cloud key + a local URL ⇒ run a local model (Ollama).
-                # A cloud key's own shape tells us which provider it belongs
-                # to (Anthropic/Groq/Gemini/OpenAI) — no separate provider
-                # picker needed on this first screen.
+            if not (api_key or base_url):
+                errors["base"] = "need_llm"
+            else:
                 from .llm_provider import (
                     DEFAULT_MODELS,
                     detect_provider_from_key,
                     normalize_provider_endpoint,
                     test_connection,
                 )
+                # The key's own shape tells us the provider; no key means a
+                # local Ollama server.
                 provider = detect_provider_from_key(api_key) if api_key else "ollama"
                 if provider == "ollama":
                     try:
                         base_url = normalize_provider_endpoint(base_url, provider)
                     except ValueError:
                         errors["base"] = "cannot_connect"
-                model = user_input.get(CONF_MODEL, "").strip()
-                if not model or model == DEFAULT_MODEL:
-                    # Field still on its placeholder — use the right default
-                    # for whichever provider we just detected, not Groq's.
-                    model = DEFAULT_MODELS.get(provider, DEFAULT_MODEL)
-                # Validate the endpoint before committing, so a wrong URL or key
-                # fails here instead of installing into a broken state.
-                conn_err = errors.get("base") or await test_connection(
-                    self.hass, provider, api_key, model, base_url or None)
-                if conn_err:
-                    errors["base"] = conn_err
-                else:
-                    await self.async_set_unique_id(DOMAIN)
-                    self._abort_if_unique_id_configured()
-                    return self.async_create_entry(
-                        title="Nova",
-                        data={
-                            CONF_API_KEY: api_key,
-                            CONF_MODEL: model,
-                            CONF_HONORIFIC: user_input.get(CONF_HONORIFIC, DEFAULT_HONORIFIC),
-                            "llm_provider": provider,
-                            "llm_base_url": base_url,
-                            "ollama_base_url": base_url if provider == "ollama" else "",
-                            "schema_version": 7,
-                        },
-                    )
-            else:
-                errors["base"] = "need_llm"
+                if not errors:
+                    self._provider = provider
+                    self._api_key = api_key
+                    self._base_url = base_url
+                    default_model = DEFAULT_MODELS.get(provider, DEFAULT_MODEL)
+                    models = await self._discover_models(provider, api_key, base_url)
+                    self._models = models
+                    self._default_model = (
+                        default_model if default_model in models or not models
+                        else models[0])
+                    if models:
+                        # A model list came back, so the key and address work.
+                        return await self.async_step_model()
+                    # No list (some keys cannot read it): check the connection
+                    # with the default model, then let the user type a model.
+                    conn_err = await test_connection(
+                        self.hass, provider, api_key, default_model,
+                        base_url or None)
+                    if conn_err:
+                        errors["base"] = conn_err
+                    else:
+                        return await self.async_step_model()
 
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema({
-                vol.Optional(CONF_API_KEY, default=""): str,
+                vol.Optional(CONF_API_KEY, default=""):
+                    selector.TextSelector(selector.TextSelectorConfig(
+                        type=selector.TextSelectorType.PASSWORD)),
                 vol.Optional("llm_base_url", default=""): str,
-                vol.Optional(CONF_MODEL, default=DEFAULT_MODEL): str,
-                vol.Optional(CONF_HONORIFIC, default=DEFAULT_HONORIFIC):
-                    selector.SelectSelector(selector.SelectSelectorConfig(
-                        options=HONORIFIC_OPTIONS, custom_value=True,
-                        mode=selector.SelectSelectorMode.DROPDOWN)),
             }),
             errors=errors,
-            description_placeholders={
-                "note": "Enter a cloud API key (Anthropic, Groq, OpenAI, or Gemini — "
-                        "the provider is detected from the key itself), OR leave it "
-                        "blank and enter a local LLM URL (e.g. "
-                        "http://homeassistant.local:11434/v1) to run Ollama with no "
-                        "cloud account. One of the two is required to get through "
-                        "this step; everything else is configured later in the Nova "
-                        "panel → Settings.",
-            },
+            description_placeholders={"note": _USER_NOTE},
+        )
+
+    async def _discover_models(
+        self, provider: str, api_key: str, base_url: str,
+    ) -> list[str]:
+        """Ask the provider which models it offers. Never raises: an empty
+        list means the caller falls back to a plain connection test."""
+        try:
+            from homeassistant.helpers import aiohttp_client
+            from .const import PROVIDER_API_KEY_FIELDS
+            from .providers import discovery
+
+            config: dict[str, Any] = {"llm_provider": provider}
+            if provider == "ollama":
+                config["ollama_base_url"] = base_url
+            else:
+                config[PROVIDER_API_KEY_FIELDS[provider]] = api_key
+            request = discovery.resolve_discovery_request(config, provider)
+            session = aiohttp_client.async_get_clientsession(self.hass)
+            result = await discovery.fetch_models(self.hass, session, request)
+            models, _truncated, _details = result.as_tuple()
+            return [str(m) for m in models]
+        except Exception as exc:  # noqa: BLE001 - discovery is best effort
+            _LOGGER.debug("Nova setup: model list unavailable (%s)", type(exc).__name__)
+            return []
+
+    async def async_step_model(
+        self, user_input: dict[str, Any] | None = None,
+    ) -> dict:
+        """Second first run step: pick the conversation model."""
+        errors: dict[str, str] = {}
+        provider, api_key, base_url = self._provider, self._api_key, self._base_url
+        if user_input is not None:
+            model = str(user_input.get(CONF_MODEL, "")).strip() or self._default_model
+            from .llm_provider import test_connection
+            conn_err = await test_connection(
+                self.hass, provider, api_key, model, base_url or None)
+            if conn_err:
+                errors["base"] = conn_err
+            else:
+                await self.async_set_unique_id(DOMAIN)
+                self._abort_if_unique_id_configured()
+                return self.async_create_entry(
+                    title="Nova",
+                    data={
+                        CONF_API_KEY: api_key,
+                        CONF_MODEL: model,
+                        CONF_HONORIFIC: DEFAULT_HONORIFIC,
+                        "llm_provider": provider,
+                        "llm_base_url": base_url,
+                        "ollama_base_url": base_url if provider == "ollama" else "",
+                        "schema_version": 7,
+                    },
+                )
+
+        if self._models:
+            field: Any = selector.SelectSelector(selector.SelectSelectorConfig(
+                options=self._models, custom_value=True,
+                mode=selector.SelectSelectorMode.DROPDOWN))
+        else:
+            field = str
+        return self.async_show_form(
+            step_id="model",
+            data_schema=vol.Schema({
+                vol.Required(CONF_MODEL, default=self._default_model): field,
+            }),
+            errors=errors,
         )
 
     async def async_step_import(

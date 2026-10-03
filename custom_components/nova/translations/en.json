@@ -5,10 +5,15 @@
         "title": "Nova Setup",
         "description": "{note}",
         "data": {
-          "api_key": "Cloud LLM API key (e.g. Groq)",
-          "llm_base_url": "Local LLM base URL — for Ollama use host homeassistant.local, port 11434, path /v1",
-          "model": "Conversation model",
-          "honorific": "Address me as"
+          "api_key": "API key (optional)",
+          "llm_base_url": "Ollama address (optional)"
+        }
+      },
+      "model": {
+        "title": "Choose a model",
+        "description": "Pick the model Nova should use for conversation. You can change it later in the Nova panel.",
+        "data": {
+          "model": "Model"
         }
       }
     },

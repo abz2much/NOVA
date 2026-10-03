@@ -2,13 +2,18 @@
   "config": {
     "step": {
       "user": {
-        "title": "Nova-installatie",
+        "title": "Nova instellen",
         "description": "{note}",
         "data": {
-          "api_key": "Cloud-LLM-API-sleutel (bijv. Groq)",
-          "llm_base_url": "Basis-URL van lokale LLM — voor Ollama host homeassistant.local, poort 11434, pad /v1",
-          "model": "Conversatiemodel",
-          "honorific": "Spreek mij aan met"
+          "api_key": "API-sleutel (optioneel)",
+          "llm_base_url": "Ollama-adres (optioneel)"
+        }
+      },
+      "model": {
+        "title": "Kies een model",
+        "description": "Kies het model dat Nova voor gesprekken gebruikt. Je kunt het later wijzigen in het Nova-paneel.",
+        "data": {
+          "model": "Model"
         }
       }
     },
