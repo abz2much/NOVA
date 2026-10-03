@@ -684,3 +684,46 @@ async def test_resubmitting_forgets_earlier_passes(config_flow, monkeypatch):
 
 async def _async(value):
     return value
+
+
+def _default_of(form, field):
+    """The value a field is filled in with (vol.Required default)."""
+    for marker, value in form["data_schema"].schema.items():
+        if marker == field:
+            return marker.default() if callable(marker.default) else marker.default
+    raise AssertionError(field)
+
+
+async def test_roles_screen_fills_in_defaults(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch,
+                           lists={"groq": GROQ, "anthropic": (["claude-sonnet-5"], [])})
+    form = await flow.async_step_user(_keys(groq_api_key="g", anthropic_api_key="a"))
+    assert form["step_id"] == "roles"
+    assert _default_of(form, "conversation") == "anthropic"
+    assert _default_of(form, "classifier") == "groq"
+    assert _default_of(form, "vision") == "anthropic"
+    assert form["description_placeholders"] == {"failed": "—"}
+
+
+async def test_roles_screen_names_stale_saved_keys(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, lists={"groq": GROQ, "openai": None},
+                           conn={"openai": "authentication_failed"}, saved={"openai": "sk_stale"})
+    form = await flow.async_step_user(_keys(groq_api_key="g"))
+    assert form["description_placeholders"] == {"failed": "OpenAI"}
+
+
+async def test_roles_screen_not_now_for_ollama_without_pictures(config_flow, monkeypatch):
+    no_pictures = (["llama3.2"], [{"id": "llama3.2", "capabilities": ["completion", "tools"]}])
+    flow = _first_run_flow(config_flow, monkeypatch, lists={"ollama": no_pictures})
+    form = await flow.async_step_user(_keys(ollama_base_url="http://x:11434"))
+    assert _default_of(form, "vision") == "not_now"
+
+
+async def test_roles_screen_saves_choices(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, lists={"groq": GROQ})
+    await flow.async_step_user(_keys(groq_api_key="g"))
+    res = await flow.async_step_roles({"conversation": "groq", "classifier": "groq",
+                                       "reasoning": "groq", "camera_reasoning": "groq",
+                                       "vision": "not_now"})
+    assert flow._roles["vision"] == "not_now"
+    assert res["step_id"] == "models"

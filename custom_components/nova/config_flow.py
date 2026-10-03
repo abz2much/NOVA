@@ -255,8 +255,38 @@ class NovaConfigFlow(ConfigFlow, domain=DOMAIN):
                           provider, type(exc).__name__)
             return None
 
-    async def async_step_roles(self, user_input=None):
-        return self.async_show_form(step_id="roles", data_schema=vol.Schema({}))
+    async def async_step_roles(
+        self, user_input: dict[str, Any] | None = None,
+    ) -> dict:
+        """Screen 2: the provider for each role, from the ones that passed."""
+        from . import setup_roles
+
+        passed = list(self._lists)
+        if user_input is not None:
+            self._roles = {role: str(user_input.get(role) or "")
+                           for role in setup_roles.ROLES}
+            return await self.async_step_models()
+
+        details = self._lists.get("ollama", ([], []))[1]
+        ollama_vision = setup_roles.ollama_has(details, "vision")
+        fields: dict[Any, Any] = {}
+        for role in setup_roles.ROLES:
+            fields[vol.Required(role, default=setup_roles.default_provider(
+                role, passed, ollama_vision))] = selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=setup_roles.provider_options(role, passed),
+                        translation_key="setup_provider",
+                        mode=selector.SelectSelectorMode.DROPDOWN))
+        return self.async_show_form(
+            step_id="roles",
+            data_schema=vol.Schema(fields),
+            description_placeholders={"failed": ", ".join(
+                setup_roles.PROVIDER_LABELS[p] for p in self._saved_failed) or "—"},
+        )
+
+    async def async_step_models(self, user_input=None):
+        # Temporary: Task 7 replaces this.
+        return self.async_show_form(step_id="models", data_schema=vol.Schema({}))
 
     async def async_step_import(
         self, import_data: dict[str, Any],
