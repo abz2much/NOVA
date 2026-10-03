@@ -1,3 +1,13 @@
+## [8.2.0] — Simpler first run setup
+
+**Changed**
+- The first setup screen now asks only for an API key and, if you run a local model, your Ollama address. Both are marked optional.
+- The API key field is masked.
+- The Ollama hint now shows a plain address such as `http://192.168.1.50:11434`. The old `/v1` instruction is gone.
+- A second step lets you pick the model from the list your provider reports. You can still type your own. If the list cannot be read, Nova checks the connection with the default model and shows a text field instead.
+- The honorific is no longer asked during setup. New installs use the default, and you can change it in the Nova panel.
+- The new and reworded setup text is translated into all seven languages.
+
 ## [8.1.0] — Nova uses Home Assistant's default voice
 
 **Changed**
