@@ -463,6 +463,13 @@ def schedule_bootstrap(hass: HomeAssistant) -> BootstrapHandle:
                 await async_run_bootstrap(hass)
             except Exception as exc:
                 _LOGGER.warning("Nova bootstrap: unexpected error: %s", exc)
+        # Last, once voice setup has settled: the one time "Nova is ready"
+        # notice for a fresh install (self-gated, see welcome.py).
+        try:
+            from . import welcome
+            await welcome.async_maybe_show(hass)
+        except Exception as exc:
+            _LOGGER.debug("Nova: welcome notification error: %s", exc)
 
     def _start() -> None:
         if not handle.closed:

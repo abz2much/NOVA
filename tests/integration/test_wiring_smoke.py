@@ -139,6 +139,7 @@ async def test_config_flow_model_step_offers_discovered_models(hass):
             result["flow_id"], {"model": "beta"})
     assert result["type"] == "create_entry"
     assert result["data"]["model"] == "beta"
+    assert result["data"]["welcome_pending"] is True
 
 
 async def test_config_flow_auto_imports_from_this_instances_config_dir(hass, tmp_path):
@@ -160,6 +161,8 @@ async def test_config_flow_auto_imports_from_this_instances_config_dir(hass, tmp
             DOMAIN, context={"source": "user"})
         assert result["type"] == "create_entry"
         assert result["data"]["api_key"] == "gsk_seeded_from_runtime_config"
+        # An imported (existing) install never gets the first run welcome.
+        assert "welcome_pending" not in result["data"]
     finally:
         os.remove(config_path)
 

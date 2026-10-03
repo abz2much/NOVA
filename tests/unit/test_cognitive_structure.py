@@ -161,6 +161,9 @@ SERVICE_CALLERS = {
     "local_engine.py", "mode_scene.py", "notify_targets.py", "observer.py",
     "proactive_audio.py", "routines.py", "scenes.py", "services.py", "tts_helper.py",
     "voice_confirm.py",
+    # v8.3.0: one persistent_notification.create for the first run welcome.
+    # Admin UI notice only: nothing spoken, no device actuated.
+    "welcome.py",
 }
 ANNOUNCERS = {
     "__init__.py", "appliance_monitor.py", "briefing.py", "camera.py", "cognitive_core.py",

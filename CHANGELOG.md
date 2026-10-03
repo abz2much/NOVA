@@ -1,3 +1,14 @@
+## [8.3.0] — "Nova is ready" after first setup
+
+**Added**
+- After a fresh install finishes setting up, Nova posts one "Nova is ready" notification. It runs Setup Doctor, says how many checks passed, and lists anything that needs attention with its fix.
+- It waits until voice setup has settled, so the Assist pipeline check sees the finished state.
+- It shows once. Restarts and reloads do not repeat it, and existing installs never see it.
+
+**Caveats**
+- The notification text is English only, like Nova's other notifications.
+- Run the checks again any time in the Nova panel, under Diagnostics, Setup Doctor.
+
 ## [8.2.0] — Simpler first run setup
 
 **Changed**
