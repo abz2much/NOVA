@@ -142,6 +142,22 @@
     "credential_migration_ambiguous": {
       "title": "Nova: a saved credential needs to be assigned to a provider",
       "description": "Nova found a shared credential from before separate provider credentials existed, but couldn't tell which provider it belongs to (no saved provider, and the key's shape didn't match a known provider). Nothing was changed or deleted — the old credential still works. To finish migrating it, open Settings → Devices & Services → Nova → Configure → Credentials and enter it under the correct provider. This notice clears automatically once that's done."
+    },
+    "voice_setup_step_addons": {
+      "title": "Nova is setting up voice",
+      "description": "Step {step} of {total}: installing and starting the Piper, Whisper and openWakeWord add-ons. This can take a few minutes. This notice clears itself when voice setup finishes."
+    },
+    "voice_setup_step_wyoming": {
+      "title": "Nova is setting up voice",
+      "description": "Step {step} of {total}: connecting Home Assistant to the voice add-ons (Wyoming). This notice clears itself when voice setup finishes."
+    },
+    "voice_setup_step_pipeline": {
+      "title": "Nova is setting up voice",
+      "description": "Step {step} of {total}: creating the Nova Assist pipeline. This notice clears itself when voice setup finishes."
+    },
+    "voice_setup_incomplete": {
+      "title": "Nova voice setup is incomplete",
+      "description": "Nova couldn't finish setting up voice. What failed: {failed}.\n\nTo finish it by hand: in Settings → Add-ons, install and start Piper, Whisper and openWakeWord. Then in Settings → Voice assistants, create a pipeline with Nova as the conversation agent, Whisper for speech to text and Piper for text to speech. Nova checks again on each restart, and this notice clears itself once voice works."
     }
   },
   "exceptions": {

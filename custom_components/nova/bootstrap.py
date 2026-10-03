@@ -327,7 +327,7 @@ async def async_run_bootstrap(hass: HomeAssistant, *, force: bool = False) -> di
     Full bootstrap. Idempotent + best-effort. Returns a status dict. Safe to call
     on every setup — it self-gates on the run-once marker and the Supervisor.
     """
-    from . import nova_config
+    from . import nova_config, repair_notices
 
     status = {"supervised": False, "addons_ok": False,
               "wyoming_ok": False, "pipeline_ok": False, "skipped": None}
@@ -346,13 +346,24 @@ async def async_run_bootstrap(hass: HomeAssistant, *, force: bool = False) -> di
     marker = await hass.async_add_executor_job(_read_marker)
     if not force and marker.get("version") == version and marker.get("addons_ok"):
         status["skipped"] = "already bootstrapped this version"
+        _recheck_voice_notice(hass, marker)
         return status
 
     auto_pipeline = bool(nova_config.get("auto_pipeline", True))
+    status["pipeline_tried"] = auto_pipeline
+    # The progress notice is for the first voice setup only (no marker yet),
+    # so routine version updates don't flash it.
+    show_progress = not marker
+    total = 3 if auto_pipeline else 2
+
+    def _progress(step: str, number: int) -> None:
+        if show_progress:
+            repair_notices.note_voice_setup_step(hass, step, number, total)
 
     _LOGGER.info("Nova bootstrap: starting (version=%s)", version)
 
     # Phase 1 — prerequisite add-ons
+    _progress("addons", 1)
     addons_ok = True
     for slug, friendly in REQUIRED_ADDONS.items():
         if not await _ensure_addon(hass, slug, friendly):
@@ -360,6 +371,7 @@ async def async_run_bootstrap(hass: HomeAssistant, *, force: bool = False) -> di
     status["addons_ok"] = addons_ok
 
     # Phase 2 — reload Wyoming
+    _progress("wyoming", 2)
     try:
         await _reload_wyoming(hass)
         status["wyoming_ok"] = True
@@ -368,6 +380,7 @@ async def async_run_bootstrap(hass: HomeAssistant, *, force: bool = False) -> di
 
     # Phase 3 — Assist pipeline (best-effort)
     if auto_pipeline:
+        _progress("pipeline", 3)
         agent = await _wait_for_agent(hass)
         if agent:
             status["pipeline_ok"] = await _create_pipeline(hass)
@@ -376,8 +389,43 @@ async def async_run_bootstrap(hass: HomeAssistant, *, force: bool = False) -> di
             _manual_pipeline_hint()
 
     await hass.async_add_executor_job(_write_marker, version, status)
+    failed = _failed_parts(status)
+    if failed:
+        repair_notices.note_voice_setup_incomplete(hass, failed)
+    else:
+        repair_notices.clear_voice_setup(hass)
     _LOGGER.info("Nova bootstrap: complete — %s", status)
     return status
+
+
+def _failed_parts(status: dict) -> list[str]:
+    """The voice setup parts a run left broken, named for the notice."""
+    failed = []
+    if not status.get("addons_ok"):
+        failed.append("Piper, Whisper, openWakeWord")
+    if not status.get("wyoming_ok"):
+        failed.append("Wyoming")
+    if status.get("pipeline_tried") and not status.get("pipeline_ok"):
+        failed.append("Assist pipeline")
+    return failed
+
+
+def _recheck_voice_notice(hass: HomeAssistant, marker: dict) -> None:
+    """On a start that skips the bootstrap (already done this version),
+    re-raise or clear the incomplete notice: HA drops non-persistent Repair
+    issues on restart. Add-on failures never reach here (the marker gate
+    reruns the bootstrap), so only the pipeline is checked, live, in case it
+    was fixed by hand since. Never raises."""
+    try:
+        from . import repair_notices
+        if marker.get("pipeline_tried") and not marker.get("pipeline_ok"):
+            from . import setup_health
+            if setup_health._check_assist_pipeline(hass).get("status") != "ok":
+                repair_notices.note_voice_setup_incomplete(hass, ["Assist pipeline"])
+                return
+        repair_notices.clear_voice_setup(hass)
+    except Exception as exc:
+        _LOGGER.debug("Nova bootstrap: voice notice recheck failed: %s", exc)
 
 
 async def async_ensure_pipeline_agent(hass: HomeAssistant) -> None:

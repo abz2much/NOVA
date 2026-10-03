@@ -310,3 +310,89 @@ def test_ensure_pipeline_agent_repairs_by_name_or_voice(bootstrap):
     assert "== agent" in src                # idempotent: skip when already right
     sched = inspect.getsource(bootstrap.schedule_bootstrap)
     assert "async_ensure_pipeline_agent" in sched   # wired to run every start
+
+
+# ── Voice setup Repair notices (v8.6.0) ──────────────────────────────────────
+
+class _Notices:
+    def __init__(self):
+        self.calls = []
+
+    def note_voice_setup_step(self, hass, step, number, total):
+        self.calls.append(("step", step, number, total))
+
+    def note_voice_setup_incomplete(self, hass, failed):
+        self.calls.append(("incomplete", list(failed)))
+
+    def clear_voice_setup(self, hass):
+        self.calls.append(("clear",))
+
+
+def _wire_run(bootstrap, nova_config, monkeypatch, load, *, addons=True, pipeline=True, cfg=None):
+    monkeypatch.setenv("SUPERVISOR_TOKEN", "tok")
+    cfg = {"auto_pipeline": True, **(cfg or {})}
+    monkeypatch.setattr(nova_config, "get", lambda k, d=None: cfg.get(k, d))
+    rn = load("repair_notices")
+    notices = _Notices()
+    for name in ("note_voice_setup_step", "note_voice_setup_incomplete", "clear_voice_setup"):
+        monkeypatch.setattr(rn, name, getattr(notices, name))
+
+    async def _addon(hass, slug, friendly):
+        return addons
+    monkeypatch.setattr(bootstrap, "_ensure_addon", _addon)
+    monkeypatch.setattr(bootstrap, "_reload_wyoming", lambda hass: _async_return(0))
+    monkeypatch.setattr(bootstrap, "_wait_for_agent", lambda hass, **kw: _async_return("conversation.nova"))
+
+    async def _pipe(hass):
+        return pipeline
+    monkeypatch.setattr(bootstrap, "_create_pipeline", _pipe)
+    return notices
+
+
+async def test_first_run_shows_each_step_then_clears(bootstrap, nova_config, fake_hass, monkeypatch, load):
+    notices = _wire_run(bootstrap, nova_config, monkeypatch, load)
+    await bootstrap.async_run_bootstrap(fake_hass)
+    assert notices.calls == [("step", "addons", 1, 3), ("step", "wyoming", 2, 3),
+                             ("step", "pipeline", 3, 3), ("clear",)]
+
+
+async def test_first_run_without_auto_pipeline_has_two_steps(bootstrap, nova_config, fake_hass, monkeypatch, load):
+    notices = _wire_run(bootstrap, nova_config, monkeypatch, load, cfg={"auto_pipeline": False})
+    await bootstrap.async_run_bootstrap(fake_hass)
+    assert notices.calls == [("step", "addons", 1, 2), ("step", "wyoming", 2, 2), ("clear",)]
+
+
+async def test_failures_raise_incomplete_naming_parts(bootstrap, nova_config, fake_hass, monkeypatch, load):
+    notices = _wire_run(bootstrap, nova_config, monkeypatch, load, addons=False, pipeline=False)
+    await bootstrap.async_run_bootstrap(fake_hass)
+    assert notices.calls[-1] == ("incomplete", ["Piper, Whisper, openWakeWord", "Assist pipeline"])
+
+
+async def test_version_update_rerun_shows_no_progress(bootstrap, nova_config, fake_hass, monkeypatch, load):
+    bootstrap._write_marker("0.0.1", {"addons_ok": True, "pipeline_ok": True})
+    notices = _wire_run(bootstrap, nova_config, monkeypatch, load)
+    await bootstrap.async_run_bootstrap(fake_hass)
+    assert notices.calls == [("clear",)]
+
+
+async def test_skip_rechecks_failed_pipeline_live(bootstrap, nova_config, fake_hass, monkeypatch, load):
+    bootstrap._write_marker(bootstrap._current_version(),
+                            {"addons_ok": True, "pipeline_tried": True, "pipeline_ok": False})
+    notices = _wire_run(bootstrap, nova_config, monkeypatch, load)
+    sh = load("setup_health")
+    monkeypatch.setattr(sh, "_check_assist_pipeline", lambda hass: {"status": "warn"})
+    status = await bootstrap.async_run_bootstrap(fake_hass)
+    assert status["skipped"] == "already bootstrapped this version"
+    assert notices.calls == [("incomplete", ["Assist pipeline"])]
+
+    notices.calls.clear()
+    monkeypatch.setattr(sh, "_check_assist_pipeline", lambda hass: {"status": "ok"})
+    await bootstrap.async_run_bootstrap(fake_hass)
+    assert notices.calls == [("clear",)]
+
+
+async def test_no_notices_without_supervisor(bootstrap, nova_config, fake_hass, monkeypatch, load):
+    notices = _wire_run(bootstrap, nova_config, monkeypatch, load)
+    monkeypatch.delenv("SUPERVISOR_TOKEN")
+    await bootstrap.async_run_bootstrap(fake_hass)
+    assert notices.calls == []

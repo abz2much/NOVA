@@ -142,6 +142,22 @@
     "credential_migration_ambiguous": {
       "title": "Nova: una credenziale salvata deve essere assegnata a un provider",
       "description": "Nova ha trovato una credenziale condivisa risalente a prima dell'esistenza di credenziali separate per provider, ma non è riuscita a determinare a quale provider appartenga. Non è stato modificato né eliminato nulla. Apri Impostazioni → Dispositivi e servizi → Nova → Configura → Credenziali e inseriscila sotto il provider corretto."
+    },
+    "voice_setup_step_addons": {
+      "title": "Nova sta configurando la voce",
+      "description": "Passo {step} di {total}: installazione e avvio dei componenti aggiuntivi Piper, Whisper e openWakeWord. Può richiedere alcuni minuti. Questo avviso scompare da solo al termine della configurazione vocale."
+    },
+    "voice_setup_step_wyoming": {
+      "title": "Nova sta configurando la voce",
+      "description": "Passo {step} di {total}: collegamento di Home Assistant ai componenti vocali (Wyoming). Questo avviso scompare da solo al termine della configurazione vocale."
+    },
+    "voice_setup_step_pipeline": {
+      "title": "Nova sta configurando la voce",
+      "description": "Passo {step} di {total}: creazione della pipeline Assist di Nova. Questo avviso scompare da solo al termine della configurazione vocale."
+    },
+    "voice_setup_incomplete": {
+      "title": "La configurazione vocale di Nova è incompleta",
+      "description": "Nova non è riuscita a completare la configurazione vocale. Cosa non ha funzionato: {failed}.\n\nPer completarla a mano: in Impostazioni → Componenti aggiuntivi, installa e avvia Piper, Whisper e openWakeWord. Poi, in Impostazioni → Assistenti vocali, crea una pipeline con Nova come agente di conversazione, Whisper per il riconoscimento vocale e Piper per la sintesi vocale. Nova ricontrolla a ogni riavvio, e questo avviso scompare da solo quando la voce funziona."
     }
   },
   "exceptions": {
