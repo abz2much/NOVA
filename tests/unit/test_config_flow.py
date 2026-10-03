@@ -372,3 +372,107 @@ async def test_step_credentials_values_never_land_in_nova_config(
     await flow.async_step_credentials(submission)
 
     assert calls == []
+
+
+# ── First run: two step setup (key/address, then model) ──────────────────────
+
+def _first_run_flow(config_flow, monkeypatch, *, models, conn_err=None):
+    """A NovaConfigFlow with HA's flow helpers faked and the network stubbed."""
+    import importlib
+    llm = importlib.import_module("jc.llm_provider")
+    calls = []
+
+    async def fake_test(hass, provider, key, model, base):
+        calls.append((provider, key, model, base))
+        return conn_err
+
+    monkeypatch.setattr(llm, "test_connection", fake_test)
+
+    class _Hass:
+        class config:
+            @staticmethod
+            def path(*a):
+                return "/nonexistent/" + "/".join(a)
+
+        async def async_add_executor_job(self, fn, *a):
+            return fn(*a)
+
+    class Flow(config_flow.NovaConfigFlow):
+        hass = _Hass()
+
+        def async_show_form(self, **kw):
+            return {"type": "form", **kw}
+
+        def async_create_entry(self, **kw):
+            return {"type": "create_entry", **kw}
+
+        async def async_set_unique_id(self, *_a, **_k):
+            return None
+
+        def _abort_if_unique_id_configured(self, *_a, **_k):
+            return None
+
+        async def _discover_models(self, provider, api_key, base_url):
+            return list(models)
+
+    flow = Flow()
+    flow.calls = calls
+    return flow
+
+
+async def test_user_step_asks_only_for_key_and_address(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, models=[])
+    form = await flow.async_step_user(None)
+    assert form["step_id"] == "user"
+    assert set(form["data_schema"].schema) == {"api_key", "llm_base_url"}
+
+
+async def test_user_step_requires_key_or_address(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, models=[])
+    res = await flow.async_step_user({"api_key": "", "llm_base_url": ""})
+    assert res["errors"] == {"base": "need_llm"}
+
+
+async def test_models_found_moves_on_without_a_chat_test(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, models=["a", "b"])
+    res = await flow.async_step_user(
+        {"api_key": "", "llm_base_url": "http://x:11434"})
+    assert res["step_id"] == "model"
+    assert flow.calls == []
+
+
+async def test_no_model_list_falls_back_to_connection_test(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, models=[])
+    res = await flow.async_step_user(
+        {"api_key": "", "llm_base_url": "http://x:11434"})
+    assert res["step_id"] == "model"
+    assert len(flow.calls) == 1
+
+
+async def test_no_model_list_and_bad_connection_stays_on_first_step(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, models=[], conn_err="cannot_connect")
+    res = await flow.async_step_user(
+        {"api_key": "", "llm_base_url": "http://x:11434"})
+    assert res["step_id"] == "user"
+    assert res["errors"] == {"base": "cannot_connect"}
+
+
+async def test_model_step_creates_entry_with_chosen_model(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, models=["a", "b"])
+    await flow.async_step_user({"api_key": "", "llm_base_url": "http://x:11434"})
+    done = await flow.async_step_model({"model": "b"})
+    assert done["type"] == "create_entry"
+    data = done["data"]
+    assert data["model"] == "b"
+    assert data["llm_provider"] == "ollama"
+    assert data["ollama_base_url"] == "http://x:11434"
+    assert data["honorific"]
+    assert flow.calls[-1][2] == "b"
+
+
+async def test_model_step_error_keeps_the_picker_open(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, models=["m"], conn_err="unknown")
+    await flow.async_step_user({"api_key": "", "llm_base_url": "http://x:11434"})
+    res = await flow.async_step_model({"model": "m"})
+    assert res["type"] == "form" and res["step_id"] == "model"
+    assert res["errors"] == {"base": "unknown"}
