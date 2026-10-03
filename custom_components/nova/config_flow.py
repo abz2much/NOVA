@@ -221,6 +221,8 @@ class NovaConfigFlow(ConfigFlow, domain=DOMAIN):
                         "llm_base_url": base_url,
                         "ollama_base_url": base_url if provider == "ollama" else "",
                         "schema_version": 7,
+                        # Fresh install only: welcome.py posts "Nova is ready" once.
+                        "welcome_pending": True,
                     },
                 )
 

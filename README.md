@@ -24,7 +24,7 @@ Nova looks elaborate, but the floor is low. You can be talking to it in five min
 
 1. **Install via HACS.** Add this repo (badge below), install "Nova AI Assistant," restart Home Assistant.
 2. **Add the integration.** Go to *Settings → Devices & Services → Add Integration → Nova*. Paste a cloud API key from [Groq](https://console.groq.com), Anthropic, OpenAI, or Gemini; Nova detects which provider it belongs to from the key itself, no picker needed. Or leave it blank and point it at a local Ollama URL to run with no cloud account at all.
-3. **That's it.** Nova registers its conversation agent and appears in your sidebar. Ask it about your home, your calendar, or the outside world.
+3. **That's it.** Nova registers its conversation agent and appears in your sidebar. A one time "Nova is ready" notification then lists anything that still needs attention. Ask it about your home, your calendar, or the outside world.
 
 Everything past this point (vision, doorbell analysis, the live 3D floor plan, proactive safety) layers on top as you connect cameras and voice. None of it is required to start. Jump to [Installation](#installation) for the full walkthrough.
 
@@ -174,7 +174,7 @@ https://github.com/abz2much/NOVA
 
 **2. Install "Nova AI Assistant"** from HACS, then restart Home Assistant.
 
-**3. Add the integration.** Go to **Settings → Devices & Services → Add Integration → Nova**. Enter a cloud API key from Groq, Anthropic, OpenAI, or Gemini; Nova detects the provider from the key's own shape, so there's no separate picker. Or leave it blank and enter a local Ollama URL (for example `http://ollama-host.local:11434`) to run without a cloud account. Nova registers its conversation agent and appears in the sidebar. You can also configure or change a self-hosted endpoint later under **Nova → Settings → AI Models**.
+**3. Add the integration.** Go to **Settings → Devices & Services → Add Integration → Nova**. Enter a cloud API key from Groq, Anthropic, OpenAI, or Gemini; Nova detects the provider from the key's own shape, so there's no separate picker. Or leave it blank and enter a local Ollama URL (for example `http://ollama-host.local:11434`) to run without a cloud account. Nova registers its conversation agent and appears in the sidebar. Once setup finishes, a one time "Nova is ready" notification shows the Setup Doctor results and lists anything that needs a fix. You can also configure or change a self-hosted endpoint later under **Nova → Settings → AI Models**.
 
 **4. Set up voice (optional).** On Home Assistant OS / Supervised, Nova bootstraps the voice stack itself on first run: it installs and starts the Piper, Whisper, and openWakeWord add-ons, and creates an Assist pipeline with Nova as the conversation agent. On Container/Core installs, with no Supervisor, install those pieces yourself and create the pipeline through Settings → Voice Assistants.
 

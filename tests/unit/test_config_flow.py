@@ -467,6 +467,7 @@ async def test_model_step_creates_entry_with_chosen_model(config_flow, monkeypat
     assert data["llm_provider"] == "ollama"
     assert data["ollama_base_url"] == "http://x:11434"
     assert data["honorific"]
+    assert data["welcome_pending"] is True
     assert flow.calls[-1][2] == "b"
 
 
