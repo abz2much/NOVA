@@ -16,6 +16,13 @@ the real `homeassistant` package, which collides with tests/unit/'s
 hand-rolled fakes and sys.modules stubs (confirmed live: installing PHACC
 into the shared dev venv took 1634 passing unit tests to 1465 errors).
 """
+
+# PHACC's hass fixture uses one shared config folder inside the installed
+# package (pytest_homeassistant_custom_component/testing_config), and Nova's
+# setup writes config.json, secrets.yaml and nova.db there. It is not reset
+# between runs, so a test that reads keys or config must isolate them (see
+# test_new_choices_beat_a_leftover_config_json_after_real_setup).
+
 import os
 import sys
 
