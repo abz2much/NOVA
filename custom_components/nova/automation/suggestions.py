@@ -31,7 +31,14 @@ _LOGGER = logging.getLogger(__name__)
 # stuck on or unavailable past this leaves the device as it is.
 RELEASE_TIMEOUT = "04:00:00"
 
-DB_PATH = "/config/nova/patterns.db"
+DB_PATH: Optional[str] = None  # override; None resolves via paths.py
+
+
+def _db_path() -> str:
+    from .. import paths  # lazily: the package reaches root modules only at call time
+    return DB_PATH or paths.patterns_db()
+
+
 MIN_DAYS = 7           # Don't analyze until we have this much data
 
 
@@ -700,8 +707,8 @@ class SuggestionStore:
     """SQL access to the suggestions table. Stateless: every call opens and
     closes its own connection in the calling thread."""
 
-    def __init__(self, db_path: str = DB_PATH):
-        self._db = db_path
+    def __init__(self, db_path: Optional[str] = None):
+        self._db = db_path or _db_path()
 
     def _connect(self) -> Optional[sqlite3.Connection]:
         try:

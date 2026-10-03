@@ -42,6 +42,7 @@ from .models import (
 from .recorder_time import recorder_epoch
 from .suggestions import (  # DB_PATH / MIN_DAYS are shared with stats
     DB_PATH,
+    _db_path,
     MIN_DAYS,
     SuggestionStore,
     _name_for,
@@ -437,7 +438,7 @@ class PatternAnalyzer:
         self._last_analysis: float = 0.0
         self._last_result: dict = {}
         self._last_patterns: list[DetectedPattern] = []
-        self._db = DB_PATH
+        self._db = _db_path()
         # entity_id -> friendly name, read on the event loop at the start of
         # each analysis (the detectors run in an executor, away from states).
         self._names: dict = {}

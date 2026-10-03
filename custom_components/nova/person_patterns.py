@@ -21,10 +21,15 @@ from datetime import datetime
 from typing import Optional
 
 from .persistence import sqlite as _store
+from . import paths
 
 _LOGGER = logging.getLogger(__name__)
 
-DB_PATH = "/config/nova/patterns.db"
+DB_PATH: Optional[str] = None  # override; None resolves via paths.py
+
+
+def _db_path() -> str:
+    return DB_PATH or paths.patterns_db()
 
 
 def _normalize(person: str) -> str:
@@ -35,9 +40,10 @@ def _normalize(person: str) -> str:
         return str(person or "")
 
 
-def ensure_schema(db_path: str = DB_PATH) -> None:
+def ensure_schema(db_path: Optional[str] = None) -> None:
     """Create the person_patterns table + index if missing. Idempotent.
     (cognitive_core also creates it at init; this keeps the module standalone.)"""
+    db_path = db_path or _db_path()
     try:
         with sqlite3.connect(db_path) as conn:
             _store.ensure(conn, "person_patterns")
@@ -47,7 +53,7 @@ def ensure_schema(db_path: str = DB_PATH) -> None:
 
 def store(person: str, pattern_type: str, description: str, *,
           data: Optional[dict] = None, confidence: float = 0.0,
-          occurrences: int = 1, db_path: str = DB_PATH,
+          occurrences: int = 1, db_path: Optional[str] = None,
           key: Optional[str] = None) -> bool:
     """Upsert a person routine. With a `key` (cognitive.routines.routine_key)
     the routine is found by (person, pattern_type, routine_key), so the same
@@ -56,6 +62,7 @@ def store(person: str, pattern_type: str, description: str, *,
     True on success. Never raises."""
     if not person:
         return False
+    db_path = db_path or _db_path()
     person = _normalize(person)
     try:
         ensure_schema(db_path)
@@ -99,9 +106,10 @@ def store(person: str, pattern_type: str, description: str, *,
         return False
 
 
-def read(person: Optional[str] = None, db_path: str = DB_PATH) -> list[dict]:
+def read(person: Optional[str] = None, db_path: Optional[str] = None) -> list[dict]:
     """Read stored routines, optionally for one (normalized) person, ordered by
     confidence. Returns a list of dicts (column-keyed). Never raises."""
+    db_path = db_path or _db_path()
     try:
         with sqlite3.connect(db_path) as conn:
             conn.row_factory = sqlite3.Row

@@ -1719,6 +1719,7 @@ from pathlib import Path as _Path
 import threading as _threading
 import queue as _queue
 import json as _json_mod
+from . import paths
 
 _DEBUG_LOG: _deque = _deque(maxlen=500)
 # A dedicated buffer for conversation + reply-routing entries only, so a burst of
@@ -1726,7 +1727,11 @@ _DEBUG_LOG: _deque = _deque(maxlen=500)
 # the reply-delivery decisions before they're read from diagnostics.
 _CONV_CATEGORIES = frozenset({"CONV", "LOCAL", "AGENT", "REPLY", "ROUTE", "OFFLINE", "ERROR"})
 _CONV_LOG: _deque = _deque(maxlen=80)
-_LOG_FILE = _Path("/config/nova/nova.log")
+_LOG_FILE: Optional[_Path] = None  # override; None resolves via paths.py
+
+
+def _log_file() -> _Path:
+    return _LOG_FILE or _Path(paths.nova_path("nova.log"))
 
 
 def _read_integration_version() -> str:
@@ -1764,13 +1769,13 @@ def _log_writer_loop() -> None:
         try:
             if entry is None:
                 continue
-            _LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-            with open(_LOG_FILE, "a") as f:
+            _log_file().parent.mkdir(parents=True, exist_ok=True)
+            with open(_log_file(), "a") as f:
                 f.write(f"{entry['date']} {entry['ts']} [{entry['cat']}] {entry['msg']}\n")
             # Rotate if file gets too large (>2MB)
-            if _LOG_FILE.stat().st_size > 2_000_000:
-                lines = _LOG_FILE.read_text().splitlines()
-                _LOG_FILE.write_text("\n".join(lines[-2000:]) + "\n")
+            if _log_file().stat().st_size > 2_000_000:
+                lines = _log_file().read_text().splitlines()
+                _log_file().write_text("\n".join(lines[-2000:]) + "\n")
         except Exception:
             pass
         finally:
@@ -1804,9 +1809,9 @@ def _persist_log_entry(entry: dict) -> None:
 def _load_persisted_log() -> None:
     """Load recent entries from persistent log on startup."""
     try:
-        if _LOG_FILE.exists():
+        if _log_file().exists():
             import re
-            lines = _LOG_FILE.read_text().splitlines()[-200:]
+            lines = _log_file().read_text().splitlines()[-200:]
             for line in lines:
                 m = re.match(r"(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}) \[(\w+)\] (.+)", line)
                 if m:

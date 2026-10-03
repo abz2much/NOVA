@@ -240,7 +240,7 @@ async def fetch_recent(hass, *, limit: int = 5, unread_only: bool = False,
     password = await ha_secrets.async_get_secret(hass, secret_key, "")
     if not password:
         return {"error": (f"no IMAP password — add '{secret_key}' to "
-                          f"/config/secrets.yaml")}
+                          f"{ha_secrets._secrets_path()}")}
 
     try:
         return await hass.async_add_executor_job(

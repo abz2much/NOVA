@@ -34,11 +34,24 @@ from pathlib import Path
 from typing import Optional
 
 from .persistence import sqlite as _store
+from . import paths
 
 _LOGGER = logging.getLogger(__name__)
 
-MEMORY_DIR = "/config/nova_memory"
-DB_PATH = "/config/nova.db"
+MEMORY_DIR: Optional[str] = None  # override; None resolves via paths.py
+
+
+def _memory_dir() -> str:
+    return MEMORY_DIR or paths.memory_dir()
+
+
+DB_PATH: Optional[str] = None  # override; None resolves via paths.py
+
+
+def _db_path() -> str:
+    return DB_PATH or paths.nova_db()
+
+
 _chromadb_available = False
 _collection = None
 _fts_available = False
@@ -51,14 +64,14 @@ def _init_chromadb():
     global _chromadb_available, _collection
     try:
         import chromadb
-        os.makedirs(MEMORY_DIR, exist_ok=True)
-        client = chromadb.PersistentClient(path=MEMORY_DIR)
+        os.makedirs(_memory_dir(), exist_ok=True)
+        client = chromadb.PersistentClient(path=_memory_dir())
         _collection = client.get_or_create_collection(
             name="nova_memory",
             metadata={"hnsw:space": "cosine"},
         )
         _chromadb_available = True
-        _LOGGER.info("Nova memory: ChromaDB initialized at %s", MEMORY_DIR)
+        _LOGGER.info("Nova memory: ChromaDB initialized at %s", _memory_dir())
         return True
     except ImportError:
         _LOGGER.debug("Nova memory: ChromaDB not available, using FTS5 fallback")
@@ -75,7 +88,7 @@ def _init_fts():
     global _fts_available
     try:
         import sqlite3
-        db_path = DB_PATH
+        db_path = _db_path()
         conn = sqlite3.connect(db_path)
         _store.ensure(conn, "memory_fts")
         conn.commit()
@@ -152,7 +165,7 @@ def store_memory(
     if _fts_available:
         try:
             import sqlite3, json
-            conn = sqlite3.connect(DB_PATH)
+            conn = sqlite3.connect(_db_path())
             conn.execute(
                 "INSERT INTO memory_fts (content, metadata, timestamp) VALUES (?, ?, ?)",
                 (text, json.dumps(metadata), ts),
@@ -260,7 +273,7 @@ def search_memory(
     if _fts_available:
         try:
             import sqlite3, json
-            conn = sqlite3.connect(DB_PATH)
+            conn = sqlite3.connect(_db_path())
             conn.row_factory = sqlite3.Row
             # FTS5 MATCH query
             query_clean = " OR ".join(query.split()[:8])  # limit query terms
@@ -354,7 +367,7 @@ def _find_sibling(
     if _fts_available:
         try:
             import sqlite3, json
-            conn = sqlite3.connect(DB_PATH)
+            conn = sqlite3.connect(_db_path())
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 "SELECT content, metadata FROM memory_fts WHERE metadata LIKE ? ESCAPE '\\'",
@@ -501,7 +514,7 @@ def get_memory_stats() -> dict:
     elif _fts_available:
         try:
             import sqlite3
-            conn = sqlite3.connect(DB_PATH)
+            conn = sqlite3.connect(_db_path())
             row = conn.execute("SELECT COUNT(*) FROM memory_fts").fetchone()
             conn.close()
             stats["backend"] = "fts5"

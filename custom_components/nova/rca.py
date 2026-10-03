@@ -32,11 +32,22 @@ import re
 import sqlite3
 from datetime import datetime, timedelta
 from typing import Optional
+from . import paths
 
 _LOGGER = logging.getLogger(__name__)
 
-PATTERNS_DB = "/config/nova/patterns.db"
-ACTIVITY_DB = "/config/nova/conversations.db"
+PATTERNS_DB: Optional[str] = None  # override; None resolves via paths.py
+
+
+def _patterns_db() -> str:
+    return PATTERNS_DB or paths.patterns_db()
+
+
+ACTIVITY_DB: Optional[str] = None  # override; None resolves via paths.py
+
+
+def _activity_db() -> str:
+    return ACTIVITY_DB or paths.conversations_db()
 
 DEFAULT_WINDOW_SECS = 1800     # look back 30 min before the event
 AFTER_WINDOW_SECS = 120        # small tail after, for context
@@ -108,9 +119,11 @@ def _focal_event(patterns_db: str, entity_id: str,
 
 def gather(entity_id: str, event_time: Optional[str] = None,
            window_secs: int = DEFAULT_WINDOW_SECS,
-           patterns_db: str = PATTERNS_DB,
-           activity_db: str = ACTIVITY_DB) -> dict:
+           patterns_db: Optional[str] = None,
+           activity_db: Optional[str] = None) -> dict:
     """All evidence around the focal event. Never raises."""
+    patterns_db = patterns_db or _patterns_db()
+    activity_db = activity_db or _activity_db()
     focal = _focal_event(patterns_db, entity_id, event_time)
     if focal is None and event_time:
         focal = {"entity_id": entity_id, "timestamp": event_time,
@@ -310,8 +323,8 @@ def _timeline(ev: dict, names: Optional[dict] = None) -> list[dict]:
 
 def analyze(entity_id: str, event_time: Optional[str] = None,
             window_secs: int = DEFAULT_WINDOW_SECS,
-            patterns_db: str = PATTERNS_DB,
-            activity_db: str = ACTIVITY_DB,
+            patterns_db: Optional[str] = None,
+            activity_db: Optional[str] = None,
             names: Optional[dict] = None) -> dict:
     """Full root-cause analysis for an entity's (latest or specified) change.
     `names` (see entity_names) words the summary, causes and timeline with

@@ -326,7 +326,7 @@ The reasoning pipeline is layered for resilience and cost: local templates, then
 
 ## Privacy and your data
 
-Nova is local-first. Everything it learns and stores lives inside your Home Assistant instance, mostly under `/config/nova/`. There is no Nova cloud and no telemetry — nothing is ever sent anywhere on Nova's own initiative.
+Nova is local-first. Everything it learns and stores lives inside your Home Assistant instance, mostly under the `nova/` folder in Home Assistant's config directory (`/config/nova/` on HA OS and Container). Nova follows whatever config directory Home Assistant reports, so it never writes outside it. There is no Nova cloud and no telemetry — nothing is ever sent anywhere on Nova's own initiative.
 
 What's stored, and where:
 

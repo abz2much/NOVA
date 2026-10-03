@@ -34,10 +34,17 @@ from datetime import datetime, timedelta
 from typing import Awaitable, Callable, Optional
 
 from .persistence import sqlite as _store
+from . import paths
 
 _LOGGER = logging.getLogger(__name__)
 
-DB_PATH = "/config/nova/patterns.db"
+DB_PATH: Optional[str] = None  # override; None resolves via paths.py
+
+
+def _db_path() -> str:
+    return DB_PATH or paths.patterns_db()
+
+
 MAX_ACTIVE = 10            # concurrent outcomes Nova may pursue
 MAX_RUNS = 120             # per-goal engagement budget (runaway guard)
 DEFAULT_INTERVAL_MIN = 30  # re-engage cadence when the model doesn't set one
@@ -78,7 +85,7 @@ def create(title: str, outcome: str, steps: Optional[list] = None, *,
            now: Optional[datetime] = None,
            db_path: Optional[str] = None) -> dict:
     """Open a new goal. Returns the row, or an 'error' dict — never raises."""
-    db_path = db_path or DB_PATH
+    db_path = db_path or _db_path()
     outcome = (outcome or "").strip()
     title = (title or outcome[:60] or "").strip()
     if not outcome:
@@ -120,7 +127,7 @@ def create(title: str, outcome: str, steps: Optional[list] = None, *,
 
 
 def get(goal_id: int, *, db_path: Optional[str] = None) -> Optional[dict]:
-    db_path = db_path or DB_PATH
+    db_path = db_path or _db_path()
     try:
         with _connect(db_path) as conn:
             r = conn.execute("SELECT * FROM goals WHERE id=?",
@@ -131,7 +138,7 @@ def get(goal_id: int, *, db_path: Optional[str] = None) -> Optional[dict]:
 
 
 def active(*, db_path: Optional[str] = None) -> list[dict]:
-    db_path = db_path or DB_PATH
+    db_path = db_path or _db_path()
     try:
         with _connect(db_path) as conn:
             rows = conn.execute(
@@ -144,7 +151,7 @@ def active(*, db_path: Optional[str] = None) -> list[dict]:
 
 def due(*, now: Optional[datetime] = None,
         db_path: Optional[str] = None) -> list[dict]:
-    db_path = db_path or DB_PATH
+    db_path = db_path or _db_path()
     try:
         with _connect(db_path) as conn:
             rows = conn.execute(
@@ -161,7 +168,7 @@ def recent(*, limit: int = 20, db_path: Optional[str] = None) -> list[dict]:
     """All goals regardless of status (active + done/failed/cancelled),
     most recently updated first — the panel's history view. active() only
     ever returns active ones, which can't show what Nova just finished."""
-    db_path = db_path or DB_PATH
+    db_path = db_path or _db_path()
     try:
         with _connect(db_path) as conn:
             rows = conn.execute(
@@ -180,7 +187,7 @@ def update(goal_id: int, *, step_updates: Optional[list] = None,
            db_path: Optional[str] = None) -> dict:
     """Advance a goal: mark steps, set the next engagement, log progress, or
     close it out. The headless runs are *required* to call this. Never raises."""
-    db_path = db_path or DB_PATH
+    db_path = db_path or _db_path()
     t = _now(now)
     g = get(goal_id, db_path=db_path)
     if g is None:
@@ -226,7 +233,7 @@ def update(goal_id: int, *, step_updates: Optional[list] = None,
 
 
 def cancel(goal_id: int, *, db_path: Optional[str] = None) -> bool:
-    db_path = db_path or DB_PATH
+    db_path = db_path or _db_path()
     try:
         with _connect(db_path) as conn:
             cur = conn.execute(
@@ -242,7 +249,7 @@ def delete(goal_id: int, *, db_path: Optional[str] = None) -> bool:
     """Permanently remove a goal row (any status). Unlike cancel(), which keeps
     the row for history, this hard-deletes it — for tidying the goals list.
     Returns True if a row was removed. Never raises."""
-    db_path = db_path or DB_PATH
+    db_path = db_path or _db_path()
     try:
         with _connect(db_path) as conn:
             cur = conn.execute("DELETE FROM goals WHERE id=?", (int(goal_id),))
@@ -255,7 +262,7 @@ def _arm(goal_id: int, when: datetime, runs: int, *,
          db_path: Optional[str] = None) -> None:
     """Pre-arm the next engagement + count the run (crash-safe: set BEFORE the
     run so a mid-run failure can never hot-loop the goal)."""
-    db_path = db_path or DB_PATH
+    db_path = db_path or _db_path()
     try:
         with _connect(db_path) as conn:
             conn.execute("UPDATE goals SET next_check_ts=?, runs=? WHERE id=?",
@@ -310,7 +317,7 @@ async def async_process_due(
     """Engage every due goal through the headless agent. Quiet while a goal is
     active; returns announce actions only for goals that FINISH (done/failed).
     Never raises."""
-    db_path = db_path or DB_PATH
+    db_path = db_path or _db_path()
     actions: list[dict] = []
     t = _now(now)
     try:

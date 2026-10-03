@@ -136,7 +136,7 @@ async def test_db_path_resolved_through_hass_config_not_hardcoded(hass):
     from custom_components.nova import spoken_history
 
     await _setup_nova(hass)
-    assert spoken_history._DEFAULT_DB == hass.config.path("nova", "conversations.db")
+    assert spoken_history._resolve(None) == hass.config.path("nova", "conversations.db")
 
 
 async def test_setup_succeeds_when_spoken_history_hydrate_fails(hass, monkeypatch):

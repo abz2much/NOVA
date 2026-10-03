@@ -220,3 +220,23 @@ async def test_setup_failure_before_resource_acquisition_leaves_no_state(hass):
     await hass.async_block_till_done()
     assert _has_runtime(entry)
     assert DOMAIN not in hass.data
+
+
+async def test_nova_stores_live_under_this_instances_config_dir(hass):
+    """PHACC's config dir is not /config: Nova must resolve every store
+    against hass.config.path(), never the literal /config."""
+    from custom_components.nova import goals, nova_config, paths, spoken_history
+
+    assert hass.config.config_dir != "/config"
+    assert await async_setup_component(hass, "homeassistant", {})
+    entry = _make_entry()
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    root = hass.config.path()
+    assert paths.config_dir() == root
+    assert str(nova_config._config_path()) == hass.config.path("nova", "config.json")
+    assert goals._db_path() == hass.config.path("nova", "patterns.db")
+    assert spoken_history._resolve(None) == hass.config.path("nova", "conversations.db")
+    assert os.path.isfile(hass.config.path("nova", "config.json"))

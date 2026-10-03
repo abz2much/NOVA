@@ -33,11 +33,16 @@ import time
 from pathlib import Path
 from typing import Optional
 
-_DEFAULT_DB = "/config/nova/patterns.db"
+_DEFAULT_DB: Optional[str] = None  # override; None resolves via paths.py
+
+
+def _default_db() -> str:
+    from .. import paths  # lazily: the package reaches root modules only at call time
+    return _DEFAULT_DB or paths.patterns_db()
 
 
 def _resolve(db_path: Optional[str]) -> str:
-    return db_path or _DEFAULT_DB
+    return db_path or _default_db()
 
 
 def _connect(db_path: str) -> sqlite3.Connection:

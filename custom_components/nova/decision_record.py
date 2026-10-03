@@ -30,8 +30,13 @@ from pathlib import Path
 from typing import Optional
 
 from .persistence import sqlite as _store
+from . import paths
 
-_DEFAULT_DB = "/config/nova/decisions.db"
+_DEFAULT_DB: Optional[str] = None  # override; None resolves via paths.py
+
+
+def _default_db() -> str:
+    return _DEFAULT_DB or paths.nova_path("decisions.db")
 
 # Recognised outcome verdicts (set by the outcome-capture layer in a later phase).
 OUTCOME_GOOD = "good"            # the decision was useful / acted upon
@@ -40,7 +45,7 @@ OUTCOME_WRONG = "wrong"          # false alarm / incorrect
 
 
 def _resolve(db_path: Optional[str]) -> str:
-    return db_path or _DEFAULT_DB
+    return db_path or _default_db()
 
 
 def _connect(db_path: str) -> sqlite3.Connection:

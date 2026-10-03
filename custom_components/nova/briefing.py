@@ -25,10 +25,16 @@ from .database import get_recent_messages, save_message
 from .directive_helper import build_system_prompt
 from .presence import get_presence_summary
 from .tts_helper import async_announce
+from . import paths
+from typing import Optional
 
 _LOGGER = logging.getLogger(__name__)
 
-CONVERSATIONS_DB = "/config/nova/conversations.db"   # sentinel events (read only here)
+CONVERSATIONS_DB: Optional[str] = None  # override; None resolves via paths.py; sentinel events (read only here)
+
+
+def _conversations_db() -> str:
+    return CONVERSATIONS_DB or paths.conversations_db()
 
 BRIEFING_MODEL = "openai/gpt-oss-120b"
 
@@ -117,7 +123,7 @@ def _gather_overnight_events(hass: HomeAssistant, hours: int = 12) -> list[str]:
     """Sentinel events from the database in the last N hours."""
     import sqlite3
     from pathlib import Path
-    db = Path(CONVERSATIONS_DB)
+    db = Path(_conversations_db())
     events = []
     try:
         if not db.exists():

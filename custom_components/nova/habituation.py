@@ -23,10 +23,17 @@ import fnmatch
 import logging
 import time
 from typing import Optional
+from . import paths
 
 _LOGGER = logging.getLogger(__name__)
 
-STATE_FILE = "/config/nova/habituation.json"
+STATE_FILE: Optional[str] = None  # override; None resolves via paths.py
+
+
+def _state_file() -> str:
+    return STATE_FILE or paths.nova_path("habituation.json")
+
+
 QUIET_AFTER_DAYS = 3
 QUIET_NOTE = "This has come up three days running, so I'll stop mentioning it."
 
@@ -46,21 +53,21 @@ def _load() -> dict:
         _state = {}
         try:
             import json
-            with open(STATE_FILE, encoding="utf-8") as f:
+            with open(_state_file(), encoding="utf-8") as f:
                 data = json.load(f)
             if isinstance(data, dict):
                 _state = {str(k): v for k, v in data.items() if isinstance(v, dict)}
         except FileNotFoundError:
             pass
         except Exception as exc:
-            _LOGGER.debug("habituation: could not read %s: %s", STATE_FILE, exc)
+            _LOGGER.debug("habituation: could not read %s: %s", _state_file(), exc)
     return _state
 
 
 def _save() -> None:
     try:
         from .persistence.files import write_json_atomic
-        write_json_atomic(STATE_FILE, _load(), indent=2)
+        write_json_atomic(_state_file(), _load(), indent=2)
     except Exception as exc:
         _LOGGER.warning("habituation: could not save: %s", exc)
 

@@ -1,3 +1,15 @@
+## [8.5.0] — Nova follows Home Assistant's config directory
+
+**Changed**
+- Nova no longer hard codes `/config` anywhere. A new `paths.py` takes Home Assistant's own config directory at setup, and every store (databases, state files, logs, documents, secrets) is found through it when used.
+- Shared files such as `patterns.db` and `conversations.db` are named in one place instead of many.
+- Messages that show a path now show the real one: the broken config.json notice, the IMAP password hint, the documents folder in the panel, and the documents tool text the AI model sees.
+
+**Caveats**
+- On HA OS and HA Container the config directory is `/config`, so every file stays exactly where it was. Nothing moves and no data is migrated.
+- Installs whose config directory isn't `/config` now keep Nova's files in that directory, as they always should have.
+- Hard refresh the page (Ctrl+Shift+R) after updating.
+
 ## [8.4.0] — Welcome card: setup checks and "Say hello"
 
 **Added**

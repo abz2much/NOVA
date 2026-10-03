@@ -32,14 +32,27 @@ import json
 from datetime import timedelta
 from pathlib import Path
 from typing import Optional
+from . import paths
 
 _LOGGER = logging.getLogger(__name__)
 
 _DEFAULT_NOTIFY_IMAGE_TTL_MIN = 60.0
 
 # Private snapshot dir — never under /config/www (see module docstring).
-SNAPSHOT_DIR = "/config/nova/intrusion"
-_LEGACY_SNAPSHOT_DIR = "/config/www/nova/intrusion"  # pre-v7.102.0 location
+SNAPSHOT_DIR: Optional[str] = None  # override; None resolves via paths.py
+
+
+def _snapshot_dir() -> str:
+    return SNAPSHOT_DIR or paths.nova_path("intrusion")
+
+
+_LEGACY_SNAPSHOT_DIR: Optional[str] = None  # override; None resolves via paths.py; pre-v7.102.0 location
+
+
+def _legacy_snapshot_dir() -> str:
+    return _LEGACY_SNAPSHOT_DIR or paths.config_path("www", "nova", "intrusion")
+
+
 _MAX_SNAPSHOTS = 40           # keep the last N, prune older
 
 # Call-off state (module-level; the investigation itself lives in SafetyManager)
@@ -82,11 +95,11 @@ async def capture_snapshot(hass, camera_entity: str,
         content = getattr(image, "content", None)
         if not content:
             return None
-        os.makedirs(SNAPSHOT_DIR, exist_ok=True)
+        os.makedirs(_snapshot_dir(), exist_ok=True)
         ts = int(time.time())
         slug = camera_entity.split(".", 1)[-1]
         fname = f"{tag}_{slug}_{ts}.jpg"
-        path = os.path.join(SNAPSHOT_DIR, fname)
+        path = os.path.join(_snapshot_dir(), fname)
         await hass.async_add_executor_job(_write_bytes, path, content)
         _prune_old()
         info = {
@@ -117,11 +130,11 @@ def _read_b64(path: str) -> Optional[str]:
     try:
         if not path:
             return None
-        real_dir = os.path.realpath(SNAPSHOT_DIR)
+        real_dir = os.path.realpath(_snapshot_dir())
         real_path = os.path.realpath(path)
         if os.path.commonpath([real_dir, real_path]) != real_dir:
             _LOGGER.warning("intrusion: refused to read snapshot outside %s: %s",
-                            SNAPSHOT_DIR, path)
+                            _snapshot_dir(), path)
             return None
         with open(real_path, "rb") as f:
             return base64.b64encode(f.read()).decode("ascii")
@@ -242,8 +255,8 @@ async def get_notification_image_url(hass, snapshot_path: str) -> Optional[str]:
 def _prune_old() -> None:
     try:
         files = [
-            os.path.join(SNAPSHOT_DIR, f)
-            for f in os.listdir(SNAPSHOT_DIR)
+            os.path.join(_snapshot_dir(), f)
+            for f in os.listdir(_snapshot_dir())
             if f.endswith(".jpg")
         ]
         files.sort(key=lambda p: os.path.getmtime(p), reverse=True)
@@ -267,14 +280,14 @@ def migrate_legacy_snapshots() -> dict:
     moved = 0
     skipped = 0
     try:
-        if not os.path.isdir(_LEGACY_SNAPSHOT_DIR):
+        if not os.path.isdir(_legacy_snapshot_dir()):
             return {"moved": 0, "skipped": 0}
-        os.makedirs(SNAPSHOT_DIR, exist_ok=True)
-        for fname in os.listdir(_LEGACY_SNAPSHOT_DIR):
+        os.makedirs(_snapshot_dir(), exist_ok=True)
+        for fname in os.listdir(_legacy_snapshot_dir()):
             if not fname.endswith(".jpg"):
                 continue
-            src = os.path.join(_LEGACY_SNAPSHOT_DIR, fname)
-            dst = os.path.join(SNAPSHOT_DIR, fname)
+            src = os.path.join(_legacy_snapshot_dir(), fname)
+            dst = os.path.join(_snapshot_dir(), fname)
             try:
                 if os.path.exists(dst):
                     skipped += 1
@@ -290,15 +303,15 @@ def migrate_legacy_snapshots() -> dict:
             changed = False
             for ev in _log:
                 p = ev.get("snapshot_path") or ""
-                if p.startswith(_LEGACY_SNAPSHOT_DIR):
-                    ev["snapshot_path"] = p.replace(_LEGACY_SNAPSHOT_DIR, SNAPSHOT_DIR, 1)
+                if p.startswith(_legacy_snapshot_dir()):
+                    ev["snapshot_path"] = p.replace(_legacy_snapshot_dir(), _snapshot_dir(), 1)
                     changed = True
             if changed:
                 _save_log()
             _LOGGER.warning(
                 "Nova: migrated %d intrusion snapshot(s) from the old, "
                 "unauthenticated %s to %s (%d left in place)%s",
-                moved, _LEGACY_SNAPSHOT_DIR, SNAPSHOT_DIR, skipped,
+                moved, _legacy_snapshot_dir(), _snapshot_dir(), skipped,
                 " — remaining legacy files were left untouched" if skipped else "",
             )
     except Exception as exc:
@@ -401,7 +414,13 @@ def status() -> dict:
 # alerts regardless of how many times a pattern was called a false alarm. The
 # learning only damps the noisy, unconfirmed path.
 
-LOG_PATH = Path("/config/nova/intrusion_log.json")
+LOG_PATH: Optional[Path] = None  # override; None resolves via paths.py
+
+
+def _log_path() -> Path:
+    return LOG_PATH or Path(paths.nova_path("intrusion_log.json"))
+
+
 _MAX_LOG = 200                 # keep the last N events
 _LEARN_WINDOW = 30 * 86400.0   # labels older than this stop counting
 _LEARN_MIN_FALSE = 3           # this many false labels ⇒ damp the weak alerts
@@ -416,8 +435,8 @@ def _load_log() -> list:
         return _log
     _log_loaded = True
     try:
-        if LOG_PATH.exists():
-            with open(LOG_PATH, "r", encoding="utf-8") as f:
+        if _log_path().exists():
+            with open(_log_path(), "r", encoding="utf-8") as f:
                 data = json.load(f)
             if isinstance(data, list):
                 _log = data[-_MAX_LOG:]
@@ -430,8 +449,8 @@ def _load_log() -> list:
 def _save_log() -> None:
     """Persist the event log. Never raises."""
     try:
-        LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with open(LOG_PATH, "w", encoding="utf-8") as f:
+        _log_path().parent.mkdir(parents=True, exist_ok=True)
+        with open(_log_path(), "w", encoding="utf-8") as f:
             json.dump(_log[-_MAX_LOG:], f, indent=2, default=str)
     except Exception as exc:
         _LOGGER.debug("intrusion log: save failed: %s", exc)

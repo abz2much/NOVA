@@ -28,10 +28,15 @@ import time
 from typing import Optional
 
 from .persistence import sqlite as _store
+from . import paths
 
 _LOGGER = logging.getLogger(__name__)
 
-DB_PATH = "/config/nova/knowledge.db"
+DB_PATH: Optional[str] = None  # override; None resolves via paths.py
+
+
+def _db_path() -> str:
+    return DB_PATH or paths.nova_path("knowledge.db")
 
 KINDS = ("fact", "preference", "event", "profile")
 SOURCES = ("stated", "observed", "inferred")
@@ -48,7 +53,7 @@ _STOPWORDS = {
 
 def _connect() -> Optional[sqlite3.Connection]:
     try:
-        conn = _store.connect(DB_PATH, timeout=10)
+        conn = _store.connect(_db_path(), timeout=10)
         _store.ensure(conn, "facts", "fact_vectors")
         conn.commit()
         return conn

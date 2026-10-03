@@ -8,10 +8,15 @@ from pathlib import Path
 from typing import Optional
 
 from .persistence import sqlite as _store
+from . import paths
 
 _LOGGER = logging.getLogger(__name__)
 
-DB_PATH = Path("/config/nova/conversations.db")
+DB_PATH: Optional[Path] = None  # override; None resolves via paths.py
+
+
+def _db_path() -> Path:
+    return DB_PATH or Path(paths.conversations_db())
 
 _last_error: Optional[str] = None   # last connect/schema failure, for diagnostics
 
@@ -19,7 +24,7 @@ _last_error: Optional[str] = None   # last connect/schema failure, for diagnosti
 def _connect() -> sqlite3.Connection:
     global _last_error
     try:
-        conn = _store.connect(DB_PATH)
+        conn = _store.connect(_db_path())
         _store.ensure(conn, "conversations")
         conn.commit()
         _last_error = None

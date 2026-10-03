@@ -377,7 +377,7 @@ def _check_database(hass) -> dict:
         out["detail"] = "database module unavailable"
         return out
     try:
-        exists = database.DB_PATH.exists()
+        exists = database._db_path().exists()
     except Exception:
         exists = False
     if not exists:

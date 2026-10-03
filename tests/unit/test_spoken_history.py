@@ -168,4 +168,4 @@ def test_configure_points_default_db_at_hass_config_path(sh):
     class _FakeHass:
         config = _FakeConfig()
     sh.configure(_FakeHass())
-    assert sh._DEFAULT_DB == "/fake/config/nova/conversations.db"
+    assert sh._resolve(None) == "/fake/config/nova/conversations.db"

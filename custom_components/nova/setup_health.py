@@ -276,7 +276,7 @@ def _check_persistence(hass) -> dict:
     out = {"name": "Persistence", "key": "persistence", "status": _OK, "detail": ""}
     try:
         from . import nova_config
-        cfg_dir = nova_config.CONFIG_PATH.parent
+        cfg_dir = nova_config._config_path().parent
         cfg_dir.mkdir(parents=True, exist_ok=True)
         probe = cfg_dir / ".setup_health_probe"
         probe.write_text("ok")

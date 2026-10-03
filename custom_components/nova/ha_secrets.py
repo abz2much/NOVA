@@ -22,10 +22,16 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 from typing import Any
+from . import paths
+from typing import Optional
 
 _LOGGER = logging.getLogger(__name__)
 
-SECRETS_PATH = Path("/config/secrets.yaml")
+SECRETS_PATH: Optional[Path] = None  # override; None resolves via paths.py
+
+
+def _secrets_path() -> Path:
+    return SECRETS_PATH or Path(paths.config_path("secrets.yaml"))
 
 
 _SECRETS_CACHE = None            # cached read of the default SECRETS_PATH
@@ -50,7 +56,7 @@ def _read_secrets(path: Path | None = None, force: bool = False) -> dict:
     global _SECRETS_CACHE
     use_default = path is None
     if path is None:
-        path = SECRETS_PATH
+        path = _secrets_path()
     if (use_default and not force and _SECRETS_CACHE is not None
             and _SECRETS_CACHE[0] == path):
         return _SECRETS_CACHE[1]
@@ -241,7 +247,7 @@ def set_secret_sync(key: str, value, path: Path | None = None) -> bool:
     import tempfile
     try:
         if path is None:
-            path = SECRETS_PATH
+            path = _secrets_path()
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         text = path.read_text() if path.exists() else ""
@@ -289,7 +295,7 @@ def delete_secret_sync(key: str, path: Path | None = None) -> bool:
     import tempfile
     try:
         if path is None:
-            path = SECRETS_PATH
+            path = _secrets_path()
         path = Path(path)
         if not path.exists():
             return True

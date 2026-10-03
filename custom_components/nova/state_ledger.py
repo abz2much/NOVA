@@ -20,18 +20,27 @@ import logging
 import os
 import time
 from threading import Lock
+from typing import Optional
 
 _LOGGER = logging.getLogger(__name__)
 
-DEFAULT_LEDGER_PATH = "/config/nova/state_ledger.jsonl"
+DEFAULT_LEDGER_PATH: Optional[str] = None  # override; None resolves via paths.py
+
+
+def _default_ledger_path() -> str:
+    # Imported here so this stdlib-only module still loads on its own.
+    from . import paths
+    return DEFAULT_LEDGER_PATH or paths.nova_path("state_ledger.jsonl")
+
+
 MAX_RECORDS = 5000
 
 
 class StateLedger:
     """Append-only write-ahead log for high-stakes device intents."""
 
-    def __init__(self, path: str = DEFAULT_LEDGER_PATH, *, max_records: int = MAX_RECORDS) -> None:
-        self.path = path
+    def __init__(self, path: Optional[str] = None, *, max_records: int = MAX_RECORDS) -> None:
+        self.path = path or _default_ledger_path()
         self.max_records = max_records
         self._lock = Lock()
         self._seq = 0

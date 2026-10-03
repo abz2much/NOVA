@@ -28,10 +28,17 @@ import logging
 import os
 import time
 from typing import Optional
+from . import paths
 
 _LOGGER = logging.getLogger(__name__)
 
-MODE_STATE_PATH = "/config/nova/mode_state.json"
+MODE_STATE_PATH: Optional[str] = None  # override; None resolves via paths.py
+
+
+def _mode_state_path() -> str:
+    return MODE_STATE_PATH or paths.nova_path("mode_state.json")
+
+
 DEFAULT_MODE = "normal"
 
 # Behavior fields a mode may override. A mode dict need only include the fields
@@ -121,8 +128,8 @@ def _load() -> None:
         return
     _loaded = True
     try:
-        if os.path.exists(MODE_STATE_PATH):
-            with open(MODE_STATE_PATH) as f:
+        if os.path.exists(_mode_state_path()):
+            with open(_mode_state_path()) as f:
                 d = json.load(f)
             mode = str(d.get("mode", DEFAULT_MODE)).lower()
             if mode in _all_modes():
@@ -137,11 +144,11 @@ def _load() -> None:
 
 def _persist() -> None:
     try:
-        os.makedirs(os.path.dirname(MODE_STATE_PATH), exist_ok=True)
-        tmp = MODE_STATE_PATH + ".tmp"
+        os.makedirs(os.path.dirname(_mode_state_path()), exist_ok=True)
+        tmp = _mode_state_path() + ".tmp"
         with open(tmp, "w") as f:
             json.dump(_state, f)
-        os.replace(tmp, MODE_STATE_PATH)
+        os.replace(tmp, _mode_state_path())
     except Exception as exc:
         _LOGGER.debug("mode state persist failed: %s", exc)
 

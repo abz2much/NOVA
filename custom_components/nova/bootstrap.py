@@ -31,12 +31,17 @@ import aiohttp
 
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from . import paths
 
 _LOGGER = logging.getLogger(__name__)
 
 SUPERVISOR = "http://supervisor"
 PIPER_DIR = Path("/share/piper")
-MARKER_PATH = Path("/config/nova/.bootstrap_done")
+MARKER_PATH: Optional[Path] = None  # override; None resolves via paths.py
+
+
+def _marker_path() -> Path:
+    return MARKER_PATH or Path(paths.nova_path(".bootstrap_done"))
 
 REQUIRED_ADDONS = {
     "core_piper":        "Piper TTS",
@@ -292,8 +297,8 @@ async def _create_pipeline(hass: HomeAssistant) -> bool:
 
 def _read_marker() -> dict:
     try:
-        if MARKER_PATH.exists():
-            return json.loads(MARKER_PATH.read_text())
+        if _marker_path().exists():
+            return json.loads(_marker_path().read_text())
     except Exception:
         pass
     return {}
@@ -301,8 +306,8 @@ def _read_marker() -> dict:
 
 def _write_marker(version: str, status: dict) -> None:
     try:
-        MARKER_PATH.parent.mkdir(parents=True, exist_ok=True)
-        MARKER_PATH.write_text(json.dumps({"version": version, **status}))
+        _marker_path().parent.mkdir(parents=True, exist_ok=True)
+        _marker_path().write_text(json.dumps({"version": version, **status}))
     except Exception as exc:
         _LOGGER.debug("Nova bootstrap: could not write marker: %s", exc)
 

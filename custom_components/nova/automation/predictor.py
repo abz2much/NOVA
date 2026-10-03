@@ -19,10 +19,19 @@ import logging
 import os
 import time
 from threading import Lock
+from typing import Optional
 
 _LOGGER = logging.getLogger(__name__)
 
-DEFAULT_MATRIX_PATH = "/config/nova/habit_matrix.json"
+DEFAULT_MATRIX_PATH: Optional[str] = None  # override; None resolves via paths.py
+
+
+def _default_matrix_path() -> str:
+    # Imported here so this stdlib-only module still loads on its own.
+    from .. import paths
+    return DEFAULT_MATRIX_PATH or paths.nova_path("habit_matrix.json")
+
+
 DEFAULT_BUCKET_MINUTES = 30
 DEFAULT_THRESHOLD = 0.90
 DEFAULT_LEAD_MINUTES = 7          # how far ahead "pre-emptive" looks (5–10 min)
@@ -39,12 +48,12 @@ class PredictiveHabitMatrix:
 
     def __init__(
         self,
-        path: str = DEFAULT_MATRIX_PATH,
+        path: Optional[str] = None,
         *,
         bucket_minutes: int = DEFAULT_BUCKET_MINUTES,
         max_events: int = MAX_EVENTS,
     ) -> None:
-        self.path = path
+        self.path = path or _default_matrix_path()
         self.bucket_minutes = max(1, int(bucket_minutes))
         self.max_events = max_events
         self._lock = Lock()

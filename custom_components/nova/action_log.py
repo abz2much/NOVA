@@ -57,14 +57,14 @@ import time
 import uuid
 from typing import Any, Callable, Optional, TypeVar
 
+from . import paths
 from .persistence import sqlite as _store
 
 _LOGGER = logging.getLogger(__name__)
 
-# Overridden by configure(hass) with the instance's own reported config
-# directory — this default only applies before configure() has run (e.g.
-# isolated unit tests that never call it), mirroring spoken_history.py.
-_DEFAULT_DB = "/config/nova/conversations.db"
+# Override for the default db; None resolves via paths.py to this
+# instance's own <config>/nova/conversations.db (mirrors spoken_history.py).
+_DEFAULT_DB: Optional[str] = None
 
 # Short and bounded on purpose — see module docstring. Not the 10000ms every
 # other Nova SQLite module uses; this table sits in a device-control await
@@ -184,10 +184,9 @@ _EXECUTION_ALLOWED_PRIOR = {
 
 def configure(hass) -> None:
     """Point the default db path at this Home Assistant instance's own
-    config directory. Call once, early in async_setup_entry, before any
-    action_log access — mirrors spoken_history.py's own configure()."""
-    global _DEFAULT_DB
-    _DEFAULT_DB = hass.config.path("nova", "conversations.db")
+    config directory. paths.py owns that directory; this stays so callers
+    that configure this store on its own keep working."""
+    paths.configure(hass)
 
 
 def new_request_id() -> str:
@@ -200,7 +199,7 @@ def new_request_id() -> str:
 
 
 def _resolve(db_path: Optional[str]) -> str:
-    return db_path or _DEFAULT_DB
+    return db_path or _DEFAULT_DB or paths.conversations_db()
 
 
 def _connect(db_path: str) -> sqlite3.Connection:

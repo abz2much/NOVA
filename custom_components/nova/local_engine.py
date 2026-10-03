@@ -437,8 +437,9 @@ def _find_entity(hass, name_fragment, domain_hint=None):
     # ── Tier 1: Check learned aliases ───────────────────────────────
     # An exact key maps to exactly one entity — always unique.
     try:
+        from . import paths
         from .persistence.files import OK, read_json
-        read = read_json("/config/.nova_learned.json")
+        read = read_json(paths.learned_file())
         if read.status == OK and isinstance(read.value, dict):
             aliases = read.value.get("alias", {})
             if fragment in aliases:
