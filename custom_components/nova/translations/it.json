@@ -2,30 +2,83 @@
   "config": {
     "step": {
       "user": {
-        "title": "Configurazione di Nova",
-        "description": "{note}",
+        "title": "Configura Nova",
+        "description": "Inserisci una chiave per ogni provider di IA che vuoi usare, il tuo indirizzo Ollama, o entrambi. Ogni campo è facoltativo, ma ne serve almeno uno. Nova controlla ciascuno.\n\nChiavi salvate trovate: {saved}. Lascia un campo vuoto per mantenere la sua chiave salvata.",
         "data": {
-          "api_key": "Chiave API (facoltativa)",
-          "llm_base_url": "Indirizzo Ollama (facoltativo)"
+          "groq_api_key": "Chiave API Groq",
+          "anthropic_api_key": "Chiave API Anthropic",
+          "openai_api_key": "Chiave API OpenAI",
+          "gemini_api_key": "Chiave API Gemini",
+          "ollama_base_url": "Indirizzo Ollama"
+        },
+        "data_description": {
+          "ollama_base_url": "Ad esempio {example}"
         }
       },
-      "model": {
-        "title": "Scegli un modello",
-        "description": "Scegli il modello che Nova userà per conversare. Potrai cambiarlo più tardi nel pannello Nova.",
+      "roles": {
+        "title": "Scegli un provider per ogni ruolo",
+        "description": "Scegli quale provider svolge ogni compito. Sono elencati solo i provider che hanno superato il controllo.\n\nChiavi salvate che non hanno funzionato e sono state escluse: {failed}.",
         "data": {
-          "model": "Modello"
+          "conversation": "Conversazione",
+          "classifier": "Classificatore",
+          "reasoning": "Ragionamento",
+          "camera_reasoning": "Ragionamento telecamera",
+          "vision": "Visione"
+        },
+        "data_description": {
+          "conversation": "Parla con te e controlla la tua casa.",
+          "classifier": "Decide se un evento in casa è importante. Viene eseguito spesso.",
+          "reasoning": "Decide cosa fare per un evento e scrive i riepiloghi. Viene eseguito spesso.",
+          "camera_reasoning": "Valuta una scena della telecamera dalla descrizione della visione.",
+          "vision": "Descrive le immagini delle telecamere. Scegli Non ora per configurarlo più tardi."
+        }
+      },
+      "models": {
+        "title": "Scegli un modello per ogni ruolo",
+        "description": "Nova prova ogni modello quando invii. Classificatore e ragionamento vengono eseguiti spesso, quindi con un provider a pagamento scegli per loro un modello piccolo ed economico. Per cambiare provider, riavvia la configurazione: queste schermate non hanno il pulsante indietro.",
+        "data": {
+          "conversation_model": "Modello di conversazione ({conversation_provider})",
+          "classifier_model": "Modello di classificatore ({classifier_provider})",
+          "reasoning_model": "Modello di ragionamento ({reasoning_provider})",
+          "camera_reasoning_model": "Modello di ragionamento telecamera ({camera_reasoning_provider})",
+          "vision_model": "Modello di visione ({vision_provider})"
+        },
+        "data_description": {
+          "vision_model": "Lascia vuoto per configurare la visione più tardi."
         }
       }
     },
     "error": {
-      "need_llm": "Inserisci una chiave API cloud o un URL LLM locale.",
-      "cannot_connect": "Impossibile raggiungere il LLM. Verifica che l'URL/endpoint sia corretto e che il server (es. Ollama) sia in esecuzione.",
-      "invalid_auth": "La chiave API è stata rifiutata. Controlla la chiave e riprova.",
-      "unknown": "Impossibile convalidare la connessione al LLM. Controlla le impostazioni e riprova."
+      "need_llm": "Inserisci almeno una chiave o un indirizzo Ollama.",
+      "no_working_provider": "Nessun provider funzionante per ora: inserisci una chiave o un indirizzo Ollama.",
+      "invalid_auth": "Il provider ha rifiutato questa chiave.",
+      "cannot_connect": "Il controllo non è stato completato. Riprova tra un momento e controlla l'indirizzo se si tratta di Ollama.",
+      "unknown": "Il controllo non è riuscito. Riprova.",
+      "model_required": "Scegli un modello per questo ruolo.",
+      "model_no_pictures": "Questo modello non è riuscito a leggere un'immagine di prova.",
+      "model_not_found": "Questo provider non offre quel modello.",
+      "model_access_denied": "La tua chiave non può usare questo modello.",
+      "test_incomplete": "Il test non è stato completato. Riprova.",
+      "test_failed": "Il test non è riuscito. Il motivo del provider è nel registro di Home Assistant.",
+      "secrets_write_failed": "Nova non è riuscita a salvare le chiavi in secrets.yaml. Controlla che il file sia scrivibile, poi riprova.",
+      "config_write_failed": "Nova non è riuscita a salvare le tue scelte nel suo file di configurazione. Controlla che la cartella nova sia scrivibile, poi riprova."
     },
     "abort": {
       "already_configured": "Nova è già configurato.",
-      "import_failed": "Trovata una configurazione Nova ma nessun LLM utilizzabile (nessuna chiave API né endpoint locale)."
+      "import_failed": "Trovata una configurazione Nova ma nessun LLM utilizzabile (nessuna chiave API né endpoint locale).",
+      "already_in_progress": "La configurazione di Nova è già aperta in un'altra finestra."
+    }
+  },
+  "selector": {
+    "setup_provider": {
+      "options": {
+        "groq": "Groq",
+        "anthropic": "Anthropic",
+        "openai": "OpenAI",
+        "gemini": "Gemini",
+        "ollama": "Ollama",
+        "not_now": "Non ora (configura più tardi)"
+      }
     }
   },
   "options": {

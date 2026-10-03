@@ -3,29 +3,82 @@
     "step": {
       "user": {
         "title": "Nova instellen",
-        "description": "{note}",
+        "description": "Voer een sleutel in voor elke AI-aanbieder die je wilt gebruiken, je Ollama-adres, of beide. Elk veld is optioneel, maar er is er minstens één nodig. Nova controleert ze stuk voor stuk.\n\nOpgeslagen sleutels gevonden: {saved}. Laat een veld leeg om de opgeslagen sleutel te houden.",
         "data": {
-          "api_key": "API-sleutel (optioneel)",
-          "llm_base_url": "Ollama-adres (optioneel)"
+          "groq_api_key": "Groq-API-sleutel",
+          "anthropic_api_key": "Anthropic-API-sleutel",
+          "openai_api_key": "OpenAI-API-sleutel",
+          "gemini_api_key": "Gemini-API-sleutel",
+          "ollama_base_url": "Ollama-adres"
+        },
+        "data_description": {
+          "ollama_base_url": "Bijvoorbeeld {example}"
         }
       },
-      "model": {
-        "title": "Kies een model",
-        "description": "Kies het model dat Nova voor gesprekken gebruikt. Je kunt het later wijzigen in het Nova-paneel.",
+      "roles": {
+        "title": "Kies een aanbieder voor elke rol",
+        "description": "Kies welke aanbieder elke taak doet. Alleen aanbieders die de controle hebben doorstaan staan in de lijst.\n\nOpgeslagen sleutels die niet werkten en zijn weggelaten: {failed}.",
         "data": {
-          "model": "Model"
+          "conversation": "Gesprek",
+          "classifier": "Classificator",
+          "reasoning": "Redeneren",
+          "camera_reasoning": "Camera-redeneren",
+          "vision": "Zicht"
+        },
+        "data_description": {
+          "conversation": "Praat met je en bedient je huis.",
+          "classifier": "Bepaalt of een gebeurtenis in huis ertoe doet. Draait vaak.",
+          "reasoning": "Bepaalt wat te doen bij een gebeurtenis en schrijft overzichten. Draait vaak.",
+          "camera_reasoning": "Beoordeelt een camerabeeld op basis van de zichtbeschrijving.",
+          "vision": "Beschrijft camerabeelden. Kies Nu niet om dit later in te stellen."
+        }
+      },
+      "models": {
+        "title": "Kies een model voor elke rol",
+        "description": "Nova test elk model wanneer je verzendt. Classificator en redeneren draaien vaak, kies dus bij een betaalde aanbieder een klein, goedkoop model. Om een aanbieder te wijzigen, start je de installatie opnieuw: deze schermen hebben geen terugknop.",
+        "data": {
+          "conversation_model": "Gespreksmodel ({conversation_provider})",
+          "classifier_model": "Classificatormodel ({classifier_provider})",
+          "reasoning_model": "Redeneermodel ({reasoning_provider})",
+          "camera_reasoning_model": "Camera-redeneermodel ({camera_reasoning_provider})",
+          "vision_model": "Zichtmodel ({vision_provider})"
+        },
+        "data_description": {
+          "vision_model": "Laat leeg om zicht later in te stellen."
         }
       }
     },
     "error": {
-      "need_llm": "Voer een cloud-API-sleutel of een lokale LLM-URL in.",
-      "cannot_connect": "Kon de LLM niet bereiken. Controleer of de URL/het endpoint klopt en of de server (bijv. Ollama) draait.",
-      "invalid_auth": "De API-sleutel werd geweigerd. Controleer de sleutel en probeer opnieuw.",
-      "unknown": "Kon de LLM-verbinding niet valideren. Controleer de instellingen en probeer opnieuw."
+      "need_llm": "Voer minstens één sleutel of een Ollama-adres in.",
+      "no_working_provider": "Nog geen werkende aanbieder: voer een sleutel of een Ollama-adres in.",
+      "invalid_auth": "De aanbieder weigerde deze sleutel.",
+      "cannot_connect": "De controle kon niet worden voltooid. Probeer het zo opnieuw en controleer het adres als het Ollama is.",
+      "unknown": "De controle is mislukt. Probeer het opnieuw.",
+      "model_required": "Kies een model voor deze rol.",
+      "model_no_pictures": "Dit model kon een testafbeelding niet lezen.",
+      "model_not_found": "Deze aanbieder biedt dat model niet aan.",
+      "model_access_denied": "Je sleutel kan dit model niet gebruiken.",
+      "test_incomplete": "De test kon niet worden voltooid. Probeer het opnieuw.",
+      "test_failed": "De test is mislukt. De reden van de aanbieder staat in het logboek van Home Assistant.",
+      "secrets_write_failed": "Nova kon de sleutels niet opslaan in secrets.yaml. Controleer of het bestand beschrijfbaar is en probeer het opnieuw.",
+      "config_write_failed": "Nova kon je keuzes niet opslaan in het configuratiebestand. Controleer of de map nova beschrijfbaar is en probeer het opnieuw."
     },
     "abort": {
       "already_configured": "Nova is al geconfigureerd.",
-      "import_failed": "Nova-configuratie gevonden maar geen bruikbare LLM (geen API-sleutel en geen lokaal endpoint)."
+      "import_failed": "Nova-configuratie gevonden maar geen bruikbare LLM (geen API-sleutel en geen lokaal endpoint).",
+      "already_in_progress": "De Nova-installatie is al geopend in een ander venster."
+    }
+  },
+  "selector": {
+    "setup_provider": {
+      "options": {
+        "groq": "Groq",
+        "anthropic": "Anthropic",
+        "openai": "OpenAI",
+        "gemini": "Gemini",
+        "ollama": "Ollama",
+        "not_now": "Nu niet (later instellen)"
+      }
     }
   },
   "options": {

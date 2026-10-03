@@ -2,30 +2,83 @@
   "config": {
     "step": {
       "user": {
-        "title": "Configuração do Nova",
-        "description": "{note}",
+        "title": "Configurar a Nova",
+        "description": "Introduza uma chave para cada fornecedor de IA que quer usar, o seu endereço Ollama, ou ambos. Todos os campos são opcionais, mas é preciso pelo menos um. A Nova verifica cada um.\n\nChaves guardadas encontradas: {saved}. Deixe um campo vazio para manter a sua chave guardada.",
         "data": {
-          "api_key": "Chave API (opcional)",
-          "llm_base_url": "Endereço do Ollama (opcional)"
+          "groq_api_key": "Chave API Groq",
+          "anthropic_api_key": "Chave API Anthropic",
+          "openai_api_key": "Chave API OpenAI",
+          "gemini_api_key": "Chave API Gemini",
+          "ollama_base_url": "Endereço Ollama"
+        },
+        "data_description": {
+          "ollama_base_url": "Por exemplo {example}"
         }
       },
-      "model": {
-        "title": "Escolha um modelo",
-        "description": "Escolha o modelo que o Nova vai usar para conversar. Pode alterá-lo mais tarde no painel do Nova.",
+      "roles": {
+        "title": "Escolha um fornecedor para cada função",
+        "description": "Escolha qual fornecedor faz cada tarefa. Só aparecem os fornecedores que passaram na verificação.\n\nChaves guardadas que não funcionaram e foram deixadas de fora: {failed}.",
         "data": {
-          "model": "Modelo"
+          "conversation": "Conversa",
+          "classifier": "Classificador",
+          "reasoning": "Raciocínio",
+          "camera_reasoning": "Raciocínio da câmara",
+          "vision": "Visão"
+        },
+        "data_description": {
+          "conversation": "Fala consigo e controla a sua casa.",
+          "classifier": "Decide se um evento em casa é importante. Corre com frequência.",
+          "reasoning": "Decide o que fazer perante um evento e escreve resumos. Corre com frequência.",
+          "camera_reasoning": "Avalia uma cena da câmara a partir da descrição da visão.",
+          "vision": "Descreve as imagens das câmaras. Escolha Agora não para configurar isto mais tarde."
+        }
+      },
+      "models": {
+        "title": "Escolha um modelo para cada função",
+        "description": "A Nova testa cada modelo quando submete. O classificador e o raciocínio correm com frequência, por isso, num fornecedor pago, escolha para eles um modelo pequeno e barato. Para mudar de fornecedor, comece a configuração de novo: estes ecrãs não têm botão de voltar.",
+        "data": {
+          "conversation_model": "Modelo de conversa ({conversation_provider})",
+          "classifier_model": "Modelo de classificador ({classifier_provider})",
+          "reasoning_model": "Modelo de raciocínio ({reasoning_provider})",
+          "camera_reasoning_model": "Modelo de raciocínio da câmara ({camera_reasoning_provider})",
+          "vision_model": "Modelo de visão ({vision_provider})"
+        },
+        "data_description": {
+          "vision_model": "Deixe vazio para configurar a visão mais tarde."
         }
       }
     },
     "error": {
-      "need_llm": "Introduza uma chave API na nuvem ou um URL de LLM local.",
-      "cannot_connect": "Não foi possível contactar o LLM. Verifique se o URL/endpoint está correto e se o servidor (ex. Ollama) está em execução.",
-      "invalid_auth": "A chave API foi rejeitada. Verifique a chave e tente novamente.",
-      "unknown": "Não foi possível validar a ligação ao LLM. Verifique as definições e tente novamente."
+      "need_llm": "Introduza pelo menos uma chave ou um endereço Ollama.",
+      "no_working_provider": "Ainda não há nenhum fornecedor a funcionar: introduza uma chave ou um endereço Ollama.",
+      "invalid_auth": "O fornecedor recusou esta chave.",
+      "cannot_connect": "A verificação não foi concluída. Tente de novo daqui a pouco e verifique o endereço se for Ollama.",
+      "unknown": "A verificação falhou. Tente de novo.",
+      "model_required": "Escolha um modelo para esta função.",
+      "model_no_pictures": "Este modelo não conseguiu ler uma imagem de teste.",
+      "model_not_found": "Este fornecedor não oferece esse modelo.",
+      "model_access_denied": "A sua chave não pode usar este modelo.",
+      "test_incomplete": "O teste não foi concluído. Tente de novo.",
+      "test_failed": "O teste falhou. O motivo do fornecedor está no registo do Home Assistant.",
+      "secrets_write_failed": "A Nova não conseguiu guardar as chaves em secrets.yaml. Verifique se o ficheiro pode ser escrito e tente de novo.",
+      "config_write_failed": "A Nova não conseguiu guardar as suas escolhas no ficheiro de configuração. Verifique se a pasta nova pode ser escrita e tente de novo."
     },
     "abort": {
       "already_configured": "O Nova já está configurado.",
-      "import_failed": "Encontrada uma configuração do Nova mas nenhum LLM utilizável (sem chave API nem endpoint local)."
+      "import_failed": "Encontrada uma configuração do Nova mas nenhum LLM utilizável (sem chave API nem endpoint local).",
+      "already_in_progress": "A configuração da Nova já está aberta noutra janela."
+    }
+  },
+  "selector": {
+    "setup_provider": {
+      "options": {
+        "groq": "Groq",
+        "anthropic": "Anthropic",
+        "openai": "OpenAI",
+        "gemini": "Gemini",
+        "ollama": "Ollama",
+        "not_now": "Agora não (configurar mais tarde)"
+      }
     }
   },
   "options": {
