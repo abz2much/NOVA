@@ -75,3 +75,64 @@ def test_recovery_cycle_reraises(rn, ir):
     rn.clear_llm_problem(object())
     rn.note_llm_problem(object(), "down")   # a later outage raises again
     assert len(ir.created) == 2
+
+
+# ── Voice setup notices (v8.6.0) ─────────────────────────────────────────────
+
+class _VoiceIR(_RecordingIR):
+    def __init__(self):
+        super().__init__()
+        self.IssueSeverity = type("S", (), {"ERROR": "error", "WARNING": "warning"})
+        self.keys = []
+
+    def async_create_issue(self, hass, domain, issue_id, **kw):
+        self.keys.append((issue_id, kw["translation_key"], kw.get("translation_placeholders")))
+
+
+def test_voice_step_uses_a_translation_key_per_step(rn, monkeypatch):
+    fake = _VoiceIR()
+    monkeypatch.setattr(rn, "ir", fake)
+    rn.note_voice_setup_step(object(), "wyoming", 2, 3)
+    assert fake.keys == [("voice_setup_in_progress", "voice_setup_step_wyoming",
+                          {"step": "2", "total": "3"})]
+
+
+def test_voice_incomplete_replaces_progress(rn, monkeypatch):
+    fake = _VoiceIR()
+    monkeypatch.setattr(rn, "ir", fake)
+    rn.note_voice_setup_incomplete(object(), ["Wyoming", "Assist pipeline"])
+    assert fake.deleted == ["voice_setup_in_progress"]
+    assert fake.keys == [("voice_setup_incomplete", "voice_setup_incomplete",
+                          {"failed": "Wyoming, Assist pipeline"})]
+
+
+def test_clear_voice_setup_removes_both(rn, monkeypatch):
+    fake = _VoiceIR()
+    monkeypatch.setattr(rn, "ir", fake)
+    rn.clear_voice_setup(object())
+    assert fake.deleted == ["voice_setup_in_progress", "voice_setup_incomplete"]
+
+
+def test_voice_notices_never_raise(rn, monkeypatch):
+    class _Broken:
+        IssueSeverity = type("S", (), {"WARNING": "warning"})
+
+        def async_create_issue(self, *a, **k):
+            raise RuntimeError("registry gone")
+
+        def async_delete_issue(self, *a, **k):
+            raise RuntimeError("registry gone")
+    monkeypatch.setattr(rn, "ir", _Broken())
+    rn.note_voice_setup_step(object(), "addons", 1, 3)
+    rn.note_voice_setup_incomplete(object(), ["Wyoming"])
+    rn.clear_voice_setup(object())
+
+
+def test_every_voice_translation_key_exists_in_strings():
+    import json
+    import pathlib
+    strings = json.loads((pathlib.Path(__file__).resolve().parents[2]
+                          / "custom_components/nova/strings.json").read_text())
+    for step in ("addons", "wyoming", "pipeline"):
+        assert "{step}" in strings["issues"][f"voice_setup_step_{step}"]["description"]
+    assert "{failed}" in strings["issues"]["voice_setup_incomplete"]["description"]

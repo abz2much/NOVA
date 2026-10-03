@@ -1,3 +1,14 @@
+## [8.6.0] — Voice setup shows its progress in Repairs
+
+**Added**
+- On HA OS, the first voice setup now shows a Repair notice, "Nova is setting up voice", with the current step: installing the Piper, Whisper and openWakeWord add-ons, connecting Wyoming, then creating the Nova pipeline. It clears itself when setup finishes.
+- If any part fails, a "Nova voice setup is incomplete" notice names what failed and gives the steps to finish it by hand. Nova checks again on each restart and clears the notice once voice works, including when you fix the pipeline yourself.
+- The notice text is translated into all seven languages.
+
+**Caveats**
+- The progress notice shows on the first voice setup only, not on routine Nova updates.
+- On HA Container there is no Supervisor, so there is no voice setup and no notice. Setup Doctor's Assist pipeline check covers that case.
+
 ## [8.5.0] — Nova follows Home Assistant's config directory
 
 **Changed**

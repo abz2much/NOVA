@@ -111,3 +111,61 @@ def clear_credential_migration_ambiguous(hass: HomeAssistant) -> None:
     except Exception as exc:
         _LOGGER.debug("could not clear credential migration repair issue: %s", exc)
     _cred_state["active"] = False
+
+
+# ─── Voice setup (v8.6.0) ────────────────────────────────────────────────────
+# bootstrap.async_run_bootstrap installs the voice add-ons, reconnects Wyoming
+# and builds the Nova pipeline, which can take several minutes and used to be
+# visible only in the log. The progress notice shows on the first run only;
+# the incomplete notice names what failed and clears once a later run (or the
+# live pipeline check) succeeds. Each step has its own translation key so the
+# whole notice is translated, not just its frame.
+
+_VOICE_PROGRESS_ISSUE = "voice_setup_in_progress"
+_VOICE_INCOMPLETE_ISSUE = "voice_setup_incomplete"
+VOICE_STEPS = ("addons", "wyoming", "pipeline")
+
+
+def note_voice_setup_step(hass: HomeAssistant, step: str, number: int, total: int) -> None:
+    """Show (or move on) the 'Nova is setting up voice' notice. ``step`` is
+    one of VOICE_STEPS. Safe to call from the event loop; never raises."""
+    try:
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            _VOICE_PROGRESS_ISSUE,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=f"voice_setup_step_{step}",
+            translation_placeholders={"step": str(number), "total": str(total)},
+        )
+    except Exception as exc:
+        _LOGGER.debug("could not create voice setup progress issue: %s", exc)
+
+
+def note_voice_setup_incomplete(hass: HomeAssistant, failed: list[str]) -> None:
+    """Replace the progress notice with 'voice setup is incomplete', naming
+    the parts that failed. Safe to call from the event loop; never raises."""
+    try:
+        ir.async_delete_issue(hass, DOMAIN, _VOICE_PROGRESS_ISSUE)
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            _VOICE_INCOMPLETE_ISSUE,
+            is_fixable=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=_VOICE_INCOMPLETE_ISSUE,
+            translation_placeholders={"failed": ", ".join(failed)},
+        )
+    except Exception as exc:
+        _LOGGER.debug("could not create voice setup incomplete issue: %s", exc)
+
+
+def clear_voice_setup(hass: HomeAssistant) -> None:
+    """Remove both voice setup notices (setup finished and works). Safe to
+    call unconditionally; never raises."""
+    for issue_id in (_VOICE_PROGRESS_ISSUE, _VOICE_INCOMPLETE_ISSUE):
+        try:
+            ir.async_delete_issue(hass, DOMAIN, issue_id)
+        except Exception as exc:
+            _LOGGER.debug("could not clear %s: %s", issue_id, exc)

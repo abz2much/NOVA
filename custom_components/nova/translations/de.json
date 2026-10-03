@@ -142,6 +142,22 @@
     "credential_migration_ambiguous": {
       "title": "Nova: Ein gespeicherter Anmeldedatensatz muss einem Anbieter zugeordnet werden",
       "description": "Nova hat einen gemeinsamen Anmeldedatensatz aus der Zeit vor separaten Anbieter-Anmeldedaten gefunden, konnte aber nicht feststellen, zu welchem Anbieter er gehört. Es wurde nichts geändert oder gelöscht. Öffnen Sie Einstellungen → Geräte & Dienste → Nova → Konfigurieren → Anmeldedaten und geben Sie ihn beim richtigen Anbieter ein."
+    },
+    "voice_setup_step_addons": {
+      "title": "Nova richtet die Sprachsteuerung ein",
+      "description": "Schritt {step} von {total}: Die Add-ons Piper, Whisper und openWakeWord werden installiert und gestartet. Das kann einige Minuten dauern. Dieser Hinweis verschwindet von selbst, sobald die Einrichtung abgeschlossen ist."
+    },
+    "voice_setup_step_wyoming": {
+      "title": "Nova richtet die Sprachsteuerung ein",
+      "description": "Schritt {step} von {total}: Home Assistant wird mit den Sprach-Add-ons verbunden (Wyoming). Dieser Hinweis verschwindet von selbst, sobald die Einrichtung abgeschlossen ist."
+    },
+    "voice_setup_step_pipeline": {
+      "title": "Nova richtet die Sprachsteuerung ein",
+      "description": "Schritt {step} von {total}: Die Nova-Assist-Pipeline wird erstellt. Dieser Hinweis verschwindet von selbst, sobald die Einrichtung abgeschlossen ist."
+    },
+    "voice_setup_incomplete": {
+      "title": "Die Spracheinrichtung von Nova ist unvollständig",
+      "description": "Nova konnte die Sprachsteuerung nicht vollständig einrichten. Fehlgeschlagen: {failed}.\n\nSo schließen Sie es manuell ab: Installieren und starten Sie unter Einstellungen → Add-ons Piper, Whisper und openWakeWord. Erstellen Sie dann unter Einstellungen → Sprachassistenten eine Pipeline mit Nova als Konversationsagent, Whisper für Sprache zu Text und Piper für Text zu Sprache. Nova prüft bei jedem Neustart erneut, und dieser Hinweis verschwindet von selbst, sobald die Sprachsteuerung funktioniert."
     }
   },
   "exceptions": {

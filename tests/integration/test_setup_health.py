@@ -130,3 +130,33 @@ async def test_say_hello_runs_through_novas_real_agent(hass, hass_ws_client):
     text, agent = seen[0]
     assert text == welcome.HELLO_TEXT
     assert agent and agent.startswith("conversation.")
+
+
+async def test_voice_setup_notices_in_the_real_issue_registry(hass):
+    """The voice setup notices land in HA's real issue registry with the
+    per-step translation key, are replaced by the incomplete notice, and
+    clear completely."""
+    from homeassistant.helpers import issue_registry as ir
+    from custom_components.nova import repair_notices
+
+    await _setup_nova(hass)
+    reg = ir.async_get(hass)
+
+    repair_notices.note_voice_setup_step(hass, "addons", 1, 3)
+    issue = reg.async_get_issue("nova", "voice_setup_in_progress")
+    assert issue is not None
+    assert issue.translation_key == "voice_setup_step_addons"
+    assert issue.translation_placeholders == {"step": "1", "total": "3"}
+    assert issue.is_fixable is False
+
+    repair_notices.note_voice_setup_step(hass, "pipeline", 3, 3)
+    assert reg.async_get_issue("nova", "voice_setup_in_progress").translation_key == \
+        "voice_setup_step_pipeline"
+
+    repair_notices.note_voice_setup_incomplete(hass, ["Assist pipeline"])
+    assert reg.async_get_issue("nova", "voice_setup_in_progress") is None
+    inc = reg.async_get_issue("nova", "voice_setup_incomplete")
+    assert inc.translation_placeholders == {"failed": "Assist pipeline"}
+
+    repair_notices.clear_voice_setup(hass)
+    assert reg.async_get_issue("nova", "voice_setup_incomplete") is None

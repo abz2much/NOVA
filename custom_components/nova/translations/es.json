@@ -142,6 +142,22 @@
     "credential_migration_ambiguous": {
       "title": "Nova: una credencial guardada necesita asignarse a un proveedor",
       "description": "Nova encontró una credencial compartida de antes de que existieran credenciales separadas por proveedor, pero no pudo determinar a qué proveedor pertenece. No se cambió ni eliminó nada. Abre Ajustes → Dispositivos y servicios → Nova → Configurar → Credenciales e introdúcela en el proveedor correcto."
+    },
+    "voice_setup_step_addons": {
+      "title": "Nova está configurando la voz",
+      "description": "Paso {step} de {total}: instalando e iniciando los complementos Piper, Whisper y openWakeWord. Puede tardar unos minutos. Este aviso desaparece solo cuando termina la configuración de voz."
+    },
+    "voice_setup_step_wyoming": {
+      "title": "Nova está configurando la voz",
+      "description": "Paso {step} de {total}: conectando Home Assistant con los complementos de voz (Wyoming). Este aviso desaparece solo cuando termina la configuración de voz."
+    },
+    "voice_setup_step_pipeline": {
+      "title": "Nova está configurando la voz",
+      "description": "Paso {step} de {total}: creando la canalización de Assist de Nova. Este aviso desaparece solo cuando termina la configuración de voz."
+    },
+    "voice_setup_incomplete": {
+      "title": "La configuración de voz de Nova está incompleta",
+      "description": "Nova no pudo terminar de configurar la voz. Lo que falló: {failed}.\n\nPara terminarla a mano: en Ajustes → Complementos, instala e inicia Piper, Whisper y openWakeWord. Después, en Ajustes → Asistentes de voz, crea una canalización con Nova como agente de conversación, Whisper para voz a texto y Piper para texto a voz. Nova vuelve a comprobarlo en cada reinicio, y este aviso desaparece solo cuando la voz funcione."
     }
   },
   "exceptions": {
