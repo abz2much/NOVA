@@ -1,3 +1,10 @@
+## [8.6.1] — fix: two file reads blocking Home Assistant
+
+**Fixed**
+- The panel no longer reads the doorbell training log on Home Assistant's event loop. It read the whole file on every 20 second refresh. It now reads it in the background.
+- Nova now loads its habituation file during setup, in the background, like its other state files. Before, the first panel status request read it on the event loop.
+- Home Assistant's "Detected blocking call to open" warnings for these two files no longer appear.
+
 ## [8.6.0] — Voice setup shows its progress in Repairs
 
 **Added**

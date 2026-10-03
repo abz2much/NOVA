@@ -82,6 +82,11 @@ def _prewarm_persisted_state() -> None:
         reasoning_cache.load()
     except Exception:
         pass
+    try:
+        from . import habituation
+        habituation._load()   # cached after this; panel status reads it on the loop
+    except Exception:
+        pass
 
 
 PLATFORMS = ["conversation"]
