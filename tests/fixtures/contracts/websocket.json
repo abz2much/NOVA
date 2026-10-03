@@ -782,6 +782,13 @@
     ],
     "registered": true
   },
+  "nova/say_hello": {
+    "admin": true,
+    "error_codes": [],
+    "fields": {},
+    "literal_response_keys": [],
+    "registered": true
+  },
   "nova/search_memory": {
     "admin": false,
     "error_codes": [

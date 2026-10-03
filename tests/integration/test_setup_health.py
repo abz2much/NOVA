@@ -89,3 +89,44 @@ async def test_setup_health_does_not_duplicate_service_health_checks(hass, hass_
     core = {"llm", "embeddings", "tts", "stt", "cameras", "routines", "database", "scheduler"}
     for key in core:
         assert keys.count(key) == 1, f"{key} appeared {keys.count(key)} times"
+
+
+async def test_say_hello_rejects_non_admin(hass, hass_ws_client, hass_read_only_access_token):
+    await _setup_nova(hass)
+    client = await hass_ws_client(hass, access_token=hass_read_only_access_token)
+
+    await client.send_json_auto_id({"type": "nova/say_hello"})
+    resp = await client.receive_json()
+
+    assert resp["success"] is False
+    assert resp["error"]["code"] == "unauthorized"
+
+
+async def test_say_hello_runs_through_novas_real_agent(hass, hass_ws_client):
+    """The welcome card's Say hello goes through HA's real conversation
+    component to Nova's registered agent, and the reply is returned as text.
+    The LLM is patched, so this proves the wiring, not the model."""
+    from unittest.mock import patch
+    from custom_components.nova import welcome
+
+    await _setup_nova(hass)
+    seen = []
+
+    async def _fake_converse(hass_, text, conversation_id, context, **kw):
+        from homeassistant.components.conversation import ConversationResult
+        from homeassistant.helpers import intent
+        seen.append((text, kw.get("agent_id")))
+        resp = intent.IntentResponse(language="en")
+        resp.async_set_speech("Good day.")
+        return ConversationResult(response=resp)
+
+    with patch("homeassistant.components.conversation.async_converse", _fake_converse):
+        client = await hass_ws_client(hass)
+        await client.send_json_auto_id({"type": "nova/say_hello"})
+        resp = await client.receive_json()
+
+    assert resp["success"] is True
+    assert resp["result"] == {"ok": True, "reply": "Good day."}
+    text, agent = seen[0]
+    assert text == welcome.HELLO_TEXT
+    assert agent and agent.startswith("conversation.")

@@ -67,3 +67,31 @@ async def async_maybe_show(hass) -> bool:
     except Exception as exc:
         _LOGGER.debug("Nova welcome notification skipped: %s", exc)
         return False
+
+
+HELLO_TEXT = "Hello"
+
+
+async def async_say_hello(hass, context) -> dict:
+    """Send the fixed text "Hello" through Nova's own conversation agent and
+    return {ok, reply} or {ok: False, error}. Used by the panel's welcome card
+    to prove the LLM path works end to end. The text is fixed, never user
+    input, so it can't be used to drive device actions. Never raises."""
+    try:
+        from homeassistant.components import conversation
+        from . import bootstrap
+        agent = bootstrap._find_nova_agent(hass)
+        if not agent:
+            return {"ok": False, "error": "Nova's conversation agent was not found."}
+        result = await conversation.async_converse(
+            hass, HELLO_TEXT, None, context, agent_id=agent)
+        resp = result.response.as_dict() if result and result.response else {}
+        speech = ((resp.get("speech") or {}).get("plain") or {}).get("speech", "")
+        if resp.get("response_type") == "error":
+            return {"ok": False, "error": speech or "Nova returned an error."}
+        if not speech:
+            return {"ok": False, "error": "Nova replied with no text."}
+        return {"ok": True, "reply": speech}
+    except Exception as exc:
+        _LOGGER.debug("Nova say hello failed: %s", exc)
+        return {"ok": False, "error": f"Couldn't reach Nova: {exc}"}
