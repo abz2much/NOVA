@@ -1,6 +1,8 @@
 """Model tests for the first run setup screens (setup_probe.py)."""
 from __future__ import annotations
 
+import asyncio
+import base64
 import sys
 import types
 
@@ -54,3 +56,138 @@ def test_a_refused_key_is_authentication_failed(load):
     # A 400 that is not about the key is unchanged.
     assert errors.normalize_error(_HTTPError(400, "bad field"), "gemini").kind \
         is errors.ProviderErrorKind.INVALID_REQUEST
+
+
+@pytest.fixture
+def sp(load):
+    return load("setup_probe")
+
+
+def test_test_picture_is_a_valid_png(sp):
+    head, data = sp.TEST_PICTURE.split(",", 1)
+    assert head == "data:image/png;base64"
+    assert base64.b64decode(data)[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+class _Resp:
+    def __init__(self, text):
+        self.text, self.tool_calls = text, []
+
+
+def _wire(sp, monkeypatch, outcome):
+    """Fake the client and the chat call. `outcome(job_model, messages)`
+    returns text or raises."""
+    calls = []
+    llm = __import__("jc.llm_provider", fromlist=["x"])
+    monkeypatch.setattr(llm, "create_provider",
+                        lambda provider, key, model, base: type("C", (), {"model": model})())
+    activity = __import__("jc.providers.activity", fromlist=["x"])
+    manager = __import__("jc.providers.manager", fromlist=["x"])
+
+    async def fake_chat(hass, client, messages, **kw):
+        calls.append((client.model, messages, kw))
+        return _Resp(outcome(client.model, messages))
+
+    async def fake_close(hass, client):
+        return None
+    monkeypatch.setattr(activity, "execute_chat", fake_chat)
+    monkeypatch.setattr(manager, "async_close_client", fake_close)
+    return calls
+
+
+async def test_text_probe_passes(sp, fake_hass, monkeypatch):
+    calls = _wire(sp, monkeypatch, lambda m, msgs: "pong")
+    assert await sp.probe_model(fake_hass, sp.Job("groq", "m"), "k", None) is None
+    assert calls[0][1][0]["content"] == "Reply with the word pong."
+
+
+async def test_probe_leaves_room_for_reasoning_models(sp, fake_hass, monkeypatch):
+    # Nova's defaults are reasoning models; they spend output tokens thinking
+    # first, so a tiny budget returns an empty reply.
+    calls = _wire(sp, monkeypatch, lambda m, msgs: "pong")
+    await sp.probe_model(fake_hass, sp.Job("groq", "m"), "k", None)
+    assert calls[0][2]["max_tokens"] == 256
+
+
+async def test_picture_probe_sends_the_picture(sp, fake_hass, monkeypatch):
+    calls = _wire(sp, monkeypatch, lambda m, msgs: "red")
+    assert await sp.probe_model(fake_hass, sp.Job("gemini", "v", picture=True), "k", None) is None
+    parts = calls[0][1][0]["content"]
+    assert parts[1] == {"type": "image_url", "image_url": {"url": sp.TEST_PICTURE}}
+    assert calls[0][2]["data_category"] == "vision"
+
+
+async def test_picture_refusal_is_unsupported_capability(sp, fake_hass, monkeypatch):
+    def refuse(m, msgs):
+        raise Exception("messages[1].content must be a string")
+    _wire(sp, monkeypatch, refuse)
+    assert await sp.probe_model(
+        fake_hass, sp.Job("groq", "t", picture=True), "k", None) == "unsupported_capability"
+
+
+async def test_rate_limit_is_not_reported_as_no_pictures(sp, fake_hass, monkeypatch):
+    errors = __import__("jc.providers.errors", fromlist=["x"])
+
+    def limited(m, msgs):
+        raise errors.ProviderError(errors.ProviderErrorKind.RATE_LIMITED, "groq")
+    _wire(sp, monkeypatch, limited)
+    assert await sp.probe_model(
+        fake_hass, sp.Job("groq", "t", picture=True), "k", None) == "rate_limited"
+
+
+async def test_empty_reply_fails_and_is_logged(sp, fake_hass, monkeypatch, caplog):
+    # The screen says "the provider's reason is in Home Assistant's log", so
+    # every failure path must write one.
+    _wire(sp, monkeypatch, lambda m, msgs: "   ")
+    assert await sp.probe_model(fake_hass, sp.Job("groq", "m"), "k", None) == "malformed_response"
+    assert "groq model m failed its test" in caplog.text
+
+
+async def test_client_build_failure_is_logged(sp, fake_hass, monkeypatch, caplog):
+    llm = __import__("jc.llm_provider", fromlist=["x"])
+
+    def broken(*a):
+        raise RuntimeError("no sdk")
+    monkeypatch.setattr(llm, "create_provider", broken)
+    assert await sp.probe_model(fake_hass, sp.Job("openai", "m"), "k", None) is not None
+    assert "openai model m failed its test" in caplog.text
+
+
+async def test_same_model_for_several_roles_is_tested_once(sp, fake_hass, monkeypatch):
+    calls = _wire(sp, monkeypatch, lambda m, msgs: "ok")
+    job = sp.Job("groq", "m")
+    out = await sp.probe_all(fake_hass, {"classifier": job, "reasoning": job,
+                                         "camera_reasoning": job}, {"groq": ("k", None)})
+    assert out == {"classifier": None, "reasoning": None, "camera_reasoning": None}
+    assert len(calls) == 1
+
+
+async def test_ollama_models_run_one_after_another(sp, fake_hass, monkeypatch):
+    running = {"now": 0, "most": 0}
+
+    async def slow_probe(hass, job, key, base):
+        running["now"] += 1
+        running["most"] = max(running["most"], running["now"])
+        await asyncio.sleep(0.01)
+        running["now"] -= 1
+        return None
+    monkeypatch.setattr(sp, "probe_model", slow_probe)
+    jobs = {"conversation": sp.Job("ollama", "a"), "classifier": sp.Job("ollama", "b"),
+            "vision": sp.Job("ollama", "c", picture=True)}
+    await sp.probe_all(fake_hass, jobs, {"ollama": ("", "http://x:11434")})
+    assert running["most"] == 1
+
+
+async def test_different_providers_run_together(sp, fake_hass, monkeypatch):
+    running = {"now": 0, "most": 0}
+
+    async def slow_probe(hass, job, key, base):
+        running["now"] += 1
+        running["most"] = max(running["most"], running["now"])
+        await asyncio.sleep(0.01)
+        running["now"] -= 1
+        return None
+    monkeypatch.setattr(sp, "probe_model", slow_probe)
+    jobs = {"conversation": sp.Job("anthropic", "a"), "classifier": sp.Job("groq", "b")}
+    await sp.probe_all(fake_hass, jobs, {"anthropic": ("k", None), "groq": ("k", None)})
+    assert running["most"] == 2
