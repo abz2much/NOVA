@@ -20,10 +20,17 @@ from datetime import datetime, timedelta
 from typing import Awaitable, Callable, Optional
 
 from .persistence import sqlite as _store
+from . import paths
 
 _LOGGER = logging.getLogger(__name__)
 
-DB_PATH = "/config/nova/patterns.db"
+DB_PATH: Optional[str] = None  # override; None resolves via paths.py
+
+
+def _db_path() -> str:
+    return DB_PATH or paths.patterns_db()
+
+
 MAX_OPEN = 25                 # safety valve: the agent can't queue unbounded work
 MAX_DELAY_MINUTES = 7 * 24 * 60   # a week out, at most
 STATUSES = ("pending", "done", "cancelled", "failed")
@@ -52,7 +59,7 @@ def schedule(instruction: str, delay_minutes: float, *, context: str = "",
         delay = max(0.1, min(float(delay_minutes), MAX_DELAY_MINUTES))
     except (TypeError, ValueError):
         return {"error": f"bad delay: {delay_minutes!r}"}
-    db_path = db_path or DB_PATH
+    db_path = db_path or _db_path()
     t = _now(now)
     due = t + timedelta(minutes=delay)
     try:
@@ -76,7 +83,7 @@ def schedule(instruction: str, delay_minutes: float, *, context: str = "",
 def pending(*, now: Optional[datetime] = None, due_only: bool = False,
             db_path: Optional[str] = None) -> list[dict]:
     """Open follow-ups; with due_only, just those whose time has arrived."""
-    db_path = db_path or DB_PATH
+    db_path = db_path or _db_path()
     try:
         with _connect(db_path) as conn:
             if due_only:
@@ -94,7 +101,7 @@ def pending(*, now: Optional[datetime] = None, due_only: bool = False,
 
 
 def cancel(followup_id: int, *, db_path: Optional[str] = None) -> bool:
-    db_path = db_path or DB_PATH
+    db_path = db_path or _db_path()
     try:
         with _connect(db_path) as conn:
             cur = conn.execute(
@@ -109,7 +116,7 @@ def mark(followup_id: int, status: str, result: str = "",
          *, db_path: Optional[str] = None) -> None:
     if status not in STATUSES:
         return
-    db_path = db_path or DB_PATH
+    db_path = db_path or _db_path()
     try:
         with _connect(db_path) as conn:
             conn.execute("UPDATE followups SET status=?, result=? WHERE id=?",
@@ -129,7 +136,7 @@ async def async_process_due(
     headless agent). Returns proactive action dicts for the normal emission
     path — quiet hours and urgency routing apply there. Never raises."""
     actions: list[dict] = []
-    db_path = db_path or DB_PATH
+    db_path = db_path or _db_path()
     try:
         due = await hass.async_add_executor_job(
             lambda: pending(now=now, due_only=True, db_path=db_path))

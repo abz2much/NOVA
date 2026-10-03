@@ -382,7 +382,7 @@ def test_database_check_off_when_not_created(sh):
 
 def test_database_check_down_on_health_failure(sh, monkeypatch):
     fake = types.ModuleType("jc.database")
-    fake.DB_PATH = type("P", (), {"exists": staticmethod(lambda: True)})()
+    fake._db_path = lambda: type("P", (), {"exists": staticmethod(lambda: True)})()
     fake.health = lambda: {"ok": False, "error": "disk I/O error"}
     monkeypatch.setitem(sys.modules, "jc.database", fake)
     out = sh._check_database(_Hass({}))
@@ -392,7 +392,7 @@ def test_database_check_down_on_health_failure(sh, monkeypatch):
 
 def test_database_check_ok_when_healthy(sh, monkeypatch):
     fake = types.ModuleType("jc.database")
-    fake.DB_PATH = type("P", (), {"exists": staticmethod(lambda: True)})()
+    fake._db_path = lambda: type("P", (), {"exists": staticmethod(lambda: True)})()
     fake.health = lambda: {"ok": True, "error": ""}
     monkeypatch.setitem(sys.modules, "jc.database", fake)
     out = sh._check_database(_Hass({}))

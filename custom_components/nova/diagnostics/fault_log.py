@@ -19,18 +19,27 @@ import logging
 import os
 import time
 from threading import Lock
+from typing import Optional
 
 _LOGGER = logging.getLogger(__name__)
 
-DEFAULT_FAULT_LOG_PATH = "/config/nova/fault_history.json"
+DEFAULT_FAULT_LOG_PATH: Optional[str] = None  # override; None resolves via paths.py
+
+
+def _default_fault_log_path() -> str:
+    # Imported here so this stdlib-only module still loads on its own.
+    from .. import paths
+    return DEFAULT_FAULT_LOG_PATH or paths.nova_path("fault_history.json")
+
+
 MAX_ENTRIES = 1000
 
 
 class FaultLog:
     """A bounded, persisted fault ledger with keyword-overlap recall."""
 
-    def __init__(self, path: str = DEFAULT_FAULT_LOG_PATH, *, max_entries: int = MAX_ENTRIES) -> None:
-        self.path = path
+    def __init__(self, path: Optional[str] = None, *, max_entries: int = MAX_ENTRIES) -> None:
+        self.path = path or _default_fault_log_path()
         self.max_entries = max_entries
         self._lock = Lock()
 

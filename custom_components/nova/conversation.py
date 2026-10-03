@@ -46,6 +46,8 @@ from .llm_provider import (
 from .presence import presence_context_string
 from .runtime import get_runtime, runtime_config_snapshot
 from .tts_helper import resolve_tts_entity, async_announce
+from . import paths
+from typing import Optional
 
 
 # ── Multi-wake dedup ────────────────────────────────────────────────────────
@@ -108,7 +110,11 @@ _LOGGER = logging.getLogger(__name__)
 
 MAX_HISTORY  = 20   # messages kept in per-conversation context window
 MAX_ITERS    = 8    # max agentic tool-call iterations per request
-PERSONA_FILE = "/config/nova_persona.txt"
+PERSONA_FILE: Optional[str] = None  # override; None resolves via paths.py
+
+
+def _persona_file() -> str:
+    return PERSONA_FILE or paths.config_path("nova_persona.txt")
 
 # Module-level persona cache. Loaded lazily via executor to avoid blocking
 # the event loop with file I/O on every conversation turn. Invalidated
@@ -214,9 +220,9 @@ def _is_connectivity_failure(text: str) -> bool:
 def _sync_load_persona() -> tuple[float, str | None]:
     """Synchronous persona file read. Must be called from an executor thread."""
     try:
-        if os.path.exists(PERSONA_FILE):
-            mtime = os.path.getmtime(PERSONA_FILE)
-            with open(PERSONA_FILE) as f:
+        if os.path.exists(_persona_file()):
+            mtime = os.path.getmtime(_persona_file())
+            with open(_persona_file()) as f:
                 text = f.read().strip() or None
             return mtime, text
     except OSError:

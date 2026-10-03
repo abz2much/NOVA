@@ -117,7 +117,9 @@ def test_init_defines_async_setup_that_registers_services():
     assert isinstance(setup, ast.AsyncFunctionDef)
     assert [a.arg for a in setup.args.args] == ["hass", "config"]
     stmts = _body(setup)
-    assert ast.unparse(stmts[0]) == "async_setup_services(hass)"
+    # paths.configure runs first, before anything can touch a Nova file.
+    assert [ast.unparse(s) for s in stmts[:3]] == [
+        "from . import paths", "paths.configure(hass)", "async_setup_services(hass)"]
     assert ast.unparse(stmts[-1]) == "return True"
     src = INIT.read_text(encoding="utf-8")
     assert "CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)" in src

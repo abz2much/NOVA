@@ -121,15 +121,14 @@ def test_config_json_is_a_flat_object_under_the_config_dir(load, tmp_path, monke
     import json
     import types
     nc = load("nova_config")
-    monkeypatch.setattr(nc, "CONFIG_PATH", nc.CONFIG_PATH)
     hass = types.SimpleNamespace(config=types.SimpleNamespace(
         path=lambda *p: str(tmp_path.joinpath(*p))))
     nc.configure(hass)
     try:
-        assert nc.CONFIG_PATH == tmp_path / "nova" / "config.json"
+        assert nc._config_path() == tmp_path / "nova" / "config.json"
         nc.set("banter_level", 2)
-        assert json.loads(nc.CONFIG_PATH.read_text()) == {"banter_level": 2}
-        nc.CONFIG_PATH.write_text("[1, 2]")
+        assert json.loads(nc._config_path().read_text()) == {"banter_level": 2}
+        nc._config_path().write_text("[1, 2]")
         nc._cache, nc._loaded = {}, False
         assert nc.get("banter_level") is None
         assert nc.last_load_error

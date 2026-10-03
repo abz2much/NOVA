@@ -25,11 +25,23 @@ import os
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Optional
+from . import paths
 
 _LOGGER = logging.getLogger(__name__)
 
-LOG_DIR = "/config/nova"
-LOG_PATH = os.path.join(LOG_DIR, "doorbell_log.jsonl")
+LOG_DIR: Optional[str] = None  # override; None resolves via paths.py
+
+
+def _log_dir() -> str:
+    return LOG_DIR or paths.nova_path()
+
+
+LOG_PATH: Optional[str] = None  # override; None resolves to <log dir>/doorbell_log.jsonl
+
+
+def _log_path() -> str:
+    return LOG_PATH or os.path.join(_log_dir(), "doorbell_log.jsonl")
+
 MAX_RECORDS = 5000  # ring the file so it can't grow unbounded
 
 
@@ -57,8 +69,8 @@ def log_event(camera: str, entity_id: str, source: str, result: dict) -> None:
             # sounded like (v7.101.8; caught live testing with announcements off).
             "speak": (result or {}).get("speak") or "",
         }
-        os.makedirs(LOG_DIR, exist_ok=True)
-        with open(LOG_PATH, "a", encoding="utf-8") as fh:
+        os.makedirs(_log_dir(), exist_ok=True)
+        with open(_log_path(), "a", encoding="utf-8") as fh:
             fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
         _trim_if_needed()
     except Exception as exc:  # logging must never break the caller
@@ -67,12 +79,12 @@ def log_event(camera: str, entity_id: str, source: str, result: dict) -> None:
 
 def _trim_if_needed() -> None:
     try:
-        if not os.path.exists(LOG_PATH):
+        if not os.path.exists(_log_path()):
             return
-        with open(LOG_PATH, "r", encoding="utf-8") as fh:
+        with open(_log_path(), "r", encoding="utf-8") as fh:
             lines = fh.readlines()
         if len(lines) > MAX_RECORDS:
-            with open(LOG_PATH, "w", encoding="utf-8") as fh:
+            with open(_log_path(), "w", encoding="utf-8") as fh:
                 fh.writelines(lines[-MAX_RECORDS:])
     except Exception as exc:
         _LOGGER.debug("doorbell_training trim failed: %s", exc)
@@ -83,10 +95,10 @@ def _trim_if_needed() -> None:
 def load_events(limit: Optional[int] = None) -> list[dict]:
     """Return logged events (newest last). Never raises."""
     try:
-        if not os.path.exists(LOG_PATH):
+        if not os.path.exists(_log_path()):
             return []
         out: list[dict] = []
-        with open(LOG_PATH, "r", encoding="utf-8") as fh:
+        with open(_log_path(), "r", encoding="utf-8") as fh:
             for line in fh:
                 line = line.strip()
                 if not line:

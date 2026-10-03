@@ -16,10 +16,16 @@ import yaml
 from homeassistant.core import HomeAssistant, ServiceCall
 
 from .tts_helper import async_announce
+from . import paths
+from typing import Optional
 
 _LOGGER = logging.getLogger(__name__)
 
-ROUTINE_FILE = "/config/nova_routines.yaml"
+ROUTINE_FILE: Optional[str] = None  # override; None resolves via paths.py
+
+
+def _routine_file() -> str:
+    return ROUTINE_FILE or paths.config_path("nova_routines.yaml")
 
 # Sensible defaults — user can override by creating /config/nova_routines.yaml
 DEFAULT_ROUTINES: dict[str, list[dict]] = {
@@ -51,16 +57,16 @@ DEFAULT_ROUTINES: dict[str, list[dict]] = {
 
 def _load_routines() -> dict[str, list[dict]]:
     """Load user routines from file if present, else use defaults."""
-    if os.path.exists(ROUTINE_FILE):
+    if os.path.exists(_routine_file()):
         try:
-            with open(ROUTINE_FILE) as f:
+            with open(_routine_file()) as f:
                 user_routines = yaml.safe_load(f) or {}
             if isinstance(user_routines, dict):
                 merged = {**DEFAULT_ROUTINES, **user_routines}
                 _LOGGER.debug("Nova: loaded %d user routines", len(user_routines))
                 return merged
         except Exception as exc:
-            _LOGGER.warning("Nova: could not parse %s: %s", ROUTINE_FILE, exc)
+            _LOGGER.warning("Nova: could not parse %s: %s", _routine_file(), exc)
     return DEFAULT_ROUTINES
 
 

@@ -28,13 +28,20 @@ from pathlib import Path
 from typing import Optional
 
 from .persistence import sqlite as _store
+from . import paths
 
-_DEFAULT_DB = "/config/nova/provider_activity.db"
+_DEFAULT_DB: Optional[str] = None  # override; None resolves via paths.py
+
+
+def _default_db() -> str:
+    return _DEFAULT_DB or paths.nova_path("provider_activity.db")
+
+
 _SCHEMA_LOCK = threading.Lock()
 
 
 def _resolve(db_path: Optional[str]) -> str:
-    return db_path or _DEFAULT_DB
+    return db_path or _default_db()
 
 
 def db_path_for(hass) -> Optional[str]:

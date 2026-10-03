@@ -44,7 +44,8 @@ ALLOWED_OUTSIDE = {"action_log", "decision_record", "nova_config", "identity",
                    "knowledge", "person_patterns", "runtime", "websocket",
                    "audio_routing",  # shared entity-to-area resolver
                    "cognitive",   # Phase 8: pure routine scoring
-                   "persistence"}   # Phase 9: schema owner
+                   "persistence",   # Phase 9: schema owner
+                   "paths"}   # v8.5.0: config directory owner
 FORBIDDEN_TIMERS = {"async_track_time_interval", "async_call_later",
                     "async_track_point_in_time", "async_create_background_task",
                     "async_track_time_change"}

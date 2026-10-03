@@ -219,7 +219,8 @@ FACADE_LIMITS = {
     "reasoning_loop": (248, ("_decision_from_cache", "_lm_compose", "_local_fallback",
                              "_parse_reasoning_json", "_rich_mode", "_snapshot",
                              "_structured_hazard", "_try_local_reasoning", "decide")),
-    "local_mind": (370, ("_case_prior", "_compose", "_connect", "_data_days", "_ev",
+    # 371: +1 for `from . import paths` (v8.5.0, config dir no longer hard coded).
+    "local_mind": (371, ("_case_prior", "_compose", "_connect", "_data_days", "_ev",
                          "_is_duplicate", "_note_event", "_pick", "_security_relevant",
                          "_state_phrase", "assess", "assess_core", "compose_announcement",
                          "history_profile", "stats")),

@@ -13,9 +13,15 @@ import math
 import re
 import sqlite3
 from typing import Iterable
+from . import paths
+from typing import Optional
 
 
-DB_PATH = "/config/nova/patterns.db"
+DB_PATH: Optional[str] = None  # override; None resolves via paths.py
+
+
+def _db_path() -> str:
+    return DB_PATH or paths.patterns_db()
 
 DEFAULT_LOOKBACK_DAYS = 30
 MIN_LOOKBACK_DAYS = 7
@@ -135,12 +141,13 @@ def _known_resident(person, confidence) -> str:
 
 
 def read_recent_events(
-    db_path: str = DB_PATH,
+    db_path: str | None = None,
     *,
     now: datetime | None = None,
     lookback_days: int = DEFAULT_LOOKBACK_DAYS,
 ) -> list[CameraEvent]:
     """Read a bounded set of canonical camera rows from the shared store."""
+    db_path = db_path or _db_path()
     now = now or datetime.now()
     lookback_days = _bounded_int(
         lookback_days, DEFAULT_LOOKBACK_DAYS, MIN_LOOKBACK_DAYS, MAX_LOOKBACK_DAYS,
@@ -351,7 +358,7 @@ def _enabled(config: dict) -> bool:
 def build_prompt(
     config: dict | None,
     *,
-    db_path: str = DB_PATH,
+    db_path: str | None = None,
     now: datetime | None = None,
     _fence_token: str | None = None,
 ) -> str:

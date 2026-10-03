@@ -14,6 +14,7 @@ caller) because it is plain data.
 from __future__ import annotations
 
 import ast
+import os
 import json
 import pathlib
 import re
@@ -350,6 +351,36 @@ def agent_tool_specs(agent) -> dict:
 _CONFIG_ROOT = "/config/"
 
 
+def _paths_module():
+    """paths.py loaded on its own with an empty root, so each helper returns
+    its path relative to HA's config dir. It imports only os."""
+    global _PATHS_MOD
+    if _PATHS_MOD is None:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("_contract_paths", COMP / "paths.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        mod._root = ""
+        _PATHS_MOD = mod
+    return _PATHS_MOD
+
+
+_PATHS_MOD = None
+
+
+def _paths_call(n) -> str:
+    if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+            and isinstance(n.func.value, ast.Name) and n.func.value.id == "paths"
+            and all(isinstance(a, ast.Constant) and isinstance(a.value, str) for a in n.args)
+            and not n.keywords):
+        return ""
+    fn = getattr(_paths_module(), n.func.attr, None)
+    if fn is None or n.func.attr in ("configure", "config_dir"):
+        return ""
+    rel = fn(*(a.value for a in n.args)).replace(os.sep, "/").strip("/")
+    return rel
+
+
 def storage_contract() -> dict:
     """Persisted file paths (relative to HA's config dir) and SQLite table
     names each module owns, read from literals in the source. Nothing is
@@ -368,6 +399,10 @@ def storage_contract() -> dict:
             if (isinstance(n, ast.Call) and ast.unparse(n.func).endswith("config.path")
                     and n.args and all(isinstance(a, ast.Constant) for a in n.args)):
                 paths.add("/".join(a.value for a in n.args))
+            # paths.py helpers (v8.5.0): paths.nova_path("x.db"), paths.patterns_db(), ...
+            rel = _paths_call(n)
+            if rel:
+                paths.add(rel)
         tables |= set(re.findall(r"CREATE TABLE(?: IF NOT EXISTS)?\s+([a-z_]+)\s*\(", src))
         tables |= set(re.findall(
             r"CREATE VIRTUAL TABLE(?: IF NOT EXISTS)?\s+([a-z_]+)\s+USING", src))

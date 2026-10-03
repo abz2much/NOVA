@@ -41,6 +41,7 @@ from homeassistant.util import dt as dt_util
 
 from .persistence import sqlite as _store
 from .persistence.files import write_json_atomic
+from . import paths
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -54,7 +55,13 @@ ALARM_ARMED_STATES = {
 LOCKDOWN_DOOR_COVER_CLASSES = {"door", "garage", "garage_door"}
 LOCKDOWN_BREACH_COOLDOWN = 120  # seconds between repeat breach announcements
 LOCKDOWN_SECURE_VERIFY_DELAY = 25  # seconds to wait before confirming a close actually took (slow covers)
-LOCKDOWN_STATE_PATH = "/config/nova/lockdown_state.json"  # survives reboots/reloads
+LOCKDOWN_STATE_PATH: Optional[str] = None  # override; None resolves via paths.py; survives reboots/reloads
+
+
+def _lockdown_state_path() -> str:
+    return LOCKDOWN_STATE_PATH or paths.nova_path("lockdown_state.json")
+
+
 # Locks that are NOT physical security (thermostat keypad/child locks, etc).
 # Lockdown's "lock every unlocked lock" sweep and breach re-lock both skip
 # these entities. Overridable via the "lockdown_exempt_locks" config key
@@ -66,7 +73,11 @@ LOCKDOWN_EXEMPT_LOCKS_DEFAULT = {
 }
 FREEZE_WARN_TEMP_F = 35  # outdoor temp (°F) that triggers pipe concern
 FREEZE_CRITICAL_TEMP_F = 20  # act immediately
-IGNORE_FILE = "/config/.nova_ignore_rules.json"
+IGNORE_FILE: Optional[str] = None  # override; None resolves via paths.py
+
+
+def _ignore_file() -> str:
+    return IGNORE_FILE or paths.config_path(".nova_ignore_rules.json")
 
 
 def _temp_to_f(value: float, unit: str) -> float:
@@ -209,8 +220,18 @@ INTRUSION_RESPONSE_TIMEOUT_SECS = 120
 # A suggestion that the user approves repeatedly earns the right to auto-apply.
 AUTONOMY_TRUST_THRESHOLD = 3     # approvals of same pattern → auto-execute tier
 AUTONOMY_MIN_CONFIDENCE = 0.80   # confidence floor for auto-execution
-AUTONOMY_FILE = "/config/nova/autonomy_grants.json"
-PATTERNS_DB = "/config/nova/patterns.db"   # learned patterns and the cognition model
+AUTONOMY_FILE: Optional[str] = None  # override; None resolves via paths.py
+
+
+def _autonomy_file() -> str:
+    return AUTONOMY_FILE or paths.nova_path("autonomy_grants.json")
+
+
+PATTERNS_DB: Optional[str] = None  # override; None resolves via paths.py; learned patterns and the cognition model
+
+
+def _patterns_db() -> str:
+    return PATTERNS_DB or paths.patterns_db()
 
 
 # ── Ignore System ───────────────────────────────────────────────────────────
@@ -241,8 +262,8 @@ class IgnoreManager:
 
     def _load(self):
         try:
-            if os.path.exists(IGNORE_FILE):
-                with open(IGNORE_FILE) as f:
+            if os.path.exists(_ignore_file()):
+                with open(_ignore_file()) as f:
                     data = json.load(f)
                 self._rules = [
                     IgnoreRule(**r) for r in data
@@ -262,7 +283,7 @@ class IgnoreManager:
                 }
                 for r in self._rules if not r.is_expired()
             ]
-            write_json_atomic(IGNORE_FILE, data, indent=2)
+            write_json_atomic(_ignore_file(), data, indent=2)
         except Exception as exc:
             _LOGGER.warning("Failed to save ignore rules: %s", exc)
 
@@ -1407,9 +1428,9 @@ class LockdownManager:
 
     def _load_state(self) -> None:
         try:
-            if not os.path.exists(LOCKDOWN_STATE_PATH):
+            if not os.path.exists(_lockdown_state_path()):
                 return
-            with open(LOCKDOWN_STATE_PATH) as f:
+            with open(_lockdown_state_path()) as f:
                 d = json.load(f)
             self._auto_suppressed = bool(d.get("auto_suppressed", False))
             if d.get("active"):
@@ -1442,7 +1463,7 @@ class LockdownManager:
 
     def _persist_sync(self) -> None:
         try:
-            write_json_atomic(LOCKDOWN_STATE_PATH, {
+            write_json_atomic(_lockdown_state_path(), {
                 "active": self.active,
                 "since": self.since,
                 "reason": self.reason,
@@ -2130,8 +2151,8 @@ class AutonomyManager:
 
     def _load(self) -> None:
         try:
-            if os.path.exists(AUTONOMY_FILE):
-                with open(AUTONOMY_FILE, "r", encoding="utf-8") as f:
+            if os.path.exists(_autonomy_file()):
+                with open(_autonomy_file(), "r", encoding="utf-8") as f:
                     self._grants = json.load(f) or {}
         except Exception as exc:
             _LOGGER.warning("Autonomy grants load failed: %s", exc)
@@ -2139,7 +2160,7 @@ class AutonomyManager:
 
     def _save(self) -> None:
         try:
-            write_json_atomic(AUTONOMY_FILE, self._grants, indent=2, encoding="utf-8")
+            write_json_atomic(_autonomy_file(), self._grants, indent=2, encoding="utf-8")
         except Exception as exc:
             _LOGGER.warning("Autonomy grants save failed: %s", exc)
 
@@ -2225,7 +2246,7 @@ class StateLogger:
 
     def __init__(self, db_path=None):
         self._last_states: dict[str, str] = {}
-        self._db_path = db_path or PATTERNS_DB
+        self._db_path = db_path or _patterns_db()
         self._init_db()
 
     def _init_db(self):
@@ -2848,7 +2869,7 @@ async def _tick():
                 # Persist the model and the once-a-day ledger; a reminder
                 # between cycles is saved at once so a restart can't repeat it.
                 await hass.async_add_executor_job(
-                    cognition.save_to_db, PATTERNS_DB
+                    cognition.save_to_db, _patterns_db()
                 )
     except Exception as exc:
         _LOGGER.debug("Cognition anticipation tick error: %s", exc)
@@ -3958,7 +3979,7 @@ async def start(hass: HomeAssistant, config: dict, entry=None) -> None:
     # restarts and keeps accumulating across days.
     try:
         from . import cognition
-        await hass.async_add_executor_job(cognition.load_from_db, PATTERNS_DB)
+        await hass.async_add_executor_job(cognition.load_from_db, _patterns_db())
     except Exception as exc:
         _LOGGER.debug("cognition load on start failed: %s", exc)
 

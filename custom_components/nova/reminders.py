@@ -22,15 +22,22 @@ from datetime import timedelta
 from .persistence import sqlite as _store
 from .presence import get_presence_summary
 from .tts_helper import async_announce
+from . import paths
 
 _LOGGER = logging.getLogger(__name__)
 
-DB_PATH = Path("/config/nova/reminders.db")
+DB_PATH: Optional[Path] = None  # override; None resolves via paths.py
+
+
+def _db_path() -> Path:
+    return DB_PATH or Path(paths.nova_path("reminders.db"))
+
+
 QUIET_START = time(22, 0)
 QUIET_END   = time(7, 0)
 
 def _connect():
-    conn = _store.connect(DB_PATH, wal=False, busy_timeout_ms=None)
+    conn = _store.connect(_db_path(), wal=False, busy_timeout_ms=None)
     _store.ensure(conn, "reminders")
     conn.commit()
     return conn

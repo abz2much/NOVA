@@ -29,10 +29,18 @@ from pathlib import Path
 from threading import Lock
 
 from .persistence.files import CORRUPT, OK, read_json, write_json_atomic
+from . import paths
+from typing import Optional
 
 _LOGGER = logging.getLogger(__name__)
 
-CACHE_PATH = Path("/config/nova/reasoning_cache.json")
+CACHE_PATH: Optional[Path] = None  # override; None resolves via paths.py
+
+
+def _cache_path() -> Path:
+    return CACHE_PATH or Path(paths.nova_path("reasoning_cache.json"))
+
+
 REFRESH_AGE = 14 * 86400        # re-validate a learned decision via cloud after 2 weeks
 MAX_ENTRIES = 2000              # bound the cache
 _NUMERIC_RE = re.compile(r"^-?\d+(\.\d+)?$")
@@ -73,7 +81,7 @@ def load() -> int:
     with _lock:
         if _loaded:                      # re-check under the lock
             return len(_cache)
-        read = read_json(CACHE_PATH)
+        read = read_json(_cache_path())
         if read.status == CORRUPT:
             _LOGGER.warning("Reasoning cache load error: %s", read.error)
         _cache = read.value if read.status == OK and isinstance(read.value, dict) else {}
@@ -91,7 +99,7 @@ def save() -> None:
                 items = sorted(_cache.items(), key=lambda kv: kv[1].get("refreshed", 0))
                 for sig, _v in items[: len(_cache) - MAX_ENTRIES]:
                     _cache.pop(sig, None)
-            write_json_atomic(CACHE_PATH, _cache)
+            write_json_atomic(_cache_path(), _cache)
     except Exception as exc:
         _LOGGER.debug("Reasoning cache save error: %s", exc)
 

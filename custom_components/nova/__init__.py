@@ -101,12 +101,20 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
     They outlive every config-entry load, unload, reload and setup failure;
     each call resolves the loaded entry and its NovaRuntime (services.py)."""
+    # Before anything can touch a Nova file: resolve every store against
+    # this instance's own config directory (paths.py).
+    from . import paths
+    paths.configure(hass)
     async_setup_services(hass)
     return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool:
     """Set up Nova from a config entry."""
+    # Idempotent; async_setup already did this, but an entry set up on its
+    # own must never fall back to the default root.
+    from . import paths
+    paths.configure(hass)
     # ── Run config migrations if entry is from an older schema ──────────────
     current_version = entry.data.get("schema_version", 1)
     if current_version < CURRENT_SCHEMA_VERSION:
@@ -861,8 +869,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
                         "message": (
                             f"{nova_config.last_load_error}. Nova started "
                             "with defaults. Fix the JSON in the preserved file "
-                            "and copy it back to /config/nova/config.json, "
-                            "then restart."),
+                            "and copy it back to "
+                            f"{nova_config._config_path()}, then restart."),
                         "notification_id": "nova_config_corrupt",
                     }, blocking=False)
             except Exception:

@@ -1307,7 +1307,7 @@ NOVA_TOOLS: list[dict[str, Any]] = [
             "name": "ingest_documents",
             "description": (
                 "Re-scan and ingest the documents folder "
-                "(/config/nova/documents). Use when the user says they added "
+                "(nova/documents in Home Assistant's config folder). Use when the user says they added "
                 "or updated manuals/receipts and wants them searchable."
             ),
             "parameters": {"type": "object", "properties": {}},

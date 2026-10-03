@@ -98,7 +98,7 @@ async def test_db_path_resolved_through_hass_config_not_hardcoded(hass):
     from custom_components.nova import action_log
 
     await _setup_nova(hass)
-    assert action_log._DEFAULT_DB == hass.config.path("nova", "conversations.db")
+    assert action_log._resolve(None) == hass.config.path("nova", "conversations.db")
 
 
 async def test_setup_succeeds_when_action_log_configure_fails(hass, monkeypatch):

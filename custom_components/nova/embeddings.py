@@ -29,10 +29,17 @@ import struct
 from typing import Optional
 
 from .persistence import sqlite as _store
+from . import paths
 
 _LOGGER = logging.getLogger(__name__)
 
-_DB_PATH = "/config/nova.db"
+_DB_PATH: Optional[str] = None  # override; None resolves via paths.py
+
+
+def _db_path() -> str:
+    return _DB_PATH or paths.nova_db()
+
+
 _DEFAULT_MODEL = "nomic-embed-text"
 # Holds the most specific reason the last embed attempt failed, so the health
 # status can say *why* (model not pulled / unreachable / HTTP error) instead of
@@ -90,7 +97,7 @@ def _unpack(blob: bytes) -> list[float]:
 def init_store() -> bool:
     """Create the vector table if absent. Returns True on success."""
     try:
-        conn = sqlite3.connect(_DB_PATH)
+        conn = sqlite3.connect(_db_path())
         _store.ensure(conn, "doc_vectors")
         conn.commit()
         conn.close()
@@ -102,7 +109,7 @@ def init_store() -> bool:
 
 def forget_source(source: str) -> None:
     try:
-        conn = sqlite3.connect(_DB_PATH)
+        conn = sqlite3.connect(_db_path())
         conn.execute("DELETE FROM doc_vectors WHERE source = ?", (source,))
         conn.commit()
         conn.close()
@@ -117,7 +124,7 @@ def store_vectors(source: str, chunks: list[str], vectors: list[list[float]],
         return 0
     model = _model()
     try:
-        conn = sqlite3.connect(_DB_PATH)
+        conn = sqlite3.connect(_db_path())
         conn.executemany(
             "INSERT INTO doc_vectors (source, chunk, content, dim, vec, model, "
             "ingested) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -135,7 +142,7 @@ def store_vectors(source: str, chunks: list[str], vectors: list[list[float]],
 
 def vector_count() -> int:
     try:
-        conn = sqlite3.connect(_DB_PATH)
+        conn = sqlite3.connect(_db_path())
         n = conn.execute("SELECT COUNT(*) FROM doc_vectors").fetchone()[0]
         conn.close()
         return int(n)
@@ -165,7 +172,7 @@ def search_vectors(query_vec: list[float], k: int = 4) -> list[dict]:
     if not query_vec:
         return []
     try:
-        conn = sqlite3.connect(_DB_PATH)
+        conn = sqlite3.connect(_db_path())
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             "SELECT source, chunk, content, vec FROM doc_vectors").fetchall()

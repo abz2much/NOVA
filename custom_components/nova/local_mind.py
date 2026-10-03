@@ -39,10 +39,11 @@ import sqlite3
 import time
 from collections import deque
 from typing import Optional
+from . import paths
 
 _LOGGER = logging.getLogger(__name__)
 
-DB_PATH = "/config/nova/patterns.db"
+DB_PATH: Optional[str] = None  # override; None resolves via paths.py
 
 # History lookups are cached briefly so a chatty entity doesn't hammer sqlite.
 _HIST_TTL = 600.0          # seconds
@@ -63,7 +64,7 @@ _stats = {"decisions": 0, "spoke": 0, "silent": 0}
 
 def _connect() -> Optional[sqlite3.Connection]:
     try:
-        conn = sqlite3.connect(DB_PATH, timeout=2.0)
+        conn = sqlite3.connect(DB_PATH or paths.patterns_db(), timeout=2.0)
         conn.row_factory = sqlite3.Row
         return conn
     except Exception:

@@ -33,14 +33,14 @@ import sqlite3
 import time
 from typing import Optional
 
+from . import paths
 from .persistence import sqlite as _store
 
 _LOGGER = logging.getLogger(__name__)
 
-# Overridden by configure(hass) with the instance's own reported config
-# directory (hass.config.path(...)) — this default only applies before
-# configure() has run (e.g. in isolated unit tests that never call it).
-_DEFAULT_DB = "/config/nova/conversations.db"
+# Override for the default db; None resolves via paths.py to this
+# instance's own <config>/nova/conversations.db.
+_DEFAULT_DB: Optional[str] = None
 
 _MAX_ENTRIES = 100
 
@@ -52,14 +52,13 @@ _last: Optional[dict] = None
 
 def configure(hass) -> None:
     """Point the default db path at this Home Assistant instance's own
-    config directory (mirrors nova_config.py's own configure()). Call
-    once, early in async_setup_entry, before any spoken_history access."""
-    global _DEFAULT_DB
-    _DEFAULT_DB = hass.config.path("nova", "conversations.db")
+    config directory. paths.py owns that directory; this stays so callers
+    that configure this store on its own keep working."""
+    paths.configure(hass)
 
 
 def _resolve(db_path: Optional[str]) -> str:
-    return db_path or _DEFAULT_DB
+    return db_path or _DEFAULT_DB or paths.conversations_db()
 
 
 def _connect(db_path: str) -> sqlite3.Connection:

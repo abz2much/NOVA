@@ -105,9 +105,9 @@ def test_snapshot_dir_is_not_under_config_www(load):
     authentication at all. Checked against the module's own source constant,
     not a test's redirected path, so this can't pass by accident."""
     m = load("intrusion")
-    assert "/www/" not in m.SNAPSHOT_DIR
+    assert "/www/" not in m._snapshot_dir()
     src = pathlib.Path(m.__file__).read_text(encoding="utf-8")
-    assert 'SNAPSHOT_DIR = "/config/nova/intrusion"' in src
+    assert 'paths.nova_path("intrusion")' in src
 
 
 async def test_capture_snapshot_no_entity_returns_none(intr):

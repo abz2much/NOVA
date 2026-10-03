@@ -3,7 +3,7 @@ Nova — Centralized Configuration.
 
 Single source of truth for all Nova settings.
 
-Config file: /config/nova/config.json
+Config file: <config>/nova/config.json (resolved by paths.py)
 
 Lifecycle (v6.45.0 — config-entry-only, no add-on):
   1. Integration loads → reads config.json
@@ -21,9 +21,19 @@ import threading
 from pathlib import Path
 from typing import Any, Optional
 
+from . import paths
+
 _LOGGER = logging.getLogger(__name__)
 
-CONFIG_PATH = Path("/config/nova/config.json")
+# Override for config.json's location; None resolves via paths.py to this
+# instance's own <config>/nova/config.json.
+CONFIG_PATH: Optional[Path] = None
+
+
+def _config_path() -> Path:
+    return CONFIG_PATH or Path(paths.nova_path("config.json"))
+
+
 _lock = threading.Lock()
 _cache: dict = {}
 _loaded = False
@@ -35,20 +45,12 @@ last_load_error: Optional[str] = None
 
 
 def configure(hass) -> None:
-    """Point CONFIG_PATH at this Home Assistant instance's own config dir.
+    """Point config.json at this Home Assistant instance's own config dir
+    (paths.py owns the directory) and drop the process cache.
 
-    hass.config.path() resolves to whatever directory THIS instance was
-    configured with — /config on HA OS/Supervised/container installs, but
-    not universally (a Core install run out of a venv can point anywhere).
-    Before this, nova_config always wrote through the literal `/config`
-    regardless of what hass actually reported, which made setup unrunnable
-    anywhere that isn't the real config dir — including every test harness
-    (PHACC), whose hass fixture points elsewhere. On an install where
-    hass.config.path() genuinely is /config, this resolves to the same path
-    CONFIG_PATH already had, so behaviour there is unchanged.
     Call once, early in async_setup_entry, before any config.json access."""
-    global CONFIG_PATH, _cache, _loaded
-    CONFIG_PATH = Path(hass.config.path("nova", "config.json"))
+    global _cache, _loaded
+    paths.configure(hass)
     # Integration reloads reuse this Python module. Invalidate the process
     # cache every time setup begins so a file restored or edited on disk is
     # visible after a Nova reload, without requiring a full HA restart.
@@ -67,7 +69,7 @@ def reload() -> dict:
 
 
 def _ensure_dir():
-    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _config_path().parent.mkdir(parents=True, exist_ok=True)
 
 
 def _sideline_corrupt(reason: str) -> None:
@@ -76,10 +78,10 @@ def _sideline_corrupt(reason: str) -> None:
     startup either."""
     global last_load_error
     import time as _t
-    dest = CONFIG_PATH.with_name(
-        CONFIG_PATH.name + f".corrupt-{int(_t.time())}")
+    dest = _config_path().with_name(
+        _config_path().name + f".corrupt-{int(_t.time())}")
     try:
-        CONFIG_PATH.rename(dest)
+        _config_path().rename(dest)
         last_load_error = f"{reason} — file preserved at {dest.name}"
     except Exception:
         last_load_error = f"{reason} — could not sideline file"
@@ -99,8 +101,8 @@ def load() -> dict:
     with _lock:
         last_load_error = None
         try:
-            if CONFIG_PATH.exists():
-                with open(CONFIG_PATH) as f:
+            if _config_path().exists():
+                with open(_config_path()) as f:
                     data = json.load(f)
                 if isinstance(data, dict):
                     _cache = data
@@ -113,7 +115,7 @@ def load() -> dict:
             _loaded = True
             _LOGGER.info(
                 "Nova config loaded: %d keys from %s",
-                len(_cache), CONFIG_PATH,
+                len(_cache), _config_path(),
             )
         except json.JSONDecodeError as exc:
             _cache = {}
@@ -147,10 +149,10 @@ def save() -> bool:
     with _lock:
         try:
             # Write atomically via temp file
-            tmp = CONFIG_PATH.with_suffix(".tmp")
+            tmp = _config_path().with_suffix(".tmp")
             with open(tmp, "w") as f:
                 json.dump(_cache, f, indent=2, default=str)
-            tmp.replace(CONFIG_PATH)
+            tmp.replace(_config_path())
             return True
         except Exception as exc:
             _LOGGER.warning("Nova config save error: %s", exc)
@@ -369,10 +371,10 @@ def set_many_atomic(updates: dict) -> bool:
         candidate = dict(_cache_dict())
         candidate.update(updates)
         try:
-            tmp = CONFIG_PATH.with_suffix(".tmp")
+            tmp = _config_path().with_suffix(".tmp")
             with open(tmp, "w") as f:
                 json.dump(candidate, f, indent=2, default=str)
-            tmp.replace(CONFIG_PATH)
+            tmp.replace(_config_path())
         except Exception as exc:
             _LOGGER.warning("Nova atomic config save error: %s", exc)
             return False

@@ -1112,7 +1112,7 @@
     },
     {
       "function": {
-        "description": "Re-scan and ingest the documents folder (/config/nova/documents). Use when the user says they added or updated manuals/receipts and wants them searchable.",
+        "description": "Re-scan and ingest the documents folder (nova/documents in Home Assistant's config folder). Use when the user says they added or updated manuals/receipts and wants them searchable.",
         "name": "ingest_documents",
         "parameters": {
           "properties": {},

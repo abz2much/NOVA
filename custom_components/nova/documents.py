@@ -36,13 +36,30 @@ from pathlib import Path
 from typing import Optional
 
 from .persistence import sqlite as _store
+from . import paths
 
 _LOGGER = logging.getLogger(__name__)
 
-DOCS_DIR = "/config/nova/documents"
-MEMORY_DIR = "/config/nova_memory"          # same Chroma client as memory.py
+DOCS_DIR: Optional[str] = None  # override; None resolves via paths.py
+
+
+def _documents_dir() -> str:
+    return DOCS_DIR or paths.nova_path("documents")
+
+
+MEMORY_DIR: Optional[str] = None  # override; None resolves via paths.py; same Chroma client as memory.py
+
+
+def _memory_dir() -> str:
+    return MEMORY_DIR or paths.memory_dir()
+
+
 _COLLECTION_NAME = "nova_documents"
-_DB_PATH = "/config/nova.db"
+_DB_PATH: Optional[str] = None  # override; None resolves via paths.py
+
+
+def _db_path() -> str:
+    return _DB_PATH or paths.nova_db()
 
 _CHUNK_CHARS = 900            # ~1 chunk ≈ a paragraph or two — good recall granularity
 _CHUNK_OVERLAP = 150         # carry context across chunk boundaries
@@ -61,13 +78,13 @@ def _init_chroma() -> bool:
     global _chroma_ok, _collection
     try:
         import chromadb
-        client = chromadb.PersistentClient(path=MEMORY_DIR)
+        client = chromadb.PersistentClient(path=_memory_dir())
         _collection = client.get_or_create_collection(
             name=_COLLECTION_NAME,
             metadata={"hnsw:space": "cosine"},
         )
         _chroma_ok = True
-        _LOGGER.info("Nova documents: ChromaDB collection ready at %s", MEMORY_DIR)
+        _LOGGER.info("Nova documents: ChromaDB collection ready at %s", _memory_dir())
         return True
     except ImportError:
         _LOGGER.debug("Nova documents: ChromaDB not available, FTS5 fallback")
@@ -81,7 +98,7 @@ def _init_fts() -> bool:
     global _fts_ok
     try:
         import sqlite3
-        conn = sqlite3.connect(_DB_PATH)
+        conn = sqlite3.connect(_db_path())
         _store.ensure(conn, "document_fts")
         conn.commit()
         conn.close()
@@ -206,7 +223,7 @@ def _forget_source(source: str) -> None:
     if _fts_ok:
         try:
             import sqlite3
-            conn = sqlite3.connect(_DB_PATH)
+            conn = sqlite3.connect(_db_path())
             conn.execute("DELETE FROM document_fts WHERE source = ?", (source,))
             conn.commit()
             conn.close()
@@ -231,7 +248,7 @@ def delete_source(filename: str) -> dict:
         pass
     # remove the file
     try:
-        p = Path(DOCS_DIR) / safe
+        p = Path(_documents_dir()) / safe
         if p.exists():
             p.unlink()
     except Exception as exc:
@@ -273,7 +290,7 @@ def ingest_file(path: str) -> dict:
     if _fts_ok:
         try:
             import sqlite3
-            conn = sqlite3.connect(_DB_PATH)
+            conn = sqlite3.connect(_db_path())
             conn.executemany(
                 "INSERT INTO document_fts (content, source, chunk_id, ingested) "
                 "VALUES (?, ?, ?, ?)",
@@ -291,7 +308,7 @@ def ingest_file(path: str) -> dict:
             "error": "no vector or FTS store available"}
 
 
-async def ingest_directory_async(hass, directory: str = DOCS_DIR) -> dict:
+async def ingest_directory_async(hass, directory: Optional[str] = None) -> dict:
     """Ingest the documents folder, adding Ollama-embedded vectors when semantic
     search is enabled (v6.57.0). Always does keyword (FTS) ingest; layers vector
     embeddings on top when available. Falls back silently to keyword-only if
@@ -373,7 +390,7 @@ def save_uploaded_file(filename: str, b64_content: str) -> dict:
     if len(raw) > _MAX_FILE_MB * 1_000_000:
         return {"ok": False, "error": f"file exceeds {_MAX_FILE_MB}MB"}
     try:
-        d = Path(DOCS_DIR)
+        d = Path(_documents_dir())
         d.mkdir(parents=True, exist_ok=True)
         dest = d / safe
         # resolve and re-check the destination stays inside DOCS_DIR
@@ -450,12 +467,12 @@ async def auto_ingest_new(hass) -> dict:
     automatically on the next scheduled scan, without re-embedding everything.
     Never raises."""
     import sqlite3
-    docs = Path(DOCS_DIR)
+    docs = Path(_documents_dir())
     if not docs.is_dir():
         return {"ok": True, "new_files": 0, "note": "docs dir absent"}
 
     try:
-        conn = sqlite3.connect(_DB_PATH)
+        conn = sqlite3.connect(_db_path())
         _store.ensure(conn, "document_watch_seen")
         conn.commit()
         seen = {r[0]: r[1] for r in
@@ -480,7 +497,7 @@ async def auto_ingest_new(hass) -> dict:
             results.append({"source": f.name, **res})
             if res.get("ok"):
                 try:
-                    conn = sqlite3.connect(_DB_PATH)
+                    conn = sqlite3.connect(_db_path())
                     conn.execute("INSERT OR REPLACE INTO document_watch_seen "
                                  "(path, mtime, ingested) VALUES (?, ?, ?)",
                                  (key, mtime, datetime.now(timezone.utc).replace(tzinfo=None).isoformat()))
@@ -507,7 +524,7 @@ async def scan_watch_folders(hass) -> dict:
     import sqlite3
     # remember ingested watch-file paths+mtimes in a tiny table
     try:
-        conn = sqlite3.connect(_DB_PATH)
+        conn = sqlite3.connect(_db_path())
         _store.ensure(conn, "document_watch_seen")
         conn.commit()
         seen = {r[0]: r[1] for r in
@@ -542,7 +559,7 @@ async def scan_watch_folders(hass) -> dict:
                 res = await save_and_ingest_upload_from_path(hass, copied["path"])
                 new_results.append({"source": f.name, **res})
                 try:
-                    conn = sqlite3.connect(_DB_PATH)
+                    conn = sqlite3.connect(_db_path())
                     conn.execute("INSERT OR REPLACE INTO document_watch_seen "
                                  "(path, mtime, ingested) VALUES (?, ?, ?)",
                                  (key, mtime, datetime.now(timezone.utc).replace(tzinfo=None).isoformat()))
@@ -565,7 +582,7 @@ def _copy_into_docs(src_path: str) -> dict:
     if not safe:
         return {"ok": False}
     try:
-        d = Path(DOCS_DIR)
+        d = Path(_documents_dir())
         d.mkdir(parents=True, exist_ok=True)
         dest = d / safe
         shutil.copy2(src_path, dest)
@@ -617,9 +634,10 @@ async def search_documents_async(hass, query: str, k: int = 4) -> list[dict]:
     return hits
 
 
-def ingest_directory(directory: str = DOCS_DIR) -> dict:
+def ingest_directory(directory: Optional[str] = None) -> dict:
     """Ingest every supported file in the documents directory. Returns a
     summary with per-file results. Creates the directory if missing."""
+    directory = directory or _documents_dir()
     _ensure_init()
     d = Path(directory)
     try:
@@ -681,7 +699,7 @@ def search_documents(query: str, k: int = 4) -> list[dict]:
     if _fts_ok:
         try:
             import sqlite3
-            conn = sqlite3.connect(_DB_PATH)
+            conn = sqlite3.connect(_db_path())
             conn.row_factory = sqlite3.Row
             terms = " OR ".join(re.findall(r"\w+", query)[:8]) or query
             rows = conn.execute(
@@ -701,7 +719,7 @@ def search_documents(query: str, k: int = 4) -> list[dict]:
 def library_status() -> dict:
     """What's in the library — backends and counts, for status/UI. Never raises."""
     _ensure_init()
-    info = {"chroma": _chroma_ok, "fts": _fts_ok, "directory": DOCS_DIR,
+    info = {"chroma": _chroma_ok, "fts": _fts_ok, "directory": _documents_dir(),
             "chunk_count": 0, "sources": []}
     if _chroma_ok and _collection is not None:
         try:
@@ -718,7 +736,7 @@ def library_status() -> dict:
     elif _fts_ok:
         try:
             import sqlite3
-            conn = sqlite3.connect(_DB_PATH)
+            conn = sqlite3.connect(_db_path())
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 "SELECT source, COUNT(*) n FROM document_fts GROUP BY source"

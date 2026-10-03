@@ -8,6 +8,8 @@ from typing import Any
 from homeassistant.core import HomeAssistant
 
 from ...persistence.files import CORRUPT, OK, read_json, write_json_atomic
+from ... import paths
+from typing import Optional
 
 # One logger for the whole agent, named as it always was (…nova.agent), so
 # log filters and levels set for the agent keep applying.
@@ -16,12 +18,16 @@ _LOGGER = logging.getLogger(__name__.partition(".agent_runtime")[0] + ".agent")
 
 # ── Learning memory ─────────────────────────────────────────────────────────
 
-_LEARN_FILE = "/config/.nova_learned.json"
+_LEARN_FILE: Optional[str] = None  # override; None resolves via paths.py
+
+
+def _learn_file() -> str:
+    return _LEARN_FILE or paths.learned_file()
 
 
 def _load_learned() -> dict:
     """Load persistent learned data."""
-    read = read_json(_LEARN_FILE)
+    read = read_json(_learn_file())
     if read.status == CORRUPT:
         _LOGGER.warning("Learned data unreadable, starting empty: %s", read.error)
     if read.status == OK and read.value is not None:
@@ -32,7 +38,7 @@ def _load_learned() -> dict:
 def _save_learned(data: dict) -> None:
     """Save learned data to disk."""
     try:
-        write_json_atomic(_LEARN_FILE, data, indent=2)
+        write_json_atomic(_learn_file(), data, indent=2)
     except Exception as exc:
         _LOGGER.warning("Failed to save learned data: %s", exc)
 
