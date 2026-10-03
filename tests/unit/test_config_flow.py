@@ -6,7 +6,9 @@ import types
 
 import pytest
 
-pytest.importorskip("voluptuous")  # core HA dep; skip cleanly where absent
+# Required, not optional: these tests silently skipped for months when it was
+# missing. CI's unit job installs it; locally run `pip install voluptuous`.
+import voluptuous  # noqa: E402,F401
 
 
 def _install_stubs():
@@ -17,7 +19,9 @@ def _install_stubs():
     sys.modules["homeassistant.core"] = core
 
     # homeassistant.config_entries
-    ce = types.ModuleType("homeassistant.config_entries")
+    # Extend the shared stub (tests/conftest.py) rather than replace it:
+    # replacing it drops ConfigEntryState, which later test files need.
+    ce = sys.modules.get("homeassistant.config_entries") or types.ModuleType("homeassistant.config_entries")
 
     class ConfigFlow:
         def __init_subclass__(cls, **kw):
