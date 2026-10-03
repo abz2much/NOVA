@@ -203,6 +203,7 @@ const _coverageCalls = [];
 let _credStatus = { groq: true, openai: false, anthropic: false, gemini: false, custom: false, ollama: false };
 const _setCredentialCalls = [];
 const _deleteCredentialCalls = [];
+const _sayHelloCalls = [];
 const hass = {
   config: { location_name: "Springfield IL", latitude: 39.78, longitude: -89.65 },
   states: { "assist_satellite.a": { state: "idle", attributes: {} }, "camera.front": { attributes: { access_token: "tok123" } }, "camera.back": { attributes: { access_token: "tok456" } },
@@ -214,6 +215,13 @@ const hass = {
       return {};
     }
     if (m.type === "nova/get_panel_data") return PANEL;
+    if (m.type === "nova/get_setup_health") return { overall: "warn", checks: [
+      { name: "Language model", key: "llm", status: "ok", detail: "reachable" },
+      { name: "Assist pipeline", key: "assist_pipeline", status: "warn",
+        detail: "no Nova-named or Nova-voiced Assist pipeline found", suggested_fix: "Create an Assist pipeline." },
+      { name: "Room speakers", key: "room_speakers", status: "off", detail: "" },
+    ] };
+    if (m.type === "nova/say_hello") { _sayHelloCalls.push(m); return { ok: true, reply: "Good day. All quiet here." }; }
     if (m.type === "nova/get_activity_log") return { entries: [
       { ts: "08:59", urgency: "low", tag: "OBS", msg: "motion in kitchen" },
       { ts: "09:02", urgency: "medium", tag: "GOAL", msg: "goal #1 engaged quietly" },
@@ -561,8 +569,22 @@ setTimeout(async () => {
   checks.push(["command center restores the first-run onboarding checklist",
     newRoot.querySelectorAll(".onboarding-step").length === 5
     && /1\/5 DONE/.test(newRoot.getElementById("onboardingCard")?.textContent || "")]);
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["welcome card shows Setup Doctor problems with their fix",
+    /1 need attention/.test(newRoot.getElementById("welcomeChecks")?.textContent || "")
+    && /Assist pipeline.*Fix: Create an Assist pipeline\./.test(newRoot.getElementById("welcomeChecks")?.textContent || "")
+    && !/Room speakers/.test(newRoot.getElementById("welcomeChecks")?.textContent || "")]);
+  newRoot.getElementById("onboardingHello").click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["welcome card Say hello sends nova/say_hello and shows the reply",
+    _sayHelloCalls.length === 1 && Object.keys(_sayHelloCalls[0]).join() === "type"
+    && /Nova: Good day\. All quiet here\./.test(newRoot.getElementById("welcomeHello")?.textContent || "")]);
   newRoot.getElementById("onboardingDismiss").click();
   await new Promise(r => setTimeout(r, 20));
+  checks.push(["fresh install keeps the welcome card up while Setup Doctor has problems, dismiss wins",
+    /onboardingCard/.test(elNew._onboardingHtml({ show: false, fresh: true, steps: [] }))
+    && elNew._onboardingHtml({ show: false, fresh: false, steps: [] }) === ""
+    && elNew._onboardingHtml({ show: true, fresh: true, dismissed: true, steps: [] }) === ""]);
   checks.push(["onboarding can be dismissed persistently",
     !newRoot.getElementById("onboardingCard")
     && _updateConfigCalls.some(c => c.key === "onboarding_dismissed" && c.value === true)]);

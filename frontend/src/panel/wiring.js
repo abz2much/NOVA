@@ -112,10 +112,23 @@
   _wireOnboarding() {
     const root = this.shadowRoot;
     root.getElementById("onboardingDismiss")?.addEventListener("click", async () => {
-      if (this._liveData?.onboarding) this._liveData.onboarding.show = false;
-      if (this._liveData?.config?.onboarding) this._liveData.config.onboarding.show = false;
+      for (const ob of [this._liveData?.onboarding, this._liveData?.config?.onboarding]) {
+        if (ob) { ob.show = false; ob.dismissed = true; }
+      }
       this._renderData();
       try { await this._hass.callWS({ type: "nova/update_config", key: "onboarding_dismissed", value: true }); } catch (_) {}
+    });
+    root.getElementById("onboardingHello")?.addEventListener("click", async () => {
+      if (!this._hass || this._helloState?.busy) return;
+      this._helloState = { busy: true };
+      this._renderData();
+      try {
+        const res = await this._hass.callWS({ type: "nova/say_hello" });
+        this._helloState = res?.ok ? { reply: res.reply } : { error: res?.error || "Nova didn't reply." };
+      } catch (err) {
+        this._helloState = { error: "Couldn't reach Nova — restart Home Assistant after updating." };
+      }
+      this._renderData();
     });
     root.querySelector(".onboarding-settings")?.addEventListener("click", () => {
       this._currentTab = "settings";

@@ -94,6 +94,7 @@ def async_register(hass: HomeAssistant) -> None:
         websocket_api.async_register_command(hass, ws_semantic_search)
         websocket_api.async_register_command(hass, ws_diagnostics)
         websocket_api.async_register_command(hass, ws_get_setup_health)
+        websocket_api.async_register_command(hass, ws_say_hello)
         websocket_api.async_register_command(hass, ws_get_provider_activity)
         websocket_api.async_register_command(hass, ws_get_spoken_history)
         websocket_api.async_register_command(hass, ws_list_actions)
@@ -486,12 +487,20 @@ def _get_onboarding_state(hass: HomeAssistant, entry, current_notify: str) -> di
         banter_set = nova_config.get("banter_level", None) is not None
     except Exception:
         banter_set = False
+    # Voice counts as set up only when Setup Doctor's own Assist pipeline
+    # check passes (a Nova pipeline that really uses Nova's agent), not
+    # merely when some satellite exists. That check is cheap and sync: no
+    # LLM probe, so it is safe on the 20s panel poll.
     try:
-        has_voice = any(
-            e.entity_id.startswith("assist_satellite.")
-            for e in hass.states.async_all("assist_satellite"))
+        from . import setup_health
+        has_voice = setup_health._check_assist_pipeline(hass).get("status") == "ok"
     except Exception:
         has_voice = False
+    try:
+        from . import nova_config
+        fresh = bool(nova_config.get("welcome_pending", False))
+    except Exception:
+        fresh = False
     try:
         from . import nova_config
         briefings_on = (bool(nova_config.get("briefing_morning_enabled", False))
@@ -506,7 +515,9 @@ def _get_onboarding_state(hass: HomeAssistant, entry, current_notify: str) -> di
          "hint": "Nest/Frigate cameras enable doorbell analysis, package detection, the live floor plan.",
          "jump": "Cameras", "done": has_cameras},
         {"id": "voice", "label": "Set up voice (optional)",
-         "hint": "On HA OS/Supervised Nova installs the voice stack for you — or just talk to it in chat.",
+         "hint": "On HA OS/Supervised Nova installs the voice stack for you. Done when "
+                 "an Assist pipeline uses Nova as its conversation agent "
+                 "(Settings \u2192 Voice assistants).",
          "done": has_voice},
         {"id": "banter", "label": "Pick a personality level",
          "hint": "Plain, dry, or full — how much of Nova's quiet wit comes through. Settings \u2192 Character.",
@@ -521,6 +532,9 @@ def _get_onboarding_state(hass: HomeAssistant, entry, current_notify: str) -> di
     return {
         "dismissed": dismissed,
         "show": (not dismissed) and (not has_notify or done_count < 2),
+        # Fresh install (setup screens): the panel also keeps the card up
+        # while Setup Doctor reports problems, until dismissed.
+        "fresh": fresh,
         "steps": steps,
         "done_count": done_count,
         "total": len(steps),
@@ -3699,6 +3713,24 @@ async def ws_get_setup_health(
     except Exception as exc:
         _LOGGER.exception("ws_get_setup_health failed: %s", exc)
         connection.send_error(msg["id"], "get_setup_health_failed", str(exc))
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "nova/say_hello",
+})
+@websocket_api.async_response
+async def ws_say_hello(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict,
+) -> None:
+    """Welcome card "Say hello" test: sends the fixed text "Hello" through
+    Nova's own conversation agent and returns {ok, reply|error}. Admin-only;
+    takes no text from the caller, so it can't drive device actions."""
+    from . import welcome
+    res = await welcome.async_say_hello(hass, connection.context(msg))
+    connection.send_result(msg["id"], res)
 
 
 @websocket_api.require_admin

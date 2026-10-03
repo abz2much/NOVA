@@ -112,3 +112,78 @@ def test_bootstrap_runs_welcome_after_pipeline_repair(load):
     import inspect
     src = inspect.getsource(load("bootstrap").schedule_bootstrap)
     assert src.index("async_ensure_pipeline_agent") < src.index("welcome.async_maybe_show")
+
+
+# ── async_say_hello ──────────────────────────────────────────────────────────
+
+class _Resp:
+    def __init__(self, d):
+        self._d = d
+
+    def as_dict(self):
+        return self._d
+
+
+def _fake_conversation(monkeypatch, response=None, exc=None):
+    calls = []
+
+    async def async_converse(hass, text, conversation_id, context, agent_id=None, **kw):
+        calls.append((text, conversation_id, context, agent_id))
+        if exc:
+            raise exc
+        return types.SimpleNamespace(response=_Resp(response or {}))
+
+    conv = types.ModuleType("homeassistant.components.conversation")
+    conv.async_converse = async_converse
+    comps = sys.modules.get("homeassistant.components") or types.ModuleType("homeassistant.components")
+    monkeypatch.setitem(sys.modules, "homeassistant.components", comps)
+    monkeypatch.setitem(sys.modules, "homeassistant.components.conversation", conv)
+    monkeypatch.setattr(comps, "conversation", conv, raising=False)
+    return calls
+
+
+@pytest.fixture
+def bootstrap(load):
+    return load("bootstrap")
+
+
+async def test_say_hello_returns_reply_and_sends_fixed_text(welcome, bootstrap, fake_hass, monkeypatch):
+    monkeypatch.setattr(bootstrap, "_find_nova_agent", lambda h: "conversation.nova")
+    calls = _fake_conversation(monkeypatch, {
+        "response_type": "action_done", "speech": {"plain": {"speech": "Good day."}}})
+    res = await welcome.async_say_hello(fake_hass, "ctx")
+    assert res == {"ok": True, "reply": "Good day."}
+    assert calls == [("Hello", None, "ctx", "conversation.nova")]
+
+
+async def test_say_hello_reports_agent_error(welcome, bootstrap, fake_hass, monkeypatch):
+    monkeypatch.setattr(bootstrap, "_find_nova_agent", lambda h: "conversation.nova")
+    _fake_conversation(monkeypatch, {
+        "response_type": "error", "speech": {"plain": {"speech": "LLM unreachable"}}})
+    res = await welcome.async_say_hello(fake_hass, None)
+    assert res == {"ok": False, "error": "LLM unreachable"}
+
+
+async def test_say_hello_without_agent(welcome, bootstrap, fake_hass, monkeypatch):
+    monkeypatch.setattr(bootstrap, "_find_nova_agent", lambda h: None)
+    calls = _fake_conversation(monkeypatch)
+    res = await welcome.async_say_hello(fake_hass, None)
+    assert res["ok"] is False and "not found" in res["error"]
+    assert calls == []
+
+
+async def test_say_hello_never_raises(welcome, bootstrap, fake_hass, monkeypatch):
+    monkeypatch.setattr(bootstrap, "_find_nova_agent", lambda h: "conversation.nova")
+    _fake_conversation(monkeypatch, exc=RuntimeError("boom"))
+    res = await welcome.async_say_hello(fake_hass, None)
+    assert res["ok"] is False and "boom" in res["error"]
+
+
+def test_onboarding_voice_step_uses_setup_doctor_pipeline_check():
+    from pathlib import Path
+    src = (Path(__file__).resolve().parents[2] / "custom_components/nova/websocket.py").read_text()
+    fn = src[src.index("def _get_onboarding_state("):src.index("def _get_cameras(")]
+    assert "_check_assist_pipeline(hass)" in fn
+    assert "assist_satellite" not in fn
+    assert '"fresh": fresh' in fn
+    assert "talk to it in chat" not in fn

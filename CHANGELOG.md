@@ -1,3 +1,19 @@
+## [8.4.0] — Welcome card: setup checks and "Say hello"
+
+**Added**
+- The dashboard's welcome card now shows Setup Doctor results: "All checks passed", or each problem with its fix.
+- A "Say hello" button sends "Hello" to Nova and shows the reply as text, so you can check Nova can answer. The text is fixed, so the button can't control any device.
+- On a fresh install the card stays up while Setup Doctor reports problems, until you dismiss it.
+
+**Changed**
+- The voice step now counts as done only when an Assist pipeline really uses Nova as its conversation agent. Before, any voice satellite was enough. The hint no longer mentions a chat the panel doesn't have.
+
+**Caveats**
+- Setup Doctor runs once when the card first shows, not on every refresh, because it contacts the AI model.
+- If your voice step was only "done" because a satellite existed, it may now show as not done until the pipeline uses Nova.
+- The card text is English only, as before.
+- Hard refresh the page (Ctrl+Shift+R) after updating.
+
 ## [8.3.0] — "Nova is ready" after first setup
 
 **Added**

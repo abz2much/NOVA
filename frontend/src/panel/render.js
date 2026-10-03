@@ -147,18 +147,52 @@
 ${this._htmlDashboardBody()}`;
   }
 
+  // Setup Doctor problems (warn/down) for the welcome card, or null while
+  // the one-off nova/get_setup_health fetch is still pending.
+  _welcomeProblems() {
+    const sh = this._setupHealth;
+    if (!sh || sh.error || !Array.isArray(sh.checks)) return null;
+    return sh.checks.filter(c => c.status === "warn" || c.status === "down");
+  }
+
   _onboardingHtml(onboarding) {
-    return onboarding?.show ? `
+    if (!onboarding || onboarding.dismissed) return "";
+    const problems = this._welcomeProblems();
+    // A fresh install also keeps the card up while Setup Doctor reports problems.
+    const visible = onboarding.show || (onboarding.fresh && problems && problems.length > 0);
+    if (!visible) return "";
+    const sh = this._setupHealth;
+    const active = (sh?.checks || []).filter(c => c.status !== "off");
+    const checksLine = sh?.error
+      ? `<small>Couldn't run Setup Doctor — restart Home Assistant after updating.</small>`
+      : problems === null
+        ? `<small>Checking…</small>`
+        : problems.length === 0
+          ? `<small>All ${this._esc(active.length)} checks passed.</small>`
+          : `<small>${this._esc(problems.length)} need attention:</small>${problems.map(c => `
+            <small class="welcome-problem">• <b>${this._esc(c.name)}</b>: ${this._esc(c.detail || "")}${
+              c.suggested_fix ? ` Fix: ${this._esc(c.suggested_fix)}` : ""}</small>`).join("")}`;
+    const hello = this._helloState || {};
+    const helloOut = hello.busy
+      ? `<small>Waiting for Nova…</small>`
+      : hello.reply ? `<small class="welcome-reply">Nova: ${this._esc(hello.reply)}</small>`
+      : hello.error ? `<small class="welcome-error">${this._esc(hello.error)}</small>` : "";
+    return `
       <div class="onboarding-card" id="onboardingCard">
         <div class="panel-head"><div><div class="panel-title">Welcome — get Nova working for you</div>
           <div class="toggle-desc">These steps are optional. Nova can already answer you.</div></div>
           <button class="camera-toggle" id="onboardingDismiss" title="Dismiss">DISMISS</button></div>
         <div class="onboarding-progress"><span>${this._esc(onboarding.done_count || 0)}/${this._esc(onboarding.total || 0)} DONE</span><i style="width:${Math.round(((onboarding.done_count || 0) / Math.max(1, onboarding.total || 1)) * 100)}%"></i></div>
+        <div class="welcome-checks" id="welcomeChecks"><b>Setup checks</b>${checksLine}</div>
         <div class="onboarding-steps">${(onboarding.steps || []).map(step => `<div class="onboarding-step${step.done ? " done" : ""}">
           <span>${step.done ? "✓" : "○"}</span><div><b>${this._esc(step.label)}</b><small>${this._esc(step.hint)}</small></div>
           ${step.jump ? `<button class="mode-chip onboarding-jump" data-settings-title="${this._esc(step.jump)}">OPEN</button>` : ""}</div>`).join("")}</div>
+        <div class="welcome-hello" id="welcomeHello">
+          <button class="mode-chip" id="onboardingHello"${hello.busy ? " disabled" : ""}>SAY HELLO</button>
+          <div>${helloOut || `<small>Sends "Hello" to Nova and shows the reply, to check it can answer.</small>`}</div>
+        </div>
         <button class="mode-chip onboarding-settings">OPEN SETTINGS</button>
-      </div>` : "";
+      </div>`;
   }
 
   _htmlDashboardBody() {

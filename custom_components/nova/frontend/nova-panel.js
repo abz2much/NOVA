@@ -1082,7 +1082,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v8.3.0
+ * v8.4.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1158,7 +1158,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.3.0 ",
+      console.log("%c Nova Panel %c v8.4.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -1427,18 +1427,52 @@ class NovaPanel extends HTMLElement {
 ${this._htmlDashboardBody()}`;
   }
 
+  // Setup Doctor problems (warn/down) for the welcome card, or null while
+  // the one-off nova/get_setup_health fetch is still pending.
+  _welcomeProblems() {
+    const sh = this._setupHealth;
+    if (!sh || sh.error || !Array.isArray(sh.checks)) return null;
+    return sh.checks.filter(c => c.status === "warn" || c.status === "down");
+  }
+
   _onboardingHtml(onboarding) {
-    return onboarding?.show ? `
+    if (!onboarding || onboarding.dismissed) return "";
+    const problems = this._welcomeProblems();
+    // A fresh install also keeps the card up while Setup Doctor reports problems.
+    const visible = onboarding.show || (onboarding.fresh && problems && problems.length > 0);
+    if (!visible) return "";
+    const sh = this._setupHealth;
+    const active = (sh?.checks || []).filter(c => c.status !== "off");
+    const checksLine = sh?.error
+      ? `<small>Couldn't run Setup Doctor — restart Home Assistant after updating.</small>`
+      : problems === null
+        ? `<small>Checking…</small>`
+        : problems.length === 0
+          ? `<small>All ${this._esc(active.length)} checks passed.</small>`
+          : `<small>${this._esc(problems.length)} need attention:</small>${problems.map(c => `
+            <small class="welcome-problem">• <b>${this._esc(c.name)}</b>: ${this._esc(c.detail || "")}${
+              c.suggested_fix ? ` Fix: ${this._esc(c.suggested_fix)}` : ""}</small>`).join("")}`;
+    const hello = this._helloState || {};
+    const helloOut = hello.busy
+      ? `<small>Waiting for Nova…</small>`
+      : hello.reply ? `<small class="welcome-reply">Nova: ${this._esc(hello.reply)}</small>`
+      : hello.error ? `<small class="welcome-error">${this._esc(hello.error)}</small>` : "";
+    return `
       <div class="onboarding-card" id="onboardingCard">
         <div class="panel-head"><div><div class="panel-title">Welcome — get Nova working for you</div>
           <div class="toggle-desc">These steps are optional. Nova can already answer you.</div></div>
           <button class="camera-toggle" id="onboardingDismiss" title="Dismiss">DISMISS</button></div>
         <div class="onboarding-progress"><span>${this._esc(onboarding.done_count || 0)}/${this._esc(onboarding.total || 0)} DONE</span><i style="width:${Math.round(((onboarding.done_count || 0) / Math.max(1, onboarding.total || 1)) * 100)}%"></i></div>
+        <div class="welcome-checks" id="welcomeChecks"><b>Setup checks</b>${checksLine}</div>
         <div class="onboarding-steps">${(onboarding.steps || []).map(step => `<div class="onboarding-step${step.done ? " done" : ""}">
           <span>${step.done ? "✓" : "○"}</span><div><b>${this._esc(step.label)}</b><small>${this._esc(step.hint)}</small></div>
           ${step.jump ? `<button class="mode-chip onboarding-jump" data-settings-title="${this._esc(step.jump)}">OPEN</button>` : ""}</div>`).join("")}</div>
+        <div class="welcome-hello" id="welcomeHello">
+          <button class="mode-chip" id="onboardingHello"${hello.busy ? " disabled" : ""}>SAY HELLO</button>
+          <div>${helloOut || `<small>Sends "Hello" to Nova and shows the reply, to check it can answer.</small>`}</div>
+        </div>
         <button class="mode-chip onboarding-settings">OPEN SETTINGS</button>
-      </div>` : "";
+      </div>`;
   }
 
   _htmlDashboardBody() {
@@ -5418,6 +5452,15 @@ ${this._htmlDashboardBody()}`;
 
     const onboardingMount = root.getElementById("onboardingMount");
     if (onboardingMount) {
+      // The welcome card's Setup Doctor line: fetched once, not on every
+      // 20s poll, because the check makes a real LLM/TTS probe.
+      const ob = d.onboarding;
+      if (this._hass && ob && !ob.dismissed && (ob.show || ob.fresh) && !this._setupHealth && !this._welcomeHealthPending) {
+        this._welcomeHealthPending = true;
+        this._hass.callWS({ type: "nova/get_setup_health" })
+          .then(res => { this._setupHealth = res; }, () => { this._setupHealth = { error: true }; })
+          .finally(() => { this._welcomeHealthPending = false; this._renderData(); });
+      }
       onboardingMount.innerHTML = this._onboardingHtml(d.onboarding);
       this._wireOnboarding();
     }
@@ -5924,10 +5967,23 @@ ${this._htmlDashboardBody()}`;
   _wireOnboarding() {
     const root = this.shadowRoot;
     root.getElementById("onboardingDismiss")?.addEventListener("click", async () => {
-      if (this._liveData?.onboarding) this._liveData.onboarding.show = false;
-      if (this._liveData?.config?.onboarding) this._liveData.config.onboarding.show = false;
+      for (const ob of [this._liveData?.onboarding, this._liveData?.config?.onboarding]) {
+        if (ob) { ob.show = false; ob.dismissed = true; }
+      }
       this._renderData();
       try { await this._hass.callWS({ type: "nova/update_config", key: "onboarding_dismissed", value: true }); } catch (_) {}
+    });
+    root.getElementById("onboardingHello")?.addEventListener("click", async () => {
+      if (!this._hass || this._helloState?.busy) return;
+      this._helloState = { busy: true };
+      this._renderData();
+      try {
+        const res = await this._hass.callWS({ type: "nova/say_hello" });
+        this._helloState = res?.ok ? { reply: res.reply } : { error: res?.error || "Nova didn't reply." };
+      } catch (err) {
+        this._helloState = { error: "Couldn't reach Nova — restart Home Assistant after updating." };
+      }
+      this._renderData();
     });
     root.querySelector(".onboarding-settings")?.addEventListener("click", () => {
       this._currentTab = "settings";
@@ -8171,6 +8227,9 @@ ${this._htmlDashboardBody()}`;
       .onboarding-steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:7px;margin-bottom:10px}
       .onboarding-step{display:grid;grid-template-columns:18px 1fr auto;align-items:center;gap:7px;background:var(--surface-2);border:1px solid var(--line-soft);border-radius:9px;padding:8px;color:var(--ink-dim)}
       .onboarding-step.done{opacity:.62}.onboarding-step b{display:block;font-size:11px}.onboarding-step small{display:block;font-size:9px;color:var(--ink-faint);margin-top:2px}
+      .welcome-checks,.welcome-hello{background:var(--surface-2);border:1px solid var(--line-soft);border-radius:9px;padding:8px;margin-bottom:10px;color:var(--ink-dim)}
+      .welcome-checks b{display:block;font-size:11px}.welcome-checks small,.welcome-hello small{display:block;font-size:9px;color:var(--ink-faint);margin-top:2px}
+      .welcome-hello{display:grid;grid-template-columns:auto 1fr;align-items:center;gap:10px}.welcome-hello .welcome-reply{color:var(--ink-dim);font-size:11px}.welcome-hello .welcome-error{color:#d95b65}
       .dashboard-pair{max-width:1100px;margin:16px auto 0;display:grid;grid-template-columns:1fr 1fr;gap:16px}
       @media (max-width:760px){.dashboard-pair{grid-template-columns:1fr}}
       .metric-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px}

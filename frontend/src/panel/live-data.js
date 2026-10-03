@@ -25,6 +25,15 @@
 
     const onboardingMount = root.getElementById("onboardingMount");
     if (onboardingMount) {
+      // The welcome card's Setup Doctor line: fetched once, not on every
+      // 20s poll, because the check makes a real LLM/TTS probe.
+      const ob = d.onboarding;
+      if (this._hass && ob && !ob.dismissed && (ob.show || ob.fresh) && !this._setupHealth && !this._welcomeHealthPending) {
+        this._welcomeHealthPending = true;
+        this._hass.callWS({ type: "nova/get_setup_health" })
+          .then(res => { this._setupHealth = res; }, () => { this._setupHealth = { error: true }; })
+          .finally(() => { this._welcomeHealthPending = false; this._renderData(); });
+      }
       onboardingMount.innerHTML = this._onboardingHtml(d.onboarding);
       this._wireOnboarding();
     }
