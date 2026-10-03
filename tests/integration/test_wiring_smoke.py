@@ -108,6 +108,12 @@ def _flow_patches(lists, probes=None, saved=None):
         # Nova's own setup builds AI clients before it copies settings into
         # config.json, and the key write is mocked here, so keep it out.
         patch("custom_components.nova.async_setup_entry", return_value=True),
+        # Screen 3 writes the AI choices into the real config.json in PHACC's
+        # shared folder. Stub it so these tests leave nothing behind; the real
+        # write is covered by the leftover config.json test, which isolates and
+        # restores the file.
+        patch("custom_components.nova.config_flow.NovaConfigFlow._apply_to_config",
+              return_value=True),
         patch("custom_components.nova.config_flow._find_config", return_value=None),
         patch("custom_components.nova.config_flow._saved_keys", return_value=saved or {}),
         patch("custom_components.nova.config_flow.NovaConfigFlow._discover", discover),
