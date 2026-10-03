@@ -111,11 +111,34 @@ async def test_config_flow_accepts_local_llm(hass):
             result["flow_id"],
             {"llm_base_url": "http://localhost:11434/v1"},
         )
+        # Setup is two steps now: address first, then the model.
+        assert result["type"] == "form" and result["step_id"] == "model"
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"model": "local-model"})
     assert result["type"] == "create_entry"
     assert result["data"]["llm_provider"] == "ollama"
+    assert result["data"]["model"] == "local-model"
     # Storage preserves the user's compatible legacy path. OllamaProvider
     # removes a trailing /v1 only when it builds the native /api/chat URL.
     assert result["data"]["ollama_base_url"] == "http://localhost:11434/v1"
+
+
+async def test_config_flow_model_step_offers_discovered_models(hass):
+    """When the provider reports its models, the second step is a dropdown of
+    them (real HA selector validation), and the chosen model is what's saved."""
+    with patch("custom_components.nova.config_flow._find_config", return_value=None), \
+            patch("custom_components.nova.config_flow.NovaConfigFlow._discover_models",
+                  return_value=["alpha", "beta"]), \
+            patch("custom_components.nova.llm_provider.test_connection", return_value=None):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": "user"})
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"llm_base_url": "http://localhost:11434"})
+        assert result["step_id"] == "model"
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"model": "beta"})
+    assert result["type"] == "create_entry"
+    assert result["data"]["model"] == "beta"
 
 
 async def test_config_flow_auto_imports_from_this_instances_config_dir(hass, tmp_path):
