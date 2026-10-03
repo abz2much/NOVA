@@ -796,6 +796,10 @@ async def ws_get_panel_data(
         current_notify_services = configured_notify_services(notify_config)
         current_notify = current_notify_services[0] if current_notify_services else ""
 
+        # Reads the whole doorbell log file on every panel poll: off the loop.
+        doorbell_training_data = await hass.async_add_executor_job(
+            _get_doorbell_training, hass)
+
         result = {
             "status":         status,
             "version":        _INTEGRATION_VERSION,
@@ -809,7 +813,7 @@ async def ws_get_panel_data(
             "dominant":       dominant,
             "areas":          areas_list,
             "sleep_reason":   sleep_reason if sleeping else None,
-            "doorbell_training": _get_doorbell_training(hass),
+            "doorbell_training": doorbell_training_data,
             "doors":          _get_door_states(hass),
             "lockdown":       _get_lockdown_status(),
             "intrusion":      _get_intrusion_status(),
@@ -1068,7 +1072,8 @@ def _get_door_states(hass: HomeAssistant) -> dict:
 
 def _get_doorbell_training(hass: HomeAssistant) -> dict:
     """Doorbell training-dataset stats + the most recent analysed events, for
-    the panel's Doorbell Training view. Never raises."""
+    the panel's Doorbell Training view. Does file I/O: run it in the
+    executor, never on the event loop. Never raises."""
     try:
         from . import doorbell_training
         from datetime import timedelta as _timedelta
