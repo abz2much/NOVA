@@ -727,3 +727,184 @@ async def test_roles_screen_saves_choices(config_flow, monkeypatch):
                                        "vision": "not_now"})
     assert flow._roles["vision"] == "not_now"
     assert res["step_id"] == "models"
+
+
+async def _to_models(flow, roles):
+    return await flow.async_step_roles(roles)
+
+
+ALL_GROQ = {"conversation": "groq", "classifier": "groq", "reasoning": "groq",
+            "camera_reasoning": "groq", "vision": "groq"}
+
+
+def _suggested(form, field):
+    for marker in form["data_schema"].schema:
+        if marker == field:
+            return (marker.description or {}).get("suggested_value")
+    return None
+
+
+async def test_models_screen_defaults_and_placeholders(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, lists={"groq": GROQ})
+    await flow.async_step_user(_keys(groq_api_key="g"))
+    form = await _to_models(flow, ALL_GROQ)
+    assert form["step_id"] == "models"
+    assert _suggested(form, "conversation_model") == "openai/gpt-oss-120b"
+    assert _suggested(form, "vision_model") == "qwen/qwen3.6-27b"
+    assert form["description_placeholders"] == {
+        f"{r}_provider": "Groq" for r in ALL_GROQ}
+
+
+async def test_no_vision_field_after_not_now(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, lists={"groq": GROQ})
+    await flow.async_step_user(_keys(groq_api_key="g"))
+    form = await _to_models(flow, {**ALL_GROQ, "vision": "not_now"})
+    assert "vision_model" not in set(form["data_schema"].schema)
+
+
+async def test_unreadable_list_gives_a_text_box_with_the_default(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, lists={"anthropic": None})
+    await flow.async_step_user(_keys(anthropic_api_key="a"))
+    form = await _to_models(flow, {**{r: "anthropic" for r in ALL_GROQ}})
+    assert _suggested(form, "conversation_model") == "claude-sonnet-5"
+
+
+async def test_missing_cloud_default_is_kept_not_the_first_model(config_flow, monkeypatch):
+    # OpenAI's list is sorted by name and starts with a non chat model.
+    listing = (["babbage-002", "dall-e-3", "gpt-4o"], [])
+    flow = _first_run_flow(config_flow, monkeypatch, lists={"openai": listing})
+    await flow.async_step_user(_keys(openai_api_key="sk"))
+    form = await _to_models(flow, {r: "openai" for r in ALL_GROQ})
+    assert _suggested(form, "conversation_model") == "gpt-5-mini"
+
+
+async def test_ollama_field_empty_when_no_model_has_the_ability(config_flow, monkeypatch):
+    old = (["a", "b"], [{"id": "a", "capabilities": []}, {"id": "b", "capabilities": []}])
+    flow = _first_run_flow(config_flow, monkeypatch, lists={"ollama": old})
+    await flow.async_step_user(_keys(ollama_base_url="http://x:11434"))
+    form = await _to_models(flow, {r: "ollama" for r in ALL_GROQ})
+    assert _suggested(form, "conversation_model") == ""
+
+
+def _models(**values):
+    base = {"conversation_model": "openai/gpt-oss-120b", "classifier_model": "openai/gpt-oss-120b",
+            "reasoning_model": "openai/gpt-oss-120b", "camera_reasoning_model": "openai/gpt-oss-120b",
+            "vision_model": "qwen/qwen3.6-27b"}
+    base.update(values)
+    return base
+
+
+async def test_text_fields_are_required(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, lists={"groq": GROQ})
+    await flow.async_step_user(_keys(groq_api_key="g"))
+    await _to_models(flow, ALL_GROQ)
+    res = await flow.async_step_models(_models(classifier_model=""))
+    assert res["errors"] == {"classifier_model": "model_required"}
+    assert flow.calls["probe"] == []
+
+
+async def test_each_failure_shows_on_its_field_and_choices_are_kept(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, lists={"groq": GROQ},
+                           probes={"vision": "unsupported_capability", "reasoning": "rate_limited"})
+    await flow.async_step_user(_keys(groq_api_key="g"))
+    await _to_models(flow, ALL_GROQ)
+    res = await flow.async_step_models(_models(vision_model="openai/gpt-oss-120b"))
+    assert res["errors"] == {"vision_model": "model_no_pictures",
+                             "reasoning_model": "test_incomplete"}
+    assert _suggested(res, "vision_model") == "openai/gpt-oss-120b"
+    assert flow.calls["written"] == []
+
+
+async def test_vision_job_is_a_picture_test(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, lists={"groq": GROQ})
+    await flow.async_step_user(_keys(groq_api_key="g"))
+    await _to_models(flow, ALL_GROQ)
+    await flow.async_step_models(_models())
+    jobs, creds = flow.calls["probe"][0]
+    assert jobs["vision"].picture is True and jobs["conversation"].picture is False
+    assert creds == {"groq": ("g", None)}
+
+
+async def test_success_saves_typed_keys_and_creates_the_entry(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, lists={"groq": GROQ, "ollama": OLLAMA},
+                           saved={"anthropic": "sk-saved"})
+    flow._discover = lambda p, v: _async({"groq": GROQ, "ollama": OLLAMA,
+                                          "anthropic": (["claude-sonnet-5"], [])}.get(p))
+    await flow.async_step_user(_keys(groq_api_key="g", ollama_base_url="192.168.1.50"))
+    await _to_models(flow, {**ALL_GROQ, "conversation": "anthropic", "vision": "ollama"})
+    done = await flow.async_step_models(_models(conversation_model="claude-sonnet-5",
+                                                vision_model="llava"))
+    assert done["type"] == "create_entry"
+    assert flow.calls["written"] == [("groq", "g")]          # the saved key is not rewritten
+    data = done["data"]
+    assert "api_key" not in data and "groq_api_key" not in data
+    assert data["llm_provider"] == "anthropic" and data["model"] == "claude-sonnet-5"
+    assert data["classifier_provider"] == "groq"
+    assert data["vision_provider"] == "ollama" and data["vision_model"] == "llava"
+    assert data["ollama_base_url"] == "http://192.168.1.50:11434"
+    assert data["self_hosted_endpoints_migrated"] is True
+    assert data["welcome_pending"] is True and data["schema_version"] == 7
+    assert data["honorific"]
+
+
+async def test_choices_are_written_to_config_json_too(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, lists={"groq": GROQ})
+    await flow.async_step_user(_keys(groq_api_key="g"))
+    await _to_models(flow, ALL_GROQ)
+    done = await flow.async_step_models(_models())
+    assert done["type"] == "create_entry"
+    written = flow.calls["config_set"]
+    assert written["llm_provider"] == "groq" and written["model"] == "openai/gpt-oss-120b"
+    assert written["vision_model"] == "qwen/qwen3.6-27b"
+    assert written["welcome_pending"] is True
+    assert written["self_hosted_endpoints_migrated"] is True
+    assert written["ollama_base_url"] == ""            # an old address is cleared
+    assert {"welcome_shown", "conversation_base_url", "classifier_base_url",
+            "reasoning_base_url", "suggestion_review_enabled"} <= set(flow.calls["config_deleted"])
+    assert "honorific" not in written                  # a reinstall keeps its old honorific
+    order = flow.calls["order"]
+    assert order[0] == "paths" and order.index("write") < order.index("config")
+
+
+async def test_vision_later_clears_old_vision_settings(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, lists={"groq": GROQ})
+    await flow.async_step_user(_keys(groq_api_key="g"))
+    await _to_models(flow, {**ALL_GROQ, "vision": "not_now"})
+    await flow.async_step_models({k: v for k, v in _models().items() if k != "vision_model"})
+    assert {"vision_provider", "vision_model"} <= set(flow.calls["config_deleted"])
+
+
+async def test_failed_config_write_creates_no_entry(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, lists={"groq": GROQ}, config_ok=False)
+    await flow.async_step_user(_keys(groq_api_key="g"))
+    await _to_models(flow, ALL_GROQ)
+    res = await flow.async_step_models(_models())
+    assert res["type"] == "form" and res["errors"] == {"base": "config_write_failed"}
+
+
+async def test_empty_vision_field_means_set_up_later(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, lists={"groq": GROQ})
+    await flow.async_step_user(_keys(groq_api_key="g"))
+    await _to_models(flow, ALL_GROQ)
+    done = await flow.async_step_models(_models(vision_model=""))
+    assert "vision_provider" not in done["data"] and "vision_model" not in done["data"]
+    jobs, _creds = flow.calls["probe"][0]
+    assert "vision" not in jobs
+
+
+async def test_failed_secrets_write_creates_no_entry(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, lists={"groq": GROQ}, write_ok=False)
+    await flow.async_step_user(_keys(groq_api_key="g"))
+    await _to_models(flow, ALL_GROQ)
+    res = await flow.async_step_models(_models())
+    assert res["type"] == "form" and res["errors"] == {"base": "secrets_write_failed"}
+
+
+async def test_already_set_up_checked_again_before_saving(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, lists={"groq": GROQ})
+    await flow.async_step_user(_keys(groq_api_key="g"))
+    await _to_models(flow, ALL_GROQ)
+    flow.configured = True
+    with pytest.raises(_Aborted):
+        await flow.async_step_models(_models())
+    assert flow.calls["written"] == []
