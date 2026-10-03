@@ -380,17 +380,62 @@ async def test_step_credentials_values_never_land_in_nova_config(
 
 # ── First run: two step setup (key/address, then model) ──────────────────────
 
-def _first_run_flow(config_flow, monkeypatch, *, models, conn_err=None):
-    """A NovaConfigFlow with HA's flow helpers faked and the network stubbed."""
+def _first_run_flow(config_flow, monkeypatch, *, lists=None, conn=None, saved=None,
+                    probes=None, write_ok=True, config_ok=True):
+    """NovaConfigFlow with Home Assistant's flow helpers faked and every
+    network call stubbed. lists: provider -> (models, details) or None for
+    an unreadable list. conn: provider -> ProviderErrorKind value returned by
+    screen 1's fallback test (missing means it passed). saved: provider ->
+    saved key. probes: role -> screen 3 probe result. config_ok: whether the
+    config.json write succeeds."""
     import importlib
-    llm = importlib.import_module("jc.llm_provider")
-    calls = []
+    hs = importlib.import_module("jc.ha_secrets")
+    sp = importlib.import_module("jc.setup_probe")
+    nc = importlib.import_module("jc.nova_config")
+    paths = importlib.import_module("jc.paths")
+    lists, conn, saved, probes = lists or {}, conn or {}, saved or {}, probes or {}
+    calls = {"conn": [], "probe": [], "written": [], "order": [],
+             "config_set": {}, "config_deleted": []}
 
-    async def fake_test(hass, provider, key, model, base):
-        calls.append((provider, key, model, base))
-        return conn_err
+    async def fake_probe_model(hass, job, key, base):
+        calls["conn"].append((job.provider, key, job.model, base))
+        return conn.get(job.provider)
 
-    monkeypatch.setattr(llm, "test_connection", fake_test)
+    async def fake_probe_all(hass, jobs, creds):
+        calls["probe"].append((dict(jobs), dict(creds)))
+        return {role: probes.get(role) for role in jobs}
+
+    async def fake_set(hass, provider, value):
+        calls["order"].append("write")
+        calls["written"].append((provider, value))
+        return write_ok
+
+    def fake_get(key, default=None, path=None):
+        calls["order"].append("read")
+        for provider, value in saved.items():
+            if key == hs.secret_key_for(f"{provider}_api_key"):
+                return value
+        return default
+
+    real_configure = paths.configure
+
+    def fake_configure(hass):
+        calls["order"].append("paths")
+        real_configure(hass)
+
+    def fake_set_many(values):
+        calls["order"].append("config")
+        calls["config_set"].update(values)
+        return config_ok
+
+    monkeypatch.setattr(sp, "probe_model", fake_probe_model)
+    monkeypatch.setattr(sp, "probe_all", fake_probe_all)
+    monkeypatch.setattr(hs, "async_set_provider_credential", fake_set)
+    monkeypatch.setattr(hs, "get_secret_sync", fake_get)
+    monkeypatch.setattr(paths, "configure", fake_configure)
+    monkeypatch.setattr(nc, "configure", lambda hass: None)
+    monkeypatch.setattr(nc, "set_many", fake_set_many)
+    monkeypatch.setattr(nc, "delete", lambda key: calls["config_deleted"].append(key))
 
     class _Hass:
         class config:
@@ -403,6 +448,7 @@ def _first_run_flow(config_flow, monkeypatch, *, models, conn_err=None):
 
     class Flow(config_flow.NovaConfigFlow):
         hass = _Hass()
+        configured = False
 
         def async_show_form(self, **kw):
             return {"type": "form", **kw}
@@ -410,74 +456,231 @@ def _first_run_flow(config_flow, monkeypatch, *, models, conn_err=None):
         def async_create_entry(self, **kw):
             return {"type": "create_entry", **kw}
 
+        def async_abort(self, **kw):
+            return {"type": "abort", **kw}
+
         async def async_set_unique_id(self, *_a, **_k):
             return None
 
         def _abort_if_unique_id_configured(self, *_a, **_k):
-            return None
+            if self.configured:
+                raise _Aborted()
 
-        async def _discover_models(self, provider, api_key, base_url):
-            return list(models)
+        async def _discover(self, provider, value):
+            return lists.get(provider)
 
     flow = Flow()
     flow.calls = calls
     return flow
 
 
-async def test_user_step_asks_only_for_key_and_address(config_flow, monkeypatch):
-    flow = _first_run_flow(config_flow, monkeypatch, models=[])
+class _Aborted(Exception):
+    pass
+
+
+GROQ = (["openai/gpt-oss-120b", "qwen/qwen3.6-27b", "whisper-large-v3"], [])
+OLLAMA = (["llama3.2", "llava", "nomic-embed-text"], [
+    {"id": "llama3.2", "capabilities": ["completion", "tools"]},
+    {"id": "llava", "capabilities": ["completion", "vision"]},
+    {"id": "nomic-embed-text", "capabilities": ["embedding"]},
+])
+
+
+def _keys(**values):
+    base = {"groq_api_key": "", "anthropic_api_key": "", "openai_api_key": "",
+            "gemini_api_key": "", "ollama_base_url": ""}
+    base.update(values)
+    return base
+
+
+async def test_user_step_shows_one_field_per_provider(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch)
     form = await flow.async_step_user(None)
     assert form["step_id"] == "user"
-    assert set(form["data_schema"].schema) == {"api_key", "llm_base_url"}
+    assert set(form["data_schema"].schema) == {
+        "groq_api_key", "anthropic_api_key", "openai_api_key", "gemini_api_key",
+        "ollama_base_url"}
+    assert form["description_placeholders"] == {"saved": "—",
+                                                 "example": "http://192.168.1.50:11434"}
 
 
-async def test_user_step_requires_key_or_address(config_flow, monkeypatch):
-    flow = _first_run_flow(config_flow, monkeypatch, models=[])
-    res = await flow.async_step_user({"api_key": "", "llm_base_url": ""})
+async def test_already_set_up_stops_on_the_first_screen(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch)
+    flow.configured = True
+    with pytest.raises(_Aborted):
+        await flow.async_step_user(None)
+
+
+async def test_nothing_entered_asks_for_one(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch)
+    res = await flow.async_step_user(_keys())
     assert res["errors"] == {"base": "need_llm"}
 
 
-async def test_models_found_moves_on_without_a_chat_test(config_flow, monkeypatch):
-    flow = _first_run_flow(config_flow, monkeypatch, models=["a", "b"])
-    res = await flow.async_step_user(
-        {"api_key": "", "llm_base_url": "http://x:11434"})
-    assert res["step_id"] == "model"
-    assert flow.calls == []
+async def test_key_is_trimmed(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, lists={"groq": GROQ})
+    res = await flow.async_step_user(_keys(groq_api_key="  gsk_abc \n"))
+    assert res["step_id"] == "roles"
+    assert flow._entries == {"groq": "gsk_abc"}
 
 
-async def test_no_model_list_falls_back_to_connection_test(config_flow, monkeypatch):
-    flow = _first_run_flow(config_flow, monkeypatch, models=[])
-    res = await flow.async_step_user(
-        {"api_key": "", "llm_base_url": "http://x:11434"})
-    assert res["step_id"] == "model"
-    assert len(flow.calls) == 1
+async def test_bare_ollama_address_is_normalised(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, lists={"ollama": OLLAMA})
+    res = await flow.async_step_user(_keys(ollama_base_url="192.168.1.50"))
+    assert res["step_id"] == "roles"
+    assert flow._entries == {"ollama": "http://192.168.1.50:11434"}
 
 
-async def test_no_model_list_and_bad_connection_stays_on_first_step(config_flow, monkeypatch):
-    flow = _first_run_flow(config_flow, monkeypatch, models=[], conn_err="cannot_connect")
-    res = await flow.async_step_user(
-        {"api_key": "", "llm_base_url": "http://x:11434"})
+def _suggested_key(form, field):
+    for marker in form["data_schema"].schema:
+        if marker == field:
+            return (marker.description or {}).get("suggested_value")
+    return None
+
+
+async def test_failing_typed_key_blocks_keeps_the_good_one_and_never_sends_the_bad_one_back(
+        config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, lists={"groq": GROQ, "openai": None},
+                           conn={"openai": "authentication_failed"})
+    res = await flow.async_step_user(_keys(groq_api_key="gsk_ok", openai_api_key="gsk_wrong"))
     assert res["step_id"] == "user"
-    assert res["errors"] == {"base": "cannot_connect"}
+    assert res["errors"] == {"openai_api_key": "invalid_auth"}
+    assert _suggested_key(res, "groq_api_key") == "gsk_ok"
+    assert _suggested_key(res, "openai_api_key") == ""
 
 
-async def test_model_step_creates_entry_with_chosen_model(config_flow, monkeypatch):
-    flow = _first_run_flow(config_flow, monkeypatch, models=["a", "b"])
-    await flow.async_step_user({"api_key": "", "llm_base_url": "http://x:11434"})
-    done = await flow.async_step_model({"model": "b"})
-    assert done["type"] == "create_entry"
-    data = done["data"]
-    assert data["model"] == "b"
-    assert data["llm_provider"] == "ollama"
-    assert data["ollama_base_url"] == "http://x:11434"
-    assert data["honorific"]
-    assert data["welcome_pending"] is True
-    assert flow.calls[-1][2] == "b"
+async def test_failing_ollama_address_stays_for_correcting(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, lists={"ollama": None})
+    res = await flow.async_step_user(_keys(ollama_base_url="http://typo:11434"))
+    assert res["errors"] == {"ollama_base_url": "cannot_connect"}
+    assert _suggested_key(res, "ollama_base_url") == "http://typo:11434"
 
 
-async def test_model_step_error_keeps_the_picker_open(config_flow, monkeypatch):
-    flow = _first_run_flow(config_flow, monkeypatch, models=["m"], conn_err="unknown")
-    await flow.async_step_user({"api_key": "", "llm_base_url": "http://x:11434"})
-    res = await flow.async_step_model({"model": "m"})
-    assert res["type"] == "form" and res["step_id"] == "model"
-    assert res["errors"] == {"base": "unknown"}
+async def test_key_in_the_wrong_field_is_refused_on_that_field(config_flow, monkeypatch):
+    # A Groq key in the OpenAI field: OpenAI answers 401, which Nova turns
+    # into authentication_failed (proven in test_setup_probe.py), which
+    # screen 1 shows as invalid_auth on that field.
+    flow = _first_run_flow(config_flow, monkeypatch, lists={"openai": None},
+                           conn={"openai": "authentication_failed"})
+    res = await flow.async_step_user(_keys(openai_api_key="gsk_groq_key"))
+    assert res["errors"] == {"openai_api_key": "invalid_auth"}
+
+
+async def test_unreadable_cloud_list_falls_back_to_default_model(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, lists={"anthropic": None})
+    res = await flow.async_step_user(_keys(anthropic_api_key="sk-ant"))
+    assert res["step_id"] == "roles"
+    assert flow.calls["conn"] == [("anthropic", "sk-ant", "claude-sonnet-5", None)]
+    assert flow._lists["anthropic"] == ([], [])
+
+
+async def test_rate_limit_reads_as_could_not_complete(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, lists={"gemini": None},
+                           conn={"gemini": "rate_limited"})
+    res = await flow.async_step_user(_keys(gemini_api_key="AIza"))
+    assert res["errors"] == {"gemini_api_key": "cannot_connect"}
+
+
+async def test_good_key_without_the_default_model_still_passes(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, lists={"openai": None},
+                           conn={"openai": "access_denied"})
+    res = await flow.async_step_user(_keys(openai_api_key="sk"))
+    assert res["step_id"] == "roles"
+    assert flow._lists["openai"] == ([], [])
+
+
+async def test_saved_key_denied_access_is_left_out_not_a_trap(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, lists={"groq": GROQ, "openai": None},
+                           conn={"openai": "access_denied"}, saved={"openai": "sk_blocked"})
+    res = await flow.async_step_user(_keys(groq_api_key="g"))
+    assert res["step_id"] == "roles"
+    assert "openai" not in flow._lists and flow._saved_failed == ["openai"]
+
+
+async def test_empty_cloud_list_still_tests_the_key(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, lists={"groq": ([], [])},
+                           conn={"groq": "authentication_failed"})
+    res = await flow.async_step_user(_keys(groq_api_key="bad"))
+    assert res["errors"] == {"groq_api_key": "invalid_auth"}
+    assert flow.calls["conn"] == [("groq", "bad", "openai/gpt-oss-120b", None)]
+
+
+async def test_paths_are_set_before_secrets_are_read(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, lists={"groq": GROQ})
+    await flow.async_step_user(None)
+    order = flow.calls["order"]
+    assert order[0] == "paths" and "read" in order
+
+
+async def test_ollama_needs_a_readable_list(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, lists={"ollama": None})
+    res = await flow.async_step_user(_keys(ollama_base_url="http://x:11434"))
+    assert res["errors"] == {"ollama_base_url": "cannot_connect"}
+    assert flow.calls["conn"] == []
+
+
+async def test_entries_are_tested_at_the_same_time(config_flow, monkeypatch):
+    import asyncio
+    running = {"now": 0, "most": 0}
+    flow = _first_run_flow(config_flow, monkeypatch)
+
+    async def slow(provider, value):
+        running["now"] += 1
+        running["most"] = max(running["most"], running["now"])
+        await asyncio.sleep(0.01)
+        running["now"] -= 1
+        return GROQ
+    flow._discover = slow
+    await flow.async_step_user(_keys(groq_api_key="a", openai_api_key="b", gemini_api_key="c"))
+    assert running["most"] == 3
+
+
+async def test_saved_key_is_found_kept_and_tested(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, lists={"groq": GROQ},
+                           saved={"groq": "gsk_saved"})
+    form = await flow.async_step_user(None)
+    assert form["description_placeholders"]["saved"] == "Groq"
+    res = await flow.async_step_user(_keys())
+    assert res["step_id"] == "roles"
+    assert flow._entries == {"groq": "gsk_saved"}
+    assert flow._typed == set()
+
+
+async def test_typed_key_replaces_saved_key(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, lists={"groq": GROQ},
+                           saved={"groq": "gsk_old"})
+    await flow.async_step_user(_keys(groq_api_key="gsk_new"))
+    assert flow._entries == {"groq": "gsk_new"}
+    assert flow._typed == {"groq"}
+
+
+async def test_stale_saved_key_is_left_out_without_blocking(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, lists={"groq": GROQ, "openai": None},
+                           conn={"openai": "authentication_failed"}, saved={"openai": "sk_stale"})
+    res = await flow.async_step_user(_keys(groq_api_key="gsk"))
+    assert res["step_id"] == "roles"
+    assert flow._saved_failed == ["openai"]
+    assert "openai" not in flow._lists
+
+
+async def test_nothing_passing_stays_on_screen_one(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, lists={"openai": None},
+                           conn={"openai": "authentication_failed"}, saved={"openai": "sk_stale"})
+    res = await flow.async_step_user(_keys())
+    assert res["step_id"] == "user"
+    assert res["errors"] == {"base": "no_working_provider"}
+
+
+async def test_resubmitting_forgets_earlier_passes(config_flow, monkeypatch):
+    flow = _first_run_flow(config_flow, monkeypatch, lists={"groq": GROQ, "openai": None},
+                           conn={"openai": "authentication_failed"})
+    await flow.async_step_user(_keys(groq_api_key="gsk", openai_api_key="bad"))
+    flow_lists = {"openai": (["gpt-5-mini"], [])}
+    flow._discover = lambda p, v, _l=flow_lists: _async(_l.get(p))
+    res = await flow.async_step_user(_keys(openai_api_key="good"))
+    assert res["step_id"] == "roles"
+    assert set(flow._lists) == {"openai"}
+
+
+async def _async(value):
+    return value

@@ -15,6 +15,7 @@ bootstrap shell that registers the conversation platform.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -58,14 +59,6 @@ from .const import (
 
 _LOGGER = logging.getLogger(__name__)
 
-_USER_NOTE = (
-    "Paste an API key from Anthropic, Groq, OpenAI or Gemini. Nova works out "
-    "the provider from the key. To run a model on your own machine instead, "
-    "leave the key blank and enter your Ollama address, for example "
-    "http://192.168.1.50:11434. You will pick the model on the next step. "
-    "Everything else can be set up later in the Nova panel."
-)
-
 def _find_config(config_path: str) -> dict | None:
     """Read an existing runtime config at config_path, if one with a usable
     LLM exists. This is the panel's runtime config — survives integration
@@ -90,92 +83,158 @@ def _find_config(config_path: str) -> dict | None:
     return None
 
 
+_OLLAMA_FIELD = "ollama_base_url"
+# Shown as a placeholder: Home Assistant's checks reject URLs written
+# directly in translation text.
+_OLLAMA_EXAMPLE = "http://192.168.1.50:11434"
+
+
+def _saved_keys() -> dict[str, str]:
+    """Nova keys already in secrets.yaml, for example from an earlier
+    install. Blocking: run it in the executor."""
+    from . import ha_secrets, setup_roles
+    from .const import PROVIDER_API_KEY_FIELDS
+    found: dict[str, str] = {}
+    for provider in setup_roles.CLOUD:
+        value = ha_secrets.get_secret_sync(
+            ha_secrets.secret_key_for(PROVIDER_API_KEY_FIELDS[provider]), None)
+        if value:
+            found[provider] = str(value).strip()
+    return found
+
+
 class NovaConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle Nova config flow — auto-imports an existing runtime config."""
 
     VERSION = 1
 
-    _provider: str = "ollama"
-    _api_key: str = ""
-    _base_url: str = ""
-    _models: list[str] = []
-    _default_model: str = DEFAULT_MODEL
+    def __init__(self) -> None:
+        super().__init__()
+        self._entries: dict[str, str] = {}
+        self._typed: set[str] = set()
+        self._lists: dict[str, tuple[list[str], list[dict]]] = {}
+        self._saved_failed: list[str] = []
+        self._roles: dict[str, str] = {}
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None,
     ) -> dict:
-        """
-        UI-driven setup. Tries auto-import first; falls back to
-        manual API key entry only if no config file exists.
-        """
-        # Try auto-import from an existing runtime config (re-install case)
+        """Screen 1: a key per cloud provider, and an Ollama address.
+
+        A reinstall with an old config.json still imports it with no
+        screens. Keys already in secrets.yaml are found and kept."""
+        from . import paths, setup_roles
+
+        # The screens run before Nova is loaded, so set Nova's paths first.
+        paths.configure(self.hass)
+        await self.async_set_unique_id(DOMAIN)
+        self._abort_if_unique_id_configured()
+
         config_path = self.hass.config.path("nova", "config.json")
         cfg = await self.hass.async_add_executor_job(_find_config, config_path)
         if cfg:
             return await self.async_step_import(cfg)
 
-        # Manual fallback: a cloud API key OR a local LLM endpoint.
+        saved = await self.hass.async_add_executor_job(_saved_keys)
         errors: dict[str, str] = {}
+        values: dict[str, Any] = {}
         if user_input is not None:
-            api_key = user_input.get(CONF_API_KEY, "").strip()
-            base_url = user_input.get("llm_base_url", "").strip()
-            if not (api_key or base_url):
-                errors["base"] = "need_llm"
-            else:
-                from .llm_provider import (
-                    DEFAULT_MODELS,
-                    detect_provider_from_key,
-                    normalize_provider_endpoint,
-                    test_connection,
-                )
-                # The key's own shape tells us the provider; no key means a
-                # local Ollama server.
-                provider = detect_provider_from_key(api_key) if api_key else "ollama"
-                if provider == "ollama":
-                    try:
-                        base_url = normalize_provider_endpoint(base_url, provider)
-                    except ValueError:
-                        errors["base"] = "cannot_connect"
-                if not errors:
-                    self._provider = provider
-                    self._api_key = api_key
-                    self._base_url = base_url
-                    default_model = DEFAULT_MODELS.get(provider, DEFAULT_MODEL)
-                    models = await self._discover_models(provider, api_key, base_url)
-                    self._models = models
-                    self._default_model = (
-                        default_model if default_model in models or not models
-                        else models[0])
-                    if models:
-                        # A model list came back, so the key and address work.
-                        return await self.async_step_model()
-                    # No list (some keys cannot read it): check the connection
-                    # with the default model, then let the user type a model.
-                    conn_err = await test_connection(
-                        self.hass, provider, api_key, default_model,
-                        base_url or None)
-                    if conn_err:
-                        errors["base"] = conn_err
-                    else:
-                        return await self.async_step_model()
+            errors = await self._check_entries(user_input, saved)
+            if not errors:
+                return await self.async_step_roles()
+            # Keep what passed; never send a failing key back to the browser.
+            # The Ollama address is not secret, so it stays for correcting.
+            values = {k: ("" if k in errors and k.endswith("_api_key") else v)
+                      for k, v in user_input.items()}
 
         return self.async_show_form(
             step_id="user",
-            data_schema=vol.Schema({
-                vol.Optional(CONF_API_KEY, default=""):
-                    selector.TextSelector(selector.TextSelectorConfig(
-                        type=selector.TextSelectorType.PASSWORD)),
-                vol.Optional("llm_base_url", default=""): str,
-            }),
+            data_schema=self._keys_schema(values),
             errors=errors,
-            description_placeholders={"note": _USER_NOTE},
+            description_placeholders={
+                "saved": ", ".join(setup_roles.PROVIDER_LABELS[p]
+                                   for p in setup_roles.CLOUD if p in saved) or "—",
+                "example": _OLLAMA_EXAMPLE,
+            },
         )
 
-    async def _discover_models(
-        self, provider: str, api_key: str, base_url: str,
-    ) -> list[str]:
-        """Ask the provider which models it offers. Never raises: an empty
-        list means the caller falls back to a plain connection test."""
+    async def _check_entries(self, user_input: dict[str, Any],
+                             saved: dict[str, str]) -> dict[str, str]:
+        """Test every typed key, saved key and the Ollama address at the
+        same time. Fills self._entries, _typed, _lists and _saved_failed.
+        Returns the screen's errors (empty when it may move on)."""
+        from . import setup_roles
+        from .const import PROVIDER_API_KEY_FIELDS
+        from .llm_provider import normalize_provider_endpoint
+
+        self._lists, self._saved_failed = {}, []
+        errors: dict[str, str] = {}
+        typed = {p: str(user_input.get(PROVIDER_API_KEY_FIELDS[p]) or "").strip()
+                 for p in setup_roles.CLOUD}
+        typed = {p: k for p, k in typed.items() if k}
+        entries = {**{p: k for p, k in saved.items() if p not in typed}, **typed}
+        url = str(user_input.get(_OLLAMA_FIELD) or "").strip()
+        if url:
+            try:
+                entries["ollama"] = normalize_provider_endpoint(url, "ollama")
+            except ValueError:
+                errors[_OLLAMA_FIELD] = "cannot_connect"
+        if not entries and not errors:
+            return {"base": "need_llm"}
+
+        results = await asyncio.gather(
+            *(self._check(p, v, p in typed) for p, v in entries.items()))
+        for (provider, _value), (err, models, details) in zip(entries.items(), results):
+            if err is None:
+                self._lists[provider] = (models, details)
+            elif provider in typed:
+                errors[PROVIDER_API_KEY_FIELDS[provider]] = err
+            elif provider == "ollama":
+                errors[_OLLAMA_FIELD] = err
+            else:
+                self._saved_failed.append(provider)
+        if not errors and not self._lists:
+            errors["base"] = "no_working_provider"
+        if not errors:
+            self._entries = {p: v for p, v in entries.items() if p in self._lists}
+            self._typed = {p for p in typed if p in self._lists}
+        return errors
+
+    async def _check(self, provider: str, value: str, typed: bool
+                     ) -> tuple[str | None, list[str], list[dict]]:
+        """(error key or None, models, details) for one entry. A cloud key
+        whose list cannot be read, or is empty, is tested with the default
+        model. Ollama has no default model, so its list must be readable."""
+        from . import setup_probe, setup_roles
+        listed = await self._discover(provider, value)
+        if listed is not None and (listed[0] or provider == "ollama"):
+            return None, listed[0], listed[1]
+        if provider == "ollama":
+            return "cannot_connect", [], []
+        from .llm_provider import DEFAULT_MODELS
+        kind = await setup_probe.probe_model(
+            self.hass, setup_probe.Job(provider, DEFAULT_MODELS[provider]), value, None)
+        # A key that works but cannot use the default model passes here with
+        # an empty list, so screen 3 shows a text box for the model.
+        return (None if kind is None else setup_roles.key_error(kind, typed)), [], []
+
+    def _keys_schema(self, values: dict[str, Any]) -> vol.Schema:
+        from . import setup_roles
+        from .const import PROVIDER_API_KEY_FIELDS
+        fields: dict[Any, Any] = {}
+        for provider in setup_roles.CLOUD:
+            key = PROVIDER_API_KEY_FIELDS[provider]
+            fields[vol.Optional(key, description={"suggested_value": values.get(key, "")})] = \
+                selector.TextSelector(selector.TextSelectorConfig(
+                    type=selector.TextSelectorType.PASSWORD))
+        fields[vol.Optional(_OLLAMA_FIELD, description={
+            "suggested_value": values.get(_OLLAMA_FIELD, "")})] = str
+        return vol.Schema(fields)
+
+    async def _discover(self, provider: str, value: str
+                        ) -> tuple[list[str], list[dict]] | None:
+        """The provider's model ids and details, or None when the list
+        could not be read. Never raises."""
         try:
             from homeassistant.helpers import aiohttp_client
             from .const import PROVIDER_API_KEY_FIELDS
@@ -183,62 +242,21 @@ class NovaConfigFlow(ConfigFlow, domain=DOMAIN):
 
             config: dict[str, Any] = {"llm_provider": provider}
             if provider == "ollama":
-                config["ollama_base_url"] = base_url
+                config["ollama_base_url"] = value
             else:
-                config[PROVIDER_API_KEY_FIELDS[provider]] = api_key
+                config[PROVIDER_API_KEY_FIELDS[provider]] = value
             request = discovery.resolve_discovery_request(config, provider)
             session = aiohttp_client.async_get_clientsession(self.hass)
             result = await discovery.fetch_models(self.hass, session, request)
-            models, _truncated, _details = result.as_tuple()
-            return [str(m) for m in models]
+            models, _truncated, details = result.as_tuple()
+            return [str(m) for m in models], list(details)
         except Exception as exc:  # noqa: BLE001 - discovery is best effort
-            _LOGGER.debug("Nova setup: model list unavailable (%s)", type(exc).__name__)
-            return []
+            _LOGGER.debug("Nova setup: %s model list unavailable (%s)",
+                          provider, type(exc).__name__)
+            return None
 
-    async def async_step_model(
-        self, user_input: dict[str, Any] | None = None,
-    ) -> dict:
-        """Second first run step: pick the conversation model."""
-        errors: dict[str, str] = {}
-        provider, api_key, base_url = self._provider, self._api_key, self._base_url
-        if user_input is not None:
-            model = str(user_input.get(CONF_MODEL, "")).strip() or self._default_model
-            from .llm_provider import test_connection
-            conn_err = await test_connection(
-                self.hass, provider, api_key, model, base_url or None)
-            if conn_err:
-                errors["base"] = conn_err
-            else:
-                await self.async_set_unique_id(DOMAIN)
-                self._abort_if_unique_id_configured()
-                return self.async_create_entry(
-                    title="Nova",
-                    data={
-                        CONF_API_KEY: api_key,
-                        CONF_MODEL: model,
-                        CONF_HONORIFIC: DEFAULT_HONORIFIC,
-                        "llm_provider": provider,
-                        "llm_base_url": base_url,
-                        "ollama_base_url": base_url if provider == "ollama" else "",
-                        "schema_version": 7,
-                        # Fresh install only: welcome.py posts "Nova is ready" once.
-                        "welcome_pending": True,
-                    },
-                )
-
-        if self._models:
-            field: Any = selector.SelectSelector(selector.SelectSelectorConfig(
-                options=self._models, custom_value=True,
-                mode=selector.SelectSelectorMode.DROPDOWN))
-        else:
-            field = str
-        return self.async_show_form(
-            step_id="model",
-            data_schema=vol.Schema({
-                vol.Required(CONF_MODEL, default=self._default_model): field,
-            }),
-            errors=errors,
-        )
+    async def async_step_roles(self, user_input=None):
+        return self.async_show_form(step_id="roles", data_schema=vol.Schema({}))
 
     async def async_step_import(
         self, import_data: dict[str, Any],
