@@ -261,10 +261,18 @@ def _household_presence(hass: HomeAssistant) -> str:
 
 
 def _household_home() -> bool:
-    """True only when household presence reads home. Any error reads as not
-    home, so the event keeps its normal path."""
+    """True only when the registered people or the security alarm say the
+    household is home. Occupied areas are left out on purpose: the motion
+    being judged occupies its own area, so it would always read as home.
+    Any error reads as not home, so the event keeps its normal path."""
     try:
-        return _household_presence(_STATE.hass) == cognitive_rules.PRESENCE_HOME
+        from . import alarm_source
+        hass = _STATE.hass
+        return cognitive_rules.household_presence(
+            [s.state for s in hass.states.async_all("person")],
+            [s.state for s in alarm_source.states(hass, _STATE.config)],
+            [],
+        ) == cognitive_rules.PRESENCE_HOME
     except Exception:
         return False
 
@@ -552,6 +560,8 @@ def _on_state_changed(event: Event) -> None:
     # NOTE: announcements_enabled is NOT checked here. Events still get
     # classified and logged when announcements are off — they just don't
     # get spoken. This keeps the activity feed populated for observability.
+    # (Motion-class sensors while the household is home are the exception:
+    # they are kept as context only, below.)
     # The speak gate is in _process_event, after classification.
 
     # Local cognition observes EVERY event (learning + triage) at zero cloud
