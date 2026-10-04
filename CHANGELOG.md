@@ -1,3 +1,28 @@
+## [8.7.8] — Internal tidy: websocket.py is split into seven modules (4,192 lines down to 2,251)
+
+This is an internal change. Nothing you can see or configure changes: no setting, service, websocket command, request field, error code or stored file is different, and the panel behaves as before. It is the second step of splitting `websocket.py`. No step was skipped.
+
+**Moved (code moved as it was, no edits)**
+- `ws_area_helpers.py`: the 19 area, satellite and camera helpers behind the room cards and setup lists (`_area_live_readings`, `_area_capabilities`, `_get_satellites`, `_get_cameras`, `_get_onboarding_state` and the rest).
+- `ws_panel_stats.py`: 19 stat helpers and a constant (`_get_goals`, `_get_suggestions`, `_get_person_routines`, `_get_area_sparklines`, `_get_observer_stats`, `_entity_names`, `_named_decision` and the rest).
+- `ws_ai.py`: nova/list_models, nova/test_provider_endpoint, nova/apply_ai_config, nova/get_credential_status, nova/set_credential and nova/delete_credential, with their helpers. Error text still goes through `safe_errors` as before.
+- `ws_decisions.py`: nova/list_decisions, nova/get_decision, nova/set_decision_outcome, nova/replay_decision, nova/get_calibration, nova/run_analysis, nova/get_cognitive_status and nova/root_cause.
+- `ws_knowledge.py`: nova/get_knowledge, nova/add_knowledge, nova/forget_knowledge, nova/pending_fact_action, nova/edit_pending_fact, nova/clear_scene_memory, nova/search_memory and nova/set_lockdown.
+- `ws_automation.py`: nova/suggestion_action, nova/list_automation_inventory, nova/list_automation_trials, nova/automation_trial_feedback, nova/goal_action and nova/get_person_routines.
+- `ws_bridge.py` (new, 24 lines): two delegators, `_get_entry` and `_executor_runtime_config`. The AI commands need those two helpers, which stay in `websocket.py`, so the delegators look them up in `websocket.py` when called. That avoids an import cycle, and a patch of either helper on `websocket` still reaches the moved commands. They go away when the entry and runtime helpers move.
+- `websocket.py` still registers all 56 commands in the same order inside its one `try`, imports each handler by name, and still exports `invalidate_model_cache`, `nova_log`, `recent_debug_log`, `recent_conversation_log` and `PANEL_WRITABLE_KEYS`. `tests/fixtures/contracts/websocket.json` is unchanged.
+
+**Stays in `websocket.py`** (later steps): `ws_get_panel_data`, `ws_update_config`, `PANEL_WRITABLE_KEYS`, `async_register`, the entry and runtime helpers, the host health, door and disabled rule helpers, `ws_reload_appliances`, `ws_compute_camera_coverage`, and the camera, safety mode and voice history commands.
+
+**Tests**
+- 78 new unit tests for the area and stat helpers (`test_ws_area_helpers.py`, `test_ws_panel_stats.py`) and 26 new PHACC tests for 14 commands that were 11% to 40% covered (`test_ws_commands_characterisation.py`). All of them passed against the old code before the move.
+- `tests/ws_sources.py` gains `ws_owner_module(name)`, which returns the module that defines a name. The two PHACC patches that must hit moved code (`_fetch_models_deduped`, and `invalidate_model_cache` for nova/apply_ai_config) use it. The patch of `invalidate_model_cache` for nova/update_config stays on `websocket`, because that command stays there.
+
+**Caveats**
+- The moved modules log under the logger name `custom_components.nova.websocket`, as before, so log lines read the same. A log record's source file now shows the new file instead of `websocket.py`.
+- A command that moved no longer sees a patch made on `websocket` for a name it calls inside its own module. Tests that patch such a name now patch the module that defines it (see above).
+- The Python 3.14 run that CI also does was not measured locally.
+
 ## [8.7.7] — Internal tidy: the panel debug log moves to its own module, all 41 admin commands are checked by a test, coverage floors raised
 
 This is an internal change. Nothing you can see or configure changes: no setting, service, websocket command, error code or stored file is different, and the panel behaves as before. It is the first step of splitting `websocket.py`, which is 4,300 lines.
