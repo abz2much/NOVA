@@ -39,6 +39,15 @@ def test_backup_restore_roundtrip(tmp_path):
     assert open(os.path.join(cfg, "nova_memory", "chroma.sqlite3")).read() == "CHROMA"
 
 
+def test_backup_archive_is_owner_only(tmp_path):
+    import stat
+    cfg = str(tmp_path)
+    os.makedirs(os.path.join(cfg, "nova"))
+    open(os.path.join(cfg, "nova", "config.json"), "w").write("{}")
+    arc = backup.create_backup(cfg)
+    assert stat.S_IMODE(os.stat(arc).st_mode) == 0o600
+
+
 def test_restore_no_backup_raises(tmp_path):
     with pytest.raises(FileNotFoundError):
         backup.restore_backup(str(tmp_path))

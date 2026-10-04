@@ -230,6 +230,64 @@ async def test_a_transport_failure_is_unchanged(isolated, fake_hass, provider_fa
     assert len(holds) == 0 and writes == []
 
 
+# ── Retry classification (v8.7.4) ───────────────────────────────────────────
+# A normalized ProviderError retries by kind (rate limited, timeout, provider
+# unavailable), never on a connection failure. Other exceptions keep the old
+# text match, with status numbers matched whole.
+
+class _StatusError(Exception):
+    def __init__(self, status, text):
+        super().__init__(text)
+        self.status_code = status
+
+
+@pytest.mark.parametrize("kind,expected", [
+    ("RATE_LIMITED", True), ("TIMEOUT", True), ("PROVIDER_UNAVAILABLE", True),
+    ("CONNECTION_FAILED", False), ("INVALID_REQUEST", False),
+    ("AUTHENTICATION_FAILED", False), ("MODEL_NOT_FOUND", False),
+])
+def test_provider_errors_retry_by_kind(load, kind, expected):
+    coord = load("cognitive.coordinator")
+    errors = load("providers.errors")
+    exc = errors.ProviderError(getattr(errors.ProviderErrorKind, kind), "groq")
+    assert coord._is_transient(exc) is expected
+
+
+def test_status_beats_numbers_in_the_text(load):
+    coord = load("cognitive.coordinator")
+    errors = load("providers.errors")
+    exc = errors.normalize_error(_StatusError(400, "max_tokens 1500 exceeds 500"), "groq")
+    assert exc.kind is errors.ProviderErrorKind.INVALID_REQUEST
+    assert coord._is_transient(exc) is False
+    exc = errors.normalize_error(_StatusError(429, "slow down"), "groq")
+    assert coord._is_transient(exc) is True
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("HTTP 503 Service Unavailable", True), ("status=429", True), ("error 500.", True),
+    ("SERVICE_UNAVAILABLE", True), ("RESOURCE_EXHAUSTED", True), ("Read Timeout", True),
+    ("max_tokens 1500", False), ("request id 4290", False), ("code 5003", False),
+    ("bad request", False),
+])
+def test_other_exceptions_keep_the_text_match_with_whole_numbers(load, text, expected):
+    coord = load("cognitive.coordinator")
+    assert coord._is_transient(RuntimeError(text)) is expected
+
+
+async def test_a_rate_limited_reply_is_retried_three_times(isolated, fake_hass,
+                                                           provider_factory, monkeypatch):
+    import asyncio
+    rl, cache, holds, writes = isolated
+
+    async def _no_sleep(_s):
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", _no_sleep)
+    p = provider_factory(exc=_StatusError(429, "slow down"))
+    out = await _decide(rl, fake_hass, p)
+    assert p.calls == 3 and out["reason"].startswith("local mind:")
+
+
 async def test_the_coordinator_collects_the_snapshot_from_the_summary(
         isolated, fake_hass, provider_factory, monkeypatch, connectivity, load):
     """With no structured fields, the snapshot is backfilled from the event

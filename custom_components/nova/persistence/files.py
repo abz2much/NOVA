@@ -13,7 +13,7 @@ import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 StrPath = Union[str, "os.PathLike[str]"]
 
@@ -43,22 +43,26 @@ def read_json(path: StrPath, *, encoding: Optional[str] = None) -> JsonRead:
 
 
 def write_json_atomic(path: StrPath, data: Any, *, indent: Optional[int] = None,
-                      encoding: Optional[str] = None) -> None:
+                      encoding: Optional[str] = None, mode: Optional[int] = None,
+                      default: Optional[Callable[[Any], Any]] = None) -> None:
     """Write `data` to a temporary file beside `path`, then rename it into
     place, so readers only ever see the old or the new complete file.
-    Raises on failure; the temporary file is removed."""
+    `mode` forces the file's permissions (0o600 for a file holding
+    credentials); without it an existing file keeps its mode. `default` is
+    passed to json.dump. Raises on failure; the temporary file is removed."""
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=str(target.parent),
                                prefix=f".{target.name}.", suffix=".tmp")
     try:
-        try:
-            mode = target.stat().st_mode & 0o777   # keep an existing file's mode
-        except OSError:
-            mode = 0o644                          # what a plain open() gave before
+        if mode is None:
+            try:
+                mode = target.stat().st_mode & 0o777   # keep an existing file's mode
+            except OSError:
+                mode = 0o644                          # what a plain open() gave before
         os.chmod(tmp, mode)
         with os.fdopen(fd, "w", encoding=encoding) as f:
-            json.dump(data, f, indent=indent)
+            json.dump(data, f, indent=indent, default=default)
         os.replace(tmp, target)
     except BaseException:
         try:

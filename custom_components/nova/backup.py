@@ -30,7 +30,10 @@ def create_backup(config_dir: str) -> str:
     os.makedirs(bdir, exist_ok=True)
     stamp = time.strftime("%Y%m%d-%H%M%S")
     path = os.path.join(bdir, f"nova-state-{stamp}.tar.gz")
-    with tarfile.open(path, "w:gz") as tar:
+    # Owner-only from creation: the archive holds config.json and every store.
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(fd, 0o600)   # also when a same-second archive already existed
+    with os.fdopen(fd, "wb") as fh, tarfile.open(fileobj=fh, mode="w:gz") as tar:
         for rel in _STATE_PATHS:
             full = os.path.join(config_dir, rel)
             if os.path.exists(full):

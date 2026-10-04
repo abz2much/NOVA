@@ -36,6 +36,7 @@ def ai_config(load):
     namespace = {
         "Any": Any,
         "resolve_provider_endpoint": llm.resolve_provider_endpoint,
+        "NovaValidationError": load("safe_errors").NovaValidationError,
         "__package__": "jc",
     }
     exec(compile(ast.Module(body=nodes, type_ignores=[]), str(SRC), "exec"), namespace)

@@ -28,8 +28,10 @@ Cancellation always propagates.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Callable, NamedTuple, Optional
 
+from ..providers.errors import ProviderError, ProviderErrorKind, error_text
 from . import cache_policy, presentation
 from .arbitration import arbitrate
 from .evaluators import (
@@ -153,9 +155,25 @@ def _learn(sig: str, decision: Decision, classifier_urgency: str) -> None:
     reasoning_cache.remember(sig, speak, urgency)
 
 
-def _is_transient(err_str: str) -> bool:
-    return ("503" in err_str or "UNAVAILABLE" in err_str or "429" in err_str
-            or "RESOURCE_EXHAUSTED" in err_str or "500" in err_str
+# A provider failure worth a short back-off and retry. A normalized
+# ProviderError is judged by its kind (set from the HTTP status first);
+# a connection failure is not retried. Anything else falls back to the
+# old text match, with status numbers matched whole so "1500" is not "500".
+# (Immutable literals only: this module keeps no module-level state.)
+_TRANSIENT_KINDS = (
+    ProviderErrorKind.RATE_LIMITED,
+    ProviderErrorKind.TIMEOUT,
+    ProviderErrorKind.PROVIDER_UNAVAILABLE,
+)
+_TRANSIENT_STATUS = r"(?<!\d)(?:503|429|500)(?!\d)"
+
+
+def _is_transient(exc: BaseException) -> bool:
+    if isinstance(exc, ProviderError):
+        return exc.kind in _TRANSIENT_KINDS
+    err_str = error_text(exc)
+    return (bool(re.search(_TRANSIENT_STATUS, err_str))
+            or "UNAVAILABLE" in err_str or "RESOURCE_EXHAUSTED" in err_str
             or "timeout" in err_str.lower())
 
 
@@ -257,7 +275,6 @@ async def decide(hass, provider, *, hooks: Hooks, honorific: str, event_summary:
         # The activity boundary runs the blocking SDK call in the executor.
         # Transient 503/429/500/timeout errors back off and retry, as before.
         from ..providers.activity import execute_chat
-        from ..providers.errors import error_text
         response = None
         last_err = None
         for attempt in range(3):
@@ -268,7 +285,7 @@ async def decide(hass, provider, *, hooks: Hooks, honorific: str, event_summary:
                 break
             except Exception as exc:
                 last_err = exc
-                if not _is_transient(error_text(exc)) or attempt == 2:
+                if not _is_transient(exc) or attempt == 2:
                     raise
                 import asyncio
                 backoff = 2 ** attempt  # 1s, 2s

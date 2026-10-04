@@ -256,8 +256,10 @@ def set_secret_sync(key: str, value, path: Path | None = None) -> bool:
         new_text = _upsert_secret_line(text, key, value)
         if path.exists():
             shutil.copy2(str(path), str(path) + ".nova.bak")
+            os.chmod(str(path) + ".nova.bak", 0o600)   # holds the old keys
         fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".secrets-", suffix=".tmp")
         try:
+            os.chmod(tmp, 0o600)   # secrets.yaml holds credentials
             with os.fdopen(fd, "w") as f:
                 f.write(new_text)
             os.replace(tmp, str(path))
@@ -306,8 +308,10 @@ def delete_secret_sync(key: str, path: Path | None = None) -> bool:
         if new_text == text:
             return True  # key wasn't present
         shutil.copy2(str(path), str(path) + ".nova.bak")
+        os.chmod(str(path) + ".nova.bak", 0o600)   # holds the old keys
         fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".secrets-", suffix=".tmp")
         try:
+            os.chmod(tmp, 0o600)   # secrets.yaml holds credentials
             with os.fdopen(fd, "w") as f:
                 f.write(new_text)
             os.replace(tmp, str(path))

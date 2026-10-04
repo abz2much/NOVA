@@ -17,11 +17,13 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 from pathlib import Path
 from typing import Any, Optional
 
 from . import paths
+from .persistence.files import write_json_atomic
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -72,6 +74,23 @@ def _ensure_dir():
     _config_path().parent.mkdir(parents=True, exist_ok=True)
 
 
+# config.json can hold credentials and personal details, so only Home
+# Assistant's own user may read it.
+_FILE_MODE = 0o600
+
+
+def _tighten_mode() -> None:
+    """Remove group and other access from an existing config.json, which
+    older versions wrote with the default umask. Best-effort: a failure is
+    logged and never stops a load."""
+    try:
+        mode = _config_path().stat().st_mode & 0o777
+        if mode & 0o077:
+            os.chmod(_config_path(), _FILE_MODE)
+    except OSError as exc:
+        _LOGGER.debug("Nova config: could not tighten permissions: %s", exc)
+
+
 def _sideline_corrupt(reason: str) -> None:
     """Move the unusable config aside (preserving the user's edits for
     recovery) and record why. Best-effort — failure to move must not stop
@@ -102,6 +121,7 @@ def load() -> dict:
         last_load_error = None
         try:
             if _config_path().exists():
+                _tighten_mode()
                 with open(_config_path()) as f:
                     data = json.load(f)
                 if isinstance(data, dict):
@@ -148,11 +168,8 @@ def save() -> bool:
     _ensure_dir()
     with _lock:
         try:
-            # Write atomically via temp file
-            tmp = _config_path().with_suffix(".tmp")
-            with open(tmp, "w") as f:
-                json.dump(_cache, f, indent=2, default=str)
-            tmp.replace(_config_path())
+            write_json_atomic(_config_path(), _cache, indent=2, default=str,
+                              mode=_FILE_MODE)
             return True
         except Exception as exc:
             _LOGGER.warning("Nova config save error: %s", exc)
@@ -371,10 +388,8 @@ def set_many_atomic(updates: dict) -> bool:
         candidate = dict(_cache_dict())
         candidate.update(updates)
         try:
-            tmp = _config_path().with_suffix(".tmp")
-            with open(tmp, "w") as f:
-                json.dump(candidate, f, indent=2, default=str)
-            tmp.replace(_config_path())
+            write_json_atomic(_config_path(), candidate, indent=2, default=str,
+                              mode=_FILE_MODE)
         except Exception as exc:
             _LOGGER.warning("Nova atomic config save error: %s", exc)
             return False

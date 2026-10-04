@@ -18,6 +18,7 @@ from .grants import _MUTATING_TOOL_NAMES
 from .ha_tools import _ha_kwargs
 from .models import ToolExecutionContext, ToolGrant, ToolResult
 from .registry import _TOOL_MAP, trust_of
+from ..safe_errors import safe_error_message
 
 # One logger for the whole agent, named as it always was (…nova.agent), so
 # log filters and levels set for the agent keep applying.
@@ -65,7 +66,8 @@ async def _execute_tool(
                 extra["user_id"] = ctx.user_id
             return await fn(hass, tool_args, **extra)
         except Exception as exc:
-            return json.dumps({"error": str(exc)})
+            return json.dumps({"error": safe_error_message(
+                exc, where=f"tool {tool_name}", log=True, keep_ha_text=True)})
 
     # Fallback to HA's built-in LLM API tools
     if hass_api:
@@ -104,7 +106,8 @@ async def _execute_tool(
             except Exception as exc:
                 if attempt >= attempts - 1:
                     await assist_policy.async_record_execution(hass, decision, False)
-                    return json.dumps({"error": f"{tool_name} failed: {exc}"})
+                    return json.dumps({"error": f"{tool_name} failed: " + safe_error_message(
+                        exc, where=f"tool {tool_name}", log=True, keep_ha_text=True)})
 
     return json.dumps({"error": f"Unknown tool: {tool_name}"})
 
