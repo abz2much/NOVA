@@ -395,7 +395,23 @@ def _build_local_clarification(candidates: list[dict], addr: str) -> str:
     return f"I found more than one possible match{addr} — could you be more specific?"
 
 
-def _find_entity(hass, name_fragment, domain_hint=None):
+def _read_aliases() -> dict:
+    """The learned aliases (from the agent's remember tool). Reads a file,
+    so call it in the executor."""
+    try:
+        from . import paths
+        from .persistence.files import OK, read_json
+        read = read_json(paths.learned_file())
+        if read.status == OK and isinstance(read.value, dict):
+            aliases = read.value.get("alias", {})
+            if isinstance(aliases, dict):
+                return aliases
+    except Exception:
+        pass
+    return {}
+
+
+def _find_entity(hass, name_fragment, domain_hint=None, aliases=None):
     """
     Fuzzy-match a name fragment against HA entities. v5.7.08.
 
@@ -435,21 +451,14 @@ def _find_entity(hass, name_fragment, domain_hint=None):
         return None
 
     # ── Tier 1: Check learned aliases ───────────────────────────────
-    # An exact key maps to exactly one entity — always unique.
-    try:
-        from . import paths
-        from .persistence.files import OK, read_json
-        read = read_json(paths.learned_file())
-        if read.status == OK and isinstance(read.value, dict):
-            aliases = read.value.get("alias", {})
-            if fragment in aliases:
-                resolved_id = aliases[fragment]
-                state = hass.states.get(resolved_id)
-                if state:
-                    _LOGGER.info("Entity resolve: alias '%s' → %s", fragment, resolved_id)
-                    return (resolved_id, state.attributes.get("friendly_name", resolved_id))
-    except Exception:
-        pass
+    # An exact key maps to exactly one entity — always unique. The caller
+    # reads them off the event loop (_read_aliases) and passes them in.
+    if aliases and fragment in aliases:
+        resolved_id = aliases[fragment]
+        state = hass.states.get(resolved_id)
+        if state:
+            _LOGGER.info("Entity resolve: alias '%s' → %s", fragment, resolved_id)
+            return (resolved_id, state.attributes.get("friendly_name", resolved_id))
 
     domains = [domain_hint] if domain_hint else [
         "light", "switch", "lock", "cover", "climate",
@@ -1242,6 +1251,8 @@ async def try_local(hass, text, honorific="sir", force=False, device_id=None):
         _LOGGER.debug("Local: complexity %d for '%s' — LLM", complexity, text[:60])
         return None
 
+    aliases = await hass.async_add_executor_job(_read_aliases)
+
     # Contextual queries
     for pattern, qtype in _QUERY_PATTERNS:
         match = re.search(pattern, normalized)
@@ -1513,7 +1524,8 @@ async def try_local(hass, text, honorific="sir", force=False, device_id=None):
         extra_arg = groups[1] if len(groups) > 1 else None
         if not name_frag:
             continue
-        resolved = _find_entity(hass, name_frag, domain_hint) or _find_entity(hass, name_frag, None)
+        resolved = (_find_entity(hass, name_frag, domain_hint, aliases)
+                    or _find_entity(hass, name_frag, None, aliases))
         if isinstance(resolved, _AmbiguousEntity):
             return LocalResult(
                 text=_build_local_clarification(resolved.candidates, addr),
@@ -1649,7 +1661,7 @@ async def try_local(hass, text, honorific="sir", force=False, device_id=None):
     # like "what are your capabilities" get fed wholesale to the resolver,
     # which wastes a full registry scan and (previously) logged noise.
     if complexity < 40 and _looks_like_entity_name(normalized):
-        resolved = _find_entity(hass, normalized, None)
+        resolved = _find_entity(hass, normalized, None, aliases)
         if isinstance(resolved, _AmbiguousEntity):
             return LocalResult(
                 text=_build_local_clarification(resolved.candidates, addr),

@@ -301,5 +301,7 @@
   "type to find an entity…": "skriv för att hitta en entitet…",
   "watch folders": "bevakade mappar",
   "window left open": "fönster lämnat öppet",
-  "Leave reminder (min)": "Påminnelse före avfärd (min)"
+  "Leave reminder (min)": "Påminnelse före avfärd (min)",
+  "Infrastructure audit": "Infrastrukturgranskning",
+  "Audit alerts room": "Rum för granskningsvarningar"
 }

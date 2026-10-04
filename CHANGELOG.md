@@ -1,3 +1,12 @@
+## [8.7.1] — Fewer classifier calls, quieter infrastructure audit, fewer blocking calls
+
+**Fixed**
+- Motion, occupancy and presence sensors no longer use up the hourly classifier budget while someone is home. They are kept as recent context but not sent to the AI classifier. They still are when everyone is away or presence is unknown (presence here comes from people and the alarm only, not from occupied rooms), and a local cognition anomaly still escalates them. While home they no longer appear in the activity feed as "not worth considering". On a busy home this hit the 100 calls an hour limit several times a day.
+- The infrastructure audit no longer reports sensors that don't exist in your home. Before, every home without those exact server and switch sensors got "I can't read root storage" every 15 minutes.
+- The audit no longer speaks to a built-in "office" area. Pick its room in Settings, Host Health, "Audit alerts room". Left at none, it only logs what it finds. If you relied on hearing audit alerts in an area called office, pick that room.
+- Nova no longer reads the learned names file on the event loop when it resolves a device name.
+- Answering the "Heading to bed?" notification no longer saves settings on the event loop, and the sleep override now saves once instead of twice.
+
 ## [8.7.0] — Set up every AI role at first run
 
 **Added**

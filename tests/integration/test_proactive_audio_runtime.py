@@ -267,6 +267,52 @@ async def test_audit_tick_uses_the_runtime_flag(hass, monkeypatch):
     assert seen == [True]
 
 
+async def test_audit_speaks_only_in_the_chosen_area(hass, monkeypatch, spoken):
+    """The audit has no built-in area (it used to say everything to "office",
+    which most homes don't have). Unset, it only logs; set, it speaks there."""
+    from custom_components.nova import proactive_audio
+    ticks = []
+    real_call_later = proactive_audio.async_call_later
+
+    def _capture(hass_, delay, action):
+        ticks.append(action)
+        return real_call_later(hass_, delay, action)
+
+    class _Triage:
+        def __init__(self, hass_, honorific=""):
+            pass
+
+        def evaluate(self):
+            return {"alert_required": True, "message": "Root storage is high",
+                    "critical": False, "tags": []}
+
+    class _FaultLog:
+        def query_related_faults(self, tags):
+            return []
+
+        def commit_event(self, message, tags):
+            return None
+
+    async def _no_predictor(hass_, predictor):
+        return None
+
+    monkeypatch.setattr(proactive_audio, "async_call_later", _capture)
+    monkeypatch.setattr(proactive_audio, "InfrastructureTriage", _Triage)
+    monkeypatch.setattr(proactive_audio, "FaultLog", _FaultLog)
+    monkeypatch.setattr(proactive_audio, "_run_predictor", _no_predictor)
+    entry = await _setup(hass)
+    (run_audit,) = ticks
+
+    await run_audit()
+    await hass.async_block_till_done()
+    assert spoken == []                           # no area set: nothing spoken
+
+    entry.runtime_data.runtime_config["infrastructure_audit_area"] = "work_area"
+    await run_audit()
+    await hass.async_block_till_done()
+    assert [(m, a) for _, m, a, _ in spoken] == [("Root storage is high", "work_area")]
+
+
 # ── Unload and reload ───────────────────────────────────────────────────────
 
 async def test_unload_releases_everything_and_repeats_safely(hass, routed):

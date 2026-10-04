@@ -167,3 +167,48 @@ def test_maybe_prompt_marks_today_so_it_only_fires_once(sd, fake_hass, monkeypat
     # Same tick again later tonight — must not re-send.
     asyncio.run(sd.maybe_prompt_sleep(fake_hass, cfg))
     assert sent == [("07:00", cfg)]
+
+
+async def test_prompt_answer_saves_off_the_event_loop(sd, fake_hass, monkeypatch):
+    # The notification answer arrives in an event loop callback, so the
+    # config save must run in the executor, not in the callback itself.
+    import types
+    monkeypatch.setattr(sd.uuid, "uuid4", lambda: types.SimpleNamespace(hex="abcd1234ffff"))
+
+    async def _sent(*a, **k):
+        return True
+
+    import sys
+    notify = types.ModuleType("notify_targets")
+    notify.async_send_configured_notifications = _sent
+    monkeypatch.setitem(sys.modules, sd.__name__.rpartition(".")[0] + ".notify_targets", notify)
+    ev = types.ModuleType("homeassistant.helpers.event")
+    ev.async_call_later = lambda *a, **k: (lambda: None)
+    monkeypatch.setitem(sys.modules, "homeassistant.helpers.event", ev)
+    handlers = []
+    monkeypatch.setattr(fake_hass.bus, "async_listen",
+                        lambda event, handler: handlers.append(handler) or (lambda: None))
+    jobs = []
+    monkeypatch.setattr(fake_hass, "async_add_executor_job",
+                        lambda func, *args, **kw: jobs.append((func, args, kw)))
+    direct = []
+    monkeypatch.setattr(sd.nova_config, "set_many", lambda *a: direct.append(a))
+    monkeypatch.setattr(sd.nova_config, "set", lambda *a: direct.append(a))
+
+    await sd._send_sleep_prompt(fake_hass, "07:00", {})
+    assert handlers
+    handlers[0](types.SimpleNamespace(data={"action": "NOVA_SLEEP_YES_abcd1234"}))
+    assert direct == []                       # nothing saved inside the callback
+    assert len(jobs) == 1
+    func, args, kw = jobs[0]
+    assert func.__name__ == "set_override" and args[0] == "asleep"
+
+
+def test_set_override_saves_once(sd, monkeypatch):
+    _freeze(monkeypatch, sd, datetime(2026, 9, 13, 23, 15, tzinfo=timezone.utc))
+    saves = []
+    real = sd.nova_config.save
+    monkeypatch.setattr(sd.nova_config, "save", lambda: saves.append(1) or real())
+    sd.set_override("asleep", "07:00")
+    assert len(saves) == 1
+    assert sd._read_override()[0] == "asleep"

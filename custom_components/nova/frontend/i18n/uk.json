@@ -301,5 +301,7 @@
   "type to find an entity…": "введіть, щоб знайти сутність…",
   "watch folders": "відстежувані папки",
   "window left open": "вікно залишено відчиненим",
-  "Leave reminder (min)": "Нагадування перед виходом (хв)"
+  "Leave reminder (min)": "Нагадування перед виходом (хв)",
+  "Infrastructure audit": "Аудит інфраструктури",
+  "Audit alerts room": "Кімната для сповіщень аудиту"
 }

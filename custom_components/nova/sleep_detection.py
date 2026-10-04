@@ -125,12 +125,13 @@ def set_override(value: str, quiet_end: str = "07:00") -> None:
     if value not in ("auto", "awake", "asleep"):
         raise ValueError(f"invalid sleep override: {value!r}")
     if value == "auto":
-        nova_config.set("sleep_override", "auto")
-        nova_config.set("sleep_override_expires", None)
+        nova_config.set_many({"sleep_override": "auto", "sleep_override_expires": None})
         _LOGGER.info("Nova: sleep-state override cleared (Auto)")
         return
-    nova_config.set("sleep_override", value)
-    nova_config.set("sleep_override_expires", _next_quiet_end(quiet_end).isoformat())
+    nova_config.set_many({
+        "sleep_override": value,
+        "sleep_override_expires": _next_quiet_end(quiet_end).isoformat(),
+    })
     _LOGGER.info("Nova: sleep-state override set to %s until %s", value, quiet_end)
 
 
@@ -315,11 +316,13 @@ async def _send_sleep_prompt(
     @callback
     def _on_action(event) -> None:
         action = event.data.get("action")
+        # set_override writes config.json, so it runs in the executor; this
+        # callback is on the event loop.
         if action == yes_action:
-            set_override("asleep", quiet_end=quiet_end)
+            hass.async_add_executor_job(set_override, "asleep", quiet_end)
             _unsub()
         elif action == no_action:
-            set_override("awake", quiet_end=quiet_end)
+            hass.async_add_executor_job(set_override, "awake", quiet_end)
             _unsub()
 
     _unsub = hass.bus.async_listen("mobile_app_notification_action", _on_action)

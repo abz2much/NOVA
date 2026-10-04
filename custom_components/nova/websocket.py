@@ -901,6 +901,7 @@ async def ws_get_panel_data(
                 "operational_mode_auto": bool(_runtime_opt(hass, entry, "operational_mode_auto", True)),
                 "lab_areas": _runtime_opt(hass, entry, "lab_areas", []) or [],
                 "movie_area": str(_runtime_opt(hass, entry, "movie_area", "") or ""),
+                "infrastructure_audit_area": str(_runtime_opt(hass, entry, "infrastructure_audit_area", "") or ""),
                 "movie_media_player": str(_runtime_opt(hass, entry, "movie_media_player", "") or ""),
                 "movie_dim_pct": int(_runtime_opt(hass, entry, "movie_dim_pct", 15) or 15),
                 "llm_base_url": str(_runtime_opt(hass, entry, "llm_base_url", "") or ""),
@@ -1678,6 +1679,7 @@ PANEL_WRITABLE_KEYS = {
     "adaptive_suggestion_threshold", # bool: tune the suggestion confidence bar from how welcome recent suggestions were
     "adaptive_awareness",            # bool: anticipation alerts learn from alerts the user mutes
     "tts_use_ha_voice",              # bool: prefer the TTS entity of the preferred Assist pipeline
+    "infrastructure_audit_area",     # area id the infrastructure audit speaks in ("" = log only)
     "pattern_learn_motion",          # bool: learn motion/occupancy triggers for "when X, do Y" suggestions (rate-limited)
     "camera_event_learning",        # bool: feed Eufy/Frigate/Nest/vision detections into pattern learning (Phase 4, v7.109.0)
     "camera_event_confidence_floor",  # float 0-100: minimum source-supplied confidence to record a camera event (0 = off)

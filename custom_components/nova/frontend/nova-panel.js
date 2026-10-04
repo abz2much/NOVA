@@ -1082,7 +1082,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v8.7.0
+ * v8.7.1
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1158,7 +1158,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.7.0 ",
+      console.log("%c Nova Panel %c v8.7.1 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -4519,7 +4519,13 @@ ${this._htmlDashboardBody()}`;
       </div>
       ${setupGuidance}
       <div class="mode-bind-head">Readings</div>
-      ${metrics.length ? metrics.map(metricRow).join("") : `<div class="stub-body">Loading detected readings…</div>`}`;
+      ${metrics.length ? metrics.map(metricRow).join("") : `<div class="stub-body">Loading detected readings…</div>`}
+      <div class="mode-bind-head">Infrastructure audit</div>
+      <div class="stub-body">A separate check every 15 minutes of a fixed set of server and network switch sensors. Sensors that don't exist here are skipped. Pick a room for its alerts, or leave none to only log them.</div>
+      <div class="cfg-row">
+        <label>Audit alerts room</label>
+        <select class="cfg-field" data-cfg-key="infrastructure_audit_area">${this._optSelect([["", "— none —"], ...(this._data()?.areas || []).map(a => [a.id, a.name])], cfg.infrastructure_audit_area || "")}</select>
+      </div>`;
   }
 
   _renderHazardScan(res) {

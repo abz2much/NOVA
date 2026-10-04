@@ -290,7 +290,13 @@
       </div>
       ${setupGuidance}
       <div class="mode-bind-head">Readings</div>
-      ${metrics.length ? metrics.map(metricRow).join("") : `<div class="stub-body">Loading detected readings…</div>`}`;
+      ${metrics.length ? metrics.map(metricRow).join("") : `<div class="stub-body">Loading detected readings…</div>`}
+      <div class="mode-bind-head">Infrastructure audit</div>
+      <div class="stub-body">A separate check every 15 minutes of a fixed set of server and network switch sensors. Sensors that don't exist here are skipped. Pick a room for its alerts, or leave none to only log them.</div>
+      <div class="cfg-row">
+        <label>Audit alerts room</label>
+        <select class="cfg-field" data-cfg-key="infrastructure_audit_area">${this._optSelect([["", "— none —"], ...(this._data()?.areas || []).map(a => [a.id, a.name])], cfg.infrastructure_audit_area || "")}</select>
+      </div>`;
   }
 
   _renderHazardScan(res) {

@@ -301,5 +301,7 @@
   "type to find an entity…": "saisir pour rechercher une entité…",
   "watch folders": "dossiers surveillés",
   "window left open": "fenêtre restée ouverte",
-  "Leave reminder (min)": "Rappel avant de partir (min)"
+  "Leave reminder (min)": "Rappel avant de partir (min)",
+  "Infrastructure audit": "Audit d'infrastructure",
+  "Audit alerts room": "Pièce des alertes d'audit"
 }

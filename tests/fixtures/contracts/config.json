@@ -147,6 +147,7 @@
     "host_health_thresholds",
     "identity_min_confidence",
     "indoor_entities",
+    "infrastructure_audit_area",
     "intrusion_inward_depth",
     "intrusion_notify_image_ttl_minutes",
     "intrusion_requires_confinement",
