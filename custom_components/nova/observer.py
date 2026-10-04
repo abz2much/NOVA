@@ -260,6 +260,15 @@ def _household_presence(hass: HomeAssistant) -> str:
         audio_routing.currently_occupied_areas(hass))
 
 
+def _household_home() -> bool:
+    """True only when household presence reads home. Any error reads as not
+    home, so the event keeps its normal path."""
+    try:
+        return _household_presence(_STATE.hass) == cognitive_rules.PRESENCE_HOME
+    except Exception:
+        return False
+
+
 def _should_pre_filter(event: Event) -> bool:
     """Return True if this event should be dropped before any LLM call."""
     entity_id = event.data.get("entity_id", "")
@@ -612,6 +621,16 @@ def _on_state_changed(event: Event) -> None:
     dclass = new_state.attributes.get("device_class") if new_state else None
     interval = DEBOUNCE_MOTION_S if dclass in HIGH_FREQ_BINARY_CLASSES else DEBOUNCE_DEFAULT_S
     if not critical and _debounced(entity_id, interval):
+        return
+
+    # Motion, occupancy and presence while the household is home are normal
+    # activity: kept as recent context, not sent to the classifier (v8.7.1).
+    # On a busy home they used up the hourly classifier budget. They are
+    # still classified when everyone is away or presence is unknown, and a
+    # local cognition anomaly still escalates them.
+    if (not critical and not cog_escalate and dclass in HIGH_FREQ_BINARY_CLASSES
+            and entity_id.startswith("binary_sensor.") and _household_home()):
+        _record_for_context(event)
         return
 
     # Hourly rate limit — user-configurable cap to bound API cost. Person

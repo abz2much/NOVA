@@ -301,5 +301,7 @@
   "type to find an entity…": "píšte na nájdenie entity…",
   "watch folders": "sledované priečinky",
   "window left open": "okno nechané otvorené",
-  "Leave reminder (min)": "Pripomenutie odchodu (min)"
+  "Leave reminder (min)": "Pripomenutie odchodu (min)",
+  "Infrastructure audit": "Audit infraštruktúry",
+  "Audit alerts room": "Miestnosť pre upozornenia auditu"
 }

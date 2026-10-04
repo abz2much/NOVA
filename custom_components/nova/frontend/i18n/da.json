@@ -301,5 +301,7 @@
   "type to find an entity…": "skriv for at finde en enhed…",
   "watch folders": "overvågede mapper",
   "window left open": "vindue efterladt åbent",
-  "Leave reminder (min)": "Påmindelse før afgang (min)"
+  "Leave reminder (min)": "Påmindelse før afgang (min)",
+  "Infrastructure audit": "Infrastrukturrevision",
+  "Audit alerts room": "Rum til revisionsadvarsler"
 }

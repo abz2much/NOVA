@@ -301,5 +301,7 @@
   "type to find an entity…": "escreva para encontrar uma entidade…",
   "watch folders": "pastas vigiadas",
   "window left open": "janela deixada aberta",
-  "Leave reminder (min)": "Lembrete antes de sair (min)"
+  "Leave reminder (min)": "Lembrete antes de sair (min)",
+  "Infrastructure audit": "Auditoria de infraestrutura",
+  "Audit alerts room": "Divisão para alertas da auditoria"
 }

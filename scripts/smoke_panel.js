@@ -79,6 +79,7 @@ const PANEL = {
     { id: "briefings", label: "Turn on daily briefings", hint: "briefings", done: false, jump: "Briefings" },
   ] },
   config: { camera_event_learning: true,
+    infrastructure_audit_area: "kitchen",
     host_health_enabled: true, host_health_alerts_enabled: false,
     host_health_recovery_announce: true, host_health_persistence_minutes: 10,
     host_health_cooldown_minutes: 60,
@@ -1176,6 +1177,14 @@ setTimeout(async () => {
         // Fixture: enabled=true, alerts=false — two independent toggles, not one.
         return !!alertBtn && !!masterBtn && alertBtn !== masterBtn
           && masterBtn.classList.contains("on") && alertBtn.classList.contains("off");
+      })()],
+    ["settings tab: Host Health has an infrastructure audit room select with none + every area, preselected",
+      (() => {
+        const hc = hostHealthCardOf(sRoot);
+        const sel = hc?.querySelector('select.cfg-field[data-cfg-key="infrastructure_audit_area"]');
+        const opts = sel ? Array.from(sel.querySelectorAll("option")).map(o => o.value) : [];
+        return !!sel && opts[0] === "" && opts.includes("garage") && opts.includes("kitchen")
+          && sel.value === "kitchen";
       })()],
     ["settings tab: Host Health persistence/cooldown are bounded numeric inputs",
       (() => {

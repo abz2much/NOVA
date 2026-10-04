@@ -301,5 +301,7 @@
   "type to find an entity…": "bir varlık bulmak için yazın…",
   "watch folders": "izlenen klasörler",
   "window left open": "pencere açık bırakıldı",
-  "Leave reminder (min)": "Çıkış hatırlatması (dk)"
+  "Leave reminder (min)": "Çıkış hatırlatması (dk)",
+  "Infrastructure audit": "Altyapı denetimi",
+  "Audit alerts room": "Denetim uyarıları odası"
 }

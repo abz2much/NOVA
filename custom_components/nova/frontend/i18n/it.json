@@ -301,5 +301,7 @@
   "type to find an entity…": "digita per trovare un’entità…",
   "watch folders": "cartelle monitorate",
   "window left open": "finestra lasciata aperta",
-  "Leave reminder (min)": "Promemoria prima di uscire (min)"
+  "Leave reminder (min)": "Promemoria prima di uscire (min)",
+  "Infrastructure audit": "Controllo infrastruttura",
+  "Audit alerts room": "Stanza per gli avvisi del controllo"
 }
