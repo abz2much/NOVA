@@ -37,11 +37,28 @@ _URL_USERINFO = re.compile(r"(?i)\b([a-z][a-z0-9+.\-]*://)[^/\s?#@]+@")
 _SECRET_QUERY = re.compile(
     r"(?i)([?&](?:access_token|api_key|apikey|auth|key|password|pass|pwd|secret|"
     r"sig|signature|token)=)[^&#\s]*")
+# A webhook address's path is itself the secret, so in free text (an error, a
+# log line) everything after the webhook segment goes: n8n /webhook/<id> and
+# /webhook-test/<id>, Home Assistant /api/webhook/<id>, Discord
+# /api/webhooks/<id>/<token> and Slack hooks.slack.com/services/<path>.
+_WEBHOOK_PATH = re.compile(
+    r"(?i)(/webhooks?(?:-test)?/|hooks\.slack\.com/services/)[^\s?#\"'<>]+")
 
 
 def _scrub_text(value: str) -> str:
     value = _URL_USERINFO.sub(r"\1**REDACTED**@", value)
-    return _SECRET_QUERY.sub(r"\1**REDACTED**", value)
+    value = _SECRET_QUERY.sub(r"\1**REDACTED**", value)
+    return _WEBHOOK_PATH.sub(r"\1**REDACTED**", value)
+
+
+def _err(exc: BaseException) -> str:
+    """An error line for the dump: the exception type and text, with credentials
+    scrubbed. Diagnostics is for the owner, so the detail stays (unlike
+    safe_errors.safe_error_message, which is for the model and the panel)."""
+    try:
+        return _scrub_text(f"{type(exc).__name__}: {exc}")[:200]
+    except Exception:
+        return type(exc).__name__
 
 
 def _redact(obj):
@@ -89,20 +106,20 @@ async def async_get_config_entry_diagnostics(hass, entry) -> dict:
         diag["entry_data"] = _redact(data)
         diag["entry_options"] = _redact(options)
     except Exception as exc:
-        diag["config_error"] = str(exc)
+        diag["config_error"] = _err(exc)
 
     # Live Nova config (redacted)
     try:
         from .. import nova_config
         diag["nova_config"] = _redact(nova_config.get_all())
     except Exception as exc:
-        diag["nova_config_error"] = str(exc)
+        diag["nova_config_error"] = _err(exc)
 
     # Service health (LLM/embeddings/TTS/STT)
     try:
-        diag["service_health"] = await run_service_health(hass)
+        diag["service_health"] = _redact(await run_service_health(hass))
     except Exception as exc:
-        diag["service_health_error"] = str(exc)
+        diag["service_health_error"] = _err(exc)
 
     # Cognitive core + connectivity status
     try:
@@ -111,13 +128,13 @@ async def async_get_config_entry_diagnostics(hass, entry) -> dict:
         if core and hasattr(core, "status"):
             diag["cognitive"] = _redact(core.status())
     except Exception as exc:
-        diag["cognitive_error"] = str(exc)
+        diag["cognitive_error"] = _err(exc)
     try:
         from .. import connectivity
         if hasattr(connectivity, "snapshot"):
-            diag["connectivity"] = connectivity.snapshot()
+            diag["connectivity"] = _redact(connectivity.snapshot())
     except Exception as exc:
-        diag["connectivity_error"] = str(exc)
+        diag["connectivity_error"] = _err(exc)
 
     # Rough entity/domain counts (no entity_ids — could reveal layout)
     try:
@@ -128,7 +145,7 @@ async def async_get_config_entry_diagnostics(hass, entry) -> dict:
         diag["entity_domain_counts"] = dict(counts)
         diag["entity_total"] = sum(counts.values())
     except Exception as exc:
-        diag["entity_count_error"] = str(exc)
+        diag["entity_count_error"] = _err(exc)
 
     # Subsystem stats — the local loops and stores, so their volume/health is
     # visible without a live session. (Database health is already covered by
@@ -147,7 +164,7 @@ async def async_get_config_entry_diagnostics(hass, entry) -> dict:
                 mod = importlib.import_module(f"..{mod_name}", __package__)
                 out[mod_name] = _redact(getattr(mod, fn_name)())
             except Exception as exc:
-                out[mod_name] = {"error": str(exc)[:200]}
+                out[mod_name] = {"error": _err(exc)}
         return out
     diag["subsystems"] = await hass.async_add_executor_job(_collect_subsystems)
 
@@ -177,7 +194,7 @@ async def async_get_config_entry_diagnostics(hass, entry) -> dict:
         }
         diag["audio_routing"] = routing
     except Exception as exc:
-        diag["audio_routing_error"] = str(exc)[:200]
+        diag["audio_routing_error"] = _err(exc)
 
     # Recent activity log tail — includes the reply-routing decisions (which
     # speaker each spoken reply targeted, whether it reached a Cast speaker or
@@ -185,16 +202,16 @@ async def async_get_config_entry_diagnostics(hass, entry) -> dict:
     # straight from the download.
     try:
         from ..websocket import recent_debug_log
-        diag["recent_log"] = recent_debug_log(150)
+        diag["recent_log"] = _redact(recent_debug_log(150))
     except Exception as exc:
-        diag["recent_log_error"] = str(exc)
+        diag["recent_log_error"] = _err(exc)
 
     # Dedicated conversation/reply-routing log — survives observer/anomaly floods
     # that evict the reply-delivery decisions from the main log above.
     try:
         from ..websocket import recent_conversation_log
-        diag["conversation_log"] = recent_conversation_log(80)
+        diag["conversation_log"] = _redact(recent_conversation_log(80))
     except Exception as exc:
-        diag["conversation_log_error"] = str(exc)
+        diag["conversation_log_error"] = _err(exc)
 
     return diag

@@ -1,3 +1,18 @@
+## [8.7.5] — Diagnostics downloads scrub error lines, log tails and service health
+
+**Fixed**
+- The error lines in a diagnostics download (the `*_error` fields and a subsystem's `error`) now pass through the same scrubbing as the rest of the file. Each one reads as the error type and its text, with passwords in URLs (`user:pass@host`), token or key query parameters and webhook addresses removed. The detail is kept otherwise, because the download is for you.
+- The recent log tail (`recent_log`) and the conversation log (`conversation_log`) in the download are scrubbed the same way. Each entry keeps its date, time, category and message, and a message without credentials is unchanged.
+- The service health section (`service_health`) is scrubbed the same way, including each service's detail and error text.
+- Webhook addresses inside free text are now hidden too. Before, a webhook address was hidden only when its setting name said webhook. Now everything after the webhook part of the path goes: n8n `/webhook/` and `/webhook-test/`, Home Assistant `/api/webhook/`, Discord `/api/webhooks/` and Slack `hooks.slack.com/services/`.
+
+**Caveats**
+- Scrubbing works on patterns. A secret that is not in a URL's `user:pass@`, a token or key query parameter or a webhook path, such as a bare key pasted into a message, is not caught.
+- The `connectivity` key is never in the download. Nova's connectivity module has no snapshot to give it. Its call is scrubbed in case one is added later.
+- Only the download changes. The panel's Logs tab and Nova's log file still hold the full text.
+- Error lines are now at most 200 characters, as the audio routing and subsystem errors already were.
+- Audio routing still lists the paired speakers by entity ID, and the entity counts per domain are unchanged.
+
 ## [8.7.4] — Security tidy up: file permissions, safe error text, document scans off the event loop
 
 **Fixed**
