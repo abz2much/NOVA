@@ -1,3 +1,22 @@
+## [8.7.0] — Set up every AI role at first run
+
+**Added**
+- First setup takes a key for each cloud provider (Groq, Anthropic, OpenAI, Gemini) and an Ollama address, all optional, and tests each one.
+- You choose the provider and the model for each role: conversation, classifier, reasoning, camera reasoning and vision. Sensible choices are filled in.
+- Each model is tested on submit. The vision model gets a small test picture.
+- Keys left in secrets.yaml by an earlier install are found and reused.
+- Setup Doctor's new "AI roles" check warns when a role's provider has no key or address.
+
+**Fixed**
+- A new install with only an Anthropic, OpenAI, Gemini or Ollama setup no longer leaves the background and camera roles pointing at Groq with no key.
+- OpenAI's GPT-5 and o series models now work: Nova sends them max_completion_tokens and no temperature, which is what they require. Before, every call to them failed.
+- Reinstalling over an old config.json no longer lets the old AI choices beat the new ones.
+- The config flow unit tests now run in CI. They were silently skipped.
+
+**Caveats**
+- Keys are now saved in secrets.yaml at setup, never in Home Assistant's config entry.
+- The setup screens only show on a fresh install, so they have not been seen on a live install.
+
 ## [8.6.1] — fix: two file reads blocking Home Assistant
 
 **Fixed**
