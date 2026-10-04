@@ -1,0 +1,75 @@
+# Publishes the GitHub release for the version in manifest.json, so HACS
+# offers it. Runs when a merge to main changes the version (or this file),
+# and by hand from the Actions tab. Does nothing if that release exists.
+name: Publish release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - custom_components/nova/manifest.json
+      - .github/workflows/release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Publish the release if it is missing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          VERSION="$(python3 -c "import json;print(json.load(open('custom_components/nova/manifest.json'))['version'])")"
+          TAG="v${VERSION}"
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "Release $TAG already exists, nothing to do."
+            exit 0
+          fi
+          # Notes: this version's CHANGELOG section, plus any later sections
+          # of versions that were never released (back to the latest release).
+          LATEST="$(gh release view --repo "$REPO" --json tagName -q .tagName 2>/dev/null || true)"
+          python3 - "$VERSION" "${LATEST#v}" > notes.md <<'PY'
+          import re, sys
+          version, latest = sys.argv[1], sys.argv[2]
+          text = open("CHANGELOG.md", encoding="utf-8").read()
+          parts = re.split(r"(?m)^(?=## \[)", text)
+          out, started = [], False
+          for part in parts:
+              m = re.match(r"## \[([^\]]+)\]", part)
+              if not m:
+                  continue
+              if m.group(1) == version:
+                  started = True
+              elif started and (not latest or m.group(1) == latest):
+                  break
+              if started:
+                  out.append(part.strip())
+                  if not latest:
+                      break
+          print("\n\n".join(out))
+          PY
+          TITLE="$(python3 - "$VERSION" <<'PY'
+          import re, sys
+          v = sys.argv[1]
+          m = re.search(r"(?m)^## \[" + re.escape(v) + r"\]\s*[—-]\s*(.+)$",
+                        open("CHANGELOG.md", encoding="utf-8").read())
+          print(f"v{v} — {m.group(1).strip()}" if m else f"v{v}")
+          PY
+          )"
+          test -s notes.md || echo "See CHANGELOG.md." > notes.md
+          gh release create "$TAG" --repo "$REPO" --target "$SHA" --latest \
+            --title "$TITLE" --notes-file notes.md
+          echo "Published $TAG"
