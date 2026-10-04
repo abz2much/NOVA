@@ -482,7 +482,7 @@ class _Aborted(Exception):
     pass
 
 
-GROQ = (["openai/gpt-oss-120b", "qwen/qwen3.6-27b", "whisper-large-v3"], [])
+GROQ = (["openai/gpt-oss-120b", "qwen/qwen3.8-27b", "whisper-large-v3"], [])
 OLLAMA = (["llama3.2", "llava", "nomic-embed-text"], [
     {"id": "llama3.2", "capabilities": ["completion", "tools"]},
     {"id": "llava", "capabilities": ["completion", "vision"]},
@@ -574,7 +574,7 @@ async def test_unreadable_cloud_list_falls_back_to_default_model(config_flow, mo
     flow = _first_run_flow(config_flow, monkeypatch, lists={"anthropic": None})
     res = await flow.async_step_user(_keys(anthropic_api_key="sk-ant"))
     assert res["step_id"] == "roles"
-    assert flow.calls["conn"] == [("anthropic", "sk-ant", "claude-sonnet-5", None)]
+    assert flow.calls["conn"] == [("anthropic", "sk-ant", "claude-sonnet-5-5", None)]
     assert flow._lists["anthropic"] == ([], [])
 
 
@@ -700,7 +700,7 @@ def _default_of(form, field):
 
 async def test_roles_screen_fills_in_defaults(config_flow, monkeypatch):
     flow = _first_run_flow(config_flow, monkeypatch,
-                           lists={"groq": GROQ, "anthropic": (["claude-sonnet-5"], [])})
+                           lists={"groq": GROQ, "anthropic": (["claude-sonnet-5-5"], [])})
     form = await flow.async_step_user(_keys(groq_api_key="g", anthropic_api_key="a"))
     assert form["step_id"] == "roles"
     assert _default_of(form, "conversation") == "anthropic"
@@ -754,7 +754,7 @@ async def test_models_screen_defaults_and_placeholders(config_flow, monkeypatch)
     form = await _to_models(flow, ALL_GROQ)
     assert form["step_id"] == "models"
     assert _suggested(form, "conversation_model") == "openai/gpt-oss-120b"
-    assert _suggested(form, "vision_model") == "qwen/qwen3.6-27b"
+    assert _suggested(form, "vision_model") == "qwen/qwen3.8-27b"
     assert form["description_placeholders"] == {
         f"{r}_provider": "Groq" for r in ALL_GROQ}
 
@@ -770,7 +770,7 @@ async def test_unreadable_list_gives_a_text_box_with_the_default(config_flow, mo
     flow = _first_run_flow(config_flow, monkeypatch, lists={"anthropic": None})
     await flow.async_step_user(_keys(anthropic_api_key="a"))
     form = await _to_models(flow, {**{r: "anthropic" for r in ALL_GROQ}})
-    assert _suggested(form, "conversation_model") == "claude-sonnet-5"
+    assert _suggested(form, "conversation_model") == "claude-sonnet-5-5"
 
 
 async def test_missing_cloud_default_is_kept_not_the_first_model(config_flow, monkeypatch):
@@ -793,7 +793,7 @@ async def test_ollama_field_empty_when_no_model_has_the_ability(config_flow, mon
 def _models(**values):
     base = {"conversation_model": "openai/gpt-oss-120b", "classifier_model": "openai/gpt-oss-120b",
             "reasoning_model": "openai/gpt-oss-120b", "camera_reasoning_model": "openai/gpt-oss-120b",
-            "vision_model": "qwen/qwen3.6-27b"}
+            "vision_model": "qwen/qwen3.8-27b"}
     base.update(values)
     return base
 
@@ -833,16 +833,16 @@ async def test_success_saves_typed_keys_and_creates_the_entry(config_flow, monke
     flow = _first_run_flow(config_flow, monkeypatch, lists={"groq": GROQ, "ollama": OLLAMA},
                            saved={"anthropic": "sk-saved"})
     flow._discover = lambda p, v: _async({"groq": GROQ, "ollama": OLLAMA,
-                                          "anthropic": (["claude-sonnet-5"], [])}.get(p))
+                                          "anthropic": (["claude-sonnet-5-5"], [])}.get(p))
     await flow.async_step_user(_keys(groq_api_key="g", ollama_base_url="192.168.1.50"))
     await _to_models(flow, {**ALL_GROQ, "conversation": "anthropic", "vision": "ollama"})
-    done = await flow.async_step_models(_models(conversation_model="claude-sonnet-5",
+    done = await flow.async_step_models(_models(conversation_model="claude-sonnet-5-5",
                                                 vision_model="llava"))
     assert done["type"] == "create_entry"
     assert flow.calls["written"] == [("groq", "g")]          # the saved key is not rewritten
     data = done["data"]
     assert "api_key" not in data and "groq_api_key" not in data
-    assert data["llm_provider"] == "anthropic" and data["model"] == "claude-sonnet-5"
+    assert data["llm_provider"] == "anthropic" and data["model"] == "claude-sonnet-5-5"
     assert data["classifier_provider"] == "groq"
     assert data["vision_provider"] == "ollama" and data["vision_model"] == "llava"
     assert data["ollama_base_url"] == "http://192.168.1.50:11434"
@@ -859,7 +859,7 @@ async def test_choices_are_written_to_config_json_too(config_flow, monkeypatch):
     assert done["type"] == "create_entry"
     written = flow.calls["config_set"]
     assert written["llm_provider"] == "groq" and written["model"] == "openai/gpt-oss-120b"
-    assert written["vision_model"] == "qwen/qwen3.6-27b"
+    assert written["vision_model"] == "qwen/qwen3.8-27b"
     assert written["welcome_pending"] is True
     assert written["self_hosted_endpoints_migrated"] is True
     assert written["ollama_base_url"] == ""            # an old address is cleared

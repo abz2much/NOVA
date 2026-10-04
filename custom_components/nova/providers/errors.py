@@ -179,7 +179,8 @@ _VISION_REJECTED = ("must be a string", "does not support image", "image input i
                     "image_url is only supported")
 
 # Some providers (Google) answer a bad key with 400, not 401.
-_KEY_REJECTED = ("api key not valid", "api_key_invalid", "invalid api key")
+_KEY_REJECTED = ("api key not valid", "api_key_invalid", "invalid api key",
+                 "pass a valid api key")
 
 
 def _kind_for_status(status: int, text: str) -> ProviderErrorKind:

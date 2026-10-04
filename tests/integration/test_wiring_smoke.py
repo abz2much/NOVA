@@ -91,7 +91,7 @@ async def test_conversation_agent_is_registered(hass):
     assert agent is not None
 
 
-_GROQ_LIST = (["openai/gpt-oss-120b", "qwen/qwen3.6-27b"], [])
+_GROQ_LIST = (["openai/gpt-oss-120b", "qwen/qwen3.8-27b"], [])
 _OLLAMA_LIST = (["llama3.2", "llava"], [
     {"id": "llama3.2", "capabilities": ["completion", "tools"]},
     {"id": "llava", "capabilities": ["completion", "vision"]}])
@@ -151,12 +151,12 @@ async def test_first_run_one_groq_key(hass):
                     "camera_reasoning": "groq", "vision": "groq"},
                    {"conversation_model": _TEXT, "classifier_model": _TEXT,
                     "reasoning_model": _TEXT, "camera_reasoning_model": _TEXT,
-                    "vision_model": "qwen/qwen3.6-27b"})
+                    "vision_model": "qwen/qwen3.8-27b"})
     assert r["type"] == "create_entry"
     assert r["_placeholders"] == {f"{x}_provider": "Groq" for x in (
         "conversation", "classifier", "reasoning", "camera_reasoning", "vision")}
     writer.assert_awaited_once()
-    assert r["data"]["vision_model"] == "qwen/qwen3.6-27b"
+    assert r["data"]["vision_model"] == "qwen/qwen3.8-27b"
     assert "api_key" not in r["data"]
     entry = hass.config_entries.async_entries(DOMAIN)[0]
     assert entry.unique_id == DOMAIN
@@ -178,13 +178,13 @@ async def test_first_run_ollama_only_vision_later(hass):
 
 
 async def test_first_run_several_keys(hass):
-    writer, patches = _flow_patches({"groq": _GROQ_LIST, "anthropic": (["claude-sonnet-5"], [])})
+    writer, patches = _flow_patches({"groq": _GROQ_LIST, "anthropic": (["claude-sonnet-5-5"], [])})
     r = await _run(hass, patches, {"groq_api_key": "g", "anthropic_api_key": "a"},
                    {"conversation": "anthropic", "classifier": "groq", "reasoning": "groq",
                     "camera_reasoning": "groq", "vision": "anthropic"},
-                   {"conversation_model": "claude-sonnet-5", "classifier_model": _TEXT,
+                   {"conversation_model": "claude-sonnet-5-5", "classifier_model": _TEXT,
                     "reasoning_model": _TEXT, "camera_reasoning_model": _TEXT,
-                    "vision_model": "claude-sonnet-5"})
+                    "vision_model": "claude-sonnet-5-5"})
     assert r["type"] == "create_entry"
     assert writer.await_count == 2
 

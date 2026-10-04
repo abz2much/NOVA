@@ -83,6 +83,36 @@ def test_groq_usage_partial_fields_missing(lp):
     assert result["usage"] == {"input_tokens": 5, "output_tokens": None}
 
 
+def test_groq_retired_model_is_sent_as_its_successor(lp):
+    # Groq shut qwen/qwen3.6-27b down on 2026-09-14; a saved setting naming
+    # it must still work, so the request goes out with the successor.
+    sent = {}
+
+    def create(**kw):
+        sent.update(kw)
+        return _FakeCompletion(_FakeMessage("hi"))
+
+    provider = _make_openai_style(lp, lp.GroqProvider, None)
+    provider._client.chat.completions.create = create
+    provider.model = "qwen/qwen3.6-27b"
+    provider.chat([{"role": "user", "content": "hi"}])
+    assert sent["model"] == "qwen/qwen3.8-27b"
+
+
+def test_groq_current_model_is_sent_unchanged(lp):
+    sent = {}
+
+    def create(**kw):
+        sent.update(kw)
+        return _FakeCompletion(_FakeMessage("hi"))
+
+    provider = _make_openai_style(lp, lp.GroqProvider, None)
+    provider._client.chat.completions.create = create
+    provider.model = "openai/gpt-oss-120b"
+    provider.chat([{"role": "user", "content": "hi"}])
+    assert sent["model"] == "openai/gpt-oss-120b"
+
+
 # ── OpenAI-compatible providers ──────────────────────────────────────────────
 
 def test_openai_usage_extracted_when_present(lp):

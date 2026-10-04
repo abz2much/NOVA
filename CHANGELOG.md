@@ -12,10 +12,14 @@
 - OpenAI's GPT-5 and o series models now work: Nova sends them max_completion_tokens and no temperature, which is what they require. Before, every call to them failed.
 - A fresh setup through the screens over an old config.json no longer lets the old AI choices win.
 - The config flow unit tests now run in CI. They were silently skipped.
+- Camera vision works again on Groq. Groq shut down the default vision model, qwen/qwen3.6-27b, on 14 September 2026. The default is now its successor, qwen/qwen3.8-27b, and a saved setting that still names the old model is sent as the new one.
+- Gemini's chat reply to a bad key ("Please pass a valid API key") now shows as an invalid key, not a general error.
+- The Anthropic default model is now claude-sonnet-5-5, the current Sonnet. claude-sonnet-5 is still offered but is a legacy model.
 
 **Caveats**
 - The setup screens save keys in secrets.yaml, never in Home Assistant's config entry.
 - The setup screens only show on a fresh install, so they have not been seen on a live install.
+- Each provider's reply to a bad key was checked live with a fake key. Model names and request formats were checked against each provider's docs, not with real keys.
 
 ## [8.6.1] — fix: two file reads blocking Home Assistant
 

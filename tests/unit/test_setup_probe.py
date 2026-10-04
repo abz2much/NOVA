@@ -26,7 +26,7 @@ def test_rejects_images_matches_groq_text_only_error(load):
 
 def test_default_vision_model_is_shared(load):
     const = load("const")
-    assert const.DEFAULT_VISION_MODEL == "qwen/qwen3.6-27b"
+    assert const.DEFAULT_VISION_MODEL == "qwen/qwen3.8-27b"
 
 
 class _HTTPError(Exception):
@@ -49,8 +49,12 @@ def test_a_refused_key_is_authentication_failed(load):
     assert errors.normalize_error(_HTTPError(401, "Incorrect API key provided"), "openai").kind \
         is errors.ProviderErrorKind.AUTHENTICATION_FAILED
     # Google answers a bad key with 400, not 401.
-    for text in ("API key not valid. Please pass a valid API key.", "API_KEY_INVALID",
-                 "Invalid API key"):
+    # The second is Gemini's real chat endpoint reply to a bad key (checked
+    # live with a fake key, 2026-10-04); its body is a JSON list.
+    for text in ("API key not valid. Please pass a valid API key.",
+                 '[{"error": {"code": 400, "message": "Please pass a valid API key", '
+                 '"status": "INVALID_ARGUMENT"}}]',
+                 "API_KEY_INVALID", "Invalid API key"):
         assert errors.normalize_error(_HTTPError(400, text), "gemini").kind \
             is errors.ProviderErrorKind.AUTHENTICATION_FAILED, text
     # A 400 that is not about the key is unchanged.

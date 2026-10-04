@@ -10,7 +10,7 @@ def sr(load):
 
 
 CLOUD_DEFAULTS = {"groq": "openai/gpt-oss-120b", "openai": "gpt-5-mini",
-                  "gemini": "gemini-3.6-flash", "anthropic": "claude-sonnet-5"}
+                  "gemini": "gemini-3.6-flash", "anthropic": "claude-sonnet-5-5"}
 
 
 def test_role_keys_match_nova_settings(sr):
@@ -60,7 +60,7 @@ def test_ollama_has_reports_unknown_when_no_abilities(sr):
 
 def test_cloud_default_models(sr):
     assert sr.default_model("conversation", "openai", CLOUD_DEFAULTS, []) == "gpt-5-mini"
-    assert sr.default_model("vision", "groq", CLOUD_DEFAULTS, []) == "qwen/qwen3.6-27b"
+    assert sr.default_model("vision", "groq", CLOUD_DEFAULTS, []) == "qwen/qwen3.8-27b"
     assert sr.default_model("vision", "gemini", CLOUD_DEFAULTS, []) == "gemini-3.6-flash"
 
 
