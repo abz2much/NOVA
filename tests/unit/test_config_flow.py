@@ -378,7 +378,7 @@ async def test_step_credentials_values_never_land_in_nova_config(
     assert calls == []
 
 
-# ── First run: two step setup (key/address, then model) ──────────────────────
+# ── First run: three screens (keys and Ollama address, provider per role, model per role) ──
 
 def _first_run_flow(config_flow, monkeypatch, *, lists=None, conn=None, saved=None,
                     probes=None, write_ok=True, config_ok=True):
@@ -435,7 +435,11 @@ def _first_run_flow(config_flow, monkeypatch, *, lists=None, conn=None, saved=No
     monkeypatch.setattr(paths, "configure", fake_configure)
     monkeypatch.setattr(nc, "configure", lambda hass: None)
     monkeypatch.setattr(nc, "set_many", fake_set_many)
-    monkeypatch.setattr(nc, "delete", lambda key: calls["config_deleted"].append(key))
+    def fake_delete(key):
+        calls["order"].append("delete")
+        calls["config_deleted"].append(key)
+
+    monkeypatch.setattr(nc, "delete", fake_delete)
 
     class _Hass:
         class config:
@@ -864,6 +868,9 @@ async def test_choices_are_written_to_config_json_too(config_flow, monkeypatch):
     assert "honorific" not in written                  # a reinstall keeps its old honorific
     order = flow.calls["order"]
     assert order[0] == "paths" and order.index("write") < order.index("config")
+    # The save is last, so its result also covers the deletions.
+    ops = [o for o in order if o in ("delete", "config")]
+    assert ops[-1] == "config" and ops.count("config") == 1 and "delete" in ops
 
 
 async def test_vision_later_clears_old_vision_settings(config_flow, monkeypatch):

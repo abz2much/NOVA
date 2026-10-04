@@ -391,10 +391,11 @@ class NovaConfigFlow(ConfigFlow, domain=DOMAIN):
                 values[model_key] = chosen[role]
             else:
                 drop += [provider_key, model_key]
-        ok = nova_config.set_many(values)
+        # Delete first, save last: set_many saves the whole cache, so its
+        # result also covers the deletions.
         for key in drop:
             nova_config.delete(key)
-        return ok
+        return nova_config.set_many(values)
 
     def _entry_data(self, chosen: dict[str, str]) -> dict[str, Any]:
         from . import setup_roles

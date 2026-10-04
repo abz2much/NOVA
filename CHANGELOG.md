@@ -10,11 +10,11 @@
 **Fixed**
 - A new install with only an Anthropic, OpenAI, Gemini or Ollama setup no longer leaves the background and camera roles pointing at Groq with no key.
 - OpenAI's GPT-5 and o series models now work: Nova sends them max_completion_tokens and no temperature, which is what they require. Before, every call to them failed.
-- Reinstalling over an old config.json no longer lets the old AI choices beat the new ones.
+- A fresh setup through the screens over an old config.json no longer lets the old AI choices win.
 - The config flow unit tests now run in CI. They were silently skipped.
 
 **Caveats**
-- Keys are now saved in secrets.yaml at setup, never in Home Assistant's config entry.
+- The setup screens save keys in secrets.yaml, never in Home Assistant's config entry.
 - The setup screens only show on a fresh install, so they have not been seen on a live install.
 
 ## [8.6.1] — fix: two file reads blocking Home Assistant
