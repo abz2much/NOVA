@@ -231,7 +231,9 @@ def _upsert_secret_line(text: str, key: str, value) -> str:
     line = '%s: "%s"' % (key, esc)
     pat = re.compile(r"(?m)^" + re.escape(key) + r":.*$")
     if pat.search(text):
-        return pat.sub(line, text, count=1)
+        # A function, so re.sub does not read the escaped backslashes in
+        # the value as its own escapes.
+        return pat.sub(lambda _m: line, text, count=1)
     sep = "" if (text == "" or text.endswith("\n")) else "\n"
     return text + sep + line + "\n"
 

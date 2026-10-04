@@ -87,6 +87,11 @@ def _prewarm_persisted_state() -> None:
         habituation._load()   # cached after this; panel status reads it on the loop
     except Exception:
         pass
+    try:
+        from . import scene_memory
+        scene_memory.prune()  # expired rows go even when nothing new is written
+    except Exception:
+        pass
 
 
 PLATFORMS = ["conversation"]

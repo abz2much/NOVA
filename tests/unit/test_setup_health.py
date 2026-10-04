@@ -334,7 +334,7 @@ def test_assist_pipeline_warn_when_no_nova_pipeline(sh, bootstrap, fake_hass, mo
     try:
         out = sh._check_assist_pipeline(fake_hass)
         assert out["status"] == "warn"
-        assert "no Nova-named" in out["detail"]
+        assert "no Assist pipeline uses Nova" in out["detail"]
     finally:
         cleanup()
 
@@ -358,6 +358,31 @@ def test_assist_pipeline_ok_when_correctly_wired(sh, bootstrap, fake_hass, monke
     try:
         out = sh._check_assist_pipeline(fake_hass)
         assert out["status"] == "ok"
+    finally:
+        cleanup()
+
+
+def test_assist_pipeline_ok_for_any_name_that_uses_nova(sh, bootstrap, fake_hass, monkeypatch):
+    """The name doesn't matter: a pipeline the user made and named
+    themselves passes once Nova is its agent."""
+    monkeypatch.setattr(bootstrap, "_find_nova_agent", lambda hass: "conversation.nova")
+    pipeline = _FakePipeline(name="Home Assistant", conversation_engine="conversation.nova")
+    cleanup = _install_fake_assist_pipeline([pipeline])
+    try:
+        out = sh._check_assist_pipeline(fake_hass)
+        assert out["status"] == "ok" and "Home Assistant" in out["detail"]
+    finally:
+        cleanup()
+
+
+def test_assist_pipeline_stale_nova_named_one_does_not_hide_a_correct_one(
+        sh, bootstrap, fake_hass, monkeypatch):
+    monkeypatch.setattr(bootstrap, "_find_nova_agent", lambda hass: "conversation.nova")
+    cleanup = _install_fake_assist_pipeline([
+        _FakePipeline(name="Nova (old)", conversation_engine="conversation.homeassistant"),
+        _FakePipeline(name="Kitchen", conversation_engine="conversation.nova")])
+    try:
+        assert sh._check_assist_pipeline(fake_hass)["status"] == "ok"
     finally:
         cleanup()
 

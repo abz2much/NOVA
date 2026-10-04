@@ -79,6 +79,25 @@ class OpenAICompatibleProvider(LLMProvider):
 
 # OpenAI's reasoning models: GPT-5 and the o series.
 _OPENAI_REASONING_PREFIXES = ("gpt-5", "o1", "o3", "o4")
+# Reasoning models spend hidden reasoning tokens out of max_completion_tokens,
+# so a small budget (40 to 120 tokens for scenes, the classifier and the
+# package monitor) can run out before any text is written and the reply comes
+# back empty. Room for the reasoning is added on top of what the caller asked
+# for, and the effort is set low: these are short tasks.
+_REASONING_TOKEN_ROOM = 4096
+_REASONING_EFFORT = "low"
+# Models that reject reasoning_effort: the chat snapshots and the first o1
+# previews.
+_NO_EFFORT_PREFIXES = ("o1-mini", "o1-preview")
+
+
+def _openai_base_model(model: str) -> str:
+    """The base model name, lower case: a fine-tuned "ft:gpt-5-mini:org::id"
+    gives "gpt-5-mini"."""
+    name = str(model or "").lower()
+    if name.startswith("ft:"):
+        name = name[3:].split(":", 1)[0]
+    return name
 
 
 class OpenAIProvider(OpenAICompatibleProvider):
@@ -89,12 +108,17 @@ class OpenAIProvider(OpenAICompatibleProvider):
 
     def _adjust_kwargs(self, kwargs: dict[str, Any], model: str) -> dict[str, Any]:
         """OpenAI's reasoning models reject max_tokens and any temperature
-        but the default: send max_completion_tokens and leave temperature
-        out."""
-        if str(model or "").lower().startswith(_OPENAI_REASONING_PREFIXES):
+        but the default: send max_completion_tokens, with room for the
+        reasoning, and leave temperature out."""
+        base = _openai_base_model(model)
+        if base.startswith(_OPENAI_REASONING_PREFIXES):
             kwargs = dict(kwargs)
-            kwargs["max_completion_tokens"] = kwargs.pop("max_tokens")
+            requested = kwargs.pop("max_tokens", None)
+            if requested is not None:
+                kwargs["max_completion_tokens"] = int(requested) + _REASONING_TOKEN_ROOM
             kwargs.pop("temperature", None)
+            if "-chat" not in base and not base.startswith(_NO_EFFORT_PREFIXES):
+                kwargs.setdefault("reasoning_effort", _REASONING_EFFORT)
         return kwargs
 
 

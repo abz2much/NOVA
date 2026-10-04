@@ -129,6 +129,45 @@ def test_old_rows_are_dropped(sm, db):
     assert sm.where_last_seen("bucket", db_path=db) is not None
 
 
+def test_expired_rows_are_never_read(sm, db, load, monkeypatch):
+    """Reads ignore rows older than the retention even before the next write
+    deletes them, e.g. after the retention was lowered."""
+    sm.record_scene("camera.a", "A ladder.", ts=time.time() - 5 * 86400,
+                    retention=14, db_path=db)
+    sm.record_scene("camera.a", "A bucket.", ts=time.time() - 6 * 86400,
+                    retention=14, db_path=db)
+    _on(monkeypatch, load, days=14)
+    assert sm.where_last_seen("ladder", db_path=db) is not None
+    _on(monkeypatch, load, days=1)
+    assert sm.where_last_seen("ladder", db_path=db) is None
+    assert sm.what_changed("camera.a", time.time(), db_path=db)["found"] is False
+    assert sm.stats(db_path=db)["count"] == 2   # still on disk until pruned
+
+
+def test_prune_deletes_expired_rows_whether_on_or_off(sm, db, load, monkeypatch):
+    sm.record_scene("camera.a", "A ladder.", ts=time.time() - 20 * 86400,
+                    retention=30, db_path=db)
+    sm.record_scene("camera.a", "A bucket.", ts=time.time() - 2 * 86400,
+                    retention=30, db_path=db)
+    _on(monkeypatch, load, on=False)
+    assert sm.prune(db_path=db) == 1
+    assert sm.stats(db_path=db)["count"] == 1
+
+
+def test_prune_never_creates_the_database(sm, tmp_path):
+    path = tmp_path / "none.db"
+    assert sm.prune(db_path=str(path)) == 0
+    assert not path.exists()
+
+
+def test_setup_prunes_scene_memory():
+    import pathlib
+    src = (pathlib.Path(__file__).parents[2] / "custom_components" / "nova"
+           / "__init__.py").read_text()
+    body = src[src.index("def _prewarm_persisted_state"):src.index("PLATFORMS =")]
+    assert "scene_memory.prune()" in body
+
+
 def test_each_camera_is_capped(sm, db, monkeypatch):
     monkeypatch.setattr(sm, "MAX_ROWS_PER_CAMERA", 5)
     for i in range(9):
@@ -282,6 +321,25 @@ def test_question_looks_are_not_recorded(cams):
     import inspect
     src = inspect.getsource(cams._analyze_camera)
     assert '"record_scene": False' in src
+
+
+def test_intrusion_person_check_is_not_recorded(load):
+    """The intrusion yes/no check is a question, not a scene: its "PERSON:
+    NO" reply would otherwise be stored as a person sighting."""
+    import inspect
+    cc = load("cognitive_core")
+    src = inspect.getsource(cc.SafetyManager._confirm_person_with_vision)
+    assert '"record_scene": False' in src
+
+
+def test_doorbell_backlog_is_not_recorded():
+    """The backlog scan analyses old recordings; scene memory would store
+    them as seen now."""
+    import pathlib
+    src = (pathlib.Path(__file__).parents[2] / "custom_components" / "nova"
+           / "services.py").read_text()
+    body = src[src.index("async def _train_backlog"):src.index("scan_backlog(")]
+    assert '"record_scene": False' in body
 
 
 def test_tools_are_read_only_and_fenced(load):

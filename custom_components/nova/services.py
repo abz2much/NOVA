@@ -329,7 +329,10 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 f"appearance, clothing, packages, vehicles. "
                 f"Focus on what the resident would want to know."
             )
-            fc = _FakeCall({"entity_id": doorbell_entity, "prompt": prompt, "announce": False})
+            # Old recordings: kept out of scene memory, which would store
+            # them as seen now.
+            fc = _FakeCall({"entity_id": doorbell_entity, "prompt": prompt,
+                            "announce": False, "record_scene": False})
             return await async_analyze_camera(
                 hass, fc, client, honorific, None, [],
                 gate_announce=True, force_images=[image_bytes],
