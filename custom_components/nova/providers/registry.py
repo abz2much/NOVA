@@ -107,7 +107,7 @@ _DESCRIPTORS: tuple[ProviderDescriptor, ...] = (
     ProviderDescriptor(
         id="anthropic", adapter=AnthropicProvider, location="cloud",
         credential_field="anthropic_api_key", concurrency=SDK_CLIENT_POLICY,
-        default_model="claude-sonnet-5", legacy_shared_key=True,
+        default_model="claude-sonnet-5-5", legacy_shared_key=True,
         discovery=DiscoverySpec(
             auth="x-api-key", shape="openai",
             fixed_url="https://api.anthropic.com/v1/models",

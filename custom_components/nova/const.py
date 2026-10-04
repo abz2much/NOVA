@@ -104,6 +104,11 @@ DEFAULT_REASONING_MODEL       = "openai/gpt-oss-120b"
 DEFAULT_REVIEW_PROVIDER       = "groq"
 DEFAULT_REVIEW_MODEL          = "openai/gpt-oss-120b"
 
+# Nova's default camera vision model (Groq). It reads pictures even though
+# its name does not say "vision" — which is why first run setup tests
+# vision models with a real picture instead of trusting names.
+DEFAULT_VISION_MODEL          = "qwen/qwen3.8-27b"
+
 # Urgency levels
 URGENCY_LOW      = "low"
 URGENCY_MEDIUM   = "medium"
@@ -144,7 +149,7 @@ HONORIFIC_OPTIONS = ["sir", "ma'am", "boss", "friend"]
 MODELS = [
     "openai/gpt-oss-120b",
     "openai/gpt-oss-20b",
-    "qwen/qwen3.6-27b",
+    "qwen/qwen3.8-27b",
 ]
 
 ALL_TTS_CONTEXTS = [

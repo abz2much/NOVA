@@ -318,7 +318,7 @@ def test_provider_ids_and_order(lp):
 def test_default_models(lp):
     assert lp.DEFAULT_MODELS == {
         "groq": "openai/gpt-oss-120b",
-        "anthropic": "claude-sonnet-5",
+        "anthropic": "claude-sonnet-5-5",
         "openai": "gpt-5-mini",
         "gemini": "gemini-3.6-flash",
     }

@@ -10,6 +10,12 @@ from .base import LLMProvider
 from .models import ChatRequest, ChatResponse
 
 
+# Models Groq has shut down, mapped to the successor Groq names for each, so
+# a setting saved before the shutdown keeps working. qwen/qwen3.6-27b closed
+# on 2026-09-14 (https://console.groq.com/docs/deprecations).
+RETIRED_MODELS = {"qwen/qwen3.6-27b": "qwen/qwen3.8-27b"}
+
+
 class GroqProvider(LLMProvider):
     name: ClassVar[str] = "groq"
     concurrency = SDK_CLIENT_POLICY
@@ -30,6 +36,7 @@ class GroqProvider(LLMProvider):
 
     def complete(self, request: ChatRequest) -> ChatResponse:
         model = request.model or self.model
+        model = RETIRED_MODELS.get(model, model)
         resp = self._client.chat.completions.create(
             **build_openai_kwargs(request, model))
         return parse_openai_completion(resp, provider=self.name, model=model)

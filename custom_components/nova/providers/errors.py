@@ -134,6 +134,14 @@ def error_text(exc: BaseException) -> str:
     return str(exc)
 
 
+def rejects_images(exc: BaseException) -> bool:
+    """True when the provider refused image content because the model is
+    text only, for example Groq's 'messages[1].content must be a string'."""
+    if getattr(exc, "kind", None) is ProviderErrorKind.UNSUPPORTED_CAPABILITY:
+        return True
+    return "must be a string" in error_text(exc)
+
+
 def _status_of(exc: BaseException) -> Optional[int]:
     for attr in ("status_code", "status", "code"):
         value = getattr(exc, attr, None)
@@ -167,7 +175,12 @@ def _code_of(exc: BaseException) -> Optional[str]:
 
 _TOO_LARGE = ("request too large", "too large for model", "context length",
               "maximum context", "prompt is too long", "input is too long")
-_VISION_REJECTED = ("must be a string", "does not support image", "image input is not supported")
+_VISION_REJECTED = ("must be a string", "does not support image", "image input is not supported",
+                    "image_url is only supported")
+
+# Some providers (Google) answer a bad key with 400, not 401.
+_KEY_REJECTED = ("api key not valid", "api_key_invalid", "invalid api key",
+                 "pass a valid api key")
 
 
 def _kind_for_status(status: int, text: str) -> ProviderErrorKind:
@@ -185,8 +198,11 @@ def _kind_for_status(status: int, text: str) -> ProviderErrorKind:
         return ProviderErrorKind.RATE_LIMITED
     if status >= 500:
         return ProviderErrorKind.PROVIDER_UNAVAILABLE
-    if status in (400, 422) and any(k in text for k in _VISION_REJECTED):
-        return ProviderErrorKind.UNSUPPORTED_CAPABILITY
+    if status in (400, 422):
+        if any(k in text for k in _KEY_REJECTED):
+            return ProviderErrorKind.AUTHENTICATION_FAILED
+        if any(k in text for k in _VISION_REJECTED):
+            return ProviderErrorKind.UNSUPPORTED_CAPABILITY
     if 300 <= status < 400:
         return ProviderErrorKind.INVALID_ENDPOINT
     if 400 <= status < 500:

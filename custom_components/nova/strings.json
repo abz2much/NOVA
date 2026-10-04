@@ -2,30 +2,83 @@
   "config": {
     "step": {
       "user": {
-        "title": "Nova Setup",
-        "description": "{note}",
+        "title": "Set up Nova",
+        "description": "Enter a key for each AI provider you want to use, your Ollama address, or both. Every field is optional, but at least one is needed. Nova checks each one.\n\nSaved keys found: {saved}. Leave a field blank to keep its saved key.",
         "data": {
-          "api_key": "API key (optional)",
-          "llm_base_url": "Ollama address (optional)"
+          "groq_api_key": "Groq API key",
+          "anthropic_api_key": "Anthropic API key",
+          "openai_api_key": "OpenAI API key",
+          "gemini_api_key": "Gemini API key",
+          "ollama_base_url": "Ollama address"
+        },
+        "data_description": {
+          "ollama_base_url": "For example {example}"
         }
       },
-      "model": {
-        "title": "Choose a model",
-        "description": "Pick the model Nova should use for conversation. You can change it later in the Nova panel.",
+      "roles": {
+        "title": "Choose a provider for each role",
+        "description": "Pick which provider does each job. Only providers that passed the check are listed.\n\nSaved keys that did not work and were left out: {failed}.",
         "data": {
-          "model": "Model"
+          "conversation": "Conversation",
+          "classifier": "Classifier",
+          "reasoning": "Reasoning",
+          "camera_reasoning": "Camera reasoning",
+          "vision": "Vision"
+        },
+        "data_description": {
+          "conversation": "Talks to you and controls your home.",
+          "classifier": "Decides if a home event matters. Runs often.",
+          "reasoning": "Decides what to do about an event, and writes briefings. Runs often.",
+          "camera_reasoning": "Judges a camera scene from the vision description.",
+          "vision": "Describes camera pictures. Choose Not now to set this up later."
+        }
+      },
+      "models": {
+        "title": "Choose a model for each role",
+        "description": "Nova tests each model when you submit. Classifier and reasoning run often, so on a paid provider pick a small, cheap model for them. To change a provider, start setup again: these screens have no back button.",
+        "data": {
+          "conversation_model": "Conversation model ({conversation_provider})",
+          "classifier_model": "Classifier model ({classifier_provider})",
+          "reasoning_model": "Reasoning model ({reasoning_provider})",
+          "camera_reasoning_model": "Camera reasoning model ({camera_reasoning_provider})",
+          "vision_model": "Vision model ({vision_provider})"
+        },
+        "data_description": {
+          "vision_model": "Leave empty to set up vision later."
         }
       }
     },
     "error": {
-      "need_llm": "Enter either a cloud API key or a local LLM URL.",
-      "cannot_connect": "Couldn't reach the LLM. Check the URL/endpoint is correct and the server (e.g. Ollama) is running.",
-      "invalid_auth": "The API key was rejected. Check the key and try again.",
-      "unknown": "Couldn't validate the LLM connection. Check the settings and try again."
+      "need_llm": "Enter at least one key or an Ollama address.",
+      "no_working_provider": "No working provider yet: enter a key or an Ollama address.",
+      "invalid_auth": "The provider refused this key.",
+      "cannot_connect": "The check could not complete. Try again in a moment, and check the address if this is Ollama.",
+      "unknown": "The check failed. Try again.",
+      "model_required": "Choose a model for this role.",
+      "model_no_pictures": "This model could not read a test picture.",
+      "model_not_found": "This provider does not offer that model.",
+      "model_access_denied": "Your key cannot use this model.",
+      "test_incomplete": "The test could not complete. Try again.",
+      "test_failed": "The test failed. The provider's reason is in Home Assistant's log.",
+      "secrets_write_failed": "Nova could not save the keys to secrets.yaml. Check the file can be written, then try again.",
+      "config_write_failed": "Nova could not save your choices to its config file. Check the nova folder can be written, then try again."
     },
     "abort": {
       "already_configured": "Nova is already configured.",
-      "import_failed": "Found a Nova config but no usable LLM (no API key and no local endpoint)."
+      "import_failed": "Found a Nova config but no usable LLM (no API key and no local endpoint).",
+      "already_in_progress": "Nova setup is already open in another window."
+    }
+  },
+  "selector": {
+    "setup_provider": {
+      "options": {
+        "groq": "Groq",
+        "anthropic": "Anthropic",
+        "openai": "OpenAI",
+        "gemini": "Gemini",
+        "ollama": "Ollama",
+        "not_now": "Not now (set up later)"
+      }
     }
   },
   "options": {

@@ -20,7 +20,7 @@ import json
 import os
 
 import pytest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from homeassistant.setup import async_setup_component  # noqa: E402
 
@@ -91,55 +91,184 @@ async def test_conversation_agent_is_registered(hass):
     assert agent is not None
 
 
-async def test_config_flow_accepts_local_llm(hass):
-    """A local (Ollama) endpoint with no cloud key must be a valid config — the
-    v6.7.0 'local-first install' contract. test_connection is mocked so this
-    exercises the flow's own acceptance logic, not a real network call to a
-    local Ollama server that won't exist in CI."""
-    # Earlier setup tests legitimately persist a local-only runtime config in
-    # PHACC's shared test config directory. Once _find_config learned to
-    # recognise local endpoints (not only cloud keys), that state correctly
-    # triggers the reinstall auto-import path and completes this flow during
-    # async_init. This test is specifically for the *manual* form path, so
-    # isolate that path instead of depending on suite order or deleting a
-    # valid config file another test created.
-    with patch("custom_components.nova.config_flow._find_config", return_value=None), \
-            patch("custom_components.nova.llm_provider.test_connection", return_value=None):
-        result = await hass.config_entries.flow.async_init(
-            DOMAIN, context={"source": "user"})
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"],
-            {"llm_base_url": "http://localhost:11434/v1"},
-        )
-        # Setup is two steps now: address first, then the model.
-        assert result["type"] == "form" and result["step_id"] == "model"
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], {"model": "local-model"})
-    assert result["type"] == "create_entry"
-    assert result["data"]["llm_provider"] == "ollama"
-    assert result["data"]["model"] == "local-model"
-    # Storage preserves the user's compatible legacy path. OllamaProvider
-    # removes a trailing /v1 only when it builds the native /api/chat URL.
-    assert result["data"]["ollama_base_url"] == "http://localhost:11434/v1"
+_GROQ_LIST = (["openai/gpt-oss-120b", "qwen/qwen3.8-27b"], [])
+_OLLAMA_LIST = (["llama3.2", "llava"], [
+    {"id": "llama3.2", "capabilities": ["completion", "tools"]},
+    {"id": "llava", "capabilities": ["completion", "vision"]}])
 
 
-async def test_config_flow_model_step_offers_discovered_models(hass):
-    """When the provider reports its models, the second step is a dropdown of
-    them (real HA selector validation), and the chosen model is what's saved."""
-    with patch("custom_components.nova.config_flow._find_config", return_value=None), \
-            patch("custom_components.nova.config_flow.NovaConfigFlow._discover_models",
-                  return_value=["alpha", "beta"]), \
-            patch("custom_components.nova.llm_provider.test_connection", return_value=None):
-        result = await hass.config_entries.flow.async_init(
-            DOMAIN, context={"source": "user"})
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], {"llm_base_url": "http://localhost:11434"})
-        assert result["step_id"] == "model"
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], {"model": "beta"})
-    assert result["type"] == "create_entry"
-    assert result["data"]["model"] == "beta"
-    assert result["data"]["welcome_pending"] is True
+def _flow_patches(lists, probes=None, saved=None):
+    async def discover(self, provider, value):
+        return lists.get(provider)
+
+    async def probe_all(hass, jobs, creds):
+        return {r: (probes or {}).get(r) for r in jobs}
+    writer = AsyncMock(return_value=True)
+    return writer, (
+        # Nova's own setup builds AI clients before it copies settings into
+        # config.json, and the key write is mocked here, so keep it out.
+        patch("custom_components.nova.async_setup_entry", return_value=True),
+        # Screen 3 writes the AI choices into the real config.json in PHACC's
+        # shared folder. Stub it so these tests leave nothing behind; the real
+        # write is covered by the leftover config.json test, which isolates and
+        # restores the file.
+        patch("custom_components.nova.config_flow.NovaConfigFlow._apply_to_config",
+              return_value=True),
+        patch("custom_components.nova.config_flow._find_config", return_value=None),
+        patch("custom_components.nova.config_flow._saved_keys", return_value=saved or {}),
+        patch("custom_components.nova.config_flow.NovaConfigFlow._discover", discover),
+        patch("custom_components.nova.setup_probe.probe_all", probe_all),
+        patch("custom_components.nova.ha_secrets.async_set_provider_credential", writer),
+    )
+
+
+async def _run(hass, patches, keys, roles, models):
+    from contextlib import ExitStack
+    with ExitStack() as stack:
+        for p in patches:
+            stack.enter_context(p)
+        r = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+        assert r["step_id"] == "user"
+        r = await hass.config_entries.flow.async_configure(r["flow_id"], keys)
+        if r.get("step_id") != "roles":
+            return r
+        r = await hass.config_entries.flow.async_configure(r["flow_id"], roles)
+        assert r["step_id"] == "models"
+        placeholders = r["description_placeholders"]
+        r = await hass.config_entries.flow.async_configure(r["flow_id"], models)
+        await hass.async_block_till_done()
+        r["_placeholders"] = placeholders
+        return r
+
+
+_TEXT = "openai/gpt-oss-120b"
+
+
+async def test_first_run_one_groq_key(hass):
+    writer, patches = _flow_patches({"groq": _GROQ_LIST})
+    r = await _run(hass, patches, {"groq_api_key": "gsk"},
+                   {"conversation": "groq", "classifier": "groq", "reasoning": "groq",
+                    "camera_reasoning": "groq", "vision": "groq"},
+                   {"conversation_model": _TEXT, "classifier_model": _TEXT,
+                    "reasoning_model": _TEXT, "camera_reasoning_model": _TEXT,
+                    "vision_model": "qwen/qwen3.8-27b"})
+    assert r["type"] == "create_entry"
+    assert r["_placeholders"] == {f"{x}_provider": "Groq" for x in (
+        "conversation", "classifier", "reasoning", "camera_reasoning", "vision")}
+    writer.assert_awaited_once()
+    assert r["data"]["vision_model"] == "qwen/qwen3.8-27b"
+    assert "api_key" not in r["data"]
+    entry = hass.config_entries.async_entries(DOMAIN)[0]
+    assert entry.unique_id == DOMAIN
+    assert entry.data["classifier_provider"] == "groq"
+    assert entry.data["llm_provider"] == "groq"
+
+
+async def test_first_run_ollama_only_vision_later(hass):
+    writer, patches = _flow_patches({"ollama": _OLLAMA_LIST})
+    r = await _run(hass, patches, {"ollama_base_url": "192.168.1.50"},
+                   {r: "ollama" for r in ("conversation", "classifier", "reasoning",
+                                           "camera_reasoning")} | {"vision": "not_now"},
+                   {"conversation_model": "llama3.2", "classifier_model": "llama3.2",
+                    "reasoning_model": "llama3.2", "camera_reasoning_model": "llama3.2"})
+    assert r["type"] == "create_entry"
+    assert r["data"]["ollama_base_url"] == "http://192.168.1.50:11434"
+    assert "vision_provider" not in r["data"]
+    writer.assert_not_awaited()
+
+
+async def test_first_run_several_keys(hass):
+    writer, patches = _flow_patches({"groq": _GROQ_LIST, "anthropic": (["claude-sonnet-5-5"], [])})
+    r = await _run(hass, patches, {"groq_api_key": "g", "anthropic_api_key": "a"},
+                   {"conversation": "anthropic", "classifier": "groq", "reasoning": "groq",
+                    "camera_reasoning": "groq", "vision": "anthropic"},
+                   {"conversation_model": "claude-sonnet-5-5", "classifier_model": _TEXT,
+                    "reasoning_model": _TEXT, "camera_reasoning_model": _TEXT,
+                    "vision_model": "claude-sonnet-5-5"})
+    assert r["type"] == "create_entry"
+    assert writer.await_count == 2
+
+
+async def test_first_run_bad_key_stays_on_screen_one(hass):
+    _writer, patches = _flow_patches({"openai": None})
+    # Screen 1's fallback key test is setup_probe.probe_model (Task 5).
+    with patch("custom_components.nova.setup_probe.probe_model",
+               return_value="authentication_failed"):
+        r = await _run(hass, patches, {"openai_api_key": "wrong"}, {}, {})
+    assert r["step_id"] == "user"
+    assert r["errors"] == {"openai_api_key": "invalid_auth"}
+
+
+async def test_new_choices_beat_a_leftover_config_json_after_real_setup(hass, tmp_path):
+    """An earlier cloud only install left config.json behind (its keys were
+    moved to secrets.yaml, so it does not trigger the import). After the
+    screens and Nova's real setup, nothing mocked, the new choices win.
+
+    PHACC's config folder is shared between runs and may already hold keys
+    and a config.json from other tests, so this test uses its own empty
+    secrets file and puts any existing config.json back afterwards."""
+    import json as _json
+    import os as _os
+    from custom_components.nova import ha_secrets as _hs
+    from custom_components.nova import nova_config, setup_health
+
+    assert await async_setup_component(hass, "homeassistant", {})
+    _os.makedirs(hass.config.path("nova"), exist_ok=True)
+    path = hass.config.path("nova", "config.json")
+    before = open(path, "rb").read() if _os.path.exists(path) else None
+    with open(path, "w") as f:
+        _json.dump({"llm_provider": "anthropic", "model": "old-model",
+                    "classifier_provider": "anthropic", "welcome_shown": True}, f)
+
+    async def discover(self, provider, value):
+        return {"ollama": _OLLAMA_LIST}.get(provider)
+
+    async def probe_all(hass_, jobs, creds):
+        return {r: None for r in jobs}
+    _hs._reset_secrets_cache()
+    try:
+        with patch.object(_hs, "SECRETS_PATH", tmp_path / "secrets.yaml"), \
+                patch("custom_components.nova.config_flow._saved_keys", return_value={}), \
+                patch("custom_components.nova.config_flow.NovaConfigFlow._discover", discover), \
+                patch("custom_components.nova.setup_probe.probe_all", probe_all):
+            r = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+            assert r["step_id"] == "user"          # the leftover file did not trigger an import
+            r = await hass.config_entries.flow.async_configure(
+                r["flow_id"], {"ollama_base_url": "http://localhost:11434"})
+            r = await hass.config_entries.flow.async_configure(r["flow_id"], {
+                "conversation": "ollama", "classifier": "ollama", "reasoning": "ollama",
+                "camera_reasoning": "ollama", "vision": "not_now"})
+            r = await hass.config_entries.flow.async_configure(r["flow_id"], {
+                "conversation_model": "llama3.2", "classifier_model": "llama3.2",
+                "reasoning_model": "llama3.2", "camera_reasoning_model": "llama3.2"})
+            assert r["type"] == "create_entry"
+            await hass.async_block_till_done()
+
+            assert nova_config.get("llm_provider") == "ollama"
+            assert nova_config.get("model") == "llama3.2"
+            assert nova_config.get("classifier_provider") == "ollama"
+            assert nova_config.get("vision_provider") is None
+            entry = hass.config_entries.async_entries(DOMAIN)[0]
+            ai = await hass.async_add_executor_job(setup_health._check_ai_roles, hass, entry)
+            # Every chosen role works; only vision, set up later, is flagged.
+            assert ai["status"] == "warn"
+            assert "Vision (groq)" in ai["detail"] and "Conversation" not in ai["detail"]
+    finally:
+        _hs._reset_secrets_cache()
+        if before is None:
+            _os.remove(path)
+        else:
+            with open(path, "wb") as f:
+                f.write(before)
+
+
+async def test_first_run_already_set_up(hass):
+    # A real Nova entry carries the unique id the flow checks.
+    MockConfigEntry(domain=DOMAIN, unique_id=DOMAIN,
+                    data={"llm_provider": "groq", "schema_version": 7}).add_to_hass(hass)
+    with patch("custom_components.nova.config_flow._find_config", return_value=None):
+        r = await hass.config_entries.flow.async_init(DOMAIN, context={"source": "user"})
+    assert r["type"] == "abort" and r["reason"] == "already_configured"
 
 
 async def test_config_flow_auto_imports_from_this_instances_config_dir(hass, tmp_path):

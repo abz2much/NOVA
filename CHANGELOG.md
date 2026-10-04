@@ -1,3 +1,26 @@
+## [8.7.0] — Set up every AI role at first run
+
+**Added**
+- First setup takes a key for each cloud provider (Groq, Anthropic, OpenAI, Gemini) and an Ollama address, all optional, and tests each one.
+- You choose the provider and the model for each role: conversation, classifier, reasoning, camera reasoning and vision. Sensible choices are filled in.
+- Each model is tested on submit. The vision model gets a small test picture.
+- Keys left in secrets.yaml by an earlier install are found and reused.
+- Setup Doctor's new "AI roles" check warns when a role's provider has no key or address.
+
+**Fixed**
+- A new install with only an Anthropic, OpenAI, Gemini or Ollama setup no longer leaves the background and camera roles pointing at Groq with no key.
+- OpenAI's GPT-5 and o series models now work: Nova sends them max_completion_tokens and no temperature, which is what they require. Before, every call to them failed.
+- A fresh setup through the screens over an old config.json no longer lets the old AI choices win.
+- The config flow unit tests now run in CI. They were silently skipped.
+- Camera vision works again on Groq. Groq shut down the default vision model, qwen/qwen3.6-27b, on 14 September 2026. The default is now its successor, qwen/qwen3.8-27b, and a saved setting that still names the old model is sent as the new one.
+- Gemini's chat reply to a bad key ("Please pass a valid API key") now shows as an invalid key, not a general error.
+- The Anthropic default model is now claude-sonnet-5-5, the current Sonnet. claude-sonnet-5 is still offered but is a legacy model.
+
+**Caveats**
+- The setup screens save keys in secrets.yaml, never in Home Assistant's config entry.
+- The setup screens only show on a fresh install, so they have not been seen on a live install.
+- Each provider's reply to a bad key was checked live with a fake key. Model names and request formats were checked against each provider's docs, not with real keys.
+
 ## [8.6.1] — fix: two file reads blocking Home Assistant
 
 **Fixed**

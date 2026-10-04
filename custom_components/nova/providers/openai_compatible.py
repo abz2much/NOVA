@@ -57,10 +57,16 @@ class OpenAICompatibleProvider(LLMProvider):
         """Provider-specific request extras. Empty for vanilla OpenAI."""
         return {}
 
+    def _adjust_kwargs(self, kwargs: dict[str, Any], model: str) -> dict[str, Any]:
+        """Last change to the request before it is sent. None for most
+        OpenAI compatible APIs."""
+        return kwargs
+
     def complete(self, request: ChatRequest) -> ChatResponse:
         model = request.model or self.model
         kwargs = build_openai_kwargs(
             request, model, keep_extra_content=self.keeps_extra_content)
+        kwargs = self._adjust_kwargs(kwargs, model)
         extra = self._extra_body()
         if extra:
             kwargs["extra_body"] = extra
@@ -71,11 +77,25 @@ class OpenAICompatibleProvider(LLMProvider):
         return ProviderCapabilities(vision=openai_compatible_vision(model or self.model))
 
 
+# OpenAI's reasoning models: GPT-5 and the o series.
+_OPENAI_REASONING_PREFIXES = ("gpt-5", "o1", "o3", "o4")
+
+
 class OpenAIProvider(OpenAICompatibleProvider):
     """OpenAI's own API."""
 
     name: ClassVar[str] = "openai"
     requires_credential = True
+
+    def _adjust_kwargs(self, kwargs: dict[str, Any], model: str) -> dict[str, Any]:
+        """OpenAI's reasoning models reject max_tokens and any temperature
+        but the default: send max_completion_tokens and leave temperature
+        out."""
+        if str(model or "").lower().startswith(_OPENAI_REASONING_PREFIXES):
+            kwargs = dict(kwargs)
+            kwargs["max_completion_tokens"] = kwargs.pop("max_tokens")
+            kwargs.pop("temperature", None)
+        return kwargs
 
 
 class GeminiProvider(OpenAICompatibleProvider):

@@ -396,6 +396,8 @@ async def test_run_setup_health_folds_in_service_health_unchanged(sh, fake_hass,
             monkeypatch.setattr(sh, fn, lambda hass, _f=fn: {"name": _f, "key": _f, "status": "off", "detail": ""})
         monkeypatch.setattr(sh, "_check_persistence",
                             lambda hass: {"name": "p", "key": "persistence", "status": "off", "detail": ""})
+        monkeypatch.setattr(sh, "_check_ai_roles", lambda hass, entry=None: {
+            "name": "ai", "key": "ai_roles", "status": "off", "detail": ""})
 
         result = await sh.run_setup_health(fake_hass)
         assert fake_services[0] in result["checks"]
@@ -413,3 +415,68 @@ async def test_run_setup_health_never_raises_on_service_health_failure(sh, fake_
         assert result["overall"] in ("down", "warn", "ok", "off")  # never raised
     finally:
         cleanup()
+
+
+# ── AI roles ─────────────────────────────────────────────────────────────────
+
+def _ai(sh, nova_config, monkeypatch, cfg):
+    """cfg is the effective config: entry plus config.json plus keys."""
+    monkeypatch.setattr(nova_config, "effective_config", lambda entry=None: dict(cfg))
+    return sh._check_ai_roles(None, None)
+
+
+def test_ai_roles_ok_when_every_role_has_a_key(sh, nova_config, monkeypatch):
+    out = _ai(sh, nova_config, monkeypatch, {"llm_provider": "groq", "groq_api_key": "k"})
+    assert out["status"] == "ok"
+
+
+def test_ai_roles_unset_roles_mean_groq_like_runtime(sh, nova_config, monkeypatch):
+    out = _ai(sh, nova_config, monkeypatch,
+              {"llm_provider": "anthropic", "anthropic_api_key": "k"})
+    assert out["status"] == "warn"
+    for label in ("Classifier (groq)", "Reasoning (groq)", "Vision (groq)",
+                  "Camera reasoning (groq)"):
+        assert label in out["detail"]
+    assert "Conversation" not in out["detail"]
+
+
+def test_ai_roles_sees_the_old_shared_key(sh, nova_config, monkeypatch):
+    # An install not yet migrated still has one shared api_key for its
+    # saved provider; Nova uses it at runtime, so it is not missing.
+    cfg = {r: "groq" for r in ("llm_provider", "classifier_provider", "reasoning_provider",
+                               "vision_provider", "camera_reasoning_provider")}
+    cfg["api_key"] = "legacy"
+    assert _ai(sh, nova_config, monkeypatch, cfg)["status"] == "ok"
+
+
+def test_ai_roles_ollama_needs_an_address_and_gets_the_right_fix(sh, nova_config, monkeypatch):
+    cfg = {r: "ollama" for r in ("llm_provider", "classifier_provider", "reasoning_provider",
+                                 "vision_provider", "camera_reasoning_provider")}
+    out = _ai(sh, nova_config, monkeypatch, cfg)
+    assert out["status"] == "warn" and "AI Models" in out["suggested_fix"]
+    assert "Credentials" not in out["suggested_fix"]
+    cfg["ollama_base_url"] = "http://x:11434"
+    assert _ai(sh, nova_config, monkeypatch, cfg)["status"] == "ok"
+
+
+def test_ai_roles_sees_a_per_role_address(sh, nova_config, monkeypatch):
+    cfg = {"llm_provider": "groq", "groq_api_key": "k", "classifier_provider": "ollama",
+           "classifier_base_url": "http://x:11434", "reasoning_provider": "groq",
+           "vision_provider": "groq", "camera_reasoning_provider": "groq"}
+    assert _ai(sh, nova_config, monkeypatch, cfg)["status"] == "ok"
+
+
+def test_ai_roles_suggestion_review_only_when_on(sh, nova_config, monkeypatch):
+    cfg = {"llm_provider": "groq", "groq_api_key": "k", "suggestion_review_provider": "openai"}
+    assert _ai(sh, nova_config, monkeypatch, cfg)["status"] == "ok"
+    cfg["suggestion_review_enabled"] = True
+    out = _ai(sh, nova_config, monkeypatch, cfg)
+    assert "Suggestion review (openai)" in out["detail"]
+    del cfg["suggestion_review_provider"]   # falls back to the conversation provider
+    assert _ai(sh, nova_config, monkeypatch, cfg)["status"] == "ok"
+
+
+def test_ai_roles_runs_off_the_event_loop(sh):
+    import inspect
+    src = inspect.getsource(sh.run_setup_health)
+    assert "async_add_executor_job(_check_ai_roles, hass, entry)" in src

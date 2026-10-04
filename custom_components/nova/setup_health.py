@@ -289,6 +289,65 @@ def _check_persistence(hass) -> dict:
     return out
 
 
+# Role label, provider key, endpoint tier (for a per role address).
+_AI_ROLES = (
+    ("Conversation", "llm_provider", "conversation"),
+    ("Classifier", "classifier_provider", "classifier"),
+    ("Reasoning", "reasoning_provider", "reasoning"),
+    ("Vision", "vision_provider", None),
+    ("Camera reasoning", "camera_reasoning_provider", None),
+)
+
+
+def _check_ai_roles(hass, entry) -> dict:
+    """Each AI role's provider must have a key (cloud) or an address
+    (Ollama, custom). Reads the same merged config Nova runs with (entry,
+    config.json, keys from secrets.yaml), and works the provider out as
+    Nova does: an unset role means Groq, and suggestion review, when on,
+    uses the conversation provider until it has its own. Blocking: it reads
+    config.json and secrets.yaml, so it runs in the executor."""
+    out = {"name": "AI roles", "key": "ai_roles", "status": _OK, "detail": ""}
+    from . import nova_config, suggestion_review
+    from .providers.routing import resolve_provider_credential, resolve_provider_endpoint
+
+    cfg = nova_config.effective_config(entry)
+    roles = [(label, str(cfg.get(key) or "groq").lower(), tier)
+             for label, key, tier in _AI_ROLES]
+    if suggestion_review.enabled(cfg):
+        roles.append(("Suggestion review",
+                      str(cfg.get("suggestion_review_provider") or roles[0][1]).lower(),
+                      None))
+
+    missing, need_address, need_key = [], False, False
+    for label, provider, tier in roles:
+        if provider in ("ollama", "custom"):
+            try:
+                ok = bool(resolve_provider_endpoint(cfg, provider, tier))
+            except ValueError:
+                ok = False
+            need_address = need_address or not ok
+        else:
+            ok = bool(resolve_provider_credential(cfg, provider))
+            need_key = need_key or not ok
+        if not ok:
+            missing.append(f"{label} ({provider})")
+    if missing:
+        fixes = []
+        if need_key:
+            fixes.append("add the key under Settings, Devices and Services, Nova, "
+                         "Configure, Credentials")
+        if need_address:
+            fixes.append("set the address in the Nova panel, Settings, AI Models")
+        out["status"] = _WARN
+        out["detail"] = "no key or address for: " + ", ".join(missing)
+        fix = " or ".join(fixes) + (", or pick another provider in the Nova panel, "
+                                    "Settings, AI Models.")
+        out["suggested_fix"] = fix[0].upper() + fix[1:]
+    else:
+        out["detail"] = f"all {len(roles)} roles have a key or address"
+    return out
+
+
 # ── aggregate ────────────────────────────────────────────────────────────────
 
 async def run_setup_health(hass) -> dict:
@@ -322,6 +381,21 @@ async def run_setup_health(hass) -> dict:
         except Exception as exc:
             checks.append({"name": fn.__name__, "key": fn.__name__,
                            "status": _DOWN, "detail": str(exc)})
+
+    # The AI roles check needs the entry, which is read here on the event
+    # loop; the check itself does file I/O, so it runs in the executor.
+    entry = None
+    try:
+        from .const import DOMAIN
+        entries = hass.config_entries.async_entries(DOMAIN)
+        entry = entries[0] if entries else None
+    except Exception:
+        entry = None
+    try:
+        checks.append(await hass.async_add_executor_job(_check_ai_roles, hass, entry))
+    except Exception as exc:
+        checks.append({"name": "AI roles", "key": "ai_roles",
+                       "status": _DOWN, "detail": str(exc)})
 
     active = [c for c in checks if c.get("status") != _OFF]
     if any(c["status"] == _DOWN for c in active):

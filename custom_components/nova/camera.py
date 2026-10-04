@@ -31,7 +31,7 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.network import get_url
 
 from .camera_backends import find_backend
-from .const import NOVA_PERSONA, DOMAIN
+from .const import DEFAULT_VISION_MODEL, NOVA_PERSONA, DOMAIN
 from .database import save_message
 from .directive_helper import build_system_prompt
 from .tts_helper import async_announce
@@ -44,7 +44,7 @@ except ImportError:
 
 _LOGGER = logging.getLogger(__name__)
 
-VISION_MODEL = "qwen/qwen3.6-27b"
+VISION_MODEL = DEFAULT_VISION_MODEL
 
 # Minimum JPEG size — anything smaller is almost certainly a black/broken frame
 MIN_IMAGE_SIZE = 2_000  # ~2 KB
@@ -149,13 +149,11 @@ async def _camera_client(hass: HomeAssistant, provider: str, model: str,
 
 
 def _vision_model_rejects_images(exc) -> bool:
-    """True when the error is the API refusing our image content because the
-    configured vision model is text-only — e.g. Groq's
-    'messages[1].content must be a string' 400 for gpt-oss / other LLMs."""
-    from .providers.errors import ProviderErrorKind, error_text
-    if getattr(exc, "kind", None) is ProviderErrorKind.UNSUPPORTED_CAPABILITY:
-        return True
-    return "must be a string" in error_text(exc)
+    """True when the API refused our image because the vision model is text
+    only. Kept as a name here for existing callers; the check itself lives
+    in providers.errors.rejects_images, shared with setup."""
+    from .providers.errors import rejects_images
+    return rejects_images(exc)
 
 
 def _parse_json_obj(raw: str):
