@@ -2,13 +2,10 @@
 from __future__ import annotations
 
 import ast
-from pathlib import Path
 from typing import Any
 
 import pytest
-
-
-SRC = Path(__file__).resolve().parents[2] / "custom_components" / "nova" / "websocket.py"
+from ws_sources import ws_top_level
 
 
 @pytest.fixture
@@ -19,18 +16,17 @@ def ai_config(load):
         "_AI_CLOUD_PROVIDERS", "_prepare_ai_config_updates",
         "_validate_ai_candidate",
     }
-    tree = ast.parse(SRC.read_text())
     nodes = []
     found = set()
-    for node in tree.body:
+    for path, _src, node in ws_top_level():
         if isinstance(node, (ast.Assign, ast.AnnAssign)):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
             names = {target.id for target in targets if isinstance(target, ast.Name)}
             if names & wanted:
-                nodes.append(node)
+                nodes.append((path, node))
                 found.update(names & wanted)
         elif isinstance(node, ast.FunctionDef) and node.name in wanted:
-            nodes.append(node)
+            nodes.append((path, node))
             found.add(node.name)
     assert found == wanted
     namespace = {
@@ -39,7 +35,8 @@ def ai_config(load):
         "NovaValidationError": load("safe_errors").NovaValidationError,
         "__package__": "jc",
     }
-    exec(compile(ast.Module(body=nodes, type_ignores=[]), str(SRC), "exec"), namespace)
+    for path, node in nodes:
+        exec(compile(ast.Module(body=[node], type_ignores=[]), str(path), "exec"), namespace)
     return namespace
 
 

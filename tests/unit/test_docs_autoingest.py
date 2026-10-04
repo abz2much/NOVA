@@ -166,9 +166,8 @@ def test_scan_helpers_are_sync_and_scans_never_touch_sqlite_directly():
 
 def test_semantic_search_toggle_writes_off_the_loop():
     import ast
-    src = (pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova"
-           / "websocket.py").read_text(encoding="utf-8")
-    fn = next(n for n in ast.walk(ast.parse(src))
+    from ws_sources import ws_tree
+    fn = next(n for n in ast.walk(ws_tree())
               if isinstance(n, ast.AsyncFunctionDef) and n.name == "ws_semantic_search")
     body = ast.unparse(fn)
     assert "nova_config.set(" not in body

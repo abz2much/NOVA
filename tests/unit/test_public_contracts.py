@@ -23,6 +23,7 @@ import os
 import pytest
 
 import contract_extract as ce
+from ws_sources import ws_tree
 
 _WRITE = os.environ.get("NOVA_WRITE_CONTRACTS") == "1"
 
@@ -176,7 +177,7 @@ _WEBSOCKET_EXPORTS = ("nova_log", "recent_debug_log", "recent_conversation_log",
 def test_websocket_exports_are_defined_at_module_level():
     """websocket.py can't be imported under the unit fakes; the PHACC twin
     of this test imports them for real."""
-    tree = ast.parse((ce.COMP / "websocket.py").read_text(encoding="utf-8"))
+    tree = ws_tree()
     defined = set()
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):

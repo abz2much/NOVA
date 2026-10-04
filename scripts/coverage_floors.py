@@ -26,8 +26,8 @@ FLOORS = {
     "providers": 86,
     "automation": 81,
     "diagnostics": 77,
-    "agent_runtime": 71,
-    "intent": 33,
+    "agent_runtime": 74,
+    "intent": 35,
 }
 
 

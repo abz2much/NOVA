@@ -12,18 +12,13 @@ available.
 from __future__ import annotations
 
 import ast
-import pathlib
 import types
-
-_WS_PY = (pathlib.Path(__file__).resolve().parents[2]
-          / "custom_components" / "nova" / "websocket.py")
+from ws_sources import ws_top_level
 
 
 def _load_bound_decision_strings():
-    src = _WS_PY.read_text()
-    tree = ast.parse(src)
     mod = types.ModuleType("ws_decisions_stub")
-    for node in tree.body:
+    for _path, src, node in ws_top_level():
         if isinstance(node, ast.Assign) and any(
                 isinstance(t, ast.Name) and t.id == "_DECISION_FIELD_MAX_CHARS"
                 for t in node.targets):

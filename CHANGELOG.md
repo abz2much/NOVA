@@ -1,3 +1,22 @@
+## [8.7.7] — Internal tidy: the panel debug log moves to its own module, all 41 admin commands are checked by a test, coverage floors raised
+
+This is an internal change. Nothing you can see or configure changes: no setting, service, websocket command, error code or stored file is different, and the panel behaves as before. It is the first step of splitting `websocket.py`, which is 4,300 lines.
+
+**Moved (code moved as it was, no edits)**
+- The panel debug log moved from `websocket.py` to a new `custom_components/nova/ws_log.py`: the two in memory buffers (500 entries, and 80 for conversation and reply routing), the `nova.log` file, its queue, writer thread and lock, `nova_log`, `recent_debug_log` and `recent_conversation_log`. The new module imports nothing from Home Assistant.
+- The persisted log is still read once when Nova is imported, before the config folder is set, from the same file (`nova/nova.log`). `websocket.py` still exports `nova_log`, `recent_debug_log` and `recent_conversation_log`, so the 15 modules that import `nova_log` from it are untouched.
+- `_read_integration_version` and `_INTEGRATION_VERSION` stay in `websocket.py`.
+
+**Tests**
+- New `tests/ws_sources.py` reads `websocket.py` and every `ws_*.py` together. The tests and `tests/contract_extract.py` that read `websocket.py` by path now use it, so they keep finding commands and helpers after later moves.
+- `test_websocket_admin_gate.py` listed 36 of the 41 admin gated commands. It now lists all 41 (it adds `camera_snapshot`, `clear_scene_memory`, `get_debug_log`, `list_actions` and `say_hello`), and the count check is exact. These five were already admin gated and pinned by `websocket.json`. This only makes the gate test cover them.
+- 31 new unit tests for the debug log (`tests/unit/test_ws_log.py`). The behaviour tests passed against the old code before the move.
+- The one test that patched `_LOG_FILE` on `websocket` now patches it on `ws_log`. `_LOG_FILE` is not re exported, so a stray patch of it on `websocket` fails loudly instead of doing nothing.
+- `tests/fixtures/contracts/storage.json`: the owner of `nova/nova.log` is now `ws_log` instead of `websocket`. The path is the same. `websocket.json` is unchanged.
+
+**Coverage floors**
+- `agent_runtime` 71 to 74 and `intent` 33 to 35 (measured 75.1% and 36.5% on the unit run). The Python 3.14 run that CI also does was not measured.
+
 ## [8.7.6] — Delivery and mail: no wide views, a 30 minute announce cooldown, early checks from sensors
 
 **Fixed**

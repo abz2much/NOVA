@@ -10,15 +10,15 @@ Both sides are parsed statically from source — websocket.py can't be imported
 import ast
 import re
 from pathlib import Path
+from ws_sources import ws_text, ws_tree
 
 _COMPONENT = Path(__file__).resolve().parents[2] / "custom_components" / "nova"
 _PANEL_JS = _COMPONENT / "frontend" / "nova-panel.js"
-_WEBSOCKET = _COMPONENT / "websocket.py"
 
 
 def _allowlist() -> set[str]:
-    """The PANEL_WRITABLE_KEYS set, read from websocket.py via AST."""
-    tree = ast.parse(_WEBSOCKET.read_text())
+    """The PANEL_WRITABLE_KEYS set, read from the websocket source via AST."""
+    tree = ws_tree()
     for node in ast.walk(tree):
         if isinstance(node, ast.Assign) and isinstance(node.value, ast.Set):
             for tgt in node.targets:
@@ -70,7 +70,7 @@ def _panel_data_config_keys() -> set[str]:
     """Keys surfaced in ws_get_panel_data's `config` dict, read from the
     "key": _runtime_opt(...) / "key": _get_... lines via regex. This is what the
     panel reads back as d.config.KEY."""
-    js = _WEBSOCKET.read_text()
+    js = ws_text()
     # crude but effective: any '"key":' inside the config block
     m = re.search(r'"config":\s*\{(.*?)\n            \},', js, re.DOTALL)
     if not m:
@@ -115,7 +115,7 @@ def test_read_back_cfg_fields_are_surfaced():
 
 def test_onboarding_state_wired_into_panel_data():
     # the first-run onboarding block must be present in get_panel_data (v6.70.0)
-    js = _WEBSOCKET.read_text()
+    js = ws_text()
     assert '"onboarding": _get_onboarding_state(' in js
     assert "def _get_onboarding_state(" in js
 
@@ -136,6 +136,6 @@ def test_security_alarm_settings_round_trip_through_panel_data():
 
 def test_onboarding_steps_cover_key_setup():
     # the checklist should name the high-value post-install steps
-    js = _WEBSOCKET.read_text()
+    js = ws_text()
     for step_id in ('"notify"', '"cameras"', '"voice"', '"banter"'):
         assert step_id in js, f"onboarding missing step {step_id}"

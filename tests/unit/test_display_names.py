@@ -15,13 +15,11 @@ from __future__ import annotations
 
 import ast
 import json
-import pathlib
 import types
 
 import pytest
+from ws_sources import ws_top_level
 
-_WS_PY = (pathlib.Path(__file__).resolve().parents[2]
-          / "custom_components" / "nova" / "websocket.py")
 
 NAMES = {
     "device_tracker.home_cloud": "Home Cloud",
@@ -37,12 +35,10 @@ OLD_ALERT = ("Around this time you usually device_tracker.home_cloud turns "
 
 def _ws_helpers(load, *names):
     load("cognitive.naming")
-    src = _WS_PY.read_text()
-    tree = ast.parse(src)
     mod = types.ModuleType("jc._ws_display_stub")
     mod.__dict__["__package__"] = "jc"
     exec("from typing import Any, Optional\nHomeAssistant = object\n", mod.__dict__)
-    for node in tree.body:
+    for _path, src, node in ws_top_level():
         if isinstance(node, ast.Assign) and any(
                 isinstance(t, ast.Name) and t.id == "_DECISION_TEXT_FIELDS"
                 for t in node.targets):

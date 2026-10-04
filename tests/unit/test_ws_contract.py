@@ -16,9 +16,9 @@ from __future__ import annotations
 import ast
 import pathlib
 import re
+from ws_sources import ws_text, ws_tree
 
 _COMP = pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova"
-_WS_PY = _COMP / "websocket.py"
 _PANEL_JS = _COMP / "frontend" / "nova-panel.js"
 
 
@@ -43,8 +43,8 @@ def _type_from_decorator(dec: ast.AST):
 
 def _backend():
     """Return (func_to_type, registered_types)."""
-    src = _WS_PY.read_text()
-    tree = ast.parse(src)
+    src = ws_text()
+    tree = ws_tree()
     func_to_type: dict[str, str] = {}
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):

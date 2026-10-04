@@ -9,14 +9,15 @@ distinct name like `fact_id`.
 import re
 from pathlib import Path
 
+from ws_sources import ws_text
+
 _ROOT = Path(__file__).resolve().parents[2] / "custom_components" / "nova"
-_WS = _ROOT / "websocket.py"
 _PANEL = _ROOT / "frontend" / "nova-panel.js"
 
 
 def test_no_ws_command_declares_reserved_id_field():
     offenders = re.findall(r'vol\.(?:Optional|Required)\(\s*["\']id["\']\s*\)',
-                           _WS.read_text())
+                           ws_text())
     assert not offenders, (
         "a WS command schema declares a reserved 'id' field — it collides with "
         "the HA message id and is overwritten by the frontend; use e.g. 'fact_id'"
@@ -32,4 +33,4 @@ def test_forget_button_sends_fact_id():
 
 
 def test_forget_handler_reads_fact_id():
-    assert 'msg.get("fact_id")' in _WS.read_text()
+    assert 'msg.get("fact_id")' in ws_text()

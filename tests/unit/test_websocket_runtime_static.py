@@ -17,9 +17,9 @@ Focused run:
 """
 import ast
 import pathlib
+from ws_sources import ws_text, ws_tree
 
 COMP = pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova"
-WS = COMP / "websocket.py"
 
 # Calls that return a fresh copy of runtime_config.
 SNAPSHOT_CALLS = {"_executor_runtime_config", "runtime_config_snapshot"}
@@ -28,7 +28,7 @@ LIVE_NAMES = {"_live_runtime_config", "lifecycle_runtime_config", "runtime_confi
 
 
 def _tree():
-    return ast.parse(WS.read_text(encoding="utf-8"))
+    return ws_tree()
 
 
 def _func(name):
@@ -57,7 +57,7 @@ def test_websocket_never_reads_hass_data():
 
 
 def test_no_setdefault_creates_runtime_config():
-    src = WS.read_text(encoding="utf-8")
+    src = ws_text()
     assert 'setdefault("runtime_config"' not in src
     assert "setdefault('runtime_config'" not in src
 

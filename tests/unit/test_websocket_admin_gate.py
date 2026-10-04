@@ -29,9 +29,7 @@ design — an accepted risk, not an oversight. Don't re-gate these without
 an explicit compatibility decision; it silently breaks the panel for non-admin
 household members, not just narrows what they can see.
 """
-from pathlib import Path
-
-SRC = Path(__file__).resolve().parents[2] / "custom_components" / "nova" / "websocket.py"
+from ws_sources import ws_text
 
 # type string -> must be admin-gated
 ADMIN_GATED_TYPES = [
@@ -71,11 +69,17 @@ ADMIN_GATED_TYPES = [
     "get_credential_status",
     "set_credential",
     "delete_credential",
+    # Added when the list was found to cover 36 of the 41 gated commands.
+    "camera_snapshot",
+    "clear_scene_memory",
+    "get_debug_log",
+    "list_actions",
+    "say_hello",
 ]
 
 
 def test_sensitive_commands_require_admin():
-    src = SRC.read_text()
+    src = ws_text()
     missing = []
     for t in ADMIN_GATED_TYPES:
         anchor = f'vol.Required("type"): "nova/{t}",'
@@ -89,16 +93,18 @@ def test_sensitive_commands_require_admin():
 
 
 def test_require_admin_used_at_least_once_per_gated_command():
-    src = SRC.read_text()
-    # 17 gated commands -> at least 17 occurrences of the decorator
-    assert src.count("@websocket_api.require_admin") >= len(ADMIN_GATED_TYPES)
+    src = ws_text()
+    # Exactly one decorator per listed command: a new admin gated command that
+    # is not added to ADMIN_GATED_TYPES (or a listed one that lost its gate)
+    # changes the count and fails here.
+    assert src.count("@websocket_api.require_admin") == len(ADMIN_GATED_TYPES) == 41
 
 
 def test_require_admin_sits_above_websocket_command_not_below():
     # Matches the upstream HA pattern: require_admin, then websocket_command,
     # then async_response — require_admin must be OUTERMOST (topmost), or it
     # silently never runs, since Python decorators apply bottom-up.
-    src = SRC.read_text()
+    src = ws_text()
     assert "@websocket_api.require_admin\n@websocket_api.websocket_command({" in src
     # For every require_admin occurrence, the very next line must be
     # websocket_command (not async_response, not the def).

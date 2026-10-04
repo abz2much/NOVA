@@ -266,7 +266,7 @@
     ],
     "tables": []
   },
-  "websocket": {
+  "ws_log": {
     "paths": [
       "nova/nova.log"
     ],
