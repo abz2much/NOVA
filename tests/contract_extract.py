@@ -6,7 +6,7 @@ extractor returns plain, deterministic, JSON-ready data: sorted keys, sorted
 inventories, no timestamps, IDs, reprs or runtime values.
 
 Static (AST / YAML) extraction is used where the module can't be imported
-under the unit-test fakes — websocket.py, __init__.py, config_flow.py and the
+under the unit-test fakes — websocket.py (and its ws_*.py siblings), __init__.py, config_flow.py and the
 store modules all pull in Home Assistant at import time. The agent's tool
 inventory is read from the real module (loaded through the unit fakes by the
 caller) because it is plain data.
@@ -19,6 +19,8 @@ import json
 import pathlib
 import re
 from typing import Any
+
+from ws_sources import ws_tree
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 COMP = REPO / "custom_components" / "nova"
@@ -162,7 +164,7 @@ def websocket_contract() -> dict:
     codes, and the top-level response keys written as literals in the
     handler (a lower bound: keys added through a variable or ** spread are
     pinned from real calls in websocket_responses.json instead)."""
-    tree = _tree(COMP / "websocket.py")
+    tree = ws_tree()
     registered = {
         ast.unparse(n.args[1]) for n in ast.walk(tree)
         if isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "async_register_command"
@@ -213,7 +215,7 @@ def websocket_contract() -> dict:
 
 
 def panel_writable_keys() -> list:
-    tree = _tree(COMP / "websocket.py")
+    tree = ws_tree()
     for node in ast.walk(tree):
         if (isinstance(node, ast.Assign) and isinstance(node.value, ast.Set)
                 and any(isinstance(t, ast.Name) and t.id == "PANEL_WRITABLE_KEYS" for t in node.targets)):
@@ -224,7 +226,7 @@ def panel_writable_keys() -> list:
 
 def panel_data_backend_keys() -> list:
     """Top-level keys ws_get_panel_data puts in its `result` payload."""
-    tree = _tree(COMP / "websocket.py")
+    tree = ws_tree()
     fn = next(f for f in tree.body if isinstance(f, ast.AsyncFunctionDef)
               and f.name == "ws_get_panel_data")
     keys = set()

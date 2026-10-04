@@ -7,23 +7,19 @@ a working default). Never inferred from another provider's state.
 from __future__ import annotations
 
 import ast
-from pathlib import Path
 
 import pytest
-
-
-SRC = Path(__file__).resolve().parents[2] / "custom_components" / "nova" / "websocket.py"
+from ws_sources import ws_top_level
 
 
 @pytest.fixture
 def compute():
-    tree = ast.parse(SRC.read_text())
-    node = next(
-        n for n in tree.body
+    path, _src, node = next(
+        (p, s, n) for p, s, n in ws_top_level()
         if isinstance(n, ast.FunctionDef) and n.name == "_compute_provider_availability"
     )
     namespace: dict = {}
-    exec(compile(ast.Module(body=[node], type_ignores=[]), str(SRC), "exec"), namespace)
+    exec(compile(ast.Module(body=[node], type_ignores=[]), str(path), "exec"), namespace)
     return namespace["_compute_provider_availability"]
 
 

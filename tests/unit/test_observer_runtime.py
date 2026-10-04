@@ -22,6 +22,7 @@ import sys
 import types
 
 import pytest
+from ws_sources import ws_function, ws_text
 
 COMP = pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova"
 
@@ -181,7 +182,7 @@ def test_only_the_helper_writes_observer_running():
 def test_every_known_writer_uses_the_helper():
     init_src = (COMP / "__init__.py").read_text(encoding="utf-8")
     svc_src = (COMP / "services.py").read_text(encoding="utf-8")
-    ws_src = (COMP / "websocket.py").read_text(encoding="utf-8")
+    ws_src = ws_text()
     # setup enabled + setup failure, and unload
     assert init_src.count("set_observer_running(entry, True)") == 2
     assert init_src.count("set_observer_running(entry, False)") == 1
@@ -194,7 +195,7 @@ def test_every_known_writer_uses_the_helper():
 
 
 def test_panel_status_reads_the_runtime():
-    ws_src = (COMP / "websocket.py").read_text(encoding="utf-8")
+    ws_src = ws_text()
     assert "observer_running = observer_status(entry)" in ws_src
     assert 'data.get("observer_running"' not in ws_src
 
@@ -252,7 +253,7 @@ def _guarded_by_get_runtime(func: ast.AST, target: ast.Call) -> bool:
 def test_ownership_is_checked_before_any_observer_change(path, func, expected):
     """All four live paths (both services, the panel toggle on and off)
     resolve the runtime before observer.start()/stop() can run."""
-    fn = _nested(COMP / path, func)
+    fn = ws_function(func) if path == "websocket.py" else _nested(COMP / path, func)
     changes = [n for n in ast.walk(fn)
                if _is_call(n, "observer_mod.start") or _is_call(n, "observer_mod.stop")]
     assert len(changes) == expected

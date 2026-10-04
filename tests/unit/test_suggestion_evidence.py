@@ -5,6 +5,7 @@ import json
 import pathlib
 
 import pytest
+from ws_sources import ws_text
 
 COMP = pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova"
 
@@ -100,7 +101,7 @@ def test_insert_stores_evidence():
 def test_websocket_surfaces_why():
     # websocket.py builds get_panel_data.suggestions through the automation
     # package's panel translation helper (Phase 5).
-    assert "panel_suggestion_items" in (COMP / "websocket.py").read_text()
+    assert "panel_suggestion_items" in ws_text()
     ws = (COMP / "automation" / "api.py").read_text()
     assert "explain_suggestion" in ws
     assert "why_headline" in ws

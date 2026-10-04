@@ -10,6 +10,8 @@ from __future__ import annotations
 import ast
 import pathlib
 
+from ws_sources import ws_function
+
 COMP = pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova"
 
 
@@ -20,7 +22,7 @@ def _func(path, name):
 
 
 def test_panel_data_reads_doorbell_log_in_executor():
-    src = ast.unparse(_func("websocket.py", "ws_get_panel_data"))
+    src = ast.unparse(ws_function("ws_get_panel_data"))
     assert "async_add_executor_job(_get_doorbell_training, hass)" in src
     assert "_get_doorbell_training(hass)" not in src.replace(
         "async_add_executor_job(_get_doorbell_training, hass)", "")

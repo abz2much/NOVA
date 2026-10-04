@@ -180,8 +180,8 @@ async def test_say_hello_never_raises(welcome, bootstrap, fake_hass, monkeypatch
 
 
 def test_onboarding_voice_step_uses_setup_doctor_pipeline_check():
-    from pathlib import Path
-    src = (Path(__file__).resolve().parents[2] / "custom_components/nova/websocket.py").read_text()
+    from ws_sources import ws_text
+    src = ws_text()
     fn = src[src.index("def _get_onboarding_state("):src.index("def _get_cameras(")]
     assert "_check_assist_pipeline(hass)" in fn
     assert "assist_satellite" not in fn

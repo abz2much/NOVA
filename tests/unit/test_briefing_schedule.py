@@ -5,11 +5,12 @@ read-back/writable registration that makes the toggles work."""
 import json
 import pathlib
 import re
+from ws_sources import ws_text
 
 COMP = pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova"
 INIT = (COMP / "__init__.py").read_text()
 SERVICES = (COMP / "services.py").read_text()
-WS = (COMP / "websocket.py").read_text()
+WS = ws_text()
 BRIEF = (COMP / "briefing.py").read_text()
 PANEL = (COMP / "frontend" / "nova-panel.js").read_text()
 

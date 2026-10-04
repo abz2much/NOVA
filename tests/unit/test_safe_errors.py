@@ -17,6 +17,7 @@ import types
 import pytest
 
 from fakes import FakeHass, FakeUserInput
+from ws_sources import ws_tree
 
 COMP = pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova"
 
@@ -94,7 +95,7 @@ def test_plain_value_error_is_not_treated_as_nova_validation(se):
 def test_ai_settings_validation_raises_are_nova_validation_errors():
     """Nova's own messages in the AI settings handlers keep reaching the
     settings screen: every raise there is a NovaValidationError."""
-    tree = ast.parse((COMP / "websocket.py").read_text(encoding="utf-8"))
+    tree = ws_tree()
     names = {"_prepare_ai_config_updates", "ws_test_provider_endpoint"}
     raised = [
         node.exc.func.id
@@ -171,7 +172,7 @@ async def test_assist_tool_failure_returns_safe_text(load, monkeypatch):
 
 
 def _handlers_returning_raw_exc():
-    tree = ast.parse((COMP / "websocket.py").read_text(encoding="utf-8"))
+    tree = ws_tree()
     found = set()
     for fn in ast.walk(tree):
         if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):

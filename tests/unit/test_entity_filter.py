@@ -93,8 +93,8 @@ def test_presence_summary_includes_sensor_when_not_excluded(load):
 def test_room_card_path_applies_exclusion():
     """The room-card area enumeration must consult the exclusion filter, so an
     excluded entity is never counted (light count) or listed (capabilities)."""
-    import pathlib
-    src = pathlib.Path("custom_components/nova/websocket.py").read_text()
+    from ws_sources import ws_text
+    src = ws_text()
     m = re.search(r"def _entities_in_area\(.*?\n(.*?)\n\n\ndef ", src, re.S)
     assert m, "could not isolate _entities_in_area"
     body = m.group(1)
