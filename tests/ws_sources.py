@@ -11,6 +11,7 @@ Nothing here imports Home Assistant: the files are only read and parsed.
 from __future__ import annotations
 
 import ast
+import importlib
 import pathlib
 from typing import Iterator
 
@@ -47,3 +48,27 @@ def ws_function(name: str) -> ast.AST:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
             return node
     raise AssertionError(f"{name} not found in {[p.name for p in ws_paths()]}")
+
+
+def ws_owner_name(name: str) -> str:
+    """The module (websocket or a ws_* sibling) that defines the top level
+    `name`, as a dotted path under custom_components.nova. A name that is only
+    imported into a module does not count: this is where the code lives."""
+    for path, _src, node in ws_top_level():
+        found = []
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            found = [node.name]
+        elif isinstance(node, ast.Assign):
+            found = [t.id for t in node.targets if isinstance(t, ast.Name)]
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            found = [node.target.id]
+        if name in found:
+            return f"custom_components.nova.{path.stem}"
+    raise AssertionError(f"{name} is not defined in {[p.name for p in ws_paths()]}")
+
+
+def ws_owner_module(name: str):
+    """The imported module that owns `name`. A test that patches `name` must
+    patch it here: a patch on websocket (which only re exports a moved name)
+    rebinds the copy websocket holds and changes nothing for the moved code."""
+    return importlib.import_module(ws_owner_name(name))

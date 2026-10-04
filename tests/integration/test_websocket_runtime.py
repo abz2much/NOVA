@@ -349,6 +349,7 @@ async def test_unloaded_or_missing_entry_keeps_defaults(hass):
 def executor_fakes(monkeypatch, observer_fake):
     """Keep the executor paths off the network and off real subsystems."""
     from custom_components.nova import appliance_monitor, websocket
+    from ws_sources import ws_owner_module
     seen: dict[str, list] = {"appliances": [], "models": []}
 
     async def _appliances(hass, cfg, entry=None):
@@ -359,7 +360,8 @@ def executor_fakes(monkeypatch, observer_fake):
         return ["m1"], False, {}
 
     monkeypatch.setattr(appliance_monitor, "start", _appliances)
-    monkeypatch.setattr(websocket, "_fetch_models_deduped", _models)
+    # ws_list_models calls it, so patch it in the module that defines it.
+    monkeypatch.setattr(ws_owner_module("_fetch_models_deduped"), "_fetch_models_deduped", _models)
     websocket.invalidate_model_cache()
     yield seen
     websocket.invalidate_model_cache()
@@ -773,7 +775,8 @@ def _ollama_roles(model="llama3"):
 def ai_fakes(monkeypatch, hass):
     """Fake connection tests, the atomic save, cache invalidation and the
     scheduled reload, recording each call."""
-    from custom_components.nova import llm_provider, nova_config, websocket
+    from custom_components.nova import llm_provider, nova_config
+    from ws_sources import ws_owner_module
     seen = type("Seen", (), {"tests": [], "saves": [], "invalidations": [],
                              "reloads": [], "test_result": None,
                              "save_result": True})()
@@ -793,7 +796,8 @@ def ai_fakes(monkeypatch, hass):
 
     monkeypatch.setattr(llm_provider, "test_connection", _test)
     monkeypatch.setattr(nova_config, "set_many_atomic", _save)
-    monkeypatch.setattr(websocket, "invalidate_model_cache",
+    # ws_apply_ai_config calls it, so patch it in the module that defines it.
+    monkeypatch.setattr(ws_owner_module("invalidate_model_cache"), "invalidate_model_cache",
                         lambda provider=None: seen.invalidations.append(provider))
     monkeypatch.setattr(hass.config_entries, "async_reload", _reload)
     return seen
