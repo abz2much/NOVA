@@ -127,13 +127,28 @@ def test_freeze_sensor_offline_is_critical():
     assert "freeze" in v["message"].lower()
 
 
-def test_missing_sensor_is_warning_not_critical():
+def test_absent_sensor_is_skipped():
+    # A sensor that does not exist in this home is not part of its setup,
+    # so it is not a fault. (Before v8.7.1 every home without these exact
+    # sensors got "I can't read root storage" every 15 minutes.)
     states = dict(_HEALTHY)
     del states["sensor.server_root_storage_usage"]  # entity entirely absent
+    del states["binary_sensor.core_switch_status"]
     v = _verdict(states)
+    assert v["alert_required"] is False
+    assert v["message"] == ""
+
+
+def test_home_with_none_of_the_sensors_is_silent():
+    v = _verdict({})
+    assert v["alert_required"] is False
+
+
+def test_unknown_threshold_sensor_that_exists_is_still_a_warning():
+    v = _verdict({**_HEALTHY, "sensor.server_root_storage_usage": ("unknown", {})})
     assert v["alert_required"] is True
     assert v["critical"] is False
-    assert "can't read" in v["message"].lower() or "unavailable" in v["message"].lower()
+    assert "can't read" in v["message"].lower()
 
 
 def test_unavailable_state_is_warning():

@@ -100,7 +100,9 @@ class InfrastructureTriage:
     def _eval_threshold(self, check: _ThresholdCheck) -> Finding | None:
         try:
             state = self.hass.states.get(check.entity_id)
-            if state is None or str(state.state).lower() in _UNKNOWN_STATES:
+            if state is None:
+                return None  # not part of this home's setup
+            if str(state.state).lower() in _UNKNOWN_STATES:
                 return Finding(
                     _SEV_WARNING,
                     f"I can't read {check.label} — that sensor is unavailable",
@@ -134,11 +136,7 @@ class InfrastructureTriage:
         try:
             state = self.hass.states.get(check.entity_id)
             if state is None:
-                return Finding(
-                    _SEV_WARNING,
-                    f"{check.label} is not reporting to Home Assistant",
-                    check.label,
-                )
+                return None  # not part of this home's setup
             value = str(state.state).lower()
             if value in _UNKNOWN_STATES:
                 return Finding(

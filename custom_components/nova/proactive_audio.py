@@ -62,7 +62,9 @@ DEFAULT_ANNOUNCE_PLAYER = ""            # optional fallback player when an area 
 MEDIA_DUCK_LEVEL = 0.10                 # spec background-duck floor — see _announce() note
 AUDIT_INTERVAL = timedelta(minutes=15)
 AUDIT_STARTUP_DELAY = timedelta(seconds=60)
-AUDIT_TARGET_AREA = "office"            # ← set to your office area_id
+# The area the infrastructure audit speaks in, from the "infrastructure_audit_area"
+# setting. Unset means the audit only logs what it finds.
+AUDIT_AREA_KEY = "infrastructure_audit_area"
 
 # Predictive habit matrix: record occupancy each audit tick and surface likely
 # upcoming actions. Pre-emptive *execution* is OFF by default — Nova earns
@@ -564,16 +566,20 @@ async def async_setup_proactive_audio(hass: HomeAssistant, entry: ConfigEntry) -
                 if matches:
                     message += _history_phrase(matches, honorific)
                 _LOGGER.info("Infrastructure audit: %s", message)
-                await hass.services.async_call(
-                    DOMAIN,
-                    SERVICE_SPEAK,
-                    {
-                        "message": message,
-                        "target_area": AUDIT_TARGET_AREA,
-                        "critical": verdict["critical"],
-                    },
-                    blocking=False,
-                )
+                from . import nova_config
+                area = str(nova_config.runtime_get(
+                    hass, entry, AUDIT_AREA_KEY, "") or "").strip()
+                if area:
+                    await hass.services.async_call(
+                        DOMAIN,
+                        SERVICE_SPEAK,
+                        {
+                            "message": message,
+                            "target_area": area,
+                            "critical": verdict["critical"],
+                        },
+                        blocking=False,
+                    )
                 # Persist this occurrence for future recall.
                 await hass.async_add_executor_job(
                     fault_log.commit_event, verdict["message"], tags

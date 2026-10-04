@@ -1,3 +1,11 @@
+## [8.7.1] — Quieter infrastructure audit, fewer blocking calls
+
+**Fixed**
+- The infrastructure audit no longer reports sensors that don't exist in your home. Before, every home without the original author's exact server and switch sensors got "I can't read root storage" every 15 minutes.
+- The audit no longer speaks to a built-in "office" area. It now uses a new setting, `infrastructure_audit_area`. Unset, it only logs what it finds. If you relied on hearing audit alerts in an area called office, set this to that area.
+- Nova no longer reads the learned names file on the event loop when it resolves a device name.
+- Answering the "Heading to bed?" notification no longer saves settings on the event loop, and the sleep override now saves once instead of twice.
+
 ## [8.7.0] — Set up every AI role at first run
 
 **Added**
