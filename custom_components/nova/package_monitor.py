@@ -13,24 +13,48 @@ ring the bell are still caught) and the doorbell-press analysis (which already
 describes the doorway — we reuse its text, no extra vision call). Both funnel
 through the same state machine in `evaluate`.
 
+Speech is limited to once per camera and kind every 30 minutes. A porch motion
+sensor can start the periodic check early, and a mailbox sensor can report mail
+through `note_from_mailbox`; neither adds a way to speak.
+
 Vision and capture plumbing is reused from camera.py via lazy import to avoid a
 circular dependency; the module itself is otherwise dependency-light.
 """
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
 import re
+import time
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Callable, Optional
 
 _LOGGER = logging.getLogger(__name__)
 
 # Per-camera state: entity_id -> {"package": bool, "mail": bool, "count": int,
 #                                 "since": datetime, "desc": str}
 _STATE: dict[str, dict] = {}
+
+# Speech cooldown: (camera entity_id, kind) -> monotonic time of the last
+# announcement actually SPOKEN for that pair. kind is delivered / mail /
+# removed / stranded, so a "removed while away" alert is never held back by a
+# recent "delivered". Only speech is gated by this; state, logs, observer and
+# camera_semantic recording happen exactly as before. Kept next to _STATE and
+# cleared wherever _STATE is cleared.
+_LAST_SPOKEN: dict[tuple[str, str], float] = {}
+_ANNOUNCE_COOLDOWN_S = 1800.0
+
+# Debounce stamps (monotonic) for the sensor triggers: "early_check" for the
+# porch motion sweep (one stamp for all sensors), "mailbox:<entity_id>" per
+# mailbox sensor. Cleared with _STATE as well.
+_TRIGGER_LAST: dict[str, float] = {}
+_EARLY_KEY = "early_check"
+_EARLY_CHECK_DELAY_S = 20.0
+_EARLY_CHECK_MIN_GAP_S = 180.0
+_MAILBOX_MIN_GAP_S = 300.0
 
 _PKG_KEYWORDS = re.compile(
     r"\b(package|parcel|box|delivery|delivered|amazon|ups|fedex|usps|dhl|"
@@ -207,6 +231,41 @@ def _anyone_home(hass) -> bool:
     return True
 
 
+# ── Name matching ────────────────────────────────────────────────────────────
+# Entity ids are matched on whole word tokens of the object part (the bit after
+# the dot, split on "_" and on letter/digit changes), not on substrings. The old
+# substring test on "front" swept wide views such as camera.front_yard.
+
+# A token that marks a view of the front door / porch.
+_PORCH_TOKENS = frozenset({
+    "doorbell", "frontdoor", "porch", "front",
+    # Glued compounds the old substring match caught and that are plainly the
+    # same thing; kept so they keep matching.
+    "frontporch", "frontdoorbell",
+})
+# A token that marks a wide view. It excludes a camera or sensor that would
+# otherwise match on a porch token (camera.front_yard, camera.front_driveway).
+_WIDE_TOKENS = frozenset({
+    "yard", "backyard", "frontyard", "street", "road", "lawn", "garden",
+    "driveway", "curb", "field", "garage", "pool", "patio", "deck", "gate",
+    "parking", "lot",
+})
+_MAILBOX_TOKENS = frozenset({"mailbox", "letterbox", "postbox"})
+_MOTION_DEVICE_CLASSES = frozenset({"motion", "occupancy", "presence"})
+_MAILBOX_DEVICE_CLASSES = frozenset({"opening", "door", "occupancy"})
+
+
+def _name_tokens(entity_id: str) -> frozenset[str]:
+    obj = str(entity_id).split(".", 1)[-1].lower()
+    return frozenset(re.findall(r"[a-z]+|\d+", obj))
+
+
+def _is_porch_view(entity_id: str) -> bool:
+    """True for a front door / porch / doorbell name that is not a wide view."""
+    toks = _name_tokens(entity_id)
+    return bool(toks & _PORCH_TOKENS) and not (toks & _WIDE_TOKENS)
+
+
 def watched_cameras(hass, configured=None) -> list[str]:
     """Resolve which cameras to inspect for deliveries with the VISION sweep.
 
@@ -224,7 +283,7 @@ def watched_cameras(hass, configured=None) -> list[str]:
     from . import eufy
     for st in active_camera_states(hass):
         e = st.entity_id
-        if any(k in e for k in ("doorbell", "front_door", "porch", "front")):
+        if _is_porch_view(e):
             if eufy.is_eufy_camera(hass, e) and "package_delivered" in eufy.discover_roles(hass, e):
                 continue
             out.append(e)
@@ -239,6 +298,20 @@ _PACKAGE_KIND_TO_STATE = {
     "removed": "taken",
     "stranded": "stranded",
 }
+
+
+def _now_mono() -> float:
+    return time.monotonic()
+
+
+def _cooldown_open(entity_id: str, kind: str) -> bool:
+    """True when this (camera, kind) has not been spoken in the last 30 minutes."""
+    last = _LAST_SPOKEN.get((entity_id, kind))
+    return last is None or (_now_mono() - last) >= _ANNOUNCE_COOLDOWN_S
+
+
+def _mark_spoken(entity_id: str, kind: str) -> None:
+    _LAST_SPOKEN[(entity_id, kind)] = _now_mono()
 
 
 def _log(hass, entity_id: str, kind: str, det: dict, source: str) -> None:
@@ -310,29 +383,32 @@ async def evaluate(hass, groq_client, honorific, tts_entity, speakers,
               if n and n > 1 else
               f"a package has been delivered to {loc}.")
         _log(hass, entity_id, "delivered", det, source)
-        if can_speak:
+        if can_speak and _cooldown_open(entity_id, "delivered"):
             await async_announce(hass, msg, tts_entity, speakers, context="package")
+            _mark_spoken(entity_id, "delivered")
             spoke = True
     # Package removed
     elif prev.get("package") and not det.get("package"):
         away = not _anyone_home(hass)
         _log(hass, entity_id, "removed", det, source)
-        if away and can_speak:
+        if away and can_speak and _cooldown_open(entity_id, "removed"):
             await async_announce(
                 hass,
                 _lead(f"a package was just removed from {loc} while no one is home."),
                 tts_entity, speakers, context="package",
             )
+            _mark_spoken(entity_id, "removed")
             spoke = True
 
     # Mail arrival
     if det.get("mail") and not prev.get("mail"):
         _log(hass, entity_id, "mail", det, source)
-        if can_speak:
+        if can_speak and _cooldown_open(entity_id, "mail"):
             await async_announce(
                 hass, _lead(f"mail has arrived at {loc}."),
                 tts_entity, speakers, context="package",
             )
+            _mark_spoken(entity_id, "mail")
             spoke = True
 
     _STATE[entity_id] = {
@@ -440,10 +516,135 @@ async def note_from_eufy(hass, honorific, tts_entity, speakers,
         if _in_quiet_hours(hass) or not _announcements_on(hass):
             _log(hass, entity_id, "stranded", det, "eufy")
             return
+        if not _cooldown_open(entity_id, "stranded"):
+            # A repeat inside 30 minutes is logged and recorded, not spoken.
+            _log(hass, entity_id, "stranded", det, "eufy")
+            return
         msg = (f"{honorific}, a package at the front door hasn't been picked up yet."
                if honorific else "A package at the front door hasn't been picked up yet.")
         await async_announce(hass, msg, tts_entity, speakers, context="package")
+        _mark_spoken(entity_id, "stranded")
         _log(hass, entity_id, "stranded", det, "eufy")
+
+
+# ── Early checks from sensors ───────────────────────────────────────────────
+# Both triggers only bring a check forward. They add no announcement path: the
+# motion trigger runs the existing periodic_check (second look and state machine
+# unchanged) and the mailbox trigger runs evaluate(). Speech still goes through
+# evaluate()'s own gates, including the 30 minute cooldown.
+
+def _package_detection_on(hass) -> bool:
+    v = _runtime(hass, "package_detection", True)
+    return v if isinstance(v, bool) else str(v).lower() in ("1", "true", "yes", "on")
+
+
+def _eufy_covered_entities(hass) -> set[str]:
+    """Entity ids on a Eufy camera whose package roles note_from_eufy already
+    handles (the same cameras watched_cameras() leaves out of the vision sweep).
+    Never raises."""
+    covered: set[str] = set()
+    try:
+        from . import eufy
+        from homeassistant.helpers import entity_registry as er
+        reg = er.async_get(hass)
+        for cam, roles in eufy.all_camera_roles(hass).items():
+            if "package_delivered" not in roles:
+                continue
+            covered.update(roles.values())
+            entry = reg.async_get(cam)
+            dev = getattr(entry, "device_id", None)
+            if dev:
+                covered.update(e.entity_id for e in reg.entities.values()
+                               if e.device_id == dev)
+    except Exception as exc:
+        _LOGGER.debug("Nova package: eufy coverage lookup failed: %s", exc)
+    return covered
+
+
+def discover_trigger_sensors(hass) -> dict[str, str]:
+    """entity_id -> "motion" | "mailbox" for the binary sensors that may bring a
+    package check forward. Resolved once at setup, like the Eufy role map, so a
+    sensor added later needs a Nova reload."""
+    out: dict[str, str] = {}
+    try:
+        states = hass.states.async_all("binary_sensor")
+    except Exception:
+        return out
+    covered: Optional[set[str]] = None
+    for st in states:
+        e = st.entity_id
+        dc = str((getattr(st, "attributes", None) or {}).get("device_class") or "").lower()
+        if (_name_tokens(e) & _MAILBOX_TOKENS) and (dc == "" or dc in _MAILBOX_DEVICE_CLASSES):
+            out[e] = "mailbox"
+            continue
+        if dc in _MOTION_DEVICE_CLASSES and _is_porch_view(e):
+            if covered is None:
+                covered = _eufy_covered_entities(hass)
+            if e not in covered:
+                out[e] = "motion"
+    return out
+
+
+async def note_from_motion(hass, groq_client, ctx: Callable[[], tuple],
+                           entity_id: str) -> Optional[dict]:
+    """A porch or doorbell motion sensor turned on: wait 20 seconds, then run
+    periodic_check once for the watched cameras. At most one early check every
+    3 minutes in total. `ctx()` returns (honorific, tts_entity, speakers) and is
+    called after the wait, so presence is current when the check runs."""
+    if not (_package_detection_on(hass) and _announcements_on(hass)) or _in_quiet_hours(hass):
+        return None
+    now = _now_mono()
+    last = _TRIGGER_LAST.get(_EARLY_KEY)
+    if last is not None and now - last < _EARLY_CHECK_MIN_GAP_S:
+        return None
+    _TRIGGER_LAST[_EARLY_KEY] = now
+    await asyncio.sleep(_EARLY_CHECK_DELAY_S)
+    if not _package_detection_on(hass):
+        return None
+    honorific, tts_entity, speakers = ctx()
+    return await periodic_check(hass, groq_client, honorific, tts_entity, speakers,
+                                configured_camera=None)
+
+
+def _mail_still_current(prev: dict) -> bool:
+    """mail is True in the tracked state and was set within the cooldown. An
+    older True is left over from an earlier delivery; a mailbox sensor has no
+    camera sweep to clear it."""
+    if not prev.get("mail"):
+        return False
+    since = prev.get("since")
+    if not isinstance(since, datetime):
+        return True
+    age = (datetime.now(timezone.utc).replace(tzinfo=None) - since).total_seconds()
+    return age < _ANNOUNCE_COOLDOWN_S
+
+
+async def note_from_mailbox(hass, groq_client, ctx: Callable[[], tuple],
+                            entity_id: str) -> bool:
+    """A mailbox sensor turned on. Runs evaluate() with source "mailbox" and
+    mail True, package unchanged from the current state. Ignored when mail is
+    already True for this sensor, and at most once every 5 minutes per sensor.
+    Returns whether anything was spoken."""
+    if not _package_detection_on(hass):
+        return False
+    key = f"mailbox:{entity_id}"
+    now = _now_mono()
+    last = _TRIGGER_LAST.get(key)
+    if last is not None and now - last < _MAILBOX_MIN_GAP_S:
+        return False
+    _TRIGGER_LAST[key] = now
+    prev = _STATE.get(entity_id, {"package": False, "mail": False, "count": 0})
+    if _mail_still_current(prev):
+        return False
+    if prev.get("mail"):
+        # Stale True from an earlier delivery: start a new arrival.
+        prev = dict(prev, mail=False)
+        _STATE[entity_id] = prev
+    honorific, tts_entity, speakers = ctx()
+    det = {"package": bool(prev.get("package")), "mail": True,
+           "count": int(prev.get("count") or 0), "description": "(mailbox sensor) mail"}
+    return await evaluate(hass, groq_client, honorific, tts_entity, speakers,
+                          entity_id, det, source="mailbox")
 
 
 def status() -> dict:

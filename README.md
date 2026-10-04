@@ -121,6 +121,7 @@ Everything Nova can do today, grouped by domain. In conversation these surface a
 **Cameras and vision**
 - Look at a camera on demand and describe it (`look_at_camera`); report who's recognized at the door (`who_do_you_see`).
 - Automatic doorbell-press analysis, package and mail detection, and silent visitor learning — over Nest/Frigate vision, or natively off a Eufy Security doorbell's own sensors.
+- Package and mail alerts skip wide views (yard, driveway, garden and similar), speak at most once per camera and kind every 30 minutes, and can start early from a porch motion sensor or a mailbox sensor.
 
 **Awareness, diagnostics and energy**
 - Report the cognitive core's state, connectivity, and a full self-diagnostic (`cognitive_status`, `connectivity_status`, `system_diagnostics`); reason about the root cause of a fault (`root_cause`).

@@ -564,6 +564,70 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
         _LOGGER.info("Nova: package/mail detection active (porch sweep every %s min)",
                      int(PKG_INTERVAL.total_seconds() // 60))
 
+    # ── Package & mail — early checks from porch motion / mailbox sensors ───
+    # Discovery happens once here, like the Eufy role map above, so a sensor
+    # added later needs a Nova reload. A porch motion sensor only brings the
+    # existing sweep forward (20 s wait, one early check per 3 min). A mailbox
+    # sensor runs the same state machine with mail True. Neither adds an
+    # announcement path; package_monitor applies quiet hours, announcements and
+    # the 30 minute cooldown. Eufy cameras with native package sensors are left
+    # to note_from_eufy.
+    try:
+        from homeassistant.helpers.event import async_track_state_change_event as _track_pkg
+        from . import package_monitor as _pkg_mon
+
+        _pkg_sensors = _pkg_mon.discover_trigger_sensors(hass)
+        if _pkg_sensors:
+            _pkg_tasks: set = set()
+
+            def _pkg_ctx() -> tuple:
+                return (_live_honorific(hass), _get_tts(hass, entry, context="package"),
+                        _get_speakers(hass, entry))
+
+            async def _run_pkg_trigger(kind: str, sensor_id: str) -> None:
+                try:
+                    if kind == "mailbox":
+                        await _pkg_mon.note_from_mailbox(hass, llm_client, _pkg_ctx, sensor_id)
+                    else:
+                        await _pkg_mon.note_from_motion(hass, llm_client, _pkg_ctx, sensor_id)
+                except Exception as exc:  # CancelledError is not an Exception
+                    _LOGGER.debug("Nova package sensor trigger error (%s): %s", sensor_id, exc)
+
+            @callback
+            def _auto_pkg_sensor(event) -> None:
+                new_state = event.data.get("new_state")
+                old_state = event.data.get("old_state")
+                # Only a real off -> on change; unavailable -> on after a restart
+                # or reconnect is not someone at the door.
+                if new_state is None or new_state.state != "on":
+                    return
+                if old_state is None or old_state.state != "off":
+                    return
+                sensor_id = event.data.get("entity_id")
+                kind = _pkg_sensors.get(sensor_id)
+                if not kind or not _auto_flag("package_detection", True):
+                    return
+                # A background task: it may sleep 20 s, and must not hold up
+                # Home Assistant's own task tracking or shutdown.
+                task = hass.async_create_background_task(
+                    _run_pkg_trigger(kind, sensor_id), "nova_package_sensor_trigger")
+                _pkg_tasks.add(task)
+                task.add_done_callback(_pkg_tasks.discard)
+
+            def _cancel_pkg_tasks() -> None:
+                for _t in list(_pkg_tasks):
+                    _t.cancel()
+
+            camera_unsubs.append(_track_pkg(hass, list(_pkg_sensors), _auto_pkg_sensor))
+            camera_unsubs.append(_cancel_pkg_tasks)
+            _LOGGER.info(
+                "Nova: package early-check sensors active (%d motion, %d mailbox)",
+                sum(1 for k in _pkg_sensors.values() if k == "motion"),
+                sum(1 for k in _pkg_sensors.values() if k == "mailbox"),
+            )
+    except Exception as exc:
+        _LOGGER.debug("Nova: package sensor listener registration failed: %s", exc)
+
     # Hourly gentle service-health sweep (v6.70.3): re-runs the core-dependency
     # checks on its own so the panel stays current without the user opening it.
     # It's reachability-only and never alarms — a synthetic miss yields IDLE, and

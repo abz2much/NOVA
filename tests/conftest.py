@@ -396,6 +396,24 @@ def _isolated_config(request, tmp_path_factory):
         mp.undo()
 
 
+@pytest.fixture(autouse=True)
+def _reset_package_monitor_holds():
+    """package_monitor keeps its speech cooldown and trigger debounce stamps in
+    module level dicts next to _STATE, and _load() caches the module across
+    tests. Clear them around every test so one test's announcement cannot
+    silence the next one's."""
+    def _clear():
+        for key in ("jc.package_monitor", "custom_components.nova.package_monitor"):
+            mod = sys.modules.get(key)
+            for name in ("_LAST_SPOKEN", "_TRIGGER_LAST"):
+                held = getattr(mod, name, None) if mod is not None else None
+                if isinstance(held, dict):
+                    held.clear()
+    _clear()
+    yield
+    _clear()
+
+
 @pytest.fixture
 def load():
     """Return the component-module loader (call as load('cognitive_core'))."""
