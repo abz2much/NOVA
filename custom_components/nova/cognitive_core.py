@@ -3001,6 +3001,8 @@ async def _emit_action(hass, config, action, sleeping):
     # below, and the voice announcement's Spoken History link, all share it.
     from . import action_log
     request_id = action_log.new_request_id()
+    # Set on anticipation alerts: the Decision Record the user can rate.
+    decision_id = action.get("decision_id")
 
     # Route announcement
     try:
@@ -3026,8 +3028,10 @@ async def _emit_action(hass, config, action, sleeping):
                 await _notify_all_devices(hass, config, message, action_type, _snap_url,
                                            request_id=request_id)
             else:
+                # Adaptive awareness: the alert itself carries the rating buttons.
                 await _push_notification(hass, config, message, action_type, _snap_url,
-                                          request_id=request_id)
+                                          request_id=request_id,
+                                          extra_data=_rating_data(decision_id))
         else:
             # Get announcement speakers from config
             ann_speakers = None
@@ -3062,6 +3066,16 @@ async def _emit_action(hass, config, action, sleeping):
                         context="sentinel", action_request_id=request_id,
                     )
 
+            # Adaptive awareness: a spoken alert gets a silent phone
+            # notification with the rating buttons, so it can be rated too.
+            if decision_id is not None and urgency not in ("critical", "high"):
+                try:
+                    from . import adaptive_awareness
+                    await adaptive_awareness.async_send_rating_prompt(
+                        hass, config, message, decision_id)
+                except Exception as exc:
+                    _LOGGER.debug("rating prompt failed: %s", exc)
+
             # Also push critical/high alerts to phones
             if urgency in ("critical", "high"):
                 _snap_url = action.get("snapshot_url")
@@ -3070,10 +3084,22 @@ async def _emit_action(hass, config, action, sleeping):
                                                request_id=request_id)
                 else:
                     await _push_notification(hass, config, message, action_type, _snap_url,
-                                              request_id=request_id)
+                                              request_id=request_id,
+                                              extra_data=_rating_data(decision_id))
 
     except Exception as exc:
         _LOGGER.warning("Cognitive: action routing failed: %s", exc)
+
+
+def _rating_data(decision_id) -> dict:
+    """Adaptive awareness rating buttons for a phone alert, or {}."""
+    if decision_id is None:
+        return {}
+    try:
+        from . import adaptive_awareness
+        return adaptive_awareness.rating_push_data(decision_id)
+    except Exception:
+        return {}
 
 
 def _lockdown_exempt_locks() -> set:
@@ -3347,7 +3373,7 @@ async def request_lockdown(on: bool, reason: str = "requested", hass: HomeAssist
 
 
 async def _push_notification(hass, config, message, action_type, snapshot_url=None,
-                              *, request_id=None):
+                              *, request_id=None, extra_data=None):
     """Push notification to phone, with an optional snapshot image (v6.69.0).
 
     request_id, when given, is the caller's (_emit_action's or
@@ -3357,10 +3383,11 @@ async def _push_notification(hass, config, message, action_type, snapshot_url=No
 
     data = {"message": message,
             "title": _notify_i18n().title(action_type, _hass_lang(hass))}
-    img_data = _notification_image_data(hass, snapshot_url)
+    img_data = dict(_notification_image_data(hass, snapshot_url))
+    img_data.update(extra_data or {})
     if img_data:
         data["data"] = img_data
-    await async_send_configured_notifications(
+    return await async_send_configured_notifications(
         hass, config, data,
         request_id=request_id, action="cognitive_alert", source="proactive",
         requested_state=action_type,

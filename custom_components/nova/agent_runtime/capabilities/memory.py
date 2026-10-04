@@ -164,16 +164,6 @@ async def _exec_ignore(hass: HomeAssistant, args: dict) -> str:
             duration_minutes=int(args.get("duration_minutes", 0)),
             reason=args.get("reason", "user request"),
         )
-        if result.get("success"):
-            # Adaptive awareness: muting something right after an alert about it
-            # counts as that alert being unnecessary. A no-op unless opted in.
-            try:
-                from ... import adaptive_awareness
-                await hass.async_add_executor_job(
-                    adaptive_awareness.note_ignored,
-                    str(args.get("entity_pattern", "")))
-            except Exception:
-                pass
         return json.dumps(result)
     except Exception as exc:
         return json.dumps({"error": str(exc)})

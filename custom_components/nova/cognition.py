@@ -768,15 +768,17 @@ def distance_home_km(hass, st):
 def _log_decision(kind, observation, interpretation, decision, reason, confidence=None,
                   ref=None):
     """Record a proactive decision to the immutable Decision Record (v7.32.0).
-    Best-effort by design — a logging failure must never break the decision."""
+    Best-effort by design — a logging failure must never break the decision.
+    Returns the record id (None on failure), so the alert can carry it and
+    the user can rate that exact alert."""
     try:
         from . import decision_record
-        decision_record.record(
+        return decision_record.record(
             kind, observation=observation, interpretation=interpretation,
             decision=decision, reason=reason, confidence=confidence, ref=ref,
         )
     except Exception:
-        pass
+        return None
 
 
 def predict_overdue(hass, now: float = None) -> list:
@@ -817,7 +819,7 @@ def predict_overdue(hass, now: float = None) -> list:
             st = hass.states.get(eid)
             name = st.attributes.get("friendly_name", eid) if st else eid
             usual = f"{int(mean_s // 3600):02d}:{int((mean_s % 3600) // 60):02d}"
-            _log_decision(
+            decision_id = _log_decision(
                 "anticipation_overdue",
                 {"entity": name, "entity_id": eid, "usual_active_by": usual},
                 {"predicted": "no activity yet, past the usual time"},
@@ -834,6 +836,7 @@ def predict_overdue(hass, now: float = None) -> list:
                 ),
                 "pattern_key": f"overdue:{eid}",
                 "offer": False,
+                "decision_id": decision_id,
             })
     except Exception as exc:
         _LOGGER.debug("predict_overdue error: %s", exc)
@@ -1017,7 +1020,7 @@ async def predict_departure(hass, now: float = None) -> list:
             _RECUR_ALERTED[key] = today
             mins_to = max(0, int((start_dt - now_dt).total_seconds() // 60))
             loc_str = (" at %s" % loc) if loc else ""
-            _log_decision(
+            decision_id = _log_decision(
                 "anticipation_departure",
                 {"event": title, "location": loc or None, "minutes_until": mins_to},
                 {"predicted": "departure imminent — should leave soon"},
@@ -1029,6 +1032,7 @@ async def predict_departure(hass, now: float = None) -> list:
                 "message": ("Heads up — %s%s begins in about %d minutes; "
                             "you'll want to head out." % (title, loc_str, mins_to)),
                 "pattern_key": key, "offer": False,
+                "decision_id": decision_id,
             })
             break  # one departure alert per tick — the nearest event
     except Exception as exc:
@@ -1121,7 +1125,7 @@ def predict_routine_start(hass, now: float = None) -> list:
             msg = _routines.routine_sentence(
                 entity, state, names,
                 person_name=_person_name(hass, person) if others_home else "")
-            _log_decision(
+            decision_id = _log_decision(
                 "anticipation_routine",
                 {"person": person, "routine": rkey},
                 {"predicted": "routine usually starts around now"},
@@ -1135,6 +1139,7 @@ def predict_routine_start(hass, now: float = None) -> list:
                 # One habit per person and device, whatever the hour.
                 "habit_key": "routine:%s:%s:%s" % (person, entity, state),
                 "entity_id": entity,
+                "decision_id": decision_id,
             })
     except Exception as exc:
         _LOGGER.debug("predict_routine_start error: %s", exc)
@@ -1195,7 +1200,7 @@ def predict_presence(hass, now: float = None) -> list:
                     if _RECUR_ALERTED.get(key) == today:
                         continue
                     _RECUR_ALERTED[key] = today
-                    _log_decision(
+                    decision_id = _log_decision(
                         "anticipation_presence",
                         {"person": name, "entity_id": eid,
                          "usual_out_by": routines.hhmm(r.mean), "day_type": r.day_type},
@@ -1209,6 +1214,7 @@ def predict_presence(hass, now: float = None) -> list:
                         "type": "anticipation_presence", "urgency": "low",
                         "message": msg,
                         "pattern_key": f"presence_depart:{eid}:{r.key}", "offer": False,
+                        "decision_id": decision_id,
                     })
 
             # Arrival overdue — usually home by now, not home, did leave today
@@ -1221,7 +1227,7 @@ def predict_presence(hass, now: float = None) -> list:
                 key = "arr:" + eid
                 if now_secs > m + tol and _RECUR_ALERTED.get(key) != today:
                     _RECUR_ALERTED[key] = today
-                    _log_decision(
+                    decision_id = _log_decision(
                         "anticipation_presence",
                         {"person": name, "entity_id": eid, "usual_home_by": _hhmm(m)},
                         {"predicted": "not home yet, past the usual arrival time"},
@@ -1234,6 +1240,7 @@ def predict_presence(hass, now: float = None) -> list:
                         "message": (f"{name} is usually home by around {_hhmm(m)}, "
                                     f"but isn't back yet."),
                         "pattern_key": f"presence_arrive:{eid}", "offer": False,
+                        "decision_id": decision_id,
                     })
     except Exception as exc:
         _LOGGER.debug("predict_presence error: %s", exc)

@@ -1082,7 +1082,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v8.7.2
+ * v8.7.3
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1158,7 +1158,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.7.2 ",
+      console.log("%c Nova Panel %c v8.7.3 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -4758,7 +4758,7 @@ ${this._htmlDashboardBody()}`;
       ${onOff("pattern_learn_motion", false, { label: "Learn motion/presence triggers" })}
       ${onOff("adaptive_interruption_budget", false, { label: "Adaptive interruptions", sub: "speak less after alerts are repeatedly marked unhelpful" })}
       ${onOff("adaptive_suggestion_threshold", false, { label: "Adaptive suggestions", sub: "adjust the suggestion bar from past feedback" })}
-      ${onOff("adaptive_awareness", false, { label: "Adaptive awareness", sub: "wait longer before routine alerts you mute or mark unnecessary" })}
+      ${onOff("adaptive_awareness", false, { label: "Adaptive awareness", sub: "routine alerts get Helpful / Not helpful buttons on your phone; Nova adjusts its timing only from your taps" })}
       ${num("observer_group_debounce", "Sibling-burst coalescing (sec)", "90", 0, 600, 10)}
       ${onOff("continued_conversation_enabled", false, { label: "Continued conversation" })}
       ${onOff("continued_conversation_multi_satellite", false, { label: "Follow me between rooms", sub: "reopen the mic where you moved to (needs 2+ satellites)" })}

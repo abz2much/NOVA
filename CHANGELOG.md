@@ -1,3 +1,17 @@
+## [8.7.3] — Adaptive awareness learns only from what you confirm
+
+**Changed**
+- Adaptive awareness no longer guesses. Before, a routine alert left unmuted for a day counted as welcome, and muting something soon after an alert counted as unwelcome. Neither counts any more.
+- Each routine alert now comes with Helpful and Not helpful buttons on your phone. When the alert goes to your phone (quiet hours, asleep), the buttons are on it. When it is spoken, a silent phone notification, "Was this helpful?", carries them. It makes no sound.
+- You can still rate an alert in the panel (Logs, Decisions: Helpful, Unnecessary, Wrong).
+- Only those ratings count. Nothing changes until at least five alerts have been rated, and the first rating of an alert stands.
+
+**Caveats**
+- The buttons only appear while adaptive awareness is on, and only on routine alerts that leave a decision record: usually active by now, usually home or out by now, routine starts and calendar departures.
+- Ratings already stored by earlier versions, including those from mutes, still count until they are 30 days old.
+- On Android the silent notification uses a new "Nova ratings" channel, which you can change in the app's notification settings.
+- Hard refresh the page (Ctrl+Shift+R) after updating.
+
 ## [8.7.2] — Scene memory keeps only real sightings, GPT-5 replies, and review fixes
 
 **Fixed**
