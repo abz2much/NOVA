@@ -806,6 +806,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
     except Exception as exc:
         _LOGGER.debug("Nova: automation probation listener registration failed: %s", exc)
 
+    # Adaptive awareness: the Helpful / Not helpful buttons on routine alerts.
+    # Taps are ignored while the setting is off.
+    try:
+        from . import adaptive_awareness
+        resources.add_unsub(adaptive_awareness.async_listen(hass))
+    except Exception as exc:
+        _LOGGER.debug("Nova: adaptive awareness listener registration failed: %s", exc)
+
     # Reminder watcher — checks every 30 seconds for due reminders
     reminder_watcher = ReminderWatcher(
         hass,

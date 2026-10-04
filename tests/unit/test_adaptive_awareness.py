@@ -1,10 +1,13 @@
-"""Adaptive awareness (opt in): anticipation alerts learn from alerts you mute.
+"""Adaptive awareness (opt in): anticipation alerts learn from your ratings.
 
-Pins the rules: off by default, needs enough judged alerts, small bounded
-steps, anticipation records only (never safety), and an ignore right after an
-alert judges that alert "unnecessary".
+Pins the rules: off by default, needs enough rated alerts, small bounded
+steps, anticipation records only (never safety), and only a confirmation (a
+Helpful / Not helpful tap, or the panel) is a verdict. Silence and muting
+never are.
 """
 import datetime
+import sys
+import types
 import time
 
 import pytest
@@ -117,48 +120,14 @@ async def test_mostly_welcome_is_a_little_looser_never_below_baseline_days(
     assert aa.extra_min_days() == 0
 
 
-async def test_alerts_left_unmuted_for_a_day_count_as_welcome(aa, monkeypatch, load, db, dr):
-    """Muting is the only automatic verdict, so without this the rate was
-    always 1.0 and could only ever say "wait longer"."""
+async def test_unrated_alerts_count_for_nothing(aa, monkeypatch, load, db, dr):
+    """No guessing: alerts nobody rated never count as welcome, however old."""
     _enable(monkeypatch, load)
-    old = time.time() - 2 * 86400
-    for _ in range(9):
-        dr.record("anticipation_overdue", ts=old, db_path=db)
-    _judged(dr, db, "anticipation_overdue", ["unnecessary"])
-    assert await aa.async_refresh(_Hass(), db_path=db) == -0.07
-    st = aa.status()
-    assert st["judged"] == 10 and st["unwelcome_rate"] == 0.1
-
-
-async def test_recent_unjudged_alerts_are_not_counted_yet(aa, monkeypatch, load, db, dr):
-    """An alert from the last day can still be muted, so it is not counted."""
-    _enable(monkeypatch, load)
-    for _ in range(9):
-        dr.record("anticipation_overdue", ts=time.time() - 3600, db_path=db)
+    for ts in (time.time() - 2 * 86400, time.time() - 3600):
+        for _ in range(9):
+            dr.record("anticipation_overdue", ts=ts, db_path=db)
     assert await aa.async_refresh(_Hass(), db_path=db) == 0.0
     assert aa.status()["judged"] == 0
-
-
-async def test_mostly_muted_still_waits_longer(aa, monkeypatch, load, db, dr):
-    _enable(monkeypatch, load)
-    dr.record("anticipation_overdue", ts=time.time() - 2 * 86400, db_path=db)
-    _judged(dr, db, "anticipation_overdue", ["unnecessary"] * 6)
-    assert await aa.async_refresh(_Hass(), db_path=db) == 0.15
-
-
-def test_settled_unjudged_count_window_and_family(dr, db):
-    now = time.time()
-    dr.record("anticipation_overdue", ts=now - 2 * 86400, db_path=db)     # counted
-    dr.record("anticipation_presence", ts=now - 3 * 86400, db_path=db)    # counted
-    dr.record("anticipation_overdue", ts=now - 3600, db_path=db)          # too recent
-    dr.record("anticipation_overdue", ts=now - 40 * 86400, db_path=db)    # too old
-    dr.record("intrusion", ts=now - 2 * 86400, db_path=db)                # other kind
-    rid = dr.record("anticipation_overdue", ts=now - 2 * 86400, db_path=db)
-    dr.set_outcome(rid, "good", source="test", db_path=db)                # judged
-    assert dr.settled_unjudged_count("anticipation", 30 * 86400, 86400,
-                                     db_path=db, prefix=True) == 2
-    assert dr.settled_unjudged_count("anticipation", 30 * 86400, 86400,
-                                     db_path=db + ".missing", prefix=True) == 0
 
 
 async def test_only_anticipation_records_count(aa, monkeypatch, load, db, dr):
@@ -188,57 +157,107 @@ def test_outcome_rate_prefix_matches_family_only(dr, db):
     assert fam["judged"] == 3 and fam["unwelcome_rate"] == pytest.approx(2 / 3, abs=1e-3)
 
 
-# ── ignoring something judges the alert ─────────────────────────────────────
+# ── confirmations: the rating buttons ───────────────────────────────────────
 
-def test_ignore_judges_matching_recent_alert(aa, monkeypatch, load, db, dr):
-    _enable(monkeypatch, load)
-    rid = dr.record("anticipation_overdue", ref="entity:binary_sensor.porch_door",
-                    db_path=db)
-    other = dr.record("anticipation_overdue", ref="entity:binary_sensor.garage",
-                      db_path=db)
-    assert aa.note_ignored("binary_sensor.porch_door", db_path=db) == 1
-    assert dr.get(rid, db_path=db)["outcome"] == "unnecessary"
-    assert dr.get(rid, db_path=db)["outcome_source"] == "ignore"
-    assert dr.get(other, db_path=db)["outcome"] is None
-
-
-def test_ignore_pattern_can_be_a_glob(aa, monkeypatch, load, db, dr):
-    _enable(monkeypatch, load)
-    a = dr.record("anticipation_overdue", ref="entity:binary_sensor.porch_door",
-                  db_path=db)
-    b = dr.record("anticipation_presence", ref="entity:binary_sensor.porch_back",
-                  db_path=db)
-    c = dr.record("anticipation_overdue", ref="entity:lock.front", db_path=db)
-    assert aa.note_ignored("binary_sensor.porch_*", db_path=db) == 2
-    assert dr.get(a, db_path=db)["outcome"] == "unnecessary"
-    assert dr.get(b, db_path=db)["outcome"] == "unnecessary"
-    assert dr.get(c, db_path=db)["outcome"] is None
-
-
-def test_ignore_leaves_old_judged_and_other_kinds_alone(aa, monkeypatch, load, db, dr):
-    _enable(monkeypatch, load)
-    old = dr.record("anticipation_overdue", ref="entity:lock.front",
-                    ts=time.time() - 3 * 86400, db_path=db)
-    done = dr.record("anticipation_overdue", ref="entity:lock.front", db_path=db)
-    dr.set_outcome(done, "good", source="panel", db_path=db)
-    safety = dr.record("intrusion", ref="entity:lock.front", db_path=db)
-    assert aa.note_ignored("lock.front", db_path=db) == 0
-    assert dr.get(old, db_path=db)["outcome"] is None
-    assert dr.get(done, db_path=db)["outcome"] == "good"
-    assert dr.get(safety, db_path=db)["outcome"] is None
-
-
-def test_ignore_records_nothing_when_off(aa, monkeypatch, load, db, dr):
+def test_rating_buttons_only_when_on_and_linked(aa, monkeypatch, load):
     _enable(monkeypatch, load, on=False)
-    rid = dr.record("anticipation_overdue", ref="entity:lock.front", db_path=db)
-    assert aa.note_ignored("lock.front", db_path=db) == 0
+    assert aa.rating_actions(7) == []
+    _enable(monkeypatch, load)
+    assert aa.rating_actions(None) == []
+    assert aa.rating_actions("junk") == []
+    assert aa.rating_actions(7) == [
+        {"action": "NOVA_AWARE_GOOD_7", "title": "Helpful"},
+        {"action": "NOVA_AWARE_BAD_7", "title": "Not helpful"}]
+
+
+def test_parse_action(aa):
+    assert aa.parse_action("NOVA_AWARE_GOOD_12") == (12, True)
+    assert aa.parse_action("NOVA_AWARE_BAD_3") == (3, False)
+    for junk in (None, "", "NOVA_SLEEP_YES_ab", "NOVA_AWARE_MAYBE_3",
+                 "NOVA_AWARE_GOOD_x", "NOVA_AWARE_GOOD_"):
+        assert aa.parse_action(junk) is None
+
+
+def test_tap_records_the_verdict_once(aa, monkeypatch, load, db, dr):
+    _enable(monkeypatch, load)
+    good = dr.record("anticipation_overdue", db_path=db)
+    bad = dr.record("anticipation_presence", db_path=db)
+    assert aa.record_rating(good, True, db_path=db) is True
+    assert aa.record_rating(bad, False, db_path=db) is True
+    assert dr.get(good, db_path=db)["outcome"] == "good"
+    assert dr.get(good, db_path=db)["outcome_source"] == "phone"
+    assert dr.get(bad, db_path=db)["outcome"] == "unnecessary"
+    # The first verdict stands.
+    assert aa.record_rating(good, False, db_path=db) is False
+    assert dr.get(good, db_path=db)["outcome"] == "good"
+
+
+def test_tap_cannot_judge_other_kinds_or_while_off(aa, monkeypatch, load, db, dr):
+    _enable(monkeypatch, load)
+    safety = dr.record("intrusion", db_path=db)
+    assert aa.record_rating(safety, False, db_path=db) is False
+    assert dr.get(safety, db_path=db)["outcome"] is None
+    assert aa.record_rating(999, True, db_path=db) is False
+    _enable(monkeypatch, load, on=False)
+    rid = dr.record("anticipation_overdue", db_path=db)
+    assert aa.record_rating(rid, True, db_path=db) is False
     assert dr.get(rid, db_path=db)["outcome"] is None
 
 
-def test_ignore_with_empty_pattern_judges_nothing(aa, monkeypatch, load, db, dr):
+async def test_rated_alerts_move_the_adjustment(aa, monkeypatch, load, db, dr):
     _enable(monkeypatch, load)
-    dr.record("anticipation_overdue", ref="entity:lock.front", db_path=db)
-    assert aa.note_ignored("", db_path=db) == 0
+    for _ in range(6):
+        aa.record_rating(dr.record("anticipation_routine", db_path=db), True, db_path=db)
+    assert await aa.async_refresh(_Hass(), db_path=db) == -0.07
+
+
+async def test_listener_stores_a_tap_and_refreshes(aa, monkeypatch, load, db, dr, fake_hass):
+    _enable(monkeypatch, load)
+    rid = dr.record("anticipation_overdue", db_path=db)
+    stored = []
+    monkeypatch.setattr(aa, "record_rating",
+                        lambda r, h: stored.append((r, h)) or True)
+    aa._STATE["ts"] = time.time()
+    listeners = {}
+    monkeypatch.setattr(fake_hass.bus, "async_listen",
+                        lambda ev, fn: listeners.setdefault(ev, fn) and (lambda: None))
+    aa.async_listen(fake_hass)
+    handler = listeners["mobile_app_notification_action"]
+    handler(type("E", (), {"data": {"action": "NOVA_SLEEP_YES_ab"}})())
+    handler(type("E", (), {"data": {"action": f"NOVA_AWARE_BAD_{rid}"}})())
+    await fake_hass.drain()
+    assert stored == [(rid, False)]
+    assert aa._STATE["ts"] == 0.0
+
+
+async def test_rating_prompt_is_silent_and_carries_the_buttons(aa, monkeypatch, load, fake_hass):
+    nt = load("notify_targets")
+    sent = []
+
+    async def _send(hass, config, payload, **kw):
+        sent.append((payload, kw))
+        return ["notify.phone"]
+    monkeypatch.setattr(nt, "async_send_configured_notifications", _send)
+    _enable(monkeypatch, load, on=False)
+    assert await aa.async_send_rating_prompt(fake_hass, {}, "msg", 5) is False
+    _enable(monkeypatch, load)
+    assert await aa.async_send_rating_prompt(fake_hass, {}, "msg", None) is False
+    assert await aa.async_send_rating_prompt(fake_hass, {}, "Porch usually opens by now", 5)
+    payload, kw = sent[-1]
+    assert payload["title"] == "Was this helpful?"
+    assert payload["message"] == "Porch usually opens by now"
+    assert [a["action"] for a in payload["data"]["actions"]] == [
+        "NOVA_AWARE_GOOD_5", "NOVA_AWARE_BAD_5"]
+    assert payload["data"]["push"] == {"interruption-level": "passive"}
+    assert payload["data"]["importance"] == "low"
+    assert len(sent) == 1
+
+
+def test_ignore_tool_no_longer_judges_anything(load):
+    import inspect
+    mem = load("agent_runtime.capabilities.memory")
+    assert "adaptive_awareness" not in inspect.getsource(mem._exec_ignore)
+    assert not hasattr(load("adaptive_awareness"), "note_ignored")
 
 
 # ── the alerts themselves ───────────────────────────────────────────────────
@@ -296,3 +315,83 @@ def test_overdue_alert_links_to_its_entity(cog, dr, db, fake_hass, monkeypatch):
     assert len(cog.predict_overdue(_hass(fake_hass), now)) == 1
     rows = dr.recent(kind="anticipation_overdue", db_path=db)
     assert rows and rows[0]["ref"] == f"entity:{EID}"
+
+
+def test_overdue_alert_carries_its_decision_id(cog, dr, db, fake_hass, monkeypatch):
+    now = _at(3, 0)
+    _learn(cog, now, 10)
+    monkeypatch.setattr(dr, "_resolve", lambda p: db)
+    out = cog.predict_overdue(_hass(fake_hass), now)
+    rows = dr.recent(kind="anticipation_overdue", db_path=db)
+    assert out[0]["decision_id"] == rows[0]["id"]
+
+
+# ── routing: every rated alert reaches the phone with the buttons ──────────
+
+@pytest.fixture
+def routed(load, monkeypatch, aa):
+    cc = load("cognitive_core")
+    hab = load("habituation")
+    monkeypatch.setattr(hab, "is_quiet", lambda k: False)
+    monkeypatch.setattr(hab, "record", lambda *a, **k: None)
+    pushes, prompts, spoken = [], [], []
+
+    async def _push(hass, config, message, action_type, snap=None, *,
+                    request_id=None, extra_data=None):
+        pushes.append(extra_data)
+    monkeypatch.setattr(cc, "_push_notification", _push)
+
+    async def _prompt(hass, config, message, decision_id):
+        prompts.append((message, decision_id))
+        return True
+    monkeypatch.setattr(aa, "async_send_rating_prompt", _prompt)
+
+    tts = types.ModuleType("jc.tts_helper")
+    tts.resolve_tts_for_context = lambda *a, **k: "tts.x"
+
+    async def _announce(hass, message, *a, **k):
+        spoken.append(message)
+    tts.async_announce = _announce
+    ar = types.ModuleType("jc.audio_routing")
+    ar.observer_speak_target = lambda *a, **k: (["media_player.x"], "normal")
+    monkeypatch.setitem(sys.modules, "jc.tts_helper", tts)
+    monkeypatch.setitem(sys.modules, "jc.audio_routing", ar)
+    sd = types.ModuleType("jc.sleep_detection")
+    sd._in_quiet_hours = lambda *a: False
+    monkeypatch.setitem(sys.modules, "jc.sleep_detection", sd)
+    return cc, pushes, prompts, spoken
+
+
+def _alert(**kw):
+    a = {"type": "anticipation_overdue", "urgency": "low",
+         "message": "The porch usually has activity by now.",
+         "pattern_key": "overdue:binary_sensor.porch", "decision_id": 42}
+    a.update(kw)
+    return a
+
+
+async def test_spoken_alert_gets_a_silent_rating_prompt(routed, fake_hass, monkeypatch, load):
+    cc, pushes, prompts, spoken = routed
+    _enable(monkeypatch, load)
+    await cc._emit_action(fake_hass, {}, _alert(), sleeping=False)
+    assert spoken and prompts == [("The porch usually has activity by now.", 42)]
+    assert pushes == []
+
+
+async def test_alert_pushed_in_quiet_hours_carries_the_buttons(routed, fake_hass, monkeypatch, load):
+    cc, pushes, prompts, spoken = routed
+    _enable(monkeypatch, load)
+    await cc._emit_action(fake_hass, {}, _alert(), sleeping=True)
+    assert not spoken and prompts == []
+    assert [a["action"] for a in pushes[0]["actions"]] == [
+        "NOVA_AWARE_GOOD_42", "NOVA_AWARE_BAD_42"]
+
+
+async def test_no_buttons_without_a_record_or_while_off(routed, fake_hass, monkeypatch, load):
+    cc, pushes, prompts, spoken = routed
+    _enable(monkeypatch, load)
+    await cc._emit_action(fake_hass, {}, _alert(decision_id=None), sleeping=True)
+    assert pushes == [{}]
+    _enable(monkeypatch, load, on=False)
+    await cc._emit_action(fake_hass, {}, _alert(pattern_key="overdue:other"), sleeping=True)
+    assert pushes[-1] == {}
