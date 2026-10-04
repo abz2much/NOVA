@@ -72,10 +72,8 @@ from .ws_panel_stats import (
     _get_knowledge_stats,
     _get_lockdown_status,
     _get_observer_stats,
-    _get_person_routines,
     _get_sentinel_rules,
     _get_suggestions,
-    _named_decision,
 )
 # The AI settings commands live in ws_ai.py. async_register registers the
 # handlers by name; invalidate_model_cache is public and also used below.
@@ -87,6 +85,37 @@ from .ws_ai import (
     ws_list_models,
     ws_set_credential,
     ws_test_provider_endpoint,
+)
+# The knowledge, decision and automation commands live in ws_knowledge.py,
+# ws_decisions.py and ws_automation.py. async_register registers the handlers
+# by name.
+from .ws_automation import (
+    ws_automation_trial_feedback,
+    ws_get_person_routines,
+    ws_goal_action,
+    ws_list_automation_inventory,
+    ws_list_automation_trials,
+    ws_suggestion_action,
+)
+from .ws_decisions import (
+    ws_get_calibration,
+    ws_get_cognitive_status,
+    ws_get_decision,
+    ws_list_decisions,
+    ws_replay_decision,
+    ws_root_cause,
+    ws_run_analysis,
+    ws_set_decision_outcome,
+)
+from .ws_knowledge import (
+    ws_add_knowledge,
+    ws_clear_scene_memory,
+    ws_edit_pending_fact,
+    ws_forget_knowledge,
+    ws_get_knowledge,
+    ws_pending_fact_action,
+    ws_search_memory,
+    ws_set_lockdown,
 )
 from .const import (
     CONF_BEDROOM_AREAS,
@@ -992,231 +1021,6 @@ async def ws_reload_appliances(
         connection.send_error(msg["id"], "reload_failed", safe_error_message(exc, where="reload_appliances", log=True))
 
 
-@websocket_api.require_admin
-@websocket_api.websocket_command({
-    vol.Required("type"): "nova/set_lockdown",
-    vol.Required("on"): bool,
-})
-@websocket_api.async_response
-async def ws_set_lockdown(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict[str, Any],
-) -> None:
-    """Engage or lift the formal lockdown from the panel."""
-    try:
-        from . import cognitive_core
-        ok = await cognitive_core.request_lockdown(
-            bool(msg["on"]), reason="requested from panel", hass=hass)
-        status = cognitive_core.lockdown_status()
-        if not ok:
-            _LOGGER.warning("Panel lockdown request returned not-ok (on=%s); status=%s",
-                            bool(msg["on"]), status)
-        connection.send_result(msg["id"], {"ok": ok, "lockdown": status})
-    except Exception as exc:
-        _LOGGER.exception("Panel lockdown request failed: %s", exc)
-        connection.send_error(msg["id"], "lockdown_failed", safe_error_message(exc))
-
-
-@websocket_api.websocket_command({
-    vol.Required("type"): "nova/get_knowledge",
-    vol.Optional("subject"): str,
-})
-@websocket_api.async_response
-async def ws_get_knowledge(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict[str, Any],
-) -> None:
-    """Return the curated facts Nova knows, for the Memory panel.
-
-    `facts` is confirmed-only (v7.88.0) -- a fact agent.py's `remember` tool
-    staged as pending must not appear here as if it were already established;
-    `pending` carries those separately so the panel can show a distinct
-    review queue (confirm / reject / edit) instead of silently merging them
-    into the trusted list.
-    """
-    try:
-        from . import knowledge
-        subject = msg.get("subject")
-        facts = await hass.async_add_executor_job(
-            lambda: knowledge.all_facts(subject=subject, status="confirmed"))
-        pending = await hass.async_add_executor_job(
-            lambda: knowledge.pending_facts(subject=subject))
-        kstats = await hass.async_add_executor_job(knowledge.stats)
-        connection.send_result(msg["id"], {"facts": facts, "pending": pending, "stats": kstats})
-    except Exception as exc:
-        _LOGGER.exception("get_knowledge failed: %s", exc)
-        connection.send_error(msg["id"], "knowledge_failed", safe_error_message(exc))
-
-
-@websocket_api.require_admin
-@websocket_api.websocket_command({
-    vol.Required("type"): "nova/add_knowledge",
-    vol.Required("key"): str,
-    vol.Required("value"): str,
-    vol.Optional("subject"): str,
-    vol.Optional("kind"): str,
-})
-@websocket_api.async_response
-async def ws_add_knowledge(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict[str, Any],
-) -> None:
-    """Teach Nova a fact from the Memory panel."""
-    try:
-        from . import knowledge
-        f = await hass.async_add_executor_job(
-            lambda: knowledge.remember(
-                msg["key"], msg["value"],
-                subject=msg.get("subject", knowledge.DEFAULT_SUBJECT),
-                kind=msg.get("kind", "fact"), source="stated"))
-        facts = await hass.async_add_executor_job(knowledge.all_facts)
-        connection.send_result(msg["id"], {"ok": bool(f), "facts": facts})
-    except Exception as exc:
-        _LOGGER.exception("add_knowledge failed: %s", exc)
-        connection.send_error(msg["id"], "add_failed", safe_error_message(exc))
-
-
-@websocket_api.require_admin
-@websocket_api.websocket_command({
-    vol.Required("type"): "nova/clear_scene_memory",
-})
-@websocket_api.async_response
-async def ws_clear_scene_memory(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict[str, Any],
-) -> None:
-    """Forget every camera description scene memory has kept."""
-    try:
-        from . import scene_memory
-        removed = await hass.async_add_executor_job(scene_memory.forget_all)
-        stats = await hass.async_add_executor_job(scene_memory.stats)
-        connection.send_result(msg["id"], {"removed": removed, "stats": stats})
-    except Exception as exc:
-        _LOGGER.exception("clear_scene_memory failed: %s", exc)
-        connection.send_error(msg["id"], "clear_failed", safe_error_message(exc))
-
-
-@websocket_api.require_admin
-@websocket_api.websocket_command({
-    vol.Required("type"): "nova/forget_knowledge",
-    vol.Optional("fact_id"): int,
-    vol.Optional("subject"): str,
-    vol.Optional("key"): str,
-})
-@websocket_api.async_response
-async def ws_forget_knowledge(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict[str, Any],
-) -> None:
-    """Forget a fact (by fact_id, or subject+key) from the Memory panel.
-
-    NOTE: the fact id is carried as ``fact_id``, not ``id`` — ``id`` is reserved
-    by the HA WebSocket protocol for the message sequence number (the frontend
-    overwrites any ``id`` we send), so using it here silently deleted nothing.
-    """
-    try:
-        from . import knowledge
-        fid = msg.get("fact_id")
-        removed = await hass.async_add_executor_job(
-            lambda: knowledge.forget(fact_id=fid, subject=msg.get("subject"), key=msg.get("key")))
-        facts = await hass.async_add_executor_job(knowledge.all_facts)
-        connection.send_result(msg["id"], {"removed": removed, "facts": facts})
-    except Exception as exc:
-        _LOGGER.exception("forget_knowledge failed: %s", exc)
-        connection.send_error(msg["id"], "forget_failed", safe_error_message(exc))
-
-
-@websocket_api.require_admin
-@websocket_api.websocket_command({
-    vol.Required("type"): "nova/pending_fact_action",
-    vol.Required("fact_id"): int,
-    vol.Required("action"): vol.In(["confirm", "reject"]),
-})
-@websocket_api.async_response
-async def ws_pending_fact_action(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict[str, Any],
-) -> None:
-    """Confirm or reject a fact agent.py's `remember` tool staged as pending
-    (v7.88.0), from the Memory panel's review queue -- the fallback for when
-    the user didn't (or couldn't) confirm it inline in the conversation that
-    proposed it."""
-    try:
-        from . import knowledge
-        fid = msg["fact_id"]
-        if msg["action"] == "confirm":
-            ok = await hass.async_add_executor_job(knowledge.confirm_fact, fid)
-        else:
-            ok = bool(await hass.async_add_executor_job(lambda: knowledge.forget(fact_id=fid)))
-        facts = await hass.async_add_executor_job(lambda: knowledge.all_facts(status="confirmed"))
-        pending = await hass.async_add_executor_job(knowledge.pending_facts)
-        connection.send_result(msg["id"], {"ok": ok, "facts": facts, "pending": pending})
-    except Exception as exc:
-        _LOGGER.exception("pending_fact_action failed: %s", exc)
-        connection.send_error(msg["id"], "pending_fact_action_failed", safe_error_message(exc))
-
-
-@websocket_api.require_admin
-@websocket_api.websocket_command({
-    vol.Required("type"): "nova/edit_pending_fact",
-    vol.Required("fact_id"): int,
-    vol.Required("value"): str,
-})
-@websocket_api.async_response
-async def ws_edit_pending_fact(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict[str, Any],
-) -> None:
-    """Correct a pending fact's value before confirming it (v7.88.0) — the
-    one capability the Memory panel didn't have for any fact before this."""
-    try:
-        from . import knowledge
-        updated = await hass.async_add_executor_job(
-            lambda: knowledge.edit_fact(msg["fact_id"], msg["value"]))
-        pending = await hass.async_add_executor_job(knowledge.pending_facts)
-        connection.send_result(msg["id"], {"ok": bool(updated), "pending": pending})
-    except Exception as exc:
-        _LOGGER.exception("edit_pending_fact failed: %s", exc)
-        connection.send_error(msg["id"], "edit_pending_fact_failed", safe_error_message(exc))
-
-
-@websocket_api.websocket_command({
-    vol.Required("type"): "nova/root_cause",
-    vol.Required("entity_id"): str,
-    vol.Optional("event_time"): str,
-    vol.Optional("window_secs"): int,
-})
-@websocket_api.async_response
-async def ws_root_cause(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict[str, Any],
-) -> None:
-    """Root cause analysis for an entity's (latest or specified) change —
-    the same engine the conversational 'why did …' tool uses, structured for
-    the panel."""
-    try:
-        from . import rca
-        names = rca.entity_names(hass)
-        result = await hass.async_add_executor_job(
-            lambda: rca.analyze(
-                msg["entity_id"],
-                msg.get("event_time"),
-                int(msg.get("window_secs") or rca.DEFAULT_WINDOW_SECS),
-                names=names))
-        connection.send_result(msg["id"], result)
-    except Exception as exc:
-        _LOGGER.exception("root_cause failed: %s", exc)
-        connection.send_error(msg["id"], "root_cause_failed", safe_error_message(exc))
-
-
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/compute_camera_coverage",
     vol.Required("camera"): dict,
@@ -1520,28 +1324,6 @@ def _get_runtime_str(hass: HomeAssistant, entry, key: str, default: str) -> str:
 
     return default# ─── Memory search WebSocket command ─────────────────────────────────────────
 
-@websocket_api.websocket_command({
-    vol.Required("type"): "nova/search_memory",
-    vol.Required("query"): str,
-    vol.Optional("k", default=5): int,
-})
-@websocket_api.async_response
-async def ws_search_memory(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict[str, Any],
-) -> None:
-    """Search long-term memory for relevant past conversations."""
-    try:
-        from .memory import search_memory
-        results = await hass.async_add_executor_job(
-            lambda: search_memory(msg["query"], k=msg["k"])
-        )
-        connection.send_result(msg["id"], {"results": results})
-    except Exception as exc:
-        _LOGGER.warning("ws_search_memory failed: %s", exc)
-        connection.send_error(msg["id"], "search_failed", safe_error_message(exc))
-
 
 @websocket_api.require_admin
 @websocket_api.websocket_command({
@@ -1559,383 +1341,13 @@ async def ws_get_debug_log(
         list(_DEBUG_LOG), _entity_names(hass))})
 
 
-@websocket_api.websocket_command({
-    vol.Required("type"): "nova/get_calibration",
-})
-@websocket_api.async_response
-async def ws_get_calibration(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict,
-) -> None:
-    """Confidence calibration + interruption-budget health for the dashboard."""
-    try:
-        from . import decision_record
-        payload = {
-            "calibration": decision_record.calibration(),
-            "interruption_budget": decision_record.interruption_budget(),
-            "stats": decision_record.stats(),
-            "suggestion": decision_record.outcome_rate("suggestion"),
-            "anticipation": decision_record.outcome_rate(
-                "anticipation", None, None, True),
-        }
-        try:
-            from . import adaptive_awareness
-            payload["adaptive_awareness"] = adaptive_awareness.status()
-        except Exception:
-            pass
-        try:
-            from .automation import patterns as pattern_analyzer
-            payload["suggestion_threshold"] = {
-                "base": round(pattern_analyzer.CONFIDENCE_THRESHOLD, 3),
-                "effective": round(pattern_analyzer._effective_threshold(), 3),
-                "learned_delta": round(pattern_analyzer._learned_threshold_delta(), 3),
-            }
-        except Exception:
-            pass
-        connection.send_result(msg["id"], payload)
-    except Exception as exc:
-        connection.send_result(msg["id"], {
-            "calibration": {"n": 0}, "interruption_budget": {"judged": 0},
-            "error": safe_error_message(exc, where="get_calibration", log=True),
-        })
-
-
 # ─── Decision Record browser (Phase 1: decision explanations + feedback) ────
-
-@websocket_api.require_admin
-@websocket_api.websocket_command({
-    vol.Required("type"): "nova/list_decisions",
-    vol.Optional("kind"): str,
-    vol.Optional("only_unjudged", default=False): bool,
-    vol.Optional("limit", default=50): int,
-    vol.Optional("cursor_ts"): vol.Coerce(float),
-    vol.Optional("cursor_id"): int,
-})
-@websocket_api.async_response
-async def ws_list_decisions(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict,
-) -> None:
-    """Bounded, cursor-paginated Decision Record browser for the Logs tab.
-    Summary rows only (no observation/interpretation/evidence) — full detail
-    is a separate nova/get_decision call."""
-    try:
-        from . import decision_record
-        limit = max(1, min(int(msg.get("limit", 50)), 200))
-        result = await hass.async_add_executor_job(
-            lambda: decision_record.page(
-                limit=limit,
-                kind=msg.get("kind"),
-                only_unjudged=bool(msg.get("only_unjudged", False)),
-                cursor_ts=msg.get("cursor_ts"),
-                cursor_id=msg.get("cursor_id"),
-            )
-        )
-        names = _entity_names(hass)
-        connection.send_result(msg["id"], {
-            "decisions": [_named_decision(d, names) for d in result["items"]],
-            "next_cursor": result["next_cursor"],
-        })
-    except Exception as exc:
-        _LOGGER.exception("ws_list_decisions failed: %s", exc)
-        connection.send_error(msg["id"], "list_decisions_failed", safe_error_message(exc))
-
-
-_DECISION_FIELD_MAX_CHARS = 500
-
-
-def _bound_decision_strings(obj):
-    """Recursively cap every string at _DECISION_FIELD_MAX_CHARS. The
-    observation/interpretation/evidence blobs can carry free text (a calendar
-    event title, a routine description) with no length limit enforced at
-    write time (decision_record._js() has none) — this bounds it before it
-    ever reaches the panel. Never raises."""
-    try:
-        if isinstance(obj, str):
-            return obj if len(obj) <= _DECISION_FIELD_MAX_CHARS else (
-                obj[:_DECISION_FIELD_MAX_CHARS] + "…")
-        if isinstance(obj, dict):
-            return {k: _bound_decision_strings(v) for k, v in obj.items()}
-        if isinstance(obj, (list, tuple)):
-            return [_bound_decision_strings(v) for v in obj]
-        return obj
-    except Exception:
-        return obj
-
-
-@websocket_api.require_admin
-@websocket_api.websocket_command({
-    vol.Required("type"): "nova/get_decision",
-    vol.Required("decision_id"): int,
-})
-@websocket_api.async_response
-async def ws_get_decision(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict,
-) -> None:
-    """Full detail for one Decision Record — the drawer behind nova/list_decisions.
-    Defence in depth (today's writers put nothing sensitive here — verified):
-    redacted the same way the config-entry diagnostics dump already is, then
-    string-bounded, before this ever reaches the panel."""
-    try:
-        from . import decision_record
-        from .diagnostics import _redact
-        rec = await hass.async_add_executor_job(decision_record.get, msg["decision_id"])
-        if rec is None:
-            connection.send_error(msg["id"], "not_found", "decision not found")
-            return
-        connection.send_result(
-            msg["id"], {"decision": _bound_decision_strings(
-                _named_decision(_redact(rec), _entity_names(hass)))})
-    except Exception as exc:
-        _LOGGER.exception("ws_get_decision failed: %s", exc)
-        connection.send_error(msg["id"], "get_decision_failed", safe_error_message(exc))
-
-
-@websocket_api.require_admin
-@websocket_api.websocket_command({
-    vol.Required("type"): "nova/set_decision_outcome",
-    vol.Required("decision_id"): int,
-    vol.Required("verdict"): vol.In(["good", "unnecessary", "wrong"]),
-})
-@websocket_api.async_response
-async def ws_set_decision_outcome(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict,
-) -> None:
-    """Record Helpful/Unnecessary/Wrong feedback on a Decision Record.
-    Set-once: an already-judged record reports "already_judged", not a silent
-    no-op, so the panel can tell the two apart from "not_found"."""
-    try:
-        from . import decision_record
-        status = await hass.async_add_executor_job(
-            decision_record.set_outcome_checked, msg["decision_id"], msg["verdict"], "panel")
-        connection.send_result(msg["id"], {"status": status})
-    except Exception as exc:
-        _LOGGER.exception("ws_set_decision_outcome failed: %s", exc)
-        connection.send_error(msg["id"], "set_decision_outcome_failed", safe_error_message(exc))
 
 
 # ─── Decision Lab (Phase 4: current-policy replay) ──────────────────────────
 
-@websocket_api.require_admin
-@websocket_api.websocket_command({
-    vol.Required("type"): "nova/replay_decision",
-    vol.Required("decision_id"): int,
-})
-@websocket_api.async_response
-async def ws_replay_decision(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict,
-) -> None:
-    """Read-only Decision Lab replay — current policy only, never a
-    historical reconstruction (see replay.replay_one's docstring). No writes,
-    no service calls, no LLM/cloud calls: replay_one takes a plain record
-    dict, not hass, so it has no way to perform any of those even by
-    accident."""
-    try:
-        from . import decision_record, replay
-        rec = await hass.async_add_executor_job(decision_record.get, msg["decision_id"])
-        if rec is None:
-            connection.send_error(msg["id"], "not_found", "decision not found")
-            return
-        connection.send_result(msg["id"], replay.replay_one(rec))
-    except Exception as exc:
-        _LOGGER.exception("ws_replay_decision failed: %s", exc)
-        connection.send_error(msg["id"], "replay_decision_failed", safe_error_message(exc))
-
-
-def _name_diagnostic(res, names: dict) -> None:
-    """Add a `name` beside each entity_id in the analysis diagnostic, in
-    place. Never raises."""
-    try:
-        dg = res.get("diagnostic") if isinstance(res, dict) else None
-        if not isinstance(dg, dict):
-            return
-        from .cognitive.naming import name_for
-        for key in ("candidates", "top_sources"):
-            for row in dg.get(key) or []:
-                if isinstance(row, dict) and row.get("entity_id"):
-                    row["name"] = name_for(row["entity_id"], names)
-    except Exception:
-        pass
-
-
-@websocket_api.require_admin
-@websocket_api.websocket_command({
-    vol.Required("type"): "nova/run_analysis",
-})
-@websocket_api.async_response
-async def ws_run_analysis(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict,
-) -> None:
-    """Force a pattern-analysis pass now (manual 'Analyze Now')."""
-    try:
-        from . import cognitive_core
-        res = await cognitive_core.run_analysis_now(hass)
-        _name_diagnostic(res, _entity_names(hass))
-        connection.send_result(msg["id"], res)
-    except Exception as exc:
-        connection.send_result(msg["id"], {"ran": False, "error": safe_error_message(exc, where="analyze_now", log=True)})
-
-
-@websocket_api.websocket_command({
-    vol.Required("type"): "nova/get_cognitive_status",
-})
-@websocket_api.async_response
-async def ws_get_cognitive_status(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict,
-) -> None:
-    """Return Nova cognitive core status for the dashboard."""
-    try:
-        from . import cognitive_core
-        status = cognitive_core.status()
-        connection.send_result(msg["id"], status)
-    except Exception as exc:
-        connection.send_result(msg["id"], {
-            "running": False,
-            "error": safe_error_message(exc, where="get_cognitive_status", log=True),
-            "learning": {},
-        })
-
-
-@websocket_api.require_admin
-@websocket_api.websocket_command({
-    vol.Required("type"): "nova/suggestion_action",
-    vol.Required("suggestion_id"): int,
-    vol.Required("action"): vol.In(["approve", "dismiss", "restore"]),
-})
-@websocket_api.async_response
-async def ws_suggestion_action(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict,
-) -> None:
-    """Approve or dismiss a pattern-engine automation suggestion. Approval now
-    installs the automation into HA, not just flags it (v6.52.0). "restore"
-    brings back a suggestion the AI review rejected (v7.126.0)."""
-    try:
-        from .automation.installation import install_approved_suggestion
-        from .automation.patterns import get_analyzer
-        analyzer = get_analyzer()
-        sid = int(msg["suggestion_id"])
-        if msg["action"] == "approve":
-            res = await install_approved_suggestion(
-                hass, sid,
-                requested_by_user_id=getattr(connection.user, "id", None),
-                requested_by_name=getattr(connection.user, "name", None),
-            )
-            if res.get("installed"):
-                nova_log("LEARN", f"Suggestion #{sid} approved & installed "
-                                    f"as '{res.get('alias')}'")
-            elif res.get("ok"):
-                nova_log("LEARN", f"Suggestion #{sid} approved "
-                                    f"(advisory — {res.get('reason')})")
-            connection.send_result(msg["id"], {
-                "ok": bool(res.get("ok")),
-                "installed": bool(res.get("installed")),
-                "reason": res.get("reason"),
-                "alias": res.get("alias"),
-            })
-            return
-        if msg["action"] == "restore":
-            ok = await hass.async_add_executor_job(analyzer.restore_suggestion, sid)
-            nova_log("LEARN", f"Suggestion #{sid} restored after AI review (ok={ok})")
-            connection.send_result(msg["id"], {"ok": bool(ok)})
-            return
-        ok = await hass.async_add_executor_job(analyzer.dismiss_suggestion, sid)
-        nova_log("LEARN", f"Suggestion #{sid} dismissed (ok={ok})")
-        connection.send_result(msg["id"], {"ok": bool(ok)})
-    except Exception as exc:
-        _LOGGER.exception("ws_suggestion_action failed: %s", exc)
-        connection.send_error(msg["id"], "suggestion_action_failed", safe_error_message(exc))
-
 
 # ─── Automation probation (Phase 3) ──────────────────────────────────────────
-
-@websocket_api.require_admin
-@websocket_api.websocket_command({
-    vol.Required("type"): "nova/list_automation_inventory",
-})
-@websocket_api.async_response
-async def ws_list_automation_inventory(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict,
-) -> None:
-    """Return Nova's cached, read-only Home Assistant automation inventory.
-
-    Raw automation configuration never leaves the backend. This endpoint
-    reads the startup/reload cache, so opening Suggestions adds no inventory
-    scan to Home Assistant's normal dashboard polling.
-    """
-    try:
-        from .automation.inventory import get_inventory
-        inventory = get_inventory(hass)
-        connection.send_result(msg["id"], {
-            "available": inventory is not None,
-            "refreshed_at": inventory.refreshed_at if inventory else None,
-            "automations": inventory.public_items() if inventory else [],
-        })
-    except Exception as exc:
-        _LOGGER.exception("ws_list_automation_inventory failed: %s", exc)
-        connection.send_error(
-            msg["id"], "list_automation_inventory_failed", safe_error_message(exc))
-
-
-@websocket_api.require_admin
-@websocket_api.websocket_command({
-    vol.Required("type"): "nova/list_automation_trials",
-})
-@websocket_api.async_response
-async def ws_list_automation_trials(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict,
-) -> None:
-    """Installed-automation run counts + manual feedback for the Suggestions
-    tab. Installation only means the suggestion was accepted — this reports
-    what's actually observed running, never a claim that it works."""
-    try:
-        from .automation import trials as automation_trials
-        trials = await hass.async_add_executor_job(automation_trials.list_trials)
-        connection.send_result(msg["id"], {"trials": trials})
-    except Exception as exc:
-        _LOGGER.exception("ws_list_automation_trials failed: %s", exc)
-        connection.send_error(msg["id"], "list_automation_trials_failed", safe_error_message(exc))
-
-
-@websocket_api.require_admin
-@websocket_api.websocket_command({
-    vol.Required("type"): "nova/automation_trial_feedback",
-    vol.Required("trial_id"): int,
-    vol.Required("verdict"): vol.In(["working", "needs_adjustment"]),
-})
-@websocket_api.async_response
-async def ws_automation_trial_feedback(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict,
-) -> None:
-    """Manual Working / Needs adjustment feedback — never inferred, only ever
-    what the household actually reports."""
-    try:
-        from .automation import trials as automation_trials
-        ok = await hass.async_add_executor_job(
-            automation_trials.set_manual_outcome, msg["trial_id"], msg["verdict"])
-        connection.send_result(msg["id"], {"ok": bool(ok)})
-    except Exception as exc:
-        _LOGGER.exception("ws_automation_trial_feedback failed: %s", exc)
-        connection.send_error(msg["id"], "automation_trial_feedback_failed", safe_error_message(exc))
 
 
 _SNAP_LOG_TS: dict[str, float] = {}
@@ -2837,80 +2249,3 @@ async def ws_get_area_sparklines(
         connection.send_error(msg["id"], "sparklines_failed", safe_error_message(exc))
 
 
-@websocket_api.require_admin
-@websocket_api.websocket_command({
-    vol.Required("type"): "nova/goal_action",
-    vol.Required("action"): vol.In(["cancel", "delete", "create"]),
-    vol.Optional("goal_id"): int,
-    vol.Optional("title"): str,
-    vol.Optional("outcome"): str,
-    vol.Optional("interval_min"): vol.Coerce(float),
-})
-@websocket_api.async_response
-async def ws_goal_action(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict,
-) -> None:
-    """Manage goals from the panel: create a new one, cancel an active one
-    (keeps it in history), or delete one entirely (tidies the list). Goals also
-    close themselves via the headless runner as before."""
-    try:
-        from . import goals
-        action = msg["action"]
-        if action == "create":
-            outcome = str(msg.get("outcome", "") or "").strip()
-            if not outcome:
-                connection.send_error(msg["id"], "empty_outcome",
-                                      "a goal needs an outcome to work toward")
-                return
-            title = str(msg.get("title", "") or "").strip()
-            kwargs = {}
-            if msg.get("interval_min") is not None:
-                kwargs["check_interval_min"] = float(msg["interval_min"])
-            res = await hass.async_add_executor_job(
-                lambda: goals.create(title, outcome, **kwargs))
-            if res.get("error"):
-                connection.send_error(msg["id"], "create_failed", res["error"])
-                return
-            nova_log("LEARN", f"Goal created from panel: {title or outcome[:50]}")
-            connection.send_result(msg["id"], {"ok": True, "goal": res,
-                                               "goals": _get_goals()})
-            return
-
-        # cancel / delete both need a goal_id
-        gid = msg.get("goal_id")
-        if gid is None:
-            connection.send_error(msg["id"], "missing_goal_id",
-                                  f"{action} needs a goal_id")
-            return
-        gid = int(gid)
-        if action == "delete":
-            ok = await hass.async_add_executor_job(goals.delete, gid)
-            nova_log("LEARN", f"Goal #{gid} deleted from panel (ok={ok})")
-        else:  # cancel
-            ok = await hass.async_add_executor_job(goals.cancel, gid)
-            nova_log("LEARN", f"Goal #{gid} cancelled from panel (ok={ok})")
-        connection.send_result(msg["id"], {"ok": bool(ok), "goals": _get_goals()})
-    except Exception as exc:
-        _LOGGER.exception("ws_goal_action failed: %s", exc)
-        connection.send_error(msg["id"], "goal_action_failed", safe_error_message(exc))
-
-
-@websocket_api.websocket_command({
-    vol.Required("type"): "nova/get_person_routines",
-})
-@websocket_api.async_response
-async def ws_get_person_routines(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict[str, Any],
-) -> None:
-    """Per-person learned routines, grouped by person, for the Memory panel."""
-    try:
-        routines = await hass.async_add_executor_job(
-            _get_person_routines, _entity_names(hass))
-        connection.send_result(msg["id"], {"routines": routines})
-    except Exception as exc:
-        _LOGGER.exception("get_person_routines failed: %s", exc)
-        connection.send_error(msg["id"], "person_routines_failed", safe_error_message(exc))
