@@ -60,7 +60,7 @@ def _no_real_config(tmp_path, monkeypatch):
     state ledger. Point them all at this test's tmp dir so nothing here reads
     or writes the real /config. monkeypatch restores every value (and cache)
     afterwards."""
-    from custom_components.nova import ha_secrets, intrusion, proactive_audio, websocket
+    from custom_components.nova import ha_secrets, intrusion, proactive_audio, ws_log
     monkeypatch.setattr(ha_secrets, "SECRETS_PATH", tmp_path / "secrets.yaml")
     monkeypatch.setattr(ha_secrets, "_SECRETS_CACHE", None)
     monkeypatch.setattr(intrusion, "LOG_PATH", tmp_path / "intrusion_log.json")
@@ -68,13 +68,14 @@ def _no_real_config(tmp_path, monkeypatch):
     monkeypatch.setattr(intrusion, "_LEGACY_SNAPSHOT_DIR", str(tmp_path / "www_intrusion"))
     monkeypatch.setattr(intrusion, "_log", [])
     monkeypatch.setattr(intrusion, "_log_loaded", False)
-    monkeypatch.setattr(websocket, "_LOG_FILE", tmp_path / "nova.log")
+    # _LOG_FILE belongs to ws_log; a patch on websocket would do nothing.
+    monkeypatch.setattr(ws_log, "_LOG_FILE", tmp_path / "nova.log")
     real_ledger = proactive_audio.StateLedger
     ledger_path = str(tmp_path / "state_ledger.jsonl")
     monkeypatch.setattr(proactive_audio, "StateLedger", lambda: real_ledger(ledger_path))
     yield
     # Log lines queued during the test must land in tmp, not after restore.
-    websocket._LOG_QUEUE.join()
+    ws_log._LOG_QUEUE.join()
 
 
 async def _add_entry(hass, **options):

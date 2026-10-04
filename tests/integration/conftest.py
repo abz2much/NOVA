@@ -81,7 +81,7 @@ def _prestart_nova_log_writer():
     """Start Nova's persistent-log background thread once per session, before
     any test's PHACC thread-leak snapshot is taken.
 
-    websocket.py's _ensure_writer() lazily starts a daemon thread ("nova-log-
+    ws_log.py's _ensure_writer() (re-exported by websocket.py) lazily starts a daemon thread ("nova-log-
     writer") the first time anything logs through nova_log() during setup.
     It's an intentional once-per-process thread with no shutdown path — it's
     meant to outlive every config entry and die only with the process, same
