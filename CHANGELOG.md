@@ -1,3 +1,20 @@
+## [8.7.4] — Security tidy up: file permissions, safe error text, document scans off the event loop
+
+**Fixed**
+- Nova's config file (`/config/nova/config.json`) is now readable only by Home Assistant's own user. Before, it was written readable by everyone on the system. An existing file is tightened the next time Nova loads it.
+- The backup of `secrets.yaml` Nova makes before changing it (`secrets.yaml.nova.bak`), and the state backups in `/config/nova_backups/`, are now readable only by Home Assistant's own user too. Both can hold keys.
+- Errors no longer pass raw exception text to the AI model or the panel. They now say what kind of error it was and that the details are in the Home Assistant log, which keeps the full error. Three kinds of text still come through as they are: Nova's own settings validation messages, Nova's provider errors (built only from fixed phrases and the HTTP status), and, for tool calls, Home Assistant's own error text, which Home Assistant itself also gives the model.
+- Document scans no longer block Home Assistant. Listing the documents and watch folders, the seen files table and the semantic search store now all run off the event loop, as does turning semantic search on or off.
+- The reasoning loop retries a provider only when the provider is rate limited, timed out or unavailable. Before, any error text containing "500", "503" or "429" counted, so "1500 tokens" could trigger a pointless retry.
+- Diagnostics downloads now scrub passwords in URLs (`user:pass@host`) and token or key query parameters from every value, and hide webhook addresses.
+
+**Caveats**
+- Only Nova's own files change permissions. `secrets.yaml` itself was already written owner only by Nova, and is unchanged.
+- A provider error that has no HTTP status is still classified from its text by the shared provider classifier, so a number such as "1500" in that text can still read as "500" there. Errors with a status, which is most of them, are classified by the status.
+- A connection failure is still not retried by the reasoning loop, as before.
+- The error lines in a diagnostics download (the `*_error` fields), the recent log tail and the service health section are not scrubbed. Diagnostics already hides a URL's password in the service health section.
+- Panel error messages are shorter. Check the Home Assistant log for the detail.
+
 ## [8.7.3] — Adaptive awareness learns only from what you confirm
 
 **Changed**

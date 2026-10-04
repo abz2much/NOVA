@@ -425,6 +425,22 @@ def test_atomic_write_replaces_whole_file_and_keeps_its_mode(files, tmp_path):
     assert [x.name for x in tmp_path.iterdir()] == ["state.json"]
 
 
+def test_atomic_write_forces_a_given_mode(files, tmp_path):
+    p = tmp_path / "state.json"
+    p.write_text("{}")
+    os.chmod(p, 0o644)
+    files.write_json_atomic(p, {"b": 2}, mode=0o600)
+    assert stat.S_IMODE(os.stat(p).st_mode) == 0o600
+    files.write_json_atomic(tmp_path / "new.json", {}, mode=0o600)
+    assert stat.S_IMODE(os.stat(tmp_path / "new.json").st_mode) == 0o600
+
+
+def test_atomic_write_passes_default_to_json(files, tmp_path):
+    p = tmp_path / "state.json"
+    files.write_json_atomic(p, {"x": {1, 2}}, default=sorted)
+    assert json.loads(p.read_text()) == {"x": [1, 2]}
+
+
 def test_failed_atomic_write_leaves_the_old_file(files, tmp_path):
     p = tmp_path / "state.json"
     p.write_text('{"keep": true}')

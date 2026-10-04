@@ -72,6 +72,32 @@ def test_redact_never_raises_on_weird_input(diag):
     assert diag._redact(Weird()) is not None    # returns something, no raise
 
 
+# ── Value scrubbing (v8.7.4) ────────────────────────────────────────────────
+
+def test_redact_scrubs_credentials_in_urls_whatever_the_key(diag):
+    out = diag._redact({
+        "ollama_base_url": "http://nova:pa55word@10.0.0.5:11434",
+        "searxng_url": "https://search.example/?q=x&token=abc123&lang=en",
+        "nested": ["https://u@host.example/api?api_key=sk-1"],
+    })
+    assert out["ollama_base_url"] == "http://**REDACTED**@10.0.0.5:11434"
+    assert out["searxng_url"] == "https://search.example/?q=x&token=**REDACTED**&lang=en"
+    assert out["nested"] == ["https://**REDACTED**@host.example/api?api_key=**REDACTED**"]
+    assert "pa55word" not in str(out) and "abc123" not in str(out) and "sk-1" not in str(out)
+
+
+def test_redact_leaves_plain_urls_and_text_alone(diag):
+    src = {"ollama_base_url": "http://10.0.0.5:11434",
+           "searxng_url": "https://search.example/?q=monkey&keyboard=1",
+           "honorific": "sir", "note": "mail me at a@b.example"}
+    assert diag._redact(src) == src
+
+
+def test_redact_hides_webhook_urls_by_key(diag):
+    out = diag._redact({"n8n_webhook_base_url": "https://n8n.example/webhook/0f3c"})
+    assert out["n8n_webhook_base_url"] == "**REDACTED**"
+
+
 async def test_diagnostics_entry_point_redacts_and_returns_dict(diag):
     # end-to-end: the HA entry point returns a dict with keys redacted, no raise
     class _Entry:

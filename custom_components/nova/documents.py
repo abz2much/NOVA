@@ -31,6 +31,7 @@ import hashlib
 import logging
 import os
 import re
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -314,12 +315,12 @@ async def ingest_directory_async(hass, directory: Optional[str] = None) -> dict:
     embeddings on top when available. Falls back silently to keyword-only if
     Ollama is unreachable."""
     from . import embeddings
-    base = ingest_directory(directory)          # FTS ingest (sync)
+    base = await hass.async_add_executor_job(ingest_directory, directory)  # FTS ingest (sync)
     if not base.get("ok") or not embeddings.is_enabled():
         base["semantic"] = False
         return base
 
-    embeddings.init_store()
+    await hass.async_add_executor_job(embeddings.init_store)
     embedded_files = 0
     embedded_chunks = 0
     semantic_error = None
@@ -333,7 +334,7 @@ async def ingest_directory_async(hass, directory: Optional[str] = None) -> dict:
             semantic_error = ("Ollama embeddings unavailable — pull the embed "
                               "model and check the host; keyword search is active")
             break
-        embeddings.forget_source(source)
+        await hass.async_add_executor_job(embeddings.forget_source, source)
         stored = await hass.async_add_executor_job(
             embeddings.store_vectors, source, chunks, vecs,
             res.get("ingested", ""))
@@ -420,10 +421,11 @@ async def save_and_ingest_upload(hass, filename: str, b64_content: str) -> dict:
     try:
         from . import embeddings
         if embeddings.is_enabled() and res.get("chunk_texts"):
-            embeddings.init_store()
+            await hass.async_add_executor_job(embeddings.init_store)
             vecs = await embeddings.embed_texts(hass, res["chunk_texts"])
             if vecs is not None:
-                embeddings.forget_source(saved["filename"])
+                await hass.async_add_executor_job(
+                    embeddings.forget_source, saved["filename"])
                 n = await hass.async_add_executor_job(
                     embeddings.store_vectors, saved["filename"],
                     res["chunk_texts"], vecs, res.get("ingested", ""))
@@ -456,6 +458,79 @@ def _cfg(key: str, default):
         return default
 
 
+# Blocking helpers for the two scans below; run them in the executor.
+
+def _read_seen() -> dict:
+    """Path -> mtime of every file already ingested ({} on any failure)."""
+    import sqlite3
+    try:
+        with closing(sqlite3.connect(_db_path())) as conn:
+            _store.ensure(conn, "document_watch_seen")
+            conn.commit()
+            return {r[0]: r[1] for r in
+                    conn.execute("SELECT path, mtime FROM document_watch_seen")}
+    except Exception:
+        return {}
+
+
+def _mark_seen(key: str, mtime: float) -> None:
+    """Record that `key` was ingested at this mtime. Never raises."""
+    import sqlite3
+    try:
+        with closing(sqlite3.connect(_db_path())) as conn:
+            conn.execute("INSERT OR REPLACE INTO document_watch_seen "
+                         "(path, mtime, ingested) VALUES (?, ?, ?)",
+                         (key, mtime, datetime.now(timezone.utc).replace(tzinfo=None).isoformat()))
+            conn.commit()
+    except Exception:
+        pass
+
+
+def _is_unchanged(seen: dict, key: str, mtime: float) -> bool:
+    return key in seen and abs(seen[key] - mtime) < 1.0
+
+
+def _new_docs_in_library(docs: Path, seen: dict) -> list[tuple[str, float, str]]:
+    """(path, mtime, name) of each new or changed supported file in DOCS_DIR."""
+    out = []
+    for f in sorted(docs.iterdir()):
+        try:
+            if not f.is_file() or f.suffix.lower() not in _SUPPORTED:
+                continue
+            st = f.stat()
+            if st.st_size > _MAX_FILE_MB * 1_000_000:
+                continue
+            key = str(f)
+            if _is_unchanged(seen, key, st.st_mtime):
+                continue                       # already ingested this version
+            out.append((key, st.st_mtime, f.name))
+        except Exception as exc:
+            _LOGGER.debug("auto-ingest of %s failed: %s", f, exc)
+    return out
+
+
+def _new_docs_in_watch_folder(d: Path, seen: dict) -> list[tuple[str, float, str]]:
+    """(path, mtime, name) of each new or changed supported file in one watch
+    folder; [] when it is not a directory."""
+    if not d.is_dir():
+        return []
+    out = []
+    for f in sorted(d.iterdir()):
+        if not f.is_file() or f.suffix.lower() not in _SUPPORTED:
+            continue
+        try:
+            mtime = f.stat().st_mtime
+            if f.stat().st_size > _MAX_FILE_MB * 1_000_000:
+                continue
+        except Exception:
+            continue
+        key = str(f)
+        if _is_unchanged(seen, key, mtime):
+            continue          # already ingested this version
+        out.append((key, mtime, f.name))
+    return out
+
+
 async def auto_ingest_new(hass) -> dict:
     """Ingest only NEW or CHANGED files in DOCS_DIR (v6.79.0).
 
@@ -466,47 +541,22 @@ async def auto_ingest_new(hass) -> dict:
     so dropping a manual into /config/nova/documents gets picked up
     automatically on the next scheduled scan, without re-embedding everything.
     Never raises."""
-    import sqlite3
     docs = Path(_documents_dir())
-    if not docs.is_dir():
+    if not await hass.async_add_executor_job(docs.is_dir):
         return {"ok": True, "new_files": 0, "note": "docs dir absent"}
 
-    try:
-        conn = sqlite3.connect(_db_path())
-        _store.ensure(conn, "document_watch_seen")
-        conn.commit()
-        seen = {r[0]: r[1] for r in
-                conn.execute("SELECT path, mtime FROM document_watch_seen")}
-        conn.close()
-    except Exception:
-        seen = {}
+    seen = await hass.async_add_executor_job(_read_seen)
+    pending = await hass.async_add_executor_job(_new_docs_in_library, docs, seen)
 
     results = []
-    for f in sorted(docs.iterdir()):
+    for key, mtime, name in pending:
         try:
-            if not f.is_file() or f.suffix.lower() not in _SUPPORTED:
-                continue
-            st = f.stat()
-            if st.st_size > _MAX_FILE_MB * 1_000_000:
-                continue
-            key = str(f)
-            mtime = st.st_mtime
-            if key in seen and abs(seen[key] - mtime) < 1.0:
-                continue                       # already ingested this version
             res = await save_and_ingest_upload_from_path(hass, key)
-            results.append({"source": f.name, **res})
+            results.append({"source": name, **res})
             if res.get("ok"):
-                try:
-                    conn = sqlite3.connect(_db_path())
-                    conn.execute("INSERT OR REPLACE INTO document_watch_seen "
-                                 "(path, mtime, ingested) VALUES (?, ?, ?)",
-                                 (key, mtime, datetime.now(timezone.utc).replace(tzinfo=None).isoformat()))
-                    conn.commit()
-                    conn.close()
-                except Exception:
-                    pass
+                await hass.async_add_executor_job(_mark_seen, key, mtime)
         except Exception as exc:
-            _LOGGER.debug("auto-ingest of %s failed: %s", f, exc)
+            _LOGGER.debug("auto-ingest of %s failed: %s", key, exc)
 
     ingested = sum(1 for r in results if r.get("ok"))
     return {"ok": True, "new_files": ingested, "files": results}
@@ -521,52 +571,23 @@ async def scan_watch_folders(hass) -> dict:
         return {"ok": True, "watched": 0, "new_files": 0,
                 "note": "no watch folders configured"}
 
-    import sqlite3
     # remember ingested watch-file paths+mtimes in a tiny table
-    try:
-        conn = sqlite3.connect(_db_path())
-        _store.ensure(conn, "document_watch_seen")
-        conn.commit()
-        seen = {r[0]: r[1] for r in
-                conn.execute("SELECT path, mtime FROM document_watch_seen")}
-        conn.close()
-    except Exception:
-        seen = {}
+    seen = await hass.async_add_executor_job(_read_seen)
 
     new_results = []
     for folder in folders:
         try:
-            d = Path(folder)
-            if not d.is_dir():
-                continue
-            for f in sorted(d.iterdir()):
-                if not f.is_file() or f.suffix.lower() not in _SUPPORTED:
-                    continue
-                try:
-                    mtime = f.stat().st_mtime
-                    if f.stat().st_size > _MAX_FILE_MB * 1_000_000:
-                        continue
-                except Exception:
-                    continue
-                key = str(f)
-                if key in seen and abs(seen[key] - mtime) < 1.0:
-                    continue          # already ingested this version
+            pending = await hass.async_add_executor_job(
+                _new_docs_in_watch_folder, Path(folder), seen)
+            for key, mtime, name in pending:
                 # ingest by copying into DOCS_DIR (keeps the library in one place)
                 copied = await hass.async_add_executor_job(
                     _copy_into_docs, key)
                 if not copied.get("ok"):
                     continue
                 res = await save_and_ingest_upload_from_path(hass, copied["path"])
-                new_results.append({"source": f.name, **res})
-                try:
-                    conn = sqlite3.connect(_db_path())
-                    conn.execute("INSERT OR REPLACE INTO document_watch_seen "
-                                 "(path, mtime, ingested) VALUES (?, ?, ?)",
-                                 (key, mtime, datetime.now(timezone.utc).replace(tzinfo=None).isoformat()))
-                    conn.commit()
-                    conn.close()
-                except Exception:
-                    pass
+                new_results.append({"source": name, **res})
+                await hass.async_add_executor_job(_mark_seen, key, mtime)
         except Exception as exc:
             _LOGGER.debug("watch scan of %s failed: %s", folder, exc)
 
@@ -602,10 +623,11 @@ async def save_and_ingest_upload_from_path(hass, path: str) -> dict:
     try:
         from . import embeddings
         if embeddings.is_enabled() and res.get("chunk_texts"):
-            embeddings.init_store()
+            await hass.async_add_executor_job(embeddings.init_store)
             vecs = await embeddings.embed_texts(hass, res["chunk_texts"])
             if vecs is not None:
-                embeddings.forget_source(out["filename"])
+                await hass.async_add_executor_job(
+                    embeddings.forget_source, out["filename"])
                 await hass.async_add_executor_job(
                     embeddings.store_vectors, out["filename"],
                     res["chunk_texts"], vecs, res.get("ingested", ""))

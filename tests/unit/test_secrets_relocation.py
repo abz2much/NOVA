@@ -164,6 +164,30 @@ def test_delete_secret_removes_and_preserves_rest(hs, tmp_path):
     assert (tmp_path / "secrets.yaml.nova.bak").exists()
 
 
+def test_set_secret_writes_file_and_backup_owner_only(hs, tmp_path):
+    import os
+    import stat
+    p = tmp_path / "secrets.yaml"
+    p.write_text("other_key: value\n")
+    os.chmod(p, 0o644)
+    assert hs.set_secret_sync("nova_api_key", "K", path=p) is True
+    assert stat.S_IMODE(os.stat(p).st_mode) == 0o600
+    bak = tmp_path / "secrets.yaml.nova.bak"
+    assert stat.S_IMODE(os.stat(bak).st_mode) == 0o600
+
+
+def test_delete_secret_writes_file_and_backup_owner_only(hs, tmp_path):
+    import os
+    import stat
+    p = tmp_path / "secrets.yaml"
+    p.write_text('nova_api_key: "K"\nother: "v"\n')
+    os.chmod(p, 0o644)
+    assert hs.delete_secret_sync("nova_api_key", path=p) is True
+    assert stat.S_IMODE(os.stat(p).st_mode) == 0o600
+    bak = tmp_path / "secrets.yaml.nova.bak"
+    assert stat.S_IMODE(os.stat(bak).st_mode) == 0o600
+
+
 def test_delete_secret_missing_key_is_noop_true(hs, tmp_path):
     p = tmp_path / "secrets.yaml"
     p.write_text('other: "v"\n')

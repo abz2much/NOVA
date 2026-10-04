@@ -8,6 +8,7 @@ available on site"."""
 from __future__ import annotations
 
 import logging
+import re
 
 from .fault_log import FaultLog
 from .heartbeat import HeartbeatMonitor
@@ -27,11 +28,25 @@ _REDACT_KEYS = {
     "client_secret", "client_id", "password", "secret", "notify_service",
     "notify_services",
     "floor_plan_address", "imap_user",
+    "webhook",   # a webhook URL's path is itself the secret (n8n_webhook_base_url)
 }
+
+# Values are scrubbed too, whatever their key: credentials embedded in a URL
+# (scheme://user:pass@host) and credential-like query parameters.
+_URL_USERINFO = re.compile(r"(?i)\b([a-z][a-z0-9+.\-]*://)[^/\s?#@]+@")
+_SECRET_QUERY = re.compile(
+    r"(?i)([?&](?:access_token|api_key|apikey|auth|key|password|pass|pwd|secret|"
+    r"sig|signature|token)=)[^&#\s]*")
+
+
+def _scrub_text(value: str) -> str:
+    value = _URL_USERINFO.sub(r"\1**REDACTED**@", value)
+    return _SECRET_QUERY.sub(r"\1**REDACTED**", value)
 
 
 def _redact(obj):
-    """Recursively redact sensitive values by key name. Never raises."""
+    """Recursively redact sensitive values by key name, and scrub credentials
+    out of every other string value. Never raises."""
     try:
         if isinstance(obj, dict):
             out = {}
@@ -44,6 +59,8 @@ def _redact(obj):
             return out
         if isinstance(obj, (list, tuple)):
             return [_redact(v) for v in obj]
+        if isinstance(obj, str):
+            return _scrub_text(obj)
         return obj
     except Exception:
         return "**redaction-error**"

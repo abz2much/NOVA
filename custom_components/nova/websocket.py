@@ -23,6 +23,7 @@ from homeassistant.core import HomeAssistant, callback
 
 from . import audio_routing, sleep_detection
 from .llm_provider import resolve_provider_endpoint
+from .safe_errors import NovaValidationError, safe_error_message
 from .const import (
     CONF_BEDROOM_AREAS,
     CONF_GROUND_FLOOR_AREAS,
@@ -1022,7 +1023,7 @@ async def ws_get_panel_data(
         connection.send_result(msg["id"], result)
     except Exception as exc:
         _LOGGER.exception("ws_get_panel_data failed: %s", exc)
-        connection.send_error(msg["id"], "panel_data_failed", str(exc))
+        connection.send_error(msg["id"], "panel_data_failed", safe_error_message(exc))
 
 
 def _format_uptime(seconds: float) -> str:
@@ -1371,7 +1372,7 @@ def _get_host_health_status(hass: HomeAssistant, entry) -> dict:
             })
         return {"metrics": metrics, "snapshot": host_health.snapshot(hass, config)}
     except Exception as exc:
-        return {"error": str(exc)[:160]}
+        return {"error": safe_error_message(exc, where="host health read", log=True)}
 
 
 def _get_appliance_status() -> dict:
@@ -1528,7 +1529,7 @@ async def ws_get_activity_log(
         connection.send_result(msg["id"], {"entries": result})
     except Exception as exc:
         _LOGGER.warning("ws_get_activity_log failed: %s", exc)
-        connection.send_error(msg["id"], "activity_log_failed", str(exc))
+        connection.send_error(msg["id"], "activity_log_failed", safe_error_message(exc))
 
 # ─── Config update WebSocket command ─────────────────────────────────────────
 
@@ -1907,7 +1908,7 @@ async def ws_reload_appliances(
             "ok": True, "appliances": _get_appliance_status(),
         })
     except Exception as exc:
-        connection.send_error(msg["id"], "reload_failed", str(exc))
+        connection.send_error(msg["id"], "reload_failed", safe_error_message(exc, where="reload_appliances", log=True))
 
 
 @websocket_api.require_admin
@@ -1933,7 +1934,7 @@ async def ws_set_lockdown(
         connection.send_result(msg["id"], {"ok": ok, "lockdown": status})
     except Exception as exc:
         _LOGGER.exception("Panel lockdown request failed: %s", exc)
-        connection.send_error(msg["id"], "lockdown_failed", str(exc))
+        connection.send_error(msg["id"], "lockdown_failed", safe_error_message(exc))
 
 
 @websocket_api.websocket_command({
@@ -1965,7 +1966,7 @@ async def ws_get_knowledge(
         connection.send_result(msg["id"], {"facts": facts, "pending": pending, "stats": kstats})
     except Exception as exc:
         _LOGGER.exception("get_knowledge failed: %s", exc)
-        connection.send_error(msg["id"], "knowledge_failed", str(exc))
+        connection.send_error(msg["id"], "knowledge_failed", safe_error_message(exc))
 
 
 @websocket_api.require_admin
@@ -1994,7 +1995,7 @@ async def ws_add_knowledge(
         connection.send_result(msg["id"], {"ok": bool(f), "facts": facts})
     except Exception as exc:
         _LOGGER.exception("add_knowledge failed: %s", exc)
-        connection.send_error(msg["id"], "add_failed", str(exc))
+        connection.send_error(msg["id"], "add_failed", safe_error_message(exc))
 
 
 @websocket_api.require_admin
@@ -2015,7 +2016,7 @@ async def ws_clear_scene_memory(
         connection.send_result(msg["id"], {"removed": removed, "stats": stats})
     except Exception as exc:
         _LOGGER.exception("clear_scene_memory failed: %s", exc)
-        connection.send_error(msg["id"], "clear_failed", str(exc))
+        connection.send_error(msg["id"], "clear_failed", safe_error_message(exc))
 
 
 @websocket_api.require_admin
@@ -2046,7 +2047,7 @@ async def ws_forget_knowledge(
         connection.send_result(msg["id"], {"removed": removed, "facts": facts})
     except Exception as exc:
         _LOGGER.exception("forget_knowledge failed: %s", exc)
-        connection.send_error(msg["id"], "forget_failed", str(exc))
+        connection.send_error(msg["id"], "forget_failed", safe_error_message(exc))
 
 
 @websocket_api.require_admin
@@ -2077,7 +2078,7 @@ async def ws_pending_fact_action(
         connection.send_result(msg["id"], {"ok": ok, "facts": facts, "pending": pending})
     except Exception as exc:
         _LOGGER.exception("pending_fact_action failed: %s", exc)
-        connection.send_error(msg["id"], "pending_fact_action_failed", str(exc))
+        connection.send_error(msg["id"], "pending_fact_action_failed", safe_error_message(exc))
 
 
 @websocket_api.require_admin
@@ -2102,7 +2103,7 @@ async def ws_edit_pending_fact(
         connection.send_result(msg["id"], {"ok": bool(updated), "pending": pending})
     except Exception as exc:
         _LOGGER.exception("edit_pending_fact failed: %s", exc)
-        connection.send_error(msg["id"], "edit_pending_fact_failed", str(exc))
+        connection.send_error(msg["id"], "edit_pending_fact_failed", safe_error_message(exc))
 
 
 @websocket_api.websocket_command({
@@ -2132,7 +2133,7 @@ async def ws_root_cause(
         connection.send_result(msg["id"], result)
     except Exception as exc:
         _LOGGER.exception("root_cause failed: %s", exc)
-        connection.send_error(msg["id"], "root_cause_failed", str(exc))
+        connection.send_error(msg["id"], "root_cause_failed", safe_error_message(exc))
 
 
 @websocket_api.websocket_command({
@@ -2159,7 +2160,7 @@ async def ws_compute_camera_coverage(
         connection.send_result(msg["id"], result)
     except Exception as exc:
         _LOGGER.exception("compute_camera_coverage failed: %s", exc)
-        connection.send_error(msg["id"], "coverage_failed", str(exc))
+        connection.send_error(msg["id"], "coverage_failed", safe_error_message(exc))
 
 
 @websocket_api.require_admin
@@ -2342,7 +2343,7 @@ async def ws_update_config(
         connection.send_result(msg["id"], {"key": key, "value": value, "persisted": persisted})
     except Exception as exc:
         _LOGGER.warning("ws_update_config failed: %s", exc)
-        connection.send_error(msg["id"], "update_failed", str(exc))
+        connection.send_error(msg["id"], "update_failed", safe_error_message(exc))
 
 
 # Model discovery lives in providers.discovery (descriptor-driven, fixed cloud
@@ -2472,10 +2473,10 @@ def _prepare_ai_config_updates(updates: dict) -> dict:
     from .llm_provider import normalize_provider_endpoint
 
     if not isinstance(updates, dict) or not updates:
-        raise ValueError("No AI settings were supplied")
+        raise NovaValidationError("No AI settings were supplied")
     unknown = set(updates) - _AI_APPLY_KEYS
     if unknown:
-        raise ValueError("The request contains unsupported AI settings")
+        raise NovaValidationError("The request contains unsupported AI settings")
 
     clean: dict[str, Any] = {}
     provider_keys = {provider_key for _, provider_key, _ in _AI_ROLE_FIELDS}
@@ -2484,35 +2485,35 @@ def _prepare_ai_config_updates(updates: dict) -> dict:
         if key in provider_keys:
             provider = str(value or "").strip().lower()
             if provider not in _AI_PROVIDERS:
-                raise ValueError(f"Unsupported provider for {key}")
+                raise NovaValidationError(f"Unsupported provider for {key}")
             clean[key] = provider
         elif key in model_keys:
             model = str(value or "").strip()
             if not model or len(model) > 512:
-                raise ValueError(f"A valid model is required for {key}")
+                raise NovaValidationError(f"A valid model is required for {key}")
             clean[key] = model
         elif key in ("ollama_base_url", "custom_base_url"):
             provider = key.removesuffix("_base_url")
             clean[key] = normalize_provider_endpoint(str(value or ""), provider)
         elif key == "ollama_num_ctx":
             if isinstance(value, bool):
-                raise ValueError("Ollama context length must be a number")
+                raise NovaValidationError("Ollama context length must be a number")
             try:
                 number = int(value)
             except (TypeError, ValueError) as exc:
-                raise ValueError("Ollama context length must be a number") from exc
+                raise NovaValidationError("Ollama context length must be a number") from exc
             if not 512 <= number <= 262144:
-                raise ValueError("Ollama context length must be between 512 and 262144")
+                raise NovaValidationError("Ollama context length must be between 512 and 262144")
             clean[key] = number
         elif key == "home_context_max_entities":
             if isinstance(value, bool):
-                raise ValueError("Prompt size must be a number")
+                raise NovaValidationError("Prompt size must be a number")
             try:
                 number = int(value)
             except (TypeError, ValueError) as exc:
-                raise ValueError("Prompt size must be a number") from exc
+                raise NovaValidationError("Prompt size must be a number") from exc
             if not 0 <= number <= 50:
-                raise ValueError("Prompt size must be between 0 and 50")
+                raise NovaValidationError("Prompt size must be between 0 and 50")
             clean[key] = number
     return clean
 
@@ -2574,12 +2575,12 @@ async def ws_test_provider_endpoint(hass: HomeAssistant, connection, msg) -> Non
 
         endpoint = normalize_provider_endpoint(msg["endpoint"], provider)
         if not endpoint:
-            raise ValueError("Endpoint is required")
+            raise NovaValidationError("Endpoint is required")
         try:
             await hass.async_add_executor_job(
                 lambda: check_url(endpoint, resolve=True))
         except ProviderError as exc:
-            raise ValueError("Endpoint is not an allowed destination") from exc
+            raise NovaValidationError("Endpoint is not an allowed destination") from exc
         entry = _get_entry(hass)
         config = await hass.async_add_executor_job(
             nova_config.effective_config, entry)
@@ -2595,7 +2596,7 @@ async def ws_test_provider_endpoint(hass: HomeAssistant, connection, msg) -> Non
         })
     except ValueError as exc:
         connection.send_result(msg["id"], {
-            "ok": False, "error": "invalid_endpoint", "message": str(exc)[:240],
+            "ok": False, "error": "invalid_endpoint", "message": safe_error_message(exc, where="AI settings", log=True),
         })
     except Exception as exc:
         if (isinstance(exc, ProviderError)
@@ -2708,7 +2709,7 @@ async def ws_apply_ai_config(hass: HomeAssistant, connection, msg) -> None:
     except ValueError as exc:
         connection.send_result(msg["id"], {
             "ok": False, "error": "invalid_configuration",
-            "message": str(exc)[:240],
+            "message": safe_error_message(exc, where="AI settings", log=True),
         })
     except Exception as exc:
         _LOGGER.warning("ws_apply_ai_config failed: %s", type(exc).__name__)
@@ -2931,7 +2932,7 @@ async def ws_search_memory(
         connection.send_result(msg["id"], {"results": results})
     except Exception as exc:
         _LOGGER.warning("ws_search_memory failed: %s", exc)
-        connection.send_error(msg["id"], "search_failed", str(exc))
+        connection.send_error(msg["id"], "search_failed", safe_error_message(exc))
 
 
 @websocket_api.require_admin
@@ -2988,7 +2989,7 @@ async def ws_get_calibration(
     except Exception as exc:
         connection.send_result(msg["id"], {
             "calibration": {"n": 0}, "interruption_budget": {"judged": 0},
-            "error": str(exc),
+            "error": safe_error_message(exc, where="get_calibration", log=True),
         })
 
 
@@ -3031,7 +3032,7 @@ async def ws_list_decisions(
         })
     except Exception as exc:
         _LOGGER.exception("ws_list_decisions failed: %s", exc)
-        connection.send_error(msg["id"], "list_decisions_failed", str(exc))
+        connection.send_error(msg["id"], "list_decisions_failed", safe_error_message(exc))
 
 
 _DECISION_FIELD_MAX_CHARS = 500
@@ -3083,7 +3084,7 @@ async def ws_get_decision(
                 _named_decision(_redact(rec), _entity_names(hass)))})
     except Exception as exc:
         _LOGGER.exception("ws_get_decision failed: %s", exc)
-        connection.send_error(msg["id"], "get_decision_failed", str(exc))
+        connection.send_error(msg["id"], "get_decision_failed", safe_error_message(exc))
 
 
 @websocket_api.require_admin
@@ -3108,7 +3109,7 @@ async def ws_set_decision_outcome(
         connection.send_result(msg["id"], {"status": status})
     except Exception as exc:
         _LOGGER.exception("ws_set_decision_outcome failed: %s", exc)
-        connection.send_error(msg["id"], "set_decision_outcome_failed", str(exc))
+        connection.send_error(msg["id"], "set_decision_outcome_failed", safe_error_message(exc))
 
 
 # ─── Decision Lab (Phase 4: current-policy replay) ──────────────────────────
@@ -3138,7 +3139,7 @@ async def ws_replay_decision(
         connection.send_result(msg["id"], replay.replay_one(rec))
     except Exception as exc:
         _LOGGER.exception("ws_replay_decision failed: %s", exc)
-        connection.send_error(msg["id"], "replay_decision_failed", str(exc))
+        connection.send_error(msg["id"], "replay_decision_failed", safe_error_message(exc))
 
 
 def _name_diagnostic(res, names: dict) -> None:
@@ -3174,7 +3175,7 @@ async def ws_run_analysis(
         _name_diagnostic(res, _entity_names(hass))
         connection.send_result(msg["id"], res)
     except Exception as exc:
-        connection.send_result(msg["id"], {"ran": False, "error": str(exc)})
+        connection.send_result(msg["id"], {"ran": False, "error": safe_error_message(exc, where="analyze_now", log=True)})
 
 
 @websocket_api.websocket_command({
@@ -3194,7 +3195,7 @@ async def ws_get_cognitive_status(
     except Exception as exc:
         connection.send_result(msg["id"], {
             "running": False,
-            "error": str(exc),
+            "error": safe_error_message(exc, where="get_cognitive_status", log=True),
             "learning": {},
         })
 
@@ -3248,7 +3249,7 @@ async def ws_suggestion_action(
         connection.send_result(msg["id"], {"ok": bool(ok)})
     except Exception as exc:
         _LOGGER.exception("ws_suggestion_action failed: %s", exc)
-        connection.send_error(msg["id"], "suggestion_action_failed", str(exc))
+        connection.send_error(msg["id"], "suggestion_action_failed", safe_error_message(exc))
 
 
 # ─── Automation probation (Phase 3) ──────────────────────────────────────────
@@ -3280,7 +3281,7 @@ async def ws_list_automation_inventory(
     except Exception as exc:
         _LOGGER.exception("ws_list_automation_inventory failed: %s", exc)
         connection.send_error(
-            msg["id"], "list_automation_inventory_failed", str(exc))
+            msg["id"], "list_automation_inventory_failed", safe_error_message(exc))
 
 
 @websocket_api.require_admin
@@ -3302,7 +3303,7 @@ async def ws_list_automation_trials(
         connection.send_result(msg["id"], {"trials": trials})
     except Exception as exc:
         _LOGGER.exception("ws_list_automation_trials failed: %s", exc)
-        connection.send_error(msg["id"], "list_automation_trials_failed", str(exc))
+        connection.send_error(msg["id"], "list_automation_trials_failed", safe_error_message(exc))
 
 
 @websocket_api.require_admin
@@ -3326,7 +3327,7 @@ async def ws_automation_trial_feedback(
         connection.send_result(msg["id"], {"ok": bool(ok)})
     except Exception as exc:
         _LOGGER.exception("ws_automation_trial_feedback failed: %s", exc)
-        connection.send_error(msg["id"], "automation_trial_feedback_failed", str(exc))
+        connection.send_error(msg["id"], "automation_trial_feedback_failed", safe_error_message(exc))
 
 
 _SNAP_LOG_TS: dict[str, float] = {}
@@ -3379,7 +3380,7 @@ async def ws_camera_snapshot(
     except Exception as exc:
         _LOGGER.debug("camera_snapshot failed for %s: %s", entity_id, exc)
         _snap_log(entity_id, f"error — {exc}")
-        connection.send_error(msg["id"], "snapshot_failed", str(exc))
+        connection.send_error(msg["id"], "snapshot_failed", safe_error_message(exc))
 
 
 @websocket_api.require_admin
@@ -3415,7 +3416,7 @@ async def ws_rename_camera(
         })
     except Exception as exc:
         _LOGGER.exception("rename_camera failed: %s", exc)
-        connection.send_error(msg["id"], "rename_failed", str(exc))
+        connection.send_error(msg["id"], "rename_failed", safe_error_message(exc))
 
 
 @websocket_api.require_admin
@@ -3453,7 +3454,7 @@ async def ws_biometrics(
         })
     except Exception as exc:
         _LOGGER.exception("ws_biometrics failed: %s", exc)
-        connection.send_error(msg["id"], "biometrics_failed", str(exc))
+        connection.send_error(msg["id"], "biometrics_failed", safe_error_message(exc))
 
 
 @websocket_api.require_admin
@@ -3488,7 +3489,7 @@ async def ws_energy(
             connection.send_result(msg["id"], res)
     except Exception as exc:
         _LOGGER.exception("ws_energy failed: %s", exc)
-        connection.send_error(msg["id"], "energy_failed", str(exc))
+        connection.send_error(msg["id"], "energy_failed", safe_error_message(exc))
 
 
 @websocket_api.websocket_command({
@@ -3511,7 +3512,7 @@ async def ws_solar(
         connection.send_result(msg["id"], res)
     except Exception as exc:
         _LOGGER.exception("ws_solar failed: %s", exc)
-        connection.send_error(msg["id"], "solar_failed", str(exc))
+        connection.send_error(msg["id"], "solar_failed", safe_error_message(exc))
 
 
 @websocket_api.websocket_command({
@@ -3537,7 +3538,7 @@ async def ws_hazard(
         connection.send_result(msg["id"], res)
     except Exception as exc:
         _LOGGER.exception("ws_hazard failed: %s", exc)
-        connection.send_error(msg["id"], "hazard_failed", str(exc))
+        connection.send_error(msg["id"], "hazard_failed", safe_error_message(exc))
 
 
 @websocket_api.require_admin
@@ -3578,7 +3579,7 @@ async def ws_mode(
             connection.send_result(msg["id"], modes.mode_info())
     except Exception as exc:
         _LOGGER.exception("ws_mode failed: %s", exc)
-        connection.send_error(msg["id"], "mode_failed", str(exc))
+        connection.send_error(msg["id"], "mode_failed", safe_error_message(exc))
 
 
 @websocket_api.require_admin
@@ -3655,7 +3656,7 @@ async def ws_intrusion(
             connection.send_result(msg["id"], await _status_with_image())
     except Exception as exc:
         _LOGGER.exception("ws_intrusion failed: %s", exc)
-        connection.send_error(msg["id"], "intrusion_failed", str(exc))
+        connection.send_error(msg["id"], "intrusion_failed", safe_error_message(exc))
 
 
 @websocket_api.require_admin
@@ -3677,7 +3678,7 @@ async def ws_voice_confirm_test(
         connection.send_result(msg["id"], res)
     except Exception as exc:
         _LOGGER.exception("ws_voice_confirm_test failed: %s", exc)
-        connection.send_error(msg["id"], "test_failed", str(exc))
+        connection.send_error(msg["id"], "test_failed", safe_error_message(exc))
 
 
 @websocket_api.websocket_command({
@@ -3698,7 +3699,7 @@ async def ws_diagnostics(
         connection.send_result(msg["id"], res)
     except Exception as exc:
         _LOGGER.exception("ws_diagnostics failed: %s", exc)
-        connection.send_error(msg["id"], "diagnostics_failed", str(exc))
+        connection.send_error(msg["id"], "diagnostics_failed", safe_error_message(exc))
 
 
 @websocket_api.require_admin
@@ -3724,7 +3725,7 @@ async def ws_get_setup_health(
         connection.send_result(msg["id"], res)
     except Exception as exc:
         _LOGGER.exception("ws_get_setup_health failed: %s", exc)
-        connection.send_error(msg["id"], "get_setup_health_failed", str(exc))
+        connection.send_error(msg["id"], "get_setup_health_failed", safe_error_message(exc))
 
 
 @websocket_api.require_admin
@@ -3769,7 +3770,7 @@ async def ws_get_provider_activity(
         connection.send_result(msg["id"], {"days": result})
     except Exception as exc:
         _LOGGER.exception("ws_get_provider_activity failed: %s", exc)
-        connection.send_error(msg["id"], "get_provider_activity_failed", str(exc))
+        connection.send_error(msg["id"], "get_provider_activity_failed", safe_error_message(exc))
 
 
 @websocket_api.require_admin
@@ -3793,7 +3794,7 @@ async def ws_get_spoken_history(
         connection.send_result(msg["id"], {"entries": entries})
     except Exception as exc:
         _LOGGER.exception("ws_get_spoken_history failed: %s", exc)
-        connection.send_error(msg["id"], "get_spoken_history_failed", str(exc))
+        connection.send_error(msg["id"], "get_spoken_history_failed", safe_error_message(exc))
 
 
 @websocket_api.require_admin
@@ -3848,7 +3849,7 @@ async def ws_list_actions(
         connection.send_result(msg["id"], result)
     except Exception as exc:
         _LOGGER.exception("ws_list_actions failed: %s", exc)
-        connection.send_error(msg["id"], "list_actions_failed", str(exc))
+        connection.send_error(msg["id"], "list_actions_failed", safe_error_message(exc))
 
 
 @websocket_api.require_admin
@@ -3912,7 +3913,7 @@ async def ws_repeat_spoken(
         connection.send_result(msg["id"], {"ok": ok, "spoken": row["text"] if ok else ""})
     except Exception as exc:
         _LOGGER.exception("ws_repeat_spoken failed: %s", exc)
-        connection.send_error(msg["id"], "repeat_spoken_failed", str(exc))
+        connection.send_error(msg["id"], "repeat_spoken_failed", safe_error_message(exc))
 
 
 @websocket_api.require_admin
@@ -3934,8 +3935,8 @@ async def ws_semantic_search(
     try:
         from . import embeddings, nova_config
         if action == "enable":
-            nova_config.set("semantic_search", True)
-            embeddings.init_store()
+            await hass.async_add_executor_job(nova_config.set, "semantic_search", True)
+            await hass.async_add_executor_job(embeddings.init_store)
             res = await embeddings.probe(hass)
             res["enabled"] = True
             if res.get("ok"):
@@ -3947,7 +3948,7 @@ async def ws_semantic_search(
                                     f"ready: {res.get('error')}")
             connection.send_result(msg["id"], res)
         elif action == "disable":
-            nova_config.set("semantic_search", False)
+            await hass.async_add_executor_job(nova_config.set, "semantic_search", False)
             nova_log("AGENT", "semantic search disabled — keyword (FTS) active")
             connection.send_result(msg["id"], {"enabled": False, "ok": True})
         elif action == "test":
@@ -3966,7 +3967,7 @@ async def ws_semantic_search(
             })
     except Exception as exc:
         _LOGGER.exception("ws_semantic_search failed: %s", exc)
-        connection.send_error(msg["id"], "semantic_search_failed", str(exc))
+        connection.send_error(msg["id"], "semantic_search_failed", safe_error_message(exc))
 
 
 @websocket_api.require_admin
@@ -4024,7 +4025,7 @@ async def ws_documents(
         connection.send_result(msg["id"], res)
     except Exception as exc:
         _LOGGER.exception("ws_documents failed: %s", exc)
-        connection.send_error(msg["id"], "documents_failed", str(exc))
+        connection.send_error(msg["id"], "documents_failed", safe_error_message(exc))
 
 
 @websocket_api.websocket_command({
@@ -4101,7 +4102,7 @@ async def ws_mmwave_overview(
         })
     except Exception as exc:
         _LOGGER.exception("mmwave_overview failed: %s", exc)
-        connection.send_error(msg["id"], "mmwave_overview_failed", str(exc))
+        connection.send_error(msg["id"], "mmwave_overview_failed", safe_error_message(exc))
 
 
 @websocket_api.require_admin
@@ -4144,7 +4145,7 @@ async def ws_camera_location(
         })
     except Exception as exc:
         _LOGGER.exception("camera_location failed: %s", exc)
-        connection.send_error(msg["id"], "camera_location_failed", str(exc))
+        connection.send_error(msg["id"], "camera_location_failed", safe_error_message(exc))
 
 
 @websocket_api.websocket_command({
@@ -4199,7 +4200,7 @@ async def ws_camera_diagnostics(
         })
     except Exception as exc:
         _LOGGER.exception("camera_diagnostics failed: %s", exc)
-        connection.send_error(msg["id"], "camera_diag_failed", str(exc))
+        connection.send_error(msg["id"], "camera_diag_failed", safe_error_message(exc))
 
 
 @websocket_api.websocket_command({
@@ -4225,7 +4226,7 @@ async def ws_get_area_sparklines(
         connection.send_result(msg["id"], {"sparklines": sparklines})
     except Exception as exc:
         _LOGGER.exception("get_area_sparklines failed: %s", exc)
-        connection.send_error(msg["id"], "sparklines_failed", str(exc))
+        connection.send_error(msg["id"], "sparklines_failed", safe_error_message(exc))
 
 
 @websocket_api.require_admin
@@ -4285,7 +4286,7 @@ async def ws_goal_action(
         connection.send_result(msg["id"], {"ok": bool(ok), "goals": _get_goals()})
     except Exception as exc:
         _LOGGER.exception("ws_goal_action failed: %s", exc)
-        connection.send_error(msg["id"], "goal_action_failed", str(exc))
+        connection.send_error(msg["id"], "goal_action_failed", safe_error_message(exc))
 
 
 @websocket_api.websocket_command({
@@ -4304,4 +4305,4 @@ async def ws_get_person_routines(
         connection.send_result(msg["id"], {"routines": routines})
     except Exception as exc:
         _LOGGER.exception("get_person_routines failed: %s", exc)
-        connection.send_error(msg["id"], "person_routines_failed", str(exc))
+        connection.send_error(msg["id"], "person_routines_failed", safe_error_message(exc))
