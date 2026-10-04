@@ -696,3 +696,38 @@ def outcome_rate(kind: str, window_s: Optional[float] = None,
         out["unwelcome_rate"] = round(
             (counts["unnecessary"] + counts["wrong"]) / judged, 4)
     return out
+
+
+def settled_unjudged_count(kind: str, window_s: float, settle_s: float,
+                           db_path: Optional[str] = None, prefix: bool = False) -> int:
+    """How many records of ``kind`` from the last ``window_s`` seconds are
+    older than ``settle_s`` and still have no verdict. With ``prefix`` true,
+    ``kind`` matches every kind that starts with it. Pure DB read; never
+    raises (0 on any failure)."""
+    db = _resolve(db_path)
+    if not Path(db).exists():
+        return 0
+    try:
+        conn = _connect(db)
+    except Exception:
+        return 0
+    try:
+        now = time.time()
+        if prefix:
+            esc = (str(kind).replace("\\", "\\\\").replace("%", "\\%")
+                   .replace("_", "\\_"))
+            where, param = "kind LIKE ? ESCAPE '\\'", esc + "%"
+        else:
+            where, param = "kind = ?", str(kind)
+        row = conn.execute(
+            f"SELECT COUNT(*) FROM decision_records WHERE outcome IS NULL AND {where} "
+            "AND ts >= ? AND ts <= ?",
+            (param, now - float(window_s), now - float(settle_s))).fetchone()
+        return int(row[0] or 0)
+    except Exception:
+        return 0
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass

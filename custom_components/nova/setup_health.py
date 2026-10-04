@@ -194,6 +194,15 @@ def _check_assist_pipeline(hass) -> dict:
         pipelines = list(assist_pipeline.async_get_pipelines(hass))
     except Exception:
         pipelines = []
+    # Any pipeline that uses Nova's agent counts, whatever its name.
+    using_nova = [p for p in pipelines
+                  if getattr(p, "conversation_engine", None) == agent]
+    if using_nova:
+        out["status"] = _OK
+        out["detail"] = (f"pipeline '{getattr(using_nova[0], 'name', '?')}' "
+                         "uses Nova as its agent")
+        return out
+
     nova_pipeline = None
     for p in pipelines:
         name = (getattr(p, "name", "") or "").lower()
@@ -204,22 +213,17 @@ def _check_assist_pipeline(hass) -> dict:
 
     if nova_pipeline is None:
         out["status"] = _WARN
-        out["detail"] = "no Nova-named or Nova-voiced Assist pipeline found"
+        out["detail"] = "no Assist pipeline uses Nova as its conversation agent"
         out["suggested_fix"] = ("Create an Assist pipeline under Settings → Voice Assistants "
                                 "with Nova as the conversation agent.")
         return out
 
     engine = getattr(nova_pipeline, "conversation_engine", None)
-    if engine != agent:
-        out["status"] = _WARN
-        out["detail"] = (f"pipeline '{getattr(nova_pipeline, 'name', '?')}' uses conversation "
-                         f"agent '{engine}', not Nova ({agent})")
-        out["suggested_fix"] = ("Set the pipeline's conversation agent to Nova under "
-                                "Settings → Voice Assistants.")
-        return out
-
-    out["status"] = _OK
-    out["detail"] = f"pipeline '{getattr(nova_pipeline, 'name', '?')}' uses Nova as its agent"
+    out["status"] = _WARN
+    out["detail"] = (f"pipeline '{getattr(nova_pipeline, 'name', '?')}' uses conversation "
+                     f"agent '{engine}', not Nova ({agent})")
+    out["suggested_fix"] = ("Set the pipeline's conversation agent to Nova under "
+                            "Settings → Voice Assistants.")
     return out
 
 

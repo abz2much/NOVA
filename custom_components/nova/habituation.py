@@ -18,9 +18,11 @@ changes, so at most once per key per day.
 """
 from __future__ import annotations
 
+import asyncio
 import datetime
 import fnmatch
 import logging
+import threading
 import time
 from typing import Optional
 from . import paths
@@ -64,12 +66,42 @@ def _load() -> dict:
     return _state
 
 
+_save_lock = threading.Lock()
+_save_gen = 0      # bumped for every save request
+_written_gen = 0   # the newest request already on disk
+
+
+def _write(snapshot: dict, gen: int) -> None:
+    """Write one snapshot. Blocking. A snapshot older than the one already
+    written is skipped, so writes that finish out of order never go back."""
+    global _written_gen
+    with _save_lock:
+        if gen < _written_gen:
+            return
+        try:
+            from .persistence.files import write_json_atomic
+            write_json_atomic(_state_file(), snapshot, indent=2)
+            _written_gen = gen
+        except Exception as exc:
+            _LOGGER.warning("habituation: could not save: %s", exc)
+
+
 def _save() -> None:
+    """Save the state. On the event loop the file write goes to the executor,
+    so callers in async code never block the loop. Elsewhere it is written
+    straight away."""
+    global _save_gen
+    _save_gen += 1
+    gen = _save_gen
+    snapshot = {k: dict(v) for k, v in _load().items()}
     try:
-        from .persistence.files import write_json_atomic
-        write_json_atomic(_state_file(), _load(), indent=2)
-    except Exception as exc:
-        _LOGGER.warning("habituation: could not save: %s", exc)
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop is None:
+        _write(snapshot, gen)
+    else:
+        loop.run_in_executor(None, _write, snapshot, gen)
 
 
 def exempt(*, urgency: str = "", kind: str = "", entity_id: str = "") -> bool:

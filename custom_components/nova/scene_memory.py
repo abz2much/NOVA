@@ -12,7 +12,9 @@ Privacy and bounds:
   * Off unless ``scene_memory_enabled`` is true.
   * Text only. No images, faces or embeddings are stored.
   * Old rows are dropped after ``scene_memory_retention_days`` (default 14) and
-    each camera keeps at most ``MAX_ROWS_PER_CAMERA`` rows.
+    each camera keeps at most ``MAX_ROWS_PER_CAMERA`` rows. Reads ignore expired
+    rows, and ``prune`` runs at setup so they are deleted even when nothing new
+    is written.
   * ``forget_all`` wipes everything.
 
 Matching is deliberately plain. A description is split into clauses, clauses
@@ -25,6 +27,7 @@ All database functions are blocking. Call them from the executor.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import time
 from typing import Optional
@@ -83,6 +86,12 @@ def retention_days() -> int:
     except Exception:
         pass
     return DEFAULT_RETENTION_DAYS
+
+
+def _cutoff(retention: Optional[int] = None) -> float:
+    """Rows older than this are expired."""
+    days = retention if retention is not None else retention_days()
+    return time.time() - days * 86400.0
 
 
 def _resolve(db_path: Optional[str]) -> str:
@@ -171,8 +180,7 @@ def record_scene(camera: str, description: str, area: Optional[str] = None, *,
                 "VALUES (?, ?, ?, ?, ?)",
                 (camera, (str(area).strip() or None) if area else None, when,
                  description, _pack(extract_objects(description))))
-            conn.execute("DELETE FROM sightings WHERE ts < ?",
-                         (time.time() - days * 86400.0,))
+            conn.execute("DELETE FROM sightings WHERE ts < ?", (_cutoff(days),))
             conn.execute(
                 "DELETE FROM sightings WHERE camera = ? AND id NOT IN "
                 "(SELECT id FROM sightings WHERE camera = ? ORDER BY ts DESC, id DESC "
@@ -208,10 +216,10 @@ def where_last_seen(term: str, *, db_path: Optional[str] = None) -> Optional[dic
     except Exception:
         return None
     try:
-        sql = "SELECT * FROM sightings WHERE " + " AND ".join(
+        sql = "SELECT * FROM sightings WHERE ts >= ? AND " + " AND ".join(
             "objects LIKE ? ESCAPE '\\'" for _ in words) + " ORDER BY ts DESC, id DESC LIMIT 1"
-        params = ["%\n" + w.replace("\\", "\\\\").replace("%", "\\%")
-                  .replace("_", "\\_") + "\n%" for w in words]
+        params: list = [_cutoff()] + ["%\n" + w.replace("\\", "\\\\").replace("%", "\\%")
+                                     .replace("_", "\\_") + "\n%" for w in words]
         row = conn.execute(sql, params).fetchone()
         return _row(row) if row else None
     except Exception as exc:
@@ -236,17 +244,19 @@ def what_changed(camera: str, since: float, *,
         return out
     try:
         match = "(lower(camera) = ? OR lower(COALESCE(area, '')) = ?)"
+        cutoff = _cutoff()
         latest = conn.execute(
-            f"SELECT * FROM sightings WHERE {match} ORDER BY ts DESC, id DESC LIMIT 1",
-            (key, key)).fetchone()
+            f"SELECT * FROM sightings WHERE {match} AND ts >= ? "
+            "ORDER BY ts DESC, id DESC LIMIT 1",
+            (key, key, cutoff)).fetchone()
         if not latest:
             return out
         out.update(found=True, latest_ts=latest["ts"], camera=latest["camera"],
                    area=latest["area"])
         baseline = conn.execute(
-            "SELECT * FROM sightings WHERE camera = ? AND ts <= ? "
+            "SELECT * FROM sightings WHERE camera = ? AND ts <= ? AND ts >= ? "
             "ORDER BY ts DESC, id DESC LIMIT 1",
-            (latest["camera"], float(since))).fetchone()
+            (latest["camera"], float(since), cutoff)).fetchone()
         if not baseline or baseline["id"] == latest["id"]:
             return out
         now_words = set(_unpack(latest["objects"]))
@@ -277,6 +287,28 @@ def stats(*, db_path: Optional[str] = None) -> dict:
     finally:
         conn.close()
     return out
+
+
+def prune(*, retention: Optional[int] = None, db_path: Optional[str] = None) -> int:
+    """Delete expired rows, whether or not scene memory is on. Runs at setup,
+    so rows do not outlive the retention when nothing new is written. Does
+    not create the database. Returns how many rows were removed."""
+    path = _resolve(db_path)
+    if not os.path.exists(path):
+        return 0
+    try:
+        conn = _connect(path)
+    except Exception:
+        return 0
+    try:
+        with conn:
+            cur = conn.execute("DELETE FROM sightings WHERE ts < ?", (_cutoff(retention),))
+            return int(cur.rowcount or 0)
+    except Exception as exc:
+        _LOGGER.warning("scene memory: prune failed: %s", exc)
+        return 0
+    finally:
+        conn.close()
 
 
 def forget_all(*, db_path: Optional[str] = None) -> int:

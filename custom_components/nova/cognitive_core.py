@@ -850,8 +850,10 @@ class SafetyManager:
                 "object). Do not guess — if you cannot clearly see a person, "
                 "answer NO."
             )
+            # A yes/no probe, not a scene description: keep it out of scene
+            # memory, or "PERSON: NO" would be stored as a person sighting.
             fc = _FakeCall({"entity_id": cam_entity, "prompt": prompt,
-                            "announce": False})
+                            "announce": False, "record_scene": False})
             groq_client = getattr(self, "groq_client", None) or getattr(self, "_groq", None)
             res = await async_analyze_camera(
                 self.hass, fc, groq_client, honorific, None, [], gate_announce=True)

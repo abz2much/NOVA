@@ -163,7 +163,9 @@ ${this._htmlDashboardBody()}`;
     if (!visible) return "";
     const sh = this._setupHealth;
     const active = (sh?.checks || []).filter(c => c.status !== "off");
-    const checksLine = sh?.error
+    const checksLine = sh?.unauthorized
+      ? `<small>Setup Doctor needs a Home Assistant admin account.</small>`
+      : sh?.error
       ? `<small>Couldn't run Setup Doctor — restart Home Assistant after updating.</small>`
       : problems === null
         ? `<small>Checking…</small>`

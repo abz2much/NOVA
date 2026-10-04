@@ -39,6 +39,15 @@ def test_upsert_escapes_quotes_and_backslashes(hs):
     assert yaml.safe_load(out)["k"] == 'a"b\\c'
 
 
+@pytest.mark.parametrize("value", ["abc\\def", "ab\\", "a\\nb", "x\\1y", 'p"w\\x', "plain-key"])
+def test_overwrite_keeps_backslashes(hs, value):
+    """Replacing an existing key must round-trip exactly like appending one:
+    re.sub must not read the escaped value as its own escapes."""
+    out = hs._upsert_secret_line('k: "old"\nother: 1\n', "k", value)
+    loaded = yaml.safe_load(out)
+    assert loaded["k"] == value and loaded["other"] == 1
+
+
 # ── set_secret_sync (safe write) ─────────────────────────────────────────────
 
 @pytest.mark.skipif(yaml is None, reason="PyYAML unavailable")

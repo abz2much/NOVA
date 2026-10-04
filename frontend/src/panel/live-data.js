@@ -31,7 +31,8 @@
       if (this._hass && ob && !ob.dismissed && (ob.show || ob.fresh) && !this._setupHealth && !this._welcomeHealthPending) {
         this._welcomeHealthPending = true;
         this._hass.callWS({ type: "nova/get_setup_health" })
-          .then(res => { this._setupHealth = res; }, () => { this._setupHealth = { error: true }; })
+          .then(res => { this._setupHealth = res; },
+                err => { this._setupHealth = { error: true, unauthorized: err?.code === "unauthorized" }; })
           .finally(() => { this._welcomeHealthPending = false; this._renderData(); });
       }
       onboardingMount.innerHTML = this._onboardingHtml(d.onboarding);

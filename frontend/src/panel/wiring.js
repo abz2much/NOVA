@@ -126,7 +126,9 @@
         const res = await this._hass.callWS({ type: "nova/say_hello" });
         this._helloState = res?.ok ? { reply: res.reply } : { error: res?.error || "Nova didn't reply." };
       } catch (err) {
-        this._helloState = { error: "Couldn't reach Nova — restart Home Assistant after updating." };
+        this._helloState = { error: err?.code === "unauthorized"
+          ? "Say hello needs a Home Assistant admin account."
+          : "Couldn't reach Nova — restart Home Assistant after updating." };
       }
       this._renderData();
     });

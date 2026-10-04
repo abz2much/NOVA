@@ -219,7 +219,7 @@ const hass = {
     if (m.type === "nova/get_setup_health") return { overall: "warn", checks: [
       { name: "Language model", key: "llm", status: "ok", detail: "reachable" },
       { name: "Assist pipeline", key: "assist_pipeline", status: "warn",
-        detail: "no Nova-named or Nova-voiced Assist pipeline found", suggested_fix: "Create an Assist pipeline." },
+        detail: "no Assist pipeline uses Nova as its conversation agent", suggested_fix: "Create an Assist pipeline." },
       { name: "Room speakers", key: "room_speakers", status: "off", detail: "" },
     ] };
     if (m.type === "nova/say_hello") { _sayHelloCalls.push(m); return { ok: true, reply: "Good day. All quiet here." }; }
@@ -586,6 +586,18 @@ setTimeout(async () => {
     /onboardingCard/.test(elNew._onboardingHtml({ show: false, fresh: true, steps: [] }))
     && elNew._onboardingHtml({ show: false, fresh: false, steps: [] }) === ""
     && elNew._onboardingHtml({ show: true, fresh: true, dismissed: true, steps: [] }) === ""]);
+  {
+    // A non-admin is refused by Setup Doctor: say so, don't blame the update.
+    const savedHealth = elNew._setupHealth;
+    elNew._setupHealth = { error: true, unauthorized: true };
+    const html = elNew._onboardingHtml({ show: true, steps: [] });
+    elNew._setupHealth = { error: true };
+    const htmlOther = elNew._onboardingHtml({ show: true, steps: [] });
+    elNew._setupHealth = savedHealth;
+    checks.push(["welcome card tells a non-admin Setup Doctor needs an admin",
+      /needs a Home Assistant admin account/.test(html) && !/restart Home Assistant/.test(html)
+      && /restart Home Assistant after updating/.test(htmlOther)]);
+  }
   checks.push(["onboarding can be dismissed persistently",
     !newRoot.getElementById("onboardingCard")
     && _updateConfigCalls.some(c => c.key === "onboarding_dismissed" && c.value === true)]);

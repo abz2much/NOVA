@@ -113,3 +113,35 @@ def test_unignore_restores_a_quiet_notification(hab, load):
     out = core.unignore("binary_sensor.disk")
     assert out["success"] is True and out["restored_notifications"] == 1
     assert not hab.is_quiet("binary_sensor.disk")
+
+
+async def test_save_on_the_event_loop_runs_in_the_executor(hab, monkeypatch):
+    """record() is called from async alert code: the file write must not run
+    on the loop thread."""
+    import asyncio
+    import threading
+    loop_thread = threading.get_ident()
+    writers = []
+    real_write = hab._write
+
+    def spy(snapshot, gen):
+        real_write(snapshot, gen)
+        writers.append(threading.get_ident())
+
+    monkeypatch.setattr(hab, "_write", spy)
+    hab.record("k", "k", _ts(1))
+    for _ in range(50):
+        if writers:
+            break
+        await asyncio.sleep(0.01)
+    assert writers and loop_thread not in writers
+    with open(hab.STATE_FILE) as f:
+        assert json.load(f)["k"]["streak"] == 1
+
+
+def test_an_older_snapshot_never_overwrites_a_newer_one(hab, monkeypatch):
+    monkeypatch.setattr(hab, "_written_gen", 0)
+    hab._write({"k": {"streak": 2}}, 2)
+    hab._write({"k": {"streak": 1}}, 1)
+    with open(hab.STATE_FILE) as f:
+        assert json.load(f)["k"]["streak"] == 2

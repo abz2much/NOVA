@@ -117,6 +117,50 @@ async def test_mostly_welcome_is_a_little_looser_never_below_baseline_days(
     assert aa.extra_min_days() == 0
 
 
+async def test_alerts_left_unmuted_for_a_day_count_as_welcome(aa, monkeypatch, load, db, dr):
+    """Muting is the only automatic verdict, so without this the rate was
+    always 1.0 and could only ever say "wait longer"."""
+    _enable(monkeypatch, load)
+    old = time.time() - 2 * 86400
+    for _ in range(9):
+        dr.record("anticipation_overdue", ts=old, db_path=db)
+    _judged(dr, db, "anticipation_overdue", ["unnecessary"])
+    assert await aa.async_refresh(_Hass(), db_path=db) == -0.07
+    st = aa.status()
+    assert st["judged"] == 10 and st["unwelcome_rate"] == 0.1
+
+
+async def test_recent_unjudged_alerts_are_not_counted_yet(aa, monkeypatch, load, db, dr):
+    """An alert from the last day can still be muted, so it is not counted."""
+    _enable(monkeypatch, load)
+    for _ in range(9):
+        dr.record("anticipation_overdue", ts=time.time() - 3600, db_path=db)
+    assert await aa.async_refresh(_Hass(), db_path=db) == 0.0
+    assert aa.status()["judged"] == 0
+
+
+async def test_mostly_muted_still_waits_longer(aa, monkeypatch, load, db, dr):
+    _enable(monkeypatch, load)
+    dr.record("anticipation_overdue", ts=time.time() - 2 * 86400, db_path=db)
+    _judged(dr, db, "anticipation_overdue", ["unnecessary"] * 6)
+    assert await aa.async_refresh(_Hass(), db_path=db) == 0.15
+
+
+def test_settled_unjudged_count_window_and_family(dr, db):
+    now = time.time()
+    dr.record("anticipation_overdue", ts=now - 2 * 86400, db_path=db)     # counted
+    dr.record("anticipation_presence", ts=now - 3 * 86400, db_path=db)    # counted
+    dr.record("anticipation_overdue", ts=now - 3600, db_path=db)          # too recent
+    dr.record("anticipation_overdue", ts=now - 40 * 86400, db_path=db)    # too old
+    dr.record("intrusion", ts=now - 2 * 86400, db_path=db)                # other kind
+    rid = dr.record("anticipation_overdue", ts=now - 2 * 86400, db_path=db)
+    dr.set_outcome(rid, "good", source="test", db_path=db)                # judged
+    assert dr.settled_unjudged_count("anticipation", 30 * 86400, 86400,
+                                     db_path=db, prefix=True) == 2
+    assert dr.settled_unjudged_count("anticipation", 30 * 86400, 86400,
+                                     db_path=db + ".missing", prefix=True) == 0
+
+
 async def test_only_anticipation_records_count(aa, monkeypatch, load, db, dr):
     _enable(monkeypatch, load)
     # Plenty of unwelcome verdicts, but all on other kinds: no effect.

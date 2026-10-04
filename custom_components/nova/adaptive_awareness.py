@@ -3,7 +3,8 @@
 Nova's anticipation alerts ("the porch door usually opens by now", "usually home
 by now", routine and departure nudges) each leave a Decision Record. When the
 user mutes or ignores something right after one of those alerts, the matching
-record is judged "unnecessary". This module turns the recent mix of verdicts
+record is judged "unnecessary". An alert left unmuted for a day counts as
+welcome, as does one judged "good" by hand. This module turns the recent mix
 into one small, bounded adjustment:
 
     mostly unwelcome  -> wait a bit longer before saying "not yet" and ask for
@@ -87,8 +88,15 @@ async def async_refresh(hass, *, db_path: Optional[str] = None) -> float:
         from . import decision_record
         r = await hass.async_add_executor_job(
             decision_record.outcome_rate, KIND_PREFIX, WINDOW_S, db_path, True)
-        judged = int(r.get("judged", 0))
-        rate = r.get("unwelcome_rate")
+        # An alert nobody muted within a day counts as welcome. Without this
+        # the only automatic verdict is "unnecessary", so the rate could
+        # only ever say "wait longer".
+        settled = await hass.async_add_executor_job(
+            decision_record.settled_unjudged_count, KIND_PREFIX, WINDOW_S,
+            IGNORE_WINDOW_S, db_path, True)
+        unwelcome = int(r.get("unnecessary", 0)) + int(r.get("wrong", 0))
+        judged = int(r.get("judged", 0)) + int(settled)
+        rate = round(unwelcome / judged, 4) if judged else None
         if judged >= MIN_JUDGED:
             delta = delta_from_rate(rate)
     except Exception as exc:

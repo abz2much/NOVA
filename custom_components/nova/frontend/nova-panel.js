@@ -1082,7 +1082,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v8.7.1
+ * v8.7.2
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1158,7 +1158,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.7.1 ",
+      console.log("%c Nova Panel %c v8.7.2 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -1443,7 +1443,9 @@ ${this._htmlDashboardBody()}`;
     if (!visible) return "";
     const sh = this._setupHealth;
     const active = (sh?.checks || []).filter(c => c.status !== "off");
-    const checksLine = sh?.error
+    const checksLine = sh?.unauthorized
+      ? `<small>Setup Doctor needs a Home Assistant admin account.</small>`
+      : sh?.error
       ? `<small>Couldn't run Setup Doctor — restart Home Assistant after updating.</small>`
       : problems === null
         ? `<small>Checking…</small>`
@@ -5464,7 +5466,8 @@ ${this._htmlDashboardBody()}`;
       if (this._hass && ob && !ob.dismissed && (ob.show || ob.fresh) && !this._setupHealth && !this._welcomeHealthPending) {
         this._welcomeHealthPending = true;
         this._hass.callWS({ type: "nova/get_setup_health" })
-          .then(res => { this._setupHealth = res; }, () => { this._setupHealth = { error: true }; })
+          .then(res => { this._setupHealth = res; },
+                err => { this._setupHealth = { error: true, unauthorized: err?.code === "unauthorized" }; })
           .finally(() => { this._welcomeHealthPending = false; this._renderData(); });
       }
       onboardingMount.innerHTML = this._onboardingHtml(d.onboarding);
@@ -5987,7 +5990,9 @@ ${this._htmlDashboardBody()}`;
         const res = await this._hass.callWS({ type: "nova/say_hello" });
         this._helloState = res?.ok ? { reply: res.reply } : { error: res?.error || "Nova didn't reply." };
       } catch (err) {
-        this._helloState = { error: "Couldn't reach Nova — restart Home Assistant after updating." };
+        this._helloState = { error: err?.code === "unauthorized"
+          ? "Say hello needs a Home Assistant admin account."
+          : "Couldn't reach Nova — restart Home Assistant after updating." };
       }
       this._renderData();
     });

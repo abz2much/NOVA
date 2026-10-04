@@ -1,3 +1,22 @@
+## [8.7.2] — Scene memory keeps only real sightings, GPT-5 replies, and review fixes
+
+**Fixed**
+- Scene memory no longer stores the intrusion "is anyone there?" check. Its "PERSON: NO" answer was saved as a person sighting, so "when did you last see a person in the hall?" could point at a frame where vision had said nobody was there.
+- Scene memory no longer stores the doorbell backlog scan. Those are old recordings, but they were saved as seen now, so "where did I last see the package?" could answer "just now" about a weeks-old event.
+- Scene memory never answers from descriptions older than the retention, and expired descriptions are deleted at startup, including while scene memory is off. Before, they were only deleted when a new one was written.
+- OpenAI's GPT-5 and o-series models no longer return empty replies on short requests. Their hidden reasoning counts against the reply budget, and Nova's scenes, classifier, sentinel and package checks ask for 40 to 120 tokens, which reasoning could use up before any text was written. Nova now adds room for the reasoning on top of the budget and asks for low reasoning effort. Fine-tuned GPT-5 and o-series models are recognised too.
+- "Go quiet after 3 days" now saves its file off the event loop.
+- Replacing a saved key in secrets.yaml keeps backslashes in it. Before, a custom or Ollama key containing a backslash was changed on write or made secrets.yaml unreadable. Other providers' keys never contain one.
+- Adaptive awareness can now also wait less. A routine alert left unmuted for a day counts as welcome. Before, muting was the only automatic verdict, so after five mutes it stayed at "wait longer" for good.
+- The welcome card's voice step, and Setup Doctor's Assist pipeline check, accept any pipeline that uses Nova as its conversation agent, whatever it is called. Before, only a pipeline named or voiced "Nova" counted.
+- A Home Assistant user who isn't an admin now sees that Setup Doctor and Say hello need an admin account, instead of "restart Home Assistant after updating".
+
+**Caveats**
+- Descriptions the two checks above already stored are kept until they expire (14 days by default), or until "Forget everything" in Settings.
+- The GPT-5 change was checked against OpenAI's documentation and with a fake client, not with a real key. The extra room is a ceiling, not a cost: only tokens actually used are billed.
+- With adaptive awareness on, routine alerts from the last 30 days count right away, including ones from before this update. An alert you didn't mute counts as welcome even if you simply didn't see it, and calendar departure alerts can still only be marked unwelcome by hand.
+- Hard refresh the page (Ctrl+Shift+R) after updating.
+
 ## [8.7.1] — Fewer classifier calls, quieter infrastructure audit, fewer blocking calls
 
 **Fixed**
