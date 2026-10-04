@@ -1,3 +1,31 @@
+## [8.7.6] — Delivery and mail: no wide views, a 30 minute announce cooldown, early checks from sensors
+
+**Fixed**
+- Package watch no longer sweeps wide views. It matched the text "front" anywhere in a camera's entity ID, so `camera.front_yard` and `camera.front_garden` were checked for packages. It now matches whole words in the part after the dot (split on `_` and on letters versus digits). A camera is watched when it has the word doorbell, frontdoor, porch or front (or frontporch, frontdoorbell) and none of these wide view words: yard, backyard, frontyard, street, road, lawn, garden, driveway, curb, field, garage, pool, patio, deck, gate, parking, lot.
+- A camera you name yourself (the `entity_id` on `nova.check_packages`) is never filtered, and a Eufy camera with native package sensors is still left to its own sensors, both as before.
+
+**Camera names whose behaviour changes**
+- Watched before, not now, because of a wide view word: `camera.front_yard`, `camera.front_garden`, `camera.front_driveway`, `camera.front_lawn`, `camera.front_gate`, `camera.front_garage_door`, `camera.porch_driveway`, `camera.frontyard`.
+- Watched before, not now, because the word is glued to other letters: `camera.porchcam`, `camera.doorbellcam`, `camera.frontcam`, `camera.frontdoorcam`, `camera.backporch`. Use the `nova.check_packages` entity ID, or rename the entity, to keep one watched.
+- Not changed: `camera.front_door`, `camera.frontdoor`, `camera.front_door_hd`, `camera.frontdoor_hd`, `camera.front_door_2`, `camera.porch`, `camera.back_porch`, `camera.doorbell`, `camera.my_doorbell`, `camera.front`, `camera.frontporch`, `camera.frontdoorbell`, and `camera.front_porch_wide` (the word "wide" is not on the wide view list).
+
+**Added**
+- A 30 minute announce cooldown for each camera and kind of alert (delivered, mail, removed, stranded). A repeat inside 1800 seconds is not spoken. The state, the log, the observer event and the learning record all happen as before. Only the speech is skipped. A "removed while away" alert is never held back by a recent "delivered", because each kind has its own clock. A "stranded" reminder is gated too.
+- Porch motion sensors can start a check early. A binary sensor with device class motion, occupancy or presence, whose name passes the same test as a camera, starts the existing package sweep 20 seconds after it turns on. At most one early check every 3 minutes. It only brings the sweep forward: the second look and the state machine are the same, and it adds no new way to speak. Sensors on a Eufy camera that already has package sensors are left out.
+- Mailbox sensors can announce mail. A binary sensor with device class opening, door, occupancy or none, whose name has the word mailbox, letterbox or postbox, runs the package state machine with mail True when it turns on. Mail already true is ignored, and each sensor is debounced for 5 minutes.
+- Both sensor triggers respect Package Watch (`package_detection`), quiet hours, announcements and the cooldown. There is no new setting. Only a real off to on change counts, so a sensor coming back from unavailable does nothing.
+- The sensors are found once at setup, the same way as the Eufy sensors. A sensor added later needs a Nova reload.
+
+**Caveats**
+- Opening your own mailbox to collect mail can announce once, because a sensor cannot tell who opened it.
+- A real second delivery inside 30 minutes is logged and shown in the panel but not spoken.
+- Mail that sits in a mailbox is not visible to a porch camera, so camera mail detection is unchanged.
+- A mailbox sensor gets its own entry in the tracked package state (the sensor's entity ID). Mail counts as already announced for 30 minutes. After that, the next opening counts as new mail, because nothing else clears that entry.
+- In quiet hours, or with announcements off, a mailbox opening updates the state and the log but is not spoken, like every other package event. With Package Watch off it does nothing at all. A mailbox opening is recorded for pattern learning with the source "vision", because that recorder has no sensor source.
+- The cooldown and the debounce are kept in memory, like the package state, so a restart clears them.
+- An early check costs the same vision calls as the regular 15 minute sweep, at most one extra sweep every 3 minutes.
+- No existing test assertion was changed. `tests/conftest.py` gains a fixture that clears the new cooldown and debounce dictionaries around every test, because the test loader keeps the module between tests.
+
 ## [8.7.5] — Diagnostics downloads scrub error lines, log tails and service health
 
 **Fixed**
