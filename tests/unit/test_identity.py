@@ -31,7 +31,9 @@ def sigs(load, monkeypatch):
     return state
 
 
-def _face(state, camera, name, confidence=0.9, age_seconds=5):
+def _face(state, camera, name, confidence=90.0, age_seconds=5):
+    """`confidence` is a percent (0..100), the scale recognition.py really
+    stores. These fixtures used 0..1, which is not what last_seen_at returns."""
     state["seen"][camera] = name
     state["last"][camera] = {"name": name, "confidence": confidence,
                              "age_seconds": age_seconds}
@@ -61,7 +63,7 @@ def test_two_home_alone_is_ambiguous_unknown(identity, cfg, sigs, fake_hass):
 
 def test_face_disambiguates_multi_home(identity, cfg, sigs, fake_hass):
     sigs["home"] = ["Username", "Username2"]
-    _face(sigs, "camera.office", "Username2", confidence=0.95, age_seconds=3)
+    _face(sigs, "camera.office", "Username2", confidence=95.0, age_seconds=3)
     ident = identity.resolve(fake_hass)
     assert ident.person == "Username2" and ident.known
     assert "face" in ident.method
@@ -69,14 +71,14 @@ def test_face_disambiguates_multi_home(identity, cfg, sigs, fake_hass):
 
 def test_stale_face_carries_no_weight(identity, cfg, sigs, fake_hass):
     sigs["home"] = ["Username", "Username2"]
-    _face(sigs, "camera.office", "Username2", confidence=0.95, age_seconds=10_000)
+    _face(sigs, "camera.office", "Username2", confidence=95.0, age_seconds=10_000)
     ident = identity.resolve(fake_hass)
     assert ident.person == "unknown"   # face too old → back to ambiguous
 
 
 def test_presence_and_face_agree_high_confidence(identity, cfg, sigs, fake_hass):
     sigs["home"] = ["Username"]
-    _face(sigs, "camera.kitchen", "Username", confidence=0.95, age_seconds=2)
+    _face(sigs, "camera.kitchen", "Username", confidence=95.0, age_seconds=2)
     ident = identity.resolve(fake_hass)
     assert ident.person == "Username"
     assert ident.confidence > 0.8
@@ -155,7 +157,7 @@ def test_quick_person_ignores_face_and_voice(identity, cfg, sigs, fake_hass):
     # quick_person is presence-only by design — a face vote for a second
     # person must not disambiguate the way the full resolve() would.
     sigs["home"] = ["Username", "Username2"]
-    _face(sigs, "camera.office", "Username2", confidence=0.95, age_seconds=3)
+    _face(sigs, "camera.office", "Username2", confidence=95.0, age_seconds=3)
     assert identity.quick_person(fake_hass) == "unknown"
 
 
@@ -176,7 +178,7 @@ class _Rec:
         self._meta = meta or {}
     def who_is_where(self, hass): return self._seen
     def last_seen_at(self, hass, cam):
-        return self._meta.get(cam, {"confidence": 0.9, "age_seconds": 10.0})
+        return self._meta.get(cam, {"confidence": 90.0, "age_seconds": 10.0})
 
 
 def _stub_room(identity, monkeypatch, seen, cam_areas, meta=None):
@@ -207,7 +209,7 @@ def test_room_votes_ignore_other_rooms(identity, monkeypatch):
 def test_room_votes_expire(identity, monkeypatch):
     _stub_room(identity, monkeypatch, {"camera.kitchen": "Username"},
                {"camera.kitchen": "kitchen"},
-               meta={"camera.kitchen": {"confidence": 0.9,
+               meta={"camera.kitchen": {"confidence": 90.0,
                                         "age_seconds": identity._ROOM_FRESH_SECS + 60}})
     assert identity._room_votes(None, "kitchen", __import__("time").time()) == {}
 
