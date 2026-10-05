@@ -22,3 +22,8 @@ def _autonomy_file(*args, **kwargs):
 def _ignore_file(*args, **kwargs):
     from . import cognitive_core
     return cognitive_core._ignore_file(*args, **kwargs)
+
+
+def _patterns_db(*args, **kwargs):
+    from . import cognitive_core
+    return cognitive_core._patterns_db(*args, **kwargs)
