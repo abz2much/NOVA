@@ -9,6 +9,7 @@ import sys
 import types
 
 import pytest
+from core_sources import core_text
 
 if "aiohttp" not in sys.modules:           # camera.py imports it; same stub the n8n tests use
     try:
@@ -109,7 +110,7 @@ def test_single_names_table_everywhere(load):
     ol = load("output_language")
     ctx = load("agent_runtime.context")
     assert ctx._LANG_NAMES is ol.LANG_NAMES
-    cc = (COMP / "cognitive_core.py").read_text()
+    cc = core_text()
     assert "hass.config.language" not in cc          # no second copy of the logic
     assert "_LANG_NAMES = {" not in (COMP / "agent_runtime" / "context.py").read_text()
 
@@ -330,7 +331,7 @@ def test_structured_and_internal_callers_are_untouched():
     for fname in ("suggestion_review.py", "package_monitor.py", "scenes.py",
                   "camera_coverage.py", "classifier.py", "setup_probe.py",
                   "agent_runtime/loop.py", "llm_provider.py", "cognitive_core.py"):
-        src = (COMP / fname).read_text()
+        src = core_text() if fname == "cognitive_core.py" else (COMP / fname).read_text()
         assert "with_language(" not in src and "field_directive(" not in src, fname
         assert "output_language.directive(" not in src, fname
 

@@ -1,3 +1,31 @@
+## [8.7.17] — Internal: cognitive_core.py split into smaller files
+
+**No behaviour change.** This is an internal change only. No setting, service, panel command, error code, log name or stored file changed. Nothing to do after updating.
+
+**What changed**
+- `cognitive_core.py` was 4,235 lines holding intrusion, lockdown, freeze, the proactive manager and the main tick. The code now lives in 13 sibling files, moved without edits:
+  - `core_common.py`: constants and shared helpers (temperatures, language, persona, honorific)
+  - `core_ignore.py`: ignore rules and the outdoor filter
+  - `core_autonomy.py`: AutonomyManager
+  - `core_pattern_store.py`: StateLogger
+  - `core_proactive.py`: ProactiveManager
+  - `core_lockdown.py`: build_lockdown_message and LockdownManager
+  - `core_safety.py`: SafetyManager (moved whole)
+  - `core_state.py`: `_CORE`, the one shared state object
+  - `core_delivery.py`: announcing and pushing an action, notifications
+  - `core_lockdown_sync.py`: alarm sync, request_lockdown, lockdown status
+  - `core_learning.py`: pattern logging gate, backfill, run_analysis_now
+  - `core_runtime.py`: state listener, tick, loop, start and stop, the public API
+  - `core_bridge.py`: call time lookups that avoid import cycles (like `ws_bridge.py`)
+- `cognitive_core.py` stays, as a 341 line facade like `agent.py`: same file name and import path, every old name importable as the same object, and a patch of a moved name on `cognitive_core` reaches the file that owns it. The four persisted paths (`lockdown_state.json`, `.nova_ignore_rules.json`, `autonomy_grants.json`, `patterns.db`) are still defined in `cognitive_core.py`, so the storage contract is unchanged.
+- The only edits inside moved code replace a name that tests patch with a lookup in the file that owns it (for example `_CORE` became `core_state._CORE`), so the patch still applies.
+
+**How it was checked**
+- Every one of the 100 top level functions, classes and constants is identical to 8.7.16 once those lookups are normalised away. All 120 old top level names are present, and the 93 that moved are the same objects as in their new files.
+- The full suite passes with the same tests as 8.7.16 (5,790 passed, 4 skipped). The only test changes are in the five files that read `cognitive_core.py` as text: they now read it and the `core_*.py` files together, through the new helper `tests/core_sources.py`.
+- 14 mutations that put back the 8.7.15 and 8.7.16 defects, applied in the new files, each fail the suite.
+- Coverage is unchanged: the moved code has the same 59 uncovered lines as before. The one 94% floor on `cognitive_core.py` is now a floor per file, each three and a half points under its measured coverage. `scripts/audit.py` now holds `cognitive_core.py` to its facade size.
+
 ## [8.7.16] — Safety fixes: five defects found by the 8.7.15 tests
 
 Each fix fails toward alerting, never toward silence. Nothing else changes.

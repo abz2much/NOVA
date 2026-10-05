@@ -11,6 +11,7 @@ import pathlib
 import sqlite3
 
 import pytest
+from core_sources import core_tree
 
 COMPONENT = pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova"
 EID = "binary_sensor.example_morning_activity"
@@ -238,7 +239,7 @@ def test_other_anticipation_types_keep_once_per_day_across_restart(
 
 # ── database work stays off the event loop ───────────────────────────────────
 def test_patterns_db_io_only_via_executor():
-    tree = ast.parse((COMPONENT / "cognitive_core.py").read_text())
+    tree = core_tree()
     names = {"save_to_db", "load_from_db"}
     executor_args, direct_calls = 0, 0
     for node in ast.walk(tree):

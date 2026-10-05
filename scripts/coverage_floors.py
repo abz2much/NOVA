@@ -39,8 +39,27 @@ FLOORS = {
 # floor sits three and a half points under that: the same margin the package
 # floors use, low enough for normal churn, high enough that deleting the
 # tests, or the safety branches they pin, fails the build.
+#
+# 8.7.17 split that code into core_*.py with cognitive_core.py kept as the
+# facade. The one 94% floor became a floor per file, each set the same three
+# and a half points under that file's measured coverage (rounded down). The
+# files together measured 97.5% (2463 of 2526 lines), as before the split,
+# and each file is now held on its own, so no moved code has less protection.
 FILE_FLOORS = {
-    "cognitive_core.py": 94,
+    "cognitive_core.py": 90,       # 94.3%: the facade (__delattr__ is unused)
+    "core_autonomy.py": 96,        # 100.0%
+    "core_bridge.py": 96,          # 100.0%
+    "core_common.py": 96,          # 100.0%
+    "core_delivery.py": 92,        # 95.9%
+    "core_ignore.py": 96,          # 100.0%
+    "core_learning.py": 89,        # 92.7%
+    "core_lockdown.py": 94,        # 98.0%
+    "core_lockdown_sync.py": 96,   # 100.0%
+    "core_pattern_store.py": 94,   # 97.6%
+    "core_proactive.py": 93,       # 97.2%
+    "core_runtime.py": 93,         # 96.8%
+    "core_safety.py": 95,          # 98.5%
+    "core_state.py": 96,           # 100.0%
 }
 
 
