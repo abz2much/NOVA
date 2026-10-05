@@ -24,6 +24,19 @@ Philosophy:
     does act, via LockdownManager)
   - Everything else: observe, learn, suggest
   - Approved suggestions become automations over time
+
+Where the code lives (8.7.17). This module is the public compatibility
+facade, like agent.py. The implementation is in sibling modules:
+  - core_common.py: constants and shared helpers
+
+This module keeps every name that production code and tests import from
+cognitive_core as the very same object, and keeps each one patchable here:
+setting (or deleting) a moved name on this module sets it on the module that
+owns it too, and reading it reads the owner's current value. Nothing is
+copied: there is one definition and one value of each. The persisted paths
+(LOCKDOWN_STATE_PATH, IGNORE_FILE, AUTONOMY_FILE, PATTERNS_DB and their
+helpers) stay defined here: they are the storage identity of the cognitive
+core (tests/fixtures/contracts/storage.json).
 """
 from __future__ import annotations
 
@@ -31,7 +44,9 @@ import asyncio
 import json
 import logging
 import os
+import sys
 import time
+import types
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Iterable, Optional
@@ -40,146 +55,54 @@ from homeassistant.core import HomeAssistant, Event, callback
 from homeassistant.util import dt as dt_util
 
 from .persistence import sqlite as _store
-from .persistence.files import write_json_atomic
 from . import paths
+from . import core_common as _m_common
+from .core_common import (
+    ALARM_ARMED_STATES,
+    AUTONOMY_MIN_CONFIDENCE,
+    AUTONOMY_TRUST_THRESHOLD,
+    DARK_LUX_THRESHOLD,
+    FREEZE_CRITICAL_TEMP_F,
+    FREEZE_WARN_TEMP_F,
+    HIGH_TEMP_AWAY_F,
+    INTRUSION_CLEAR_QUIET_SECS,
+    INTRUSION_INWARD_DEPTH,
+    INTRUSION_MAX_INVESTIGATE_SECS,
+    INTRUSION_RESPONSE_TIMEOUT_SECS,
+    INTRUSION_SPREAD_ZONES,
+    INTRUSION_SUSTAINED_SECS,
+    LOCKDOWN_BREACH_COOLDOWN,
+    LOCKDOWN_CHECK_INTERVAL,
+    LOCKDOWN_DOOR_COVER_CLASSES,
+    LOCKDOWN_EXEMPT_LOCKS_DEFAULT,
+    LOCKDOWN_SECURE_VERIFY_DELAY,
+    LOW_TEMP_AWAY_F,
+    PROACTIVE_CHECK_INTERVAL,
+    PROACTIVE_OFFER_COOLDOWN,
+    STALE_LIGHT_MINUTES,
+    TICK_INTERVAL,
+    _f_to_unit,
+    _fmt_temp,
+    _hass_lang,
+    _live_honorific,
+    _notify_i18n,
+    _persona,
+    _temp_to_f,
+    discover_outdoor_temp,
+    write_json_atomic,
+)
 
 _LOGGER = logging.getLogger(__name__)
-
-TICK_INTERVAL = 30  # seconds between evaluations
-LOCKDOWN_CHECK_INTERVAL = 300  # 5 min between lockdown scans
-# Formal lockdown state
-ALARM_ARMED_STATES = {
-    "armed_home", "armed_away", "armed_night", "armed_vacation",
-    "armed_custom_bypass",
-}
-LOCKDOWN_DOOR_COVER_CLASSES = {"door", "garage", "garage_door"}
-LOCKDOWN_BREACH_COOLDOWN = 120  # seconds between repeat breach announcements
-LOCKDOWN_SECURE_VERIFY_DELAY = 25  # seconds to wait before confirming a close actually took (slow covers)
 LOCKDOWN_STATE_PATH: Optional[str] = None  # override; None resolves via paths.py; survives reboots/reloads
 
 
 def _lockdown_state_path() -> str:
     return LOCKDOWN_STATE_PATH or paths.nova_path("lockdown_state.json")
-
-
-# Locks that are NOT physical security (thermostat keypad/child locks, etc).
-# Lockdown's "lock every unlocked lock" sweep and breach re-lock both skip
-# these entities. Overridable via the "lockdown_exempt_locks" config key
-# (panel / config.json) — this set is just the default so it works out of
-# the box even with no config.json entry.
-LOCKDOWN_EXEMPT_LOCKS_DEFAULT = {
-    "lock.downstairs_thermo_lock",
-    "lock.upstairs_thermo_lock",
-}
-FREEZE_WARN_TEMP_F = 35  # outdoor temp (°F) that triggers pipe concern
-FREEZE_CRITICAL_TEMP_F = 20  # act immediately
 IGNORE_FILE: Optional[str] = None  # override; None resolves via paths.py
 
 
 def _ignore_file() -> str:
     return IGNORE_FILE or paths.config_path(".nova_ignore_rules.json")
-
-
-def _temp_to_f(value: float, unit: str) -> float:
-    """A temperature already in ``unit`` (``°C`` or ``°F``) → Fahrenheit, so
-    threshold checks are unit-correct regardless of the home's unit system."""
-    return value * 9.0 / 5.0 + 32.0 if unit and "C" in unit.upper() else value
-
-
-def _f_to_unit(f_value: float, unit: str) -> float:
-    """Fahrenheit → ``unit`` (inverse of :func:`_temp_to_f`)."""
-    return (f_value - 32.0) * 5.0 / 9.0 if unit and "C" in unit.upper() else f_value
-
-
-def _fmt_temp(value: float, unit: str, decimals: int = 1) -> str:
-    """Render a temperature with its unit label (``18.3°C``)."""
-    return f"{value:.{decimals}f}{unit or '°'}"
-
-
-def discover_outdoor_temp(hass) -> Optional[tuple[float, str]]:
-    """(value, unit) of the outdoor temperature: a weather.* entity if one
-    exists, else a sensor whose entity_id/name says "outdoor"/"outside".
-    None if nothing is found. Never raises. Shared by the freeze-risk check
-    below and Sentinel's door/window-left-open temperature gate."""
-    try:
-        default_unit = hass.config.units.temperature_unit
-    except Exception:
-        default_unit = "°F"
-
-    value = None
-    unit = default_unit
-    for state in hass.states.async_all("weather"):
-        temp = state.attributes.get("temperature")
-        if temp is not None:
-            try:
-                value = float(temp)
-            except (ValueError, TypeError):
-                continue
-            unit = state.attributes.get("temperature_unit") or default_unit
-            break
-
-    if value is None:
-        for state in hass.states.async_all("sensor"):
-            if state.attributes.get("device_class") != "temperature":
-                continue
-            eid = state.entity_id.lower()
-            fname = (state.attributes.get("friendly_name") or "").lower()
-            if "outdoor" in eid or "outside" in eid or "outdoor" in fname:
-                try:
-                    value = float(state.state)
-                except (ValueError, TypeError):
-                    pass
-                else:
-                    unit = state.attributes.get("unit_of_measurement") or default_unit
-                break
-
-    if value is None:
-        return None
-    return value, unit
-
-
-def _hass_lang(hass) -> str:
-    """Nova's output language ('en' fallback), for localized safety
-    notifications: the output_language setting, else Home Assistant's
-    language (output_language.resolve). Only the words change; notify_i18n
-    falls back to English for a language it has no templates for."""
-    from . import output_language
-    return output_language.resolve(hass)
-
-
-def _notify_i18n():
-    """Lazy import of the localized-notification table (keeps this heavy module's
-    import order unaffected)."""
-    from . import notify_i18n
-    return notify_i18n
-
-
-def _persona():
-    """Lazy import of the persona voice module (same reasoning as _notify_i18n).
-    A local variable named `persona` exists elsewhere in this file (an agent
-    prompt field, unrelated) — routing through this helper avoids any
-    ambiguity with a top-level import."""
-    from . import persona
-    return persona
-
-
-def _live_honorific(hass) -> str:
-    """Presence-aware honorific (Phase C), resolved fresh every call — never
-    cache this on a long-lived object, since who's home changes over time.
-    Every call site below already fetched honorific fresh from self.config
-    on each tick/event (just not presence-aware), so swapping to this here
-    is a straight replacement, not a new staleness risk."""
-    try:
-        from . import honorific as honorific_mod
-        return honorific_mod.effective_honorific(hass)
-    except Exception:
-        return "sir"
-
-# ── Proactive intelligence (v5.9.07) ────────────────────────────────────────
-PROACTIVE_CHECK_INTERVAL = 120   # 2 min between comfort/efficiency scans
-PROACTIVE_OFFER_COOLDOWN = 1800  # 30 min before re-offering the same thing
-DARK_LUX_THRESHOLD = 15          # below this lux + occupancy → offer lights
-STALE_LIGHT_MINUTES = 90         # light on this long in an empty room → flag
 def _offer_area(hass, offer):
     """Best-effort area for a proactive offer, from its action target entity.
     Used to scope a room-bound mode's quiet to just that room. None if unknown."""
@@ -194,32 +117,6 @@ def _offer_area(hass, offer):
         return audio_routing.entity_area(hass, eid)
     except Exception:
         return None
-
-
-HIGH_TEMP_AWAY_F = 78            # cooling running while away → efficiency flag
-LOW_TEMP_AWAY_F = 62             # heating running while away → efficiency flag
-
-# ── Intrusion investigation (v6.33.0) ───────────────────────────────────────
-# One alert, then investigate silently until it's a confirmed intrusion or
-# confirmed benign — never a stream of "motion detected" repeats.
-INTRUSION_SPREAD_ZONES = 2       # motion in this many zones ⇒ someone moving through
-INTRUSION_INWARD_DEPTH = 2       # rooms deep from the breach motion must reach to
-                                 # confirm a real inward route (v6.74.0);
-                                 # configurable via intrusion_inward_depth
-INTRUSION_CLEAR_QUIET_SECS = 180 # motion quiet this long ⇒ nothing of note
-INTRUSION_MAX_INVESTIGATE_SECS = 600  # one zone this long, no spread ⇒ benign
-INTRUSION_SUSTAINED_SECS = 60    # multi-zone motion sustained this long (no breach location) ⇒ real
-# If the user doesn't respond to the initial "investigating" alert (neither
-# acknowledges nor calls it off) within this window AND the situation hasn't
-# cleared, escalate to a full alert anyway — an unanswered possible break-in
-# should fail toward alerting, not toward silently waiting. Configurable via
-# `intrusion_response_timeout` (v6.69.0).
-INTRUSION_RESPONSE_TIMEOUT_SECS = 120
-
-# ── Graduated autonomy (v5.9.07) ────────────────────────────────────────────
-# A suggestion that the user approves repeatedly earns the right to auto-apply.
-AUTONOMY_TRUST_THRESHOLD = 3     # approvals of same pattern → auto-execute tier
-AUTONOMY_MIN_CONFIDENCE = 0.80   # confidence floor for auto-execution
 AUTONOMY_FILE: Optional[str] = None  # override; None resolves via paths.py
 
 
@@ -2540,8 +2437,6 @@ class _CoreState:
 _CORE = _CoreState()
 
 
-# ── State Change Listener ──────────────────────────────────────────────────
-
 @callback
 def _pattern_opted_in(entity_id: str, device_class: str = "") -> bool:
     """Whether a normally-excluded entity (door/window, presence) should still be
@@ -2614,6 +2509,8 @@ def _pattern_rate_ok(entity_id: str, now: float, device_class: str = "") -> bool
     _PATTERN_LOG_LAST[entity_id] = now
     return True
 
+
+# ── State Change Listener ──────────────────────────────────────────────────
 
 def _on_state_changed(event: Event) -> None:
     """Log state changes and check ignore rules."""
@@ -4233,3 +4130,67 @@ def release_runtime() -> None:
     _CORE.lockdown_mgr = None
     _CORE.hass = None
     _CORE.config = {}
+
+
+# Name -> the core module that owns it.
+_OWNERS = {
+    'ALARM_ARMED_STATES': _m_common,
+    'AUTONOMY_MIN_CONFIDENCE': _m_common,
+    'AUTONOMY_TRUST_THRESHOLD': _m_common,
+    'DARK_LUX_THRESHOLD': _m_common,
+    'FREEZE_CRITICAL_TEMP_F': _m_common,
+    'FREEZE_WARN_TEMP_F': _m_common,
+    'HIGH_TEMP_AWAY_F': _m_common,
+    'INTRUSION_CLEAR_QUIET_SECS': _m_common,
+    'INTRUSION_INWARD_DEPTH': _m_common,
+    'INTRUSION_MAX_INVESTIGATE_SECS': _m_common,
+    'INTRUSION_RESPONSE_TIMEOUT_SECS': _m_common,
+    'INTRUSION_SPREAD_ZONES': _m_common,
+    'INTRUSION_SUSTAINED_SECS': _m_common,
+    'LOCKDOWN_BREACH_COOLDOWN': _m_common,
+    'LOCKDOWN_CHECK_INTERVAL': _m_common,
+    'LOCKDOWN_DOOR_COVER_CLASSES': _m_common,
+    'LOCKDOWN_EXEMPT_LOCKS_DEFAULT': _m_common,
+    'LOCKDOWN_SECURE_VERIFY_DELAY': _m_common,
+    'LOW_TEMP_AWAY_F': _m_common,
+    'PROACTIVE_CHECK_INTERVAL': _m_common,
+    'PROACTIVE_OFFER_COOLDOWN': _m_common,
+    'STALE_LIGHT_MINUTES': _m_common,
+    'TICK_INTERVAL': _m_common,
+    '_f_to_unit': _m_common,
+    '_fmt_temp': _m_common,
+    '_hass_lang': _m_common,
+    '_live_honorific': _m_common,
+    '_notify_i18n': _m_common,
+    '_persona': _m_common,
+    '_temp_to_f': _m_common,
+    'discover_outdoor_temp': _m_common,
+    'write_json_atomic': _m_common,
+}
+
+
+class _Facade(types.ModuleType):
+    """Forward writes of an owned name to its owning module as well, and
+    read an owned name from its owner, so a value the owner reassigns
+    itself (_ALARM_INDET_LOG_TS) is never read stale from here."""
+
+    def __getattribute__(self, name):
+        owner = _OWNERS.get(name)
+        if owner is not None:
+            return getattr(owner, name)
+        return super().__getattribute__(name)
+
+    def __setattr__(self, name, value):
+        owner = _OWNERS.get(name)
+        if owner is not None:
+            setattr(owner, name, value)
+        super().__setattr__(name, value)
+
+    def __delattr__(self, name):
+        owner = _OWNERS.get(name)
+        if owner is not None and hasattr(owner, name):
+            delattr(owner, name)
+        super().__delattr__(name)
+
+
+sys.modules[__name__].__class__ = _Facade
