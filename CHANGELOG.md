@@ -1,3 +1,36 @@
+## [8.7.12] — Fix: a recognised face was counted about 100 times too strongly when working out who someone is
+
+**What was wrong**
+- Nova works out who it is talking to, or who did something, by adding up votes from several signals in `identity.py`: who is home, a recent face, which room someone is in, a nearby phone and, if enabled, a voice match. Every weight is on a 0 to 1 scale (face 0.8, voice 0.9, room 0.75, nearby phone 0.35).
+- The recognition cache holds a **percent**: Double Take's confidence, and Frigate's score times 100. The face vote multiplied that percent in as it was. A fresh face at 98.7% was worth about 78, not 0.8, and it beat every other signal, including a perfect voice match. A recognised face always won, and resolved at full confidence. The room vote had the same mistake.
+- The face vote was also keyed by the name exactly as the backend wrote it, while the room and nearby phone votes use `identity.normalize`. So "Sam" and "sam", or the same person on two cameras, could split into separate votes.
+
+**What changed (no setting, no weight and no threshold)**
+- A recognition confidence is divided by 100 and clamped to 0..1, in the face vote and in the room vote. A missing or odd value (nothing, text, a bool, NaN, infinity) falls back to the existing default of 0.7 and never raises. A value under 0 counts as 0 and over 100 as 100.
+- Face votes are now keyed by `identity.normalize(name)`, and so are the who-is-home and voice votes, so one person is one vote whatever each signal's spelling. The name shown is still the way the home, voice or face signal wrote it, so a single signal gives the same answer as before ("Username", not "username"). Two cameras showing the same person in different spelling in the room vote count as one person, not two.
+- No other weight or threshold was touched, including `identity_min_confidence` (0.45).
+
+**What you will notice**
+- A face on its own is trusted for about **two minutes, not five**. With the default `identity_min_confidence` of 0.45, a 95% face resolves on its own until 0.8 × 0.95 × (1 − age ÷ 300) drops under 0.45, so up to about 2 minutes (122 seconds). Before the fix the inflated weight kept it known for the whole 300 second window. After that it is "unknown" unless presence, voice or the room still agree. A recognised face is also still enough on its own while fresh (at most 0.8 confidence).
+- A voice match or who-is-home can now outvote a face. A strong voice match for one person beats a fresh face for someone else, where before the face always won. A close call goes to the voice only just: a voice at 0.95 against a fresh 98.7% face resolves to the voice person with a confidence of about 0.47, barely over the 0.45 gate.
+- What each caller of the resolver now sees:
+  - **Conversation** (`conversation.py`): memory, knowledge and command attribution use `resolve()`. A turn shortly after a face now gets the person's own memory scope for about two minutes, not five, and then falls back to conversation scoped memory as for any unresolved person. A voice or presence signal that disagrees with the face can now win.
+  - **`remember` (memory attribution)**: `resolve_subject()` gives "primary" once the face is stale, as it does when nobody is known.
+  - **Voice enrolment** (`voice_recognition.py`): the "known from other signals but not enrolled" candidate window is now about two minutes after a face.
+  - **State logger** (`cognitive_core.py`, via `quick_identify`): with an area, the room and face votes both come from the same sighting. Fresh, they still add to full confidence, as before. As the sighting ages they fall, so older attributions drop into the existing best guess path (confidence capped at 0.44) or "unknown" a little sooner. Sole occupant attribution is unchanged.
+  - **Action gating:** the comment in `cognitive_core.py` about a "high certainty action gate" through `identity.resolve()` describes a gate that does not exist in the code. Nothing gates an action on identity, so no action behaviour changes.
+  - **Camera awareness** reads a separate percent stored by camera events and is not affected.
+- **Tuning:** `identity_min_confidence` (0.45, shown in the panel as a 0 to 1 setting) was written for a 0 to 1 face weight, so the fix puts the face back in the range it was designed for. No threshold was retuned. If two minutes is too short for you, that is the setting to adjust.
+
+**Tests**
+- New `tests/unit/test_identity_face_scale.py` (41 tests): the old formula is reproduced to show it was wrong (a face worth about 78 that beat a perfect voice at full confidence), then the fixed expectations: a fresh face alone resolves with a weight of at most 0.8, a strong voice beats a fresh face, a strong face with no voice still resolves, casing and spacing merge into one vote, bad confidence values never raise, the room vote, and what the callers see.
+- One existing test file changed, with no assertion edited: `tests/unit/test_identity.py` fed the face and room fixtures confidences of 0.9 and 0.95, but `last_seen_at` returns a percent. The fixtures now use 90.0 and 95.0, the scale the cache really holds. They only passed before because the bug let a fraction read as a strong vote. Every assertion is as it was.
+- No contract, setting, websocket command or panel change.
+
+**Caveats**
+- Past `state_changes.person` rows stay as they were stored. Existing attributions made while the face was inflated are not rewritten.
+- The Python 3.14 run that CI also does was not measured locally.
+
 ## [8.7.11] — A resident roster and a Faces tab, and an opt in intrusion stand down
 
 **Part 1: roster and Faces tab (always on, no change to any alert, announcement or intrusion behaviour)**

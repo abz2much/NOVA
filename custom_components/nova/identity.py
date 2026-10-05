@@ -29,6 +29,7 @@ Config (all via nova_config, sensible defaults):
 from __future__ import annotations
 
 import logging
+import math
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -105,6 +106,31 @@ def normalize(name: str) -> str:
     return "_".join((name or "").strip().lower().split())
 
 
+# What a recognition vote uses when the cache entry carries no usable
+# confidence. It is on the 0..1 scale, like every vote weight below.
+_DEFAULT_FACE_CONFIDENCE = 0.7
+
+
+def _unit_confidence(raw, default: float = _DEFAULT_FACE_CONFIDENCE) -> float:
+    """A recognition confidence on the 0..1 scale of the vote weights.
+
+    recognition.py reports a percent (0..100: Double Take's confidence, and
+    Frigate's score times 100), but every weight in resolve() is 0..1. A face
+    at 98.7 was multiplied in as 98.7, which made it worth about 79 against a
+    voice match worth at most 0.9. So: divide by 100 and clamp to 0..1. A
+    missing or odd value (None, text that is not a number, a bool, NaN,
+    infinity) falls back to `default`. Never raises."""
+    if isinstance(raw, bool) or raw is None:
+        return default
+    try:
+        value = float(raw)
+    except (TypeError, ValueError, OverflowError):
+        return default
+    if not math.isfinite(value):
+        return default
+    return min(1.0, max(0.0, value / 100.0))
+
+
 def subject_for(ident: Identification) -> str:
     """The knowledge `subject` to attribute to — the person, or the default."""
     return normalize(ident.person) if ident.known else DEFAULT_PERSONAL_SUBJECT
@@ -129,21 +155,35 @@ def _home_people(hass: HomeAssistant) -> list[str]:
         return []
 
 
-def _face_votes(hass: HomeAssistant, now: float) -> dict:
-    """Recent Frigate/DoubleTake recognitions → {name: weight}."""
+def _face_votes(hass: HomeAssistant, now: float,
+                names: Optional[dict] = None) -> dict:
+    """Recent Frigate/DoubleTake recognitions → {normalize(name): weight}, each
+    weight 0..0.8 (_W_FACE times the 0..1 confidence times how recent it is).
+    Keyed by normalize(name) like the room and proximity signals, so "Sam" and
+    "sam" are one person. If `names` is given it is filled with
+    {normalized: the name as the backend wrote it}, for display."""
     votes: dict = {}
     try:
         from . import recognition
         seen = recognition.who_is_where(hass)  # {camera_entity: name}
-        for cam, name in seen.items():
-            rec = recognition.last_seen_at(hass, cam) or {}
-            conf = float(rec.get("confidence", 0.7))
-            age = float(rec.get("age_seconds", 0.0))
-            recency = max(0.0, 1.0 - age / _FACE_RECENCY_WINDOW)
-            if recency > 0 and name:
-                votes[name] = max(votes.get(name, 0.0), _W_FACE * conf * recency)
     except Exception as exc:
         _LOGGER.debug("identity: face read failed: %s", exc)
+        return votes
+    for cam, name in (seen or {}).items():
+        try:
+            if not name:
+                continue
+            rec = recognition.last_seen_at(hass, cam) or {}
+            conf = _unit_confidence(rec.get("confidence"))
+            age = float(rec.get("age_seconds", 0.0))
+            recency = max(0.0, 1.0 - age / _FACE_RECENCY_WINDOW)
+            if recency > 0:
+                key = normalize(name)
+                votes[key] = max(votes.get(key, 0.0), _W_FACE * conf * recency)
+                if names is not None:
+                    names.setdefault(key, name)
+        except Exception as exc:
+            _LOGGER.debug("identity: face read failed for %s: %s", cam, exc)
     return votes
 
 
@@ -163,7 +203,7 @@ def _room_votes(hass: HomeAssistant, area_id: Optional[str], now: float) -> dict
     try:
         from . import recognition, audio_routing
         seen = recognition.who_is_where(hass) or {}   # {camera_entity: name}
-        in_room: dict = {}
+        in_room: dict = {}      # normalized name -> (name as written, strength 0..1)
         for cam, name in seen.items():
             if not name or name == UNKNOWN:
                 continue
@@ -177,14 +217,17 @@ def _room_votes(hass: HomeAssistant, area_id: Optional[str], now: float) -> dict
             age = float(rec.get("age_seconds", 0.0))
             if age > _ROOM_FRESH_SECS:
                 continue
-            conf = float(rec.get("confidence", 0.7))
+            conf = _unit_confidence(rec.get("confidence"))
             recency = max(0.0, 1.0 - (age / _ROOM_FRESH_SECS))
-            in_room[name] = max(in_room.get(name, 0.0), conf * recency)
+            key = normalize(name)
+            strength = conf * recency
+            if key not in in_room or strength > in_room[key][1]:
+                in_room[key] = (name, strength)
         if not in_room:
             return votes
         # exactly one person seen in the room ⇒ strong; several ⇒ weaker each
         weight = _W_ROOM_SOLE if len(in_room) == 1 else _W_ROOM_PRESENT
-        for name, strength in in_room.items():
+        for name, strength in in_room.values():
             votes[name] = weight * max(0.25, strength)
     except Exception as exc:
         _LOGGER.debug("identity: room votes failed: %s", exc)
@@ -249,20 +292,28 @@ def resolve(hass: HomeAssistant, *, device_id: Optional[str] = None,
     now = now if now is not None else time.time()
     votes: dict = defaultdict(float)
     methods: set = set()
+    # Every signal is added under normalize(name), so one person is one vote
+    # however each signal spells the name. `display` remembers the name as the
+    # presence, face or voice signal wrote it, so a result still reads
+    # "Username", not "username". (Room and proximity only ever had the
+    # normalized form, and still give it.)
+    display: dict = {}
 
     # Tier 1 — presence
     home = _home_people(hass)
     if len(home) == 1:
-        votes[home[0]] += _W_SOLE_OCCUPANT
+        votes[normalize(home[0])] += _W_SOLE_OCCUPANT
+        display.setdefault(normalize(home[0]), home[0])
         methods.add("sole_occupant")
     elif len(home) > 1:
         for name in home:
-            votes[name] += _W_HOME_PRIOR
+            votes[normalize(name)] += _W_HOME_PRIOR
+            display.setdefault(normalize(name), name)
         methods.add("home_prior")
 
     # Tier 2 — recent face (optional)
-    for name, w in _face_votes(hass, now).items():
-        votes[name] += w
+    for key, w in _face_votes(hass, now, display).items():
+        votes[key] += w
         methods.add("face")
 
     # Tier 2b — ROOM-SCOPED signals (v6.77.0). resolve() has always accepted an
@@ -280,7 +331,8 @@ def resolve(hass: HomeAssistant, *, device_id: Optional[str] = None,
     # Tier 3 — voice fingerprint (optional, GPU)
     if bool(_cfg("identity_voice_fingerprint", False)):
         for name, score in _voice_votes(hass, device_id).items():
-            votes[name] += _W_VOICE * float(score)
+            votes[normalize(name)] += _W_VOICE * float(score)
+            display.setdefault(normalize(name), name)
             methods.add("voice")
 
     if not votes:
@@ -294,7 +346,8 @@ def resolve(hass: HomeAssistant, *, device_id: Optional[str] = None,
     # runner-up. A lone weak vote, or a near-tie, stays low.
     decisiveness = (top - second) / top if top > 0 else 0.0
     confidence = min(1.0, top) * (0.5 + 0.5 * decisiveness)
-    candidates = {k: round(v, 3) for k, v in ranked}
+    candidates = {display.get(k, k): round(v, 3) for k, v in ranked}
+    person = display.get(person, person)
 
     min_conf = float(_cfg("identity_min_confidence", 0.45))
     if confidence < min_conf:
