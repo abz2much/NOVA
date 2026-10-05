@@ -1,3 +1,28 @@
+## [8.7.15] — Tests only: the safety code in cognitive_core.py is now pinned
+
+**No behaviour changes.** No production code is touched in this release. The only edits outside the tests are this entry, `scripts/coverage_floors.py` and the version number.
+
+**Why**
+- `cognitive_core.py` (about 4,100 lines) holds intrusion, lockdown, pipe freeze, the proactive manager and the main tick. Its risky parts had thin tests, and it is due to be split. These tests pin what the code does today, so a split can be checked against them.
+
+**What is now covered**
+- SafetyManager: the order of freeze, intrusion and the nighttime sweep in one tick; the confinement switch; freeze thresholds, cooldown and wording; every branch of `_check_intrusion` and `_investigate_step` (escalate exactly once, the soft "couldn't reach you" notice, call off, acknowledgement, vision confirm, deny and timeout, snapshots); `_nighttime_lockdown` (what it locks and skips, one failure, the audit rows, the setting guard); `_residents_away`, `_open_entry`, `_qualifying_motion`.
+- LockdownManager: the secure state model, engage, disengage and the manual lift, every `handle_state_change` branch, the background verify, `tick`, the state file and a restart mid lockdown.
+- ProactiveManager, AutonomyManager and the offer API; `_emit_action` routing with the real output gate and notifications only mode; habituation; `_tick`, the loop, start and stop; the state change listener and StateLogger.
+- 544 new tests. `cognitive_core.py` line coverage went from 63.1% to 97.5%.
+
+**Coverage floor**
+- `scripts/coverage_floors.py` now supports a floor for a single top level file. `cognitive_core.py` has a floor of 94%, three and a half points under the measured 97.5%. Package floors are unchanged.
+
+**Found, not fixed**
+- Nothing was changed. 21 tests named `test_current_behaviour_*` pin behaviour that looks wrong or odd, so a later change shows up as a deliberate edit. The ones that matter most:
+- After the soft "couldn't reach you" notice, a later confirmed route or a person on camera never raises the critical alert. The same happens when learning silenced that notice.
+- Lockdown engage reports "the home was already fully secured" when a lock command fails.
+- A lock unlocked a second time during lockdown is adopted as intentional and left unlocked.
+- An error in `SafetyManager.tick` drops the lockdown announcement gathered in the same tick and stops the rest of that tick.
+- Alerts sent from `cognitive_core.py` never go through the output gate, so a shush or a mute does not quiet its non critical alerts.
+- The smaller items are in the pull request.
+
 ## [8.7.14] — Relations can only be confirmed in the panel
 
 **What was wrong**
