@@ -26,11 +26,16 @@ FEEDBACK_TIMEOUT_S = 10.0
 # Intent table — ordered most-specific first so "turn off the lights" matches
 # the light intent rather than the pronoun ("it") intent.
 _INTENT_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    # Arming is not a local command (8.7.20): it used to fall into secure_area,
+    # which closed covers and locked locks, never armed anything, and reported
+    # success. It is matched here only so it can be refused plainly.
+    ("arm_alarm", (
+        r"\barm\b.*\b(garage|house|home|alarm)\b",
+    )),
     ("secure_area", (
         r"\bsecure\b",
         r"\bclose\b.*\bgarage\b",
         r"\block\s+(up|down|the|it)\b",
-        r"\barm\b.*\b(garage|house|home|alarm)\b",
     )),
     ("lights_off", (
         r"\b(turn|switch|shut)\s+off\b.*\blight",
@@ -59,6 +64,17 @@ _AFFIRMATIVE_PATTERNS: tuple[str, ...] = (
     r"\b(close|shut|secure)\s+it\b",
 )
 
+# A phrase with any of these is never a yes and never a command (8.7.20):
+# "no, don't do it" used to confirm, and "don't secure the garage" used to
+# secure it. Failing toward doing nothing is the safe direction.
+_NEGATION = re.compile(r"\b(no|not|never|cancel|stop|don[\u2019']?t|do\s+not)\b")
+
+# A question asks; it never acts (8.7.20): "is the garage secure?" used to
+# close the garage. A trailing "?" or a leading question word marks one.
+_QUESTION_START = re.compile(
+    r"^(is|are|was|were|am|do|does|did|has|have|had|what|what's|whats|why|how|"
+    r"when|where|which|who|whose)\b")
+
 _ACTIVE_MEDIA_STATES = {"playing"}
 _ACTIVE_LIGHT_STATES = {"on"}
 _ACTIVE_GENERIC_STATES = {"on", "open"}
@@ -70,6 +86,8 @@ def match_intent(phrase: str) -> dict | None:
     if not phrase:
         return None
     text = phrase.lower().strip()
+    if _NEGATION.search(text) or text.endswith("?") or _QUESTION_START.match(text):
+        return None
     for name, patterns in _INTENT_PATTERNS:
         if any(re.search(pat, text) for pat in patterns):
             return {"intent": name, "raw": phrase}
@@ -81,6 +99,8 @@ def is_affirmative(phrase: str) -> bool:
     if not phrase:
         return False
     text = phrase.lower().strip()
+    if _NEGATION.search(text):
+        return False
     return any(re.search(pat, text) for pat in _AFFIRMATIVE_PATTERNS)
 
 
@@ -223,6 +243,11 @@ class LocalIntentRouter:
             )
             return {"executed": bool(acted), "intent": intent, "entities": acted}
 
+        if intent == "arm_alarm":
+            return {"executed": False, "intent": intent,
+                    "reason": "arming the alarm is not available as a local voice "
+                              "command; nothing was done"}
+
         if intent == "secure_area":
             covers = await self._call_domain_in_area(
                 "cover", "close_cover", area_id,
@@ -239,7 +264,10 @@ class LocalIntentRouter:
             }
 
         if intent in ("context_off", "context_close"):
-            entity_id, domain = self.resolve_active_entity(area_id)
+            # "close it" means an open cover (8.7.20); it used to turn off
+            # the playing media or the light and could never close a cover.
+            domains = ("cover",) if intent == "context_close" else ("media_player", "light")
+            entity_id, domain = self.resolve_active_entity(area_id, domains)
             if entity_id is None:
                 return {"executed": False, "intent": intent,
                         "reason": "nothing active to act on in this area"}
