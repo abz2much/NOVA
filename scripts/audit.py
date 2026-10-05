@@ -214,6 +214,10 @@ LEAF_PACKAGES = {"persistence", "audio", "vision"}
 # more lines than today. New behaviour belongs in its package.
 FACADE_LIMITS = {
     "agent": (424, ("_Facade",)),
+    # 8.7.17: split into core_*.py. The persisted path helpers stay here as
+    # the storage contract (tests/fixtures/contracts/storage.json).
+    "cognitive_core": (341, ("_Facade", "_autonomy_file", "_ignore_file",
+                             "_lockdown_state_path", "_patterns_db")),
     "llm_provider": (181, ("_classify_conn_error", "_openai_style_usage",
                            "chat_with_activity", "test_connection")),
     "reasoning_loop": (248, ("_decision_from_cache", "_lm_compose", "_local_fallback",
