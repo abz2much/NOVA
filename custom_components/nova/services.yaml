@@ -319,7 +319,7 @@ shush:
             - schedule
     all:
       name: Mute everything
-      description: "Suppress every non-critical Nova announcement until nova.unshush is called or Home Assistant restarts. Critical safety announcements always pass."
+      description: "Suppress every non-critical Nova announcement until nova.unshush is called. This is saved and survives a restart. Critical safety announcements always pass."
       required: false
       selector:
         boolean:

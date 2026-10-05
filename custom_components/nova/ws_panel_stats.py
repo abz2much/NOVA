@@ -344,6 +344,21 @@ def _get_reasoning_stats() -> dict:
     return out
 
 
+def _get_output_mutes() -> dict:
+    """What Nova is muted on, for the panel's Muted card: the entity and
+    category mutes and the blanket shush (all three are saved across restarts)."""
+    try:
+        from . import output_gate
+        st = output_gate.status()
+        return {
+            "entities": list(st.get("muted_entities", [])),
+            "categories": list(st.get("muted_categories", [])),
+            "all": bool(st.get("mute_all", False)),
+        }
+    except Exception:
+        return {"entities": [], "categories": [], "all": False}
+
+
 def _get_observer_stats() -> dict:
     """Return observer pipeline stats for the tuning dashboard."""
     try:

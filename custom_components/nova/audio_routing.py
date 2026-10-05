@@ -416,7 +416,49 @@ def reply_targets(
 
 # ─── Routing: observer mode (proactive) ──────────────────────────────────────
 
+def notify_only_enabled(hass: HomeAssistant) -> bool:
+    """Whether `announce_notify_only` is on (nova_config.announce_notify_only).
+    A failed read counts as off, so nothing that should speak goes quiet."""
+    try:
+        from . import nova_config
+        return bool(nova_config.announce_notify_only(hass))
+    except Exception:
+        return False
+
+
 def observer_speak_target(
+    hass: HomeAssistant,
+    *,
+    urgency: str,
+    broadcast_group: Optional[str] = None,
+    announcement_speakers: Optional[list[str]] = None,
+    is_sleeping: bool = False,
+    authoritative_anyone_home: Optional[bool] = None,
+) -> tuple[list[str], str]:
+    """Where to speak for an observer-mode announcement, as (targets, mode).
+
+    Routing rules are in `_observer_route`. With `announce_notify_only` on, any
+    non-critical announcement that would have been spoken ("local" or
+    "broadcast") becomes ([], "notify_only"), so the caller sends the phone
+    notification and nothing is spoken. Critical urgency is never changed:
+    safety alerts keep speaking. "suppressed" (sleep and quiet rules) stays
+    suppressed and an existing "notify_only" stays as it is.
+    """
+    targets, mode = _observer_route(
+        hass,
+        urgency=urgency,
+        broadcast_group=broadcast_group,
+        announcement_speakers=announcement_speakers,
+        is_sleeping=is_sleeping,
+        authoritative_anyone_home=authoritative_anyone_home,
+    )
+    if (urgency != "critical" and mode in ("local", "broadcast")
+            and notify_only_enabled(hass)):
+        return ([], "notify_only")
+    return (targets, mode)
+
+
+def _observer_route(
     hass: HomeAssistant,
     *,
     urgency: str,

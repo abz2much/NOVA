@@ -116,6 +116,10 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     from . import paths
     paths.configure(hass)
     async_setup_services(hass)
+    # Saved mutes (output_mutes.json): once per HA run, after paths are set,
+    # and off the event loop. A missing or corrupt file is not an error.
+    from . import output_gate
+    await hass.async_add_executor_job(output_gate.load_mutes)
     return True
 
 

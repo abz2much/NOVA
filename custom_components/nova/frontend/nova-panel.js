@@ -1082,7 +1082,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v8.7.8
+ * v8.7.9
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1158,7 +1158,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.7.8 ",
+      console.log("%c Nova Panel %c v8.7.9 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -1532,6 +1532,14 @@ ${this._htmlDashboardBody()}`;
             <button class="mode-chip" id="qaRunAnalysis">Analyze Now</button>
           </div>
           <div class="toggle-desc" id="qaAnalysisResult" style="margin-top:8px"></div>
+        </div>
+
+        <div class="panel" id="mutesPanel" style="max-width:1100px;margin:16px auto 0" hidden>
+          <div class="panel-head">
+            <div class="panel-title">Muted</div>
+            <div class="panel-meta" id="mutesMeta">SAVED</div>
+          </div>
+          <div id="mutesBody"></div>
         </div>
 
         <div class="panel camera-panel" id="cameraPanel" style="max-width:1100px;margin:16px auto 0" hidden>
@@ -3445,6 +3453,7 @@ ${this._htmlDashboardBody()}`;
       </div>
       <div class="toggle-list">
         ${onOff("announcements_enabled", "Announcements", "Master switch — all proactive speech")}
+        ${onOff("announce_notify_only", "Notifications only", "Send proactive alerts to your phone instead of speaking them. Critical safety alerts still speak. Reminders, package and camera announcements, scheduled briefings and the infrastructure audit are not covered and still speak")}
         ${onOff("sentinel_enabled", "Sentinel", "Door/garage/lock-left-open alerts")}
         ${onOff("observer_enabled", "Observer", "AI event awareness (uses API)")}
         ${onOff("cognition_enabled", "Cognition", "Local triage — sees telemetry and decides what deserves deeper reasoning")}
@@ -5555,6 +5564,7 @@ ${this._htmlDashboardBody()}`;
     if (areasMeta) areasMeta.textContent = `${d.occupied} OCCUPIED · ${d.areasMonitored} MONITORED`;
 
     this._renderSolarPanel();
+    this._renderMutesPanel();
 
     const cog = this._cognitive || {};
     const learning = cog.learning || {};
@@ -5781,6 +5791,52 @@ ${this._htmlDashboardBody()}`;
     }
     const advice = (s.advice || []).map(a => `<div class="toggle-desc" style="margin-bottom:6px">${this._esc(a)}</div>`).join("");
     body.innerHTML = advice + rows.join("");
+  }
+
+  // Muted card: what Nova has been told to stop announcing. Mutes are saved
+  // across restarts, so a blanket shush gets a loud banner. Critical safety
+  // alerts are never muted. Unmute uses the existing nova.unshush service.
+  _renderMutesPanel() {
+    const root = this.shadowRoot;
+    const panel = root.getElementById("mutesPanel");
+    const body = root.getElementById("mutesBody");
+    if (!panel || !body) return;
+    const m = this._liveData?.config?.output_mutes || {};
+    const entities = Array.isArray(m.entities) ? m.entities : [];
+    const categories = Array.isArray(m.categories) ? m.categories : [];
+    const all = m.all === true;
+    if (!all && !entities.length && !categories.length) { panel.hidden = true; body.innerHTML = ""; return; }
+    panel.hidden = false;
+    const row = (label, kind, value) => `
+      <div class="feed-row">
+        <span class="feed-text">${label}${value ? ` <b>${this._esc(value)}</b>` : ""}</span>
+        <button class="mode-chip" data-unmute="${kind}" data-unmute-value="${this._esc(value || "")}">Unmute</button>
+      </div>`;
+    const banner = all ? `
+      <div class="mute-banner" role="alert" style="border:1px solid var(--warn,#d9a300);border-radius:8px;padding:10px 12px;margin-bottom:10px">
+        <b>Blanket shush is on.</b> Nova is not announcing anything except critical safety alerts, and this stays on after a restart until you turn it off.
+        <div style="margin-top:8px"><button class="mode-chip" data-unmute="all">Unshush</button> <span class="toggle-desc">clears every mute below as well</span></div>
+      </div>` : "";
+    body.innerHTML = banner
+      + entities.map(e => row("Entity", "entity", e)).join("")
+      + categories.map(c => row("Category", "category", c)).join("")
+      + `<div class="toggle-desc" style="margin-top:8px">Critical safety alerts always speak.</div>`;
+    body.querySelectorAll("[data-unmute]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        if (!this._hass) return;
+        const kind = btn.getAttribute("data-unmute");
+        const value = btn.getAttribute("data-unmute-value") || "";
+        const data = kind === "entity" ? { entity_id: value }
+          : kind === "category" ? { category: value } : {};
+        btn.disabled = true;
+        try {
+          await this._hass.callService("nova", "unshush", data);
+        } catch (err) {
+          console.error("Nova: unshush failed", err);
+        }
+        this._fetchLiveData();
+      });
+    });
   }
 
   // Shared by the dashboard's Quick Actions card and the Suggestions tab's

@@ -1,3 +1,38 @@
+## [8.7.9] — Mutes survive a restart, a Muted card, and a notifications only mode
+
+**Mutes are saved**
+- Entity mutes, category mutes and the blanket shush (`nova.shush`, `nova.unshush`) are now saved to `output_mutes.json` in Nova's data folder (`<config>/nova/output_mutes.json`) and loaded once when Nova sets up. The file holds no secrets and uses the default file mode. A missing, empty or corrupt file starts with no mutes and is logged at debug level only. Saves run in the executor after every shush and unshush, including `nova.unshush` with no arguments.
+- **A blanket shush now survives a restart.** Before, a restart cleared it. Now it stays on until you turn it off. The dashboard shows a banner with an Unshush button whenever it is on.
+- The dashboard has a new **Muted** card, shown only when something is muted. It lists muted entities, muted categories and the blanket shush, each with an Unmute button that calls the existing `nova.unshush` service. The blanket banner's button calls `nova.unshush` with no arguments, which clears every mute, not only the blanket one. The banner says so.
+- The mutes reach the panel inside the existing `nova/get_panel_data` result, under `config.output_mutes` (`entities`, `categories`, `all`). No new websocket command was added. `output_gate.status()` gains a `mute_all` key, so `nova_observer_status` events now report the blanket shush too.
+- `can_announce()` is unchanged: critical first, then the blanket mute, then entity and category mutes. Critical alerts bypass every mute, including a blanket shush loaded from the file. Rate limit, dedup and announcement history are still in memory only.
+- If a save fails (for example a full disk) it is logged as a warning and the mute still works until the next restart.
+
+**Notifications only mode**
+- New setting `announce_notify_only` (off by default), in Settings → General as "Notifications only". It is read at call time, so a change applies to the next announcement.
+- When on, any non critical announcement that would have been spoken goes to the phone instead. It is implemented in `audio_routing.observer_speak_target()`, which returns mode `notify_only`. Observer, appliance monitor and host health already turn that into a phone notification, so they are unchanged. The proactive arrival and security briefings go through the same routing and already push to the phone.
+- **Critical alerts still speak.** This is on purpose, and it is different from JARVIS, where this mode silences everything. Critical urgency bypasses every mute and every quiet mode in Nova, and this mode follows the same rule.
+- Quiet hours, sleep rules and every other routing rule are unchanged. A medium or low announcement that sleep rules suppress stays suppressed. It does not turn into a notification, so there is no phone buzz at night.
+- Low urgency announcements are normally spoken only when someone is in the room. In this mode they become phone notifications, so you may see more notifications than you would hear announcements.
+- Cognitive core alerts: in this mode a non critical alert is pushed to the phone with its Helpful / Not helpful buttons. With the setting off, nothing changes.
+- Sentinel (door, window, garage, lock left open) already sent a phone push with its spoken alert. In this mode it skips the speech. If no notification service accepts the push, it speaks after all, so the alert is never lost.
+
+**Proactive speech paths, checked one by one**
+- Covered (routed to the phone in this mode): observer events, appliance cycle alerts, host health alerts, cognitive core alerts, the arrival and security briefings (`proactive_briefing.py`), sentinel rules.
+- **Not covered, still spoken, because there is no phone notification equivalent:** package and mail announcements (`package_monitor.py`), camera and doorbell analysis announcements and the Eufy vehicle announcement (`camera.py`, `__init__.py`), the scheduled morning and evening briefings (`briefing.py`), reminders (`reminders.py`), and the infrastructure audit, which speaks through `nova.speak` (`proactive_audio.py`). These keep speaking rather than being dropped.
+- **Not changed on purpose:** hazard alerts (`hazard_monitor.py`: earthquakes, severe weather, natural hazards). They already send a phone notification, but they are safety alerts, so they keep speaking as critical ones do.
+- Never affected: replies to something you said to Nova (conversation replies, voice confirmations and questions), and speech you asked for directly (`nova.speak` called by an automation, `nova.test_tts`, routines, scenes, summaries and the `nova.briefing` service).
+
+**Contracts and tests changed**
+- `tests/fixtures/contracts/config.json`: `announce_notify_only` added to `panel_writable_keys`. This is the only pinned contract that changed. `websocket.json` and `panel_boundary.json` are unchanged, and the top level keys of `nova/get_panel_data` are the same.
+- `config` in `nova/get_panel_data` gains two keys, `announce_notify_only` and `output_mutes`. That block is not pinned by a fixture.
+- `services.yaml`: the `nova.shush` description no longer says the mute ends when Home Assistant restarts. The schema is unchanged.
+- No existing assertion was changed. Added: `tests/unit/test_output_mutes.py` (save and load round trip, missing and corrupt file, shush and unshush persist, blanket shush persists, critical still bypasses a loaded blanket shush, loaded at setup and not at import), `tests/unit/test_notify_only.py` (every urgency with the setting on and off, default off, read at call time, the callers that handle `notify_only`, cognitive core and sentinel), and new panel smoke checks for the Muted card and the new toggle.
+
+**Caveats**
+- Mutes set before this update were never saved, so nothing is restored from before it. From this version on they are saved.
+- The Python 3.14 run that CI also does was not measured locally.
+
 ## [8.7.8] — Internal tidy: websocket.py is split into seven modules (4,192 lines down to 2,251)
 
 This is an internal change. Nothing you can see or configure changes: no setting, service, websocket command, request field, error code or stored file is different, and the panel behaves as before. It is the second step of splitting `websocket.py`. No step was skipped.
