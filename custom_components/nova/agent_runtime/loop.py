@@ -611,10 +611,7 @@ async def _run_agent_turn(
         result = await _chat_agent(working, None, 512)
         return result.text
     except Exception:
-        try:
-            from .. import persona as persona_mod
-            from .. import honorific as honorific_mod
-            hon = honorific_mod.effective_honorific(hass)  # Phase C: presence-aware
-            return persona_mod.completed(hon)
-        except Exception:
-            return "I've completed the requested actions, sir."
+        # The truth, never a claim of completion (8.7.20): the round limit
+        # was hit and nothing could summarise what actually happened.
+        return ("I couldn't finish that. I ran out of steps before I could check "
+                "what was done, so please check before relying on it.")

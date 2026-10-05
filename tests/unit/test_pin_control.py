@@ -5,7 +5,8 @@ agent performs: control_device, bulk_control, execute_plan and
 run_scene_or_script, and the background verifier that retries. These tests
 run the real policy gate; only the confirmation transport, the satellite
 lookup and the action log are faked, and no time passes. Tests named
-test_current_behaviour_* pin behaviour that looks wrong; each says why.
+test_current_behaviour_* pin behaviour that looks wrong; each says why. The
+value and verifier findings from 8.7.19 were fixed in 8.7.20.
 """
 from __future__ import annotations
 
@@ -100,33 +101,54 @@ def _calls(hass, domain=None):
     return [c for c in hass.service_calls if domain is None or c[0] == domain]
 
 
-# ── values: 0 is read as "not given" ────────────────────────────────────────
+# ── values (fixed in 8.7.20: 0 is a real value, a missing target is refused) ─
 
-async def test_current_behaviour_brightness_zero_turns_the_light_on_at_half(ctl, hass, audit, confirm, activity):
-    # Looks wrong: int(value or 50) turns a requested 0% into 50%, so "set the
-    # desk light to 0" switches it ON at half brightness.
+async def test_brightness_zero_stays_zero(ctl, hass, audit, confirm, activity):
+    # 8.7.19 pinned 0% becoming 50% (the light switched ON at half).
     await ctl._exec_control_device(hass, {"entity_id": "light.desk", "action": "set_brightness",
                                           "value": 0})
-    assert _calls(hass) == [("light", "turn_on", {"entity_id": "light.desk", "brightness_pct": 50})]
+    assert _calls(hass) == [("light", "turn_on", {"entity_id": "light.desk", "brightness_pct": 0})]
 
 
-async def test_current_behaviour_volume_zero_sets_half_volume(ctl, hass, audit, confirm):
-    # Looks wrong: (value or 50) / 100 turns "volume to 0" into 50%.
+async def test_volume_zero_stays_zero(ctl, hass, audit, confirm):
+    # 8.7.19 pinned "volume to 0" becoming 50%.
     await ctl._exec_control_device(hass, {"entity_id": "media_player.lounge",
                                           "action": "volume_set", "value": 0})
     assert _calls(hass) == [("media_player", "volume_set",
-                             {"entity_id": "media_player.lounge", "volume_level": 0.5})]
+                             {"entity_id": "media_player.lounge", "volume_level": 0.0})]
 
 
-async def test_current_behaviour_a_missing_temperature_is_72_even_in_celsius(ctl, hass, audit, confirm):
-    # Looks wrong: with no value the target is 72, a Fahrenheit default, sent
-    # unchanged to a home that runs in Celsius (72 °C, or the thermostat's max).
+async def test_plain_brightness_and_volume_still_work(ctl, hass, audit, confirm, activity):
+    await ctl._exec_control_device(hass, {"entity_id": "light.desk", "action": "set_brightness",
+                                          "value": 40})
+    await ctl._exec_control_device(hass, {"entity_id": "media_player.lounge",
+                                          "action": "volume_set", "value": 30})
+    await ctl._exec_control_device(hass, {"entity_id": "light.desk", "action": "set_brightness"})
+    assert _calls(hass) == [
+        ("light", "turn_on", {"entity_id": "light.desk", "brightness_pct": 40}),
+        ("media_player", "volume_set", {"entity_id": "media_player.lounge", "volume_level": 0.3}),
+        ("light", "turn_on", {"entity_id": "light.desk", "brightness_pct": 50}),  # no value: 50
+    ]
+
+
+@pytest.mark.parametrize("args", [{}, {"value": None}, {"value": ""}])
+async def test_a_missing_temperature_is_refused_and_nothing_changes(ctl, hass, audit, confirm, args):
+    # 8.7.19 pinned a missing value becoming 72, even in a Celsius home.
     hass.config.units = types.SimpleNamespace(temperature_unit="°C")
     res = json.loads(await ctl._exec_control_device(
-        hass, {"entity_id": "climate.hall", "action": "set_temperature"}))
+        hass, {"entity_id": "climate.hall", "action": "set_temperature", **args}))
+    assert res["success"] is False and res["status"] == "error"
+    assert "No target temperature was given for Hall" in res["error"]
+    assert hass.service_calls == []
+    assert audit["execution"] == [(1, "failed", "missing_value")]
+
+
+async def test_a_given_temperature_is_set_as_given(ctl, hass, audit, confirm):
+    res = json.loads(await ctl._exec_control_device(
+        hass, {"entity_id": "climate.hall", "action": "set_temperature", "value": 21.5}))
     assert res["success"] is True
     assert _calls(hass) == [("climate", "set_temperature",
-                             {"entity_id": "climate.hall", "temperature": 72.0})]
+                             {"entity_id": "climate.hall", "temperature": 21.5})]
 
 
 # ── control_device: the gate and what reaches Home Assistant ────────────────
@@ -185,21 +207,29 @@ async def test_unlock_by_voice_needs_a_phone_tap_even_with_confirmation_off(ctl,
 
 # ── the background verifier ─────────────────────────────────────────────────
 
-async def test_current_behaviour_the_verifier_unlocks_again_without_asking(
-        ctl, hass, audit, confirm, activity):
-    # Looks wrong: after a confirmed unlock, if the lock still reads locked a
-    # few seconds later (someone locked it again by hand, or it is slow), the
-    # verifier sends a second unlock on its own. The second command is never
-    # confirmed, so a person who deliberately re-locked the door gets it
-    # unlocked again.
+@pytest.mark.parametrize("action,service,entity", [
+    ("unlock", "unlock", "lock.front_door"), ("open", "open_cover", "cover.garage_door")])
+async def test_the_verifier_never_sends_an_unlock_or_open_a_second_time(
+        ctl, hass, audit, confirm, activity, action, service, entity):
+    # 8.7.19 pinned the verifier sending a second, unconfirmed unlock when the
+    # lock still read locked (someone may have locked it again on purpose).
+    hass.states.set("cover.garage_door", "closed", friendly_name="Garage")
     confirm.update(enabled=True, answer="approved")
-    await ctl._exec_control_device(hass, {"entity_id": "lock.front_door", "action": "unlock"})
+    await ctl._exec_control_device(hass, {"entity_id": entity, "action": action})
     assert confirm["asked"] == ["speaker"]
-    await hass.drain()                                 # the lock never reports unlocked
-    assert _calls(hass) == [("lock", "unlock", {"entity_id": "lock.front_door"})] * 2
-    assert confirm["asked"] == ["speaker"]              # asked once, sent twice
-    assert audit["execution"][-1] == (1, "unverified", "no_response_after_retry")
-    assert "even after a retry" in activity[-1]["message"]
+    await hass.drain()                                 # it never reports unlocked or open
+    assert _calls(hass) == [(entity.split(".")[0], service, {"entity_id": entity})]   # once
+    assert audit["execution"][-1] == (1, "unverified", "not_retried_could_undo_a_lock")
+    assert "Not retried automatically" in activity[-1]["message"]
+    assert activity[-1]["urgency"] == "medium"
+
+
+async def test_the_verifier_still_retries_a_lock_once(ctl, hass, audit, confirm, activity):
+    hass.states.set("lock.back_door", "unlocked")       # never reports locked
+    await ctl._verify_control(hass, "lock.back_door", "lock", "lock", "lock",
+                              {"entity_id": "lock.back_door"}, action_id=9)
+    assert _calls(hass) == [("lock", "lock", {"entity_id": "lock.back_door"})]   # one retry
+    assert audit["execution"] == [(9, "unverified", "no_response_after_retry")]
 
 
 async def test_the_verifier_is_silent_when_the_device_got_there(ctl, hass, audit, confirm, activity):

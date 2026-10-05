@@ -164,7 +164,10 @@ class LockdownManager:
                 self.since = d.get("since", time.time())
                 self.reason = d.get("reason", "restored")
                 self.auto = bool(d.get("auto", False))
-                self.exempt_windows = set(d.get("exempt_windows", []))
+                # A lock is never exempt (8.7.20): a state file written by an
+                # older version may still list one adopted as "left open".
+                self.exempt_windows = {e for e in d.get("exempt_windows", [])
+                                       if not str(e).startswith("lock.")}
                 _LOGGER.warning(
                     "Lockdown state RESTORED (auto=%s, %d exempt windows)",
                     self.auto, len(self.exempt_windows))
@@ -520,6 +523,8 @@ class LockdownManager:
         if not self._is_relevant(dom, dc, eid):
             return None
         if self._is_secure(dom, new.state):
+            if dom == "lock":
+                self._alerted.discard(eid)   # locked again: a later unlock alerts again
             return None
         if old is not None and not self._is_secure(dom, old.state):
             return None  # was already unsecure — not a fresh transition
@@ -532,6 +537,21 @@ class LockdownManager:
             await self._persist()
             _LOGGER.info("Lockdown: %s opened (not controllable) — treating as intentional", eid)
             return None
+
+        if eid in self._secured_by_us and dom == "lock":
+            # A lock unlocked again after Nova locked it (8.7.20). It is never
+            # adopted as intentional, never left out of the lockdown and not
+            # locked a second time (Nova does not fight a person at the door):
+            # it is a critical alert, once until it is locked again.
+            if eid in self._alerted:
+                return None
+            self._alerted.add(eid)
+            return {
+                "type": "lockdown_breach", "urgency": "critical", "auto_act": True,
+                "message": _persona().lead_in(honorific,
+                    f"{name} was unlocked again during lockdown after I locked it. "
+                    f"Please check it."),
+            }
 
         if eid in self._secured_by_us:
             # We shut it once and it's open again → the user wants it open.

@@ -6,9 +6,11 @@ still exports every name defined here, as the same object.
 """
 from __future__ import annotations
 
+import fnmatch
 import json
 import logging
 import os
+import re
 import time
 from dataclasses import dataclass
 
@@ -19,6 +21,25 @@ _LOGGER = logging.getLogger(f"{__package__}.cognitive_core")
 
 
 # ── Ignore System ───────────────────────────────────────────────────────────
+
+# Every ignore rule expires (8.7.20). A request with no duration (or 0) gets
+# the same default as nova.nap's manual mute: 30 minutes.
+DEFAULT_IGNORE_MINUTES = 30
+
+# Entity ids of different kinds. A pattern that matches all of them, or has no
+# letter or digit at all ("*", "*.*", "?*"), would mute the whole house.
+_EVERYTHING_PROBES = ("lock.front_door", "binary_sensor.kitchen_leak",
+                      "alarm_control_panel.home", "sensor.outdoor_temperature",
+                      "cover.garage_door", "light.x")
+
+
+def matches_everything(pattern: str) -> bool:
+    """True for a pattern that would ignore every entity (8.7.20)."""
+    text = str(pattern or "").strip()
+    if not re.search(r"[A-Za-z0-9]", text):
+        return True
+    return all(fnmatch.fnmatch(eid, text) for eid in _EVERYTHING_PROBES)
+
 
 @dataclass
 class IgnoreRule:
@@ -52,7 +73,13 @@ class IgnoreManager:
                 self._rules = [
                     IgnoreRule(**r) for r in data
                     if not IgnoreRule(**r).is_expired()
+                    and not matches_everything(r.get("entity_pattern", ""))
                 ]
+                # A rule saved by an older version without an expiry gets
+                # the default one from now (8.7.20).
+                for r in self._rules:
+                    if r.expires_at == 0:
+                        r.expires_at = time.time() + DEFAULT_IGNORE_MINUTES * 60
         except Exception:
             self._rules = []
 
@@ -73,7 +100,13 @@ class IgnoreManager:
 
     def add(self, entity_pattern: str, duration_minutes: int = 0,
             reason: str = "") -> IgnoreRule:
-        expires = (time.time() + duration_minutes * 60) if duration_minutes > 0 else 0
+        if matches_everything(entity_pattern):
+            raise ValueError(
+                f"'{entity_pattern}' would ignore every entity in the home; name the "
+                f"entity or a narrower pattern")
+        if duration_minutes <= 0:
+            duration_minutes = DEFAULT_IGNORE_MINUTES
+        expires = time.time() + duration_minutes * 60
         rule = IgnoreRule(
             entity_pattern=entity_pattern,
             reason=reason,

@@ -1,3 +1,43 @@
+## [8.7.20] — Fixes: Nova no longer does or says the wrong thing in seven cases found by the 8.7.19 tests
+
+Each fix fails toward doing nothing or telling the truth, never toward acting.
+
+**1. A "no" is never a "yes"**
+- In the ten second window after "Shall I secure the garage?", "no, don't do it", "that's not ok" and "don't shut it" all counted as yes and closed the garage door.
+- A reply with a negation (no, not, don't, do not, never, cancel, stop) is now never a yes, and the window stays open for a real answer. "Yes", "ok", "go ahead" and "close it" still confirm.
+
+**2. Questions and negated commands no longer act**
+- Through `nova.process_intent`, "is the garage secure?" and "don't secure the garage" both closed the garage door and locked the lock.
+- A question (ending in "?" or starting with a question word such as "is", "are", "do" or "what") and a phrase with a negation now match nothing and move nothing. Plain commands ("secure the garage", "lock up", "turn off the lights") match as before. A polite request ending in "?" ("can you secure the garage?") is now treated as a question and does nothing.
+
+**3. "Arm the alarm" is refused, not faked**
+- It used to close covers and lock locks, never arm the alarm, and report success.
+- It is now refused with the reason "arming the alarm is not available as a local voice command; nothing was done". This is the smaller of the two options: arming through the alarm path was not added.
+
+**4. A lock unlocked again during lockdown is a critical alert**
+- A lock unlocked a second time after Nova locked it was adopted like a garage door: announced at high as "I'll leave it open", left out of the lockdown, and still left out after a restart.
+- It is now a critical alert ("... was unlocked again during lockdown after I locked it. Please check it."). It is never left out of the lockdown, a lock in an old saved state is dropped from the exemptions, and Nova does not lock it a second time (it does not fight a person at the door). Once it is locked again, a later unlock alerts again. Covers keep the old "I'll leave it open" behaviour.
+- The agent's background check after an unlock or an open no longer sends the command a second time on its own. A lock that still reads locked may have been locked again on purpose. It is recorded as unverified instead. Locks and closes are still retried once.
+
+**5. Ignore requests are bounded and never silence Sentinel**
+- "Ignore *" muted every non-critical announcement and switched off every Sentinel rule (a door left open, a lock left unlocked), with no expiry.
+- A pattern that would match every entity ("*", "*.*", one with no letter or digit) is now refused. Every ignore expires: with no duration it gets the same 30 minute default as `nova.nap`. Rules saved by an older version lose any match-everything pattern and gain that expiry. Sentinel no longer reads ignore rules at all; the user's exclusion list still applies. An ignore still quiets Nova's non-critical announcements as before.
+
+**6. Values mean what was asked**
+- Brightness 0 and volume 0 became 50%. They now stay 0. With no value given, brightness and volume still default to 50%.
+- A set temperature with no value became 72, in any unit. It is now refused with a message and nothing changes.
+- "Close it" turned off a light and could never close a cover. It now closes an open cover in the room, and does nothing when no cover is open.
+
+**7. No false "completed"**
+- After the ten round limit, if the summary call also failed, Nova said it had completed the requested actions. It now says it could not finish and asks the person to check.
+
+**Not changed, on purpose**
+- Confirmation requirements, admin checks and audit rows. An unlock, a bulk unlock and a plan step that disarms the alarm still run unconfirmed from chat while voice confirmation is off. Un-ignore still matches the exact pattern text. A mode change is still neither confirmed nor audited. The panel's intrusion call off still needs no confirmation. Their `test_current_behaviour_*` tests are unchanged.
+- The `ignore_entity` tool description still says "0 = until manually cleared": it is part of the agent tool contract, which this release does not change. The tool's reply reports the real duration.
+
+**Tests**
+- The `test_current_behaviour_*` tests for these findings are now tests of the fixed behaviour, with tests beside them for the plain cases that must still work. Three older tests changed because item 5 reverses what they pinned: two that checked Sentinel honours ignore rules, and one that checked an ignore with no duration is permanent.
+
 ## [8.7.19] — Tests only: the agent's riskiest decision code is now pinned
 
 **No behaviour changes.** No production code is touched in this release. The only edits outside the tests are this entry, `scripts/coverage_floors.py` and the version number.

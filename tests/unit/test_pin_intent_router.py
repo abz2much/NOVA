@@ -5,9 +5,10 @@ phrase and an area come in, and it closes covers, locks locks and switches
 lights with no LLM and no policy gate. A nova.speak with expect_response opens
 a ten second window in which a "yes" runs the pending action.
 
-These tests drive the real router against FakeHass. Tests named
-test_current_behaviour_* pin behaviour that looks wrong; each says why in a
-comment. They are not fixed here.
+These tests drive the real router against FakeHass. The 8.7.19
+test_current_behaviour_* tests here were fixed in 8.7.20: a question or a
+negated phrase never acts, a refusal is never a yes, arming is refused
+plainly, and "close it" closes a cover.
 """
 from __future__ import annotations
 
@@ -115,48 +116,62 @@ async def test_a_failed_service_call_reports_not_executed(ir, hass):
     assert res == {"matched": True, "executed": False, "intent": "lights_off", "entities": []}
 
 
-# ── findings: phrases that act when they should not ─────────────────────────
+# ── questions, negations and arming (fixed in 8.7.20) ──────────────────────
 
-async def test_current_behaviour_a_question_secures_the_area(ir, hass):
-    # Looks wrong: "is the garage secure?" is a question, but "secure" alone
-    # matches secure_area, so asking closes the garage door and locks the lock.
-    res = await _router(ir, hass).route("is the garage secure?", GARAGE)
-    assert res["intent"] == "secure_area" and res["executed"] is True
-    assert ("cover", "close_cover", {"entity_id": ["cover.garage_door"]}) in hass.service_calls
-
-
-async def test_current_behaviour_a_negated_command_still_runs(ir, hass):
-    # Looks wrong: there is no negation check. "don't secure the garage"
-    # closes the garage door and locks the lock.
-    res = await _router(ir, hass).route("don't secure the garage", GARAGE)
-    assert res["executed"] is True
-    assert [c[:2] for c in hass.service_calls] == [("cover", "close_cover"), ("lock", "lock")]
+@pytest.mark.parametrize("phrase", [
+    "is the garage secure?", "is the garage secure", "is it locked?",
+    "are the lights off?", "can you secure the garage?",
+])
+async def test_a_question_moves_nothing(ir, hass, phrase):
+    # 8.7.19 pinned "is the garage secure?" closing the garage door and
+    # locking the lock. A question now never acts.
+    res = await _router(ir, hass).route(phrase, GARAGE)
+    assert res == {"matched": False, "intent": None, "executed": False}
+    assert hass.service_calls == []
 
 
-async def test_current_behaviour_arm_the_alarm_never_arms_it(ir, hass):
-    # Looks wrong: "arm the alarm" is routed to secure_area, which closes covers
-    # and locks locks in the area and never touches the alarm panel. The reply
-    # says executed=True, so a caller would believe the alarm was armed.
+@pytest.mark.parametrize("phrase", [
+    "don't secure the garage", "do not close the garage", "never lock up",
+    "dont turn off the lights", "don’t secure the garage", "no, lights off",
+])
+async def test_a_negated_command_moves_nothing(ir, hass, phrase):
+    # 8.7.19 pinned "don't secure the garage" securing it.
+    res = await _router(ir, hass).route(phrase, GARAGE)
+    assert res["matched"] is False and hass.service_calls == []
+
+
+@pytest.mark.parametrize("phrase", [
+    "secure the garage", "close the garage door", "lock up", "secure it",
+    "turn off the lights", "kill the lights",
+])
+async def test_plain_commands_still_act(ir, hass, phrase):
+    res = await _router(ir, hass).route(phrase, GARAGE)
+    assert res["matched"] is True and res["executed"] is True and hass.service_calls
+
+
+async def test_arm_the_alarm_is_refused_plainly_and_nothing_moves(ir, hass):
+    # 8.7.19 pinned "arm the alarm" closing covers and locking locks, never
+    # arming, and reporting executed=True. It is now refused, with a reason.
     res = await _router(ir, hass).route("arm the alarm", HALL)
-    assert res["executed"] is True and res["intent"] == "secure_area"
-    assert all(d != "alarm_control_panel" for d, _s, _x in hass.service_calls)
+    assert res == {"matched": True, "executed": False, "intent": "arm_alarm",
+                   "reason": "arming the alarm is not available as a local voice "
+                             "command; nothing was done"}
+    assert hass.service_calls == []
     assert hass.states.get("alarm_control_panel.home").state == "disarmed"
 
 
-async def test_current_behaviour_close_it_turns_off_a_light_and_never_closes_a_cover(ir, hass):
-    # Looks wrong: "close it" resolves only media players and lights, so with a
-    # blind open and a light on it turns the light off. The close_cover branch
-    # can never be reached: no cover is ever a candidate.
+async def test_close_it_closes_an_open_cover_and_never_turns_off_a_light(ir, hass):
+    # 8.7.19 pinned "close it" turning a light off and never closing a cover.
     hass.states.set("light.hall", "on")
     res = await _router(ir, hass).route("close it", HALL)
     assert res == {"matched": True, "executed": True, "intent": "context_close",
-                   "entity_id": "light.hall"}
-    assert hass.service_calls == [("light", "turn_off", {"entity_id": "light.hall"})]
+                   "entity_id": "cover.hall_blind"}
+    assert hass.service_calls == [("cover", "close_cover", {"entity_id": "cover.hall_blind"})]
 
     hass.service_calls.clear()
-    hass.states.set("light.hall", "off")
-    res = await _router(ir, hass).route("close it", HALL)
-    assert res["executed"] is False and hass.service_calls == []   # the open blind stays open
+    hass.states.set("cover.hall_blind", "closed")
+    res = await _router(ir, hass).route("close it", HALL)     # only a light is on now
+    assert res["executed"] is False and hass.service_calls == []
 
 
 async def test_pronoun_prefers_playing_media_in_the_area(ir, hass):
@@ -215,16 +230,26 @@ async def test_a_plain_no_leaves_the_window_open_and_moves_nothing(ir, hass, tim
     assert hass.service_calls == [] and r._pending_feedback is not None
 
 
-@pytest.mark.parametrize("reply", ["no, don't do it", "that's not ok", "don't shut it"])
-async def test_current_behaviour_a_refusal_counts_as_yes(ir, hass, timers, reply):
-    # Looks wrong: the yes patterns are plain substrings with no negation
-    # check, so "don't do it", "not ok" and "don't shut it" all confirm. The
-    # garage door closes and the lock locks after the person said no.
+@pytest.mark.parametrize("reply", [
+    "no, don't do it", "that's not ok", "don't shut it", "do not", "stop", "cancel it",
+    "never mind, no", "yes, no wait",
+])
+async def test_a_refusal_is_never_a_yes(ir, hass, timers, reply):
+    # 8.7.19 pinned "no, don't do it", "that's not ok" and "don't shut it" all
+    # confirming. A phrase with a negation is now never a yes, and the window
+    # stays open for a real answer.
+    r = _router(ir, hass)
+    await r.open_feedback_window({"intent": "secure_area", "area": GARAGE})
+    assert await r.handle_voice_response(reply) == {"handled": False, "affirmative": False}
+    assert hass.service_calls == [] and r._pending_feedback is not None
+
+
+@pytest.mark.parametrize("reply", ["yes", "yeah do it", "ok", "go ahead", "sure", "close it"])
+async def test_a_plain_yes_still_confirms(ir, hass, timers, reply):
     r = _router(ir, hass)
     await r.open_feedback_window({"intent": "secure_area", "area": GARAGE})
     res = await r.handle_voice_response(reply)
     assert res["handled"] is True and res["executed"] is True
-    assert [c[:2] for c in hass.service_calls] == [("cover", "close_cover"), ("lock", "lock")]
 
 
 # ── concurrency lock and write-ahead ledger ─────────────────────────────────

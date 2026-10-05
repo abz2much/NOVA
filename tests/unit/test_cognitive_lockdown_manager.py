@@ -608,11 +608,13 @@ async def test_a_cover_that_nova_closed_and_that_is_opened_again_is_adopted_once
     assert await mgr.handle_state_change("cover.garage", _st("cover.garage", "closed"), new) is None
 
 
-async def test_current_behaviour_a_lock_unlocked_a_second_time_is_adopted_and_left_unlocked(
+async def test_a_lock_unlocked_a_second_time_is_a_critical_alert_and_never_adopted(
         cc, fake_hass, monkeypatch):
-    """The "I secured it and you reopened it, so you meant it" rule is applied to
-    locks too. The first unlock is locked again; the second is announced as "I'll
-    leave it open" and the lock is exempt from then on, still unlocked."""
+    """Fixed in 8.7.20 (8.7.15 pinned the lock being adopted as "left open").
+    The first unlock is locked again; the second is a critical alert, the lock
+    is not locked a second time (Nova does not fight a person at the door) and
+    it is never made exempt. Once it is locked again, a later unlock alerts
+    again."""
     monkeypatch.setattr(cc, "_live_honorific", lambda hass: "sir")
     mgr = await _active(cc, fake_hass)
     new = _st("lock.front", "unlocked", friendly_name="Front")
@@ -620,10 +622,14 @@ async def test_current_behaviour_a_lock_unlocked_a_second_time_is_adopted_and_le
     assert await mgr.handle_state_change("lock.front", old, new) is None          # locked again
     fake_hass.close_pending()
     alert = await mgr.handle_state_change("lock.front", old, new)                  # second unlock
-    assert alert["urgency"] == "high" and "I'll leave it open" in alert["message"]
-    assert "lock.front" in mgr.exempt_windows
-    assert len(service_calls(fake_hass, "lock", "lock")) == 1                      # only one relock, ever
-    assert await mgr.handle_state_change("lock.front", old, new) is None           # and then it is ignored
+    assert alert == {"type": "lockdown_breach", "urgency": "critical", "auto_act": True,
+                     "message": "Sir, Front was unlocked again during lockdown after I "
+                                "locked it. Please check it."}
+    assert "lock.front" not in mgr.exempt_windows
+    assert len(service_calls(fake_hass, "lock", "lock")) == 1                      # not locked twice
+    assert await mgr.handle_state_change("lock.front", old, new) is None           # alerted once...
+    await mgr.handle_state_change("lock.front", new, _st("lock.front", "locked"))  # ...until locked
+    assert (await mgr.handle_state_change("lock.front", old, new))["urgency"] == "critical"
 
 
 # ── _verify_secured (the background check) ──────────────────────────────────

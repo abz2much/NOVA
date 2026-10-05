@@ -137,26 +137,21 @@ def test_system_prompt_instructs_the_enforcement_response_boundary():
     assert "ignore_entity, not remember" in text
 
 
-# ── Sentinel now actually enforces a genuine ignore_entity rule ────────────
+# ── Sentinel no longer reads ignore rules (8.7.20) ─────────────────────────
 
-def test_sentinel_ignore_check_reads_the_same_store_ignore_entity_writes(load, monkeypatch):
-    """cognitive_core.is_ignored() is the public read side of the exact
-    store cognitive_core.ignore() (the ignore_entity tool) writes to --
-    confirms sentinel._is_ignored() and the tool are wired to the same
-    mechanism, not two independent concepts that happen to share a name."""
+def test_sentinel_has_no_ignore_rule_check(load, monkeypatch):
+    """8.7.20 reverses the earlier wiring: an ignore request quiets Nova's
+    announcements but never switches off a Sentinel rule (a door left open,
+    a lock left unlocked). Sentinel no longer consults the ignore store at all;
+    only the user's exclusion list (entity_filter) removes an entity."""
+    import pathlib
     import sys, types
     ev = types.ModuleType("homeassistant.helpers.event")
     ev.async_track_state_change_event = lambda *a, **k: (lambda: None)
     ev.async_track_time_interval = lambda *a, **k: (lambda: None)
     monkeypatch.setitem(sys.modules, "homeassistant.helpers.event", ev)
-
-    cognitive_core = load("cognitive_core")
     sentinel = load("sentinel")
-
-    class _FakeIgnoreMgr:
-        def is_ignored(self, entity_id):
-            return entity_id == "lock.upstairs_thermo_lock"
-    cognitive_core._CORE.ignore_mgr = _FakeIgnoreMgr()
-
-    assert sentinel._is_ignored(None, "lock.upstairs_thermo_lock") is True
-    assert sentinel._is_ignored(None, "lock.front_door") is False
+    assert not hasattr(sentinel, "_is_ignored")
+    src = (pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova"
+           / "sentinel.py").read_text(encoding="utf-8")
+    assert "is_ignored" not in src and "ignore_mgr" not in src

@@ -80,18 +80,10 @@ DEFAULT_RULES = [
 ]
 
 
-def _is_ignored(hass: HomeAssistant, entity_id: str) -> bool:
-    """Check the REAL, enforceable ignore-rule store the `ignore_entity`
-    tool writes to (cognitive_core.IgnoreManager) — separate from, and in
-    addition to, entity_filter.py's user-configured exclusion list. Sentinel
-    previously checked only entity_filter, so a genuine `ignore_entity` call
-    had no actual effect on sentinel's own alerts despite the tool reporting
-    success — this closes that gap. Fails open (not ignored) on any error."""
-    try:
-        from . import cognitive_core
-        return bool(cognitive_core.is_ignored(entity_id))
-    except Exception:
-        return False
+# Sentinel's rules (a door left open, a lock left unlocked) are never switched
+# off by an ignore request (8.7.20): `ignore_entity` quiets Nova's
+# announcements, not these checks. Only entity_filter.py's user-configured
+# exclusion list removes an entity from Sentinel.
 
 
 def _is_security_relevant_lock(hass: HomeAssistant, entity_id: str) -> bool:
@@ -334,7 +326,7 @@ class NovaSentinel:
                     continue  # mild out — skip this rule's checks this tick
 
             for entity_id in self._entity_cache:
-                if _excl(self.hass, entity_id) or _is_ignored(self.hass, entity_id):
+                if _excl(self.hass, entity_id):
                     continue
                 key = f"{entity_id}:{rule['id']}"
                 started = self._state_start.get(key)
@@ -391,8 +383,6 @@ class NovaSentinel:
                 return
         except Exception:
             pass
-        if _is_ignored(self.hass, entity_id):
-            return
         # runtime_config → config.json → options → data, via the canonical
         # resolver (immediate effect from panel toggles, no entry reload).
         if self._entry:
@@ -599,8 +589,7 @@ class NovaSentinel:
         ids: set[str] = set()
         for rule in self._rules:
             if rule.get("entity_id"):
-                if not is_excluded(self.hass, rule["entity_id"]) and not _is_ignored(
-                        self.hass, rule["entity_id"]):
+                if not is_excluded(self.hass, rule["entity_id"]):
                     ids.add(rule["entity_id"])
             else:
                 domain       = rule.get("domain")
@@ -615,8 +604,6 @@ class NovaSentinel:
                             self.hass, state.entity_id):
                         continue
                     if is_excluded(self.hass, state.entity_id):
-                        continue
-                    if _is_ignored(self.hass, state.entity_id):
                         continue
                     ids.add(state.entity_id)
         return list(ids)

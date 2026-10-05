@@ -319,16 +319,16 @@ async def test_a_rule_explicitly_flagged_urgent_security_still_speaks_overnight(
     assert len(announced) == 1
 
 
-# ── Test 8-adjacent: a real ignore_entity rule genuinely suppresses sentinel
+# ── An ignore rule never removes an entity from Sentinel (8.7.20) ──────────
 
-def test_ignore_manager_rule_is_now_actually_checked_by_sentinel(
-    sentinel_mod, fake_hass, monkeypatch,
+def test_an_ignore_rule_does_not_switch_off_a_sentinel_rule(
+    sentinel_mod, fake_hass, load, monkeypatch,
 ):
-    """The gap this closes: cognitive_core.IgnoreManager (what ignore_entity
-    writes to) was never consulted by sentinel.py at all, so a genuine
-    ignore_entity call had no real effect on sentinel's own alerts."""
-    monkeypatch.setattr(sentinel_mod, "_is_ignored",
-                         lambda hass, eid: eid == "lock.front_door")
+    """Until 8.7.20 an ignore_entity rule removed the entity from Sentinel's
+    checks, so "ignore *" switched off every "lock left unlocked" rule. Now an
+    ignored lock is still checked."""
+    cc = load("cognitive_core")
+    monkeypatch.setattr(cc, "is_ignored", lambda eid: True)        # everything ignored
     fake_hass.states.set("lock.front_door", "unlocked", friendly_name="Front Door")
     fake_hass.states.set("lock.back_door", "unlocked", friendly_name="Back Door")
     s = sentinel_mod.NovaSentinel(fake_hass, groq_client=None, honorific="sir",
@@ -336,8 +336,7 @@ def test_ignore_manager_rule_is_now_actually_checked_by_sentinel(
                                            "state": "unlocked", "for_minutes": 20}],
                                    entry=None)
     ids = s._collect_entity_ids()
-    assert "lock.front_door" not in ids
-    assert "lock.back_door" in ids
+    assert "lock.front_door" in ids and "lock.back_door" in ids
 
 
 def load_sleep_detection_stub(sentinel_mod, monkeypatch, *, sleeping: bool):
