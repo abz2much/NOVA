@@ -170,7 +170,10 @@ ANNOUNCERS = {
     "__init__.py", "appliance_monitor.py", "briefing.py", "camera.py", "cognitive_core.py",
     "conversation.py", "hazard_monitor.py", "host_health.py", "package_monitor.py",
     "proactive_briefing.py", "reminders.py", "routines.py", "scenes.py", "sentinel.py",
-    "services.py", "summary.py", "voice_confirm.py", "websocket.py",
+    "services.py", "summary.py", "voice_confirm.py",
+    # 8.7.18: ws_repeat_spoken, the panel's Repeat button and the only
+    # announcer in the websocket layer, moved from websocket.py.
+    "ws_voice.py",
 }
 
 
