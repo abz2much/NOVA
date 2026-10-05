@@ -156,8 +156,9 @@ async def test_the_message_is_localised(safety, cc, fake_hass, monkeypatch):
 
 # ── one failure does not stop the rest ──────────────────────────────────────
 
-async def test_one_lock_that_fails_does_not_stop_the_others_or_get_named(
-        safety, cc, fake_hass, al, caplog):
+async def test_one_lock_that_fails_does_not_stop_the_others_and_is_named_as_not_secured(
+        safety, cc, fake_hass, al, caplog, monkeypatch):
+    monkeypatch.setattr(cc, "_live_honorific", lambda hass: "sir")
     fake_hass.states.set("lock.front", "unlocked", friendly_name="Front")
     fake_hass.states.set("lock.back", "unlocked", friendly_name="Back")
     fake_hass.states.set("lock.side", "unlocked", friendly_name="Side")
@@ -166,8 +167,13 @@ async def test_one_lock_that_fails_does_not_stop_the_others_or_get_named(
         (action,) = await safety._nighttime_lockdown(0)
     assert [c[2]["entity_id"] for c in service_calls(fake_hass, "lock", "lock")] == [
         "lock.front", "lock.side"]
-    assert "Front" in action["message"] and "Side" in action["message"]
-    assert "Back" not in action["message"]                          # never claims what failed
+    i18n = cc._notify_i18n()
+    locked = i18n.message("lockdown_locked", "en", names=i18n.join_names(["Front", "Side"], "en"))
+    assert action["message"] == i18n.message(
+        "lockdown_nighttime_partial", "en", honorific="Sir", body=locked,
+        failed=i18n.message("lockdown_secure_failed", "en", names="Back"))
+    assert "The house is secured." not in action["message"]
+    assert action["urgency"] == "high"                              # a failure is raised so it reaches the phone
     assert "failed to lock lock.back" in caplog.text
     by_entity = {r["entity_id"]: r for r in _rows(al)}
     assert by_entity["lock.front"]["execution_result"] == "accepted"
@@ -175,22 +181,33 @@ async def test_one_lock_that_fails_does_not_stop_the_others_or_get_named(
     assert by_entity["lock.back"]["reason_code"] == "service_call_failed"
 
 
-async def test_a_failing_cover_does_not_stop_the_locks_and_is_not_claimed(
+async def test_a_failing_cover_does_not_stop_the_locks_and_is_named_as_not_secured(
         safety, fake_hass, al):
     fake_hass.states.set("lock.front", "unlocked", friendly_name="Front")
     fake_hass.states.set("cover.garage", "open", friendly_name="Garage")
     _fail_for(fake_hass, "cover.garage")
     (action,) = await safety._nighttime_lockdown(0)
-    assert "Front" in action["message"] and "Garage" not in action["message"]
+    assert "Front" in action["message"] and "Garage" in action["message"]
+    assert "not fully secured" in action["message"] and "The house is secured." not in action["message"]
     assert {r["entity_id"]: r["execution_result"] for r in _rows(al)} == {
         "lock.front": "accepted", "cover.garage": "failed"}
 
 
-async def test_when_everything_fails_there_is_no_message_claiming_success(safety, fake_hass):
-    fake_hass.states.set("lock.front", "unlocked")
-    fake_hass.states.set("cover.garage", "open")
+async def test_when_everything_fails_the_message_says_so_and_never_claims_success(
+        safety, cc, fake_hass, monkeypatch):
+    """Before 8.7.16 this returned nothing at all, so a night where every lock
+    failed produced no message."""
+    monkeypatch.setattr(cc, "_live_honorific", lambda hass: "sir")
+    fake_hass.states.set("lock.front", "unlocked", friendly_name="Front")
+    fake_hass.states.set("cover.garage", "open", friendly_name="Garage")
     _fail_for(fake_hass, "lock.front", "cover.garage")
-    assert await safety._nighttime_lockdown(0) == []
+    (action,) = await safety._nighttime_lockdown(0)
+    i18n = cc._notify_i18n()
+    assert action["message"] == i18n.message(
+        "lockdown_nighttime_failed_only", "en", honorific="Sir",
+        failed=i18n.message("lockdown_secure_failed", "en", names=i18n.join_names(["Front", "Garage"], "en")))
+    assert action["urgency"] == "high" and action["type"] == "lockdown"
+    assert "The house is secured." not in action["message"]
 
 
 # ── the audit trail ─────────────────────────────────────────────────────────
@@ -257,18 +274,23 @@ async def test_current_behaviour_audit_rows_of_a_cancelled_sweep_stay_pending(
     assert [r["execution_result"] for r in _rows(al)] == ["pending"]
 
 
-async def test_current_behaviour_the_message_says_the_house_is_secured_even_when_a_lock_failed(
-        safety, fake_hass):
-    """The template ends "The house is secured." whatever the sweep managed: a
-    lock that failed is left out of the list, and an open window sensor, which
-    the sweep cannot close, is never mentioned."""
+async def test_the_house_is_secured_is_only_said_when_nothing_failed(safety, cc, fake_hass, monkeypatch):
+    monkeypatch.setattr(cc, "_live_honorific", lambda hass: "sir")
     fake_hass.states.set("lock.front", "unlocked", friendly_name="Front")
+    (ok,) = await safety._nighttime_lockdown(0)
+    assert ok["message"].endswith("The house is secured.") and ok["urgency"] == "low"
     fake_hass.states.set("lock.back", "unlocked", friendly_name="Back")
-    fake_hass.states.set("binary_sensor.window", "on", device_class="window")
     _fail_for(fake_hass, "lock.back")
+    (bad,) = await safety._nighttime_lockdown(0)
+    assert "The house is secured." not in bad["message"] and "Back" in bad["message"]
+
+
+async def test_an_open_window_sensor_is_still_not_mentioned_by_the_nighttime_sweep(safety, fake_hass):
+    """Out of scope for 8.7.16: window sensors are not part of this message."""
+    fake_hass.states.set("lock.front", "unlocked", friendly_name="Front")
+    fake_hass.states.set("binary_sensor.window", "on", device_class="window", friendly_name="Window")
     (action,) = await safety._nighttime_lockdown(0)
-    assert action["message"].endswith("The house is secured.")
-    assert "Back" not in action["message"] and "window" not in action["message"].lower()
+    assert "window" not in action["message"].lower() and action["message"].endswith("The house is secured.")
 
 
 async def test_the_sleeping_tick_with_the_opt_in_off_does_not_start_a_sweep_at_all(

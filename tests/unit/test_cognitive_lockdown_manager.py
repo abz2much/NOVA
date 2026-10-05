@@ -252,23 +252,108 @@ async def test_a_cover_that_cannot_be_closed_is_left_open_and_named_in_the_messa
     assert request["targets"][0]["execution_result"] == "failed"
 
 
-async def test_current_behaviour_a_lock_that_fails_to_lock_is_reported_as_already_secured(
-        cc, fake_hass, monkeypatch):
-    """engage() only schedules a verify for locks it reached, and the message is
-    built from the same list. If the lock command itself raises, nothing is
-    left to report, so the announcement says the home was already secured."""
-    fake_hass.states.set("lock.front", "unlocked", friendly_name="Front")
+def _fail_locks(fake_hass, *entities):
+    """Make the lock command raise for the given locks (others still work)."""
+    real = fake_hass.services.async_call
 
-    async def boom(*a, **k):
-        raise RuntimeError("lock offline")
-    fake_hass.services.async_call = boom
+    async def call(domain, service, data=None, blocking=False, **kw):
+        if domain == "lock" and (data or {}).get("entity_id") in entities:
+            raise RuntimeError("lock offline")
+        await real(domain, service, data, blocking=blocking, **kw)
+    fake_hass.services.async_call = call
+
+
+async def test_a_lock_that_fails_to_lock_is_named_and_never_called_already_secured(
+        cc, fake_hass, monkeypatch):
+    """Before 8.7.16 a failing lock command was only logged, so with nothing
+    else to do the announcement said the home was already fully secured."""
+    fake_hass.states.set("lock.front", "unlocked", friendly_name="Front")
+    _fail_locks(fake_hass, "lock.front")
     mgr = _mgr(cc, fake_hass)
     monkeypatch.setattr(cc, "_live_honorific", lambda hass: "sir")
     action = await mgr.engage("x")
+    fake_hass.close_pending()
+    i18n = cc._notify_i18n()
     assert mgr.active is True
+    assert action["message"] == i18n.message(
+        "lockdown_failed_only", "en", honorific="Sir",
+        gap=i18n.message("lockdown_secure_failed", "en", names="Front"))
+    assert "already fully secured" not in action["message"]
+    assert "Front" in action["message"] and action["urgency"] == "high"
+
+
+async def test_a_failed_lock_is_reported_alongside_the_ones_that_were_sent(
+        cc, fake_hass, monkeypatch):
+    fake_hass.states.set("lock.front", "unlocked", friendly_name="Front")
+    fake_hass.states.set("lock.back", "unlocked", friendly_name="Back")
+    fake_hass.states.set("cover.garage", "open", device_class="garage", friendly_name="Garage")
+    _fail_locks(fake_hass, "lock.back")
+    mgr = _mgr(cc, fake_hass)
+    monkeypatch.setattr(cc, "_live_honorific", lambda hass: "sir")
+    action = await mgr.engage("x")
+    fake_hass.close_pending()
+    i18n = cc._notify_i18n()
+    did = i18n.join_names([i18n.message("lockdown_lock_pending", "en", names="Front"),
+                           i18n.message("lockdown_close_pending", "en", names="Garage")], "en")
+    assert action["message"] == i18n.message(
+        "lockdown_did_gap_pending", "en", honorific="Sir", did=did,
+        gap=i18n.message("lockdown_secure_failed", "en", names="Back"))
+
+
+async def test_a_failed_lock_and_an_open_window_are_both_named(cc, fake_hass, monkeypatch):
+    fake_hass.states.set("lock.front", "unlocked", friendly_name="Front")
+    fake_hass.states.set("binary_sensor.window", "on", device_class="window", friendly_name="Window")
+    _fail_locks(fake_hass, "lock.front")
+    mgr = _mgr(cc, fake_hass)
+    action = await mgr.engage("x")
+    fake_hass.close_pending()
+    assert "Front" in action["message"] and "Window" in action["message"]
+    assert "already" not in action["message"].lower()
+
+
+async def test_a_failed_lock_gets_the_same_background_check_as_the_ones_that_were_sent(
+        cc, fake_hass, monkeypatch, slept, emitted):
+    """If the lock is still unlocked after the check, it is raised as a
+    critical alert, the way an unsecured cover already is."""
+    monkeypatch.setattr(cc, "_live_honorific", lambda hass: "sir")
+    fake_hass.states.set("lock.front", "unlocked", friendly_name="Front")
+    _fail_locks(fake_hass, "lock.front")
+    mgr = _mgr(cc, fake_hass)
+    await mgr.engage("x")
+    assert len(fake_hass._tasks) == 1
+    await fake_hass.drain()
+    assert [a["type"] for a, _ in emitted] == ["lockdown_breach"]
+    assert emitted[0][0]["urgency"] == "critical" and "Front" in emitted[0][0]["message"]
+
+
+async def test_already_fully_secured_is_only_said_when_nothing_failed_and_nothing_needed_doing(
+        cc, fake_hass, monkeypatch):
+    monkeypatch.setattr(cc, "_live_honorific", lambda hass: "sir")
+    fake_hass.states.set("lock.front", "locked")
+    action = await _mgr(cc, fake_hass).engage("x")
     assert action["message"] == cc._notify_i18n().message(
         "lockdown_already_secured", "en", honorific="Sir")
-    assert fake_hass._tasks == []                                   # no background verify was scheduled either
+
+
+def test_the_lockdown_message_builder_never_says_already_secured_with_a_failure(cc):
+    for kwargs in ({}, {"closed": ["Garage"]}, {"locked": ["A"]}, {"open_names": ["Window"]}):
+        msg = cc.build_lockdown_message(
+            "sir", kwargs.get("locked", []), kwargs.get("closed", []), kwargs.get("open_names", []),
+            failed=["Front"])
+        assert "Front" in msg and "already" not in msg.lower()
+
+
+@pytest.mark.parametrize("lang", ["en", "fr", "de", "es", "it", "nl", "pt"])
+def test_every_language_has_the_failure_wording(cc, lang):
+    msg = cc.build_lockdown_message("sir", ["A"], [], [], lang=lang, failed=["Front"])
+    assert "Front" in msg and "{" not in msg
+    only = cc.build_lockdown_message("sir", [], [], [], lang=lang, failed=["Front"])
+    assert "Front" in only and "{" not in only
+    assert only != cc.build_lockdown_message("sir", [], [], [], lang=lang)
+    i18n = cc._notify_i18n()
+    for key in ("lockdown_secure_failed", "lockdown_failed_only",
+                "lockdown_nighttime_partial", "lockdown_nighttime_failed_only"):
+        assert lang in i18n.MESSAGES[key]
 
 
 async def test_silent_engage_still_acts_and_persists(cc, fake_hass):

@@ -373,14 +373,22 @@ class SafetyManager:
                 and safety_config.automatic_lockdown_enabled(self.config))
 
     async def tick(self, sleeping: bool, anyone_home: bool) -> list[dict]:
-        """Run all safety checks. Returns list of actions taken."""
+        """Run all safety checks. Returns list of actions taken.
+
+        Each stage (freeze, intrusion, nighttime sweep) is guarded on its own:
+        an error in one is logged and the others still run, and anything an
+        earlier stage already gathered is still returned, so a fault in the
+        safety code can never swallow an alert that was already raised."""
         actions = []
         now = time.time()
 
         # ── Pipe freeze prevention ──────────────────────────────────
-        freeze_action = await self._check_freeze()
-        if freeze_action:
-            actions.append(freeze_action)
+        try:
+            freeze_action = await self._check_freeze()
+            if freeze_action:
+                actions.append(freeze_action)
+        except Exception as exc:
+            _LOGGER.warning("Safety tick: freeze check failed: %s", exc)
 
         # ── Unauthorized entry detection ────────────────────────────
         # Only when residents are CONFIDENTLY away (tracked away / armed-away) or
@@ -390,37 +398,43 @@ class SafetyManager:
         # switch instead. Monitoring runs only while a formal lockdown is
         # engaged or the selected alarm is armed, and ending confinement stops
         # it at once, dropping any investigation in progress.
-        from . import safety_config as _sc
-        if _sc.intrusion_requires_confinement(self.config):
-            if is_lockdown() or self._alarm_armed():
-                intrusion = await self._check_intrusion(
-                    anyone_home, sleeping, confined=True)
-                if intrusion:
-                    actions.append(intrusion)
+        try:
+            from . import safety_config as _sc
+            if _sc.intrusion_requires_confinement(self.config):
+                if is_lockdown() or self._alarm_armed():
+                    intrusion = await self._check_intrusion(
+                        anyone_home, sleeping, confined=True)
+                    if intrusion:
+                        actions.append(intrusion)
+                else:
+                    self._investigation = None
             else:
-                self._investigation = None
-        else:
-            # The setting was turned off mid investigation: drop one that only
-            # existed because of confinement.
-            if (self._investigation is not None
-                    and self._investigation.get("trigger") == "confined"):
-                self._investigation = None
-            if self._residents_away() or sleeping or self._investigation is not None:
-                intrusion = await self._check_intrusion(anyone_home, sleeping)
-                if intrusion:
-                    actions.append(intrusion)
+                # The setting was turned off mid investigation: drop one that only
+                # existed because of confinement.
+                if (self._investigation is not None
+                        and self._investigation.get("trigger") == "confined"):
+                    self._investigation = None
+                if self._residents_away() or sleeping or self._investigation is not None:
+                    intrusion = await self._check_intrusion(anyone_home, sleeping)
+                    if intrusion:
+                        actions.append(intrusion)
+        except Exception as exc:
+            _LOGGER.warning("Safety tick: intrusion check failed: %s", exc)
 
         # ── Nighttime lockdown ──────────────────────────────────────
         # Skipped when a formal lockdown is already active (it handles securing).
-        from . import safety_config
-        if (safety_config.automatic_lockdown_enabled(self.config)
-                and sleeping and not is_lockdown()
-                and (now - self._last_lockdown_check) > LOCKDOWN_CHECK_INTERVAL):
-            self._last_lockdown_check = now
-            generation = self._automatic_generation
-            lockdown = await self._nighttime_lockdown(generation)
-            if lockdown:
-                actions.extend(lockdown)
+        try:
+            from . import safety_config
+            if (safety_config.automatic_lockdown_enabled(self.config)
+                    and sleeping and not is_lockdown()
+                    and (now - self._last_lockdown_check) > LOCKDOWN_CHECK_INTERVAL):
+                self._last_lockdown_check = now
+                generation = self._automatic_generation
+                lockdown = await self._nighttime_lockdown(generation)
+                if lockdown:
+                    actions.extend(lockdown)
+        except Exception as exc:
+            _LOGGER.warning("Safety tick: nighttime lockdown failed: %s", exc)
 
         return actions
 
@@ -672,6 +686,7 @@ class SafetyManager:
         self._investigation = {
             "start": now, "last_motion": now,
             "zones": {start_zone}, "path": [start_zone], "escalated": False,
+            "soft_notice": False,
             "breach_area": breach_area, "breach_name": breach_name,
             "connected": connected,
             "hops": hops, "max_depth": start_depth,
@@ -1071,7 +1086,11 @@ class SafetyManager:
         # a false-alarm call-off (handled above) stops it entirely.
         quiet_for = now - inv["last_motion"]
         timed_out = False
-        if not inv["escalated"] and not confirmed:
+        # The soft notice is tracked on its own ("soft_notice") so it can never
+        # use up the critical alert: "escalated" means the critical alert has
+        # gone out, "soft_notice" means the soft one has been dealt with.
+        soft_done = inv.get("soft_notice", False)
+        if not inv["escalated"] and not soft_done and not confirmed:
             try:
                 from . import intrusion as _intr
                 acknowledged = _intr.is_acknowledged()
@@ -1146,10 +1165,12 @@ class SafetyManager:
                 pass
             return action
 
-        if not inv["escalated"] and timed_out:
+        if not inv["escalated"] and not soft_done and timed_out:
             # Unanswered, still some motion, but NO confirming inward route.
             # Don't cry "intrusion confirmed" — send a soft check-in instead.
-            inv["escalated"] = True            # don't repeat this either
+            # Only the soft notice is marked done here, so a route or a person
+            # confirmed later still raises the critical alert, once.
+            inv["soft_notice"] = True          # don't repeat this either
             honorific = _live_honorific(self.hass)  # Phase C: presence-aware
             # Learned damping applies here too: this is a LOW-CONFIDENCE alert
             # (nothing was confirmed), so a pattern repeatedly labelled a false
@@ -1218,10 +1239,11 @@ class SafetyManager:
                 pass
             return action
 
-        if not inv["escalated"] and (quiet_for > INTRUSION_CLEAR_QUIET_SECS
-                                     or elapsed > INTRUSION_MAX_INVESTIGATE_SECS):
+        if not inv["escalated"] and not soft_done and (
+                quiet_for > INTRUSION_CLEAR_QUIET_SECS
+                or elapsed > INTRUSION_MAX_INVESTIGATE_SECS):
             self._investigation = None            # nothing of note
-        elif inv["escalated"] and quiet_for > INTRUSION_CLEAR_QUIET_SECS:
+        elif (inv["escalated"] or soft_done) and quiet_for > INTRUSION_CLEAR_QUIET_SECS:
             self._investigation = None            # situation settled
         return None
 
@@ -1252,6 +1274,7 @@ class SafetyManager:
 
         # Check locks
         unlocked = []
+        failed = []   # friendly names of anything the sweep could not secure
         for state in self.hass.states.async_all("lock"):
             if not self._automatic_operation_current(automatic_generation):
                 return []
@@ -1275,6 +1298,7 @@ class SafetyManager:
                     )
                 except Exception as exc:
                     _LOGGER.warning("Cognitive lockdown: failed to lock %s: %s", eid, exc)
+                    failed.append(fname)
                     await self.hass.async_add_executor_job(
                         lambda rid=row_id: action_log.set_execution(
                             rid, "failed", reason_code="service_call_failed")
@@ -1302,6 +1326,7 @@ class SafetyManager:
                     )
                 except Exception as exc:
                     _LOGGER.warning("Cognitive lockdown: failed to close %s: %s", eid, exc)
+                    failed.append(fname)
                     await self.hass.async_add_executor_job(
                         lambda rid=row_id: action_log.set_execution(
                             rid, "failed", reason_code="service_call_failed")
@@ -1309,7 +1334,7 @@ class SafetyManager:
 
         if not self._automatic_operation_current(automatic_generation):
             return []
-        if unlocked or open_covers:
+        if unlocked or open_covers or failed:
             i18n = _notify_i18n()
             lang = _hass_lang(self.hass)
             parts = []
@@ -1319,14 +1344,31 @@ class SafetyManager:
             if open_covers:
                 parts.append(i18n.message("lockdown_closed", lang,
                                           names=i18n.join_names(open_covers, lang)))
-            actions.append({
-                "type": "lockdown",
-                "urgency": "low",
-                "message": i18n.message(
+            if not failed:
+                message = i18n.message(
                     "lockdown_nighttime", lang,
                     honorific=honorific.title(),
                     body=i18n.join_names(parts, lang),
-                ),
+                )
+            else:
+                # "The house is secured." is only said when nothing failed.
+                problem = i18n.message("lockdown_secure_failed", lang,
+                                       names=i18n.join_names(failed, lang))
+                if parts:
+                    message = i18n.message(
+                        "lockdown_nighttime_partial", lang,
+                        honorific=honorific.title(),
+                        body=i18n.join_names(parts, lang), failed=problem)
+                else:
+                    message = i18n.message(
+                        "lockdown_nighttime_failed_only", lang,
+                        honorific=honorific.title(), failed=problem)
+            actions.append({
+                "type": "lockdown",
+                # A failure to secure at night is raised to high so it is
+                # pushed to the phone and spoken when someone is awake.
+                "urgency": "high" if failed else "low",
+                "message": message,
                 "auto_act": True,
             })
 
@@ -1368,7 +1410,8 @@ class SafetyManager:
 # ── Lockdown (v5.9.36) ──────────────────────────────────────────────────────
 
 def build_lockdown_message(honorific: str, locked: list, closed: list,
-                           open_names: list, lang: str = "en") -> str:
+                           open_names: list, lang: str = "en",
+                           failed: Optional[list] = None) -> str:
     """
     Compose the lockdown-engaged announcement. Pure (no I/O) so it's unit-tested.
 
@@ -1376,8 +1419,11 @@ def build_lockdown_message(honorific: str, locked: list, closed: list,
     closeable openings it sent a close command to (garage doors / motorized
     covers), and openings it can't secure remotely (bare window contacts) —
     those are named and framed as the gap to close by hand, never a footnote.
-    The message never claims the home is secure while something is open, and
-    never announces a non-event.
+    A fourth, `failed`, names the locks whose lock command itself failed
+    (8.7.16): they are said to be unsecured, never counted as done. The message
+    never claims the home is secure while something is open or failed, and
+    never announces a non-event: "already fully secured" is only said when
+    nothing was done, nothing is open and nothing failed.
 
     Phase 3 (honest verification): engage() only ever gets here with a
     non-empty `locked`/`closed` list when it just called the lock/close
@@ -1419,14 +1465,26 @@ def build_lockdown_message(honorific: str, locked: list, closed: list,
                                 names=i18n.join_names(names, lang))
         return i18n.message("lockdown_gap_many", lang, count=len(names))
 
-    if did and open_names:
+    # What is wrong, as one clause: the locks that failed first, then the
+    # openings Nova cannot close remotely.
+    problems = []
+    if failed:
+        problems.append(i18n.message("lockdown_secure_failed", lang,
+                                     names=i18n.join_names(list(failed), lang)))
+    if open_names:
+        problems.append(gap(open_names))
+    problem = "; ".join(problems)
+
+    if did and problem:
         return i18n.message("lockdown_did_gap_pending", lang, honorific=h, did=did,
-                            gap=gap(open_names))
+                            gap=problem)
     if did:
         return i18n.message("lockdown_did_pending", lang, honorific=h, did=did)
+    if failed:
+        return i18n.message("lockdown_failed_only", lang, honorific=h, gap=problem)
     if open_names:
         return i18n.message("lockdown_gap_only", lang, honorific=h,
-                            gap=gap(open_names))
+                            gap=problem)
     return i18n.message("lockdown_already_secured", lang, honorific=h)
 
 
@@ -1462,6 +1520,9 @@ class LockdownManager:
         self._alerted: set = set()         # entities already alerted about this lockdown
         self._last_breach_alert = 0.0
         self._automatic_generation = 0
+        # (entity_id, friendly_name) of every lock the last _lock_all() could
+        # not lock because the lock command itself failed (8.7.16).
+        self._lock_failures: list = []
         # When the user manually lifts lockdown while the alarm is still armed,
         # this suppresses auto re-engage until the alarm is disarmed and re-armed
         # — so "exit lockdown" from the UI actually keeps you out.
@@ -1654,6 +1715,7 @@ class LockdownManager:
                 )
             )
         locked = []
+        self._lock_failures = []
         for st in candidates:
             if not self._automatic_operation_current(automatic_generation):
                 break
@@ -1673,6 +1735,7 @@ class LockdownManager:
                     )
             except Exception as exc:
                 _LOGGER.warning("Lockdown: failed to lock %s: %s", eid, exc)
+                self._lock_failures.append((eid, fname))
                 if row_id is not None:
                     await self.hass.async_add_executor_job(
                         lambda rid=row_id: action_log.set_execution(
@@ -1711,6 +1774,13 @@ class LockdownManager:
             return None
         locked = [fname for _eid, fname in locked_pairs]
         for eid, fname in locked_pairs:
+            self.hass.async_create_task(self._verify_secured(eid, "lock", fname))
+        # A lock whose command failed is named in the message as not secured
+        # and gets the same background check as the ones that were sent, so a
+        # lock that is still unlocked is raised as a critical alert too.
+        failed_pairs, self._lock_failures = list(self._lock_failures), []
+        failed_locks = [fname for _eid, fname in failed_pairs]
+        for eid, fname in failed_pairs:
             self.hass.async_create_task(self._verify_secured(eid, "lock", fname))
 
         # 2) Close every open *closeable* opening (garage doors / motorized
@@ -1769,10 +1839,12 @@ class LockdownManager:
         if not self._automatic_operation_current(automatic_generation):
             return None
         message = build_lockdown_message(honorific, locked, closed, open_names,
-                                          lang=_hass_lang(self.hass))
+                                          lang=_hass_lang(self.hass),
+                                          failed=failed_locks)
         _LOGGER.warning(
-            "Lockdown ENGAGED (%s): locked=%s closed=%s left-open=%d announce=%s",
-            reason, locked, closed, len(uncloseable), announce)
+            "Lockdown ENGAGED (%s): locked=%s closed=%s left-open=%d "
+            "lock-failed=%s announce=%s",
+            reason, locked, closed, len(uncloseable), failed_locks, announce)
         await self._persist()
         if not announce:
             return None
@@ -2747,8 +2819,13 @@ async def _tick():
     except Exception as exc:
         _LOGGER.debug("auto-mode eval error: %s", exc)
 
-    # Run safety checks
-    actions.extend(await _CORE.safety_mgr.tick(sleeping, anyone_home))
+    # Run safety checks. An error here must not lose what is already gathered
+    # (a lockdown announcement: the manager has already changed state and will
+    # not announce it again) or stop the rest of the tick.
+    try:
+        actions.extend(await _CORE.safety_mgr.tick(sleeping, anyone_home))
+    except Exception as exc:
+        _LOGGER.warning("Cognitive safety tick error: %s", exc)
 
     # ── Proactive comfort/efficiency offers (v5.9.07) ───────────────
     # Gated by the global proactive kill-switch AND the active operational mode
@@ -3046,27 +3123,13 @@ async def _emit_action(hass, config, action, sleeping):
     # Set on anticipation alerts: the Decision Record the user can rate.
     decision_id = action.get("decision_id")
 
-    # Route announcement
-    try:
-        from .tts_helper import resolve_tts_for_context, async_announce
-        from .audio_routing import observer_speak_target
-        from . import nova_config
+    # Route announcement. Speech and the phone push each have their own error
+    # handling (8.7.16): an announcement that raises must not skip the push for
+    # a critical alert, and a push that raises must not undo the speech.
+    _snap_url = action.get("snapshot_url")
 
-        # Quiet hours: only CRITICAL may speak. Non-critical → phone push only.
-        # Time-based (independent of bedroom presence), so nothing slips through.
-        in_quiet = False
+    async def _push() -> None:
         try:
-            from . import sleep_detection
-            in_quiet = sleep_detection._in_quiet_hours(
-                config.get("observer_quiet_start", "22:00"),
-                config.get("observer_quiet_end", "07:00"),
-            )
-        except Exception:
-            in_quiet = False
-
-        if (sleeping or in_quiet) and urgency != "critical":
-            # Push to phone only (no spoken announcement)
-            _snap_url = action.get("snapshot_url")
             if notify_all:
                 await _notify_all_devices(hass, config, message, action_type, _snap_url,
                                            request_id=request_id)
@@ -3075,74 +3138,103 @@ async def _emit_action(hass, config, action, sleeping):
                 await _push_notification(hass, config, message, action_type, _snap_url,
                                           request_id=request_id,
                                           extra_data=_rating_data(decision_id))
-        else:
-            # Get announcement speakers from config
-            ann_speakers = None
+        except Exception as exc:
+            _LOGGER.warning("Cognitive: action push failed: %s", exc)
+
+    # Quiet hours: only CRITICAL may speak. Non-critical → phone push only.
+    # Time-based (independent of bedroom presence), so nothing slips through.
+    in_quiet = False
+    try:
+        from . import sleep_detection
+        in_quiet = sleep_detection._in_quiet_hours(
+            config.get("observer_quiet_start", "22:00"),
+            config.get("observer_quiet_end", "07:00"),
+        )
+    except Exception:
+        in_quiet = False
+
+    if (sleeping or in_quiet) and urgency != "critical":
+        # Push to phone only (no spoken announcement)
+        await _push()
+        return
+
+    # Speech. "suppressed" is what a failure here means for the push decision
+    # below: critical and high alerts are pushed whatever the speech did.
+    mode = "suppressed"
+    try:
+        from .tts_helper import resolve_tts_for_context, async_announce
+        from .audio_routing import observer_speak_target
+
+        # Get announcement speakers from config. A loaded entry that has lost
+        # its runtime raises here; fall back to no panel selection (the
+        # broadcast group in config still applies) and carry on.
+        ann_speakers = None
+        try:
             rc = _live_runtime_config()
-            try:
-                raw = rc.get("announcement_speakers")
-                if raw:
-                    parsed = json.loads(raw) if isinstance(raw, str) else raw
-                    if isinstance(parsed, list) and parsed:
-                        ann_speakers = parsed
-            except Exception:
-                pass
+        except Exception as exc:
+            _LOGGER.warning(
+                "Cognitive: live settings unavailable, using defaults: %s", exc)
+            rc = {}
+        try:
+            raw = rc.get("announcement_speakers")
+            if raw:
+                parsed = json.loads(raw) if isinstance(raw, str) else raw
+                if isinstance(parsed, list) and parsed:
+                    ann_speakers = parsed
+        except Exception:
+            pass
 
-            broadcast_group = config.get("broadcast_group") or None
-            targets, mode = observer_speak_target(
-                hass, urgency=urgency,
-                broadcast_group=broadcast_group,
-                announcement_speakers=ann_speakers,
-                is_sleeping=sleeping,
+        broadcast_group = config.get("broadcast_group") or None
+        targets, mode = observer_speak_target(
+            hass, urgency=urgency,
+            broadcast_group=broadcast_group,
+            announcement_speakers=ann_speakers,
+            is_sleeping=sleeping,
+        )
+
+        if targets and mode not in ("suppressed",):
+            tts_entity = resolve_tts_for_context(
+                hass, "sentinel",
+                config.get("tts_engine", "auto"),
+                config.get("tts_premium_engine") or None,
+                config.get("tts_premium_contexts") or [],
             )
-
-            if targets and mode not in ("suppressed",):
-                tts_entity = resolve_tts_for_context(
-                    hass, "sentinel",
-                    config.get("tts_engine", "auto"),
-                    config.get("tts_premium_engine") or None,
-                    config.get("tts_premium_contexts") or [],
+            if tts_entity:
+                await async_announce(
+                    hass, message, tts_entity, targets,
+                    context="sentinel", action_request_id=request_id,
                 )
-                if tts_entity:
-                    await async_announce(
-                        hass, message, tts_entity, targets,
-                        context="sentinel", action_request_id=request_id,
-                    )
-
-            # announce_notify_only: a non-critical alert that would have been
-            # spoken is routed to notify_only, so the phone gets the alert
-            # itself (with the rating buttons) in place of the speech. With
-            # the setting off, notify_only keeps its old meaning here (only
-            # critical and high alerts are pushed).
-            alert_pushed_instead = (
-                mode == "notify_only" and urgency not in ("critical", "high")
-                and nova_config.announce_notify_only(hass)
-            )
-
-            # Adaptive awareness: a spoken alert gets a silent phone
-            # notification with the rating buttons, so it can be rated too.
-            if (decision_id is not None and urgency not in ("critical", "high")
-                    and not alert_pushed_instead):
-                try:
-                    from . import adaptive_awareness
-                    await adaptive_awareness.async_send_rating_prompt(
-                        hass, config, message, decision_id)
-                except Exception as exc:
-                    _LOGGER.debug("rating prompt failed: %s", exc)
-
-            # Also push critical/high alerts to phones
-            if urgency in ("critical", "high") or alert_pushed_instead:
-                _snap_url = action.get("snapshot_url")
-                if notify_all:
-                    await _notify_all_devices(hass, config, message, action_type, _snap_url,
-                                               request_id=request_id)
-                else:
-                    await _push_notification(hass, config, message, action_type, _snap_url,
-                                              request_id=request_id,
-                                              extra_data=_rating_data(decision_id))
-
     except Exception as exc:
         _LOGGER.warning("Cognitive: action routing failed: %s", exc)
+
+    # announce_notify_only: a non-critical alert that would have been
+    # spoken is routed to notify_only, so the phone gets the alert
+    # itself (with the rating buttons) in place of the speech. With
+    # the setting off, notify_only keeps its old meaning here (only
+    # critical and high alerts are pushed).
+    try:
+        from . import nova_config
+        alert_pushed_instead = (
+            mode == "notify_only" and urgency not in ("critical", "high")
+            and nova_config.announce_notify_only(hass)
+        )
+    except Exception:
+        alert_pushed_instead = False
+
+    # Adaptive awareness: a spoken alert gets a silent phone
+    # notification with the rating buttons, so it can be rated too.
+    if (decision_id is not None and urgency not in ("critical", "high")
+            and not alert_pushed_instead):
+        try:
+            from . import adaptive_awareness
+            await adaptive_awareness.async_send_rating_prompt(
+                hass, config, message, decision_id)
+        except Exception as exc:
+            _LOGGER.debug("rating prompt failed: %s", exc)
+
+    # Also push critical/high alerts to phones
+    if urgency in ("critical", "high") or alert_pushed_instead:
+        await _push()
 
 
 def _rating_data(decision_id) -> dict:

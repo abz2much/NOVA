@@ -1,3 +1,28 @@
+## [8.7.16] — Safety fixes: five defects found by the 8.7.15 tests
+
+Each fix fails toward alerting, never toward silence. Nothing else changes.
+
+**1. The soft notice no longer blocks the real alarm**
+- After the "I flagged possible activity and couldn't reach you" notice, a later confirmed inward route or a person confirmed on camera never raised the critical alert. The same happened when learned damping had silenced that notice.
+- The soft notice is now tracked separately from the critical alert. The soft notice still goes out at most once, the critical alert still goes out at most once, and one no longer uses up the other. Clearing is unchanged: a quiet house still clears, and after a soft notice the ten minute benign clear still does not apply while there is motion.
+- A side effect: the panel's intrusion status no longer reports an investigation as confirmed after only the soft notice.
+
+**2. Lockdown no longer says "already fully secured" after a failed lock**
+- A lock command that failed was only logged, so with nothing else to do the announcement said the home was already fully secured. It now names the locks it could not lock, and "already fully secured" is only said when nothing failed and nothing needed doing. New wording in all seven languages that have the lockdown templates.
+- A lock whose command failed also gets the same background check as the ones that were sent, so a lock that is still unlocked is raised as a critical alert. This is how an unsecured cover is already surfaced.
+
+**3. The nighttime message no longer always says "The house is secured."**
+- It now names any lock that failed, and says "The house is secured." only when nothing failed. A failure is raised from low to high urgency so it reaches the phone. A night where every command failed used to produce no message at all; it now does. I counted a cover that failed to close the same way as a lock. Window sensors are not part of this change.
+
+**4. A critical alert is no longer dropped**
+- Speech and the phone push now have separate error handling, so an announcement that raises no longer skips the push, and a failing push no longer undoes the speech. A loaded entry with no runtime used to drop an awake critical alert completely; it now falls back to the config defaults and carries on. Critical alerts bypass sleep, quiet hours and every mute exactly as before.
+
+**5. A safety error no longer loses a lockdown announcement**
+- An error in `SafetyManager.tick` ended the whole tick: the lockdown announcement already gathered was lost (the lockdown manager had already changed state, so it never announced again) and nothing after it ran. Each stage (freeze, intrusion, nighttime sweep) is now guarded on its own, `_tick` guards the call as well, the error is logged, and the rest of the tick still runs.
+
+**Tests**
+- The `test_current_behaviour_*` tests that pinned these five defects are now ordinary tests of the new behaviour, renamed, with new tests beside them. The remaining 15 items from the 8.7.15 list are untouched.
+
 ## [8.7.15] — Tests only: the safety code in cognitive_core.py is now pinned
 
 **No behaviour changes.** No production code is touched in this release. The only edits outside the tests are this entry, `scripts/coverage_floors.py` and the version number.

@@ -272,6 +272,46 @@ MESSAGES: dict[str, dict[str, str]] = {
         "nl": "{honorific}, nachtelijke vergrendeling: {body}. Het huis is beveiligd.",
         "pt": "{honorific}, confinamento noturno: {body}. A casa está segura.",
     },
+    # Failure wording (8.7.16). {names} is a comma joined device list. The
+    # clause is impersonal so it reads the same whatever the device is.
+    "lockdown_secure_failed": {
+        "en": "I couldn't secure {names} — please check by hand",
+        "fr": "je n'ai pas pu sécuriser {names} — à vérifier manuellement",
+        "de": "{names} konnte nicht gesichert werden — bitte manuell prüfen",
+        "es": "no pude asegurar {names} — hay que revisarlo manualmente",
+        "it": "non sono riuscito a mettere in sicurezza {names} — da controllare manualmente",
+        "nl": "ik kon {names} niet beveiligen — graag handmatig controleren",
+        "pt": "não consegui proteger {names} — verifique manualmente",
+    },
+    # Lockdown engaged, nothing could be sent or was already secure, but a lock
+    # command failed: never "already fully secured".
+    "lockdown_failed_only": {
+        "en": "{honorific}, lockdown engaged, but {gap}.",
+        "fr": "{honorific}, confinement activé, mais {gap}.",
+        "de": "{honorific}, Sicherung aktiviert, aber {gap}.",
+        "es": "{honorific}, confinamiento activado, pero {gap}.",
+        "it": "{honorific}, blocco attivato, ma {gap}.",
+        "nl": "{honorific}, vergrendeling ingeschakeld, maar {gap}.",
+        "pt": "{honorific}, confinamento ativado, mas {gap}.",
+    },
+    "lockdown_nighttime_partial": {
+        "en": "{honorific}, nighttime lockdown: {body}. The house is not fully secured — {failed}.",
+        "fr": "{honorific}, confinement nocturne : {body}. La maison n'est pas entièrement sécurisée — {failed}.",
+        "de": "{honorific}, nächtliche Sicherung: {body}. Das Haus ist nicht vollständig gesichert — {failed}.",
+        "es": "{honorific}, confinamiento nocturno: {body}. La casa no está totalmente asegurada — {failed}.",
+        "it": "{honorific}, blocco notturno: {body}. La casa non è completamente protetta — {failed}.",
+        "nl": "{honorific}, nachtelijke vergrendeling: {body}. Het huis is niet volledig beveiligd — {failed}.",
+        "pt": "{honorific}, confinamento noturno: {body}. A casa não está totalmente segura — {failed}.",
+    },
+    "lockdown_nighttime_failed_only": {
+        "en": "{honorific}, nighttime lockdown: the house is not fully secured — {failed}.",
+        "fr": "{honorific}, confinement nocturne : la maison n'est pas entièrement sécurisée — {failed}.",
+        "de": "{honorific}, nächtliche Sicherung: das Haus ist nicht vollständig gesichert — {failed}.",
+        "es": "{honorific}, confinamiento nocturno: la casa no está totalmente asegurada — {failed}.",
+        "it": "{honorific}, blocco notturno: la casa non è completamente protetta — {failed}.",
+        "nl": "{honorific}, nachtelijke vergrendeling: het huis is niet volledig beveiligd — {failed}.",
+        "pt": "{honorific}, confinamento noturno: a casa não está totalmente segura — {failed}.",
+    },
 }
 
 
