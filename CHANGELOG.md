@@ -1,3 +1,37 @@
+## [8.7.19] — Tests only: the agent's riskiest decision code is now pinned
+
+**No behaviour changes.** No production code is touched in this release. The only edits outside the tests are this entry, `scripts/coverage_floors.py` and the version number.
+
+**Why**
+- 8.7.15 pinned `cognitive_core.py` and its tests found five real safety bugs. This applies the same method to the code that moves devices and decides what Nova does, ranked by what it can do in a real home, not by coverage alone.
+
+**What is now covered** (six files, picked by risk)
+- `intent/intent_router.py` (30.8% to 87.2%): the local router behind `nova.process_intent`. It closes covers and locks locks with no LLM and no policy gate, and a ten second window lets a spoken "yes" run a pending action. Area scoping, the write-ahead ledger, the concurrency lock and the confirmation window are pinned.
+- `agent_runtime/capabilities/safety_modes.py` (59.0% to 87.2%): calling off an intrusion (no requester, every confirmation outcome, a phone tap for a voice request), acknowledging an alert, switching mode.
+- `agent_runtime/capabilities/control.py` (89.1% to 92.1%): value handling, the confirmation gate for unlock and disarm, the background verifier's retry, bulk control's skip and failure counts, plan steps gated one by one.
+- `ws_modes.py` (0% to 80.9%): the panel's intrusion call off, acknowledge, label and log, mode switching, and the energy, hazard and biometrics commands.
+- `agent_runtime/loop.py` (67.8% to 78.8%): the one-shot slim retry on a too-large request, malformed tool call retries, the provider fallback, and the reply after the ten round cap.
+- `agent_runtime/capabilities/memory.py` (69.4% to 73.5%): the ignore and unignore tools against the real ignore store.
+- The known lockdown finding end to end (`core_lockdown.py`): see below.
+- 86 new tests in seven files (`tests/unit/test_pin_*.py`). `dispatcher.py`, `grants.py` and `entity_resolution.py` were not picked: they are at 94% to 98% with dedicated boundary tests.
+- 26 mutations in the covered files (grant checks, device targets, confirmation steps, parse steps) each make a test fail.
+
+**Coverage floors**
+- `scripts/coverage_floors.py` gains a floor for each of the six files, three and a half points under its measured coverage. No floor was lowered.
+
+**Found, not fixed**
+- Nothing was changed. 20 tests named `test_current_behaviour_*` pin behaviour that looks wrong, so a later fix shows up as a deliberate edit. Most important first:
+- During a confirmation window, a refusal counts as yes: "no, don't do it", "that's not ok" and "don't shut it" all run the pending action (close the garage, lock the locks).
+- The local router acts on questions and negations: "is the garage secure?" and "don't secure the garage" both close the garage door and lock the lock.
+- `ignore_entity` accepts `*`: one request, with no confirmation and no expiry, mutes every non-critical announcement and switches off every Sentinel rule (a door left open, a lock left unlocked).
+- During lockdown, a lock unlocked a second time is adopted and left unlocked. It is announced at high, not critical, worded "I'll leave it open", stays exempt after a restart, and the pending relock check then stays silent.
+- With voice confirmation off (the default), an unlock typed in chat, "unlock all the doors" in bulk, and a plan step that disarms the alarm all run without any confirmation. The policy's high and critical ratings are only used when the confirmation module fails.
+- The background verifier re-sends an unlock on its own if the lock still reads locked a few seconds later, so a door someone deliberately re-locked is unlocked again, unconfirmed.
+- "Arm the alarm" through the local router closes covers and locks locks, never arms the alarm, and reports it as done.
+- The panel's intrusion call off needs no confirmation and writes no audit row; the agent's call off always needs one.
+- After ten failed tool rounds, if the summary call also fails, Nova says it completed the requested actions.
+- Smaller ones: a brightness or volume of 0 becomes 50%, a missing temperature becomes 72 even on a Celsius home, "close it" turns off a light and never closes a cover, unignore only matches the exact pattern text, and a mode change is neither confirmed nor audited.
+
 ## [8.7.18] — Internal tidy: websocket.py split again (2,273 lines down to 1,586)
 
 **No behaviour change.** This is an internal change only. No setting, service, websocket command, request field, error code, log name or stored file changed, and the panel behaves as before. Nothing to do after updating. It is the third step of splitting `websocket.py`.

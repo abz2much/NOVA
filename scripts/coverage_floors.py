@@ -45,7 +45,17 @@ FLOORS = {
 # and a half points under that file's measured coverage (rounded down). The
 # files together measured 97.5% (2463 of 2526 lines), as before the split,
 # and each file is now held on its own, so no moved code has less protection.
+#
+# 8.7.19 pinned the agent's riskiest decision code the same way. Floors for
+# those six files sit three and a half points under their measured coverage,
+# rounded down (measured in the comments; before 8.7.19 in brackets).
 FILE_FLOORS = {
+    "intent/intent_router.py": 83,                      # 87.2% (30.8%)
+    "agent_runtime/capabilities/safety_modes.py": 83,   # 87.2% (59.0%)
+    "agent_runtime/capabilities/control.py": 88,        # 92.1% (89.1%)
+    "ws_modes.py": 77,                                  # 80.9% (0.0%)
+    "agent_runtime/loop.py": 75,                        # 78.8% (67.8%)
+    "agent_runtime/capabilities/memory.py": 70,         # 73.5% (69.4%)
     "cognitive_core.py": 90,       # 94.3%: the facade (__delattr__ is unused)
     "core_autonomy.py": 96,        # 100.0%
     "core_bridge.py": 96,          # 100.0%
