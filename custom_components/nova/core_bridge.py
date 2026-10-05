@@ -14,6 +14,11 @@ Nothing runs at import time.
 from __future__ import annotations
 
 
+def _autonomy_file(*args, **kwargs):
+    from . import cognitive_core
+    return cognitive_core._autonomy_file(*args, **kwargs)
+
+
 def _ignore_file(*args, **kwargs):
     from . import cognitive_core
     return cognitive_core._ignore_file(*args, **kwargs)
