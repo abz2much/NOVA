@@ -80,6 +80,10 @@ ADMIN_GATED_TYPES = [
     "list_faces",
     "add_resident",
     "remove_resident",
+    # Relations (8.7.13): confirming, rejecting, removing and editing the
+    # links Nova may use. nova/list_relations is a read, open like get_knowledge.
+    "relation_action",
+    "edit_relation",
 ]
 
 
@@ -102,7 +106,7 @@ def test_require_admin_used_at_least_once_per_gated_command():
     # Exactly one decorator per listed command: a new admin gated command that
     # is not added to ADMIN_GATED_TYPES (or a listed one that lost its gate)
     # changes the count and fails here.
-    assert src.count("@websocket_api.require_admin") == len(ADMIN_GATED_TYPES) == 44
+    assert src.count("@websocket_api.require_admin") == len(ADMIN_GATED_TYPES) == 46
 
 
 def test_require_admin_sits_above_websocket_command_not_below():

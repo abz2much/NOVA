@@ -114,9 +114,12 @@ from .ws_knowledge import (
     ws_add_knowledge,
     ws_clear_scene_memory,
     ws_edit_pending_fact,
+    ws_edit_relation,
     ws_forget_knowledge,
     ws_get_knowledge,
+    ws_list_relations,
     ws_pending_fact_action,
+    ws_relation_action,
     ws_search_memory,
     ws_set_lockdown,
 )
@@ -206,6 +209,9 @@ def async_register(hass: HomeAssistant) -> None:
         websocket_api.async_register_command(hass, ws_list_faces)
         websocket_api.async_register_command(hass, ws_add_resident)
         websocket_api.async_register_command(hass, ws_remove_resident)
+        websocket_api.async_register_command(hass, ws_list_relations)
+        websocket_api.async_register_command(hass, ws_relation_action)
+        websocket_api.async_register_command(hass, ws_edit_relation)
     except Exception as exc:
         _LOGGER.debug("WS command register note: %s", exc)
 

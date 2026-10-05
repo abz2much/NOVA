@@ -193,6 +193,9 @@ const _intrLabelCalls = [];
 let _energyAgency = "advisory";
 let _bioEnabled = false;
 let _pendingFacts = [{ id: 42, key: "bedtime", value: "10pm", subject: "primary" }];
+let _relPending = [{ id: 7, subject: "sam", predicate: "owns", object: "car.jeep", source: "stated", status: "pending" }];
+let _relConfirmed = [{ id: 3, subject: "kitchen", predicate: "adjacent_to", object: "garage", source: "stated", status: "confirmed" }];
+const _relationCalls = [];
 let _knownFacts = [
   { id: 1, key: "trash day", value: "Tuesday", subject: "household", source: "stated", confidence: 1 },
   { id: 2, key: "favorite tea", value: "Earl Grey", subject: "primary", source: "inferred", confidence: 0.7 },
@@ -234,6 +237,21 @@ const hass = {
       { id: 1, pattern_type: "time_routine", description: "office light turns on around 07:00 most days when Username is home", confidence: 0.82, occurrences: 9, last_seen: "2026-07-13" },
     ] } };
     if (m.type === "nova/get_knowledge") return { facts: _knownFacts, pending: _pendingFacts, stats: {} };
+    if (m.type === "nova/list_relations") return { pending: _relPending, confirmed: _relConfirmed, counts: { pending: _relPending.length, confirmed: _relConfirmed.length }, cap: 500 };
+    if (m.type === "nova/relation_action") {
+      _relationCalls.push({ ...m });
+      const hit = _relPending.find(r => r.id === m.relation_id);
+      if (m.action === "confirm" && hit) { _relPending = _relPending.filter(r => r !== hit); _relConfirmed = [..._relConfirmed, { ...hit, status: "confirmed" }]; }
+      else if (m.action === "reject") _relPending = _relPending.filter(r => r.id !== m.relation_id);
+      else if (m.action === "remove") _relConfirmed = _relConfirmed.filter(r => r.id !== m.relation_id);
+      return { ok: true, pending: _relPending, confirmed: _relConfirmed, counts: {}, cap: 500 };
+    }
+    if (m.type === "nova/edit_relation") {
+      _relationCalls.push({ ...m });
+      if (m.predicate && !/^[a-z][a-z0-9_]{1,39}$/.test(m.predicate)) return { ok: false, error: "invalid_predicate", pending: _relPending, confirmed: _relConfirmed, counts: {}, cap: 500 };
+      _relPending = _relPending.map(r => r.id === m.relation_id ? { ...r, subject: m.subject, predicate: m.predicate, object: m.object } : r);
+      return { ok: true, error: null, pending: _relPending, confirmed: _relConfirmed, counts: {}, cap: 500 };
+    }
     if (m.type === "nova/add_knowledge") {
       const id = Math.max(0, ..._knownFacts.map(f => f.id)) + 1;
       _knownFacts = [..._knownFacts, { id, key: m.key, value: m.value, subject: m.subject, source: "stated", confidence: 1 }];
@@ -2499,6 +2517,50 @@ setTimeout(async () => {
   sRoot = elNew.shadowRoot;
   checks.push(["memory tab: forgetting a fact removes it via nova/forget_knowledge",
     !/trash day/.test(sRoot.getElementById("newMemList")?.textContent || "")]);
+
+  // Relations: pending ones can be confirmed, edited or rejected, confirmed
+  // ones can be removed. Nothing pending is presented as known.
+  sRoot = elNew.shadowRoot;
+  const relPanel = sRoot.getElementById("newRelationsPanel");
+  checks.push(["memory tab: a Relations section lists pending and confirmed relations with their controls",
+    !!relPanel && /Relations/.test(relPanel.textContent)
+    && /Waiting for confirmation/.test(sRoot.getElementById("newRelationsPending")?.textContent || "")
+    && sRoot.querySelector('#newRelationsPending .rel-row[data-id="7"] .rel-predicate')?.value === "owns"
+    && !!sRoot.querySelector("#newRelationsPending .rel-confirm") && !!sRoot.querySelector("#newRelationsPending .rel-save")
+    && !!sRoot.querySelector("#newRelationsPending .rel-reject")
+    && /kitchen/.test(sRoot.getElementById("newRelationsList")?.textContent || "")
+    && /adjacent_to/.test(sRoot.getElementById("newRelationsList")?.textContent || "")
+    && !!sRoot.querySelector('#newRelationsList .new-rel-remove[data-id="3"]')
+    && !/car\.jeep/.test(sRoot.getElementById("newRelationsList")?.textContent || "")
+    && /1 confirmed · 1 waiting/.test(sRoot.getElementById("newRelationsCount")?.textContent || "")
+    && /not used until you confirm/.test(relPanel.textContent)]);
+  sRoot.querySelector('#newRelationsPending .rel-row[data-id="7"] .rel-predicate').value = "Owns It";
+  sRoot.querySelector('#newRelationsPending .rel-save[data-id="7"]').click();
+  await new Promise(r => setTimeout(r, 20));
+  sRoot = elNew.shadowRoot;
+  checks.push(["memory tab: an invalid edit shows what to fix and keeps what was typed",
+    /lowercase with underscores/.test(sRoot.getElementById("newRelationsMsg")?.textContent || "")
+    && sRoot.querySelector('#newRelationsPending .rel-row[data-id="7"] .rel-predicate')?.value === "Owns It"]);
+  sRoot.querySelector('#newRelationsPending .rel-row[data-id="7"] .rel-predicate').value = "belongs_to";
+  sRoot.querySelector('#newRelationsPending .rel-save[data-id="7"]').click();
+  await new Promise(r => setTimeout(r, 20));
+  sRoot = elNew.shadowRoot;
+  checks.push(["memory tab: Save edit calls nova/edit_relation and shows the change",
+    _relationCalls.some(c => c.type === "nova/edit_relation" && c.relation_id === 7 && c.predicate === "belongs_to")
+    && sRoot.querySelector('#newRelationsPending .rel-row[data-id="7"] .rel-predicate')?.value === "belongs_to"]);
+  sRoot.querySelector('#newRelationsPending .rel-confirm[data-id="7"]').click();
+  await new Promise(r => setTimeout(r, 20));
+  sRoot = elNew.shadowRoot;
+  checks.push(["memory tab: Confirm moves a relation into the confirmed list",
+    _relationCalls.some(c => c.type === "nova/relation_action" && c.action === "confirm" && c.relation_id === 7)
+    && /belongs_to/.test(sRoot.getElementById("newRelationsList")?.textContent || "")
+    && (sRoot.getElementById("newRelationsPending")?.textContent || "").trim() === ""]);
+  sRoot.querySelector('#newRelationsList .new-rel-remove[data-id="3"]').click();
+  await new Promise(r => setTimeout(r, 20));
+  sRoot = elNew.shadowRoot;
+  checks.push(["memory tab: Remove takes a confirmed relation out",
+    _relationCalls.some(c => c.type === "nova/relation_action" && c.action === "remove" && c.relation_id === 3)
+    && !/adjacent_to/.test(sRoot.getElementById("newRelationsList")?.textContent || "")]);
 
   // Pending Confirmation: inject a fresh pending fact directly (independent
   // of the _pendingFacts fixture, which was forced empty above) to

@@ -44,6 +44,7 @@
     "calendar_agenda",
     "cognitive_status",
     "confirm_pending_fact",
+    "confirm_pending_relation",
     "connectivity_status",
     "control_device",
     "create_goal",
@@ -59,11 +60,14 @@
     "ignore_entity",
     "ingest_documents",
     "look_at_camera",
+    "lookup_relations",
     "manage_autonomy",
     "manage_followups",
     "manage_goals",
+    "propose_relation",
     "read_email",
     "reject_pending_fact",
+    "reject_pending_relation",
     "remember",
     "review_suggestions",
     "root_cause",
@@ -117,6 +121,7 @@
     "ask_security_privacy_agent",
     "bulk_control",
     "confirm_pending_fact",
+    "confirm_pending_relation",
     "control_device",
     "create_goal",
     "delegate_task",
@@ -129,7 +134,9 @@
     "manage_autonomy",
     "manage_followups",
     "manage_goals",
+    "propose_relation",
     "reject_pending_fact",
+    "reject_pending_relation",
     "remember",
     "review_suggestions",
     "run_scene_or_script",
@@ -364,6 +371,23 @@
       },
       "required": [
         "fact_id"
+      ]
+    },
+    "confirm_pending_relation": {
+      "parameters": {
+        "properties": {
+          "relation_id": {
+            "description": "The relation_id returned by the propose_relation call being confirmed.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "relation_id"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "relation_id"
       ]
     },
     "connectivity_status": {
@@ -701,6 +725,23 @@
         "question"
       ]
     },
+    "lookup_relations": {
+      "parameters": {
+        "properties": {
+          "entity": {
+            "description": "The name to look up, for example 'sam' or 'kitchen'.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entity"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "entity"
+      ]
+    },
     "manage_autonomy": {
       "parameters": {
         "properties": {
@@ -776,6 +817,35 @@
         "action"
       ]
     },
+    "propose_relation": {
+      "parameters": {
+        "properties": {
+          "object": {
+            "description": "The second thing, 1 to 80 characters (for example 'car.jeep' or 'garage').",
+            "type": "string"
+          },
+          "predicate": {
+            "description": "How it relates: lowercase snake case, 2 to 40 characters (for example 'owns' or 'adjacent_to').",
+            "type": "string"
+          },
+          "subject": {
+            "description": "The first thing, 1 to 80 characters (for example 'sam' or 'kitchen').",
+            "type": "string"
+          }
+        },
+        "required": [
+          "subject",
+          "predicate",
+          "object"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "object",
+        "predicate",
+        "subject"
+      ]
+    },
     "read_email": {
       "parameters": {
         "properties": {
@@ -811,6 +881,23 @@
       },
       "required": [
         "fact_id"
+      ]
+    },
+    "reject_pending_relation": {
+      "parameters": {
+        "properties": {
+          "relation_id": {
+            "description": "The relation_id returned by the propose_relation call being rejected.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "relation_id"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "relation_id"
       ]
     },
     "remember": {

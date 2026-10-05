@@ -83,6 +83,7 @@ _SUBAGENT_DENY: set = {
     "approve_suggestion", "dismiss_suggestion", "review_suggestions",
     "manage_autonomy", "remember", "ingest_documents",
     "confirm_pending_fact", "reject_pending_fact",
+    "propose_relation", "confirm_pending_relation", "reject_pending_relation",
     "look_at_camera", "where_last_seen", "what_changed",
     "ask_executive_assistant", "ask_marketing_agent", "ask_security_privacy_agent",
     "ask_homelab_infra_agent", "ask_house_manager_agent",

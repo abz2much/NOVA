@@ -217,6 +217,100 @@ async def ws_edit_pending_fact(
         connection.send_error(msg["id"], "edit_pending_fact_failed", safe_error_message(exc))
 
 
+def _relation_payload(knowledge) -> dict:
+    """The relations the Memory tab shows: pending ones for review, confirmed
+    ones with a Remove button, and counts."""
+    return {
+        "pending": knowledge.list_relations(status="pending"),
+        "confirmed": knowledge.list_relations(status="confirmed"),
+        "counts": knowledge.relation_counts(),
+        "cap": knowledge.RELATION_LIVE_CAP,
+    }
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "nova/list_relations",
+})
+@websocket_api.async_response
+async def ws_list_relations(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """The links between things Nova has stored (8.7.13), for the Memory tab:
+    pending ones awaiting a person, and confirmed ones. A read, open to any
+    signed in user like nova/get_knowledge, which already lists pending facts."""
+    try:
+        from . import knowledge
+        payload = await hass.async_add_executor_job(_relation_payload, knowledge)
+        connection.send_result(msg["id"], payload)
+    except Exception as exc:
+        _LOGGER.exception("list_relations failed: %s", exc)
+        connection.send_error(msg["id"], "relations_failed", safe_error_message(exc))
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "nova/relation_action",
+    vol.Required("relation_id"): int,
+    vol.Required("action"): vol.In(["confirm", "reject", "remove"]),
+})
+@websocket_api.async_response
+async def ws_relation_action(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Confirm or reject a pending relation, or remove a confirmed one. A
+    confirm only works on a pending relation. Reject and remove are soft
+    deletes: the edge stays removed even if something proposes it again."""
+    try:
+        from . import knowledge
+        rid = msg["relation_id"]
+        if msg["action"] == "confirm":
+            ok = await hass.async_add_executor_job(knowledge.confirm_relation, rid)
+        elif msg["action"] == "reject":
+            ok = await hass.async_add_executor_job(
+                lambda: knowledge.remove_relation(rid, only_pending=True))
+        else:
+            ok = await hass.async_add_executor_job(knowledge.remove_relation, rid)
+        payload = await hass.async_add_executor_job(_relation_payload, knowledge)
+        connection.send_result(msg["id"], {"ok": bool(ok), **payload})
+    except Exception as exc:
+        _LOGGER.exception("relation_action failed: %s", exc)
+        connection.send_error(msg["id"], "relation_action_failed", safe_error_message(exc))
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command({
+    vol.Required("type"): "nova/edit_relation",
+    vol.Required("relation_id"): int,
+    vol.Optional("subject"): str,
+    vol.Optional("predicate"): str,
+    vol.Optional("object"): str,
+})
+@websocket_api.async_response
+async def ws_edit_relation(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Correct a pending relation before confirming it. A value that fails
+    validation is answered with ok false and an error code, so the panel can
+    say what to fix; the relation is not changed."""
+    try:
+        from . import knowledge
+        res = await hass.async_add_executor_job(
+            lambda: knowledge.edit_relation(
+                msg["relation_id"], msg.get("subject"), msg.get("predicate"),
+                msg.get("object")))
+        payload = await hass.async_add_executor_job(_relation_payload, knowledge)
+        connection.send_result(msg["id"], {"ok": res["ok"], "error": res["error"], **payload})
+    except Exception as exc:
+        _LOGGER.exception("edit_relation failed: %s", exc)
+        connection.send_error(msg["id"], "edit_relation_failed", safe_error_message(exc))
+
+
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/search_memory",
     vol.Required("query"): str,

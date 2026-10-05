@@ -1,3 +1,25 @@
+## [8.7.13] — Confirmed relations in the knowledge store
+
+**What this adds**
+- A `relations` table in `knowledge.db` (subject, predicate, object, source, status, confidence, timestamps, soft delete), unique on the triple, indexed on subject and object. It is a new component in the persistence ledger, so existing databases upgrade in place and re running changes nothing.
+- Every relation starts **pending**, whatever its source. Nothing is live until a person confirms it. A confirm only works on a pending row.
+- A relation you remove is kept as a tombstone, so observed or inferred writes can never bring it back. Only you stating it again revives it, and then as pending.
+- Validation on every write: nodes are trimmed, 1 to 80 characters, no control characters, normalised like `identity.normalize`; predicates are lowercase snake case, 2 to 40 characters; "unknown" and its relatives are refused, as are self relations. Writes never raise.
+- The table holds at most 500 live rows. At the cap new proposals are refused with a clear message. Nothing is evicted.
+- Agent tools: `propose_relation` (stages pending, like `remember`), `confirm_pending_relation`, `reject_pending_relation`, and a read only `lookup_relations`.
+- Prompt: a short fenced RELATIONS block with the 12 most relevant confirmed edges, capped at 1200 characters, using the shared anti injection fence. Pending relations never reach the model.
+- Memory tab: a Relations section. Pending ones have Confirm, Edit and Reject; confirmed ones have Remove. Three new websocket commands: `nova/list_relations` (read), `nova/relation_action` and `nova/edit_relation` (admin only).
+- `knowledge.stats()` now reports relation counts (counts only, never names). `forget_relations()` wipes relations, including tombstones.
+
+**What it does not do**
+- Nothing creates relations automatically. No entity, area or camera code is wired in.
+- The model can call `confirm_pending_relation`, mirroring `confirm_pending_fact`. The panel is the authoritative human path, and sub agents are denied all three write tools, but a prompt injected main agent could confirm its own proposal. The same risk already exists for facts.
+- Facts have no soft delete, no subject normalisation, and there was no existing wipe path or diagnostics reporting for knowledge, so relations add the first of each rather than extending one.
+
+**Contracts and tests**
+- Websocket commands 59 to 62; admin gated 44 to 46. Agent tools 51 to 55. `agent_tools.json`, `agent_tool_specs.json` (additions only), `storage.json` and `websocket.json` regenerated. Admin gate test updated.
+- New `tests/unit/test_relations.py`, plus panel smoke checks.
+
 ## [8.7.12] — Fix: a recognised face was counted about 100 times too strongly when working out who someone is
 
 **What was wrong**

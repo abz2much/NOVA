@@ -843,6 +843,19 @@ class NovaAgent(conversation.ConversationEntity):
         if kn_block:
             persona = persona + "\n\n" + kn_block
 
+        # Confirmed relations (8.7.13): links between things a person approved,
+        # the 12 most relevant to this message, fenced like the facts above.
+        # Household wide, so not scoped to who is speaking. A pending relation
+        # is never read here (knowledge.confirmed_relations).
+        try:
+            from . import knowledge as _knowledge
+            rel_block = await self.hass.async_add_executor_job(
+                lambda: _knowledge.relations_prompt_block(user_input.text))
+            if rel_block:
+                persona = persona + "\n\n" + rel_block
+        except Exception as exc:
+            _LOGGER.debug("Relations inject: %s", exc)
+
         hass_api = await self._get_hass_api(user_input) if self._use_hass_api() else None
 
         cast_routed = False  # tracks whether Cast speaker is handling TTS
