@@ -1,3 +1,17 @@
+## [8.7.14] — Relations can only be confirmed in the panel
+
+**What was wrong**
+- In 8.7.13 the agent tool `confirm_pending_relation` let the model confirm a pending relation. A prompt injected agent could propose a relation and then confirm it itself, so the human approval was only soft.
+
+**What changed (relations only)**
+- `confirm_pending_relation` is removed from the agent tools, the registry, the grants and the tool specs. The only way to confirm a relation is the admin gated panel command `nova/relation_action`.
+- `propose_relation` and `reject_pending_relation` stay, as does the read only `lookup_relations`. A model rejecting its own or a stale proposal is safe. The wording now tells the model it cannot confirm, and to ask the user to confirm in the Memory tab. The panel text no longer says you can confirm in the chat.
+- Every path that can set a relation to confirmed: `knowledge.confirm_relation`, whose only caller is the admin gated `nova/relation_action`. `propose_relation` always writes pending (a revived removed relation is also pending), `edit_relation` never changes status, and there is no other SQL that sets confirmed.
+- Agent tools 55 to 54. `agent_tools.json` and `agent_tool_specs.json` updated (the removal, plus the new `propose_relation` wording).
+
+**What did not change**
+- Facts still use the model confirm tool (`confirm_pending_fact`). That is a separate trust decision and is untouched here.
+
 ## [8.7.13] — Confirmed relations in the knowledge store
 
 **What this adds**

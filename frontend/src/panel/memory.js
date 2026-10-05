@@ -311,7 +311,7 @@
         <button class="new-rel-remove" data-id="${r.id}" title="Remove this relation" aria-label="Remove">✕ Remove</button>
       </div>`).join("")
       : (this._relationsLoaded
-        ? `<div class="stub-body">None yet. Tell Nova how things relate, for example "Sam owns the Jeep", then confirm it here or in the chat.</div>`
+        ? `<div class="stub-body">None yet. Tell Nova how things relate, for example "Sam owns the Jeep", then confirm it here. Only you can confirm a link, Nova cannot.</div>`
         : `<div class="stub-body">Loading…</div>`);
     const idOf = (el) => parseInt(el.getAttribute("data-id"), 10);
     pendingBox.querySelectorAll(".rel-confirm").forEach(b => b.addEventListener("click", e => this._relationAction(idOf(e.currentTarget), "confirm")));

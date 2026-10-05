@@ -44,7 +44,6 @@
     "calendar_agenda",
     "cognitive_status",
     "confirm_pending_fact",
-    "confirm_pending_relation",
     "connectivity_status",
     "control_device",
     "create_goal",
@@ -121,7 +120,6 @@
     "ask_security_privacy_agent",
     "bulk_control",
     "confirm_pending_fact",
-    "confirm_pending_relation",
     "control_device",
     "create_goal",
     "delegate_task",
@@ -371,23 +369,6 @@
       },
       "required": [
         "fact_id"
-      ]
-    },
-    "confirm_pending_relation": {
-      "parameters": {
-        "properties": {
-          "relation_id": {
-            "description": "The relation_id returned by the propose_relation call being confirmed.",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "relation_id"
-        ],
-        "type": "object"
-      },
-      "required": [
-        "relation_id"
       ]
     },
     "connectivity_status": {

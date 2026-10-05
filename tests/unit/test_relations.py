@@ -469,7 +469,8 @@ async def test_propose_relation_stages_pending_and_cannot_confirm_itself(mem, kn
         _Hass(), {"subject": "Sam", "predicate": "owns", "object": "car.jeep",
                   "status": "confirmed", "confirmed": True, "source": "stated"}))
     assert out["success"] and out["status"] == "pending" and out["enforced"] is False
-    assert "confirm_pending_relation" in out["message"] and "reject_pending_relation" in out["message"]
+    assert "reject_pending_relation" in out["message"] and "Memory tab" in out["message"]
+    assert "confirm_pending_relation" not in out["message"]            # the model is not told it can confirm
     assert knowledge.confirmed_relations(node="sam") == []             # extra arguments were ignored
     assert knowledge.list_relations(status="pending")[0]["subject"] == "sam"
 
@@ -484,20 +485,47 @@ async def test_propose_relation_returns_a_helpful_error_and_stores_nothing(mem, 
     assert knowledge.list_relations() == []
 
 
-async def test_confirm_and_reject_tools_work_on_pending_rows_only(mem, knowledge):
+async def test_reject_tool_works_on_pending_rows_only(mem, knowledge):
     rid = knowledge.propose_relation("a", "owns", "b")["relation"]["id"]
-    ok = json.loads(await mem._exec_confirm_pending_relation(_Hass(), {"relation_id": rid}))
-    assert ok["success"] and knowledge.confirmed_relations(node="a")
-    again = json.loads(await mem._exec_confirm_pending_relation(_Hass(), {"relation_id": rid}))
-    assert "error" in again                                            # a confirm only works on a pending row
+    assert knowledge.confirm_relation(rid)                             # a person confirms it (the panel path)
     assert json.loads(await mem._exec_reject_pending_relation(_Hass(), {"relation_id": rid}))["success"] is False
     assert knowledge.confirmed_relations(node="a")                     # a confirmed edge is not rejected by the tool
     p = knowledge.propose_relation("c", "owns", "d")["relation"]["id"]
     assert json.loads(await mem._exec_reject_pending_relation(_Hass(), {"relation_id": p}))["success"] is True
     assert knowledge.propose_relation("c", "owns", "d", source="observed")["error"] == "removed_by_user"
     for bad in ({}, {"relation_id": "x"}, {"relation_id": True}, {"relation_id": None}):
-        assert "error" in json.loads(await mem._exec_confirm_pending_relation(_Hass(), bad))
         assert "error" in json.loads(await mem._exec_reject_pending_relation(_Hass(), bad))
+
+
+def test_no_agent_tool_can_confirm_a_relation(load):
+    """8.7.14: only the admin gated panel command confirms a relation. Not the
+    main agent, not a sub agent, under any tool name or argument."""
+    mem = load("agent_runtime.capabilities.memory")
+    reg = load("agent_runtime.registry")
+    gr = load("agent_runtime.grants")
+    specs = load("agent_runtime.tool_specs")
+    assert not hasattr(mem, "_exec_confirm_pending_relation")
+    for table in (reg.TOOL_REGISTRY, reg._TOOL_MAP):
+        assert "confirm_pending_relation" not in table
+    offered = {t["function"]["name"] for t in specs.NOVA_TOOLS}
+    assert "confirm_pending_relation" not in offered
+    assert not any("confirm" in n and "relation" in n for n in offered | set(reg._TOOL_MAP))
+    for grant in (gr.HEADLESS_TOOLS, gr._SUBAGENT_DENY):
+        assert "confirm_pending_relation" not in grant
+    # No tool body reaches knowledge.confirm_relation: every agent runtime module is clean.
+    root = pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova" / "agent_runtime"
+    for f in root.rglob("*.py"):
+        assert "confirm_relation" not in f.read_text(), f.name
+
+
+def test_the_only_caller_of_confirm_relation_is_the_admin_gated_command():
+    base = pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova"
+    callers = [f.name for f in base.rglob("*.py")
+               if "confirm_relation" in f.read_text() and f.name != "knowledge.py"]
+    assert callers == ["ws_knowledge.py"]
+    body = (base / "ws_knowledge.py").read_text()
+    head = body[:body.index("confirm_relation")]
+    assert "@websocket_api.require_admin" in head.rsplit("async def ", 1)[0].rsplit("\n\n\n", 1)[-1]
 
 
 async def test_lookup_relations_is_read_only_and_confirmed_only(mem, knowledge):
@@ -518,7 +546,7 @@ def test_the_tools_are_classified_and_the_writers_are_denied_to_sub_agents(load)
     reg = load("agent_runtime.registry")
     gr = load("agent_runtime.grants")
     row = reg.TOOL_REGISTRY
-    for name in ("propose_relation", "confirm_pending_relation", "reject_pending_relation"):
+    for name in ("propose_relation", "reject_pending_relation"):
         assert row[name].persists is True and row[name].mutates is False
         assert name in gr._SUBAGENT_DENY and name not in gr.HEADLESS_TOOLS
     look = row["lookup_relations"]
