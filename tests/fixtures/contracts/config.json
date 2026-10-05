@@ -114,6 +114,7 @@
     "excluded_domains",
     "excluded_entities",
     "excluded_labels",
+    "face_stand_down",
     "floor_plan_bg",
     "floor_plan_bg_opacity",
     "floor_plan_cameras",

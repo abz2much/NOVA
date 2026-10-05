@@ -87,6 +87,8 @@ from .ws_ai import (
     ws_set_credential,
     ws_test_provider_endpoint,
 )
+# The Faces tab commands live in ws_faces.py.
+from .ws_faces import ws_add_resident, ws_list_faces, ws_remove_resident
 # The knowledge, decision and automation commands live in ws_knowledge.py,
 # ws_decisions.py and ws_automation.py. async_register registers the handlers
 # by name.
@@ -201,6 +203,9 @@ def async_register(hass: HomeAssistant) -> None:
         websocket_api.async_register_command(hass, ws_solar)
         websocket_api.async_register_command(hass, ws_hazard)
         websocket_api.async_register_command(hass, ws_biometrics)
+        websocket_api.async_register_command(hass, ws_list_faces)
+        websocket_api.async_register_command(hass, ws_add_resident)
+        websocket_api.async_register_command(hass, ws_remove_resident)
     except Exception as exc:
         _LOGGER.debug("WS command register note: %s", exc)
 
@@ -542,6 +547,8 @@ async def ws_get_panel_data(
                     hass, entry, "lockdown_auto_on_arm", False) is True,
                 "intrusion_requires_confinement": _runtime_opt(
                     hass, entry, "intrusion_requires_confinement", False) is True,
+                "face_stand_down": _runtime_opt(
+                    hass, entry, "face_stand_down", False) is True,
                 "alarm_panels": _get_alarm_panels(hass),
                 "onboarding": _get_onboarding_state(hass, entry, current_notify),
                 "sentinel_rules": _get_sentinel_rules(),
@@ -795,6 +802,7 @@ PANEL_WRITABLE_KEYS = {
     "security_alarm_entity",       # str: authoritative household alarm panel
     "lockdown_auto_on_arm",        # bool: explicit opt in for automatic lockdown
     "intrusion_requires_confinement",  # bool: intrusion monitoring only while locked down or alarm armed
+    "face_stand_down",             # bool, off by default: a recognised resident can stop a NEW intrusion investigation opening
     "departure_alerts_enabled",
     "routine_alerts_enabled",
     "departure_lead_minutes",
@@ -1215,7 +1223,7 @@ async def ws_update_config(
                 _LOGGER.warning("sleep_override apply failed: %s", exc)
 
         if key in ("security_alarm_entity", "lockdown_auto_on_arm",
-                   "intrusion_requires_confinement"):
+                   "intrusion_requires_confinement", "face_stand_down"):
             from . import cognitive_core
             await cognitive_core.apply_runtime_config(key, value)
 

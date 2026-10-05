@@ -75,6 +75,11 @@ ADMIN_GATED_TYPES = [
     "get_debug_log",
     "list_actions",
     "say_hello",
+    # Faces tab: the list shows who was seen on which camera, add and remove
+    # change who the opt in intrusion stand down trusts.
+    "list_faces",
+    "add_resident",
+    "remove_resident",
 ]
 
 
@@ -97,7 +102,7 @@ def test_require_admin_used_at_least_once_per_gated_command():
     # Exactly one decorator per listed command: a new admin gated command that
     # is not added to ADMIN_GATED_TYPES (or a listed one that lost its gate)
     # changes the count and fails here.
-    assert src.count("@websocket_api.require_admin") == len(ADMIN_GATED_TYPES) == 41
+    assert src.count("@websocket_api.require_admin") == len(ADMIN_GATED_TYPES) == 44
 
 
 def test_require_admin_sits_above_websocket_command_not_below():

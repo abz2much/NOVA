@@ -6,6 +6,7 @@ import re
 
 LOCKDOWN_AUTO_KEY = "lockdown_auto_on_arm"
 INTRUSION_CONFINEMENT_KEY = "intrusion_requires_confinement"
+FACE_STAND_DOWN_KEY = "face_stand_down"
 
 # Phase 4 (v7.109.0): camera semantic-learning tunables must stay within
 # their documented bounds — see camera_semantic.py's own clamp_* helpers,
@@ -57,6 +58,13 @@ def intrusion_requires_confinement(config: dict | None) -> bool:
     return isinstance(config, dict) and config.get(INTRUSION_CONFINEMENT_KEY) is True
 
 
+def face_stand_down_enabled(config: dict | None) -> bool:
+    """Only the literal JSON boolean true lets a recognised resident stop a NEW
+    intrusion investigation from opening. Off by default; anything else keeps
+    the existing behaviour."""
+    return isinstance(config, dict) and config.get(FACE_STAND_DOWN_KEY) is True
+
+
 def _valid_bounded_number(value, lo: float, hi: float) -> bool:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return False
@@ -74,7 +82,7 @@ def _valid_bounded_integer(value, lo: int, hi: int) -> bool:
 
 def valid_panel_value(key: str, value) -> bool:
     """Reject truthy strings and numbers for the automatic safety opt in."""
-    if key in (LOCKDOWN_AUTO_KEY, INTRUSION_CONFINEMENT_KEY):
+    if key in (LOCKDOWN_AUTO_KEY, INTRUSION_CONFINEMENT_KEY, FACE_STAND_DOWN_KEY):
         return type(value) is bool
     if key in ("camera_event_learning", "camera_historical_awareness",
                SCENE_MEMORY_ENABLED_KEY):

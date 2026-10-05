@@ -133,6 +133,7 @@
     })];
     const automatic = !!cfg.lockdown_auto_on_arm;
     const confined = cfg.intrusion_requires_confinement === true;
+    const faceDown = cfg.face_stand_down === true;
     return `
       <div class="stub-body">Nova ignores every other alarm panel for security alerts and lockdown decisions. If more than one Alarmo panel exists, choose the intended household alarm here.</div>
       <div class="cfg-row">
@@ -148,6 +149,11 @@
         <span class="toggle-label">Require confinement for intrusion monitoring</span>
         <span class="toggle-desc">Watch for intruders only while a lockdown is on or the alarm is armed. Off keeps the automatic away and asleep behaviour</span>
         <button class="toggle-btn ${confined ? "on" : "off"}" data-cfg-key="intrusion_requires_confinement" data-cfg-val="${confined ? "false" : "true"}">${confined ? "ON" : "OFF"}</button>
+      </div>
+      <div class="toggle-row">
+        <span class="toggle-label">Residents can stand down a new intrusion alert</span>
+        <span class="toggle-desc">Off by default. When on, a resident on the Faces roster, recognised at or above the confidence threshold on a camera in the last 3 minutes, stops Nova opening a NEW intrusion investigation, but only if no unknown face or unexplained person was also seen. It never closes an investigation that is already open, and never affects critical alerts, lockdown, freeze or mutes. A face can be a photo or a lookalike, so leave this off unless you accept that. Every stand down is logged in the Actions log</span>
+        <button class="toggle-btn ${faceDown ? "on" : "off"}" data-cfg-key="face_stand_down" data-cfg-val="${faceDown ? "false" : "true"}">${faceDown ? "ON" : "OFF"}</button>
       </div>`;
   }
 

@@ -99,13 +99,14 @@
             <div class="brand-mark"></div>
             <div>
               <div class="brand-name">Nova</div>
-              <div class="brand-tag">${tab === "settings" ? "Settings" : tab === "logs" ? "Logs" : tab === "memory" ? "Memory" : tab === "diagnostics" ? "Diagnostics" : tab === "intrusion" ? "Intrusion" : tab === "suggestions" ? "Suggestions" : tab === "residence" ? "Residence" : "Command Center"}</div>
+              <div class="brand-tag">${tab === "settings" ? "Settings" : tab === "logs" ? "Logs" : tab === "memory" ? "Memory" : tab === "diagnostics" ? "Diagnostics" : tab === "intrusion" ? "Intrusion" : tab === "faces" ? "Faces" : tab === "suggestions" ? "Suggestions" : tab === "residence" ? "Residence" : "Command Center"}</div>
             </div>
           </div>
           <nav class="top-nav">
             <button class="nav-tab${tab === "dashboard" ? " active" : ""}" data-tab="dashboard">Command Center</button>
             <button class="nav-tab${tab === "residence" ? " active" : ""}" data-tab="residence">Residence</button>
             <button class="nav-tab${tab === "intrusion" ? " active" : ""}" data-tab="intrusion">Intrusion</button>
+            <button class="nav-tab${tab === "faces" ? " active" : ""}" data-tab="faces">Faces</button>
             <button class="nav-tab${tab === "suggestions" ? " active" : ""}" data-tab="suggestions">Suggestions</button>
             <button class="nav-tab${tab === "settings" ? " active" : ""}" data-tab="settings">Settings</button>
             <button class="nav-tab${tab === "logs" ? " active" : ""}" data-tab="logs">Logs</button>
@@ -115,7 +116,7 @@
           <button class="lockdown-control" id="lockdownControl" hidden></button>
         </div>
 
-        ${tab === "settings" ? this._htmlSettings() : tab === "logs" ? this._htmlLogs() : tab === "memory" ? this._htmlMemory() : tab === "diagnostics" ? this._htmlDiagnostics() : tab === "intrusion" ? this._htmlIntrusion() : tab === "suggestions" ? this._htmlSuggestions() : tab === "residence" ? this._htmlResidence() : this._htmlDashboard()}
+        ${tab === "settings" ? this._htmlSettings() : tab === "logs" ? this._htmlLogs() : tab === "memory" ? this._htmlMemory() : tab === "diagnostics" ? this._htmlDiagnostics() : tab === "intrusion" ? this._htmlIntrusion() : tab === "faces" ? this._htmlFaces() : tab === "suggestions" ? this._htmlSuggestions() : tab === "residence" ? this._htmlResidence() : this._htmlDashboard()}
 
         <div class="footnote">NOVA COMMAND CENTER</div>
       </div>
