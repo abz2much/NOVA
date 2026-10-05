@@ -8,7 +8,8 @@ This file pins the recovery paths that decide what runs and what the person
 is told: the one-shot slim retry on a too-large request, the malformed tool
 call retries, the provider fallback, and the reply after the iteration cap.
 A scripted fake client stands in for the provider; nothing leaves the test.
-Tests named test_current_behaviour_* pin behaviour that looks wrong.
+The one 8.7.19 finding here (a false "completed" after the round limit) was
+fixed in 8.7.20.
 """
 from __future__ import annotations
 
@@ -155,23 +156,21 @@ async def test_with_no_fallback_the_person_is_told_and_nothing_runs(loop, monkey
 
 # ── the iteration cap ───────────────────────────────────────────────────────
 
-async def test_current_behaviour_after_the_cap_a_failed_summary_reports_success(
+async def test_after_the_cap_a_failed_summary_says_nova_could_not_finish(
         loop, load, monkeypatch):
-    # Looks wrong: the model asks for an action ten times and every one fails
-    # (the entity does not exist). The summary call then fails too, and the
-    # loop falls back to persona.completed(), which tells the person the
-    # requested actions were completed when none were.
-    monkeypatch.setattr(load("persona"), "completed",
-                        lambda honorific="sir", register="neutral": "COMPLETED-LINE")
+    # 8.7.19 pinned the fallback persona.completed() line here: after ten
+    # failed actions and a failed summary, Nova said it had completed them.
+    # It now says it could not finish.
     attempt = {"text": "", "tool_calls": [_tc("control_device", {"entity_id": "lock.garden",
                                                                 "action": "lock"})]}
     script = [attempt] * loop.MAX_TOOL_ITERATIONS + [RuntimeError("summary failed")]
     result, client, hass, _ = await _run(loop, monkeypatch, script)
-    assert result == "COMPLETED-LINE"
-    assert hass.service_calls == []                       # nothing was locked
+    assert result == ("I couldn't finish that. I ran out of steps before I could check "
+                      "what was done, so please check before relying on it.")
+    assert "complete" not in result.lower()
+    assert hass.service_calls == []
     tool_msgs = [m for m in client.calls[-1]["messages"] if m.get("role") == "tool"]
     assert len(tool_msgs) == loop.MAX_TOOL_ITERATIONS
-    assert all("not found" in m["content"] for m in tool_msgs)
 
 
 async def test_after_the_cap_the_summary_is_asked_for_without_tools(loop, monkeypatch):
