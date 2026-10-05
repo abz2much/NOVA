@@ -1,13 +1,12 @@
-"""Pin the known lockdown finding end to end (8.7.19, tests only).
+"""A lock unlocked twice during lockdown, end to end (8.7.19 pinned it,
+8.7.20 fixed it).
 
-During an active lockdown, a lock someone unlocks is locked again; if it is
-unlocked a second time it is "adopted" with the cover rule ("I secured it and
-you reopened it, so you meant it") and left unlocked. The basic case is pinned
-in test_cognitive_lockdown_manager.py. This file pins what follows from it in
-a real home: the adoption reaches the person through the event listener as a
-high (not critical) announcement worded for a door, it survives a restart,
-and the background check scheduled for the first relock stays silent. All
-tests here are current behaviour that looks wrong.
+During an active lockdown, a lock someone unlocks is locked again. 8.7.19
+pinned a second unlock being "adopted" with the cover rule and left unlocked:
+announced at high as "I'll leave it open", exempt after a restart, with the
+relock check then silent. Since 8.7.20 the second unlock is a critical alert
+through the real event listener, the lock is never exempt (not even from an
+old state file), and nothing ever sends it an unlock.
 """
 from __future__ import annotations
 
@@ -62,12 +61,8 @@ async def _lockdown_with_the_door_locked_by_nova(cc, hass):
     return mgr
 
 
-async def test_current_behaviour_the_second_unlock_is_announced_as_left_open_not_as_a_breach(
+async def test_the_second_unlock_is_a_critical_alert_and_the_lock_is_never_adopted(
         cc, fake_hass, announced):
-    # Looks wrong: the first unlock during lockdown is locked again silently.
-    # The second is announced at "high" urgency (pushed, not a critical alarm)
-    # with wording meant for a garage door ("reopened ... I'll leave it open")
-    # and the front door stays unlocked for the rest of the lockdown.
     mgr = await _lockdown_with_the_door_locked_by_nova(cc, fake_hass)
 
     await cc._on_lockdown_state(_event("locked", "unlocked"))
@@ -76,51 +71,55 @@ async def test_current_behaviour_the_second_unlock_is_announced_as_left_open_not
     fake_hass.close_pending()
 
     await cc._on_lockdown_state(_event("locked", "unlocked"))
-    assert announced == [{"type": "lockdown_breach", "urgency": "high", "auto_act": True,
-                          "message": "Sir, Front Door reopened after I secured it — "
-                                     "I'll leave it open."}]
+    assert announced == [{"type": "lockdown_breach", "urgency": "critical", "auto_act": True,
+                          "message": "Sir, Front Door was unlocked again during lockdown "
+                                     "after I locked it. Please check it."}]
+    assert "leave it open" not in announced[0]["message"]
+    assert LOCK not in mgr.exempt_windows
     assert len(service_calls(fake_hass, "lock", "lock")) == 1        # not locked a second time
-
-    await cc._on_lockdown_state(_event("locked", "unlocked"))        # a third unlock
-    assert len(announced) == 1 and len(service_calls(fake_hass, "lock", "lock")) == 1
+    assert service_calls(fake_hass, "lock", "unlock") == []          # and never unlocked
     assert mgr.active is True
 
 
-async def test_current_behaviour_the_adopted_lock_stays_exempt_after_a_restart(cc, fake_hass, announced):
-    # Looks wrong: the exemption is saved with the lockdown state, so after a
-    # Home Assistant restart in the middle of the night the restored lockdown
-    # still ignores the front door being unlocked.
+async def test_a_lock_is_never_exempt_after_a_restart(cc, fake_hass, announced, tmp_path):
     mgr = await _lockdown_with_the_door_locked_by_nova(cc, fake_hass)
     await cc._on_lockdown_state(_event("locked", "unlocked"))
     fake_hass.close_pending()
     await cc._on_lockdown_state(_event("locked", "unlocked"))
-    assert LOCK in mgr.exempt_windows
+    assert LOCK not in mgr.exempt_windows
 
+    # A state file written by 8.7.19 or earlier, with the lock adopted.
+    import json
+    path = cc._lockdown_state_path()
+    state = json.load(open(path))
+    state["exempt_windows"] = [LOCK, "binary_sensor.bathroom_window"]
+    json.dump(state, open(path, "w"))
     restored = cc.LockdownManager(fake_hass, {})                      # Nova starts again
-    assert restored.active is True and LOCK in restored.exempt_windows
+    assert restored.active is True
+    assert restored.exempt_windows == {"binary_sensor.bathroom_window"}   # windows still kept
     fake_hass.service_calls.clear()
-    assert await restored.handle_state_change(
-        LOCK, FakeState(LOCK, "locked"), FakeState(LOCK, "unlocked")) is None
-    assert fake_hass.service_calls == []
+    alert = await restored.handle_state_change(
+        LOCK, FakeState(LOCK, "locked"), FakeState(LOCK, "unlocked", {"friendly_name": "Front Door"}))
+    assert alert is None                                               # relocked like any lock
+    assert service_calls(fake_hass, "lock", "lock") == [("lock", "lock", {"entity_id": LOCK})]
+    fake_hass.close_pending()
 
 
-async def test_current_behaviour_the_relock_check_stays_silent_once_the_lock_is_adopted(
+async def test_the_relock_check_raises_one_critical_alert_and_sends_nothing(
         cc, fake_hass, announced, no_wait):
-    # Looks wrong: the first relock schedules a background check that should
-    # raise a critical alert if the lock is still unlocked 25 s later. If the
-    # second unlock lands first, the check sees the lock as adopted and says
-    # nothing: no critical alert is ever raised for an unlocked front door.
     mgr = await _lockdown_with_the_door_locked_by_nova(cc, fake_hass)
     await cc._on_lockdown_state(_event("locked", "unlocked"))          # relocked, check scheduled
     pending_checks = list(fake_hass._tasks)
     fake_hass._tasks = []
-    await cc._on_lockdown_state(_event("locked", "unlocked"))          # adopted
     fake_hass.states.set(LOCK, "unlocked", friendly_name="Front Door")
-    announced.clear()
-    for check in pending_checks:
+    for check in pending_checks:                                       # 25 s later: still unlocked
         await check
-    assert announced == []
-    assert fake_hass.states.get(LOCK).state == "unlocked" and mgr.active is True
+    assert [a["urgency"] for a in announced] == ["critical"]
+    await cc._on_lockdown_state(_event("locked", "unlocked"))          # the second unlock event
+    assert [a["urgency"] for a in announced] == ["critical"]           # one alert, not two
+    assert len(service_calls(fake_hass, "lock", "lock")) == 1
+    assert service_calls(fake_hass, "lock", "unlock") == []
+    assert mgr.active is True
 
 
 async def test_a_new_lockdown_starts_with_no_adopted_locks(cc, fake_hass, announced):
