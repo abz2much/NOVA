@@ -683,8 +683,8 @@ async def test_d11_manual_and_scheduled_analysis_never_overlap(load, monkeypatch
 
 
 async def test_d11_scheduled_tick_skips_while_an_analysis_runs(load):
-    import contract_extract as ce
-    src = (ce.COMP / "cognitive_core.py").read_text(encoding="utf-8")
+    from core_sources import core_text
+    src = core_text()
     tick = src[src.index("# Run pattern analysis periodically"):]
     tick = tick[:tick.index("patterns = await analyzer.analyze(hass)")]
     assert "not analyzer.analysis_running" in tick

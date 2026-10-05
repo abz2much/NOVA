@@ -22,6 +22,7 @@ import ast
 import pathlib
 
 import pytest
+from core_sources import core_tree, core_unit
 
 ROOT = pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova"
 COG = ROOT / "cognitive"
@@ -177,7 +178,7 @@ def _modules_calling(attr):
     out = set()
     for p in sorted(ROOT.rglob("*.py")):
         if _calls(_tree(p), attr):
-            out.add(str(p.relative_to(ROOT)))
+            out.add(core_unit(str(p.relative_to(ROOT))))
     return out
 
 
@@ -213,7 +214,7 @@ def test_pattern_analysis_is_not_on_the_state_change_hot_path():
     """Scoring and analysis run from the analyzer, never from a
     state-changed listener in the observer or the cognitive core."""
     for mod in ("observer.py", "cognitive_core.py"):
-        tree = _tree(ROOT / mod)
+        tree = core_tree() if mod == "cognitive_core.py" else _tree(ROOT / mod)
         for fn in ast.walk(tree):
             if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) \
                     and fn.name == "_on_state_changed":

@@ -10,6 +10,7 @@ import ast
 import pathlib
 
 import pytest
+from core_sources import core_text, core_tree
 
 COMP = pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova"
 ALARM = "alarm_control_panel.home"
@@ -87,7 +88,7 @@ def test_setting_is_panel_writable_surfaced_and_applied_live():
     assert '"face_stand_down",             # bool, off by default' in ws
     assert '"face_stand_down": _runtime_opt(\n                    hass, entry, "face_stand_down", False) is True,' in ws
     assert '"intrusion_requires_confinement", "face_stand_down"):\n            from . import cognitive_core' in ws
-    cc = (COMP / "cognitive_core.py").read_text()
+    cc = core_text()
     assert 'key in ("intrusion_requires_confinement", "face_stand_down")' in cc
 
 
@@ -274,7 +275,7 @@ async def test_rule3_an_open_investigation_is_never_ended_by_a_face(env):
 
 
 def test_rule3_the_stand_down_is_only_called_where_an_investigation_would_start():
-    tree = ast.parse((COMP / "cognitive_core.py").read_text())
+    tree = core_tree()
     calls = {}
     for fn in ast.walk(tree):
         if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -283,7 +284,7 @@ def test_rule3_the_stand_down_is_only_called_where_an_investigation_would_start(
             if n:
                 calls[fn.name] = n
     assert calls == {"_check_intrusion": 3}              # away, confined, sleeping: never _investigate_step
-    src = (COMP / "cognitive_core.py").read_text()
+    src = core_text()
     step = src.split("async def _investigate_step")[1].split("\n    async def ")[0]
     assert "face_roster" not in step and "_face_stand_down" not in step
 
@@ -291,7 +292,7 @@ def test_rule3_the_stand_down_is_only_called_where_an_investigation_would_start(
 # ── rule 4: nothing else reads it ───────────────────────────────────────────
 
 def test_rule4_critical_lockdown_freeze_and_mutes_never_read_the_roster():
-    tree = ast.parse((COMP / "cognitive_core.py").read_text())
+    tree = core_tree()
     users = [fn.name for fn in ast.walk(tree)
              if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef))
              and any(isinstance(n, ast.Name) and n.id == "face_roster"
