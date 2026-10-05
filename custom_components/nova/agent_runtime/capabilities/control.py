@@ -95,15 +95,29 @@ async def _exec_control_device(hass: HomeAssistant, args: dict, device_id: Optio
         # included — resolves to one service and passes the same
         # authorization gate before it runs, so a per-entity protection
         # override applies whatever the action.
+        # 0 is a real value, never "not given" (8.7.20): brightness 0 and
+        # volume 0 used to become 50%.
         if action == "set_brightness":
-            requested_pct = int(value or 50)
+            requested_pct = int(value if value is not None else 50)
             svc_data["brightness_pct"] = requested_pct
             svc_domain, svc_name = "light", "turn_on"
         elif action == "set_temperature":
-            svc_data["temperature"] = float(value or 72)
+            # A missing target is refused (8.7.20); it used to become 72 in
+            # whatever unit the home uses.
+            if value is None or value == "":
+                await hass.async_add_executor_job(
+                    lambda: action_log.set_execution(action_id, "failed",
+                                                     reason_code="missing_value")
+                )
+                return json.dumps({
+                    "error": f"No target temperature was given for {fname}. "
+                             f"Ask what temperature to set; nothing was changed.",
+                    "status": "error", "success": False, "entity_id": entity_id,
+                })
+            svc_data["temperature"] = float(value)
             svc_domain, svc_name = "climate", "set_temperature"
         elif action == "volume_set":
-            svc_data["volume_level"] = (value or 50) / 100.0
+            svc_data["volume_level"] = (value if value is not None else 50) / 100.0
             svc_domain, svc_name = "media_player", "volume_set"
         elif action in action_map:
             svc_domain, svc_name = action_map[action]
@@ -710,6 +724,10 @@ _EXPECTED_STATES = {
 _TRANSITIONAL = ("opening", "closing", "locking", "unlocking")
 
 
+# Actions that drop a guard: never retried by the verifier (8.7.20).
+_NO_RETRY_ACTIONS = ("unlock", "open")
+
+
 def _state_ok(hass: HomeAssistant, entity_id: str, expected: tuple) -> Optional[bool]:
     st = hass.states.get(entity_id)
     if st is None:
@@ -751,6 +769,22 @@ async def _verify_control(hass: HomeAssistant, entity_id: str, action: str,
                 lambda: action_log.set_execution(action_id, "verified")
             )
             return                           # first-try success stays silent
+        if action in _NO_RETRY_ACTIONS:
+            # An unlock or an open is never sent a second time on its own
+            # (8.7.20): the lock may read locked because someone locked it
+            # again on purpose, and repeating the command would undo that.
+            st = hass.states.get(entity_id)
+            from ... import database
+            database.save_activity(
+                entity_id=entity_id, category="verify", urgency="medium",
+                message=f"{display_name(hass, entity_id)} did not report {action} "
+                        f"(state: {st.state if st else 'unknown'}). Not retried "
+                        f"automatically, so a deliberate lock or close is never undone.",
+                source=source)
+            await hass.async_add_executor_job(
+                lambda: action_log.set_execution(
+                    action_id, "unverified", reason_code="not_retried_could_undo_a_lock"))
+            return
         _LOGGER.info("verify: %s not %s after %s — retrying once",
                      entity_id, "/".join(expected), action)
         await hass.services.async_call(svc_domain, svc_name, dict(svc_data),
