@@ -202,6 +202,22 @@ def announce_notify_only(hass) -> bool:
     return str(value).strip().lower() in ("1", "true", "yes", "on")
 
 
+def output_language(hass) -> str:
+    """The raw ``output_language`` setting: "" or "auto" follow Home Assistant,
+    otherwise a language code. Read at call time, never cached: the live
+    runtime config first (a panel change applies at once, and "" there means
+    auto even if config.json is stale), then config.json. Anything that is not
+    a string reads as "". Validation is output_language.parse()."""
+    try:
+        from .runtime import domain_runtime_config
+        rc = domain_runtime_config(hass)
+    except Exception:
+        rc = {}
+    value = rc["output_language"] if "output_language" in rc \
+        else get("output_language", "")
+    return value if type(value) is str else ""
+
+
 def get_all() -> dict:
     """Return a copy of the entire config."""
     global _loaded

@@ -319,6 +319,8 @@ async def async_briefing(
         f"{BRIEFING_GROUNDING_RULE}"
     )
     system = build_system_prompt(hass, honorific, task)
+    from . import output_language
+    system = output_language.with_language(hass, system)   # spoken: follows Nova's language
 
     try:
         from .providers.activity import execute_chat

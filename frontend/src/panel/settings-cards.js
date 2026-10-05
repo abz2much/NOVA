@@ -83,6 +83,44 @@
           ${this._optSelect([["auto", "Auto (occupancy + quiet hours)"], ["awake", "Awake"], ["asleep", "Asleep"]], cfg.sleep_override || "auto")}
         </select>
       </div>
+      <div class="cfg-row">
+        <label>Nova speaks</label>
+        <select class="cfg-field" data-cfg-key="output_language">
+          ${this._optSelect([
+            ["auto", "Auto (follow Home Assistant)"],
+            ["ar", "Arabic"],
+            ["ca", "Catalan"],
+            ["zh", "Chinese"],
+            ["cs", "Czech"],
+            ["da", "Danish"],
+            ["nl", "Dutch"],
+            ["en", "English"],
+            ["fi", "Finnish"],
+            ["fr", "French"],
+            ["de", "German"],
+            ["el", "Greek"],
+            ["he", "Hebrew"],
+            ["hu", "Hungarian"],
+            ["id", "Indonesian"],
+            ["it", "Italian"],
+            ["ja", "Japanese"],
+            ["ko", "Korean"],
+            ["nb", "Norwegian Bokmål"],
+            ["pl", "Polish"],
+            ["pt", "Portuguese"],
+            ["ro", "Romanian"],
+            ["ru", "Russian"],
+            ["sk", "Slovak"],
+            ["es", "Spanish"],
+            ["sv", "Swedish"],
+            ["th", "Thai"],
+            ["tr", "Turkish"],
+            ["uk", "Ukrainian"],
+            ["vi", "Vietnamese"],
+          ], String(cfg.output_language || "auto").toLowerCase().split("-")[0])}
+        </select>
+        <span class="toggle-desc">The language Nova speaks and writes in. The panel's own language is set above and is not affected. Safety notifications are translated for English, French, German, Spanish, Italian, Dutch and Portuguese only; in any other language they stay in English, while text Nova generates follows this setting.</span>
+      </div>
       <div class="toggle-list">
         ${onOff("announcements_enabled", "Announcements", "Master switch — all proactive speech")}
         ${onOff("announce_notify_only", "Notifications only", "Send proactive alerts to your phone instead of speaking them. Critical safety alerts still speak. Reminders, package and camera announcements, scheduled briefings and the infrastructure audit are not covered and still speak")}

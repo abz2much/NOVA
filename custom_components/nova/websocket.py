@@ -633,6 +633,7 @@ async def ws_get_panel_data(
                 "floor_plan_bg_opacity": _runtime_opt(hass, entry, "floor_plan_bg_opacity", "0.2"),
                 "home_context_max_entities": _int_opt(hass, entry, "home_context_max_entities", 15),
                 "ui_language": _runtime_opt(hass, entry, "ui_language", "auto"),
+                "output_language": str(_runtime_opt(hass, entry, "output_language", "") or ""),
                 "disabled_cameras":     _get_runtime_json(hass, entry, "disabled_cameras", []),
                 "home_stories":         _runtime_opt(hass, entry, "home_stories", "1.5"),
                 "has_basement":         _runtime_opt(hass, entry, "has_basement", True),
@@ -777,6 +778,7 @@ async def ws_get_activity_log(
 # Only these keys can be toggled from the panel. Prevents arbitrary writes.
 PANEL_WRITABLE_KEYS = {
     "ui_language",
+    "output_language",             # "" or "auto" follows Home Assistant, else a language code
     "announcements_enabled",
     "announce_notify_only",        # bool: proactive announcements go to the phone, not the speakers (critical still speaks)
     "sentinel_enabled",
@@ -1106,7 +1108,9 @@ async def ws_update_config(
     if not safety_config.valid_panel_value(key, value):
         connection.send_error(
             msg["id"], "invalid_value",
-            f"Key '{key}' requires a boolean value",
+            "Key 'output_language' must be 'auto' or a supported language code"
+            if key == "output_language"
+            else f"Key '{key}' requires a boolean value",
         )
         return
 

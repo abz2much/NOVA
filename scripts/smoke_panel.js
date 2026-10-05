@@ -1355,6 +1355,19 @@ setTimeout(async () => {
   checks.push(["settings tab toggle saves via nova/update_config",
     _updateConfigCalls.some(c => c.key === "announcements_enabled")]);
   sRoot = elNew.shadowRoot;
+  const outLang = sRoot.querySelector('select[data-cfg-key="output_language"]');
+  const outLangNames = outLang ? Array.from(outLang.options).slice(1).map(o => o.textContent) : [];
+  checks.push(["settings tab: Nova speaks is Auto by default, then languages sorted by name, and says the panel language is separate",
+    !!outLang && outLang.value === "auto" && /^Auto/.test(outLang.options[0].textContent)
+    && outLangNames.length > 20 && outLangNames.join("|") === [...outLangNames].sort((x, y) => x.localeCompare(y)).join("|")
+    && Array.from(outLang.options).some(o => o.value === "de" && o.textContent === "German")
+    && /not affected/.test(outLang.parentElement.textContent)]);
+  outLang.value = "de";
+  outLang.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: Nova speaks saves output_language through nova/update_config",
+    _updateConfigCalls.some(c => c.key === "output_language" && c.value === "de")]);
+  sRoot = elNew.shadowRoot;
   const notifyOnlyToggle = sRoot.querySelector('.toggle-btn[data-cfg-key="announce_notify_only"]');
   checks.push(["settings tab: Notifications only toggle is there, off by default, and says critical still speaks",
     !!notifyOnlyToggle && notifyOnlyToggle.classList.contains("off")
