@@ -449,6 +449,7 @@ async def ws_get_panel_data(
             "goals":          _get_goals(),
             "config": {
                 "announcements_enabled": announcements_on,
+                "announce_notify_only": bool(_runtime_opt(hass, entry, "announce_notify_only", False)),
                 "sentinel_enabled": sentinel_on,
                 "observer_enabled": observer_enabled_cfg,
                 "pattern_learn_doors":     bool(_runtime_opt(hass, entry, "pattern_learn_doors", False)),
@@ -777,6 +778,7 @@ async def ws_get_activity_log(
 PANEL_WRITABLE_KEYS = {
     "ui_language",
     "announcements_enabled",
+    "announce_notify_only",        # bool: proactive announcements go to the phone, not the speakers (critical still speaks)
     "sentinel_enabled",
     "observer_enabled",
     "pattern_learn_doors",         # learn door/window activity for routines

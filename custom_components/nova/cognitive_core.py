@@ -3008,6 +3008,7 @@ async def _emit_action(hass, config, action, sleeping):
     try:
         from .tts_helper import resolve_tts_for_context, async_announce
         from .audio_routing import observer_speak_target
+        from . import nova_config
 
         # Quiet hours: only CRITICAL may speak. Non-critical → phone push only.
         # Time-based (independent of bedroom presence), so nothing slips through.
@@ -3066,9 +3067,20 @@ async def _emit_action(hass, config, action, sleeping):
                         context="sentinel", action_request_id=request_id,
                     )
 
+            # announce_notify_only: a non-critical alert that would have been
+            # spoken is routed to notify_only, so the phone gets the alert
+            # itself (with the rating buttons) in place of the speech. With
+            # the setting off, notify_only keeps its old meaning here (only
+            # critical and high alerts are pushed).
+            alert_pushed_instead = (
+                mode == "notify_only" and urgency not in ("critical", "high")
+                and nova_config.announce_notify_only(hass)
+            )
+
             # Adaptive awareness: a spoken alert gets a silent phone
             # notification with the rating buttons, so it can be rated too.
-            if decision_id is not None and urgency not in ("critical", "high"):
+            if (decision_id is not None and urgency not in ("critical", "high")
+                    and not alert_pushed_instead):
                 try:
                     from . import adaptive_awareness
                     await adaptive_awareness.async_send_rating_prompt(
@@ -3077,7 +3089,7 @@ async def _emit_action(hass, config, action, sleeping):
                     _LOGGER.debug("rating prompt failed: %s", exc)
 
             # Also push critical/high alerts to phones
-            if urgency in ("critical", "high"):
+            if urgency in ("critical", "high") or alert_pushed_instead:
                 _snap_url = action.get("snapshot_url")
                 if notify_all:
                     await _notify_all_devices(hass, config, message, action_type, _snap_url,

@@ -185,6 +185,23 @@ def get(key: str, default: Any = None) -> Any:
         return _cache_dict().get(key, default)
 
 
+def announce_notify_only(hass) -> bool:
+    """Whether `announce_notify_only` is on: proactive announcements go to the
+    phone instead of the speakers (critical urgency still speaks). Read at
+    call time, never cached: the live runtime config first (panel changes
+    apply at once), then config.json, default off."""
+    try:
+        from .runtime import domain_runtime_config
+        rc = domain_runtime_config(hass)
+    except Exception:
+        rc = {}
+    value = rc["announce_notify_only"] if "announce_notify_only" in rc \
+        else get("announce_notify_only", False)
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+
 def get_all() -> dict:
     """Return a copy of the entire config."""
     global _loaded

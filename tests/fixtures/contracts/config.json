@@ -53,6 +53,7 @@
     "adaptive_awareness",
     "adaptive_interruption_budget",
     "adaptive_suggestion_threshold",
+    "announce_notify_only",
     "announcement_speakers",
     "announcements_enabled",
     "appliance_profile",

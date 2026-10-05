@@ -3453,6 +3453,7 @@ ${this._htmlDashboardBody()}`;
       </div>
       <div class="toggle-list">
         ${onOff("announcements_enabled", "Announcements", "Master switch — all proactive speech")}
+        ${onOff("announce_notify_only", "Notifications only", "Send proactive alerts to your phone instead of speaking them. Critical safety alerts still speak. Reminders, package and camera announcements, scheduled briefings and the infrastructure audit are not covered and still speak")}
         ${onOff("sentinel_enabled", "Sentinel", "Door/garage/lock-left-open alerts")}
         ${onOff("observer_enabled", "Observer", "AI event awareness (uses API)")}
         ${onOff("cognition_enabled", "Cognition", "Local triage — sees telemetry and decides what deserves deeper reasoning")}

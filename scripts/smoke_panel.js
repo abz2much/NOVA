@@ -1355,6 +1355,15 @@ setTimeout(async () => {
   checks.push(["settings tab toggle saves via nova/update_config",
     _updateConfigCalls.some(c => c.key === "announcements_enabled")]);
   sRoot = elNew.shadowRoot;
+  const notifyOnlyToggle = sRoot.querySelector('.toggle-btn[data-cfg-key="announce_notify_only"]');
+  checks.push(["settings tab: Notifications only toggle is there, off by default, and says critical still speaks",
+    !!notifyOnlyToggle && notifyOnlyToggle.classList.contains("off")
+    && /Critical safety alerts still speak/.test(notifyOnlyToggle.parentElement.textContent)]);
+  notifyOnlyToggle.click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: Notifications only saves announce_notify_only as true",
+    _updateConfigCalls.some(c => c.key === "announce_notify_only" && c.value === true)]);
+  sRoot = elNew.shadowRoot;
 
   // Search crosses group boundaries
   const searchBox = sRoot.getElementById("settingsSearch");
