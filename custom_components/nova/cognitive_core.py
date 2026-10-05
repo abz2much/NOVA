@@ -35,6 +35,7 @@ facade, like agent.py. The implementation is in sibling modules:
   - core_pattern_store.py: StateLogger
   - core_proactive.py: ProactiveManager
   - core_safety.py: SafetyManager
+  - core_state.py: _CORE, the one shared state object
 
 This module keeps every name that production code and tests import from
 cognitive_core as the very same object, and keeps each one patchable here:
@@ -70,6 +71,7 @@ from . import core_lockdown as _m_lockdown
 from . import core_pattern_store as _m_pattern_store
 from . import core_proactive as _m_proactive
 from . import core_safety as _m_safety
+from . import core_state as _m_state
 from .core_autonomy import AutonomyManager
 from .core_common import (
     ALARM_ARMED_STATES,
@@ -110,6 +112,7 @@ from .core_lockdown import build_lockdown_message, LockdownManager
 from .core_pattern_store import StateLogger
 from .core_proactive import ProactiveManager
 from .core_safety import SafetyManager
+from .core_state import _CORE, _CoreState
 
 _LOGGER = logging.getLogger(__name__)
 LOCKDOWN_STATE_PATH: Optional[str] = None  # override; None resolves via paths.py; survives reboots/reloads
@@ -148,39 +151,6 @@ PATTERNS_DB: Optional[str] = None  # override; None resolves via paths.py; learn
 
 def _patterns_db() -> str:
     return PATTERNS_DB or paths.patterns_db()
-
-
-# ── Core State ──────────────────────────────────────────────────────────────
-
-class _CoreState:
-    def __init__(self):
-        self.hass: Optional[HomeAssistant] = None
-        self.config: dict = {}
-        self.running: bool = False
-        self.task: Optional[asyncio.Task] = None
-        self.unsub: Optional[object] = None
-        self.alarm_unsub: Optional[object] = None  # alarm_control_panel → lockdown sync listener
-        self.ignore_mgr: Optional[IgnoreManager] = None
-        self.safety_mgr: Optional[SafetyManager] = None
-        self.lockdown_mgr: Optional["LockdownManager"] = None
-        self.proactive_mgr: Optional[ProactiveManager] = None
-        self.autonomy_mgr: Optional[AutonomyManager] = None
-        self.state_logger: Optional[StateLogger] = None
-        self.automation_contexts = None
-        # The config entry that started the core; its NovaRuntime owns the
-        # live panel settings read when an action is announced.
-        self.entry = None
-        self.tick_count: int = 0
-        self.actions_taken: int = 0
-        self.offers_made: int = 0
-        self.autonomous_actions: int = 0
-        self.last_tick: float = 0.0
-        self.startup_time: float = 0.0
-        # Pending offer awaiting a yes/no from the user (set when an offer is
-        # spoken, consumed by the conversation layer on "yes"/"no").
-        self.pending_offer: Optional[dict] = None
-
-_CORE = _CoreState()
 
 
 @callback
@@ -1910,6 +1880,8 @@ _OWNERS = {
     'SafetyManager': _m_safety,
     'StateLogger': _m_pattern_store,
     'TICK_INTERVAL': _m_common,
+    '_CORE': _m_state,
+    '_CoreState': _m_state,
     '_f_to_unit': _m_common,
     '_fmt_temp': _m_common,
     '_hass_lang': _m_common,
