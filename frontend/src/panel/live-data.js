@@ -120,6 +120,7 @@
     if (areasMeta) areasMeta.textContent = `${d.occupied} OCCUPIED · ${d.areasMonitored} MONITORED`;
 
     this._renderSolarPanel();
+    this._renderMutesPanel();
 
     const cog = this._cognitive || {};
     const learning = cog.learning || {};
@@ -346,6 +347,52 @@
     }
     const advice = (s.advice || []).map(a => `<div class="toggle-desc" style="margin-bottom:6px">${this._esc(a)}</div>`).join("");
     body.innerHTML = advice + rows.join("");
+  }
+
+  // Muted card: what Nova has been told to stop announcing. Mutes are saved
+  // across restarts, so a blanket shush gets a loud banner. Critical safety
+  // alerts are never muted. Unmute uses the existing nova.unshush service.
+  _renderMutesPanel() {
+    const root = this.shadowRoot;
+    const panel = root.getElementById("mutesPanel");
+    const body = root.getElementById("mutesBody");
+    if (!panel || !body) return;
+    const m = this._liveData?.config?.output_mutes || {};
+    const entities = Array.isArray(m.entities) ? m.entities : [];
+    const categories = Array.isArray(m.categories) ? m.categories : [];
+    const all = m.all === true;
+    if (!all && !entities.length && !categories.length) { panel.hidden = true; body.innerHTML = ""; return; }
+    panel.hidden = false;
+    const row = (label, kind, value) => `
+      <div class="feed-row">
+        <span class="feed-text">${label}${value ? ` <b>${this._esc(value)}</b>` : ""}</span>
+        <button class="mode-chip" data-unmute="${kind}" data-unmute-value="${this._esc(value || "")}">Unmute</button>
+      </div>`;
+    const banner = all ? `
+      <div class="mute-banner" role="alert" style="border:1px solid var(--warn,#d9a300);border-radius:8px;padding:10px 12px;margin-bottom:10px">
+        <b>Blanket shush is on.</b> Nova is not announcing anything except critical safety alerts, and this stays on after a restart until you turn it off.
+        <div style="margin-top:8px"><button class="mode-chip" data-unmute="all">Unshush</button> <span class="toggle-desc">clears every mute below as well</span></div>
+      </div>` : "";
+    body.innerHTML = banner
+      + entities.map(e => row("Entity", "entity", e)).join("")
+      + categories.map(c => row("Category", "category", c)).join("")
+      + `<div class="toggle-desc" style="margin-top:8px">Critical safety alerts always speak.</div>`;
+    body.querySelectorAll("[data-unmute]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        if (!this._hass) return;
+        const kind = btn.getAttribute("data-unmute");
+        const value = btn.getAttribute("data-unmute-value") || "";
+        const data = kind === "entity" ? { entity_id: value }
+          : kind === "category" ? { category: value } : {};
+        btn.disabled = true;
+        try {
+          await this._hass.callService("nova", "unshush", data);
+        } catch (err) {
+          console.error("Nova: unshush failed", err);
+        }
+        this._fetchLiveData();
+      });
+    });
   }
 
   // Shared by the dashboard's Quick Actions card and the Suggestions tab's

@@ -254,6 +254,14 @@ ${this._htmlDashboardBody()}`;
           <div class="toggle-desc" id="qaAnalysisResult" style="margin-top:8px"></div>
         </div>
 
+        <div class="panel" id="mutesPanel" style="max-width:1100px;margin:16px auto 0" hidden>
+          <div class="panel-head">
+            <div class="panel-title">Muted</div>
+            <div class="panel-meta" id="mutesMeta">SAVED</div>
+          </div>
+          <div id="mutesBody"></div>
+        </div>
+
         <div class="panel camera-panel" id="cameraPanel" style="max-width:1100px;margin:16px auto 0" hidden>
           <div class="camera-head-row">
             <div>

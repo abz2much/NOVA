@@ -618,13 +618,15 @@ def async_setup_services(hass: HomeAssistant) -> None:
 
     async def _shush(call: ServiceCall) -> None:
         """Tell Nova to stop announcing. Pass all=true to mute every
-        non-critical announcement; critical safety alerts always pass."""
+        non-critical announcement; critical safety alerts always pass.
+        Mutes are saved and survive a restart."""
         entry, runtime = async_resolve_loaded(hass)
         from . import output_gate
         entity_id = call.data.get("entity_id")
         category  = call.data.get("category")
         shush_all = bool(call.data.get("all", False))
         result = output_gate.shush(entity_id=entity_id, category=category, all=shush_all)
+        await output_gate.async_save_mutes(hass)
         hass.bus.async_fire("nova_observer_shushed", result)
         _LOGGER.info("Nova shushed: %s", result)
 
@@ -644,6 +646,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
         entity_id = call.data.get("entity_id")
         category  = call.data.get("category")
         result = output_gate.unshush(entity_id=entity_id, category=category)
+        await output_gate.async_save_mutes(hass)
         hass.bus.async_fire("nova_observer_unshushed", result)
 
     _register(

@@ -12,8 +12,10 @@ The final line of defense before an announcement actually plays. Handles:
   - Announcement log for feedback learning
 
 State lives in memory (dict). Simple and works across the reasoning loop
-and service calls. Persistence across restarts is a future improvement —
-for now mute preferences reset on restart, which is fine for early use.
+and service calls. Mutes (entities, categories and the blanket shush) are
+also saved to output_mutes.json under Nova's data folder and loaded once
+when Nova sets up, so they survive a restart. Rate-limit, dedup and
+announcement history stay in memory only.
 
 The `nova.shush` service lets the user say "stop announcing that" and
 pushes the entity_id (or category) of the most recent announcement into
@@ -21,6 +23,7 @@ the mute set.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections import deque
@@ -57,6 +60,9 @@ class GateState:
 
 
 _STATE = GateState()
+
+MUTES_FILE = "output_mutes.json"
+_SAVE_LOCK = asyncio.Lock()
 
 
 def _now() -> float:
@@ -115,7 +121,7 @@ def can_announce(
     silenced by a shush.
 
     Blanket mute (`_STATE.mute_all`) blocks every non-critical announcement
-    until unshush() is called (or Home Assistant restarts).
+    until unshush() is called. It is saved, so it survives a restart.
     """
     # Critical first, so no mute of any kind can suppress a safety alert.
     if urgency == "critical":
@@ -238,7 +244,8 @@ def shush(
         result["all"] = True
         _LOGGER.warning(
             "Nova BLANKET SHUSH engaged — non-critical announcements "
-            "suppressed until nova.unshush is called; critical still pass"
+            "suppressed until nova.unshush is called (survives a restart); "
+            "critical still pass"
         )
         return result
 
@@ -285,6 +292,66 @@ def unshush(entity_id: Optional[str] = None, category: Optional[str] = None) -> 
     return result
 
 
+# ─── Saved mutes ────────────────────────────────────────────────────────────
+
+def _mutes_path() -> str:
+    from . import paths
+    return paths.nova_path(MUTES_FILE)
+
+
+def _mutes_snapshot() -> dict:
+    return {
+        "entities": sorted(_STATE.muted_entities),
+        "categories": sorted(_STATE.muted_categories),
+        "all": bool(_STATE.mute_all),
+    }
+
+
+def load_mutes() -> None:
+    """Load saved mutes into the gate. Call once at setup, after
+    paths.configure(); never at import time. A missing, empty or corrupt
+    file never raises: the gate simply starts with no mutes."""
+    try:
+        from .persistence.files import MISSING, OK, read_json
+        res = read_json(_mutes_path())
+        if res.status == MISSING:
+            _LOGGER.debug("output gate: no saved mutes")
+            return
+        data = res.value
+        if res.status != OK or not isinstance(data, dict):
+            _LOGGER.debug("output gate: ignoring unreadable saved mutes (%s)",
+                          res.error or "not an object")
+            return
+        entities = data.get("entities")
+        categories = data.get("categories")
+        _STATE.muted_entities = {e for e in entities if isinstance(e, str) and e} \
+            if isinstance(entities, list) else set()
+        _STATE.muted_categories = {c for c in categories if isinstance(c, str) and c} \
+            if isinstance(categories, list) else set()
+        _STATE.mute_all = data.get("all") is True
+        _LOGGER.debug("output gate: loaded %d entity, %d category mutes, blanket=%s",
+                      len(_STATE.muted_entities), len(_STATE.muted_categories),
+                      _STATE.mute_all)
+    except Exception as exc:
+        _LOGGER.debug("output gate: could not load saved mutes: %s", exc)
+
+
+def _write_mutes(data: dict) -> None:
+    from .persistence.files import write_json_atomic
+    write_json_atomic(_mutes_path(), data, indent=2)
+
+
+async def async_save_mutes(hass) -> None:
+    """Save the current mutes without blocking the event loop. The snapshot
+    is taken under a lock just before the write, so concurrent saves can
+    never leave an older state on disk. Never raises."""
+    try:
+        async with _SAVE_LOCK:
+            await hass.async_add_executor_job(_write_mutes, _mutes_snapshot())
+    except Exception as exc:
+        _LOGGER.warning("output gate: could not save mutes: %s", exc)
+
+
 def status() -> dict:
     """Return current gate state — for nova.observer_status service."""
     recent = _recent_within(_STATE.history, 3600)
@@ -295,6 +362,7 @@ def status() -> dict:
         "suppressed_last_hour": len(suppressed),
         "muted_entities": sorted(_STATE.muted_entities),
         "muted_categories": sorted(_STATE.muted_categories),
+        "mute_all": bool(_STATE.mute_all),
         "last_announcement": (
             {
                 "message": spoken[-1].message,

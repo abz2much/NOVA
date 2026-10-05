@@ -134,6 +134,7 @@ const PANEL = {
     disabled_sentinel_rules: ["garage_left_open"],
     appliance_profile: [{ name: "Dryer", type: "dryer", entity: "", watts: 4200 }],
     memory_stats: { backend: "sqlite-vec", total_memories: 214 },
+    output_mutes: { entities: ["light.hall"], categories: ["appliance"], all: true },
     observer_stats: {
       running: true, calls_last_hour: 4, rate_limit: 30, events_24h: 112, flagged_24h: 9,
       spoken_24h: 3, cognition_enabled: true, cog_entities: 88, cog_predictable: 61,
@@ -527,6 +528,27 @@ setTimeout(async () => {
   await new Promise(r => setTimeout(r, 20));
   checks.push(["new look: area light toggle calls light.turn_off targeted at the area",
     _serviceCalls.some(c => c.domain === "light" && c.service === "turn_off" && c.target?.area_id === "garage")]);
+
+  // Muted card: lists entity and category mutes, shows the blanket shush
+  // banner, and each Unmute button calls the existing nova.unshush service.
+  const mutesPanel = newRoot.getElementById("mutesPanel");
+  checks.push(
+    ["muted card shows entity and category mutes plus the blanket banner",
+      !!mutesPanel && !mutesPanel.hidden
+      && /light\.hall/.test(mutesPanel.textContent) && /appliance/.test(mutesPanel.textContent)
+      && !!mutesPanel.querySelector(".mute-banner") && /after a restart/.test(mutesPanel.textContent)],
+  );
+  _serviceCalls.length = 0;
+  mutesPanel.querySelector('[data-unmute="entity"]').click();
+  mutesPanel.querySelector('[data-unmute="category"]').click();
+  mutesPanel.querySelector('[data-unmute="all"]').click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["muted card: Unmute buttons call nova.unshush with the entity, category and no data",
+    _serviceCalls.length === 3
+    && _serviceCalls.every(c => c.domain === "nova" && c.service === "unshush")
+    && _serviceCalls[0].data.entity_id === "light.hall"
+    && _serviceCalls[1].data.category === "appliance"
+    && Object.keys(_serviceCalls[2].data).length === 0]);
 
   checks.push(
     ["command center restores Cognitive Core status",

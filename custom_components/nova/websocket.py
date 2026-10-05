@@ -72,6 +72,7 @@ from .ws_panel_stats import (
     _get_knowledge_stats,
     _get_lockdown_status,
     _get_observer_stats,
+    _get_output_mutes,
     _get_sentinel_rules,
     _get_suggestions,
 )
@@ -545,6 +546,7 @@ async def ws_get_panel_data(
                 "sentinel_rules": _get_sentinel_rules(),
                 "disabled_sentinel_rules": _get_disabled_rules(hass, entry),
                 "observer_stats": _get_observer_stats(),
+                "output_mutes": _get_output_mutes(),
                 "lockdown": _get_lockdown_status(),
                 "appliances": _get_appliance_status(),
                 "appliance_profile": _get_runtime_json(hass, entry, "appliance_profile", []),
