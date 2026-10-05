@@ -395,18 +395,70 @@ async def test_a_routing_failure_is_swallowed_and_logged(cc, fake_hass, out, loa
     assert "action routing failed" in caplog.text and cc._CORE.actions_taken == 1
 
 
-async def test_current_behaviour_a_failing_announcement_also_skips_the_phone_push(
-        cc, fake_hass, out, load, monkeypatch):
-    """Speech and the phone push share one try block, so if the announcement
-    call itself raises (tts_helper normally handles a bad speaker inside), the
-    push that follows it for a critical alert is never sent."""
+async def test_a_failing_announcement_does_not_skip_the_phone_push(
+        cc, fake_hass, out, load, monkeypatch, caplog):
+    """Speech and push have their own error handling (8.7.16). Before, they
+    shared one try block, so an announcement that raised skipped the push for a
+    critical alert."""
     tts = load("tts_helper")
 
     async def boom(*a, **k):
         raise RuntimeError("speaker offline")
     monkeypatch.setattr(tts, "async_announce", boom)
-    await _emit(cc, fake_hass, _act(urgency="critical"))
-    assert out.pushed == [] and cc._CORE.actions_taken == 1
+    with caplog.at_level("WARNING"):
+        await _emit(cc, fake_hass, _act(urgency="critical"))
+    assert len(out.pushed) == 1 and cc._CORE.actions_taken == 1
+    assert "action routing failed" in caplog.text
+    out.pushed.clear()
+    await _emit(cc, fake_hass, _act(urgency="high", notify_all=True))
+    assert len(out.devices) == 1                                                     # every device path too
+
+
+async def test_a_failing_push_does_not_undo_the_speech_and_is_logged(
+        cc, fake_hass, out, monkeypatch, caplog):
+    async def boom(*a, **k):
+        raise RuntimeError("push service down")
+    monkeypatch.setattr(cc, "_push_notification", boom)
+    monkeypatch.setattr(cc, "_notify_all_devices", boom)
+    with caplog.at_level("WARNING"):
+        await _emit(cc, fake_hass, _act(urgency="critical"))
+        await _emit(cc, fake_hass, _act(urgency="critical", notify_all=True))
+    assert len(out.spoken) == 2
+    assert caplog.text.count("action push failed") == 2
+
+
+async def test_a_failing_push_while_asleep_is_logged_not_raised(
+        cc, fake_hass, out, monkeypatch, caplog, quiet):
+    async def boom(*a, **k):
+        raise RuntimeError("push service down")
+    monkeypatch.setattr(cc, "_push_notification", boom)
+    with caplog.at_level("WARNING"):
+        await _emit(cc, fake_hass, _act(urgency="high"), sleeping=True)
+    assert "action push failed" in caplog.text and cc._CORE.actions_taken == 1
+
+
+async def test_a_routing_failure_still_pushes_a_critical_or_high_alert_but_not_a_medium_one(
+        cc, fake_hass, out, load, monkeypatch):
+    ar = load("audio_routing")
+    monkeypatch.setattr(ar, "observer_speak_target",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("routing broke")))
+    for urgency, pushed in (("critical", 1), ("high", 1), ("medium", 0)):
+        out.pushed.clear()
+        await _emit(cc, fake_hass, _act(urgency=urgency))
+        assert len(out.pushed) == pushed, urgency
+    assert out.spoken == []
+
+
+async def test_critical_still_bypasses_sleep_quiet_hours_and_a_blanket_shush_after_the_split(
+        cc, fake_hass, out, quiet, gate):
+    quiet["on"] = True
+    gate._STATE.mute_all = True
+    await _emit(cc, fake_hass, _act(urgency="critical"), sleeping=True)
+    assert len(out.spoken) == 1 and len(out.pushed) == 1
+    out.spoken.clear()
+    out.pushed.clear()
+    await _emit(cc, fake_hass, _act(urgency="medium"), sleeping=True)               # a non critical alert is still push only
+    assert out.spoken == [] and len(out.pushed) == 1
 
 
 async def test_an_unusable_speaker_setting_means_a_critical_alert_is_pushed_but_not_spoken(

@@ -151,6 +151,63 @@ async def test_formal_lockdown_counts_as_confinement_without_an_alarm(
     assert _types(intrusions(actions)) == ["intrusion_investigating"]
 
 
+# ── tick: one failing stage never loses what the others gathered ───────────
+
+def _boom(*a, **k):
+    raise RuntimeError("stage broke")
+
+
+async def _boom_async(*a, **k):
+    raise RuntimeError("stage broke")
+
+
+async def _all_three_would_fire(make_safety, fake_hass):
+    safety = make_safety(lockdown_auto_on_arm=True)
+    fake_hass.states.set("weather.home", "snowy", temperature=10)
+    away(fake_hass)
+    motion(fake_hass)
+    fake_hass.states.set("lock.front", "unlocked", friendly_name="Front")
+    return safety
+
+
+async def test_a_freeze_error_is_logged_and_intrusion_and_the_sweep_still_run(
+        make_safety, fake_hass, clock, monkeypatch, caplog):
+    safety = await _all_three_would_fire(make_safety, fake_hass)
+    monkeypatch.setattr(safety, "_check_freeze", _boom_async)
+    with caplog.at_level("WARNING"):
+        actions = await _tick(safety, fake_hass, sleeping=True, anyone_home=False)
+    assert _types(actions) == ["intrusion_investigating", "lockdown"]
+    assert "freeze check failed" in caplog.text
+
+
+async def test_an_intrusion_error_keeps_the_freeze_alert_and_the_sweep_still_runs(
+        make_safety, fake_hass, clock, monkeypatch, caplog):
+    safety = await _all_three_would_fire(make_safety, fake_hass)
+    monkeypatch.setattr(safety, "_check_intrusion", _boom_async)
+    with caplog.at_level("WARNING"):
+        actions = await _tick(safety, fake_hass, sleeping=True, anyone_home=False)
+    assert _types(actions) == ["freeze_critical", "lockdown"]
+    assert "intrusion check failed" in caplog.text
+
+
+async def test_a_sweep_error_keeps_the_freeze_and_intrusion_alerts(
+        make_safety, fake_hass, clock, monkeypatch, caplog):
+    safety = await _all_three_would_fire(make_safety, fake_hass)
+    monkeypatch.setattr(safety, "_nighttime_lockdown", _boom_async)
+    with caplog.at_level("WARNING"):
+        actions = await _tick(safety, fake_hass, sleeping=True, anyone_home=False)
+    assert _types(actions) == ["freeze_critical", "intrusion_investigating"]
+    assert "nighttime lockdown failed" in caplog.text
+
+
+async def test_an_error_before_the_intrusion_check_is_also_contained(
+        make_safety, fake_hass, clock, monkeypatch):
+    safety = await _all_three_would_fire(make_safety, fake_hass)
+    monkeypatch.setattr(safety, "_residents_away", _boom)
+    actions = await _tick(safety, fake_hass, sleeping=False, anyone_home=False)
+    assert _types(actions) == ["freeze_critical"]
+
+
 # ── tick: the nighttime sweep guards ────────────────────────────────────────
 
 async def test_the_nighttime_sweep_does_nothing_without_the_opt_in(make_safety, fake_hass, clock):

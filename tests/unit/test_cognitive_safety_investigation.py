@@ -41,7 +41,8 @@ def records(intr, monkeypatch):
 def _seed(safety, now, **over):
     """An investigation that is already open, as _begin_investigation builds it."""
     inv = {"start": now, "last_motion": now, "zones": {"living"}, "path": ["living"],
-           "escalated": False, "breach_area": "living", "breach_name": "Front Door",
+           "escalated": False, "soft_notice": False, "breach_area": "living",
+           "breach_name": "Front Door",
            "connected": {"living", "hall"}, "hops": {}, "max_depth": 0,
            "trigger": "away"}
     inv.update(over)
@@ -232,7 +233,7 @@ async def test_begin_records_the_breach_the_adjacent_rooms_and_the_starting_dept
     assert inv["connected"] == {"living", "hall", "kitchen"}
     assert inv["zones"] == {"hall"} and inv["path"] == ["hall"]
     assert inv["max_depth"] == 1                                    # started one room in
-    assert inv["escalated"] is False and inv["trigger"] == "away"
+    assert inv["escalated"] is False and inv["soft_notice"] is False and inv["trigger"] == "away"
     assert inv["start"] == inv["last_motion"] == clock["now"]
 
 
@@ -316,6 +317,16 @@ async def test_the_investigation_ends_when_its_own_situation_ends(
     _seed(safety, clock["now"], trigger=trigger)
     assert await safety._investigate_step(clock["now"], away_now, sleeping_now) is None
     assert (safety._investigation is not None) is kept
+
+
+async def test_an_old_investigation_without_the_soft_notice_flag_still_works(
+        safety, fake_hass, clock, monkeypatch):
+    _no_camera(safety, monkeypatch)
+    inv = _seed(safety, clock["now"])
+    del inv["soft_notice"]
+    motion(fake_hass)
+    action = await safety._investigate_step(clock["now"] + 130, True, False)
+    assert action["type"] == "intrusion_unresolved" and inv["soft_notice"] is True
 
 
 async def test_an_old_investigation_without_a_trigger_is_treated_as_away(
@@ -593,7 +604,7 @@ async def test_unanswered_active_motion_sends_one_soft_notice_not_a_confirmation
     assert action["notify_all"] is True and action["can_dismiss"] is True
     assert "I flagged possible activity near Front Door" in action["message"]
     assert "have not confirmed" in action["message"]
-    assert inv["escalated"] is True
+    assert inv["soft_notice"] is True and inv["escalated"] is False           # the critical alert is not used up
     assert await safety._investigate_step(now + 5, True, False) is None       # and it is not repeated
     assert [k for k, _ in records] == ["unresolved"]
     assert records[0][1]["reason"] == "no response; unconfirmed activity"
@@ -630,14 +641,14 @@ async def test_an_acknowledgement_holds_the_soft_notice(
     assert safety._investigation["escalated"] is False
 
 
-async def test_a_damped_soft_notice_is_silent_but_marks_the_investigation_done(
+async def test_a_damped_soft_notice_is_silent_and_only_marks_the_soft_notice_done(
         safety, load, fake_hass, clock, monkeypatch, intr, records):
     _one_zone(safety, monkeypatch, load)
     inv = _seed(safety, clock["now"])
     motion(fake_hass)
     monkeypatch.setattr(intr, "should_damp_weak_alert", lambda area, cam: True)
     assert await safety._investigate_step(clock["now"] + 130, True, False) is None
-    assert inv["escalated"] is True                                 # marked done even though silent
+    assert inv["soft_notice"] is True and inv["escalated"] is False     # done, but the critical alert is still open
     assert records[-1][1]["reason"] == "damped (learned benign)"
     assert fake_hass.bus.fired == []
 
@@ -687,28 +698,59 @@ async def test_the_soft_notice_names_the_point_of_entry_even_when_it_is_unknown(
     assert "near the point of entry" in action["message"]
 
 
-async def test_current_behaviour_a_real_route_after_the_soft_notice_is_never_escalated(
-        safety, fake_hass, clock, monkeypatch):
-    """After the "couldn't reach you" notice the investigation is marked
-    escalated, and the confirmed alert only fires while it is not. Someone who
-    then walks inward through the house stays at the soft notice."""
+async def test_a_real_route_after_the_soft_notice_still_raises_the_critical_alert_once(
+        safety, fake_hass, clock, monkeypatch, records):
+    """The soft "couldn't reach you" notice is tracked on its own, so it no
+    longer uses up the critical alert (before 8.7.16 it did)."""
     _no_camera(safety, monkeypatch)
     inv = _seed(safety, clock["now"], hops={"living": 0, "hall": 2})
     motion(fake_hass)
     assert (await safety._investigate_step(clock["now"] + 130, True, False))["type"] == "intrusion_unresolved"
     inv["max_depth"] = 2                                            # the route is now real
-    assert await safety._investigate_step(clock["now"] + 140, True, False) is None
+    action = await safety._investigate_step(clock["now"] + 140, True, False)
+    assert action["type"] == "intrusion_confirmed" and action["urgency"] == "critical"
+    assert inv["escalated"] is True and inv["soft_notice"] is True
+    assert await safety._investigate_step(clock["now"] + 150, True, False) is None     # critical: exactly once
+    assert [k for k, _ in records] == ["unresolved", "confirmed"]
 
 
-async def test_current_behaviour_a_damped_soft_notice_also_blocks_a_later_confirmation(
+async def test_a_person_on_camera_after_the_soft_notice_still_raises_the_critical_alert(
         safety, fake_hass, clock, monkeypatch, intr):
+    _no_camera(safety, monkeypatch)
+    _seed(safety, clock["now"])
+    motion(fake_hass)
+    assert (await safety._investigate_step(clock["now"] + 130, True, False))["type"] == "intrusion_unresolved"
+    _camera(safety, monkeypatch, True)
+
+    async def no_snap(hass, cam, tag="intrusion"):
+        return None
+    monkeypatch.setattr(intr, "capture_snapshot", no_snap)
+    action = await safety._investigate_step(clock["now"] + 140, True, False)
+    assert action["type"] == "intrusion_confirmed"
+
+
+async def test_a_confirmation_after_a_damped_soft_notice_still_raises_the_critical_alert(
+        safety, fake_hass, clock, monkeypatch, intr):
+    """Learned damping may only quiet the weak notice. It must never silence a
+    confirmed intrusion that follows."""
     _no_camera(safety, monkeypatch)
     inv = _seed(safety, clock["now"], hops={"living": 0, "hall": 2})
     motion(fake_hass)
     monkeypatch.setattr(intr, "should_damp_weak_alert", lambda area, cam: True)
     assert await safety._investigate_step(clock["now"] + 130, True, False) is None
     inv["max_depth"] = 2
-    assert await safety._investigate_step(clock["now"] + 140, True, False) is None   # silent confirmation
+    action = await safety._investigate_step(clock["now"] + 140, True, False)
+    assert action["type"] == "intrusion_confirmed"
+
+
+async def test_the_soft_notice_fires_at_most_once_and_never_after_the_critical_alert(
+        safety, fake_hass, clock, monkeypatch):
+    _no_camera(safety, monkeypatch)
+    inv = _seed(safety, clock["now"], hops={"living": 0, "hall": 2}, max_depth=2)
+    motion(fake_hass)
+    assert (await safety._investigate_step(clock["now"] + 130, True, False))["type"] == "intrusion_confirmed"
+    assert await safety._investigate_step(clock["now"] + 140, True, False) is None    # no soft notice after it
+    assert inv["soft_notice"] is False
 
 
 # ── _investigate_step: clearing ─────────────────────────────────────────────
@@ -734,6 +776,31 @@ async def test_ten_minutes_with_one_zone_clears_it_when_the_user_is_holding_the_
     assert safety._investigation is not None
     await safety._investigate_step(clock["now"] + 601, True, False)
     assert safety._investigation is None
+
+
+async def test_after_the_soft_notice_the_investigation_clears_when_the_house_settles(
+        safety, load, fake_hass, clock, monkeypatch):
+    _one_zone(safety, monkeypatch, load)
+    inv = _seed(safety, clock["now"])
+    motion(fake_hass)
+    assert (await safety._investigate_step(clock["now"] + 130, True, False))["type"] == "intrusion_unresolved"
+    fake_hass.states.set("binary_sensor.living_motion", "off", device_class="motion")
+    await safety._investigate_step(clock["now"] + 130 + 180, True, False)
+    assert safety._investigation is inv                             # 180 quiet seconds is not more than 180
+    await safety._investigate_step(clock["now"] + 130 + 181, True, False)
+    assert safety._investigation is None
+
+
+async def test_after_the_soft_notice_continuing_motion_keeps_it_open_past_ten_minutes(
+        safety, load, fake_hass, clock, monkeypatch):
+    """Same as before 8.7.16: once the soft notice has gone out, the ten minute
+    "benign" clear no longer applies while there is still motion."""
+    _one_zone(safety, monkeypatch, load)
+    inv = _seed(safety, clock["now"])
+    motion(fake_hass)
+    await safety._investigate_step(clock["now"] + 130, True, False)
+    await safety._investigate_step(clock["now"] + 5000, True, False)
+    assert safety._investigation is inv
 
 
 async def test_current_behaviour_a_response_window_over_ten_minutes_never_sends_the_soft_notice(

@@ -227,18 +227,27 @@ async def test_the_auto_mode_evaluation_failing_does_not_stop_the_tick(cc, env, 
     assert _types(env) == ["freeze_critical"]
 
 
-async def test_current_behaviour_a_safety_tick_error_aborts_the_tick_and_drops_gathered_actions(
-        cc, env):
-    """SafetyManager.tick is not wrapped like the other steps. If it raises, the
-    tick ends there: the lockdown announcement already gathered is never
-    emitted (the lockdown manager has already switched its state, so it will not
-    announce again), and nothing after it runs this tick."""
+async def test_a_safety_tick_error_is_logged_and_the_gathered_actions_and_the_rest_of_the_tick_still_run(
+        cc, env, caplog):
+    """Before 8.7.16 an error in SafetyManager.tick ended the tick: the lockdown
+    announcement already gathered was lost (the manager had already changed
+    state, so it never announced again) and nothing after it ran."""
     cc._CORE.lockdown_mgr = _Lockdown([{"type": "lockdown_engaged"}])
     env.safety.exc = RuntimeError("safety broke")
-    cc._CORE.proactive_mgr = _Proactive([{"type": "proactive_lights"}])
-    with pytest.raises(RuntimeError, match="safety broke"):
+    cc._CORE.proactive_mgr = _Proactive([_offer()])
+    env.energy_offer = {"type": "energy_offer"}
+    env.followups = [{"type": "followup_result"}]
+    with caplog.at_level("WARNING"):
         await cc._tick()
-    assert env.emitted == [] and cc._CORE.proactive_mgr.calls == []
+    assert _types(env) == ["lockdown_engaged", "proactive_lights", "energy_offer", "followup_result"]
+    assert "Cognitive safety tick error: safety broke" in caplog.text
+
+
+async def test_a_missing_safety_manager_does_not_stop_the_tick(cc, env):
+    cc._CORE.safety_mgr = None
+    cc._CORE.lockdown_mgr = _Lockdown([{"type": "lockdown_engaged"}])
+    await cc._tick()
+    assert _types(env) == ["lockdown_engaged"]
 
 
 async def test_safety_runs_even_when_the_proactive_layer_is_switched_off(cc, env):
@@ -716,29 +725,31 @@ def test_live_runtime_config_is_empty_without_an_owning_entry_and_follows_the_ru
     assert cc._live_runtime_config()["announcement_speakers"] == []                      # live: never a copy
 
 
-async def test_current_behaviour_a_loaded_entry_without_a_runtime_drops_an_awake_critical_alert(
+async def test_a_loaded_entry_without_a_runtime_does_not_drop_an_awake_critical_alert(
         cc, fake_hass, monkeypatch, load, caplog):
-    """_live_runtime_config raises for a loaded entry that has lost its
-    runtime. That read sits inside _emit_action's routing try block on the
-    spoken path, so an awake critical alert is neither spoken nor pushed (the
-    asleep path pushes without reading it)."""
+    """_live_runtime_config raises for a loaded entry that has lost its runtime.
+    The alert now falls back to the config defaults and carries on: it is
+    spoken (using the broadcast group in config) and pushed."""
     tts = load("tts_helper")
     spoken, pushed = [], []
 
-    async def announce(*a, **k):
-        spoken.append(a)
+    async def announce(hass, message, tts_entity, targets, **kw):
+        spoken.append(list(targets))
 
     async def push(*a, **k):
         pushed.append(a)
     monkeypatch.setattr(tts, "async_announce", announce)
+    monkeypatch.setattr(tts, "resolve_tts_for_context", lambda *a, **k: "tts.test")
     monkeypatch.setattr(cc, "_push_notification", push)
     monkeypatch.setattr(load("sleep_detection"), "_in_quiet_hours", lambda s, e: False)
+    fake_hass.states.set("media_player.house", "idle")
     states = sys.modules["homeassistant.config_entries"].ConfigEntryState
     cc._CORE.entry = types.SimpleNamespace(state=states.LOADED, runtime_data=None, entry_id="e")
     with caplog.at_level("WARNING"):
-        await cc._emit_action(fake_hass, {}, {"type": "intrusion_confirmed", "urgency": "critical",
-                                              "message": "m"}, False)
-    assert spoken == [] and pushed == [] and "action routing failed" in caplog.text
+        await cc._emit_action(fake_hass, {"broadcast_group": "media_player.house"},
+                              {"type": "intrusion_confirmed", "urgency": "critical", "message": "m"}, False)
+    assert spoken == [["media_player.house"]] and len(pushed) == 1
+    assert "live settings unavailable" in caplog.text
 
 
 # ── _CoreState and the public status helpers ────────────────────────────────
