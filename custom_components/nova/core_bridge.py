@@ -34,6 +34,11 @@ def _ignore_file(*args, **kwargs):
     return cognitive_core._ignore_file(*args, **kwargs)
 
 
+def _lockdown_exempt_locks(*args, **kwargs):
+    from . import cognitive_core
+    return cognitive_core._lockdown_exempt_locks(*args, **kwargs)
+
+
 def _lockdown_state_path(*args, **kwargs):
     from . import cognitive_core
     return cognitive_core._lockdown_state_path(*args, **kwargs)
@@ -42,3 +47,8 @@ def _lockdown_state_path(*args, **kwargs):
 def _patterns_db(*args, **kwargs):
     from . import cognitive_core
     return cognitive_core._patterns_db(*args, **kwargs)
+
+
+def is_lockdown(*args, **kwargs):
+    from . import cognitive_core
+    return cognitive_core.is_lockdown(*args, **kwargs)
