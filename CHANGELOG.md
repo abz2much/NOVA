@@ -1,3 +1,35 @@
+## [8.7.10] — Output language: choose the language Nova speaks and writes in
+
+**What it does**
+- New setting `output_language`, shown in Settings → General as **Nova speaks**. **Auto** (the default, stored as "" or "auto") follows Home Assistant's language exactly as before, so nothing changes for anyone who does not touch it. Pick a language and Nova speaks and writes in it while Home Assistant and the panel stay as they are. The panel's own language (`ui_language`, the Language row above it) is a different setting and is not touched.
+- One resolver decides the language, in the new `output_language.py`: a per request language if a caller passes one, then this setting, then Home Assistant's language, then English. The agent prompts and the safety notifications both use it, so they cannot disagree. `_language_directive` (agent prompts) and `_hass_lang` (safety notifications) are now thin wrappers over it, and there is one table of language names (`LANG_NAMES`, now with English added). Nothing in it raises.
+- The setting is checked on write like the other panel keys. Only a string is accepted: "", "auto" or a code whose base language Nova knows ("de", "de-DE", "pt-BR"). Anything else is refused with `invalid_value` and nothing is stored. Writing "" or "auto" clears it. It is read when needed, so a change applies to the next reply, with no reload. It is not a secret and appears unredacted in diagnostics, like other plain settings.
+- The language list in the panel is the table's languages sorted by name. "no" is shown once, as Norwegian Bokmål (`nb`).
+
+**Which LLM calls follow it (every direct caller was checked)**
+- Added (text a person reads or hears): the main agent, profile and restricted prompts (via the resolver), scheduled and manual briefings (`briefing.py`), arrival and security briefings (`proactive_briefing.py`), camera scene descriptions (`camera.py`), sentinel alerts (`sentinel.py`), conversation summaries (`summary.py`).
+- Added, for one field only: the camera reasoning reply (`camera.py`) and the observer decision reply (`cognitive/coordinator.py`). Both are JSON, but one string in each is spoken or pushed (`speak` and `message`). Only that value is asked for in your language. The keys, the other values and the JSON shape stay exactly as before, in English.
+- Left alone, because they return structure or text no person reads: suggestion review (`suggestion_review.py`, a keep or reject verdict), package and mail detection (`package_monitor.py`, JSON), scene picking (`scenes.py`, an entity id), camera coverage (`camera_coverage.py`, JSON), the classifier, the setup probe, and the long conversation summariser inside the agent loop (`agent_runtime/loop.py`, which feeds the agent, not a person). `llm_provider.py` has no prompts.
+- English is byte for byte unchanged: no block is added when the language is English.
+
+**What is not covered**
+- **The voice.** This changes the words, not the text to speech voice. Pick a voice that speaks your language in your TTS settings, or the words will be read with the wrong accent.
+- **Fixed English text.** Deterministic messages are not translated by this setting: package and mail announcements, reminders, routine and scene confirmations, Local Mind phrasing (used when the cloud model is unreachable), and the panel. Only the generated text above follows it.
+- **Safety notifications** (freeze, intrusion, lockdown and similar) are templates. They exist in English, French, German, Spanish, Italian, Dutch and Portuguese. In any other language they stay in English, as before, while LLM generated text still follows the setting. The composed lockdown sentences that list devices were already English only.
+- **A per request language is not used.** `conversation.py` has `user_input.language`, but that is the voice pipeline's language, which defaults to Home Assistant's. Passing it in would override this setting on every voice request. The resolver accepts a per request language and is tested for it, but no caller passes one. In a conversation, if you write to Nova in another language it still answers in yours, as before.
+- Text Nova stores (conversation summaries, scene memory) is stored in the language it was written in.
+
+**Safety**
+- No safety behaviour changed. Critical alerts, lockdown, intrusion logic and the mute rules are untouched. Only the language of the words changes.
+
+**Contracts and tests**
+- `tests/fixtures/contracts/config.json`: `output_language` added to `panel_writable_keys`. This is the only contract that changed. No new websocket command was added, so the admin gate test is unchanged and still covers all admin commands. The `get_panel_data` `config` block gains `output_language` (not pinned by a fixture).
+- No existing assertion was changed. Added `tests/unit/test_output_language.py` (resolver, directive, `_hass_lang`, write validation, every direct caller), `tests/integration/test_output_language.py` (the admin gated write path and panel data), and panel smoke checks for the new control.
+- The error text for a refused `output_language` write says what is allowed. Other keys keep their text.
+
+**Caveats**
+- The Python 3.14 run that CI also does was not measured locally.
+
 ## [8.7.9] — Mutes survive a restart, a Muted card, and a notifications only mode
 
 **Mutes are saved**

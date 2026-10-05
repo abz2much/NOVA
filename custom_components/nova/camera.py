@@ -250,6 +250,9 @@ async def _reason_about_scene(
         '"summary": "<one concise factual sentence for the log>", '
         '"speak": "<exactly what Nova should say aloud, in his voice, or empty string if not notable>"}'
     )
+    from . import output_language
+    # Only the spoken line follows Nova's language; the JSON stays as specified.
+    system += output_language.field_directive(hass, "speak")
     user = (
         f"Camera: {camera_name}\n"
         f"Time: {now}\n"
@@ -1049,6 +1052,8 @@ async def async_analyze_camera(
             f"{recognition_hint}"
         )
     system = build_system_prompt(hass, honorific, task)
+    from . import output_language
+    system = output_language.with_language(hass, system)   # the description is announced
     vision_provider = _cfg_opt(hass, "vision_provider", "groq") or "groq"
     vision_model = _cfg_opt(hass, "vision_model", VISION_MODEL) or VISION_MODEL
     try:

@@ -68,6 +68,8 @@ async def async_summarise(
         f"Extract the essence — do not list every exchange."
     )
     system = build_system_prompt(hass, honorific, task)
+    from . import output_language
+    system = output_language.with_language(hass, system)   # a spoken summary
 
     try:
         from .providers.activity import execute_chat

@@ -254,6 +254,10 @@ async def decide(hass, provider, *, hooks: Hooks, honorific: str, event_summary:
     reasoning_cache.note_cloud_call()
     system = hooks.build_system_prompt(
         hass, honorific=honorific, task_context="observer") + "\n\n" + hooks.system_appendix
+    # The reply is JSON, but its "message" is spoken or pushed: only that value
+    # follows Nova's language (empty for English, so English prompts are unchanged).
+    from .. import output_language
+    system += output_language.field_directive(hass, "message")
     recent_block = ""
     if recent_announcements:
         recent_block = "\n\nRecent announcements (avoid repeating):\n" + "\n".join(

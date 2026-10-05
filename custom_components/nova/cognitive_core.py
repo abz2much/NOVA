@@ -139,12 +139,12 @@ def discover_outdoor_temp(hass) -> Optional[tuple[float, str]]:
 
 
 def _hass_lang(hass) -> str:
-    """Home Assistant's configured language ('en' fallback), for localized
-    safety notifications."""
-    try:
-        return getattr(hass.config, "language", None) or "en"
-    except Exception:
-        return "en"
+    """Nova's output language ('en' fallback), for localized safety
+    notifications: the output_language setting, else Home Assistant's
+    language (output_language.resolve). Only the words change; notify_i18n
+    falls back to English for a language it has no templates for."""
+    from . import output_language
+    return output_language.resolve(hass)
 
 
 def _notify_i18n():

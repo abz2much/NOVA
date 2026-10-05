@@ -89,6 +89,9 @@ def valid_panel_value(key: str, value) -> bool:
         return _valid_bounded_number(value, *_CAMERA_EVENT_CONFIDENCE_FLOOR_RANGE)
     if key == CAMERA_EVENT_DEDUP_WINDOW_KEY:
         return _valid_bounded_number(value, *_CAMERA_EVENT_DEDUP_WINDOW_RANGE)
+    if key == "output_language":
+        from . import output_language
+        return output_language.is_valid_setting(value)
     if key in ("host_health_enabled", "host_health_alerts_enabled",
                "host_health_recovery_announce"):
         return type(value) is bool

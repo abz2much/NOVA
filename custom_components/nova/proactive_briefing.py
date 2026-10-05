@@ -506,6 +506,8 @@ async def _trigger_briefing(
             f"{BRIEFING_GROUNDING_RULE}"
         )
         system = build_system_prompt(hass, honorific, task)
+        from . import output_language
+        system = output_language.with_language(hass, system)   # spoken and pushed: follows Nova's language
 
         # Generate briefing via LLM: the reasoning tier, or the primary
         # provider when the tier can't be built. The entry's ProviderManager

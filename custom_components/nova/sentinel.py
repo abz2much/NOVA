@@ -569,6 +569,8 @@ class NovaSentinel:
                 "anticipate. Deliver the alert directly, no preamble."
             )
             system = build_system_prompt(self.hass, honorific, task)
+            from . import output_language
+            system = output_language.with_language(self.hass, system)   # spoken and pushed
             from .providers.activity import execute_chat
             result = await execute_chat(
                 self.hass, self._groq,

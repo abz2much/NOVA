@@ -176,6 +176,7 @@
     "operational_mode_auto",
     "outdoor_areas",
     "outdoor_entities",
+    "output_language",
     "package_detection",
     "pattern_confidence",
     "pattern_include_entities",

@@ -6,6 +6,7 @@ import logging
 
 from homeassistant.core import HomeAssistant
 
+from .. import output_language as _output_language
 from .capabilities import memory as _memory
 
 # One logger for the whole agent, named as it always was (…nova.agent), so
@@ -115,39 +116,17 @@ def _strip_home_state(system_text: str) -> str:
     return system_text[:i] + note + tail
 
 
-_LANG_NAMES = {
-    "fr": "French", "de": "German", "es": "Spanish", "it": "Italian",
-    "nl": "Dutch", "pt": "Portuguese", "pl": "Polish", "sv": "Swedish",
-    "nb": "Norwegian", "no": "Norwegian", "da": "Danish", "fi": "Finnish",
-    "cs": "Czech", "ru": "Russian", "uk": "Ukrainian", "tr": "Turkish",
-    "zh": "Chinese", "ja": "Japanese", "ko": "Korean", "ar": "Arabic",
-    "he": "Hebrew", "el": "Greek", "hu": "Hungarian", "ro": "Romanian",
-    "sk": "Slovak", "ca": "Catalan", "id": "Indonesian", "th": "Thai",
-    "vi": "Vietnamese",
-}
+_LANG_NAMES = _output_language.LANG_NAMES
 
 
 def _language_directive(hass) -> str:
-    """A system-prompt block steering replies to the home's configured language.
-
-    Uses Home Assistant's ``language`` so a non-English household gets replies in
-    its own language. Returns ``""`` for English installs (which are therefore
-    completely unaffected). The user's own input language still wins if they
-    write in something else.
+    """A system-prompt block steering replies to Nova's output language: the
+    ``output_language`` setting, else Home Assistant's language (see
+    output_language.resolve). Returns ``""`` for English installs (which are
+    therefore completely unaffected). The user's own input language still wins
+    if they write in something else.
     """
-    try:
-        lang = (getattr(hass.config, "language", None) or "en").split("-")[0].lower()
-    except Exception:
-        return ""
-    if not lang or lang == "en":
-        return ""
-    lname = _LANG_NAMES.get(lang, lang)
-    return (
-        f"## Language\n"
-        f"Respond in {lname} by default — this household's configured language "
-        f"is {lname}. If the user writes to you in another language, reply in "
-        f"that language instead. Keep entity names and proper nouns unchanged.\n\n"
-    )
+    return _output_language.directive(hass)
 
 
 # ── System prompts ──────────────────────────────────────────────────────────
