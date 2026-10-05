@@ -1,3 +1,23 @@
+## [8.7.18] — Internal tidy: websocket.py split again (2,273 lines down to 1,586)
+
+**No behaviour change.** This is an internal change only. No setting, service, websocket command, request field, error code, log name or stored file changed, and the panel behaves as before. Nothing to do after updating. It is the third step of splitting `websocket.py`.
+
+**Moved (code moved as it was, no edits)**
+- `ws_cameras.py` (330 lines): nova/camera_snapshot, nova/rename_camera, nova/camera_location, nova/camera_diagnostics, nova/compute_camera_coverage and nova/mmwave_overview, with `_snap_log` and its throttle state `_SNAP_LOG_TS`.
+- `ws_modes.py` (266 lines): nova/intrusion, nova/mode, nova/hazard, nova/energy, nova/solar and nova/biometrics.
+- `ws_voice.py` (208 lines): nova/get_spoken_history, nova/list_actions, nova/repeat_spoken, nova/voice_confirm_test and nova/say_hello.
+- Every decorator, command schema and admin gate moved unchanged. `websocket.py` imports each handler by name and still registers all 62 commands in the same order inside its one `try`. 46 commands are admin gated, as before. The moved commands that need `_get_entry` reach it through the existing `ws_bridge.py` delegator, and the area and camera helpers are imported from `ws_area_helpers.py`, where they are defined. No helper was copied and no new delegator was needed.
+- The new modules log under `custom_components.nova.websocket`, as before, so log lines read the same.
+
+**Stays in `websocket.py`, on purpose:** `ws_get_panel_data` and its helpers, `ws_update_config`, `PANEL_WRITABLE_KEYS`, `async_register`, the entry and runtime helpers (`_get_entry`, `_entry_opt`, `_live_runtime_config`, `_executor_runtime_config`, `_runtime_opt`, `_int_opt`), and the remaining commands (activity log, debug log, reload appliances, documents, semantic search, diagnostics, setup health, provider activity, area sparklines). They hold the panel's data and settings contract or are what the moved commands call.
+
+**How it was checked**
+- All 19 moved statements have the same AST as in 8.7.17, decorators and schemas included. Every top level name of the old `websocket.py` is defined once, in the file named above.
+- `tests/fixtures/contracts` is unchanged. The full suite passes with the same tests as 8.7.17 (5,790 passed, 4 skipped), and the PHACC integration suite too (467 passed).
+- 12 mutations in the new files (removing an admin gate, renaming a command, dropping a registration, breaking the bridge delegator, changing a schema default) each make a test fail.
+- One test changed: `ws_repeat_spoken` is the only announcement call in the websocket layer, so the announcer allow list in `test_cognitive_structure.py` now names `ws_voice.py` in place of `websocket.py`.
+- No new coverage floor. The coverage floors read the unit run, where every websocket handler file (old and new) measures 0%, because the handlers need real Home Assistant and are tested by the PHACC suite, which CI does not measure. A floor of 0% would protect nothing. Under PHACC the new files measure 72.7% (`ws_voice.py`), 30.9% (`ws_modes.py`) and 20.7% (`ws_cameras.py`). No existing floor changed.
+
 ## [8.7.17] — Internal: cognitive_core.py split into smaller files
 
 **No behaviour change.** This is an internal change only. No setting, service, panel command, error code, log name or stored file changed. Nothing to do after updating.
