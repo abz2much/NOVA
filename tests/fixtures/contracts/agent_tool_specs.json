@@ -324,6 +324,92 @@
     },
     {
       "function": {
+        "description": "Remember that two things are linked, for example 'sam owns car.jeep' or 'kitchen adjacent_to garage'. Use it when the user tells you how two people, places or things relate. It is saved as PENDING, not yet trusted and not shown to you again: you must ask the user to confirm it, then call confirm_pending_relation (or reject_pending_relation if they say no). It only stores a link you can recall later; it never changes what any alerting, automation or device does.",
+        "name": "propose_relation",
+        "parameters": {
+          "properties": {
+            "object": {
+              "description": "The second thing, 1 to 80 characters (for example 'car.jeep' or 'garage').",
+              "type": "string"
+            },
+            "predicate": {
+              "description": "How it relates: lowercase snake case, 2 to 40 characters (for example 'owns' or 'adjacent_to').",
+              "type": "string"
+            },
+            "subject": {
+              "description": "The first thing, 1 to 80 characters (for example 'sam' or 'kitchen').",
+              "type": "string"
+            }
+          },
+          "required": [
+            "subject",
+            "predicate",
+            "object"
+          ],
+          "type": "object"
+        }
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Confirm a relation that propose_relation saved as pending, once the user has actually said it is correct. Never call this unless the user has genuinely confirmed it in this conversation.",
+        "name": "confirm_pending_relation",
+        "parameters": {
+          "properties": {
+            "relation_id": {
+              "description": "The relation_id returned by the propose_relation call being confirmed.",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "relation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Discard a relation that propose_relation saved as pending, when the user says it is wrong or does not confirm it.",
+        "name": "reject_pending_relation",
+        "parameters": {
+          "properties": {
+            "relation_id": {
+              "description": "The relation_id returned by the propose_relation call being rejected.",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "relation_id"
+          ],
+          "type": "object"
+        }
+      },
+      "type": "function"
+    },
+    {
+      "function": {
+        "description": "Look up the confirmed links that involve a person, place or thing (who owns what, what is next to what). Read only. Pending links are never returned.",
+        "name": "lookup_relations",
+        "parameters": {
+          "properties": {
+            "entity": {
+              "description": "The name to look up, for example 'sam' or 'kitchen'.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "entity"
+          ],
+          "type": "object"
+        }
+      },
+      "type": "function"
+    },
+    {
+      "function": {
         "description": "Tell Nova to ignore an entity or area for a specified duration. Use when the user says things like 'ignore the garage door for 2 hours' or 'stop alerting me about the backyard'. Supports glob patterns like 'binary_sensor.garage*'. This is the ONLY tool that actually changes alerting behavior at runtime — a success result here (enforced: true) means sentinel/cognitive alerting will genuinely skip this entity, unlike remember, which only saves a fact for later conversation.",
         "name": "ignore_entity",
         "parameters": {

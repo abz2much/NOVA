@@ -249,6 +249,36 @@ _COMPONENTS = (
         columns=(Column("facts", "status", "TEXT NOT NULL DEFAULT 'confirmed'"),),
     ),
     Component(
+        name="relations",
+        version=1,
+        tables=("relations",),
+        statements=(
+            # Links between things ("sam owns car.jeep"). Every row starts
+            # 'pending' and is only used once a person confirms it. A removed
+            # row is kept with deleted_at set, so a later non stated write
+            # cannot bring back an edge the user took out. The table is new
+            # in 8.7.13: an existing knowledge.db only gains it, and the
+            # facts tables are untouched.
+            """CREATE TABLE IF NOT EXISTS relations (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    subject     TEXT NOT NULL,
+    predicate   TEXT NOT NULL,
+    object      TEXT NOT NULL,
+    source      TEXT NOT NULL DEFAULT 'stated'
+                CHECK (source IN ('stated', 'observed', 'inferred')),
+    status      TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending', 'confirmed')),
+    confidence  REAL NOT NULL DEFAULT 1.0,
+    created_at  REAL NOT NULL,
+    updated_at  REAL NOT NULL,
+    deleted_at  REAL,
+    UNIQUE(subject, predicate, object)
+)""",
+            "CREATE INDEX IF NOT EXISTS idx_relations_subject ON relations(subject)",
+            "CREATE INDEX IF NOT EXISTS idx_relations_object ON relations(object)",
+        ),
+    ),
+    Component(
         name="fact_vectors",
         version=1,
         tables=("fact_vectors",),
@@ -573,7 +603,7 @@ COMPONENTS: dict[str, Component] = {c.name: c for c in _COMPONENTS}
 STORES: tuple[Store, ...] = (
     Store("conversations", "nova/conversations.db",
           ("conversations", "action_log", "spoken_history"), wal=True),
-    Store("knowledge", "nova/knowledge.db", ("facts", "fact_vectors"), wal=True),
+    Store("knowledge", "nova/knowledge.db", ("facts", "fact_vectors", "relations"), wal=True),
     Store("patterns", "nova/patterns.db",
           ("pattern_log", "person_patterns", "cognition", "automation_trials",
            "followups", "goals"), wal=True),

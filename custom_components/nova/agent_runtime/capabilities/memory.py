@@ -155,6 +155,118 @@ async def _exec_reject_pending_fact(hass: HomeAssistant, args: dict) -> str:
     return json.dumps({"success": bool(removed), "rejected": fact_id})
 
 
+# ── Relations (8.7.13) ──────────────────────────────────────────────────────
+# Links between things ("sam owns car.jeep"). Same trust model as pending
+# facts, stricter: propose_relation can only STAGE a pending relation, nothing
+# reads it until a person confirms it (in conversation, through
+# confirm_pending_relation, or in the panel's Memory tab), and a confirmed one
+# is shown to the model only inside a fenced block.
+
+_RELATION_ERRORS = {
+    "invalid_subject": "subject must be 1 to 80 characters with no control "
+                       "characters, and cannot be 'unknown'",
+    "invalid_object": "object must be 1 to 80 characters with no control "
+                      "characters, and cannot be 'unknown'",
+    "invalid_predicate": "predicate must be lowercase snake case, 2 to 40 "
+                         "characters, starting with a letter (for example "
+                         "owns or adjacent_to)",
+    "self_relation": "a thing cannot be related to itself",
+    "relation_cap": "the relation store is full (500); ask the user to remove "
+                    "some in the Memory tab before adding more",
+    "removed_by_user": "the user removed this relation earlier; it is not added again",
+    "failed": "the relation could not be saved",
+}
+
+
+def _relation_id(args: dict) -> Optional[int]:
+    raw: Any = args.get("relation_id")
+    if isinstance(raw, bool):
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+async def _exec_propose_relation(hass: HomeAssistant, args: dict) -> str:
+    """Stage a relation as PENDING. This tool can never confirm what it
+    stages: it takes no status, and the result tells the model to ask the user."""
+    from ... import knowledge
+    res = await hass.async_add_executor_job(
+        lambda: knowledge.propose_relation(
+            args.get("subject"), args.get("predicate"), args.get("object"),
+            source="stated"))
+    if not res["ok"]:
+        return json.dumps({"error": _RELATION_ERRORS.get(res["error"], res["error"]),
+                           "code": res["error"]})
+    rel = res["relation"]
+    if rel["status"] == "confirmed":
+        return json.dumps({
+            "success": True, "status": "confirmed", "relation_id": rel["id"],
+            "created": False,
+            "message": f"'{rel['subject']} {rel['predicate']} {rel['object']}' "
+                       f"is already a confirmed relation.",
+        })
+    _LOGGER.info("Nova staged a pending relation (relation_id=%s)", rel["id"])
+    return json.dumps({
+        "success": True, "status": "pending", "relation_id": rel["id"],
+        "created": res["created"], "enforced": False,
+        "message": (
+            f"Saved '{rel['subject']} {rel['predicate']} {rel['object']}' as "
+            f"PENDING, not yet trusted and not shown to you again until the "
+            f"user confirms it. Ask the user whether it is correct. If they "
+            f"confirm, call confirm_pending_relation with relation_id="
+            f"{rel['id']}. If they say no or correct it, call "
+            f"reject_pending_relation with the same relation_id. It is a "
+            f"memory only and changes no alert, automation or device."),
+    })
+
+
+async def _exec_confirm_pending_relation(hass: HomeAssistant, args: dict) -> str:
+    """Confirm a pending relation, once the user has actually approved it."""
+    rid = _relation_id(args)
+    if rid is None:
+        return json.dumps({"error": "relation_id is required and must be an integer"})
+    from ... import knowledge
+    ok = await hass.async_add_executor_job(knowledge.confirm_relation, rid)
+    if not ok:
+        return json.dumps({"error": f"no pending relation with id {rid} (already "
+                                    f"confirmed, rejected, or never existed)"})
+    return json.dumps({"success": True, "confirmed": rid, "enforced": False,
+                       "message": "Relation confirmed. It is a memory only, not a "
+                                  "change to any alerting or automation code."})
+
+
+async def _exec_reject_pending_relation(hass: HomeAssistant, args: dict) -> str:
+    """Discard a pending relation the user did not confirm. It stays removed:
+    only the user can bring it back."""
+    rid = _relation_id(args)
+    if rid is None:
+        return json.dumps({"error": "relation_id is required and must be an integer"})
+    from ... import knowledge
+    removed = await hass.async_add_executor_job(
+        lambda: knowledge.remove_relation(rid, only_pending=True))
+    return json.dumps({"success": bool(removed), "rejected": rid})
+
+
+async def _exec_lookup_relations(hass: HomeAssistant, args: dict) -> str:
+    """Read only: the CONFIRMED relations touching a thing. Pending and removed
+    ones are never returned."""
+    entity = args.get("entity")
+    from ... import knowledge
+    if type(entity) is not str or not entity.strip():
+        return json.dumps({"error": "entity is required: the name of a person, "
+                                    "place or thing"})
+    rels = await hass.async_add_executor_job(
+        lambda: knowledge.confirmed_relations(node=entity, limit=knowledge.RELATION_PROMPT_LIMIT * 2))
+    return json.dumps({
+        "relations": [{"subject": r["subject"], "predicate": r["predicate"],
+                       "object": r["object"]} for r in rels],
+        "note": "confirmed relations only" if rels else
+                "no confirmed relation involves that name",
+    })
+
+
 async def _exec_ignore(hass: HomeAssistant, args: dict) -> str:
     """Add an ignore rule via the cognitive core."""
     try:

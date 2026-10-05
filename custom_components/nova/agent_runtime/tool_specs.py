@@ -354,6 +354,102 @@ NOVA_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "propose_relation",
+            "description": (
+                "Remember that two things are linked, for example 'sam owns "
+                "car.jeep' or 'kitchen adjacent_to garage'. Use it when the user "
+                "tells you how two people, places or things relate. It is saved "
+                "as PENDING, not yet trusted and not shown to you again: you must "
+                "ask the user to confirm it, then call confirm_pending_relation "
+                "(or reject_pending_relation if they say no). It only stores a "
+                "link you can recall later; it never changes what any alerting, "
+                "automation or device does."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "subject": {
+                        "type": "string",
+                        "description": "The first thing, 1 to 80 characters (for example 'sam' or 'kitchen').",
+                    },
+                    "predicate": {
+                        "type": "string",
+                        "description": "How it relates: lowercase snake case, 2 to 40 characters (for example 'owns' or 'adjacent_to').",
+                    },
+                    "object": {
+                        "type": "string",
+                        "description": "The second thing, 1 to 80 characters (for example 'car.jeep' or 'garage').",
+                    },
+                },
+                "required": ["subject", "predicate", "object"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "confirm_pending_relation",
+            "description": (
+                "Confirm a relation that propose_relation saved as pending, once "
+                "the user has actually said it is correct. Never call this unless "
+                "the user has genuinely confirmed it in this conversation."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "relation_id": {
+                        "type": "integer",
+                        "description": "The relation_id returned by the propose_relation call being confirmed.",
+                    },
+                },
+                "required": ["relation_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "reject_pending_relation",
+            "description": (
+                "Discard a relation that propose_relation saved as pending, when "
+                "the user says it is wrong or does not confirm it."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "relation_id": {
+                        "type": "integer",
+                        "description": "The relation_id returned by the propose_relation call being rejected.",
+                    },
+                },
+                "required": ["relation_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "lookup_relations",
+            "description": (
+                "Look up the confirmed links that involve a person, place or thing "
+                "(who owns what, what is next to what). Read only. Pending links "
+                "are never returned."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "entity": {
+                        "type": "string",
+                        "description": "The name to look up, for example 'sam' or 'kitchen'.",
+                    },
+                },
+                "required": ["entity"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "ignore_entity",
             "description": (
                 "Tell Nova to ignore an entity or area for a specified duration. "

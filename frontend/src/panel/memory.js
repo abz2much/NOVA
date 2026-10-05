@@ -36,6 +36,18 @@
           <div id="newPendingList" class="mem-body"></div>
         </div>
 
+        <div class="panel" id="newRelationsPanel">
+          <div class="panel-head">
+            <div class="panel-title">Relations</div>
+            <div class="panel-meta" id="newRelationsCount">—</div>
+          </div>
+          <div class="stub-body">Links between things, such as "sam owns car.jeep" or "kitchen adjacent_to garage". Nova proposes them when you tell it how things relate. A new link waits here and is not used until you confirm it. Only confirmed links are shown to Nova. Removing one is permanent: Nova will not add it back on its own.</div>
+          <div class="toggle-desc" id="newRelationsMsg"></div>
+          <div id="newRelationsPending" class="mem-body"></div>
+          <div class="mode-bind-head">Confirmed</div>
+          <div id="newRelationsList" class="mem-body"><div class="stub-body">Loading…</div></div>
+        </div>
+
         <div class="panel">
           <div class="panel-head">
             <div class="panel-title">Person Routines</div>
@@ -245,6 +257,110 @@
     });
   }
 
+  async _fetchRelations() {
+    if (!this._hass) return;
+    try {
+      const res = await this._hass.callWS({ type: "nova/list_relations" });
+      this._relations = { pending: res?.pending || [], confirmed: res?.confirmed || [], cap: res?.cap || 500 };
+    } catch (err) {
+      this._relations = { pending: [], confirmed: [], cap: 500, error: String(err) };
+    }
+    this._relationsLoaded = true;
+    this._renderRelations();
+  }
+
+  _relationErrorText(code) {
+    return ({
+      invalid_subject: "The first name must be 1 to 80 characters and cannot be 'unknown'.",
+      invalid_object: "The second name must be 1 to 80 characters and cannot be 'unknown'.",
+      invalid_predicate: "The link word must be lowercase with underscores, 2 to 40 characters, such as owns or adjacent_to.",
+      self_relation: "A thing cannot be linked to itself.",
+      duplicate: "That link already exists.",
+      not_found: "That link is no longer waiting for confirmation.",
+    })[code] || "Could not save that change.";
+  }
+
+  _renderRelations() {
+    const root = this.shadowRoot;
+    const pendingBox = root?.getElementById("newRelationsPending");
+    const list = root?.getElementById("newRelationsList");
+    if (!pendingBox || !list) return;
+    const rel = this._relations || { pending: [], confirmed: [], cap: 500 };
+    const countEl = root.getElementById("newRelationsCount");
+    if (countEl) countEl.textContent = `${rel.confirmed.length} confirmed · ${rel.pending.length} waiting`;
+    if (rel.error) {
+      pendingBox.innerHTML = "";
+      list.innerHTML = `<div class="stub-body">Couldn't load relations — ${this._esc(rel.error)}</div>`;
+      return;
+    }
+    pendingBox.innerHTML = rel.pending.length ? `
+      <div class="mode-bind-head">Waiting for confirmation</div>` + rel.pending.map(r => `
+      <div class="cfg-row cfg-row-wrap rel-row" data-id="${r.id}">
+        <input class="cfg-field rel-subject" style="flex:1" maxlength="80" value="${this._esc(r.subject)}" aria-label="First thing">
+        <input class="cfg-field rel-predicate" style="flex:1" maxlength="40" value="${this._esc(r.predicate)}" aria-label="Link">
+        <input class="cfg-field rel-object" style="flex:1" maxlength="80" value="${this._esc(r.object)}" aria-label="Second thing">
+      </div>
+      <div class="mode-grid" style="margin-bottom:10px">
+        <button class="mode-chip rel-confirm" data-id="${r.id}">✓ Confirm</button>
+        <button class="mode-chip rel-save" data-id="${r.id}">💾 Save edit</button>
+        <button class="mode-chip rel-reject" data-id="${r.id}">✕ Reject</button>
+      </div>`).join("") : "";
+    list.innerHTML = rel.confirmed.length ? rel.confirmed.map(r => `
+      <div class="cfg-row" data-id="${r.id}">
+        <label>${this._esc(r.subject)} <b>${this._esc(r.predicate)}</b> ${this._esc(r.object)}</label>
+        <button class="new-rel-remove" data-id="${r.id}" title="Remove this relation" aria-label="Remove">✕ Remove</button>
+      </div>`).join("")
+      : (this._relationsLoaded
+        ? `<div class="stub-body">None yet. Tell Nova how things relate, for example "Sam owns the Jeep", then confirm it here or in the chat.</div>`
+        : `<div class="stub-body">Loading…</div>`);
+    const idOf = (el) => parseInt(el.getAttribute("data-id"), 10);
+    pendingBox.querySelectorAll(".rel-confirm").forEach(b => b.addEventListener("click", e => this._relationAction(idOf(e.currentTarget), "confirm")));
+    pendingBox.querySelectorAll(".rel-reject").forEach(b => b.addEventListener("click", e => this._relationAction(idOf(e.currentTarget), "reject")));
+    pendingBox.querySelectorAll(".rel-save").forEach(b => b.addEventListener("click", e => {
+      const id = idOf(e.currentTarget);
+      const row = pendingBox.querySelector(`.rel-row[data-id="${id}"]`);
+      if (!isNaN(id) && row) this._editRelation(id, {
+        subject: row.querySelector(".rel-subject").value,
+        predicate: row.querySelector(".rel-predicate").value,
+        object: row.querySelector(".rel-object").value,
+      });
+    }));
+    list.querySelectorAll(".new-rel-remove").forEach(b => b.addEventListener("click", e => this._relationAction(idOf(e.currentTarget), "remove")));
+  }
+
+  async _relationAction(id, action) {
+    if (!this._hass || isNaN(id)) return;
+    const msg = this.shadowRoot?.getElementById("newRelationsMsg");
+    try {
+      const res = await this._hass.callWS({ type: "nova/relation_action", relation_id: id, action });
+      this._relations = { pending: res?.pending || [], confirmed: res?.confirmed || [], cap: res?.cap || 500 };
+      if (msg) msg.textContent = res?.ok ? "" : "That link has already changed.";
+    } catch (err) {
+      if (msg) msg.textContent = "Could not change that link (administrator only).";
+      return;
+    }
+    this._renderRelations();
+  }
+
+  async _editRelation(id, fields) {
+    if (!this._hass || isNaN(id)) return;
+    const msg = this.shadowRoot?.getElementById("newRelationsMsg");
+    try {
+      const res = await this._hass.callWS({ type: "nova/edit_relation", relation_id: id, ...fields });
+      if (!res?.ok) {
+        // Keep what the person typed so they can fix it.
+        if (msg) msg.textContent = this._relationErrorText(res?.error);
+        return;
+      }
+      this._relations = { pending: res?.pending || [], confirmed: res?.confirmed || [], cap: res?.cap || 500 };
+      if (msg) msg.textContent = "Saved.";
+    } catch (err) {
+      if (msg) msg.textContent = "Could not save that change (administrator only).";
+      return;
+    }
+    this._renderRelations();
+  }
+
   _wireMemory() {
     const root = this.shadowRoot;
     const memAdd = root.getElementById("newMemAdd");
@@ -260,5 +376,6 @@
     this._renderKnowledgeList();
     this._renderPendingFacts();
     this._renderPersonRoutines();
+    this._fetchRelations();
   }
 

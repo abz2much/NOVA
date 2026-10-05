@@ -258,6 +258,31 @@
     ],
     "registered": true
   },
+  "nova/edit_relation": {
+    "admin": true,
+    "error_codes": [
+      "edit_relation_failed"
+    ],
+    "fields": {
+      "object": {
+        "required": false
+      },
+      "predicate": {
+        "required": false
+      },
+      "relation_id": {
+        "required": true
+      },
+      "subject": {
+        "required": false
+      }
+    },
+    "literal_response_keys": [
+      "error",
+      "ok"
+    ],
+    "registered": true
+  },
   "nova/energy": {
     "admin": true,
     "error_codes": [
@@ -666,6 +691,15 @@
     ],
     "registered": true
   },
+  "nova/list_relations": {
+    "admin": false,
+    "error_codes": [
+      "relations_failed"
+    ],
+    "fields": {},
+    "literal_response_keys": [],
+    "registered": true
+  },
   "nova/mmwave_overview": {
     "admin": false,
     "error_codes": [
@@ -722,6 +756,29 @@
       "facts",
       "ok",
       "pending"
+    ],
+    "registered": true
+  },
+  "nova/relation_action": {
+    "admin": true,
+    "error_codes": [
+      "relation_action_failed"
+    ],
+    "fields": {
+      "action": {
+        "options": [
+          "confirm",
+          "reject",
+          "remove"
+        ],
+        "required": true
+      },
+      "relation_id": {
+        "required": true
+      }
+    },
+    "literal_response_keys": [
+      "ok"
     ],
     "registered": true
   },

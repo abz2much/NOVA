@@ -203,6 +203,7 @@
       "nova_schema_components",
       "person_patterns",
       "provider_activity_daily",
+      "relations",
       "reminders",
       "sentinel_events",
       "sightings",
