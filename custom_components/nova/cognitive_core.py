@@ -735,6 +735,42 @@ class SafetyManager:
             "message": msg, "auto_act": True, "entity_id": eid,
         }
 
+    async def _face_stand_down(self, trigger: str, where: str) -> bool:
+        """Opt in (face_stand_down): True when a recognised household resident
+        should stop a NEW intrusion investigation from opening. Called only
+        where an investigation would be opened; it can never end one that is
+        already open, and nothing else (critical alerts, lockdown, freeze, the
+        mute rules) reads it. The rules are in face_roster.evaluate_stand_down.
+        Every stand down is written to the Action Audit Log first; if that
+        write fails, or anything else goes wrong, the alert goes ahead."""
+        try:
+            from . import safety_config as _sc
+            if not _sc.face_stand_down_enabled(self.config):
+                return False
+            from . import action_log, face_roster
+            decision = face_roster.evaluate_stand_down()
+            if decision.get("stand_down") is not True:
+                return False
+            who, cam = decision["name"], decision["camera_entity"]
+            reason = (f"{decision['reason']}. No {trigger} intrusion investigation "
+                      f"was opened for motion at {where}. Opt in setting face_stand_down.")
+            row_id = await self.hass.async_add_executor_job(
+                lambda: action_log.start(
+                    action_log.new_request_id(), "intrusion_face_stand_down", "safety",
+                    requested_by_name=who, entity_id=cam,
+                    execution_result="accepted",
+                    reason_code="face_stand_down", reason_text=reason[:500])
+            )
+            if row_id is None:
+                _LOGGER.warning("intrusion: face stand down not recorded in the "
+                                "action log, so the alert goes ahead")
+                return False
+            _LOGGER.info("intrusion: standing down (%s)", reason)
+            return True
+        except Exception as exc:
+            _LOGGER.debug("intrusion: face stand down check failed, alerting: %s", exc)
+            return False
+
     async def _check_intrusion(self, anyone_home: bool, sleeping: bool,
                                 confined: bool = False) -> Optional[dict]:
         """Detect unauthorized entry when away or asleep. Fires ONE alert, then
@@ -774,6 +810,8 @@ class SafetyManager:
                 if not (armed or entry):
                     return None
             breach_name = self._friendly(entry) if entry else None
+            if await self._face_stand_down("away", where):
+                return None
             self._last_intrusion_alert = now
             return self._begin_investigation(
                 now=now, trigger="away", presence="away",
@@ -793,6 +831,8 @@ class SafetyManager:
                 entry = self._open_entry()
                 if not (armed or entry):
                     return None
+            if await self._face_stand_down("confined", where):
+                return None
             self._last_intrusion_alert = now
             return self._begin_investigation(
                 now=now, trigger="confined", presence="home",
@@ -812,6 +852,8 @@ class SafetyManager:
             if not entry:
                 return None
             breach_name = self._friendly(entry)
+            if await self._face_stand_down("sleeping", where):
+                return None
             self._last_intrusion_alert = now
             return self._begin_investigation(
                 now=now, trigger="sleeping", presence="asleep",
@@ -3156,7 +3198,7 @@ def lockdown_status() -> dict:
 async def apply_runtime_config(key: str, value) -> None:
     """Apply safety settings immediately without reloading the integration."""
     if key not in ("lockdown_auto_on_arm", "security_alarm_entity",
-                   "intrusion_requires_confinement"):
+                   "intrusion_requires_confinement", "face_stand_down"):
         return
     if not isinstance(_CORE.config, dict):
         _CORE.config = {}
@@ -3166,7 +3208,7 @@ async def apply_runtime_config(key: str, value) -> None:
         for component in (_CORE.safety_mgr, _CORE.lockdown_mgr):
             if component is not None:
                 component.set_automatic_lockdown(enabled)
-    elif key == "intrusion_requires_confinement":
+    elif key in ("intrusion_requires_confinement", "face_stand_down"):
         enabled = value is True
         _CORE.config[key] = enabled
         for component in (_CORE.safety_mgr, _CORE.lockdown_mgr):

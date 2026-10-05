@@ -24,6 +24,26 @@
     ],
     "registered": true
   },
+  "nova/add_resident": {
+    "admin": true,
+    "error_codes": [
+      "add_failed",
+      "faces_failed",
+      "invalid_name",
+      "roster_full"
+    ],
+    "fields": {
+      "name": {
+        "required": true
+      }
+    },
+    "literal_response_keys": [
+      "added",
+      "residents",
+      "saved"
+    ],
+    "registered": true
+  },
   "nova/apply_ai_config": {
     "admin": true,
     "error_codes": [],
@@ -606,6 +626,24 @@
     ],
     "registered": true
   },
+  "nova/list_faces": {
+    "admin": true,
+    "error_codes": [
+      "faces_failed"
+    ],
+    "fields": {
+      "limit": {
+        "required": false
+      }
+    },
+    "literal_response_keys": [
+      "confidence_threshold",
+      "faces",
+      "residents",
+      "sources"
+    ],
+    "registered": true
+  },
   "nova/list_models": {
     "admin": true,
     "error_codes": [],
@@ -696,6 +734,25 @@
     "literal_response_keys": [
       "appliances",
       "ok"
+    ],
+    "registered": true
+  },
+  "nova/remove_resident": {
+    "admin": true,
+    "error_codes": [
+      "faces_failed",
+      "invalid_name",
+      "remove_failed"
+    ],
+    "fields": {
+      "name": {
+        "required": true
+      }
+    },
+    "literal_response_keys": [
+      "removed",
+      "residents",
+      "saved"
     ],
     "registered": true
   },

@@ -771,6 +771,15 @@ setTimeout(async () => {
           && !!card.querySelector('select[data-cfg-key="security_alarm_entity"]')
           && !!card.querySelector('button[data-cfg-key="lockdown_auto_on_arm"]');
       })()],
+    ["settings tab: Security Alarm card has the opt in face stand down toggle, OFF, saying it never closes an open investigation",
+      (() => {
+        const card = sRoot.getElementById("settings-card-security_alarm");
+        const t = card && card.querySelector('button[data-cfg-key="face_stand_down"]');
+        return !!t && t.classList.contains("off") && t.textContent.trim() === "OFF"
+          && /NEW intrusion investigation/.test(card.textContent)
+          && /never closes an investigation that is already open/.test(card.textContent)
+          && /photo or a lookalike/.test(card.textContent);
+      })()],
     ["settings tab: Floor Plan Editor is real, with rooms and the drag canvas",
       (() => {
         const fpeCard = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Floor Plan Editor/.test(c.querySelector(".panel-title")?.textContent || ""));
@@ -2558,6 +2567,93 @@ setTimeout(async () => {
   sRoot = elNew.shadowRoot;
   checks.push(["intrusion tab: CALL OFF calls nova/intrusion dismiss and updates the status",
     /CALLED OFF/.test(sRoot.getElementById("newIntrStatus")?.textContent || "")]);
+
+  // Faces tab: recent faces and the resident roster. Admin only commands;
+  // Nova has no face engine of its own and no image is shown.
+  const facesCallWS = hass.callWS;
+  const _faceCalls = [];
+  let _faceResidents = ["Sam"];
+  let _faceMode = "empty";                       // empty -> data -> denied
+  hass.callWS = async (m) => {
+    if (m.type === "nova/list_faces") {
+      _faceCalls.push({ ...m });
+      if (_faceMode === "denied") { const e = new Error("Unauthorized"); e.code = "unauthorized"; throw e; }
+      if (_faceMode === "empty") return { faces: [], residents: [], confidence_threshold: 60,
+        sources: { configured: false, mqtt: false, frigate_sensors: 0, recognition_source: "both" } };
+      return { faces: [
+        { name: "Sam", camera: "front_door", camera_entity: "camera.front_door", confidence: 93.4, age_seconds: 45, known: true, resident: _faceResidents.includes("Sam"), source: "frigate" },
+        { name: "Visitor", camera: "garden", camera_entity: "camera.garden", confidence: 71, age_seconds: 4000, known: true, resident: false, source: "doubletake" },
+        { name: "unknown", camera: "garden", camera_entity: "camera.garden", confidence: 0, age_seconds: 90000, known: false, resident: false, source: "frigate" },
+      ], residents: [..._faceResidents], confidence_threshold: 60,
+      sources: { configured: true, mqtt: true, frigate_sensors: 2, recognition_source: "both" } };
+    }
+    if (m.type === "nova/add_resident") {
+      _faceCalls.push({ ...m });
+      if (!_faceResidents.includes(m.name)) _faceResidents.push(m.name);
+      return { added: true, residents: [..._faceResidents], saved: true };
+    }
+    if (m.type === "nova/remove_resident") {
+      _faceCalls.push({ ...m });
+      _faceResidents = _faceResidents.filter(n => n !== m.name);
+      return { removed: true, residents: [..._faceResidents], saved: true };
+    }
+    return facesCallWS(m);
+  };
+  const facesTabBtn = Array.from(newRoot.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === "faces");
+  checks.push(["faces tab: a Faces nav tab exists", !!facesTabBtn]);
+  facesTabBtn.click();
+  await new Promise(r => setTimeout(r, 30));
+  sRoot = elNew.shadowRoot;
+  const emptyText = sRoot.getElementById("facesBody")?.textContent || "";
+  checks.push(["faces tab: says Nova has no face engine of its own and shows no images",
+    /does not run its own face engine/.test(sRoot.innerHTML) && /Frigate or Double Take/.test(sRoot.innerHTML)
+    && !sRoot.querySelector("#facesBody img") && !/<img/.test(sRoot.getElementById("facesBody")?.innerHTML || "")]);
+  checks.push(["faces tab: helpful empty state when no recognition source is configured",
+    /No face recognition source found/.test(emptyText) && /Frigate/.test(emptyText)]);
+  _faceMode = "data";
+  await elNew._fetchFaces();
+  sRoot = elNew.shadowRoot;
+  const faceRows = Array.from(sRoot.querySelectorAll("#facesBody .face-row"));
+  const badges = row => Array.from(row.querySelectorAll(".feed-text > span[class^='diag-']")).map(b => b.textContent.trim());
+  checks.push(["faces tab: rows show Known or Unknown and a Resident badge, with camera, confidence and age",
+    faceRows.length === 3
+    && badges(faceRows[0]).join() === "KNOWN,RESIDENT"
+    && /Sam/.test(faceRows[0].textContent) && /front_door/.test(faceRows[0].textContent)
+    && /93%/.test(faceRows[0].textContent) && /just now/.test(faceRows[0].textContent)
+    && badges(faceRows[1]).join() === "KNOWN" && /ADD RESIDENT/.test(faceRows[1].textContent)
+    && badges(faceRows[2]).join() === "UNKNOWN" && !faceRows[2].querySelector("button")]);
+  checks.push(["faces tab: residents list and the stand down status (off by default)",
+    /Sam/.test(sRoot.getElementById("facesResidents")?.textContent || "")
+    && /Intrusion stand down is\s*OFF/.test(sRoot.innerHTML.replace(/<[^>]+>/g, ""))]);
+  sRoot.querySelector('button[data-face-add="Visitor"]').click();
+  await new Promise(r => setTimeout(r, 30));
+  sRoot = elNew.shadowRoot;
+  checks.push(["faces tab: Add resident calls nova/add_resident and the list refreshes",
+    _faceCalls.some(c => c.type === "nova/add_resident" && c.name === "Visitor")
+    && /Visitor/.test(sRoot.getElementById("facesResidents")?.textContent || "")
+    && /RESIDENT/.test(Array.from(sRoot.querySelectorAll("#facesBody .face-row"))[1]?.textContent || "")]);
+  sRoot.getElementById("facesAddName").value = "Anna";
+  sRoot.getElementById("facesAdd").click();
+  await new Promise(r => setTimeout(r, 30));
+  sRoot = elNew.shadowRoot;
+  checks.push(["faces tab: typing a name and Add resident adds it",
+    _faceCalls.some(c => c.type === "nova/add_resident" && c.name === "Anna")
+    && /Anna/.test(sRoot.getElementById("facesResidents")?.textContent || "")]);
+  sRoot.querySelector('#facesResidents button[data-face-remove="Sam"]').click();
+  await new Promise(r => setTimeout(r, 30));
+  sRoot = elNew.shadowRoot;
+  checks.push(["faces tab: Remove calls nova/remove_resident and the resident goes",
+    _faceCalls.some(c => c.type === "nova/remove_resident" && c.name === "Sam")
+    && !/Sam/.test(sRoot.getElementById("facesResidents")?.textContent || "")]);
+  _faceMode = "denied";
+  await elNew._fetchFaces();
+  sRoot = elNew.shadowRoot;
+  checks.push(["faces tab: a non admin sees that Faces needs an administrator, not a broken page",
+    /needs a Home Assistant administrator/.test(sRoot.getElementById("facesBody")?.textContent || "")]);
+  hass.callWS = facesCallWS;
+  Array.from(sRoot.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === "intrusion").click();
+  await new Promise(r => setTimeout(r, 20));
+  sRoot = elNew.shadowRoot;
   hass.callWS = intrusionCallWS;
 
   await elNew._fetchIntrusionLog();

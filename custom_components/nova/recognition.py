@@ -24,8 +24,9 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import deque
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from homeassistant.core import HomeAssistant, callback
 
@@ -47,6 +48,33 @@ _RECOGNITION_CACHE: dict[str, dict] = {}
 _RECENT_EVENTS: dict[str, dict] = {}
 CACHE_MAX_AGE = timedelta(hours=2)
 CONFIDENCE_THRESHOLD = 60  # anything below this is considered uncertain
+
+# The Faces tab lists sightings up to this old (the Frigate sensors hold the
+# last face indefinitely, so something has to bound them).
+RECENT_FACES_MAX_AGE_S = 24 * 3600
+
+# Every recognition a backend reports, newest last. The cache above keeps only
+# the latest result per camera, so a resident seen a moment after a stranger
+# would hide the stranger. The face roster's intrusion stand down needs that
+# history (an unknown face in the window must block it), and the Faces tab
+# lists from it. Only remember_recognition() writes here, so only the backends
+# (Double Take, Frigate) can: never user text, never the conversation.
+_FACE_LOG: deque = deque(maxlen=300)
+# Frigate person detections (a person was seen, whether or not it was named).
+_PERSON_LOG: deque = deque(maxlen=100)
+
+# Names a backend uses for "a face, but nobody we know".
+UNKNOWN_NAMES = ("unknown", "unknown person", "unknown_face", "unrecognized",
+                 "unrecognised")
+
+
+def is_unknown_name(name) -> bool:
+    """True for an empty name or one of the backends' "unknown" labels."""
+    return str(name or "").strip().lower() in UNKNOWN_NAMES + ("", "none", "null")
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _normalize_score(raw) -> float:
@@ -171,17 +199,63 @@ def _camera_entity_from_name(camera_name: str) -> str:
     return f"camera.{camera_name.lower()}"
 
 
-def remember_recognition(camera_name: str, name: str, confidence: float) -> None:
-    """Store a recognition event in the in-memory cache."""
+def remember_recognition(camera_name: str, name: str, confidence: float,
+                         source: str = "") -> None:
+    """Store a recognition event in the in-memory cache, and in the recent
+    recognition log. `source` says which backend reported it."""
     entity_id = _camera_entity_from_name(camera_name)
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     prev = _RECOGNITION_CACHE.get(entity_id, {})
+    try:
+        _FACE_LOG.append({"camera_entity": entity_id, "name": str(name or ""),
+                          "confidence": float(confidence or 0.0), "ts": now,
+                          "source": source})
+    except Exception:
+        pass
     _RECOGNITION_CACHE[entity_id] = {
         "name":       name,
         "confidence": confidence,
         "ts":         now,
         "unknown_count": 0 if name.lower() != "unknown" else prev.get("unknown_count", 0) + 1,
     }
+
+
+def note_person_detected(camera_name: str) -> None:
+    """Record that Frigate saw a person on this camera, named or not."""
+    try:
+        _PERSON_LOG.append({"camera_entity": _camera_entity_from_name(camera_name),
+                            "ts": _utcnow()})
+    except Exception:
+        pass
+
+
+def recent_face_events(window_s: float) -> list[dict]:
+    """Backend recognitions from the last `window_s` seconds, oldest first,
+    each with `age_seconds`. Never raises."""
+    out: list[dict] = []
+    try:
+        now = _utcnow()
+        for e in list(_FACE_LOG):
+            age = (now - e["ts"]).total_seconds()
+            if 0 <= age <= window_s:
+                out.append({**e, "age_seconds": int(age)})
+    except Exception:
+        return []
+    return out
+
+
+def recent_person_detections(window_s: float) -> list[dict]:
+    """Frigate person detections from the last `window_s` seconds. Never raises."""
+    out: list[dict] = []
+    try:
+        now = _utcnow()
+        for e in list(_PERSON_LOG):
+            age = (now - e["ts"]).total_seconds()
+            if 0 <= age <= window_s:
+                out.append({**e, "age_seconds": int(age)})
+    except Exception:
+        return []
+    return out
 
 
 def last_seen_at(hass: HomeAssistant, camera_entity: str) -> Optional[dict]:
@@ -249,6 +323,116 @@ def recognition_context_string(hass: HomeAssistant) -> str:
     return "Recent faces: " + "; ".join(bits) + "."
 
 
+def _roster_names() -> set[str]:
+    try:
+        from . import face_roster
+        return face_roster.normalized_names()
+    except Exception:
+        return set()
+
+
+def _sensor_age_seconds(st) -> Optional[int]:
+    try:
+        ts = getattr(st, "last_updated", None) or getattr(st, "last_changed", None)
+        if ts is None:
+            return None
+        if getattr(ts, "tzinfo", None) is not None:
+            ts = ts.astimezone(timezone.utc).replace(tzinfo=None)
+        return max(0, int((_utcnow() - ts).total_seconds()))
+    except Exception:
+        return None
+
+
+def recent_faces(hass, limit: int = 20) -> list[dict]:
+    """Recently recognised faces for the Faces tab, newest first.
+
+    Merges the backends' recognition log (Double Take and Frigate over MQTT,
+    including faces named "unknown") with Frigate's `*_last_recognized_face`
+    sensors. One row per person and camera: the newest sighting wins. Each row:
+    {name, camera, camera_entity, confidence, age_seconds, known, resident,
+    source}. `known` is False for an "unknown" face. `resident` is True when the
+    name is on the face roster (matched with identity.normalize). No image is
+    read, returned or stored. Never raises."""
+    try:
+        limit = max(1, min(int(limit), 100))
+    except (TypeError, ValueError):
+        limit = 20
+    try:
+        from .identity import normalize
+        roster = _roster_names()
+        rows: dict[tuple[str, str], dict] = {}
+
+        def _offer(name, cam_entity, conf, age, source):
+            name = str(name or "").strip()
+            if not name or age is None:
+                return
+            key = (normalize(name), cam_entity)
+            cur = rows.get(key)
+            if cur is not None and cur["age_seconds"] <= age:
+                return
+            known = not is_unknown_name(name)
+            rows[key] = {
+                "name": name,
+                "camera": cam_entity.replace("camera.", ""),
+                "camera_entity": cam_entity,
+                "confidence": round(float(conf or 0.0), 1),
+                "age_seconds": int(age),
+                "known": known,
+                "resident": known and normalize(name) in roster,
+                "source": source,
+            }
+
+        now = _utcnow()
+        for e in list(_FACE_LOG):
+            _offer(e["name"], e["camera_entity"], e["confidence"],
+                   (now - e["ts"]).total_seconds(), e.get("source") or "mqtt")
+        for rec_cam, rec in list(_RECOGNITION_CACHE.items()):
+            _offer(rec.get("name"), rec_cam, rec.get("confidence"),
+                   (now - rec["ts"]).total_seconds(), "recent_cache")
+        for st in hass.states.async_all("sensor"):
+            eid = str(getattr(st, "entity_id", ""))
+            if not eid.endswith("_last_recognized_face"):
+                continue
+            val = str(st.state or "").strip()
+            if val.lower() in _FACE_SENSOR_EMPTY:
+                continue
+            attrs = st.attributes or {}
+            conf = _normalize_score(
+                attrs.get("score", attrs.get("confidence", attrs.get("sub_label_score"))))
+            slug = eid[len("sensor."):-len("_last_recognized_face")]
+            _offer(val, f"camera.{slug}", conf, _sensor_age_seconds(st), "frigate_sensor")
+        out = sorted(rows.values(), key=lambda r: r["age_seconds"])
+        return [r for r in out if r["age_seconds"] <= RECENT_FACES_MAX_AGE_S][:limit]
+    except Exception as exc:
+        _LOGGER.debug("recognition: recent_faces failed: %s", exc)
+        return []
+
+
+def source_status(hass) -> dict[str, Any]:
+    """What identity sources Nova can see, for the Faces tab's empty state.
+    Never raises."""
+    out: dict[str, Any] = {"recognition_source": "both", "mqtt": False,
+                           "frigate_sensors": 0, "seen_recently": bool(_FACE_LOG)}
+    try:
+        from . import nova_config
+        out["recognition_source"] = str(
+            nova_config.get("recognition_source", "both") or "both").lower()
+    except Exception:
+        pass
+    try:
+        out["mqtt"] = bool(hass.services.has_service("mqtt", "publish"))
+    except Exception:
+        pass
+    try:
+        out["frigate_sensors"] = sum(
+            1 for st in hass.states.async_all("sensor")
+            if str(getattr(st, "entity_id", "")).endswith("_last_recognized_face"))
+    except Exception:
+        pass
+    out["configured"] = bool(out["frigate_sensors"] or out["mqtt"] or out["seen_recently"])
+    return out
+
+
 # ─── MQTT subscription ───────────────────────────────────────────────────────
 
 async def register_recognition_listener(hass: HomeAssistant) -> list:
@@ -283,7 +467,7 @@ async def register_recognition_listener(hass: HomeAssistant) -> list:
         name = match.get("name", "unknown")
         confidence = float(match.get("confidence", 0))
 
-        remember_recognition(camera, name, confidence)
+        remember_recognition(camera, name, confidence, source="doubletake")
 
         # Fire a custom event that automations/blueprints can use
         hass.bus.async_fire(
@@ -347,6 +531,8 @@ async def register_recognition_listener(hass: HomeAssistant) -> list:
                     camera, score * 100, event_id[:8],
                 )
 
+                note_person_detected(camera)
+
                 # Cache the event for snapshot retrieval
                 _RECENT_EVENTS[camera_entity] = {
                     "event_id": event_id,
@@ -373,7 +559,7 @@ async def register_recognition_listener(hass: HomeAssistant) -> list:
                     sub = after.get("sub_label")
                     sub_name, sub_conf = _parse_sub_label(sub)
                     if sub_name:
-                        remember_recognition(camera, sub_name, sub_conf)
+                        remember_recognition(camera, sub_name, sub_conf, source="frigate")
                         hass.bus.async_fire("nova_face_recognized", {
                             "camera": camera,
                             "camera_entity": camera_entity,
@@ -418,7 +604,7 @@ async def register_recognition_listener(hass: HomeAssistant) -> list:
                     conf = _normalize_score(payload.get("score"))
                     is_unknown = name.lower() in ("unknown", "unknown person")
                     if camera:
-                        remember_recognition(camera, name, conf)
+                        remember_recognition(camera, name, conf, source="frigate_tracked")
                     hass.bus.async_fire("nova_face_recognized", {
                         "camera": camera,
                         "camera_entity": f"camera.{camera}" if camera else "",

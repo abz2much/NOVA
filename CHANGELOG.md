@@ -1,3 +1,41 @@
+## [8.7.11] — A resident roster and a Faces tab, and an opt in intrusion stand down
+
+**Part 1: roster and Faces tab (always on, no change to any alert, announcement or intrusion behaviour)**
+- New **Faces** tab. It lists recent faces with a **Known** or **Unknown** badge and a **Resident** badge, with camera, confidence and age, and has buttons to add or remove a resident. It says plainly that Nova does not run its own face engine and reads names from Frigate or Double Take, and it shows a helpful empty state when no recognition source is found. **No image is shown, returned or stored.**
+- New `face_roster.py`: the household resident list, saved to `<config>/nova/face_roster.json` (names only). The file is readable only by Home Assistant's own user (`0600`), written atomically in the executor under a lock, and loaded once at setup after `paths.configure(hass)`. A missing, empty or corrupt file means an empty roster. Nothing in it raises. Names are matched with `identity.normalize`, so "Sam", "sam" and " Sam " are one person. A name must be a string of 1 to 60 characters with no control characters, and "unknown" and its relatives (`unknown person`, `none`, `null`) are refused, because an "unknown" resident would make every stranger a resident. At most 50 residents.
+- New `recognition.recent_faces(hass, limit)`: merges Nova's recognition log (Double Take and Frigate over MQTT, including faces named "unknown") with Frigate's `*_last_recognized_face` sensors. One row per person and camera, newest first, with `name, camera, camera_entity, confidence, age_seconds, known, resident, source`. It never raises. `recognition.source_status(hass)` feeds the empty state.
+- `recognition.py` keeps a short log of every recognition a backend reports, and of Frigate person detections. `remember_recognition()` gains an optional `source` argument, and the three backend handlers pass it. Behaviour of the cache, `who_is_where`, `who_do_you_see` and the events is unchanged.
+- **Three new websocket commands, in a new `ws_faces.py`, all admin only:** `nova/list_faces`, `nova/add_resident`, `nova/remove_resident`. The list is admin gated too, like the other commands that show what the home saw (`nova/get_spoken_history`, `nova/list_actions`, `nova/camera_snapshot`): it says who was seen on which camera, and the roster is what the stand down trusts. A non admin sees "Faces needs a Home Assistant administrator". Commands: 56 before, **59** now. Admin gated: 41 before, **44** now.
+
+**Part 2: intrusion stand down (opt in, off by default)**
+- New setting `face_stand_down`, off by default, under Settings → Security alarm next to the other intrusion settings. Only the literal JSON `true` turns it on, and it is written through the same validated panel path. It applies live, with no reload.
+- When on, a recognised resident can stop Nova **opening a new intrusion investigation**. The rules:
+  1. The name is on the roster, the recognition came from a backend (Frigate or Double Take reaching Nova through `remember_recognition`), its confidence is at or above `CONFIDENCE_THRESHOLD` (60), and it was seen in the last 180 seconds.
+  2. If any other face was reported in that window on any camera, it does not stand down. That means an unknown face, a face below the threshold, or a named face that is not on the roster. This is stricter than "an unknown face", on purpose.
+  3. It never ends an investigation that is already open. It is only asked at the three places a new investigation would start (away, confined, asleep) and is not called from the code that runs an open one.
+  4. It never affects critical alerts, lockdown, freeze or the mute rules. Nothing else reads the roster, and a test proves it.
+  5. Every stand down is written to the Action Audit Log (`intrusion_face_stand_down`, source `safety`): who, which camera, the confidence, and why. If that write fails, it does not stand down.
+  6. On any error it alerts.
+- A stand down does not hold anything back. It sets no lockout, so if the resident goes quiet or an unknown face appears, the next check (every 30 seconds while there is motion) starts the investigation as usual. While a resident stays in view and there is motion, each check writes one audit row.
+- **Why it is built this way:** a face match can be a photo, a lookalike, or a resident with an intruder behind them. So it only reduces false alarms at the start, and never closes anything that is already running.
+
+**What this does not cover**
+- **Nova can only stand down on what the backends report.** Double Take only publishes matches, and Frigate only names faces it recognises, so a face nobody recognised may never reach Nova. To cover that gap, a Frigate person detection on a camera where no resident was recognised in the window also blocks the stand down. If Frigate does not publish person events (or MQTT is down), Nova has less to check against, and the guard is weaker. Treat this setting as a convenience, not a security control.
+- **The Frigate `last_recognized_face` sensors are shown on the Faces tab but never used for a stand down.** They keep the last face indefinitely and carry no event time Nova can trust.
+- **A name is whatever the backend says.** Anyone who can publish to the Double Take or Frigate MQTT topics can produce a resident name. The MQTT broker is the trust boundary.
+- The Faces tab shows names only: no images, no Nova guess at who an unknown face is, no pinned snapshots, and no motion analysis for plain cameras.
+- **Existing behaviour found, not changed:** `identity._face_votes` multiplies a 0 to 100 percent confidence into a weight that is meant to be 0 to 1, so a recognised face outweighs every other identity signal. It also keys votes by the raw name while other signals use the normalised one. Both are left as they are, because Part 1 must not change behaviour.
+
+**Contracts and tests**
+- `tests/fixtures/contracts/websocket.json` (the three new commands, all `admin: true`) and `tests/fixtures/contracts/config.json` (`face_stand_down` in `panel_writable_keys`) are the only pinned contracts that changed. No other contract changed. The `get_panel_data` `config` block gains `face_stand_down` (not pinned).
+- `tests/unit/test_websocket_admin_gate.py`: the three new command names added to `ADMIN_GATED_TYPES`, and the count assertion changed from 41 to 44. Nothing else in an existing test was edited.
+- `tests/ws_sources.py` already reads every `ws_*.py`, so `ws_faces.py` is covered with no change; a test proves it.
+- New: `tests/unit/test_face_roster.py` and `tests/unit/test_face_stand_down.py` (every rule, off by default, the armed away and confinement paths still alerting when it is off, and mutation checked), `tests/integration/test_face_roster.py` (the admin gate, validation, the `0600` file, panel data), and panel smoke checks for the tab and the setting.
+
+**Caveats**
+- The Python 3.14 run that CI also does was not measured locally.
+- Only tested with fakes and a real Home Assistant test instance. It has not been tried with a live Frigate or Double Take.
+
 ## [8.7.10] — Output language: choose the language Nova speaks and writes in
 
 **What it does**

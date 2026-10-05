@@ -64,6 +64,7 @@
     if (this._currentTab === "diagnostics") this._wireDiagnostics();
     if (this._currentTab === "memory") { this._wireMemory(); this._fetchKnowledge(); this._fetchPersonRoutines(); }
     if (this._currentTab === "intrusion") this._wireIntrusion();
+    if (this._currentTab === "faces") this._wireFaces();
     if (this._currentTab === "residence") {
       this._build3DHouseNew();
       this._wireResidenceControlsNew();

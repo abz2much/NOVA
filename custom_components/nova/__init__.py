@@ -120,6 +120,8 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     # and off the event loop. A missing or corrupt file is not an error.
     from . import output_gate
     await hass.async_add_executor_job(output_gate.load_mutes)
+    from . import face_roster
+    await hass.async_add_executor_job(face_roster.load)
     return True
 
 
