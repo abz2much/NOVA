@@ -591,12 +591,18 @@ def ignore(entity_pattern: str, duration_minutes: int = 0,
            reason: str = "") -> dict:
     """Add an ignore rule. Called by the agent's 'ignore' tool."""
     if _m_state._CORE.ignore_mgr:
-        rule = _m_state._CORE.ignore_mgr.add(entity_pattern, duration_minutes, reason)
+        try:
+            rule = _m_state._CORE.ignore_mgr.add(entity_pattern, duration_minutes, reason)
+        except ValueError as exc:
+            # A pattern that matches everything is refused (8.7.20).
+            return {"success": False, "enforced": False, "error": str(exc)}
         return {
             "success": True,
             "enforced": True,
             "pattern": rule.entity_pattern,
-            "duration": duration_minutes,
+            # The real duration: a request with none gets the default (8.7.20).
+            "duration": (duration_minutes if duration_minutes > 0
+                         else _m_ignore.DEFAULT_IGNORE_MINUTES),
             "reason": reason,
         }
     return {"success": False, "enforced": False, "error": "Cognitive core not running"}

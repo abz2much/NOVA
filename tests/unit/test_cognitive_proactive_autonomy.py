@@ -463,14 +463,17 @@ def test_revoke_autonomy_through_the_core(cc):
 def test_ignore_rules_match_globs_expire_and_persist(cc, clock):
     mgr = cc.IgnoreManager()
     mgr.add("binary_sensor.garage*", duration_minutes=10, reason="working in there")
-    mgr.add("light.porch", reason="forever")
+    mgr.add("light.porch", reason="no duration given")
     assert mgr.is_ignored("binary_sensor.garage_side") and mgr.is_ignored("light.porch")
     assert not mgr.is_ignored("light.other")
-    assert [r["remaining_min"] for r in mgr.list_rules()] == [10, "permanent"]
+    # 8.7.20: no duration is no longer "permanent"; it is the 30 minute default.
+    assert [r["remaining_min"] for r in mgr.list_rules()] == [10, 30]
     clock["now"] += 601
     assert not mgr.is_ignored("binary_sensor.garage_side")                              # expired
     assert [r["pattern"] for r in mgr.list_rules()] == ["light.porch"]
     assert [r["pattern"] for r in cc.IgnoreManager().list_rules()] == ["light.porch"]    # saved and reloaded
+    clock["now"] += 30 * 60
+    assert mgr.list_rules() == []                                                       # it expires too
 
 
 def test_ignore_remove_clear_and_a_corrupt_file(cc, tmp_path):
