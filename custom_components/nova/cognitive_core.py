@@ -33,6 +33,7 @@ facade, like agent.py. The implementation is in sibling modules:
   - core_delivery.py: action delivery and notifications
   - core_ignore.py: ignore rules and the outdoor filter
   - core_lockdown.py: build_lockdown_message and LockdownManager
+  - core_lockdown_sync.py: alarm sync and the lockdown entry points
   - core_pattern_store.py: StateLogger
   - core_proactive.py: ProactiveManager
   - core_safety.py: SafetyManager
@@ -70,6 +71,7 @@ from . import core_common as _m_common
 from . import core_delivery as _m_delivery
 from . import core_ignore as _m_ignore
 from . import core_lockdown as _m_lockdown
+from . import core_lockdown_sync as _m_lockdown_sync
 from . import core_pattern_store as _m_pattern_store
 from . import core_proactive as _m_proactive
 from . import core_safety as _m_safety
@@ -121,6 +123,20 @@ from .core_delivery import (
 )
 from .core_ignore import IgnoreManager, IgnoreRule, is_outdoor_notable
 from .core_lockdown import build_lockdown_message, LockdownManager
+from .core_lockdown_sync import (
+    _ALARM_INDET_LOG_TS,
+    _ALARM_INDET_STATES,
+    _alarm_state_view,
+    _ensure_lockdown_mgr,
+    _lockdown_exempt_locks,
+    _log_alarm_indeterminate,
+    _on_lockdown_state,
+    _sync_lockdown_to_alarm,
+    ensure_lockdown,
+    is_lockdown,
+    lockdown_status,
+    request_lockdown,
+)
 from .core_pattern_store import StateLogger
 from .core_proactive import ProactiveManager
 from .core_safety import SafetyManager
@@ -699,20 +715,6 @@ def _make_followup_runner(hass, config):
     return _run
 
 
-def _lockdown_exempt_locks() -> set:
-    """Locks the nighttime sweep must never touch (thermostat child locks,
-    etc). Single source of truth is whatever LockdownManager loaded from
-    config, so this and the formal lockdown sweep never drift apart."""
-    if _CORE.lockdown_mgr is not None:
-        return _CORE.lockdown_mgr.exempt_locks
-    return LOCKDOWN_EXEMPT_LOCKS_DEFAULT
-
-
-def is_lockdown() -> bool:
-    """True if a formal lockdown is currently active."""
-    return bool(_CORE.lockdown_mgr and _CORE.lockdown_mgr.active)
-
-
 def intrusion_status() -> dict:
     """Snapshot of any active intrusion investigation, for the panel — where the
     search started (the breach) and which rooms activity has reached, so the
@@ -729,13 +731,6 @@ def intrusion_status() -> dict:
         "path": list(inv.get("path", [])),
         "zones": sorted(str(z) for z in inv.get("zones", set())),
     }
-
-
-def lockdown_status() -> dict:
-    """Lockdown state snapshot for the panel / observability."""
-    if _CORE.lockdown_mgr:
-        return _CORE.lockdown_mgr.status()
-    return {"active": False, "since": 0.0, "reason": "", "auto": False, "exempt_windows": 0}
 
 
 async def apply_runtime_config(key: str, value) -> None:
@@ -775,198 +770,6 @@ async def apply_runtime_config(key: str, value) -> None:
         await mgr._persist()
         _LOGGER.warning(
             "Automatic lockdown disabled; cleared Nova lockdown state without device actions")
-
-
-def _ensure_lockdown_mgr(hass: HomeAssistant = None) -> Optional["LockdownManager"]:
-    """
-    Return the lockdown manager, creating it on demand. Lockdown is a security
-    feature, so it must not depend on the cognitive-core loop having started
-    cleanly — if start() was interrupted (and swallowed as non-fatal), the
-    manager is created here the first time it's needed.
-    """
-    if _CORE.lockdown_mgr is None:
-        h = _CORE.hass or hass
-        if h is None:
-            return None
-        try:
-            _CORE.lockdown_mgr = LockdownManager(h, _CORE.config or {})
-            if _CORE.hass is None:
-                _CORE.hass = h
-            _LOGGER.warning("Lockdown manager created on demand (core start had not initialised it)")
-        except Exception as exc:
-            _LOGGER.error("Lockdown manager create failed: %s", exc)
-            return None
-    return _CORE.lockdown_mgr
-
-
-async def ensure_lockdown(hass: HomeAssistant, config: dict) -> None:
-    """
-    Wire lockdown up independently of the observer / cognitive loop: make sure
-    the manager exists, register an event-driven alarm→lockdown sync, and apply
-    the current alarm state immediately (so a reboot while the alarm is armed
-    re-engages lockdown). Idempotent — safe to call from setup and from start().
-    """
-    if _CORE.hass is None:
-        _CORE.hass = hass
-    if not _CORE.config:
-        _CORE.config = config or {}
-    _ensure_lockdown_mgr(hass)
-    if _CORE.alarm_unsub is None:
-        _CORE.alarm_unsub = hass.bus.async_listen("state_changed", _on_lockdown_state)
-        _LOGGER.info("Lockdown listener registered (alarm sync + breach enforcement)")
-    # Startup: adopt the current alarm state silently. Re-announcing "lockdown
-    # engaged" on every reboot/reload (when nothing actually changed) was the
-    # source of the repeated notifications — a fresh arm is announced via the
-    # event path below, not here.
-    await _sync_lockdown_to_alarm("startup", announce=False)
-
-
-async def _on_lockdown_state(event) -> None:
-    """One listener for everything lockdown cares about: alarm arm/disarm sync,
-    plus securing doors/windows/locks that go unsecure while lockdown is active."""
-    try:
-        eid = event.data.get("entity_id", "")
-        dom = eid.split(".", 1)[0]
-        if dom == "alarm_control_panel":
-            old = event.data.get("old_state")
-            # A real arm is disarmed→armed. Entity initialisation on startup
-            # (None / unknown / unavailable → armed) is NOT a fresh arm — adopt
-            # it silently so reboots don't re-announce.
-            genuine = bool(old) and str(getattr(old, "state", "")).lower() not in (
-                "unknown", "unavailable", "none", "")
-            await _sync_lockdown_to_alarm("alarm " + eid, announce=genuine)
-            return
-        mgr = _CORE.lockdown_mgr
-        if mgr is None or not mgr.active or dom not in ("binary_sensor", "cover", "lock"):
-            return
-        new = event.data.get("new_state")
-        if new is None:
-            return
-        action = await mgr.handle_state_change(eid, event.data.get("old_state"), new)
-        if action and _CORE.hass:
-            await _emit_action(_CORE.hass, _CORE.config or {}, action, False)
-    except Exception as exc:
-        _LOGGER.debug("lockdown state handler error: %s", exc)
-
-
-async def _sync_lockdown_to_alarm(reason: str, announce: bool = True) -> None:
-    """
-    Engage lockdown when any alarm is armed, lift it (if it was the alarm that
-    engaged it) when all alarms report a CONFIRMED disarm. Honours
-    lockdown_auto_on_arm and the manual-exit suppression. Event-driven, so it
-    does not depend on the loop. `announce=False` adopts an already-armed
-    state silently (startup / reboot).
-
-    v6.47.2: `unavailable`/`unknown` is neither armed nor disarmed — it's the
-    alarm integration losing its cloud (Cove/Alula drops were LIFTING an
-    armed-night lockdown as "alarm disarmed"). Indeterminate state now HOLDS
-    the current lockdown, with a throttled SAFETY log so the dropout is
-    visible. Only an actual 'disarmed' report lifts an auto-engaged lockdown.
-    """
-    mgr = _CORE.lockdown_mgr
-    if mgr is None or _CORE.hass is None:
-        return
-    from . import safety_config
-    if not safety_config.automatic_lockdown_enabled(_CORE.config or {}):
-        return
-    try:
-        armed, disarm_confirmed, indeterminate = _alarm_state_view(_CORE.hass)
-    except Exception:
-        return
-    if indeterminate:
-        _log_alarm_indeterminate(reason, lockdown_active=mgr.active)
-        return  # hold everything — no engage, no lift, no suppression reset
-    if not armed and mgr._auto_suppressed:
-        mgr._auto_suppressed = False
-        await mgr._persist()
-    action = None
-    if armed and not mgr.active and not mgr._auto_suppressed:
-        action = await mgr.engage("alarm armed", auto=True, announce=announce)
-    elif mgr.active and mgr.auto and disarm_confirmed:
-        action = await mgr.disengage("alarm disarmed")
-    if action and _CORE.hass:
-        try:
-            await _emit_action(_CORE.hass, _CORE.config or {}, action, False)
-        except Exception as exc:
-            _LOGGER.debug("lockdown alarm-sync emit failed: %s", exc)
-
-
-_ALARM_INDET_STATES = {"unavailable", "unknown", "none", ""}
-_ALARM_INDET_LOG_TS = 0.0
-
-
-def _alarm_state_view(hass, config: Optional[dict] = None) -> tuple:
-    """(armed, disarm_confirmed, indeterminate) across all alarm panels.
-    armed: any panel in an armed state. disarm_confirmed: no panel armed AND
-    at least one affirmatively reports 'disarmed'. indeterminate: no panel
-    armed and none disarmed either (all unavailable/unknown, or no panels) —
-    the integration is down, not the alarm off."""
-    armed = False
-    disarmed = False
-    from . import alarm_source
-    selected_config = (_CORE.config or {}) if config is None else config
-    for st in alarm_source.states(hass, selected_config):
-        s = str(st.state).lower()
-        if s in ALARM_ARMED_STATES:
-            armed = True
-        elif s == "disarmed":
-            disarmed = True
-    if armed:
-        return True, False, False
-    if disarmed:
-        return False, True, False
-    return False, False, True
-
-
-def _log_alarm_indeterminate(reason: str, lockdown_active: bool) -> None:
-    """SAFETY-log the alarm integration being unreadable, at most once per
-    10 minutes — a Cove/Alula cloud drop shouldn't spam, but must be seen."""
-    global _ALARM_INDET_LOG_TS
-    now = time.time()
-    if now - _ALARM_INDET_LOG_TS < 600:
-        return
-    _ALARM_INDET_LOG_TS = now
-    msg = ("alarm panel unavailable/unknown (%s) — holding lockdown %s; "
-           "only a confirmed disarm lifts it" %
-           (reason, "ACTIVE" if lockdown_active else "state"))
-    _LOGGER.warning("Lockdown: %s", msg)
-    try:
-        from .websocket import nova_log
-        nova_log("SAFETY", f"Lockdown: {msg}")
-    except Exception:
-        pass
-
-
-async def request_lockdown(on: bool, reason: str = "requested", hass: HomeAssistant = None) -> bool:
-    """
-    Manual lockdown entry point (service / voice / panel). Engages or lifts the
-    lockdown and announces the result. Creates the manager on demand if needed,
-    so it works even if the cognitive core didn't initialise it. Returns True if
-    the request was handled.
-    """
-    mgr = _ensure_lockdown_mgr(hass)
-    h = _CORE.hass or hass
-    if mgr is None or h is None:
-        _LOGGER.warning("Lockdown %s request ignored — manager/hass unavailable",
-                        "engage" if on else "lift")
-        return False
-    action = await (mgr.engage(reason, auto=False) if on else mgr.disengage(reason, manual=True))
-    _LOGGER.info("Lockdown %s requested (%s) → active=%s",
-                 "engage" if on else "lift", reason, mgr.active)
-    if action:
-        try:
-            from . import sleep_detection
-            cfg = _CORE.config or {}
-            sleeping, _ = sleep_detection.is_sleeping(
-                h,
-                bedroom_area_ids=cfg.get("bedroom_areas", []) or [],
-                quiet_start=cfg.get("observer_quiet_start", "22:00"),
-                quiet_end=cfg.get("observer_quiet_end", "07:00"),
-            )
-        except Exception:
-            sleeping = False
-        await _emit_action(h, _CORE.config or {}, action, sleeping)
-    return True
 
 
 async def _loop():
@@ -1524,26 +1327,38 @@ _OWNERS = {
     'SafetyManager': _m_safety,
     'StateLogger': _m_pattern_store,
     'TICK_INTERVAL': _m_common,
+    '_ALARM_INDET_LOG_TS': _m_lockdown_sync,
+    '_ALARM_INDET_STATES': _m_lockdown_sync,
     '_CORE': _m_state,
     '_CoreState': _m_state,
+    '_alarm_state_view': _m_lockdown_sync,
     '_autonomous_done_message': _m_delivery,
     '_emit_action': _m_delivery,
+    '_ensure_lockdown_mgr': _m_lockdown_sync,
     '_execute_action_data': _m_delivery,
     '_f_to_unit': _m_common,
     '_fmt_temp': _m_common,
     '_hass_lang': _m_common,
     '_live_honorific': _m_common,
     '_live_runtime_config': _m_delivery,
+    '_lockdown_exempt_locks': _m_lockdown_sync,
+    '_log_alarm_indeterminate': _m_lockdown_sync,
     '_notification_image_data': _m_delivery,
     '_notify_all_devices': _m_delivery,
     '_notify_i18n': _m_common,
+    '_on_lockdown_state': _m_lockdown_sync,
     '_persona': _m_common,
     '_push_notification': _m_delivery,
     '_rating_data': _m_delivery,
+    '_sync_lockdown_to_alarm': _m_lockdown_sync,
     '_temp_to_f': _m_common,
     'build_lockdown_message': _m_lockdown,
     'discover_outdoor_temp': _m_common,
+    'ensure_lockdown': _m_lockdown_sync,
+    'is_lockdown': _m_lockdown_sync,
     'is_outdoor_notable': _m_ignore,
+    'lockdown_status': _m_lockdown_sync,
+    'request_lockdown': _m_lockdown_sync,
     'write_json_atomic': _m_common,
 }
 

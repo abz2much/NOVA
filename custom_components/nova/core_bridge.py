@@ -15,8 +15,8 @@ from __future__ import annotations
 
 
 def _alarm_state_view(*args, **kwargs):
-    from . import cognitive_core
-    return cognitive_core._alarm_state_view(*args, **kwargs)
+    from . import core_lockdown_sync
+    return core_lockdown_sync._alarm_state_view(*args, **kwargs)
 
 
 def _autonomy_file(*args, **kwargs):
@@ -35,8 +35,8 @@ def _ignore_file(*args, **kwargs):
 
 
 def _lockdown_exempt_locks(*args, **kwargs):
-    from . import cognitive_core
-    return cognitive_core._lockdown_exempt_locks(*args, **kwargs)
+    from . import core_lockdown_sync
+    return core_lockdown_sync._lockdown_exempt_locks(*args, **kwargs)
 
 
 def _lockdown_state_path(*args, **kwargs):
@@ -50,5 +50,5 @@ def _patterns_db(*args, **kwargs):
 
 
 def is_lockdown(*args, **kwargs):
-    from . import cognitive_core
-    return cognitive_core.is_lockdown(*args, **kwargs)
+    from . import core_lockdown_sync
+    return core_lockdown_sync.is_lockdown(*args, **kwargs)
