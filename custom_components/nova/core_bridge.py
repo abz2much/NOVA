@@ -14,14 +14,29 @@ Nothing runs at import time.
 from __future__ import annotations
 
 
+def _alarm_state_view(*args, **kwargs):
+    from . import cognitive_core
+    return cognitive_core._alarm_state_view(*args, **kwargs)
+
+
 def _autonomy_file(*args, **kwargs):
     from . import cognitive_core
     return cognitive_core._autonomy_file(*args, **kwargs)
 
 
+async def _emit_action(*args, **kwargs):
+    from . import cognitive_core
+    return await cognitive_core._emit_action(*args, **kwargs)
+
+
 def _ignore_file(*args, **kwargs):
     from . import cognitive_core
     return cognitive_core._ignore_file(*args, **kwargs)
+
+
+def _lockdown_state_path(*args, **kwargs):
+    from . import cognitive_core
+    return cognitive_core._lockdown_state_path(*args, **kwargs)
 
 
 def _patterns_db(*args, **kwargs):
