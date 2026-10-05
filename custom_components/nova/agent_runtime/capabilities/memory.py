@@ -158,8 +158,8 @@ async def _exec_reject_pending_fact(hass: HomeAssistant, args: dict) -> str:
 # ── Relations (8.7.13) ──────────────────────────────────────────────────────
 # Links between things ("sam owns car.jeep"). Same trust model as pending
 # facts, stricter: propose_relation can only STAGE a pending relation, nothing
-# reads it until a person confirms it (in conversation, through
-# confirm_pending_relation, or in the panel's Memory tab), and a confirmed one
+# reads it until a person confirms it in the panel's Memory tab (8.7.14: there
+# is deliberately NO agent tool that confirms a relation), and a confirmed one
 # is shown to the model only inside a fenced block.
 
 _RELATION_ERRORS = {
@@ -214,27 +214,12 @@ async def _exec_propose_relation(hass: HomeAssistant, args: dict) -> str:
         "message": (
             f"Saved '{rel['subject']} {rel['predicate']} {rel['object']}' as "
             f"PENDING, not yet trusted and not shown to you again until the "
-            f"user confirms it. Ask the user whether it is correct. If they "
-            f"confirm, call confirm_pending_relation with relation_id="
-            f"{rel['id']}. If they say no or correct it, call "
-            f"reject_pending_relation with the same relation_id. It is a "
-            f"memory only and changes no alert, automation or device."),
+            f"user confirms it. You cannot confirm it yourself: tell the user "
+            f"to confirm it in the Memory tab of the Nova panel (Relations). "
+            f"If they say it is wrong, call reject_pending_relation with "
+            f"relation_id={rel['id']}. It is a memory only and changes no "
+            f"alert, automation or device."),
     })
-
-
-async def _exec_confirm_pending_relation(hass: HomeAssistant, args: dict) -> str:
-    """Confirm a pending relation, once the user has actually approved it."""
-    rid = _relation_id(args)
-    if rid is None:
-        return json.dumps({"error": "relation_id is required and must be an integer"})
-    from ... import knowledge
-    ok = await hass.async_add_executor_job(knowledge.confirm_relation, rid)
-    if not ok:
-        return json.dumps({"error": f"no pending relation with id {rid} (already "
-                                    f"confirmed, rejected, or never existed)"})
-    return json.dumps({"success": True, "confirmed": rid, "enforced": False,
-                       "message": "Relation confirmed. It is a memory only, not a "
-                                  "change to any alerting or automation code."})
 
 
 async def _exec_reject_pending_relation(hass: HomeAssistant, args: dict) -> str:

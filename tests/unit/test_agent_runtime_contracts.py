@@ -32,7 +32,7 @@ def test_tool_specs_are_byte_identical(agent):
 
 def test_tool_names_are_unique(agent):
     names = [t["function"]["name"] for t in agent.NOVA_TOOLS]
-    assert len(names) == len(set(names)) == 55
+    assert len(names) == len(set(names)) == 54
 
 
 def test_facade_symbols_still_importable(agent):

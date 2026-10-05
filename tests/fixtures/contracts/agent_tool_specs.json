@@ -324,7 +324,7 @@
     },
     {
       "function": {
-        "description": "Remember that two things are linked, for example 'sam owns car.jeep' or 'kitchen adjacent_to garage'. Use it when the user tells you how two people, places or things relate. It is saved as PENDING, not yet trusted and not shown to you again: you must ask the user to confirm it, then call confirm_pending_relation (or reject_pending_relation if they say no). It only stores a link you can recall later; it never changes what any alerting, automation or device does.",
+        "description": "Remember that two things are linked, for example 'sam owns car.jeep' or 'kitchen adjacent_to garage'. Use it when the user tells you how two people, places or things relate. It is saved as PENDING, not yet trusted and not shown to you again. You cannot confirm it: only the user can, in the Memory tab of the Nova panel, so tell them to confirm it there (or call reject_pending_relation if they say it is wrong). It only stores a link you can recall later; it never changes what any alerting, automation or device does.",
         "name": "propose_relation",
         "parameters": {
           "properties": {
@@ -345,25 +345,6 @@
             "subject",
             "predicate",
             "object"
-          ],
-          "type": "object"
-        }
-      },
-      "type": "function"
-    },
-    {
-      "function": {
-        "description": "Confirm a relation that propose_relation saved as pending, once the user has actually said it is correct. Never call this unless the user has genuinely confirmed it in this conversation.",
-        "name": "confirm_pending_relation",
-        "parameters": {
-          "properties": {
-            "relation_id": {
-              "description": "The relation_id returned by the propose_relation call being confirmed.",
-              "type": "integer"
-            }
-          },
-          "required": [
-            "relation_id"
           ],
           "type": "object"
         }

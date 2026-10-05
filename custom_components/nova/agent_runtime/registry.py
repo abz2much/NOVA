@@ -52,7 +52,6 @@ from .capabilities.home import (
 )
 from .capabilities.memory import (
     _exec_confirm_pending_fact,
-    _exec_confirm_pending_relation,
     _exec_ignore,
     _exec_ingest_documents,
     _exec_lookup_relations,
@@ -104,7 +103,6 @@ _TOOL_MAP = {
     "confirm_pending_fact": _exec_confirm_pending_fact,
     "reject_pending_fact": _exec_reject_pending_fact,
     "propose_relation":    _exec_propose_relation,
-    "confirm_pending_relation": _exec_confirm_pending_relation,
     "reject_pending_relation": _exec_reject_pending_relation,
     "lookup_relations":    _exec_lookup_relations,
     "ignore_entity":       _exec_ignore,
@@ -170,7 +168,6 @@ _CLASSIFICATION = {
     "confirm_pending_fact":       ("memory", False, True, False, _H),
     "reject_pending_fact":        ("memory", False, True, False, _H),
     "propose_relation":           ("memory", False, True, False, _H),
-    "confirm_pending_relation":   ("memory", False, True, False, _H),
     "reject_pending_relation":    ("memory", False, True, False, _H),
     # Read only. Its text was first written by the model or the user, so the
     # result goes back inside a fresh prompt fence, like search_documents.
