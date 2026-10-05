@@ -25,8 +25,8 @@ def _autonomy_file(*args, **kwargs):
 
 
 async def _emit_action(*args, **kwargs):
-    from . import cognitive_core
-    return await cognitive_core._emit_action(*args, **kwargs)
+    from . import core_delivery
+    return await core_delivery._emit_action(*args, **kwargs)
 
 
 def _ignore_file(*args, **kwargs):
