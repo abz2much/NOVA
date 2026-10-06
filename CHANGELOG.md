@@ -1,3 +1,19 @@
+## [8.7.21] — Fix: Nova's spoken replies no longer show or read out markdown
+
+Spoken History showed `**` and `- ` in replies such as "I'm not quite following, Sir". The model returns markdown in voice replies. Nothing removed it, so the speaker and the history got it as written, and the panel shows stored text without rendering markdown.
+
+- A new `speech_text()` removes bold, italics, headings, backticks, links and list markers, and turns lists into flowing sentences. Plain text passes through unchanged.
+- It runs on every conversation reply, so the speaker, Spoken History, chat memory and "repeat that" all get the clean text.
+- It also runs inside `async_announce`, so briefings, alerts and every other announcement are covered.
+- The main system prompt now says replies are read aloud and must be plain sentences with no markdown or lists.
+
+**Not changed**
+- Entries already in Spoken History keep their asterisks, as they are stored text.
+- If `nova_persona.txt` tells the model to use lists, the cleaner still strips them, but the persona should be changed too.
+
+**Tests**
+- New `test_speech_text.py`, including a real reply from the history, and a test that the text sent to the speaker is clean.
+
 ## [8.7.20] — Fixes: Nova no longer does or says the wrong thing in seven cases found by the 8.7.19 tests
 
 Each fix fails toward doing nothing or telling the truth, never toward acting.
