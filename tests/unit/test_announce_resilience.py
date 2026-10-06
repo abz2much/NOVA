@@ -579,3 +579,20 @@ async def test_repeat_of_id_is_threaded_through_to_spoken_history(tts, sh, tmp_p
     repeat_entry = entries[0]  # newest first
     assert repeat_entry["source"] == "repeat"
     assert repeat_entry["repeat_of_id"] == original_id
+
+
+@pytest.mark.asyncio
+async def test_announce_strips_markdown_before_speaking(tts, monkeypatch):
+    # The model (or any caller) can hand over markdown; the speaker must get
+    # plain text, whatever the context.
+    monkeypatch.setattr(tts, "_is_sonos", lambda hass, eid: False)
+    hass = _Hass({"media_player.a": _State("media_player.a", "idle")})
+    ok = await tts.async_announce(
+        hass, "Sir, two things: - **Weather** — cloudy? - **Doors** — locked?",
+        "tts.piper", ["media_player.a"], context="summary")
+    assert ok is True
+    import urllib.parse
+    spoken = [urllib.parse.unquote_plus(c[2]["media_content_id"])
+              for c in hass.calls if c[0] == "play_media"]
+    assert spoken and "*" not in spoken[0] and " - " not in spoken[0]
+    assert "Weather" in spoken[0] and "Doors" in spoken[0]

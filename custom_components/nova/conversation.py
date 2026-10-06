@@ -45,6 +45,7 @@ from .llm_provider import (
 )
 from .presence import presence_context_string
 from .runtime import get_runtime, runtime_config_snapshot
+from .speech_text import speech_text
 from .tts_helper import resolve_tts_entity, async_announce
 from . import paths
 from typing import Optional
@@ -1038,7 +1039,7 @@ class NovaAgent(conversation.ConversationEntity):
                                 f"report status while I reconnect."
                             )
             from .directive_helper import fill_honorific
-            response_text = fill_honorific(response_text, honorific)
+            response_text = speech_text(fill_honorific(response_text, honorific))
 
             # v5.7.01: Record the winning response so duplicate pipelines
             # arriving slightly later will get caught by dedup

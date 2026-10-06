@@ -23,6 +23,8 @@ from typing import Optional, Sequence
 
 from homeassistant.core import HomeAssistant
 
+from .speech_text import speech_text
+
 _LOGGER = logging.getLogger(__name__)
 
 # Seconds to wait for a speaker to accept an announcement before treating it
@@ -310,6 +312,13 @@ async def async_announce(
     `context` is accepted for logging; callers resolve the entity beforehand.
     """
     if not text or not tts_entity or not speakers:
+        return False
+
+    # Whatever wrote this text (the model, a briefing, an alert), a speaker
+    # and Spoken History show it literally, so markdown is removed here once
+    # for every caller. Plain text passes through unchanged.
+    text = speech_text(text)
+    if not text:
         return False
 
     # Final safety net: never speak through a TV/movie player, whatever routing
