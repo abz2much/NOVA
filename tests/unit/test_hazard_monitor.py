@@ -207,3 +207,5 @@ async def test_status_reports_config(hz):
     assert st["enabled"] is True
     assert st["center"] == [40.77, -75.61]
     assert st["feeds"]["earthquakes"] is True
+    assert st["feeds"]["weather"] is False       # no country outside Ireland defaults custom
+    assert st["source"] == "custom"

@@ -1,8 +1,9 @@
 """Real-time multi-hazard monitor (v6.71.0; warnings sources 8.8.0).
 
-Weather warnings (8.8.0): Met Éireann's warnings for the chosen counties
-(hazard_met_eireann.py), and a custom CAP feed for other countries
-(hazard_cap.py), share one lifecycle (hazard_warnings.py): a warning is
+Weather warnings (8.8.0; single source 8.8.2): Met Éireann's warnings for the
+chosen counties (hazard_met_eireann.py), the US National Weather Service, or a
+custom CAP feed (hazard_cap.py). The CAP sources share one lifecycle
+(hazard_warnings.py): a warning is
 announced once, again when its level changes, and a phone-only notice
 follows when it is cancelled. hazard_push_level (default yellow) is the
 lowest level sent to the phone; hazard_speak_level (default orange) and
@@ -92,6 +93,7 @@ _REGION_DEFAULTS = {
 _DEF_PUSH_LEVEL = "yellow"
 _DEF_SPEAK_LEVEL = "orange"
 _DEF_NIGHT_SPEAK_LEVEL = "red"
+HAZARD_SOURCES = ("met_eireann", "us", "custom")
 
 # Warnings memory ({source: {id: entry}}), loaded from disk once per run,
 # and the warnings each source last reported after a successful poll (for
@@ -141,6 +143,40 @@ def effective_flag(hass, key: str) -> bool:
         return bool(saved)
     irish, other = _REGION_DEFAULTS[key]
     return irish if is_irish_home(hass) else other
+
+
+def default_source(hass) -> str:
+    """The weather-warning source for a home with no saved choice."""
+    try:
+        country = str(getattr(hass.config, "country", "") or "").upper()
+    except Exception:
+        country = ""
+    if country == "IE":
+        return "met_eireann"
+    if country == "US":
+        return "us"
+    if not country and is_irish_home(hass):
+        return "met_eireann"
+    return "custom"
+
+
+def effective_source(hass) -> str:
+    """Saved source, old-setting derivation, or the geographic default.
+
+    The derived choice is deliberately read-only: upgrading never writes a new
+    setting merely because old source flags exist.
+    """
+    saved = _saved("hazard_source")
+    if saved in HAZARD_SOURCES:
+        return saved
+    if _saved("hazard_met_eireann_on") is True:
+        return "met_eireann"
+    if (_saved("hazard_cap_on") is True
+            and str(_saved("hazard_cap_url") or "").strip()):
+        return "custom"
+    if _saved("hazard_weather_on") is True:
+        return "us"
+    return default_source(hass)
 
 
 def _level_setting(key: str, default: str) -> str:
@@ -197,17 +233,8 @@ def _lang(hass) -> str:
         return ""
 
 
-def _home_latlon(hass) -> Optional[tuple[float, float]]:
-    """Resolve the monitoring center: an explicit override if set, else HA's
-    home coordinates. Returns (lat, lon) or None."""
-    ov_lat = _cfg("hazard_lat", None)
-    ov_lon = _cfg("hazard_lon", None)
-    try:
-        if ov_lat not in (None, "") and ov_lon not in (None, ""):
-            return float(ov_lat), float(ov_lon)
-    except Exception:
-        pass
-    # fall back to HA's known home location
+def base_home_latlon(hass) -> Optional[tuple[float, float]]:
+    """Home Assistant's home coordinates, without Nova's override."""
     try:
         z = hass.states.get("zone.home")
         if z is not None:
@@ -221,6 +248,18 @@ def _home_latlon(hass) -> Optional[tuple[float, float]]:
         return float(hass.config.latitude), float(hass.config.longitude)
     except Exception:
         return None
+
+
+def _home_latlon(hass) -> Optional[tuple[float, float]]:
+    """Resolve the monitoring center: an explicit override if set, else home."""
+    ov_lat = _cfg("hazard_lat", None)
+    ov_lon = _cfg("hazard_lon", None)
+    try:
+        if ov_lat not in (None, "") and ov_lon not in (None, ""):
+            return float(ov_lat), float(ov_lon)
+    except Exception:
+        pass
+    return base_home_latlon(hass)
 
 
 def _haversine_km(lat1, lon1, lat2, lon2) -> float:
@@ -471,19 +510,19 @@ def _cap_settings() -> dict:
 
 
 async def _fetch_warnings(hass) -> dict:
-    """{source: (complete, warnings)} for every source that is on. A source
-    that is off is absent; a failed one is (False, [])."""
+    """The chosen CAP warning source, if any; failures are incomplete lists."""
     from . import hazard_cap, hazard_met_eireann
     home = _home_latlon(hass)
     out: dict = {}
-    if effective_flag(hass, "hazard_met_eireann_on"):
+    source = effective_source(hass)
+    if source == "met_eireann":
         counties = hazard_met_eireann.chosen_counties(_saved("hazard_counties"), home)
         if counties:
             complete, warnings, _via = await hazard_met_eireann.fetch(
                 hass, counties, lang=_lang(hass), user_agent=_USER_AGENT)
             out[hazard_met_eireann.SOURCE] = (complete, warnings)
     cap = _cap_settings()
-    if bool(_saved("hazard_cap_on")) and cap["url"]:
+    if source == "custom" and cap["url"]:
         complete, alerts = await hazard_cap.collect(
             hass, cap["url"], lang=_lang(hass), user_agent=_USER_AGENT)
         out[hazard_cap.SOURCE] = (complete, hazard_cap.to_warnings(
@@ -581,7 +620,7 @@ async def periodic_check(hass, honorific: str = "sir") -> dict:
             fired["quake"] += 1
 
     # Weather
-    if effective_flag(hass, "hazard_weather_on"):
+    if effective_source(hass) == "us":
         for w in await _check_weather(hass, lat, lon):
             await _announce("wx", _fmt_weather(w, honorific))
             fired["wx"] += 1
@@ -629,7 +668,7 @@ async def scan_now(hass, honorific: str = "sir") -> dict:
         quakes = (await _check_earthquakes(hass, lat, lon)
                   if effective_flag(hass, "hazard_quakes_on") else [])
         wx = (await _check_weather(hass, lat, lon)
-              if effective_flag(hass, "hazard_weather_on") else [])
+              if effective_source(hass) == "us" else [])
         disasters = (await _check_disasters(hass, lat, lon)
                      if effective_flag(hass, "hazard_disasters_on") else [])
     finally:
@@ -653,6 +692,8 @@ async def status(hass) -> dict:
     Runs a *read-only* count so the user can confirm it's wired to their area."""
     from . import hazard_met_eireann, hazard_warnings as hw
     center = _home_latlon(hass)
+    home = base_home_latlon(hass)
+    source = effective_source(hass)
     nearest = hazard_met_eireann.nearest_county(*center) if center else None
     chosen = hazard_met_eireann.chosen_counties(_saved("hazard_counties"), center)
     tz = _tz(hass)
@@ -666,14 +707,16 @@ async def status(hass) -> dict:
         "disaster_radius_km": float(_cfg("hazard_disaster_radius_km", _DEF_DISASTER_RADIUS_KM)),
         "feeds": {
             "earthquakes": effective_flag(hass, "hazard_quakes_on"),
-            "weather": effective_flag(hass, "hazard_weather_on"),
+            "weather": source == "us",
             "disasters": effective_flag(hass, "hazard_disasters_on"),
         },
         # 8.8.0: weather warnings.
         "in_ireland": is_irish_home(hass),
+        "source": source,
+        "home_center": [round(home[0], 6), round(home[1], 6)] if home else None,
         "sources": {
-            "met_eireann": effective_flag(hass, "hazard_met_eireann_on"),
-            "cap": bool(_saved("hazard_cap_on")),
+            "met_eireann": source == "met_eireann",
+            "cap": source == "custom",
             "cap_configured": bool(cap["url"]),
         },
         "detected_county": ({"code": nearest, "name": hazard_met_eireann.county_name(nearest)}
@@ -685,6 +728,9 @@ async def status(hass) -> dict:
         "push_level": _level_setting("hazard_push_level", _DEF_PUSH_LEVEL),
         "speak_level": _level_setting("hazard_speak_level", _DEF_SPEAK_LEVEL),
         "night_speak_level": _night_level_setting(),
-        "warnings": [hw.for_panel(w, tz) for ws in _LAST_WARNINGS.values() for w in ws],
+        "warnings": [hw.for_panel(w, tz)
+                     for w in _LAST_WARNINGS.get(
+                         hazard_met_eireann.SOURCE if source == "met_eireann" else "cap", [])]
+                    if source in ("met_eireann", "custom") else [],
     }
     return out

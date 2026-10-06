@@ -217,6 +217,7 @@ const hass = {
     if (m.type === "nova/update_config") {
       _updateConfigCalls.push({ key: m.key, value: m.value });
       if (m.key === "ui_language") PANEL.config.ui_language = m.value;
+      if (m.key === "hazard_source") PANEL.config.hazard_source = m.value;
       return {};
     }
     if (m.type === "nova/get_panel_data") return PANEL;
@@ -296,6 +297,7 @@ const hass = {
     }
     if (m.type === "nova/hazard") {
       if (m.action === "status") return { enabled: true, center: [40.77, -75.61], using_override: false,
+        source: "us", home_center: [40.77, -75.61],
         quake_radius_km: 300, quake_min_mag: 2.5, disaster_radius_km: 300,
         feeds: { earthquakes: true, weather: true, disasters: true } };
       if (m.action === "scan") return { ok: true, center: [40.77, -75.61],
@@ -1746,16 +1748,18 @@ setTimeout(async () => {
     _updateConfigCalls.some(c => c.key === "disabled_sentinel_rules" && c.value === JSON.stringify([]))]);
   sRoot = elNew.shadowRoot;
 
-  // Hazard Monitor: status fetched once on entering Settings (async, like
-  // Diagnostics), SCAN NOW re-checks the sources that are on via nova/hazard.
+  // Hazard Monitor: one weather source, home-prefilled location, and a closed
+  // Advanced fold. SCAN NOW keeps the existing result rendering.
   await new Promise(r => setTimeout(r, 20));
   sRoot = elNew.shadowRoot;
   checks.push(
-    ["settings tab: Hazard Monitor card is real and shows the resolved location",
+    ["settings tab: Hazard Monitor is real, omits the Location line, and pre-fills home coordinates",
       (() => {
         const hc = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Hazard Monitor/.test(c.querySelector(".panel-title")?.textContent || ""));
         return !!hc && !hc.querySelector(".stub-tag")
-          && /40\.77, -75\.61/.test(hc.textContent)
+          && !/Location:/.test(hc.textContent)
+          && hc.querySelector('input[data-cfg-key="hazard_lat"]')?.value === "40.77"
+          && hc.querySelector('input[data-cfg-key="hazard_lon"]')?.value === "-75.61"
           && !!hc.querySelector("#newHazScan");
       })()],
   );
@@ -1769,12 +1773,12 @@ setTimeout(async () => {
       return /12km N of town/.test(t) && /Tornado Warning/.test(t) && /Wildfire/.test(t);
     })()]);
 
-  // 8.8.0: weather warnings. Outside Ireland the legacy feeds stay; for an
-  // Irish home they are hidden, the Met Éireann counties show with the
-  // detected one, and the warnings list shows the level colour, the time
-  // window, the full published text and the Met Éireann credit.
-  checks.push(["settings tab: Hazard Monitor keeps the legacy feeds outside Ireland",
-    !!sRoot.getElementById("hazardLegacyFeeds") && !!sRoot.getElementById("hazardSources")]);
+  checks.push(["settings tab: Hazard Monitor has one source dropdown in the required order, without Europe",
+    (() => {
+      const sel = sRoot.querySelector('#hazardSources select[data-cfg-key="hazard_source"]');
+      return !!sel && Array.from(sel.options).map(o => o.value).join(",") === "met_eireann,us,custom"
+        && sel.value === "us" && !Array.from(sel.options).some(o => o.value === "europe");
+    })()]);
   const hazardCallWS = hass.callWS;
   const irishWarning = {
     id: "o1", source: "met_eireann", source_label: "Met Éireann", type: "Wind", level: "orange",
@@ -1786,9 +1790,10 @@ setTimeout(async () => {
   };
   hass.callWS = async (m) => {
     if (m.type === "nova/hazard" && m.action === "status") return {
-      enabled: true, center: [52.85, -8.98], using_override: false, in_ireland: true,
+      enabled: true, center: [52.85, -8.98], home_center: [52.85, -8.98],
+      using_override: false, in_ireland: true, source: "met_eireann",
       feeds: { earthquakes: false, weather: false, disasters: false },
-      sources: { met_eireann: true, cap: true, cap_configured: true },
+      sources: { met_eireann: true, cap: false, cap_configured: true },
       detected_county: { code: "EI03", name: "Clare" }, counties: [{ code: "EI03", name: "Clare" }],
       county_table: [{ code: "EI01", name: "Carlow" }, { code: "EI03", name: "Clare" },
                      { code: "EI16", name: "Limerick" }],
@@ -1798,6 +1803,7 @@ setTimeout(async () => {
   };
   const savedHazCfg = { ...elNew._liveData.config };
   Object.assign(elNew._liveData.config, {
+    hazard_source: "met_eireann", hazard_lat: 52.85, hazard_lon: -8.98,
     hazard_met_eireann_on: true, hazard_cap_on: true, hazard_counties: [],
     hazard_quakes_on: false, hazard_weather_on: false, hazard_disasters_on: false,
     hazard_push_level: "yellow", hazard_speak_level: "orange",
@@ -1809,19 +1815,27 @@ setTimeout(async () => {
   sRoot = elNew.shadowRoot;
   const hzCard = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Hazard Monitor/.test(c.querySelector(".panel-title")?.textContent || ""));
   checks.push(
-    ["settings tab: an Irish home hides the earthquake, US weather and NASA settings",
-      !sRoot.getElementById("hazardLegacyFeeds") && !/Quake radius/.test(hzCard?.textContent || "")],
-    ["settings tab: the Met Éireann source is on and the detected county is shown",
-      !!hzCard.querySelector('#hazardSources [data-cfg-key="hazard_met_eireann_on"].mode-chip-on')
-      && /Nearest county to home: Clare/.test(sRoot.getElementById("hazardDetectedCounty")?.textContent || "")
-      && hzCard.querySelectorAll("[data-hazard-county]").length === 3],
-    ["settings tab: push and speak levels are selects",
-      hzCard.querySelector('select[data-cfg-key="hazard_push_level"]')?.value === "yellow"
-      && hzCard.querySelector('select[data-cfg-key="hazard_speak_level"]')?.value === "orange"],
-    ["settings tab: quiet-hours speech defaults to Red and offers Off",
+    ["settings tab: the Irish description is exact, Met Éireann is selected, and county UI is gone",
+      /Weather warnings for your area\. Alerts push and speak like any Nova alert\./.test(hzCard.textContent)
+      && hzCard.querySelector('select[data-cfg-key="hazard_source"]')?.value === "met_eireann"
+      && hzCard.querySelectorAll("[data-hazard-county]").length === 0
+      && !/Nearest county/.test(hzCard.textContent)],
+    ["settings tab: Advanced is closed and contains both legacy toggles plus all three level selects",
+      (() => {
+        const adv = hzCard.querySelector("#hazardAdvanced");
+        return !!adv && !adv.open
+          && !!adv.querySelector('[data-cfg-key="hazard_quakes_on"]')
+          && !!adv.querySelector('[data-cfg-key="hazard_disasters_on"]')
+          && adv.querySelector('select[data-cfg-key="hazard_push_level"]')?.value === "yellow"
+          && adv.querySelector('select[data-cfg-key="hazard_speak_level"]')?.value === "orange"
+          && adv.querySelector('select[data-cfg-key="hazard_night_speak_level"]')?.value === "red";
+      })()],
+    ["settings tab: quiet-hours speech still offers Off while defaulting to Red",
       hzCard.querySelector('select[data-cfg-key="hazard_night_speak_level"]')?.value === "red"
       && Array.from(hzCard.querySelectorAll('select[data-cfg-key="hazard_night_speak_level"] option'))
         .some(o => o.value === "off")],
+    ["settings tab: Custom feed fields are hidden while Met Éireann is selected",
+      !hzCard.querySelector('input[data-cfg-key="hazard_cap_url"]')],
     ["settings tab: an active warning shows its colour, window, full text and Met Éireann credit",
       (() => {
         const w = sRoot.querySelector('#hazardWarnings .hazard-warning[data-level="orange"]');
@@ -1833,14 +1847,17 @@ setTimeout(async () => {
           && /Source: Met Éireann/.test(w.querySelector(".hazard-source")?.textContent || "")
           && !w.querySelector("ul");      // published HTML is shown as text, never rendered
       })()],
-    ["settings tab: the custom CAP feed is marked as not tested, with its URL masked",
-      /Custom CAP feed \(not tested by Nova\)/.test(hzCard.textContent)
-      && hzCard.querySelector('input[data-cfg-key="hazard_cap_url"]')?.value === "https://**REDACTED**@alerts.example.org/cap.xml"],
   );
-  hzCard.querySelector('[data-hazard-county="EI03"]').click();
-  await new Promise(r => setTimeout(r, 20));
-  checks.push(["settings tab: a county chip saves hazard_counties as a JSON list",
-    _updateConfigCalls.some(c => c.key === "hazard_counties" && c.value === JSON.stringify(["EI03"]))]);
+  const sourceSel = hzCard.querySelector('select[data-cfg-key="hazard_source"]');
+  sourceSel.value = "custom";
+  sourceSel.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+  await new Promise(r => setTimeout(r, 80));
+  sRoot = elNew.shadowRoot;
+  const customHzCard = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Hazard Monitor/.test(c.querySelector(".panel-title")?.textContent || ""));
+  checks.push(["settings tab: selecting Custom saves once and reveals the masked custom feed fields",
+    _updateConfigCalls.some(c => c.key === "hazard_source" && c.value === "custom")
+    && /Custom CAP feed \(not tested by Nova\)/.test(customHzCard.textContent)
+    && customHzCard.querySelector('input[data-cfg-key="hazard_cap_url"]')?.value === "https://**REDACTED**@alerts.example.org/cap.xml"]);
   sRoot = elNew.shadowRoot;
   const codesArea = sRoot.querySelector('textarea[data-list-key="hazard_cap_area_codes"]');
   codesArea.value = "IE061\n IE062 \n";
@@ -1849,6 +1866,7 @@ setTimeout(async () => {
   checks.push(["settings tab: CAP area codes save one per line as a JSON list",
     _updateConfigCalls.some(c => c.key === "hazard_cap_area_codes" && c.value === JSON.stringify(["IE061", "IE062"]))]);
   hass.callWS = hazardCallWS;
+  PANEL.config = savedHazCfg;
   elNew._liveData.config = savedHazCfg;
   await elNew._fetchHazardStatus();
   await new Promise(r => setTimeout(r, 20));

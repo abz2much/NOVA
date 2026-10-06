@@ -13,6 +13,7 @@ Activity log is a separate endpoint (deferred to session 3, needs DB work).
 from __future__ import annotations
 
 import logging
+import math
 import time
 from typing import Any, Optional
 
@@ -660,8 +661,8 @@ async def ws_get_panel_data(
                 "briefing_include_hazards": bool(_runtime_opt(hass, entry, "briefing_include_hazards", True)),
                 # Hazard monitor controls — same read-back requirement (v6.71.0)
                 "hazard_monitor_enabled": bool(_runtime_opt(hass, entry, "hazard_monitor_enabled", False)),
-                "hazard_lat":             _runtime_opt(hass, entry, "hazard_lat", ""),
-                "hazard_lon":             _runtime_opt(hass, entry, "hazard_lon", ""),
+                "hazard_lat":             _hazard_coordinate(hass, entry, "hazard_lat", 0),
+                "hazard_lon":             _hazard_coordinate(hass, entry, "hazard_lon", 1),
                 # 8.8.0: region-aware (off by default for an Irish home
                 # unless saved); a saved value is shown as saved.
                 "hazard_quakes_on":       _hazard_flag(hass, "hazard_quakes_on"),
@@ -670,6 +671,7 @@ async def ws_get_panel_data(
                 # Weather warnings (8.8.0)
                 "hazard_met_eireann_on":  _hazard_flag(hass, "hazard_met_eireann_on"),
                 "hazard_cap_on":          bool(_runtime_opt(hass, entry, "hazard_cap_on", False)),
+                "hazard_source":          _hazard_source(hass, entry),
                 "hazard_counties":        _get_runtime_json(hass, entry, "hazard_counties", []),
                 "hazard_push_level":      str(_runtime_opt(hass, entry, "hazard_push_level", "yellow") or "yellow"),
                 "hazard_speak_level":     str(_runtime_opt(hass, entry, "hazard_speak_level", "orange") or "orange"),
@@ -718,6 +720,31 @@ def _hazard_flag(hass: HomeAssistant, key: str) -> bool:
         return hazard_monitor.effective_flag(hass, key)
     except Exception:
         return key != "hazard_met_eireann_on"
+
+
+def _hazard_source(hass: HomeAssistant, entry) -> str:
+    """The saved or compatibility-derived single weather-warning source."""
+    saved = _runtime_opt(hass, entry, "hazard_source", None)
+    if saved in ("met_eireann", "us", "custom"):
+        return saved
+    try:
+        from . import hazard_monitor
+        return hazard_monitor.effective_source(hass)
+    except Exception:
+        return "custom"
+
+
+def _hazard_coordinate(hass: HomeAssistant, entry, key: str, index: int):
+    """Saved override for the panel, else the current HA home coordinate."""
+    value = _runtime_opt(hass, entry, key, "")
+    if value not in (None, ""):
+        return value
+    try:
+        from . import hazard_monitor
+        home = hazard_monitor.base_home_latlon(hass)
+        return home[index] if home else ""
+    except Exception:
+        return ""
 
 
 def _masked_url(value) -> str:
@@ -984,6 +1011,7 @@ PANEL_WRITABLE_KEYS = {
     # Hazard Monitor weather warnings (8.8.0)
     "hazard_met_eireann_on",      # bool: Met Éireann warnings (on by default for an Irish home)
     "hazard_cap_on",              # bool: a custom CAP feed (hazard_cap_url)
+    "hazard_source",              # str: met_eireann | us | custom warning source
     "hazard_counties",            # JSON list: Met Éireann county codes (empty = nearest to home)
     "hazard_push_level",          # str: yellow | orange | red, lowest level sent to the phone
     "hazard_speak_level",         # str: yellow | orange | red, lowest level also spoken
@@ -1222,6 +1250,52 @@ async def ws_update_config(
         rc = runtime.runtime_config
         if not isinstance(rc, dict):
             connection.send_error(msg["id"], "no_data", "Nova runtime data not found")
+            return
+
+        # A location override is one coordinate pair. The panel still writes
+        # through nova/update_config, but either coordinate update resolves the
+        # other value and saves both together. Clearing either field, or making
+        # the pair equal to HA's home, deletes both keys so a later home move is
+        # never shadowed by a stale copy of the old coordinates (8.8.2).
+        if key in ("hazard_lat", "hazard_lon"):
+            from . import hazard_monitor, nova_config
+            keys = ("hazard_lat", "hazard_lon")
+            home = hazard_monitor.base_home_latlon(hass)
+            if value == "":
+                for location_key in keys:
+                    rc.pop(location_key, None)
+                    await hass.async_add_executor_job(nova_config.delete, location_key)
+                connection.send_result(
+                    msg["id"], {"key": key, "value": value, "persisted": True})
+                return
+            index = 0 if key == "hazard_lat" else 1
+            other = 1 - index
+            new_value = float(value)
+            other_value = rc.get(keys[other], None)
+            if other_value in (None, ""):
+                other_value = home[other] if home else None
+            if other_value is None:
+                connection.send_error(
+                    msg["id"], "invalid_value",
+                    "Both hazard coordinates are required when Home Assistant has no home location",
+                )
+                return
+            other_number = float(other_value)
+            pair = ((new_value, other_number) if index == 0
+                    else (other_number, new_value))
+            if (home is not None
+                    and math.isclose(pair[0], home[0], rel_tol=0.0, abs_tol=1e-7)
+                    and math.isclose(pair[1], home[1], rel_tol=0.0, abs_tol=1e-7)):
+                for location_key in keys:
+                    rc.pop(location_key, None)
+                    await hass.async_add_executor_job(nova_config.delete, location_key)
+                persisted = True
+            else:
+                updates = dict(zip(keys, pair))
+                rc.update(updates)
+                persisted = await hass.async_add_executor_job(nova_config.set_many, updates)
+            connection.send_result(
+                msg["id"], {"key": key, "value": value, "persisted": persisted})
             return
 
         # observer_enabled: change the observer first and confirm the result
@@ -1664,4 +1738,3 @@ async def ws_get_area_sparklines(
     except Exception as exc:
         _LOGGER.exception("get_area_sparklines failed: %s", exc)
         connection.send_error(msg["id"], "sparklines_failed", safe_error_message(exc))
-
