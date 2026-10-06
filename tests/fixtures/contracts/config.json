@@ -143,6 +143,7 @@
     "hazard_quake_min_mag",
     "hazard_quake_radius_km",
     "hazard_quakes_on",
+    "hazard_source",
     "hazard_speak_level",
     "hazard_weather_on",
     "home_bathrooms",

@@ -88,6 +88,10 @@ HAZARD_LEVEL_KEYS = ("hazard_push_level", "hazard_speak_level")
 HAZARD_LEVELS = ("yellow", "orange", "red")
 HAZARD_NIGHT_LEVEL_KEY = "hazard_night_speak_level"
 HAZARD_NIGHT_LEVELS = HAZARD_LEVELS + ("off",)
+HAZARD_SOURCE_KEY = "hazard_source"
+HAZARD_SOURCES = ("met_eireann", "us", "custom")
+HAZARD_LOCATION_RANGES = {"hazard_lat": (-90.0, 90.0),
+                          "hazard_lon": (-180.0, 180.0)}
 HAZARD_COUNTIES_KEY = "hazard_counties"
 HAZARD_CAP_URL_KEY = "hazard_cap_url"
 HAZARD_CAP_LIST_KEYS = ("hazard_cap_area_codes", "hazard_cap_area_names")
@@ -192,6 +196,11 @@ def valid_panel_value(key: str, value) -> bool:
         return isinstance(value, str) and value in HAZARD_LEVELS
     if key == HAZARD_NIGHT_LEVEL_KEY:
         return isinstance(value, str) and value in HAZARD_NIGHT_LEVELS
+    if key == HAZARD_SOURCE_KEY:
+        return isinstance(value, str) and value in HAZARD_SOURCES
+    if key in HAZARD_LOCATION_RANGES:
+        # Empty is the panel's explicit "delete the override" command.
+        return value == "" or _valid_bounded_number(value, *HAZARD_LOCATION_RANGES[key])
     if key == HAZARD_COUNTIES_KEY:
         from .hazard_met_eireann import COUNTIES
         items = _json_string_list(value)
@@ -291,6 +300,11 @@ def invalid_panel_value_message(key: str) -> str:
         return f"Key '{key}' must be one of: yellow, orange, red"
     if key == HAZARD_NIGHT_LEVEL_KEY:
         return f"Key '{key}' must be one of: yellow, orange, red, off"
+    if key == HAZARD_SOURCE_KEY:
+        return f"Key '{key}' must be one of: met_eireann, us, custom"
+    if key in HAZARD_LOCATION_RANGES:
+        return (f"Key '{key}' must be a number from "
+                f"{_range_text(*HAZARD_LOCATION_RANGES[key])}, or empty to use home coordinates")
     if key == HAZARD_COUNTIES_KEY:
         return f"Key '{key}' must be a JSON list of Met Éireann county codes, such as [\"EI07\"]"
     if key in HAZARD_CAP_LIST_KEYS:

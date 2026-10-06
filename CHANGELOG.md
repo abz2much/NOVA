@@ -1,3 +1,11 @@
+## [8.8.2] — simpler Hazard Monitor source and location controls
+
+- **One weather-warning source.** The Hazard Monitor now offers one dropdown: Met Éireann, US National Weather Service, or Custom feed. Ireland defaults to Met Éireann, the US to NWS, and every other country to Custom. Existing source flags are still read when no new choice is saved, without rewriting old config.
+- **A quieter card.** County controls and the duplicate location sentence are gone. Saved `hazard_counties` values still work, while an unset value continues to use the nearest county. Warning levels, earthquakes, NASA disasters, and quake tuning now sit in a closed Advanced fold. Earthquakes and NASA remain independent of the weather source.
+- **Location overrides follow home safely.** The latitude and longitude boxes are pre-filled from Home Assistant. A different pair is saved as an override; clearing either box or returning both to the home coordinates deletes the override. New writes must use numeric latitude from -90 to 90 and longitude from -180 to 180. Old saved values still load under the existing write-only validation rule.
+- **Europe deliberately stays on Custom.** Live MeteoAlarm entries expose area names and administrative geocodes, but no polygons or circles. Safe automatic matching needs a separate geographic dataset, so there is no Europe option in this release.
+- **Contracts and safety behavior.** The config contract adds only `hazard_source`. Quiet-hours delivery is unchanged: Red remains spoken at night by default, and setting the night level to Off keeps Red phone-only.
+
 ## [8.8.1] — quiet hazard alerts, Irish/UK carriers, and local date order
 
 - **Hazards respect quiet hours.** Weather warnings still push to the phone, but speech during the Observer quiet window now has its own `hazard_night_speak_level`. It defaults to Red; `off` keeps even Red phone-only. Outside quiet hours, the existing push and speech levels are unchanged. Cancellations remain phone-only.

@@ -196,7 +196,7 @@
         }
       });
     });
-    root.querySelectorAll("input.cfg-field[data-cfg-key]").forEach(inp => {
+    root.querySelectorAll("input.cfg-field[data-cfg-key]:not(.hazard-location-field)").forEach(inp => {
       inp.addEventListener("change", async () => {
         const key = inp.getAttribute("data-cfg-key");
         let value = inp.value;
@@ -529,25 +529,21 @@
         }
       });
     }
-    // Hazard Monitor (8.8.0): county chips toggle membership of the
-    // hazard_counties list (as the Lab mode area chips do), and the CAP
-    // area fields save one entry per line as a JSON list. Level selects,
-    // including the quiet-hours speech floor, re-fetch hazard status too.
-    root.querySelectorAll("[data-hazard-county]").forEach(btn => {
-      btn.addEventListener("click", async () => {
-        const code = btn.getAttribute("data-hazard-county");
-        let cur = this._data()?.config?.hazard_counties;
-        cur = Array.isArray(cur) ? cur.slice() : [];
-        const i = cur.indexOf(code);
-        if (i >= 0) cur.splice(i, 1); else cur.push(code);
-        await this._saveSetting("hazard_counties", JSON.stringify(cur));
-        await this._fetchHazardStatus();
-      });
-    });
+    // Hazard Monitor (8.8.2): CAP area fields keep their one-entry-per-line
+    // contract. Location fields are a pair: the backend saves both, and an
+    // empty field deletes the whole override before the card re-renders home.
     root.querySelectorAll("textarea.hazard-list-field[data-list-key]").forEach(area => {
       area.addEventListener("change", async () => {
         const items = area.value.split("\n").map(v => v.trim()).filter(Boolean);
         await this._saveSetting(area.getAttribute("data-list-key"), JSON.stringify(items));
+      });
+    });
+    root.querySelectorAll(".hazard-location-field[data-cfg-key]").forEach(inp => {
+      inp.addEventListener("change", async () => {
+        const raw = inp.value.trim();
+        const value = raw === "" ? "" : Number(raw);
+        await this._saveSetting(inp.getAttribute("data-cfg-key"), value);
+        await this._fetchHazardStatus();
       });
     });
     root.querySelectorAll("#hazardSources [data-cfg-key], select.cfg-field[data-cfg-key^=\"hazard_\"]").forEach(el => {

@@ -1082,7 +1082,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v8.8.1
+ * v8.8.2
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1158,7 +1158,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.8.1 ",
+      console.log("%c Nova Panel %c v8.8.2 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -3225,7 +3225,7 @@ ${this._htmlDashboardBody()}`;
     { id: "sentinel_rules", group: "safety", title: "Sentinel Rules", real: true,
       desc: "Enable or disable individual door/lock/garage anomaly rules." },
     { id: "hazard_monitor", group: "safety", title: "Hazard Monitor", real: true,
-      desc: "Weather warnings for your area, with a separate quiet-hours speech level, plus optional legacy hazard feeds." },
+      desc: "One weather-warning source for your area, with optional earthquake and NASA feeds under Advanced." },
     { id: "energy_management", group: "safety", title: "Energy Management", real: true,
       desc: "Peak-draw threshold and how much say Nova has over high-draw appliances." },
     { id: "host_health", group: "safety", title: "Host Health", real: true,
@@ -4733,8 +4733,7 @@ ${this._htmlDashboardBody()}`;
   }
 
   // Hazard status is fetched once per element lifetime (same on-demand
-  // pattern as Diagnostics) — a manual SCAN NOW re-checks every source that
-  // is on. A county or level change re-fetches it (8.8.0).
+  // pattern as Diagnostics). A source, location or level change re-fetches it.
   async _fetchHazardStatus() {
     if (!this._hass) return;
     try {
@@ -4746,63 +4745,38 @@ ${this._htmlDashboardBody()}`;
   _hazardMonitorCardBody() {
     const cfg = this._data()?.config || {};
     const hz = this._hazard || {};
-    const irish = hz.in_ireland === true;
-    const loc = hz.center
-      ? (hz.using_override ? `Location: override ${hz.center[0]}, ${hz.center[1]}.` : `Location: home ${hz.center[0]}, ${hz.center[1]}.`)
-      : "Location: using home coordinates.";
-    // Source and feed switches show what the monitor uses: a saved value,
-    // else the region default (8.8.0: Met Éireann on and the legacy feeds
-    // off for an Irish home), which get_panel_data already resolves.
+    const source = cfg.hazard_source || hz.source || "custom";
     const chip = (key, label) => {
       const on = cfg[key] === true;
       return `<button class="mode-chip ${on ? "mode-chip-on" : ""}" data-cfg-key="${key}" data-cfg-val="${on ? "false" : "true"}">${label}</button>`;
     };
-    const metOn = cfg.hazard_met_eireann_on === true;
-    const capOn = cfg.hazard_cap_on === true;
-    const chosen = new Set(Array.isArray(cfg.hazard_counties) ? cfg.hazard_counties : []);
-    const detected = hz.detected_county;
-    const countyChips = (hz.county_table || []).map(c =>
-      `<button class="mode-chip ${chosen.has(c.code) ? "mode-chip-on" : ""}" data-hazard-county="${this._esc(c.code)}">${this._esc(c.name)}</button>`).join("");
     const levels = [["yellow", "Yellow"], ["orange", "Orange"], ["red", "Red"]];
     const nightLevels = [...levels, ["off", "Off"]];
     const listText = key => (Array.isArray(cfg[key]) ? cfg[key] : []).join("\n");
+    const descriptions = {
+      met_eireann: "Weather warnings for your area. Alerts push and speak like any Nova alert.",
+      us: "US National Weather Service warnings for your area. Alerts push and speak like any Nova alert.",
+      custom: "Weather warnings from your custom feed. Alerts push and speak like any Nova alert.",
+    };
+    const credits = { met_eireann: "Met Éireann", us: "NWS" };
+    const lat = cfg.hazard_lat ?? hz.center?.[0] ?? "";
+    const lon = cfg.hazard_lon ?? hz.center?.[1] ?? "";
     return `
-      <div class="stub-body">Weather warnings for your area, and optional nearby earthquake, US severe-weather and NASA disaster feeds. Alerts push and speak like any Nova alert.</div>
+      <div class="stub-body">${this._esc(descriptions[source] || descriptions.custom)}</div>
       <div class="cfg-row">
         <label>Monitor</label>
         <button class="toggle-btn ${cfg.hazard_monitor_enabled ? "on" : "off"}" data-cfg-key="hazard_monitor_enabled" data-cfg-val="${cfg.hazard_monitor_enabled ? "false" : "true"}">${cfg.hazard_monitor_enabled ? "ON" : "OFF"}</button>
       </div>
-      <div class="panel-head" style="margin-top:10px"><div class="panel-title">Sources</div></div>
-      <div class="mode-grid" id="hazardSources">
-        ${chip("hazard_met_eireann_on", "Met Éireann")}
-        ${chip("hazard_cap_on", "Custom CAP feed")}
+      <div class="cfg-row" id="hazardSources">
+        <label>Source</label>
+        <select class="cfg-field" data-cfg-key="hazard_source">${this._optSelect([
+          ["met_eireann", "Met Éireann (Ireland)"],
+          ["us", "US (National Weather Service)"],
+          ["custom", "Custom feed"],
+        ], source)}</select>
       </div>
-      ${irish ? "" : `
-      <div class="toggle-desc" style="margin:6px 0 2px">Legacy feeds</div>
-      <div class="mode-grid" id="hazardLegacyFeeds">
-        ${chip("hazard_quakes_on", "Earthquakes")}
-        ${chip("hazard_weather_on", "US weather (NWS)")}
-        ${chip("hazard_disasters_on", "NASA disasters")}
-      </div>`}
-      ${metOn ? `
-      <div class="panel-head" style="margin-top:10px"><div class="panel-title">Met Éireann counties</div></div>
-      <div class="stub-body" id="hazardDetectedCounty">${detected
-        ? `Nearest county to home: <b>${this._esc(detected.name)}</b>${chosen.size ? "" : " (used while none is chosen)"}.`
-        : "No home location, so choose your county."} Choose two if you live near a county border.</div>
-      <div class="mode-grid" id="hazardCounties">${countyChips}</div>` : ""}
-      <div class="cfg-row">
-        <label>Push to phone from <span class="toggle-desc">lower levels are ignored</span></label>
-        <select class="cfg-field" data-cfg-key="hazard_push_level">${this._optSelect(levels, cfg.hazard_push_level || "yellow")}</select>
-      </div>
-      <div class="cfg-row">
-        <label>Also speak from <span class="toggle-desc">below this, phone only</span></label>
-        <select class="cfg-field" data-cfg-key="hazard_speak_level">${this._optSelect(levels, cfg.hazard_speak_level || "orange")}</select>
-      </div>
-      <div class="cfg-row">
-        <label>Speak during quiet hours from <span class="toggle-desc">Red by default</span></label>
-        <select class="cfg-field" data-cfg-key="hazard_night_speak_level">${this._optSelect(nightLevels, cfg.hazard_night_speak_level || "red")}</select>
-      </div>
-      ${capOn ? `
+      ${credits[source] ? `<div class="toggle-desc hazard-source-credit">Source: ${this._esc(credits[source])}</div>` : ""}
+      ${source === "custom" ? `
       <div class="panel-head" style="margin-top:10px"><div class="panel-title">Custom CAP feed (not tested by Nova)</div></div>
       <div class="stub-body">An https address of one CAP alert, or an Atom or RSS list of them. Nova only alerts when an alert's area covers your home, or matches a code or name below.</div>
       <div class="cfg-row">
@@ -4819,22 +4793,39 @@ ${this._htmlDashboardBody()}`;
       </div>` : ""}
       <div class="panel-head" style="margin-top:10px"><div class="panel-title">Warnings now</div></div>
       <div id="hazardWarnings">${this._renderHazardWarnings(hz.warnings)}</div>
-      <div class="stub-body" style="font-family:var(--font-mono);font-size:10.5px">${this._esc(loc)}</div>
       <div class="cfg-row">
         <label>Override lat / lon <span class="toggle-desc">optional</span></label>
         <div style="display:flex;gap:6px">
-          <input class="cfg-field cfg-num" style="width:76px" type="text" inputmode="decimal" data-cfg-key="hazard_lat" value="${this._esc(cfg.hazard_lat || "")}" placeholder="lat">
-          <input class="cfg-field cfg-num" style="width:76px" type="text" inputmode="decimal" data-cfg-key="hazard_lon" value="${this._esc(cfg.hazard_lon || "")}" placeholder="lon">
+          <input class="cfg-field cfg-num hazard-location-field" style="width:76px" type="number" min="-90" max="90" step="any" data-cfg-key="hazard_lat" value="${this._esc(lat)}">
+          <input class="cfg-field cfg-num hazard-location-field" style="width:76px" type="number" min="-180" max="180" step="any" data-cfg-key="hazard_lon" value="${this._esc(lon)}">
         </div>
       </div>
-      ${irish ? "" : `
-      <div class="cfg-row">
-        <label>Quake radius (km) / min mag</label>
-        <div style="display:flex;gap:6px">
-          <input class="cfg-field cfg-num" style="width:56px" type="text" inputmode="numeric" data-cfg-key="hazard_quake_radius_km" value="${this._esc(cfg.hazard_quake_radius_km ?? 300)}">
-          <input class="cfg-field cfg-num" style="width:56px" type="text" inputmode="decimal" data-cfg-key="hazard_quake_min_mag" value="${this._esc(cfg.hazard_quake_min_mag ?? 2.5)}">
+      <details class="mode-bindings" id="hazardAdvanced">
+        <summary class="mode-bind-head">Advanced</summary>
+        <div class="cfg-row">
+          <label>Push to phone from <span class="toggle-desc">lower levels are ignored</span></label>
+          <select class="cfg-field" data-cfg-key="hazard_push_level">${this._optSelect(levels, cfg.hazard_push_level || "yellow")}</select>
         </div>
-      </div>`}
+        <div class="cfg-row">
+          <label>Also speak from <span class="toggle-desc">below this, phone only</span></label>
+          <select class="cfg-field" data-cfg-key="hazard_speak_level">${this._optSelect(levels, cfg.hazard_speak_level || "orange")}</select>
+        </div>
+        <div class="cfg-row">
+          <label>Speak during quiet hours from <span class="toggle-desc">Red by default</span></label>
+          <select class="cfg-field" data-cfg-key="hazard_night_speak_level">${this._optSelect(nightLevels, cfg.hazard_night_speak_level || "red")}</select>
+        </div>
+        <div class="mode-grid" id="hazardLegacyFeeds">
+          ${chip("hazard_quakes_on", "Earthquakes")}
+          ${chip("hazard_disasters_on", "NASA disasters")}
+        </div>
+        <div class="cfg-row">
+          <label>Quake radius (km) / min mag</label>
+          <div style="display:flex;gap:6px">
+            <input class="cfg-field cfg-num" style="width:56px" type="number" min="1" step="1" data-cfg-key="hazard_quake_radius_km" value="${this._esc(cfg.hazard_quake_radius_km ?? 300)}">
+            <input class="cfg-field cfg-num" style="width:56px" type="number" min="0" step="0.1" data-cfg-key="hazard_quake_min_mag" value="${this._esc(cfg.hazard_quake_min_mag ?? 2.5)}">
+          </div>
+        </div>
+      </details>
       <div class="cfg-row"><button class="mode-chip" id="newHazScan">⟳ SCAN NOW</button></div>
       <div id="newHazBody" class="stub-body"></div>`;
   }
@@ -6511,7 +6502,7 @@ ${this._htmlDashboardBody()}`;
         }
       });
     });
-    root.querySelectorAll("input.cfg-field[data-cfg-key]").forEach(inp => {
+    root.querySelectorAll("input.cfg-field[data-cfg-key]:not(.hazard-location-field)").forEach(inp => {
       inp.addEventListener("change", async () => {
         const key = inp.getAttribute("data-cfg-key");
         let value = inp.value;
@@ -6844,25 +6835,21 @@ ${this._htmlDashboardBody()}`;
         }
       });
     }
-    // Hazard Monitor (8.8.0): county chips toggle membership of the
-    // hazard_counties list (as the Lab mode area chips do), and the CAP
-    // area fields save one entry per line as a JSON list. Level selects,
-    // including the quiet-hours speech floor, re-fetch hazard status too.
-    root.querySelectorAll("[data-hazard-county]").forEach(btn => {
-      btn.addEventListener("click", async () => {
-        const code = btn.getAttribute("data-hazard-county");
-        let cur = this._data()?.config?.hazard_counties;
-        cur = Array.isArray(cur) ? cur.slice() : [];
-        const i = cur.indexOf(code);
-        if (i >= 0) cur.splice(i, 1); else cur.push(code);
-        await this._saveSetting("hazard_counties", JSON.stringify(cur));
-        await this._fetchHazardStatus();
-      });
-    });
+    // Hazard Monitor (8.8.2): CAP area fields keep their one-entry-per-line
+    // contract. Location fields are a pair: the backend saves both, and an
+    // empty field deletes the whole override before the card re-renders home.
     root.querySelectorAll("textarea.hazard-list-field[data-list-key]").forEach(area => {
       area.addEventListener("change", async () => {
         const items = area.value.split("\n").map(v => v.trim()).filter(Boolean);
         await this._saveSetting(area.getAttribute("data-list-key"), JSON.stringify(items));
+      });
+    });
+    root.querySelectorAll(".hazard-location-field[data-cfg-key]").forEach(inp => {
+      inp.addEventListener("change", async () => {
+        const raw = inp.value.trim();
+        const value = raw === "" ? "" : Number(raw);
+        await this._saveSetting(inp.getAttribute("data-cfg-key"), value);
+        await this._fetchHazardStatus();
       });
     });
     root.querySelectorAll("#hazardSources [data-cfg-key], select.cfg-field[data-cfg-key^=\"hazard_\"]").forEach(el => {

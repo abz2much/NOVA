@@ -42,7 +42,8 @@ def hm(load, monkeypatch, tmp_path, cfg):
     monkeypatch.setattr(mod, "_STORE", None)
     monkeypatch.setattr(mod, "_LAST_WARNINGS", {})
     monkeypatch.setattr(hw, "_store_path", lambda: str(tmp_path / "hazard_warnings.json"))
-    st = types.SimpleNamespace(met=(True, []), met_calls=[], delivered=[], legacy=[])
+    st = types.SimpleNamespace(met=(True, []), met_calls=[], cap_calls=[],
+                               delivered=[], legacy=[])
 
     async def met_fetch(hass, counties, *, lang, user_agent):
         st.met_calls.append(list(counties))
@@ -50,6 +51,11 @@ def hm(load, monkeypatch, tmp_path, cfg):
             raise st.met
         return st.met[0], st.met[1], "rss"
     monkeypatch.setattr(load("hazard_met_eireann"), "fetch", met_fetch)
+
+    async def cap_collect(hass, url, *, lang, user_agent):
+        st.cap_calls.append(url)
+        return True, []
+    monkeypatch.setattr(load("hazard_cap"), "collect", cap_collect)
 
     async def deliver(hass, push_text, action_key, *, speak_text=""):
         st.delivered.append((push_text, action_key, speak_text))
@@ -97,6 +103,34 @@ def test_a_home_elsewhere_is_unchanged(hm, cfg):
     assert hm.effective_flag(hass, "hazard_weather_on") is False
 
 
+@pytest.mark.parametrize(("country", "lat", "lon", "source"), [
+    ("IE", 40.7, -74.0, "met_eireann"),
+    ("US", 40.7, -74.0, "us"),
+    ("DE", 50.1, 8.7, "custom"),
+    ("", 53.35, -6.26, "met_eireann"),
+    (None, 51.5, -0.12, "custom"),
+])
+def test_source_defaults_follow_the_home_country(hm, country, lat, lon, source):
+    assert hm.effective_source(_hass(country, lat, lon)) == source
+
+
+def test_old_source_flags_are_derived_in_priority_order_without_being_saved(hm, cfg):
+    hass = _hass("DE", 50.1, 8.7)
+    cfg.update(hazard_weather_on=True)
+    assert hm.effective_source(hass) == "us"
+    cfg.update(hazard_cap_on=True, hazard_cap_url="https://alerts.example.org/feed.xml")
+    assert hm.effective_source(hass) == "custom"
+    cfg.update(hazard_met_eireann_on=True)
+    assert hm.effective_source(hass) == "met_eireann"
+    assert "hazard_source" not in cfg
+
+
+def test_a_saved_source_wins_over_every_old_flag(hm, cfg):
+    cfg.update(hazard_source="us", hazard_met_eireann_on=True,
+               hazard_cap_on=True, hazard_cap_url="https://alerts.example.org/feed.xml")
+    assert hm.effective_source(_hass("IE")) == "us"
+
+
 async def test_the_legacy_feeds_are_not_polled_for_an_irish_home(hm, cfg):
     cfg["hazard_monitor_enabled"] = True
     await hm.periodic_check(_hass("IE"))
@@ -104,6 +138,22 @@ async def test_the_legacy_feeds_are_not_polled_for_an_irish_home(hm, cfg):
     hm._st.legacy.clear()
     await hm.periodic_check(_hass("US", 40.7, -74.0))
     assert hm._st.legacy == ["quake", "wx", "disaster"]
+
+
+@pytest.mark.parametrize(("source", "met_calls", "cap_calls", "legacy"), [
+    ("met_eireann", [["EI03"]], [], []),
+    ("us", [], [], ["wx"]),
+    ("custom", [], ["https://alerts.example.org/feed.xml"], []),
+])
+async def test_only_the_chosen_weather_source_is_polled(
+        hm, cfg, source, met_calls, cap_calls, legacy):
+    cfg.update(hazard_monitor_enabled=True, hazard_source=source,
+               hazard_cap_url="https://alerts.example.org/feed.xml",
+               hazard_quakes_on=False, hazard_disasters_on=False)
+    await hm.periodic_check(_hass())
+    assert hm._st.met_calls == met_calls
+    assert hm._st.cap_calls == cap_calls
+    assert hm._st.legacy == legacy
 
 
 async def test_nothing_runs_while_the_monitor_is_off(hm, cfg):
@@ -225,6 +275,20 @@ async def test_status_adds_the_county_and_level_settings(hm, cfg):
     assert (st["push_level"], st["speak_level"]) == ("yellow", "red")
     assert st["feeds"] == {"earthquakes": False, "weather": False, "disasters": False}
     assert st["sources"] == {"met_eireann": True, "cap": False, "cap_configured": False}
+
+
+async def test_the_automatic_county_follows_a_location_override(hm, cfg):
+    cfg.update(hazard_source="met_eireann", hazard_lat=52.664, hazard_lon=-8.627)
+    st = await hm.status(_hass())
+    assert st["detected_county"] == {"code": "EI16", "name": "Limerick"}
+    await hm.scan_now(_hass())
+    assert hm._st.met_calls == [["EI16"]]
+
+
+async def test_a_saved_county_list_still_wins_without_any_county_ui(hm, cfg):
+    cfg.update(hazard_source="met_eireann", hazard_counties='["EI03", "EI16"]')
+    await hm.scan_now(_hass())
+    assert hm._st.met_calls == [["EI03", "EI16"]]
 
 
 async def test_ws_hazard_returns_the_new_data(hm, cfg, load, monkeypatch):
