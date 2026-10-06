@@ -77,9 +77,13 @@ from .ws_panel_stats import (
     _get_suggestions,
 )
 # The AI settings commands live in ws_ai.py. async_register registers the
-# handlers by name; invalidate_model_cache is public and also used below.
-from .ws_ai import (
+# handlers by name; invalidate_model_cache is public and stays importable
+# from here. nova/update_config uses the panel AI key checks below.
+from .ws_ai import (  # noqa: F401
+    PANEL_AI_ENDPOINT_KEYS,
+    PANEL_AI_VALUE_KEYS,
     invalidate_model_cache,
+    panel_ai_value,
     ws_apply_ai_config,
     ws_delete_credential,
     ws_get_credential_status,
@@ -540,7 +544,7 @@ async def ws_get_panel_data(
                 "departure_lead_minutes": _runtime_opt(hass, entry, "departure_lead_minutes", 30),
                 "routine_departure_lead_minutes": _runtime_opt(hass, entry, "routine_departure_lead_minutes", 15),
                 "departure_origin_entity": str(_runtime_opt(hass, entry, "departure_origin_entity", "") or ""),
-                "departure_osrm_url": str(_runtime_opt(hass, entry, "departure_osrm_url", "") or ""),
+                "departure_osrm_url": _masked_url(_runtime_opt(hass, entry, "departure_osrm_url", "")),
                 "departure_travel_sensor": str(_runtime_opt(hass, entry, "departure_travel_sensor", "") or ""),
                 "identity_min_confidence": _runtime_opt(hass, entry, "identity_min_confidence", 0.45),
                 "ollama_num_ctx": _runtime_opt(hass, entry, "ollama_num_ctx", 8192),
@@ -566,9 +570,9 @@ async def ws_get_panel_data(
                 "infrastructure_audit_area": str(_runtime_opt(hass, entry, "infrastructure_audit_area", "") or ""),
                 "movie_media_player": str(_runtime_opt(hass, entry, "movie_media_player", "") or ""),
                 "movie_dim_pct": int(_runtime_opt(hass, entry, "movie_dim_pct", 15) or 15),
-                "llm_base_url": str(_runtime_opt(hass, entry, "llm_base_url", "") or ""),
-                "ollama_base_url": str(_runtime_opt(hass, entry, "ollama_base_url", "") or ""),
-                "custom_base_url": str(_runtime_opt(hass, entry, "custom_base_url", "") or ""),
+                "llm_base_url": _masked_url(_runtime_opt(hass, entry, "llm_base_url", "")),
+                "ollama_base_url": _masked_url(_runtime_opt(hass, entry, "ollama_base_url", "")),
+                "custom_base_url": _masked_url(_runtime_opt(hass, entry, "custom_base_url", "")),
                 "self_hosted_endpoints_migrated": bool(_runtime_opt(
                     hass, entry, "self_hosted_endpoints_migrated", False)),
                 "notify_service": current_notify,
@@ -634,7 +638,7 @@ async def ws_get_panel_data(
                 # re-render even though the value was saved (v6.64.1 fix).
                 "banter_level":         _runtime_opt(hass, entry, "banter_level", 1),
                 "search_backend":       str(_runtime_opt(hass, entry, "search_backend", "duckduckgo") or "duckduckgo"),
-                "searxng_url":          str(_runtime_opt(hass, entry, "searxng_url", "") or ""),
+                "searxng_url":          _masked_url(_runtime_opt(hass, entry, "searxng_url", "")),
                 "calendar_tight_gap_min": _runtime_opt(hass, entry, "calendar_tight_gap_min", 15),
                 "recognition_source":   str(_runtime_opt(hass, entry, "recognition_source", "both") or "both"),
                 "voice_confirm_enabled": bool(_runtime_opt(hass, entry, "voice_confirm_enabled", False)),
@@ -689,6 +693,21 @@ async def ws_get_panel_data(
     except Exception as exc:
         _LOGGER.exception("ws_get_panel_data failed: %s", exc)
         connection.send_error(msg["id"], "panel_data_failed", safe_error_message(exc))
+
+
+def _masked_url(value) -> str:
+    """A saved URL for display, as a string, with any user:pass@ (and any
+    credential-like query value) masked by the diagnostics scrubber
+    (8.7.23). Only what is sent to the panel changes; the saved value is
+    untouched. Never raises."""
+    text = str(value or "")
+    if not text:
+        return text
+    try:
+        from .diagnostics import _scrub_text
+        return _scrub_text(text)
+    except Exception:
+        return "**REDACTED**" if "@" in text else text
 
 
 def _door_entity_open(state_obj) -> bool:
@@ -1118,13 +1137,31 @@ async def ws_update_config(
         )
         return
 
+    # AI endpoints are written only by nova/apply_ai_config, which normalises
+    # them, checks the destination and tests the connection (8.7.23). The
+    # panel never sends them here. Already saved values still load.
+    if key in PANEL_AI_ENDPOINT_KEYS:
+        connection.send_error(
+            msg["id"], "invalid_key",
+            f"Key '{key}' is set with nova/apply_ai_config (Settings, AI Models), "
+            "not nova/update_config",
+        )
+        return
+
+    # Provider and model keys get nova/apply_ai_config's own checks.
+    if key in PANEL_AI_VALUE_KEYS:
+        from .safe_errors import NovaValidationError
+        try:
+            value = panel_ai_value(key, value)
+        except NovaValidationError as exc:
+            connection.send_error(msg["id"], "invalid_value", safe_error_message(exc))
+            return
+
     from . import safety_config
     if not safety_config.valid_panel_value(key, value):
         connection.send_error(
             msg["id"], "invalid_value",
-            "Key 'output_language' must be 'auto' or a supported language code"
-            if key == "output_language"
-            else f"Key '{key}' requires a boolean value",
+            safety_config.invalid_panel_value_message(key),
         )
         return
 
@@ -1187,15 +1224,6 @@ async def ws_update_config(
         if key == "cognition_enabled" and not value:
             from . import cognition
             cognition.mark_unobserved()
-
-        # llm_base_url is the saved endpoint identity custom/ollama discovery
-        # is cached under (Phase 3, v7.108.0) — a stale cached list for the
-        # old endpoint must not survive the endpoint changing.
-        if key in ("llm_base_url", "ollama_base_url", "custom_base_url"):
-            if key != "ollama_base_url":
-                invalidate_model_cache("custom")
-            if key != "custom_base_url":
-                invalidate_model_cache("ollama")
 
         # Persist via centralized config module (survives restarts). The
         # in-memory runtime_config above is already set either way, so this
@@ -1358,9 +1386,19 @@ async def ws_get_debug_log(
     msg: dict,
 ) -> None:
     """Return Nova internal debug log entries, with entities named. The
-    persisted log file and the diagnostics export keep the entity_ids."""
-    connection.send_result(msg["id"], {"entries": _named_log_entries(
-        list(_DEBUG_LOG), _entity_names(hass))})
+    persisted log file and the diagnostics export keep the entity_ids.
+
+    Never raises (8.7.23). If naming fails, the entries go back with their
+    entity_ids, and the failure goes to the Home Assistant log. The pinned
+    contract has no error code for this command, so it answers with the
+    same {"entries": [...]} shape rather than a new error."""
+    entries = list(_DEBUG_LOG)
+    try:
+        names = _entity_names(hass)
+    except Exception as exc:
+        safe_error_message(exc, where="get_debug_log naming", log=True)
+        names = {}
+    connection.send_result(msg["id"], {"entries": _named_log_entries(entries, names)})
 
 
 # ─── Decision Record browser (Phase 1: decision explanations + feedback) ────
@@ -1491,7 +1529,7 @@ async def ws_semantic_search(
             connection.send_result(msg["id"], {
                 "enabled": enabled,
                 "ollama_configured": bool(base),
-                "base": base or "",
+                "base": _masked_url(base),
                 "model": embeddings._model(),
                 "vector_count": vcount,
             })

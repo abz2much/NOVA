@@ -92,9 +92,10 @@ async def test_panel_data_shows_a_safety_opt_in_on_only_for_a_real_true(ws, load
 
 
 async def test_current_behaviour_panel_data_shows_the_string_false_as_on(ws, load):
-    # Looks wrong, and pairs with the unchecked write: voice_confirm_enabled
-    # and sentinel_enabled are shown with bool(), so a stored "false" shows
-    # as on (and is on, since their readers use bool() too).
+    # Still pinned after 8.7.23, on purpose: writes now refuse "false" for
+    # these keys, but values saved before are never re-checked on read, so
+    # an old config keeps loading. Such a stored "false" still shows as on
+    # (and is on, since their readers use bool() too).
     entry = _entry(load, runtime_config={"voice_confirm_enabled": "false",
                                          "sentinel_enabled": "false"})
     res = (await _call(ws.ws_get_panel_data, _hass(entry))).results[0][1]
@@ -102,19 +103,35 @@ async def test_current_behaviour_panel_data_shows_the_string_false_as_on(ws, loa
     assert res["config"]["sentinel_enabled"] is True
 
 
-async def test_current_behaviour_panel_data_returns_endpoint_urls_unmasked(ws, load):
-    # Looks wrong: a self-hosted endpoint can carry a user and password in
-    # the URL. get_panel_data returns the three endpoint URLs, the SearXNG
-    # URL and the OSRM URL exactly as stored, credentials included, on every
-    # 5 second poll.
+_URL_KEYS = ("ollama_base_url", "custom_base_url", "llm_base_url", "searxng_url",
+             "departure_osrm_url")
+
+
+async def test_panel_data_masks_a_user_and_password_in_endpoint_urls(ws, load):
+    # 8.7.23: was test_current_behaviour_panel_data_returns_endpoint_urls_
+    # unmasked. The diagnostics scrubber masks user:pass@; the field stays a
+    # string, so the response shape is unchanged. The saved value is not.
     url = "http://nova:hunter2@10.0.0.2:11434"
-    entry = _entry(load, runtime_config={"ollama_base_url": url, "custom_base_url": url,
-                                         "llm_base_url": url, "searxng_url": url,
-                                         "departure_osrm_url": url})
+    entry = _entry(load, runtime_config={k: url for k in _URL_KEYS})
     cfg = (await _call(ws.ws_get_panel_data, _hass(entry))).results[0][1]["config"]
-    for key in ("ollama_base_url", "custom_base_url", "llm_base_url", "searxng_url",
-                "departure_osrm_url"):
-        assert cfg[key] == url
+    for key in _URL_KEYS:
+        assert cfg[key] == "http://**REDACTED**@10.0.0.2:11434", key
+        assert entry.runtime_data.runtime_config[key] == url
+
+
+async def test_panel_data_leaves_plain_and_empty_urls_as_they_are(ws, load):
+    plain = "http://10.0.0.2:11434/v1"
+    entry = _entry(load, runtime_config={"ollama_base_url": plain})
+    cfg = (await _call(ws.ws_get_panel_data, _hass(entry))).results[0][1]["config"]
+    assert cfg["ollama_base_url"] == plain
+    assert cfg["custom_base_url"] == "" and cfg["searxng_url"] == ""
+
+
+def test_masking_still_hides_the_password_if_the_scrubber_is_missing(ws, monkeypatch):
+    monkeypatch.setitem(sys.modules, "jc.diagnostics", None)   # import fails
+    assert ws._masked_url("http://a:b@h") == "**REDACTED**"
+    assert ws._masked_url("http://h:1") == "http://h:1"
+    assert ws._masked_url(None) == ""
 
 
 async def test_panel_data_failure_returns_no_raw_text(ws, load, monkeypatch):
@@ -207,13 +224,16 @@ async def test_debug_log_with_no_names_is_unchanged(ws, load, monkeypatch):
     assert conn.results[0][1]["entries"] == [{"msg": "lock.front_door"}]
 
 
-async def test_current_behaviour_debug_log_raises_instead_of_returning_an_error(ws, load,
-                                                                                monkeypatch):
-    # Looks wrong: the one handler here with no try/except. A failure raises
-    # out of the handler instead of sending a nova error code.
+async def test_debug_log_answers_unnamed_when_naming_fails(ws, load, monkeypatch):
+    # 8.7.23: was test_current_behaviour_debug_log_raises_instead_of_
+    # returning_an_error. The pinned contract has no error code for this
+    # command, so it answers in its usual shape with the entity_ids as they
+    # are; the failure goes to the Home Assistant log.
+    monkeypatch.setattr(ws, "_DEBUG_LOG", [{"msg": "lock.front_door jammed"}])
     monkeypatch.setattr(ws, "_entity_names", _boom())
-    with pytest.raises(RuntimeError):
-        await _call(ws.ws_get_debug_log, _hass(_entry(load)))
+    conn = await _call(ws.ws_get_debug_log, _hass(_entry(load)))
+    assert conn.errors == []
+    assert conn.results == [(7, {"entries": [{"msg": "lock.front_door jammed"}]})]
 
 
 @pytest.mark.parametrize("handler,module,fn,code", [
@@ -303,16 +323,22 @@ async def test_semantic_disable_and_test(ws, load, emb):
     assert conn.results[0][1]["ok"] is True and calls == ["probe"]
 
 
-async def test_current_behaviour_semantic_status_returns_the_endpoint_unmasked(ws, load, emb,
-                                                                               monkeypatch):
-    # Looks wrong: status returns the embedding base URL as stored, so a
-    # user and password in the URL go back to the panel.
+async def test_semantic_status_masks_a_user_and_password_in_the_endpoint(ws, load, emb,
+                                                                         monkeypatch):
+    # 8.7.23: was test_current_behaviour_semantic_status_returns_the_
+    # endpoint_unmasked. Same keys, "base" masked.
     _, _, _, _, e = emb
     monkeypatch.setattr(e, "_ollama_base", lambda: "http://nova:hunter2@10.0.0.2:11434")
     conn = await _call(ws.ws_semantic_search, _hass(_entry(load)), action="status")
     assert conn.results == [(7, {"enabled": False, "ollama_configured": True,
-                                 "base": "http://nova:hunter2@10.0.0.2:11434",
+                                 "base": "http://**REDACTED**@10.0.0.2:11434",
                                  "model": "nomic-embed-text", "vector_count": 12})]
+
+
+async def test_semantic_status_with_no_endpoint_is_an_empty_base(ws, load, emb, monkeypatch):
+    monkeypatch.setattr(emb[4], "_ollama_base", lambda: None)
+    res = (await _call(ws.ws_semantic_search, _hass(_entry(load)), action="status")).results[0][1]
+    assert res["base"] == "" and res["ollama_configured"] is False
 
 
 async def test_semantic_failure_returns_no_raw_text(ws, load, emb, monkeypatch):
@@ -387,11 +413,11 @@ async def test_documents_delete_strips_a_path_from_the_name(ws, load, docs, tmp_
     assert outside.exists()
 
 
-async def test_current_behaviour_a_failed_document_delete_returns_raw_exception_text(
-        ws, load, docs, tmp_path, monkeypatch):
-    # Looks wrong: documents.delete_source puts str(exc) in its result and the
-    # handler sends it on as is, so the panel sees the raw OS error text with
-    # its full /config path.
+async def test_a_failed_document_delete_returns_no_raw_exception_text(
+        ws, load, docs, tmp_path, monkeypatch, caplog):
+    # 8.7.23: was test_current_behaviour_a_failed_document_delete_returns_
+    # raw_exception_text. The panel gets the error type; the OS error with
+    # its full /config path goes to the Home Assistant log only.
     d, _, _ = docs
     monkeypatch.setattr(d, "_documents_dir", lambda: str(tmp_path))
     monkeypatch.setattr(d, "_forget_source", lambda s: None)
@@ -399,8 +425,11 @@ async def test_current_behaviour_a_failed_document_delete_returns_raw_exception_
     conn = await _call(ws.ws_documents, _hass(_entry(load)), action="delete",
                        filename="manual.txt")
     res = conn.results[0][1]
-    assert res["ok"] is False and res["error"].startswith("file remove failed: ")
-    assert str(tmp_path) in res["error"]
+    assert res["ok"] is False and res["filename"] == "manual.txt"
+    assert res["error"].startswith("file remove failed: ")
+    assert res["error"].endswith(" (details are in the Home Assistant log)")
+    assert str(tmp_path) not in res["error"]
+    assert "document delete failed" in caplog.text
 
 
 async def test_documents_failure_returns_no_raw_text(ws, load, docs, monkeypatch):

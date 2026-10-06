@@ -372,17 +372,22 @@ async def test_list_models_cache_invalidated_when_credential_changes(hass, hass_
     assert second["result"]["models"] == ["llama-3.3-70b-versatile"]
 
 
-async def test_list_models_cache_invalidated_when_base_url_changes(hass, hass_ws_client, aioclient_mock):
-    """Changing llm_base_url (custom/ollama's saved endpoint identity) must
-    drop any cached list fetched under the old endpoint."""
+async def test_update_config_cannot_change_the_endpoint_under_a_cached_list(
+    hass, hass_ws_client, aioclient_mock,
+):
+    """8.7.23: was test_list_models_cache_invalidated_when_base_url_changes,
+    which changed llm_base_url through nova/update_config. That write is now
+    refused (endpoints are set only by nova/apply_ai_config, which drops
+    every cached list when it saves), so the saved endpoint and the list
+    cached for it stay as they were."""
+    from custom_components.nova import nova_config
     await _setup_nova(hass)
+    entry = hass.config_entries.async_entries("nova")[0]
+    nova_config.set("llm_base_url", "https://old.example.test/v1")
+    entry.runtime_data.runtime_config["llm_base_url"] = "https://old.example.test/v1"
     client = await hass_ws_client(hass)
 
     aioclient_mock.get("https://old.example.test/v1/models", json={"data": [{"id": "old-model"}]})
-    await client.send_json_auto_id({
-        "type": "nova/update_config", "key": "llm_base_url", "value": "https://old.example.test/v1",
-    })
-    await client.receive_json()
     await client.send_json_auto_id({"type": "nova/list_models", "provider": "custom"})
     first = await client.receive_json()
     assert first["result"]["models"] == ["old-model"]
@@ -390,12 +395,15 @@ async def test_list_models_cache_invalidated_when_base_url_changes(hass, hass_ws
     await client.send_json_auto_id({
         "type": "nova/update_config", "key": "llm_base_url", "value": "https://new.example.test/v1",
     })
-    await client.receive_json()
-    aioclient_mock.get("https://new.example.test/v1/models", json={"data": [{"id": "new-model"}]})
+    refused = await client.receive_json()
+    assert refused["success"] is False and refused["error"]["code"] == "invalid_key"
+    assert nova_config.get("llm_base_url") == "https://old.example.test/v1"
+    assert entry.runtime_data.runtime_config["llm_base_url"] == "https://old.example.test/v1"
+
     await client.send_json_auto_id({"type": "nova/list_models", "provider": "custom"})
     second = await client.receive_json()
-    assert second["result"]["models"] == ["new-model"]
-    assert second["result"]["cached"] is False
+    assert second["result"]["models"] == ["old-model"]
+    assert second["result"]["cached"] is True
 
 
 async def test_get_credential_status_rejects_non_admin(

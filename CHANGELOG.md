@@ -1,3 +1,69 @@
+## [8.7.23] — Fixes: panel settings are checked when saved, and the panel no longer gets secrets or raw errors
+
+These are the panel websocket findings from the 8.7.22 tests. Each fix fails toward refusing or telling the truth, never toward doing more. Every check runs only when a value is saved. Values already in the config are never checked again when they load, so an older config cannot stop Nova starting.
+
+**1. On/off settings must be true or false**
+- `voice_confirm_enabled`, `observer_enabled` and the other on/off settings stored any value. Nova reads them with `bool()`, so the strings `"false"` and `"off"` left voice confirmation on, and `"false"` started the observer.
+- Every panel setting whose allow-list comment says bool, plus `observer_enabled`, now takes only `true` or `false`. Anything else is refused with `invalid_value`. That is 40 keys; `satellite_audio_out` is "dict/bool" and is not included.
+- I checked the panel before making this change. Every one of these keys is saved by a toggle button or chip, which sends a real boolean, or by a fixed `value: true`. None is saved by a select or an input. A test keeps it that way.
+
+**2. The intrusion reply timeout is bounded: 30 to 600 seconds**
+- `intrusion_response_timeout` took any value. With 999999, the "couldn't reach you, please check" notice for an unanswered intrusion never came.
+- It must now be a number of seconds from 30 to 600:
+  - 30 is the cognitive core's tick, so a shorter wait cannot be checked any sooner.
+  - 600 (10 minutes) is the longest choice the panel offers. The default stays 120.
+- The panel's select sends its choice as a string (`"120"`), so a numeric string in range is accepted and stored as sent, as before.
+
+**3. The security alarm must be an alarm panel id**
+- `security_alarm_entity` took anything, for example `light.kitchen`. A typo meant automatic lockdown silently never followed the alarm.
+- It must now be empty (the panel's "Auto detect") or a well formed `alarm_control_panel.*` id. Nova does not check that the panel exists right now, since it may be offline.
+
+**4. AI settings get the AI settings checks**
+- `nova/update_config` wrote endpoints, providers and models with none of `nova/apply_ai_config`'s checks. It accepted:
+  - a cloud metadata address or a bad scheme
+  - a user name and password in the URL
+  - an unknown provider, or an empty model
+- The panel never saves these through `nova/update_config`; its AI Models card uses `nova/apply_ai_config`. So:
+  - `llm_base_url`, `ollama_base_url` and `custom_base_url` are now refused there with `invalid_key`. The error points to `nova/apply_ai_config`.
+  - Provider and model keys run `nova/apply_ai_config`'s own validator and get its reasons. `review_provider` and `review_model` are checked like the Main Agent's provider and model.
+
+**5. URLs sent to the panel are masked**
+- The panel data call (every 5 seconds) returned the three model endpoints, the SearXNG URL and the OSRM URL as stored. The semantic search status returned the embedding URL. A user name and password in a URL reached the panel.
+- They now go through the diagnostics scrubber, so `http://user:pass@host` is shown as `http://**REDACTED**@host`. The response keeps its shape, and the saved value does not change.
+
+**6. Repeat only plays where the line was said**
+- When the original speaker was gone, Repeat said the line again on the house-wide default speakers.
+- It is now refused with `no_speaker`: "The speaker this was said on is not available, so it was not repeated". A line with no recorded speaker is refused the same way.
+
+**7. An invalid sleep override is refused when saved**
+- `"sleepy"` was stored and reported as saved, then quietly refused when applied.
+- `sleep_override` must now be `auto`, `awake` or `asleep`. Anything else is refused with `invalid_value` and nothing is written.
+
+**8. Error messages say what was wrong**
+- Every refused value used to say "requires a boolean value". Each kind of key now has its own message, for example "must be a whole number from 1 to 90", "must be a number of seconds from 30 to 600" or "must be empty or an alarm_control_panel entity id".
+- A bad AI endpoint used to get "ValueError (details are in the Home Assistant log)". It now gets the reason as a fixed phrase, for example "The endpoint must not include a user name or password. Add the key under Provider Credentials instead." An unknown cause gets "The endpoint is not a valid address.", and the detail goes to the Home Assistant log. No exception text is sent.
+
+**9. No raw error text on the panel, and no handler raises**
+- A failed document delete returned the raw OS error with its full `/config` path. It now returns "file remove failed:" with the error type, and the detail goes to the Home Assistant log.
+- A failed snapshot wrote the raw exception text into the debug log, which the panel shows. The debug log now gets the error type, and the detail stays in the Home Assistant log.
+- `nova/say_hello` no longer raises. A failure answers `{ok: false, error}`, the same shape `welcome.async_say_hello` already returns, with safe text.
+- `nova/get_debug_log` no longer raises. If naming entities fails, it returns the entries with their entity ids. This is not an error: the pinned contract has no error code for this command, so the old response shape is kept.
+
+**Not changed, on purpose**
+- Audit rows for panel safety changes, size limits on inputs, and camera diagnostics probing any entity. Their `test_current_behaviour_*` tests are unchanged.
+- Values already saved. A stored `"false"` for `voice_confirm_enabled` or `sentinel_enabled` still loads, and still reads as on, until it is saved again. That test stays pinned as current behaviour.
+- `PANEL_WRITABLE_KEYS` and every websocket contract (`tests/fixtures/contracts` has no diff). The endpoint keys stay in the allow-list, so saved values keep loading at startup; only writes through `nova/update_config` are refused.
+
+**Tests**
+- Every `test_current_behaviour_*` test for these findings is now a test of the fixed behaviour. Each says what it pinned before. Beside them are tests for what must still work:
+  - every strict boolean accepting `true` and `false`
+  - the panel's real timeout, sleep and alarm choices
+  - empty and plain URLs left as they are
+  - a good provider or model saved cleaned
+  - repeats on a speaker that is still there
+- Integration tests that pinned the old behaviour now pin the new behaviour: the repeat fallback, and endpoint writes and cache drops through `nova/update_config`.
+- `websocket.py`'s coverage floor rises from 69 to 70. It is now at 74.0%.
+
 ## [8.7.22] — Tests only: the panel websocket layer is now pinned
 
 **No behaviour changes.** No production code is touched in this release. The only edits outside the tests are this entry, `scripts/coverage_floors.py` and the version number.

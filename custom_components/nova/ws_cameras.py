@@ -110,8 +110,10 @@ async def ws_camera_snapshot(
         connection.send_result(
             msg["id"], {"image": base64.b64encode(img).decode()})
     except Exception as exc:
+        # The detail stays in the Home Assistant log; the debug log, which
+        # the panel shows, gets the error type only (8.7.23).
         _LOGGER.debug("camera_snapshot failed for %s: %s", entity_id, exc)
-        _snap_log(entity_id, f"error — {exc}")
+        _snap_log(entity_id, f"error — {safe_error_message(exc)}")
         connection.send_error(msg["id"], "snapshot_failed", safe_error_message(exc))
 
 

@@ -480,7 +480,10 @@ async def test_update_config_without_runtime_changes_nothing(
     with _runtime_missing(entry) as runtime:
         resp = await _update(hass, hass_ws_client, key, value)
         assert resp["success"] is False
-        assert resp["error"]["code"] == "update_failed"
+        # 8.7.23: endpoint keys are refused before the runtime is looked up
+        # (they are written only by nova/apply_ai_config); still nothing changes.
+        assert resp["error"]["code"] == (
+            "invalid_key" if key.endswith("_base_url") else "update_failed")
         assert runtime.runtime_config == runtime_rc_before   # memory unchanged
         assert persist_spy.calls == []                       # nothing saved
         assert nova_config.get(key) == json_before
@@ -504,20 +507,35 @@ async def test_update_config_persist_failure_is_session_only(
     assert "will revert on restart" in caplog.text
 
 
-@pytest.mark.parametrize(("key", "expected"), [
-    ("llm_base_url", [("invalidate", "custom"), ("invalidate", "ollama")]),
-    ("ollama_base_url", [("invalidate", "ollama")]),
-    ("custom_base_url", [("invalidate", "custom")]),
-    ("chimney_side", []),
-])
-async def test_update_config_model_cache_invalidation_unchanged(
-    hass, hass_ws_client, side_effects, key, expected,
+@pytest.mark.parametrize("key", ["llm_base_url", "ollama_base_url", "custom_base_url"])
+async def test_update_config_refuses_endpoint_keys_and_drops_no_cache(
+    hass, hass_ws_client, side_effects, key,
 ):
-    await _setup(hass)
+    """8.7.23: was test_update_config_model_cache_invalidation_unchanged, which
+    pinned that an endpoint written here dropped the cached model lists.
+    Endpoints are now written only by nova/apply_ai_config (which drops every
+    cached list when it saves), so here the write is refused and nothing is
+    invalidated or saved."""
+    from custom_components.nova import nova_config
+    entry = await _setup(hass)
+    before = nova_config.get(key)
+    runtime_before = dict(entry.runtime_data.runtime_config)
     side_effects.clear()
     resp = await _update(hass, hass_ws_client, key, "http://new:8000/v1")
+    assert resp["success"] is False
+    assert resp["error"]["code"] == "invalid_key"
+    assert "nova/apply_ai_config" in resp["error"]["message"]
+    assert [e for e in side_effects if e[0] == "invalidate"] == []
+    assert entry.runtime_data.runtime_config == runtime_before
+    assert nova_config.get(key) == before
+
+
+async def test_update_config_ordinary_key_drops_no_cache(hass, hass_ws_client, side_effects):
+    await _setup(hass)
+    side_effects.clear()
+    resp = await _update(hass, hass_ws_client, "chimney_side", "left")
     assert resp["success"], resp
-    assert [e for e in side_effects if e[0] == "invalidate"] == expected
+    assert [e for e in side_effects if e[0] == "invalidate"] == []
 
 
 async def test_update_config_sleep_lockdown_and_provider_effects_unchanged(

@@ -95,15 +95,23 @@ async def test_repeat_goes_to_the_original_speaker_when_it_is_there(voice, speec
 
 
 @pytest.mark.parametrize("state", [None, "unavailable", "unknown"])
-async def test_current_behaviour_repeat_falls_back_to_every_default_speaker(voice, speech,
-                                                                            state):
-    # Looks wrong, or at least worth knowing: when the room the line was
-    # said in has no working speaker, the line is said again on the house
-    # wide default speakers, wherever they are and whoever is near them.
+async def test_repeat_is_refused_when_the_original_speaker_is_gone(voice, speech, state):
+    # 8.7.23: was test_current_behaviour_repeat_falls_back_to_every_default_
+    # speaker. A line is only repeated where it was said; it is no longer
+    # sent to the house-wide default speakers.
     hass = _hass(**({"media_player__kitchen": state} if state else {}))
     conn = await _call(voice.ws_repeat_spoken, hass, spoken_id=11)
+    assert conn.errors == [(4, "no_speaker", "The speaker this was said on is not available, "
+                                             "so it was not repeated")]
+    assert speech.announced == []
+
+
+async def test_repeat_uses_only_the_original_speakers_still_there(voice, speech):
+    speech.row["speakers"] = ["media_player.kitchen", "media_player.gone"]
+    conn = await _call(voice.ws_repeat_spoken, _hass(media_player__kitchen="playing"),
+                       spoken_id=11)
     assert conn.results[0][1]["ok"] is True
-    assert speech.announced[0][2] == ["media_player.everywhere"]
+    assert speech.announced[0][2] == ["media_player.kitchen"]
 
 
 async def test_repeat_of_a_missing_row_is_not_found(voice, speech):
@@ -113,11 +121,11 @@ async def test_repeat_of_a_missing_row_is_not_found(voice, speech):
     assert speech.announced == []
 
 
-async def test_repeat_with_no_speaker_at_all_says_so(voice, speech):
-    speech.broadcast = []
+async def test_repeat_of_a_line_with_no_recorded_speaker_is_refused(voice, speech):
+    # Before 8.7.23 this fell back to the default speakers too.
+    speech.row["speakers"] = []
     conn = await _call(voice.ws_repeat_spoken, _hass(), spoken_id=11)
-    assert conn.errors == [(4, "no_speaker", "No speaker available to repeat through")]
-    assert speech.announced == []
+    assert conn.errors[0][:2] == (4, "no_speaker") and speech.announced == []
 
 
 async def test_repeat_with_no_tts_entity_says_so(voice, speech):
@@ -217,10 +225,14 @@ async def test_say_hello_sends_only_the_fixed_text_through_the_agent(voice, load
     assert conn.results == [(4, {"ok": True, "reply": "Hello."})] and seen == [("ctx", 4)]
 
 
-async def test_current_behaviour_say_hello_raises_instead_of_returning_an_error(voice, load,
-                                                                                monkeypatch):
-    # Looks wrong: the only command in ws_voice.py with no try/except, so a
-    # failure raises out of the handler instead of sending an error code.
+async def test_say_hello_failure_is_an_error_result_not_a_raise(voice, load, monkeypatch, caplog):
+    # 8.7.23: was test_current_behaviour_say_hello_raises_instead_of_
+    # returning_an_error. The answer keeps welcome.async_say_hello's own
+    # {ok, error} shape (the pinned contract has no error code here), with
+    # safe text; the detail goes to the Home Assistant log.
     monkeypatch.setattr(load("welcome"), "async_say_hello", _araise)
-    with pytest.raises(RuntimeError):
-        await _call(voice.ws_say_hello, _hass())
+    conn = await _call(voice.ws_say_hello, _hass())
+    assert conn.errors == []
+    assert conn.results == [(4, {"ok": False,
+                                 "error": "RuntimeError (details are in the Home Assistant log)"})]
+    assert "say_hello failed" in caplog.text

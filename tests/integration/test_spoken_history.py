@@ -94,9 +94,13 @@ async def test_panel_repeat_creates_exactly_one_new_row(hass, hass_ws_client, tm
     assert new_row["text"] == "Welcome home, sir."
 
 
-async def test_repeat_falls_back_to_configured_default_when_original_speaker_gone(
+async def test_repeat_is_refused_when_the_original_speaker_is_gone(
     hass, hass_ws_client, tmp_path, monkeypatch,
 ):
+    """8.7.23: this used to fall back to the configured default speakers
+    (test_repeat_falls_back_to_configured_default_when_original_speaker_gone).
+    A line is now only repeated where it was said; with that speaker gone the
+    repeat is refused with no_speaker, nothing plays, and no row is added."""
     from custom_components.nova import spoken_history, nova_config
 
     calls = []
@@ -122,11 +126,10 @@ async def test_repeat_falls_back_to_configured_default_when_original_speaker_gon
     await client.send_json_auto_id({"type": "nova/repeat_spoken", "spoken_id": original_id})
     resp = await client.receive_json()
 
-    assert resp["success"] is True, resp
-    assert resp["result"]["ok"] is True
-    after = spoken_history.list_recent(db_path=db_path)
-    repeat_row = after[0]
-    assert repeat_row["speakers"] == ["media_player.default_speaker"]
+    assert resp["success"] is False, resp
+    assert resp["error"]["code"] == "no_speaker"
+    assert calls == []
+    assert [r["id"] for r in spoken_history.list_recent(db_path=db_path)] == [original_id]
 
 
 async def test_db_path_resolved_through_hass_config_not_hardcoded(hass):
