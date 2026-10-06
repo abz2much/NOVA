@@ -205,6 +205,40 @@ def ungrounded_briefing_fact(text: str, context: str) -> str:
     return ""
 
 
+def _hazard_context(hz: dict) -> list[str]:
+    """Briefing lines for a hazard_monitor.scan_now result: the legacy feeds
+    as before, and (8.8.0) only Orange and Red weather warnings, for the
+    chosen counties or areas (the scan keeps only those). The headline is
+    passed on as published, never reworded. Silent when nothing is active."""
+    lines: list[str] = []
+    if hz.get("ok"):
+        bits = []
+        for q in hz.get("earthquakes", []) or []:
+            mag = q.get("mag")
+            magtxt = f"magnitude {mag:.1f}" if isinstance(mag, (int, float)) else "an earthquake"
+            bits.append(f"{magtxt} quake {q.get('dist_km')} km away ({q.get('place')})")
+        for w in hz.get("weather", []) or []:
+            bits.append(f"{w.get('severity')} weather alert: {w.get('event')}"
+                        + (f" for {w.get('area')}" if w.get("area") else ""))
+        for d in hz.get("disasters", []) or []:
+            bits.append(f"{d.get('category')}: {d.get('title')} "
+                        f"{d.get('dist_km')} km away")
+        if bits:
+            lines.append("Active hazards nearby: " + "; ".join(bits) + ".")
+    serious = [w for w in (hz.get("warnings") or []) if w.get("level") in ("orange", "red")]
+    if serious:
+        items = []
+        for w in serious:
+            where = ", ".join(w.get("counties") or []) or "your area"
+            when = (f" from {w.get('from')} to {w.get('to')}"
+                    if w.get("from") and w.get("to") else "")
+            items.append(f"{w.get('source_label')} {str(w.get('level')).capitalize()} "
+                         f"{w.get('type')} warning for {where}{when}. "
+                         f"Headline (quote exactly): {w.get('headline_text')}")
+        lines.append("Weather warnings in force:\n- " + "\n- ".join(items))
+    return lines
+
+
 async def async_briefing(
     hass: HomeAssistant,
     call: ServiceCall,
@@ -270,20 +304,7 @@ async def async_briefing(
         try:
             from . import hazard_monitor
             hz = await hazard_monitor.scan_now(hass)
-            if hz.get("ok"):
-                bits = []
-                for q in hz.get("earthquakes", []) or []:
-                    mag = q.get("mag")
-                    magtxt = f"magnitude {mag:.1f}" if isinstance(mag, (int, float)) else "an earthquake"
-                    bits.append(f"{magtxt} quake {q.get('dist_km')} km away ({q.get('place')})")
-                for w in hz.get("weather", []) or []:
-                    bits.append(f"{w.get('severity')} weather alert: {w.get('event')}"
-                                + (f" for {w.get('area')}" if w.get("area") else ""))
-                for d in hz.get("disasters", []) or []:
-                    bits.append(f"{d.get('category')}: {d.get('title')} "
-                                f"{d.get('dist_km')} km away")
-                if bits:
-                    context_lines.append("Active hazards nearby: " + "; ".join(bits) + ".")
+            context_lines.extend(_hazard_context(hz))
         except Exception:
             pass
 

@@ -177,7 +177,8 @@
   }
 
   // Hazard status is fetched once per element lifetime (same on-demand
-  // pattern as Diagnostics) — a manual SCAN NOW re-checks USGS/NWS/EONET.
+  // pattern as Diagnostics) — a manual SCAN NOW re-checks every source that
+  // is on. A county or level change re-fetches it (8.8.0).
   async _fetchHazardStatus() {
     if (!this._hass) return;
     try {
@@ -189,24 +190,74 @@
   _hazardMonitorCardBody() {
     const cfg = this._data()?.config || {};
     const hz = this._hazard || {};
+    const irish = hz.in_ireland === true;
     const loc = hz.center
       ? (hz.using_override ? `Location: override ${hz.center[0]}, ${hz.center[1]}.` : `Location: home ${hz.center[0]}, ${hz.center[1]}.`)
       : "Location: using home coordinates.";
-    const feedChip = (key, label) => {
-      const on = cfg[key] !== false;
+    // Source and feed switches show what the monitor uses: a saved value,
+    // else the region default (8.8.0: Met Éireann on and the legacy feeds
+    // off for an Irish home), which get_panel_data already resolves.
+    const chip = (key, label) => {
+      const on = cfg[key] === true;
       return `<button class="mode-chip ${on ? "mode-chip-on" : ""}" data-cfg-key="${key}" data-cfg-val="${on ? "false" : "true"}">${label}</button>`;
     };
+    const metOn = cfg.hazard_met_eireann_on === true;
+    const capOn = cfg.hazard_cap_on === true;
+    const chosen = new Set(Array.isArray(cfg.hazard_counties) ? cfg.hazard_counties : []);
+    const detected = hz.detected_county;
+    const countyChips = (hz.county_table || []).map(c =>
+      `<button class="mode-chip ${chosen.has(c.code) ? "mode-chip-on" : ""}" data-hazard-county="${this._esc(c.code)}">${this._esc(c.name)}</button>`).join("");
+    const levels = [["yellow", "Yellow"], ["orange", "Orange"], ["red", "Red"]];
+    const listText = key => (Array.isArray(cfg[key]) ? cfg[key] : []).join("\n");
     return `
-      <div class="stub-body">Real-time nearby earthquakes (USGS), severe-weather warnings (NWS), and natural disasters like wildfires (NASA EONET). Alerts speak and push like any Nova alert.</div>
+      <div class="stub-body">Weather warnings for your area, and optional nearby earthquake, US severe-weather and NASA disaster feeds. Alerts push and speak like any Nova alert.</div>
       <div class="cfg-row">
         <label>Monitor</label>
         <button class="toggle-btn ${cfg.hazard_monitor_enabled ? "on" : "off"}" data-cfg-key="hazard_monitor_enabled" data-cfg-val="${cfg.hazard_monitor_enabled ? "false" : "true"}">${cfg.hazard_monitor_enabled ? "ON" : "OFF"}</button>
       </div>
-      <div class="mode-grid">
-        ${feedChip("hazard_quakes_on", "Earthquakes")}
-        ${feedChip("hazard_weather_on", "Weather")}
-        ${feedChip("hazard_disasters_on", "Disasters")}
+      <div class="panel-head" style="margin-top:10px"><div class="panel-title">Sources</div></div>
+      <div class="mode-grid" id="hazardSources">
+        ${chip("hazard_met_eireann_on", "Met Éireann")}
+        ${chip("hazard_cap_on", "Custom CAP feed")}
       </div>
+      ${irish ? "" : `
+      <div class="toggle-desc" style="margin:6px 0 2px">Legacy feeds</div>
+      <div class="mode-grid" id="hazardLegacyFeeds">
+        ${chip("hazard_quakes_on", "Earthquakes")}
+        ${chip("hazard_weather_on", "US weather (NWS)")}
+        ${chip("hazard_disasters_on", "NASA disasters")}
+      </div>`}
+      ${metOn ? `
+      <div class="panel-head" style="margin-top:10px"><div class="panel-title">Met Éireann counties</div></div>
+      <div class="stub-body" id="hazardDetectedCounty">${detected
+        ? `Nearest county to home: <b>${this._esc(detected.name)}</b>${chosen.size ? "" : " (used while none is chosen)"}.`
+        : "No home location, so choose your county."} Choose two if you live near a county border.</div>
+      <div class="mode-grid" id="hazardCounties">${countyChips}</div>` : ""}
+      <div class="cfg-row">
+        <label>Push to phone from <span class="toggle-desc">lower levels are ignored</span></label>
+        <select class="cfg-field" data-cfg-key="hazard_push_level">${this._optSelect(levels, cfg.hazard_push_level || "yellow")}</select>
+      </div>
+      <div class="cfg-row">
+        <label>Also speak from <span class="toggle-desc">below this, phone only</span></label>
+        <select class="cfg-field" data-cfg-key="hazard_speak_level">${this._optSelect(levels, cfg.hazard_speak_level || "orange")}</select>
+      </div>
+      ${capOn ? `
+      <div class="panel-head" style="margin-top:10px"><div class="panel-title">Custom CAP feed (not tested by Nova)</div></div>
+      <div class="stub-body">An https address of one CAP alert, or an Atom or RSS list of them. Nova only alerts when an alert's area covers your home, or matches a code or name below.</div>
+      <div class="cfg-row">
+        <label>Feed address</label>
+        <input class="cfg-field" type="text" data-cfg-key="hazard_cap_url" value="${this._esc(cfg.hazard_cap_url || "")}" placeholder="https://" autocomplete="off">
+      </div>
+      <div class="cfg-row">
+        <label>Area codes <span class="toggle-desc">one per line</span></label>
+        <textarea class="hazard-list-field" data-list-key="hazard_cap_area_codes" rows="2">${this._esc(listText("hazard_cap_area_codes"))}</textarea>
+      </div>
+      <div class="cfg-row">
+        <label>Area names <span class="toggle-desc">one per line</span></label>
+        <textarea class="hazard-list-field" data-list-key="hazard_cap_area_names" rows="2">${this._esc(listText("hazard_cap_area_names"))}</textarea>
+      </div>` : ""}
+      <div class="panel-head" style="margin-top:10px"><div class="panel-title">Warnings now</div></div>
+      <div id="hazardWarnings">${this._renderHazardWarnings(hz.warnings)}</div>
       <div class="stub-body" style="font-family:var(--font-mono);font-size:10.5px">${this._esc(loc)}</div>
       <div class="cfg-row">
         <label>Override lat / lon <span class="toggle-desc">optional</span></label>
@@ -215,15 +266,32 @@
           <input class="cfg-field cfg-num" style="width:76px" type="text" inputmode="decimal" data-cfg-key="hazard_lon" value="${this._esc(cfg.hazard_lon || "")}" placeholder="lon">
         </div>
       </div>
+      ${irish ? "" : `
       <div class="cfg-row">
         <label>Quake radius (km) / min mag</label>
         <div style="display:flex;gap:6px">
           <input class="cfg-field cfg-num" style="width:56px" type="text" inputmode="numeric" data-cfg-key="hazard_quake_radius_km" value="${this._esc(cfg.hazard_quake_radius_km ?? 300)}">
           <input class="cfg-field cfg-num" style="width:56px" type="text" inputmode="decimal" data-cfg-key="hazard_quake_min_mag" value="${this._esc(cfg.hazard_quake_min_mag ?? 2.5)}">
         </div>
-      </div>
+      </div>`}
       <div class="cfg-row"><button class="mode-chip" id="newHazScan">⟳ SCAN NOW</button></div>
       <div id="newHazBody" class="stub-body"></div>`;
+  }
+
+  // Weather warnings (8.8.0): level colour, time window, the headline and
+  // the full description exactly as published (as plain text), and the
+  // source credit (Met Éireann's licence requires both).
+  _renderHazardWarnings(list) {
+    if (!Array.isArray(list)) return `<div class="stub-body">Loading…</div>`;
+    if (!list.length) return `<div class="stub-body">No warnings in force for your area.</div>`;
+    const colour = { yellow: "#e6b800", orange: "#f08c00", red: "#e03131" };
+    return list.map(w => `
+      <div class="hazard-warning" data-level="${this._esc(w.level)}" style="border-left:4px solid ${colour[w.level] || "#888"};padding:4px 8px;margin:6px 0">
+        <div><b class="hazard-level" style="color:${colour[w.level] || "inherit"}">${this._esc(String(w.level || "").toUpperCase())}</b> ${this._esc(w.headline_text || "")}</div>
+        <div class="toggle-desc">${this._esc((w.counties || []).join(", "))}${w.from && w.to ? ` · ${this._esc(w.from)} to ${this._esc(w.to)}` : ""}</div>
+        ${w.description_text ? `<div class="stub-body hazard-description" style="white-space:pre-line">${this._esc(w.description_text)}</div>` : ""}
+        <div class="toggle-desc hazard-source">Source: ${this._esc(w.source_label || "")}</div>
+      </div>`).join("");
   }
 
   // Phase 10 (v7.112.0) — Host Health. Off by default; discovery/mapping
@@ -310,10 +378,11 @@
       return `<div class="stub-body">${this._esc(res?.error || "No location configured.")}</div>`;
     }
     const q = res.earthquakes || [], w = res.weather || [], d = res.disasters || [];
-    if (!q.length && !w.length && !d.length) {
-      return `<div class="stub-body">✓ All clear near ${res.center ? res.center[0] + ", " + res.center[1] : "home"} — no active earthquakes, severe weather, or disasters.</div>`;
+    const warn = res.warnings || [];
+    if (!q.length && !w.length && !d.length && !warn.length) {
+      return `<div class="stub-body">✓ All clear near ${res.center ? res.center[0] + ", " + res.center[1] : "home"} — no weather warnings or other hazards from the sources that are on.</div>`;
     }
-    let html = "";
+    let html = warn.length ? this._renderHazardWarnings(warn) : "";
     for (const e of q) {
       const mag = (typeof e.mag === "number") ? `M${e.mag.toFixed(1)}` : "M?";
       html += `<div class="stub-body"><b class="diag-warn">${mag}</b> ${this._esc(e.place)} — ${e.dist_km} km away</div>`;

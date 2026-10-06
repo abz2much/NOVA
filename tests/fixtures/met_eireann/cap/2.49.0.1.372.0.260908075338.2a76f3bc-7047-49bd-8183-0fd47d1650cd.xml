@@ -1,0 +1,64 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<?xml-stylesheet type="text/xsl" href="https://cap.met.ie/cap-en-style.xsl"?>
+<alert xmlns="urn:oasis:names:tc:emergency:cap:1.2">
+  <identifier>2.49.0.1.372.0.260908075338.2a76f3bc-7047-49bd-8183-0fd47d1650cd</identifier>
+  <sender>forecasts@met.ie</sender>
+  <sent>2026-09-08T07:53:38+01:00</sent>
+  <status>Test</status>
+  <msgType>Alert</msgType>
+  <scope>Public</scope>
+  <incidents>Amy</incidents>
+  <info>
+    <language>en-GB</language>
+    <category>Met</category>
+    <event>Yellow Wind</event>
+    <responseType>Monitor</responseType>
+    <urgency>Future</urgency>
+    <severity>Moderate</severity>
+    <certainty>Likely</certainty>
+    <effective>2026-09-08T07:53:38+01:00</effective>
+    <onset>2026-09-09T12:00:00+01:00</onset>
+    <expires>2026-09-10T12:00:00+01:00</expires>
+    <senderName>Met Éireann</senderName>
+    <headline>Status Yellow - Wind warning for Connacht, Donegal</headline>
+    <description>&lt;p&gt;&amp;nbsp;&lt;/p&gt;&lt;p&gt;Be aware of potential impacts:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Debris, loose objects displaced&lt;/li&gt;&lt;li&gt;Difficult driving and cycling conditions&lt;/li&gt;&lt;li&gt;Large coastal waves&lt;/li&gt;&lt;li&gt;Some fallen trees, branches&lt;/li&gt;&lt;/ul&gt;</description>
+    <instruction></instruction>
+    <web>https://www.met.ie/warnings</web>
+    <contact>forecasts@met.ie</contact>
+    <parameter>
+      <valueName>awareness_type</valueName>
+      <value>1; Wind</value>
+    </parameter>
+    <parameter>
+      <valueName>awareness_level</valueName>
+      <value>2; yellow; Moderate</value>
+    </parameter>
+    <area>
+      <areaDesc>Connacht, Donegal</areaDesc>
+      <geocode>
+        <valueName>FIPS</valueName>
+        <value>EI10</value>
+      </geocode>
+      <geocode>
+        <valueName>FIPS</valueName>
+        <value>EI14</value>
+      </geocode>
+      <geocode>
+        <valueName>FIPS</valueName>
+        <value>EI20</value>
+      </geocode>
+      <geocode>
+        <valueName>FIPS</valueName>
+        <value>EI25</value>
+      </geocode>
+      <geocode>
+        <valueName>FIPS</valueName>
+        <value>EI06</value>
+      </geocode>
+      <geocode>
+        <valueName>FIPS</valueName>
+        <value>EI24</value>
+      </geocode>
+    </area>
+  </info>
+</alert>
