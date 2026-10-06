@@ -136,8 +136,10 @@ def _build_summary(hass: HomeAssistant) -> str:
 
     # ── Time context ─────────────────────────────────────────────────────
     from homeassistant.util import dt as dt_util
+    from .locale_format import format_date
     now = dt_util.now()
-    parts.insert(0, f"Current time: {now.strftime('%I:%M %p, %A %B %d')}")
+    parts.insert(0, f"Current time: {now.strftime('%I:%M %p')}, "
+                    f"{format_date(now, hass, pad_month_first_day=True)}")
 
     return "\n".join(parts)
 

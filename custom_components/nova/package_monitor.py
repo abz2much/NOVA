@@ -56,13 +56,17 @@ _EARLY_CHECK_DELAY_S = 20.0
 _EARLY_CHECK_MIN_GAP_S = 180.0
 _MAILBOX_MIN_GAP_S = 300.0
 
+_CARRIER_WORD = (
+    r"(?:amazon|ups|fedex|usps|dhl|an\s+post|dpd|gls|evri|hermes|yodel|"
+    r"parcelforce|royal\s+mail|courier)"
+)
 _PKG_KEYWORDS = re.compile(
-    r"\b(package|parcel|box|delivery|delivered|amazon|ups|fedex|usps|dhl|"
-    r"carton|crate|cardboard)\b", re.I,
+    r"\b(?:package|parcel|box|delivery|delivered|" + _CARRIER_WORD
+    + r"|carton|crate|cardboard)\b", re.I,
 )
 _MAIL_KEYWORDS = re.compile(
     r"\b(mail|letter|letters|envelope|envelopes|mailman|mail\s*carrier|"
-    r"postal|postman|post)\b", re.I,
+    r"postal|postman|postie|post)\b", re.I,
 )
 # Negated mentions — "no package visible", "not carrying a delivery",
 # "without any boxes", "no sign of packages or mail" — must not count as
@@ -72,7 +76,8 @@ _MAIL_KEYWORDS = re.compile(
 # or/and-connected chains) before keyword matching.
 _DELIVERY_WORD = (
     r"(?:package|packages|parcel|parcels|box|boxes|delivery|deliveries|"
-    r"mail|letter|letters|envelope|envelopes)\w*"
+    r"mail|letter|letters|envelope|envelopes|mailman|mail\s*carrier|postal|"
+    r"postman|postie|post|" + _CARRIER_WORD + r")\w*"
 )
 _NEGATION = re.compile(
     r"\b(?:no|not|without|isn'?t|aren'?t|doesn'?t|don'?t|nor|zero|none of|"

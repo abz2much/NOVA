@@ -42,7 +42,7 @@
     { id: "sentinel_rules", group: "safety", title: "Sentinel Rules", real: true,
       desc: "Enable or disable individual door/lock/garage anomaly rules." },
     { id: "hazard_monitor", group: "safety", title: "Hazard Monitor", real: true,
-      desc: "Weather warnings for your area (Met Éireann, or a custom CAP feed), plus optional earthquake, US weather and NASA disaster feeds." },
+      desc: "Weather warnings for your area, with a separate quiet-hours speech level, plus optional legacy hazard feeds." },
     { id: "energy_management", group: "safety", title: "Energy Management", real: true,
       desc: "Peak-draw threshold and how much say Nova has over high-draw appliances." },
     { id: "host_health", group: "safety", title: "Host Health", real: true,
@@ -72,4 +72,3 @@
     { id: "document_library", group: "home", title: "Document Library", real: true,
       desc: "Manuals and receipts Nova can search and cite from." },
   ];
-

@@ -1792,7 +1792,8 @@ setTimeout(async () => {
       detected_county: { code: "EI03", name: "Clare" }, counties: [{ code: "EI03", name: "Clare" }],
       county_table: [{ code: "EI01", name: "Carlow" }, { code: "EI03", name: "Clare" },
                      { code: "EI16", name: "Limerick" }],
-      push_level: "yellow", speak_level: "orange", warnings: [irishWarning] };
+      push_level: "yellow", speak_level: "orange", night_speak_level: "red",
+      warnings: [irishWarning] };
     return hazardCallWS(m);
   };
   const savedHazCfg = { ...elNew._liveData.config };
@@ -1800,6 +1801,7 @@ setTimeout(async () => {
     hazard_met_eireann_on: true, hazard_cap_on: true, hazard_counties: [],
     hazard_quakes_on: false, hazard_weather_on: false, hazard_disasters_on: false,
     hazard_push_level: "yellow", hazard_speak_level: "orange",
+    hazard_night_speak_level: "red",
     hazard_cap_url: "https://**REDACTED**@alerts.example.org/cap.xml",
     hazard_cap_area_codes: ["IE061"], hazard_cap_area_names: [] });
   await elNew._fetchHazardStatus();
@@ -1816,6 +1818,10 @@ setTimeout(async () => {
     ["settings tab: push and speak levels are selects",
       hzCard.querySelector('select[data-cfg-key="hazard_push_level"]')?.value === "yellow"
       && hzCard.querySelector('select[data-cfg-key="hazard_speak_level"]')?.value === "orange"],
+    ["settings tab: quiet-hours speech defaults to Red and offers Off",
+      hzCard.querySelector('select[data-cfg-key="hazard_night_speak_level"]')?.value === "red"
+      && Array.from(hzCard.querySelectorAll('select[data-cfg-key="hazard_night_speak_level"] option'))
+        .some(o => o.value === "off")],
     ["settings tab: an active warning shows its colour, window, full text and Met Éireann credit",
       (() => {
         const w = sRoot.querySelector('#hazardWarnings .hazard-warning[data-level="orange"]');

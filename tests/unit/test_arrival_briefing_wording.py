@@ -14,6 +14,7 @@ aren't part of the prompt-building logic under test.
 """
 import sys
 import types
+from datetime import datetime
 
 import pytest
 
@@ -106,6 +107,21 @@ def test_arrival_without_honorific_still_welcomes_home(pb, fake_hass, monkeypatc
     system_msg = pb._captured["messages"][0]["content"]
     assert "Begin with 'Welcome home.'" in system_msg
     assert "Good afternoon" not in system_msg and "Good morning" not in system_msg
+
+
+def test_proactive_briefing_keeps_its_exact_us_date_and_time(pb, fake_hass, monkeypatch):
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            value = cls(2026, 10, 6, 16, 5)
+            return value.replace(tzinfo=tz) if tz else value
+
+    fake_hass.config.country = "US"
+    monkeypatch.setattr(pb, "datetime", FixedDateTime)
+    import asyncio
+    asyncio.run(pb._trigger_briefing("arrival", person_name="Alex"))
+    user_msg = pb._captured["messages"][1]["content"]
+    assert "It is Tuesday October 6, 4:05 PM." in user_msg
 
 
 def test_arrival_leaves_out_camera_detections_from_hours_ago(pb, fake_hass):

@@ -208,6 +208,7 @@
     const countyChips = (hz.county_table || []).map(c =>
       `<button class="mode-chip ${chosen.has(c.code) ? "mode-chip-on" : ""}" data-hazard-county="${this._esc(c.code)}">${this._esc(c.name)}</button>`).join("");
     const levels = [["yellow", "Yellow"], ["orange", "Orange"], ["red", "Red"]];
+    const nightLevels = [...levels, ["off", "Off"]];
     const listText = key => (Array.isArray(cfg[key]) ? cfg[key] : []).join("\n");
     return `
       <div class="stub-body">Weather warnings for your area, and optional nearby earthquake, US severe-weather and NASA disaster feeds. Alerts push and speak like any Nova alert.</div>
@@ -240,6 +241,10 @@
       <div class="cfg-row">
         <label>Also speak from <span class="toggle-desc">below this, phone only</span></label>
         <select class="cfg-field" data-cfg-key="hazard_speak_level">${this._optSelect(levels, cfg.hazard_speak_level || "orange")}</select>
+      </div>
+      <div class="cfg-row">
+        <label>Speak during quiet hours from <span class="toggle-desc">Red by default</span></label>
+        <select class="cfg-field" data-cfg-key="hazard_night_speak_level">${this._optSelect(nightLevels, cfg.hazard_night_speak_level || "red")}</select>
       </div>
       ${capOn ? `
       <div class="panel-head" style="margin-top:10px"><div class="panel-title">Custom CAP feed (not tested by Nova)</div></div>
@@ -1276,4 +1281,3 @@
       });
     }
   }
-

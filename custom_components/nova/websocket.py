@@ -673,6 +673,8 @@ async def ws_get_panel_data(
                 "hazard_counties":        _get_runtime_json(hass, entry, "hazard_counties", []),
                 "hazard_push_level":      str(_runtime_opt(hass, entry, "hazard_push_level", "yellow") or "yellow"),
                 "hazard_speak_level":     str(_runtime_opt(hass, entry, "hazard_speak_level", "orange") or "orange"),
+                "hazard_night_speak_level": str(_runtime_opt(
+                    hass, entry, "hazard_night_speak_level", "red") or "red"),
                 "hazard_cap_url":         _masked_url(_runtime_opt(hass, entry, "hazard_cap_url", "")),
                 "hazard_cap_area_codes":  _get_runtime_json(hass, entry, "hazard_cap_area_codes", []),
                 "hazard_cap_area_names":  _get_runtime_json(hass, entry, "hazard_cap_area_names", []),
@@ -985,6 +987,7 @@ PANEL_WRITABLE_KEYS = {
     "hazard_counties",            # JSON list: Met Éireann county codes (empty = nearest to home)
     "hazard_push_level",          # str: yellow | orange | red, lowest level sent to the phone
     "hazard_speak_level",         # str: yellow | orange | red, lowest level also spoken
+    "hazard_night_speak_level",   # str: yellow | orange | red | off, quiet-hours speech floor
     "hazard_cap_url",             # str: https CAP document, or Atom/RSS index of them
     "hazard_cap_area_codes",      # JSON list: CAP geocode values that mean "here"
     "hazard_cap_area_names",      # JSON list: CAP areaDesc names that mean "here"
@@ -1661,5 +1664,4 @@ async def ws_get_area_sparklines(
     except Exception as exc:
         _LOGGER.exception("get_area_sparklines failed: %s", exc)
         connection.send_error(msg["id"], "sparklines_failed", safe_error_message(exc))
-
 

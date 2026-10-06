@@ -43,6 +43,7 @@ from .llm_provider import (
     resolve_provider_credential,
     resolve_provider_endpoint,
 )
+from .locale_format import format_date
 from .presence import presence_context_string
 from .runtime import get_runtime, runtime_config_snapshot
 from .speech_text import speech_text
@@ -156,6 +157,15 @@ _FILLER = {
     "wait", "well", "anyway", "actually", "i", "me", "you", "we", "they",
     "it", "that", "this", "there", "here",
 }
+
+
+def _current_time_context(hass, now=None) -> str:
+    """The live prompt's date/time line; ``now`` is injectable for tests."""
+    if now is None:
+        import datetime as _dt
+        now = _dt.datetime.now()
+    return (f"Current time: {format_date(now, hass)}, "
+            f"{now.strftime('%-I:%M %p')}.")
 
 
 def _is_addressed_to_nova(text: str) -> bool:
@@ -462,8 +472,7 @@ class NovaAgent(conversation.ConversationEntity):
         base = f"{directive}\n\n---\n\n{base}"
 
         # Inject live context — time, presence, weather summary
-        import datetime as _dt
-        ctx_parts = [f"Current time: {_dt.datetime.now().strftime('%A %B %-d, %-I:%M %p')}."]
+        ctx_parts = [_current_time_context(self.hass)]
 
         # Temperature unit, so freeform mentions (not just quoted sensor values)
         # follow the household's Home Assistant unit system rather than defaulting

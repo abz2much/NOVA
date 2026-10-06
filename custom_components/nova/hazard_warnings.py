@@ -47,6 +47,21 @@ def at_least(level, threshold) -> bool:
     return level_rank(level) >= 0 and level_rank(level) >= level_rank(threshold)
 
 
+def speak_allowed(level, now_in_quiet: bool, speak_level, push_level, night_level) -> bool:
+    """Whether a warning that is being pushed may also be spoken.
+
+    Daytime keeps the existing speak and push thresholds.  During quiet
+    hours the separate night threshold replaces the daytime speak threshold;
+    ``off`` keeps every warning phone-only.  A warning below the push
+    threshold is never spoken on its own.
+    """
+    if not at_least(level, push_level):
+        return False
+    if now_in_quiet:
+        return night_level != "off" and at_least(level, night_level)
+    return at_least(level, speak_level)
+
+
 def _expired(expiry: str, now: datetime) -> bool:
     dt = hazard_cap.parse_time(expiry)
     return dt is not None and dt <= now

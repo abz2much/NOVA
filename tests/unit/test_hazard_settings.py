@@ -47,6 +47,20 @@ async def test_a_level_must_be_yellow_orange_or_red(ws, load, store, key, value)
     assert store.calls == []
 
 
+@pytest.mark.parametrize("value", ["yellow", "orange", "red", "off"])
+async def test_the_night_speak_level_saves(ws, load, store, value):
+    conn = await _update(ws, _hass(_entry(load)), "hazard_night_speak_level", value)
+    assert conn.errors == [] and store.data["hazard_night_speak_level"] == value
+
+
+@pytest.mark.parametrize("value", ["green", "Off", "", None, 1, True])
+async def test_the_night_speak_level_refuses_other_values(ws, load, store, value):
+    conn = await _update(ws, _hass(_entry(load)), "hazard_night_speak_level", value)
+    assert conn.errors == [(1, "invalid_value", "Key 'hazard_night_speak_level' must be "
+                                                "one of: yellow, orange, red, off")]
+    assert store.calls == []
+
+
 @pytest.mark.parametrize("value", ['["EI07"]', '["EI14", "EI24"]', "[]"])
 async def test_counties_in_the_table_save(ws, load, store, value):
     conn = await _update(ws, _hass(_entry(load)), "hazard_counties", value)
@@ -116,6 +130,7 @@ async def test_panel_data_has_the_settings_with_the_url_masked(ws, load, store):
     assert cfg["hazard_cap_url"] == "https://**REDACTED**@alerts.example.org/feed.xml"
     assert cfg["hazard_counties"] == ["EI07"] and cfg["hazard_cap_on"] is True
     assert cfg["hazard_push_level"] == "orange" and cfg["hazard_speak_level"] == "orange"
+    assert cfg["hazard_night_speak_level"] == "red"
     assert cfg["hazard_cap_area_names"] == ["Fingal"] and cfg["hazard_cap_area_codes"] == []
 
 
@@ -135,3 +150,9 @@ async def test_panel_data_shows_the_region_defaults(ws, load, store):
     await ws.ws_get_panel_data(hass, conn, {"id": 1})
     cfg = conn.results[0][1]["config"]
     assert cfg["hazard_met_eireann_on"] is False and cfg["hazard_quakes_on"] is True
+
+
+async def test_old_config_without_night_level_loads_with_red_default(ws, load, store):
+    conn = _Conn()
+    await ws.ws_get_panel_data(_hass(_entry(load, runtime_config={})), conn, {"id": 1})
+    assert conn.results[0][1]["config"]["hazard_night_speak_level"] == "red"

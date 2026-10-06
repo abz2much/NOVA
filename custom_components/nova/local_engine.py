@@ -997,7 +997,8 @@ def _query_resp(hass, action, entity_id, fname, h="sir"):
         return f"It's currently {dt_util.now().strftime('%I:%M %p')}{addr}."
     if action == "query_date":
         from homeassistant.util import dt as dt_util
-        return f"Today is {dt_util.now().strftime('%A, %B %d, %Y')}{addr}."
+        from .locale_format import format_date
+        return f"Today is {format_date(dt_util.now(), hass, include_year=True)}{addr}."
     if action == "greeting":
         from homeassistant.util import dt as dt_util
         hour = dt_util.now().hour

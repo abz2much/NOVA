@@ -1,3 +1,12 @@
+## [8.8.1] — quiet hazard alerts, Irish/UK carriers, and local date order
+
+- **Hazards respect quiet hours.** Weather warnings still push to the phone, but speech during the Observer quiet window now has its own `hazard_night_speak_level`. It defaults to Red; `off` keeps even Red phone-only. Outside quiet hours, the existing push and speech levels are unchanged. Cancellations remain phone-only.
+- **Legacy hazard feeds are quiet at night.** USGS earthquakes, NWS alerts and NASA EONET events push without a whole-house announcement during quiet hours. They have no shared severity scale, so 8.8.1 adds no night exception for them.
+- **Morning briefings need no replay.** The existing read-only hazard scan already includes Orange and Red warnings still in force.
+- **Irish and UK delivery wording.** Package text detection now recognises An Post, DPD, GLS, Evri, Hermes, Yodel, Parcelforce, Royal Mail and courier, while mail detection also recognises postie. Carrier names participate in the existing negation handling, so wording such as “no DPD van visible” stays negative. An Post can set both the package and mail flags.
+- **Spoken dates follow Home Assistant's country.** IE, GB, DE and other non-month-first countries now hear day-first dates without zero padding. US, CA, PH, and homes with no country set keep the previous month-first strings exactly.
+- **Panel and config.** The new night speech level sits beside the existing Hazard Monitor levels. The websocket config contract adds only `hazard_night_speak_level`.
+
 ## [8.8.0] — Hazard Monitor: Met Éireann weather warnings for Ireland, and custom CAP feeds for other countries
 
 **What was wrong**
