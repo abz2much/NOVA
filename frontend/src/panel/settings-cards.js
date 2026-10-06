@@ -505,13 +505,13 @@
       <div class="panel-head" style="margin-top:14px"><div class="panel-title">Self-hosted endpoints</div></div>
       <div class="cfg-row" data-endpoint-row="ollama">
         <label>Ollama</label>
-        <input class="cfg-field ai-endpoint" data-endpoint-provider="ollama" type="text" value="${this._esc(ollamaEndpoint)}" placeholder="http://host:11434">
+        <input class="cfg-field ai-endpoint" data-endpoint-provider="ollama" data-current="${this._esc(cfg.ollama_base_url || "")}" type="text" value="${this._esc(ollamaEndpoint)}" placeholder="http://host:11434">
         <button class="mode-chip ai-endpoint-test" data-endpoint-provider="ollama">TEST</button>
       </div>
       <div class="stub-body ai-endpoint-status" data-endpoint-status="ollama"></div>
       <div class="cfg-row" data-endpoint-row="custom">
         <label>OpenAI-compatible</label>
-        <input class="cfg-field ai-endpoint" data-endpoint-provider="custom" type="text" value="${this._esc(customEndpoint)}" placeholder="https://host/v1">
+        <input class="cfg-field ai-endpoint" data-endpoint-provider="custom" data-current="${this._esc(cfg.custom_base_url || "")}" type="text" value="${this._esc(customEndpoint)}" placeholder="https://host/v1">
         <button class="mode-chip ai-endpoint-test" data-endpoint-provider="custom">TEST</button>
       </div>
       <div class="stub-body ai-endpoint-status" data-endpoint-status="custom"></div>

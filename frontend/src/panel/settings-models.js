@@ -142,11 +142,20 @@
       const button = event.currentTarget;
       const status = root.getElementById("aiApplyStatus");
       const updates = {
-        ollama_base_url: (root.querySelector('.ai-endpoint[data-endpoint-provider="ollama"]')?.value || "").trim(),
-        custom_base_url: (root.querySelector('.ai-endpoint[data-endpoint-provider="custom"]')?.value || "").trim(),
         ollama_num_ctx: Number(root.getElementById("aiOllamaNumCtx")?.value || 8192),
         home_context_max_entities: Number(root.getElementById("aiHomeContextMaxEntities")?.value ?? 15),
       };
+      // An endpoint field left as it showed its saved address is not sent,
+      // the same way a model select keeps its data-current value: the saved
+      // address stays as it is. It may be shown with its password masked,
+      // and the server refuses that masked text (8.7.24). An edited, empty
+      // or legacy-filled field is sent as before.
+      ["ollama", "custom"].forEach(provider => {
+        const input = root.querySelector(`.ai-endpoint[data-endpoint-provider="${provider}"]`);
+        const value = (input?.value || "").trim();
+        const shown = input?.getAttribute("data-current") || "";
+        if (!(shown && value === shown)) updates[`${provider}_base_url`] = value;
+      });
       root.querySelectorAll(".new-model-row").forEach(row => {
         const provSel = row.querySelector(".new-prov-select");
         const modelSel = row.querySelector(".new-model-select");

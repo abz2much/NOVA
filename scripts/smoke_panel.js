@@ -1496,6 +1496,37 @@ setTimeout(async () => {
     && _applyAiCalls[0].updates.home_context_max_entities === 15
     && _updateConfigCalls.length === updatesBeforeProviderChange]);
 
+  // 8.7.24: an endpoint field left showing its saved address (which may be
+  // shown with its password masked) is not sent back on Apply; an edited
+  // one is sent as before.
+  const savedOllamaEndpoint = elNew._liveData.config.ollama_base_url;
+  const maskedEndpoint = "http://**REDACTED**@ollama.lan:11434";
+  elNew._liveData.config.ollama_base_url = maskedEndpoint;
+  elNew._render();
+  await new Promise(r => setTimeout(r, 30));
+  sRoot = elNew.shadowRoot;
+  const maskedInput = sRoot.querySelector('.ai-endpoint[data-endpoint-provider="ollama"]');
+  sRoot.querySelector("#aiApply").click();
+  await new Promise(r => setTimeout(r, 20));
+  const unchangedApply = _applyAiCalls[_applyAiCalls.length - 1];
+  checks.push(["settings tab: an endpoint left as its saved (masked) address is not sent on Apply",
+    maskedInput.value === maskedEndpoint
+    && maskedInput.getAttribute("data-current") === maskedEndpoint
+    && !("ollama_base_url" in unchangedApply.updates)
+    && "custom_base_url" in unchangedApply.updates]);
+  elNew._render();
+  await new Promise(r => setTimeout(r, 30));
+  sRoot = elNew.shadowRoot;
+  sRoot.querySelector('.ai-endpoint[data-endpoint-provider="ollama"]').value = "http://ollama.new:11434";
+  sRoot.querySelector("#aiApply").click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: an edited endpoint is still sent on Apply",
+    _applyAiCalls[_applyAiCalls.length - 1].updates.ollama_base_url === "http://ollama.new:11434"]);
+  elNew._liveData.config.ollama_base_url = savedOllamaEndpoint;
+  elNew._render();
+  await new Promise(r => setTimeout(r, 30));
+  sRoot = elNew.shadowRoot;
+
   // Phase 3, v7.108.0: a saved model absent from the live list must be kept
   // selected, NEVER silently auto-picked-and-saved (the exact bug this
   // phase fixes — _pickHealModel used to call _rawSaveConfig here).
@@ -2390,6 +2421,29 @@ setTimeout(async () => {
   await new Promise(r => setTimeout(r, 20));
   checks.push(["spoken history: Repeat button calls nova/repeat_spoken with spoken_id (never id)",
     repeatCalls.length === 1 && repeatCalls[0] === 5]);
+
+  // 8.7.24: a refused Repeat shows the server's message in the panel, on
+  // the inline message line (as the Faces tab does), not only the console.
+  const noSpeakerMsg = "The speaker this was said on is not available, so it was not repeated";
+  hass.callWS = async (m) => {
+    if (m.type === "nova/repeat_spoken") { const e = new Error(noSpeakerMsg); e.code = "no_speaker"; throw e; }
+    if (m.type === "nova/get_spoken_history") return { entries: [
+      { id: 4, timestamp: 1699990000, text: "Reminder: take out the bins.", source: "reminder",
+        speakers: ["media_player.gone"], delivery_state: "sent", repeat_of_id: null },
+    ] };
+    return spokenCallWS(m);
+  };
+  await elNew._fetchSpokenHistory();
+  sRoot = elNew.shadowRoot;
+  sRoot.querySelector('.new-spoken-repeat[data-spoken-id="4"]').click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["spoken history: a refused Repeat shows the server's message",
+    (sRoot.getElementById("spokenHistoryMsg")?.textContent || "") === noSpeakerMsg]);
+  hass.callWS = async (m) => (m.type === "nova/repeat_spoken" ? { ok: true, spoken: "x" } : spokenCallWS(m));
+  sRoot.querySelector('.new-spoken-repeat[data-spoken-id="4"]').click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["spoken history: a later successful Repeat clears that message",
+    (sRoot.getElementById("spokenHistoryMsg")?.textContent || "") === ""]);
 
   hass.callWS = async (m) => {
     if (m.type === "nova/get_spoken_history") throw new Error("boom");

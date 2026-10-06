@@ -457,3 +457,22 @@ async def test_sparklines_only_ask_for_areas_with_a_sensor(ws, load, monkeypatch
 async def test_sparklines_failure_returns_no_raw_text(ws, load, monkeypatch):
     monkeypatch.setattr(ws, "_all_areas_with_anything", _boom())
     _safe(await _call(ws.ws_get_area_sparklines, _hass(_entry(load))), "sparklines_failed")
+
+
+async def test_a_masked_url_shown_by_the_panel_cannot_be_saved_back(ws, load, monkeypatch):
+    # 8.7.24: the round trip. What get_panel_data shows for a URL with a
+    # password, sent straight back through nova/update_config, is refused,
+    # and the saved value is untouched.
+    nc = load("nova_config")
+    written = []
+    monkeypatch.setattr(nc, "set", lambda k, v: written.append((k, v)) or True)
+    real = "http://nova:hunter2@searx.lan:8080"
+    entry = _entry(load, runtime_config={"searxng_url": real, "departure_osrm_url": real})
+    hass = _hass(entry)
+    shown = (await _call(ws.ws_get_panel_data, hass)).results[0][1]["config"]
+    for key in ("searxng_url", "departure_osrm_url"):
+        conn = await _call(ws.ws_update_config, hass, key=key, value=shown[key])
+        assert conn.errors == [(7, "invalid_value", "This field shows a hidden password. "
+                                                   "Type the full address to change it.")]
+        assert entry.runtime_data.runtime_config[key] == real
+    assert written == []

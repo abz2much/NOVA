@@ -1,3 +1,26 @@
+## [8.7.24] — Fixes: a masked URL is never saved back, and Repeat shows why it refused
+
+Two fixes left over from 8.7.23. Each fails toward refusing or telling the truth.
+
+**1. A masked URL is never saved back**
+- Since 8.7.23 the panel shows saved URLs with any password masked (`http://**REDACTED**@host`). If someone edited such a field, the mask text could be saved over the real address. This covers the SearXNG and OSRM fields through `nova/update_config`, and the AI endpoint fields through `nova/apply_ai_config`. The AI fields can also show a masked legacy `llm_base_url`.
+- **On the server.** A value that contains the mask text is now refused with "This field shows a hidden password. Type the full address to change it.", and the saved value is untouched. This holds whatever the panel does. It applies to:
+  - `nova/update_config`: any key, error `invalid_value`
+  - `nova/apply_ai_config`: any value in the update, `invalid_configuration`
+  - `nova/test_provider_endpoint`: `invalid_endpoint`
+- **One copy of the mask.** The mask text now lives in one place, `safe_errors.REDACTED`. The diagnostics scrubber, `_masked_url` and the new check all use it.
+- **In the panel.** An AI endpoint field now records the saved address it showed (`data-current`, as the model selects already do). Apply leaves out a field the user did not change, so the saved address is kept. An edited field, an empty one, or one filled from the legacy address is sent as before. The SearXNG and OSRM fields already save only when the user changes them.
+- **What still works.** A plain URL with no credentials behaves exactly as before. A real new URL with a password still saves through `nova/update_config`. The AI endpoints still refuse credentials in the URL, as since 8.7.23.
+
+**2. Repeat shows its refusal**
+- Since 8.7.23 Repeat is refused with `no_speaker` when the original speaker is gone. The panel only logged it to the browser console, so the person saw nothing.
+- Spoken History now shows the server's message above the list, for example "The speaker this was said on is not available, so it was not repeated". It uses the same inline message line the Faces tab uses. A later successful Repeat clears it.
+
+**Not changed, on purpose**
+- Wire shapes and contracts. `tests/fixtures/contracts` has no diff. The refusals use the error codes each command already had.
+- Admin checks.
+- A failed SearXNG or OSRM save is still only logged to the console. The field then shows the saved value again, as before.
+
 ## [8.7.23] — Fixes: panel settings are checked when saved, and the panel no longer gets secrets or raw errors
 
 These are the panel websocket findings from the 8.7.22 tests. Each fix fails toward refusing or telling the truth, never toward doing more. Every check runs only when a value is saved. Values already in the config are never checked again when they load, so an older config cannot stop Nova starting.

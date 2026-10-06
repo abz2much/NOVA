@@ -94,7 +94,10 @@
     // update #spokenHistoryEntries directly, the same way _fetchDecisions()/
     // _renderDecisionRows() do, so a fetch never has to go through a full
     // _render() (which would re-trigger _wire() and re-fetch, looping).
-    return `<div id="spokenHistoryEntries"><div class="stub-body">Loading…</div></div>`;
+    // #spokenHistoryMsg shows the outcome of a Repeat, the same inline
+    // message line the Faces tab uses (#facesMsg) (8.7.24).
+    return `<div class="toggle-desc" id="spokenHistoryMsg" style="margin:4px 0"></div>
+      <div id="spokenHistoryEntries"><div class="stub-body">Loading…</div></div>`;
   }
 
   async _fetchSpokenHistory() {
@@ -142,11 +145,15 @@
 
   async _repeatSpoken(spokenId) {
     if (!this._hass) return;
+    const msg = this.shadowRoot?.getElementById("spokenHistoryMsg");
+    if (msg) msg.textContent = "";
     try {
       await this._hass.callWS({ type: "nova/repeat_spoken", spoken_id: spokenId });
       this._fetchSpokenHistory();
     } catch (err) {
-      console.error("Nova: repeat spoken failed", err);
+      // The server's own message, e.g. no_speaker: "The speaker this was
+      // said on is not available, so it was not repeated".
+      if (msg) msg.textContent = (err && err.message) || "Could not repeat that.";
     }
   }
 

@@ -10,6 +10,8 @@ from __future__ import annotations
 import logging
 import re
 
+from ..safe_errors import REDACTED
+
 from .fault_log import FaultLog
 from .heartbeat import HeartbeatMonitor
 from .monitor import Finding, InfrastructureTriage
@@ -46,9 +48,9 @@ _WEBHOOK_PATH = re.compile(
 
 
 def _scrub_text(value: str) -> str:
-    value = _URL_USERINFO.sub(r"\1**REDACTED**@", value)
-    value = _SECRET_QUERY.sub(r"\1**REDACTED**", value)
-    return _WEBHOOK_PATH.sub(r"\1**REDACTED**", value)
+    value = _URL_USERINFO.sub(r"\1" + REDACTED + "@", value)
+    value = _SECRET_QUERY.sub(r"\1" + REDACTED, value)
+    return _WEBHOOK_PATH.sub(r"\1" + REDACTED, value)
 
 
 def _err(exc: BaseException) -> str:
@@ -70,7 +72,7 @@ def _redact(obj):
             for k, v in obj.items():
                 lk = str(k).lower()
                 if any(r in lk for r in _REDACT_KEYS):
-                    out[k] = "**REDACTED**" if v not in (None, "") else v
+                    out[k] = REDACTED if v not in (None, "") else v
                 else:
                     out[k] = _redact(v)
             return out

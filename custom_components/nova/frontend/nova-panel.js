@@ -1082,7 +1082,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v8.7.23
+ * v8.7.24
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1158,7 +1158,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.7.23 ",
+      console.log("%c Nova Panel %c v8.7.24 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -1662,7 +1662,10 @@ ${this._htmlDashboardBody()}`;
     // update #spokenHistoryEntries directly, the same way _fetchDecisions()/
     // _renderDecisionRows() do, so a fetch never has to go through a full
     // _render() (which would re-trigger _wire() and re-fetch, looping).
-    return `<div id="spokenHistoryEntries"><div class="stub-body">Loading…</div></div>`;
+    // #spokenHistoryMsg shows the outcome of a Repeat, the same inline
+    // message line the Faces tab uses (#facesMsg) (8.7.24).
+    return `<div class="toggle-desc" id="spokenHistoryMsg" style="margin:4px 0"></div>
+      <div id="spokenHistoryEntries"><div class="stub-body">Loading…</div></div>`;
   }
 
   async _fetchSpokenHistory() {
@@ -1710,11 +1713,15 @@ ${this._htmlDashboardBody()}`;
 
   async _repeatSpoken(spokenId) {
     if (!this._hass) return;
+    const msg = this.shadowRoot?.getElementById("spokenHistoryMsg");
+    if (msg) msg.textContent = "";
     try {
       await this._hass.callWS({ type: "nova/repeat_spoken", spoken_id: spokenId });
       this._fetchSpokenHistory();
     } catch (err) {
-      console.error("Nova: repeat spoken failed", err);
+      // The server's own message, e.g. no_speaker: "The speaker this was
+      // said on is not available, so it was not repeated".
+      if (msg) msg.textContent = (err && err.message) || "Could not repeat that.";
     }
   }
 
@@ -4136,13 +4143,13 @@ ${this._htmlDashboardBody()}`;
       <div class="panel-head" style="margin-top:14px"><div class="panel-title">Self-hosted endpoints</div></div>
       <div class="cfg-row" data-endpoint-row="ollama">
         <label>Ollama</label>
-        <input class="cfg-field ai-endpoint" data-endpoint-provider="ollama" type="text" value="${this._esc(ollamaEndpoint)}" placeholder="http://host:11434">
+        <input class="cfg-field ai-endpoint" data-endpoint-provider="ollama" data-current="${this._esc(cfg.ollama_base_url || "")}" type="text" value="${this._esc(ollamaEndpoint)}" placeholder="http://host:11434">
         <button class="mode-chip ai-endpoint-test" data-endpoint-provider="ollama">TEST</button>
       </div>
       <div class="stub-body ai-endpoint-status" data-endpoint-status="ollama"></div>
       <div class="cfg-row" data-endpoint-row="custom">
         <label>OpenAI-compatible</label>
-        <input class="cfg-field ai-endpoint" data-endpoint-provider="custom" type="text" value="${this._esc(customEndpoint)}" placeholder="https://host/v1">
+        <input class="cfg-field ai-endpoint" data-endpoint-provider="custom" data-current="${this._esc(cfg.custom_base_url || "")}" type="text" value="${this._esc(customEndpoint)}" placeholder="https://host/v1">
         <button class="mode-chip ai-endpoint-test" data-endpoint-provider="custom">TEST</button>
       </div>
       <div class="stub-body ai-endpoint-status" data-endpoint-status="custom"></div>
@@ -4432,11 +4439,20 @@ ${this._htmlDashboardBody()}`;
       const button = event.currentTarget;
       const status = root.getElementById("aiApplyStatus");
       const updates = {
-        ollama_base_url: (root.querySelector('.ai-endpoint[data-endpoint-provider="ollama"]')?.value || "").trim(),
-        custom_base_url: (root.querySelector('.ai-endpoint[data-endpoint-provider="custom"]')?.value || "").trim(),
         ollama_num_ctx: Number(root.getElementById("aiOllamaNumCtx")?.value || 8192),
         home_context_max_entities: Number(root.getElementById("aiHomeContextMaxEntities")?.value ?? 15),
       };
+      // An endpoint field left as it showed its saved address is not sent,
+      // the same way a model select keeps its data-current value: the saved
+      // address stays as it is. It may be shown with its password masked,
+      // and the server refuses that masked text (8.7.24). An edited, empty
+      // or legacy-filled field is sent as before.
+      ["ollama", "custom"].forEach(provider => {
+        const input = root.querySelector(`.ai-endpoint[data-endpoint-provider="${provider}"]`);
+        const value = (input?.value || "").trim();
+        const shown = input?.getAttribute("data-current") || "";
+        if (!(shown && value === shown)) updates[`${provider}_base_url`] = value;
+      });
       root.querySelectorAll(".new-model-row").forEach(row => {
         const provSel = row.querySelector(".new-prov-select");
         const modelSel = row.querySelector(".new-model-select");

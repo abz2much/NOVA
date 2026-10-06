@@ -80,10 +80,12 @@ from .ws_panel_stats import (
 # handlers by name; invalidate_model_cache is public and stays importable
 # from here. nova/update_config uses the panel AI key checks below.
 from .ws_ai import (  # noqa: F401
+    HIDDEN_PASSWORD_MESSAGE,
     PANEL_AI_ENDPOINT_KEYS,
     PANEL_AI_VALUE_KEYS,
     invalidate_model_cache,
     panel_ai_value,
+    shows_hidden_password,
     ws_apply_ai_config,
     ws_delete_credential,
     ws_get_credential_status,
@@ -707,7 +709,8 @@ def _masked_url(value) -> str:
         from .diagnostics import _scrub_text
         return _scrub_text(text)
     except Exception:
-        return "**REDACTED**" if "@" in text else text
+        from .safe_errors import REDACTED
+        return REDACTED if "@" in text else text
 
 
 def _door_entity_open(state_obj) -> bool:
@@ -1135,6 +1138,14 @@ async def ws_update_config(
             msg["id"], "invalid_key",
             f"Key '{key}' is not writable from the panel",
         )
+        return
+
+    # The panel shows saved URLs with any password masked. A value still
+    # holding the mask is that shown text sent back, so it is refused and the
+    # saved value is kept (8.7.24). A plain URL, or a real new one with a
+    # password, is not affected.
+    if shows_hidden_password(value):
+        connection.send_error(msg["id"], "invalid_value", HIDDEN_PASSWORD_MESSAGE)
         return
 
     # AI endpoints are written only by nova/apply_ai_config, which normalises

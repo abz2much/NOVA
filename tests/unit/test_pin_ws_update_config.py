@@ -645,3 +645,46 @@ async def test_a_failure_after_validation_returns_no_raw_exception_text(ws, load
     (_, code, message), = conn.errors
     assert code == "update_failed"
     assert "abc123" not in message and message.startswith("RuntimeError")
+
+
+# ── A masked URL is never saved back (8.7.24) ──────────────────────────────
+
+_HIDDEN = "This field shows a hidden password. Type the full address to change it."
+
+
+@pytest.mark.parametrize("key", ["searxng_url", "departure_osrm_url", "embed_base_url",
+                                 "llm_base_url", "ollama_base_url", "custom_base_url"])
+@pytest.mark.parametrize("masked", ["http://**REDACTED**@searx.lan:8080",
+                                    "https://router.lan/?token=**REDACTED**",
+                                    "**REDACTED**"])
+async def test_a_value_holding_the_mask_is_refused_and_the_saved_value_kept(
+        ws, load, store, key, masked):
+    real = "http://nova:hunter2@searx.lan:8080"
+    store.data[key] = real
+    entry = _entry(load, runtime_config={key: real})
+    conn = await _update(ws, _hass(entry), key, masked)
+    assert conn.errors == [(1, "invalid_value", _HIDDEN)]
+    assert store.calls == []
+    assert store.data[key] == real and entry.runtime_data.runtime_config[key] == real
+
+
+def test_the_refused_text_is_the_mask_the_panel_is_shown(ws, load):
+    # The one copy of the mask (safe_errors.REDACTED) is what _masked_url
+    # puts in the panel, both through the scrubber and its fallback.
+    mask = load("safe_errors").REDACTED
+    assert ws._masked_url("http://a:b@h:1") == f"http://{mask}@h:1"
+    assert ws.shows_hidden_password(ws._masked_url("http://a:b@h:1")) is True
+
+
+@pytest.mark.parametrize("key,value", [
+    ("searxng_url", "http://searx.lan:8080"),                 # plain, as before
+    ("searxng_url", "http://nova:hunter2@searx.lan:8080"),    # a real new password
+    ("departure_osrm_url", "https://osrm.lan/route/v1"),
+    ("departure_osrm_url", "https://me:pw@osrm.lan"),
+    ("searxng_url", ""),
+])
+async def test_a_plain_or_real_credential_url_still_saves(ws, load, store, key, value):
+    entry = _entry(load)
+    conn = await _update(ws, _hass(entry), key, value)
+    assert conn.results == [(1, {"key": key, "value": value, "persisted": True})]
+    assert store.data[key] == value and entry.runtime_data.runtime_config[key] == value

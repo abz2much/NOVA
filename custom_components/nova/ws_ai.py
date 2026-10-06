@@ -21,7 +21,7 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant
 
 from .llm_provider import resolve_provider_endpoint
-from .safe_errors import NovaValidationError, safe_error_message
+from .safe_errors import REDACTED, NovaValidationError, safe_error_message
 from .ws_bridge import _executor_runtime_config, _get_entry
 
 _LOGGER = logging.getLogger(f"{__package__}.websocket")
@@ -233,6 +233,17 @@ def panel_ai_value(key: str, value):
         raise NovaValidationError(f"A valid model is required for {key}") from None
 
 
+# A saved URL is shown on the panel with its password masked (websocket.py
+# _masked_url). A value still holding that mask is the shown text sent back,
+# not a real address, so it is refused and the saved value is kept (8.7.24).
+HIDDEN_PASSWORD_MESSAGE = "This field shows a hidden password. Type the full address to change it."
+
+
+def shows_hidden_password(value) -> bool:
+    """Whether ``value`` contains the mask the panel shows for a secret."""
+    return isinstance(value, str) and REDACTED in value
+
+
 # Why an endpoint was refused, as fixed panel text (8.7.23). The keys are
 # the fixed reasons providers.routing.normalize_provider_endpoint raises;
 # the exception's own text is only matched, never sent.
@@ -321,6 +332,8 @@ async def ws_test_provider_endpoint(hass: HomeAssistant, connection, msg) -> Non
         from . import nova_config
         from .llm_provider import normalize_provider_endpoint
 
+        if shows_hidden_password(msg["endpoint"]):
+            raise NovaValidationError(HIDDEN_PASSWORD_MESSAGE)
         endpoint = normalize_provider_endpoint(msg["endpoint"], provider)
         if not endpoint:
             raise NovaValidationError("Endpoint is required")
@@ -378,6 +391,9 @@ async def ws_apply_ai_config(hass: HomeAssistant, connection, msg) -> None:
             test_connection,
         )
 
+        if isinstance(msg["updates"], dict) and any(
+                shows_hidden_password(v) for v in msg["updates"].values()):
+            raise NovaValidationError(HIDDEN_PASSWORD_MESSAGE)
         updates = _prepare_ai_config_updates(msg["updates"])
         entry = _get_entry(hass)
         if entry is None:
