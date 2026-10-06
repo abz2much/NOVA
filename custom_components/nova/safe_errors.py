@@ -22,6 +22,12 @@ _LOGGER = logging.getLogger(__name__)
 
 _MAX_LEN = 240
 
+# The text that stands in for a hidden secret: the diagnostics scrubber puts
+# it where a URL's user:pass@ or a credential-like query value was, and the
+# panel shows saved URLs that way. The one copy (8.7.24); nothing that holds
+# it is ever a real value, so a write containing it is refused.
+REDACTED = "**REDACTED**"
+
 
 class NovaValidationError(ValueError):
     """A rejected request, in Nova's own words. Raise it only with fixed text

@@ -456,3 +456,46 @@ async def test_credential_status_failure_is_empty(ai, load, cfg, monkeypatch):
     monkeypatch.setattr(load("ha_secrets"), "async_credential_status", boom)
     assert await _cred(ai.ws_get_credential_status, _hass(_entry(load))) == {
         "status": {}, "available": {}}
+
+
+# ── A masked endpoint is never saved back (8.7.24) ─────────────────────────
+
+_HIDDEN = "This field shows a hidden password. Type the full address to change it."
+
+
+@pytest.mark.parametrize("updates", [
+    {"ollama_base_url": "http://**REDACTED**@10.0.0.2:11434"},
+    {"custom_base_url": "https://llm.lan/v1?api_key=**REDACTED**", "model": "m2"},
+    {"model": "m2", "ollama_base_url": "**REDACTED**"},
+])
+async def test_apply_refuses_a_masked_endpoint_and_saves_nothing(ai, load, cfg, dropped, updates):
+    cfg.config["ollama_base_url"] = "http://10.0.0.2:11434"
+    entry = _entry(load, runtime_config={"model": "old"})
+    hass = _reloading_hass(entry)
+    res = await _apply(ai, hass, updates)
+    assert res == {"ok": False, "error": "invalid_configuration", "message": _HIDDEN}
+    assert cfg.saved == [] and cfg.tests == [] and hass.reloads == [] and dropped == []
+    assert entry.runtime_data.runtime_config == {"model": "old"}
+
+
+async def test_apply_with_a_plain_endpoint_saves_as_before(ai, load, cfg, dropped):
+    hass = _reloading_hass(_entry(load))
+    res = await _apply(ai, hass, {"vision_provider": "ollama", "vision_model": "llava",
+                                  "ollama_base_url": "http://10.0.0.2:11434"})
+    assert res["ok"] is True
+    assert cfg.saved[0]["ollama_base_url"] == "http://10.0.0.2:11434"
+    await hass.drain()
+
+
+async def test_the_endpoint_test_refuses_a_masked_endpoint(ai, load, cfg, net):
+    res = await _test_endpoint(ai, _hass(_entry(load)), "ollama",
+                               "http://**REDACTED**@10.0.0.2:11434")
+    assert res == {"ok": False, "error": "invalid_endpoint", "message": _HIDDEN}
+    assert net.checked == [] and net.fetched == []
+
+
+def test_only_text_holding_the_mask_counts_as_hidden(ai):
+    assert ai.shows_hidden_password("http://a:b@h") is False
+    assert ai.shows_hidden_password("http://h:1") is False
+    assert ai.shows_hidden_password(None) is False and ai.shows_hidden_password(5) is False
+    assert ai.shows_hidden_password("x**REDACTED**y") is True
