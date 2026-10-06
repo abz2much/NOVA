@@ -56,6 +56,15 @@ FILE_FLOORS = {
     "ws_modes.py": 77,                                  # 80.9% (0.0%)
     "agent_runtime/loop.py": 75,                        # 78.8% (67.8%)
     "agent_runtime/capabilities/memory.py": 70,         # 73.5% (69.4%)
+    # 8.7.22 pinned the panel websocket layer the same way: the handlers now
+    # run in the unit run, so the floors are set from it (measured in the
+    # comments; the unit run before 8.7.22 in brackets).
+    "websocket.py": 69,                                 # 73.4% (0.0%)
+    "ws_ai.py": 90,                                     # 93.8% (23.3%)
+    "ws_cameras.py": 89,                                # 93.5% (0.0%)
+    "ws_decisions.py": 89,                              # 93.4% (0.0%)
+    "ws_faces.py": 96,                                  # 100.0% (0.0%)
+    "ws_voice.py": 96,                                  # 100.0% (0.0%)
     "cognitive_core.py": 90,       # 94.3%: the facade (__delattr__ is unused)
     "core_autonomy.py": 96,        # 100.0%
     "core_bridge.py": 96,          # 100.0%

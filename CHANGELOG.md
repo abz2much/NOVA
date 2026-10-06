@@ -1,3 +1,50 @@
+## [8.7.22] — Tests only: the panel websocket layer is now pinned
+
+**No behaviour changes.** No production code is touched in this release. The only edits outside the tests are this entry, `scripts/coverage_floors.py` and the version number.
+
+**Why**
+- `websocket.py` was only covered by the integration tests, and the unit run measured its handlers at 0%. The same method found real bugs in 8.7.15 and 8.7.19. This applies it to the panel commands, ranked by what a panel call can change in a real home. `tests/unit/test_pin_ws_modes.py` (8.7.19) is the pattern: the handlers are called directly with a fake hass and a recording connection, so the unit run measures them.
+
+**What is now covered** (six files, picked by risk; unit run before and after, then unit plus integration)
+- `websocket.py` (0% to 73.4%; combined 68.4% to 91.0%): `nova/update_config` first. That covers the allowlist, the credential refusal, the validators and their error codes, the transactional observer switch, a failed save, the live safety apply and the model cache drop. Also `get_panel_data`, the activity log, documents, semantic search, provider activity, the appliance reload, the debug log and sparklines.
+- `ws_ai.py` (23.3% to 93.8%; combined 89.1% to 97.3%): AI settings apply (every refusal, the connection test, a failed save, a good apply and reload), the endpoint test and its destination check, model lists and the cache, and the credential commands. A credential is never echoed.
+- `ws_cameras.py` (0% to 93.5%; combined 20.7% to 93.5%): indoor and outdoor camera location (this decides what the intrusion investigator follows), renames, snapshots, diagnostics, coverage and mmWave.
+- `ws_voice.py` (0% to 100%; combined 72.7% to 100%): repeating a spoken line and how its speakers are picked, the Action Audit Log list, spoken history, the voice confirmation test and say hello.
+- `ws_faces.py` (0% to 100%; combined 69.1% to 100%): adding and removing residents (the roster the opt in face stand down trusts).
+- `ws_decisions.py` (0% to 93.4%; combined 80.1% to 94.1%): the decision verdict (the one write), the redacted and bounded decision detail, paging limits, root cause, replay, analysis and status.
+- 242 new tests in seven files (`tests/unit/test_pin_ws_*.py`).
+- Not picked:
+  - `ws_log.py` (98.7%), `ws_bridge.py` (100%), `ws_automation.py` (94.9%) and `ws_knowledge.py` (90.1%, including `nova/set_lockdown`) are above 90% combined. `ws_modes.py` was done in 8.7.19.
+  - `ws_area_helpers.py` and `ws_panel_stats.py` only read state for display. Nothing in them changes the home.
+- 29 mutations in the covered files each make a test fail:
+  - `websocket.py` (8): the credential refusal, the allowlist, the validator, the observer start check, the runtime write, raw error text, the provider activity bound, a safety opt-in shown with `bool()`.
+  - `ws_ai.py` (6): unknown keys, a failed connection test, a failed save, the legacy endpoint clear, the destination check, a credential echoed.
+  - `ws_cameras.py` (4): a non-camera id for location and for snapshot, the indoor and outdoor lists swapped, the snapshot log throttle.
+  - `ws_voice.py` (4): the action list bound, unavailable speakers used, a missing TTS entity, a spoken lookup failure.
+  - `ws_faces.py` (3): an invalid name, a full roster, an unsaved add reported as saved.
+  - `ws_decisions.py` (4): the list bound, string bounding, redaction, the verdict source.
+
+**Coverage floors**
+- `scripts/coverage_floors.py` gains a floor for each of the six files, three and a half points under its unit run coverage (rounded down). No floor was lowered.
+
+**Found, not fixed**
+- Nothing was changed. 27 tests named `test_current_behaviour_*` pin behaviour that looks wrong, so a later fix shows up as a deliberate edit. Most important first:
+- Panel changes to safety settings leave no audit trail. Switching off voice confirmation (which guards locks, garage doors and the alarm), the lockdown and intrusion opt ins, marking a camera outdoor (which takes its motion out of the intrusion investigator), and adding a resident (whom face stand down then trusts) write no Action Audit Log row. Most leave only a debug or INFO log line.
+- `voice_confirm_enabled` has no validator. Any value is stored and read with `bool()`, so `0` or `""` switches confirmation off and the strings `"false"` or `"off"` leave it on while the panel meant off. `observer_enabled` is the same: the string `"false"` starts the observer.
+- `intrusion_response_timeout` is not bounded. 999999 means the "couldn't reach you" notice for an unanswered intrusion never comes.
+- `security_alarm_entity` accepts any entity, for example `light.kitchen`. A typo means automatic lockdown silently never follows the alarm.
+- `nova/update_config` writes the AI keys with none of `nova/apply_ai_config`'s checks: an unknown provider, an empty model, an endpoint at a cloud metadata address or with a bad scheme, credentials inside an endpoint URL, and the server-owned `llm_base_url`.
+- Endpoint URLs come back unmasked. `get_panel_data` returns the three model endpoints, the SearXNG URL and the OSRM URL as stored on every 5 second poll, and semantic search status returns the embedding URL, so a user and password inside a URL reach the panel.
+- Repeating a spoken line whose speaker is gone says it again on the house wide default speakers.
+- An invalid `sleep_override` ("sleepy") is stored and reported as saved, then quietly refused when applied.
+- Smaller ones:
+  - A bad number is refused with "requires a boolean value".
+  - A bad AI endpoint is refused with "ValueError (details are in the Home Assistant log)" instead of the reason.
+  - These inputs have no bound: config values (a 2 MB floor plan background), camera names, activity log hours and limit, the root cause window, and the coverage dict sent to the LLM.
+  - Raw exception text reaches the panel in a failed document delete, and in the debug log from a failed snapshot.
+  - `nova/get_debug_log` and `nova/say_hello` raise instead of returning an error.
+  - Camera diagnostics probes any entity id, not only cameras.
+
 ## [8.7.21] — Fix: Nova's spoken replies no longer show or read out markdown
 
 Spoken History showed `**` and `- ` in replies such as "I'm not quite following, Sir". The model returns markdown in voice replies. Nothing removed it, so the speaker and the history got it as written, and the panel shows stored text without rendering markdown.
