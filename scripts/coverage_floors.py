@@ -59,12 +59,18 @@ FILE_FLOORS = {
     # 8.7.22 pinned the panel websocket layer the same way: the handlers now
     # run in the unit run, so the floors are set from it (measured in the
     # comments; the unit run before 8.7.22 in brackets).
-    "websocket.py": 70,                                 # 74.0% (0.0%); 73.4% in 8.7.22
+    "websocket.py": 71,                                 # 74.6% (0.0%); 73.4% in 8.7.22
     "ws_ai.py": 90,                                     # 93.8% (23.3%)
     "ws_cameras.py": 89,                                # 93.5% (0.0%)
     "ws_decisions.py": 89,                              # 93.4% (0.0%)
     "ws_faces.py": 96,                                  # 100.0% (0.0%)
     "ws_voice.py": 96,                                  # 100.0% (0.0%)
+    # 8.8.0 weather warnings: the two sources, their shared lifecycle, and
+    # the monitor that runs them (measured; hazard_monitor.py had no floor).
+    "hazard_cap.py": 90,                                # 94.3% (new)
+    "hazard_met_eireann.py": 90,                        # 93.9% (new)
+    "hazard_warnings.py": 92,                           # 96.4% (new)
+    "hazard_monitor.py": 74,                            # 78.2%
     "cognitive_core.py": 90,       # 94.3%: the facade (__delattr__ is unused)
     "core_autonomy.py": 96,        # 100.0%
     "core_bridge.py": 96,          # 100.0%

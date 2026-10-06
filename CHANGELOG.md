@@ -1,3 +1,106 @@
+## [8.8.0] — Hazard Monitor: Met Éireann weather warnings for Ireland, and custom CAP feeds for other countries
+
+**What was wrong**
+- The Hazard Monitor did nothing useful for an Irish home. Its weather feed is the US National Weather Service (api.weather.gov), which only covers the United States. USGS earthquakes and NASA EONET events almost never fire in Ireland.
+- What it had seen was held in memory only, so after a restart every standing alert would have been announced again.
+
+**What happens now**
+
+*1. Met Éireann warnings*
+- **Source.** Nova follows Met Éireann's own warnings for your county.
+  - The source is Met Éireann's RSS list of current warnings, with one CAP file per warning. Their format document says this list "always contains a list of valid warnings".
+  - The JSON file `warning_IRELAND.json` is used only if that list cannot be read. When checked on 6 October 2026 it answered 404 while the RSS list was live, so the RSS list is the main source.
+  - Both carry the same warning id, so switching between them never repeats a warning.
+- **What counts.** Only real warnings: Wind, Rain, snow-ice, Thunderstorm, Fog, low and high temperature. Advisories, blight notices and test messages are ignored. So is a warning for sea areas only.
+- **Counties.**
+  - The 26 county codes and names come from Met Éireann's format document (EI01 Carlow to EI31 Wicklow). The "Weather Advisory for Ireland" example lists the same 26.
+  - Northern Ireland counties do not appear in Met Éireann's documents or examples.
+  - By default Nova uses the county nearest your home, and the panel shows which one it found. You can choose a list instead, for example two counties if you live near a border.
+- **Levels.** Two settings decide who hears what:
+  - `hazard_push_level` (default Yellow) is the lowest level sent to your phone.
+  - `hazard_speak_level` (default Orange) is the lowest level also spoken.
+  - Delivery uses exactly the paths the monitor already used (the phone push and the house speakers). The output gate is unchanged, and hazard alerts get no new way around it.
+- **Lifecycle.**
+  - A warning is announced once.
+  - When its level changes it is announced again ("upgraded from Yellow to Orange", or lowered).
+  - When an announced warning that has not expired disappears from a list that was fetched and read correctly, one phone-only "cancelled" notice is sent.
+  - A failed fetch, a bad status code or an unreadable reply is never treated as "no warnings", so it can never cancel anything.
+  - Expired warnings are ignored. Times are shown in Home Assistant's time zone.
+- **Met Éireann's licence.** The headline and description must not be altered, and Met Éireann must be credited.
+  - When speaking, Nova says its own sentence (level, type, counties, from and to times), then the headline word for word. The description is never spoken, so it is never shortened.
+  - The phone notification adds the full description and "Source: Met Éireann".
+  - Met Éireann publishes the description as HTML. Nova shows it as plain text, with the tags turned into line breaks and bullet points and every word kept, rather than putting their HTML into the panel.
+- **Memory across restarts.** What was announced (id, level, expiry) is saved in `hazard_warnings.json` with the atomic writer, so a restart never repeats a standing warning. Expired entries are dropped, the file is capped at 200 entries, and a corrupt or oversized file starts empty with a log line.
+
+*2. Custom CAP feeds (other countries)*
+- Set `hazard_cap_url` to an https address of one CAP alert, or of an Atom or RSS list of them. You can also give area codes and area names.
+- **Safety limits:**
+  - at most 50 linked alerts, 2 MB each, 20 seconds each
+  - every redirect is checked again
+  - the same address checks as the AI endpoints: no link-local or cloud metadata addresses, no user:pass@ in the URL
+  - any XML with a DOCTYPE or ENTITY declaration is refused
+  - standard library parser only
+- **What counts.** Only status Actual. Update and Cancel messages are followed through their references. The info block in Home Assistant's language is used, else the first one. Severity Moderate, Severe and Extreme map to Yellow, Orange and Red; Minor is ignored.
+- **Where.** An alert counts only when one of these covers the home, checked in this order:
+  1. a polygon containing the home point
+  2. a circle containing it
+  3. a geocode in your area codes
+  4. an area name in your area names
+
+  If nothing matches, there is no alert.
+- The panel marks it "Custom CAP feed (not tested by Nova)". It shares the lifecycle, levels and memory with Met Éireann.
+
+*3. Region-aware defaults*
+- **When a home counts as Irish:** Home Assistant's country is IE, or no country is set and the home point is on the island.
+- **For an Irish home**, anything you have not saved defaults as follows:
+  - the Met Éireann source is on
+  - the earthquake, US weather and NASA feeds are off, and the panel hides their settings
+
+  A value you saved is never overridden. The monitor itself stays off until you turn it on, as before.
+- A home with another country set (Northern Ireland homes are GB) keeps today's defaults.
+
+*4. Everywhere hazards are used*
+- Each of these now carries a `warnings` list (county, type, level, from, to, headline and description as published) beside every key it had before:
+  - the hazard scan
+  - the agent's `hazard_report` tool
+  - the `nova/hazard` command
+- `nova/hazard` status adds the detected county, the chosen counties, the county table, the levels and the warnings now in force.
+- The morning briefing mentions only Orange and Red warnings for your counties, with the headline quoted exactly.
+- A legacy feed that is off is no longer queried by a scan. It used to be queried regardless.
+
+*5. Panel*
+- **The Hazard Monitor card** has:
+  - **Sources:** Met Éireann, a custom CAP feed, and the legacy feeds (outside Ireland)
+  - **County chips** (choose more than one), with the nearest county shown
+  - **Push and speak levels**
+  - **The CAP address and area fields**
+  - **The warnings in force now:** level colour, time window, the full published text, and the Met Éireann credit
+- New on/off settings take only true or false. Each new key has its own check when saved:
+  - the levels must be yellow, orange or red
+  - the counties must be in the table
+  - the CAP address must pass the checks above
+- The CAP address is masked in the panel, and a value containing the mask is refused.
+
+**How to set it up**
+1. Settings → Safety → Hazard Monitor: turn the monitor on.
+2. In Ireland, Met Éireann is already on. Check the "Nearest county" line and choose your county, or two near a border.
+3. Choose the levels: by default Yellow goes to the phone, and Orange and Red are also spoken.
+4. Elsewhere, turn on "Custom CAP feed" and paste your national warning service's https CAP or Atom feed. Add an area code or name if their alerts don't carry polygons.
+
+**Not changed, on purpose**
+- **Sea area warnings** (EI805 to EI825) are not included in this release.
+- **Other countries' feeds are not tested.** Nothing is promised for any country other than Ireland.
+- **The old feeds are kept.** USGS, NWS and NASA EONET, and their settings, work as before outside Ireland.
+- **No new bypass.** The output gate, notification titles and quiet rules are unchanged.
+- **The agent tool's description** is part of the agent tool contract, which this release does not change. Its reply carries the warnings.
+
+**Tests**
+- 161 new unit tests, built on Met Éireann's own example files (JSON and CAP, kept unchanged in `tests/fixtures/met_eireann/`).
+- The CAP examples are all status Test, which the "only Actual" rule ignores. Tests that need an actual warning change only that one element, in memory.
+- 8 new panel smoke checks.
+- 63 mutations, each caught by a test.
+- New coverage floors: `hazard_cap.py` 90, `hazard_met_eireann.py` 90, `hazard_warnings.py` 92 and `hazard_monitor.py` 74. `websocket.py` rises from 70 to 71.
+
 ## [8.7.24] — Fixes: a masked URL is never saved back, and Repeat shows why it refused
 
 Two fixes left over from 8.7.23. Each fails toward refusing or telling the truth.

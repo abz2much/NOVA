@@ -517,7 +517,7 @@
         hazScan.disabled = true;
         const orig = hazScan.textContent;
         hazScan.textContent = "⟳ SCANNING…";
-        if (body) body.innerHTML = `<div class="stub-body">Checking USGS, NWS, and NASA EONET…</div>`;
+        if (body) body.innerHTML = `<div class="stub-body">Checking the hazard sources that are on…</div>`;
         try {
           const res = await this._hass.callWS({ type: "nova/hazard", action: "scan" });
           if (body) body.innerHTML = this._renderHazardScan(res);
@@ -529,6 +529,32 @@
         }
       });
     }
+    // Hazard Monitor (8.8.0): county chips toggle membership of the
+    // hazard_counties list (as the Lab mode area chips do), and the CAP
+    // area fields save one entry per line as a JSON list. Both re-fetch the
+    // hazard status, so the chosen counties and warnings stay current.
+    root.querySelectorAll("[data-hazard-county]").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        const code = btn.getAttribute("data-hazard-county");
+        let cur = this._data()?.config?.hazard_counties;
+        cur = Array.isArray(cur) ? cur.slice() : [];
+        const i = cur.indexOf(code);
+        if (i >= 0) cur.splice(i, 1); else cur.push(code);
+        await this._saveSetting("hazard_counties", JSON.stringify(cur));
+        await this._fetchHazardStatus();
+      });
+    });
+    root.querySelectorAll("textarea.hazard-list-field[data-list-key]").forEach(area => {
+      area.addEventListener("change", async () => {
+        const items = area.value.split("\n").map(v => v.trim()).filter(Boolean);
+        await this._saveSetting(area.getAttribute("data-list-key"), JSON.stringify(items));
+      });
+    });
+    root.querySelectorAll("#hazardSources [data-cfg-key], select.cfg-field[data-cfg-key^=\"hazard_\"]").forEach(el => {
+      el.addEventListener(el.tagName === "SELECT" ? "change" : "click", () => {
+        setTimeout(() => this._fetchHazardStatus(), 50);
+      });
+    });
     root.querySelectorAll(".settings-card [data-svc]").forEach(btn => {
       btn.addEventListener("click", async () => {
         const svcAttr = btn.getAttribute("data-svc");

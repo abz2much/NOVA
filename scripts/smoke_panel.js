@@ -1747,7 +1747,7 @@ setTimeout(async () => {
   sRoot = elNew.shadowRoot;
 
   // Hazard Monitor: status fetched once on entering Settings (async, like
-  // Diagnostics), SCAN NOW re-checks USGS/NWS/EONET via nova/hazard.
+  // Diagnostics), SCAN NOW re-checks the sources that are on via nova/hazard.
   await new Promise(r => setTimeout(r, 20));
   sRoot = elNew.shadowRoot;
   checks.push(
@@ -1768,6 +1768,85 @@ setTimeout(async () => {
       const t = body?.textContent || "";
       return /12km N of town/.test(t) && /Tornado Warning/.test(t) && /Wildfire/.test(t);
     })()]);
+
+  // 8.8.0: weather warnings. Outside Ireland the legacy feeds stay; for an
+  // Irish home they are hidden, the Met Éireann counties show with the
+  // detected one, and the warnings list shows the level colour, the time
+  // window, the full published text and the Met Éireann credit.
+  checks.push(["settings tab: Hazard Monitor keeps the legacy feeds outside Ireland",
+    !!sRoot.getElementById("hazardLegacyFeeds") && !!sRoot.getElementById("hazardSources")]);
+  const hazardCallWS = hass.callWS;
+  const irishWarning = {
+    id: "o1", source: "met_eireann", source_label: "Met Éireann", type: "Wind", level: "orange",
+    counties: ["Clare"], from: "Wed 9 Sep 12:00", to: "Thu 10 Sep 12:00",
+    headline: "Status Orange - Wind and Rain warning for Clare, Galway, Mayo",
+    headline_text: "Status Orange - Wind and Rain warning for Clare, Galway, Mayo",
+    description: "<p>Prepare for impacts:</p><ul><li>Damage to power lines</li></ul>",
+    description_text: "Prepare for impacts:\n\n• Damage to power lines",
+  };
+  hass.callWS = async (m) => {
+    if (m.type === "nova/hazard" && m.action === "status") return {
+      enabled: true, center: [52.85, -8.98], using_override: false, in_ireland: true,
+      feeds: { earthquakes: false, weather: false, disasters: false },
+      sources: { met_eireann: true, cap: true, cap_configured: true },
+      detected_county: { code: "EI03", name: "Clare" }, counties: [{ code: "EI03", name: "Clare" }],
+      county_table: [{ code: "EI01", name: "Carlow" }, { code: "EI03", name: "Clare" },
+                     { code: "EI16", name: "Limerick" }],
+      push_level: "yellow", speak_level: "orange", warnings: [irishWarning] };
+    return hazardCallWS(m);
+  };
+  const savedHazCfg = { ...elNew._liveData.config };
+  Object.assign(elNew._liveData.config, {
+    hazard_met_eireann_on: true, hazard_cap_on: true, hazard_counties: [],
+    hazard_quakes_on: false, hazard_weather_on: false, hazard_disasters_on: false,
+    hazard_push_level: "yellow", hazard_speak_level: "orange",
+    hazard_cap_url: "https://**REDACTED**@alerts.example.org/cap.xml",
+    hazard_cap_area_codes: ["IE061"], hazard_cap_area_names: [] });
+  await elNew._fetchHazardStatus();
+  await new Promise(r => setTimeout(r, 20));
+  sRoot = elNew.shadowRoot;
+  const hzCard = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Hazard Monitor/.test(c.querySelector(".panel-title")?.textContent || ""));
+  checks.push(
+    ["settings tab: an Irish home hides the earthquake, US weather and NASA settings",
+      !sRoot.getElementById("hazardLegacyFeeds") && !/Quake radius/.test(hzCard?.textContent || "")],
+    ["settings tab: the Met Éireann source is on and the detected county is shown",
+      !!hzCard.querySelector('#hazardSources [data-cfg-key="hazard_met_eireann_on"].mode-chip-on')
+      && /Nearest county to home: Clare/.test(sRoot.getElementById("hazardDetectedCounty")?.textContent || "")
+      && hzCard.querySelectorAll("[data-hazard-county]").length === 3],
+    ["settings tab: push and speak levels are selects",
+      hzCard.querySelector('select[data-cfg-key="hazard_push_level"]')?.value === "yellow"
+      && hzCard.querySelector('select[data-cfg-key="hazard_speak_level"]')?.value === "orange"],
+    ["settings tab: an active warning shows its colour, window, full text and Met Éireann credit",
+      (() => {
+        const w = sRoot.querySelector('#hazardWarnings .hazard-warning[data-level="orange"]');
+        const t = w?.textContent || "";
+        return !!w && /border-left:4px solid #f08c00/.test(w.getAttribute("style") || "")
+          && /ORANGE/.test(t) && t.includes(irishWarning.headline_text)
+          && /Wed 9 Sep 12:00 to Thu 10 Sep 12:00/.test(t)
+          && w.querySelector(".hazard-description")?.textContent === irishWarning.description_text
+          && /Source: Met Éireann/.test(w.querySelector(".hazard-source")?.textContent || "")
+          && !w.querySelector("ul");      // published HTML is shown as text, never rendered
+      })()],
+    ["settings tab: the custom CAP feed is marked as not tested, with its URL masked",
+      /Custom CAP feed \(not tested by Nova\)/.test(hzCard.textContent)
+      && hzCard.querySelector('input[data-cfg-key="hazard_cap_url"]')?.value === "https://**REDACTED**@alerts.example.org/cap.xml"],
+  );
+  hzCard.querySelector('[data-hazard-county="EI03"]').click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: a county chip saves hazard_counties as a JSON list",
+    _updateConfigCalls.some(c => c.key === "hazard_counties" && c.value === JSON.stringify(["EI03"]))]);
+  sRoot = elNew.shadowRoot;
+  const codesArea = sRoot.querySelector('textarea[data-list-key="hazard_cap_area_codes"]');
+  codesArea.value = "IE061\n IE062 \n";
+  codesArea.dispatchEvent(new Event("change"));
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: CAP area codes save one per line as a JSON list",
+    _updateConfigCalls.some(c => c.key === "hazard_cap_area_codes" && c.value === JSON.stringify(["IE061", "IE062"]))]);
+  hass.callWS = hazardCallWS;
+  elNew._liveData.config = savedHazCfg;
+  await elNew._fetchHazardStatus();
+  await new Promise(r => setTimeout(r, 20));
+  sRoot = elNew.shadowRoot;
 
   // Energy Management: status fetched once (like Diagnostics/Hazard), shows
   // current draw + running loads, and set_agency round-trips through

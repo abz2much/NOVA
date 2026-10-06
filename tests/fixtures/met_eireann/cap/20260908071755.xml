@@ -1,0 +1,66 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:content="http://purl.org/rss/1.0/modules/content/">
+  <channel>
+    <title>Met Éireann Warnings</title>
+    <atom:link rel="self" type="application/rss+xml" href="https://www.met.ie/warningsxml/rss.xml" />
+    <description>Warnings issued by Met Éireann. Clicking the links loads the CAP (Common Alerting
+Protocol) XML file.
+Note: Moderate means ‘Status Yellow’, Severe means ‘Status Orange’ and extreme means ‘Status
+Red’</description>
+    <copyright>Public Domain</copyright>
+    <item>
+      <title>Yellow Wind</title>
+      <link>https://cap.met.ie//2.49.0.1.372.0.260908075338.2a76f3bc-7047-49bd-8183-0fd47d1650cd.xml</link>
+      <description>&lt;p&gt;&amp;nbsp;&lt;/p&gt;&lt;p&gt;Be aware of potential impacts:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Debris, loose objects displaced&lt;/li&gt;&lt;li&gt;Difficult driving and cycling conditions&lt;/li&gt;&lt;li&gt;Large coastal waves&lt;/li&gt;&lt;li&gt;Some fallen trees, branches&lt;/li&gt;&lt;/ul&gt;</description>
+      <author>forecasts@met.ie (Met Éireann)</author>
+      <category>Weather</category>
+      <guid>https://cap.met.ie//2.49.0.1.372.0.260908075338.2a76f3bc-7047-49bd-8183-0fd47d1650cd.xml</guid>
+      <pubDate>Tue, 08 Sep 2026 07:53:38 GMT</pubDate>
+    </item>
+    <item>
+      <title>Yellow Gale</title>
+      <link>https://cap.met.ie//2.49.0.1.372.0.260908080655.ec503002-4e09-4e48-9df1-0a23e7410b9a.xml</link>
+      <description>&lt;p&gt;This is a description&lt;/p&gt;</description>
+      <author>forecasts@met.ie (Met Éireann)</author>
+      <category>Weather</category>
+      <guid>https://cap.met.ie//2.49.0.1.372.0.260908080655.ec503002-4e09-4e48-9df1-0a23e7410b9a.xml</guid>
+      <pubDate>Tue, 08 Sep 2026 08:06:55 GMT</pubDate>
+    </item>
+    <item>
+      <title>Advisory</title>
+      <link>https://cap.met.ie//2.49.0.1.372.0.260908080732.7c813acf-8bbc-4677-b5c6-34e7a48ccf50.xml</link>
+      <description>&lt;p&gt;&amp;nbsp;&lt;/p&gt;&lt;p&gt;Be aware of potential impacts:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Difficult travelling conditions&lt;/li&gt;&lt;li&gt;Localised flooding possible&lt;/li&gt;&lt;li&gt;Outdoor events impacted&lt;/li&gt;&lt;/ul&gt;</description>
+      <author>forecasts@met.ie (Met Éireann)</author>
+      <category>Weather</category>
+      <guid>https://cap.met.ie//2.49.0.1.372.0.260908080732.7c813acf-8bbc-4677-b5c6-34e7a48ccf50.xml</guid>
+      <pubDate>Tue, 08 Sep 2026 08:07:32 GMT</pubDate>
+    </item>
+    <item>
+      <title>Blight</title>
+      <link>https://cap.met.ie//2.49.0.1.372.0.260908080833.02cd7071-f785-4be0-a3df-26d3ace3143a.xml</link>
+      <description>&lt;p&gt;This is a Blight description&lt;/p&gt;</description>
+      <author>forecasts@met.ie (Met Éireann)</author>
+      <category>Weather</category>
+      <guid>https://cap.met.ie//2.49.0.1.372.0.260908080833.02cd7071-f785-4be0-a3df-26d3ace3143a.xml</guid>
+      <pubDate>Tue, 08 Sep 2026 08:08:33 GMT</pubDate>
+    </item>
+    <item>
+      <title>Orange Rain</title>
+      <link>https://cap.met.ie//2.49.0.1.372.0.260908081755.32d2b236-8081-4586-aea1-3a96167d6dbb.xml</link>
+      <description>&lt;p&gt;&amp;nbsp;&lt;/p&gt;&lt;p&gt;Prepare for impacts:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Damage to already weakened structures&lt;/li&gt;&lt;li&gt;Damage to power lines, power outages&lt;/li&gt;&lt;li&gt;Disruption and delays to public transport likely (air, rail, bus, ferry)&lt;/li&gt;&lt;li&gt;Fallen trees&lt;/li&gt;&lt;li&gt;Large coastal waves&lt;/li&gt;&lt;li&gt;Loose objects displaced&lt;/li&gt;&lt;li&gt;Some coastal flooding where winds onshore&lt;/li&gt;&lt;li&gt;Very difficult travelling conditions, dangerous conditions at sea&lt;/li&gt;&lt;/ul&gt;</description>
+      <author>forecasts@met.ie (Met Éireann)</author>
+      <category>Weather</category>
+      <guid>https://cap.met.ie//2.49.0.1.372.0.260908081755.32d2b236-8081-4586-aea1-3a96167d6dbb.xml</guid>
+      <pubDate>Tue, 08 Sep 2026 08:17:55 GMT</pubDate>
+    </item>
+    <item>
+      <title>Orange Wind</title>
+      <link>https://cap.met.ie//2.49.0.1.372.0.260908081755.17b4d568-792a-4a9e-87a4-d5e357cfac23.xml</link>
+      <description>&lt;p&gt;&amp;nbsp;&lt;/p&gt;&lt;p&gt;Prepare for impacts:&lt;/p&gt;&lt;ul&gt;&lt;li&gt;Damage to already weakened structures&lt;/li&gt;&lt;li&gt;Damage to power lines, power outages&lt;/li&gt;&lt;li&gt;Disruption and delays to public transport likely (air, rail, bus, ferry)&lt;/li&gt;&lt;li&gt;Fallen trees&lt;/li&gt;&lt;li&gt;Large coastal waves&lt;/li&gt;&lt;li&gt;Loose objects displaced&lt;/li&gt;&lt;li&gt;Some coastal flooding where winds onshore&lt;/li&gt;&lt;li&gt;Very difficult travelling conditions, dangerous conditions at sea&lt;/li&gt;&lt;/ul&gt;</description>
+      <author>forecasts@met.ie (Met Éireann)</author>
+      <category>Weather</category>
+      <guid>https://cap.met.ie//2.49.0.1.372.0.260908081755.17b4d568-792a-4a9e-87a4-d5e357cfac23.xml</guid>
+      <pubDate>Tue, 08 Sep 2026 08:17:55 GMT</pubDate>
+    </item>
+  </channel>
+</rss>

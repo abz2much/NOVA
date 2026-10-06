@@ -59,6 +59,7 @@ STRICT_BOOL_KEYS = frozenset({
     "has_basement", "semantic_search", "operational_mode_auto", "biometrics_enabled",
     "voice_confirm_enabled", "onboarding_dismissed",
     "hazard_monitor_enabled", "hazard_quakes_on", "hazard_weather_on", "hazard_disasters_on",
+    "hazard_met_eireann_on", "hazard_cap_on",
     "intrusion_vision_confirm",
     "briefing_morning_enabled", "briefing_evening_enabled", "briefing_require_home",
     "suggestion_review_enabled", "adaptive_interruption_budget",
@@ -81,6 +82,13 @@ _INTRUSION_RESPONSE_TIMEOUT_RANGE = (30.0, 600.0)
 
 SECURITY_ALARM_ENTITY_KEY = "security_alarm_entity"
 _ALARM_ENTITY_ID = re.compile(r"alarm_control_panel\.[a-z0-9_]+")
+
+# Weather warnings (8.8.0).
+HAZARD_LEVEL_KEYS = ("hazard_push_level", "hazard_speak_level")
+HAZARD_LEVELS = ("yellow", "orange", "red")
+HAZARD_COUNTIES_KEY = "hazard_counties"
+HAZARD_CAP_URL_KEY = "hazard_cap_url"
+HAZARD_CAP_LIST_KEYS = ("hazard_cap_area_codes", "hazard_cap_area_names")
 
 SLEEP_OVERRIDE_KEY = "sleep_override"
 SLEEP_OVERRIDE_VALUES = ("auto", "awake", "asleep")
@@ -129,6 +137,40 @@ def _valid_number_or_numeric_string(value, lo: float, hi: float) -> bool:
     return _valid_bounded_number(value, lo, hi)
 
 
+def _json_string_list(value) -> list | None:
+    """A JSON list of strings (as the panel sends a list), or None."""
+    if not isinstance(value, str):
+        return None
+    try:
+        items = json.loads(value)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(items, list) or not all(isinstance(i, str) for i in items):
+        return None
+    return items
+
+
+def _valid_cap_url(value) -> bool:
+    """Empty (no custom feed), or an https URL that passes the AI endpoints'
+    destination checks without resolving the host: no user:pass@, no cloud
+    metadata name or link-local address. The host is resolved and checked
+    again on every fetch and every redirect (hazard_cap.py)."""
+    if value == "":
+        return True
+    if not isinstance(value, str) or len(value) > 2048:
+        return False
+    from urllib.parse import urlparse
+    from .providers.destinations import check_url
+    from .providers.errors import ProviderError
+    try:
+        if urlparse(value).scheme != "https":
+            return False
+        check_url(value, resolve=False)
+    except (ProviderError, ValueError):
+        return False
+    return True
+
+
 def valid_panel_value(key: str, value) -> bool:
     """Whether nova/update_config may write ``value`` for ``key``. Only on
     write: values already saved are never checked again here, so an older
@@ -144,6 +186,17 @@ def valid_panel_value(key: str, value) -> bool:
                                and _ALARM_ENTITY_ID.fullmatch(value) is not None)
     if key == SLEEP_OVERRIDE_KEY:
         return isinstance(value, str) and value in SLEEP_OVERRIDE_VALUES
+    if key in HAZARD_LEVEL_KEYS:
+        return isinstance(value, str) and value in HAZARD_LEVELS
+    if key == HAZARD_COUNTIES_KEY:
+        from .hazard_met_eireann import COUNTIES
+        items = _json_string_list(value)
+        return items is not None and all(c in COUNTIES for c in items)
+    if key in HAZARD_CAP_LIST_KEYS:
+        items = _json_string_list(value)
+        return items is not None and all(i.strip() for i in items)
+    if key == HAZARD_CAP_URL_KEY:
+        return _valid_cap_url(value)
     if key == SCENE_MEMORY_RETENTION_KEY:
         return _valid_bounded_integer(value, *_SCENE_MEMORY_RETENTION_RANGE)
     if key == CAMERA_AWARENESS_MIN_OBSERVATIONS_KEY:
@@ -230,6 +283,15 @@ def invalid_panel_value_message(key: str) -> str:
         return f"Key '{key}' must be empty or an alarm_control_panel entity id"
     if key == SLEEP_OVERRIDE_KEY:
         return f"Key '{key}' must be one of: auto, awake, asleep"
+    if key in HAZARD_LEVEL_KEYS:
+        return f"Key '{key}' must be one of: yellow, orange, red"
+    if key == HAZARD_COUNTIES_KEY:
+        return f"Key '{key}' must be a JSON list of Met Éireann county codes, such as [\"EI07\"]"
+    if key in HAZARD_CAP_LIST_KEYS:
+        return f"Key '{key}' must be a JSON list of non-empty strings"
+    if key == HAZARD_CAP_URL_KEY:
+        return (f"Key '{key}' must be empty or an https address with no user name or "
+                "password, not a link-local or cloud metadata address")
     whole = {SCENE_MEMORY_RETENTION_KEY: _SCENE_MEMORY_RETENTION_RANGE,
              CAMERA_AWARENESS_MIN_OBSERVATIONS_KEY: _CAMERA_AWARENESS_MIN_OBSERVATIONS_RANGE}
     if key in whole:

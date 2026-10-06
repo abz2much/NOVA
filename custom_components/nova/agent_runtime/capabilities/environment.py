@@ -69,7 +69,9 @@ async def _exec_energy_report(hass: HomeAssistant, args: dict) -> str:
 
 
 async def _exec_hazard_report(hass: HomeAssistant, args: dict) -> str:
-    """Live nearby hazard scan — earthquakes, severe weather, disasters (v6.71.0)."""
+    """Live nearby hazard scan — earthquakes, severe weather, disasters (v6.71.0),
+    and weather warnings for the chosen counties or areas under "warnings"
+    (8.8.0: county, type, level, from, to, headline as published)."""
     try:
         from ... import hazard_monitor
         res = await hazard_monitor.scan_now(hass)

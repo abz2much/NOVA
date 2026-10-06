@@ -101,7 +101,8 @@ def test_hazard_announce_argument_order():
     """async_announce is (hass, text, tts_entity, speakers) — the hazard monitor
     passed (hass, tts, speakers, text), which would speak the wrong thing."""
     hz = (COMP / "hazard_monitor.py").read_text()
-    assert "async_announce(hass, message, tts, spk" in hz
+    # 8.8.0: the shared _deliver speaks speak_text (was message).
+    assert "async_announce(hass, speak_text, tts, spk" in hz
 
 
 def test_all_announce_callers_pass_text_second():

@@ -662,9 +662,20 @@ async def ws_get_panel_data(
                 "hazard_monitor_enabled": bool(_runtime_opt(hass, entry, "hazard_monitor_enabled", False)),
                 "hazard_lat":             _runtime_opt(hass, entry, "hazard_lat", ""),
                 "hazard_lon":             _runtime_opt(hass, entry, "hazard_lon", ""),
-                "hazard_quakes_on":       bool(_runtime_opt(hass, entry, "hazard_quakes_on", True)),
-                "hazard_weather_on":      bool(_runtime_opt(hass, entry, "hazard_weather_on", True)),
-                "hazard_disasters_on":    bool(_runtime_opt(hass, entry, "hazard_disasters_on", True)),
+                # 8.8.0: region-aware (off by default for an Irish home
+                # unless saved); a saved value is shown as saved.
+                "hazard_quakes_on":       _hazard_flag(hass, "hazard_quakes_on"),
+                "hazard_weather_on":      _hazard_flag(hass, "hazard_weather_on"),
+                "hazard_disasters_on":    _hazard_flag(hass, "hazard_disasters_on"),
+                # Weather warnings (8.8.0)
+                "hazard_met_eireann_on":  _hazard_flag(hass, "hazard_met_eireann_on"),
+                "hazard_cap_on":          bool(_runtime_opt(hass, entry, "hazard_cap_on", False)),
+                "hazard_counties":        _get_runtime_json(hass, entry, "hazard_counties", []),
+                "hazard_push_level":      str(_runtime_opt(hass, entry, "hazard_push_level", "yellow") or "yellow"),
+                "hazard_speak_level":     str(_runtime_opt(hass, entry, "hazard_speak_level", "orange") or "orange"),
+                "hazard_cap_url":         _masked_url(_runtime_opt(hass, entry, "hazard_cap_url", "")),
+                "hazard_cap_area_codes":  _get_runtime_json(hass, entry, "hazard_cap_area_codes", []),
+                "hazard_cap_area_names":  _get_runtime_json(hass, entry, "hazard_cap_area_names", []),
                 "hazard_quake_radius_km": _runtime_opt(hass, entry, "hazard_quake_radius_km", 300),
                 "hazard_quake_min_mag":   _runtime_opt(hass, entry, "hazard_quake_min_mag", 2.5),
                 # Residence model detail controls — same read-back requirement:
@@ -695,6 +706,16 @@ async def ws_get_panel_data(
     except Exception as exc:
         _LOGGER.exception("ws_get_panel_data failed: %s", exc)
         connection.send_error(msg["id"], "panel_data_failed", safe_error_message(exc))
+
+
+def _hazard_flag(hass: HomeAssistant, key: str) -> bool:
+    """A hazard source switch as the monitor sees it: saved, else the region
+    default (8.8.0). Falls back to the pre-8.8.0 default on any error."""
+    try:
+        from . import hazard_monitor
+        return hazard_monitor.effective_flag(hass, key)
+    except Exception:
+        return key != "hazard_met_eireann_on"
 
 
 def _masked_url(value) -> str:
@@ -958,6 +979,15 @@ PANEL_WRITABLE_KEYS = {
     "briefing_include_events",
     "briefing_include_energy",
     "briefing_include_hazards",
+    # Hazard Monitor weather warnings (8.8.0)
+    "hazard_met_eireann_on",      # bool: Met Éireann warnings (on by default for an Irish home)
+    "hazard_cap_on",              # bool: a custom CAP feed (hazard_cap_url)
+    "hazard_counties",            # JSON list: Met Éireann county codes (empty = nearest to home)
+    "hazard_push_level",          # str: yellow | orange | red, lowest level sent to the phone
+    "hazard_speak_level",         # str: yellow | orange | red, lowest level also spoken
+    "hazard_cap_url",             # str: https CAP document, or Atom/RSS index of them
+    "hazard_cap_area_codes",      # JSON list: CAP geocode values that mean "here"
+    "hazard_cap_area_names",      # JSON list: CAP areaDesc names that mean "here"
     "document_watch_folders",    # str/list: extra folders to auto-ingest new docs from
     # AI model selection (Settings → AI Models live-fetched dropdowns)
     "llm_provider",
