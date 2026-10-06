@@ -91,6 +91,7 @@ _REGION_DEFAULTS = {
 }
 _DEF_PUSH_LEVEL = "yellow"
 _DEF_SPEAK_LEVEL = "orange"
+_DEF_NIGHT_SPEAK_LEVEL = "red"
 
 # Warnings memory ({source: {id: entry}}), loaded from disk once per run,
 # and the warnings each source last reported after a successful poll (for
@@ -145,6 +146,30 @@ def effective_flag(hass, key: str) -> bool:
 def _level_setting(key: str, default: str) -> str:
     value = str(_saved(key) or "").strip().lower()
     return value if value in ("yellow", "orange", "red") else default
+
+
+def _night_level_setting() -> str:
+    value = str(_saved("hazard_night_speak_level") or "").strip().lower()
+    return value if value in ("yellow", "orange", "red", "off") else _DEF_NIGHT_SPEAK_LEVEL
+
+
+def _runtime(hass, key: str, default):
+    """Live panel config, matching package_monitor's event-loop read."""
+    from .runtime import domain_runtime_config
+    rc = domain_runtime_config(hass)
+    return rc[key] if key in rc else default
+
+
+def _in_quiet_hours(hass) -> bool:
+    """The Observer quiet window; a read or parse failure is safely not quiet."""
+    try:
+        from . import sleep_detection
+        return sleep_detection._in_quiet_hours(
+            str(_runtime(hass, "observer_quiet_start", "22:00")),
+            str(_runtime(hass, "observer_quiet_end", "07:00")),
+        )
+    except Exception:
+        return False
 
 
 def _json_list(key: str) -> list:
@@ -473,7 +498,7 @@ def _active(warnings: list[dict], now) -> list[dict]:
             and w.get("level") in hw.LEVELS and not hw._expired(w.get("expiry", ""), now)]
 
 
-async def _poll_warnings(hass, honorific: str) -> dict:
+async def _poll_warnings(hass, honorific: str, *, in_quiet: bool) -> dict:
     """One poll of the warnings sources: reconcile, deliver, remember."""
     global _STORE
     from datetime import datetime, timezone
@@ -486,6 +511,7 @@ async def _poll_warnings(hass, honorific: str) -> dict:
         _STORE = await hass.async_add_executor_job(hw.load_store, now)
     push_level = _level_setting("hazard_push_level", _DEF_PUSH_LEVEL)
     speak_level = _level_setting("hazard_speak_level", _DEF_SPEAK_LEVEL)
+    night_level = _night_level_setting()
     tz = _tz(hass)
     counts: dict = {}
     changed = False
@@ -508,8 +534,8 @@ async def _poll_warnings(hass, honorific: str) -> dict:
             # At or above the speak level (and the push level): spoken and
             # pushed. Below it, including a warning lowered under the push
             # level after it was announced: phone only.
-            speak = (hw.at_least(w["level"], speak_level)
-                     and hw.at_least(w["level"], push_level))
+            speak = hw.speak_allowed(
+                w["level"], in_quiet, speak_level, push_level, night_level)
             await _deliver(hass, hw.pushed(kind, w, honorific, tz, old), "warning",
                            speak_text=hw.spoken(kind, w, honorific, tz, old) if speak else "")
         counts[source] = len(events)
@@ -526,8 +552,9 @@ async def periodic_check(hass, honorific: str = "sir") -> dict:
     if not _enabled():
         return {"skipped": "disabled"}
 
+    in_quiet = _in_quiet_hours(hass)
     try:
-        warnings = await _poll_warnings(hass, honorific)
+        warnings = await _poll_warnings(hass, honorific, in_quiet=in_quiet)
     except Exception as exc:
         _LOGGER.debug("hazard: warnings poll failed: %s", type(exc).__name__)
         warnings = {}
@@ -542,8 +569,10 @@ async def periodic_check(hass, honorific: str = "sir") -> dict:
 
     async def _announce(action_key: str, message: str) -> None:
         # deliver via the same paths every other Nova alert uses: pushed
-        # to the phones and spoken
-        await _deliver(hass, message, action_key, speak_text=message)
+        # to the phones, and spoken only outside quiet hours.  These legacy
+        # feeds have no shared severity scale for a safe night exception.
+        await _deliver(hass, message, action_key,
+                       speak_text="" if in_quiet else message)
 
     # Earthquakes
     if effective_flag(hass, "hazard_quakes_on"):
@@ -655,6 +684,7 @@ async def status(hass) -> dict:
                                                        key=lambda kv: kv[1][0])],
         "push_level": _level_setting("hazard_push_level", _DEF_PUSH_LEVEL),
         "speak_level": _level_setting("hazard_speak_level", _DEF_SPEAK_LEVEL),
+        "night_speak_level": _night_level_setting(),
         "warnings": [hw.for_panel(w, tz) for ws in _LAST_WARNINGS.values() for w in ws],
     }
     return out

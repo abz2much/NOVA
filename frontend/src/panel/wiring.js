@@ -531,8 +531,8 @@
     }
     // Hazard Monitor (8.8.0): county chips toggle membership of the
     // hazard_counties list (as the Lab mode area chips do), and the CAP
-    // area fields save one entry per line as a JSON list. Both re-fetch the
-    // hazard status, so the chosen counties and warnings stay current.
+    // area fields save one entry per line as a JSON list. Level selects,
+    // including the quiet-hours speech floor, re-fetch hazard status too.
     root.querySelectorAll("[data-hazard-county]").forEach(btn => {
       btn.addEventListener("click", async () => {
         const code = btn.getAttribute("data-hazard-county");
@@ -689,4 +689,3 @@
       card.hidden = !(matchesGroup || matchesSearch);
     });
   }
-

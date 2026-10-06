@@ -28,6 +28,8 @@ from typing import Optional
 from homeassistant.core import HomeAssistant, Event, callback
 from homeassistant.util import dt as dt_util
 
+from .locale_format import format_date
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -448,7 +450,10 @@ async def _trigger_briefing(
         from . import sleep_detection
 
         # Gather context
-        context_lines = [f"It is {datetime.now().strftime('%A %B %-d, %-I:%M %p')}."]
+        local_now = datetime.now()
+        context_lines = [
+            f"It is {format_date(local_now, hass)}, {local_now.strftime('%-I:%M %p')}."
+        ]
         weather = _gather_weather(hass)
         if weather:
             context_lines.append(f"Weather: {weather}.")

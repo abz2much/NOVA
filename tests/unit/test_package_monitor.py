@@ -41,6 +41,40 @@ def test_text_mail_positive(pm):
     assert det["mail"] is True
 
 
+@pytest.mark.parametrize("carrier", [
+    "an post", "dpd", "gls", "evri", "hermes", "yodel", "parcelforce",
+    "royal mail", "courier",
+])
+def test_irish_and_uk_carriers_match_alone_in_sentences_and_any_case(pm, carrier):
+    for text in (carrier, f"A {carrier} van is at the door", carrier.upper(),
+                 f"A {carrier.upper()} VAN IS AT THE DOOR"):
+        assert pm.detection_from_text(text)["package"] is True, text
+
+
+@pytest.mark.parametrize("carrier", [
+    "an post", "dpd", "gls", "evri", "hermes", "yodel", "parcelforce",
+    "royal mail", "courier", "amazon", "ups", "fedex", "usps", "dhl",
+])
+def test_carrier_mentions_are_removed_by_negation(pm, carrier):
+    det = pm.detection_from_text(f"No {carrier} van visible")
+    assert det["package"] is False, carrier
+
+
+def test_an_post_keeps_the_existing_mail_flag(pm):
+    det = pm.detection_from_text("An Post van at the door")
+    assert det["package"] is True and det["mail"] is True
+
+
+def test_postie_is_mail_and_a_negated_postie_is_not(pm):
+    assert pm.detection_from_text("The postie is at the door")["mail"] is True
+    assert pm.detection_from_text("No postie visible")["mail"] is False
+
+
+def test_usps_still_works_and_embedded_carrier_text_does_not(pm):
+    assert pm.detection_from_text("USPS")["package"] is True
+    assert pm.detection_from_text("The wiglsworth sign is visible")["package"] is False
+
+
 # ── detect_on_camera: blank-frame guard ──────────────────────────────────────
 
 async def test_blank_frame_returns_none(pm, load, fake_hass, monkeypatch):

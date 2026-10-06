@@ -23,6 +23,7 @@ from homeassistant.util import dt as dt_util
 from .const import BRIEFING_GROUNDING_RULE, NOVA_PERSONA
 from .database import get_recent_messages, save_message
 from .directive_helper import build_system_prompt
+from .locale_format import format_date
 from .presence import get_presence_summary
 from .tts_helper import async_announce
 from . import paths
@@ -260,7 +261,8 @@ async def async_briefing(
     overnight_hours  = int(call.data.get("hours", 12))
 
     # Gather everything
-    context_lines = [f"It is {datetime.now().strftime('%A %B %-d, %-I:%M %p')}."]
+    now = datetime.now()
+    context_lines = [f"It is {format_date(now, hass)}, {now.strftime('%-I:%M %p')}."]
 
     if include_weather:
         weather = _gather_weather(hass)

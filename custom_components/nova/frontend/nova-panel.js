@@ -1082,7 +1082,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v8.8.0
+ * v8.8.1
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1158,7 +1158,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.8.0 ",
+      console.log("%c Nova Panel %c v8.8.1 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -3225,7 +3225,7 @@ ${this._htmlDashboardBody()}`;
     { id: "sentinel_rules", group: "safety", title: "Sentinel Rules", real: true,
       desc: "Enable or disable individual door/lock/garage anomaly rules." },
     { id: "hazard_monitor", group: "safety", title: "Hazard Monitor", real: true,
-      desc: "Weather warnings for your area (Met Éireann, or a custom CAP feed), plus optional earthquake, US weather and NASA disaster feeds." },
+      desc: "Weather warnings for your area, with a separate quiet-hours speech level, plus optional legacy hazard feeds." },
     { id: "energy_management", group: "safety", title: "Energy Management", real: true,
       desc: "Peak-draw threshold and how much say Nova has over high-draw appliances." },
     { id: "host_health", group: "safety", title: "Host Health", real: true,
@@ -3255,7 +3255,6 @@ ${this._htmlDashboardBody()}`;
     { id: "document_library", group: "home", title: "Document Library", real: true,
       desc: "Manuals and receipts Nova can search and cite from." },
   ];
-
   // ─── Residence 3D (Phase A) ──────────────────────────────────────────────
   // Reuses the NOVA3D engine defined at the top of this file (window.NOVA3D)
   // rather than re-deriving the ~1000 lines of isometric-projection geometry
@@ -4765,6 +4764,7 @@ ${this._htmlDashboardBody()}`;
     const countyChips = (hz.county_table || []).map(c =>
       `<button class="mode-chip ${chosen.has(c.code) ? "mode-chip-on" : ""}" data-hazard-county="${this._esc(c.code)}">${this._esc(c.name)}</button>`).join("");
     const levels = [["yellow", "Yellow"], ["orange", "Orange"], ["red", "Red"]];
+    const nightLevels = [...levels, ["off", "Off"]];
     const listText = key => (Array.isArray(cfg[key]) ? cfg[key] : []).join("\n");
     return `
       <div class="stub-body">Weather warnings for your area, and optional nearby earthquake, US severe-weather and NASA disaster feeds. Alerts push and speak like any Nova alert.</div>
@@ -4797,6 +4797,10 @@ ${this._htmlDashboardBody()}`;
       <div class="cfg-row">
         <label>Also speak from <span class="toggle-desc">below this, phone only</span></label>
         <select class="cfg-field" data-cfg-key="hazard_speak_level">${this._optSelect(levels, cfg.hazard_speak_level || "orange")}</select>
+      </div>
+      <div class="cfg-row">
+        <label>Speak during quiet hours from <span class="toggle-desc">Red by default</span></label>
+        <select class="cfg-field" data-cfg-key="hazard_night_speak_level">${this._optSelect(nightLevels, cfg.hazard_night_speak_level || "red")}</select>
       </div>
       ${capOn ? `
       <div class="panel-head" style="margin-top:10px"><div class="panel-title">Custom CAP feed (not tested by Nova)</div></div>
@@ -5833,7 +5837,6 @@ ${this._htmlDashboardBody()}`;
       });
     }
   }
-
   _mediaPlayerOptions(selected) {
     const states = this._hass?.states || {};
     const eids = Object.keys(states).filter(e => e.startsWith("media_player.")).sort();
@@ -6843,8 +6846,8 @@ ${this._htmlDashboardBody()}`;
     }
     // Hazard Monitor (8.8.0): county chips toggle membership of the
     // hazard_counties list (as the Lab mode area chips do), and the CAP
-    // area fields save one entry per line as a JSON list. Both re-fetch the
-    // hazard status, so the chosen counties and warnings stay current.
+    // area fields save one entry per line as a JSON list. Level selects,
+    // including the quiet-hours speech floor, re-fetch hazard status too.
     root.querySelectorAll("[data-hazard-county]").forEach(btn => {
       btn.addEventListener("click", async () => {
         const code = btn.getAttribute("data-hazard-county");
@@ -7001,7 +7004,6 @@ ${this._htmlDashboardBody()}`;
       card.hidden = !(matchesGroup || matchesSearch);
     });
   }
-
   // ─── Ember head: the hero's 3D face ─────────────────────────────────────
   // A head built from gold sparks, projected in plain canvas 2D (no library,
   // same idea as NOVA3D). It sits on the left of a full-width stage, turns

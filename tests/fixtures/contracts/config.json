@@ -138,6 +138,7 @@
     "hazard_lon",
     "hazard_met_eireann_on",
     "hazard_monitor_enabled",
+    "hazard_night_speak_level",
     "hazard_push_level",
     "hazard_quake_min_mag",
     "hazard_quake_radius_km",
