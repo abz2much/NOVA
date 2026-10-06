@@ -46,6 +46,45 @@ SCENE_MEMORY_ENABLED_KEY = "scene_memory_enabled"
 SCENE_MEMORY_RETENTION_KEY = "scene_memory_retention_days"
 _SCENE_MEMORY_RETENTION_RANGE = (1, 90)
 
+# Panel keys that only ever hold true or false (8.7.23): every entry in
+# PANEL_WRITABLE_KEYS whose comment says bool, plus observer_enabled. The
+# panel saves each of them with a toggle button or chip, which sends a JSON
+# boolean, so a string such as "false" or "off" is refused rather than
+# stored and later read as on. satellite_audio_out is "dict/bool" and is
+# not in this set.
+STRICT_BOOL_KEYS = frozenset({
+    LOCKDOWN_AUTO_KEY, INTRUSION_CONFINEMENT_KEY, FACE_STAND_DOWN_KEY,
+    "observer_enabled", "announce_notify_only",
+    "continued_conversation_speaker_reopen", "continued_conversation_multi_satellite",
+    "has_basement", "semantic_search", "operational_mode_auto", "biometrics_enabled",
+    "voice_confirm_enabled", "onboarding_dismissed",
+    "hazard_monitor_enabled", "hazard_quakes_on", "hazard_weather_on", "hazard_disasters_on",
+    "intrusion_vision_confirm",
+    "briefing_morning_enabled", "briefing_evening_enabled", "briefing_require_home",
+    "suggestion_review_enabled", "adaptive_interruption_budget",
+    "adaptive_suggestion_threshold", "adaptive_awareness", "tts_use_ha_voice",
+    "pattern_learn_motion", "camera_event_learning", "camera_historical_awareness",
+    SCENE_MEMORY_ENABLED_KEY,
+    "host_health_enabled", "host_health_alerts_enabled", "host_health_recovery_announce",
+    "camera_auto_analyze", "camera_auto_analyze_motion", "package_detection",
+    "visitor_learning", "rich_reasoning", "light_control_enabled", "sleep_prompt_enabled",
+})
+
+# How long an unanswered intrusion alert waits before the softer "couldn't
+# reach you, please check" notice (core_safety.py, default 120 seconds).
+# 30 seconds is the cognitive core's tick, so a shorter wait cannot be
+# checked any sooner; 600 seconds (10 minutes) is the longest choice the
+# panel offers. The panel sends the choice as a string ("120"), so a
+# numeric string in range is accepted and stored as sent.
+INTRUSION_RESPONSE_TIMEOUT_KEY = "intrusion_response_timeout"
+_INTRUSION_RESPONSE_TIMEOUT_RANGE = (30.0, 600.0)
+
+SECURITY_ALARM_ENTITY_KEY = "security_alarm_entity"
+_ALARM_ENTITY_ID = re.compile(r"alarm_control_panel\.[a-z0-9_]+")
+
+SLEEP_OVERRIDE_KEY = "sleep_override"
+SLEEP_OVERRIDE_VALUES = ("auto", "awake", "asleep")
+
 
 def automatic_lockdown_enabled(config: dict | None) -> bool:
     """Only the literal JSON boolean true enables automatic device control."""
@@ -80,13 +119,31 @@ def _valid_bounded_integer(value, lo: int, hi: int) -> bool:
     return type(value) is int and lo <= value <= hi
 
 
+def _valid_number_or_numeric_string(value, lo: float, hi: float) -> bool:
+    """A bounded number, or a string holding one (what a panel select sends)."""
+    if isinstance(value, str):
+        try:
+            value = float(value.strip())
+        except ValueError:
+            return False
+    return _valid_bounded_number(value, lo, hi)
+
+
 def valid_panel_value(key: str, value) -> bool:
-    """Reject truthy strings and numbers for the automatic safety opt in."""
-    if key in (LOCKDOWN_AUTO_KEY, INTRUSION_CONFINEMENT_KEY, FACE_STAND_DOWN_KEY):
+    """Whether nova/update_config may write ``value`` for ``key``. Only on
+    write: values already saved are never checked again here, so an older
+    config keeps loading."""
+    if key in STRICT_BOOL_KEYS:
         return type(value) is bool
-    if key in ("camera_event_learning", "camera_historical_awareness",
-               SCENE_MEMORY_ENABLED_KEY):
-        return type(value) is bool
+    if key == INTRUSION_RESPONSE_TIMEOUT_KEY:
+        return _valid_number_or_numeric_string(value, *_INTRUSION_RESPONSE_TIMEOUT_RANGE)
+    if key == SECURITY_ALARM_ENTITY_KEY:
+        # Empty means auto detect. The panel may not be online right now, so
+        # only the form of the id is checked, not that it exists.
+        return value == "" or (isinstance(value, str)
+                               and _ALARM_ENTITY_ID.fullmatch(value) is not None)
+    if key == SLEEP_OVERRIDE_KEY:
+        return isinstance(value, str) and value in SLEEP_OVERRIDE_VALUES
     if key == SCENE_MEMORY_RETENTION_KEY:
         return _valid_bounded_integer(value, *_SCENE_MEMORY_RETENTION_RANGE)
     if key == CAMERA_AWARENESS_MIN_OBSERVATIONS_KEY:
@@ -100,9 +157,6 @@ def valid_panel_value(key: str, value) -> bool:
     if key == "output_language":
         from . import output_language
         return output_language.is_valid_setting(value)
-    if key in ("host_health_enabled", "host_health_alerts_enabled",
-               "host_health_recovery_announce"):
-        return type(value) is bool
     if key == HOST_HEALTH_PERSISTENCE_KEY:
         return _valid_bounded_number(value, *_HOST_HEALTH_PERSISTENCE_RANGE)
     if key == HOST_HEALTH_COOLDOWN_KEY:
@@ -156,3 +210,42 @@ def valid_panel_value(key: str, value) -> bool:
                     for item in services)
         )
     return True
+
+
+def _range_text(lo, hi) -> str:
+    return f"{lo:g} to {hi:g}"
+
+
+def invalid_panel_value_message(key: str) -> str:
+    """The panel's message for a value valid_panel_value refused, worded for
+    the kind of value the key takes (8.7.23). Fixed text only."""
+    if key in STRICT_BOOL_KEYS:
+        return f"Key '{key}' requires a boolean value"
+    if key == "output_language":
+        return "Key 'output_language' must be 'auto' or a supported language code"
+    if key == INTRUSION_RESPONSE_TIMEOUT_KEY:
+        return (f"Key '{key}' must be a number of seconds from "
+                f"{_range_text(*_INTRUSION_RESPONSE_TIMEOUT_RANGE)}")
+    if key == SECURITY_ALARM_ENTITY_KEY:
+        return f"Key '{key}' must be empty or an alarm_control_panel entity id"
+    if key == SLEEP_OVERRIDE_KEY:
+        return f"Key '{key}' must be one of: auto, awake, asleep"
+    whole = {SCENE_MEMORY_RETENTION_KEY: _SCENE_MEMORY_RETENTION_RANGE,
+             CAMERA_AWARENESS_MIN_OBSERVATIONS_KEY: _CAMERA_AWARENESS_MIN_OBSERVATIONS_RANGE}
+    if key in whole:
+        return f"Key '{key}' must be a whole number from {_range_text(*whole[key])}"
+    number = {CAMERA_EVENT_CONFIDENCE_FLOOR_KEY: _CAMERA_EVENT_CONFIDENCE_FLOOR_RANGE,
+              CAMERA_EVENT_DEDUP_WINDOW_KEY: _CAMERA_EVENT_DEDUP_WINDOW_RANGE,
+              HOST_HEALTH_PERSISTENCE_KEY: _HOST_HEALTH_PERSISTENCE_RANGE,
+              HOST_HEALTH_COOLDOWN_KEY: _HOST_HEALTH_COOLDOWN_RANGE}
+    if key in number:
+        return f"Key '{key}' must be a number from {_range_text(*number[key])}"
+    if key == "host_health_mappings":
+        return (f"Key '{key}' must be a JSON object mapping each metric to a "
+                "sensor entity id, or to an empty string")
+    if key == "host_health_thresholds":
+        return (f"Key '{key}' must be a JSON object of known metrics, each "
+                "with a number in its allowed range")
+    if key == "notify_services":
+        return f"Key '{key}' must be a JSON list of notify service ids, such as notify.mobile_app_phone"
+    return f"Key '{key}' has a value that is not allowed"

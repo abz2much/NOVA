@@ -56,9 +56,18 @@ async def ws_say_hello(
 ) -> None:
     """Welcome card "Say hello" test: sends the fixed text "Hello" through
     Nova's own conversation agent and returns {ok, reply|error}. Admin-only;
-    takes no text from the caller, so it can't drive device actions."""
-    from . import welcome
-    res = await welcome.async_say_hello(hass, connection.context(msg))
+    takes no text from the caller, so it can't drive device actions.
+
+    Never raises (8.7.23): a failure answers with the same {ok: False,
+    error} shape welcome.async_say_hello returns, with safe text, and the
+    detail goes to the Home Assistant log. The pinned contract has no error
+    code for this command, so it is not a send_error."""
+    try:
+        from . import welcome
+        res = await welcome.async_say_hello(hass, connection.context(msg))
+    except Exception as exc:
+        res = {"ok": False,
+               "error": safe_error_message(exc, where="say_hello", log=True)}
     connection.send_result(msg["id"], res)
 
 
@@ -159,17 +168,16 @@ async def ws_repeat_spoken(
     `spoken_id` (never `id` — that field is reserved for websocket message
     correlation) names which row to repeat.
 
-    Sends to the original speaker(s) if they are still available;
-    otherwise falls back to Nova's configured default speakers
-    (the same broadcast_target() the manual TTS test already uses).
-    Delivery and recording both happen inside async_announce — this
+    Sends only to the original speaker(s), and only those still available.
+    When none is (8.7.23), it is refused with no_speaker rather than said
+    again on the house-wide default speakers, which may be in a different
+    room from the person who heard it. Delivery and recording both happen inside async_announce — this
     handler never calls spoken_history.record itself, so a repeat is
     recorded exactly once, by the same single recorder as every other
     path that goes through async_announce."""
     try:
         from . import spoken_history, nova_config
         from .tts_helper import async_announce, resolve_tts_entity
-        from .audio_routing import broadcast_target
 
         row = await hass.async_add_executor_job(spoken_history.get, msg["spoken_id"])
         if row is None:
@@ -181,17 +189,13 @@ async def ws_repeat_spoken(
             if (st := hass.states.get(s)) is not None
             and st.state not in ("unavailable", "unknown")
         ]
+        if not speakers:
+            connection.send_error(
+                msg["id"], "no_speaker",
+                "The speaker this was said on is not available, so it was not repeated")
+            return
         entry = _get_entry(hass)
         cfg = await hass.async_add_executor_job(nova_config.effective_config, entry)
-        if not speakers:
-            speakers = broadcast_target(
-                hass,
-                broadcast_group=(cfg.get("broadcast_group") or None),
-                announcement_speakers=cfg.get("announcement_speakers"),
-            )
-        if not speakers:
-            connection.send_error(msg["id"], "no_speaker", "No speaker available to repeat through")
-            return
 
         tts_entity = resolve_tts_entity(hass, cfg.get("tts_engine", "auto"))
         if not tts_entity:

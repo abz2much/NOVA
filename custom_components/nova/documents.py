@@ -253,7 +253,12 @@ def delete_source(filename: str) -> dict:
         if p.exists():
             p.unlink()
     except Exception as exc:
-        return {"ok": False, "filename": safe, "error": f"file remove failed: {exc}"}
+        # The detail (an OS error with the full path) goes to the Home
+        # Assistant log only; the panel gets the error type (8.7.23).
+        from .safe_errors import safe_error_message
+        return {"ok": False, "filename": safe,
+                "error": "file remove failed: "
+                         + safe_error_message(exc, where="document delete", log=True)}
     return {"ok": True, "filename": safe}
 
 

@@ -116,16 +116,51 @@ async def test_a_bad_update_is_refused_with_its_reason_and_nothing_is_saved(
     assert cfg.saved == [] and hass.reloads == [] and dropped == []
 
 
-async def test_current_behaviour_a_bad_endpoint_is_refused_without_its_reason(ai, load, cfg):
-    # Looks wrong: normalize_provider_endpoint raises a plain ValueError with
-    # a clear reason ("credentials are not accepted" and so on), but
-    # safe_errors only keeps the text of a NovaValidationError, so the panel
-    # is told the type and pointed at the log.
-    res = await _apply(ai, _reloading_hass(_entry(load)),
-                       {"ollama_base_url": "http://user:pw@10.0.0.2:11434"})
-    assert res == {"ok": False, "error": "invalid_configuration",
-                   "message": "ValueError (details are in the Home Assistant log)"}
+_CREDS = ("The endpoint must not include a user name or password. "
+          "Add the key under Provider Credentials instead.")
+
+
+@pytest.mark.parametrize("endpoint,message", [
+    # 8.7.23: was test_current_behaviour_a_bad_endpoint_is_refused_without_
+    # its_reason, which got "ValueError (details are in the Home Assistant
+    # log)". Each reason is now a fixed phrase; no exception text is sent.
+    ("http://user:pw@10.0.0.2:11434", _CREDS),
+    ("ftp://10.0.0.2", "The endpoint must start with http:// or https://."),
+    ("http://", "The endpoint must include a host name or address."),
+    ("http://10.0.0.2/?token=abc", "The endpoint must not include a query string (?…) "
+                                   "or a fragment (#…)."),
+    ("http://10.0.0.2:99999", "The endpoint has an invalid port."),
+    ("http://" + "a" * 2050, "The endpoint is too long."),
+])
+async def test_a_bad_endpoint_is_refused_with_a_fixed_reason(ai, load, cfg, endpoint, message):
+    res = await _apply(ai, _reloading_hass(_entry(load)), {"ollama_base_url": endpoint})
+    assert res == {"ok": False, "error": "invalid_configuration", "message": message}
     assert cfg.saved == []
+    assert "user:pw" not in res["message"] and "token" not in res["message"]
+
+
+def test_every_fixed_reason_matches_a_real_normaliser_refusal(ai, load):
+    # If providers.routing rewords a reason, the table would silently fall
+    # back to the generic phrase; this keeps them in step.
+    routing = load("providers.routing")
+    raised = set()
+    for bad in ("http://user:pw@h", "ftp://h", "http://", "http://h/?q=1", "http://h:99999",
+                "http://" + "a" * 2050):
+        with pytest.raises(ValueError) as info:
+            routing.normalize_provider_endpoint(bad, "ollama")
+        raised.add(info.value.args)
+    assert raised == {(k,) for k in ai._ENDPOINT_REASONS}
+
+
+def test_an_unknown_value_error_gets_the_fixed_fallback(ai, caplog):
+    msg = ai._value_error_message(ValueError("socket /run/secret token=abc"))
+    assert msg == "The endpoint is not a valid address."
+    assert "AI settings failed" in caplog.text
+
+
+def test_novas_own_validation_message_is_kept(ai, load):
+    err = load("safe_errors").NovaValidationError("Prompt size must be a number")
+    assert ai._value_error_message(err) == "Prompt size must be a number"
 
 
 async def test_no_entry_is_reported(ai, load, cfg):
@@ -286,14 +321,12 @@ async def test_any_other_fetch_failure_returns_a_fixed_message(ai, load, cfg, ne
                    "message": "Could not connect to the endpoint or list its models."}
 
 
-async def test_current_behaviour_a_malformed_endpoint_is_refused_without_its_reason(
-        ai, load, cfg, net):
-    # Looks wrong, the same gap as apply: the normaliser's reason is a plain
-    # ValueError, so the panel gets the type, not the reason.
+async def test_a_malformed_staged_endpoint_is_refused_with_its_reason(ai, load, cfg, net):
+    # 8.7.23: was test_current_behaviour_a_malformed_endpoint_is_refused_
+    # without_its_reason. Same fixed phrases as apply.
     res = await _test_endpoint(ai, _hass(_entry(load)), "ollama", "http://u:p@10.0.0.2")
-    assert res == {"ok": False, "error": "invalid_endpoint",
-                   "message": "ValueError (details are in the Home Assistant log)"}
-    assert net.fetched == []
+    assert res == {"ok": False, "error": "invalid_endpoint", "message": _CREDS}
+    assert net.fetched == [] and net.checked == []
 
 
 # ── nova/list_models ────────────────────────────────────────────────────────

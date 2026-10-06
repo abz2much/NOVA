@@ -59,7 +59,7 @@ FILE_FLOORS = {
     # 8.7.22 pinned the panel websocket layer the same way: the handlers now
     # run in the unit run, so the floors are set from it (measured in the
     # comments; the unit run before 8.7.22 in brackets).
-    "websocket.py": 69,                                 # 73.4% (0.0%)
+    "websocket.py": 70,                                 # 74.0% (0.0%); 73.4% in 8.7.22
     "ws_ai.py": 90,                                     # 93.8% (23.3%)
     "ws_cameras.py": 89,                                # 93.5% (0.0%)
     "ws_decisions.py": 89,                              # 93.4% (0.0%)

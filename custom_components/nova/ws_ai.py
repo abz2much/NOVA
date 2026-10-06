@@ -205,6 +205,67 @@ def _prepare_ai_config_updates(updates: dict) -> dict:
     return clean
 
 
+# nova/update_config's check for a provider or model key (8.7.23): the same
+# rules as nova/apply_ai_config, by running that command's own validator on
+# the one key. review_provider and review_model are not apply keys, so they
+# are checked as the Main Agent's provider and model are.
+_PANEL_AI_ALIASES = {"review_provider": "llm_provider", "review_model": "model"}
+PANEL_AI_VALUE_KEYS = frozenset(
+    {key for _label, provider_key, model_key in _AI_ROLE_FIELDS
+     for key in (provider_key, model_key)} | set(_PANEL_AI_ALIASES))
+# Endpoints are only written by nova/apply_ai_config, which normalises them,
+# checks the destination and tests the connection. The panel never sends
+# them through nova/update_config.
+PANEL_AI_ENDPOINT_KEYS = frozenset({"llm_base_url", "ollama_base_url", "custom_base_url"})
+
+
+def panel_ai_value(key: str, value):
+    """The cleaned value for a provider or model key, or NovaValidationError
+    with the same reason nova/apply_ai_config gives."""
+    probe = _PANEL_AI_ALIASES.get(key, key)
+    try:
+        return _prepare_ai_config_updates({probe: value})[probe]
+    except NovaValidationError:
+        if probe == key:
+            raise
+        if key.endswith("_provider"):
+            raise NovaValidationError(f"Unsupported provider for {key}") from None
+        raise NovaValidationError(f"A valid model is required for {key}") from None
+
+
+# Why an endpoint was refused, as fixed panel text (8.7.23). The keys are
+# the fixed reasons providers.routing.normalize_provider_endpoint raises;
+# the exception's own text is only matched, never sent.
+_ENDPOINT_REASONS = {
+    "endpoint is too long": "The endpoint is too long.",
+    "endpoint must use http or https": "The endpoint must start with http:// or https://.",
+    "endpoint must include a host": "The endpoint must include a host name or address.",
+    "endpoint credentials must be stored separately":
+        "The endpoint must not include a user name or password. "
+        "Add the key under Provider Credentials instead.",
+    "endpoint must not include a query string or fragment":
+        "The endpoint must not include a query string (?…) or a fragment (#…).",
+    "endpoint has an invalid port": "The endpoint has an invalid port.",
+}
+_ENDPOINT_REASON_FALLBACK = "The endpoint is not a valid address."
+
+
+def _value_error_message(exc: ValueError) -> str:
+    """Panel text for a ValueError from the AI settings path: Nova's own
+    validation message, a fixed endpoint reason, or a fixed fallback."""
+    if isinstance(exc, NovaValidationError):
+        return safe_error_message(exc)
+    # Matched against the fixed reasons; the exception text itself is never
+    # turned into panel text.
+    reason = next((text for known, text in _ENDPOINT_REASONS.items()
+                   if exc.args == (known,)), None)
+    if reason is None:
+        # Not a known reason: the detail goes to the Home Assistant log only.
+        safe_error_message(exc, where="AI settings", log=True)
+        return _ENDPOINT_REASON_FALLBACK
+    return reason
+
+
 def _validate_ai_candidate(candidate: dict) -> list[str]:
     """Return user-safe validation errors for the complete staged setup."""
     from .llm_provider import resolve_provider_credential
@@ -283,7 +344,7 @@ async def ws_test_provider_endpoint(hass: HomeAssistant, connection, msg) -> Non
         })
     except ValueError as exc:
         connection.send_result(msg["id"], {
-            "ok": False, "error": "invalid_endpoint", "message": safe_error_message(exc, where="AI settings", log=True),
+            "ok": False, "error": "invalid_endpoint", "message": _value_error_message(exc),
         })
     except Exception as exc:
         if (isinstance(exc, ProviderError)
@@ -396,7 +457,7 @@ async def ws_apply_ai_config(hass: HomeAssistant, connection, msg) -> None:
     except ValueError as exc:
         connection.send_result(msg["id"], {
             "ok": False, "error": "invalid_configuration",
-            "message": safe_error_message(exc, where="AI settings", log=True),
+            "message": _value_error_message(exc),
         })
     except Exception as exc:
         _LOGGER.warning("ws_apply_ai_config failed: %s", type(exc).__name__)

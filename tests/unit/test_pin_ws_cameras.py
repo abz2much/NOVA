@@ -230,14 +230,17 @@ async def test_snapshot_with_no_frame_is_none_and_logged_once(cams, frames):
     assert len(cams._logged) == 1 and cams._logged[0][0] == "CAMERA"
 
 
-async def test_current_behaviour_a_snapshot_error_puts_raw_text_in_the_debug_log(cams, frames):
-    # Looks wrong: the panel gets the safe type-only message, but the same
-    # failure goes into the debug log with the raw exception text, and the
-    # debug log is shown on the panel (nova/get_debug_log).
+async def test_a_snapshot_error_puts_only_the_error_type_in_the_debug_log(cams, frames, caplog):
+    # 8.7.23: was test_current_behaviour_a_snapshot_error_puts_raw_text_in_
+    # the_debug_log. The debug log is shown on the panel, so it now gets the
+    # error type; the detail stays in the Home Assistant log.
     frames.error = RuntimeError("http://user:pw@nvr.local/api token=abc")
+    caplog.set_level("DEBUG")
     conn = await _call(cams.ws_camera_snapshot, _hass("camera.porch"), entity_id="camera.porch")
     _safe(conn, "snapshot_failed")
-    assert "token=abc" in cams._logged[0][1]
+    assert cams._logged == [("CAMERA", "camera.porch snapshot: error — "
+                                       "RuntimeError (details are in the Home Assistant log)")]
+    assert "token=abc" in caplog.text
 
 
 # ── nova/camera_diagnostics ─────────────────────────────────────────────────
