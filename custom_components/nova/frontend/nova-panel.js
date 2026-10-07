@@ -1082,7 +1082,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v8.8.3
+ * v8.8.4
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1159,7 +1159,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.8.3 ",
+      console.log("%c Nova Panel %c v8.8.4 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -3646,7 +3646,7 @@ ${this._htmlDashboardBody()}`;
           <input type="search" id="settingsSearch" class="settings-search" placeholder="Search settings — try “camera” or “sleep”…" value="${this._esc(this._settingsSearch)}">
           <nav class="settings-nav">${groupsNav}</nav>
         </div>
-        <div class="settings-grid" id="settingsGrid">${cards}</div>
+        <div class="settings-grid" id="settingsGrid" data-section="${this._settingsSearch ? "" : this._settingsSection}">${cards}</div>
     `;
   }
 
@@ -6993,6 +6993,7 @@ ${this._htmlDashboardBody()}`;
   _applySettingsFilter() {
     const root = this.shadowRoot;
     const q = (this._settingsSearch || "").trim().toLowerCase();
+    root.getElementById("settingsGrid")?.setAttribute("data-section", q ? "" : this._settingsSection);
     root.querySelectorAll(".settings-card").forEach(card => {
       const matchesGroup = !q && card.getAttribute("data-settings-group") === this._settingsSection;
       const matchesSearch = q && (card.getAttribute("data-search") || "").includes(q);
@@ -8817,9 +8818,14 @@ ${this._htmlDashboardBody()}`;
       @media (max-width:720px){.settings-grid{column-count:1}}
       .settings-card{break-inside:avoid;margin-bottom:14px;display:inline-block;width:100%}
       .settings-card[hidden]{display:none}
-      /* Doorbell Training starts the second column so it sits beside the
-         Cameras card instead of stacking under it. */
-      @media (min-width:721px){#settings-card-doorbell_training{break-before:column}}
+      /* The Cameras group is only two cards, so lay it out as a plain two
+         column grid. Column breaks inside CSS columns are not supported in
+         Safari, so Doorbell Training could not be pushed beside Cameras
+         that way. */
+      @media (min-width:721px){
+        .settings-grid[data-section="cameras"]{column-count:auto;display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
+        .settings-grid[data-section="cameras"] .settings-card{margin-bottom:0}
+      }
       .new-cam-collapse{background:none;border:none;padding:0;cursor:pointer;font:inherit;font-size:12.5px;color:var(--ink-dim);text-align:left}
       .new-cam-collapse:hover{color:var(--ink)}
       .new-cam-caret{display:inline-block;width:1em}

@@ -8,7 +8,7 @@
           <input type="search" id="settingsSearch" class="settings-search" placeholder="Search settings — try “camera” or “sleep”…" value="${this._esc(this._settingsSearch)}">
           <nav class="settings-nav">${groupsNav}</nav>
         </div>
-        <div class="settings-grid" id="settingsGrid">${cards}</div>
+        <div class="settings-grid" id="settingsGrid" data-section="${this._settingsSearch ? "" : this._settingsSection}">${cards}</div>
     `;
   }
 

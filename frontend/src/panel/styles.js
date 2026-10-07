@@ -173,9 +173,14 @@
       @media (max-width:720px){.settings-grid{column-count:1}}
       .settings-card{break-inside:avoid;margin-bottom:14px;display:inline-block;width:100%}
       .settings-card[hidden]{display:none}
-      /* Doorbell Training starts the second column so it sits beside the
-         Cameras card instead of stacking under it. */
-      @media (min-width:721px){#settings-card-doorbell_training{break-before:column}}
+      /* The Cameras group is only two cards, so lay it out as a plain two
+         column grid. Column breaks inside CSS columns are not supported in
+         Safari, so Doorbell Training could not be pushed beside Cameras
+         that way. */
+      @media (min-width:721px){
+        .settings-grid[data-section="cameras"]{column-count:auto;display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}
+        .settings-grid[data-section="cameras"] .settings-card{margin-bottom:0}
+      }
       .new-cam-collapse{background:none;border:none;padding:0;cursor:pointer;font:inherit;font-size:12.5px;color:var(--ink-dim);text-align:left}
       .new-cam-collapse:hover{color:var(--ink)}
       .new-cam-caret{display:inline-block;width:1em}

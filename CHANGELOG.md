@@ -1,3 +1,7 @@
+## [8.8.4] — Doorbell Training beside Cameras in Safari
+
+- **Doorbell Training now sits beside Cameras in every browser.** 8.8.3 pushed it into the second column with a column break, which Safari does not support, so it stayed underneath. On wide screens the Cameras group is now a plain two column grid. Other settings groups and searches keep their existing layout, and narrow screens still use one column.
+
 ## [8.8.3] — tidier Suggestions and Cameras settings
 
 - **Suggestions.** The Existing Home Assistant Automations list now sits at the bottom of the tab, below Created by Nova, so new suggestions are the first thing you see.
