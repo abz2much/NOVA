@@ -679,6 +679,7 @@
   _applySettingsFilter() {
     const root = this.shadowRoot;
     const q = (this._settingsSearch || "").trim().toLowerCase();
+    root.getElementById("settingsGrid")?.setAttribute("data-section", q ? "" : this._settingsSection);
     root.querySelectorAll(".settings-card").forEach(card => {
       const matchesGroup = !q && card.getAttribute("data-settings-group") === this._settingsSection;
       const matchesSearch = q && (card.getAttribute("data-search") || "").includes(q);
