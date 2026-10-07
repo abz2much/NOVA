@@ -1082,7 +1082,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v8.8.2
+ * v8.8.3
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1135,6 +1135,7 @@ class NovaPanel extends HTMLElement {
     this._logSearch = "";
     this._settingsSection = "general";
     this._settingsSearch = "";
+    this._camListOpen = false;
     this._uiStrings = null;
     this._uiLangLoaded = null;
     this._uiLangRequest = 0;
@@ -1158,7 +1159,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.8.2 ",
+      console.log("%c Nova Panel %c v8.8.3 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -2887,7 +2888,6 @@ ${this._htmlDashboardBody()}`;
     const sugs = this._data()?.suggestions || [];
     if (!sugs.length) {
       return `
-        ${this._htmlAutomationInventory()}
         <div class="panel">
           <div class="panel-head"><div class="panel-title">Learned Opportunities</div></div>
           <div class="stub-body">No suggestions right now. Nova proposes automations as it notices routines repeat — a light you turn on each evening, a scene after a button press, the heat when it's cold. As patterns build up, they'll appear here for you to review and approve. Nothing is ever created without your say-so.</div>
@@ -2895,7 +2895,8 @@ ${this._htmlDashboardBody()}`;
           <div class="toggle-desc" id="sugAnalysisResult" style="margin-top:8px">See why nothing has qualified yet, or force a fresh pass over your history.</div>
         </div>
         ${this._htmlFilteredSuggestions()}
-        ${this._htmlAutomationTrials()}`;
+        ${this._htmlAutomationTrials()}
+        ${this._htmlAutomationInventory()}`;
     }
     const rows = sugs.map(s => {
       const pct = Math.round((s.confidence || 0) * 100);
@@ -2939,7 +2940,6 @@ ${this._htmlDashboardBody()}`;
         </div>`;
     }).join("");
     return `
-      ${this._htmlAutomationInventory()}
       <div class="panel">
         <div class="panel-head">
           <div class="panel-title">Learned Opportunities</div>
@@ -2949,7 +2949,8 @@ ${this._htmlDashboardBody()}`;
       </div>
       ${rows}
       ${this._htmlFilteredSuggestions()}
-      ${this._htmlAutomationTrials()}`;
+      ${this._htmlAutomationTrials()}
+      ${this._htmlAutomationInventory()}`;
   }
 
   // Suggestions the AI review turned down (v7.126.0). They are never
@@ -5346,9 +5347,12 @@ ${this._htmlDashboardBody()}`;
     if (!cams.length) return `<div class="stub-body">No camera entities in Home Assistant.</div>`;
     const names = cfg.camera_names || {};
     const nOn = cams.filter(c => c.enabled !== false).length;
+    const open = !!this._camListOpen;
     const head = `
       <div class="cfg-row">
-        <label>${nOn} of ${cams.length} cameras in use</label>
+        <button class="new-cam-collapse" id="newCamListToggle" aria-expanded="${open}">
+          <span class="new-cam-caret">${open ? "▾" : "▸"}</span> ${nOn} of ${cams.length} cameras in use
+        </button>
         <div style="display:flex;gap:6px">
           <button class="mode-chip" id="newCamEnableAll">Enable all</button>
           <button class="mode-chip" id="newCamDisableAll">Disable all</button>
@@ -5376,7 +5380,7 @@ ${this._htmlDashboardBody()}`;
           </div>
         </div>`;
     }).join("");
-    return head + rows;
+    return head + `<div id="newCamList"${open ? "" : " hidden"}>${rows}</div>`;
   }
 
   _camerasCardBody() {
@@ -5439,6 +5443,10 @@ ${this._htmlDashboardBody()}`;
         const cam = btn.getAttribute("data-cam"), cur = curDisabled(), isOff = cur.includes(cam);
         applyDisabled(isOff ? cur.filter(c => c !== cam) : [...cur, cam]);
       });
+    });
+    root.getElementById("newCamListToggle")?.addEventListener("click", () => {
+      this._camListOpen = !this._camListOpen;
+      this._rerenderCameraSettings();
     });
     const enAll = root.getElementById("newCamEnableAll");
     if (enAll) enAll.addEventListener("click", () => applyDisabled([]));
@@ -8809,6 +8817,12 @@ ${this._htmlDashboardBody()}`;
       @media (max-width:720px){.settings-grid{column-count:1}}
       .settings-card{break-inside:avoid;margin-bottom:14px;display:inline-block;width:100%}
       .settings-card[hidden]{display:none}
+      /* Doorbell Training starts the second column so it sits beside the
+         Cameras card instead of stacking under it. */
+      @media (min-width:721px){#settings-card-doorbell_training{break-before:column}}
+      .new-cam-collapse{background:none;border:none;padding:0;cursor:pointer;font:inherit;font-size:12.5px;color:var(--ink-dim);text-align:left}
+      .new-cam-collapse:hover{color:var(--ink)}
+      .new-cam-caret{display:inline-block;width:1em}
       .stub-tag{font-family:var(--font-mono);font-size:9px;letter-spacing:.08em;color:var(--ink-faint);
         background:var(--surface-2);border:1px solid var(--line-soft);border-radius:20px;padding:2px 8px;margin-left:8px;vertical-align:middle}
       .stub-body{font-size:12.5px;color:var(--ink-dim);line-height:1.5}

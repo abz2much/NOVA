@@ -173,6 +173,12 @@
       @media (max-width:720px){.settings-grid{column-count:1}}
       .settings-card{break-inside:avoid;margin-bottom:14px;display:inline-block;width:100%}
       .settings-card[hidden]{display:none}
+      /* Doorbell Training starts the second column so it sits beside the
+         Cameras card instead of stacking under it. */
+      @media (min-width:721px){#settings-card-doorbell_training{break-before:column}}
+      .new-cam-collapse{background:none;border:none;padding:0;cursor:pointer;font:inherit;font-size:12.5px;color:var(--ink-dim);text-align:left}
+      .new-cam-collapse:hover{color:var(--ink)}
+      .new-cam-caret{display:inline-block;width:1em}
       .stub-tag{font-family:var(--font-mono);font-size:9px;letter-spacing:.08em;color:var(--ink-faint);
         background:var(--surface-2);border:1px solid var(--line-soft);border-radius:20px;padding:2px 8px;margin-left:8px;vertical-align:middle}
       .stub-body{font-size:12.5px;color:var(--ink-dim);line-height:1.5}

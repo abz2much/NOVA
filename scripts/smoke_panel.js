@@ -2090,6 +2090,14 @@ setTimeout(async () => {
           && !!cc.querySelector("#newCamEnableAll");
       })()],
   );
+  checks.push(["settings tab: camera list is collapsed by default",
+    sRoot.querySelector("#newCamList")?.hidden === true
+    && sRoot.querySelector("#newCamListToggle")?.getAttribute("aria-expanded") === "false"]);
+  sRoot.querySelector("#newCamListToggle").click();
+  sRoot = elNew.shadowRoot;
+  checks.push(["settings tab: camera list toggle expands the list and keeps it open",
+    sRoot.querySelector("#newCamList")?.hidden === false
+    && sRoot.querySelector("#newCamListToggle")?.getAttribute("aria-expanded") === "true"]);
   // Camera Watch / Visitor Learning (v7.101.5) — previously Classic-only,
   // parity gap: the new look had no way to flip camera_auto_analyze from
   // its settings screen.

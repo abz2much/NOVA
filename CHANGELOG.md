@@ -1,3 +1,9 @@
+## [8.8.3] — tidier Suggestions and Cameras settings
+
+- **Suggestions.** The Existing Home Assistant Automations list now sits at the bottom of the tab, below Created by Nova, so new suggestions are the first thing you see.
+- **Camera list collapses.** On Settings, Cameras, the per camera rows are folded away by default. The "cameras in use" line, Enable all and Disable all stay visible, and a click on the line opens or closes the list.
+- **Doorbell Training moves right.** On wide screens it now starts the second column beside Cameras rather than stacking underneath. Narrow screens still use one column.
+
 ## [8.8.2] — simpler Hazard Monitor source and location controls
 
 - **One weather-warning source.** The Hazard Monitor now offers one dropdown: Met Éireann, US National Weather Service, or Custom feed. Ireland defaults to Met Éireann, the US to NWS, and every other country to Custom. Existing source flags are still read when no new choice is saved, without rewriting old config.
