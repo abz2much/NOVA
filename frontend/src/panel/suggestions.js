@@ -13,7 +13,6 @@
     const sugs = this._data()?.suggestions || [];
     if (!sugs.length) {
       return `
-        ${this._htmlAutomationInventory()}
         <div class="panel">
           <div class="panel-head"><div class="panel-title">Learned Opportunities</div></div>
           <div class="stub-body">No suggestions right now. Nova proposes automations as it notices routines repeat — a light you turn on each evening, a scene after a button press, the heat when it's cold. As patterns build up, they'll appear here for you to review and approve. Nothing is ever created without your say-so.</div>
@@ -21,7 +20,8 @@
           <div class="toggle-desc" id="sugAnalysisResult" style="margin-top:8px">See why nothing has qualified yet, or force a fresh pass over your history.</div>
         </div>
         ${this._htmlFilteredSuggestions()}
-        ${this._htmlAutomationTrials()}`;
+        ${this._htmlAutomationTrials()}
+        ${this._htmlAutomationInventory()}`;
     }
     const rows = sugs.map(s => {
       const pct = Math.round((s.confidence || 0) * 100);
@@ -65,7 +65,6 @@
         </div>`;
     }).join("");
     return `
-      ${this._htmlAutomationInventory()}
       <div class="panel">
         <div class="panel-head">
           <div class="panel-title">Learned Opportunities</div>
@@ -75,7 +74,8 @@
       </div>
       ${rows}
       ${this._htmlFilteredSuggestions()}
-      ${this._htmlAutomationTrials()}`;
+      ${this._htmlAutomationTrials()}
+      ${this._htmlAutomationInventory()}`;
   }
 
   // Suggestions the AI review turned down (v7.126.0). They are never

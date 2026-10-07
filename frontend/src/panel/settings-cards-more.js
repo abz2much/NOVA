@@ -790,9 +790,12 @@
     if (!cams.length) return `<div class="stub-body">No camera entities in Home Assistant.</div>`;
     const names = cfg.camera_names || {};
     const nOn = cams.filter(c => c.enabled !== false).length;
+    const open = !!this._camListOpen;
     const head = `
       <div class="cfg-row">
-        <label>${nOn} of ${cams.length} cameras in use</label>
+        <button class="new-cam-collapse" id="newCamListToggle" aria-expanded="${open}">
+          <span class="new-cam-caret">${open ? "▾" : "▸"}</span> ${nOn} of ${cams.length} cameras in use
+        </button>
         <div style="display:flex;gap:6px">
           <button class="mode-chip" id="newCamEnableAll">Enable all</button>
           <button class="mode-chip" id="newCamDisableAll">Disable all</button>
@@ -820,7 +823,7 @@
           </div>
         </div>`;
     }).join("");
-    return head + rows;
+    return head + `<div id="newCamList"${open ? "" : " hidden"}>${rows}</div>`;
   }
 
   _camerasCardBody() {
@@ -883,6 +886,10 @@
         const cam = btn.getAttribute("data-cam"), cur = curDisabled(), isOff = cur.includes(cam);
         applyDisabled(isOff ? cur.filter(c => c !== cam) : [...cur, cam]);
       });
+    });
+    root.getElementById("newCamListToggle")?.addEventListener("click", () => {
+      this._camListOpen = !this._camListOpen;
+      this._rerenderCameraSettings();
     });
     const enAll = root.getElementById("newCamEnableAll");
     if (enAll) enAll.addEventListener("click", () => applyDisabled([]));
