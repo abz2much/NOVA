@@ -1,3 +1,9 @@
+## [8.9.1] — leave alerts start from home
+
+- **Journeys start from home while anyone is home.** Before, with no Origin tracker chosen, Nova measured every journey from the first person on its list who had a position, wherever they were. If that person was at work, walking, driving and public transport times were counted from work. Now a leave alert starts from home whenever someone is home. Only when nobody is home does it use the first person with a position, and then home if there is none.
+- **A chosen Origin tracker still wins.** If you pick a person or device in Settings, Learning & Memory, Anticipation & Memory, that is always the starting point.
+- The Origin tracker row now says what blank means.
+
 ## [8.9.0] — leave alerts for walking, public transport and driving
 
 - **One heads up for every way of travelling.** A leave alert now says when to leave on foot, by public transport and by car, for example "Head out now if you're walking, leave in 20 minutes if you're taking public transport, or leave in 40 minutes if you're driving." The alert fires at the earliest leave time. A heads up with only a driving time reads exactly as before.

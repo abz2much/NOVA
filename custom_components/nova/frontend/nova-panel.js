@@ -1082,7 +1082,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v8.9.0
+ * v8.9.1
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1159,7 +1159,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.9.0 ",
+      console.log("%c Nova Panel %c v8.9.1 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -5171,7 +5171,7 @@ ${this._htmlDashboardBody()}`;
       ${num("memory_threading_hours", "Memory window (hrs)", "48", 1, 336, 1)}
       ${num("memory_threading_max", "Memory max turns", "12", 1, 50, 1)}
       <div class="cfg-row">
-        <label>Origin tracker</label>
+        <label>Origin tracker <span class="toggle-desc">blank: home while anyone is home</span></label>
         <select class="cfg-field" data-cfg-key="departure_origin_entity">${this._optSelect(this._trackerOptions(cfg.departure_origin_entity || ""), cfg.departure_origin_entity || "")}</select>
       </div>
       <div class="cfg-row">
@@ -5191,7 +5191,7 @@ ${this._htmlDashboardBody()}`;
       <div class="mode-grid" id="newDepCalChips">${depCals.length
         ? depCals.map((e, i) => `<span class="new-pl-chip">${this._esc(e)}<button class="new-dep-cal-del" data-i="${i}" title="Remove">×</button></span>`).join("")
         : `<span class="toggle-desc">None.</span>`}</div>
-      <div class="stub-body">Departure warns when to leave for calendar events. It lists each way of travelling you have switched on that gives a different leave time, and reminds you again at a later leave time only if everyone who was home at the first alert still is. Walking and public transport need the Google Maps Travel Time integration; driving also works from your device location + open-source routing. Routine alerts learn per-person timing over about a week. Continued conversation keeps the mic open after a question.</div>`;
+      <div class="stub-body">Departure warns when to leave for calendar events. It lists each way of travelling you have switched on that gives a different leave time, and reminds you again at a later leave time only if everyone who was home at the first alert still is. Walking and public transport need the Google Maps Travel Time integration; driving also works from open-source routing. Journeys start from home while anyone is home, otherwise from the Origin tracker you pick, or the first person with a position. Routine alerts learn per-person timing over about a week. Continued conversation keeps the mic open after a question.</div>`;
   }
 
   _memoryCardBody() {
