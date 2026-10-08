@@ -310,43 +310,27 @@
       </div>`;
   }
 
-  // Solar (ported from Classic's own Solar card — data was already fetched
-  // into this._solar by _fetchLiveData but never rendered anywhere; the new
-  // look never actually showed it despite pulling the data every poll).
+  // Solar summary for the Energy tab's Live panel (8.11.0): nova/solar's
+  // self-sufficiency in the header meta and the first sentence of its advice
+  // as one line under the flow diagram. The power numbers themselves come
+  // from nova/energy_flow. Called from every _renderData(), so it does
+  // nothing when the Energy tab is not open.
   _renderSolarPanel() {
     const root = this.shadowRoot;
-    const body = root.getElementById("solarBody");
-    const sufficiencyEl = root.getElementById("solarSufficiency");
-    if (!body) return;
-    const s = this._solar || {};
-    if (!s || s.error) {
-      body.innerHTML = `<div class="stub-body">Couldn't load solar data — restart Home Assistant after updating.</div>`;
-      if (sufficiencyEl) sufficiencyEl.textContent = "—";
-      return;
+    const summary = root?.getElementById("solarSummary");
+    const sufficiencyEl = root?.getElementById("solarSufficiency");
+    if (!summary && !sufficiencyEl) return;
+    const s = this._solar;
+    const pct = s && !s.error && s.configured && s.self_sufficiency_pct != null
+      ? `${s.self_sufficiency_pct}% self-sufficient` : "—";
+    const first = String((s && !s.error && (s.advice || [])[0]) || "");
+    const end = first.indexOf(". ");
+    const line = end >= 0 ? first.slice(0, end + 1) : first;
+    if (sufficiencyEl && sufficiencyEl.textContent !== pct) sufficiencyEl.textContent = pct;
+    if (summary) {
+      if (summary.textContent !== line) summary.textContent = line;
+      summary.hidden = !line;
     }
-    if (!s.configured) {
-      body.innerHTML = `<div class="stub-body">${this._esc((s.advice || [])[0] || "No solar source configured yet.")}</div>`;
-      if (sufficiencyEl) sufficiencyEl.textContent = "—";
-      return;
-    }
-    if (sufficiencyEl) {
-      sufficiencyEl.textContent = s.self_sufficiency_pct != null
-        ? `${s.self_sufficiency_pct}% self-sufficient` : "—";
-    }
-    const rows = [];
-    if (s.solar_w != null) {
-      rows.push(`<div class="feed-row"><span class="feed-text">Solar</span><span class="feed-time">${(s.solar_w / 1000).toFixed(2)} kW</span></div>`);
-    }
-    if (s.grid_w != null) {
-      const dirLabel = s.grid_direction === "export" ? "Exporting" : s.grid_direction === "import" ? "Importing" : "Balanced";
-      rows.push(`<div class="feed-row"><span class="feed-text">Grid</span><span class="feed-time">${dirLabel} ${(Math.abs(s.grid_w) / 1000).toFixed(2)} kW</span></div>`);
-    }
-    if (s.battery_w != null || s.battery_pct != null) {
-      const pct = s.battery_pct != null ? `${s.battery_pct}%` : "no % available";
-      rows.push(`<div class="feed-row"><span class="feed-text">Battery</span><span class="feed-time">${pct}${s.battery_w != null ? ` · ${(s.battery_w / 1000).toFixed(2)} kW` : ""}</span></div>`);
-    }
-    const advice = (s.advice || []).map(a => `<div class="toggle-desc" style="margin-bottom:6px">${this._esc(a)}</div>`).join("");
-    body.innerHTML = advice + rows.join("");
   }
 
   // Muted card: what Nova has been told to stop announcing. Mutes are saved

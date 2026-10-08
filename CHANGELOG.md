@@ -1,3 +1,13 @@
+## [8.11.0] — Energy tab: live readout, flow diagram, today and battery
+
+- **Live readout.** The Energy tab now shows solar, house, battery and grid power, refreshed every 5 seconds while the tab is open and the page is visible. It reads Home Assistant's own Energy dashboard setup, so nothing needs to be picked in Nova. Every battery and grid source counts, not just the first.
+- **Safe direction.** Power sensors do not agree on which way is positive, so Nova never trusts a sensor's sign alone. It decides import or export, and charging or discharging, from whichever energy total changed last. Only when those totals are missing does it fall back to the sign, and the result says so.
+- **Power flow diagram.** A diagram with the house in the middle shows how power moves between solar, grid and battery. Lines move faster and get thicker with more power, and stop when a source is idle. Every line also has an arrow and the direction in words, so nothing relies on colour or motion. With reduced motion turned on, the lines do not move. The diagram replaces the old Solar panel; its self sufficiency figure and summary line now sit in the Live panel.
+- **Today.** A Today panel shows solar made, home used, bought from and sold to the grid, battery charged and discharged, and self sufficiency today. The totals come from the recorder and refresh at most once a minute.
+- **Battery.** A Battery panel shows the charge level, whether it is charging or discharging and at what power, how much energy is stored, and roughly how long until empty or full at the current rate. Stored energy and the time estimate need a capacity on every battery in the Energy dashboard; without one they are left out rather than guessed.
+- **Clearer error.** When the energy data cannot be read, the tab now says "Couldn't read energy data." instead of asking you to set up the Energy dashboard.
+- **Both grid layouts.** Newer Home Assistant stores the grid's sensors on the grid source itself; older versions keep them in lists. Nova now reads both, for the live readout, Today, the solar summary and the daily cost estimate.
+
 ## [8.10.0] — Energy tab
 
 - **New Energy tab.** Energy Management and Appliances move off Settings, and Solar moves off the Command Center, onto one Energy tab after Memory. How they work does not change.

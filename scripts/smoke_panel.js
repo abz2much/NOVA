@@ -192,6 +192,18 @@ const _serviceCalls = [];
 const _docDeleteCalls = [];
 const _intrLabelCalls = [];
 let _energyAgency = "advisory";
+const _flowCharging = { configured: true, solar: { w: 3200 }, house: { w: 2100 },
+  battery: { w: 450, state: "charging", pct: 82 }, grid: { w: 650, state: "exporting" }, direction_source: "totals" };
+const _flowDischarging = { configured: true, solar: { w: 0 }, house: { w: 1500 },
+  battery: { w: 1200, state: "discharging", pct: 80 }, grid: { w: 300, state: "importing" }, direction_source: "totals" };
+const _flowUnconfigured = { configured: false, solar: { w: null }, house: { w: null },
+  battery: { w: null, state: null, pct: null }, grid: { w: null, state: null }, direction_source: null };
+let _flowResp = _flowCharging;
+let _flowCalls = 0;
+const _todayFull = { configured: true, solar_kwh: 12.4, grid_import_kwh: 3, grid_export_kwh: 125.43,
+  battery_charged_kwh: 4, battery_discharged_kwh: 2.5, home_kwh: 8.5, self_sufficiency_pct: 64.7 };
+let _todayResp = _todayFull;
+let _todayCalls = 0;
 let _bioEnabled = false;
 let _pendingFacts = [{ id: 42, key: "bedtime", value: "10pm", subject: "primary" }];
 let _relPending = [{ id: 7, subject: "sam", predicate: "owns", object: "car.jeep", source: "stated", status: "pending" }];
@@ -288,6 +300,16 @@ const hass = {
         { name: "Refrigerator", entity: "sensor.fridge", watts: 200, shed_ok: false },
       ], advice: ["Heads up — Dryer and Oven are running at 9.2 kW, over your peak."] };
       if (m.action === "set_agency") { _energyAgency = m.agency; return { watts: 9200, kw: 9.2, over_peak: true, agency: m.agency, configured_agency: m.agency, running: [], advice: [] }; }
+    }
+    if (m.type === "nova/energy_flow" && m.action === "today") {
+      _todayCalls++;
+      if (_todayResp === "error") throw new Error("energy_flow_failed");
+      return _todayResp;
+    }
+    if (m.type === "nova/energy_flow") {
+      _flowCalls++;
+      if (_flowResp === "error") throw new Error("energy_flow_failed");
+      return _flowResp;
     }
     if (m.type === "nova/solar") {
       if (m.action === "status") return {
@@ -2000,13 +2022,337 @@ setTimeout(async () => {
     sRoot = elNew.shadowRoot;
   }
 
-  checks.push(["energy tab: Solar renders here (3.2 kW, 100% self-sufficient)",
-    (() => {
-      const sp = sRoot.getElementById("solarPanel");
-      return !!sp && energyPanel("Solar") === sp
-        && /3\.2 kW/.test(sRoot.getElementById("solarBody")?.textContent || "")
-        && /100% self-sufficient/.test(sRoot.getElementById("solarSufficiency")?.textContent || "");
-    })()]);
+  // The Solar panel is gone (2b): nova/solar's self-sufficiency is the Live
+  // panel's header meta and its first advice sentence is the line under the
+  // flow diagram.
+  checks.push(["energy tab: no separate Solar panel; Live shows 100% self-sufficient and the solar summary",
+    !sRoot.getElementById("solarPanel") && !sRoot.getElementById("solarBody") && !energyPanel("Solar")
+    && energyPanel("Live")?.querySelector(".panel-head #solarSufficiency")?.textContent === "100% self-sufficient"
+    && sRoot.getElementById("solarSummary")?.textContent === "Generating 3.2 kW of solar right now."
+    && sRoot.getElementById("solarSummary")?.hidden === false]);
+
+  // Live readout (8.11.0): nova/energy_flow polled every 5 s while the
+  // Energy tab is open and the page is visible, tiles updated in place, one
+  // timer at most, and a polite live region that speaks only real changes.
+  {
+    const realSetInterval = global.setInterval;
+    const realClearInterval = global.clearInterval;
+    const flowTimers = new Set();
+    global.setInterval = (fn, ms, ...rest) => {
+      const id = realSetInterval(fn, ms, ...rest);
+      if (ms === 5000) flowTimers.add(id);
+      return id;
+    };
+    global.clearInterval = (id) => { flowTimers.delete(id); return realClearInterval(id); };
+    const wait = (ms = 20) => new Promise(r => setTimeout(r, ms));
+    const tileText = (kind, cls) => sRoot.querySelector(`#energyLive .energy-tile[data-flow="${kind}"] .${cls}`)?.textContent;
+
+    // A fresh first load: no previous states and nothing announced yet.
+    _flowResp = _flowCharging;
+    elNew._flowPrevStates = null;
+    elNew._flowAnnounced = {};
+    sRoot.getElementById("energyLiveAnnounce").textContent = "";
+    elNew._startEnergyFlowPoll();
+    await wait();
+    sRoot = elNew.shadowRoot;
+    const live = energyPanel("Live");
+    checks.push(["energy tab: Live is the first panel, a dl of Solar, House, Battery and Grid tiles",
+      !!live && sRoot.querySelector(".panel") === live
+      && Array.from(live.querySelectorAll("dl#energyLive dt")).map(d => d.textContent).join(",") === "Solar,House,Battery,Grid"]);
+    checks.push(["energy tab: Live tiles show W under 1000, kW with two decimals, and the state words",
+      tileText("solar", "energy-tile-w") === "3.20 kW" && tileText("house", "energy-tile-w") === "2.10 kW"
+      && tileText("battery", "energy-tile-w") === "450 W" && tileText("battery", "energy-tile-state") === "Charging · 82%"
+      && tileText("grid", "energy-tile-w") === "650 W" && tileText("grid", "energy-tile-state") === "Exporting"]);
+    checks.push(["energy tab: no aria-live on the tiles; one polite live region, silent on first load",
+      !live.querySelector("#energyLive[aria-live], #energyLive [aria-live]")
+      && live.querySelectorAll("[aria-live]").length === 1
+      && sRoot.getElementById("energyLiveAnnounce")?.getAttribute("aria-live") === "polite"
+      && sRoot.getElementById("energyLiveAnnounce")?.textContent === ""]);
+    checks.push(["energy tab: one Live poll timer runs while the tab is open", flowTimers.size === 1 && !!elNew._flowTimer]);
+    elNew._startEnergyFlowPoll();
+    elNew._render();
+    await wait();
+    sRoot = elNew.shadowRoot;
+    checks.push(["energy tab: restarting the poll or re-rendering never leaves two timers", flowTimers.size === 1]);
+
+    // A poll changes text on the same nodes and never calls _render().
+    const nodesBefore = Array.from(sRoot.querySelectorAll("#energyLive .energy-tile dd"));
+    const listBefore = sRoot.getElementById("energyLive");
+    const realRender = elNew._render;
+    let renders = 0;
+    elNew._render = function () { renders++; return realRender.apply(this, arguments); };
+    _flowResp = _flowDischarging;
+    await elNew._fetchEnergyFlow();
+    const nodesAfter = Array.from(sRoot.querySelectorAll("#energyLive .energy-tile dd"));
+    checks.push(["energy tab: a Live poll updates the existing tile nodes in place, no full render",
+      renders === 0 && sRoot.getElementById("energyLive") === listBefore
+      && nodesAfter.length === 8 && nodesAfter.every((n, i) => n === nodesBefore[i])
+      && tileText("battery", "energy-tile-w") === "1.20 kW" && tileText("battery", "energy-tile-state") === "Discharging · 80%"
+      && tileText("grid", "energy-tile-state") === "Importing"]);
+    checks.push(["energy tab: the live region announces a real battery and grid state change",
+      sRoot.getElementById("energyLiveAnnounce")?.textContent === "Battery discharging. Grid importing."]);
+    _flowResp = _flowCharging;
+    await elNew._fetchEnergyFlow();
+    checks.push(["energy tab: changing back is a different change, announced once",
+      sRoot.getElementById("energyLiveAnnounce")?.textContent === "Battery charging. Grid exporting."]);
+    sRoot.getElementById("energyLiveAnnounce").textContent = "";
+    _flowResp = _flowDischarging;
+    await elNew._fetchEnergyFlow();
+    checks.push(["energy tab: the same change is not announced again within a minute",
+      sRoot.getElementById("energyLiveAnnounce")?.textContent === ""]);
+
+    // Flow diagram (2b): one SVG built once, updated in place.
+    _flowResp = _flowCharging;
+    await elNew._fetchEnergyFlow();
+    const svg = sRoot.getElementById("energyFlowSvg");
+    const flowG = (k) => svg?.querySelector(`.flow[data-flow="${k}"]`);
+    const nodeText = (k, cls) => svg?.querySelector(`.flow-node[data-node="${k}"] .${cls}`)?.textContent;
+    checks.push(["energy tab: the flow diagram sits in Live above the tiles, with four nodes and three lines",
+      !!svg && svg.closest(".panel") === energyPanel("Live")
+      && !!(sRoot.getElementById("energyDiagram").compareDocumentPosition(sRoot.getElementById("energyLive")) & 4)
+      && svg.getAttribute("viewBox") === "0 0 640 360"
+      && Array.from(svg.querySelectorAll(".flow-node")).map(n => n.getAttribute("data-node")).sort().join() === "battery,grid,house,solar"
+      && Array.from(svg.querySelectorAll(".flow")).map(n => n.getAttribute("data-flow")).sort().join() === "battery,grid,solar"
+      && svg.querySelectorAll(".flow-line").length === 3 && svg.querySelectorAll(".flow-arrow").length === 3]);
+    checks.push(["energy tab: the diagram has role img, a title and a desc, and is not a live region",
+      svg.getAttribute("role") === "img"
+      && svg.getAttribute("aria-labelledby") === "energyFlowTitle energyFlowDesc"
+      && !!svg.querySelector("title#energyFlowTitle") && !!svg.querySelector("desc#energyFlowDesc")
+      && !svg.hasAttribute("aria-live") && !svg.querySelector("[aria-live]")]);
+    checks.push(["energy tab: diagram values, words and directions for solar, a charging battery and an exporting grid",
+      nodeText("solar", "flow-value") === "3.20 kW" && nodeText("house", "flow-value") === "2.10 kW"
+      && nodeText("battery", "flow-value") === "450 W" && nodeText("battery", "flow-state") === "Charging · 82%"
+      && nodeText("grid", "flow-value") === "650 W" && nodeText("grid", "flow-state") === "Exporting"
+      && flowG("solar").getAttribute("data-dir") === "in" && flowG("solar").getAttribute("data-state") === "producing"
+      && flowG("grid").getAttribute("data-dir") === "out" && flowG("grid").getAttribute("data-state") === "exporting"
+      && flowG("battery").getAttribute("data-dir") === "out" && flowG("battery").getAttribute("data-state") === "charging"
+      && svg.querySelector(".battery-arc").style.getPropertyValue("--batt-pct") === "82"]);
+    const descBefore = sRoot.getElementById("energyFlowDesc").textContent;
+    checks.push(["energy tab: the desc reads the diagram as one plain sentence",
+      descBefore === "Solar 3.2 kW. House 2.1 kW. Battery charging at 450 W, 82 percent. Grid exporting 650 W."]);
+    const svgNodes = [svg, ...svg.querySelectorAll(".flow, .flow-line, .flow-node text, .battery-arc, desc")];
+    const durBefore = flowG("battery").style.getPropertyValue("--flow-dur");
+    _flowResp = _flowDischarging;
+    await elNew._fetchEnergyFlow();
+    const svgNodesAfter = [sRoot.getElementById("energyFlowSvg"), ...sRoot.getElementById("energyFlowSvg").querySelectorAll(".flow, .flow-line, .flow-node text, .battery-arc, desc")];
+    checks.push(["energy tab: a poll changes values and data-state without replacing any SVG node",
+      renders === 0 && svgNodesAfter.length === svgNodes.length && svgNodesAfter.every((n, i) => n === svgNodes[i])
+      && nodeText("battery", "flow-value") === "1.20 kW" && nodeText("battery", "flow-state") === "Discharging · 80%"
+      && flowG("battery").getAttribute("data-state") === "discharging"
+      && flowG("battery").style.getPropertyValue("--flow-dur") !== durBefore]);
+    checks.push(["energy tab: a discharging battery and an importing grid point into the house; solar at 0 W is idle",
+      flowG("battery").getAttribute("data-dir") === "in" && flowG("grid").getAttribute("data-dir") === "in"
+      && flowG("grid").getAttribute("data-state") === "importing"
+      && flowG("solar").getAttribute("data-state") === "idle"
+      && flowG("solar").style.getPropertyValue("--flow-dur") === "6s" && flowG("solar").style.getPropertyValue("--flow-w") === "2"]);
+    checks.push(["energy tab: the desc changes with the data",
+      sRoot.getElementById("energyFlowDesc").textContent !== descBefore
+      && sRoot.getElementById("energyFlowDesc").textContent === "Solar 0 W. House 1.5 kW. Battery discharging at 1.2 kW, 80 percent. Grid importing 300 W."]);
+    _flowResp = { ..._flowDischarging, grid: { w: 5, state: "idle" }, battery: { w: null, state: null, pct: null }, house: { w: null } };
+    await elNew._fetchEnergyFlow();
+    checks.push(["energy tab: an idle grid and a missing battery reading draw idle lines and a dash",
+      flowG("grid").getAttribute("data-state") === "idle" && nodeText("grid", "flow-state") === "Idle"
+      && flowG("battery").getAttribute("data-state") === "idle" && nodeText("battery", "flow-value") === "—"
+      && nodeText("house", "flow-value") === "—"
+      && svg.querySelector(".battery-arc").getAttribute("data-pct") === "none"]);
+    {
+      const ws = [-5, null, 0, 20, 50, 100, 500, 1000, 3000, 8000, 20000];
+      const d = ws.map(w => elNew._flowDuration(w));
+      const t = ws.map(w => elNew._flowWidth(w));
+      const nonInc = d.every((v, i) => i === 0 || v <= d[i - 1]);
+      const nonDec = t.every((v, i) => i === 0 || v >= t[i - 1]);
+      checks.push(["energy tab: watts to duration and width are monotonic and clamped at 6 s / 1.2 s and 2 / 6",
+        nonInc && nonDec
+        && elNew._flowDuration(50) === 6 && elNew._flowDuration(0) === 6 && elNew._flowDuration(-5) === 6
+        && elNew._flowDuration(8000) === 1.2 && elNew._flowDuration(1e6) === 1.2
+        && elNew._flowWidth(50) === 2 && elNew._flowWidth(8000) === 6 && elNew._flowWidth(1e6) === 6
+        && elNew._flowDuration(1000) < 6 && elNew._flowDuration(1000) > 1.2
+        && elNew._flowDuration(500) > elNew._flowDuration(3000) && elNew._flowWidth(500) < elNew._flowWidth(3000)]);
+    }
+    {
+      const css = fs.readFileSync(COMPONENT, "utf8");
+      checks.push(["energy tab: built styles turn the flow animation and arc transition off under prefers-reduced-motion",
+        /@media \(prefers-reduced-motion: reduce\)\{\.energy-flow \.flow-line\{animation:none\}\.energy-flow \.battery-arc\{transition:none\}\.battery-tank \.tank-fill\{transition:none\}\}/.test(css)
+        && /\.flow\[data-dir="out"\] \.flow-line\{animation-direction:reverse\}/.test(css)
+        && /\.flow\[data-state="idle"\] \.flow-line\{animation:none;/.test(css)
+        && !/offset-path|<animate|requestAnimationFrame\(\(\) => this\._renderEnergy/.test(css.slice(css.indexOf("_energyFlowSvg()"), css.indexOf("_announceEnergyFlow(f) {")))
+        && !/filter:|blur\(/.test(css.slice(css.indexOf(".energy-flow{"), css.indexOf("prefers-reduced-motion: reduce){.energy-flow")))]);
+    }
+    _flowResp = _flowCharging;
+    await elNew._fetchEnergyFlow();
+
+    // Today and Battery panels (2c): panel order, values in place, today
+    // at most once a minute on the same single timer.
+    {
+      const titles = Array.from(sRoot.querySelectorAll(".panel > .panel-head .panel-title")).map(t => t.textContent);
+      checks.push(["energy tab: panel order is Live, Today, Battery, Energy Management, Appliances",
+        titles.join(",") === "Live,Today,Battery,Energy Management,Appliances"]);
+    }
+    const todayText = (k) => sRoot.querySelector(`#energyToday .energy-tile[data-today="${k}"] .energy-tile-w`)?.textContent;
+    _todayResp = _todayFull;
+    await elNew._fetchEnergyToday();
+    checks.push(["energy tab: Today tiles show kWh (two decimals under 100, one above) and self sufficiency today",
+      sRoot.getElementById("energyTodayPanel").hidden === false
+      && todayText("solar_kwh") === "12.40 kWh" && todayText("home_kwh") === "8.50 kWh"
+      && todayText("grid_import_kwh") === "3.00 kWh" && todayText("grid_export_kwh") === "125.4 kWh"
+      && todayText("battery_charged_kwh") === "4.00 kWh" && todayText("battery_discharged_kwh") === "2.50 kWh"
+      && todayText("self_sufficiency_pct") === "65%"
+      && Array.from(sRoot.querySelectorAll("#energyToday dt")).some(d => d.textContent === "Self sufficiency today")
+      && sRoot.getElementById("energyToday").tagName === "DL"]);
+    const todayNodes = Array.from(sRoot.querySelectorAll("#energyToday dd"));
+    _todayResp = { ..._todayFull, grid_export_kwh: null, home_kwh: null, self_sufficiency_pct: null };
+    await elNew._fetchEnergyToday();
+    checks.push(["energy tab: a missing Today value shows a dash, in place",
+      todayText("grid_export_kwh") === "—" && todayText("home_kwh") === "—" && todayText("self_sufficiency_pct") === "—"
+      && todayText("solar_kwh") === "12.40 kWh"
+      && Array.from(sRoot.querySelectorAll("#energyToday dd")).every((n, i) => n === todayNodes[i])]);
+
+    // Battery: discharging, charging, idle and unknown capacity.
+    const bt = (id) => sRoot.getElementById(id);
+    const tank = bt("batteryTank");
+    const tankFill = tank?.querySelector(".tank-fill");
+    _flowResp = { ..._flowDischarging, battery: { w: 2199, state: "discharging", pct: 54, capacity_kwh: 10, stored_kwh: 5.4, eta_min: 145, eta_to: "empty" } };
+    await elNew._fetchEnergyFlow();
+    checks.push(["energy tab: Battery panel, discharging: tank fill, percentage, power, stored and time left",
+      bt("energyBatteryPanel").hidden === false
+      && bt("batteryPct").textContent === "54%" && bt("batteryState").textContent === "Discharging · 2.20 kW"
+      && bt("batteryStored").textContent === "5.4 kWh of 10.0 kWh" && bt("batteryStored").hidden === false
+      && bt("batteryEta").textContent === "About 2 h 25 m left at this rate" && bt("batteryEta").hidden === false
+      && tankFill.style.getPropertyValue("--tank-pct") === "54"]);
+    checks.push(["energy tab: the tank is role img with an aria-label, not a live region",
+      tank.getAttribute("role") === "img" && !tank.hasAttribute("aria-live")
+      && tank.getAttribute("aria-label") === "Battery 54 percent, discharging at 2.20 kW."]);
+    _flowResp = { ..._flowCharging, battery: { w: 2000, state: "charging", pct: 54, capacity_kwh: 10, stored_kwh: 5.4, eta_min: 75, eta_to: "full" } };
+    await elNew._fetchEnergyFlow();
+    checks.push(["energy tab: Battery charging says the time to full, updating the same nodes",
+      bt("batteryTank") === tank && tank.querySelector(".tank-fill") === tankFill
+      && bt("batteryState").textContent === "Charging · 2.00 kW"
+      && bt("batteryEta").textContent === "About 1 h 15 m to full at this rate"
+      && tank.getAttribute("aria-label") === "Battery 54 percent, charging at 2.00 kW."]);
+    _flowResp = { ..._flowCharging, battery: { w: 8, state: "idle", pct: 54, capacity_kwh: 10, stored_kwh: 5.4, eta_min: null, eta_to: null } };
+    await elNew._fetchEnergyFlow();
+    checks.push(["energy tab: Battery idle shows no power and no time estimate",
+      bt("batteryState").textContent === "Idle" && bt("batteryEta").hidden === true
+      && bt("batteryStored").textContent === "5.4 kWh of 10.0 kWh"
+      && tank.getAttribute("aria-label") === "Battery 54 percent, idle."]);
+    _flowResp = { ..._flowCharging, battery: { w: 450, state: "charging", pct: 82, capacity_kwh: null, stored_kwh: null, eta_min: null, eta_to: null } };
+    await elNew._fetchEnergyFlow();
+    checks.push(["energy tab: Battery with unknown capacity hides the stored and time lines",
+      bt("batteryPct").textContent === "82%" && bt("batteryStored").hidden === true && bt("batteryEta").hidden === true
+      && tankFill.style.getPropertyValue("--tank-pct") === "82"]);
+
+    // Today: fetched on entry, then not on every 5 second tick.
+    Array.from(sRoot.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === "settings").click();
+    await wait();
+    const todayBefore = _todayCalls;
+    Array.from(elNew.shadowRoot.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === "energy").click();
+    await wait();
+    sRoot = elNew.shadowRoot;
+    const todayAfterEntry = _todayCalls;
+    for (let i = 0; i < 6; i++) { elNew._energyFlowTick(); await wait(5); }
+    const todayAfterTicks = _todayCalls;
+    elNew._todayAt -= 61000;          // a minute later
+    elNew._energyFlowTick();
+    await wait();
+    checks.push(["energy tab: today is fetched on entry, not on each 5 s tick, and again after a minute",
+      todayAfterEntry === todayBefore + 1 && todayAfterTicks === todayAfterEntry && _todayCalls === todayAfterEntry + 1]);
+    checks.push(["energy tab: still exactly one timer with Today and Battery added", flowTimers.size === 1]);
+
+    // Today error, then Live unconfigured hides both panels.
+    _todayResp = "error";
+    elNew._todayAt = 0;
+    await elNew._fetchEnergyToday();
+    checks.push(["energy tab: a Today read failure says so inside the Today panel",
+      bt("energyTodayPanel").hidden === false && bt("energyToday").hidden === true
+      && bt("energyTodayMsg").textContent === "Couldn't read energy data."]);
+    _todayResp = _todayFull;
+    await elNew._fetchEnergyToday();
+    _flowResp = _flowUnconfigured;
+    await elNew._fetchEnergyFlow();
+    checks.push(["energy tab: not configured hides Today and Battery; Live shows the message",
+      bt("energyTodayPanel").hidden === true && bt("energyBatteryPanel").hidden === true
+      && bt("energyLiveMsg").textContent === "Set up solar, battery or grid in Home Assistant's Energy dashboard."]);
+    _flowResp = { ..._flowUnconfigured, error: true };
+    await elNew._fetchEnergyFlow();
+    checks.push(["energy tab: a read error hides Today and Battery; Live says it could not read",
+      bt("energyTodayPanel").hidden === true && bt("energyBatteryPanel").hidden === true
+      && bt("energyLiveMsg").textContent === "Couldn't read energy data."]);
+    _flowResp = { ..._flowCharging, battery: { w: null, state: null, pct: null } };
+    await elNew._fetchEnergyFlow();
+    checks.push(["energy tab: with no battery reading at all the Battery panel is hidden; Today comes back",
+      bt("energyBatteryPanel").hidden === true && bt("energyTodayPanel").hidden === false]);
+    _flowResp = _flowCharging;
+    await elNew._fetchEnergyFlow();
+
+    // No overlapping fetches: a tick while one is in flight is skipped.
+    const callsBefore = _flowCalls;
+    elNew._flowInFlight = true;
+    await elNew._fetchEnergyFlow();
+    elNew._flowInFlight = false;
+    checks.push(["energy tab: a Live tick is skipped while a fetch is in flight", _flowCalls === callsBefore]);
+
+    // Not configured, then an error, then back to normal.
+    _flowResp = _flowUnconfigured;
+    await elNew._fetchEnergyFlow();
+    checks.push(["energy tab: Live shows the not configured message and hides the tiles and diagram",
+      sRoot.getElementById("energyLive").hidden === true && sRoot.getElementById("energyDiagram").hidden === true
+      && sRoot.getElementById("energyLiveMsg").hidden === false
+      && sRoot.getElementById("energyLiveMsg").textContent === "Set up solar, battery or grid in Home Assistant's Energy dashboard."]);
+    _flowResp = "error";
+    await elNew._fetchEnergyFlow();
+    checks.push(["energy tab: Live shows a short error message and hides the diagram when nova/energy_flow fails",
+      sRoot.getElementById("energyLive").hidden === true && sRoot.getElementById("energyDiagram").hidden === true
+      && sRoot.getElementById("energyLiveMsg").textContent === "Couldn't read energy data."]);
+    _flowResp = { ..._flowUnconfigured, error: true };
+    await elNew._fetchEnergyFlow();
+    checks.push(["energy tab: a backend read failure (error: true) says it could not read, not set up",
+      sRoot.getElementById("energyLive").hidden === true && sRoot.getElementById("energyDiagram").hidden === true
+      && sRoot.getElementById("energyLiveMsg").textContent === "Couldn't read energy data."]);
+    _flowResp = _flowCharging;
+    await elNew._fetchEnergyFlow();
+    checks.push(["energy tab: Live tiles and diagram come back once data returns",
+      sRoot.getElementById("energyLive").hidden === false && sRoot.getElementById("energyLiveMsg").hidden === true
+      && sRoot.getElementById("energyDiagram").hidden === false
+      && tileText("solar", "energy-tile-w") === "3.20 kW"]);
+    elNew._render = realRender;
+
+    // Leaving the tab stops the timer; coming back starts exactly one.
+    Array.from(sRoot.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === "settings").click();
+    await wait();
+    checks.push(["energy tab: leaving the tab stops the Live timer", flowTimers.size === 0 && !elNew._flowTimer]);
+    const callsAway = _flowCalls;
+    await wait(30);
+    checks.push(["energy tab: no Live fetches while on another tab", _flowCalls === callsAway]);
+    Array.from(elNew.shadowRoot.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === "energy").click();
+    await wait();
+    sRoot = elNew.shadowRoot;
+    checks.push(["energy tab: returning restarts one Live timer and fetches at once",
+      flowTimers.size === 1 && _flowCalls > callsAway]);
+
+    // Hidden page stops it; visible again restarts one.
+    const setVisibility = (v) => {
+      Object.defineProperty(document, "visibilityState", { value: v, configurable: true });
+      document.dispatchEvent(new window.Event("visibilitychange"));
+    };
+    setVisibility("hidden");
+    checks.push(["energy tab: a hidden page stops the Live timer", flowTimers.size === 0 && !elNew._flowTimer]);
+    elNew._startEnergyFlowPoll();
+    checks.push(["energy tab: the Live timer will not start while the page is hidden", flowTimers.size === 0]);
+    setVisibility("visible");
+    await wait();
+    checks.push(["energy tab: a visible page restarts one Live timer", flowTimers.size === 1]);
+
+    // Disconnecting stops it too.
+    elNew.disconnectedCallback();
+    checks.push(["energy tab: disconnecting stops the Live timer", flowTimers.size === 0 && !elNew._flowTimer]);
+    elNew.connectedCallback();
+    await wait();
+    checks.push(["energy tab: reconnecting on the Energy tab restarts one Live timer", flowTimers.size === 1]);
+    delete document.visibilityState;
+
+    global.setInterval = realSetInterval;
+    global.clearInterval = realClearInterval;
+  }
 
   // Back to Settings for the cards that follow.
   Array.from(sRoot.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === "settings").click();

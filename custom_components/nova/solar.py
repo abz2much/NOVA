@@ -56,6 +56,63 @@ async def _read_prefs(hass) -> Optional[dict]:
         return None
 
 
+def _grid_sensors(grid: dict) -> dict:
+    """The sensors and prices of an Energy dashboard grid source, in either
+    of the layouts Home Assistant has stored:
+
+      flat (current HA): stat_rate, stat_energy_from and stat_energy_to on
+        the source itself, with entity_energy_price / number_energy_price
+        and their *_export twins;
+      nested (older HA, e.g. 2026.2): power[].stat_rate,
+        flow_from[].stat_energy_from and flow_to[].stat_energy_to, each
+        flow entry carrying its own entity_energy_price / number_energy_price.
+
+    Returns {"rates", "imports", "exports"} as lists of entity ids (empty
+    when absent, no duplicates) and {"import_price", "export_price"} as
+    (entity, number) pairs. A battery source uses the same flat keys, so it
+    reads correctly here too. Never raises on a malformed source."""
+    def _ids(*values) -> list:
+        out = []
+        for v in values:
+            if isinstance(v, str) and v and v not in out:
+                out.append(v)
+        return out
+
+    def _entries(key) -> list:
+        val = grid.get(key)
+        return [e for e in val if isinstance(e, dict)] if isinstance(val, list) else []
+
+    flows_from, flows_to = _entries("flow_from"), _entries("flow_to")
+
+    def _price(flat_entity, flat_number, entries) -> tuple:
+        if grid.get(flat_entity) is not None or grid.get(flat_number) is not None:
+            return grid.get(flat_entity), grid.get(flat_number)
+        for e in entries:
+            if e.get("entity_energy_price") is not None or e.get("number_energy_price") is not None:
+                return e.get("entity_energy_price"), e.get("number_energy_price")
+        return None, None
+
+    return {
+        "rates": _ids(grid.get("stat_rate"), *(e.get("stat_rate") for e in _entries("power"))),
+        "imports": _ids(grid.get("stat_energy_from"), *(e.get("stat_energy_from") for e in flows_from)),
+        "exports": _ids(grid.get("stat_energy_to"), *(e.get("stat_energy_to") for e in flows_to)),
+        "import_price": _price("entity_energy_price", "number_energy_price", flows_from),
+        "export_price": _price("entity_energy_price_export", "number_energy_price_export", flows_to),
+    }
+
+
+def _latest_state(hass, entity_ids: list):
+    """The state among entity_ids that changed most recently, or None when
+    none exist or their last_changed values cannot be compared."""
+    found = [st for st in (hass.states.get(e) for e in entity_ids) if st is not None]
+    if len(found) <= 1:
+        return found[0] if found else None
+    try:
+        return max(found, key=lambda st: st.last_changed)
+    except TypeError:
+        return None
+
+
 def _live_watts(hass, entity_id: Optional[str]) -> Optional[float]:
     """Current reading of a power (rate) sensor in watts. None if missing,
     unavailable, or non-numeric. Handles a kW-reporting sensor the same way
@@ -118,11 +175,13 @@ def _grid_direction(hass, grid: dict, grid_w: Optional[float]) -> Optional[str]:
     when it actually accumulates, so whichever one just ticked is the
     direction currently active — true regardless of any inverter's rate-
     sensor sign convention. Falls back to the (unreliable) rate sign only
-    when one or both totals aren't configured/available."""
-    from_eid = grid.get("stat_energy_from")
-    to_eid = grid.get("stat_energy_to")
-    from_st = hass.states.get(from_eid) if from_eid else None
-    to_st = hass.states.get(to_eid) if to_eid else None
+    when one or both totals aren't configured/available.
+
+    Either grid layout works (see _grid_sensors): with several import or
+    export totals, the most recently changed of each side is compared."""
+    sensors = _grid_sensors(grid)
+    from_st = _latest_state(hass, sensors["imports"])
+    to_st = _latest_state(hass, sensors["exports"])
     if from_st is not None and to_st is not None:
         try:
             if to_st.last_changed > from_st.last_changed:
@@ -179,7 +238,7 @@ async def solar_status(hass) -> dict:
     grid_direction = None
     if grid_sources:
         grid = grid_sources[0]
-        grid_w = _live_watts(hass, grid.get("stat_rate"))
+        grid_w = _sum_rate(hass, [{"stat_rate": e} for e in _grid_sensors(grid)["rates"]])
         grid_direction = _grid_direction(hass, grid, grid_w)
 
     self_sufficiency_pct = None
@@ -356,12 +415,11 @@ async def _cost_today(hass, imported_kwh: Optional[float], exported_kwh: Optiona
     if not grid_sources:
         return None, "unavailable"
 
-    grid = grid_sources[0]
-    price = _resolve_price(hass, grid.get("entity_energy_price"), grid.get("number_energy_price"))
+    sensors = _grid_sensors(grid_sources[0])
+    price = _resolve_price(hass, *sensors["import_price"])
     if price is None:
         return None, "unavailable"
-    export_price = _resolve_price(
-        hass, grid.get("entity_energy_price_export"), grid.get("number_energy_price_export"))
+    export_price = _resolve_price(hass, *sensors["export_price"])
 
     cost = imported_kwh * price
     credit = (exported_kwh or 0.0) * (export_price or 0.0)
@@ -399,9 +457,15 @@ async def daily_report(hass) -> dict:
 
     imported = exported = None
     if grid_sources:
-        grid = grid_sources[0]
-        imported = await _daily_sum(hass, grid.get("stat_energy_from"))
-        exported = await _daily_sum(hass, grid.get("stat_energy_to"))
+        sensors = _grid_sensors(grid_sources[0])
+        for eid in sensors["imports"]:
+            v = await _daily_sum(hass, eid)
+            if v is not None:
+                imported = (imported or 0.0) + v
+        for eid in sensors["exports"]:
+            v = await _daily_sum(hass, eid)
+            if v is not None:
+                exported = (exported or 0.0) + v
 
     battery_charged = battery_discharged = None
     if battery_sources:

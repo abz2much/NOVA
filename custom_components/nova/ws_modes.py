@@ -2,7 +2,8 @@
 
 Moved verbatim out of websocket.py: nova/intrusion, nova/mode, nova/hazard,
 nova/energy, nova/solar and nova/biometrics. The logger keeps the name it had
-in websocket.py.
+in websocket.py. nova/energy_flow (the Energy tab's live readout) was added
+here later, next to nova/solar.
 
 websocket.py imports every handler by name (async_register registers them).
 """
@@ -117,6 +118,32 @@ async def ws_solar(
     except Exception as exc:
         _LOGGER.exception("ws_solar failed: %s", exc)
         connection.send_error(msg["id"], "solar_failed", safe_error_message(exc))
+
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "nova/energy_flow",
+    vol.Required("action"): vol.In(["status", "today"]),
+})
+@websocket_api.async_response
+async def ws_energy_flow(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict,
+) -> None:
+    """Live solar, house, battery and grid power ("status") and today's
+    totals ("today") for the Energy tab, from Home Assistant's own Energy
+    dashboard config. Read only, so not admin gated, the same as nova/solar."""
+    try:
+        from . import energy_flow
+        if msg["action"] == "today":
+            res = await energy_flow.energy_flow_today(hass)
+        else:
+            res = await energy_flow.energy_flow_status(hass)
+        connection.send_result(msg["id"], res)
+    except Exception as exc:
+        _LOGGER.exception("ws_energy_flow failed: %s", exc)
+        connection.send_error(msg["id"], "energy_flow_failed", safe_error_message(exc))
 
 
 

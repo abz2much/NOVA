@@ -144,6 +144,7 @@ from .ws_cameras import (
 from .ws_modes import (
     ws_biometrics,
     ws_energy,
+    ws_energy_flow,
     ws_hazard,
     ws_intrusion,
     ws_mode,
@@ -238,6 +239,7 @@ def async_register(hass: HomeAssistant) -> None:
         websocket_api.async_register_command(hass, ws_mode)
         websocket_api.async_register_command(hass, ws_energy)
         websocket_api.async_register_command(hass, ws_solar)
+        websocket_api.async_register_command(hass, ws_energy_flow)
         websocket_api.async_register_command(hass, ws_hazard)
         websocket_api.async_register_command(hass, ws_biometrics)
         websocket_api.async_register_command(hass, ws_list_faces)

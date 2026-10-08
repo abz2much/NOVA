@@ -1,6 +1,6 @@
 /*
  * Nova Command Center Panel.
- * v8.10.0
+ * v8.11.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -77,7 +77,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.10.0 ",
+      console.log("%c Nova Panel %c v8.11.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -91,6 +91,8 @@ class NovaPanel extends HTMLElement {
     if (this._hass && !this._renderedOnce) {
       this._render();
       this._startIntervals();
+    } else if (this._renderedOnce && this._currentTab === "energy") {
+      this._startEnergyFlowPoll();
     }
   }
 
@@ -101,6 +103,11 @@ class NovaPanel extends HTMLElement {
     if (this._animHandle) cancelAnimationFrame(this._animHandle);
     if (this._resizeListener) window.removeEventListener("resize", this._resizeListener);
     if (this._heroTypeTimer) { clearTimeout(this._heroTypeTimer); this._heroTypeTimer = null; }
+    this._stopEnergyFlowPoll();
+    if (this._flowVisListener) {
+      document.removeEventListener("visibilitychange", this._flowVisListener);
+      this._flowVisListener = null;
+    }
   }
 
   _startIntervals() {

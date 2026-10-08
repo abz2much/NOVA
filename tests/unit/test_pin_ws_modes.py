@@ -1,7 +1,8 @@
 """Pin what the panel's mode and intrusion commands do today (8.7.19, tests only).
 
 ws_modes.py holds nova/intrusion (call off, acknowledge, label, the event log)
-and nova/mode, plus nova/energy, nova/hazard, nova/solar and nova/biometrics.
+and nova/mode, plus nova/energy, nova/hazard, nova/solar, nova/energy_flow and
+nova/biometrics.
 Its admin gates and schemas are pinned by the websocket contract tests, which
 read the real decorators. Here the decorators are stubbed to pass through, so
 the handler bodies run against the real intrusion and modes modules with a
@@ -231,3 +232,55 @@ async def test_biometrics_toggle_writes_the_setting_and_flattens_what_it_found(w
         {"kind": "heart_rate", "entity_id": "sensor.hr"}]}
     await ws.ws_biometrics(FakeHass(), conn, {"id": 15, "action": "disable"})
     assert store == {"biometrics_enabled": False} and conn.results[1][1]["enabled"] is False
+
+
+# ── nova/energy_flow ───────────────────────────────────────────────────────
+
+async def test_energy_flow_status_sends_the_readout(ws, load, monkeypatch):
+    ef = load("energy_flow")
+    readout = dict(ef.empty_status(), configured=True, solar={"w": 3200})
+
+    async def status(hass):
+        return readout
+    monkeypatch.setattr(ef, "energy_flow_status", status)
+    conn = _Conn()
+    await ws.ws_energy_flow(FakeHass(), conn, {"id": 16, "action": "status"})
+    assert conn.results == [(16, readout)] and conn.errors == []
+
+
+async def test_energy_flow_failure_sends_energy_flow_failed(ws, load, monkeypatch):
+    ef = load("energy_flow")
+
+    async def status(hass):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(ef, "energy_flow_status", status)
+    conn = _Conn()
+    await ws.ws_energy_flow(FakeHass(), conn, {"id": 17, "action": "status"})
+    assert conn.results == [] and conn.errors[0][:2] == (17, "energy_flow_failed")
+
+
+async def test_energy_flow_today_action_sends_the_totals(ws, load, monkeypatch):
+    ef = load("energy_flow")
+    totals = dict(ef.empty_today(), configured=True, solar_kwh=12.0)
+
+    async def today(hass):
+        return totals
+
+    async def status(hass):
+        raise AssertionError("today must not read the live status")
+    monkeypatch.setattr(ef, "energy_flow_today", today)
+    monkeypatch.setattr(ef, "energy_flow_status", status)
+    conn = _Conn()
+    await ws.ws_energy_flow(FakeHass(), conn, {"id": 18, "action": "today"})
+    assert conn.results == [(18, totals)] and conn.errors == []
+
+
+async def test_energy_flow_today_failure_sends_energy_flow_failed(ws, load, monkeypatch):
+    ef = load("energy_flow")
+
+    async def today(hass):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(ef, "energy_flow_today", today)
+    conn = _Conn()
+    await ws.ws_energy_flow(FakeHass(), conn, {"id": 19, "action": "today"})
+    assert conn.results == [] and conn.errors[0][:2] == (19, "energy_flow_failed")
