@@ -257,3 +257,30 @@ async def test_energy_flow_failure_sends_energy_flow_failed(ws, load, monkeypatc
     conn = _Conn()
     await ws.ws_energy_flow(FakeHass(), conn, {"id": 17, "action": "status"})
     assert conn.results == [] and conn.errors[0][:2] == (17, "energy_flow_failed")
+
+
+async def test_energy_flow_today_action_sends_the_totals(ws, load, monkeypatch):
+    ef = load("energy_flow")
+    totals = dict(ef.empty_today(), configured=True, solar_kwh=12.0)
+
+    async def today(hass):
+        return totals
+
+    async def status(hass):
+        raise AssertionError("today must not read the live status")
+    monkeypatch.setattr(ef, "energy_flow_today", today)
+    monkeypatch.setattr(ef, "energy_flow_status", status)
+    conn = _Conn()
+    await ws.ws_energy_flow(FakeHass(), conn, {"id": 18, "action": "today"})
+    assert conn.results == [(18, totals)] and conn.errors == []
+
+
+async def test_energy_flow_today_failure_sends_energy_flow_failed(ws, load, monkeypatch):
+    ef = load("energy_flow")
+
+    async def today(hass):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(ef, "energy_flow_today", today)
+    conn = _Conn()
+    await ws.ws_energy_flow(FakeHass(), conn, {"id": 19, "action": "today"})
+    assert conn.results == [] and conn.errors[0][:2] == (19, "energy_flow_failed")

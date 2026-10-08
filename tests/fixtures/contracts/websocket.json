@@ -312,7 +312,8 @@
     "fields": {
       "action": {
         "options": [
-          "status"
+          "status",
+          "today"
         ],
         "required": true
       }

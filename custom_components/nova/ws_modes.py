@@ -123,7 +123,7 @@ async def ws_solar(
 
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/energy_flow",
-    vol.Required("action"): vol.In(["status"]),
+    vol.Required("action"): vol.In(["status", "today"]),
 })
 @websocket_api.async_response
 async def ws_energy_flow(
@@ -131,12 +131,15 @@ async def ws_energy_flow(
     connection: websocket_api.ActiveConnection,
     msg: dict,
 ) -> None:
-    """Live solar, house, battery and grid power for the Energy tab, from
-    Home Assistant's own Energy dashboard config. Read only, so not admin
-    gated, the same as nova/solar."""
+    """Live solar, house, battery and grid power ("status") and today's
+    totals ("today") for the Energy tab, from Home Assistant's own Energy
+    dashboard config. Read only, so not admin gated, the same as nova/solar."""
     try:
         from . import energy_flow
-        res = await energy_flow.energy_flow_status(hass)
+        if msg["action"] == "today":
+            res = await energy_flow.energy_flow_today(hass)
+        else:
+            res = await energy_flow.energy_flow_status(hass)
         connection.send_result(msg["id"], res)
     except Exception as exc:
         _LOGGER.exception("ws_energy_flow failed: %s", exc)

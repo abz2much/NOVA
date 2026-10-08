@@ -20,6 +20,9 @@ def ef(load):
 
 _T0 = datetime(2026, 10, 8, 12, 0, tzinfo=timezone.utc)
 
+# Battery store and time estimate keys (added in 2c); None without a capacity.
+_NO_STORE = {"capacity_kwh": None, "stored_kwh": None, "eta_min": None, "eta_to": None}
+
 
 class _State:
     def __init__(self, state, unit="W", last_changed=None):
@@ -122,7 +125,7 @@ def test_solar_only(ef):
     assert out == {
         "configured": True,
         "solar": {"w": 3200},
-        "battery": {"w": None, "state": None, "pct": None},
+        "battery": {"w": None, "state": None, "pct": None, **_NO_STORE},
         "grid": {"w": None, "state": None},
         "house": {"w": 3200},
         "direction_source": None,
@@ -131,7 +134,7 @@ def test_solar_only(ef):
 
 def test_solar_plus_battery_charging(ef):
     out = ef.build_status([3000.0], [ef.source_flow(1200.0, "to")], [64.0], [])
-    assert out["battery"] == {"w": 1200, "state": "charging", "pct": 64.0}
+    assert out["battery"] == {"w": 1200, "state": "charging", "pct": 64.0, **_NO_STORE}
     assert out["house"] == {"w": 1800}
     assert out["direction_source"] == "totals"
 
@@ -159,7 +162,7 @@ def test_grid_import_and_export(ef, rate, side, state):
 def test_two_battery_sources_net_out(ef):
     flows = [ef.source_flow(800.0, "from"), ef.source_flow(-300.0, "to")]
     out = ef.build_status([], flows, [80.0, 60.0], [])
-    assert out["battery"] == {"w": 500, "state": "discharging", "pct": 70.0}
+    assert out["battery"] == {"w": 500, "state": "discharging", "pct": 70.0, **_NO_STORE}
 
 
 def test_two_batteries_charging_add_up(ef):
@@ -181,7 +184,7 @@ def test_mean_pct(ef, values, expected):
 
 def test_configured_source_unavailable(ef):
     out = ef.build_status([3000.0], [ef.source_flow(None, None)], [50.0], [])
-    assert out["battery"] == {"w": None, "state": None, "pct": 50.0}
+    assert out["battery"] == {"w": None, "state": None, "pct": 50.0, **_NO_STORE}
     assert out["house"] == {"w": None}
     assert out["solar"] == {"w": 3000}
 
@@ -200,7 +203,7 @@ def test_any_sign_guess_is_reported_over_totals(ef):
 
 def test_idle_under_20_watts(ef):
     out = ef.build_status([0.0], [ef.source_flow(15.0, "to")], [], [ef.source_flow(-8.0, None)])
-    assert out["battery"] == {"w": 0, "state": "idle", "pct": None}
+    assert out["battery"] == {"w": 0, "state": "idle", "pct": None, **_NO_STORE}
     assert out["grid"] == {"w": 0, "state": "idle"}
     assert out["direction_source"] is None
 
@@ -248,7 +251,7 @@ def test_real_case_end_to_end(ef, monkeypatch):
         **_totals("grid", "from"),
     })
     out = asyncio.run(ef.energy_flow_status(hass))
-    assert out["battery"] == {"w": 2199, "state": "discharging", "pct": 57.0}
+    assert out["battery"] == {"w": 2199, "state": "discharging", "pct": 57.0, **_NO_STORE}
     assert out["grid"] == {"w": 0, "state": "idle"}
     assert out["house"]["w"] == pytest.approx(2200, abs=5)
     assert out["direction_source"] == "totals"
@@ -271,7 +274,7 @@ def test_every_battery_and_grid_source_counts(ef, monkeypatch):
         "sensor.grid2_power": _State("150"), **_totals("grid2", "from"),
     })
     out = asyncio.run(ef.energy_flow_status(hass))
-    assert out["battery"] == {"w": 1000, "state": "charging", "pct": 40.0}
+    assert out["battery"] == {"w": 1000, "state": "charging", "pct": 40.0, **_NO_STORE}
     assert out["grid"] == {"w": 500, "state": "exporting"}
     assert out["house"] == {"w": 2500}
 

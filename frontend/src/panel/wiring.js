@@ -39,6 +39,7 @@
         if (this._cameraInterval) { clearInterval(this._cameraInterval); this._cameraInterval = null; }
         this._stopEnergyFlowPoll();
         this._flowPrevStates = null;
+        this._todayAt = 0;
         this._camOpen = false;
         this._currentTab = tab;
         this._render();

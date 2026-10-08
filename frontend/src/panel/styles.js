@@ -112,7 +112,19 @@
       .energy-flow .battery-arc[data-pct="none"]{opacity:0}
       .energy-flow-summary{margin:0 0 10px}
       .energy-flow-summary[hidden],.energy-flow-wrap[hidden]{display:none}
-      @media (prefers-reduced-motion: reduce){.energy-flow .flow-line{animation:none}.energy-flow .battery-arc{transition:none}}
+      #energyTodayPanel[hidden],#energyBatteryPanel[hidden],.energy-today[hidden],.battery-line[hidden]{display:none}
+      .energy-today{grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}
+      .energy-battery{display:flex;align-items:center;gap:18px}
+      .battery-tank{width:72px;height:auto;flex:none}
+      .battery-tank .tank-outline{fill:var(--surface-2);stroke:#2aa198;stroke-width:3}
+      .battery-tank .tank-cap{fill:#2aa198}
+      .battery-tank .tank-fill{fill:#2aa198;opacity:.85;transform-box:fill-box;transform-origin:50% 100%;
+        transform:scaleY(calc(var(--tank-pct,0) / 100));transition:transform .6s ease}
+      .battery-copy{display:flex;flex-direction:column;gap:4px;min-width:0}
+      .battery-pct{font-family:var(--font-mono);font-size:26px;color:var(--ink)}
+      .battery-state{font-size:13px;color:var(--ink-dim)}
+      .battery-line{font-size:12px;color:var(--ink-dim)}
+      @media (prefers-reduced-motion: reduce){.energy-flow .flow-line{animation:none}.energy-flow .battery-arc{transition:none}.battery-tank .tank-fill{transition:none}}
       .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
       .goal-list{display:flex;flex-direction:column;gap:7px;max-height:300px;overflow:auto}
       .goal-row{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--surface-2);border:1px solid var(--line-soft);border-radius:9px;padding:9px}

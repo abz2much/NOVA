@@ -33,6 +33,43 @@
           <div class="sr-only" id="energyLiveAnnounce" role="status" aria-live="polite"></div>
         </div>
 
+        <div class="panel" id="energyTodayPanel" hidden>
+          <div class="panel-head">
+            <div class="panel-title">Today</div>
+          </div>
+          <div class="stub-body" id="energyTodayMsg" hidden></div>
+          <dl class="energy-live energy-today" id="energyToday">${[
+            ["solar_kwh", "Solar made"], ["home_kwh", "Home used"],
+            ["grid_import_kwh", "Bought from grid"], ["grid_export_kwh", "Sold to grid"],
+            ["battery_charged_kwh", "Battery charged"], ["battery_discharged_kwh", "Battery discharged"],
+            ["self_sufficiency_pct", "Self sufficiency today"],
+          ].map(([key, label]) => `
+            <div class="energy-tile" data-today="${key}">
+              <dt>${label}</dt>
+              <dd class="energy-tile-w">—</dd>
+            </div>`).join("")}
+          </dl>
+        </div>
+
+        <div class="panel" id="energyBatteryPanel" hidden>
+          <div class="panel-head">
+            <div class="panel-title">Battery</div>
+          </div>
+          <div class="energy-battery">
+            <svg class="battery-tank" id="batteryTank" viewBox="0 0 80 140" role="img" aria-label="Battery: no reading.">
+              <rect class="tank-outline" x="4" y="12" width="72" height="124" rx="12"/>
+              <rect class="tank-cap" x="28" y="3" width="24" height="9" rx="3"/>
+              <rect class="tank-fill" x="10" y="18" width="60" height="112" rx="7" style="--tank-pct:0"/>
+            </svg>
+            <div class="battery-copy">
+              <div class="battery-pct" id="batteryPct">—</div>
+              <div class="battery-state" id="batteryState"></div>
+              <div class="battery-line" id="batteryStored" hidden></div>
+              <div class="battery-line" id="batteryEta" hidden></div>
+            </div>
+          </div>
+        </div>
+
         <div class="panel">
           <div class="panel-head">
             <div class="panel-title">Energy Management</div>
@@ -266,6 +303,7 @@
     if (this._energy) this._renderEnergyStatus();
     this._fetchEnergyStatus();
     if (this._flow) this._renderEnergyFlow();
+    if (this._today) this._renderEnergyToday();
     this._startEnergyFlowPoll();
   }
 
@@ -367,8 +405,106 @@
       document.addEventListener("visibilitychange", this._flowVisListener);
     }
     if (this._currentTab !== "energy" || document.visibilityState === "hidden") return;
+    this._energyFlowTick();
+    this._flowTimer = setInterval(() => this._energyFlowTick(), 5000);
+  }
+
+  // One tick of the single Live timer: the status every time, today's
+  // totals only when a minute has passed since the last fetch (the tab
+  // switch resets that, so entering the tab fetches them at once).
+  _energyFlowTick() {
     this._fetchEnergyFlow();
-    this._flowTimer = setInterval(() => this._fetchEnergyFlow(), 5000);
+    if (Date.now() - (this._todayAt || 0) >= 60000) this._fetchEnergyToday();
+  }
+
+  async _fetchEnergyToday() {
+    if (!this._hass || this._todayInFlight) return;
+    this._todayInFlight = true;
+    this._todayAt = Date.now();
+    try {
+      this._today = await this._hass.callWS({ type: "nova/energy_flow", action: "today" });
+    } catch (_) {
+      this._today = { error: true };
+    } finally {
+      this._todayInFlight = false;
+    }
+    this._renderEnergyToday();
+  }
+
+  _energyKwh(v) {
+    if (v == null) return "—";
+    return `${v < 100 ? Number(v).toFixed(2) : Number(v).toFixed(1)} kWh`;
+  }
+
+  // Today and Battery are hidden while Live says the dashboard is not set
+  // up or could not be read; Live shows that message.
+  _energyLiveNote() {
+    const f = this._flow;
+    return !!f && (f.error || f.configured === false);
+  }
+
+  _renderEnergyToday() {
+    const root = this.shadowRoot;
+    const panel = root?.getElementById("energyTodayPanel");
+    const list = root?.getElementById("energyToday");
+    const msg = root?.getElementById("energyTodayMsg");
+    const t = this._today;
+    if (!panel || !list || !msg || !t) return;
+    panel.hidden = this._energyLiveNote() || (t.configured === false && !t.error);
+    const note = t.error ? "Couldn't read energy data." : "";
+    if (msg.textContent !== note) msg.textContent = note;
+    msg.hidden = !note;
+    list.hidden = !!note;
+    if (note) return;
+    list.querySelectorAll(".energy-tile[data-today]").forEach(tile => {
+      const key = tile.getAttribute("data-today");
+      const v = t[key];
+      const text = key === "self_sufficiency_pct"
+        ? (v == null ? "—" : `${Math.round(v)}%`) : this._energyKwh(v);
+      const dd = tile.querySelector(".energy-tile-w");
+      if (dd && dd.textContent !== text) dd.textContent = text;
+    });
+  }
+
+  _energyDuration(min) {
+    const h = Math.floor(min / 60);
+    const m = min % 60;
+    return [h ? `${h} h` : "", m ? `${m} m` : ""].filter(Boolean).join(" ");
+  }
+
+  // The Battery panel, in place: tank fill, percentage, state and power,
+  // stored energy and the time estimate. Hidden when no battery reads at all.
+  _renderEnergyBattery(f) {
+    const root = this.shadowRoot;
+    const panel = root?.getElementById("energyBatteryPanel");
+    const tank = root?.getElementById("batteryTank");
+    if (!panel || !tank) return;
+    const b = f?.battery || {};
+    const none = b.w == null && b.pct == null && !b.state;
+    panel.hidden = this._energyLiveNote() || !f || none;
+    if (panel.hidden) return;
+    const setText = (id, t) => {
+      const el = root.getElementById(id);
+      if (!el) return;
+      if (el.textContent !== t) el.textContent = t;
+      if (el.classList.contains("battery-line")) el.hidden = !t;
+    };
+    const pct = b.pct != null ? Math.round(b.pct) : null;
+    const word = this._energyFlowWord(b.state);
+    const power = b.w != null && b.state && b.state !== "idle" ? this._energyFlowWatts(b.w) : "";
+    setText("batteryPct", pct != null ? `${pct}%` : "—");
+    setText("batteryState", [word, power].filter(Boolean).join(" · "));
+    setText("batteryStored", b.stored_kwh != null && b.capacity_kwh != null
+      ? `${Number(b.stored_kwh).toFixed(1)} kWh of ${Number(b.capacity_kwh).toFixed(1)} kWh` : "");
+    setText("batteryEta", b.eta_min
+      ? `About ${this._energyDuration(b.eta_min)} ${b.eta_to === "full" ? "to full" : "left"} at this rate` : "");
+    const fill = tank.querySelector(".tank-fill");
+    const level = String(pct != null ? Math.max(0, Math.min(100, pct)) : 0);
+    if (fill && fill.style.getPropertyValue("--tank-pct") !== level) fill.style.setProperty("--tank-pct", level);
+    const label = `Battery ${pct != null ? `${pct} percent` : "no reading"}${
+      b.state && b.state !== "idle" && b.w != null ? `, ${b.state} at ${this._energyFlowWatts(b.w)}`
+        : b.state === "idle" ? ", idle" : ""}.`;
+    if (tank.getAttribute("aria-label") !== label) tank.setAttribute("aria-label", label);
   }
 
   _stopEnergyFlowPoll() {
@@ -413,6 +549,8 @@
     msg.hidden = !note;
     list.hidden = !!note;
     if (diagram) diagram.hidden = !!note;
+    this._renderEnergyBattery(f);
+    this._renderEnergyToday();
     if (note) return;
     this._renderEnergyDiagram(f);
     const pct = f.battery?.pct;
