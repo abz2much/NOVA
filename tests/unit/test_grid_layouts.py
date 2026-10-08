@@ -184,6 +184,8 @@ async def test_daily_report_grid_totals_read_both_layouts(solar, fake_hass, monk
         return totals.get(eid)
     monkeypatch.setattr(solar, "_daily_sum", _sum)
     monkeypatch.setattr(solar, "_forecast_values", lambda hass: {})
+    for eid in totals:
+        fake_hass.states.set(eid, "0", unit_of_measurement="kWh")
 
     async def _cost(hass, imported, exported):
         return None, "unavailable"

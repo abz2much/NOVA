@@ -2178,6 +2178,24 @@ setTimeout(async () => {
         && !/offset-path|<animate|requestAnimationFrame\(\(\) => this\._renderEnergy/.test(css.slice(css.indexOf("_energyFlowSvg()"), css.indexOf("_announceEnergyFlow(f) {")))
         && !/filter:|blur\(/.test(css.slice(css.indexOf(".energy-flow{"), css.indexOf("prefers-reduced-motion: reduce){.energy-flow")))]);
     }
+    // Layout (8.11.1): the diagram is capped in height on wide screens and
+    // sits beside its tiles from 900 px; ids the updates use are unchanged.
+    {
+      const css = fs.readFileSync(COMPONENT, "utf8");
+      const live = energyPanel("Live");
+      checks.push(["energy tab: built styles cap the diagram height with clamp(220px,38vh,320px)",
+        /\.energy-flow\{[^}]*max-height:clamp\(220px,38vh,320px\)/.test(css)]);
+      checks.push(["energy tab: from 900 px the Live panel is two columns (1.4fr 1fr) with 2 by 2 tiles",
+        /@media \(min-width:900px\)\{\s*\.energy-live-grid\{display:grid;grid-template-columns:1\.4fr 1fr;/.test(css)
+        && /\.energy-live-side \.energy-live\{grid-template-columns:repeat\(2,1fr\)\}/.test(css)]);
+      checks.push(["energy tab: the diagram sits in the main column, summary and tiles in the side column",
+        !!live.querySelector(".energy-live-grid > .energy-live-main > #energyDiagram > #energyFlowSvg")
+        && !!live.querySelector(".energy-live-grid > .energy-live-side > #solarSummary")
+        && !!live.querySelector(".energy-live-grid > .energy-live-side > dl#energyLive")
+        && sRoot.getElementById("energyLiveMsg")?.parentElement === live
+        && sRoot.getElementById("energyLiveAnnounce")?.parentElement === live]);
+    }
+
     _flowResp = _flowCharging;
     await elNew._fetchEnergyFlow();
 

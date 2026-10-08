@@ -113,10 +113,45 @@ def _latest_state(hass, entity_ids: list):
         return None
 
 
+# Power units to watts. Case matters: mW is milliwatts, MW megawatts.
+_POWER_TO_W = {"W": 1.0, "kW": 1000.0, "MW": 1_000_000.0, "mW": 0.001}
+
+# Energy units to kWh. Case matters for the same reason.
+_ENERGY_TO_KWH = {"Wh": 0.001, "kWh": 1.0, "MWh": 1000.0, "mWh": 0.000001}
+
+# The most a home plausibly moves in one day through one sensor, in kWh.
+# Only used to accept an energy sensor that has no unit.
+_PLAUSIBLE_DAY_KWH = 1000.0
+
+
+def _energy_to_kwh(hass, entity_id: Optional[str], value: Optional[float]) -> Optional[float]:
+    """value (an amount read off entity_id's history) in kWh, using the
+    entity's unit_of_measurement: Wh / 1000, kWh as is, MWh x 1000. A
+    sensor with no or an unknown unit counts as kWh only when its
+    device_class is energy and the amount is plausible for one day;
+    otherwise None, since a Wh total read as kWh would be off by 1000."""
+    if value is None or not entity_id:
+        return None
+    st = hass.states.get(entity_id)
+    attrs = getattr(st, "attributes", None) or {}
+    unit = attrs.get("unit_of_measurement") or ""
+    factor = _ENERGY_TO_KWH.get(unit) or {"kwh": 1.0, "wh": 0.001}.get(unit.lower())
+    if factor is not None:
+        return value * factor
+    if attrs.get("device_class") == "energy" and 0 <= value <= _PLAUSIBLE_DAY_KWH:
+        return value
+    return None
+
+
+async def _daily_kwh(hass, entity_id: Optional[str]) -> Optional[float]:
+    """_daily_sum in kWh, whatever unit the sensor reports in."""
+    return _energy_to_kwh(hass, entity_id, await _daily_sum(hass, entity_id))
+
+
 def _live_watts(hass, entity_id: Optional[str]) -> Optional[float]:
     """Current reading of a power (rate) sensor in watts. None if missing,
-    unavailable, or non-numeric. Handles a kW-reporting sensor the same way
-    energy.py already does."""
+    unavailable, or non-numeric. Converts kW and MW (and mW); a sensor with
+    no or an unknown unit is taken as watts, as before."""
     if not entity_id:
         return None
     st = hass.states.get(entity_id)
@@ -126,10 +161,9 @@ def _live_watts(hass, entity_id: Optional[str]) -> Optional[float]:
         val = float(st.state)
     except (ValueError, TypeError):
         return None
-    unit = (st.attributes.get("unit_of_measurement") or "").lower()
-    if unit == "kw":
-        val *= 1000.0
-    return val
+    unit = st.attributes.get("unit_of_measurement") or ""
+    factor = _POWER_TO_W.get(unit) or {"kw": 1000.0, "w": 1.0}.get(unit.lower(), 1.0)
+    return val * factor
 
 
 def _live_pct(hass, entity_id: Optional[str]) -> Optional[float]:
@@ -451,7 +485,7 @@ async def daily_report(hass) -> dict:
 
     generated = None
     for src in solar_sources:
-        v = await _daily_sum(hass, src.get("stat_energy_from"))
+        v = await _daily_kwh(hass, src.get("stat_energy_from"))
         if v is not None:
             generated = (generated or 0.0) + v
 
@@ -459,19 +493,19 @@ async def daily_report(hass) -> dict:
     if grid_sources:
         sensors = _grid_sensors(grid_sources[0])
         for eid in sensors["imports"]:
-            v = await _daily_sum(hass, eid)
+            v = await _daily_kwh(hass, eid)
             if v is not None:
                 imported = (imported or 0.0) + v
         for eid in sensors["exports"]:
-            v = await _daily_sum(hass, eid)
+            v = await _daily_kwh(hass, eid)
             if v is not None:
                 exported = (exported or 0.0) + v
 
     battery_charged = battery_discharged = None
     if battery_sources:
         battery = battery_sources[0]
-        battery_discharged = await _daily_sum(hass, battery.get("stat_energy_from"))
-        battery_charged = await _daily_sum(hass, battery.get("stat_energy_to"))
+        battery_discharged = await _daily_kwh(hass, battery.get("stat_energy_from"))
+        battery_charged = await _daily_kwh(hass, battery.get("stat_energy_to"))
 
     self_consumed = None
     if generated is not None:
