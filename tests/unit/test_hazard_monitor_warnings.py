@@ -60,6 +60,10 @@ def hm(load, monkeypatch, tmp_path, cfg):
     async def deliver(hass, push_text, action_key, *, speak_text=""):
         st.delivered.append((push_text, action_key, speak_text))
     monkeypatch.setattr(mod, "_deliver", deliver)
+    # These tests are about warning levels, not the Observer quiet window, so
+    # they must not depend on the time they run. test_hazard_quiet_hours.py
+    # covers the quiet window itself.
+    monkeypatch.setattr(mod, "_in_quiet_hours", lambda hass: False)
 
     for name, key in (("_check_earthquakes", "quake"), ("_check_weather", "wx"),
                       ("_check_disasters", "disaster")):
