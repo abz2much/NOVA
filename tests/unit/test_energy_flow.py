@@ -299,8 +299,25 @@ def test_unavailable_rate_end_to_end(ef, monkeypatch):
     assert out["house"] == {"w": None}
 
 
-def test_never_raises(ef, monkeypatch):
+def test_a_read_failure_is_flagged_as_an_error(ef, monkeypatch):
     async def boom(hass):
         raise RuntimeError("prefs exploded")
     monkeypatch.setattr(ef, "_read_prefs", boom)
-    assert asyncio.run(ef.energy_flow_status(_Hass())) == ef.empty_status()
+    out = asyncio.run(ef.energy_flow_status(_Hass()))
+    assert out == {**ef.empty_status(), "error": True}
+    assert out["configured"] is False
+
+
+def test_a_failure_reading_a_state_is_flagged_as_an_error(ef, monkeypatch):
+    _stub_prefs(ef, monkeypatch, {"energy_sources": [{"type": "solar", "stat_rate": "sensor.solar_power"}]})
+
+    class _Broken:
+        @property
+        def states(self):
+            raise RuntimeError("state machine gone")
+    assert asyncio.run(ef.energy_flow_status(_Broken()))["error"] is True
+
+
+def test_normal_results_carry_no_error_key(ef, monkeypatch):
+    _stub_prefs(ef, monkeypatch, None)
+    assert "error" not in asyncio.run(ef.energy_flow_status(_Hass()))

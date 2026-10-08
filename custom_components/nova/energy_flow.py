@@ -190,7 +190,9 @@ def _flows(hass, sources: list[dict]) -> list[tuple[Optional[float], Optional[st
 
 async def energy_flow_status(hass) -> dict:
     """Live solar, house, battery and grid power. Never raises: on an
-    unexpected failure it logs and returns the unconfigured shape."""
+    unexpected failure it logs and returns the unconfigured shape with
+    "error": True, so the panel can say the read failed rather than ask
+    for setup."""
     try:
         prefs = await _read_prefs(hass)
         sources = (prefs or {}).get("energy_sources") or []
@@ -205,4 +207,4 @@ async def energy_flow_status(hass) -> dict:
         )
     except Exception as exc:
         _LOGGER.debug("energy_flow: status failed: %s", exc)
-        return empty_status()
+        return {**empty_status(), "error": True}

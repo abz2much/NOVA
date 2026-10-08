@@ -2013,13 +2013,14 @@ setTimeout(async () => {
     sRoot = elNew.shadowRoot;
   }
 
-  checks.push(["energy tab: Solar renders here (3.2 kW, 100% self-sufficient)",
-    (() => {
-      const sp = sRoot.getElementById("solarPanel");
-      return !!sp && energyPanel("Solar") === sp
-        && /3\.2 kW/.test(sRoot.getElementById("solarBody")?.textContent || "")
-        && /100% self-sufficient/.test(sRoot.getElementById("solarSufficiency")?.textContent || "");
-    })()]);
+  // The Solar panel is gone (2b): nova/solar's self-sufficiency is the Live
+  // panel's header meta and its first advice sentence is the line under the
+  // flow diagram.
+  checks.push(["energy tab: no separate Solar panel; Live shows 100% self-sufficient and the solar summary",
+    !sRoot.getElementById("solarPanel") && !sRoot.getElementById("solarBody") && !energyPanel("Solar")
+    && energyPanel("Live")?.querySelector(".panel-head #solarSufficiency")?.textContent === "100% self-sufficient"
+    && sRoot.getElementById("solarSummary")?.textContent === "Generating 3.2 kW of solar right now."
+    && sRoot.getElementById("solarSummary")?.hidden === false]);
 
   // Live readout (8.11.0): nova/energy_flow polled every 5 s while the
   // Energy tab is open and the page is visible, tiles updated in place, one
@@ -2091,6 +2092,86 @@ setTimeout(async () => {
     checks.push(["energy tab: the same change is not announced again within a minute",
       sRoot.getElementById("energyLiveAnnounce")?.textContent === ""]);
 
+    // Flow diagram (2b): one SVG built once, updated in place.
+    _flowResp = _flowCharging;
+    await elNew._fetchEnergyFlow();
+    const svg = sRoot.getElementById("energyFlowSvg");
+    const flowG = (k) => svg?.querySelector(`.flow[data-flow="${k}"]`);
+    const nodeText = (k, cls) => svg?.querySelector(`.flow-node[data-node="${k}"] .${cls}`)?.textContent;
+    checks.push(["energy tab: the flow diagram sits in Live above the tiles, with four nodes and three lines",
+      !!svg && svg.closest(".panel") === energyPanel("Live")
+      && !!(sRoot.getElementById("energyDiagram").compareDocumentPosition(sRoot.getElementById("energyLive")) & 4)
+      && svg.getAttribute("viewBox") === "0 0 640 360"
+      && Array.from(svg.querySelectorAll(".flow-node")).map(n => n.getAttribute("data-node")).sort().join() === "battery,grid,house,solar"
+      && Array.from(svg.querySelectorAll(".flow")).map(n => n.getAttribute("data-flow")).sort().join() === "battery,grid,solar"
+      && svg.querySelectorAll(".flow-line").length === 3 && svg.querySelectorAll(".flow-arrow").length === 3]);
+    checks.push(["energy tab: the diagram has role img, a title and a desc, and is not a live region",
+      svg.getAttribute("role") === "img"
+      && svg.getAttribute("aria-labelledby") === "energyFlowTitle energyFlowDesc"
+      && !!svg.querySelector("title#energyFlowTitle") && !!svg.querySelector("desc#energyFlowDesc")
+      && !svg.hasAttribute("aria-live") && !svg.querySelector("[aria-live]")]);
+    checks.push(["energy tab: diagram values, words and directions for solar, a charging battery and an exporting grid",
+      nodeText("solar", "flow-value") === "3.20 kW" && nodeText("house", "flow-value") === "2.10 kW"
+      && nodeText("battery", "flow-value") === "450 W" && nodeText("battery", "flow-state") === "Charging · 82%"
+      && nodeText("grid", "flow-value") === "650 W" && nodeText("grid", "flow-state") === "Exporting"
+      && flowG("solar").getAttribute("data-dir") === "in" && flowG("solar").getAttribute("data-state") === "producing"
+      && flowG("grid").getAttribute("data-dir") === "out" && flowG("grid").getAttribute("data-state") === "exporting"
+      && flowG("battery").getAttribute("data-dir") === "out" && flowG("battery").getAttribute("data-state") === "charging"
+      && svg.querySelector(".battery-arc").style.getPropertyValue("--batt-pct") === "82"]);
+    const descBefore = sRoot.getElementById("energyFlowDesc").textContent;
+    checks.push(["energy tab: the desc reads the diagram as one plain sentence",
+      descBefore === "Solar 3.2 kW. House 2.1 kW. Battery charging at 450 W, 82 percent. Grid exporting 650 W."]);
+    const svgNodes = [svg, ...svg.querySelectorAll(".flow, .flow-line, .flow-node text, .battery-arc, desc")];
+    const durBefore = flowG("battery").style.getPropertyValue("--flow-dur");
+    _flowResp = _flowDischarging;
+    await elNew._fetchEnergyFlow();
+    const svgNodesAfter = [sRoot.getElementById("energyFlowSvg"), ...sRoot.getElementById("energyFlowSvg").querySelectorAll(".flow, .flow-line, .flow-node text, .battery-arc, desc")];
+    checks.push(["energy tab: a poll changes values and data-state without replacing any SVG node",
+      renders === 0 && svgNodesAfter.length === svgNodes.length && svgNodesAfter.every((n, i) => n === svgNodes[i])
+      && nodeText("battery", "flow-value") === "1.20 kW" && nodeText("battery", "flow-state") === "Discharging · 80%"
+      && flowG("battery").getAttribute("data-state") === "discharging"
+      && flowG("battery").style.getPropertyValue("--flow-dur") !== durBefore]);
+    checks.push(["energy tab: a discharging battery and an importing grid point into the house; solar at 0 W is idle",
+      flowG("battery").getAttribute("data-dir") === "in" && flowG("grid").getAttribute("data-dir") === "in"
+      && flowG("grid").getAttribute("data-state") === "importing"
+      && flowG("solar").getAttribute("data-state") === "idle"
+      && flowG("solar").style.getPropertyValue("--flow-dur") === "6s" && flowG("solar").style.getPropertyValue("--flow-w") === "2"]);
+    checks.push(["energy tab: the desc changes with the data",
+      sRoot.getElementById("energyFlowDesc").textContent !== descBefore
+      && sRoot.getElementById("energyFlowDesc").textContent === "Solar 0 W. House 1.5 kW. Battery discharging at 1.2 kW, 80 percent. Grid importing 300 W."]);
+    _flowResp = { ..._flowDischarging, grid: { w: 5, state: "idle" }, battery: { w: null, state: null, pct: null }, house: { w: null } };
+    await elNew._fetchEnergyFlow();
+    checks.push(["energy tab: an idle grid and a missing battery reading draw idle lines and a dash",
+      flowG("grid").getAttribute("data-state") === "idle" && nodeText("grid", "flow-state") === "Idle"
+      && flowG("battery").getAttribute("data-state") === "idle" && nodeText("battery", "flow-value") === "—"
+      && nodeText("house", "flow-value") === "—"
+      && svg.querySelector(".battery-arc").getAttribute("data-pct") === "none"]);
+    {
+      const ws = [-5, null, 0, 20, 50, 100, 500, 1000, 3000, 8000, 20000];
+      const d = ws.map(w => elNew._flowDuration(w));
+      const t = ws.map(w => elNew._flowWidth(w));
+      const nonInc = d.every((v, i) => i === 0 || v <= d[i - 1]);
+      const nonDec = t.every((v, i) => i === 0 || v >= t[i - 1]);
+      checks.push(["energy tab: watts to duration and width are monotonic and clamped at 6 s / 1.2 s and 2 / 6",
+        nonInc && nonDec
+        && elNew._flowDuration(50) === 6 && elNew._flowDuration(0) === 6 && elNew._flowDuration(-5) === 6
+        && elNew._flowDuration(8000) === 1.2 && elNew._flowDuration(1e6) === 1.2
+        && elNew._flowWidth(50) === 2 && elNew._flowWidth(8000) === 6 && elNew._flowWidth(1e6) === 6
+        && elNew._flowDuration(1000) < 6 && elNew._flowDuration(1000) > 1.2
+        && elNew._flowDuration(500) > elNew._flowDuration(3000) && elNew._flowWidth(500) < elNew._flowWidth(3000)]);
+    }
+    {
+      const css = fs.readFileSync(COMPONENT, "utf8");
+      checks.push(["energy tab: built styles turn the flow animation and arc transition off under prefers-reduced-motion",
+        /@media \(prefers-reduced-motion: reduce\)\{\.energy-flow \.flow-line\{animation:none\}\.energy-flow \.battery-arc\{transition:none\}\}/.test(css)
+        && /\.flow\[data-dir="out"\] \.flow-line\{animation-direction:reverse\}/.test(css)
+        && /\.flow\[data-state="idle"\] \.flow-line\{animation:none;/.test(css)
+        && !/offset-path|<animate|requestAnimationFrame\(\(\) => this\._renderEnergy/.test(css.slice(css.indexOf("_energyFlowSvg()"), css.indexOf("_announceEnergyFlow(f) {")))
+        && !/filter:|blur\(/.test(css.slice(css.indexOf(".energy-flow{"), css.indexOf("prefers-reduced-motion: reduce){.energy-flow")))]);
+    }
+    _flowResp = _flowCharging;
+    await elNew._fetchEnergyFlow();
+
     // No overlapping fetches: a tick while one is in flight is skipped.
     const callsBefore = _flowCalls;
     elNew._flowInFlight = true;
@@ -2101,19 +2182,25 @@ setTimeout(async () => {
     // Not configured, then an error, then back to normal.
     _flowResp = _flowUnconfigured;
     await elNew._fetchEnergyFlow();
-    checks.push(["energy tab: Live shows the not configured message and hides the tiles",
-      sRoot.getElementById("energyLive").hidden === true
+    checks.push(["energy tab: Live shows the not configured message and hides the tiles and diagram",
+      sRoot.getElementById("energyLive").hidden === true && sRoot.getElementById("energyDiagram").hidden === true
       && sRoot.getElementById("energyLiveMsg").hidden === false
       && sRoot.getElementById("energyLiveMsg").textContent === "Set up solar, battery or grid in Home Assistant's Energy dashboard."]);
     _flowResp = "error";
     await elNew._fetchEnergyFlow();
-    checks.push(["energy tab: Live shows a short error message when nova/energy_flow fails",
-      sRoot.getElementById("energyLive").hidden === true
-      && sRoot.getElementById("energyLiveMsg").textContent === "Couldn't load live energy data."]);
+    checks.push(["energy tab: Live shows a short error message and hides the diagram when nova/energy_flow fails",
+      sRoot.getElementById("energyLive").hidden === true && sRoot.getElementById("energyDiagram").hidden === true
+      && sRoot.getElementById("energyLiveMsg").textContent === "Couldn't read energy data."]);
+    _flowResp = { ..._flowUnconfigured, error: true };
+    await elNew._fetchEnergyFlow();
+    checks.push(["energy tab: a backend read failure (error: true) says it could not read, not set up",
+      sRoot.getElementById("energyLive").hidden === true && sRoot.getElementById("energyDiagram").hidden === true
+      && sRoot.getElementById("energyLiveMsg").textContent === "Couldn't read energy data."]);
     _flowResp = _flowCharging;
     await elNew._fetchEnergyFlow();
-    checks.push(["energy tab: Live tiles come back once data returns",
+    checks.push(["energy tab: Live tiles and diagram come back once data returns",
       sRoot.getElementById("energyLive").hidden === false && sRoot.getElementById("energyLiveMsg").hidden === true
+      && sRoot.getElementById("energyDiagram").hidden === false
       && tileText("solar", "energy-tile-w") === "3.20 kW"]);
     elNew._render = realRender;
 

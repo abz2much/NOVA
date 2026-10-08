@@ -2882,7 +2882,9 @@ ${this._htmlDashboardBody()}`;
   // comes from this._solar, which _fetchLiveData already refreshes.
   //
   // The Live panel polls nova/energy_flow every 5 seconds, only while this
-  // tab is open and the page is visible, and updates its tiles in place.
+  // tab is open and the page is visible. Its flow diagram and the four tiles
+  // under it (the diagram's readable text version) are built once here and
+  // only ever updated in place.
   _htmlEnergy() {
     const cfg = this._data()?.config || {};
     const e = this._energy || {};
@@ -2896,8 +2898,11 @@ ${this._htmlDashboardBody()}`;
         <div class="panel" id="energyLivePanel">
           <div class="panel-head">
             <div class="panel-title">Live</div>
+            <div class="panel-meta" id="solarSufficiency">—</div>
           </div>
           <div class="stub-body" id="energyLiveMsg" hidden></div>
+          <div class="energy-flow-wrap" id="energyDiagram">${this._energyFlowSvg()}</div>
+          <div class="toggle-desc energy-flow-summary" id="solarSummary" hidden></div>
           <dl class="energy-live" id="energyLive">${tile("solar", "Solar")}${tile("house", "House")}${tile("battery", "Battery")}${tile("grid", "Grid")}
           </dl>
           <div class="sr-only" id="energyLiveAnnounce" role="status" aria-live="polite"></div>
@@ -2923,14 +2928,6 @@ ${this._htmlDashboardBody()}`;
             <label>Net cost today entity (optional)</label>
             <input class="cfg-field" type="text" data-cfg-key="energy_cost_net_entity" value="${this._esc(cfg.energy_cost_net_entity || "")}" placeholder="sensor.net_electricity_cost_today">
           </div>
-        </div>
-
-        <div class="panel" id="solarPanel">
-          <div class="panel-head">
-            <div class="panel-title">Solar</div>
-            <div class="panel-meta" id="solarSufficiency">—</div>
-          </div>
-          <div id="solarBody" class="stub-body">Loading…</div>
         </div>
 
         <div class="panel">
@@ -3148,6 +3145,90 @@ ${this._htmlDashboardBody()}`;
   }
 
   // ─── Live readout ─────────────────────────────────────────────────────
+  // Flow diagram: House in the centre, Solar upper left, Grid upper right,
+  // Battery below. Each line is drawn from its source to the house; data-dir
+  // "in" runs the dashes toward the house and "out" reverses the same
+  // animation, so a poll never rebuilds a path. Motion, colour and the
+  // static midpoint arrow all say the same thing as the node's words.
+  _energyFlowSvg() {
+    const nodes = {
+      solar: { x: 100, y: 84, r: 38, label: "Solar" },
+      grid: { x: 540, y: 84, r: 38, label: "Grid" },
+      house: { x: 320, y: 150, r: 44, label: "House" },
+      battery: { x: 320, y: 300, r: 38, label: "Battery" },
+    };
+    // Cubic curves from each source to the house: [P0, P1, P2, P3].
+    const lines = {
+      solar: [[138, 84], [210, 84], [230, 150], [276, 150]],
+      grid: [[502, 84], [430, 84], [410, 150], [364, 150]],
+      battery: [[320, 262], [320, 240], [320, 216], [320, 194]],
+    };
+    const icons = {
+      solar: '<circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/>',
+      grid: '<path d="M12 3L7 21M12 3l5 18M8.6 9h6.8M7.4 14h9.2M9.2 9l5.6 5M14.8 9l-5.6 5"/>',
+      house: '<path d="M3 11l9-7 9 7M5.5 9.5V20h13V9.5M10 20v-5h4v5"/>',
+      battery: '<rect x="3" y="7.5" width="16" height="9" rx="1.5"/><path d="M21 10.5v3M9.5 9.5l-2 3h4l-2 3"/>',
+    };
+    const flow = (kind) => {
+      const [p0, p1, p2, p3] = lines[kind];
+      const d = `M${p0[0]} ${p0[1]} C${p1[0]} ${p1[1]} ${p2[0]} ${p2[1]} ${p3[0]} ${p3[1]}`;
+      // Midpoint and direction of the curve at t = 0.5, for the arrow.
+      const mx = (p0[0] + 3 * p1[0] + 3 * p2[0] + p3[0]) / 8;
+      const my = (p0[1] + 3 * p1[1] + 3 * p2[1] + p3[1]) / 8;
+      const angle = Math.atan2(p3[1] + p2[1] - p1[1] - p0[1], p3[0] + p2[0] - p1[0] - p0[0]) * 180 / Math.PI;
+      return `
+            <g class="flow" data-flow="${kind}" data-dir="in" data-state="idle" style="--flow-dur:6s;--flow-w:2">
+              <path class="flow-glow" d="${d}"/>
+              <path class="flow-line" d="${d}"/>
+              <g transform="translate(${mx} ${my}) rotate(${Math.round(angle)})"><polygon class="flow-arrow" points="-6,-5 6,0 -6,5"/></g>
+            </g>`;
+    };
+    const node = (kind) => {
+      const n = nodes[kind];
+      const side = kind === "battery";
+      const tx = side ? n.x + 52 : n.x;
+      const anchor = side ? "start" : "middle";
+      const ty = kind === "house" ? [66, 96, null]
+        : side ? [n.y - 18, n.y + 10, n.y + 36]
+        : [n.y + n.r + 28, n.y + n.r + 58, n.y + n.r + 84];
+      return `
+            <g class="flow-node" data-node="${kind}">
+              <circle class="node-ring" cx="${n.x}" cy="${n.y}" r="${n.r}"/>
+              <g class="node-icon" transform="translate(${n.x - 16} ${n.y - 16}) scale(1.3333)">${icons[kind]}</g>
+              <text class="flow-label" x="${tx}" y="${ty[0]}" text-anchor="${anchor}">${n.label}</text>
+              <text class="flow-value" x="${tx}" y="${ty[1]}" text-anchor="${anchor}">—</text>${
+                kind === "grid" || kind === "battery"
+                  ? `\n              <text class="flow-state" x="${tx}" y="${ty[2]}" text-anchor="${anchor}"></text>` : ""}
+            </g>`;
+    };
+    const b = nodes.battery;
+    return `
+          <svg class="energy-flow" id="energyFlowSvg" viewBox="0 0 640 360" width="100%" role="img" aria-labelledby="energyFlowTitle energyFlowDesc">
+            <title id="energyFlowTitle">Power flow</title>
+            <desc id="energyFlowDesc">No reading yet.</desc>${flow("solar")}${flow("grid")}${flow("battery")}
+            <circle class="battery-track" cx="${b.x}" cy="${b.y}" r="${b.r + 8}"/>
+            <circle class="battery-arc" cx="${b.x}" cy="${b.y}" r="${b.r + 8}" pathLength="100" transform="rotate(-90 ${b.x} ${b.y})" data-pct="none" style="--batt-pct:0"/>${node("solar")}${node("grid")}${node("house")}${node("battery")}
+          </svg>`;
+  }
+
+  // Watts to animation speed and line width, on one log scale: 50 W or
+  // less is the slowest (6 s) and thinnest (2), 8000 W or more the fastest
+  // (1.2 s) and thickest (6). Anything else, including no reading, is 50 W.
+  _flowLevel(w) {
+    const v = Number(w);
+    if (!Number.isFinite(v) || v <= 50) return 0;
+    if (v >= 8000) return 1;
+    return Math.log(v / 50) / Math.log(8000 / 50);
+  }
+
+  _flowDuration(w) {
+    return Math.round((6 - 4.8 * this._flowLevel(w)) * 100) / 100;
+  }
+
+  _flowWidth(w) {
+    return Math.round((2 + 4 * this._flowLevel(w)) * 100) / 100;
+  }
+
   // One timer at most: starting always stops the old one first. Leaving the
   // tab, hiding the page and disconnecting stop it. A tick is skipped while
   // a fetch is still in flight.
@@ -3197,15 +3278,18 @@ ${this._htmlDashboardBody()}`;
     const root = this.shadowRoot;
     const list = root?.getElementById("energyLive");
     const msg = root?.getElementById("energyLiveMsg");
+    const diagram = root?.getElementById("energyDiagram");
     if (!list || !msg || !this._flow) return;
     const f = this._flow;
-    const note = f.error ? "Couldn't load live energy data."
+    const note = f.error ? "Couldn't read energy data."
       : f.configured === false ? "Set up solar, battery or grid in Home Assistant's Energy dashboard."
       : "";
     if (msg.textContent !== note) msg.textContent = note;
     msg.hidden = !note;
     list.hidden = !!note;
+    if (diagram) diagram.hidden = !!note;
     if (note) return;
+    this._renderEnergyDiagram(f);
     const pct = f.battery?.pct;
     const values = {
       solar: [f.solar?.w, ""],
@@ -3223,6 +3307,58 @@ ${this._htmlDashboardBody()}`;
       if (stEl && stEl.textContent !== state) stEl.textContent = state;
     });
     this._announceEnergyFlow(f);
+  }
+
+  // Updates the diagram in place: text, data-dir, data-state, the two CSS
+  // variables and the battery arc. Never rebuilds the SVG, which would
+  // restart every animation.
+  _renderEnergyDiagram(f) {
+    const svg = this.shadowRoot?.getElementById("energyFlowSvg");
+    if (!svg) return;
+    const setText = (el, t) => { if (el && el.textContent !== t) el.textContent = t; };
+    const setData = (el, k, v) => { if (el && el.getAttribute(k) !== v) el.setAttribute(k, v); };
+    const setVar = (el, k, v) => { if (el && el.style.getPropertyValue(k) !== v) el.style.setProperty(k, v); };
+    const pct = f.battery?.pct;
+    const pctText = pct != null ? `${Math.round(pct)}%` : "";
+    const lines = {
+      solar: { w: f.solar?.w, state: f.solar?.w != null && f.solar.w >= 20 ? "producing" : "idle", dir: "in" },
+      grid: { w: f.grid?.w, state: f.grid?.state || "idle", dir: f.grid?.state === "exporting" ? "out" : "in" },
+      battery: { w: f.battery?.w, state: f.battery?.state || "idle", dir: f.battery?.state === "charging" ? "out" : "in" },
+    };
+    Object.entries(lines).forEach(([kind, l]) => {
+      const g = svg.querySelector(`.flow[data-flow="${kind}"]`);
+      const idle = l.w == null || l.w < 20 || l.state === "idle";
+      setData(g, "data-state", idle ? "idle" : l.state);
+      setData(g, "data-dir", l.dir);
+      setVar(g, "--flow-dur", `${this._flowDuration(idle ? 0 : l.w)}s`);
+      setVar(g, "--flow-w", String(this._flowWidth(idle ? 0 : l.w)));
+    });
+    const node = (kind) => svg.querySelector(`.flow-node[data-node="${kind}"]`);
+    ["solar", "grid", "house", "battery"].forEach(kind => {
+      setText(node(kind)?.querySelector(".flow-value"), this._energyFlowWatts(f[kind]?.w));
+    });
+    setText(node("grid")?.querySelector(".flow-state"), this._energyFlowWord(f.grid?.state));
+    setText(node("battery")?.querySelector(".flow-state"),
+      [this._energyFlowWord(f.battery?.state), pctText].filter(Boolean).join(" · "));
+    const arc = svg.querySelector(".battery-arc");
+    setData(arc, "data-pct", pct != null ? String(Math.round(pct)) : "none");
+    setVar(arc, "--batt-pct", String(pct != null ? Math.max(0, Math.min(100, pct)) : 0));
+    setText(svg.querySelector("#energyFlowDesc"), this._energyFlowSentence(f));
+  }
+
+  // The diagram as one plain sentence, for the SVG's desc.
+  _energyFlowSentence(f) {
+    const say = (w) => w == null ? "no reading"
+      : w < 1000 ? `${Math.round(w)} W` : `${(Math.round(w / 100) / 10).toFixed(1)} kW`;
+    const pct = f.battery?.pct;
+    const bs = f.battery?.state;
+    let battery = f.battery?.w == null ? "Battery no reading"
+      : bs === "idle" || !bs ? "Battery idle" : `Battery ${bs} at ${say(f.battery.w)}`;
+    if (pct != null) battery += `, ${Math.round(pct)} percent`;
+    const gs = f.grid?.state;
+    const grid = f.grid?.w == null ? "Grid no reading"
+      : gs === "idle" || !gs ? "Grid idle" : `Grid ${gs} ${say(f.grid.w)}`;
+    return `Solar ${say(f.solar?.w)}. House ${say(f.house?.w)}. ${battery}. ${grid}.`;
   }
 
   // Speaks only a real change of battery or grid state, never the first
@@ -6386,43 +6522,27 @@ ${this._htmlDashboardBody()}`;
       </div>`;
   }
 
-  // Solar (ported from Classic's own Solar card — data was already fetched
-  // into this._solar by _fetchLiveData but never rendered anywhere; the new
-  // look never actually showed it despite pulling the data every poll).
+  // Solar summary for the Energy tab's Live panel (8.11.0): nova/solar's
+  // self-sufficiency in the header meta and the first sentence of its advice
+  // as one line under the flow diagram. The power numbers themselves come
+  // from nova/energy_flow. Called from every _renderData(), so it does
+  // nothing when the Energy tab is not open.
   _renderSolarPanel() {
     const root = this.shadowRoot;
-    const body = root.getElementById("solarBody");
-    const sufficiencyEl = root.getElementById("solarSufficiency");
-    if (!body) return;
-    const s = this._solar || {};
-    if (!s || s.error) {
-      body.innerHTML = `<div class="stub-body">Couldn't load solar data — restart Home Assistant after updating.</div>`;
-      if (sufficiencyEl) sufficiencyEl.textContent = "—";
-      return;
+    const summary = root?.getElementById("solarSummary");
+    const sufficiencyEl = root?.getElementById("solarSufficiency");
+    if (!summary && !sufficiencyEl) return;
+    const s = this._solar;
+    const pct = s && !s.error && s.configured && s.self_sufficiency_pct != null
+      ? `${s.self_sufficiency_pct}% self-sufficient` : "—";
+    const first = String((s && !s.error && (s.advice || [])[0]) || "");
+    const end = first.indexOf(". ");
+    const line = end >= 0 ? first.slice(0, end + 1) : first;
+    if (sufficiencyEl && sufficiencyEl.textContent !== pct) sufficiencyEl.textContent = pct;
+    if (summary) {
+      if (summary.textContent !== line) summary.textContent = line;
+      summary.hidden = !line;
     }
-    if (!s.configured) {
-      body.innerHTML = `<div class="stub-body">${this._esc((s.advice || [])[0] || "No solar source configured yet.")}</div>`;
-      if (sufficiencyEl) sufficiencyEl.textContent = "—";
-      return;
-    }
-    if (sufficiencyEl) {
-      sufficiencyEl.textContent = s.self_sufficiency_pct != null
-        ? `${s.self_sufficiency_pct}% self-sufficient` : "—";
-    }
-    const rows = [];
-    if (s.solar_w != null) {
-      rows.push(`<div class="feed-row"><span class="feed-text">Solar</span><span class="feed-time">${(s.solar_w / 1000).toFixed(2)} kW</span></div>`);
-    }
-    if (s.grid_w != null) {
-      const dirLabel = s.grid_direction === "export" ? "Exporting" : s.grid_direction === "import" ? "Importing" : "Balanced";
-      rows.push(`<div class="feed-row"><span class="feed-text">Grid</span><span class="feed-time">${dirLabel} ${(Math.abs(s.grid_w) / 1000).toFixed(2)} kW</span></div>`);
-    }
-    if (s.battery_w != null || s.battery_pct != null) {
-      const pct = s.battery_pct != null ? `${s.battery_pct}%` : "no % available";
-      rows.push(`<div class="feed-row"><span class="feed-text">Battery</span><span class="feed-time">${pct}${s.battery_w != null ? ` · ${(s.battery_w / 1000).toFixed(2)} kW` : ""}</span></div>`);
-    }
-    const advice = (s.advice || []).map(a => `<div class="toggle-desc" style="margin-bottom:6px">${this._esc(a)}</div>`).join("");
-    body.innerHTML = advice + rows.join("");
   }
 
   // Muted card: what Nova has been told to stop announcing. Mutes are saved
@@ -8957,6 +9077,37 @@ ${this._htmlDashboardBody()}`;
       .energy-tile dd{margin:0}
       .energy-tile .energy-tile-w{font-family:var(--font-mono);font-size:16px}
       .energy-tile .energy-tile-state{font-size:11px;color:var(--ink-dim);min-height:1em}
+      .energy-flow-wrap{margin:0 0 10px}
+      .energy-flow{display:block;width:100%;height:auto;--c-solar:var(--gold);--c-grid:#6ea8ff;--c-house:var(--ember);--c-battery:#2aa198}
+      .energy-flow .flow[data-flow="solar"]{--flow-c:var(--c-solar)}
+      .energy-flow .flow[data-flow="grid"]{--flow-c:var(--c-grid)}
+      .energy-flow .flow[data-flow="battery"]{--flow-c:var(--c-battery)}
+      .energy-flow .flow-glow{fill:none;stroke:var(--flow-c);stroke-width:calc(var(--flow-w,2) * 3);stroke-linecap:round;opacity:.12}
+      .energy-flow .flow-line{fill:none;stroke:var(--flow-c);stroke-width:var(--flow-w,2);stroke-linecap:round;stroke-dasharray:1 12;
+        animation:nova-flow var(--flow-dur,6s) linear infinite}
+      .energy-flow .flow[data-dir="out"] .flow-line{animation-direction:reverse}
+      .energy-flow .flow-arrow{fill:var(--flow-c)}
+      .energy-flow .flow[data-dir="out"] .flow-arrow{transform:rotate(180deg)}
+      .energy-flow .flow[data-state="idle"] .flow-line{animation:none;opacity:.25}
+      .energy-flow .flow[data-state="idle"] .flow-glow{opacity:.05}
+      .energy-flow .flow[data-state="idle"] .flow-arrow{visibility:hidden}
+      @keyframes nova-flow{to{stroke-dashoffset:-26}}
+      .energy-flow .node-ring{fill:var(--surface-2);stroke-width:2.5}
+      .energy-flow .node-icon{fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+      .energy-flow .flow-node[data-node="solar"] .node-ring,.energy-flow .flow-node[data-node="solar"] .node-icon{stroke:var(--c-solar)}
+      .energy-flow .flow-node[data-node="grid"] .node-ring,.energy-flow .flow-node[data-node="grid"] .node-icon{stroke:var(--c-grid)}
+      .energy-flow .flow-node[data-node="house"] .node-ring,.energy-flow .flow-node[data-node="house"] .node-icon{stroke:var(--c-house)}
+      .energy-flow .flow-node[data-node="battery"] .node-ring,.energy-flow .flow-node[data-node="battery"] .node-icon{stroke:var(--c-battery)}
+      .energy-flow .flow-label{font-family:var(--font-body);font-size:20px;fill:var(--ink-dim)}
+      .energy-flow .flow-value{font-family:var(--font-mono);font-size:26px;fill:var(--ink)}
+      .energy-flow .flow-state{font-family:var(--font-body);font-size:20px;fill:var(--ink-dim)}
+      .energy-flow .battery-track{fill:none;stroke:var(--line-soft);stroke-width:4}
+      .energy-flow .battery-arc{fill:none;stroke:var(--c-battery);stroke-width:4;stroke-linecap:round;
+        stroke-dasharray:var(--batt-pct,0) 100;transition:stroke-dasharray .6s ease}
+      .energy-flow .battery-arc[data-pct="none"]{opacity:0}
+      .energy-flow-summary{margin:0 0 10px}
+      .energy-flow-summary[hidden],.energy-flow-wrap[hidden]{display:none}
+      @media (prefers-reduced-motion: reduce){.energy-flow .flow-line{animation:none}.energy-flow .battery-arc{transition:none}}
       .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
       .goal-list{display:flex;flex-direction:column;gap:7px;max-height:300px;overflow:auto}
       .goal-row{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--surface-2);border:1px solid var(--line-soft);border-radius:9px;padding:9px}

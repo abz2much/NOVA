@@ -82,6 +82,37 @@
       .energy-tile dd{margin:0}
       .energy-tile .energy-tile-w{font-family:var(--font-mono);font-size:16px}
       .energy-tile .energy-tile-state{font-size:11px;color:var(--ink-dim);min-height:1em}
+      .energy-flow-wrap{margin:0 0 10px}
+      .energy-flow{display:block;width:100%;height:auto;--c-solar:var(--gold);--c-grid:#6ea8ff;--c-house:var(--ember);--c-battery:#2aa198}
+      .energy-flow .flow[data-flow="solar"]{--flow-c:var(--c-solar)}
+      .energy-flow .flow[data-flow="grid"]{--flow-c:var(--c-grid)}
+      .energy-flow .flow[data-flow="battery"]{--flow-c:var(--c-battery)}
+      .energy-flow .flow-glow{fill:none;stroke:var(--flow-c);stroke-width:calc(var(--flow-w,2) * 3);stroke-linecap:round;opacity:.12}
+      .energy-flow .flow-line{fill:none;stroke:var(--flow-c);stroke-width:var(--flow-w,2);stroke-linecap:round;stroke-dasharray:1 12;
+        animation:nova-flow var(--flow-dur,6s) linear infinite}
+      .energy-flow .flow[data-dir="out"] .flow-line{animation-direction:reverse}
+      .energy-flow .flow-arrow{fill:var(--flow-c)}
+      .energy-flow .flow[data-dir="out"] .flow-arrow{transform:rotate(180deg)}
+      .energy-flow .flow[data-state="idle"] .flow-line{animation:none;opacity:.25}
+      .energy-flow .flow[data-state="idle"] .flow-glow{opacity:.05}
+      .energy-flow .flow[data-state="idle"] .flow-arrow{visibility:hidden}
+      @keyframes nova-flow{to{stroke-dashoffset:-26}}
+      .energy-flow .node-ring{fill:var(--surface-2);stroke-width:2.5}
+      .energy-flow .node-icon{fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+      .energy-flow .flow-node[data-node="solar"] .node-ring,.energy-flow .flow-node[data-node="solar"] .node-icon{stroke:var(--c-solar)}
+      .energy-flow .flow-node[data-node="grid"] .node-ring,.energy-flow .flow-node[data-node="grid"] .node-icon{stroke:var(--c-grid)}
+      .energy-flow .flow-node[data-node="house"] .node-ring,.energy-flow .flow-node[data-node="house"] .node-icon{stroke:var(--c-house)}
+      .energy-flow .flow-node[data-node="battery"] .node-ring,.energy-flow .flow-node[data-node="battery"] .node-icon{stroke:var(--c-battery)}
+      .energy-flow .flow-label{font-family:var(--font-body);font-size:20px;fill:var(--ink-dim)}
+      .energy-flow .flow-value{font-family:var(--font-mono);font-size:26px;fill:var(--ink)}
+      .energy-flow .flow-state{font-family:var(--font-body);font-size:20px;fill:var(--ink-dim)}
+      .energy-flow .battery-track{fill:none;stroke:var(--line-soft);stroke-width:4}
+      .energy-flow .battery-arc{fill:none;stroke:var(--c-battery);stroke-width:4;stroke-linecap:round;
+        stroke-dasharray:var(--batt-pct,0) 100;transition:stroke-dasharray .6s ease}
+      .energy-flow .battery-arc[data-pct="none"]{opacity:0}
+      .energy-flow-summary{margin:0 0 10px}
+      .energy-flow-summary[hidden],.energy-flow-wrap[hidden]{display:none}
+      @media (prefers-reduced-motion: reduce){.energy-flow .flow-line{animation:none}.energy-flow .battery-arc{transition:none}}
       .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
       .goal-list{display:flex;flex-direction:column;gap:7px;max-height:300px;overflow:auto}
       .goal-row{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--surface-2);border:1px solid var(--line-soft);border-radius:9px;padding:9px}
