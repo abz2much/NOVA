@@ -144,6 +144,7 @@ const PANEL = {
     },
     pattern_include_entities: ["binary_sensor.garage_bay_occupied"],
     excluded_entities: ["light.spare_bedroom"], excluded_domains: [], excluded_labels: [],
+    departure_excluded_calendars: ["calendar.birthdays"],
     // Sent inside config by the backend (websocket.py _available_labels).
     available_labels: [{ id: "guest_visible", name: "guest_visible" }, { id: "noisy", name: "noisy" }] },
   suggestions: [
@@ -211,7 +212,7 @@ const _deleteCredentialCalls = [];
 const _sayHelloCalls = [];
 const hass = {
   config: { location_name: "Springfield IL", latitude: 39.78, longitude: -89.65 },
-  states: { "assist_satellite.a": { state: "idle", attributes: {} }, "camera.front": { attributes: { access_token: "tok123" } }, "camera.back": { attributes: { access_token: "tok456" } },
+  states: { "calendar.family": { state: "off", attributes: { friendly_name: "Family" } }, "calendar.birthdays": { state: "off", attributes: { friendly_name: "Birthdays" } }, "assist_satellite.a": { state: "idle", attributes: {} }, "camera.front": { attributes: { access_token: "tok123" } }, "camera.back": { attributes: { access_token: "tok456" } },
     "binary_sensor.mailbox": { state: "off", attributes: { friendly_name: "Mailbox" } } },
   callWS: async (m) => {
     if (m.type === "nova/update_config") {
@@ -1964,6 +1965,32 @@ setTimeout(async () => {
   await new Promise(r => setTimeout(r, 20));
   checks.push(["settings tab: Anticipation & Memory number field autosaves as a Number",
     _updateConfigCalls.some(c => c.key === "memory_threading_hours" && c.value === 72)]);
+  sRoot = elNew.shadowRoot;
+
+  // Departure alerts: calendars that never trigger a leave alert use the same
+  // chip picker pattern as Excluded Entities, saved as a JSON list.
+  checks.push(["settings tab: Anticipation & Memory shows the calendar already excluded from leave alerts",
+    /calendar\.birthdays/.test(sRoot.getElementById("newDepCalChips")?.textContent || "")
+    && /calendar\.family/.test(sRoot.getElementById("newDepCalList")?.innerHTML || "")
+    && !/light\./.test(sRoot.getElementById("newDepCalList")?.innerHTML || "")]);
+  sRoot.getElementById("newDepCalInput").value = "light.spare_bedroom";
+  sRoot.getElementById("newDepCalAdd").click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: a non calendar entity is not added to the leave alert exclusions",
+    !_updateConfigCalls.some(c => c.key === "departure_excluded_calendars" && /light\./.test(String(c.value)))]);
+  sRoot = elNew.shadowRoot;
+  sRoot.getElementById("newDepCalInput").value = "calendar.family";
+  sRoot.getElementById("newDepCalAdd").click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: + Add calendar saves departure_excluded_calendars",
+    _updateConfigCalls.some(c => c.key === "departure_excluded_calendars"
+      && c.value === JSON.stringify(["calendar.birthdays", "calendar.family"]))]);
+  sRoot = elNew.shadowRoot;
+  sRoot.querySelector(".new-dep-cal-del").click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: removing a calendar chip saves the shorter departure_excluded_calendars list",
+    _updateConfigCalls.some(c => c.key === "departure_excluded_calendars"
+      && c.value === JSON.stringify(["calendar.family"]))]);
   sRoot = elNew.shadowRoot;
 
   // Memory: the small stats card Classic's own Settings tab actually has —

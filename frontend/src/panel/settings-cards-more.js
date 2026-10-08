@@ -577,6 +577,7 @@
 
   _anticipationMemoryCardBody() {
     const cfg = this._data()?.config || {};
+    const depCals = this._exclArr(cfg.departure_excluded_calendars);
     const onOff = (key, defaultOn, hint) => {
       const on = defaultOn ? cfg[key] !== false : !!cfg[key];
       return `
@@ -620,6 +621,15 @@
         <label>Travel sensor</label>
         <select class="cfg-field" data-cfg-key="departure_travel_sensor">${this._optSelect(this._travelSensorOptions(cfg.departure_travel_sensor || ""), cfg.departure_travel_sensor || "")}</select>
       </div>
+      <div class="mode-bind-head">Calendars that never trigger a leave alert <span class="toggle-desc">e.g. birthdays or holidays</span></div>
+      <div class="cfg-row">
+        <input id="newDepCalInput" list="newDepCalList" class="cfg-field" style="flex:1" placeholder="type to find a calendar…" autocomplete="off">
+        <datalist id="newDepCalList">${this._calendarDatalist()}</datalist>
+        <button class="mode-chip" id="newDepCalAdd">+ Add</button>
+      </div>
+      <div class="mode-grid" id="newDepCalChips">${depCals.length
+        ? depCals.map((e, i) => `<span class="new-pl-chip">${this._esc(e)}<button class="new-dep-cal-del" data-i="${i}" title="Remove">×</button></span>`).join("")
+        : `<span class="toggle-desc">None.</span>`}</div>
       <div class="stub-body">Departure warns when to leave for calendar events using your device location + open-source routing. Routine alerts learn per-person timing over about a week. Continued conversation keeps the mic open after a question.</div>`;
   }
 
@@ -727,6 +737,11 @@
     if (!v) return [];
     if (Array.isArray(v)) return v;
     try { const j = JSON.parse(v); return Array.isArray(j) ? j : []; } catch (_) { return []; }
+  }
+  _calendarDatalist() {
+    const states = this._hass?.states || {};
+    return Object.keys(states).filter(eid => eid.startsWith("calendar.")).sort()
+      .map(eid => `<option value="${this._esc(eid)}">${this._esc(this._entName(eid))}</option>`).join("");
   }
   _allEntityDatalist() {
     const states = this._hass?.states || {};

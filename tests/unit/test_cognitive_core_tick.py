@@ -1410,3 +1410,12 @@ def test_a_failed_ignore_rule_save_is_swallowed_and_the_rule_still_applies(cc, m
     with caplog.at_level("WARNING"):
         mgr.add("light.x")
     assert mgr.is_ignored("light.x") and "Failed to save ignore rules" in caplog.text
+
+
+async def test_departure_is_checked_every_tick_not_only_on_cycles(cc, env, clock):
+    await cc._tick()
+    env.emitted.clear()
+    env.cog.departure = [{"type": "departure_reminder", "message": "d"}]
+    clock["now"] += 30                               # well inside the 15 minute cycle
+    await cc._tick()
+    assert _types(env) == ["departure_reminder"] and len(env.cog.saved) >= 1

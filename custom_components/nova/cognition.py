@@ -23,6 +23,7 @@ with no change to the observer pipeline.
 from __future__ import annotations
 
 import datetime
+import json
 import logging
 import math
 import time
@@ -932,6 +933,9 @@ def sample_presence(hass, now: float = None) -> int:
 DEFAULT_DEPART_LEAD_MIN = 30    # prep+travel lead when no travel sensor is set
 DEPART_PREP_BUFFER_MIN = 5      # added to the computed travel-time minutes
 DEPART_LOOKAHEAD_H = 3          # only consider events starting within N hours
+DEPART_ROUTE_TTL = 1800         # reuse a worked out travel time for this long (s)
+DEPART_RETRY_AFTER = 300        # wait this long before asking again after a failure (s)
+_DEPART_TRAVEL: dict = {}       # (title, start, place, origin) -> (minutes or None, reason, asked_at)
 
 
 def _current_origin(hass):
@@ -955,6 +959,42 @@ def _current_origin(hass):
     return _home_coords(hass)
 
 
+def _excluded_calendars(nova_config) -> set:
+    """Calendars the user switched off for departure alerts (a JSON list of
+    calendar entity ids, saved by the panel)."""
+    raw = nova_config.get("departure_excluded_calendars", []) or []
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw) if raw.strip() else []
+        except ValueError:
+            raw = []
+    return {str(c) for c in raw} if isinstance(raw, (list, tuple, set)) else set()
+
+
+async def _departure_travel(hass, event_key, origin, loc, osrm_url, now):
+    """Drive minutes to an event's place, asked of the routing service once
+    and then reused (a failure is not asked again for a few minutes). Returns
+    (minutes or None, why it is None). The check runs every tick, so without
+    this the same event would be looked up every 30 seconds."""
+    from . import travel
+    key = event_key + (round(origin[0], 2), round(origin[1], 2))
+    for k in [k for k, v in _DEPART_TRAVEL.items() if now - v[2] > 3600]:
+        _DEPART_TRAVEL.pop(k, None)
+    cached = _DEPART_TRAVEL.get(key)
+    if cached:
+        minutes, reason, asked = cached
+        if now - asked < (DEPART_ROUTE_TTL if minutes is not None else DEPART_RETRY_AFTER):
+            return minutes, reason
+    minutes = await travel.travel_minutes(hass, origin, loc, osrm_url)
+    reason = None if minutes is not None else (
+        travel.failure_reason(loc) or "no travel time came back")
+    if minutes is None and cached is None:
+        _LOGGER.warning("Departure alert: could not work out the travel time to %r (%s); "
+                        "using the default lead time instead", loc, reason)
+    _DEPART_TRAVEL[key] = (minutes, reason, now)
+    return minutes, reason
+
+
 async def predict_departure(hass, now: float = None) -> list:
     """Leave-time anticipation ("leave now, sir"): for the nearest upcoming
     timed calendar event, warn once when it's time to head out.
@@ -963,8 +1003,10 @@ async def predict_departure(hass, now: float = None) -> list:
     event's geocoded location via open-source geocoding + routing (Nominatim +
     OSRM, keyless) — see travel.py. An explicit travel-time sensor is used
     instead if you've set one; failing everything, a configurable default lead
-    is used. Returns action dicts for the gated announce path. One alert per
-    event per day. Async (does network); never raises.
+    is used, and the alert says so when a lookup was tried and failed. Calendars
+    in departure_excluded_calendars are ignored. Returns action dicts for the
+    gated announce path. One alert per event per day. Async (does network, but
+    each event's travel time is cached); never raises.
     """
     now = now or time.time()
     out = []
@@ -989,10 +1031,12 @@ async def predict_departure(hass, now: float = None) -> list:
                     sensor_min = None
         osrm_url = str(nova_config.get("departure_osrm_url", "") or "").strip() or None
         origin = _current_origin(hass)
+        excluded = _excluded_calendars(nova_config)
 
         from . import comms
         events = [e for e in comms.gather_events(hass)
-                  if e.get("start") and not e.get("all_day")]
+                  if e.get("start") and not e.get("all_day")
+                  and e.get("calendar") not in excluded]
         events.sort(key=lambda e: e["start"])
 
         now_dt = datetime.datetime.fromtimestamp(now)
@@ -1003,34 +1047,52 @@ async def predict_departure(hass, now: float = None) -> list:
                 continue
             if (start_dt - now_dt) > datetime.timedelta(hours=DEPART_LOOKAHEAD_H):
                 break  # sorted — nothing closer beyond the horizon
-            # travel minutes: explicit sensor > OSS route(origin -> location) > default
-            travel_min = sensor_min
-            loc = ev.get("location")
-            if travel_min is None and origin and loc:
-                from . import travel
-                travel_min = await travel.travel_minutes(hass, origin, loc, osrm_url)
-            lead = (travel_min + DEPART_PREP_BUFFER_MIN) if travel_min is not None else lead_default
-            leave_at = start_dt - datetime.timedelta(minutes=lead)
-            if now_dt < leave_at:
-                continue  # not time to leave yet
             title = ev.get("title") or "an event"
             key = "depart:%s:%s" % (title, start_dt.strftime("%Y%m%d%H%M"))
             if _RECUR_ALERTED.get(key) == today:
-                continue
+                continue  # already told today: no need to work out the route again
+            # travel minutes: explicit sensor > OSS route(origin -> location) > default
+            travel_min = sensor_min
+            lead_source = "sensor" if sensor_min is not None else None
+            failed_reason = None
+            loc = ev.get("location")
+            if travel_min is None and loc:
+                if origin:
+                    travel_min, failed_reason = await _departure_travel(
+                        hass, (title, key, loc), origin, loc, osrm_url, now)
+                else:
+                    failed_reason = "Nova does not know where you are"
+                if travel_min is not None:
+                    lead_source = "route"
+            lead = (travel_min + DEPART_PREP_BUFFER_MIN) if travel_min is not None else lead_default
+            if lead_source is None:
+                lead_source = "default"
+            leave_at = start_dt - datetime.timedelta(minutes=lead)
+            if now_dt < leave_at:
+                continue  # not time to leave yet
             _RECUR_ALERTED[key] = today
             mins_to = max(0, int((start_dt - now_dt).total_seconds() // 60))
             loc_str = (" at %s" % loc) if loc else ""
             decision_id = _log_decision(
                 "anticipation_departure",
-                {"event": title, "location": loc or None, "minutes_until": mins_to},
+                {"event": title, "location": loc or None, "minutes_until": mins_to,
+                 "lead_minutes": round(lead), "lead_from": lead_source,
+                 "travel_lookup_failed": failed_reason},
                 {"predicted": "departure imminent — should leave soon"},
                 "announce departure heads-up",
-                "recurring calendar event + estimated travel time",
+                "upcoming calendar event + %s" % {
+                    "sensor": "travel sensor reading",
+                    "route": "estimated drive time",
+                    "default": "default lead time"}[lead_source],
             )
+            message = ("Heads up — %s%s begins in about %d minutes; "
+                       "you'll want to head out." % (title, loc_str, mins_to))
+            if failed_reason:
+                message += (" I couldn't work out the travel time, so I used the usual "
+                            "%d minutes." % lead_default)
             out.append({
                 "type": "anticipation_departure", "urgency": "low",
-                "message": ("Heads up — %s%s begins in about %d minutes; "
-                            "you'll want to head out." % (title, loc_str, mins_to)),
+                "message": message,
                 "pattern_key": key, "offer": False,
                 "decision_id": decision_id,
             })

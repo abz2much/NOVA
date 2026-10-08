@@ -27,6 +27,7 @@ DEFAULT_OSRM = "https://router.project-osrm.org"
 _TIMEOUT = 8
 _UA = "nova-home-assistant (Home Assistant integration)"
 _GEO_CACHE: dict = {}          # normalized location string -> (lat, lon)
+_LAST_FAILURE: dict = {}       # normalized location string -> why the last lookup failed
 _COORD_RE = re.compile(r"^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$")
 
 
@@ -87,9 +88,13 @@ async def _get_json(hass, url: str, params: dict = None):
         return None
 
 
+def _key(location: str) -> str:
+    return (location or "").strip().lower()
+
+
 async def _geocode(hass, location: str) -> Optional[tuple]:
     """Geocode a place string to (lat, lon) via Nominatim, cached. None on miss."""
-    key = (location or "").strip().lower()
+    key = _key(location)
     if not key:
         return None
     if key in _GEO_CACHE:
@@ -99,18 +104,38 @@ async def _geocode(hass, location: str) -> Optional[tuple]:
     coords = _parse_geocode(data)
     if coords:
         _GEO_CACHE[key] = coords
+    else:
+        _LAST_FAILURE[key] = ("the map search service did not answer" if data is None
+                              else "the place could not be found on the map")
     return coords
+
+
+def failure_reason(dest_location: str) -> Optional[str]:
+    """Why the last travel_minutes() call for this place gave None, in plain
+    words for the log and the alert; None when it succeeded or never ran."""
+    return _LAST_FAILURE.get(_key(dest_location))
 
 
 async def travel_minutes(hass, origin, dest_location: str,
                          osrm_url: str = None) -> Optional[float]:
     """Drive minutes from origin (lat, lon) to dest_location (a place string or
     'lat,lon'), via open-source geocode + route. None on any failure so the
-    caller can fall back to a fixed lead."""
+    caller can fall back to a fixed lead; failure_reason() says why."""
+    key = _key(dest_location)
     if not origin or not dest_location:
+        _LAST_FAILURE[key] = "no starting position or no destination"
         return None
     dest = _coords_from_str(dest_location) or await _geocode(hass, dest_location)
     if not dest:
+        _LAST_FAILURE.setdefault(key, "the place could not be found on the map")
         return None
     data = await _get_json(hass, _route_url(origin, dest, osrm_url))
-    return _parse_route(data)
+    if data is None:
+        _LAST_FAILURE[key] = "the routing service did not answer"
+        return None
+    minutes = _parse_route(data)
+    if minutes is None:
+        _LAST_FAILURE[key] = "the routing service found no route"
+        return None
+    _LAST_FAILURE.pop(key, None)
+    return minutes

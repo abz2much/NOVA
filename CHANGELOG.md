@@ -1,3 +1,18 @@
+## [8.8.5] — leave alerts: timely, honest about failures, and per calendar
+
+**What was wrong**
+- Leave alerts were only checked every 15 minutes, so an alert could arrive up to 15 minutes after its leave time.
+- When the drive time could not be worked out, Nova silently used a fixed 30 minute lead. A Ballet alert fired 27 minutes early for a school about three minutes away, and nothing showed why.
+- Every calendar triggered alerts, with no way to leave out something like birthdays.
+- The Decision Record described every alert as a "recurring calendar event", which was never checked.
+
+**What happens now**
+- **Checked every tick.** The departure check now runs every 30 seconds with the rest of the loop. Each event's drive time is looked up once and reused for 30 minutes, and a failed lookup is not asked again for 5 minutes, so this adds almost no network traffic.
+- **Failures are visible.** If the drive time cannot be worked out, Nova logs a warning with the reason (no position, place not found, routing service not answering, no route). The spoken alert adds "I couldn't work out the travel time, so I used the usual 30 minutes."
+- **Decision Record is accurate.** It now records the lead time used, where it came from (travel sensor, drive time or default), and any lookup failure, under an honest reason.
+- **Exclude calendars.** Settings, Learning & Memory, Anticipation & Memory has a new picker for calendars that never trigger a leave alert. The new `departure_excluded_calendars` setting is a JSON list of calendar entity ids, and an empty list changes nothing.
+- No change to how alerts are worded or delivered when a drive time is found.
+
 ## [8.8.4] — Doorbell Training beside Cameras in Safari
 
 - **Doorbell Training now sits beside Cameras in every browser.** 8.8.3 pushed it into the second column with a column break, which Safari does not support, so it stayed underneath. On wide screens the Cameras group is now a plain two column grid. Other settings groups and searches keep their existing layout, and narrow screens still use one column.

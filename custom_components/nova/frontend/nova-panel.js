@@ -1082,7 +1082,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v8.8.4
+ * v8.8.5
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1159,7 +1159,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.8.4 ",
+      console.log("%c Nova Panel %c v8.8.5 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -5134,6 +5134,7 @@ ${this._htmlDashboardBody()}`;
 
   _anticipationMemoryCardBody() {
     const cfg = this._data()?.config || {};
+    const depCals = this._exclArr(cfg.departure_excluded_calendars);
     const onOff = (key, defaultOn, hint) => {
       const on = defaultOn ? cfg[key] !== false : !!cfg[key];
       return `
@@ -5177,6 +5178,15 @@ ${this._htmlDashboardBody()}`;
         <label>Travel sensor</label>
         <select class="cfg-field" data-cfg-key="departure_travel_sensor">${this._optSelect(this._travelSensorOptions(cfg.departure_travel_sensor || ""), cfg.departure_travel_sensor || "")}</select>
       </div>
+      <div class="mode-bind-head">Calendars that never trigger a leave alert <span class="toggle-desc">e.g. birthdays or holidays</span></div>
+      <div class="cfg-row">
+        <input id="newDepCalInput" list="newDepCalList" class="cfg-field" style="flex:1" placeholder="type to find a calendar…" autocomplete="off">
+        <datalist id="newDepCalList">${this._calendarDatalist()}</datalist>
+        <button class="mode-chip" id="newDepCalAdd">+ Add</button>
+      </div>
+      <div class="mode-grid" id="newDepCalChips">${depCals.length
+        ? depCals.map((e, i) => `<span class="new-pl-chip">${this._esc(e)}<button class="new-dep-cal-del" data-i="${i}" title="Remove">×</button></span>`).join("")
+        : `<span class="toggle-desc">None.</span>`}</div>
       <div class="stub-body">Departure warns when to leave for calendar events using your device location + open-source routing. Routine alerts learn per-person timing over about a week. Continued conversation keeps the mic open after a question.</div>`;
   }
 
@@ -5284,6 +5294,11 @@ ${this._htmlDashboardBody()}`;
     if (!v) return [];
     if (Array.isArray(v)) return v;
     try { const j = JSON.parse(v); return Array.isArray(j) ? j : []; } catch (_) { return []; }
+  }
+  _calendarDatalist() {
+    const states = this._hass?.states || {};
+    return Object.keys(states).filter(eid => eid.startsWith("calendar.")).sort()
+      .map(eid => `<option value="${this._esc(eid)}">${this._esc(this._entName(eid))}</option>`).join("");
   }
   _allEntityDatalist() {
     const states = this._hass?.states || {};
@@ -6708,6 +6723,11 @@ ${this._htmlDashboardBody()}`;
     });
     exclAdd("newExclDomAdd", "newExclDomInput", "excluded_domains", null);
     exclAdd("newExclLabAdd", "newExclLabInput", "excluded_labels", null);
+    exclAdd("newDepCalAdd", "newDepCalInput", "departure_excluded_calendars", (v) => {
+      if (this._hass && this._hass.states && this._hass.states[v] && v.startsWith("calendar.")) return true;
+      console.warn(`Nova: "${v}" is not a known calendar`);
+      return false;
+    });
     const exclDel = (cls, key) => root.querySelectorAll("." + cls).forEach(b => {
       b.addEventListener("click", async () => {
         const arr = this._exclArr((this._data()?.config || {})[key]);
@@ -6718,6 +6738,7 @@ ${this._htmlDashboardBody()}`;
     exclDel("new-excl-ent-del", "excluded_entities");
     exclDel("new-excl-dom-del", "excluded_domains");
     exclDel("new-excl-lab-del", "excluded_labels");
+    exclDel("new-dep-cal-del", "departure_excluded_calendars");
 
     const rateLimitInput = root.getElementById("newObserverRateLimit");
     if (rateLimitInput) {
@@ -8884,8 +8905,8 @@ ${this._htmlDashboardBody()}`;
       .new-appliance-remove:hover{border-color:#ff5a5a;background:#ff5a5a14}
       .new-pl-chip{display:inline-flex;align-items:center;gap:5px;font-family:var(--font-mono);font-size:10.5px;
         padding:5px 8px;border-radius:8px;border:1px solid var(--line-soft);background:var(--surface-2);color:var(--ink-dim)}
-      .new-pl-del,.new-excl-ent-del,.new-excl-dom-del,.new-excl-lab-del,.new-mem-forget{background:none;border:none;color:var(--ink-faint);cursor:pointer;font-size:12px;padding:0}
-      .new-pl-del:hover,.new-excl-ent-del:hover,.new-excl-dom-del:hover,.new-excl-lab-del:hover,.new-mem-forget:hover{color:#ff5a5a}
+      .new-pl-del,.new-excl-ent-del,.new-excl-dom-del,.new-excl-lab-del,.new-dep-cal-del,.new-mem-forget{background:none;border:none;color:var(--ink-faint);cursor:pointer;font-size:12px;padding:0}
+      .new-pl-del:hover,.new-excl-ent-del:hover,.new-excl-dom-del:hover,.new-excl-lab-del:hover,.new-dep-cal-del:hover,.new-mem-forget:hover{color:#ff5a5a}
       .new-camset-row{padding:10px 0;border-top:1px solid var(--line-soft)}
       .new-camset-row:first-of-type{border-top:none}
       .toggle-list{display:flex;flex-direction:column;gap:2px}
