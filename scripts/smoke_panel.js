@@ -192,6 +192,14 @@ const _serviceCalls = [];
 const _docDeleteCalls = [];
 const _intrLabelCalls = [];
 let _energyAgency = "advisory";
+const _flowCharging = { configured: true, solar: { w: 3200 }, house: { w: 2100 },
+  battery: { w: 450, state: "charging", pct: 82 }, grid: { w: 650, state: "exporting" }, direction_source: "totals" };
+const _flowDischarging = { configured: true, solar: { w: 0 }, house: { w: 1500 },
+  battery: { w: 1200, state: "discharging", pct: 80 }, grid: { w: 300, state: "importing" }, direction_source: "totals" };
+const _flowUnconfigured = { configured: false, solar: { w: null }, house: { w: null },
+  battery: { w: null, state: null, pct: null }, grid: { w: null, state: null }, direction_source: null };
+let _flowResp = _flowCharging;
+let _flowCalls = 0;
 let _bioEnabled = false;
 let _pendingFacts = [{ id: 42, key: "bedtime", value: "10pm", subject: "primary" }];
 let _relPending = [{ id: 7, subject: "sam", predicate: "owns", object: "car.jeep", source: "stated", status: "pending" }];
@@ -288,6 +296,11 @@ const hass = {
         { name: "Refrigerator", entity: "sensor.fridge", watts: 200, shed_ok: false },
       ], advice: ["Heads up — Dryer and Oven are running at 9.2 kW, over your peak."] };
       if (m.action === "set_agency") { _energyAgency = m.agency; return { watts: 9200, kw: 9.2, over_peak: true, agency: m.agency, configured_agency: m.agency, running: [], advice: [] }; }
+    }
+    if (m.type === "nova/energy_flow") {
+      _flowCalls++;
+      if (_flowResp === "error") throw new Error("energy_flow_failed");
+      return _flowResp;
     }
     if (m.type === "nova/solar") {
       if (m.action === "status") return {
@@ -2007,6 +2020,140 @@ setTimeout(async () => {
         && /3\.2 kW/.test(sRoot.getElementById("solarBody")?.textContent || "")
         && /100% self-sufficient/.test(sRoot.getElementById("solarSufficiency")?.textContent || "");
     })()]);
+
+  // Live readout (8.11.0): nova/energy_flow polled every 5 s while the
+  // Energy tab is open and the page is visible, tiles updated in place, one
+  // timer at most, and a polite live region that speaks only real changes.
+  {
+    const realSetInterval = global.setInterval;
+    const realClearInterval = global.clearInterval;
+    const flowTimers = new Set();
+    global.setInterval = (fn, ms, ...rest) => {
+      const id = realSetInterval(fn, ms, ...rest);
+      if (ms === 5000) flowTimers.add(id);
+      return id;
+    };
+    global.clearInterval = (id) => { flowTimers.delete(id); return realClearInterval(id); };
+    const wait = (ms = 20) => new Promise(r => setTimeout(r, ms));
+    const tileText = (kind, cls) => sRoot.querySelector(`#energyLive .energy-tile[data-flow="${kind}"] .${cls}`)?.textContent;
+
+    // A fresh first load: no previous states and nothing announced yet.
+    _flowResp = _flowCharging;
+    elNew._flowPrevStates = null;
+    elNew._flowAnnounced = {};
+    sRoot.getElementById("energyLiveAnnounce").textContent = "";
+    elNew._startEnergyFlowPoll();
+    await wait();
+    sRoot = elNew.shadowRoot;
+    const live = energyPanel("Live");
+    checks.push(["energy tab: Live is the first panel, a dl of Solar, House, Battery and Grid tiles",
+      !!live && sRoot.querySelector(".panel") === live
+      && Array.from(live.querySelectorAll("dl#energyLive dt")).map(d => d.textContent).join(",") === "Solar,House,Battery,Grid"]);
+    checks.push(["energy tab: Live tiles show W under 1000, kW with two decimals, and the state words",
+      tileText("solar", "energy-tile-w") === "3.20 kW" && tileText("house", "energy-tile-w") === "2.10 kW"
+      && tileText("battery", "energy-tile-w") === "450 W" && tileText("battery", "energy-tile-state") === "Charging · 82%"
+      && tileText("grid", "energy-tile-w") === "650 W" && tileText("grid", "energy-tile-state") === "Exporting"]);
+    checks.push(["energy tab: no aria-live on the tiles; one polite live region, silent on first load",
+      !live.querySelector("#energyLive[aria-live], #energyLive [aria-live]")
+      && live.querySelectorAll("[aria-live]").length === 1
+      && sRoot.getElementById("energyLiveAnnounce")?.getAttribute("aria-live") === "polite"
+      && sRoot.getElementById("energyLiveAnnounce")?.textContent === ""]);
+    checks.push(["energy tab: one Live poll timer runs while the tab is open", flowTimers.size === 1 && !!elNew._flowTimer]);
+    elNew._startEnergyFlowPoll();
+    elNew._render();
+    await wait();
+    sRoot = elNew.shadowRoot;
+    checks.push(["energy tab: restarting the poll or re-rendering never leaves two timers", flowTimers.size === 1]);
+
+    // A poll changes text on the same nodes and never calls _render().
+    const nodesBefore = Array.from(sRoot.querySelectorAll("#energyLive .energy-tile dd"));
+    const listBefore = sRoot.getElementById("energyLive");
+    const realRender = elNew._render;
+    let renders = 0;
+    elNew._render = function () { renders++; return realRender.apply(this, arguments); };
+    _flowResp = _flowDischarging;
+    await elNew._fetchEnergyFlow();
+    const nodesAfter = Array.from(sRoot.querySelectorAll("#energyLive .energy-tile dd"));
+    checks.push(["energy tab: a Live poll updates the existing tile nodes in place, no full render",
+      renders === 0 && sRoot.getElementById("energyLive") === listBefore
+      && nodesAfter.length === 8 && nodesAfter.every((n, i) => n === nodesBefore[i])
+      && tileText("battery", "energy-tile-w") === "1.20 kW" && tileText("battery", "energy-tile-state") === "Discharging · 80%"
+      && tileText("grid", "energy-tile-state") === "Importing"]);
+    checks.push(["energy tab: the live region announces a real battery and grid state change",
+      sRoot.getElementById("energyLiveAnnounce")?.textContent === "Battery discharging. Grid importing."]);
+    _flowResp = _flowCharging;
+    await elNew._fetchEnergyFlow();
+    checks.push(["energy tab: changing back is a different change, announced once",
+      sRoot.getElementById("energyLiveAnnounce")?.textContent === "Battery charging. Grid exporting."]);
+    sRoot.getElementById("energyLiveAnnounce").textContent = "";
+    _flowResp = _flowDischarging;
+    await elNew._fetchEnergyFlow();
+    checks.push(["energy tab: the same change is not announced again within a minute",
+      sRoot.getElementById("energyLiveAnnounce")?.textContent === ""]);
+
+    // No overlapping fetches: a tick while one is in flight is skipped.
+    const callsBefore = _flowCalls;
+    elNew._flowInFlight = true;
+    await elNew._fetchEnergyFlow();
+    elNew._flowInFlight = false;
+    checks.push(["energy tab: a Live tick is skipped while a fetch is in flight", _flowCalls === callsBefore]);
+
+    // Not configured, then an error, then back to normal.
+    _flowResp = _flowUnconfigured;
+    await elNew._fetchEnergyFlow();
+    checks.push(["energy tab: Live shows the not configured message and hides the tiles",
+      sRoot.getElementById("energyLive").hidden === true
+      && sRoot.getElementById("energyLiveMsg").hidden === false
+      && sRoot.getElementById("energyLiveMsg").textContent === "Set up solar, battery or grid in Home Assistant's Energy dashboard."]);
+    _flowResp = "error";
+    await elNew._fetchEnergyFlow();
+    checks.push(["energy tab: Live shows a short error message when nova/energy_flow fails",
+      sRoot.getElementById("energyLive").hidden === true
+      && sRoot.getElementById("energyLiveMsg").textContent === "Couldn't load live energy data."]);
+    _flowResp = _flowCharging;
+    await elNew._fetchEnergyFlow();
+    checks.push(["energy tab: Live tiles come back once data returns",
+      sRoot.getElementById("energyLive").hidden === false && sRoot.getElementById("energyLiveMsg").hidden === true
+      && tileText("solar", "energy-tile-w") === "3.20 kW"]);
+    elNew._render = realRender;
+
+    // Leaving the tab stops the timer; coming back starts exactly one.
+    Array.from(sRoot.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === "settings").click();
+    await wait();
+    checks.push(["energy tab: leaving the tab stops the Live timer", flowTimers.size === 0 && !elNew._flowTimer]);
+    const callsAway = _flowCalls;
+    await wait(30);
+    checks.push(["energy tab: no Live fetches while on another tab", _flowCalls === callsAway]);
+    Array.from(elNew.shadowRoot.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === "energy").click();
+    await wait();
+    sRoot = elNew.shadowRoot;
+    checks.push(["energy tab: returning restarts one Live timer and fetches at once",
+      flowTimers.size === 1 && _flowCalls > callsAway]);
+
+    // Hidden page stops it; visible again restarts one.
+    const setVisibility = (v) => {
+      Object.defineProperty(document, "visibilityState", { value: v, configurable: true });
+      document.dispatchEvent(new window.Event("visibilitychange"));
+    };
+    setVisibility("hidden");
+    checks.push(["energy tab: a hidden page stops the Live timer", flowTimers.size === 0 && !elNew._flowTimer]);
+    elNew._startEnergyFlowPoll();
+    checks.push(["energy tab: the Live timer will not start while the page is hidden", flowTimers.size === 0]);
+    setVisibility("visible");
+    await wait();
+    checks.push(["energy tab: a visible page restarts one Live timer", flowTimers.size === 1]);
+
+    // Disconnecting stops it too.
+    elNew.disconnectedCallback();
+    checks.push(["energy tab: disconnecting stops the Live timer", flowTimers.size === 0 && !elNew._flowTimer]);
+    elNew.connectedCallback();
+    await wait();
+    checks.push(["energy tab: reconnecting on the Energy tab restarts one Live timer", flowTimers.size === 1]);
+    delete document.visibilityState;
+
+    global.setInterval = realSetInterval;
+    global.clearInterval = realClearInterval;
+  }
 
   // Back to Settings for the cards that follow.
   Array.from(sRoot.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === "settings").click();

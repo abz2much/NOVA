@@ -304,6 +304,22 @@
     "literal_response_keys": [],
     "registered": true
   },
+  "nova/energy_flow": {
+    "admin": false,
+    "error_codes": [
+      "energy_flow_failed"
+    ],
+    "fields": {
+      "action": {
+        "options": [
+          "status"
+        ],
+        "required": true
+      }
+    },
+    "literal_response_keys": [],
+    "registered": true
+  },
   "nova/forget_knowledge": {
     "admin": true,
     "error_codes": [

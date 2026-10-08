@@ -74,6 +74,15 @@
       .metric-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px}
       .metric{background:var(--surface-2);border:1px solid var(--line-soft);border-radius:9px;padding:9px;display:flex;flex-direction:column;gap:2px}
       .metric b{font-family:var(--font-mono);font-size:14px}.metric span{font-size:10px;color:var(--ink-faint)}
+      .energy-live{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:0}
+      .energy-live[hidden]{display:none}
+      @media (max-width:760px){.energy-live{grid-template-columns:repeat(2,1fr)}}
+      .energy-tile{background:var(--surface-2);border:1px solid var(--line-soft);border-radius:9px;padding:9px;display:flex;flex-direction:column;gap:2px;min-width:0}
+      .energy-tile dt{font-size:10px;color:var(--ink-faint)}
+      .energy-tile dd{margin:0}
+      .energy-tile .energy-tile-w{font-family:var(--font-mono);font-size:16px}
+      .energy-tile .energy-tile-state{font-size:11px;color:var(--ink-dim);min-height:1em}
+      .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
       .goal-list{display:flex;flex-direction:column;gap:7px;max-height:300px;overflow:auto}
       .goal-row{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--surface-2);border:1px solid var(--line-soft);border-radius:9px;padding:9px}
       .goal-copy{min-width:0;display:flex;flex-direction:column;gap:2px}.goal-copy b{font-size:12px}.goal-copy span{font-size:11px;color:var(--ink-dim);overflow-wrap:anywhere}

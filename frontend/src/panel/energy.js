@@ -5,10 +5,29 @@
   // tab: a full _render() would wire the tab again, fetch again and loop,
   // and it would wipe an appliance row that has not been saved yet. Solar
   // comes from this._solar, which _fetchLiveData already refreshes.
+  //
+  // The Live panel polls nova/energy_flow every 5 seconds, only while this
+  // tab is open and the page is visible, and updates its tiles in place.
   _htmlEnergy() {
     const cfg = this._data()?.config || {};
     const e = this._energy || {};
+    const tile = (kind, label) => `
+            <div class="energy-tile" data-flow="${kind}">
+              <dt>${label}</dt>
+              <dd class="energy-tile-w">—</dd>
+              <dd class="energy-tile-state"></dd>
+            </div>`;
     return `
+        <div class="panel" id="energyLivePanel">
+          <div class="panel-head">
+            <div class="panel-title">Live</div>
+          </div>
+          <div class="stub-body" id="energyLiveMsg" hidden></div>
+          <dl class="energy-live" id="energyLive">${tile("solar", "Solar")}${tile("house", "House")}${tile("battery", "Battery")}${tile("grid", "Grid")}
+          </dl>
+          <div class="sr-only" id="energyLiveAnnounce" role="status" aria-live="polite"></div>
+        </div>
+
         <div class="panel">
           <div class="panel-head">
             <div class="panel-title">Energy Management</div>
@@ -249,4 +268,105 @@
     this._renderSolarPanel();
     if (this._energy) this._renderEnergyStatus();
     this._fetchEnergyStatus();
+    if (this._flow) this._renderEnergyFlow();
+    this._startEnergyFlowPoll();
+  }
+
+  // ─── Live readout ─────────────────────────────────────────────────────
+  // One timer at most: starting always stops the old one first. Leaving the
+  // tab, hiding the page and disconnecting stop it. A tick is skipped while
+  // a fetch is still in flight.
+  _startEnergyFlowPoll() {
+    this._stopEnergyFlowPoll();
+    if (!this._flowVisListener) {
+      this._flowVisListener = () => {
+        if (document.visibilityState === "hidden") this._stopEnergyFlowPoll();
+        else if (this._currentTab === "energy") this._startEnergyFlowPoll();
+      };
+      document.addEventListener("visibilitychange", this._flowVisListener);
+    }
+    if (this._currentTab !== "energy" || document.visibilityState === "hidden") return;
+    this._fetchEnergyFlow();
+    this._flowTimer = setInterval(() => this._fetchEnergyFlow(), 5000);
+  }
+
+  _stopEnergyFlowPoll() {
+    if (this._flowTimer) { clearInterval(this._flowTimer); this._flowTimer = null; }
+  }
+
+  async _fetchEnergyFlow() {
+    if (!this._hass || this._flowInFlight) return;
+    this._flowInFlight = true;
+    try {
+      this._flow = await this._hass.callWS({ type: "nova/energy_flow", action: "status" });
+    } catch (_) {
+      this._flow = { error: true };
+    } finally {
+      this._flowInFlight = false;
+    }
+    this._renderEnergyFlow();
+  }
+
+  _energyFlowWatts(w) {
+    if (w == null) return "—";
+    return w < 1000 ? `${Math.round(w)} W` : `${(w / 1000).toFixed(2)} kW`;
+  }
+
+  _energyFlowWord(state) {
+    return { charging: "Charging", discharging: "Discharging", importing: "Importing",
+      exporting: "Exporting", idle: "Idle" }[state] || "";
+  }
+
+  // Changes only the text of the existing tile nodes, never the nodes.
+  _renderEnergyFlow() {
+    const root = this.shadowRoot;
+    const list = root?.getElementById("energyLive");
+    const msg = root?.getElementById("energyLiveMsg");
+    if (!list || !msg || !this._flow) return;
+    const f = this._flow;
+    const note = f.error ? "Couldn't load live energy data."
+      : f.configured === false ? "Set up solar, battery or grid in Home Assistant's Energy dashboard."
+      : "";
+    if (msg.textContent !== note) msg.textContent = note;
+    msg.hidden = !note;
+    list.hidden = !!note;
+    if (note) return;
+    const pct = f.battery?.pct;
+    const values = {
+      solar: [f.solar?.w, ""],
+      house: [f.house?.w, ""],
+      battery: [f.battery?.w, [this._energyFlowWord(f.battery?.state), pct != null ? `${Math.round(pct)}%` : ""].filter(Boolean).join(" · ")],
+      grid: [f.grid?.w, this._energyFlowWord(f.grid?.state)],
+    };
+    Object.entries(values).forEach(([kind, [w, state]]) => {
+      const tile = list.querySelector(`.energy-tile[data-flow="${kind}"]`);
+      if (!tile) return;
+      const wEl = tile.querySelector(".energy-tile-w");
+      const stEl = tile.querySelector(".energy-tile-state");
+      const wText = this._energyFlowWatts(w);
+      if (wEl && wEl.textContent !== wText) wEl.textContent = wText;
+      if (stEl && stEl.textContent !== state) stEl.textContent = state;
+    });
+    this._announceEnergyFlow(f);
+  }
+
+  // Speaks only a real change of battery or grid state, never the first
+  // load, and the same change at most once a minute.
+  _announceEnergyFlow(f) {
+    const cur = { battery: f.battery?.state || null, grid: f.grid?.state || null };
+    const prev = this._flowPrevStates;
+    this._flowPrevStates = cur;
+    if (!prev) return;
+    if (!this._flowAnnounced) this._flowAnnounced = {};
+    const now = Date.now();
+    const lines = [];
+    ["battery", "grid"].forEach(kind => {
+      if (!cur[kind] || !prev[kind] || cur[kind] === prev[kind]) return;
+      const key = `${kind}:${prev[kind]}>${cur[kind]}`;
+      if (now - (this._flowAnnounced[key] || 0) < 60000) return;
+      this._flowAnnounced[key] = now;
+      lines.push(`${kind === "battery" ? "Battery" : "Grid"} ${this._energyFlowWord(cur[kind]).toLowerCase()}.`);
+    });
+    const region = this.shadowRoot?.getElementById("energyLiveAnnounce");
+    if (region && lines.length) region.textContent = lines.join(" ");
   }
