@@ -93,6 +93,8 @@ HAZARD_SOURCES = ("met_eireann", "us", "custom")
 HAZARD_LOCATION_RANGES = {"hazard_lat": (-90.0, 90.0),
                           "hazard_lon": (-180.0, 180.0)}
 HAZARD_COUNTIES_KEY = "hazard_counties"
+DEPARTURE_EXCLUDED_CALENDARS_KEY = "departure_excluded_calendars"
+_CALENDAR_ENTITY_ID = re.compile(r"calendar\.[a-z0-9_]+")
 HAZARD_CAP_URL_KEY = "hazard_cap_url"
 HAZARD_CAP_LIST_KEYS = ("hazard_cap_area_codes", "hazard_cap_area_names")
 
@@ -205,6 +207,10 @@ def valid_panel_value(key: str, value) -> bool:
         from .hazard_met_eireann import COUNTIES
         items = _json_string_list(value)
         return items is not None and all(c in COUNTIES for c in items)
+    if key == DEPARTURE_EXCLUDED_CALENDARS_KEY:
+        items = _json_string_list(value)
+        return items is not None and all(
+            _CALENDAR_ENTITY_ID.fullmatch(i) is not None for i in items)
     if key in HAZARD_CAP_LIST_KEYS:
         items = _json_string_list(value)
         return items is not None and all(i.strip() for i in items)
@@ -302,6 +308,8 @@ def invalid_panel_value_message(key: str) -> str:
         return f"Key '{key}' must be one of: yellow, orange, red, off"
     if key == HAZARD_SOURCE_KEY:
         return f"Key '{key}' must be one of: met_eireann, us, custom"
+    if key == DEPARTURE_EXCLUDED_CALENDARS_KEY:
+        return f"Key '{key}' must be a list of calendar entity ids"
     if key in HAZARD_LOCATION_RANGES:
         return (f"Key '{key}' must be a number from "
                 f"{_range_text(*HAZARD_LOCATION_RANGES[key])}, or empty to use home coordinates")

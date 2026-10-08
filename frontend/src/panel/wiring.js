@@ -394,6 +394,11 @@
     });
     exclAdd("newExclDomAdd", "newExclDomInput", "excluded_domains", null);
     exclAdd("newExclLabAdd", "newExclLabInput", "excluded_labels", null);
+    exclAdd("newDepCalAdd", "newDepCalInput", "departure_excluded_calendars", (v) => {
+      if (this._hass && this._hass.states && this._hass.states[v] && v.startsWith("calendar.")) return true;
+      console.warn(`Nova: "${v}" is not a known calendar`);
+      return false;
+    });
     const exclDel = (cls, key) => root.querySelectorAll("." + cls).forEach(b => {
       b.addEventListener("click", async () => {
         const arr = this._exclArr((this._data()?.config || {})[key]);
@@ -404,6 +409,7 @@
     exclDel("new-excl-ent-del", "excluded_entities");
     exclDel("new-excl-dom-del", "excluded_domains");
     exclDel("new-excl-lab-del", "excluded_labels");
+    exclDel("new-dep-cal-del", "departure_excluded_calendars");
 
     const rateLimitInput = root.getElementById("newObserverRateLimit");
     if (rateLimitInput) {

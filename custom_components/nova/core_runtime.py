@@ -409,14 +409,16 @@ async def _tick():
             except Exception:
                 pass
             # Departure reminders are due at a minute, not a 15-minute cycle,
-            # and are in-memory checks, so they run every tick.
+            # so both departure predictors run every tick. Each event's route
+            # is looked up once and reused, so a tick is mostly an in-memory
+            # check.
             preds = cognition.predict_presence(hass, now_t)
             if cycle:
                 preds += (cognition.predict(hass, now_t)
                           + cognition.predict_overdue(hass, now_t)
                           + cognition.predict_proximity(hass, now_t)
                           + cognition.predict_routine_start(hass, now_t))
-                preds += await cognition.predict_departure(hass, now_t)
+            preds += await cognition.predict_departure(hass, now_t)
             for pred in preds:
                 actions.append(pred)
                 from .websocket import nova_log

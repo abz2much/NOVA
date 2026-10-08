@@ -94,6 +94,7 @@
     "custom_base_url",
     "custom_modes",
     "departure_alerts_enabled",
+    "departure_excluded_calendars",
     "departure_lead_minutes",
     "departure_origin_entity",
     "departure_osrm_url",

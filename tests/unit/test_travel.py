@@ -7,6 +7,7 @@ import pytest
 def travel(load):
     t = load("travel")
     t._GEO_CACHE.clear()
+    t._LAST_FAILURE.clear()
     return t
 
 
@@ -88,3 +89,42 @@ async def test_geocode_fail_returns_none(travel, fake_hass, monkeypatch):
 async def test_no_origin_or_dest_returns_none(travel, fake_hass):
     assert await travel.travel_minutes(fake_hass, None, "X") is None
     assert await travel.travel_minutes(fake_hass, (1.0, 2.0), "") is None
+
+
+async def test_failure_reason_when_the_map_search_does_not_answer(travel, fake_hass, monkeypatch):
+    async def _fake_get(hass, url, params=None):
+        return None
+    monkeypatch.setattr(travel, "_get_json", _fake_get)
+    assert await travel.travel_minutes(fake_hass, (40.0, -75.0), "Nowhere") is None
+    assert travel.failure_reason("Nowhere") == "the map search service did not answer"
+
+
+async def test_failure_reason_when_the_place_is_not_found(travel, fake_hass, monkeypatch):
+    async def _fake_get(hass, url, params=None):
+        return []
+    monkeypatch.setattr(travel, "_get_json", _fake_get)
+    assert await travel.travel_minutes(fake_hass, (40.0, -75.0), "Atlantis") is None
+    assert travel.failure_reason("  atlantis ") == "the place could not be found on the map"
+
+
+async def test_failure_reason_when_routing_fails_then_clears_on_success(travel, fake_hass, monkeypatch):
+    state = {"route": None}
+
+    async def _fake_get(hass, url, params=None):
+        if url == travel.NOMINATIM_URL:
+            return [{"lat": "41.0", "lon": "-74.0"}]
+        return state["route"]
+    monkeypatch.setattr(travel, "_get_json", _fake_get)
+    assert await travel.travel_minutes(fake_hass, (40.0, -75.0), "School") is None
+    assert travel.failure_reason("School") == "the routing service did not answer"
+    state["route"] = {"code": "NoRoute"}
+    assert await travel.travel_minutes(fake_hass, (40.0, -75.0), "School") is None
+    assert travel.failure_reason("School") == "the routing service found no route"
+    state["route"] = {"code": "Ok", "routes": [{"duration": 600}]}
+    assert await travel.travel_minutes(fake_hass, (40.0, -75.0), "School") == 10.0
+    assert travel.failure_reason("School") is None
+
+
+async def test_failure_reason_when_there_is_no_origin(travel, fake_hass):
+    assert await travel.travel_minutes(fake_hass, None, "School") is None
+    assert travel.failure_reason("School") == "no starting position or no destination"
