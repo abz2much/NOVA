@@ -165,6 +165,9 @@ SERVICE_CALLERS = {
     # v8.3.0: one persistent_notification.create for the first run welcome.
     # Admin UI notice only: nothing spoken, no device actuated.
     "welcome.py",
+    # 8.9.0: google_travel_time.get_travel_times and get_transit_times, read only
+    # lookups that return route times for leave alerts. Nothing is actuated.
+    "google_travel.py",
 }
 ANNOUNCERS = {
     "__init__.py", "appliance_monitor.py", "briefing.py", "camera.py", "cognitive_core.py",

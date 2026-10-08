@@ -550,6 +550,10 @@ async def ws_get_panel_data(
                 "departure_osrm_url": _masked_url(_runtime_opt(hass, entry, "departure_osrm_url", "")),
                 "departure_travel_sensor": str(_runtime_opt(hass, entry, "departure_travel_sensor", "") or ""),
                 "departure_excluded_calendars": _get_runtime_json(hass, entry, "departure_excluded_calendars", []),
+                "departure_mode_walk": bool(_runtime_opt(hass, entry, "departure_mode_walk", True)),
+                "departure_mode_transit": bool(_runtime_opt(hass, entry, "departure_mode_transit", True)),
+                "departure_mode_drive": bool(_runtime_opt(hass, entry, "departure_mode_drive", True)),
+                "departure_use_google": bool(_runtime_opt(hass, entry, "departure_use_google", True)),
                 "identity_min_confidence": _runtime_opt(hass, entry, "identity_min_confidence", 0.45),
                 "ollama_num_ctx": _runtime_opt(hass, entry, "ollama_num_ctx", 8192),
                 "memory_threading_enabled": bool(_runtime_opt(hass, entry, "memory_threading_enabled", True)),
@@ -917,6 +921,10 @@ PANEL_WRITABLE_KEYS = {
     "departure_osrm_url",
     "departure_travel_sensor",
     "departure_excluded_calendars",  # JSON list: calendar entity_ids that never trigger a leave alert
+    "departure_mode_walk",         # bool: leave alerts say when to head out on foot
+    "departure_mode_transit",      # bool: leave alerts say when to leave for public transport
+    "departure_mode_drive",        # bool: leave alerts say when to leave by car
+    "departure_use_google",        # bool: time the modes with Google Maps Travel Time when set up
     "memory_threading_enabled",
     "memory_threading_hours",
     "memory_threading_max",

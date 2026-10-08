@@ -61,6 +61,8 @@ STRICT_BOOL_KEYS = frozenset({
     "hazard_monitor_enabled", "hazard_quakes_on", "hazard_weather_on", "hazard_disasters_on",
     "hazard_met_eireann_on", "hazard_cap_on",
     "intrusion_vision_confirm",
+    "departure_mode_walk", "departure_mode_transit", "departure_mode_drive",
+    "departure_use_google",
     "briefing_morning_enabled", "briefing_evening_enabled", "briefing_require_home",
     "suggestion_review_enabled", "adaptive_interruption_budget",
     "adaptive_suggestion_threshold", "adaptive_awareness", "tts_use_ha_voice",

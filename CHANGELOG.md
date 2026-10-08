@@ -1,3 +1,13 @@
+## [8.9.0] — leave alerts for walking, public transport and driving
+
+- **One heads up for every way of travelling.** A leave alert now says when to leave on foot, by public transport and by car, for example "Head out now if you're walking, leave in 20 minutes if you're taking public transport, or leave in 40 minutes if you're driving." The alert fires at the earliest leave time. A heads up with only a driving time reads exactly as before.
+- **Only the modes that matter.** A mode is left out when it adds nothing: public transport that Google returns as just a walk, a walk longer than an hour, or a mode switched off in Settings. Modes that leave within 3 minutes of each other read as one ("walking or driving").
+- **Still home reminders.** At each later leave time, Nova reminds you only if everyone who was home at the first alert is still home. If someone has gone, it stays quiet. A leave time the first alert already gave is not repeated. These reminders are held in memory, so a restart between the first alert and a later one drops the later one.
+- **Google Maps Travel Time.** Walking and public transport come from Home Assistant's Google Maps Travel Time actions (`get_travel_times` and `get_transit_times`), using the integration you set up. Nova never sees the Google key. Public transport is timed to arrive by the event's start. Driving also uses Google when it is set up, and falls back to the travel sensor, then the open-source router, then the default lead, as in 8.8.5.
+- **Few Google calls.** Each event is looked up once per mode and reused (walking for 6 hours, driving for 30 minutes, public transport for 40 minutes). Walking and public transport can show "no route" without a warning. Nova makes at most 40 Google lookups a day and then uses the fallbacks.
+- **Settings.** Settings, Learning & Memory, Anticipation & Memory has toggles for walking, public transport and driving, and one to switch Google lookups off. All are on by default. Without the Google integration nothing changes from 8.8.5.
+- The Decision Record now lists the minutes for each mode and how many people were home.
+
 ## [8.8.5] — leave alerts: timely, honest about failures, and per calendar
 
 **What was wrong**
