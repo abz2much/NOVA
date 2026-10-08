@@ -948,8 +948,11 @@ _DEPART_STAGES: dict = {}       # event key -> later leave times still to remind
 
 
 def _current_origin(hass):
-    """Where the user is now, for travel time: a configured origin entity, else
-    the first person with GPS coordinates, else home (v6.89.0)."""
+    """Where a journey starts, for travel time. An origin entity the owner chose
+    always wins. Otherwise home while anyone is home (a leave alert is about
+    leaving the house, so it must not be measured from wherever the first person
+    on the list happens to be, say at work), and only when nobody is home, the
+    first person with GPS coordinates, else home (v6.89.0, home first in 8.9.1)."""
     try:
         from . import nova_config
         ent = str(nova_config.get("departure_origin_entity", "") or "").strip()
@@ -959,6 +962,10 @@ def _current_origin(hass):
                 c = _entity_coords(st)
                 if c:
                     return c
+        if _people_home(hass):
+            home = _home_coords(hass)
+            if home:
+                return home
         for st in hass.states.async_all("person"):
             c = _entity_coords(st)
             if c:

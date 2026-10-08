@@ -303,3 +303,68 @@ async def test_a_switched_off_routes_api_is_retried_slowly(env):
     assert env.cog._retry_after("Google did not answer in time", 1800) == env.cog.DEPART_RETRY_AFTER
     assert env.cog._retry_after("Google found no walk route", 21600) == 21600
     assert env.cog._retry_after(None, 1800) == env.cog.DEPART_RETRY_AFTER
+
+
+# ── where a journey starts ──────────────────────────────────────────────────
+
+HOME = (53.607, -6.209)
+WORK = (53.350, -6.260)
+
+
+@pytest.fixture
+def origin(load, monkeypatch, fake_hass):
+    cog = load("cognition")
+    nc = load("nova_config")
+    cfg = {}
+    monkeypatch.setattr(nc, "get", lambda k, d=None: cfg.get(k, d))
+    fake_hass.states.set("zone.home", "0", latitude=HOME[0], longitude=HOME[1])
+    return types.SimpleNamespace(cog=cog, cfg=cfg, hass=fake_hass)
+
+
+def _person(hass, name, state, where):
+    hass.states.set("person." + name, state, latitude=where[0], longitude=where[1])
+
+
+def test_the_journey_starts_from_home_while_anyone_is_home(origin):
+    _person(origin.hass, "abi", "not_home", WORK)       # first on the list, at work
+    _person(origin.hass, "sam", "home", HOME)
+    assert origin.cog._current_origin(origin.hass) == HOME
+
+
+def test_when_nobody_is_home_it_starts_from_the_first_person_with_a_position(origin):
+    _person(origin.hass, "abi", "not_home", WORK)
+    _person(origin.hass, "sam", "not_home", (53.0, -6.0))
+    assert origin.cog._current_origin(origin.hass) == WORK
+
+
+def test_an_origin_tracker_the_owner_chose_wins_even_with_someone_home(origin):
+    _person(origin.hass, "abi", "not_home", WORK)
+    _person(origin.hass, "sam", "home", HOME)
+    origin.cfg["departure_origin_entity"] = "person.abi"
+    assert origin.cog._current_origin(origin.hass) == WORK
+
+
+def test_a_chosen_tracker_with_no_position_falls_back_to_home_while_someone_is_home(origin):
+    origin.hass.states.set("device_tracker.old_phone", "unknown")
+    _person(origin.hass, "sam", "home", HOME)
+    _person(origin.hass, "abi", "not_home", WORK)
+    origin.cfg["departure_origin_entity"] = "device_tracker.old_phone"
+    assert origin.cog._current_origin(origin.hass) == HOME
+
+
+def test_a_home_with_only_device_trackers_still_starts_from_home(origin):
+    origin.hass.states.set("device_tracker.phone", "home", latitude=53.1, longitude=-6.1)
+    assert origin.cog._current_origin(origin.hass) == HOME
+
+
+def test_without_a_home_position_someone_home_uses_their_position(origin):
+    origin.hass.states.remove("zone.home")
+    origin.hass.config = types.SimpleNamespace(time_zone="Europe/Dublin")   # no latitude or longitude
+    _person(origin.hass, "sam", "home", (53.2, -6.3))
+    assert origin.cog._current_origin(origin.hass) == (53.2, -6.3)
+
+
+def test_with_no_position_anywhere_there_is_no_origin(origin):
+    origin.hass.states.remove("zone.home")
+    origin.hass.config = types.SimpleNamespace(time_zone="Europe/Dublin")
+    assert origin.cog._current_origin(origin.hass) is None
