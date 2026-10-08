@@ -29,7 +29,8 @@ import time
 from typing import Optional
 
 from .solar import (
-    _daily_sum, _grid_direction, _grid_sensors, _live_pct, _live_watts, _read_prefs,
+    _daily_sum, _energy_to_kwh, _grid_direction, _grid_sensors, _live_pct, _live_watts,
+    _read_prefs,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -342,11 +343,12 @@ def _clock() -> float:
 
 
 async def _sum_totals(hass, entity_ids: list) -> Optional[float]:
-    """Today's kWh across cumulative total sensors: 0 with none configured,
-    None if any one could not be read."""
+    """Today's kWh across cumulative total sensors, each converted from its
+    own unit (solar._energy_to_kwh): 0 with none configured, None if any
+    one could not be read or has a unit that cannot be trusted."""
     total = 0.0
     for eid in entity_ids:
-        v = await _daily_sum(hass, eid)
+        v = _energy_to_kwh(hass, eid, await _daily_sum(hass, eid))
         if v is None:
             return None
         total += v

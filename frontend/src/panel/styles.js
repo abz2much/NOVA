@@ -82,8 +82,8 @@
       .energy-tile dd{margin:0}
       .energy-tile .energy-tile-w{font-family:var(--font-mono);font-size:16px}
       .energy-tile .energy-tile-state{font-size:11px;color:var(--ink-dim);min-height:1em}
-      .energy-flow-wrap{margin:0 0 10px}
-      .energy-flow{display:block;width:100%;height:auto;--c-solar:var(--gold);--c-grid:#6ea8ff;--c-house:var(--ember);--c-battery:#2aa198}
+      .energy-flow-wrap{margin:0 0 10px;display:flex;justify-content:center}
+      .energy-flow{display:block;width:100%;height:auto;max-height:clamp(220px,38vh,320px);margin:0 auto;--c-solar:var(--gold);--c-grid:#6ea8ff;--c-house:var(--ember);--c-battery:#2aa198}
       .energy-flow .flow[data-flow="solar"]{--flow-c:var(--c-solar)}
       .energy-flow .flow[data-flow="grid"]{--flow-c:var(--c-grid)}
       .energy-flow .flow[data-flow="battery"]{--flow-c:var(--c-battery)}
@@ -111,6 +111,12 @@
         stroke-dasharray:var(--batt-pct,0) 100;transition:stroke-dasharray .6s ease}
       .energy-flow .battery-arc[data-pct="none"]{opacity:0}
       .energy-flow-summary{margin:0 0 10px}
+      @media (min-width:900px){
+        .energy-live-grid{display:grid;grid-template-columns:1.4fr 1fr;gap:16px;align-items:center}
+        .energy-live-grid:has(> .energy-live-main > .energy-flow-wrap[hidden]){display:block}
+        .energy-live-side .energy-live{grid-template-columns:repeat(2,1fr)}
+        .energy-live-main .energy-flow-wrap{margin:0}
+      }
       .energy-flow-summary[hidden],.energy-flow-wrap[hidden]{display:none}
       #energyTodayPanel[hidden],#energyBatteryPanel[hidden],.energy-today[hidden],.battery-line[hidden]{display:none}
       .energy-today{grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}

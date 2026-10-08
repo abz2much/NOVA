@@ -170,10 +170,14 @@ _TOTALS = {"sensor.pv_east": 7.0, "sensor.pv_west": 5.0,
            "sensor.grid_in": 3.0, "sensor.grid_out": 5.0}
 
 
+# Every total sensor above reports kWh (units are tested separately).
+_KWH = _Hass({eid: _State("0", unit="kWh") for eid in [*_TOTALS, "sensor.grid_in2"]})
+
+
 async def test_today_sums_every_source_of_each_type(ef, monkeypatch):
     _stub_prefs(ef, monkeypatch, _SOURCES)
     _stub_totals(ef, monkeypatch, _TOTALS)
-    out = await ef.energy_flow_today(_Hass())
+    out = await ef.energy_flow_today(_KWH)
     assert out == {
         "configured": True, "solar_kwh": 12.0, "grid_import_kwh": 3.0,
         "grid_export_kwh": 5.0, "battery_charged_kwh": 4.0,
@@ -188,7 +192,7 @@ async def test_today_reads_the_nested_grid_layout(ef, monkeypatch):
         "flow_to": [{"stat_energy_to": "sensor.grid_out"}],
     }])
     _stub_totals(ef, monkeypatch, {**_TOTALS, "sensor.grid_in2": 0.5})
-    out = await ef.energy_flow_today(_Hass())
+    out = await ef.energy_flow_today(_KWH)
     assert out["grid_import_kwh"] == 3.5 and out["grid_export_kwh"] == 5.0
     assert out["battery_charged_kwh"] == 0.0     # not configured counts as 0
     assert out["home_kwh"] == 5.5
@@ -204,7 +208,7 @@ async def test_today_reads_the_nested_grid_layout(ef, monkeypatch):
 async def test_today_one_unreadable_total_makes_its_value_and_home_none(ef, monkeypatch, missing, key):
     _stub_prefs(ef, monkeypatch, _SOURCES)
     _stub_totals(ef, monkeypatch, {k: v for k, v in _TOTALS.items() if k != missing})
-    out = await ef.energy_flow_today(_Hass())
+    out = await ef.energy_flow_today(_KWH)
     assert out[key] is None
     assert out["home_kwh"] is None and out["self_sufficiency_pct"] is None
     assert out["configured"] is True
@@ -213,17 +217,17 @@ async def test_today_one_unreadable_total_makes_its_value_and_home_none(ef, monk
 async def test_today_unconfigured_and_prefs_missing(ef, monkeypatch):
     _stub_prefs(ef, monkeypatch, None)
     _stub_totals(ef, monkeypatch, {})
-    assert await ef.energy_flow_today(_Hass()) == ef.empty_today()
+    assert await ef.energy_flow_today(_KWH) == ef.empty_today()
     ef._today_cache.clear()
     _stub_prefs(ef, monkeypatch, [{"type": "gas", "stat_energy_from": "sensor.gas"}])
-    assert (await ef.energy_flow_today(_Hass()))["configured"] is False
+    assert (await ef.energy_flow_today(_KWH))["configured"] is False
 
 
 async def test_today_never_raises_and_flags_the_error(ef, monkeypatch):
     async def boom(hass):
         raise RuntimeError("prefs exploded")
     monkeypatch.setattr(ef, "_read_prefs", boom)
-    out = await ef.energy_flow_today(_Hass())
+    out = await ef.energy_flow_today(_KWH)
     assert out == {**ef.empty_today(), "error": True}
     assert ef._today_cache == {}              # an error is not cached
 
@@ -235,21 +239,21 @@ async def test_today_is_cached_for_60_seconds(ef, monkeypatch):
     calls = _stub_totals(ef, monkeypatch, _TOTALS)
     clock = [1000.0]
     monkeypatch.setattr(ef, "_clock", lambda: clock[0])
-    first = await ef.energy_flow_today(_Hass())
+    first = await ef.energy_flow_today(_KWH)
     n = len(calls)
     assert n == 8
     for step in (5, 30, 59.9):
         clock[0] = 1000.0 + step
-        assert await ef.energy_flow_today(_Hass()) == first
+        assert await ef.energy_flow_today(_KWH) == first
     assert len(calls) == n                     # no recorder reads inside 60 s
     clock[0] = 1060.0
-    await ef.energy_flow_today(_Hass())
+    await ef.energy_flow_today(_KWH)
     assert len(calls) == 2 * n                 # read again after 60 s
 
 
 async def test_a_cached_result_cannot_be_changed_by_the_caller(ef, monkeypatch):
     _stub_prefs(ef, monkeypatch, _SOURCES)
     _stub_totals(ef, monkeypatch, _TOTALS)
-    first = await ef.energy_flow_today(_Hass())
+    first = await ef.energy_flow_today(_KWH)
     first["solar_kwh"] = -1
-    assert (await ef.energy_flow_today(_Hass()))["solar_kwh"] == 12.0
+    assert (await ef.energy_flow_today(_KWH))["solar_kwh"] == 12.0

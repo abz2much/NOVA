@@ -1,3 +1,8 @@
+## [8.11.1] — Energy tab: diagram size and Today units
+
+- **Diagram size.** The Energy tab flow diagram is capped in height on wide screens and sits beside its tiles from 900 px up; phones are unchanged.
+- **Today units.** Today totals now convert Wh and MWh sensors to kWh, so Home used and Self sufficiency show correctly. The daily solar report reads its totals the same way, and live power sensors in MW now read correctly too.
+
 ## [8.11.0] — Energy tab: live readout, flow diagram, today and battery
 
 - **Live readout.** The Energy tab now shows solar, house, battery and grid power, refreshed every 5 seconds while the tab is open and the page is visible. It reads Home Assistant's own Energy dashboard setup, so nothing needs to be picked in Nova. Every battery and grid source counts, not just the first.

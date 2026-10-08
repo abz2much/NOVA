@@ -26,10 +26,16 @@
             <div class="panel-meta" id="solarSufficiency">—</div>
           </div>
           <div class="stub-body" id="energyLiveMsg" hidden></div>
-          <div class="energy-flow-wrap" id="energyDiagram">${this._energyFlowSvg()}</div>
-          <div class="toggle-desc energy-flow-summary" id="solarSummary" hidden></div>
-          <dl class="energy-live" id="energyLive">${tile("solar", "Solar")}${tile("house", "House")}${tile("battery", "Battery")}${tile("grid", "Grid")}
-          </dl>
+          <div class="energy-live-grid">
+            <div class="energy-live-main">
+              <div class="energy-flow-wrap" id="energyDiagram">${this._energyFlowSvg()}</div>
+            </div>
+            <div class="energy-live-side">
+              <div class="toggle-desc energy-flow-summary" id="solarSummary" hidden></div>
+              <dl class="energy-live" id="energyLive">${tile("solar", "Solar")}${tile("house", "House")}${tile("battery", "Battery")}${tile("grid", "Grid")}
+              </dl>
+            </div>
+          </div>
           <div class="sr-only" id="energyLiveAnnounce" role="status" aria-live="polite"></div>
         </div>
 
