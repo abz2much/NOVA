@@ -99,7 +99,7 @@
             <div class="brand-mark"></div>
             <div>
               <div class="brand-name">Nova</div>
-              <div class="brand-tag">${tab === "settings" ? "Settings" : tab === "logs" ? "Logs" : tab === "memory" ? "Memory" : tab === "diagnostics" ? "Diagnostics" : tab === "intrusion" ? "Intrusion" : tab === "faces" ? "Faces" : tab === "suggestions" ? "Suggestions" : tab === "residence" ? "Residence" : "Command Center"}</div>
+              <div class="brand-tag">${tab === "settings" ? "Settings" : tab === "logs" ? "Logs" : tab === "memory" ? "Memory" : tab === "diagnostics" ? "Diagnostics" : tab === "intrusion" ? "Intrusion" : tab === "faces" ? "Faces" : tab === "suggestions" ? "Suggestions" : tab === "residence" ? "Residence" : tab === "energy" ? "Energy" : "Command Center"}</div>
             </div>
           </div>
           <nav class="top-nav">
@@ -112,11 +112,12 @@
             <button class="nav-tab${tab === "logs" ? " active" : ""}" data-tab="logs">Logs</button>
             <button class="nav-tab${tab === "diagnostics" ? " active" : ""}" data-tab="diagnostics">Diagnostics</button>
             <button class="nav-tab${tab === "memory" ? " active" : ""}" data-tab="memory">Memory</button>
+            <button class="nav-tab${tab === "energy" ? " active" : ""}" data-tab="energy">Energy</button>
           </nav>
           <button class="lockdown-control" id="lockdownControl" hidden></button>
         </div>
 
-        ${tab === "settings" ? this._htmlSettings() : tab === "logs" ? this._htmlLogs() : tab === "memory" ? this._htmlMemory() : tab === "diagnostics" ? this._htmlDiagnostics() : tab === "intrusion" ? this._htmlIntrusion() : tab === "faces" ? this._htmlFaces() : tab === "suggestions" ? this._htmlSuggestions() : tab === "residence" ? this._htmlResidence() : this._htmlDashboard()}
+        ${tab === "settings" ? this._htmlSettings() : tab === "logs" ? this._htmlLogs() : tab === "memory" ? this._htmlMemory() : tab === "diagnostics" ? this._htmlDiagnostics() : tab === "intrusion" ? this._htmlIntrusion() : tab === "faces" ? this._htmlFaces() : tab === "suggestions" ? this._htmlSuggestions() : tab === "residence" ? this._htmlResidence() : tab === "energy" ? this._htmlEnergy() : this._htmlDashboard()}
 
         <div class="footnote">NOVA COMMAND CENTER</div>
       </div>
@@ -229,14 +230,6 @@ ${this._htmlDashboardBody()}`;
             </div>
             <div class="toggle-desc" id="goalResult"></div>
           </div>
-        </div>
-
-        <div class="panel" id="solarPanel" style="max-width:1100px;margin:16px auto 0">
-          <div class="panel-head">
-            <div class="panel-title">Solar</div>
-            <div class="panel-meta" id="solarSufficiency">—</div>
-          </div>
-          <div id="solarBody" class="stub-body">Loading…</div>
         </div>
 
         <div class="panel" style="max-width:1100px;margin:16px auto 0">
