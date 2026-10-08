@@ -1,3 +1,9 @@
+## [8.10.0] — Energy tab
+
+- **New Energy tab.** Energy Management and Appliances move off Settings, and Solar moves off the Command Center, onto one Energy tab after Memory. How they work does not change.
+- **Peak threshold field.** Energy Management has a new Peak threshold (kW) field. It shows the current peak and saves it in watts. Empty or zero input is ignored.
+- **No lost edits.** Refreshing energy status or changing how much say Nova has now redraws only the status box. An appliance row you have not saved yet stays put.
+
 ## [8.9.1] — leave alerts start from home
 
 - **Journeys start from home while anyone is home.** Before, with no Origin tracker chosen, Nova measured every journey from the first person on its list who had a position, wherever they were. If that person was at work, walking, driving and public transport times were counted from work. Now a leave alert starts from home whenever someone is home. Only when nobody is home does it use the first person with a position, and then home if there is none.
