@@ -1082,7 +1082,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v8.8.5
+ * v8.9.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1159,7 +1159,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.8.5 ",
+      console.log("%c Nova Panel %c v8.9.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -5150,6 +5150,10 @@ ${this._htmlDashboardBody()}`;
       </div>`;
     return `
       ${onOff("departure_alerts_enabled", false, { label: "Departure alerts" })}
+      ${onOff("departure_mode_walk", true, { label: "Leave alerts: walking", sub: "needs Google Maps Travel Time" })}
+      ${onOff("departure_mode_transit", true, { label: "Leave alerts: public transport", sub: "needs Google Maps Travel Time" })}
+      ${onOff("departure_mode_drive", true, { label: "Leave alerts: driving" })}
+      ${onOff("departure_use_google", true, { label: "Time journeys with Google Maps Travel Time", sub: "when that integration is set up in Home Assistant" })}
       ${onOff("routine_alerts_enabled", false, { label: "Routine alerts" })}
       ${onOff("suggestion_review_enabled", false, { label: "Review suggestions with AI", sub: "checks each new learned suggestion with the Suggestion Review model (AI Models card) before showing it; sends device and room names to that provider, or keeps them at home with Ollama" })}
       ${onOff("memory_threading_enabled", false, { label: "Memory threading" })}
@@ -5187,7 +5191,7 @@ ${this._htmlDashboardBody()}`;
       <div class="mode-grid" id="newDepCalChips">${depCals.length
         ? depCals.map((e, i) => `<span class="new-pl-chip">${this._esc(e)}<button class="new-dep-cal-del" data-i="${i}" title="Remove">×</button></span>`).join("")
         : `<span class="toggle-desc">None.</span>`}</div>
-      <div class="stub-body">Departure warns when to leave for calendar events using your device location + open-source routing. Routine alerts learn per-person timing over about a week. Continued conversation keeps the mic open after a question.</div>`;
+      <div class="stub-body">Departure warns when to leave for calendar events. It lists each way of travelling you have switched on that gives a different leave time, and reminds you again at a later leave time only if everyone who was home at the first alert still is. Walking and public transport need the Google Maps Travel Time integration; driving also works from your device location + open-source routing. Routine alerts learn per-person timing over about a week. Continued conversation keeps the mic open after a question.</div>`;
   }
 
   _memoryCardBody() {

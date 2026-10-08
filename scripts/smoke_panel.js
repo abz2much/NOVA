@@ -1959,6 +1959,16 @@ setTimeout(async () => {
           && !!amCard.querySelector('input[data-cfg-key="memory_threading_hours"]');
       })()],
   );
+  checks.push(["settings tab: Anticipation & Memory has the leave alert travel mode toggles, on by default",
+    ["departure_mode_walk", "departure_mode_transit", "departure_mode_drive", "departure_use_google"].every(k => {
+      const b = sRoot.querySelector('button[data-cfg-key="' + k + '"]');
+      return !!b && b.classList.contains("on");
+    })]);
+  sRoot.querySelector('button[data-cfg-key="departure_mode_walk"]').click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["settings tab: switching leave alerts for walking off saves departure_mode_walk as false",
+    _updateConfigCalls.some(c => c.key === "departure_mode_walk" && c.value === false)]);
+  sRoot = elNew.shadowRoot;
   const memHoursInput = sRoot.querySelector('input[data-cfg-key="memory_threading_hours"]');
   memHoursInput.value = "72";
   memHoursInput.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));

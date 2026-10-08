@@ -935,7 +935,16 @@ DEPART_PREP_BUFFER_MIN = 5      # added to the computed travel-time minutes
 DEPART_LOOKAHEAD_H = 3          # only consider events starting within N hours
 DEPART_ROUTE_TTL = 1800         # reuse a worked out travel time for this long (s)
 DEPART_RETRY_AFTER = 300        # wait this long before asking again after a failure (s)
-_DEPART_TRAVEL: dict = {}       # (title, start, place, origin) -> (minutes or None, reason, asked_at)
+DEPART_WALK_TTL = 6 * 3600      # a walking time barely changes, so keep it longer (s)
+DEPART_TRANSIT_TTL = 2400       # public transport follows the timetable (s)
+DEPART_MERGE_MIN = 3            # modes that leave within this many minutes read as one
+DEPART_TRANSIT_SAME_PCT = 0.05  # transit within 5% (or 2 min) of walking is just walking
+DEPART_MAX_WALK_MIN = 60        # further than this is not a walk
+DEPART_MODE_ORDER = ("walk", "transit", "drive")
+DEPART_MODE_LABEL = {"walk": "walking", "transit": "taking public transport",
+                     "drive": "driving", "any": "heading out"}
+_DEPART_TRAVEL: dict = {}       # lookup key -> (minutes or None, reason, asked_at)
+_DEPART_STAGES: dict = {}       # event key -> later leave times still to remind about
 
 
 def _current_origin(hass):
@@ -971,42 +980,254 @@ def _excluded_calendars(nova_config) -> set:
     return {str(c) for c in raw} if isinstance(raw, (list, tuple, set)) else set()
 
 
-async def _departure_travel(hass, event_key, origin, loc, osrm_url, now):
-    """Drive minutes to an event's place, asked of the routing service once
-    and then reused (a failure is not asked again for a few minutes). Returns
-    (minutes or None, why it is None). The check runs every tick, so without
-    this the same event would be looked up every 30 seconds."""
-    from . import travel
-    key = event_key + (round(origin[0], 2), round(origin[1], 2))
-    for k in [k for k, v in _DEPART_TRAVEL.items() if now - v[2] > 3600]:
+def _retry_after(reason, ttl) -> int:
+    """How long a failed lookup is left alone. "No route" is an answer (public
+    transport may simply not exist there) so it stands as long as a success
+    would; a switched off Routes API is retried slowly; anything else soon."""
+    if reason and reason.startswith("Google found no"):
+        return ttl
+    if reason and "not enabled" in reason:
+        return 1800
+    return DEPART_RETRY_AFTER
+
+
+async def _cached_lookup(key, now, ttl, fetch, what, warn=True):
+    """A travel time asked of a service once and then reused for ttl seconds
+    (a failure is retried after DEPART_RETRY_AFTER). fetch() returns (minutes,
+    reason). The check runs every tick, so without this every event would be
+    looked up every 30 seconds. Returns (minutes or None, why it is None)."""
+    for k in [k for k, v in _DEPART_TRAVEL.items() if now - v[2] > 6 * 3600 + 60]:
         _DEPART_TRAVEL.pop(k, None)
     cached = _DEPART_TRAVEL.get(key)
     if cached:
         minutes, reason, asked = cached
-        if now - asked < (DEPART_ROUTE_TTL if minutes is not None else DEPART_RETRY_AFTER):
+        if now - asked < (ttl if minutes is not None else _retry_after(reason, ttl)):
             return minutes, reason
-    minutes = await travel.travel_minutes(hass, origin, loc, osrm_url)
-    reason = None if minutes is not None else (
-        travel.failure_reason(loc) or "no travel time came back")
-    if minutes is None and cached is None:
-        _LOGGER.warning("Departure alert: could not work out the travel time to %r (%s); "
-                        "using the default lead time instead", loc, reason)
+    minutes, reason = await fetch()
+    if minutes is None:
+        reason = reason or "no travel time came back"
+        if cached is None:
+            # Walking or public transport may simply not exist for a place, which is
+            # not worth a warning; the drive time is the one an alert depends on.
+            (_LOGGER.warning if warn else _LOGGER.debug)(
+                "Departure alert: could not work out the travel time (%s): %s", what, reason)
     _DEPART_TRAVEL[key] = (minutes, reason, now)
     return minutes, reason
+
+
+async def _osrm_drive(hass, event_key, origin, loc, osrm_url, now):
+    """Drive minutes from the open-source router (the keyless fallback)."""
+    from . import travel
+
+    async def fetch():
+        minutes = await travel.travel_minutes(hass, origin, loc, osrm_url)
+        return minutes, (None if minutes is not None else
+                         travel.failure_reason(loc) or "no travel time came back")
+    key = ("osrm",) + event_key + (round(origin[0], 2), round(origin[1], 2))
+    return await _cached_lookup(key, now, DEPART_ROUTE_TTL, fetch,
+                                "driving to %r, open-source router" % loc)
+
+
+async def _google_minutes(hass, mode, event_key, origin, loc, start_dt, now):
+    """Minutes by one mode from Google Maps Travel Time, cached. Walking and
+    driving are for 'now'; public transport is for arriving by the event."""
+    from . import google_travel
+    ttl = {"walk": DEPART_WALK_TTL, "drive": DEPART_ROUTE_TTL,
+           "transit": DEPART_TRANSIT_TTL}[mode]
+    here = (round(origin[0], 2), round(origin[1], 2))
+    key = ("google", mode, loc.strip().lower(), here)
+    if mode == "transit":
+        key += (event_key[1],)          # a timetable answer belongs to one event
+
+    async def fetch():
+        return await google_travel.route_minutes(
+            hass, mode, origin, loc, now=now,
+            arrive_by=start_dt if mode == "transit" else None)
+    return await _cached_lookup(key, now, ttl, fetch,
+                                "%s to %r, Google" % (DEPART_MODE_LABEL[mode], loc),
+                                warn=(mode == "drive"))
+
+
+def _modes_enabled(nova_config) -> list:
+    """The travel modes the owner wants in leave alerts (walk, transit, drive)."""
+    return [m for m in DEPART_MODE_ORDER
+            if bool(nova_config.get("departure_mode_" + m, True))]
+
+
+async def _departure_plan(hass, nova_config, ev, event_key, origin, osrm_url,
+                          sensor_min, lead_default, now):
+    """Minutes per mode for one event: ({mode: minutes}, drive_source,
+    drive_failure). Modes with no answer are left out. 'drive' falls back from
+    the travel sensor, to Google, to the open-source router, to nothing (the
+    default lead is then used as 'any'). Walking and public transport need
+    Google Maps Travel Time and a place on the event."""
+    from . import google_travel
+    modes = _modes_enabled(nova_config)
+    loc = ev.get("location")
+    start_dt = ev["start"]
+    google_on = (bool(nova_config.get("departure_use_google", True))
+                 and google_travel.available(hass))
+    minutes: dict = {}
+    drive_source, drive_failure = None, None
+
+    if "drive" in modes:
+        if sensor_min is not None:
+            minutes["drive"], drive_source = sensor_min, "sensor"
+        elif loc:
+            if not origin:
+                drive_failure = "Nova does not know where you are"
+            else:
+                got = None
+                if google_on:
+                    got, drive_failure = await _google_minutes(
+                        hass, "drive", event_key, origin, loc, start_dt, now)
+                    if got is not None:
+                        minutes["drive"], drive_source = got, "google"
+                if got is None:
+                    got, why = await _osrm_drive(hass, event_key, origin, loc, osrm_url, now)
+                    if got is not None:
+                        minutes["drive"], drive_source, drive_failure = got, "route", None
+                    else:
+                        drive_failure = why or drive_failure
+
+    if loc and origin and google_on:
+        for mode in ("walk", "transit"):
+            if mode in modes:
+                got, _why = await _google_minutes(hass, mode, event_key, origin, loc,
+                                                  start_dt, now)
+                if got is not None:
+                    minutes[mode] = got
+        if minutes.get("walk") is not None and minutes["walk"] > DEPART_MAX_WALK_MIN:
+            del minutes["walk"]         # too far to walk
+        walk, transit = minutes.get("walk"), minutes.get("transit")
+        if walk is not None and transit is not None and \
+                abs(transit - walk) <= max(2.0, DEPART_TRANSIT_SAME_PCT * walk):
+            del minutes["transit"]      # no real public transport, Google gave a walk
+
+    if not minutes:
+        minutes["any"] = None
+    return minutes, drive_source, drive_failure
+
+
+def _leave_groups(minutes: dict, start_dt, lead_default):
+    """The leave times for each mode, earliest first, with modes that leave
+    within DEPART_MERGE_MIN minutes of each other read as one: a list of
+    {"modes": [...], "leave_at": datetime, "lead": minutes}."""
+    rows = []
+    for mode in (*DEPART_MODE_ORDER, "any"):
+        if mode not in minutes:
+            continue
+        got = minutes[mode]
+        lead = (got + DEPART_PREP_BUFFER_MIN) if got is not None else lead_default
+        rows.append((start_dt - datetime.timedelta(minutes=lead), mode, lead))
+    rows.sort(key=lambda r: r[0])
+    groups = []
+    for leave_at, mode, lead in rows:
+        if groups and (leave_at - groups[-1]["leave_at"]) <= datetime.timedelta(
+                minutes=DEPART_MERGE_MIN):
+            groups[-1]["modes"].append(mode)
+            continue
+        groups.append({"modes": [mode], "leave_at": leave_at, "lead": lead})
+    return groups
+
+
+def _label(modes) -> str:
+    return " or ".join(DEPART_MODE_LABEL[m] for m in modes)
+
+
+def _departure_message(title, loc_str, mins_to, groups, now_dt, lead_default, failed):
+    """The spoken heads up. One driving (or unspecified) leave time keeps the
+    long standing wording; several are listed with how long until each."""
+    head = "Heads up — %s%s begins in about %d minutes" % (title, loc_str, mins_to)
+    only = groups[0]["modes"] if len(groups) == 1 else None
+    if only in (["drive"], ["any"]):
+        message = head + "; you'll want to head out."
+    else:
+        parts = []
+        for g in groups:
+            wait = int(round((g["leave_at"] - now_dt).total_seconds() / 60.0))
+            who = _label(g["modes"])
+            parts.append("head out now if you're %s" % who if wait <= 1
+                         else "leave in %d minutes if you're %s" % (wait, who))
+        text = (parts[0] if len(parts) == 1
+                else ", ".join(parts[:-1]) + ", or " + parts[-1])
+        message = head + ". " + text[0].upper() + text[1:] + "."
+    if failed:
+        message += (" I couldn't work out the travel time, so I used the usual "
+                    "%d minutes." % lead_default)
+    return message
+
+
+def _people_home(hass) -> set:
+    """Entity ids of the people (or trackers, in a home with no people) who are
+    home right now."""
+    try:
+        return {st.entity_id for st in _routine_presence_entities(hass)
+                if _is_home(st.state)}
+    except Exception:
+        return set()
+
+
+def _departure_followups(hass, now, now_dt, today):
+    """Later leave times of an event already announced. At each one, remind
+    only if everyone who was home at the first alert is still home. Marks each
+    one done either way so it is never raised twice. Returns at most one
+    action."""
+    for key, stage in list(_DEPART_STAGES.items()):
+        if stage["start"] <= now_dt:
+            _DEPART_STAGES.pop(key, None)
+            continue
+        for idx, group in enumerate(stage["groups"]):
+            if idx == 0 or idx in stage["done"] or group["leave_at"] > now_dt:
+                continue
+            stage["done"].add(idx)
+            ledger = "%s:%d" % (key, idx)
+            if _RECUR_ALERTED.get(ledger) == today:
+                continue
+            _RECUR_ALERTED[ledger] = today
+            home_now = _people_home(hass)
+            snapshot = stage["home"]
+            if snapshot is None:
+                still_home = bool(home_now)       # the first alert predates a restart
+            else:
+                still_home = bool(snapshot) and snapshot <= home_now
+            if not still_home:
+                continue                          # someone has left, so no nagging
+            mins_to = max(0, int((stage["start"] - now_dt).total_seconds() // 60))
+            decision_id = _log_decision(
+                "anticipation_departure",
+                {"event": stage["title"], "minutes_until": mins_to,
+                 "modes": group["modes"], "everyone_still_home": True},
+                {"predicted": "still at home when it is time to leave"},
+                "remind about the later leave time",
+                "everyone home at the first alert is still home",
+            )
+            return [{
+                "type": "anticipation_departure", "urgency": "low",
+                "message": ("%s begins in about %d minutes and everyone is still home. "
+                            "If you're %s, it's time to leave." % (
+                                stage["title"], mins_to, _label(group["modes"]))),
+                "pattern_key": ledger, "offer": False, "decision_id": decision_id,
+            }]
+    return []
 
 
 async def predict_departure(hass, now: float = None) -> list:
     """Leave-time anticipation ("leave now, sir"): for the nearest upcoming
     timed calendar event, warn once when it's time to head out.
 
-    Travel time is computed from device tracking (your live location) to the
-    event's geocoded location via open-source geocoding + routing (Nominatim +
-    OSRM, keyless) — see travel.py. An explicit travel-time sensor is used
-    instead if you've set one; failing everything, a configurable default lead
-    is used, and the alert says so when a lookup was tried and failed. Calendars
-    in departure_excluded_calendars are ignored. Returns action dicts for the
+    The heads up covers each travel mode the owner enabled (walking, public
+    transport, driving) that Nova can time, saying how long until each one
+    needs to leave; modes that leave within a few minutes of each other read as
+    one. Walking and public transport come from Home Assistant's Google Maps
+    Travel Time actions (google_travel.py). Driving uses a travel sensor, else
+    Google, else open-source geocoding and routing (travel.py), else the default
+    lead, and the alert says so when a lookup was tried and failed. After the
+    first alert, each later leave time is reminded about only if everyone who
+    was home at the first alert is still home. Calendars in
+    departure_excluded_calendars are ignored. Returns action dicts for the
     gated announce path. One alert per event per day. Async (does network, but
-    each event's travel time is cached); never raises.
+    every lookup is cached and Google lookups have a daily limit); never raises.
     """
     now = now or time.time()
     out = []
@@ -1019,7 +1240,12 @@ async def predict_departure(hass, now: float = None) -> list:
                                DEFAULT_DEPART_LEAD_MIN) or DEFAULT_DEPART_LEAD_MIN)
         except Exception:
             lead_default = DEFAULT_DEPART_LEAD_MIN
-        # optional explicit travel-time sensor override (minutes)
+        now_dt = datetime.datetime.fromtimestamp(now)
+        today = _local_day(now)
+        followups = _departure_followups(hass, now, now_dt, today)
+        if followups:
+            return followups
+        # optional explicit travel-time sensor override (minutes, driving)
         sensor_min = None
         travel_entity = str(nova_config.get("departure_travel_sensor", "") or "").strip()
         if travel_entity and hass is not None:
@@ -1039,8 +1265,6 @@ async def predict_departure(hass, now: float = None) -> list:
                   and e.get("calendar") not in excluded]
         events.sort(key=lambda e: e["start"])
 
-        now_dt = datetime.datetime.fromtimestamp(now)
-        today = _local_day(now)
         for ev in events:
             start_dt = ev["start"]
             if start_dt <= now_dt:
@@ -1051,48 +1275,47 @@ async def predict_departure(hass, now: float = None) -> list:
             key = "depart:%s:%s" % (title, start_dt.strftime("%Y%m%d%H%M"))
             if _RECUR_ALERTED.get(key) == today:
                 continue  # already told today: no need to work out the route again
-            # travel minutes: explicit sensor > OSS route(origin -> location) > default
-            travel_min = sensor_min
-            lead_source = "sensor" if sensor_min is not None else None
-            failed_reason = None
             loc = ev.get("location")
-            if travel_min is None and loc:
-                if origin:
-                    travel_min, failed_reason = await _departure_travel(
-                        hass, (title, key, loc), origin, loc, osrm_url, now)
-                else:
-                    failed_reason = "Nova does not know where you are"
-                if travel_min is not None:
-                    lead_source = "route"
-            lead = (travel_min + DEPART_PREP_BUFFER_MIN) if travel_min is not None else lead_default
-            if lead_source is None:
-                lead_source = "default"
-            leave_at = start_dt - datetime.timedelta(minutes=lead)
-            if now_dt < leave_at:
+            minutes, drive_source, failed_reason = await _departure_plan(
+                hass, nova_config, ev, (title, key), origin, osrm_url,
+                sensor_min, lead_default, now)
+            groups = _leave_groups(minutes, start_dt, lead_default)
+            if now_dt < groups[0]["leave_at"]:
                 continue  # not time to leave yet
             _RECUR_ALERTED[key] = today
             mins_to = max(0, int((start_dt - now_dt).total_seconds() // 60))
             loc_str = (" at %s" % loc) if loc else ""
+            lead_from = ("default" if "any" in minutes else
+                         drive_source if minutes.keys() == {"drive"} else "modes")
+            lead_from = lead_from or "default"
+            home = _people_home(hass)
+            # Leave times the message just said are due ("head out now") are not
+            # repeated half a minute later.
+            covered = {i for i, g in enumerate(groups) if i > 0 and int(round(
+                (g["leave_at"] - now_dt).total_seconds() / 60.0)) <= 1}
+            _DEPART_STAGES[key] = {"title": title, "start": start_dt, "groups": groups,
+                                   "home": home, "done": covered}
             decision_id = _log_decision(
                 "anticipation_departure",
                 {"event": title, "location": loc or None, "minutes_until": mins_to,
-                 "lead_minutes": round(lead), "lead_from": lead_source,
-                 "travel_lookup_failed": failed_reason},
+                 "lead_minutes": round(groups[0]["lead"]), "lead_from": lead_from,
+                 "travel_lookup_failed": failed_reason,
+                 "minutes_by_mode": {m: v for m, v in minutes.items() if v is not None},
+                 "people_home": len(home)},
                 {"predicted": "departure imminent — should leave soon"},
                 "announce departure heads-up",
                 "upcoming calendar event + %s" % {
                     "sensor": "travel sensor reading",
                     "route": "estimated drive time",
-                    "default": "default lead time"}[lead_source],
+                    "google": "Google travel times",
+                    "modes": "travel times by mode",
+                    "default": "default lead time"}.get(lead_from, "travel time"),
             )
-            message = ("Heads up — %s%s begins in about %d minutes; "
-                       "you'll want to head out." % (title, loc_str, mins_to))
-            if failed_reason:
-                message += (" I couldn't work out the travel time, so I used the usual "
-                            "%d minutes." % lead_default)
+            note_failure = failed_reason if "any" in minutes else None
             out.append({
                 "type": "anticipation_departure", "urgency": "low",
-                "message": message,
+                "message": _departure_message(title, loc_str, mins_to, groups,
+                                              now_dt, lead_default, note_failure),
                 "pattern_key": key, "offer": False,
                 "decision_id": decision_id,
             })
