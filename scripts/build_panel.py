@@ -31,6 +31,7 @@ SOURCES = (
     "panel/memory.js",
     "panel/intrusion.js",
     "panel/faces.js",                # Faces tab: recent faces and the resident roster
+    "panel/energy.js",               # Energy tab: energy management, solar, appliances
     "panel/suggestions.js",          # suggestions and automation probation
     "panel/settings-catalogue.js",   # settings groups and cards
     "panel/residence.js",            # Residence 3D tab

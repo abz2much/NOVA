@@ -65,6 +65,7 @@
     if (this._currentTab === "memory") { this._wireMemory(); this._fetchKnowledge(); this._fetchPersonRoutines(); }
     if (this._currentTab === "intrusion") this._wireIntrusion();
     if (this._currentTab === "faces") this._wireFaces();
+    if (this._currentTab === "energy") this._wireEnergy();
     if (this._currentTab === "residence") {
       this._build3DHouseNew();
       this._wireResidenceControlsNew();
@@ -313,7 +314,6 @@
     }
 
     this._wireAiModels();
-    this._wireAppliances();
     this._wireCameraSettings();
 
     const dbtScan = root.getElementById("newDbtScan");
@@ -475,10 +475,6 @@
       this._hazFetchedOnce = true;
       this._fetchHazardStatus();
     }
-    if (!this._energyFetchedOnce) {
-      this._energyFetchedOnce = true;
-      this._fetchEnergyStatus();
-    }
     if (!this._bioFetchedOnce) {
       this._bioFetchedOnce = true;
       this._fetchBio();
@@ -503,18 +499,6 @@
         await this._fetchBio();
       });
     }
-    root.querySelectorAll("#newEnergyAgency .mode-chip[data-agency]").forEach(btn => {
-      btn.addEventListener("click", async () => {
-        if (!this._hass) return;
-        const agency = btn.getAttribute("data-agency");
-        try {
-          await this._hass.callWS({ type: "nova/energy", action: "set_agency", agency });
-        } catch (err) {
-          console.error("Nova: failed to set energy agency", err);
-        }
-        await this._fetchEnergyStatus();
-      });
-    });
     const hazScan = root.getElementById("newHazScan");
     if (hazScan) {
       hazScan.addEventListener("click", async () => {

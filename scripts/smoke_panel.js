@@ -738,7 +738,7 @@ setTimeout(async () => {
     ["settings tab renders the search box and group nav",
       !!sRoot.getElementById("settingsSearch") && sRoot.querySelectorAll(".settings-nav-btn").length === 6],
     ["settings tab has every setting card, General real",
-      sRoot.querySelectorAll(".settings-card").length === 27
+      sRoot.querySelectorAll(".settings-card").length === 25
       && /Sleep state/.test(sRoot.innerHTML) && /Announcements/.test(sRoot.innerHTML)],
     ["settings tab: General restores cognition, rich reasoning, and dashboard light controls",
       !!sRoot.querySelector('.toggle-btn[data-cfg-key="cognition_enabled"]')
@@ -1873,44 +1873,45 @@ setTimeout(async () => {
   await new Promise(r => setTimeout(r, 20));
   sRoot = elNew.shadowRoot;
 
-  // Energy Management: status fetched once (like Diagnostics/Hazard), shows
-  // current draw + running loads, and set_agency round-trips through
-  // nova/energy (not update_config — a separate, pre-existing contract).
+  // Energy Management and Appliances moved off Settings to their own top
+  // level Energy tab, with Solar moved off the Command Center (8.10.0).
+  checks.push(["settings tab: no Energy Management or Appliances card any more",
+    !Array.from(sRoot.querySelectorAll(".settings-card .panel-title")).some(t => /^(Energy Management|Appliances)$/.test(t.textContent.trim()))]);
+  {
+    const tabs = Array.from(sRoot.querySelectorAll(".nav-tab")).map(b => b.getAttribute("data-tab"));
+    checks.push(["nav: Energy tab button exists and sits after Memory, last in the bar",
+      tabs.includes("energy") && tabs.indexOf("energy") === tabs.indexOf("memory") + 1
+      && tabs.indexOf("energy") === tabs.length - 1
+      && sRoot.querySelector('.nav-tab[data-tab="energy"]')?.textContent === "Energy"]);
+  }
+  Array.from(sRoot.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === "energy").click();
   await new Promise(r => setTimeout(r, 20));
   sRoot = elNew.shadowRoot;
+  const energyPanel = (title) => Array.from(sRoot.querySelectorAll(".panel")).find(p => p.querySelector(".panel-title")?.textContent === title);
+
+  // Energy Management: status fetched on entry to the tab, shows current
+  // draw + running loads, and set_agency round-trips through nova/energy
+  // (not update_config — a separate, pre-existing contract).
   checks.push(
-    ["settings tab: Energy Management card is real and shows current draw + running loads",
+    ["energy tab: Energy Management panel is real and shows current draw + running loads",
       (() => {
-        const ec = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Energy Management/.test(c.querySelector(".panel-title")?.textContent || ""));
+        const ec = energyPanel("Energy Management");
         return !!ec && !ec.querySelector(".stub-tag")
           && /9\.2 kW/.test(ec.textContent) && /OVER PEAK/.test(ec.textContent)
           && /Dryer/.test(ec.textContent) && /Refrigerator/.test(ec.textContent)
-          && ec.querySelectorAll('#newEnergyAgency .mode-chip[data-agency]').length === 3
+          && ec.querySelectorAll('#energyStatusBody #newEnergyAgency .mode-chip[data-agency]').length === 3
           && ec.querySelector('.mode-chip[data-agency="advisory"]').classList.contains("mode-chip-on");
       })()],
   );
-  const autonomousChip = sRoot.querySelector('.mode-chip[data-agency="autonomous"]');
-  autonomousChip.click();
-  await new Promise(r => setTimeout(r, 20));
-  sRoot = elNew.shadowRoot;
-  checks.push(["settings tab: Energy Management agency change reflects live via nova/energy",
-    sRoot.querySelector('.mode-chip[data-agency="autonomous"]')?.classList.contains("mode-chip-on")]);
-  const costEntityInput = sRoot.querySelector('input[data-cfg-key="energy_cost_today_entity"]');
-  costEntityInput.value = "sensor.electricity_cost_today";
-  costEntityInput.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
-  await new Promise(r => setTimeout(r, 20));
-  checks.push(["settings tab: Energy Management cost-entity field autosaves via the generic cfg-field handler",
-    _updateConfigCalls.some(c => c.key === "energy_cost_today_entity" && c.value === "sensor.electricity_cost_today")]);
-  sRoot = elNew.shadowRoot;
 
   // Appliances: batch-edit-then-save, like Classic and AI Models — add a
   // row, fill it in, Save persists the WHOLE list as one JSON array plus a
   // nova/reload_appliances call, without wiping the row mid-edit (the
   // reason this card deliberately avoids _saveSetting's auto-render).
   checks.push(
-    ["settings tab: Appliances card is real with the declared row present",
+    ["energy tab: Appliances panel is real with the declared row present",
       (() => {
-        const ac = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Appliances/.test(c.querySelector(".panel-title")?.textContent || ""));
+        const ac = energyPanel("Appliances");
         return !!ac && !ac.querySelector(".stub-tag")
           && ac.querySelectorAll(".new-appliance-row").length === 1
           && ac.querySelector(".new-appliance-name")?.value === "Dryer";
@@ -1919,9 +1920,9 @@ setTimeout(async () => {
   // Regression guard: the dead "Announce unidentified loads" toggle (backed
   // by appliance_announce_unknown, which the announce chokepoint no longer
   // reads at all) was removed rather than left as a control with no effect.
-  checks.push(["settings tab: Appliances card no longer has the dead 'Announce unidentified loads' toggle",
+  checks.push(["energy tab: Appliances panel no longer has the dead 'Announce unidentified loads' toggle",
     (() => {
-      const ac = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Appliances/.test(c.querySelector(".panel-title")?.textContent || ""));
+      const ac = energyPanel("Appliances");
       return !!ac && !ac.querySelector("#newApplianceUnknown")
         && !/loads matching no declared appliance/.test(ac.textContent || "");
     })()],
@@ -1929,16 +1930,87 @@ setTimeout(async () => {
   const applianceAddBtn = sRoot.getElementById("newApplianceAdd");
   applianceAddBtn.click();
   const newRows = sRoot.querySelectorAll(".new-appliance-row");
-  checks.push(["settings tab: Appliances + Add appliance inserts a new row without wiping the existing one",
+  checks.push(["energy tab: Appliances + Add appliance inserts a new row without wiping the existing one",
     newRows.length === 2 && newRows[0].querySelector(".new-appliance-name").value === "Dryer"]);
   newRows[1].querySelector(".new-appliance-name").value = "Oven";
   newRows[1].querySelector(".new-appliance-watts").value = "3000";
+
+  // Changing the agency redraws only the status box: the unsaved Oven row
+  // above must survive it.
+  const autonomousChip = sRoot.querySelector('.mode-chip[data-agency="autonomous"]');
+  autonomousChip.click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["energy tab: Energy Management agency change reflects live via nova/energy",
+    elNew.shadowRoot.querySelector('.mode-chip[data-agency="autonomous"]')?.classList.contains("mode-chip-on")]);
+  checks.push(["energy tab: set_agency updates the chips without wiping an unsaved appliance row",
+    elNew.shadowRoot === sRoot
+    && sRoot.querySelectorAll(".new-appliance-row").length === 2
+    && sRoot.querySelectorAll(".new-appliance-name")[1]?.value === "Oven"]);
+
+  // Fetching energy status must never call _render(): on this tab that
+  // would loop (render, wire, fetch, render) and wipe unsaved rows.
+  {
+    const realRender = elNew._render;
+    let renders = 0;
+    elNew._render = function () { renders++; return realRender.apply(this, arguments); };
+    sRoot.getElementById("energyRefresh").click();
+    await elNew._fetchEnergyStatus();
+    await new Promise(r => setTimeout(r, 20));
+    elNew._render = realRender;
+    checks.push(["energy tab: fetching energy status does not trigger a full re-render",
+      renders === 0 && /9\.2 kW/.test(sRoot.getElementById("energyStatusBody")?.textContent || "")
+      && sRoot.querySelectorAll(".new-appliance-name")[1]?.value === "Oven"]);
+  }
+
   const applianceSaveBtn = sRoot.getElementById("newApplianceSave");
   applianceSaveBtn.click();
   await new Promise(r => setTimeout(r, 20));
-  checks.push(["settings tab: Appliances Save persists the whole list as one JSON array",
+  checks.push(["energy tab: Appliances Save persists the whole list as one JSON array",
     _updateConfigCalls.some(c => c.key === "appliance_profile"
       && c.value === JSON.stringify([{ name: "Dryer", type: "dryer", entity: "", watts: 4200 }, { name: "Oven", type: "appliance", entity: "", watts: 3000 }]))]);
+  sRoot = elNew.shadowRoot;
+
+  const costEntityInput = sRoot.querySelector('input[data-cfg-key="energy_cost_today_entity"]');
+  costEntityInput.value = "sensor.electricity_cost_today";
+  costEntityInput.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["energy tab: Energy Management cost-entity field autosaves via the generic cfg-field handler",
+    _updateConfigCalls.some(c => c.key === "energy_cost_today_entity" && c.value === "sensor.electricity_cost_today")]);
+  sRoot = elNew.shadowRoot;
+
+  // Peak threshold: shown in kW from nova/energy's peak_watts, saved in
+  // watts. Empty or non positive input saves nothing.
+  {
+    const peak = sRoot.getElementById("energyPeakKw");
+    checks.push(["energy tab: peak threshold field shows the current peak in kW (8)",
+      !!peak && peak.value === "8"]);
+    const before = _updateConfigCalls.filter(c => c.key === "energy_peak_watts").length;
+    peak.value = "0";
+    peak.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+    peak.value = "";
+    peak.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+    await new Promise(r => setTimeout(r, 20));
+    checks.push(["energy tab: empty or non positive peak input is ignored",
+      _updateConfigCalls.filter(c => c.key === "energy_peak_watts").length === before && peak.value === "8"]);
+    peak.value = "9";
+    peak.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+    await new Promise(r => setTimeout(r, 20));
+    checks.push(["energy tab: setting the peak to 9 kW saves energy_peak_watts 9000",
+      _updateConfigCalls.some(c => c.key === "energy_peak_watts" && c.value === 9000)]);
+    sRoot = elNew.shadowRoot;
+  }
+
+  checks.push(["energy tab: Solar renders here (3.2 kW, 100% self-sufficient)",
+    (() => {
+      const sp = sRoot.getElementById("solarPanel");
+      return !!sp && energyPanel("Solar") === sp
+        && /3\.2 kW/.test(sRoot.getElementById("solarBody")?.textContent || "")
+        && /100% self-sufficient/.test(sRoot.getElementById("solarSufficiency")?.textContent || "");
+    })()]);
+
+  // Back to Settings for the cards that follow.
+  Array.from(sRoot.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === "settings").click();
+  await new Promise(r => setTimeout(r, 20));
   sRoot = elNew.shadowRoot;
 
   // Anticipation & Memory: switch to Learning & Memory group, confirm it's
@@ -3018,6 +3090,8 @@ setTimeout(async () => {
   await new Promise(r => setTimeout(r, 20));
   checks.push(["switching tabs cancels the previous core animation loop instead of leaking it",
     _cafCalls >= 1]);
+  checks.push(["command center: no Solar panel any more (it moved to the Energy tab)",
+    !!elNew.shadowRoot.getElementById("areasGrid") && !elNew.shadowRoot.getElementById("solarPanel")]);
   global.cancelAnimationFrame = _realCaf;
 
   // The hero types its state word (Hello / Thinking / Goodnight) next to the

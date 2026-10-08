@@ -48,7 +48,7 @@ class NovaPanel extends HTMLElement {
     this._cameraInterval = null;
     this._cognitive = null;
     this._modeBindingsOpen = false;
-    this._currentTab = "dashboard"; // "dashboard" | "settings" | "logs" | "diagnostics" | "memory" | "intrusion" | "faces" | "suggestions" | "residence"
+    this._currentTab = "dashboard"; // "dashboard" | "settings" | "logs" | "diagnostics" | "memory" | "intrusion" | "faces" | "suggestions" | "residence" | "energy"
     this._logFilter = "all";
     this._logSearch = "";
     this._settingsSection = "general";
