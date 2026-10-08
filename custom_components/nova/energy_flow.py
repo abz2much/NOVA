@@ -27,7 +27,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from .solar import _grid_direction, _live_pct, _live_watts, _read_prefs
+from .solar import _grid_direction, _grid_sensors, _live_pct, _live_watts, _read_prefs
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -183,9 +183,18 @@ def _totals_side(hass, source: dict) -> Optional[str]:
     return {"import": "from", "export": "to"}.get(found)
 
 
+def _source_rate(hass, source: dict) -> Optional[float]:
+    """Signed watts of one battery or grid source: the sum of its rate
+    sensors in either grid layout (see solar._grid_sensors). None when it
+    has none or any one is unavailable."""
+    values = [_live_watts(hass, e) for e in _grid_sensors(source)["rates"]]
+    if not values or any(v is None for v in values):
+        return None
+    return sum(values)
+
+
 def _flows(hass, sources: list[dict]) -> list[tuple[Optional[float], Optional[str]]]:
-    return [source_flow(_live_watts(hass, s.get("stat_rate")), _totals_side(hass, s))
-            for s in sources]
+    return [source_flow(_source_rate(hass, s), _totals_side(hass, s)) for s in sources]
 
 
 async def energy_flow_status(hass) -> dict:
