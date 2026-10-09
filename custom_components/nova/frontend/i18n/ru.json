@@ -341,7 +341,6 @@
   "Checking models and saving…": "Проверка моделей и сохранение…",
   "Checking the hazard sources that are on…": "Проверка включённых источников угроз…",
   "Checking…": "Проверка…",
-  "Chinese": "Китайский",
   "Choose a starting profile or configure each role yourself. Profiles only stage changes; nothing is saved until Apply.": "Выберите начальный профиль или настройте каждую роль сами. Профили только подготавливают изменения; ничего не сохраняется до нажатия Применить.",
   "Choose the one alarm Nova uses for security decisions. Automatic lockdown is always opt in.": "Выберите одну сигнализацию, которую Nova использует для решений по безопасности. Автоматическая блокировка выключена, пока вы её не включите.",
   "Clear Property": "Очистить участок",
@@ -1118,5 +1117,7 @@
   "Boss": "Босс",
   "Friend": "Друг",
   "checks each new learned suggestion with the Suggestion Review model (AI Models card) before showing it; sends device and room names to that provider, or keeps them at home with Ollama": "проверяет каждое новое выученное предложение моделью проверки предложений (карточка Модели ИИ) перед показом; отправляет названия устройств и комнат этому поставщику или оставляет их дома с Ollama",
-  "routine alerts get Helpful / Not helpful buttons on your phone; Nova adjusts its timing only from your taps": "оповещения о привычках получают на телефоне кнопки Полезно / Бесполезно; Nova меняет время только по вашим нажатиям"
+  "routine alerts get Helpful / Not helpful buttons on your phone; Nova adjusts its timing only from your taps": "оповещения о привычках получают на телефоне кнопки Полезно / Бесполезно; Nova меняет время только по вашим нажатиям",
+  "Simplified Chinese": "Китайский (упрощённый)",
+  "Traditional Chinese": "Китайский (традиционный)"
 }

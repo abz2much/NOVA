@@ -1446,6 +1446,34 @@ if (require.main === module) setTimeout(async () => {
   await new Promise(r => setTimeout(r, 20));
   checks.push(["settings tab: Nova speaks saves output_language through nova/update_config",
     _updateConfigCalls.some(c => c.key === "output_language" && c.value === "de")]);
+  // Traditional Chinese is its own choice: picking it saves "zh-Hant", and a
+  // saved "zh-Hant" (or "zh-TW") shows as that choice, so the next save keeps
+  // it. An old saved "zh" still shows as Simplified Chinese.
+  const speaksAfter = async (saved) => {
+    PANEL.config.output_language = saved;
+    elNew._render();
+    await new Promise(r => setTimeout(r, 20));
+    return elNew.shadowRoot.querySelector('select[data-cfg-key="output_language"]');
+  };
+  let zhSel = await speaksAfter("de");
+  zhSel.value = "zh-Hant";
+  zhSel.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+  await new Promise(r => setTimeout(r, 20));
+  const savedHant = _updateConfigCalls.filter(c => c.key === "output_language").pop();
+  zhSel = await speaksAfter(savedHant && savedHant.value);
+  const hantShown = zhSel.value;
+  zhSel.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+  await new Promise(r => setTimeout(r, 20));
+  const resaved = _updateConfigCalls.filter(c => c.key === "output_language").pop();
+  const twShown = (await speaksAfter("zh-TW")).value;
+  const oldZh = await speaksAfter("zh");
+  checks.push(["settings tab: Nova speaks saves zh-Hant and a later save keeps it; an old zh is Simplified",
+    savedHant && savedHant.value === "zh-Hant" && hantShown === "zh-Hant" && resaved.value === "zh-Hant"
+    && twShown === "zh-Hant" && oldZh.value === "zh"
+    && oldZh.selectedOptions[0].textContent === "Simplified Chinese"]);
+  delete PANEL.config.output_language;
+  elNew._render();
+  sRoot = elNew.shadowRoot;
   sRoot = elNew.shadowRoot;
   const notifyOnlyToggle = sRoot.querySelector('.toggle-btn[data-cfg-key="announce_notify_only"]');
   checks.push(["settings tab: Notifications only toggle is there, off by default, and says critical still speaks",

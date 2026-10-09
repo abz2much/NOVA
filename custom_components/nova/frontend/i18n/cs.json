@@ -341,7 +341,6 @@
   "Checking models and saving…": "Kontroluji modely a ukládám…",
   "Checking the hazard sources that are on…": "Kontroluji zapnuté zdroje rizik…",
   "Checking…": "Kontroluji…",
-  "Chinese": "Čínština",
   "Choose a starting profile or configure each role yourself. Profiles only stage changes; nothing is saved until Apply.": "Vyberte výchozí profil, nebo nastavte každou roli sami. Profily změny jen připraví; nic se neuloží, dokud nestisknete Použít.",
   "Choose the one alarm Nova uses for security decisions. Automatic lockdown is always opt in.": "Vyberte jeden alarm, který Nova používá pro bezpečnostní rozhodnutí. Automatické uzamčení je vypnuté, dokud ho nezapnete.",
   "Clear Property": "Vymazat pozemek",
@@ -1118,5 +1117,7 @@
   "Boss": "Šéfe",
   "Friend": "Příteli",
   "checks each new learned suggestion with the Suggestion Review model (AI Models card) before showing it; sends device and room names to that provider, or keeps them at home with Ollama": "kontroluje každý nově naučený návrh modelem pro kontrolu návrhů (karta Modely AI), než ho zobrazí; posílá názvy zařízení a místností tomuto poskytovateli, nebo je s Ollama nechá doma",
-  "routine alerts get Helpful / Not helpful buttons on your phone; Nova adjusts its timing only from your taps": "upozornění na zvyky dostanou v telefonu tlačítka Užitečné / Neužitečné; Nova upravuje časování jen podle vašich klepnutí"
+  "routine alerts get Helpful / Not helpful buttons on your phone; Nova adjusts its timing only from your taps": "upozornění na zvyky dostanou v telefonu tlačítka Užitečné / Neužitečné; Nova upravuje časování jen podle vašich klepnutí",
+  "Simplified Chinese": "Zjednodušená čínština",
+  "Traditional Chinese": "Tradiční čínština"
 }

@@ -71,9 +71,21 @@ def base(lang: Optional[str]) -> str:
     return (lang or "en").replace("_", "-").split("-")[0].lower() or "en"
 
 
+# Chinese is named by script, so the model writes the one the household reads.
+# A plain "zh" is Simplified, as it always has been.
+_TRADITIONAL_ZH = {"hant", "tw", "hk", "mo"}
+
+
 def name(lang: Optional[str]) -> str:
     """A language's English name; an unknown code is returned as it is."""
     b = base(lang)
+    if b == "zh":
+        tags = set((lang or "").replace("_", "-").lower().split("-")[1:])
+        if tags & _TRADITIONAL_ZH:
+            if tags & {"hk", "mo"}:
+                return "Traditional Chinese"
+            return "Traditional Chinese (Taiwan wording)"
+        return "Simplified Chinese"
     return LANG_NAMES.get(b, b)
 
 

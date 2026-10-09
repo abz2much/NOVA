@@ -1082,7 +1082,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v8.19.0
+ * v8.19.1
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1159,7 +1159,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.19.0 ",
+      console.log("%c Nova Panel %c v8.19.1 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -4628,6 +4628,15 @@ ${this._htmlDashboardBody()}`;
       </div>`;
   }
 
+  // The "Nova speaks" choice for a saved code: the base language, except
+  // that Traditional Chinese keeps its own option so a save never turns it
+  // into "zh" (Simplified).
+  _outputLanguageChoice(value) {
+    const v = String(value || "auto").replace(/_/g, "-").toLowerCase();
+    if (/^zh-(.*-)?(hant|tw|hk|mo)(-|$)/.test(v)) return "zh-Hant";
+    return v.split("-")[0];
+  }
+
   _generalCardBody() {
     const cfg = this._data()?.config || {};
     const onOff = (key, label, desc) => `
@@ -4666,7 +4675,6 @@ ${this._htmlDashboardBody()}`;
             ["auto", "Auto (follow Home Assistant)"],
             ["ar", "Arabic"],
             ["ca", "Catalan"],
-            ["zh", "Chinese"],
             ["cs", "Czech"],
             ["da", "Danish"],
             ["nl", "Dutch"],
@@ -4686,14 +4694,16 @@ ${this._htmlDashboardBody()}`;
             ["pt", "Portuguese"],
             ["ro", "Romanian"],
             ["ru", "Russian"],
+            ["zh", "Simplified Chinese"],
             ["sk", "Slovak"],
             ["es", "Spanish"],
             ["sv", "Swedish"],
             ["th", "Thai"],
+            ["zh-Hant", "Traditional Chinese"],
             ["tr", "Turkish"],
             ["uk", "Ukrainian"],
             ["vi", "Vietnamese"],
-          ], String(cfg.output_language || "auto").toLowerCase().split("-")[0])}
+          ], this._outputLanguageChoice(cfg.output_language))}
         </select>
         <span class="toggle-desc">The language Nova speaks and writes in. The panel's own language is set above and is not affected. Safety notifications are translated for English, French, German, Spanish, Italian, Dutch and Portuguese only; in any other language they stay in English, while text Nova generates follows this setting.</span>
       </div>

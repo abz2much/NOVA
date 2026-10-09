@@ -1,3 +1,11 @@
+## [8.19.1] — Nova speaks Traditional Chinese
+
+- **Two Chinese choices.** Settings → General → Nova speaks now offers Simplified Chinese and Traditional Chinese. Traditional saves `zh-Hant`, and saving the settings again keeps it.
+- **The prompt names the script.** Nova is told to write in "Traditional Chinese (Taiwan wording)" or "Simplified Chinese", not just "Chinese". On Auto, Home Assistant's `zh-Hant` gives Traditional and `zh-Hans` gives Simplified.
+- **Old settings keep working.** A saved `zh` still means Simplified Chinese. No migration.
+- **Safety alerts** are unchanged: in Chinese they stay in English, as before.
+- The two option labels are translated in all 20 panel languages. No new settings or service calls.
+
 ## [8.19.0] — Chinese, and small language fixes
 
 - **Simplified and Traditional Chinese.** The panel and the setup dialog are fully translated in both. Home Assistant's `zh-Hans` loads `translations/zh-Hans.json` and the panel's `zh.json`; `zh-Hant` loads `translations/zh-Hant.json` and the panel's `zh-hant.json`. Words follow Home Assistant's own Chinese. Traditional Chinese uses Taiwan wording.

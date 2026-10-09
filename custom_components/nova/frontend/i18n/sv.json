@@ -341,7 +341,6 @@
   "Checking models and saving…": "Kontrollerar modeller och sparar…",
   "Checking the hazard sources that are on…": "Kontrollerar de påslagna riskkällorna…",
   "Checking…": "Kontrollerar…",
-  "Chinese": "Kinesiska",
   "Choose a starting profile or configure each role yourself. Profiles only stage changes; nothing is saved until Apply.": "Välj en startprofil eller ställ in varje roll själv. Profiler lägger bara ändringar på kö; inget sparas förrän Tillämpa.",
   "Choose the one alarm Nova uses for security decisions. Automatic lockdown is always opt in.": "Välj det enda larm Nova använder för säkerhetsbeslut. Automatiskt låsläge är av tills du slår på det.",
   "Clear Property": "Rensa tomt",
@@ -1118,5 +1117,7 @@
   "Boss": "Chefen",
   "Friend": "Vän",
   "checks each new learned suggestion with the Suggestion Review model (AI Models card) before showing it; sends device and room names to that provider, or keeps them at home with Ollama": "kontrollerar varje nytt inlärt förslag med modellen för förslagsgranskning (kortet AI-modeller) innan det visas; skickar enhets- och rumsnamn till den leverantören, eller behåller dem hemma med Ollama",
-  "routine alerts get Helpful / Not helpful buttons on your phone; Nova adjusts its timing only from your taps": "rutinvarningar får knapparna Hjälpsam / Inte hjälpsam i din telefon; Nova justerar sina tider bara utifrån dina tryck"
+  "routine alerts get Helpful / Not helpful buttons on your phone; Nova adjusts its timing only from your taps": "rutinvarningar får knapparna Hjälpsam / Inte hjälpsam i din telefon; Nova justerar sina tider bara utifrån dina tryck",
+  "Simplified Chinese": "Förenklad kinesiska",
+  "Traditional Chinese": "Traditionell kinesiska"
 }
