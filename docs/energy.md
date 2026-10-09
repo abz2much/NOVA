@@ -1,4 +1,4 @@
-# Nova Energy — Setup
+# Nova Energy
 
 Nova's **Energy** tab shows what your solar, battery and grid are doing, and
 looks 36 hours ahead to give a few pieces of advice. It reads Home Assistant's

@@ -28,6 +28,21 @@ Nova looks elaborate, but the floor is low. You can be talking to it in five min
 
 Everything past this point (vision, doorbell analysis, the live 3D floor plan, proactive safety) layers on top as you connect cameras and voice. None of it is required to start. Jump to [Installation](#installation) for the full walkthrough.
 
+## Guides
+
+Short guides for each main feature: what it needs, what Nova learns by itself, what it never does on its own, and the settings.
+
+- [Getting started](docs/getting-started.md): setup, AI models, where settings live, a tour of the panel
+- [Safety and security](docs/safety-and-security.md): intrusion, lockdown, things left open, smoke, leaks and freezing pipes
+- [Cameras and faces](docs/cameras-and-faces.md): doorbell, packages and mail, scene memory, faces
+- [Weather warnings](docs/weather-warnings.md): Met Éireann, the US National Weather Service, or a CAP feed
+- [Voice and speakers](docs/voice-and-speakers.md): speakers per room, broadcasts, language, how Nova addresses people
+- [Presence and alerts](docs/presence-and-alerts.md): who is home, rooms, sleep, quiet hours, mutes, excluded entities
+- [Routines and suggestions](docs/routines-and-suggestions.md): leave alerts, offers, suggested automations, briefings, modes
+- [Memory and knowledge](docs/memory-and-knowledge.md): facts, relations, documents, email, web research
+- [Voice recognition](docs/voice-recognition.md): knowing who is speaking
+- [Energy](docs/energy.md): the Energy tab and the Energy outlook
+
 ## What it does
 
 ### Voice and conversation
@@ -77,7 +92,7 @@ Proactive monitoring for freezing pipes, smoke, CO, water, unauthorized entry, a
 
 ### The dashboard
 
-**Command Center**: a warm ember/gold "stellar core" centerpiece — an animated particle core whose state (idle, reasoning, asleep) reflects what Nova is actually doing, so the dashboard looks and feels the same whether you have zero cameras or twelve. Areas show live capability icons, temperature/humidity sparklines, and a light toggle per room; Cognitive Core and standing Goals are visible beside the activity feed; authenticated Camera Watch snapshots stay collapsed until requested. Settings is reorganized around what you're doing rather than which subsystem it touches, right down to a per-person "who does Nova call whom" card. A Residence tab gives you a live, rotatable 3D house view built from the same floor plan you edit in Settings, plus an event feed and a doorbell-training view. An **Energy** tab shows live power flow between solar, the house, the battery and the grid, today's totals, the battery, and a 36 hour **Outlook** with advice, followed by **Energy Management** and **Appliances** (both moved off Settings in v8.10.0); see the [Energy setup guide](docs/energy.md). The Logs tab has four subviews — **System Log**, **Decisions**, **Spoken History**, and **Actions** — and the **Diagnostics** tab holds **Setup Doctor** and **Provider Activity**; Suggestions separates **Existing Home Assistant Automations**, **Learned Opportunities**, and **Created by Nova**.
+**Command Center**: a warm ember/gold "stellar core" centerpiece — an animated particle core whose state (idle, reasoning, asleep) reflects what Nova is actually doing, so the dashboard looks and feels the same whether you have zero cameras or twelve. Areas show live capability icons, temperature/humidity sparklines, and a light toggle per room; Cognitive Core and standing Goals are visible beside the activity feed; authenticated Camera Watch snapshots stay collapsed until requested. Settings is reorganized around what you're doing rather than which subsystem it touches, right down to a per-person "who does Nova call whom" card. A Residence tab gives you a live, rotatable 3D house view built from the same floor plan you edit in Settings, with door mapping and live room presence. Doorbell Training is a Settings card in the Cameras group. An **Energy** tab shows live power flow between solar, the house, the battery and the grid, today's totals, the battery, and a 36 hour **Outlook** with advice, followed by **Energy Management** and **Appliances** (both moved off Settings in v8.10.0); see the [Energy setup guide](docs/energy.md). The Logs tab has four subviews — **System Log**, **Decisions**, **Spoken History**, and **Actions** — and the **Diagnostics** tab holds **Setup Doctor** and **Provider Activity**; Suggestions separates **Existing Home Assistant Automations**, **Learned Opportunities**, and **Created by Nova**.
 
 <div align="center">
 <table border="0">
@@ -111,7 +126,7 @@ Everything Nova can do today, grouped by domain. In conversation these surface a
 
 **Schedule and communications**
 - Read household `calendar.*` entities, surface upcoming events, and flag overlaps and tight back-to-back transitions (`calendar_agenda`).
-- Read-only email (`read_email`): checks the inbox over IMAP, read-only by construction (opens with EXAMINE, fetches with BODY.PEEK, never marks, moves, or deletes). Fetched mail is sanitized and treated as untrusted. The password lives in `secrets.yaml`.
+- Read-only email (`read_email`): checks the inbox over IMAP, read-only by construction (opens with EXAMINE, fetches with BODY.PEEK, never marks, moves, or deletes). Fetched mail is sanitized and treated as untrusted. Set it up under **Configure → Email**; the password lives in `secrets.yaml`, under the key you name there.
 - Scheduled morning and evening briefings covering weather, calendar, overnight events, energy, and active hazards, occupancy-gated.
 - Leave alerts for upcoming calendar events. One heads up says when to leave on foot, by public transport and by car. Times come from Home Assistant's Google Maps Travel Time integration when you have it set up (Nova never sees the Google key); driving falls back to a travel sensor, then an open source router, then a default lead. Journeys start from home while anyone is home. Only events with a real place count: not a video call, an online meeting, a phone number or your own home. The toggles are in Settings → Learning & Memory → Anticipation & Memory.
 
@@ -141,7 +156,7 @@ Everything Nova can do today, grouped by domain. In conversation these surface a
 - Confirm or dismiss intrusion events and acknowledge alerts by voice (`dismiss_intrusion`, `acknowledge_alert`); optional voice confirmation before sensitive actions like unlocking.
 
 **Modes, memory, goals and suggestions**
-- Set operational modes, including custom ones (`set_mode`), and tune how much Nova acts on its own (`manage_autonomy`).
+- Set operational modes (normal, party, movie, guest, away, focus, and room scoped lab, plus custom ones) with `set_mode` or the Command Center's Operational Mode card, and tune how much Nova acts on its own (`manage_autonomy`).
 - Remember facts you tell it (`remember`), curated in the panel's Memory tab and confirmed with you before it's trusted (`confirm_pending_fact`, `reject_pending_fact`); open and track standing goals (`create_goal`, `update_goal`, `manage_goals`) and schedule follow-ups (`schedule_followup`, `manage_followups`). Goals and follow-ups later run on their own with no one present, so those runs can check, look and report back — including anything they think needs doing — but never control devices or change anything themselves.
 - Keep a small map of how people, places and things relate: propose a link (`propose_relation`), drop a pending one (`reject_pending_relation`), and look up confirmed ones (`lookup_relations`). Only a person can confirm a link, in the Memory tab.
 - Conversation continuity is scoped to the person speaking rather than searched globally, while the current conversation itself still carries shared household context — nobody's private recall becomes everyone's, but the room you're standing in isn't a stranger to Nova either.
@@ -164,7 +179,7 @@ To start, you need exactly two things:
 Optional add-ons unlock more, but none are required to begin:
 
 - *Voice*: HA OS / Supervised is recommended; Nova auto-installs the Piper, Whisper, and openWakeWord voice stack through the Supervisor. On Container/Core you'd add those yourself.
-- *Vision*: a Gemini API key for camera reasoning, plus cameras. Any HA camera works, but Frigate is the recommended backbone for detection and snapshots, and Nest cameras and doorbells are supported through it. A Eufy Security doorbell needs neither — it's detected natively, no plumbing required.
+- *Vision*: a vision capable model from any supported provider (Gemini, OpenAI, Anthropic, Groq, or a local Ollama model), plus cameras. Any HA camera works, but Frigate is the recommended backbone for detection and snapshots, and Nest cameras and doorbells are supported through it. A Eufy Security doorbell needs neither — it's detected natively, no plumbing required.
 - *Voice hardware*: ESP32-S3 satellites and any Home Assistant TTS voice.
 - *Fully local inference*: a GPU box running Ollama. In Nova's **Settings → AI Models**, enter its Ollama URL, test the connection, choose a discovered model, and apply a Local Text or Hybrid profile. No cloud account is required.
 
@@ -186,7 +201,7 @@ https://github.com/abz2much/NOVA
 
 **4. Set up voice (optional).** On Home Assistant OS / Supervised, Nova bootstraps the voice stack itself on first run: it installs and starts the Piper, Whisper, and openWakeWord add-ons, and creates an Assist pipeline with Nova as the conversation agent. On Container/Core installs, with no Supervisor, install those pieces yourself and create the pipeline through Settings → Voice Assistants.
 
-**5. Fine-tune (optional).** Advanced routing, observer mode, camera watching, and the AI-model-per-role assignments are all configured from the Nova panel under **Settings**.
+**5. Fine-tune (optional).** Most settings, including camera watching and the AI model for each role, are in the Nova panel under **Settings**. Routing (bedroom and ground floor areas, the broadcast speaker group, the phone notify service), observer mode and quiet hours, provider credentials, identity and email are under **Settings → Devices & Services → Nova → Configure**. See [Getting started](docs/getting-started.md#where-settings-live).
 
 > **Hard-refresh after updates.** The dashboard JavaScript is cached aggressively; after upgrading, refresh with `Ctrl+Shift+R` so the new panel loads.
 
@@ -307,7 +322,7 @@ A persistent problem (sustained past a configurable window, not a brief spike) c
 | `rich_reasoning` | Cloud-first judgment for medium/high-urgency events: costs a bit more, reasons better. |
 | `visitor_learning` | Silently learn from person events at the door. Never spoken. |
 | `package_detection` | Watch porch cameras for packages and mail. |
-| `cognition_threshold` | How salient an event must be before Nova escalates it. |
+| `cognition_threshold` | How salient an event must be before Nova escalates it. Only settable in `/config/nova/config.json`. |
 | `camera_event_learning` | Settings → Learning & Memory → Routine Learning. Feed Eufy/Frigate/Nest/vision detections into pattern learning. On by default; off automatically whenever Nova's learning system itself is off. |
 | `camera_event_confidence_floor` / `camera_event_dedup_window` | Minimum source-supplied confidence (0–100, floor of 0 disables filtering) and the cross-source deduplication window in seconds (default 300) for camera-event learning. |
 | `camera_historical_awareness` / `camera_awareness_min_observations` | Add repeated historical camera patterns to interactive conversation prompts, with a separate opt-out and a minimum evidence threshold from 3 to 12 observations across more than one day. Inactive whenever master learning or camera-event learning is off. |
