@@ -218,22 +218,26 @@ def _in_quiet_hours(hass) -> bool:
 
 
 def _anyone_home(hass) -> bool:
-    """Best-effort presence. Defaults to True (assume home) when undeterminable —
-    so a 'package removed while away' alert never false-fires on unknown state."""
+    """False only when the residents are confidently away (household.py).
+    Unknown counts as home, so a 'package removed while away' alert never
+    false-fires on unknown state."""
     try:
-        persons = hass.states.async_all("person")
-        if persons:
-            if any(st.state == "home" for st in persons):
-                return True
-            # All persons known and none home → away
-            if all(st.state not in ("unknown", "unavailable") for st in persons):
-                return False
-        z = hass.states.get("zone.home")
-        if z and str(z.state).isdigit():
-            return int(z.state) > 0
+        from . import household
+        return household.residents(hass) != household.AWAY
     except Exception:
-        pass
-    return True
+        return True
+
+
+async def _push_phones(hass, message: str) -> None:
+    """Push to every phone, through the path every other Nova alert uses.
+    Never raises."""
+    try:
+        from . import cognitive_core as cc
+        core = getattr(cc, "_CORE", None)
+        await cc._notify_all_devices(hass, getattr(core, "config", None),
+                                     message, "package_removed")
+    except Exception as exc:
+        _LOGGER.debug("package: phone push failed: %s", exc)
 
 
 # ── Name matching ────────────────────────────────────────────────────────────
@@ -396,14 +400,15 @@ async def evaluate(hass, groq_client, honorific, tts_entity, speakers,
     elif prev.get("package") and not det.get("package"):
         away = not _anyone_home(hass)
         _log(hass, entity_id, "removed", det, source)
-        if away and can_speak and _cooldown_open(entity_id, "removed"):
-            await async_announce(
-                hass,
-                _lead(f"a package was just removed from {loc} while no one is home."),
-                tts_entity, speakers, context="package",
-            )
+        if away and _cooldown_open(entity_id, "removed"):
+            msg = _lead(f"a package was just removed from {loc} while no one is home.")
+            # Nobody is home to hear it, so the phones get it too (8.21.0),
+            # quiet hours or not. The spoken line is unchanged.
+            await _push_phones(hass, msg)
+            if can_speak:
+                await async_announce(hass, msg, tts_entity, speakers, context="package")
+                spoke = True
             _mark_spoken(entity_id, "removed")
-            spoke = True
 
     # Mail arrival
     if det.get("mail") and not prev.get("mail"):

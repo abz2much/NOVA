@@ -22,12 +22,17 @@ needs, what it does by itself, and what it never does without you.
   nobody answers in time without that proof, it sends a softer notice asking
   you to check.
 - **Lockdown.** When the alarm is armed, Nova can lock the doors and close
-  the covers it controls. It is off until you turn it on.
+  the covers it controls. It is off until you turn it on. Doors and windows
+  it cannot close are named so you can close them by hand; a fridge or
+  cabinet door, a sensor on your exclude list, or a shed door is not.
+- **Packages.** A package taken from the door while nobody is home is sent to
+  your phones, as well as spoken.
 
 ## What it needs
 
 - [ ] **People in Home Assistant**: a person entity for each resident, with a
-  phone or other tracker. Nova uses them to know the house is empty.
+  phone or other tracker linked to it. Nova uses them to know the house is
+  empty.
 - [ ] **Motion or presence sensors indoors**, and door and window contact
   sensors.
 - [ ] **For hazards**: smoke, gas, carbon monoxide or moisture sensors. For
@@ -39,31 +44,56 @@ needs, what it does by itself, and what it never does without you.
 - [ ] **Optional: ground floor areas** in Configure, Routing, "Ground-floor
   areas (for night-time intrusion alerts)".
 
+## Who counts as home
+
+Every part of Nova (intrusion, lockdown, packages, briefings and offers)
+uses one answer to who is home:
+
+- **Home** when a person reads home, or a device tracker linked to a person
+  reads home.
+- **Away** when every person reads away (not home, or another zone).
+- **Unknown** otherwise, for example a person reading unknown. Unknown is
+  never treated as away.
+- A device tracker not linked to a person, such as a TV or a hub, does not
+  count. If you have no person entities at all, Nova uses your device
+  trackers instead.
+- Motion never decides who is home.
+
+And one answer to what the alarm means:
+
+| Alarm state | Means |
+|---|---|
+| Armed away, armed vacation | Nobody should be moving about |
+| Armed home, armed night, armed custom bypass | Residents are expected to move about |
+| Disarmed, arming, pending, disarming, triggered, unavailable | Says nothing either way |
+
 ## How intrusion decides
 
-- Intrusion only runs when everyone tracked is away, or the alarm is armed
-  away. It never runs on the mere absence of motion.
+- Intrusion only runs when the residents are away, or their presence is
+  unknown and the alarm is armed away. Someone reading home always wins. It
+  never runs on the mere absence of motion.
 - Bare motion while away is not enough. Nova also needs an open door or
   window, or an armed alarm, before it opens an investigation. Pets and robot
   vacuums are the reason.
 - At night it needs a real breach: an exterior door or window open. If you
   set ground floor areas, only those count.
 - Outdoor motion never starts an indoor intrusion.
-- A camera's car, animal or package sensor never counts. Real motion and
-  person sensors do.
+- A camera's car, animal or package sensor never counts. Nor does a motion
+  sensor on your exclude list. Real motion and person sensors do.
 - With **Require confinement for intrusion monitoring** on, Nova only watches
   while a lockdown is on or the alarm is armed.
 - Appliance and cabinet doors never count as a way in: a fridge, freezer,
   oven, dishwasher, washing machine, dryer, microwave or cabinet. Nor does
   anything on your exclude list.
-- When someone is home and the alarm is armed home or night, or the household
-  is asleep, walking from room to room never confirms an intrusion. Only the
-  alarm itself going off, or a person on camera that Nova's vision check
-  confirms, does. Armed away, vacation and everyone away work as before.
-- In that same case (someone home, armed home or night, or asleep), the first
-  "Motion at … while the house is secured" alert goes to your phone only, not
-  the speakers. Armed away, vacation, everyone away and a confirmed intrusion
-  still use the speakers.
+- When someone is home and the alarm is armed home, night or custom bypass,
+  or the household is asleep, walking from room to room never confirms an
+  intrusion. Only the alarm itself going off, or a person on camera that
+  Nova's vision check confirms, does. Armed away, vacation and everyone away
+  work as before.
+- In that same case, the first "Motion at … while the house is secured"
+  alert, and the later "couldn't reach you" notice, go to your phone only,
+  not the speakers. Armed away, vacation, everyone away and a confirmed
+  intrusion still use the speakers.
 
 On the **Intrusion** tab you can press **I'M LOOKING (HOLD)** to stop the
 automatic escalation, or **CALL OFF (FALSE ALARM)**. Calling off an intrusion
@@ -87,8 +117,8 @@ is always confirmed, and when you ask by voice it needs a tap on your phone.
 
 ## Limits
 
-- Nova only knows the house is empty from person and tracker entities, or an
-  armed alarm. Without them, intrusion stays quiet.
+- Nova only knows the house is empty from person entities and the trackers
+  linked to them, or an armed away alarm. Without them, intrusion stays quiet.
 - A scene or script that unlocks a door is not checked by the voice rule,
   because Nova cannot see inside it.
 - Freeze alerts need an outdoor temperature.
@@ -97,8 +127,8 @@ is always confirmed, and when you ask by voice it needs a tap on your phone.
 
 | You see | What it means | What to do |
 |---|---|---|
-| No intrusion alert while away | Nova did not see the house as empty, or had no open door or armed alarm to back up the motion | Check everyone's person entity reads away. |
-| Intrusion alerts while someone is home | That person has no person entity or tracker | Add one for each resident. |
+| No intrusion alert while away | Nova did not see the house as empty, or had no open door or armed alarm to back up the motion | Check everyone's person entity reads away, not unknown. |
+| Intrusion alerts while someone is home | That person has no person entity, or their phone is not linked to it | Add one for each resident and link their phone. |
 | A thermostat lock is ignored | It is not a door lock | Nothing to do. |
 | Lockdown never engages | **Automatic lockdown** is off, or the alarm entity is not the one you arm | Check **Settings → Security Alarm**. |
 | A door reminder does not come in summer | It is above 10°C outside | Nothing to do. |

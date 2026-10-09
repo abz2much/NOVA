@@ -141,16 +141,15 @@ ARRIVAL_RECENT_HOURS = 0.5
 
 # ── Arrival detection ───────────────────────────────────────────────────────
 
-def _anyone_home(hass) -> bool:
-    """True if any registered person or tracked device is home."""
+def _house_maybe_occupied(hass) -> bool:
+    """False only when the residents are confidently away (household.py).
+    A person reading unknown, or a device tracker not linked to anyone, no
+    longer decides this (8.21.0)."""
     try:
-        for dom in ("person", "device_tracker"):
-            for s in hass.states.async_all(dom):
-                if s.state == "home":
-                    return True
+        from . import household
+        return household.residents(hass) != household.AWAY
     except Exception:
-        pass
-    return False
+        return True
 
 
 def _configured_front_door() -> str:
@@ -243,7 +242,7 @@ def _on_state_changed(event: Event) -> None:
     if is_security:
         # Open windows / unlocked doors are NORMAL when a registered user is
         # home — only treat them as security-relevant when the house is empty.
-        if _anyone_home(_STATE.hass):
+        if _house_maybe_occupied(_STATE.hass):
             return
         now = time.time()
         _STATE.security_events.append(now)
@@ -402,9 +401,8 @@ async def _trigger_briefing(
     snap_summary = get_snapshot_summary(hours=recent_hours)
 
     # Check if anyone is home
-    anyone_home = any(
-        s.state == "home" for s in hass.states.async_all("person")
-    )
+    from . import household
+    anyone_home = household.residents(hass) == household.HOME
 
     # Build extra context based on reason
     extra_context = ""

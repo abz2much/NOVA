@@ -64,11 +64,17 @@ class ProactiveManager:
     def _mark_offered(self, key: str) -> None:
         self._offer_cooldowns[key] = time.time()
 
-    async def tick(self, sleeping: bool, anyone_home: bool) -> list[dict]:
+    async def tick(self, sleeping: bool, anyone_home: bool,
+                   nobody_home: Optional[bool] = None) -> list[dict]:
         """
         Evaluate comfort/efficiency opportunities. Returns a list of offer
         actions (same dict shape SafetyManager uses, with offer=True).
+
+        `nobody_home` is True only when the residents are confidently away
+        (household.py). Not given, it is taken as "not anyone_home".
         """
+        if nobody_home is None:
+            nobody_home = not anyone_home
         now = time.time()
         if (now - self._last_check) < PROACTIVE_CHECK_INTERVAL:
             return []
@@ -95,7 +101,8 @@ class ProactiveManager:
             _LOGGER.debug("Proactive stale-light check error: %s", exc)
 
         try:
-            hvac = await self._check_hvac_efficiency(anyone_home)
+            # "No one's home" is said only when that is known (8.21.0).
+            hvac = await self._check_hvac_efficiency(not nobody_home)
             if hvac:
                 offers.append(hvac)
         except Exception as exc:

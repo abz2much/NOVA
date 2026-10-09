@@ -225,35 +225,22 @@ class LockdownManager:
                 return True
         return False
 
-    def _anyone_home(self) -> bool:
-        """True if anyone is home — by tracked presence OR live occupancy. Used by
-        lockdown / efficiency checks, where active occupancy legitimately means
-        'someone is home' (these checks are not motion-triggered, so counting
-        occupancy here is safe). Intrusion deliberately does NOT use this — it uses
-        _residents_away, because an intruder's own motion would otherwise mask the
-        alarm."""
-        for st in self.hass.states.async_all("person"):
-            if str(st.state).lower() == "home":
-                return True
-        for st in self.hass.states.async_all("device_tracker"):
-            if str(st.state).lower() == "home":
-                return True
-        occ_on = ("on", "detected", "occupied", "home", "true")
-        for st in self.hass.states.async_all("binary_sensor"):
-            if (st.attributes.get("device_class") in ("occupancy", "motion", "presence")
-                    and str(st.state).lower() in occ_on):
-                return True
-        return False
-
     # ── opening / secure-state model (doors + windows + locks) ──────────────
     _DOOR_WINDOW_BS = ("door", "window", "garage_door", "opening")
     _CLOSEABLE_COVERS = {"door", "garage", "garage_door", "window", "gate"}
 
     def _open_openings(self) -> set:
-        """Every door/window currently open right now (sensors + covers)."""
+        """Every door/window currently open right now (sensors + covers).
+
+        A door or window sensor counts only when it is a way into the house
+        (household.is_way_in, 8.21.0): a fridge door, an excluded sensor or a
+        shed door is not named as a gap to close by hand. Covers keep their
+        own device class rule, so which covers lockdown closes is unchanged."""
+        from . import household
         out = set()
         for st in self.hass.states.async_all("binary_sensor"):
-            if st.attributes.get("device_class") in self._DOOR_WINDOW_BS and st.state == "on":
+            if (st.attributes.get("device_class") in self._DOOR_WINDOW_BS and st.state == "on"
+                    and household.is_way_in(self.hass, st)):
                 out.add(st.entity_id)
         for st in self.hass.states.async_all("cover"):
             if st.attributes.get("device_class") in self._CLOSEABLE_COVERS and st.state in ("open", "opening"):
