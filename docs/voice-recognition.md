@@ -1,123 +1,148 @@
-# Nova Voice Recognition — Setup
+# Nova Voice Recognition
 
-Nova can know who it's talking to by **voice**, fuse that with who's home and
-who's on camera, and **learn people's voices over time** from ordinary
-conversation. This is the setup guide.
+Nova can know who it is talking to by voice, combine that with who is home and
+who is on camera, and learn people's voices over time from ordinary
+conversation. This guide covers how to set it up.
 
-## How it's put together
+## How it fits together
 
-Nova does **not** run a speaker-embedding model inside Home Assistant — that's
-heavy, dependency-laden, and needs the raw utterance audio. Instead a dedicated
-speaker-recognition service does the embedding + enrollment and publishes *who is
-speaking* to Home Assistant; Nova **consumes** that signal and feeds it into
-its identity resolver's voice tier (the strongest tier).
+Nova does not run a voice recognition model inside Home Assistant. That would
+be heavy and would need the raw audio. Instead, a separate speaker
+recognition service does the recognition and tells Home Assistant who is
+speaking. Nova reads that and uses it as the strongest of its identity
+signals.
 
 ```
-  Voice satellite / Assist audio
+  Voice satellite or Assist audio
             │
             ▼
-  Speaker-recognition service          ← does the ML (embeddings, enrollment)
-  (VoiceBM · speaker-recognition · …)
-            │  publishes "current speaker" to HA
+  Speaker recognition service         ← does the recognition and enrolment
+            │  tells Home Assistant who is speaking
             ▼
-  binary_sensor.<person>_voice  /  sensor.current_speaker
+  binary_sensor.<person>_voice   or   sensor.current_speaker
             │
             ▼
-  Nova identity resolver  ──►  voice + presence + face  ──►  who you are
+  Nova's identity resolver: voice + presence + face  ──►  who you are
 ```
 
-You supply the service; Nova supplies the fusion and the personalization
-(per-person memory, routines, command attribution) it already has.
+You supply the service. Nova supplies the combining and everything it already
+does per person.
 
-## Step 1 — Run a speaker-recognition service
+## What it needs
 
-Any backend works as long as it surfaces the current speaker as an HA entity.
-Two good options:
+- [ ] **A speaker recognition service** that shows the current speaker as a
+  Home Assistant entity. Two that work:
+  - **VoiceBM** (`github.com/cybericebyte/VoiceBM`). Runs on the CPU and
+    publishes over MQTT with Home Assistant discovery. It gives a
+    `binary_sensor.<person>_voice` for each person, on while they speak, and a
+    current speaker sensor, plus its own enrolment flow.
+  - **speaker-recognition** (`github.com/EuleMitKeule/speaker-recognition`).
+    A Home Assistant add on and integration with a current speaker sensor,
+    and `/train` and `/recognize` endpoints.
+- [ ] **A couple of voices enrolled** in that service, following its own
+  instructions.
+- [ ] **The entity working.** In **Developer Tools → States**, check that
+  `binary_sensor.<person>_voice` turns on when that person speaks, or that
+  `sensor.current_speaker` shows a name.
 
-- **VoiceBM** — `github.com/cybericebyte/VoiceBM`. Sherpa-ONNX, **CPU-only**,
-  publishes over MQTT with HA discovery. Gives you a per-person
-  `binary_sensor.<person>_voice` (ON while they speak) and a current-speaker
-  sensor, plus a built-in enrollment/review flow. Closest fit.
-- **speaker-recognition** — `github.com/EuleMitKeule/speaker-recognition`.
-  Resemblyzer, runs as a Home Assistant **add-on** + integration exposing a
-  current-speaker sensor, with `/train` and `/recognize` REST endpoints.
+Neither service needs a GPU. Both default to the CPU.
 
-Install and enroll a couple of voices per their instructions, then confirm the
-entity exists in **Developer Tools → States** (e.g. `binary_sensor.username_voice`
-flips ON when Username speaks, or `sensor.current_speaker` shows a name).
-
-> GPU note: neither service *requires* a GPU (both default to CPU/ONNX). Your
-> Ollama GPU is free to keep serving the LLM. If you later want faster or
-> higher-accuracy embeddings, point the service's model at the GPU — that's a
-> service-side change, independent of Nova.
-
-## Step 2 — Point Nova at it
+## Point Nova at it
 
 In **Settings → Devices & Services → Nova → Configure → Identity**:
 
-- **Enable the voice tier** — turn on *voice fingerprint* (`identity_voice_fingerprint`).
-- **Voice recognition source** (`voice_recognition_source`) — one of:
-  - a glob for per-person sensors: `binary_sensor.*_voice` (VoiceBM style), or
-  - a single current-speaker sensor: `sensor.current_speaker`.
+- Turn on **Voice fingerprinting (requires a local GPU)**. This switches on the
+  voice signal. The services above still run on the CPU.
+- Set **Voice recognition source**: either a pattern for per person sensors,
+  `binary_sensor.*_voice` (the VoiceBM style), or a single current speaker
+  sensor, `sensor.current_speaker`.
 
-That's it — Nova now weights voice most heavily, and falls back to who's home /
-who's on camera when the voice is uncertain, so it degrades gracefully.
+Nova then weighs voice most heavily, and falls back to who is home and who is
+on camera when the voice is uncertain.
 
-**Confidence:** if your source publishes a confidence/score attribute Nova uses
-it (accepts 0–1 or 0–100); otherwise it uses `voice_recognition_confidence`
-(default 0.85).
+**Confidence.** If the source gives a confidence, score, probability or
+similarity attribute, Nova uses it. It accepts 0 to 1, or 0 to 100. Otherwise
+it uses `voice_recognition_confidence`, 0.85 by default.
 
-## Step 3 — Learn voices over time (hands-free enrollment)
+## What it learns by itself
 
-The service does the enrolling, but the hard part is the **label** — *who* is this
-unknown voice? Nova already knows the answer when you're the only one home or a
-camera just recognized your face. So when Nova is confident who's speaking from
-those signals but the voice service doesn't recognize the voice yet, it fires:
+The service does the enrolling, but it needs to know who an unknown voice
+belongs to. Nova often knows already: you are the only one home, or a camera
+just recognised your face. When Nova is sure who is speaking from those
+signals, but the voice service does not know the voice yet, it fires an event:
 
 ```
 event: nova_voice_enroll_candidate
-data:  { person: "username", device_id: "…" }
+data:  { person: "<person>", device_id: "…" }
 ```
 
-Wire that to your service's enrollment so profiles build themselves from normal
-conversation. Example (VoiceBM, enrolling the pending sample under the named
-person):
+Connect that event to your service's enrolment, so voices build up from
+normal conversation. An example for VoiceBM, using its enrol command:
 
 ```yaml
 automation:
-  - alias: "Nova · auto-enroll voice"
+  - alias: "Nova: auto enrol voice"
     trigger:
       - platform: event
         event_type: nova_voice_enroll_candidate
     action:
-      # Enroll VoiceBM's pending utterance under the person Nova identified.
-      # (Use your service's actual enroll service / MQTT command.)
+      # Enrol the pending sample under the person Nova identified.
+      # Use your service's own enrol action or MQTT command.
       - service: mqtt.publish
         data:
           topic: "voicebm/enroll"
           payload: "{{ trigger.event.data.person }}"
 ```
 
-For `speaker-recognition`, call its `/train` with the pending sample tagged with
-`trigger.event.data.person` instead.
+For speaker-recognition, call its `/train` with the pending sample, named
+with `trigger.event.data.person`.
 
-Auto-flagging is rate-limited (once per person per 5 minutes) and can be turned
-off with **Auto-flag voices to enroll** (`voice_recognition_auto_enroll`).
+The event fires at most once per person every 5 minutes, and can be turned
+off with **Auto-flag voices to enroll as people speak**.
 
-## Config reference
+## What it will never do on its own
 
-| Key | Default | Meaning |
+- Run voice recognition itself, or keep raw audio.
+- Name a person below the minimum confidence. It says the speaker is unknown
+  instead.
+- Enrol a voice. It only fires the event, and your automation decides.
+
+## Limits
+
+- Recognition is only as good as the service and its enrolled samples.
+- Unlocking a door or opening a garage by voice still needs a tap on your
+  phone, whoever is speaking.
+
+## Troubleshooting
+
+| You see | What it means | What to do |
 |---|---|---|
-| `identity_voice_fingerprint` | `false` | Master enable for the voice tier |
-| `voice_recognition_source` | — | Current-speaker sensor id, or a glob like `binary_sensor.*_voice` |
-| `voice_recognition_confidence` | `0.85` | Fallback score when the source carries none |
-| `voice_recognition_auto_enroll` | `true` | Fire `nova_voice_enroll_candidate` for hands-free learning |
-| `identity_min_confidence` | `0.45` | Below this, Nova says "unknown" rather than guess |
+| Nova never knows who is speaking | The voice signal is off, or the source does not match an entity | Check **Voice fingerprinting** and **Voice recognition source**. |
+| The source entity never changes | The service is not publishing | Check it in **Developer Tools → States**. |
+| Nova says "unknown" too often | The confidence is below the minimum | Lower **Minimum confidence before committing to a person**, or enrol more samples. |
+| No enrolment events | Auto flag is off, or it fired for that person in the last 5 minutes | Check **Auto-flag voices to enroll as people speak**. |
+
+## Settings
+
+**Configure → Identity**:
+
+| Setting | Key | Default | What it does |
+|---|---|---|---|
+| Recognize who's speaking | `identity_enabled` | on | Works out who is speaking at all. |
+| Voice fingerprinting (requires a local GPU) | `identity_voice_fingerprint` | off | Turns on the voice signal. |
+| Voice recognition source | `voice_recognition_source` | blank | The current speaker sensor, or a pattern such as `binary_sensor.*_voice`. |
+| Auto-flag voices to enroll as people speak | `voice_recognition_auto_enroll` | on | Fires `nova_voice_enroll_candidate`. |
+| Minimum confidence before committing to a person | `identity_min_confidence` | 0.45 | Below this, Nova says "unknown" rather than guess. |
+
+Only in `/config/nova/config.json`:
+
+| Setting | Default | What it does |
+|---|---|---|
+| `voice_recognition_confidence` | 0.85 | The score used when the source gives none. |
 
 ## How Nova uses the result
 
-Once Nova knows who's speaking, everything per-person it already does kicks in:
-commands are attributed to the right person, *their* preferences and facts surface
-(and stay private from other residents), and the routines it learns are filed
-under the right person. Voice just makes that attribution far more reliable than
-presence + face alone.
+Once Nova knows who is speaking, everything it does per person follows:
+commands are put down to the right person, their own preferences and facts
+come up (and stay private from other residents), and the routines it learns
+are filed under the right person.
