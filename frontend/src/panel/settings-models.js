@@ -2,7 +2,7 @@
     const root = this.shadowRoot;
     const markDirty = message => {
       const status = root.getElementById("aiApplyStatus");
-      if (status) status.textContent = message || "Unsaved changes.";
+      if (status) this._setText(status, message || "Unsaved changes.");
     };
     root.querySelectorAll(".new-model-row").forEach(row => {
       const provSel = row.querySelector(".new-prov-select");
@@ -56,7 +56,7 @@
         const provider = input.getAttribute("data-endpoint-provider");
         if (this._modelCatalog) delete this._modelCatalog[provider];
         const status = root.querySelector(`[data-endpoint-status="${provider}"]`);
-        if (status) status.textContent = "Endpoint changed. Test it before choosing a profile.";
+        if (status) this._setText(status, "Endpoint changed. Test it before choosing a profile.");
         markDirty();
       });
     });
@@ -69,7 +69,7 @@
         const input = root.querySelector(`.ai-endpoint[data-endpoint-provider="${provider}"]`);
         const status = root.querySelector(`[data-endpoint-status="${provider}"]`);
         button.disabled = true;
-        if (status) status.textContent = "Testing…";
+        if (status) this._setText(status, "Testing…");
         try {
           const res = await this._hass.callWS({
             type: "nova/test_provider_endpoint", provider,
@@ -86,10 +86,10 @@
               this._populateModelSelect(provider, row.querySelector(".new-model-select"), res);
             }
           });
-          if (status) status.textContent = this._t(res.models.length === 1 ? "Connected. {count} model found." : "Connected. {count} models found.", { count: res.models.length });
+          if (status) this._setText(status, this._t(res.models.length === 1 ? "Connected. {count} model found." : "Connected. {count} models found.", { count: res.models.length }));
           markDirty("Endpoint tested. Changes are not saved yet.");
         } catch (err) {
-          if (status) status.textContent = err?.message || "Could not test this endpoint.";
+          if (status) this._setText(status, err?.message || "Could not test this endpoint.");
         } finally {
           button.disabled = false;
         }
@@ -166,13 +166,13 @@
             ? customInput.value.trim() : modelSel.value;
       });
       button.disabled = true;
-      if (status) status.textContent = "Checking models and saving…";
+      if (status) this._setText(status, "Checking models and saving…");
       try {
         const res = await this._hass.callWS({ type: "nova/apply_ai_config", updates });
         if (!res || !res.ok) throw new Error((res && res.message) || "Could not apply AI settings.");
-        if (status) status.textContent = res.message || "Saved. Nova is reloading.";
+        if (status) this._setText(status, res.message || "Saved. Nova is reloading.");
       } catch (err) {
-        if (status) status.textContent = err?.message || "Could not apply AI settings.";
+        if (status) this._setText(status, err?.message || "Could not apply AI settings.");
         button.disabled = false;
       }
     });
@@ -193,7 +193,7 @@
       Array.from(sel.options).forEach(opt => {
         const base = opt.value;
         if (!(base in available)) return;
-        opt.textContent = available[base] ? base : `${base} (not configured)`;
+        this._setText(opt, available[base] ? base : this._t("{provider} (not configured)", { provider: base }));
       });
     });
   }
@@ -213,7 +213,7 @@
       root.querySelectorAll("[data-cred-status]").forEach(el => {
         const p = el.getAttribute("data-cred-status");
         const configured = !!status[p];
-        el.textContent = configured ? "configured" : "not set";
+        this._setText(el, configured ? "configured" : "not set");
         el.classList.toggle("cred-configured", configured);
       });
       this._markProviderAvailability(res && res.available);
@@ -230,7 +230,7 @@
           if (res && res.ok) {
             input.value = "";
             const statusEl = root.querySelector(`[data-cred-status="${p}"]`);
-            if (statusEl) { statusEl.textContent = "configured"; statusEl.classList.add("cred-configured"); }
+            if (statusEl) { this._setText(statusEl, "configured"); statusEl.classList.add("cred-configured"); }
             this._markProviderAvailability({ [p]: true });
           }
         } catch (err) { console.error(`Nova: failed to save credential for ${p}`, err); }
@@ -240,12 +240,12 @@
       btn.addEventListener("click", async () => {
         const p = btn.getAttribute("data-cred-provider");
         if (!this._hass) return;
-        if (!window.confirm(`Clear the stored ${p} credential? Any role still using it will stop working until a new key is set.`)) return;
+        if (!window.confirm(this._t("Clear the stored {provider} credential? Any role still using it will stop working until a new key is set.", { provider: p }))) return;
         try {
           const res = await this._hass.callWS({ type: "nova/delete_credential", provider: p });
           if (res && res.ok) {
             const statusEl = root.querySelector(`[data-cred-status="${p}"]`);
-            if (statusEl) { statusEl.textContent = "not set"; statusEl.classList.remove("cred-configured"); }
+            if (statusEl) { this._setText(statusEl, "not set"); statusEl.classList.remove("cred-configured"); }
             // custom/ollama availability isn't credential-derived (endpoint
             // / always-on respectively) — only the four cloud providers'
             // availability tracks their own credential.

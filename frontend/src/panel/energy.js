@@ -180,7 +180,7 @@
     const root = this.shadowRoot;
     const box = root?.getElementById("energyStatusBody");
     if (!box || !this._energy) return;
-    box.innerHTML = this._energyStatusHtml();
+    this._setHtml(box, this._energyStatusHtml());
     this._localizeDOM(box);
     box.querySelectorAll("#newEnergyAgency .mode-chip[data-agency]").forEach(btn => {
       btn.addEventListener("click", async () => {
@@ -269,7 +269,7 @@
         const empty = apList.querySelector(".stub-body");
         if (empty) empty.remove();
         const tmp = document.createElement("div");
-        tmp.innerHTML = this._applianceRowHtml({ name: "", type: "appliance", entity: "", watts: "" });
+        this._setHtml(tmp, this._applianceRowHtml({ name: "", type: "appliance", entity: "", watts: "" }));
         const row = tmp.firstElementChild;
         if (row) apList.appendChild(row);
       });
@@ -490,7 +490,7 @@
     if (!panel || !list || !msg || !t) return;
     panel.hidden = this._energyLiveNote() || (t.configured === false && !t.error);
     const note = t.error ? "Couldn't read energy data." : "";
-    if (msg.textContent !== note) msg.textContent = note;
+    if (msg.textContent !== note) this._setText(msg, note);
     msg.hidden = !note;
     list.hidden = !!note;
     if (note) return;
@@ -500,7 +500,7 @@
       const text = key === "self_sufficiency_pct"
         ? (v == null ? "—" : `${Math.round(v)}%`) : this._energyKwh(v);
       const dd = tile.querySelector(".energy-tile-w");
-      if (dd && dd.textContent !== text) dd.textContent = text;
+      if (dd && dd.textContent !== text) this._setText(dd, text);
     });
   }
 
@@ -524,7 +524,7 @@
     const setText = (id, t) => {
       const el = root.getElementById(id);
       if (!el) return;
-      if (el.textContent !== t) el.textContent = t;
+      if (el.textContent !== t) this._setText(el, t);
       if (el.classList.contains("battery-line")) el.hidden = !t;
     };
     const pct = b.pct != null ? Math.round(b.pct) : null;
@@ -533,16 +533,22 @@
     setText("batteryPct", pct != null ? `${pct}%` : "—");
     setText("batteryState", [word, power].filter(Boolean).join(" · "));
     setText("batteryStored", b.stored_kwh != null && b.capacity_kwh != null
-      ? `${Number(b.stored_kwh).toFixed(1)} kWh of ${Number(b.capacity_kwh).toFixed(1)} kWh` : "");
+      ? this._t("{stored} kWh of {capacity} kWh", {
+        stored: Number(b.stored_kwh).toFixed(1), capacity: Number(b.capacity_kwh).toFixed(1) }) : "");
     setText("batteryEta", b.eta_min
-      ? `About ${this._energyDuration(b.eta_min)} ${b.eta_to === "full" ? "to full" : "left"} at this rate` : "");
+      ? this._t(b.eta_to === "full" ? "About {time} to full at this rate" : "About {time} left at this rate",
+        { time: this._energyDuration(b.eta_min) }) : "");
     const fill = tank.querySelector(".tank-fill");
     const level = String(pct != null ? Math.max(0, Math.min(100, pct)) : 0);
     if (fill && fill.style.getPropertyValue("--tank-pct") !== level) fill.style.setProperty("--tank-pct", level);
-    const label = `Battery ${pct != null ? `${pct} percent` : "no reading"}${
-      b.state && b.state !== "idle" && b.w != null ? `, ${b.state} at ${this._energyFlowWatts(b.w)}`
-        : b.state === "idle" ? ", idle" : ""}.`;
-    if (tank.getAttribute("aria-label") !== label) tank.setAttribute("aria-label", label);
+    // Whole sentences for the screen reader; {state} is the backend's own word.
+    const active = b.state && b.state !== "idle" && b.w != null;
+    const idle = !active && b.state === "idle";
+    const label = this._t(pct != null
+      ? (active ? "Battery {percent} percent, {state} at {power}." : idle ? "Battery {percent} percent, idle." : "Battery {percent} percent.")
+      : (active ? "Battery no reading, {state} at {power}." : idle ? "Battery no reading, idle." : "Battery no reading."),
+    { percent: pct, state: b.state, power: active ? this._energyFlowWatts(b.w) : "" });
+    if (tank.getAttribute("aria-label") !== label) tank.setAttribute("aria-label", label);   // i18n-ok: built with _t just above
   }
 
   _stopEnergyFlowPoll() {
@@ -568,8 +574,8 @@
   }
 
   _energyFlowWord(state) {
-    return { charging: "Charging", discharging: "Discharging", importing: "Importing",
-      exporting: "Exporting", idle: "Idle" }[state] || "";
+    return this._tx({ charging: "Charging", discharging: "Discharging", importing: "Importing",
+      exporting: "Exporting", idle: "Idle" }[state] || "");
   }
 
   // Changes only the text of the existing tile nodes, never the nodes.
@@ -583,7 +589,7 @@
     const note = f.error ? "Couldn't read energy data."
       : f.configured === false ? "Set up solar, battery or grid in Home Assistant's Energy dashboard."
       : "";
-    if (msg.textContent !== note) msg.textContent = note;
+    if (msg.textContent !== note) this._setText(msg, note);
     msg.hidden = !note;
     list.hidden = !!note;
     if (diagram) diagram.hidden = !!note;
@@ -604,8 +610,8 @@
       const wEl = tile.querySelector(".energy-tile-w");
       const stEl = tile.querySelector(".energy-tile-state");
       const wText = this._energyFlowWatts(w);
-      if (wEl && wEl.textContent !== wText) wEl.textContent = wText;
-      if (stEl && stEl.textContent !== state) stEl.textContent = state;
+      if (wEl && wEl.textContent !== wText) this._setText(wEl, wText);
+      if (stEl && stEl.textContent !== state) this._setText(stEl, state);
     });
     this._announceEnergyFlow(f);
   }
@@ -616,7 +622,7 @@
   _renderEnergyDiagram(f) {
     const svg = this.shadowRoot?.getElementById("energyFlowSvg");
     if (!svg) return;
-    const setText = (el, t) => { if (el && el.textContent !== t) el.textContent = t; };
+    const setText = (el, t) => { if (el && el.textContent !== t) this._setText(el, t); };
     const setData = (el, k, v) => { if (el && el.getAttribute(k) !== v) el.setAttribute(k, v); };
     const setVar = (el, k, v) => { if (el && el.style.getPropertyValue(k) !== v) el.style.setProperty(k, v); };
     const pct = f.battery?.pct;
@@ -677,10 +683,18 @@
       const key = `${kind}:${prev[kind]}>${cur[kind]}`;
       if (now - (this._flowAnnounced[key] || 0) < 60000) return;
       this._flowAnnounced[key] = now;
-      lines.push(`${kind === "battery" ? "Battery" : "Grid"} ${this._energyFlowWord(cur[kind]).toLowerCase()}.`);
+      // Whole sentences, so a translation never has to join two words.
+      const sentence = {
+        battery: { charging: "Battery charging.", discharging: "Battery discharging.",
+          importing: "Battery importing.", exporting: "Battery exporting.", idle: "Battery idle." },
+        grid: { charging: "Grid charging.", discharging: "Grid discharging.",
+          importing: "Grid importing.", exporting: "Grid exporting.", idle: "Grid idle." },
+      }[kind][cur[kind]];
+      lines.push(sentence ? this._tx(sentence)
+        : `${kind === "battery" ? "Battery" : "Grid"} ${this._energyFlowWord(cur[kind]).toLowerCase()}.`);
     });
     const region = this.shadowRoot?.getElementById("energyLiveAnnounce");
-    if (region && lines.length) region.textContent = lines.join(" ");
+    if (region && lines.length) this._setText(region, lines.join(" "));
   }
 
   // ─── Outlook ──────────────────────────────────────────────────────────
@@ -727,11 +741,11 @@
   }
 
   _outlookSetText(el, t) {
-    if (el && el.textContent !== t) el.textContent = t;
+    if (el && el.textContent !== t) this._setText(el, t);
   }
 
   _outlookSetHtml(el, html) {
-    if (el && el._novaHtml !== html) { el.innerHTML = html; el._novaHtml = html; }
+    if (el && el._novaHtml !== html) { this._setHtml(el, html); el._novaHtml = html; }
   }
 
   _renderOutlook() {

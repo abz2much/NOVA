@@ -256,7 +256,7 @@ go2rtc:
 
 - `client_id` / `client_secret`: the same OAuth pair you added under Application Credentials.
 - `project_id`: the Device Access Console project UUID (not the Google Cloud project).
-- `refresh_token`: from the Nest integration's stored config. In *Settings → Add-ons → File editor* (or SSH), open `.storage/core.config_entries`, find the `nest` entry, and copy its `refresh_token`.
+- `refresh_token`: from the Nest integration's stored config. In *Settings → Apps → File editor* (or SSH), open `.storage/core.config_entries`, find the `nest` entry, and copy its `refresh_token`.
 - `device_id`: easiest through the go2rtc web UI (Frigate exposes it on port `1984`). Choose Add → nest, supply the other four values, and it lists your devices with their IDs. Copy the one you want.
 
 **2. (Optional) add the restreams as Frigate cameras.** If you want continuous recording and object detection, add each `*_restream` as a Frigate camera and enable `detect`/`record`. Frigate's on-camera object detection for people and packages is more reliable than vision-LLM guessing, and Nova will happily consume Frigate's snapshots.

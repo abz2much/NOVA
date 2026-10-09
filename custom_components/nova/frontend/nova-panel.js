@@ -1082,7 +1082,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v8.16.0
+ * v8.17.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1159,7 +1159,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.16.0 ",
+      console.log("%c Nova Panel %c v8.17.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -1301,7 +1301,7 @@ class NovaPanel extends HTMLElement {
     this._canvas = null;
 
     const root = this.shadowRoot;
-    root.innerHTML = this._html();
+    root.innerHTML = this._html();   // i18n-ok: the first render, translated just below
     this._localizeDOM(root);
     this._renderedOnce = true;
     this._wire();
@@ -1349,9 +1349,18 @@ class NovaPanel extends HTMLElement {
     if (this._renderedOnce) this._render();
   }
 
-  _localizeDOM(root) {
+  // One whole string, translated when a key matches it exactly (outer
+  // spaces kept). The lookup every translated text node goes through.
+  _tx(raw) {
     const dict = this._uiStrings;
-    if (!dict || !root) return;
+    const text = raw == null ? "" : String(raw);
+    if (!dict) return text;
+    const key = text.trim();
+    return key && Object.prototype.hasOwnProperty.call(dict, key) ? text.replace(key, dict[key]) : text;
+  }
+
+  _localizeDOM(root) {
+    if (!this._uiStrings || !root) return;
     try {
       const walker = document.createTreeWalker(root, 4, null);
       const swaps = [];
@@ -1359,22 +1368,34 @@ class NovaPanel extends HTMLElement {
       while ((node = walker.nextNode())) {
         const raw = node.nodeValue;
         if (!raw) continue;
-        const key = raw.trim();
-        if (key && Object.prototype.hasOwnProperty.call(dict, key)) {
-          swaps.push([node, raw.replace(key, dict[key])]);
-        }
+        const value = this._tx(raw);
+        if (value !== raw) swaps.push([node, value]);
       }
       swaps.forEach(([textNode, value]) => { textNode.nodeValue = value; });
       root.querySelectorAll("[title],[placeholder]").forEach(el => {
         ["title", "placeholder"].forEach(attr => {
           const raw = el.getAttribute(attr);
-          const key = raw?.trim();
-          if (key && Object.prototype.hasOwnProperty.call(dict, key)) {
-            el.setAttribute(attr, raw.replace(key, dict[key]));
-          }
+          const value = raw == null ? raw : this._tx(raw);
+          if (value !== raw) el.setAttribute(attr, value);
         });
       });
     } catch (_) { /* English DOM remains usable if localization fails. */ }
+  }
+
+  // Panel text set after the first render goes through these two, so a
+  // translation reaches it the same way it reaches the first render.
+  // tests/unit/test_panel_late_text.py fails on any other way of setting text.
+  _setHtml(el, html) {
+    if (!el) return;
+    el.innerHTML = html;   // i18n-ok: the helper itself
+    this._localizeDOM(el);
+  }
+
+  _setText(el, text) {
+    if (!el) return;
+    const value = this._tx(text);
+    // Skips a set that would change nothing, as several callers did by hand.
+    if (el.childElementCount || el.textContent !== value) el.textContent = value;   // i18n-ok: the helper itself
   }
 
   // Text with a value inside it, such as "{count} OCCUPIED", which the swap
@@ -1701,14 +1722,14 @@ ${this._htmlDashboardBody()}`;
     if (!container) return;
     const entries = this._spokenHistory;
     if (entries === null) {
-      container.innerHTML = `<div class="stub-body">Couldn't load spoken history.</div>`;
+      this._setHtml(container, `<div class="stub-body">Couldn't load spoken history.</div>`);
       return;
     }
     if (!entries || !entries.length) {
-      container.innerHTML = `<div class="stub-body">No spoken messages recorded yet.</div>`;
+      this._setHtml(container, `<div class="stub-body">No spoken messages recorded yet.</div>`);
       return;
     }
-    container.innerHTML = entries.map(e => {
+    this._setHtml(container, entries.map(e => {
       const when = e.timestamp ? new Date(e.timestamp * 1000).toLocaleString() : "";
       const speakerNames = (e.speakers || []).map(s => this._speakerLabel(s)).join(", ") || "—";
       return `
@@ -1721,7 +1742,7 @@ ${this._htmlDashboardBody()}`;
           <span class="toggle-desc">${this._esc(speakerNames)}</span>
           <button class="mode-chip new-spoken-repeat" data-spoken-id="${e.id}">REPEAT</button>
         </div>`;
-    }).join("");
+    }).join(""));
     container.querySelectorAll(".new-spoken-repeat").forEach(btn => {
       btn.addEventListener("click", () => {
         const id = parseInt(btn.getAttribute("data-spoken-id"), 10);
@@ -1733,14 +1754,14 @@ ${this._htmlDashboardBody()}`;
   async _repeatSpoken(spokenId) {
     if (!this._hass) return;
     const msg = this.shadowRoot?.getElementById("spokenHistoryMsg");
-    if (msg) msg.textContent = "";
+    if (msg) this._setText(msg, "");
     try {
       await this._hass.callWS({ type: "nova/repeat_spoken", spoken_id: spokenId });
       this._fetchSpokenHistory();
     } catch (err) {
       // The server's own message, e.g. no_speaker: "The speaker this was
       // said on is not available, so it was not repeated".
-      if (msg) msg.textContent = (err && err.message) || "Could not repeat that.";
+      if (msg) this._setText(msg, (err && err.message) || "Could not repeat that.");
     }
   }
 
@@ -1778,7 +1799,7 @@ ${this._htmlDashboardBody()}`;
     if (!this._hass) return;
     if (reset) { this._actions = []; this._actionsCursor = null; }
     const container = this.shadowRoot?.getElementById("actionEntries");
-    if (container && reset) container.innerHTML = `<div class="stub-body">Loading…</div>`;
+    if (container && reset) this._setHtml(container, `<div class="stub-body">Loading…</div>`);
     try {
       const args = { type: "nova/list_actions", limit: 20 };
       if (!reset && this._actionsCursor) {
@@ -1805,18 +1826,18 @@ ${this._htmlDashboardBody()}`;
     if (!container) return;
     const requests = this._actions;
     if (requests === null) {
-      container.innerHTML = `<div class="new-log-entry-error" style="padding:12px">Couldn't load actions.</div>`;
+      this._setHtml(container, `<div class="new-log-entry-error" style="padding:12px">Couldn't load actions.</div>`);
       const row = this.shadowRoot?.getElementById("actionLoadMoreRow");
       if (row) row.hidden = true;
       return;
     }
     if (!requests || !requests.length) {
-      container.innerHTML = `<div class="stub-body">No actions recorded yet.</div>`;
+      this._setHtml(container, `<div class="stub-body">No actions recorded yet.</div>`);
       const row = this.shadowRoot?.getElementById("actionLoadMoreRow");
       if (row) row.hidden = true;
       return;
     }
-    container.innerHTML = requests.map(r => {
+    this._setHtml(container, requests.map(r => {
       const when = r.ts_created ? new Date(r.ts_created * 1000).toLocaleString() : "";
       const statusCls = this._actionStatusClass(r.status);
       const requester = r.requested_by_name || r.requested_by_user_id || r.request_device_id || "";
@@ -1843,7 +1864,7 @@ ${this._htmlDashboardBody()}`;
           </summary>
           <div style="margin-top:8px">${targetRows || '<div class="stub-body">No target detail.</div>'}</div>
         </details>`;
-    }).join("");
+    }).join(""));
     const loadMoreRow = this.shadowRoot?.getElementById("actionLoadMoreRow");
     if (loadMoreRow) loadMoreRow.hidden = !this._actionsCursor;
   }
@@ -1874,7 +1895,7 @@ ${this._htmlDashboardBody()}`;
     if (!this._hass) return;
     if (reset) { this._decisions = []; this._decisionsCursor = null; }
     const container = this.shadowRoot?.getElementById("decisionEntries");
-    if (container && reset) container.innerHTML = `<div class="stub-body">Loading…</div>`;
+    if (container && reset) this._setHtml(container, `<div class="stub-body">Loading…</div>`);
     try {
       const args = { type: "nova/list_decisions", limit: 50, only_unjudged: !!this._decisionsUnjudgedOnly };
       if (!reset && this._decisionsCursor) {
@@ -1886,7 +1907,7 @@ ${this._htmlDashboardBody()}`;
       this._decisionsCursor = result.next_cursor || null;
       this._renderDecisionRows();
     } catch (err) {
-      if (container) container.innerHTML = `<div class="new-log-entry-error" style="padding:12px">${this._tHtml("Error loading decisions: {error}", { error: this._esc(err) })}</div>`;
+      if (container) this._setHtml(container, `<div class="new-log-entry-error" style="padding:12px">${this._tHtml("Error loading decisions: {error}", { error: this._esc(err) })}</div>`);
     }
   }
 
@@ -1895,8 +1916,8 @@ ${this._htmlDashboardBody()}`;
     if (!container) return;
     const entries = this._decisions || [];
     const countEl = this.shadowRoot?.getElementById("newDecCount");
-    if (countEl) countEl.textContent = this._t("{count} decision(s) loaded", { count: entries.length });
-    container.innerHTML = entries.length ? entries.map(d => {
+    if (countEl) this._setText(countEl, this._t("{count} decision(s) loaded", { count: entries.length }));
+    this._setHtml(container, entries.length ? entries.map(d => {
       const outcomeCls = d.outcome === "good" ? "diag-ok" : d.outcome === "wrong" ? "diag-down"
         : d.outcome === "unnecessary" ? "diag-warn" : "diag-idle";
       const outcomeLabel = d.outcome ? d.outcome.toUpperCase() : "UNJUDGED";
@@ -1907,7 +1928,7 @@ ${this._htmlDashboardBody()}`;
           <span class="new-log-msg">${this._esc(d.decision || "")}</span>
           <span class="${outcomeCls}">${this._esc(outcomeLabel)}</span>
         </div>`;
-    }).join("") : `<div class="stub-body">No decisions recorded yet.</div>`;
+    }).join("") : `<div class="stub-body">No decisions recorded yet.</div>`);
     const loadMoreRow = this.shadowRoot?.getElementById("decisionLoadMoreRow");
     if (loadMoreRow) loadMoreRow.hidden = !this._decisionsCursor;
     container.querySelectorAll(".new-decision-row").forEach(row => {
@@ -1926,14 +1947,14 @@ ${this._htmlDashboardBody()}`;
     const drawer = this.shadowRoot?.getElementById("decisionDrawer");
     if (!drawer) return;
     drawer.hidden = false;
-    drawer.innerHTML = `<div class="stub-body">Loading…</div>`;
+    this._setHtml(drawer, `<div class="stub-body">Loading…</div>`);
     try {
       const result = await this._hass.callWS({ type: "nova/get_decision", decision_id: id });
       const d = result.decision || {};
       const judged = !!d.outcome;
       const row = (label, value) => `<div class="cfg-row"><label>${this._esc(label)}</label><span>${this._esc(
         value === null || value === undefined || value === "" ? "—" : String(value))}</span></div>`;
-      drawer.innerHTML = `
+      this._setHtml(drawer, `
         <div class="panel-head"><div class="panel-title">${this._tHtml("Decision #{id}", { id: this._esc(d.id) })}</div>
           <button class="mode-chip" id="newDecCloseDrawer">CLOSE</button></div>
         ${row("Route", d.kind)}
@@ -1957,9 +1978,9 @@ ${this._htmlDashboardBody()}`;
         <div class="mode-bind-head">Decision Lab</div>
         <div class="cfg-row"><button class="mode-chip" id="newDecReplay" data-id="${this._esc(d.id)}">REPLAY</button></div>
         <div id="newDecReplayResult"></div>
-      `;
+      `);
       drawer.querySelector("#newDecCloseDrawer")?.addEventListener("click", () => {
-        drawer.hidden = true; drawer.innerHTML = "";
+        drawer.hidden = true; this._setHtml(drawer, "");
       });
       drawer.querySelectorAll(".new-dec-fb").forEach(btn => {
         btn.addEventListener("click", () => this._submitDecisionOutcome(
@@ -1967,31 +1988,31 @@ ${this._htmlDashboardBody()}`;
       });
       drawer.querySelector("#newDecReplay")?.addEventListener("click", () => this._replayDecision(d.id));
     } catch (err) {
-      drawer.innerHTML = `<div class="new-log-entry-error" style="padding:12px">${this._tHtml("Error loading decision: {error}", { error: this._esc(err) })}</div>`;
+      this._setHtml(drawer, `<div class="new-log-entry-error" style="padding:12px">${this._tHtml("Error loading decision: {error}", { error: this._esc(err) })}</div>`);
     }
   }
 
   async _replayDecision(id) {
     const resultEl = this.shadowRoot?.getElementById("newDecReplayResult");
-    if (resultEl) resultEl.innerHTML = `<div class="stub-body">Replaying…</div>`;
+    if (resultEl) this._setHtml(resultEl, `<div class="stub-body">Replaying…</div>`);
     try {
       const r = await this._hass.callWS({ type: "nova/replay_decision", decision_id: id });
       if (!resultEl) return;
       const row = (label, value) => `<div class="cfg-row"><label>${this._esc(label)}</label><span>${this._esc(String(value))}</span></div>`;
       if (!r.supported) {
-        resultEl.innerHTML = `
+        this._setHtml(resultEl, `
           <div class="toggle-desc" style="margin-top:8px"><b>${this._esc(r.label)}</b></div>
-          <div class="stub-body">${this._esc(r.reason || "Not supported for this decision kind.")}</div>`;
+          <div class="stub-body">${this._esc(r.reason || "Not supported for this decision kind.")}</div>`);
         return;
       }
-      resultEl.innerHTML = `
+      this._setHtml(resultEl, `
         <div class="toggle-desc" style="margin-top:8px"><b>${this._esc(r.label)}</b></div>
         ${row("Current suggestion threshold", r.current_threshold)}
         ${row("Would pass current threshold", r.would_pass_current_threshold ? "Yes" : "No")}
         ${row("Within 0.05 of threshold", r.within_0_05_of_threshold ? "Yes" : "No")}
-      `;
+      `);
     } catch (err) {
-      if (resultEl) resultEl.innerHTML = `<div class="new-log-entry-error" style="padding:12px">${this._tHtml("Error running replay: {error}", { error: this._esc(err) })}</div>`;
+      if (resultEl) this._setHtml(resultEl, `<div class="new-log-entry-error" style="padding:12px">${this._tHtml("Error running replay: {error}", { error: this._esc(err) })}</div>`);
     }
   }
 
@@ -2002,17 +2023,17 @@ ${this._htmlDashboardBody()}`;
       const disableButtons = () => this.shadowRoot?.querySelectorAll(".new-dec-fb")
         .forEach(b => b.setAttribute("disabled", "disabled"));
       if (result.status === "ok") {
-        if (statusEl) statusEl.textContent = this._t("Recorded: {verdict}", { verdict });
+        if (statusEl) this._setText(statusEl, this._t("Recorded: {verdict}", { verdict }));
         disableButtons();
         this._fetchDecisions(true);
       } else if (result.status === "already_judged") {
-        if (statusEl) statusEl.textContent = "This decision was already judged.";
+        if (statusEl) this._setText(statusEl, "This decision was already judged.");
         disableButtons();
       } else {
-        if (statusEl) statusEl.textContent = "Decision not found.";
+        if (statusEl) this._setText(statusEl, "Decision not found.");
       }
     } catch (err) {
-      if (statusEl) statusEl.textContent = this._t("Error: {error}", { error: this._esc(err) });
+      if (statusEl) this._setText(statusEl, this._t("Error: {error}", { error: this._esc(err) }));
     }
   }
 
@@ -2028,7 +2049,7 @@ ${this._htmlDashboardBody()}`;
     const container = this.shadowRoot?.getElementById("newLogEntries");
     if (!container) return;
     if (!entries || !entries.length) {
-      container.innerHTML = `<div class="stub-body">No entries yet. Talk to Nova to generate log entries.</div>`;
+      this._setHtml(container, `<div class="stub-body">No entries yet. Talk to Nova to generate log entries.</div>`);
       return;
     }
     const cc = NovaPanel.LOG_CATEGORIES;
@@ -2041,9 +2062,9 @@ ${this._htmlDashboardBody()}`;
 
     const countEl = this.shadowRoot?.getElementById("newLogCount");
     if (countEl) {
-      countEl.textContent = search || activeFilter !== "all"
-        ? `${filtered.length} of ${entries.length}`
-        : `${entries.length} entries`;
+      this._setText(countEl, search || activeFilter !== "all"
+        ? this._t("{shown} of {total}", { shown: filtered.length, total: entries.length })
+        : this._t("{count} entries", { count: entries.length }));
     }
 
     const ordered = filtered.slice().reverse();
@@ -2069,7 +2090,7 @@ ${this._htmlDashboardBody()}`;
     const nearTop = container.scrollTop < 40;
     const prevTop = container.scrollTop;
 
-    container.innerHTML = ordered.length ? ordered.map(e => {
+    this._setHtml(container, ordered.length ? ordered.map(e => {
       const cat = cc[e.cat] || { color: "var(--ink-dim)", icon: "•" };
       const isError = e.cat === "ERROR" || (e.msg || "").toLowerCase().includes("error") || (e.msg || "").toLowerCase().includes("failed");
       const safeCat = this._esc(e.cat);
@@ -2078,7 +2099,7 @@ ${this._htmlDashboardBody()}`;
         <span class="new-log-cat" style="color:${cat.color}">${cat.icon} ${safeCat}</span>
         <span class="new-log-msg">${this._esc(e.msg)}</span>
       </div>`;
-    }).join("") : `<div class="stub-body">No entries match${search ? ` "${this._esc(search)}"` : ""}${activeFilter !== "all" ? ` in ${activeFilter}` : ""}.</div>`;
+    }).join("") : `<div class="stub-body">No entries match${search ? ` "${this._esc(search)}"` : ""}${activeFilter !== "all" ? ` in ${activeFilter}` : ""}.</div>`);
 
     container.dataset.renderSig = renderSig;
     container.dataset.renderFilter = activeFilter;
@@ -2106,7 +2127,7 @@ ${this._htmlDashboardBody()}`;
       // usable cached to fall back on (a genuine first-load failure).
       if (!this._debugLogEntries || !this._debugLogEntries.length) {
         const c = this.shadowRoot?.getElementById("newLogEntries");
-        if (c) c.innerHTML = `<div class="new-log-entry-error" style="padding:12px">${this._tHtml("Error loading logs: {error}", { error: this._esc(err) })}</div>`;
+        if (c) this._setHtml(c, `<div class="new-log-entry-error" style="padding:12px">${this._tHtml("Error loading logs: {error}", { error: this._esc(err) })}</div>`);
       } else {
         console.warn("Nova: System Log refresh failed, keeping cached entries", err);
       }
@@ -2253,16 +2274,16 @@ ${this._htmlDashboardBody()}`;
     const groups = this._personRoutines?.groups || {};
     const people = Object.keys(groups).sort();
     if (this._personRoutines?.error) {
-      list.innerHTML = `<div class="stub-body">${this._tHtml("Couldn't load routines — {error}", { error: this._esc(this._personRoutines.error) })}</div>`;
+      this._setHtml(list, `<div class="stub-body">${this._tHtml("Couldn't load routines — {error}", { error: this._esc(this._personRoutines.error) })}</div>`);
       return;
     }
     if (!people.length) {
-      list.innerHTML = this._personRoutinesLoaded
+      this._setHtml(list, this._personRoutinesLoaded
         ? `<div class="stub-body">Nothing person-specific learned yet — Nova needs a few weeks of sole-occupant data before routines are confidently individual.</div>`
-        : `<div class="stub-body">Loading…</div>`;
+        : `<div class="stub-body">Loading…</div>`);
       return;
     }
-    list.innerHTML = people.map(person => {
+    this._setHtml(list, people.map(person => {
       const items = groups[person]
         .slice().sort((a, b) => (b.confidence || 0) - (a.confidence || 0))
         .map(r => {
@@ -2275,7 +2296,7 @@ ${this._htmlDashboardBody()}`;
         }).join("");
       const label = this._esc(person.replace(/_/g, " ")).replace(/\b\w/g, c => c.toUpperCase());
       return `<div class="mode-bind-head">${label}</div>${items}`;
-    }).join("");
+    }).join(""));
   }
 
   _renderKnowledgeList() {
@@ -2283,15 +2304,15 @@ ${this._htmlDashboardBody()}`;
     if (!list) return;
     const facts = this._knowledge?.facts || [];
     const count = this.shadowRoot?.getElementById("newMemCount");
-    if (count) count.textContent = facts.length + (facts.length === 1 ? " fact" : " facts");
+    if (count) this._setText(count, this._t(facts.length === 1 ? "{count} fact" : "{count} facts", { count: facts.length }));
     if (this._knowledge?.error) {
-      list.innerHTML = `<div class="stub-body">${this._tHtml("Couldn't load memory — {error}", { error: this._esc(this._knowledge.error) })}</div>`;
+      this._setHtml(list, `<div class="stub-body">${this._tHtml("Couldn't load memory — {error}", { error: this._esc(this._knowledge.error) })}</div>`);
       return;
     }
     if (!facts.length) {
-      list.innerHTML = this._knowledgeLoaded
+      this._setHtml(list, this._knowledgeLoaded
         ? `<div class="stub-body">Nothing yet. Say "remember that…" to Nova, or teach it above.</div>`
-        : `<div class="stub-body">Loading…</div>`;
+        : `<div class="stub-body">Loading…</div>`);
       return;
     }
     const groups = {};
@@ -2299,7 +2320,7 @@ ${this._htmlDashboardBody()}`;
     const labels = { household: "Household", primary: "About me" };
     const order = Object.keys(groups).sort(
       (a, b) => (a === "household" ? -1 : b === "household" ? 1 : a.localeCompare(b)));
-    list.innerHTML = order.map(subj => {
+    this._setHtml(list, order.map(subj => {
       const items = groups[subj].map(f => {
         const soft = (f.source !== "stated" || (f.confidence ?? 1) < 0.9);
         const hedge = soft
@@ -2317,7 +2338,7 @@ ${this._htmlDashboardBody()}`;
       }).join("");
       const label = labels[subj] || this._esc(subj.replace(/_/g, " "));
       return `<div class="mode-bind-head">${label}</div>${items}`;
-    }).join("");
+    }).join(""));
     list.querySelectorAll(".new-mem-forget").forEach(btn => {
       btn.addEventListener("click", (e) => {
         const id = parseInt(e.currentTarget.getAttribute("data-id"), 10);
@@ -2386,9 +2407,9 @@ ${this._htmlDashboardBody()}`;
     if (!panel || !list) return;
     const pending = this._knowledge?.pending || [];
     panel.hidden = pending.length === 0;
-    if (!pending.length) { list.innerHTML = ""; return; }
-    if (countEl) countEl.textContent = pending.length + (pending.length === 1 ? " waiting" : " waiting");
-    list.innerHTML = pending.map(f => `
+    if (!pending.length) { this._setHtml(list, ""); return; }
+    if (countEl) this._setText(countEl, this._t("{count} waiting", { count: pending.length }));
+    this._setHtml(list, pending.map(f => `
       <div class="cfg-row" data-id="${f.id}">
         <label>${this._esc(f.key)}</label>
         <input class="cfg-field new-pending-edit-val" style="flex:1" data-id="${f.id}" value="${this._esc(f.value)}">
@@ -2397,7 +2418,7 @@ ${this._htmlDashboardBody()}`;
         <button class="mode-chip new-pending-confirm" data-id="${f.id}">✓ Confirm</button>
         <button class="mode-chip new-pending-reject" data-id="${f.id}">✕ Reject</button>
         <button class="mode-chip new-pending-save-edit" data-id="${f.id}">💾 Save edit</button>
-      </div>`).join("");
+      </div>`).join(""));
     list.querySelectorAll(".new-pending-confirm").forEach(btn => {
       btn.addEventListener("click", (e) => {
         const id = parseInt(e.currentTarget.getAttribute("data-id"), 10);
@@ -2450,13 +2471,13 @@ ${this._htmlDashboardBody()}`;
     if (!pendingBox || !list) return;
     const rel = this._relations || { pending: [], confirmed: [], cap: 500 };
     const countEl = root.getElementById("newRelationsCount");
-    if (countEl) countEl.textContent = this._t("{confirmed} confirmed · {waiting} waiting", { confirmed: rel.confirmed.length, waiting: rel.pending.length });
+    if (countEl) this._setText(countEl, this._t("{confirmed} confirmed · {waiting} waiting", { confirmed: rel.confirmed.length, waiting: rel.pending.length }));
     if (rel.error) {
-      pendingBox.innerHTML = "";
-      list.innerHTML = `<div class="stub-body">${this._tHtml("Couldn't load relations — {error}", { error: this._esc(rel.error) })}</div>`;
+      this._setHtml(pendingBox, "");
+      this._setHtml(list, `<div class="stub-body">${this._tHtml("Couldn't load relations — {error}", { error: this._esc(rel.error) })}</div>`);
       return;
     }
-    pendingBox.innerHTML = rel.pending.length ? `
+    this._setHtml(pendingBox, rel.pending.length ? `
       <div class="mode-bind-head">Waiting for confirmation</div>` + rel.pending.map(r => `
       <div class="cfg-row cfg-row-wrap rel-row" data-id="${r.id}">
         <input class="cfg-field rel-subject" style="flex:1" maxlength="80" value="${this._esc(r.subject)}" aria-label="First thing">
@@ -2467,15 +2488,15 @@ ${this._htmlDashboardBody()}`;
         <button class="mode-chip rel-confirm" data-id="${r.id}">✓ Confirm</button>
         <button class="mode-chip rel-save" data-id="${r.id}">💾 Save edit</button>
         <button class="mode-chip rel-reject" data-id="${r.id}">✕ Reject</button>
-      </div>`).join("") : "";
-    list.innerHTML = rel.confirmed.length ? rel.confirmed.map(r => `
+      </div>`).join("") : "");
+    this._setHtml(list, rel.confirmed.length ? rel.confirmed.map(r => `
       <div class="cfg-row" data-id="${r.id}">
         <label>${this._esc(r.subject)} <b>${this._esc(r.predicate)}</b> ${this._esc(r.object)}</label>
         <button class="new-rel-remove" data-id="${r.id}" title="Remove this relation" aria-label="Remove">✕ Remove</button>
       </div>`).join("")
       : (this._relationsLoaded
         ? `<div class="stub-body">None yet. Tell Nova how things relate, for example "Sam owns the Jeep", then confirm it here. Only you can confirm a link, Nova cannot.</div>`
-        : `<div class="stub-body">Loading…</div>`);
+        : `<div class="stub-body">Loading…</div>`));
     const idOf = (el) => parseInt(el.getAttribute("data-id"), 10);
     pendingBox.querySelectorAll(".rel-confirm").forEach(b => b.addEventListener("click", e => this._relationAction(idOf(e.currentTarget), "confirm")));
     pendingBox.querySelectorAll(".rel-reject").forEach(b => b.addEventListener("click", e => this._relationAction(idOf(e.currentTarget), "reject")));
@@ -2497,9 +2518,9 @@ ${this._htmlDashboardBody()}`;
     try {
       const res = await this._hass.callWS({ type: "nova/relation_action", relation_id: id, action });
       this._relations = { pending: res?.pending || [], confirmed: res?.confirmed || [], cap: res?.cap || 500 };
-      if (msg) msg.textContent = res?.ok ? "" : "That link has already changed.";
+      if (msg) this._setText(msg, res?.ok ? "" : "That link has already changed.");
     } catch (err) {
-      if (msg) msg.textContent = "Could not change that link (administrator only).";
+      if (msg) this._setText(msg, "Could not change that link (administrator only).");
       return;
     }
     this._renderRelations();
@@ -2512,13 +2533,13 @@ ${this._htmlDashboardBody()}`;
       const res = await this._hass.callWS({ type: "nova/edit_relation", relation_id: id, ...fields });
       if (!res?.ok) {
         // Keep what the person typed so they can fix it.
-        if (msg) msg.textContent = this._relationErrorText(res?.error);
+        if (msg) this._setText(msg, this._relationErrorText(res?.error));
         return;
       }
       this._relations = { pending: res?.pending || [], confirmed: res?.confirmed || [], cap: res?.cap || 500 };
-      if (msg) msg.textContent = "Saved.";
+      if (msg) this._setText(msg, "Saved.");
     } catch (err) {
-      if (msg) msg.textContent = "Could not save that change (administrator only).";
+      if (msg) this._setText(msg, "Could not save that change (administrator only).");
       return;
     }
     this._renderRelations();
@@ -2593,14 +2614,14 @@ ${this._htmlDashboardBody()}`;
     if (!body) return;
     const s = this._intr || {};
     if (s.error) {
-      body.innerHTML = `<div class="stub-body">Couldn't load — restart Home Assistant after updating.</div>`;
-      if (statusEl) statusEl.textContent = "—";
+      this._setHtml(body, `<div class="stub-body">Couldn't load — restart Home Assistant after updating.</div>`);
+      if (statusEl) this._setText(statusEl, "—");
       return;
     }
     if (statusEl) {
-      statusEl.innerHTML = s.called_off
+      this._setHtml(statusEl, s.called_off
         ? `<span class="diag-warn">${this._tHtml("CALLED OFF · {seconds}s", { seconds: s.suppressed_for })}</span>`
-        : `<span class="diag-ok">ARMED</span>`;
+        : `<span class="diag-ok">ARMED</span>`);
     }
     const snap = s.last_snapshot;
     let html = "";
@@ -2632,7 +2653,7 @@ ${this._htmlDashboardBody()}`;
         <button class="mode-chip new-intr-ack">✓ I'M LOOKING (HOLD)</button>
         <button class="mode-chip new-intr-dismiss">✕ CALL OFF (FALSE ALARM)</button>
       </div>`;
-    body.innerHTML = html;
+    this._setHtml(body, html);
     body.querySelectorAll(".toggle-btn[data-cfg-key], select.cfg-field[data-cfg-key]").forEach(el => {
       if (el.tagName === "BUTTON") {
         el.addEventListener("click", () => this._saveSetting(el.getAttribute("data-cfg-key"), el.getAttribute("data-cfg-val") === "true"));
@@ -2675,11 +2696,11 @@ ${this._htmlDashboardBody()}`;
       const res = await this._hass.callWS({ type: "nova/intrusion", action: "log", limit: 40 });
       this._ilog = res;
       const L = res?.learning || {};
-      if (side) side.textContent = this._t("{labelled}/{events} labelled", { labelled: L.labeled || 0, events: L.events || 0 });
-      body.innerHTML = this._renderIntrusionLogHtml(res);
+      if (side) this._setText(side, this._t("{labelled}/{events} labelled", { labelled: L.labeled || 0, events: L.events || 0 }));
+      this._setHtml(body, this._renderIntrusionLogHtml(res));
       this._wireIntrusionLabels();
     } catch (err) {
-      body.innerHTML = `<div class="stub-body">Could not load the log.</div>`;
+      this._setHtml(body, `<div class="stub-body">Could not load the log.</div>`);
     }
   }
 
@@ -2737,9 +2758,9 @@ ${this._htmlDashboardBody()}`;
       refreshBtn.addEventListener("click", async () => {
         refreshBtn.disabled = true;
         const orig = refreshBtn.textContent;
-        refreshBtn.textContent = "⟳ LOADING…";
+        this._setText(refreshBtn, "⟳ LOADING…");
         try { await this._fetchIntrusionLog(); }
-        finally { refreshBtn.disabled = false; refreshBtn.textContent = orig; }
+        finally { refreshBtn.disabled = false; this._setText(refreshBtn, orig); }
       });
     } else {
       this._fetchIntrusionLog();
@@ -2808,22 +2829,22 @@ ${this._htmlDashboardBody()}`;
     const resMeta = root.getElementById("facesResidentsMeta");
     if (f.error) {
       const denied = f.code === "unauthorized";
-      body.innerHTML = `<div class="stub-body">${denied ? "Faces needs a Home Assistant administrator." : "Could not load faces."}</div>`;
-      resBox.innerHTML = "";
-      if (meta) meta.textContent = "—";
+      this._setHtml(body, `<div class="stub-body">${denied ? "Faces needs a Home Assistant administrator." : "Could not load faces."}</div>`);
+      this._setHtml(resBox, "");
+      if (meta) this._setText(meta, "—");
       return;
     }
     const faces = f.faces || [];
     const residents = f.residents || [];
     const src = f.sources || {};
-    if (meta) meta.textContent = this._t("{count} RECENT", { count: faces.length });
-    if (resMeta) resMeta.textContent = this._t(residents.length === 1 ? "{count} RESIDENT" : "{count} RESIDENTS", { count: residents.length });
+    if (meta) this._setText(meta, this._t("{count} RECENT", { count: faces.length }));
+    if (resMeta) this._setText(resMeta, this._t(residents.length === 1 ? "{count} RESIDENT" : "{count} RESIDENTS", { count: residents.length }));
     if (!faces.length) {
-      body.innerHTML = src.configured === false
+      this._setHtml(body, src.configured === false
         ? `<div class="stub-body">No face recognition source found. Set up Frigate face recognition or Double Take, and make sure Home Assistant has MQTT. Recent faces appear here once one of them names someone.</div>`
-        : `<div class="stub-body">No faces seen recently. Names appear here when Frigate or Double Take recognises someone.</div>`;
+        : `<div class="stub-body">No faces seen recently. Names appear here when Frigate or Double Take recognises someone.</div>`);
     } else {
-      body.innerHTML = faces.map(r => `
+      this._setHtml(body, faces.map(r => `
         <div class="feed-row face-row">
           <span class="feed-text"><b>${this._esc(r.name)}</b>
             <span class="${r.known ? "diag-ok" : "diag-warn"}">${r.known ? "KNOWN" : "UNKNOWN"}</span>
@@ -2833,14 +2854,14 @@ ${this._htmlDashboardBody()}`;
           ${r.known ? (r.resident
             ? `<button class="mode-chip" data-face-remove="${this._esc(r.name)}">REMOVE RESIDENT</button>`
             : `<button class="mode-chip" data-face-add="${this._esc(r.name)}">ADD RESIDENT</button>`) : ""}
-        </div>`).join("");
+        </div>`).join(""));
     }
-    resBox.innerHTML = residents.length ? residents.map(n => `
+    this._setHtml(resBox, residents.length ? residents.map(n => `
         <div class="feed-row resident-row">
           <span class="feed-text"><b>${this._esc(n)}</b></span>
           <button class="mode-chip" data-face-remove="${this._esc(n)}">REMOVE</button>
         </div>`).join("")
-      : `<div class="stub-body">No residents yet. Add the people who live here.</div>`;
+      : `<div class="stub-body">No residents yet. Add the people who live here.</div>`);
     root.querySelectorAll("[data-face-add]").forEach(b => {
       b.addEventListener("click", () => this._faceAdd(b.getAttribute("data-face-add")));
     });
@@ -2855,11 +2876,11 @@ ${this._htmlDashboardBody()}`;
     if (!this._hass || !String(name || "").trim()) return;
     try {
       const res = await this._hass.callWS({ type: "nova/add_resident", name });
-      if (msg) msg.textContent = res.added ? `${name} added.` : `${name} is already a resident.`;
+      if (msg) this._setText(msg, this._t(res.added ? "{name} added." : "{name} is already a resident.", { name }));
       const input = root?.getElementById("facesAddName");
       if (input) input.value = "";
     } catch (err) {
-      if (msg) msg.textContent = (err && err.message) || "Could not add that name.";
+      if (msg) this._setText(msg, (err && err.message) || "Could not add that name.");
       return;
     }
     await this._fetchFaces();
@@ -2870,9 +2891,9 @@ ${this._htmlDashboardBody()}`;
     if (!this._hass) return;
     try {
       await this._hass.callWS({ type: "nova/remove_resident", name });
-      if (msg) msg.textContent = this._t("{name} removed.", { name });
+      if (msg) this._setText(msg, this._t("{name} removed.", { name }));
     } catch (err) {
-      if (msg) msg.textContent = (err && err.message) || "Could not remove that name.";
+      if (msg) this._setText(msg, (err && err.message) || "Could not remove that name.");
       return;
     }
     await this._fetchFaces();
@@ -3073,7 +3094,7 @@ ${this._htmlDashboardBody()}`;
     const root = this.shadowRoot;
     const box = root?.getElementById("energyStatusBody");
     if (!box || !this._energy) return;
-    box.innerHTML = this._energyStatusHtml();
+    this._setHtml(box, this._energyStatusHtml());
     this._localizeDOM(box);
     box.querySelectorAll("#newEnergyAgency .mode-chip[data-agency]").forEach(btn => {
       btn.addEventListener("click", async () => {
@@ -3162,7 +3183,7 @@ ${this._htmlDashboardBody()}`;
         const empty = apList.querySelector(".stub-body");
         if (empty) empty.remove();
         const tmp = document.createElement("div");
-        tmp.innerHTML = this._applianceRowHtml({ name: "", type: "appliance", entity: "", watts: "" });
+        this._setHtml(tmp, this._applianceRowHtml({ name: "", type: "appliance", entity: "", watts: "" }));
         const row = tmp.firstElementChild;
         if (row) apList.appendChild(row);
       });
@@ -3383,7 +3404,7 @@ ${this._htmlDashboardBody()}`;
     if (!panel || !list || !msg || !t) return;
     panel.hidden = this._energyLiveNote() || (t.configured === false && !t.error);
     const note = t.error ? "Couldn't read energy data." : "";
-    if (msg.textContent !== note) msg.textContent = note;
+    if (msg.textContent !== note) this._setText(msg, note);
     msg.hidden = !note;
     list.hidden = !!note;
     if (note) return;
@@ -3393,7 +3414,7 @@ ${this._htmlDashboardBody()}`;
       const text = key === "self_sufficiency_pct"
         ? (v == null ? "—" : `${Math.round(v)}%`) : this._energyKwh(v);
       const dd = tile.querySelector(".energy-tile-w");
-      if (dd && dd.textContent !== text) dd.textContent = text;
+      if (dd && dd.textContent !== text) this._setText(dd, text);
     });
   }
 
@@ -3417,7 +3438,7 @@ ${this._htmlDashboardBody()}`;
     const setText = (id, t) => {
       const el = root.getElementById(id);
       if (!el) return;
-      if (el.textContent !== t) el.textContent = t;
+      if (el.textContent !== t) this._setText(el, t);
       if (el.classList.contains("battery-line")) el.hidden = !t;
     };
     const pct = b.pct != null ? Math.round(b.pct) : null;
@@ -3426,16 +3447,22 @@ ${this._htmlDashboardBody()}`;
     setText("batteryPct", pct != null ? `${pct}%` : "—");
     setText("batteryState", [word, power].filter(Boolean).join(" · "));
     setText("batteryStored", b.stored_kwh != null && b.capacity_kwh != null
-      ? `${Number(b.stored_kwh).toFixed(1)} kWh of ${Number(b.capacity_kwh).toFixed(1)} kWh` : "");
+      ? this._t("{stored} kWh of {capacity} kWh", {
+        stored: Number(b.stored_kwh).toFixed(1), capacity: Number(b.capacity_kwh).toFixed(1) }) : "");
     setText("batteryEta", b.eta_min
-      ? `About ${this._energyDuration(b.eta_min)} ${b.eta_to === "full" ? "to full" : "left"} at this rate` : "");
+      ? this._t(b.eta_to === "full" ? "About {time} to full at this rate" : "About {time} left at this rate",
+        { time: this._energyDuration(b.eta_min) }) : "");
     const fill = tank.querySelector(".tank-fill");
     const level = String(pct != null ? Math.max(0, Math.min(100, pct)) : 0);
     if (fill && fill.style.getPropertyValue("--tank-pct") !== level) fill.style.setProperty("--tank-pct", level);
-    const label = `Battery ${pct != null ? `${pct} percent` : "no reading"}${
-      b.state && b.state !== "idle" && b.w != null ? `, ${b.state} at ${this._energyFlowWatts(b.w)}`
-        : b.state === "idle" ? ", idle" : ""}.`;
-    if (tank.getAttribute("aria-label") !== label) tank.setAttribute("aria-label", label);
+    // Whole sentences for the screen reader; {state} is the backend's own word.
+    const active = b.state && b.state !== "idle" && b.w != null;
+    const idle = !active && b.state === "idle";
+    const label = this._t(pct != null
+      ? (active ? "Battery {percent} percent, {state} at {power}." : idle ? "Battery {percent} percent, idle." : "Battery {percent} percent.")
+      : (active ? "Battery no reading, {state} at {power}." : idle ? "Battery no reading, idle." : "Battery no reading."),
+    { percent: pct, state: b.state, power: active ? this._energyFlowWatts(b.w) : "" });
+    if (tank.getAttribute("aria-label") !== label) tank.setAttribute("aria-label", label);   // i18n-ok: built with _t just above
   }
 
   _stopEnergyFlowPoll() {
@@ -3461,8 +3488,8 @@ ${this._htmlDashboardBody()}`;
   }
 
   _energyFlowWord(state) {
-    return { charging: "Charging", discharging: "Discharging", importing: "Importing",
-      exporting: "Exporting", idle: "Idle" }[state] || "";
+    return this._tx({ charging: "Charging", discharging: "Discharging", importing: "Importing",
+      exporting: "Exporting", idle: "Idle" }[state] || "");
   }
 
   // Changes only the text of the existing tile nodes, never the nodes.
@@ -3476,7 +3503,7 @@ ${this._htmlDashboardBody()}`;
     const note = f.error ? "Couldn't read energy data."
       : f.configured === false ? "Set up solar, battery or grid in Home Assistant's Energy dashboard."
       : "";
-    if (msg.textContent !== note) msg.textContent = note;
+    if (msg.textContent !== note) this._setText(msg, note);
     msg.hidden = !note;
     list.hidden = !!note;
     if (diagram) diagram.hidden = !!note;
@@ -3497,8 +3524,8 @@ ${this._htmlDashboardBody()}`;
       const wEl = tile.querySelector(".energy-tile-w");
       const stEl = tile.querySelector(".energy-tile-state");
       const wText = this._energyFlowWatts(w);
-      if (wEl && wEl.textContent !== wText) wEl.textContent = wText;
-      if (stEl && stEl.textContent !== state) stEl.textContent = state;
+      if (wEl && wEl.textContent !== wText) this._setText(wEl, wText);
+      if (stEl && stEl.textContent !== state) this._setText(stEl, state);
     });
     this._announceEnergyFlow(f);
   }
@@ -3509,7 +3536,7 @@ ${this._htmlDashboardBody()}`;
   _renderEnergyDiagram(f) {
     const svg = this.shadowRoot?.getElementById("energyFlowSvg");
     if (!svg) return;
-    const setText = (el, t) => { if (el && el.textContent !== t) el.textContent = t; };
+    const setText = (el, t) => { if (el && el.textContent !== t) this._setText(el, t); };
     const setData = (el, k, v) => { if (el && el.getAttribute(k) !== v) el.setAttribute(k, v); };
     const setVar = (el, k, v) => { if (el && el.style.getPropertyValue(k) !== v) el.style.setProperty(k, v); };
     const pct = f.battery?.pct;
@@ -3570,10 +3597,18 @@ ${this._htmlDashboardBody()}`;
       const key = `${kind}:${prev[kind]}>${cur[kind]}`;
       if (now - (this._flowAnnounced[key] || 0) < 60000) return;
       this._flowAnnounced[key] = now;
-      lines.push(`${kind === "battery" ? "Battery" : "Grid"} ${this._energyFlowWord(cur[kind]).toLowerCase()}.`);
+      // Whole sentences, so a translation never has to join two words.
+      const sentence = {
+        battery: { charging: "Battery charging.", discharging: "Battery discharging.",
+          importing: "Battery importing.", exporting: "Battery exporting.", idle: "Battery idle." },
+        grid: { charging: "Grid charging.", discharging: "Grid discharging.",
+          importing: "Grid importing.", exporting: "Grid exporting.", idle: "Grid idle." },
+      }[kind][cur[kind]];
+      lines.push(sentence ? this._tx(sentence)
+        : `${kind === "battery" ? "Battery" : "Grid"} ${this._energyFlowWord(cur[kind]).toLowerCase()}.`);
     });
     const region = this.shadowRoot?.getElementById("energyLiveAnnounce");
-    if (region && lines.length) region.textContent = lines.join(" ");
+    if (region && lines.length) this._setText(region, lines.join(" "));
   }
 
   // ─── Outlook ──────────────────────────────────────────────────────────
@@ -3620,11 +3655,11 @@ ${this._htmlDashboardBody()}`;
   }
 
   _outlookSetText(el, t) {
-    if (el && el.textContent !== t) el.textContent = t;
+    if (el && el.textContent !== t) this._setText(el, t);
   }
 
   _outlookSetHtml(el, html) {
-    if (el && el._novaHtml !== html) { el.innerHTML = html; el._novaHtml = html; }
+    if (el && el._novaHtml !== html) { this._setHtml(el, html); el._novaHtml = html; }
   }
 
   _renderOutlook() {
@@ -4046,8 +4081,8 @@ ${this._htmlDashboardBody()}`;
           note.style.color = "var(--warn)";
           card.querySelector(".new-sug-approve")?.parentElement?.before(note);
         }
-        note.textContent = `⚠ ${(res && res.reason) || this._t(action === "approve"
-          ? "Could not approve this suggestion. Try again." : "Could not dismiss this suggestion. Try again.")}`;
+        this._setText(note, `⚠ ${(res && res.reason) || this._t(action === "approve"
+          ? "Could not approve this suggestion. Try again." : "Could not dismiss this suggestion. Try again.")}`);
       };
       card.querySelector(".new-sug-approve")?.addEventListener("click", () => act("approve"));
       card.querySelector(".new-sug-dismiss")?.addEventListener("click", () => act("dismiss"));
@@ -4070,7 +4105,7 @@ ${this._htmlDashboardBody()}`;
         }
         if (res && res.ok) {
           row.style.opacity = "0.35";
-          btn.textContent = "Back in suggestions";
+          this._setText(btn, "Back in suggestions");
           return;
         }
         btn.disabled = false;
@@ -4326,9 +4361,9 @@ ${this._htmlDashboardBody()}`;
     const cx = base[0] + base[2] / 2, cy = base[1] + base[3] / 2;
     const w = base[2] / zoom, h = base[3] / zoom;
     const box = [cx - w / 2, cy - h / 2, w, h];
-    mount.innerHTML = window.NOVA3D.renderSVG({
+    this._setHtml(mount, window.NOVA3D.renderSVG({
       theta: this._house3dTheta || 35, floor, lit: this._house3dLit(), doors: this._house3dDoors(), box, spec, plan, elements, garage,
-    });
+    }));
   }
   _buildResidenceAnnotationsNew() {
     const d = this._data() || {};
@@ -4338,7 +4373,7 @@ ${this._htmlDashboardBody()}`;
     const beds = (cfgBeds != null && cfgBeds !== "") ? Number(cfgBeds) : (areas.filter(a => a.bedroom).length || 0);
     const baths = (cfgBaths != null && cfgBaths !== "") ? Number(cfgBaths) : areas.filter(a => /bath/i.test(a.name || "")).length;
     const bbEl = this.shadowRoot?.getElementById("resBb");
-    if (bbEl) bbEl.textContent = beds + " / " + (baths || "—");
+    if (bbEl) this._setText(bbEl, beds + " / " + (baths || "—"));
     const sqEl = this.shadowRoot?.getElementById("resSqft");
     if (sqEl) {
       let sqft = cfg.floor_plan_sqft;
@@ -4351,17 +4386,17 @@ ${this._htmlDashboardBody()}`;
         }));
         sqft = Math.min(5000, Math.max(600, Math.round(u * 0.032 / 50) * 50));
       }
-      sqEl.textContent = sqft ? "~" + Number(sqft).toLocaleString() : "—";
+      this._setText(sqEl, sqft ? "~" + Number(sqft).toLocaleString() : "—");
     }
     const styleTag = this.shadowRoot?.getElementById("resStyleTag");
     if (styleTag) {
       const rs = this._resStyles()[(cfg.residence_style || "cape_cod")];
-      styleTag.textContent = rs ? rs.label : "—";
+      this._setText(styleTag, rs ? rs.label : "—");
     }
     const occEl = this.shadowRoot?.getElementById("resOcc");
     if (occEl) {
       const occ = areas.filter(a => a.active).length;
-      occEl.textContent = occ + " / " + (areas.length || 0);
+      this._setText(occEl, occ + " / " + (areas.length || 0));
     }
   }
   _build3DHouseNew() {
@@ -4440,11 +4475,11 @@ ${this._htmlDashboardBody()}`;
     if (!list) return;
     const data = this._mmwave || { rooms: [], summary: {} };
     const s = data.summary || {};
-    if (sumEl) sumEl.textContent = s.rooms_with_mmwave ? this._t("◉ {detecting}/{rooms} OCCUPIED", { detecting: s.rooms_detecting || 0, rooms: s.rooms_with_mmwave }) : "◉ NONE";
-    if (data.error) { list.innerHTML = `<div class="toggle-desc">Couldn't read sensors — restart Home Assistant after updating, then reopen.</div>`; return; }
+    if (sumEl) this._setText(sumEl, s.rooms_with_mmwave ? this._t("◉ {detecting}/{rooms} OCCUPIED", { detecting: s.rooms_detecting || 0, rooms: s.rooms_with_mmwave }) : "◉ NONE");
+    if (data.error) { this._setHtml(list, `<div class="toggle-desc">Couldn't read sensors — restart Home Assistant after updating, then reopen.</div>`); return; }
     const rooms = data.rooms || [];
-    if (!rooms.length) { list.innerHTML = `<div class="toggle-desc">No presence, motion, or mmWave sensors found. Assign occupancy sensors to areas in Home Assistant and they'll appear here.</div>`; return; }
-    list.innerHTML = rooms.map(r => {
+    if (!rooms.length) { this._setHtml(list, `<div class="toggle-desc">No presence, motion, or mmWave sensors found. Assign occupancy sensors to areas in Home Assistant and they'll appear here.</div>`); return; }
+    this._setHtml(list, rooms.map(r => {
       const on = r.detecting_count > 0;
       const sensorLine = r.sensor_count > 1
         ? this._tHtml("{detecting}/{total} sensors", { detecting: r.detecting_count, total: r.sensor_count })
@@ -4455,7 +4490,7 @@ ${this._htmlDashboardBody()}`;
           ? this._tHtml("OCCUPIED · {sensors} · now", { sensors: sensorLine })
           : this._tHtml("clear · {sensors} · {age}", { sensors: sensorLine, age: this._esc(r.freshest) })}</span>
       </div>`;
-    }).join("");
+    }).join(""));
   }
   _wireResidenceControlsNew() {
     const root = this.shadowRoot;
@@ -4909,14 +4944,16 @@ ${this._htmlDashboardBody()}`;
     }
     const rows = days.map(d => {
       const entries = (d.entries || []).map(e => {
+        // Each line's words are one template; the line breaks stay as they were.
         const tokens = (e.avg_input_tokens != null || e.avg_output_tokens != null)
-          ? ` · avg tokens in/out ${e.avg_input_tokens ?? "—"}/${e.avg_output_tokens ?? "—"}`
+          ? " · " + this._tHtml("avg tokens in/out {input}/{output}", {
+            input: e.avg_input_tokens ?? "—", output: e.avg_output_tokens ?? "—" })
           : "";
         return `<div class="stub-body" style="margin:2px 0">
             ${this._esc(e.provider)}/${this._esc(e.model)} (${this._esc(e.role)}, ${this._esc(e.location)}) —
-            ${e.call_count} call${e.call_count === 1 ? "" : "s"},
-            ${e.success_count} ok / ${e.failure_count} failed,
-            avg ${e.avg_latency_ms ?? "—"}ms${tokens}
+            ${this._tHtml(e.call_count === 1 ? "{count} call," : "{count} calls,", { count: e.call_count })}
+            ${this._tHtml("{ok} ok / {failed} failed,", { ok: e.success_count, failed: e.failure_count })}
+            ${this._tHtml("avg {latency}ms", { latency: e.avg_latency_ms ?? "—" })}${tokens}
           </div>`;
       }).join("");
       return `<div class="cfg-row"><label>${this._esc(d.day)}</label></div>${entries}`;
@@ -5138,7 +5175,7 @@ ${this._htmlDashboardBody()}`;
     const model = (customInput && customInput.style.display !== "none")
       ? customInput.value : modelSel.value;
     const warning = this._modelMismatchWarning(role, provSel.value, model);
-    warnEl.textContent = warning || "";
+    this._setText(warnEl, warning || "");
     warnEl.hidden = !warning;
   }
 
@@ -5174,9 +5211,9 @@ ${this._htmlDashboardBody()}`;
       opts += `<option value="" disabled>${this._tHtml("no models found{error}", { error: this._esc(err) })}</option>`;
     }
     opts += `<option value="__custom__">✎ Custom…</option>`;
-    selectEl.innerHTML = opts;
-    selectEl.title = (res && res.truncated)
-      ? "The provider returned more models than fit in one page — list may be incomplete." : "";
+    this._setHtml(selectEl, opts);
+    selectEl.title = this._tx((res && res.truncated)
+      ? "The provider returned more models than fit in one page — list may be incomplete." : "");
     const row = selectEl.closest(".new-model-row");
     if (row) this._updateRoleWarning(row);
   }
@@ -5202,7 +5239,7 @@ ${this._htmlDashboardBody()}`;
     const root = this.shadowRoot;
     const markDirty = message => {
       const status = root.getElementById("aiApplyStatus");
-      if (status) status.textContent = message || "Unsaved changes.";
+      if (status) this._setText(status, message || "Unsaved changes.");
     };
     root.querySelectorAll(".new-model-row").forEach(row => {
       const provSel = row.querySelector(".new-prov-select");
@@ -5256,7 +5293,7 @@ ${this._htmlDashboardBody()}`;
         const provider = input.getAttribute("data-endpoint-provider");
         if (this._modelCatalog) delete this._modelCatalog[provider];
         const status = root.querySelector(`[data-endpoint-status="${provider}"]`);
-        if (status) status.textContent = "Endpoint changed. Test it before choosing a profile.";
+        if (status) this._setText(status, "Endpoint changed. Test it before choosing a profile.");
         markDirty();
       });
     });
@@ -5269,7 +5306,7 @@ ${this._htmlDashboardBody()}`;
         const input = root.querySelector(`.ai-endpoint[data-endpoint-provider="${provider}"]`);
         const status = root.querySelector(`[data-endpoint-status="${provider}"]`);
         button.disabled = true;
-        if (status) status.textContent = "Testing…";
+        if (status) this._setText(status, "Testing…");
         try {
           const res = await this._hass.callWS({
             type: "nova/test_provider_endpoint", provider,
@@ -5286,10 +5323,10 @@ ${this._htmlDashboardBody()}`;
               this._populateModelSelect(provider, row.querySelector(".new-model-select"), res);
             }
           });
-          if (status) status.textContent = this._t(res.models.length === 1 ? "Connected. {count} model found." : "Connected. {count} models found.", { count: res.models.length });
+          if (status) this._setText(status, this._t(res.models.length === 1 ? "Connected. {count} model found." : "Connected. {count} models found.", { count: res.models.length }));
           markDirty("Endpoint tested. Changes are not saved yet.");
         } catch (err) {
-          if (status) status.textContent = err?.message || "Could not test this endpoint.";
+          if (status) this._setText(status, err?.message || "Could not test this endpoint.");
         } finally {
           button.disabled = false;
         }
@@ -5366,13 +5403,13 @@ ${this._htmlDashboardBody()}`;
             ? customInput.value.trim() : modelSel.value;
       });
       button.disabled = true;
-      if (status) status.textContent = "Checking models and saving…";
+      if (status) this._setText(status, "Checking models and saving…");
       try {
         const res = await this._hass.callWS({ type: "nova/apply_ai_config", updates });
         if (!res || !res.ok) throw new Error((res && res.message) || "Could not apply AI settings.");
-        if (status) status.textContent = res.message || "Saved. Nova is reloading.";
+        if (status) this._setText(status, res.message || "Saved. Nova is reloading.");
       } catch (err) {
-        if (status) status.textContent = err?.message || "Could not apply AI settings.";
+        if (status) this._setText(status, err?.message || "Could not apply AI settings.");
         button.disabled = false;
       }
     });
@@ -5393,7 +5430,7 @@ ${this._htmlDashboardBody()}`;
       Array.from(sel.options).forEach(opt => {
         const base = opt.value;
         if (!(base in available)) return;
-        opt.textContent = available[base] ? base : `${base} (not configured)`;
+        this._setText(opt, available[base] ? base : this._t("{provider} (not configured)", { provider: base }));
       });
     });
   }
@@ -5413,7 +5450,7 @@ ${this._htmlDashboardBody()}`;
       root.querySelectorAll("[data-cred-status]").forEach(el => {
         const p = el.getAttribute("data-cred-status");
         const configured = !!status[p];
-        el.textContent = configured ? "configured" : "not set";
+        this._setText(el, configured ? "configured" : "not set");
         el.classList.toggle("cred-configured", configured);
       });
       this._markProviderAvailability(res && res.available);
@@ -5430,7 +5467,7 @@ ${this._htmlDashboardBody()}`;
           if (res && res.ok) {
             input.value = "";
             const statusEl = root.querySelector(`[data-cred-status="${p}"]`);
-            if (statusEl) { statusEl.textContent = "configured"; statusEl.classList.add("cred-configured"); }
+            if (statusEl) { this._setText(statusEl, "configured"); statusEl.classList.add("cred-configured"); }
             this._markProviderAvailability({ [p]: true });
           }
         } catch (err) { console.error(`Nova: failed to save credential for ${p}`, err); }
@@ -5440,12 +5477,12 @@ ${this._htmlDashboardBody()}`;
       btn.addEventListener("click", async () => {
         const p = btn.getAttribute("data-cred-provider");
         if (!this._hass) return;
-        if (!window.confirm(`Clear the stored ${p} credential? Any role still using it will stop working until a new key is set.`)) return;
+        if (!window.confirm(this._t("Clear the stored {provider} credential? Any role still using it will stop working until a new key is set.", { provider: p }))) return;
         try {
           const res = await this._hass.callWS({ type: "nova/delete_credential", provider: p });
           if (res && res.ok) {
             const statusEl = root.querySelector(`[data-cred-status="${p}"]`);
-            if (statusEl) { statusEl.textContent = "not set"; statusEl.classList.remove("cred-configured"); }
+            if (statusEl) { this._setText(statusEl, "not set"); statusEl.classList.remove("cred-configured"); }
             // custom/ollama availability isn't credential-derived (endpoint
             // / always-on respectively) — only the four cloud providers'
             // availability tracks their own credential.
@@ -6194,7 +6231,7 @@ ${this._htmlDashboardBody()}`;
   _rerenderCameraSettings() {
     const host = this.shadowRoot?.getElementById("newCamsetBody");
     if (!host) return;
-    host.innerHTML = this._renderCameraSettingsRows();
+    this._setHtml(host, this._renderCameraSettingsRows());
     this._wireCameraSettings();
   }
 
@@ -6482,7 +6519,7 @@ ${this._htmlDashboardBody()}`;
   _rerenderDocLibraryBody() {
     const host = this.shadowRoot?.getElementById("newDoclibBody");
     if (!host) return;
-    host.innerHTML = this._renderDocLibraryList();
+    this._setHtml(host, this._renderDocLibraryList());
     this._wireDocLibraryDeletes();
   }
 
@@ -6510,7 +6547,7 @@ ${this._htmlDashboardBody()}`;
         if (!this._hass) return;
         ingestBtn.disabled = true;
         const orig = ingestBtn.textContent;
-        ingestBtn.textContent = "⟳ INGESTING…";
+        this._setText(ingestBtn, "⟳ INGESTING…");
         try {
           await this._hass.callWS({ type: "nova/documents", action: "ingest" });
           await this._fetchDocLibrary();
@@ -6518,7 +6555,7 @@ ${this._htmlDashboardBody()}`;
           console.error("Nova: ingest failed", err);
         } finally {
           ingestBtn.disabled = false;
-          ingestBtn.textContent = orig;
+          this._setText(ingestBtn, orig);
         }
       });
     }
@@ -6533,7 +6570,7 @@ ${this._htmlDashboardBody()}`;
         try {
           const res = await this._hass.callWS({ type: "nova/documents", action: "search", query });
           const host = root.getElementById("newDoclibBody");
-          if (host) host.innerHTML = this._renderDocSearchResults(res?.results || []);
+          if (host) this._setHtml(host, this._renderDocSearchResults(res?.results || []));
         } catch (err) { console.error("Nova: document search failed", err); }
       });
     }
@@ -6548,7 +6585,7 @@ ${this._htmlDashboardBody()}`;
         if (file.size > 25 * 1024 * 1024) { fileInput.value = ""; return; }
         upBtn.disabled = true;
         const orig = upBtn.textContent;
-        upBtn.textContent = "⬆ UPLOADING…";
+        this._setText(upBtn, "⬆ UPLOADING…");
         try {
           const b64 = await new Promise((resolve, reject) => {
             const r = new FileReader();
@@ -6564,7 +6601,7 @@ ${this._htmlDashboardBody()}`;
           console.error("Nova: document upload failed", err);
         } finally {
           upBtn.disabled = false;
-          upBtn.textContent = orig;
+          this._setText(upBtn, orig);
           fileInput.value = "";
         }
       });
@@ -6584,7 +6621,7 @@ ${this._htmlDashboardBody()}`;
         await saveWatch();
         scanBtn.disabled = true;
         const orig = scanBtn.textContent;
-        scanBtn.textContent = "⟳ SCANNING…";
+        this._setText(scanBtn, "⟳ SCANNING…");
         try {
           const res = await this._hass.callWS({ type: "nova/documents", action: "scan_watch" });
           if (res.watched > 0) {
@@ -6594,7 +6631,7 @@ ${this._htmlDashboardBody()}`;
           console.error("Nova: watch scan failed", err);
         } finally {
           scanBtn.disabled = false;
-          scanBtn.textContent = orig;
+          this._setText(scanBtn, orig);
         }
       });
     }
@@ -6650,7 +6687,7 @@ ${this._htmlDashboardBody()}`;
                 err => { this._setupHealth = { error: true, unauthorized: err?.code === "unauthorized" }; })
           .finally(() => { this._welcomeHealthPending = false; this._renderData(); });
       }
-      onboardingMount.innerHTML = this._onboardingHtml(d.onboarding);
+      this._setHtml(onboardingMount, this._onboardingHtml(d.onboarding));
       this._wireOnboarding();
     }
 
@@ -6665,14 +6702,14 @@ ${this._htmlDashboardBody()}`;
       reasoning: ["Something just happened.", "CHECK THE ACTIVITY FEED BELOW"],
       asleep: ["Everyone's asleep. Staying quiet.", "A GROUND-FLOOR BREACH WOULD STILL WAKE ME"],
     };
-    if (lineEl) lineEl.textContent = lines[state][0];
-    if (subEl) subEl.textContent = lines[state][1];
+    if (lineEl) this._setText(lineEl, lines[state][0]);
+    if (subEl) this._setText(subEl, lines[state][1]);
     const words = { idle: "Hello.", reasoning: "Thinking…", asleep: "Goodnight." };
     const wordEl = root.getElementById("heroWord");
     if (wordEl) wordEl.classList.toggle("dim", state === "asleep");
     const marqueeEl = root.getElementById("heroMarquee");
     const marquee = `${words[state].replace(/[.…]/g, "").toUpperCase()} · `.repeat(8);
-    if (marqueeEl && marqueeEl.textContent !== marquee) marqueeEl.textContent = marquee;
+    if (marqueeEl && marqueeEl.textContent !== marquee) this._setText(marqueeEl, marquee);
     this._typeHeroWord(words[state]);
     this._targetCoreState(state);
 
@@ -6683,10 +6720,10 @@ ${this._htmlDashboardBody()}`;
     ];
     const chipsEl = root.getElementById("chips");
     if (chipsEl) {
-      chipsEl.innerHTML = chipDefs.map(([label, s]) => {
+      this._setHtml(chipsEl, chipDefs.map(([label, s]) => {
         const warn = (s?.level === "warn") ? " warn" : "";
         return `<div class="chip${warn}"><span class="dot"></span> ${this._esc(label)} <b>${this._esc(s?.state ?? "—")}</b></div>`;
-      }).join("");
+      }).join(""));
     }
 
     // Formal lockdown is deliberately separate from the alarm controls. It
@@ -6697,8 +6734,8 @@ ${this._htmlDashboardBody()}`;
     if (lockdownBtn) {
       lockdownBtn.hidden = false;
       lockdownBtn.classList.toggle("active", !!lockdown.active);
-      lockdownBtn.textContent = lockdown.active ? "LOCKDOWN ACTIVE" : "LOCKDOWN OFF";
-      lockdownBtn.title = lockdown.reason || "Nova formal lockdown";
+      this._setText(lockdownBtn, lockdown.active ? "LOCKDOWN ACTIVE" : "LOCKDOWN OFF");
+      lockdownBtn.title = this._tx(lockdown.reason || "Nova formal lockdown");
     }
 
     // activity feed
@@ -6707,19 +6744,19 @@ ${this._htmlDashboardBody()}`;
       : [{ ts: "--:--", tag: "SYSTEM", msg: "No activity yet." }];
     const feedEl = root.getElementById("feed");
     if (feedEl) {
-      feedEl.innerHTML = entries.map(e => `
+      this._setHtml(feedEl, entries.map(e => `
         <div class="feed-row">
           <div class="feed-text"><b>${this._esc(e.tag || "")}</b> · <span class="dim">${this._esc(e.msg || "")}</span></div>
           <div class="feed-time">${this._esc(e.ts || "")}</div>
-        </div>`).join("");
+        </div>`).join(""));
     }
     const feedMeta = root.getElementById("feedMeta");
-    if (feedMeta) feedMeta.textContent = this._t("LAST {count}", { count: entries.length });
+    if (feedMeta) this._setText(feedMeta, this._t("LAST {count}", { count: entries.length }));
 
     // areas
     const areasGridEl = root.getElementById("areasGrid");
     if (areasGridEl) {
-      areasGridEl.innerHTML = (d.areas || []).map(a => this._areaTileHtml(a)).join("");
+      this._setHtml(areasGridEl, (d.areas || []).map(a => this._areaTileHtml(a)).join(""));
       // Re-wire on every patch — innerHTML above just replaced these nodes,
       // so any listeners from a previous _renderData() are already gone.
       areasGridEl.querySelectorAll(".area-light-toggle[data-light-area]").forEach(btn => {
@@ -6732,7 +6769,7 @@ ${this._htmlDashboardBody()}`;
       });
     }
     const areasMeta = root.getElementById("areasMeta");
-    if (areasMeta) areasMeta.textContent = this._t("{occupied} OCCUPIED · {monitored} MONITORED", { occupied: d.occupied, monitored: d.areasMonitored });
+    if (areasMeta) this._setText(areasMeta, this._t("{occupied} OCCUPIED · {monitored} MONITORED", { occupied: d.occupied, monitored: d.areasMonitored }));
 
     this._renderSolarPanel();
     this._renderMutesPanel();
@@ -6740,7 +6777,7 @@ ${this._htmlDashboardBody()}`;
     const cog = this._cognitive || {};
     const learning = cog.learning || {};
     const cognitiveState = root.getElementById("cognitiveState");
-    if (cognitiveState) cognitiveState.textContent = cog.running === false ? "STOPPED" : (cog.running ? "RUNNING" : "UNAVAILABLE");
+    if (cognitiveState) this._setText(cognitiveState, cog.running === false ? "STOPPED" : (cog.running ? "RUNNING" : "UNAVAILABLE"));
     const cognitiveMetrics = root.getElementById("cognitiveMetrics");
     if (cognitiveMetrics) {
       const metrics = [
@@ -6751,21 +6788,21 @@ ${this._htmlDashboardBody()}`;
         ["Actions", cog.actions_taken ?? 0],
         ["Ignore rules", cog.ignore_rules ?? 0],
       ];
-      cognitiveMetrics.innerHTML = metrics.map(([label, value]) =>
-        `<div class="metric"><b>${this._esc(value)}</b><span>${this._esc(label)}</span></div>`).join("");
+      this._setHtml(cognitiveMetrics, metrics.map(([label, value]) =>
+        `<div class="metric"><b>${this._esc(value)}</b><span>${this._esc(label)}</span></div>`).join(""));
     }
     const cognitiveAnalysis = root.getElementById("cognitiveAnalysis");
     if (cognitiveAnalysis) {
       const analysis = cog.last_analysis || {};
-      cognitiveAnalysis.textContent = analysis.summary || analysis.message || "Nova learns from household patterns locally.";
+      this._setText(cognitiveAnalysis, analysis.summary || analysis.message || "Nova learns from household patterns locally.");
     }
 
     const goals = d.goals || [];
     const goalList = root.getElementById("goalList");
     const goalsMeta = root.getElementById("goalsMeta");
-    if (goalsMeta) goalsMeta.textContent = this._t("{count} ACTIVE", { count: goals.filter(g => g.status === "active").length });
+    if (goalsMeta) this._setText(goalsMeta, this._t("{count} ACTIVE", { count: goals.filter(g => g.status === "active").length }));
     if (goalList) {
-      goalList.innerHTML = goals.length ? goals.map(g => {
+      this._setHtml(goalList, goals.length ? goals.map(g => {
         const active = g.status === "active";
         const progress = g.steps_total ? this._t("{done}/{total} STEPS", { done: g.steps_done || 0, total: g.steps_total }) : "OPEN OUTCOME";
         return `<div class="goal-row">
@@ -6774,7 +6811,7 @@ ${this._htmlDashboardBody()}`;
             <small>${this._esc(String(g.status || "active").toUpperCase())} · ${this._esc(progress)}</small></div>
           <button class="mode-chip goal-action" data-goal-id="${this._esc(g.id)}" data-goal-action="${active ? "cancel" : "delete"}">${active ? "CANCEL" : "DELETE"}</button>
         </div>`;
-      }).join("") : `<div class="empty-state">No goals yet.</div>`;
+      }).join("") : `<div class="empty-state">No goals yet.</div>`);
       this._wireGoalActions();
     }
 
@@ -6785,9 +6822,9 @@ ${this._htmlDashboardBody()}`;
       const cams = d.cameras || [];
       camPanel.hidden = cams.length === 0;
       const camToggle = root.getElementById("camToggle");
-      if (camToggle) camToggle.textContent = this._camOpen ? "HIDE CAMERAS ▴" : this._t(cams.length === 1 ? "SHOW {count} CAMERA ▾" : "SHOW {count} CAMERAS ▾", { count: cams.length });
+      if (camToggle) this._setText(camToggle, this._camOpen ? "HIDE CAMERAS ▴" : this._t(cams.length === 1 ? "SHOW {count} CAMERA ▾" : "SHOW {count} CAMERAS ▾", { count: cams.length }));
       camStrip.classList.toggle("open", this._camOpen);
-      camStrip.innerHTML = cams.map(c => {
+      this._setHtml(camStrip, cams.map(c => {
         const eid = c.entity_id;
         const image = this._cameraImages[eid];
         const diag = this._cameraDiagnostics[eid];
@@ -6801,7 +6838,7 @@ ${this._htmlDashboardBody()}`;
             <button class="mode-chip camera-diagnose" data-camera="${this._esc(eid)}">DIAGNOSE</button></div>
           ${diag ? `<div class="camera-diagnostic">${this._esc(diag)}</div>` : ""}
         </div>`;
-      }).join("");
+      }).join(""));
       this._wireCameraActions();
     }
     this._localizeDOM(root);
@@ -6852,7 +6889,7 @@ ${this._htmlDashboardBody()}`;
   _wireGoalActions() {
     this.shadowRoot.querySelectorAll(".goal-action").forEach(btn => btn.addEventListener("click", async () => {
       const action = btn.getAttribute("data-goal-action");
-      if (!window.confirm(`${action === "cancel" ? "Cancel" : "Delete"} this goal?`)) return;
+      if (!window.confirm(this._tx(action === "cancel" ? "Cancel this goal?" : "Delete this goal?"))) return;
       await this._goalAction({ action, goal_id: Number(btn.getAttribute("data-goal-id")) });
     }));
   }
@@ -6862,10 +6899,10 @@ ${this._htmlDashboardBody()}`;
     try {
       const res = await this._hass.callWS({ type: "nova/goal_action", ...payload });
       if (this._liveData && Array.isArray(res?.goals)) this._liveData.goals = res.goals;
-      if (out) out.textContent = "Saved.";
+      if (out) this._setText(out, "Saved.");
       this._renderData();
     } catch (err) {
-      if (out) out.textContent = err?.message || "Goal action failed.";
+      if (out) this._setText(out, err?.message || "Goal action failed.");
     }
   }
 
@@ -6941,9 +6978,9 @@ ${this._htmlDashboardBody()}`;
     const first = String((s && !s.error && (s.advice || [])[0]) || "");
     const end = first.indexOf(". ");
     const line = end >= 0 ? first.slice(0, end + 1) : first;
-    if (sufficiencyEl && sufficiencyEl.textContent !== pct) sufficiencyEl.textContent = pct;
+    if (sufficiencyEl && sufficiencyEl.textContent !== pct) this._setText(sufficiencyEl, pct);
     if (summary) {
-      if (summary.textContent !== line) summary.textContent = line;
+      if (summary.textContent !== line) this._setText(summary, line);
       summary.hidden = !line;
     }
   }
@@ -6960,7 +6997,7 @@ ${this._htmlDashboardBody()}`;
     const entities = Array.isArray(m.entities) ? m.entities : [];
     const categories = Array.isArray(m.categories) ? m.categories : [];
     const all = m.all === true;
-    if (!all && !entities.length && !categories.length) { panel.hidden = true; body.innerHTML = ""; return; }
+    if (!all && !entities.length && !categories.length) { panel.hidden = true; this._setHtml(body, ""); return; }
     panel.hidden = false;
     const row = (label, kind, value) => `
       <div class="feed-row">
@@ -6972,10 +7009,10 @@ ${this._htmlDashboardBody()}`;
         <b>Blanket shush is on.</b> Nova is not announcing anything except critical safety alerts, and this stays on after a restart until you turn it off.
         <div style="margin-top:8px"><button class="mode-chip" data-unmute="all">Unshush</button> <span class="toggle-desc">clears every mute below as well</span></div>
       </div>` : "";
-    body.innerHTML = banner
+    this._setHtml(body, banner
       + entities.map(e => row("Entity", "entity", e)).join("")
       + categories.map(c => row("Category", "category", c)).join("")
-      + `<div class="toggle-desc" style="margin-top:8px">Critical safety alerts always speak.</div>`;
+      + `<div class="toggle-desc" style="margin-top:8px">Critical safety alerts always speak.</div>`);
     body.querySelectorAll("[data-unmute]").forEach(btn => {
       btn.addEventListener("click", async () => {
         if (!this._hass) return;
@@ -7007,8 +7044,8 @@ ${this._htmlDashboardBody()}`;
       const out = root.getElementById(resultId);
       btn.disabled = true;
       const orig = btn.textContent;
-      btn.textContent = "Analyzing…";
-      if (out) out.textContent = "Running pattern analysis over your history…";
+      this._setText(btn, "Analyzing…");
+      if (out) this._setText(out, "Running pattern analysis over your history…");
       try {
         const res = await this._hass.callWS({ type: "nova/run_analysis" });
         const bf = res.backfill || {};
@@ -7050,17 +7087,17 @@ ${this._htmlDashboardBody()}`;
                 return `<br>• ${this._esc(m.description || m.type)}${prog}`;
               }).join("");
             }
-            out.innerHTML = msg + bfNote;
+            this._setHtml(out, msg + bfNote);
           } else {
-            out.innerHTML = `✕ ${this._esc(res.reason || res.error || "Analysis did not run.")}` + bfNote;
+            this._setHtml(out, `✕ ${this._esc(res.reason || res.error || "Analysis did not run.")}` + bfNote);
           }
         }
         try { await this._fetchLiveData(); } catch (_) {}
       } catch (err) {
-        if (out) out.innerHTML = `✕ ${this._esc(err?.message || String(err))}`;
+        if (out) this._setHtml(out, `✕ ${this._esc(err?.message || String(err))}`);
       } finally {
         btn.disabled = false;
-        btn.textContent = orig;
+        this._setText(btn, orig);
       }
     });
   }
@@ -7097,7 +7134,7 @@ ${this._htmlDashboardBody()}`;
     const lockdownBtn = root.getElementById("lockdownControl");
     if (lockdownBtn) lockdownBtn.addEventListener("click", async () => {
       const active = !!this._data()?.lockdown?.active;
-      if (!window.confirm(`${active ? "Lift" : "Engage"} Nova lockdown?`)) return;
+      if (!window.confirm(this._tx(active ? "Lift Nova lockdown?" : "Engage Nova lockdown?"))) return;
       lockdownBtn.disabled = true;
       try {
         const res = await this._hass.callWS({ type: "nova/set_lockdown", on: !active });
@@ -7417,7 +7454,7 @@ ${this._htmlDashboardBody()}`;
     const sceneClearBtn = root.getElementById("sceneMemoryClear");
     if (sceneClearBtn) {
       sceneClearBtn.addEventListener("click", async () => {
-        if (!window.confirm("Forget everything scene memory has kept?")) return;
+        if (!window.confirm(this._tx("Forget everything scene memory has kept?"))) return;
         try {
           await this._hass.callWS({ type: "nova/clear_scene_memory" });
         } catch (err) {
@@ -7512,18 +7549,18 @@ ${this._htmlDashboardBody()}`;
         const out = root.getElementById("newVcTestResult");
         vcTest.disabled = true;
         const orig = vcTest.textContent;
-        vcTest.textContent = "▶ PLAYING…";
-        if (out) out.textContent = "Firing announce to your satellite — listen for it…";
+        this._setText(vcTest, "▶ PLAYING…");
+        if (out) this._setText(out, "Firing announce to your satellite — listen for it…");
         try {
           const res = await this._hass.callWS({ type: "nova/voice_confirm_test" });
-          if (out) out.innerHTML = res.ok
+          if (out) this._setHtml(out, res.ok
             ? `<span class="diag-ok">✓</span> ${this._esc(res.note || "Announce fired.")} (${this._esc(res.satellite || "")})`
-            : `<span class="diag-down">✕</span> ${this._esc(res.note || res.error || "Test failed.")}`;
+            : `<span class="diag-down">✕</span> ${this._esc(res.note || res.error || "Test failed.")}`);
         } catch (err) {
-          if (out) out.innerHTML = `<span class="diag-down">✕</span> ${this._esc(err?.message || String(err))}`;
+          if (out) this._setHtml(out, `<span class="diag-down">✕</span> ${this._esc(err?.message || String(err))}`);
         } finally {
           vcTest.disabled = false;
-          vcTest.textContent = orig;
+          this._setText(vcTest, orig);
         }
       });
     }
@@ -7541,14 +7578,14 @@ ${this._htmlDashboardBody()}`;
         }
         briefNow.disabled = true;
         const orig = briefNow.textContent;
-        briefNow.textContent = "▶ BRIEFING…";
+        this._setText(briefNow, "▶ BRIEFING…");
         try {
           await this._hass.callService("nova", "briefing", { announce: true });
         } catch (err) {
           console.error("Nova: briefing failed", err);
         } finally {
           briefNow.disabled = false;
-          briefNow.textContent = orig;
+          this._setText(briefNow, orig);
         }
       });
     }
@@ -7588,16 +7625,16 @@ ${this._htmlDashboardBody()}`;
         const body = root.getElementById("newHazBody");
         hazScan.disabled = true;
         const orig = hazScan.textContent;
-        hazScan.textContent = "⟳ SCANNING…";
-        if (body) body.innerHTML = `<div class="stub-body">Checking the hazard sources that are on…</div>`;
+        this._setText(hazScan, "⟳ SCANNING…");
+        if (body) this._setHtml(body, `<div class="stub-body">Checking the hazard sources that are on…</div>`);
         try {
           const res = await this._hass.callWS({ type: "nova/hazard", action: "scan" });
-          if (body) body.innerHTML = this._renderHazardScan(res);
+          if (body) this._setHtml(body, this._renderHazardScan(res));
         } catch (err) {
-          if (body) body.innerHTML = `<div class="stub-body">${this._tHtml("Scan failed: {error}", { error: this._esc(err?.message || String(err)) })}</div>`;
+          if (body) this._setHtml(body, `<div class="stub-body">${this._tHtml("Scan failed: {error}", { error: this._esc(err?.message || String(err)) })}</div>`);
         } finally {
           hazScan.disabled = false;
-          hazScan.textContent = orig;
+          this._setText(hazScan, orig);
         }
       });
     }
@@ -7683,7 +7720,7 @@ ${this._htmlDashboardBody()}`;
     const html = this._operationalModeCardBody();
     if (body._html === html) return;
     body._html = html;
-    body.innerHTML = html;
+    this._setHtml(body, html);
     this._wireOperationalMode(body);
   }
 
@@ -8076,15 +8113,16 @@ ${this._htmlDashboardBody()}`;
   _typeHeroWord(word) {
     const el = this.shadowRoot.getElementById("heroWordText");
     if (!el) return;
+    word = this._tx(word);   // translate the whole word once, then type it
     this._heroWordTarget = word;
-    if (this._reduceMotion) { el.textContent = word; return; }
+    if (this._reduceMotion) { this._setText(el, word); return; }
     if (this._heroTypeTimer) return;
     const tick = () => {
       const node = this.shadowRoot.getElementById("heroWordText");
       const target = this._heroWordTarget;
       if (!node || node.textContent === target) { this._heroTypeTimer = null; return; }
       const cur = node.textContent;
-      node.textContent = target.startsWith(cur) ? target.slice(0, cur.length + 1) : cur.slice(0, -1);
+      node.textContent = target.startsWith(cur) ? target.slice(0, cur.length + 1) : cur.slice(0, -1);   // i18n-ok: types out a word already translated above
       this._heroTypeTimer = setTimeout(tick, target.startsWith(node.textContent) ? 85 : 35);
     };
     tick();
@@ -8755,9 +8793,9 @@ ${this._htmlDashboardBody()}`;
     const card = this.shadowRoot?.getElementById("settings-card-floor_plan_editor");
     if (!card) return;
     const c = NovaPanel.SETTINGS_CARDS.find(x => x.id === "floor_plan_editor");
-    card.innerHTML = `
+    this._setHtml(card, `
         <div class="panel-head"><div class="panel-title">${this._esc(c.title)}</div></div>
-        ${this._floorPlanEditorCardBody()}`;
+        ${this._floorPlanEditorCardBody()}`);
     this._wireFloorPlanEditor();
   }
 
@@ -8790,9 +8828,9 @@ ${this._htmlDashboardBody()}`;
       const plan = this._getEditingPlan();
       const floor = this._editorFloor;
       if (!plan[floor]) return;
-      const name = window.prompt("Room name:");
+      const name = window.prompt(this._tx("Room name:"));
       if (!name) return;
-      const type = window.prompt("Type (room, bath, stairs, door):", "room") || "room";
+      const type = window.prompt(this._tx("Type (room, bath, stairs, door):"), "room") || "room";
       plan[floor].rooms = plan[floor].rooms || [];
       plan[floor].rooms.push({ name, x: 50, y: 50, w: 60, h: 40, type });
       this._rerenderFloorPlanCard();
@@ -8803,7 +8841,7 @@ ${this._htmlDashboardBody()}`;
       const plan = this._getEditingPlan();
       const floor = this._editorFloor;
       if (!plan[floor]) return;
-      const name = window.prompt("Outdoor zone name (e.g. Front Yard, Driveway, Backyard):");
+      const name = window.prompt(this._tx("Outdoor zone name (e.g. Front Yard, Driveway, Backyard):"));
       if (!name) return;
       plan[floor].rooms = plan[floor].rooms || [];
       const house = plan[floor].rooms.filter(r => r.type !== "outdoor");
@@ -8821,7 +8859,7 @@ ${this._htmlDashboardBody()}`;
     if (addProperty) addProperty.addEventListener("click", () => {
       const cur = this._propertyPts();
       if (cur.length >= 3) {
-        if (window.confirm("Remove the property boundary?")) { this._setProperty([]); this._rerenderFloorPlanCard(); }
+        if (window.confirm(this._tx("Remove the property boundary?"))) { this._setProperty([]); this._rerenderFloorPlanCard(); }
         return;
       }
       const floor = this._editorFloor;
@@ -9070,7 +9108,7 @@ ${this._htmlDashboardBody()}`;
     if (bgOp) {
       const bgVal = root.getElementById("fpnBgOpVal");
       bgOp.addEventListener("input", () => {
-        if (bgVal) bgVal.textContent = Math.round(parseFloat(bgOp.value) * 100) + "%";
+        if (bgVal) this._setText(bgVal, Math.round(parseFloat(bgOp.value) * 100) + "%");
         const img = root.querySelector("#fpnSvg image");
         if (img) img.setAttribute("opacity", bgOp.value);
       });
@@ -9117,7 +9155,7 @@ ${this._htmlDashboardBody()}`;
     function redraw() {
       const canvas = self.shadowRoot.getElementById("fpnCanvas");
       if (canvas) {
-        canvas.innerHTML = self._renderFloorPlanSVG(plan, floor);
+        self._setHtml(canvas, self._renderFloorPlanSVG(plan, floor));
         setTimeout(() => self._wireFloorPlanDrag(), 10);
       }
     }
@@ -9138,7 +9176,7 @@ ${this._htmlDashboardBody()}`;
         e.preventDefault();
         const idx = parseInt(g.getAttribute("data-idx"));
         const rm = rooms[idx]; if (!rm) return;
-        if (window.confirm(`Delete '${rm.name}' from floor plan?`)) { rooms.splice(idx, 1); redraw(); }
+        if (window.confirm(self._t("Delete '{name}' from floor plan?", { name: rm.name }))) { rooms.splice(idx, 1); redraw(); }
       });
     });
 
@@ -9245,7 +9283,7 @@ ${this._htmlDashboardBody()}`;
         e.preventDefault();
         const ci = parseInt(g.getAttribute("data-cam-idx"));
         const arr = self._camsFor(floor);
-        if (arr[ci] && window.confirm("Delete this camera?")) { arr.splice(ci, 1); redraw(); }
+        if (arr[ci] && window.confirm(self._tx("Delete this camera?"))) { arr.splice(ci, 1); redraw(); }
       });
     });
 
@@ -9265,7 +9303,7 @@ ${this._htmlDashboardBody()}`;
         e.preventDefault();
         const ei = parseInt(g.getAttribute("data-ent-idx"));
         const arr = self._entsFor(floor);
-        if (arr[ei] && window.confirm("Remove this device from the plan?")) { arr.splice(ei, 1); redraw(); }
+        if (arr[ei] && window.confirm(self._tx("Remove this device from the plan?"))) { arr.splice(ei, 1); redraw(); }
       });
     });
 

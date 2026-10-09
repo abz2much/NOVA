@@ -316,15 +316,16 @@
   _typeHeroWord(word) {
     const el = this.shadowRoot.getElementById("heroWordText");
     if (!el) return;
+    word = this._tx(word);   // translate the whole word once, then type it
     this._heroWordTarget = word;
-    if (this._reduceMotion) { el.textContent = word; return; }
+    if (this._reduceMotion) { this._setText(el, word); return; }
     if (this._heroTypeTimer) return;
     const tick = () => {
       const node = this.shadowRoot.getElementById("heroWordText");
       const target = this._heroWordTarget;
       if (!node || node.textContent === target) { this._heroTypeTimer = null; return; }
       const cur = node.textContent;
-      node.textContent = target.startsWith(cur) ? target.slice(0, cur.length + 1) : cur.slice(0, -1);
+      node.textContent = target.startsWith(cur) ? target.slice(0, cur.length + 1) : cur.slice(0, -1);   // i18n-ok: types out a word already translated above
       this._heroTypeTimer = setTimeout(tick, target.startsWith(node.textContent) ? 85 : 35);
     };
     tick();

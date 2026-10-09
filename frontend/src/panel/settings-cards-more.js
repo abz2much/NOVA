@@ -734,7 +734,7 @@
   _rerenderCameraSettings() {
     const host = this.shadowRoot?.getElementById("newCamsetBody");
     if (!host) return;
-    host.innerHTML = this._renderCameraSettingsRows();
+    this._setHtml(host, this._renderCameraSettingsRows());
     this._wireCameraSettings();
   }
 
@@ -1022,7 +1022,7 @@
   _rerenderDocLibraryBody() {
     const host = this.shadowRoot?.getElementById("newDoclibBody");
     if (!host) return;
-    host.innerHTML = this._renderDocLibraryList();
+    this._setHtml(host, this._renderDocLibraryList());
     this._wireDocLibraryDeletes();
   }
 
@@ -1050,7 +1050,7 @@
         if (!this._hass) return;
         ingestBtn.disabled = true;
         const orig = ingestBtn.textContent;
-        ingestBtn.textContent = "⟳ INGESTING…";
+        this._setText(ingestBtn, "⟳ INGESTING…");
         try {
           await this._hass.callWS({ type: "nova/documents", action: "ingest" });
           await this._fetchDocLibrary();
@@ -1058,7 +1058,7 @@
           console.error("Nova: ingest failed", err);
         } finally {
           ingestBtn.disabled = false;
-          ingestBtn.textContent = orig;
+          this._setText(ingestBtn, orig);
         }
       });
     }
@@ -1073,7 +1073,7 @@
         try {
           const res = await this._hass.callWS({ type: "nova/documents", action: "search", query });
           const host = root.getElementById("newDoclibBody");
-          if (host) host.innerHTML = this._renderDocSearchResults(res?.results || []);
+          if (host) this._setHtml(host, this._renderDocSearchResults(res?.results || []));
         } catch (err) { console.error("Nova: document search failed", err); }
       });
     }
@@ -1088,7 +1088,7 @@
         if (file.size > 25 * 1024 * 1024) { fileInput.value = ""; return; }
         upBtn.disabled = true;
         const orig = upBtn.textContent;
-        upBtn.textContent = "⬆ UPLOADING…";
+        this._setText(upBtn, "⬆ UPLOADING…");
         try {
           const b64 = await new Promise((resolve, reject) => {
             const r = new FileReader();
@@ -1104,7 +1104,7 @@
           console.error("Nova: document upload failed", err);
         } finally {
           upBtn.disabled = false;
-          upBtn.textContent = orig;
+          this._setText(upBtn, orig);
           fileInput.value = "";
         }
       });
@@ -1124,7 +1124,7 @@
         await saveWatch();
         scanBtn.disabled = true;
         const orig = scanBtn.textContent;
-        scanBtn.textContent = "⟳ SCANNING…";
+        this._setText(scanBtn, "⟳ SCANNING…");
         try {
           const res = await this._hass.callWS({ type: "nova/documents", action: "scan_watch" });
           if (res.watched > 0) {
@@ -1134,7 +1134,7 @@
           console.error("Nova: watch scan failed", err);
         } finally {
           scanBtn.disabled = false;
-          scanBtn.textContent = orig;
+          this._setText(scanBtn, orig);
         }
       });
     }

@@ -270,9 +270,9 @@
     const card = this.shadowRoot?.getElementById("settings-card-floor_plan_editor");
     if (!card) return;
     const c = NovaPanel.SETTINGS_CARDS.find(x => x.id === "floor_plan_editor");
-    card.innerHTML = `
+    this._setHtml(card, `
         <div class="panel-head"><div class="panel-title">${this._esc(c.title)}</div></div>
-        ${this._floorPlanEditorCardBody()}`;
+        ${this._floorPlanEditorCardBody()}`);
     this._wireFloorPlanEditor();
   }
 
@@ -305,9 +305,9 @@
       const plan = this._getEditingPlan();
       const floor = this._editorFloor;
       if (!plan[floor]) return;
-      const name = window.prompt("Room name:");
+      const name = window.prompt(this._tx("Room name:"));
       if (!name) return;
-      const type = window.prompt("Type (room, bath, stairs, door):", "room") || "room";
+      const type = window.prompt(this._tx("Type (room, bath, stairs, door):"), "room") || "room";
       plan[floor].rooms = plan[floor].rooms || [];
       plan[floor].rooms.push({ name, x: 50, y: 50, w: 60, h: 40, type });
       this._rerenderFloorPlanCard();
@@ -318,7 +318,7 @@
       const plan = this._getEditingPlan();
       const floor = this._editorFloor;
       if (!plan[floor]) return;
-      const name = window.prompt("Outdoor zone name (e.g. Front Yard, Driveway, Backyard):");
+      const name = window.prompt(this._tx("Outdoor zone name (e.g. Front Yard, Driveway, Backyard):"));
       if (!name) return;
       plan[floor].rooms = plan[floor].rooms || [];
       const house = plan[floor].rooms.filter(r => r.type !== "outdoor");
@@ -336,7 +336,7 @@
     if (addProperty) addProperty.addEventListener("click", () => {
       const cur = this._propertyPts();
       if (cur.length >= 3) {
-        if (window.confirm("Remove the property boundary?")) { this._setProperty([]); this._rerenderFloorPlanCard(); }
+        if (window.confirm(this._tx("Remove the property boundary?"))) { this._setProperty([]); this._rerenderFloorPlanCard(); }
         return;
       }
       const floor = this._editorFloor;
@@ -585,7 +585,7 @@
     if (bgOp) {
       const bgVal = root.getElementById("fpnBgOpVal");
       bgOp.addEventListener("input", () => {
-        if (bgVal) bgVal.textContent = Math.round(parseFloat(bgOp.value) * 100) + "%";
+        if (bgVal) this._setText(bgVal, Math.round(parseFloat(bgOp.value) * 100) + "%");
         const img = root.querySelector("#fpnSvg image");
         if (img) img.setAttribute("opacity", bgOp.value);
       });
@@ -632,7 +632,7 @@
     function redraw() {
       const canvas = self.shadowRoot.getElementById("fpnCanvas");
       if (canvas) {
-        canvas.innerHTML = self._renderFloorPlanSVG(plan, floor);
+        self._setHtml(canvas, self._renderFloorPlanSVG(plan, floor));
         setTimeout(() => self._wireFloorPlanDrag(), 10);
       }
     }
@@ -653,7 +653,7 @@
         e.preventDefault();
         const idx = parseInt(g.getAttribute("data-idx"));
         const rm = rooms[idx]; if (!rm) return;
-        if (window.confirm(`Delete '${rm.name}' from floor plan?`)) { rooms.splice(idx, 1); redraw(); }
+        if (window.confirm(self._t("Delete '{name}' from floor plan?", { name: rm.name }))) { rooms.splice(idx, 1); redraw(); }
       });
     });
 
@@ -760,7 +760,7 @@
         e.preventDefault();
         const ci = parseInt(g.getAttribute("data-cam-idx"));
         const arr = self._camsFor(floor);
-        if (arr[ci] && window.confirm("Delete this camera?")) { arr.splice(ci, 1); redraw(); }
+        if (arr[ci] && window.confirm(self._tx("Delete this camera?"))) { arr.splice(ci, 1); redraw(); }
       });
     });
 
@@ -780,7 +780,7 @@
         e.preventDefault();
         const ei = parseInt(g.getAttribute("data-ent-idx"));
         const arr = self._entsFor(floor);
-        if (arr[ei] && window.confirm("Remove this device from the plan?")) { arr.splice(ei, 1); redraw(); }
+        if (arr[ei] && window.confirm(self._tx("Remove this device from the plan?"))) { arr.splice(ei, 1); redraw(); }
       });
     });
 

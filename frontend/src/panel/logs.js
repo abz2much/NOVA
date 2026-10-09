@@ -114,14 +114,14 @@
     if (!container) return;
     const entries = this._spokenHistory;
     if (entries === null) {
-      container.innerHTML = `<div class="stub-body">Couldn't load spoken history.</div>`;
+      this._setHtml(container, `<div class="stub-body">Couldn't load spoken history.</div>`);
       return;
     }
     if (!entries || !entries.length) {
-      container.innerHTML = `<div class="stub-body">No spoken messages recorded yet.</div>`;
+      this._setHtml(container, `<div class="stub-body">No spoken messages recorded yet.</div>`);
       return;
     }
-    container.innerHTML = entries.map(e => {
+    this._setHtml(container, entries.map(e => {
       const when = e.timestamp ? new Date(e.timestamp * 1000).toLocaleString() : "";
       const speakerNames = (e.speakers || []).map(s => this._speakerLabel(s)).join(", ") || "—";
       return `
@@ -134,7 +134,7 @@
           <span class="toggle-desc">${this._esc(speakerNames)}</span>
           <button class="mode-chip new-spoken-repeat" data-spoken-id="${e.id}">REPEAT</button>
         </div>`;
-    }).join("");
+    }).join(""));
     container.querySelectorAll(".new-spoken-repeat").forEach(btn => {
       btn.addEventListener("click", () => {
         const id = parseInt(btn.getAttribute("data-spoken-id"), 10);
@@ -146,14 +146,14 @@
   async _repeatSpoken(spokenId) {
     if (!this._hass) return;
     const msg = this.shadowRoot?.getElementById("spokenHistoryMsg");
-    if (msg) msg.textContent = "";
+    if (msg) this._setText(msg, "");
     try {
       await this._hass.callWS({ type: "nova/repeat_spoken", spoken_id: spokenId });
       this._fetchSpokenHistory();
     } catch (err) {
       // The server's own message, e.g. no_speaker: "The speaker this was
       // said on is not available, so it was not repeated".
-      if (msg) msg.textContent = (err && err.message) || "Could not repeat that.";
+      if (msg) this._setText(msg, (err && err.message) || "Could not repeat that.");
     }
   }
 
@@ -191,7 +191,7 @@
     if (!this._hass) return;
     if (reset) { this._actions = []; this._actionsCursor = null; }
     const container = this.shadowRoot?.getElementById("actionEntries");
-    if (container && reset) container.innerHTML = `<div class="stub-body">Loading…</div>`;
+    if (container && reset) this._setHtml(container, `<div class="stub-body">Loading…</div>`);
     try {
       const args = { type: "nova/list_actions", limit: 20 };
       if (!reset && this._actionsCursor) {
@@ -218,18 +218,18 @@
     if (!container) return;
     const requests = this._actions;
     if (requests === null) {
-      container.innerHTML = `<div class="new-log-entry-error" style="padding:12px">Couldn't load actions.</div>`;
+      this._setHtml(container, `<div class="new-log-entry-error" style="padding:12px">Couldn't load actions.</div>`);
       const row = this.shadowRoot?.getElementById("actionLoadMoreRow");
       if (row) row.hidden = true;
       return;
     }
     if (!requests || !requests.length) {
-      container.innerHTML = `<div class="stub-body">No actions recorded yet.</div>`;
+      this._setHtml(container, `<div class="stub-body">No actions recorded yet.</div>`);
       const row = this.shadowRoot?.getElementById("actionLoadMoreRow");
       if (row) row.hidden = true;
       return;
     }
-    container.innerHTML = requests.map(r => {
+    this._setHtml(container, requests.map(r => {
       const when = r.ts_created ? new Date(r.ts_created * 1000).toLocaleString() : "";
       const statusCls = this._actionStatusClass(r.status);
       const requester = r.requested_by_name || r.requested_by_user_id || r.request_device_id || "";
@@ -256,7 +256,7 @@
           </summary>
           <div style="margin-top:8px">${targetRows || '<div class="stub-body">No target detail.</div>'}</div>
         </details>`;
-    }).join("");
+    }).join(""));
     const loadMoreRow = this.shadowRoot?.getElementById("actionLoadMoreRow");
     if (loadMoreRow) loadMoreRow.hidden = !this._actionsCursor;
   }
@@ -287,7 +287,7 @@
     if (!this._hass) return;
     if (reset) { this._decisions = []; this._decisionsCursor = null; }
     const container = this.shadowRoot?.getElementById("decisionEntries");
-    if (container && reset) container.innerHTML = `<div class="stub-body">Loading…</div>`;
+    if (container && reset) this._setHtml(container, `<div class="stub-body">Loading…</div>`);
     try {
       const args = { type: "nova/list_decisions", limit: 50, only_unjudged: !!this._decisionsUnjudgedOnly };
       if (!reset && this._decisionsCursor) {
@@ -299,7 +299,7 @@
       this._decisionsCursor = result.next_cursor || null;
       this._renderDecisionRows();
     } catch (err) {
-      if (container) container.innerHTML = `<div class="new-log-entry-error" style="padding:12px">${this._tHtml("Error loading decisions: {error}", { error: this._esc(err) })}</div>`;
+      if (container) this._setHtml(container, `<div class="new-log-entry-error" style="padding:12px">${this._tHtml("Error loading decisions: {error}", { error: this._esc(err) })}</div>`);
     }
   }
 
@@ -308,8 +308,8 @@
     if (!container) return;
     const entries = this._decisions || [];
     const countEl = this.shadowRoot?.getElementById("newDecCount");
-    if (countEl) countEl.textContent = this._t("{count} decision(s) loaded", { count: entries.length });
-    container.innerHTML = entries.length ? entries.map(d => {
+    if (countEl) this._setText(countEl, this._t("{count} decision(s) loaded", { count: entries.length }));
+    this._setHtml(container, entries.length ? entries.map(d => {
       const outcomeCls = d.outcome === "good" ? "diag-ok" : d.outcome === "wrong" ? "diag-down"
         : d.outcome === "unnecessary" ? "diag-warn" : "diag-idle";
       const outcomeLabel = d.outcome ? d.outcome.toUpperCase() : "UNJUDGED";
@@ -320,7 +320,7 @@
           <span class="new-log-msg">${this._esc(d.decision || "")}</span>
           <span class="${outcomeCls}">${this._esc(outcomeLabel)}</span>
         </div>`;
-    }).join("") : `<div class="stub-body">No decisions recorded yet.</div>`;
+    }).join("") : `<div class="stub-body">No decisions recorded yet.</div>`);
     const loadMoreRow = this.shadowRoot?.getElementById("decisionLoadMoreRow");
     if (loadMoreRow) loadMoreRow.hidden = !this._decisionsCursor;
     container.querySelectorAll(".new-decision-row").forEach(row => {
@@ -339,14 +339,14 @@
     const drawer = this.shadowRoot?.getElementById("decisionDrawer");
     if (!drawer) return;
     drawer.hidden = false;
-    drawer.innerHTML = `<div class="stub-body">Loading…</div>`;
+    this._setHtml(drawer, `<div class="stub-body">Loading…</div>`);
     try {
       const result = await this._hass.callWS({ type: "nova/get_decision", decision_id: id });
       const d = result.decision || {};
       const judged = !!d.outcome;
       const row = (label, value) => `<div class="cfg-row"><label>${this._esc(label)}</label><span>${this._esc(
         value === null || value === undefined || value === "" ? "—" : String(value))}</span></div>`;
-      drawer.innerHTML = `
+      this._setHtml(drawer, `
         <div class="panel-head"><div class="panel-title">${this._tHtml("Decision #{id}", { id: this._esc(d.id) })}</div>
           <button class="mode-chip" id="newDecCloseDrawer">CLOSE</button></div>
         ${row("Route", d.kind)}
@@ -370,9 +370,9 @@
         <div class="mode-bind-head">Decision Lab</div>
         <div class="cfg-row"><button class="mode-chip" id="newDecReplay" data-id="${this._esc(d.id)}">REPLAY</button></div>
         <div id="newDecReplayResult"></div>
-      `;
+      `);
       drawer.querySelector("#newDecCloseDrawer")?.addEventListener("click", () => {
-        drawer.hidden = true; drawer.innerHTML = "";
+        drawer.hidden = true; this._setHtml(drawer, "");
       });
       drawer.querySelectorAll(".new-dec-fb").forEach(btn => {
         btn.addEventListener("click", () => this._submitDecisionOutcome(
@@ -380,31 +380,31 @@
       });
       drawer.querySelector("#newDecReplay")?.addEventListener("click", () => this._replayDecision(d.id));
     } catch (err) {
-      drawer.innerHTML = `<div class="new-log-entry-error" style="padding:12px">${this._tHtml("Error loading decision: {error}", { error: this._esc(err) })}</div>`;
+      this._setHtml(drawer, `<div class="new-log-entry-error" style="padding:12px">${this._tHtml("Error loading decision: {error}", { error: this._esc(err) })}</div>`);
     }
   }
 
   async _replayDecision(id) {
     const resultEl = this.shadowRoot?.getElementById("newDecReplayResult");
-    if (resultEl) resultEl.innerHTML = `<div class="stub-body">Replaying…</div>`;
+    if (resultEl) this._setHtml(resultEl, `<div class="stub-body">Replaying…</div>`);
     try {
       const r = await this._hass.callWS({ type: "nova/replay_decision", decision_id: id });
       if (!resultEl) return;
       const row = (label, value) => `<div class="cfg-row"><label>${this._esc(label)}</label><span>${this._esc(String(value))}</span></div>`;
       if (!r.supported) {
-        resultEl.innerHTML = `
+        this._setHtml(resultEl, `
           <div class="toggle-desc" style="margin-top:8px"><b>${this._esc(r.label)}</b></div>
-          <div class="stub-body">${this._esc(r.reason || "Not supported for this decision kind.")}</div>`;
+          <div class="stub-body">${this._esc(r.reason || "Not supported for this decision kind.")}</div>`);
         return;
       }
-      resultEl.innerHTML = `
+      this._setHtml(resultEl, `
         <div class="toggle-desc" style="margin-top:8px"><b>${this._esc(r.label)}</b></div>
         ${row("Current suggestion threshold", r.current_threshold)}
         ${row("Would pass current threshold", r.would_pass_current_threshold ? "Yes" : "No")}
         ${row("Within 0.05 of threshold", r.within_0_05_of_threshold ? "Yes" : "No")}
-      `;
+      `);
     } catch (err) {
-      if (resultEl) resultEl.innerHTML = `<div class="new-log-entry-error" style="padding:12px">${this._tHtml("Error running replay: {error}", { error: this._esc(err) })}</div>`;
+      if (resultEl) this._setHtml(resultEl, `<div class="new-log-entry-error" style="padding:12px">${this._tHtml("Error running replay: {error}", { error: this._esc(err) })}</div>`);
     }
   }
 
@@ -415,17 +415,17 @@
       const disableButtons = () => this.shadowRoot?.querySelectorAll(".new-dec-fb")
         .forEach(b => b.setAttribute("disabled", "disabled"));
       if (result.status === "ok") {
-        if (statusEl) statusEl.textContent = this._t("Recorded: {verdict}", { verdict });
+        if (statusEl) this._setText(statusEl, this._t("Recorded: {verdict}", { verdict }));
         disableButtons();
         this._fetchDecisions(true);
       } else if (result.status === "already_judged") {
-        if (statusEl) statusEl.textContent = "This decision was already judged.";
+        if (statusEl) this._setText(statusEl, "This decision was already judged.");
         disableButtons();
       } else {
-        if (statusEl) statusEl.textContent = "Decision not found.";
+        if (statusEl) this._setText(statusEl, "Decision not found.");
       }
     } catch (err) {
-      if (statusEl) statusEl.textContent = this._t("Error: {error}", { error: this._esc(err) });
+      if (statusEl) this._setText(statusEl, this._t("Error: {error}", { error: this._esc(err) }));
     }
   }
 
@@ -441,7 +441,7 @@
     const container = this.shadowRoot?.getElementById("newLogEntries");
     if (!container) return;
     if (!entries || !entries.length) {
-      container.innerHTML = `<div class="stub-body">No entries yet. Talk to Nova to generate log entries.</div>`;
+      this._setHtml(container, `<div class="stub-body">No entries yet. Talk to Nova to generate log entries.</div>`);
       return;
     }
     const cc = NovaPanel.LOG_CATEGORIES;
@@ -454,9 +454,9 @@
 
     const countEl = this.shadowRoot?.getElementById("newLogCount");
     if (countEl) {
-      countEl.textContent = search || activeFilter !== "all"
-        ? `${filtered.length} of ${entries.length}`
-        : `${entries.length} entries`;
+      this._setText(countEl, search || activeFilter !== "all"
+        ? this._t("{shown} of {total}", { shown: filtered.length, total: entries.length })
+        : this._t("{count} entries", { count: entries.length }));
     }
 
     const ordered = filtered.slice().reverse();
@@ -482,7 +482,7 @@
     const nearTop = container.scrollTop < 40;
     const prevTop = container.scrollTop;
 
-    container.innerHTML = ordered.length ? ordered.map(e => {
+    this._setHtml(container, ordered.length ? ordered.map(e => {
       const cat = cc[e.cat] || { color: "var(--ink-dim)", icon: "•" };
       const isError = e.cat === "ERROR" || (e.msg || "").toLowerCase().includes("error") || (e.msg || "").toLowerCase().includes("failed");
       const safeCat = this._esc(e.cat);
@@ -491,7 +491,7 @@
         <span class="new-log-cat" style="color:${cat.color}">${cat.icon} ${safeCat}</span>
         <span class="new-log-msg">${this._esc(e.msg)}</span>
       </div>`;
-    }).join("") : `<div class="stub-body">No entries match${search ? ` "${this._esc(search)}"` : ""}${activeFilter !== "all" ? ` in ${activeFilter}` : ""}.</div>`;
+    }).join("") : `<div class="stub-body">No entries match${search ? ` "${this._esc(search)}"` : ""}${activeFilter !== "all" ? ` in ${activeFilter}` : ""}.</div>`);
 
     container.dataset.renderSig = renderSig;
     container.dataset.renderFilter = activeFilter;
@@ -519,7 +519,7 @@
       // usable cached to fall back on (a genuine first-load failure).
       if (!this._debugLogEntries || !this._debugLogEntries.length) {
         const c = this.shadowRoot?.getElementById("newLogEntries");
-        if (c) c.innerHTML = `<div class="new-log-entry-error" style="padding:12px">${this._tHtml("Error loading logs: {error}", { error: this._esc(err) })}</div>`;
+        if (c) this._setHtml(c, `<div class="new-log-entry-error" style="padding:12px">${this._tHtml("Error loading logs: {error}", { error: this._esc(err) })}</div>`);
       } else {
         console.warn("Nova: System Log refresh failed, keeping cached entries", err);
       }

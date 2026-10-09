@@ -210,7 +210,7 @@
     },
     "voice_setup_incomplete": {
       "title": "Nova voice setup is incomplete",
-      "description": "Nova couldn't finish setting up voice. What failed: {failed}.\n\nTo finish it by hand: in Settings → Add-ons, install and start Piper, Whisper and openWakeWord. Then in Settings → Voice assistants, create a pipeline with Nova as the conversation agent, Whisper for speech to text and Piper for text to speech. Nova checks again on each restart, and this notice clears itself once voice works."
+      "description": "Nova couldn't finish setting up voice. What failed: {failed}.\n\nTo finish it by hand: in Settings → Apps, install and start Piper, Whisper and openWakeWord. Then in Settings → Voice assistants, create a pipeline with Nova as the conversation agent, Whisper for speech to text and Piper for text to speech. Nova checks again on each restart, and this notice clears itself once voice works."
     }
   },
   "exceptions": {

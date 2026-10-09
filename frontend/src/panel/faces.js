@@ -60,22 +60,22 @@
     const resMeta = root.getElementById("facesResidentsMeta");
     if (f.error) {
       const denied = f.code === "unauthorized";
-      body.innerHTML = `<div class="stub-body">${denied ? "Faces needs a Home Assistant administrator." : "Could not load faces."}</div>`;
-      resBox.innerHTML = "";
-      if (meta) meta.textContent = "—";
+      this._setHtml(body, `<div class="stub-body">${denied ? "Faces needs a Home Assistant administrator." : "Could not load faces."}</div>`);
+      this._setHtml(resBox, "");
+      if (meta) this._setText(meta, "—");
       return;
     }
     const faces = f.faces || [];
     const residents = f.residents || [];
     const src = f.sources || {};
-    if (meta) meta.textContent = this._t("{count} RECENT", { count: faces.length });
-    if (resMeta) resMeta.textContent = this._t(residents.length === 1 ? "{count} RESIDENT" : "{count} RESIDENTS", { count: residents.length });
+    if (meta) this._setText(meta, this._t("{count} RECENT", { count: faces.length }));
+    if (resMeta) this._setText(resMeta, this._t(residents.length === 1 ? "{count} RESIDENT" : "{count} RESIDENTS", { count: residents.length }));
     if (!faces.length) {
-      body.innerHTML = src.configured === false
+      this._setHtml(body, src.configured === false
         ? `<div class="stub-body">No face recognition source found. Set up Frigate face recognition or Double Take, and make sure Home Assistant has MQTT. Recent faces appear here once one of them names someone.</div>`
-        : `<div class="stub-body">No faces seen recently. Names appear here when Frigate or Double Take recognises someone.</div>`;
+        : `<div class="stub-body">No faces seen recently. Names appear here when Frigate or Double Take recognises someone.</div>`);
     } else {
-      body.innerHTML = faces.map(r => `
+      this._setHtml(body, faces.map(r => `
         <div class="feed-row face-row">
           <span class="feed-text"><b>${this._esc(r.name)}</b>
             <span class="${r.known ? "diag-ok" : "diag-warn"}">${r.known ? "KNOWN" : "UNKNOWN"}</span>
@@ -85,14 +85,14 @@
           ${r.known ? (r.resident
             ? `<button class="mode-chip" data-face-remove="${this._esc(r.name)}">REMOVE RESIDENT</button>`
             : `<button class="mode-chip" data-face-add="${this._esc(r.name)}">ADD RESIDENT</button>`) : ""}
-        </div>`).join("");
+        </div>`).join(""));
     }
-    resBox.innerHTML = residents.length ? residents.map(n => `
+    this._setHtml(resBox, residents.length ? residents.map(n => `
         <div class="feed-row resident-row">
           <span class="feed-text"><b>${this._esc(n)}</b></span>
           <button class="mode-chip" data-face-remove="${this._esc(n)}">REMOVE</button>
         </div>`).join("")
-      : `<div class="stub-body">No residents yet. Add the people who live here.</div>`;
+      : `<div class="stub-body">No residents yet. Add the people who live here.</div>`);
     root.querySelectorAll("[data-face-add]").forEach(b => {
       b.addEventListener("click", () => this._faceAdd(b.getAttribute("data-face-add")));
     });
@@ -107,11 +107,11 @@
     if (!this._hass || !String(name || "").trim()) return;
     try {
       const res = await this._hass.callWS({ type: "nova/add_resident", name });
-      if (msg) msg.textContent = res.added ? `${name} added.` : `${name} is already a resident.`;
+      if (msg) this._setText(msg, this._t(res.added ? "{name} added." : "{name} is already a resident.", { name }));
       const input = root?.getElementById("facesAddName");
       if (input) input.value = "";
     } catch (err) {
-      if (msg) msg.textContent = (err && err.message) || "Could not add that name.";
+      if (msg) this._setText(msg, (err && err.message) || "Could not add that name.");
       return;
     }
     await this._fetchFaces();
@@ -122,9 +122,9 @@
     if (!this._hass) return;
     try {
       await this._hass.callWS({ type: "nova/remove_resident", name });
-      if (msg) msg.textContent = this._t("{name} removed.", { name });
+      if (msg) this._setText(msg, this._t("{name} removed.", { name }));
     } catch (err) {
-      if (msg) msg.textContent = (err && err.message) || "Could not remove that name.";
+      if (msg) this._setText(msg, (err && err.message) || "Could not remove that name.");
       return;
     }
     await this._fetchFaces();

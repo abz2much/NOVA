@@ -269,8 +269,8 @@
           note.style.color = "var(--warn)";
           card.querySelector(".new-sug-approve")?.parentElement?.before(note);
         }
-        note.textContent = `⚠ ${(res && res.reason) || this._t(action === "approve"
-          ? "Could not approve this suggestion. Try again." : "Could not dismiss this suggestion. Try again.")}`;
+        this._setText(note, `⚠ ${(res && res.reason) || this._t(action === "approve"
+          ? "Could not approve this suggestion. Try again." : "Could not dismiss this suggestion. Try again.")}`);
       };
       card.querySelector(".new-sug-approve")?.addEventListener("click", () => act("approve"));
       card.querySelector(".new-sug-dismiss")?.addEventListener("click", () => act("dismiss"));
@@ -293,7 +293,7 @@
         }
         if (res && res.ok) {
           row.style.opacity = "0.35";
-          btn.textContent = "Back in suggestions";
+          this._setText(btn, "Back in suggestions");
           return;
         }
         btn.disabled = false;

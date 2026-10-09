@@ -169,9 +169,9 @@
     const cx = base[0] + base[2] / 2, cy = base[1] + base[3] / 2;
     const w = base[2] / zoom, h = base[3] / zoom;
     const box = [cx - w / 2, cy - h / 2, w, h];
-    mount.innerHTML = window.NOVA3D.renderSVG({
+    this._setHtml(mount, window.NOVA3D.renderSVG({
       theta: this._house3dTheta || 35, floor, lit: this._house3dLit(), doors: this._house3dDoors(), box, spec, plan, elements, garage,
-    });
+    }));
   }
   _buildResidenceAnnotationsNew() {
     const d = this._data() || {};
@@ -181,7 +181,7 @@
     const beds = (cfgBeds != null && cfgBeds !== "") ? Number(cfgBeds) : (areas.filter(a => a.bedroom).length || 0);
     const baths = (cfgBaths != null && cfgBaths !== "") ? Number(cfgBaths) : areas.filter(a => /bath/i.test(a.name || "")).length;
     const bbEl = this.shadowRoot?.getElementById("resBb");
-    if (bbEl) bbEl.textContent = beds + " / " + (baths || "—");
+    if (bbEl) this._setText(bbEl, beds + " / " + (baths || "—"));
     const sqEl = this.shadowRoot?.getElementById("resSqft");
     if (sqEl) {
       let sqft = cfg.floor_plan_sqft;
@@ -194,17 +194,17 @@
         }));
         sqft = Math.min(5000, Math.max(600, Math.round(u * 0.032 / 50) * 50));
       }
-      sqEl.textContent = sqft ? "~" + Number(sqft).toLocaleString() : "—";
+      this._setText(sqEl, sqft ? "~" + Number(sqft).toLocaleString() : "—");
     }
     const styleTag = this.shadowRoot?.getElementById("resStyleTag");
     if (styleTag) {
       const rs = this._resStyles()[(cfg.residence_style || "cape_cod")];
-      styleTag.textContent = rs ? rs.label : "—";
+      this._setText(styleTag, rs ? rs.label : "—");
     }
     const occEl = this.shadowRoot?.getElementById("resOcc");
     if (occEl) {
       const occ = areas.filter(a => a.active).length;
-      occEl.textContent = occ + " / " + (areas.length || 0);
+      this._setText(occEl, occ + " / " + (areas.length || 0));
     }
   }
   _build3DHouseNew() {
@@ -283,11 +283,11 @@
     if (!list) return;
     const data = this._mmwave || { rooms: [], summary: {} };
     const s = data.summary || {};
-    if (sumEl) sumEl.textContent = s.rooms_with_mmwave ? this._t("◉ {detecting}/{rooms} OCCUPIED", { detecting: s.rooms_detecting || 0, rooms: s.rooms_with_mmwave }) : "◉ NONE";
-    if (data.error) { list.innerHTML = `<div class="toggle-desc">Couldn't read sensors — restart Home Assistant after updating, then reopen.</div>`; return; }
+    if (sumEl) this._setText(sumEl, s.rooms_with_mmwave ? this._t("◉ {detecting}/{rooms} OCCUPIED", { detecting: s.rooms_detecting || 0, rooms: s.rooms_with_mmwave }) : "◉ NONE");
+    if (data.error) { this._setHtml(list, `<div class="toggle-desc">Couldn't read sensors — restart Home Assistant after updating, then reopen.</div>`); return; }
     const rooms = data.rooms || [];
-    if (!rooms.length) { list.innerHTML = `<div class="toggle-desc">No presence, motion, or mmWave sensors found. Assign occupancy sensors to areas in Home Assistant and they'll appear here.</div>`; return; }
-    list.innerHTML = rooms.map(r => {
+    if (!rooms.length) { this._setHtml(list, `<div class="toggle-desc">No presence, motion, or mmWave sensors found. Assign occupancy sensors to areas in Home Assistant and they'll appear here.</div>`); return; }
+    this._setHtml(list, rooms.map(r => {
       const on = r.detecting_count > 0;
       const sensorLine = r.sensor_count > 1
         ? this._tHtml("{detecting}/{total} sensors", { detecting: r.detecting_count, total: r.sensor_count })
@@ -298,7 +298,7 @@
           ? this._tHtml("OCCUPIED · {sensors} · now", { sensors: sensorLine })
           : this._tHtml("clear · {sensors} · {age}", { sensors: sensorLine, age: this._esc(r.freshest) })}</span>
       </div>`;
-    }).join("");
+    }).join(""));
   }
   _wireResidenceControlsNew() {
     const root = this.shadowRoot;

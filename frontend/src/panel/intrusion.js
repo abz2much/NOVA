@@ -49,14 +49,14 @@
     if (!body) return;
     const s = this._intr || {};
     if (s.error) {
-      body.innerHTML = `<div class="stub-body">Couldn't load — restart Home Assistant after updating.</div>`;
-      if (statusEl) statusEl.textContent = "—";
+      this._setHtml(body, `<div class="stub-body">Couldn't load — restart Home Assistant after updating.</div>`);
+      if (statusEl) this._setText(statusEl, "—");
       return;
     }
     if (statusEl) {
-      statusEl.innerHTML = s.called_off
+      this._setHtml(statusEl, s.called_off
         ? `<span class="diag-warn">${this._tHtml("CALLED OFF · {seconds}s", { seconds: s.suppressed_for })}</span>`
-        : `<span class="diag-ok">ARMED</span>`;
+        : `<span class="diag-ok">ARMED</span>`);
     }
     const snap = s.last_snapshot;
     let html = "";
@@ -88,7 +88,7 @@
         <button class="mode-chip new-intr-ack">✓ I'M LOOKING (HOLD)</button>
         <button class="mode-chip new-intr-dismiss">✕ CALL OFF (FALSE ALARM)</button>
       </div>`;
-    body.innerHTML = html;
+    this._setHtml(body, html);
     body.querySelectorAll(".toggle-btn[data-cfg-key], select.cfg-field[data-cfg-key]").forEach(el => {
       if (el.tagName === "BUTTON") {
         el.addEventListener("click", () => this._saveSetting(el.getAttribute("data-cfg-key"), el.getAttribute("data-cfg-val") === "true"));
@@ -131,11 +131,11 @@
       const res = await this._hass.callWS({ type: "nova/intrusion", action: "log", limit: 40 });
       this._ilog = res;
       const L = res?.learning || {};
-      if (side) side.textContent = this._t("{labelled}/{events} labelled", { labelled: L.labeled || 0, events: L.events || 0 });
-      body.innerHTML = this._renderIntrusionLogHtml(res);
+      if (side) this._setText(side, this._t("{labelled}/{events} labelled", { labelled: L.labeled || 0, events: L.events || 0 }));
+      this._setHtml(body, this._renderIntrusionLogHtml(res));
       this._wireIntrusionLabels();
     } catch (err) {
-      body.innerHTML = `<div class="stub-body">Could not load the log.</div>`;
+      this._setHtml(body, `<div class="stub-body">Could not load the log.</div>`);
     }
   }
 
@@ -193,9 +193,9 @@
       refreshBtn.addEventListener("click", async () => {
         refreshBtn.disabled = true;
         const orig = refreshBtn.textContent;
-        refreshBtn.textContent = "⟳ LOADING…";
+        this._setText(refreshBtn, "⟳ LOADING…");
         try { await this._fetchIntrusionLog(); }
-        finally { refreshBtn.disabled = false; refreshBtn.textContent = orig; }
+        finally { refreshBtn.disabled = false; this._setText(refreshBtn, orig); }
       });
     } else {
       this._fetchIntrusionLog();

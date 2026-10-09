@@ -19,7 +19,7 @@
     const lockdownBtn = root.getElementById("lockdownControl");
     if (lockdownBtn) lockdownBtn.addEventListener("click", async () => {
       const active = !!this._data()?.lockdown?.active;
-      if (!window.confirm(`${active ? "Lift" : "Engage"} Nova lockdown?`)) return;
+      if (!window.confirm(this._tx(active ? "Lift Nova lockdown?" : "Engage Nova lockdown?"))) return;
       lockdownBtn.disabled = true;
       try {
         const res = await this._hass.callWS({ type: "nova/set_lockdown", on: !active });
@@ -339,7 +339,7 @@
     const sceneClearBtn = root.getElementById("sceneMemoryClear");
     if (sceneClearBtn) {
       sceneClearBtn.addEventListener("click", async () => {
-        if (!window.confirm("Forget everything scene memory has kept?")) return;
+        if (!window.confirm(this._tx("Forget everything scene memory has kept?"))) return;
         try {
           await this._hass.callWS({ type: "nova/clear_scene_memory" });
         } catch (err) {
@@ -434,18 +434,18 @@
         const out = root.getElementById("newVcTestResult");
         vcTest.disabled = true;
         const orig = vcTest.textContent;
-        vcTest.textContent = "▶ PLAYING…";
-        if (out) out.textContent = "Firing announce to your satellite — listen for it…";
+        this._setText(vcTest, "▶ PLAYING…");
+        if (out) this._setText(out, "Firing announce to your satellite — listen for it…");
         try {
           const res = await this._hass.callWS({ type: "nova/voice_confirm_test" });
-          if (out) out.innerHTML = res.ok
+          if (out) this._setHtml(out, res.ok
             ? `<span class="diag-ok">✓</span> ${this._esc(res.note || "Announce fired.")} (${this._esc(res.satellite || "")})`
-            : `<span class="diag-down">✕</span> ${this._esc(res.note || res.error || "Test failed.")}`;
+            : `<span class="diag-down">✕</span> ${this._esc(res.note || res.error || "Test failed.")}`);
         } catch (err) {
-          if (out) out.innerHTML = `<span class="diag-down">✕</span> ${this._esc(err?.message || String(err))}`;
+          if (out) this._setHtml(out, `<span class="diag-down">✕</span> ${this._esc(err?.message || String(err))}`);
         } finally {
           vcTest.disabled = false;
-          vcTest.textContent = orig;
+          this._setText(vcTest, orig);
         }
       });
     }
@@ -463,14 +463,14 @@
         }
         briefNow.disabled = true;
         const orig = briefNow.textContent;
-        briefNow.textContent = "▶ BRIEFING…";
+        this._setText(briefNow, "▶ BRIEFING…");
         try {
           await this._hass.callService("nova", "briefing", { announce: true });
         } catch (err) {
           console.error("Nova: briefing failed", err);
         } finally {
           briefNow.disabled = false;
-          briefNow.textContent = orig;
+          this._setText(briefNow, orig);
         }
       });
     }
@@ -510,16 +510,16 @@
         const body = root.getElementById("newHazBody");
         hazScan.disabled = true;
         const orig = hazScan.textContent;
-        hazScan.textContent = "⟳ SCANNING…";
-        if (body) body.innerHTML = `<div class="stub-body">Checking the hazard sources that are on…</div>`;
+        this._setText(hazScan, "⟳ SCANNING…");
+        if (body) this._setHtml(body, `<div class="stub-body">Checking the hazard sources that are on…</div>`);
         try {
           const res = await this._hass.callWS({ type: "nova/hazard", action: "scan" });
-          if (body) body.innerHTML = this._renderHazardScan(res);
+          if (body) this._setHtml(body, this._renderHazardScan(res));
         } catch (err) {
-          if (body) body.innerHTML = `<div class="stub-body">${this._tHtml("Scan failed: {error}", { error: this._esc(err?.message || String(err)) })}</div>`;
+          if (body) this._setHtml(body, `<div class="stub-body">${this._tHtml("Scan failed: {error}", { error: this._esc(err?.message || String(err)) })}</div>`);
         } finally {
           hazScan.disabled = false;
-          hazScan.textContent = orig;
+          this._setText(hazScan, orig);
         }
       });
     }
@@ -605,7 +605,7 @@
     const html = this._operationalModeCardBody();
     if (body._html === html) return;
     body._html = html;
-    body.innerHTML = html;
+    this._setHtml(body, html);
     this._wireOperationalMode(body);
   }
 

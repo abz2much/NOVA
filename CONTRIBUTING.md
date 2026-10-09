@@ -66,6 +66,11 @@ when you add or change panel text:
 1. Write fixed text as a whole string. If a value sits inside the text, use
    `this._t("{count} RECENT", { count })` for plain text, or `this._tHtml(...)`
    in markup. Use one template per plural form.
+   Text set after the first render must go through `this._setHtml(el, html)`,
+   `this._setText(el, text)`, or `this._tx(text)` for a title or a dialog
+   message. `tests/unit/test_panel_late_text.py` fails on a direct
+   `innerHTML`, `textContent`, `title` or `confirm()`; where one is truly
+   needed, say why on the line with `// i18n-ok: <reason>`.
 2. Run `NODE_PATH=node_modules node scripts/panel_strings.js --write` to update
    `frontend/i18n/panel_strings.json`.
 3. Add each new string, with its translation, to every language file. Keep

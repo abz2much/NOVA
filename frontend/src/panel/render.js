@@ -13,7 +13,7 @@
     this._canvas = null;
 
     const root = this.shadowRoot;
-    root.innerHTML = this._html();
+    root.innerHTML = this._html();   // i18n-ok: the first render, translated just below
     this._localizeDOM(root);
     this._renderedOnce = true;
     this._wire();
@@ -61,9 +61,18 @@
     if (this._renderedOnce) this._render();
   }
 
-  _localizeDOM(root) {
+  // One whole string, translated when a key matches it exactly (outer
+  // spaces kept). The lookup every translated text node goes through.
+  _tx(raw) {
     const dict = this._uiStrings;
-    if (!dict || !root) return;
+    const text = raw == null ? "" : String(raw);
+    if (!dict) return text;
+    const key = text.trim();
+    return key && Object.prototype.hasOwnProperty.call(dict, key) ? text.replace(key, dict[key]) : text;
+  }
+
+  _localizeDOM(root) {
+    if (!this._uiStrings || !root) return;
     try {
       const walker = document.createTreeWalker(root, 4, null);
       const swaps = [];
@@ -71,22 +80,34 @@
       while ((node = walker.nextNode())) {
         const raw = node.nodeValue;
         if (!raw) continue;
-        const key = raw.trim();
-        if (key && Object.prototype.hasOwnProperty.call(dict, key)) {
-          swaps.push([node, raw.replace(key, dict[key])]);
-        }
+        const value = this._tx(raw);
+        if (value !== raw) swaps.push([node, value]);
       }
       swaps.forEach(([textNode, value]) => { textNode.nodeValue = value; });
       root.querySelectorAll("[title],[placeholder]").forEach(el => {
         ["title", "placeholder"].forEach(attr => {
           const raw = el.getAttribute(attr);
-          const key = raw?.trim();
-          if (key && Object.prototype.hasOwnProperty.call(dict, key)) {
-            el.setAttribute(attr, raw.replace(key, dict[key]));
-          }
+          const value = raw == null ? raw : this._tx(raw);
+          if (value !== raw) el.setAttribute(attr, value);
         });
       });
     } catch (_) { /* English DOM remains usable if localization fails. */ }
+  }
+
+  // Panel text set after the first render goes through these two, so a
+  // translation reaches it the same way it reaches the first render.
+  // tests/unit/test_panel_late_text.py fails on any other way of setting text.
+  _setHtml(el, html) {
+    if (!el) return;
+    el.innerHTML = html;   // i18n-ok: the helper itself
+    this._localizeDOM(el);
+  }
+
+  _setText(el, text) {
+    if (!el) return;
+    const value = this._tx(text);
+    // Skips a set that would change nothing, as several callers did by hand.
+    if (el.childElementCount || el.textContent !== value) el.textContent = value;   // i18n-ok: the helper itself
   }
 
   // Text with a value inside it, such as "{count} OCCUPIED", which the swap
