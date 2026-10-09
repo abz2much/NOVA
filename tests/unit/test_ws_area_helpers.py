@@ -393,3 +393,49 @@ def test_get_cast_devices(mod, hass):
         "media_player.play", "media_player.unknown_state"]
     assert out[1] == {"entity_id": "media_player.a", "name": "Google Mini"}
     assert out[5]["name"] == "media_player.home_group"       # no friendly name
+
+
+# 8.14.2: a camera's car, animal or package sensor is not motion in a room, so
+# it never sets the "last motion" age on an area card. Real motion, occupancy,
+# presence and person sensors still do, exactly as before.
+
+def test_live_readings_last_motion_ignores_car_animal_and_package_sensors(
+        mod, registries, hass, monkeypatch):
+    now = 1_000_000.0
+    monkeypatch.setattr(mod.time, "time", lambda: now)
+    _fill(hass, registries, "garage", [
+        ("binary_sensor.garage_motion", "off", {"device_class": "motion"}),
+        ("binary_sensor.garage_car_occupancy", "on", {"device_class": "occupancy"}),
+        ("binary_sensor.garage_dog_occupancy", "on", {"device_class": "occupancy"}),
+        ("binary_sensor.garage_package_occupancy", "on", {"device_class": "occupancy"}),
+    ])
+    ages = {"binary_sensor.garage_motion": 900, "binary_sensor.garage_car_occupancy": 5,
+            "binary_sensor.garage_dog_occupancy": 6, "binary_sensor.garage_package_occupancy": 7}
+    for eid, age in ages.items():
+        hass.states.get(eid).last_changed = datetime.fromtimestamp(now - age, timezone.utc)
+    assert mod._area_live_readings(hass, "garage")["last_motion_seconds"] == pytest.approx(900)
+
+
+def test_live_readings_an_area_with_only_object_sensors_has_no_last_motion(
+        mod, registries, hass, monkeypatch):
+    now = 1_000_000.0
+    monkeypatch.setattr(mod.time, "time", lambda: now)
+    _fill(hass, registries, "driveway", [
+        ("binary_sensor.driveway_car_occupancy", "on", {"device_class": "occupancy"})])
+    hass.states.get("binary_sensor.driveway_car_occupancy").last_changed = datetime.fromtimestamp(
+        now - 5, timezone.utc)
+    assert mod._area_live_readings(hass, "driveway")["last_motion_seconds"] is None
+
+
+def test_live_readings_real_motion_and_person_sensors_still_count(mod, registries, hass, monkeypatch):
+    now = 1_000_000.0
+    monkeypatch.setattr(mod.time, "time", lambda: now)
+    _fill(hass, registries, "hall", [
+        ("binary_sensor.hall_motion", "off", {"device_class": "motion"}),
+        ("binary_sensor.hall_person_occupancy", "on", {"device_class": "occupancy"}),
+        ("binary_sensor.hall_mmwave", "on", {"device_class": "presence"}),
+    ])
+    for eid, age in (("binary_sensor.hall_motion", 600), ("binary_sensor.hall_person_occupancy", 20),
+                     ("binary_sensor.hall_mmwave", 45)):
+        hass.states.get(eid).last_changed = datetime.fromtimestamp(now - age, timezone.utc)
+    assert mod._area_live_readings(hass, "hall")["last_motion_seconds"] == pytest.approx(20)

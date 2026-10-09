@@ -1,3 +1,8 @@
+## [8.14.2] — Last motion ignores cars, animals and packages
+
+- **Area cards.** A camera's car, animal or package sensor no longer sets an area's "last motion" age, on the Command Center area cards or in the occupied room's subtitle. A parked car's sensor changing used to make an empty garage look as if someone had just moved there. Real motion, occupancy, presence and person sensors count exactly as before.
+- **Residence tab.** Its live room presence list already ignored these sensors since 8.14.0. A new test now pins that.
+
 ## [8.14.1] — Feature guides
 
 - **New guides.** Short guides for each main feature, in `docs/`: Getting started, Safety and security, Cameras and faces, Weather warnings, Voice and speakers, Presence and alerts, Routines and suggestions, and Memory and knowledge. Each says what the feature needs, what Nova learns by itself, what it never does on its own, its limits, and where its settings are. The Voice recognition guide is rewritten in the same style.

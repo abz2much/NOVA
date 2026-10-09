@@ -337,3 +337,53 @@ async def test_mmwave_failure_returns_no_raw_text(cams, monkeypatch):
         raise RuntimeError("token=abc")
     monkeypatch.setattr(cams, "_all_areas_with_anything", boom)
     _safe(await _call(cams.ws_mmwave_overview, _hass()), "mmwave_overview_failed")
+
+
+# ── 8.14.2: a camera's car, animal or package sensor is not an occupied room ─
+# Runs the real sensor lookup (audio_routing.presence_entities_in_area) over a
+# fake entity registry; only the area list and names are stubbed.
+
+def _mmwave_home(cams, load, monkeypatch):
+    from fakes import FakeEntityRegistry, FakeRegistryEntry
+    reg = FakeEntityRegistry()
+    # Patch the registry module audio_routing itself holds: another test file
+    # can swap the global module, and audio_routing keeps its first import.
+    monkeypatch.setattr(load("audio_routing").er, "async_get", lambda h: reg)
+    hass = _hass()
+    sensors = {
+        "binary_sensor.driveway_car_occupancy": ("driveway", "occupancy", "Driveway car occupancy"),
+        "binary_sensor.garden_dog_occupancy": ("garden", "occupancy", "Garden dog occupancy"),
+        "binary_sensor.porch_package_occupancy": ("porch", "occupancy", "Porch package occupancy"),
+        "binary_sensor.kitchen_mmwave": ("kitchen", "occupancy", "Kitchen mmWave"),
+        "binary_sensor.hall_motion": ("hall", "motion", "Hall motion"),
+        "binary_sensor.lounge_person_occupancy": ("lounge", "occupancy", "Lounge person occupancy"),
+    }
+    for eid, (area, dc, name) in sensors.items():
+        hass.states.set(eid, "on", device_class=dc, friendly_name=name)
+        reg.add(FakeRegistryEntry(eid, "x", area_id=area))
+    areas = sorted({a for a, _, _ in sensors.values()})
+    monkeypatch.setattr(cams, "_all_areas_with_anything", lambda h: areas)
+    monkeypatch.setattr(cams, "_area_name", lambda h, a: a.title())
+    monkeypatch.setattr(cams, "_is_outdoor_area", lambda h, a: False)
+    return hass
+
+
+async def test_mmwave_never_shows_a_car_animal_or_package_as_an_occupied_room(cams, load, monkeypatch):
+    hass = _mmwave_home(cams, load, monkeypatch)
+    res = (await _call(cams.ws_mmwave_overview, hass)).results[0][1]
+    listed = {s["entity_id"] for r in res["rooms"] for s in r["sensors"]}
+    assert not listed & {"binary_sensor.driveway_car_occupancy", "binary_sensor.garden_dog_occupancy",
+                         "binary_sensor.porch_package_occupancy"}
+    assert {r["area_id"] for r in res["rooms"]}.isdisjoint({"driveway", "garden", "porch"})
+
+
+async def test_mmwave_still_shows_real_mmwave_motion_and_person_sensors(cams, load, monkeypatch):
+    hass = _mmwave_home(cams, load, monkeypatch)
+    res = (await _call(cams.ws_mmwave_overview, hass)).results[0][1]
+    rooms = {r["area_id"]: r for r in res["rooms"]}
+    assert set(rooms) == {"hall", "kitchen", "lounge"}
+    for area, eid in (("kitchen", "binary_sensor.kitchen_mmwave"), ("hall", "binary_sensor.hall_motion"),
+                      ("lounge", "binary_sensor.lounge_person_occupancy")):
+        assert rooms[area]["state"] == "detecting" and rooms[area]["detecting_count"] == 1
+        assert [s["entity_id"] for s in rooms[area]["sensors"]] == [eid]
+    assert res["summary"] == {"rooms_with_mmwave": 3, "rooms_detecting": 3, "total_sensors": 3}
