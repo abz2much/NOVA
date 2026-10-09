@@ -26,11 +26,14 @@ CHECKS = ROOT / "frontend" / "i18n"
 LANG_DIR = ROOT / "custom_components" / "nova" / "frontend" / "i18n"
 BACKEND = ROOT / "custom_components" / "nova"
 
-# The baseline may lose entries but never gain them. Lower this number when
-# strings are translated; never raise it for a string that already exists.
-# 8.17.0 raised it once, from 895 to 931: 42 new strings from text drawn after
-# the first render, less 6 joined fragments that are now whole sentences.
-BASELINE_MAX = 931
+# Each language's baseline may lose entries but never gain them. Lower a
+# number when that language's strings are translated; never raise one for a
+# string that already exists. History: one shared list of 895 (8.15.0),
+# 931 (8.17.0, late drawn text), then per language from 8.18.0, when the
+# generator stopped counting test data and code fragments: 913 each.
+BASELINE_MAX = {lang: 913 for lang in (
+    "cs", "da", "de", "es", "fi", "fr", "it", "nb", "nl", "pl",
+    "pt", "pt-br", "ro", "ru", "sk", "sv", "tr", "uk")}
 
 PLACEHOLDER = re.compile(r"\{(\w+)\}")
 # "&" and "+" are left out: a translation may rightly say "and".
@@ -50,7 +53,9 @@ def _strings() -> list[str]:
     return _json(CHECKS / "panel_strings.json")
 
 
-def _baseline() -> list[str]:
+def _baseline() -> dict[str, list[str]]:
+    """The strings each language is still allowed to miss. A language that
+    is complete has an empty list."""
     return _json(CHECKS / "baseline.json")
 
 
@@ -100,23 +105,26 @@ def test_every_language_file_is_checked():
 @pytest.mark.parametrize("lang", sorted(_langs()))
 def test_every_panel_string_has_a_key_or_is_in_the_baseline(lang):
     keys = _langs()[lang]
-    baseline = set(_baseline())
+    baseline = set(_baseline().get(lang, []))
     missing = [s for s in _strings() if s not in keys and s not in baseline]
     assert not missing, (
         f"{lang}.json has no key for {len(missing)} panel string(s): {missing[:10]}. "
         "Add a translation for each one to every language file.")
 
 
-def test_the_baseline_only_shrinks():
+@pytest.mark.parametrize("lang", sorted(_langs()))
+def test_the_baseline_only_shrinks(lang):
     baseline = _baseline()
+    assert set(baseline) == set(_langs()), "baseline.json needs one list per language file"
+    mine = baseline[lang]
     strings = set(_strings())
-    langs = _langs()
-    assert baseline == sorted(set(baseline))
-    assert len(baseline) <= BASELINE_MAX, "the baseline grew; translate new strings instead"
-    gone = [s for s in baseline if s not in strings]
-    assert not gone, f"baseline strings the panel no longer shows, remove them: {gone[:10]}"
-    done = [s for s in baseline if all(s in keys for keys in langs.values())]
-    assert not done, f"now translated in every language, remove them from the baseline: {done[:10]}"
+    keys = _langs()[lang]
+    assert mine == sorted(set(mine))
+    assert len(mine) <= BASELINE_MAX[lang], f"{lang}: the baseline grew; translate new strings instead"
+    gone = [s for s in mine if s not in strings]
+    assert not gone, f"{lang}: baseline strings the panel no longer shows, remove them: {gone[:10]}"
+    done = [s for s in mine if s in keys]
+    assert not done, f"{lang}: now translated, remove them from its baseline: {done[:10]}"
 
 
 @pytest.mark.parametrize("lang", sorted(_langs()))

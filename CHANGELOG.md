@@ -1,3 +1,13 @@
+## [8.18.0] — Panel in 9 languages
+
+- **The panel is fully translated** in Brazilian Portuguese, Czech, Dutch, French, German, Polish, Russian, Spanish and Swedish: all 913 strings that were still English, in each language. A render of every tab shows no fixed panel text left in English in any of the nine.
+- **Same words as the setup dialog.** Each language reuses the setup dialog's terms and its form of "you", and Home Assistant's own words for menus and features.
+- **Counts.** The panel has no plural rules, so in Polish, Russian and Czech a count above one is written as "label: count", which reads correctly for every number.
+- **Checks.** The untranslated baseline is now kept per language, so the nine finished languages are checked as complete while the other nine stay in their baselines. The string list no longer counts test data or code fragments.
+- **Host Health card, clearer English.** The Alerts description now says what it does: "speak or push a problem once it lasts longer than Persistence — off: no alerts, readings only". The old text, "turn off to silence immediately", read as the opposite.
+- **Clearer wording in every language** for the Decision Lab replay (re-run, not playback), the "Nova learns" toggles, lockdown, the alarm's "opt in" note and "Require confinement".
+- Danish, Finnish, Italian, Norwegian Bokmål, Portuguese, Romanian, Slovak, Turkish and Ukrainian are unchanged. Some text the backend sends is still English in every language.
+
 ## [8.17.0] — Panel text drawn later can be translated
 
 - **Text drawn after the first render** now goes through the panel's translator. That covers the logs, memory, faces and intrusion lists, status messages, dialogs, the energy card and the Diagnostics lists. Two small helpers do it, `_setHtml` and `_setText`, and they use the same lookup as the first render. There is still one translation system.

@@ -92,7 +92,7 @@ function scanSource(decode) {
         for (const t of seg.matchAll(/\?\s*"([^"\\$]*)"\s*:\s*"([^"\\$]*)"/g)) { add(t[1]); add(t[2]); }
         continue;
       }
-      if (/[`{};]|=>|&&|\|\|/.test(seg)) continue;
+      if (/[`{};]|=>|&&|\|\||'\s*\+|\+\s*'/.test(seg)) continue;   // code, not text
       add(seg);
     }
     for (const m of src.matchAll(/\b(?:title|placeholder)="([^"$]*)"/g)) add(m[1]);
@@ -148,8 +148,13 @@ async function build() {
   const decode = s => { box.innerHTML = s; return box.textContent; };
   const raw = sourceFiles().map(f => fs.readFileSync(f, "utf8")).join("\n");
   const decoded = decode(raw.replace(/</g, "&lt;"));
-  const isLiteral = s => raw.includes(s) || decoded.includes(s)
-    || raw.includes(JSON.stringify(s).slice(1, -1));
+  // A rendered string counts only when the source writes it as a whole piece
+  // of text, not when it sits inside a longer one ("Tuesday" inside
+  // "is (e.g. Tuesday)" is test data, not panel text).
+  const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const whole = (hay, s) => new RegExp(`(?:^|["'\`>}])\\s*${esc(s)}\\s*(?:["'\`<$]|$)`, "m").test(hay);
+  const isLiteral = s => whole(raw, s) || whole(decoded, s)
+    || whole(raw, JSON.stringify(s).slice(1, -1));
   const all = new Set([...scanSource(decode), ...await renderStrings(window, hass, isLiteral)]);
   return [...all].sort();
 }
