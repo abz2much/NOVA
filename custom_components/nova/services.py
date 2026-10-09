@@ -81,7 +81,7 @@ _LOGGER = logging.getLogger(__name__)
 
 # ── Lifecycle resolution ──────────────────────────────────────────────────────
 
-# Translation keys (strings.json "exceptions") for an entry that is not
+# Translation keys (translations/en.json "exceptions") for an entry that is not
 # LOADED. A state Home Assistant adds later reads as not_loaded.
 _STATE_ERRORS: dict[ConfigEntryState, str] = {
     ConfigEntryState.NOT_LOADED: "not_loaded",

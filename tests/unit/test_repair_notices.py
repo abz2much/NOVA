@@ -128,11 +128,11 @@ def test_voice_notices_never_raise(rn, monkeypatch):
     rn.clear_voice_setup(object())
 
 
-def test_every_voice_translation_key_exists_in_strings():
+def test_every_voice_translation_key_exists_in_en_json():
     import json
     import pathlib
     strings = json.loads((pathlib.Path(__file__).resolve().parents[2]
-                          / "custom_components/nova/strings.json").read_text())
+                          / "custom_components/nova/translations/en.json").read_text())
     for step in ("addons", "wyoming", "pipeline"):
         assert "{step}" in strings["issues"][f"voice_setup_step_{step}"]["description"]
     assert "{failed}" in strings["issues"]["voice_setup_incomplete"]["description"]

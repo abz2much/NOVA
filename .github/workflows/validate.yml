@@ -132,3 +132,5 @@ jobs:
           npm install jsdom >/dev/null 2>&1
           cd "$GITHUB_WORKSPACE"
           NODE_PATH=/tmp/jsdomtest/node_modules node scripts/smoke_panel.js
+      - name: Panel string list is current
+        run: NODE_PATH=/tmp/jsdomtest/node_modules node scripts/panel_strings.js --check

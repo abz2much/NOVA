@@ -75,3 +75,15 @@ def test_all_message_keys_cover_all_title_languages(i18n):
         assert set(table.keys()) == langs, f"{key} missing languages"
     for key, table in i18n.TITLES.items():
         assert set(table.keys()) == langs, f"title {key} missing languages"
+
+
+def test_placeholders_match_the_english_in_every_language(i18n):
+    # A translation that drops or renames a {placeholder} would print the
+    # placeholder itself in a safety alert, or lose the device name (8.15.0).
+    import re
+    ph = re.compile(r"\{(\w+)\}")
+    for table_name, table in (("MESSAGES", i18n.MESSAGES), ("TITLES", i18n.TITLES)):
+        for key, by_lang in table.items():
+            want = sorted(ph.findall(by_lang["en"]))
+            for lang, text in by_lang.items():
+                assert sorted(ph.findall(text)) == want, f"{table_name}[{key!r}][{lang!r}]"

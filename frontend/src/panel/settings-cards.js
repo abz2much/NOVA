@@ -272,7 +272,9 @@
           ${cfg.operational_mode_auto !== false ? "ON" : "OFF"}
         </button>
       </div>
-      <div class="stub-body">Active: <strong>${this._esc(active.toUpperCase())}</strong>${m.description ? " — " + this._esc(m.description) : ""}. Safety always stays active.</div>
+      <div class="stub-body">Active: <strong>${this._esc(active.toUpperCase())}</strong>${m.description
+        ? " " + this._tHtml("— {description}. Safety always stays active.", { description: this._esc(m.description) })
+        : ". Safety always stays active."}</div>
       <div class="mode-grid">${modeChips}</div>
       <details class="mode-bindings"${this._modeBindingsOpen ? " open" : ""}>
       <summary class="mode-bind-head">Mode bindings — scope Lab &amp; Movie to specific rooms</summary>
@@ -620,7 +622,7 @@
           // endpoint. Keep it selected and offer the live list alongside
           // it. (Previously this auto-picked and SAVED a different model
           // — often just the alphabetically-first one — on every render.)
-        opts += `<option value="${this._esc(cur)}" selected>${this._esc(cur)} — not in the live list</option>`;
+        opts += `<option value="${this._esc(cur)}" selected>${this._tHtml("{model} — not in the live list", { model: this._esc(cur) })}</option>`;
         opts += models.map(m => `<option value="${this._esc(m)}">${this._esc(label(m))}</option>`).join("");
       } else {
         opts += models.map(m => `<option value="${this._esc(m)}"${m === cur ? " selected" : ""}>${this._esc(label(m))}</option>`).join("");
@@ -628,7 +630,7 @@
     } else {
       const err = res && res.error ? ` — ${String(res.error).slice(0, 48)}` : "";
       opts += (cur ? `<option value="${this._esc(cur)}" selected>${this._esc(cur)}</option>` : "");
-      opts += `<option value="" disabled>no models found${this._esc(err)}</option>`;
+      opts += `<option value="" disabled>${this._tHtml("no models found{error}", { error: this._esc(err) })}</option>`;
     }
     opts += `<option value="__custom__">✎ Custom…</option>`;
     selectEl.innerHTML = opts;

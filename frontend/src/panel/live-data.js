@@ -99,7 +99,7 @@
         </div>`).join("");
     }
     const feedMeta = root.getElementById("feedMeta");
-    if (feedMeta) feedMeta.textContent = `LAST ${entries.length}`;
+    if (feedMeta) feedMeta.textContent = this._t("LAST {count}", { count: entries.length });
 
     // areas
     const areasGridEl = root.getElementById("areasGrid");
@@ -117,7 +117,7 @@
       });
     }
     const areasMeta = root.getElementById("areasMeta");
-    if (areasMeta) areasMeta.textContent = `${d.occupied} OCCUPIED · ${d.areasMonitored} MONITORED`;
+    if (areasMeta) areasMeta.textContent = this._t("{occupied} OCCUPIED · {monitored} MONITORED", { occupied: d.occupied, monitored: d.areasMonitored });
 
     this._renderSolarPanel();
     this._renderMutesPanel();
@@ -148,11 +148,11 @@
     const goals = d.goals || [];
     const goalList = root.getElementById("goalList");
     const goalsMeta = root.getElementById("goalsMeta");
-    if (goalsMeta) goalsMeta.textContent = `${goals.filter(g => g.status === "active").length} ACTIVE`;
+    if (goalsMeta) goalsMeta.textContent = this._t("{count} ACTIVE", { count: goals.filter(g => g.status === "active").length });
     if (goalList) {
       goalList.innerHTML = goals.length ? goals.map(g => {
         const active = g.status === "active";
-        const progress = g.steps_total ? `${g.steps_done || 0}/${g.steps_total} STEPS` : "OPEN OUTCOME";
+        const progress = g.steps_total ? this._t("{done}/{total} STEPS", { done: g.steps_done || 0, total: g.steps_total }) : "OPEN OUTCOME";
         return `<div class="goal-row">
           <div class="goal-copy"><b>${this._esc(g.title || g.outcome || `Goal ${g.id}`)}</b>
             <span>${this._esc(g.outcome || "")}</span>
@@ -170,7 +170,7 @@
       const cams = d.cameras || [];
       camPanel.hidden = cams.length === 0;
       const camToggle = root.getElementById("camToggle");
-      if (camToggle) camToggle.textContent = this._camOpen ? "HIDE CAMERAS ▴" : `SHOW ${cams.length} CAMERA${cams.length === 1 ? "" : "S"} ▾`;
+      if (camToggle) camToggle.textContent = this._camOpen ? "HIDE CAMERAS ▴" : this._t(cams.length === 1 ? "SHOW {count} CAMERA ▾" : "SHOW {count} CAMERAS ▾", { count: cams.length });
       camStrip.classList.toggle("open", this._camOpen);
       camStrip.innerHTML = cams.map(c => {
         const eid = c.entity_id;
@@ -294,7 +294,7 @@
     const lit = hasLights && (a.lights_on || 0) > 0;
     const ctlOn = (this._liveData?.config?.light_control_enabled) !== false;
     const lightCtl = hasLights
-      ? `<button class="area-light-toggle${lit ? " on" : ""}"${ctlOn ? ` data-light-area="${this._esc(a.id || "")}" data-area-name="${this._esc(a.name)}"` : " disabled"} title="${a.lights_on}/${a.lights_total} lights on${ctlOn ? " — tap to toggle" : ""}">${lit ? "ON" : "OFF"}</button>`
+      ? `<button class="area-light-toggle${lit ? " on" : ""}"${ctlOn ? ` data-light-area="${this._esc(a.id || "")}" data-area-name="${this._esc(a.name)}"` : " disabled"} title="${this._tHtml(ctlOn ? "{on}/{total} lights on — tap to toggle" : "{on}/{total} lights on", { on: a.lights_on, total: a.lights_total })}">${lit ? "ON" : "OFF"}</button>`
       : "";
     return `
       <div class="area-tile${a.active ? " active" : ""}${(a.temp || a.humidity) ? "" : " no-temp"}">
@@ -397,7 +397,10 @@
       try {
         const res = await this._hass.callWS({ type: "nova/run_analysis" });
         const bf = res.backfill || {};
-        const bfNote = bf.imported ? `<br>Imported ${bf.imported} past event${bf.imported === 1 ? "" : "s"} from history for ${bf.entities} new entit${bf.entities === 1 ? "y" : "ies"}.` : "";
+        const bfNote = bf.imported ? "<br>" + this._tHtml(bf.imported === 1
+          ? (bf.entities === 1 ? "Imported {events} past event from history for {entities} new entity." : "Imported {events} past event from history for {entities} new entities.")
+          : (bf.entities === 1 ? "Imported {events} past events from history for {entities} new entity." : "Imported {events} past events from history for {entities} new entities."),
+        { events: bf.imported, entities: bf.entities }) : "";
         if (out) {
           if (res.ran) {
             const nf = res.patterns_found ?? 0;

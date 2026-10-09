@@ -55,7 +55,7 @@
     }
     if (statusEl) {
       statusEl.innerHTML = s.called_off
-        ? `<span class="diag-warn">CALLED OFF · ${s.suppressed_for}s</span>`
+        ? `<span class="diag-warn">${this._tHtml("CALLED OFF · {seconds}s", { seconds: s.suppressed_for })}</span>`
         : `<span class="diag-ok">ARMED</span>`;
     }
     const snap = s.last_snapshot;
@@ -70,7 +70,7 @@
       html += `<div class="stub-body">No intrusion snapshots captured. This stays empty unless Nova confirms an intruder on camera.</div>`;
     }
     if (s.false_alarms_24h) {
-      html += `<div class="stub-body">${s.false_alarms_24h} false alarm${s.false_alarms_24h === 1 ? "" : "s"} called off in the last 24h</div>`;
+      html += `<div class="stub-body">${this._tHtml(s.false_alarms_24h === 1 ? "{count} false alarm called off in the last 24h" : "{count} false alarms called off in the last 24h", { count: s.false_alarms_24h })}</div>`;
     }
     if (s.acknowledged) {
       html += `<div class="stub-body">✓ Acknowledged — automatic escalation held (you're handling it)</div>`;
@@ -131,7 +131,7 @@
       const res = await this._hass.callWS({ type: "nova/intrusion", action: "log", limit: 40 });
       this._ilog = res;
       const L = res?.learning || {};
-      if (side) side.textContent = `${L.labeled || 0}/${L.events || 0} labelled`;
+      if (side) side.textContent = this._t("{labelled}/{events} labelled", { labelled: L.labeled || 0, events: L.events || 0 });
       body.innerHTML = this._renderIntrusionLogHtml(res);
       this._wireIntrusionLabels();
     } catch (err) {
@@ -147,7 +147,7 @@
     const damped = ((res.learning || {}).damped_patterns || []).length;
     let html = "";
     if (damped) {
-      html += `<div class="stub-body">Nova has learned ${damped} benign pattern${damped === 1 ? "" : "s"} — low-confidence alerts for these stay quiet.</div>`;
+      html += `<div class="stub-body">${this._tHtml(damped === 1 ? "Nova has learned {count} benign pattern — low-confidence alerts for these stay quiet." : "Nova has learned {count} benign patterns — low-confidence alerts for these stay quiet.", { count: damped })}</div>`;
     }
     for (const e of evs) {
       const when = new Date((e.ts || 0) * 1000).toLocaleString();

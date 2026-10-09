@@ -283,16 +283,20 @@
     if (!list) return;
     const data = this._mmwave || { rooms: [], summary: {} };
     const s = data.summary || {};
-    if (sumEl) sumEl.textContent = s.rooms_with_mmwave ? `◉ ${s.rooms_detecting || 0}/${s.rooms_with_mmwave} OCCUPIED` : "◉ NONE";
+    if (sumEl) sumEl.textContent = s.rooms_with_mmwave ? this._t("◉ {detecting}/{rooms} OCCUPIED", { detecting: s.rooms_detecting || 0, rooms: s.rooms_with_mmwave }) : "◉ NONE";
     if (data.error) { list.innerHTML = `<div class="toggle-desc">Couldn't read sensors — restart Home Assistant after updating, then reopen.</div>`; return; }
     const rooms = data.rooms || [];
     if (!rooms.length) { list.innerHTML = `<div class="toggle-desc">No presence, motion, or mmWave sensors found. Assign occupancy sensors to areas in Home Assistant and they'll appear here.</div>`; return; }
     list.innerHTML = rooms.map(r => {
       const on = r.detecting_count > 0;
-      const sensorLine = r.sensor_count > 1 ? `${r.detecting_count}/${r.sensor_count} sensors` : `${r.sensor_count} sensor`;
+      const sensorLine = r.sensor_count > 1
+        ? this._tHtml("{detecting}/{total} sensors", { detecting: r.detecting_count, total: r.sensor_count })
+        : this._tHtml("{count} sensor", { count: r.sensor_count });
       return `<div class="cfg-row">
         <label>${this._esc(r.name)}${r.outdoor ? " ▲" : ""}</label>
-        <span class="toggle-desc">${on ? "OCCUPIED" : "clear"} · ${sensorLine} · ${on ? "now" : this._esc(r.freshest)}</span>
+        <span class="toggle-desc">${on
+          ? this._tHtml("OCCUPIED · {sensors} · now", { sensors: sensorLine })
+          : this._tHtml("clear · {sensors} · {age}", { sensors: sensorLine, age: this._esc(r.freshest) })}</span>
       </div>`;
     }).join("");
   }

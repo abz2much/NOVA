@@ -219,7 +219,7 @@
           ["custom", "Custom feed"],
         ], source)}</select>
       </div>
-      ${credits[source] ? `<div class="toggle-desc hazard-source-credit">Source: ${this._esc(credits[source])}</div>` : ""}
+      ${credits[source] ? `<div class="toggle-desc hazard-source-credit">${this._tHtml("Source: {source}", { source: this._esc(credits[source]) })}</div>` : ""}
       ${source === "custom" ? `
       <div class="panel-head" style="margin-top:10px"><div class="panel-title">Custom CAP feed (not tested by Nova)</div></div>
       <div class="stub-body">An https address of one CAP alert, or an Atom or RSS list of them. Nova only alerts when an alert's area covers your home, or matches a code or name below.</div>
@@ -286,7 +286,7 @@
         <div><b class="hazard-level" style="color:${colour[w.level] || "inherit"}">${this._esc(String(w.level || "").toUpperCase())}</b> ${this._esc(w.headline_text || "")}</div>
         <div class="toggle-desc">${this._esc((w.counties || []).join(", "))}${w.from && w.to ? ` · ${this._esc(w.from)} to ${this._esc(w.to)}` : ""}</div>
         ${w.description_text ? `<div class="stub-body hazard-description" style="white-space:pre-line">${this._esc(w.description_text)}</div>` : ""}
-        <div class="toggle-desc hazard-source">Source: ${this._esc(w.source_label || "")}</div>
+        <div class="toggle-desc hazard-source">${this._tHtml("Source: {source}", { source: this._esc(w.source_label || "") })}</div>
       </div>`).join("");
   }
 
@@ -376,18 +376,20 @@
     const q = res.earthquakes || [], w = res.weather || [], d = res.disasters || [];
     const warn = res.warnings || [];
     if (!q.length && !w.length && !d.length && !warn.length) {
-      return `<div class="stub-body">✓ All clear near ${res.center ? res.center[0] + ", " + res.center[1] : "home"} — no weather warnings or other hazards from the sources that are on.</div>`;
+      return `<div class="stub-body">${res.center
+        ? this._tHtml("✓ All clear near {place} — no weather warnings or other hazards from the sources that are on.", { place: res.center[0] + ", " + res.center[1] })
+        : "✓ All clear near home — no weather warnings or other hazards from the sources that are on."}</div>`;
     }
     let html = warn.length ? this._renderHazardWarnings(warn) : "";
     for (const e of q) {
       const mag = (typeof e.mag === "number") ? `M${e.mag.toFixed(1)}` : "M?";
-      html += `<div class="stub-body"><b class="diag-warn">${mag}</b> ${this._esc(e.place)} — ${e.dist_km} km away</div>`;
+      html += `<div class="stub-body"><b class="diag-warn">${mag}</b> ${this._tHtml("{place} — {distance} km away", { place: this._esc(e.place), distance: e.dist_km })}</div>`;
     }
     for (const e of w) {
       html += `<div class="stub-body"><b class="diag-down">${this._esc(e.severity)}</b> ${this._esc(e.event)}${e.area ? " — " + this._esc(e.area) : ""}</div>`;
     }
     for (const e of d) {
-      html += `<div class="stub-body"><b class="diag-warn">${this._esc(e.category)}</b> ${this._esc(e.title)} — ${e.dist_km} km away</div>`;
+      html += `<div class="stub-body"><b class="diag-warn">${this._esc(e.category)}</b> ${this._tHtml("{place} — {distance} km away", { place: this._esc(e.title), distance: e.dist_km })}</div>`;
     }
     return html;
   }
@@ -524,7 +526,7 @@
       ${row("Presence Routines", s.cog_presence || 0)}
       ${presenceRows}
       ${row("Cog Escalated", s.cog_escalated || 0)}
-      ${row("Local Decisions", `${s.local_rate || 0}% (${s.local_decisions || 0} local / ${s.cloud_calls || 0} cloud)`)}
+      ${row("Local Decisions", this._tHtml("{rate}% ({local} local / {cloud} cloud)", { rate: s.local_rate || 0, local: s.local_decisions || 0, cloud: s.cloud_calls || 0 }))}
       ${row("Learned Patterns", s.learned_patterns || 0)}
       ${row("LLM Link", llmLabel, llmCls)}`;
   }
@@ -666,7 +668,7 @@
     const head = `
       <div class="cfg-row">
         <button class="new-cam-collapse" id="newCamListToggle" aria-expanded="${open}">
-          <span class="new-cam-caret">${open ? "▾" : "▸"}</span> ${nOn} of ${cams.length} cameras in use
+          <span class="new-cam-caret">${open ? "▾" : "▸"}</span> ${this._tHtml("{on} of {total} cameras in use", { on: nOn, total: cams.length })}
         </button>
         <div style="display:flex;gap:6px">
           <button class="mode-chip" id="newCamEnableAll">Enable all</button>
@@ -689,7 +691,7 @@
             <input class="cfg-field new-camset-name" style="flex:1" type="text" data-cam="${this._esc(c.entity_id)}" value="${this._esc(custom)}" placeholder="${this._esc(c.raw_name || c.entity_id)}" autocomplete="off">
           </div>
           <div class="mode-grid">
-            ${chip("auto", `AUTO (${resolved})`)}
+            ${chip("auto", resolved === "outdoor" ? "AUTO (outdoor)" : "AUTO (indoor)")}
             ${chip("indoor", "⌂ INDOOR")}
             ${chip("outdoor", "▲ OUTDOOR")}
           </div>
@@ -855,7 +857,7 @@
           <button class="mode-chip" id="newDbtScan">Scan backlog</button>
         </div>
       </div>
-      <div class="stub-body">${total} analysed · ${notable} notable · ${this._esc(srcLine)}</div>
+      <div class="stub-body">${this._tHtml("{total} analysed · {notable} notable · {sources}", { total, notable, sources: this._esc(srcLine) })}</div>
       ${patternsBlock}
       ${rows}`;
   }
@@ -876,7 +878,7 @@
       return `<div class="stub-body">Couldn't load — restart Home Assistant after updating.</div>`;
     }
     const status = b.enabled
-      ? `<span class="diag-ok">ON · ${b.found || 0} sensor${b.found === 1 ? "" : "s"}</span>`
+      ? `<span class="diag-ok">${this._tHtml(b.found === 1 ? "ON · {count} sensor" : "ON · {count} sensors", { count: b.found || 0 })}</span>`
       : `<span class="diag-off">OFF</span>`;
     const ents = b.entities || [];
     let body;
@@ -945,13 +947,13 @@
     if (d.error) return `<div class="stub-body">Couldn't reach the library — restart Home Assistant after updating, then reopen.</div>`;
     const sources = d.sources || [];
     if (!sources.length) {
-      return `<div class="stub-body">No documents ingested yet. Add PDF/.txt/.md files to <code>${this._esc(d.directory || "nova/documents in your config folder")}</code> and press Ingest.${d.chroma ? "" : " (Vector search needs ChromaDB; keyword fallback is active.)"}</div>`;
+      return `<div class="stub-body">No documents ingested yet. Add PDF/.txt/.md files to <code>${this._esc(d.directory || "nova/documents in your config folder")}</code>${d.chroma ? " and press Ingest." : " and press Ingest. (Vector search needs ChromaDB; keyword fallback is active.)"}</div>`;
     }
     return sources.map(s => `
       <div class="cfg-row">
         <label>${this._esc(s.source)}</label>
         <div style="display:flex;align-items:center;gap:8px">
-          <span class="toggle-desc">${s.chunks} chunks</span>
+          <span class="toggle-desc">${this._tHtml("{count} chunks", { count: s.chunks })}</span>
           <button class="new-doclib-del" data-src="${this._esc(s.source)}" title="Remove document">✕</button>
         </div>
       </div>`).join("");
@@ -983,7 +985,7 @@
     }
     return `
       <div class="cfg-row"><label>Search</label><span class="diag-off">KEYWORD (FTS)</span></div>
-      <div class="stub-body">Enable semantic search to match on meaning, using your Ollama server (${this._esc(v.model || "nomic-embed-text")}). No install, no ChromaDB. Re-ingest afterward to embed existing docs.</div>
+      <div class="stub-body">${this._tHtml("Enable semantic search to match on meaning, using your Ollama server ({model}). No install, no ChromaDB. Re-ingest afterward to embed existing docs.", { model: this._esc(v.model || "nomic-embed-text") })}</div>
       <div class="cfg-row"><button class="mode-chip" id="newVecbkToggle" data-mode="enable">⬆ ENABLE SEMANTIC SEARCH</button></div>`;
   }
 
@@ -992,7 +994,7 @@
     const backend = d.chroma ? "VECTOR" : d.fts ? "KEYWORD" : "NONE";
     return `
       <div class="stub-body">Drop manuals &amp; receipts (PDF, .txt, .md) into <code>${this._esc(d.directory || "nova/documents in your config folder")}</code> or upload below, then ingest. Ask Nova "what's the furnace filter size?" and it answers from your paperwork.</div>
-      <div class="cfg-row"><label>Backend</label><span>${this._esc(backend)} · ${d.chunk_count || 0} chunks</span></div>
+      <div class="cfg-row"><label>Backend</label><span>${this._tHtml("{backend} · {count} chunks", { backend: this._esc(backend), count: d.chunk_count || 0 })}</span></div>
       ${this._renderVectorBackendBody()}
       <div class="mode-bind-head">Library</div>
       <div class="cfg-row">
@@ -1029,7 +1031,7 @@
       btn.addEventListener("click", async () => {
         const src = btn.getAttribute("data-src");
         if (!src || !this._hass) return;
-        if (!window.confirm(`Remove "${src}" from the library? This deletes the file and its indexed chunks.`)) return;
+        if (!window.confirm(this._t("Remove \"{name}\" from the library? This deletes the file and its indexed chunks.", { name: src }))) return;
         try {
           await this._hass.callWS({ type: "nova/documents", action: "delete", filename: src });
           await this._fetchDocLibrary(); // triggers a full _render() when in the settings tab

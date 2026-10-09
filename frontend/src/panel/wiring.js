@@ -516,7 +516,7 @@
           const res = await this._hass.callWS({ type: "nova/hazard", action: "scan" });
           if (body) body.innerHTML = this._renderHazardScan(res);
         } catch (err) {
-          if (body) body.innerHTML = `<div class="stub-body">Scan failed: ${this._esc(err?.message || String(err))}</div>`;
+          if (body) body.innerHTML = `<div class="stub-body">${this._tHtml("Scan failed: {error}", { error: this._esc(err?.message || String(err)) })}</div>`;
         } finally {
           hazScan.disabled = false;
           hazScan.textContent = orig;

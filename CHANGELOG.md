@@ -1,3 +1,13 @@
+## [8.15.0] — Translation checks
+
+- **Panel string list.** `frontend/i18n/panel_strings.json` lists the 1,056 fixed English strings the panel shows, built from a render of every tab and a scan of the panel source. `scripts/panel_strings.js` rebuilds it, and CI fails when it is out of date.
+- **Strict checks for the panel's 18 languages.** A string with no key fails, unless it is one of the 895 untranslated when the checks began. That list may only shrink. A key the panel never shows fails, and so does a changed `{placeholder}` or symbol. A value copied from the English fails unless it is a brand or technical word on a short allow list.
+- **Clean up.** 104 panel keys that matched no text the panel can show are removed from every language file. 40 keys for labels the backend sends are kept.
+- **Text with a value inside it**, such as "3 OCCUPIED · 14 MONITORED", now goes through a small `_t` helper, so it can be translated later. English is unchanged.
+- **Setup dialog.** `strings.json` is removed. Home Assistant does not use it for a custom integration, and it had drifted from `translations/en.json`, which is now the only English source. Placeholders are now checked in every section, not only setup.
+- **Safety alerts.** Placeholders are now checked in every language.
+- No new translations, settings or service calls. What you see does not change.
+
 ## [8.14.2] — Last motion ignores cars, animals and packages
 
 - **Area cards.** A camera's car, animal or package sensor no longer sets an area's "last motion" age, on the Command Center area cards or in the occupied room's subtitle. A parked car's sensor changing used to make an empty garage look as if someone had just moved there. Real motion, occupancy, presence and person sensors count exactly as before.

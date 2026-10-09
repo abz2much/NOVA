@@ -157,15 +157,16 @@
     }
     const draw = e.kw == null
       ? `<span class="diag-off">NO METER</span>`
-      : `<span class="${e.over_peak ? "diag-warn" : "diag-ok"}">${e.kw} kW${e.over_peak ? " · OVER PEAK" : ""}</span>`;
-    const agencies = ["advisory", "opt_in", "autonomous"];
-    const agencyChips = agencies.map(a =>
-      `<button class="mode-chip ${a === e.configured_agency ? "mode-chip-on" : ""}" data-agency="${a}">${a.replace("_", "-")}</button>`).join("");
+      : `<span class="${e.over_peak ? "diag-warn" : "diag-ok"}">${e.over_peak ? this._tHtml("{kw} kW · OVER PEAK", { kw: e.kw }) : `${e.kw} kW`}</span>`;
+    // Fixed labels, so each one is a whole string the translations can match.
+    const agencyLabels = { advisory: "advisory", opt_in: "opt-in", autonomous: "autonomous" };
+    const agencyChips = Object.keys(agencyLabels).map(a =>
+      `<button class="mode-chip ${a === e.configured_agency ? "mode-chip-on" : ""}" data-agency="${a}">${agencyLabels[a]}</button>`).join("");
     const advice = (e.advice || []).map(a => `<div class="stub-body">${this._esc(a)}</div>`).join("");
     const running = e.running || [];
     const runRows = running.length
       ? `<div class="mode-bind-head">Running now</div>` + running.map(r =>
-          `<div class="cfg-row"><label>${this._esc(r.name || r.entity)}</label><span class="${r.shed_ok ? "" : "diag-warn"}">${r.watts} W${r.shed_ok ? "" : " · protected"}</span></div>`).join("")
+          `<div class="cfg-row"><label>${this._esc(r.name || r.entity)}</label><span class="${r.shed_ok ? "" : "diag-warn"}">${r.shed_ok ? `${r.watts} W` : this._tHtml("{watts} W · protected", { watts: r.watts })}</span></div>`).join("")
       : "";
     return `
       <div class="cfg-row"><label>Current draw</label>${draw}</div>
@@ -749,7 +750,7 @@
     this._outlookSetText(msg, note);
     if (msg) msg.hidden = !note;
     this._outlookSetText(root.getElementById("outlookUpdated"),
-      o.updated_at ? `Updated ${this._outlookTime(o.updated_at)}` : "");
+      o.updated_at ? this._t("Updated {time}", { time: this._outlookTime(o.updated_at) }) : "");
 
     const points = o.error ? [] : (o.points || []);
     const bands = o.error ? [] : (o.bands || []);
@@ -762,7 +763,7 @@
             <li class="outlook-item" data-kind="${this._esc(a.kind || "")}">
               <div class="outlook-item-title">${this._esc(a.title || "")}</div>
               <div class="stub-body">${this._esc(a.message || "")}</div>${
-                a.saving != null ? `\n              <div class="outlook-saving">Saves about ${this._esc(this._energyMoney(a.saving, o.currency))}</div>` : ""}
+                a.saving != null ? `\n              <div class="outlook-saving">${this._tHtml("Saves about {amount}", { amount: this._esc(this._energyMoney(a.saving, o.currency)) })}</div>` : ""}
             </li>`).join("") || `<li class="outlook-calm stub-body">Nothing to change right now.</li>`;
     }
     this._outlookSetHtml(adviceEl, adviceHtml);

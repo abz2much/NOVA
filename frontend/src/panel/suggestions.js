@@ -48,14 +48,14 @@
         <div class="panel new-sug" data-sug-id="${s.id}">
           <div class="panel-head">
             <div class="panel-title">${this._esc(label)}</div>
-            <div class="panel-meta" style="color:${confColor}">${pct}% confident</div>
+            <div class="panel-meta" style="color:${confColor}">${this._tHtml("{percent}% confident", { percent: pct })}</div>
           </div>
           ${s.why_headline ? `<div class="stub-body"><b>${this._esc(s.why_headline)}</b></div>` : ""}
           <div class="stub-body">${this._esc(s.description)}</div>
           ${overlap}
           ${evidence ? `<div class="mode-bind-head">What Nova observed</div><ul style="margin:0 0 10px;padding-left:18px;font-size:12px;color:var(--ink-dim);line-height:1.6">${evidence}</ul>` : ""}
           ${entities}
-          <div class="cfg-row"><span class="toggle-desc">seen ${s.count || "?"}× in 30 days</span></div>
+          <div class="cfg-row"><span class="toggle-desc">${this._tHtml("seen {count}× in 30 days", { count: s.count || "?" })}</span></div>
           <div class="mode-grid">
             <button class="mode-chip new-sug-approve">✓ Create automation</button>
             <button class="mode-chip new-sug-dismiss">✕ Dismiss</button>
@@ -68,7 +68,7 @@
       <div class="panel">
         <div class="panel-head">
           <div class="panel-title">Learned Opportunities</div>
-          <div class="panel-meta">${sugs.length} suggestion${sugs.length === 1 ? "" : "s"} to review</div>
+          <div class="panel-meta">${this._tHtml(sugs.length === 1 ? "{count} suggestion to review" : "{count} suggestions to review", { count: sugs.length })}</div>
         </div>
         <div class="stub-body">Automations Nova has learned from watching your routines. Review each — approve to create it in Home Assistant, or dismiss it. Nothing runs until you approve, and you can see the exact automation before deciding.</div>
       </div>
@@ -95,7 +95,7 @@
       <details class="panel">
         <summary class="panel-head" style="cursor:pointer">
           <div class="panel-title">Filtered by AI review</div>
-          <div class="panel-meta">${items.length} not suggested</div>
+          <div class="panel-meta">${this._tHtml("{count} not suggested", { count: items.length })}</div>
         </summary>
         <div class="stub-body">These learned patterns were checked by the Suggestion Review model and turned down, so Nova won't suggest them again. Bring one back if you think the review got it wrong.</div>
         ${rows}
@@ -144,14 +144,14 @@
       return `
         <div class="cfg-row">
           <label>${this._esc(a.name || a.entity_id)}</label>
-          <span class="toggle-desc">${this._esc(status)} · ${this._esc(origin)} · ${this._esc(scope)} · last triggered ${this._esc(triggered)}</span>
+          <span class="toggle-desc">${this._tHtml("{status} · {origin} · {scope} · last triggered {when}", { status: this._esc(status), origin: this._esc(origin), scope: this._esc(scope), when: this._esc(triggered) })}</span>
         </div>`;
     }).join("");
     return `
       <div class="panel">
         <div class="panel-head">
           <div class="panel-title">Existing Home Assistant Automations</div>
-          <div class="panel-meta">${automations.length} loaded</div>
+          <div class="panel-meta">${this._tHtml("{count} loaded", { count: automations.length })}</div>
         </div>
         <div class="stub-body">Nova uses this read-only inventory to avoid relearning routines Home Assistant already handles. It refreshes at startup and whenever automations are reloaded.</div>
         ${rows}
@@ -187,12 +187,12 @@
     const rows = trials.map(t => {
       const when = t.last_run ? new Date(t.last_run * 1000).toLocaleString() : "never";
       const outcome = t.manual_outcome
-        ? `<span class="toggle-desc">Feedback: ${this._esc(t.manual_outcome === "working" ? "Working" : "Needs adjustment")}</span>`
+        ? `<span class="toggle-desc">${t.manual_outcome === "working" ? "Feedback: Working" : "Feedback: Needs adjustment"}</span>`
         : "";
       return `
         <div class="cfg-row">
           <label>${this._esc(t.automation_id)}</label>
-          <span class="toggle-desc">ran ${t.run_count || 0}× · last ${this._esc(when)}</span>
+          <span class="toggle-desc">${this._tHtml("ran {count}× · last {when}", { count: t.run_count || 0, when: this._esc(when) })}</span>
         </div>
         <div class="mode-grid" data-trial-id="${t.id}">
           <button class="mode-chip new-trial-fb" data-verdict="working">WORKING</button>
@@ -204,7 +204,7 @@
       <div class="panel">
         <div class="panel-head">
           <div class="panel-title">Created by Nova</div>
-          <div class="panel-meta">${trials.length} tracked</div>
+          <div class="panel-meta">${this._tHtml("{count} tracked", { count: trials.length })}</div>
         </div>
         <div class="stub-body">Installing an automation means you accepted the suggestion — it isn't proof the automation works. This shows what's actually been observed running; "Working" and "Needs adjustment" are your own call, not Nova's.</div>
         ${rows}
@@ -269,7 +269,8 @@
           note.style.color = "var(--warn)";
           card.querySelector(".new-sug-approve")?.parentElement?.before(note);
         }
-        note.textContent = `⚠ ${(res && res.reason) || `Could not ${action} this suggestion. Try again.`}`;
+        note.textContent = `⚠ ${(res && res.reason) || this._t(action === "approve"
+          ? "Could not approve this suggestion. Try again." : "Could not dismiss this suggestion. Try again.")}`;
       };
       card.querySelector(".new-sug-approve")?.addEventListener("click", () => act("approve"));
       card.querySelector(".new-sug-dismiss")?.addEventListener("click", () => act("dismiss"));

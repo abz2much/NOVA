@@ -90,7 +90,7 @@
     const groups = this._personRoutines?.groups || {};
     const people = Object.keys(groups).sort();
     if (this._personRoutines?.error) {
-      list.innerHTML = `<div class="stub-body">Couldn't load routines — ${this._esc(this._personRoutines.error)}</div>`;
+      list.innerHTML = `<div class="stub-body">${this._tHtml("Couldn't load routines — {error}", { error: this._esc(this._personRoutines.error) })}</div>`;
       return;
     }
     if (!people.length) {
@@ -122,7 +122,7 @@
     const count = this.shadowRoot?.getElementById("newMemCount");
     if (count) count.textContent = facts.length + (facts.length === 1 ? " fact" : " facts");
     if (this._knowledge?.error) {
-      list.innerHTML = `<div class="stub-body">Couldn't load memory — ${this._esc(this._knowledge.error)}</div>`;
+      list.innerHTML = `<div class="stub-body">${this._tHtml("Couldn't load memory — {error}", { error: this._esc(this._knowledge.error) })}</div>`;
       return;
     }
     if (!facts.length) {
@@ -140,7 +140,7 @@
       const items = groups[subj].map(f => {
         const soft = (f.source !== "stated" || (f.confidence ?? 1) < 0.9);
         const hedge = soft
-          ? `<span title="${this._esc(f.source)} · ${Math.round((f.confidence ?? 1) * 100)}% sure">~</span>`
+          ? `<span title="${this._tHtml("{source} · {percent}% sure", { source: this._esc(f.source), percent: Math.round((f.confidence ?? 1) * 100) })}">~</span>`
           : "";
         const exp = f.expires_at ? `<span title="expires">⌛</span>` : "";
         return `
@@ -287,10 +287,10 @@
     if (!pendingBox || !list) return;
     const rel = this._relations || { pending: [], confirmed: [], cap: 500 };
     const countEl = root.getElementById("newRelationsCount");
-    if (countEl) countEl.textContent = `${rel.confirmed.length} confirmed · ${rel.pending.length} waiting`;
+    if (countEl) countEl.textContent = this._t("{confirmed} confirmed · {waiting} waiting", { confirmed: rel.confirmed.length, waiting: rel.pending.length });
     if (rel.error) {
       pendingBox.innerHTML = "";
-      list.innerHTML = `<div class="stub-body">Couldn't load relations — ${this._esc(rel.error)}</div>`;
+      list.innerHTML = `<div class="stub-body">${this._tHtml("Couldn't load relations — {error}", { error: this._esc(rel.error) })}</div>`;
       return;
     }
     pendingBox.innerHTML = rel.pending.length ? `

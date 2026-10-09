@@ -1,0 +1,82 @@
+{
+ "any language": [
+  "Backend",
+  "Embeddings",
+  "LLM",
+  "ONLINE",
+  "PUSH",
+  "STT",
+  "Sentinel",
+  "TEST",
+  "TTS"
+ ],
+ "da": [
+  "Status"
+ ],
+ "de": [
+  "BRIEFINGS",
+  "BROADCAST",
+  "ROUTING",
+  "Reasoning",
+  "Status",
+  "Vision"
+ ],
+ "es": [
+  "General",
+  "OFF",
+  "ON",
+  "REAL"
+ ],
+ "fr": [
+  "BRIEFINGS",
+  "Cognition",
+  "DIAGNOSTICS",
+  "Diagnostics",
+  "INTRUSION",
+  "Intrusion",
+  "Mode",
+  "NOTIFICATIONS",
+  "Notifications",
+  "Routines",
+  "SATELLITE",
+  "Vision"
+ ],
+ "it": [
+  "BROADCAST",
+  "Home",
+  "OFF",
+  "ON",
+  "SATELLITE"
+ ],
+ "nb": [
+  "Status"
+ ],
+ "nl": [
+  "CAMERA",
+  "Routines",
+  "Status"
+ ],
+ "pl": [
+  "REAL",
+  "ROUTING"
+ ],
+ "pt-br": [
+  "OFF",
+  "ON",
+  "REAL"
+ ],
+ "pt": [
+  "OFF",
+  "ON",
+  "REAL"
+ ],
+ "ro": [
+  "CALENDAR",
+  "General",
+  "Include",
+  "REAL"
+ ],
+ "sv": [
+  "Status"
+ ]
+}

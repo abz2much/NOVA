@@ -89,6 +89,24 @@
     } catch (_) { /* English DOM remains usable if localization fails. */ }
   }
 
+  // Text with a value inside it, such as "{count} OCCUPIED", which the swap
+  // above can never match. The template is the key, so a translation can move
+  // the value. Values go in exactly as given: callers escape them where they
+  // did before. With no translation, the English comes out exactly as before.
+  //   _t      plain text: textContent, confirm()
+  //   _tHtml  markup and attributes: a translation's own text is escaped
+  _t(template, values) { return this._fillTemplate(template, values, false); }
+  _tHtml(template, values) { return this._fillTemplate(template, values, true); }
+
+  _fillTemplate(template, values, html) {
+    const dict = this._uiStrings;
+    const own = !!dict && Object.prototype.hasOwnProperty.call(dict, template);
+    const text = own ? (html ? this._esc(dict[template]) : dict[template]) : template;
+    const vals = values || {};
+    return text.replace(/\{(\w+)\}/g, (m, k) =>
+      (Object.prototype.hasOwnProperty.call(vals, k) ? String(vals[k]) : m));
+  }
+
   _html() {
     const tab = this._currentTab;
     return `
@@ -172,8 +190,8 @@ ${this._htmlDashboardBody()}`;
       : problems === null
         ? `<small>Checking…</small>`
         : problems.length === 0
-          ? `<small>All ${this._esc(active.length)} checks passed.</small>`
-          : `<small>${this._esc(problems.length)} need attention:</small>${problems.map(c => `
+          ? `<small>${this._tHtml("All {count} checks passed.", { count: this._esc(active.length) })}</small>`
+          : `<small>${this._tHtml("{count} need attention:", { count: this._esc(problems.length) })}</small>${problems.map(c => `
             <small class="welcome-problem">• <b>${this._esc(c.name)}</b>: ${this._esc(c.detail || "")}${
               c.suggested_fix ? ` Fix: ${this._esc(c.suggested_fix)}` : ""}</small>`).join("")}`;
     const hello = this._helloState || {};
@@ -186,7 +204,7 @@ ${this._htmlDashboardBody()}`;
         <div class="panel-head"><div><div class="panel-title">Welcome — get Nova working for you</div>
           <div class="toggle-desc">These steps are optional. Nova can already answer you.</div></div>
           <button class="camera-toggle" id="onboardingDismiss" title="Dismiss">DISMISS</button></div>
-        <div class="onboarding-progress"><span>${this._esc(onboarding.done_count || 0)}/${this._esc(onboarding.total || 0)} DONE</span><i style="width:${Math.round(((onboarding.done_count || 0) / Math.max(1, onboarding.total || 1)) * 100)}%"></i></div>
+        <div class="onboarding-progress"><span>${this._tHtml("{done}/{total} DONE", { done: this._esc(onboarding.done_count || 0), total: this._esc(onboarding.total || 0) })}</span><i style="width:${Math.round(((onboarding.done_count || 0) / Math.max(1, onboarding.total || 1)) * 100)}%"></i></div>
         <div class="welcome-checks" id="welcomeChecks"><b>Setup checks</b>${checksLine}</div>
         <div class="onboarding-steps">${(onboarding.steps || []).map(step => `<div class="onboarding-step${step.done ? " done" : ""}">
           <span>${step.done ? "✓" : "○"}</span><div><b>${this._esc(step.label)}</b><small>${this._esc(step.hint)}</small></div>

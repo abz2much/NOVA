@@ -542,7 +542,12 @@ const hass = {
 // Command Center is Nova's one dashboard now (Classic was deleted in
 // v7.101.30 once this reached feature parity). Tests below drive the
 // single "nova-panel" element directly.
-setTimeout(async () => {
+//
+// The setup above is shared: scripts/panel_strings.js requires this file to
+// render the same panel with the same data. The checks below only run when
+// this file is run directly.
+module.exports = { window, hass, I18N_DIR };
+if (require.main === module) setTimeout(async () => {
   const checks = [];
   // ── Nova Command Center ──
   const elNew = window.document.createElement("nova-panel");
@@ -3688,6 +3693,23 @@ setTimeout(async () => {
   try { emptyOpts = elNew._labelDatalist(); } catch (_) { emptyOpts = null; }
   checks.push(["an absent label list gives an empty datalist without throwing", emptyOpts === ""]);
   cfgLive.available_labels = savedLabels;
+
+  // _t and _tHtml (8.15.0): with no translation the English is unchanged;
+  // with one, the value moves with it, and only _tHtml escapes the
+  // translation's own text.
+  const savedStrings = elNew._uiStrings;
+  elNew._uiStrings = null;
+  checks.push(["_t keeps the English exactly when there is no translation",
+    elNew._t("{count} RECENT", { count: 3 }) === "3 RECENT"
+      && elNew._tHtml("Saves about {amount}", { amount: "€2.35" }) === "Saves about €2.35"]);
+  elNew._uiStrings = { "{count} RECENT": "{count} récents", "Lot: {area}": "Terrain <{area}> & co" };
+  checks.push(["_t uses the translation and moves the value with it",
+    elNew._t("{count} RECENT", { count: 3 }) === "3 récents"]);
+  checks.push(["_tHtml escapes a translation's own text but not the value",
+    elNew._tHtml("Lot: {area}", { area: "<b>1 ha</b>" }) === "Terrain &lt;<b>1 ha</b>&gt; &amp; co"]);
+  checks.push(["_t leaves a placeholder with no value as it is",
+    elNew._t("{count} RECENT", {}) === "{count} récents"]);
+  elNew._uiStrings = savedStrings;
 
   let ok = true;
   for (const [n, p] of checks) { console.log((p ? "  PASS  " : "  FAIL  ") + n); if (!p) ok = false; }

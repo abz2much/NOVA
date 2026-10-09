@@ -12,7 +12,7 @@
           <button class="mode-chip" id="fpnAddRoom">+ Add Room</button>
           <button class="mode-chip" id="fpnAddZone">+ Outdoor Zone</button>
           ${this._fpnAddPropertyButton()}
-          <button class="mode-chip" id="fpnUnits">Units: ${this._fpUnits() === "metric" ? "Metric" : "Imperial"}</button>
+          <button class="mode-chip" id="fpnUnits">${this._fpUnits() === "metric" ? "Units: Metric" : "Units: Imperial"}</button>
           <button class="mode-chip" id="fpnZoomFit">⤢ Fit</button>
         </div>
       </div>
@@ -34,7 +34,7 @@
     const pp = this._propertyPts();
     const has = pp.length >= 3;
     return `<button class="mode-chip" id="fpnAddProperty">${has ? "Clear Property" : "+ Property Line"}</button>`
-      + (has ? `<span class="toggle-desc">Lot: ${this._propertyArea(pp)}</span>` : "");
+      + (has ? `<span class="toggle-desc">${this._tHtml("Lot: {area}", { area: this._propertyArea(pp) })}</span>` : "");
   }
 
   _renderPlanEntitiesNew(floor) {
@@ -59,7 +59,7 @@
       <div class="mode-grid">${chips}</div>
       <div class="mode-bind-head">Imported plan <span class="toggle-desc">${hasBg ? "opacity of the uploaded floor-plan image behind the rooms" : "upload a real floor-plan image to trace rooms over"}</span></div>
       <div class="cfg-row">
-        <button class="mode-chip" id="fpnBgUpload">⬆ ${hasBg ? "Replace" : "Upload"} Image</button>
+        <button class="mode-chip" id="fpnBgUpload">${hasBg ? "⬆ Replace Image" : "⬆ Upload Image"}</button>
         <input type="file" id="fpnBgFile" accept="image/*" style="display:none">
         <label>opacity</label>
         <input id="fpnBgOp" type="range" min="0" max="1" step="0.05" value="${op}">
@@ -119,7 +119,7 @@
         : "";
       return `
         <div class="cfg-row cam-row-new" data-ci="${i}">
-          <span class="new-pl-chip">CAM ${i + 1}</span>
+          <span class="new-pl-chip">${this._tHtml("CAM {number}", { number: i + 1 })}</span>
           <select class="cam-field-new" data-cam="entity" data-ci="${i}">${this._cameraEntityOptions(c.entity || "")}</select>
           <label class="fpn-inline-lbl">aim <input class="cam-field-new" data-cam="angle" data-ci="${i}" type="range" min="0" max="359" step="1" value="${c.angle != null ? c.angle : 270}"></label>
           <label class="fpn-inline-lbl">FOV <input class="cam-field-new" data-cam="fov" data-ci="${i}" type="range" min="20" max="170" step="5" value="${c.fov != null ? c.fov : 90}"></label>
