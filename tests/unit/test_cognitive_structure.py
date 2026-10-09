@@ -168,6 +168,9 @@ SERVICE_CALLERS = {
     # 8.9.0: google_travel_time.get_travel_times and get_transit_times, read only
     # lookups that return route times for leave alerts. Nothing is actuated.
     "google_travel.py",
+    # 8.12.0: forecast_solar.get_forecast, a read only lookup that returns the
+    # hourly solar forecast for the energy outlook. Nothing is actuated.
+    "energy_outlook.py",
 }
 ANNOUNCERS = {
     "__init__.py", "appliance_monitor.py", "briefing.py", "camera.py", "cognitive_core.py",

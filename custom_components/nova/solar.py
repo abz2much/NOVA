@@ -366,6 +366,17 @@ async def _daily_sum(hass, entity_id: Optional[str]) -> Optional[float]:
     return round(total, 3)
 
 
+def _forecast_entries(hass) -> list:
+    """Entity registry entries of every installed solar-forecast integration
+    (see _FORECAST_PLATFORMS) that have a unique_id. Raises on a registry
+    failure; callers decide what that means."""
+    from homeassistant.helpers import entity_registry as er
+    reg = er.async_get(hass)
+    return [e for e in reg.entities.values()
+            if getattr(e, "platform", None) in _FORECAST_PLATFORMS
+            and getattr(e, "unique_id", None)]
+
+
 def _forecast_values(hass) -> dict:
     """today/remaining-today/tomorrow straight off an installed solar-forecast
     integration, matched by platform + the stable unique_id suffix both
@@ -374,13 +385,8 @@ def _forecast_values(hass) -> dict:
     dict if no such integration is installed. Never raises."""
     out: dict = {}
     try:
-        from homeassistant.helpers import entity_registry as er
-        reg = er.async_get(hass)
-        for entry in reg.entities.values():
-            platform = getattr(entry, "platform", None)
-            uid = getattr(entry, "unique_id", None)
-            if platform not in _FORECAST_PLATFORMS or not uid:
-                continue
+        for entry in _forecast_entries(hass):
+            uid = entry.unique_id
             for suffix, out_key in _FORECAST_KEY_SUFFIXES.items():
                 if uid.endswith(suffix) and out_key not in out:
                     val = _live_pct(hass, entry.entity_id)  # plain numeric read
