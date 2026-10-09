@@ -14,6 +14,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.util import dt as dt_util
 
 from . import core_common as _m_common
+from .device_capability import can_perform
 from .core_common import (
     DARK_LUX_THRESHOLD,
     PROACTIVE_CHECK_INTERVAL,
@@ -26,6 +27,14 @@ _LOGGER = logging.getLogger(f"{__package__}.cognitive_core")
 
 
 # ── Proactive Intelligence (v5.9.07) ────────────────────────────────────────
+
+def _info_only(kind: str, key: str, message: str) -> dict:
+    """An alert with nothing to accept (8.14.0): Nova cannot do the action, so
+    there is no question, no action and no pattern to learn. offer_key keeps
+    the usual cooldown so it is not repeated every tick."""
+    return {"type": kind, "urgency": "low", "offer": False, "offer_key": key,
+            "message": message}
+
 
 class ProactiveManager:
     """
@@ -129,6 +138,11 @@ class ProactiveManager:
                 continue
             if any(self.hass.states.get(l).state == "on" for l in lights if self.hass.states.get(l)):
                 continue  # already lit
+            # Only lights Nova can really switch on (8.14.0). With none, there
+            # is nothing to offer, so no message at all.
+            lights = [l for l in lights if can_perform(self.hass, l, "light", "turn_on")]
+            if not lights:
+                continue
 
             key = f"dark:{area_id}"
             if self._on_cooldown(key):
@@ -186,6 +200,10 @@ class ProactiveManager:
             honorific = _m_common._live_honorific(self.hass)  # Phase C: presence-aware
             name = s.attributes.get("friendly_name", s.entity_id)
             area_name = self._area_name(area_id)
+            if not can_perform(self.hass, s.entity_id, "light", "turn_off"):
+                return _info_only("proactive_stale_light", key, _persona().lead_in(honorific,
+                    f"the {name} has been on for {int(mins_on)} minutes in the "
+                    f"{area_name}, which appears empty."))
             return {
                 "type": "proactive_stale_light",
                 "urgency": "low",
@@ -217,6 +235,10 @@ class ProactiveManager:
 
             honorific = _m_common._live_honorific(self.hass)  # Phase C: presence-aware
             name = s.attributes.get("friendly_name", s.entity_id)
+            if not can_perform(self.hass, s.entity_id, "climate", "set_preset_mode",
+                               {"preset_mode": "eco"}):
+                return _info_only("proactive_hvac", key, _persona().lead_in(honorific,
+                    f"the {name} is {action} but no one's home."))
             return {
                 "type": "proactive_hvac",
                 "urgency": "low",

@@ -316,8 +316,11 @@ async def _tick():
                     # Offer the FIRST non-autonomous opportunity; remaining ones
                     # wait for a later tick (their cooldown isn't marked, so they
                     # re-surface naturally next cycle).
-                    _m_state._CORE.offers_made += 1
-                    _m_state._CORE.pending_offer = offer
+                    if offer.get("offer") is not False:
+                        # An information only alert (8.14.0) has nothing for
+                        # a "yes" to do, so it is never the pending offer.
+                        _m_state._CORE.offers_made += 1
+                        _m_state._CORE.pending_offer = offer
                     okey = offer.get("offer_key")
                     if okey:
                         _m_state._CORE.proactive_mgr._mark_offered(okey)

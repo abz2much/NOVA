@@ -45,6 +45,10 @@ def registry(monkeypatch):
 def proactive(cc, fake_hass, monkeypatch):
     monkeypatch.setattr(cc.dt_util, "utcnow", lambda: NOW)
     monkeypatch.setattr(cc, "_live_honorific", lambda hass: "sir")
+    # The devices here can really do what is offered (8.14.0 checks that).
+    for domain, service in (("light", "turn_on"), ("light", "turn_off"),
+                            ("climate", "set_preset_mode")):
+        fake_hass.services.register(domain, service)
     return cc.ProactiveManager(fake_hass, {})
 
 
@@ -84,7 +88,7 @@ async def test_tick_returns_offers_in_dark_stale_hvac_order(
     _room(registry, fake_hass)
     fake_hass.states.set("light.hall", "on", last_changed=NOW - timedelta(minutes=120))
     registry.add(FakeRegistryEntry("light.hall", "x", area_id="hall"))
-    fake_hass.states.set("climate.main", "heat", hvac_action="heating")
+    fake_hass.states.set("climate.main", "heat", supported_features=16, preset_modes=["eco"], hvac_action="heating")
     offers = await proactive.tick(False, True)
     assert [o["type"] for o in offers] == ["proactive_lights", "proactive_stale_light"]
     clock["now"] += 120
@@ -95,7 +99,7 @@ async def test_tick_returns_offers_in_dark_stale_hvac_order(
 
 async def test_one_failing_check_does_not_take_the_others_down(
         proactive, clock, registry, fake_hass, monkeypatch):
-    fake_hass.states.set("climate.main", "heat", hvac_action="cooling")
+    fake_hass.states.set("climate.main", "heat", supported_features=16, preset_modes=["eco"], hvac_action="cooling")
 
     async def boom(anyone_home):
         raise RuntimeError("check broke")
@@ -263,12 +267,12 @@ async def test_the_stale_light_cooldown_starts_when_delivered(proactive, clock, 
     ("heating", True), ("cooling", True), ("idle", False), ("off", False), (None, False)])
 async def test_hvac_offer_only_while_heating_or_cooling(proactive, fake_hass, action, expected):
     attrs = {"hvac_action": action} if action else {}
-    fake_hass.states.set("climate.main", "heat", friendly_name="Main", **attrs)
+    fake_hass.states.set("climate.main", "heat", supported_features=16, preset_modes=["eco"], friendly_name="Main", **attrs)
     assert (await proactive._check_hvac_efficiency(False) is not None) is expected
 
 
 async def test_hvac_offer_shape_and_it_needs_an_empty_house(proactive, fake_hass):
-    fake_hass.states.set("climate.main", "heat", hvac_action="cooling", friendly_name="Main")
+    fake_hass.states.set("climate.main", "heat", supported_features=16, preset_modes=["eco"], hvac_action="cooling", friendly_name="Main")
     assert await proactive._check_hvac_efficiency(True) is None
     assert await proactive._check_hvac_efficiency(False) == {
         "type": "proactive_hvac", "urgency": "low", "offer": True, "offer_key": "hvac:climate.main",

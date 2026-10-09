@@ -266,11 +266,16 @@ def evaluate_for_proactive(hass) -> Optional[dict]:
             "energy": True,
         }
     if agency == AGENCY_OPT_IN:
+        # 8.14.0: this used to ask "Want me to hold X until the load drops?",
+        # but appliance profiles only hold a power sensor, never something
+        # Nova can switch, and a "yes" had nothing to act on. Information only
+        # until a profile captures a real controllable entity.
         return {
             "type": "energy_shed_offer", "urgency": "low", "auto_act": False,
             "entity_id": defer["entity"],
-            "message": f"{names} are drawing {kw:.1f} kW together. Want me to "
-                       f"hold {defer['name']} until the load drops?",
+            "message": f"{names} are drawing {kw:.1f} kW together, over your "
+                       f"peak. Holding {defer['name']} until the load drops "
+                       f"would help.",
             "energy": True,
         }
     # advisory

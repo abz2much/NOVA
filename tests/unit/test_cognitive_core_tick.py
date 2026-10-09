@@ -1419,3 +1419,15 @@ async def test_departure_is_checked_every_tick_not_only_on_cycles(cc, env, clock
     clock["now"] += 30                               # well inside the 15 minute cycle
     await cc._tick()
     assert _types(env) == ["departure_reminder"] and len(env.cog.saved) >= 1
+
+
+async def test_an_information_only_alert_is_spoken_but_never_the_pending_offer(cc, env):
+    """8.14.0: when Nova cannot do the action the alert has no question, so a
+    later "yes" must have nothing to act on. Its cooldown is still marked."""
+    info = {"type": "proactive_hvac", "urgency": "low", "offer": False,
+            "offer_key": "hvac:climate.main", "message": "The Main is heating but no one's home."}
+    cc._CORE.proactive_mgr = _Proactive([info])
+    await cc._tick()
+    assert [a["offer_key"] for a, _ in env.emitted] == ["hvac:climate.main"]
+    assert cc._CORE.pending_offer is None and cc._CORE.offers_made == 0
+    assert cc._CORE.proactive_mgr.marked == ["hvac:climate.main"]
