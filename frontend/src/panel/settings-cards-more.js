@@ -343,7 +343,7 @@
         <button class="toggle-btn ${enabled ? "on" : "off"}" data-cfg-key="host_health_enabled" data-cfg-val="${enabled ? "false" : "true"}">${enabled ? "ON" : "OFF"}</button>
       </div>
       <div class="cfg-row">
-        <label>Alerts <span class="toggle-desc">speak/push only once a problem persists — turn off to silence immediately</span></label>
+        <label>Alerts <span class="toggle-desc">speak or push a problem once it lasts longer than Persistence — off: no alerts, readings only</span></label>
         <button class="toggle-btn ${alertsEnabled ? "on" : "off"}" data-cfg-key="host_health_alerts_enabled" data-cfg-val="${alertsEnabled ? "false" : "true"}" ${enabled ? "" : "disabled"}>${alertsEnabled ? "ON" : "OFF"}</button>
       </div>
       <div class="cfg-row">
