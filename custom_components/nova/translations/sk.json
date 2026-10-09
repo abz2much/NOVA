@@ -1,0 +1,233 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Nastaviť Novu",
+        "description": "Zadajte kľúč pre každého poskytovateľa AI, ktorého chcete používať, adresu Ollama alebo oboje. Všetky polia sú voliteľné, ale aspoň jedno je potrebné. Nova každé z nich overí.\n\nNájdené uložené kľúče: {saved}. Ak chcete uložený kľúč zachovať, nechajte pole prázdne.",
+        "data": {
+          "groq_api_key": "API kľúč pre Groq",
+          "anthropic_api_key": "API kľúč pre Anthropic",
+          "openai_api_key": "API kľúč pre OpenAI",
+          "gemini_api_key": "API kľúč pre Gemini",
+          "ollama_base_url": "Adresa Ollama"
+        },
+        "data_description": {
+          "ollama_base_url": "Napríklad {example}"
+        }
+      },
+      "roles": {
+        "title": "Vyberte poskytovateľa pre každú rolu",
+        "description": "Vyberte, ktorý poskytovateľ robí ktorú prácu. Zobrazení sú len poskytovatelia, ktorí prešli overením.\n\nUložené kľúče, ktoré nefungovali a boli vynechané: {failed}.",
+        "data": {
+          "conversation": "Konverzácia",
+          "classifier": "Klasifikátor",
+          "reasoning": "Uvažovanie",
+          "camera_reasoning": "Uvažovanie nad kamerou",
+          "vision": "Analýza obrazu"
+        },
+        "data_description": {
+          "conversation": "Rozpráva sa s vami a ovláda vašu domácnosť.",
+          "classifier": "Rozhoduje, či je udalosť v domácnosti dôležitá. Beží často.",
+          "reasoning": "Rozhoduje, čo s udalosťou urobiť, a píše prehľady. Beží často.",
+          "camera_reasoning": "Posudzuje scénu z kamery podľa popisu obrazu.",
+          "vision": "Opisuje snímky z kamier. Ak to chcete nastaviť neskôr, vyberte Teraz nie."
+        }
+      },
+      "models": {
+        "title": "Vyberte model pre každú rolu",
+        "description": "Nova po odoslaní otestuje každý model. Klasifikátor a uvažovanie bežia často, preto u plateného poskytovateľa pre ne zvoľte malý a lacný model. Ak chcete zmeniť poskytovateľa, začnite nastavenie odznova: tieto obrazovky nemajú tlačidlo späť.",
+        "data": {
+          "conversation_model": "Model konverzácie ({conversation_provider})",
+          "classifier_model": "Model klasifikátora ({classifier_provider})",
+          "reasoning_model": "Model uvažovania ({reasoning_provider})",
+          "camera_reasoning_model": "Model uvažovania nad kamerou ({camera_reasoning_provider})",
+          "vision_model": "Model analýzy obrazu ({vision_provider})"
+        },
+        "data_description": {
+          "vision_model": "Ak chcete analýzu obrazu nastaviť neskôr, nechajte prázdne."
+        }
+      }
+    },
+    "error": {
+      "need_llm": "Zadajte aspoň jeden kľúč alebo adresu Ollama.",
+      "no_working_provider": "Zatiaľ žiadny funkčný poskytovateľ: zadajte kľúč alebo adresu Ollama.",
+      "invalid_auth": "Poskytovateľ tento kľúč odmietol.",
+      "cannot_connect": "Overenie sa nepodarilo dokončiť. Skúste to o chvíľu znova, a ak ide o Ollama, skontrolujte adresu.",
+      "unknown": "Overenie zlyhalo. Skúste to znova.",
+      "model_required": "Vyberte model pre túto rolu.",
+      "model_no_pictures": "Tento model nedokázal prečítať testovací obrázok.",
+      "model_not_found": "Tento poskytovateľ daný model neponúka.",
+      "model_access_denied": "Váš kľúč nemôže používať tento model.",
+      "test_incomplete": "Test sa nepodarilo dokončiť. Skúste to znova.",
+      "test_failed": "Test zlyhal. Dôvod od poskytovateľa nájdete v zázname Home Assistant.",
+      "secrets_write_failed": "Nova nemohla uložiť kľúče do secrets.yaml. Skontrolujte, či sa dá do súboru zapisovať, a skúste to znova.",
+      "config_write_failed": "Nova nemohla uložiť vaše voľby do svojho konfiguračného súboru. Skontrolujte, či sa dá do priečinka nova zapisovať, a skúste to znova."
+    },
+    "abort": {
+      "already_configured": "Nova je už nastavená.",
+      "import_failed": "Našla sa konfigurácia Nova, ale bez použiteľného LLM (žiadny API kľúč ani lokálny koncový bod).",
+      "already_in_progress": "Nastavenie Nova je už otvorené v inom okne."
+    }
+  },
+  "selector": {
+    "setup_provider": {
+      "options": {
+        "groq": "Groq",
+        "anthropic": "Anthropic",
+        "openai": "OpenAI",
+        "gemini": "Gemini",
+        "ollama": "Ollama",
+        "not_now": "Teraz nie (nastaviť neskôr)"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Nova — Konfigurovať",
+        "menu_options": {
+          "core": "Jadro — persona, direktíva, model konverzácie",
+          "routing": "Smerovanie — spálne, skupina pre hlásenia, služba upozornení",
+          "observer": "Pozorovateľ — proaktívny prehľad (úrovne modelov, hodiny pokoja)",
+          "credentials": "Prihlasovacie údaje — API kľúče poskytovateľov",
+          "identity": "Identita — rozpoznávanie jednotlivých osôb",
+          "email": "E-mail — schránka iba na čítanie (heslo v secrets.yaml)"
+        }
+      },
+      "core": {
+        "title": "Nova — Jadro",
+        "description": "Persona, direktíva a model konverzácie.",
+        "data": {
+          "honorific": "Oslovujte ma",
+          "directive_preset": "Prednastavená direktíva",
+          "directive": "Vlastná direktíva (voliteľná, nahrádza prednastavenú)",
+          "model": "Model konverzácie",
+          "use_hass_api": "Povoliť ovládanie domácnosti (svetlá, klíma, zámky atď.)"
+        }
+      },
+      "routing": {
+        "title": "Nova — Smerovanie",
+        "description": "vyberte, ktoré oblasti HA sú spálne (na rozpoznanie spánku), ktorú skupinu media_player použiť na hlásenia a službu upozornení vášho telefónu.",
+        "data": {
+          "bedroom_areas": "Oblasti spální (na rozpoznanie spánku počas hodín pokoja)",
+          "ground_floor_areas": "Oblasti na prízemí (na nočné upozornenia na vniknutie)",
+          "broadcast_group": "Skupina reproduktorov na hlásenia (zvyčajne domáca skupina Cast)",
+          "notify_service": "Služba upozornení telefónu (napr. notify.mobile_app_yourphone)"
+        },
+        "data_description": {
+          "bedroom_areas": "Akýkoľvek senzor prítomnosti v týchto oblastiach zapne počas hodín pokoja režim spánku.",
+          "ground_floor_areas": "Keď všetci spia, Nova upozorní na pohyb len vtedy, ak niektorá z týchto oblastí hlási otvorené vonkajšie dvere alebo okno. Ak chcete kontrolovať všetky poschodia, nechajte prázdne.",
+          "broadcast_group": "Používa sa na kritické a veľmi naliehavé hlásenia.",
+          "notify_service": "Používa sa, keď nie ste doma alebo spíte."
+        }
+      },
+      "observer": {
+        "title": "Nova — Režim pozorovateľa",
+        "description": "proaktívny prehľad. Nova sleduje vašu domácnosť a ozve sa, keď stojí niečo za zmienku. {note}",
+        "data": {
+          "observer_enabled": "Povoliť režim pozorovateľa",
+          "classifier_model": "Model klasifikátora (úroveň 1 — lacný)",
+          "reasoning_model": "Model uvažovania (úroveň 2 — hlavný)",
+          "review_model": "Model kontroly (úroveň 3 — pravidelný)",
+          "observer_quiet_start": "Začiatok hodín pokoja (HH:MM)",
+          "observer_quiet_end": "Koniec hodín pokoja (HH:MM)"
+        }
+      },
+      "credentials": {
+        "title": "Nova — Prihlasovacie údaje",
+        "description": "Jeden vyhradený API kľúč pre každého poskytovateľa — Groq, OpenAI, Anthropic, Gemini, vlastný koncový bod kompatibilný s OpenAI a voliteľný kľúč Bearer pre chránený koncový bod Ollama. Ukladá sa len do secrets.yaml v Home Assistant, nikdy do konfigurácie panela, a nikdy sa tu znova nezobrazí. Stav: {status}. Prázdne pole uložený kľúč daného poskytovateľa nemení. Poskytovateľ hlavného agenta je teraz: {active}.",
+        "data": {
+          "groq_credential": "API kľúč pre Groq",
+          "clear_groq": "Vymazať uložený kľúč Groq",
+          "openai_credential": "API kľúč pre OpenAI",
+          "clear_openai": "Vymazať uložený kľúč OpenAI",
+          "anthropic_credential": "API kľúč pre Anthropic",
+          "clear_anthropic": "Vymazať uložený kľúč Anthropic",
+          "gemini_credential": "API kľúč pre Gemini",
+          "clear_gemini": "Vymazať uložený kľúč Gemini",
+          "custom_credential": "API kľúč pre vlastný koncový bod",
+          "clear_custom": "Vymazať uložený kľúč vlastného koncového bodu",
+          "ollama_credential": "Kľúč Bearer pre Ollama (voliteľný — len pre chránený koncový bod)",
+          "clear_ollama": "Vymazať uložený kľúč Ollama",
+          "confirm_delete_active": "Áno, rozumiem, že vymazanie kľúča súčasného poskytovateľa hlavného agenta ho vypne, kým nebude zadaný nový kľúč alebo zmenený poskytovateľ"
+        }
+      },
+      "identity": {
+        "title": "Nova — Identita",
+        "description": "rozpoznávanie jednotlivých osôb, aby sa Nova prispôsobila tomu, kto hovorí. Funguje bez špeciálneho hardvéru pomocou prítomnosti a (ak je nastavené) rozpoznávania tvárí z kamier. Hlasový odtlačok je najpresnejší, ale vyžaduje lokálne GPU, preto je predvolene vypnutý.",
+        "data": {
+          "identity_enabled": "Rozpoznávať, kto hovorí",
+          "identity_voice_fingerprint": "Hlasový odtlačok (vyžaduje lokálne GPU)",
+          "identity_min_confidence": "Minimálna istota pred priradením k osobe",
+          "voice_recognition_source": "Zdroj rozpoznávania hlasu (entita zo služby rozpoznávania hovoriaceho, napr. binary_sensor.*_voice)",
+          "voice_recognition_auto_enroll": "Automaticky označovať hlasy na naučenie, keď ľudia hovoria"
+        },
+        "data_description": {
+          "identity_enabled": "Využíva, kto je doma, + nedávne rozpoznanie tváre z kamier. GPU nie je potrebné.",
+          "identity_voice_fingerprint": "Nechajte vypnuté, ak nemáte server s GPU, na ktorom beží model na rozpoznanie hlasu.",
+          "identity_min_confidence": "Vyššie = opatrnejšie; pri neistote zostáva neutrálna."
+        }
+      },
+      "email": {
+        "title": "Nova — E-mail",
+        "description": "Prístup k schránke iba na čítanie. Heslo IMAP sa číta zo secrets.yaml v Home Assistant — pridajte ho tam pod kľúčom uvedeným nižšie (predvolený nova_imap_password); nikdy sa neukladá do konfigurácie panela.",
+        "data": {
+          "imap_enabled": "Povoliť čítanie e-mailov",
+          "imap_host": "Hostiteľ IMAP (napr. imap.gmail.com)",
+          "imap_port": "Port IMAP (SSL: 993)",
+          "imap_user": "Používateľské meno IMAP / e-mailová adresa",
+          "imap_folder": "Priečinok schránky (predvolený INBOX)",
+          "imap_ssl": "Použiť SSL (odporúča sa)",
+          "imap_secret_key": "Kľúč v secrets.yaml, ktorý obsahuje heslo"
+        }
+      }
+    },
+    "error": {
+      "credential_set_and_clear": "Pri každom poskytovateľovi buď zadajte nový kľúč, alebo začiarknite „Vymazať“ — nie oboje.",
+      "confirm_required_for_active_provider": "Vymazanie kľúča súčasného poskytovateľa hlavného agenta vyžaduje začiarknuté potvrdzovacie pole, aby k nemu nedošlo omylom."
+    }
+  },
+  "issues": {
+    "llm_unavailable": {
+      "title": "Model uvažovania Nova nie je dostupný",
+      "description": "Nova sa nemohla spojiť so svojím modelom uvažovania, a preto beží v obmedzenom režime — ovládanie zariadení, stav a scény stále fungujú. Dôvod: {detail}\n\nOtvorte panel Nova → Nastavenia a skontrolujte poskytovateľa, model a API kľúč. Ak poskytovateľ model ukončil, vyberte ho znova zo zoznamu. Toto upozornenie zmizne samo, keď uvažovanie znova funguje."
+    },
+    "credential_migration_ambiguous": {
+      "title": "Nova: uložené prihlasovacie údaje treba priradiť poskytovateľovi",
+      "description": "Nova našla spoločné prihlasovacie údaje z čias pred zavedením samostatných údajov pre každého poskytovateľa, ale nedokázala určiť, ku ktorému poskytovateľovi patria (žiadny uložený poskytovateľ a tvar kľúča nezodpovedal žiadnemu známemu poskytovateľovi). Nič sa nezmenilo ani nevymazalo — staré údaje stále fungujú. Presun dokončíte tak, že otvoríte Nastavenia → Zariadenia a služby → Nova → Konfigurovať → Prihlasovacie údaje a zadáte ich pri správnom poskytovateľovi. Toto upozornenie zmizne samo, keď to bude hotové."
+    },
+    "voice_setup_step_addons": {
+      "title": "Nova nastavuje hlas",
+      "description": "Krok {step} z {total}: inštalácia a spustenie doplnkov Piper, Whisper a openWakeWord. Môže to trvať niekoľko minút. Toto upozornenie zmizne samo, keď sa nastavenie hlasu dokončí."
+    },
+    "voice_setup_step_wyoming": {
+      "title": "Nova nastavuje hlas",
+      "description": "Krok {step} z {total}: pripojenie Home Assistant k hlasovým doplnkom (Wyoming). Toto upozornenie zmizne samo, keď sa nastavenie hlasu dokončí."
+    },
+    "voice_setup_step_pipeline": {
+      "title": "Nova nastavuje hlas",
+      "description": "Krok {step} z {total}: vytvorenie pipeline Assist pre Novu. Toto upozornenie zmizne samo, keď sa nastavenie hlasu dokončí."
+    },
+    "voice_setup_incomplete": {
+      "title": "Nastavenie hlasu Nova nie je dokončené",
+      "description": "Nova nemohla dokončiť nastavenie hlasu. Čo zlyhalo: {failed}.\n\nRučné dokončenie: v Nastavenia → Doplnky nainštalujte a spustite Piper, Whisper a openWakeWord. Potom v Nastavenia → Hlasoví asistenti vytvorte pipeline s Novou ako agentom pre konverzáciu, Whisper na prevod reči na text a Piper na prevod textu na reč. Nova to pri každom reštarte znova skontroluje a toto upozornenie zmizne samo, keď hlas funguje."
+    }
+  },
+  "exceptions": {
+    "no_entry": {
+      "message": "Nova nie je nastavená. Pridajte integráciu Nova a skúste to znova."
+    },
+    "not_loaded": {
+      "message": "Nova nie je načítaná. Povoľte alebo znova načítajte integráciu Nova a skúste to znova."
+    },
+    "reloading": {
+      "message": "Nova sa spúšťa alebo znova načítava. Skúste to o chvíľu znova."
+    },
+    "setup_failed": {
+      "message": "Nova sa nemohla spustiť. Skontrolujte záznam Home Assistant, opravte problém a Novu znova načítajte."
+    },
+    "multiple_entries": {
+      "message": "Je nastavená viac ako jedna položka Nova. Odstráňte nadbytočnú položku a skúste to znova."
+    }
+  }
+}

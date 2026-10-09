@@ -57,7 +57,7 @@ def _backend_labels() -> list[str]:
 
 
 def _keep_english(lang: str) -> set[str]:
-    allow = _json(CHECKS / "keep_english.json")
+    allow = _json(CHECKS / "keep_english.json")["panel"]
     return set(allow["any language"]) | set(allow.get(lang, []))
 
 
@@ -161,7 +161,7 @@ def test_no_value_is_left_in_english(lang):
 
 
 def test_keep_english_only_lists_real_keys():
-    allow = _json(CHECKS / "keep_english.json")
+    allow = _json(CHECKS / "keep_english.json")["panel"]
     langs = _langs()
     for lang, words in allow.items():
         assert words == sorted(set(words)), lang

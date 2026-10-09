@@ -1,0 +1,233 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configurar a Nova",
+        "description": "Digite uma chave para cada provedor de IA que você quer usar, o endereço do Ollama ou os dois. Todos os campos são opcionais, mas pelo menos um é necessário. A Nova verifica cada um.\n\nChaves salvas encontradas: {saved}. Deixe um campo em branco para manter a chave salva.",
+        "data": {
+          "groq_api_key": "Chave API do Groq",
+          "anthropic_api_key": "Chave API da Anthropic",
+          "openai_api_key": "Chave API da OpenAI",
+          "gemini_api_key": "Chave API do Gemini",
+          "ollama_base_url": "Endereço do Ollama"
+        },
+        "data_description": {
+          "ollama_base_url": "Por exemplo, {example}"
+        }
+      },
+      "roles": {
+        "title": "Escolha um provedor para cada função",
+        "description": "Escolha qual provedor faz cada tarefa. Só aparecem os provedores que passaram na verificação.\n\nChaves salvas que não funcionaram e ficaram de fora: {failed}.",
+        "data": {
+          "conversation": "Conversa",
+          "classifier": "Classificador",
+          "reasoning": "Raciocínio",
+          "camera_reasoning": "Raciocínio das câmeras",
+          "vision": "Análise de imagem"
+        },
+        "data_description": {
+          "conversation": "Conversa com você e controla a sua casa.",
+          "classifier": "Decide se um evento da casa é importante. Roda com frequência.",
+          "reasoning": "Decide o que fazer com um evento e escreve resumos. Roda com frequência.",
+          "camera_reasoning": "Avalia uma cena de câmera a partir da descrição da imagem.",
+          "vision": "Descreve imagens das câmeras. Escolha Agora não para configurar isso depois."
+        }
+      },
+      "models": {
+        "title": "Escolha um modelo para cada função",
+        "description": "A Nova testa cada modelo quando você envia. O classificador e o raciocínio rodam com frequência, então, em um provedor pago, escolha um modelo pequeno e barato para eles. Para trocar de provedor, comece a configuração de novo: estas telas não têm botão de voltar.",
+        "data": {
+          "conversation_model": "Modelo de conversa ({conversation_provider})",
+          "classifier_model": "Modelo do classificador ({classifier_provider})",
+          "reasoning_model": "Modelo de raciocínio ({reasoning_provider})",
+          "camera_reasoning_model": "Modelo de raciocínio das câmeras ({camera_reasoning_provider})",
+          "vision_model": "Modelo de análise de imagem ({vision_provider})"
+        },
+        "data_description": {
+          "vision_model": "Deixe em branco para configurar a análise de imagem depois."
+        }
+      }
+    },
+    "error": {
+      "need_llm": "Digite pelo menos uma chave ou um endereço do Ollama.",
+      "no_working_provider": "Ainda não há provedor funcionando: digite uma chave ou um endereço do Ollama.",
+      "invalid_auth": "O provedor recusou esta chave.",
+      "cannot_connect": "Não foi possível concluir a verificação. Tente de novo daqui a pouco e, se for o Ollama, confira o endereço.",
+      "unknown": "A verificação falhou. Tente de novo.",
+      "model_required": "Escolha um modelo para esta função.",
+      "model_no_pictures": "Este modelo não conseguiu ler uma imagem de teste.",
+      "model_not_found": "Este provedor não oferece esse modelo.",
+      "model_access_denied": "Sua chave não pode usar este modelo.",
+      "test_incomplete": "Não foi possível concluir o teste. Tente de novo.",
+      "test_failed": "O teste falhou. O motivo informado pelo provedor está no registro do Home Assistant.",
+      "secrets_write_failed": "A Nova não conseguiu salvar as chaves no secrets.yaml. Verifique se o arquivo pode ser gravado e tente de novo.",
+      "config_write_failed": "A Nova não conseguiu salvar suas escolhas no arquivo de configuração dela. Verifique se a pasta nova pode ser gravada e tente de novo."
+    },
+    "abort": {
+      "already_configured": "A Nova já está configurada.",
+      "import_failed": "Foi encontrada uma configuração da Nova, mas nenhum LLM utilizável (nenhuma chave API e nenhum endpoint local).",
+      "already_in_progress": "A configuração da Nova já está aberta em outra janela."
+    }
+  },
+  "selector": {
+    "setup_provider": {
+      "options": {
+        "groq": "Groq",
+        "anthropic": "Anthropic",
+        "openai": "OpenAI",
+        "gemini": "Gemini",
+        "ollama": "Ollama",
+        "not_now": "Agora não (configurar depois)"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Nova — Configurar",
+        "menu_options": {
+          "core": "Núcleo — persona, diretiva, modelo de conversa",
+          "routing": "Encaminhamento — quartos, grupo de transmissão, serviço de notificação",
+          "observer": "Observador — atenção proativa (níveis de modelo, horário de silêncio)",
+          "credentials": "Credenciais — chaves API dos provedores",
+          "identity": "Identidade — reconhecimento de cada pessoa",
+          "email": "Email — caixa de entrada somente leitura (senha pelo secrets.yaml)"
+        }
+      },
+      "core": {
+        "title": "Nova — Núcleo",
+        "description": "Persona, diretiva e modelo de conversa.",
+        "data": {
+          "honorific": "Me chame de",
+          "directive_preset": "Diretiva predefinida",
+          "directive": "Diretiva personalizada (opcional, substitui a predefinida)",
+          "model": "Modelo de conversa",
+          "use_hass_api": "Ativar o controle da casa (luzes, climatização, fechaduras etc.)"
+        }
+      },
+      "routing": {
+        "title": "Nova — Encaminhamento",
+        "description": "escolha quais áreas do HA são quartos (para detectar o sono), qual grupo media_player usar nas transmissões e o serviço de notificação do seu celular.",
+        "data": {
+          "bedroom_areas": "Áreas de quarto (para detectar o sono no horário de silêncio)",
+          "ground_floor_areas": "Áreas do térreo (para alertas noturnos de invasão)",
+          "broadcast_group": "Grupo de alto-falantes para transmissões (normalmente o grupo Cast da sua casa)",
+          "notify_service": "Serviço de notificação do celular (ex.: notify.mobile_app_yourphone)"
+        },
+        "data_description": {
+          "bedroom_areas": "Qualquer sensor de presença nessas áreas ativa o modo sono no horário de silêncio.",
+          "ground_floor_areas": "Enquanto todos dormem, a Nova só avisa sobre movimento se uma dessas áreas tiver uma porta ou janela externa aberta. Deixe em branco para verificar todos os andares.",
+          "broadcast_group": "Usado para avisos críticos e muito urgentes.",
+          "notify_service": "Usado quando você está fora de casa ou dormindo."
+        }
+      },
+      "observer": {
+        "title": "Nova — Modo observador",
+        "description": "atenção proativa. A Nova acompanha a sua casa e avisa quando algo merece atenção. {note}",
+        "data": {
+          "observer_enabled": "Ativar o modo observador",
+          "classifier_model": "Modelo do classificador (nível 1 — barato)",
+          "reasoning_model": "Modelo de raciocínio (nível 2 — principal)",
+          "review_model": "Modelo de revisão (nível 3 — periódico)",
+          "observer_quiet_start": "Início do horário de silêncio (HH:MM)",
+          "observer_quiet_end": "Fim do horário de silêncio (HH:MM)"
+        }
+      },
+      "credentials": {
+        "title": "Nova — Credenciais",
+        "description": "Uma chave API própria para cada provedor — Groq, OpenAI, Anthropic, Gemini, um endpoint personalizado compatível com a OpenAI e uma chave Bearer opcional para um endpoint protegido do Ollama. Guardadas só no secrets.yaml do Home Assistant, nunca na configuração do painel, e nunca exibidas aqui de novo. Status: {status}. Deixar um campo em branco não muda a chave salva daquele provedor. O provedor do agente principal é: {active}.",
+        "data": {
+          "groq_credential": "Chave API do Groq",
+          "clear_groq": "Apagar a chave salva do Groq",
+          "openai_credential": "Chave API da OpenAI",
+          "clear_openai": "Apagar a chave salva da OpenAI",
+          "anthropic_credential": "Chave API da Anthropic",
+          "clear_anthropic": "Apagar a chave salva da Anthropic",
+          "gemini_credential": "Chave API do Gemini",
+          "clear_gemini": "Apagar a chave salva do Gemini",
+          "custom_credential": "Chave API do endpoint personalizado",
+          "clear_custom": "Apagar a chave salva do endpoint personalizado",
+          "ollama_credential": "Chave Bearer do Ollama (opcional — só para um endpoint protegido)",
+          "clear_ollama": "Apagar a chave salva do Ollama",
+          "confirm_delete_active": "Sim, entendo que apagar a chave do provedor atual do agente principal vai desativá-lo até que uma nova chave seja definida ou o provedor seja trocado"
+        }
+      },
+      "identity": {
+        "title": "Nova — Identidade",
+        "description": "reconhecimento de cada pessoa, para que a Nova se adapte a quem está falando. Funciona sem hardware especial, usando presença e (se configurado) reconhecimento facial das câmeras. A impressão de voz é a mais precisa, mas precisa de uma GPU local, por isso vem desligada por padrão.",
+        "data": {
+          "identity_enabled": "Reconhecer quem está falando",
+          "identity_voice_fingerprint": "Impressão de voz (precisa de uma GPU local)",
+          "identity_min_confidence": "Confiança mínima antes de escolher uma pessoa",
+          "voice_recognition_source": "Origem do reconhecimento de voz (entidade de um serviço de reconhecimento de locutor, ex.: binary_sensor.*_voice)",
+          "voice_recognition_auto_enroll": "Marcar vozes automaticamente para aprender conforme as pessoas falam"
+        },
+        "data_description": {
+          "identity_enabled": "Usa quem está em casa + reconhecimento facial recente das câmeras. Não precisa de GPU.",
+          "identity_voice_fingerprint": "Deixe desligado, a menos que você tenha um servidor com GPU rodando um modelo de identificação de voz.",
+          "identity_min_confidence": "Maior = mais cautelosa; fica neutra quando não tem certeza."
+        }
+      },
+      "email": {
+        "title": "Nova — Email",
+        "description": "Acesso à caixa de entrada somente leitura. A senha IMAP é lida do secrets.yaml do Home Assistant — adicione-a lá com a chave abaixo (padrão nova_imap_password); ela nunca fica guardada na configuração do painel.",
+        "data": {
+          "imap_enabled": "Ativar a leitura de emails",
+          "imap_host": "Servidor IMAP (ex.: imap.gmail.com)",
+          "imap_port": "Porta IMAP (SSL: 993)",
+          "imap_user": "Usuário IMAP / endereço de email",
+          "imap_folder": "Pasta da caixa de correio (padrão INBOX)",
+          "imap_ssl": "Usar SSL (recomendado)",
+          "imap_secret_key": "Chave do secrets.yaml que guarda a senha"
+        }
+      }
+    },
+    "error": {
+      "credential_set_and_clear": "Para cada provedor, digite uma nova chave ou marque \"Apagar\" — não os dois.",
+      "confirm_required_for_active_provider": "Para apagar a chave do provedor atual do agente principal, é preciso marcar a caixa de confirmação, para que isso não aconteça com um clique por engano."
+    }
+  },
+  "issues": {
+    "llm_unavailable": {
+      "title": "O modelo de raciocínio da Nova está indisponível",
+      "description": "A Nova não conseguiu acessar o modelo de raciocínio dela, por isso está funcionando em modo limitado — o controle de dispositivos, o status e as cenas continuam funcionando. Motivo: {detail}\n\nAbra o painel da Nova → Configurações e confira o provedor, o modelo e a chave API. Se o provedor descontinuou o modelo, selecione-o de novo na lista. Este aviso some sozinho assim que o raciocínio voltar a funcionar."
+    },
+    "credential_migration_ambiguous": {
+      "title": "Nova: uma credencial salva precisa ser atribuída a um provedor",
+      "description": "A Nova encontrou uma credencial compartilhada de antes de existirem credenciais separadas por provedor, mas não conseguiu descobrir a qual provedor ela pertence (nenhum provedor salvo, e o formato da chave não bateu com nenhum provedor conhecido). Nada foi alterado ou apagado — a credencial antiga continua funcionando. Para terminar a migração, abra Configurações → Dispositivos & Serviços → Nova → Configurar → Credenciais e digite-a no provedor correto. Este aviso some sozinho assim que isso for feito."
+    },
+    "voice_setup_step_addons": {
+      "title": "A Nova está configurando a voz",
+      "description": "Etapa {step} de {total}: instalando e iniciando os complementos Piper, Whisper e openWakeWord. Isso pode levar alguns minutos. Este aviso some sozinho quando a configuração de voz terminar."
+    },
+    "voice_setup_step_wyoming": {
+      "title": "A Nova está configurando a voz",
+      "description": "Etapa {step} de {total}: conectando o Home Assistant aos complementos de voz (Wyoming). Este aviso some sozinho quando a configuração de voz terminar."
+    },
+    "voice_setup_step_pipeline": {
+      "title": "A Nova está configurando a voz",
+      "description": "Etapa {step} de {total}: criando o pipeline do Assist da Nova. Este aviso some sozinho quando a configuração de voz terminar."
+    },
+    "voice_setup_incomplete": {
+      "title": "A configuração de voz da Nova está incompleta",
+      "description": "A Nova não conseguiu terminar a configuração de voz. O que falhou: {failed}.\n\nPara terminar manualmente: em Configurações → Complementos, instale e inicie Piper, Whisper e openWakeWord. Depois, em Configurações → Assistentes de voz, crie um pipeline com a Nova como agente de conversação, o Whisper para conversão de fala em texto e o Piper para conversão de texto em fala. A Nova verifica de novo a cada reinicialização, e este aviso some sozinho quando a voz funcionar."
+    }
+  },
+  "exceptions": {
+    "no_entry": {
+      "message": "A Nova não está configurada. Adicione a integração Nova e tente de novo."
+    },
+    "not_loaded": {
+      "message": "A Nova não está carregada. Ative ou recarregue a integração Nova e tente de novo."
+    },
+    "reloading": {
+      "message": "A Nova está iniciando ou recarregando. Tente de novo daqui a pouco."
+    },
+    "setup_failed": {
+      "message": "A Nova não conseguiu iniciar. Verifique o registro do Home Assistant, corrija o problema e recarregue a Nova."
+    },
+    "multiple_entries": {
+      "message": "Há mais de uma entrada da Nova configurada. Remova a entrada extra e tente de novo."
+    }
+  }
+}

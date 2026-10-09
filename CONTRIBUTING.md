@@ -75,11 +75,14 @@ when you add or change panel text:
 
 Never add to `frontend/i18n/baseline.json`. It lists the strings that were
 untranslated when the checks began, and it may only shrink. A brand or
-technical word that stays in English (LLM, TTS) goes in
+technical word that stays in English (LLM, TTS) goes in the "panel" part of
 `frontend/i18n/keep_english.json`.
 
 The setup dialog uses `custom_components/nova/translations/`, with `en.json` as
-the English source. There is no `strings.json`.
+the English source. There is no `strings.json`. A new English string there needs
+a translation in every file, with the same placeholders, symbols and line
+breaks; `tests/unit/test_setup_dialog_i18n.py` checks them. Use Home
+Assistant's own word for each menu and feature, and its form of "you".
 
 ## Releasing
 
