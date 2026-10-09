@@ -1,3 +1,9 @@
+## [8.13.0] — Solcast, README refresh and Energy guide
+
+- **Solcast.** The Energy outlook now works with Solcast as well as Forecast.Solar and Open-Meteo. The README is up to date with the Energy tab, and a new Energy setup guide (docs/energy.md) explains what Nova needs, what it learns and its limits.
+- **The dashboard's own forecast first.** Nova now reads the hourly forecast from whichever integration the Energy dashboard's solar source links to, the same way the dashboard does. If that link is out of date, it finds an installed forecast integration by its sensors instead.
+- **One forecast, never two added together.** With more than one forecast integration installed, Nova uses one: the linked one, or else Forecast.Solar, Open-Meteo, then Solcast. Several arrays set up in the same integration are still added together, so a two array Forecast.Solar install now reports its full forecast in the daily report.
+
 ## [8.12.0] — Energy outlook
 
 - **Outlook card.** The Energy tab has an Outlook card. Nova now reads your tariff times, tomorrow's solar forecast and your usual usage, and gives short advice such as when to top up the battery in a cheap window. It learns from your own history, needs no setup and never changes any device. Ask Nova "should I charge the battery tonight?" or "when is the cheapest time to run the dishwasher?"
