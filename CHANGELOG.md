@@ -1,3 +1,12 @@
+## [8.17.0] — Panel text drawn later can be translated
+
+- **Text drawn after the first render** now goes through the panel's translator. That covers the logs, memory, faces and intrusion lists, status messages, dialogs, the energy card and the Diagnostics lists. Two small helpers do it, `_setHtml` and `_setText`, and they use the same lookup as the first render. There is still one translation system.
+- **Joined labels** such as the screen reader line "Battery charging.", the battery's time left, the memory counts and the Diagnostics provider activity line are now whole strings or templates.
+- **Checks.** A new test fails if any panel code sets text directly without the helpers. Another loads a fake language and proves that late text is translated in the logs, memory, faces, intrusion, status messages and dialogs.
+- **String list.** 1,092 panel strings, up from 1,056: 42 new ones from late text, and 6 joined fragments removed. The untranslated baseline is now 931.
+- **Settings → Apps.** The voice setup notice and the README now say "Settings → Apps", Home Assistant's current name for what was "Add-ons". English only.
+- No new translations, settings or service calls. In English, the panel looks exactly as before.
+
 ## [8.16.0] — Setup dialog in 12 more languages
 
 - **New languages.** The setup dialog, the Configure screens, the repair notices and the service errors are now in Brazilian Portuguese, Czech, Danish, Finnish, Norwegian Bokmål, Polish, Romanian, Russian, Slovak, Swedish, Turkish and Ukrainian. With the six already there, that makes 18 besides English.

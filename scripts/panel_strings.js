@@ -56,18 +56,19 @@ function sourceFiles() {
   return out.sort();
 }
 
-// Every double quoted string in the first argument of _t(...) or _tHtml(...),
+// Every double quoted string in the first argument of _t, _tHtml or _tx,
 // so both sides of `n === 1 ? "{count} sensor" : "{count} sensors"` count.
 function templateKeys(src) {
   const keys = [];
-  for (const m of src.matchAll(/\b_t(?:Html)?\(/g)) {
+  for (const m of src.matchAll(/\b_t(?:Html|x)?\(/g)) {
     let depth = 0;
     for (let i = m.index + m[0].length; i < src.length; i++) {
       const c = src[i];
       if (c === '"') {
         let j = i + 1;
         while (j < src.length && src[j] !== '"') j += src[j] === "\\" ? 2 : 1;
-        keys.push(JSON.parse(src.slice(i, j + 1)));
+        // A value compared in a condition (x === "full") is not text.
+        if (!/[=!]==?\s*$/.test(src.slice(Math.max(0, i - 5), i))) keys.push(JSON.parse(src.slice(i, j + 1)));
         i = j;
       } else if (c === "(" || c === "[" || c === "{") depth++;
       else if (c === ")" || c === "]" || c === "}") { if (depth === 0) break; depth--; }
@@ -103,10 +104,10 @@ function scanSource(decode) {
     for (const m of src.matchAll(/\?\s*"([^"\\$\n]+)"\s*:\s*"([^"\\$\n]+)"/g)) { addText(m[1]); addText(m[2]); }
     // Text set after the render: textContent, toasts and browser dialogs.
     for (const line of src.split("\n")) {
-      if (!/\.(?:textContent|innerText)\s*=|_toast\(|_flash\(|\balert\(|\bconfirm\(/.test(line)) continue;
+      if (!/\.(?:textContent|innerText)\s*=|_setText\(|\.title\s*=|\balert\(|\bconfirm\(|\bprompt\(/.test(line)) continue;
       for (const m of line.matchAll(/"([^"\\$]+)"/g)) addText(m[1]);
     }
-    templateKeys(src).forEach(k => found.add(k));
+    templateKeys(src).filter(wanted).forEach(k => found.add(k));
   }
   return found;
 }

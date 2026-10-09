@@ -90,16 +90,16 @@
     const groups = this._personRoutines?.groups || {};
     const people = Object.keys(groups).sort();
     if (this._personRoutines?.error) {
-      list.innerHTML = `<div class="stub-body">${this._tHtml("Couldn't load routines — {error}", { error: this._esc(this._personRoutines.error) })}</div>`;
+      this._setHtml(list, `<div class="stub-body">${this._tHtml("Couldn't load routines — {error}", { error: this._esc(this._personRoutines.error) })}</div>`);
       return;
     }
     if (!people.length) {
-      list.innerHTML = this._personRoutinesLoaded
+      this._setHtml(list, this._personRoutinesLoaded
         ? `<div class="stub-body">Nothing person-specific learned yet — Nova needs a few weeks of sole-occupant data before routines are confidently individual.</div>`
-        : `<div class="stub-body">Loading…</div>`;
+        : `<div class="stub-body">Loading…</div>`);
       return;
     }
-    list.innerHTML = people.map(person => {
+    this._setHtml(list, people.map(person => {
       const items = groups[person]
         .slice().sort((a, b) => (b.confidence || 0) - (a.confidence || 0))
         .map(r => {
@@ -112,7 +112,7 @@
         }).join("");
       const label = this._esc(person.replace(/_/g, " ")).replace(/\b\w/g, c => c.toUpperCase());
       return `<div class="mode-bind-head">${label}</div>${items}`;
-    }).join("");
+    }).join(""));
   }
 
   _renderKnowledgeList() {
@@ -120,15 +120,15 @@
     if (!list) return;
     const facts = this._knowledge?.facts || [];
     const count = this.shadowRoot?.getElementById("newMemCount");
-    if (count) count.textContent = facts.length + (facts.length === 1 ? " fact" : " facts");
+    if (count) this._setText(count, this._t(facts.length === 1 ? "{count} fact" : "{count} facts", { count: facts.length }));
     if (this._knowledge?.error) {
-      list.innerHTML = `<div class="stub-body">${this._tHtml("Couldn't load memory — {error}", { error: this._esc(this._knowledge.error) })}</div>`;
+      this._setHtml(list, `<div class="stub-body">${this._tHtml("Couldn't load memory — {error}", { error: this._esc(this._knowledge.error) })}</div>`);
       return;
     }
     if (!facts.length) {
-      list.innerHTML = this._knowledgeLoaded
+      this._setHtml(list, this._knowledgeLoaded
         ? `<div class="stub-body">Nothing yet. Say "remember that…" to Nova, or teach it above.</div>`
-        : `<div class="stub-body">Loading…</div>`;
+        : `<div class="stub-body">Loading…</div>`);
       return;
     }
     const groups = {};
@@ -136,7 +136,7 @@
     const labels = { household: "Household", primary: "About me" };
     const order = Object.keys(groups).sort(
       (a, b) => (a === "household" ? -1 : b === "household" ? 1 : a.localeCompare(b)));
-    list.innerHTML = order.map(subj => {
+    this._setHtml(list, order.map(subj => {
       const items = groups[subj].map(f => {
         const soft = (f.source !== "stated" || (f.confidence ?? 1) < 0.9);
         const hedge = soft
@@ -154,7 +154,7 @@
       }).join("");
       const label = labels[subj] || this._esc(subj.replace(/_/g, " "));
       return `<div class="mode-bind-head">${label}</div>${items}`;
-    }).join("");
+    }).join(""));
     list.querySelectorAll(".new-mem-forget").forEach(btn => {
       btn.addEventListener("click", (e) => {
         const id = parseInt(e.currentTarget.getAttribute("data-id"), 10);
@@ -223,9 +223,9 @@
     if (!panel || !list) return;
     const pending = this._knowledge?.pending || [];
     panel.hidden = pending.length === 0;
-    if (!pending.length) { list.innerHTML = ""; return; }
-    if (countEl) countEl.textContent = pending.length + (pending.length === 1 ? " waiting" : " waiting");
-    list.innerHTML = pending.map(f => `
+    if (!pending.length) { this._setHtml(list, ""); return; }
+    if (countEl) this._setText(countEl, this._t("{count} waiting", { count: pending.length }));
+    this._setHtml(list, pending.map(f => `
       <div class="cfg-row" data-id="${f.id}">
         <label>${this._esc(f.key)}</label>
         <input class="cfg-field new-pending-edit-val" style="flex:1" data-id="${f.id}" value="${this._esc(f.value)}">
@@ -234,7 +234,7 @@
         <button class="mode-chip new-pending-confirm" data-id="${f.id}">✓ Confirm</button>
         <button class="mode-chip new-pending-reject" data-id="${f.id}">✕ Reject</button>
         <button class="mode-chip new-pending-save-edit" data-id="${f.id}">💾 Save edit</button>
-      </div>`).join("");
+      </div>`).join(""));
     list.querySelectorAll(".new-pending-confirm").forEach(btn => {
       btn.addEventListener("click", (e) => {
         const id = parseInt(e.currentTarget.getAttribute("data-id"), 10);
@@ -287,13 +287,13 @@
     if (!pendingBox || !list) return;
     const rel = this._relations || { pending: [], confirmed: [], cap: 500 };
     const countEl = root.getElementById("newRelationsCount");
-    if (countEl) countEl.textContent = this._t("{confirmed} confirmed · {waiting} waiting", { confirmed: rel.confirmed.length, waiting: rel.pending.length });
+    if (countEl) this._setText(countEl, this._t("{confirmed} confirmed · {waiting} waiting", { confirmed: rel.confirmed.length, waiting: rel.pending.length }));
     if (rel.error) {
-      pendingBox.innerHTML = "";
-      list.innerHTML = `<div class="stub-body">${this._tHtml("Couldn't load relations — {error}", { error: this._esc(rel.error) })}</div>`;
+      this._setHtml(pendingBox, "");
+      this._setHtml(list, `<div class="stub-body">${this._tHtml("Couldn't load relations — {error}", { error: this._esc(rel.error) })}</div>`);
       return;
     }
-    pendingBox.innerHTML = rel.pending.length ? `
+    this._setHtml(pendingBox, rel.pending.length ? `
       <div class="mode-bind-head">Waiting for confirmation</div>` + rel.pending.map(r => `
       <div class="cfg-row cfg-row-wrap rel-row" data-id="${r.id}">
         <input class="cfg-field rel-subject" style="flex:1" maxlength="80" value="${this._esc(r.subject)}" aria-label="First thing">
@@ -304,15 +304,15 @@
         <button class="mode-chip rel-confirm" data-id="${r.id}">✓ Confirm</button>
         <button class="mode-chip rel-save" data-id="${r.id}">💾 Save edit</button>
         <button class="mode-chip rel-reject" data-id="${r.id}">✕ Reject</button>
-      </div>`).join("") : "";
-    list.innerHTML = rel.confirmed.length ? rel.confirmed.map(r => `
+      </div>`).join("") : "");
+    this._setHtml(list, rel.confirmed.length ? rel.confirmed.map(r => `
       <div class="cfg-row" data-id="${r.id}">
         <label>${this._esc(r.subject)} <b>${this._esc(r.predicate)}</b> ${this._esc(r.object)}</label>
         <button class="new-rel-remove" data-id="${r.id}" title="Remove this relation" aria-label="Remove">✕ Remove</button>
       </div>`).join("")
       : (this._relationsLoaded
         ? `<div class="stub-body">None yet. Tell Nova how things relate, for example "Sam owns the Jeep", then confirm it here. Only you can confirm a link, Nova cannot.</div>`
-        : `<div class="stub-body">Loading…</div>`);
+        : `<div class="stub-body">Loading…</div>`));
     const idOf = (el) => parseInt(el.getAttribute("data-id"), 10);
     pendingBox.querySelectorAll(".rel-confirm").forEach(b => b.addEventListener("click", e => this._relationAction(idOf(e.currentTarget), "confirm")));
     pendingBox.querySelectorAll(".rel-reject").forEach(b => b.addEventListener("click", e => this._relationAction(idOf(e.currentTarget), "reject")));
@@ -334,9 +334,9 @@
     try {
       const res = await this._hass.callWS({ type: "nova/relation_action", relation_id: id, action });
       this._relations = { pending: res?.pending || [], confirmed: res?.confirmed || [], cap: res?.cap || 500 };
-      if (msg) msg.textContent = res?.ok ? "" : "That link has already changed.";
+      if (msg) this._setText(msg, res?.ok ? "" : "That link has already changed.");
     } catch (err) {
-      if (msg) msg.textContent = "Could not change that link (administrator only).";
+      if (msg) this._setText(msg, "Could not change that link (administrator only).");
       return;
     }
     this._renderRelations();
@@ -349,13 +349,13 @@
       const res = await this._hass.callWS({ type: "nova/edit_relation", relation_id: id, ...fields });
       if (!res?.ok) {
         // Keep what the person typed so they can fix it.
-        if (msg) msg.textContent = this._relationErrorText(res?.error);
+        if (msg) this._setText(msg, this._relationErrorText(res?.error));
         return;
       }
       this._relations = { pending: res?.pending || [], confirmed: res?.confirmed || [], cap: res?.cap || 500 };
-      if (msg) msg.textContent = "Saved.";
+      if (msg) this._setText(msg, "Saved.");
     } catch (err) {
-      if (msg) msg.textContent = "Could not save that change (administrator only).";
+      if (msg) this._setText(msg, "Could not save that change (administrator only).");
       return;
     }
     this._renderRelations();

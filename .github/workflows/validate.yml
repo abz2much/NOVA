@@ -134,3 +134,5 @@ jobs:
           NODE_PATH=/tmp/jsdomtest/node_modules node scripts/smoke_panel.js
       - name: Panel string list is current
         run: NODE_PATH=/tmp/jsdomtest/node_modules node scripts/panel_strings.js --check
+      - name: Text drawn after the first render is translated
+        run: NODE_PATH=/tmp/jsdomtest/node_modules node scripts/late_text_check.js

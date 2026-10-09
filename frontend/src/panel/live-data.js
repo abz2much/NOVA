@@ -35,7 +35,7 @@
                 err => { this._setupHealth = { error: true, unauthorized: err?.code === "unauthorized" }; })
           .finally(() => { this._welcomeHealthPending = false; this._renderData(); });
       }
-      onboardingMount.innerHTML = this._onboardingHtml(d.onboarding);
+      this._setHtml(onboardingMount, this._onboardingHtml(d.onboarding));
       this._wireOnboarding();
     }
 
@@ -50,14 +50,14 @@
       reasoning: ["Something just happened.", "CHECK THE ACTIVITY FEED BELOW"],
       asleep: ["Everyone's asleep. Staying quiet.", "A GROUND-FLOOR BREACH WOULD STILL WAKE ME"],
     };
-    if (lineEl) lineEl.textContent = lines[state][0];
-    if (subEl) subEl.textContent = lines[state][1];
+    if (lineEl) this._setText(lineEl, lines[state][0]);
+    if (subEl) this._setText(subEl, lines[state][1]);
     const words = { idle: "Hello.", reasoning: "Thinking…", asleep: "Goodnight." };
     const wordEl = root.getElementById("heroWord");
     if (wordEl) wordEl.classList.toggle("dim", state === "asleep");
     const marqueeEl = root.getElementById("heroMarquee");
     const marquee = `${words[state].replace(/[.…]/g, "").toUpperCase()} · `.repeat(8);
-    if (marqueeEl && marqueeEl.textContent !== marquee) marqueeEl.textContent = marquee;
+    if (marqueeEl && marqueeEl.textContent !== marquee) this._setText(marqueeEl, marquee);
     this._typeHeroWord(words[state]);
     this._targetCoreState(state);
 
@@ -68,10 +68,10 @@
     ];
     const chipsEl = root.getElementById("chips");
     if (chipsEl) {
-      chipsEl.innerHTML = chipDefs.map(([label, s]) => {
+      this._setHtml(chipsEl, chipDefs.map(([label, s]) => {
         const warn = (s?.level === "warn") ? " warn" : "";
         return `<div class="chip${warn}"><span class="dot"></span> ${this._esc(label)} <b>${this._esc(s?.state ?? "—")}</b></div>`;
-      }).join("");
+      }).join(""));
     }
 
     // Formal lockdown is deliberately separate from the alarm controls. It
@@ -82,8 +82,8 @@
     if (lockdownBtn) {
       lockdownBtn.hidden = false;
       lockdownBtn.classList.toggle("active", !!lockdown.active);
-      lockdownBtn.textContent = lockdown.active ? "LOCKDOWN ACTIVE" : "LOCKDOWN OFF";
-      lockdownBtn.title = lockdown.reason || "Nova formal lockdown";
+      this._setText(lockdownBtn, lockdown.active ? "LOCKDOWN ACTIVE" : "LOCKDOWN OFF");
+      lockdownBtn.title = this._tx(lockdown.reason || "Nova formal lockdown");
     }
 
     // activity feed
@@ -92,19 +92,19 @@
       : [{ ts: "--:--", tag: "SYSTEM", msg: "No activity yet." }];
     const feedEl = root.getElementById("feed");
     if (feedEl) {
-      feedEl.innerHTML = entries.map(e => `
+      this._setHtml(feedEl, entries.map(e => `
         <div class="feed-row">
           <div class="feed-text"><b>${this._esc(e.tag || "")}</b> · <span class="dim">${this._esc(e.msg || "")}</span></div>
           <div class="feed-time">${this._esc(e.ts || "")}</div>
-        </div>`).join("");
+        </div>`).join(""));
     }
     const feedMeta = root.getElementById("feedMeta");
-    if (feedMeta) feedMeta.textContent = this._t("LAST {count}", { count: entries.length });
+    if (feedMeta) this._setText(feedMeta, this._t("LAST {count}", { count: entries.length }));
 
     // areas
     const areasGridEl = root.getElementById("areasGrid");
     if (areasGridEl) {
-      areasGridEl.innerHTML = (d.areas || []).map(a => this._areaTileHtml(a)).join("");
+      this._setHtml(areasGridEl, (d.areas || []).map(a => this._areaTileHtml(a)).join(""));
       // Re-wire on every patch — innerHTML above just replaced these nodes,
       // so any listeners from a previous _renderData() are already gone.
       areasGridEl.querySelectorAll(".area-light-toggle[data-light-area]").forEach(btn => {
@@ -117,7 +117,7 @@
       });
     }
     const areasMeta = root.getElementById("areasMeta");
-    if (areasMeta) areasMeta.textContent = this._t("{occupied} OCCUPIED · {monitored} MONITORED", { occupied: d.occupied, monitored: d.areasMonitored });
+    if (areasMeta) this._setText(areasMeta, this._t("{occupied} OCCUPIED · {monitored} MONITORED", { occupied: d.occupied, monitored: d.areasMonitored }));
 
     this._renderSolarPanel();
     this._renderMutesPanel();
@@ -125,7 +125,7 @@
     const cog = this._cognitive || {};
     const learning = cog.learning || {};
     const cognitiveState = root.getElementById("cognitiveState");
-    if (cognitiveState) cognitiveState.textContent = cog.running === false ? "STOPPED" : (cog.running ? "RUNNING" : "UNAVAILABLE");
+    if (cognitiveState) this._setText(cognitiveState, cog.running === false ? "STOPPED" : (cog.running ? "RUNNING" : "UNAVAILABLE"));
     const cognitiveMetrics = root.getElementById("cognitiveMetrics");
     if (cognitiveMetrics) {
       const metrics = [
@@ -136,21 +136,21 @@
         ["Actions", cog.actions_taken ?? 0],
         ["Ignore rules", cog.ignore_rules ?? 0],
       ];
-      cognitiveMetrics.innerHTML = metrics.map(([label, value]) =>
-        `<div class="metric"><b>${this._esc(value)}</b><span>${this._esc(label)}</span></div>`).join("");
+      this._setHtml(cognitiveMetrics, metrics.map(([label, value]) =>
+        `<div class="metric"><b>${this._esc(value)}</b><span>${this._esc(label)}</span></div>`).join(""));
     }
     const cognitiveAnalysis = root.getElementById("cognitiveAnalysis");
     if (cognitiveAnalysis) {
       const analysis = cog.last_analysis || {};
-      cognitiveAnalysis.textContent = analysis.summary || analysis.message || "Nova learns from household patterns locally.";
+      this._setText(cognitiveAnalysis, analysis.summary || analysis.message || "Nova learns from household patterns locally.");
     }
 
     const goals = d.goals || [];
     const goalList = root.getElementById("goalList");
     const goalsMeta = root.getElementById("goalsMeta");
-    if (goalsMeta) goalsMeta.textContent = this._t("{count} ACTIVE", { count: goals.filter(g => g.status === "active").length });
+    if (goalsMeta) this._setText(goalsMeta, this._t("{count} ACTIVE", { count: goals.filter(g => g.status === "active").length }));
     if (goalList) {
-      goalList.innerHTML = goals.length ? goals.map(g => {
+      this._setHtml(goalList, goals.length ? goals.map(g => {
         const active = g.status === "active";
         const progress = g.steps_total ? this._t("{done}/{total} STEPS", { done: g.steps_done || 0, total: g.steps_total }) : "OPEN OUTCOME";
         return `<div class="goal-row">
@@ -159,7 +159,7 @@
             <small>${this._esc(String(g.status || "active").toUpperCase())} · ${this._esc(progress)}</small></div>
           <button class="mode-chip goal-action" data-goal-id="${this._esc(g.id)}" data-goal-action="${active ? "cancel" : "delete"}">${active ? "CANCEL" : "DELETE"}</button>
         </div>`;
-      }).join("") : `<div class="empty-state">No goals yet.</div>`;
+      }).join("") : `<div class="empty-state">No goals yet.</div>`);
       this._wireGoalActions();
     }
 
@@ -170,9 +170,9 @@
       const cams = d.cameras || [];
       camPanel.hidden = cams.length === 0;
       const camToggle = root.getElementById("camToggle");
-      if (camToggle) camToggle.textContent = this._camOpen ? "HIDE CAMERAS ▴" : this._t(cams.length === 1 ? "SHOW {count} CAMERA ▾" : "SHOW {count} CAMERAS ▾", { count: cams.length });
+      if (camToggle) this._setText(camToggle, this._camOpen ? "HIDE CAMERAS ▴" : this._t(cams.length === 1 ? "SHOW {count} CAMERA ▾" : "SHOW {count} CAMERAS ▾", { count: cams.length }));
       camStrip.classList.toggle("open", this._camOpen);
-      camStrip.innerHTML = cams.map(c => {
+      this._setHtml(camStrip, cams.map(c => {
         const eid = c.entity_id;
         const image = this._cameraImages[eid];
         const diag = this._cameraDiagnostics[eid];
@@ -186,7 +186,7 @@
             <button class="mode-chip camera-diagnose" data-camera="${this._esc(eid)}">DIAGNOSE</button></div>
           ${diag ? `<div class="camera-diagnostic">${this._esc(diag)}</div>` : ""}
         </div>`;
-      }).join("");
+      }).join(""));
       this._wireCameraActions();
     }
     this._localizeDOM(root);
@@ -237,7 +237,7 @@
   _wireGoalActions() {
     this.shadowRoot.querySelectorAll(".goal-action").forEach(btn => btn.addEventListener("click", async () => {
       const action = btn.getAttribute("data-goal-action");
-      if (!window.confirm(`${action === "cancel" ? "Cancel" : "Delete"} this goal?`)) return;
+      if (!window.confirm(this._tx(action === "cancel" ? "Cancel this goal?" : "Delete this goal?"))) return;
       await this._goalAction({ action, goal_id: Number(btn.getAttribute("data-goal-id")) });
     }));
   }
@@ -247,10 +247,10 @@
     try {
       const res = await this._hass.callWS({ type: "nova/goal_action", ...payload });
       if (this._liveData && Array.isArray(res?.goals)) this._liveData.goals = res.goals;
-      if (out) out.textContent = "Saved.";
+      if (out) this._setText(out, "Saved.");
       this._renderData();
     } catch (err) {
-      if (out) out.textContent = err?.message || "Goal action failed.";
+      if (out) this._setText(out, err?.message || "Goal action failed.");
     }
   }
 
@@ -326,9 +326,9 @@
     const first = String((s && !s.error && (s.advice || [])[0]) || "");
     const end = first.indexOf(". ");
     const line = end >= 0 ? first.slice(0, end + 1) : first;
-    if (sufficiencyEl && sufficiencyEl.textContent !== pct) sufficiencyEl.textContent = pct;
+    if (sufficiencyEl && sufficiencyEl.textContent !== pct) this._setText(sufficiencyEl, pct);
     if (summary) {
-      if (summary.textContent !== line) summary.textContent = line;
+      if (summary.textContent !== line) this._setText(summary, line);
       summary.hidden = !line;
     }
   }
@@ -345,7 +345,7 @@
     const entities = Array.isArray(m.entities) ? m.entities : [];
     const categories = Array.isArray(m.categories) ? m.categories : [];
     const all = m.all === true;
-    if (!all && !entities.length && !categories.length) { panel.hidden = true; body.innerHTML = ""; return; }
+    if (!all && !entities.length && !categories.length) { panel.hidden = true; this._setHtml(body, ""); return; }
     panel.hidden = false;
     const row = (label, kind, value) => `
       <div class="feed-row">
@@ -357,10 +357,10 @@
         <b>Blanket shush is on.</b> Nova is not announcing anything except critical safety alerts, and this stays on after a restart until you turn it off.
         <div style="margin-top:8px"><button class="mode-chip" data-unmute="all">Unshush</button> <span class="toggle-desc">clears every mute below as well</span></div>
       </div>` : "";
-    body.innerHTML = banner
+    this._setHtml(body, banner
       + entities.map(e => row("Entity", "entity", e)).join("")
       + categories.map(c => row("Category", "category", c)).join("")
-      + `<div class="toggle-desc" style="margin-top:8px">Critical safety alerts always speak.</div>`;
+      + `<div class="toggle-desc" style="margin-top:8px">Critical safety alerts always speak.</div>`);
     body.querySelectorAll("[data-unmute]").forEach(btn => {
       btn.addEventListener("click", async () => {
         if (!this._hass) return;
@@ -392,8 +392,8 @@
       const out = root.getElementById(resultId);
       btn.disabled = true;
       const orig = btn.textContent;
-      btn.textContent = "Analyzing…";
-      if (out) out.textContent = "Running pattern analysis over your history…";
+      this._setText(btn, "Analyzing…");
+      if (out) this._setText(out, "Running pattern analysis over your history…");
       try {
         const res = await this._hass.callWS({ type: "nova/run_analysis" });
         const bf = res.backfill || {};
@@ -435,17 +435,17 @@
                 return `<br>• ${this._esc(m.description || m.type)}${prog}`;
               }).join("");
             }
-            out.innerHTML = msg + bfNote;
+            this._setHtml(out, msg + bfNote);
           } else {
-            out.innerHTML = `✕ ${this._esc(res.reason || res.error || "Analysis did not run.")}` + bfNote;
+            this._setHtml(out, `✕ ${this._esc(res.reason || res.error || "Analysis did not run.")}` + bfNote);
           }
         }
         try { await this._fetchLiveData(); } catch (_) {}
       } catch (err) {
-        if (out) out.innerHTML = `✕ ${this._esc(err?.message || String(err))}`;
+        if (out) this._setHtml(out, `✕ ${this._esc(err?.message || String(err))}`);
       } finally {
         btn.disabled = false;
-        btn.textContent = orig;
+        this._setText(btn, orig);
       }
     });
   }

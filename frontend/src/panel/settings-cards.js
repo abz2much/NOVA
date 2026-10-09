@@ -368,14 +368,16 @@
     }
     const rows = days.map(d => {
       const entries = (d.entries || []).map(e => {
+        // Each line's words are one template; the line breaks stay as they were.
         const tokens = (e.avg_input_tokens != null || e.avg_output_tokens != null)
-          ? ` · avg tokens in/out ${e.avg_input_tokens ?? "—"}/${e.avg_output_tokens ?? "—"}`
+          ? " · " + this._tHtml("avg tokens in/out {input}/{output}", {
+            input: e.avg_input_tokens ?? "—", output: e.avg_output_tokens ?? "—" })
           : "";
         return `<div class="stub-body" style="margin:2px 0">
             ${this._esc(e.provider)}/${this._esc(e.model)} (${this._esc(e.role)}, ${this._esc(e.location)}) —
-            ${e.call_count} call${e.call_count === 1 ? "" : "s"},
-            ${e.success_count} ok / ${e.failure_count} failed,
-            avg ${e.avg_latency_ms ?? "—"}ms${tokens}
+            ${this._tHtml(e.call_count === 1 ? "{count} call," : "{count} calls,", { count: e.call_count })}
+            ${this._tHtml("{ok} ok / {failed} failed,", { ok: e.success_count, failed: e.failure_count })}
+            ${this._tHtml("avg {latency}ms", { latency: e.avg_latency_ms ?? "—" })}${tokens}
           </div>`;
       }).join("");
       return `<div class="cfg-row"><label>${this._esc(d.day)}</label></div>${entries}`;
@@ -597,7 +599,7 @@
     const model = (customInput && customInput.style.display !== "none")
       ? customInput.value : modelSel.value;
     const warning = this._modelMismatchWarning(role, provSel.value, model);
-    warnEl.textContent = warning || "";
+    this._setText(warnEl, warning || "");
     warnEl.hidden = !warning;
   }
 
@@ -633,9 +635,9 @@
       opts += `<option value="" disabled>${this._tHtml("no models found{error}", { error: this._esc(err) })}</option>`;
     }
     opts += `<option value="__custom__">✎ Custom…</option>`;
-    selectEl.innerHTML = opts;
-    selectEl.title = (res && res.truncated)
-      ? "The provider returned more models than fit in one page — list may be incomplete." : "";
+    this._setHtml(selectEl, opts);
+    selectEl.title = this._tx((res && res.truncated)
+      ? "The provider returned more models than fit in one page — list may be incomplete." : "");
     const row = selectEl.closest(".new-model-row");
     if (row) this._updateRoleWarning(row);
   }
