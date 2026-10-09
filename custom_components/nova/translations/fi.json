@@ -1,0 +1,233 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Määritä Nova",
+        "description": "Anna avain jokaiselle tekoälypalvelulle, jota haluat käyttää, Ollama-osoitteesi tai molemmat. Kaikki kentät ovat valinnaisia, mutta vähintään yksi tarvitaan. Nova tarkistaa jokaisen.\n\nLöydetyt tallennetut avaimet: {saved}. Jätä kenttä tyhjäksi, niin sen tallennettu avain säilyy.",
+        "data": {
+          "groq_api_key": "Groqin API-avain",
+          "anthropic_api_key": "Anthropicin API-avain",
+          "openai_api_key": "OpenAI:n API-avain",
+          "gemini_api_key": "Geminin API-avain",
+          "ollama_base_url": "Ollama-osoite"
+        },
+        "data_description": {
+          "ollama_base_url": "Esimerkiksi {example}"
+        }
+      },
+      "roles": {
+        "title": "Valitse palvelu jokaiselle roolille",
+        "description": "Valitse, mikä palvelu hoitaa minkäkin tehtävän. Luettelossa ovat vain tarkistuksen läpäisseet palvelut.\n\nTallennetut avaimet, jotka eivät toimineet ja jätettiin pois: {failed}.",
+        "data": {
+          "conversation": "Keskustelu",
+          "classifier": "Luokittelija",
+          "reasoning": "Päättely",
+          "camera_reasoning": "Kamerapäättely",
+          "vision": "Kuva-analyysi"
+        },
+        "data_description": {
+          "conversation": "Puhuu kanssasi ja ohjaa kotiasi.",
+          "classifier": "Päättää, onko kodin tapahtuma tärkeä. Toimii usein.",
+          "reasoning": "Päättää, mitä tapahtumalle tehdään, ja kirjoittaa yhteenvedot. Toimii usein.",
+          "camera_reasoning": "Arvioi kameranäkymän kuva-analyysin tuottaman kuvauksen perusteella.",
+          "vision": "Kuvailee kamerakuvia. Valitse Ei nyt, jos haluat määrittää tämän myöhemmin."
+        }
+      },
+      "models": {
+        "title": "Valitse malli jokaiselle roolille",
+        "description": "Nova testaa jokaisen mallin, kun lähetät lomakkeen. Luokittelija ja päättely toimivat usein, joten maksullisella palvelulla valitse niille pieni ja edullinen malli. Jos haluat vaihtaa palvelun, aloita määritys alusta: näillä sivuilla ei ole takaisin-painiketta.",
+        "data": {
+          "conversation_model": "Keskustelumalli ({conversation_provider})",
+          "classifier_model": "Luokittelijan malli ({classifier_provider})",
+          "reasoning_model": "Päättelymalli ({reasoning_provider})",
+          "camera_reasoning_model": "Kamerapäättelyn malli ({camera_reasoning_provider})",
+          "vision_model": "Kuva-analyysin malli ({vision_provider})"
+        },
+        "data_description": {
+          "vision_model": "Jätä tyhjäksi, jos haluat määrittää kuva-analyysin myöhemmin."
+        }
+      }
+    },
+    "error": {
+      "need_llm": "Anna vähintään yksi avain tai Ollama-osoite.",
+      "no_working_provider": "Toimivaa palvelua ei vielä ole: anna avain tai Ollama-osoite.",
+      "invalid_auth": "Palvelu hylkäsi tämän avaimen.",
+      "cannot_connect": "Tarkistusta ei voitu suorittaa loppuun. Yritä hetken päästä uudelleen, ja jos kyse on Ollamasta, tarkista osoite.",
+      "unknown": "Tarkistus epäonnistui. Yritä uudelleen.",
+      "model_required": "Valitse malli tälle roolille.",
+      "model_no_pictures": "Tämä malli ei pystynyt lukemaan testikuvaa.",
+      "model_not_found": "Tämä palvelu ei tarjoa kyseistä mallia.",
+      "model_access_denied": "Avaimellasi ei voi käyttää tätä mallia.",
+      "test_incomplete": "Testiä ei voitu suorittaa loppuun. Yritä uudelleen.",
+      "test_failed": "Testi epäonnistui. Palvelun ilmoittama syy on Home Assistantin lokissa.",
+      "secrets_write_failed": "Nova ei voinut tallentaa avaimia secrets.yaml-tiedostoon. Tarkista, että tiedostoon voi kirjoittaa, ja yritä sitten uudelleen.",
+      "config_write_failed": "Nova ei voinut tallentaa valintojasi asetustiedostoonsa. Tarkista, että nova-kansioon voi kirjoittaa, ja yritä sitten uudelleen."
+    },
+    "abort": {
+      "already_configured": "Nova on jo määritetty.",
+      "import_failed": "Löytyi Novan määritys, mutta ei käyttökelpoista LLM:ää (ei API-avainta eikä paikallista päätepistettä).",
+      "already_in_progress": "Novan määritys on jo auki toisessa ikkunassa."
+    }
+  },
+  "selector": {
+    "setup_provider": {
+      "options": {
+        "groq": "Groq",
+        "anthropic": "Anthropic",
+        "openai": "OpenAI",
+        "gemini": "Gemini",
+        "ollama": "Ollama",
+        "not_now": "Ei nyt (määritä myöhemmin)"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Nova — Määrittele",
+        "menu_options": {
+          "core": "Ydin — persoona, ohje, keskustelumalli",
+          "routing": "Reititys — makuuhuoneet, kuulutusryhmä, ilmoituspalvelu",
+          "observer": "Tarkkailija — ennakoiva tilannetaju (mallitasot, hiljaiset tunnit)",
+          "credentials": "Tunnistetiedot — palveluiden API-avaimet",
+          "identity": "Henkilöllisyys — tunnistus henkilöittäin",
+          "email": "Sähköposti — saapuneet-kansio vain luku -tilassa (salasana secrets.yaml-tiedostossa)"
+        }
+      },
+      "core": {
+        "title": "Nova — Ydin",
+        "description": "Persoona, ohje ja keskustelumalli.",
+        "data": {
+          "honorific": "Puhuttele minua",
+          "directive_preset": "Valmis ohje",
+          "directive": "Oma ohje (valinnainen, korvaa valmiin)",
+          "model": "Keskustelumalli",
+          "use_hass_api": "Ota kodin ohjaus käyttöön (valot, ilmastointi, lukot jne.)"
+        }
+      },
+      "routing": {
+        "title": "Nova — Reititys",
+        "description": "valitse, mitkä HA:n alueet ovat makuuhuoneita (unen tunnistusta varten), mitä media_player-ryhmää käytetään kuulutuksiin ja puhelimesi ilmoituspalvelu.",
+        "data": {
+          "bedroom_areas": "Makuuhuonealueet (unen tunnistukseen hiljaisina tunteina)",
+          "ground_floor_areas": "Pohjakerroksen alueet (yöllisiin murtohälytyksiin)",
+          "broadcast_group": "Kuulutusten kaiutinryhmä (yleensä kodin Cast-ryhmä)",
+          "notify_service": "Puhelimen ilmoituspalvelu (esim. notify.mobile_app_yourphone)"
+        },
+        "data_description": {
+          "bedroom_areas": "Mikä tahansa läsnäoloanturi näillä alueilla käynnistää unitilan hiljaisina tunteina.",
+          "ground_floor_areas": "Kun kaikki nukkuvat, Nova hälyttää liikkeestä vain, jos jollakin näistä alueista on auki oleva ulko-ovi tai ikkuna. Jätä tyhjäksi, niin jokainen kerros tarkistetaan.",
+          "broadcast_group": "Käytetään kriittisiin ja hyvin kiireellisiin kuulutuksiin.",
+          "notify_service": "Käytetään, kun olet poissa kotoa tai nukut."
+        }
+      },
+      "observer": {
+        "title": "Nova — Tarkkailutila",
+        "description": "ennakoiva tilannetaju. Nova tarkkailee kotiasi ja kertoo, kun jokin on mainitsemisen arvoista. {note}",
+        "data": {
+          "observer_enabled": "Ota tarkkailutila käyttöön",
+          "classifier_model": "Luokittelijan malli (taso 1 — edullinen)",
+          "reasoning_model": "Päättelymalli (taso 2 — päämalli)",
+          "review_model": "Katselmointimalli (taso 3 — säännöllinen)",
+          "observer_quiet_start": "Hiljaiset tunnit alkavat (HH:MM)",
+          "observer_quiet_end": "Hiljaiset tunnit päättyvät (HH:MM)"
+        }
+      },
+      "credentials": {
+        "title": "Nova — Tunnistetiedot",
+        "description": "Yksi oma API-avain jokaiselle palvelulle — Groq, OpenAI, Anthropic, Gemini, oma OpenAI-yhteensopiva päätepiste sekä valinnainen Bearer-avain suojatulle Ollama-päätepisteelle. Tallennetaan vain Home Assistantin secrets.yaml-tiedostoon, ei koskaan paneelin asetuksiin, eikä niitä koskaan näytetä täällä uudelleen. Tila: {status}. Tyhjä kenttä ei muuta kyseisen palvelun tallennettua avainta. Pääagentin palvelu on tällä hetkellä: {active}.",
+        "data": {
+          "groq_credential": "Groqin API-avain",
+          "clear_groq": "Tyhjennä tallennettu Groq-avain",
+          "openai_credential": "OpenAI:n API-avain",
+          "clear_openai": "Tyhjennä tallennettu OpenAI-avain",
+          "anthropic_credential": "Anthropicin API-avain",
+          "clear_anthropic": "Tyhjennä tallennettu Anthropic-avain",
+          "gemini_credential": "Geminin API-avain",
+          "clear_gemini": "Tyhjennä tallennettu Gemini-avain",
+          "custom_credential": "Oman päätepisteen API-avain",
+          "clear_custom": "Tyhjennä oman päätepisteen tallennettu avain",
+          "ollama_credential": "Ollaman Bearer-avain (valinnainen — vain suojatulle päätepisteelle)",
+          "clear_ollama": "Tyhjennä tallennettu Ollama-avain",
+          "confirm_delete_active": "Kyllä, ymmärrän, että pääagentin nykyisen palvelun avaimen tyhjentäminen poistaa sen käytöstä, kunnes uusi avain annetaan tai palvelu vaihdetaan"
+        }
+      },
+      "identity": {
+        "title": "Nova — Henkilöllisyys",
+        "description": "tunnistus henkilöittäin, jotta Nova mukautuu puhujaan. Toimii ilman erityistä laitteistoa läsnäolon ja (jos määritetty) kameroiden kasvojentunnistuksen avulla. Äänijälki on tarkin, mutta se vaatii paikallisen GPU:n, joten se on oletuksena pois päältä.",
+        "data": {
+          "identity_enabled": "Tunnista, kuka puhuu",
+          "identity_voice_fingerprint": "Äänijälki (vaatii paikallisen GPU:n)",
+          "identity_min_confidence": "Vähimmäisvarmuus ennen henkilön valitsemista",
+          "voice_recognition_source": "Äänentunnistuksen lähde (entiteetti puhujantunnistuspalvelusta, esim. binary_sensor.*_voice)",
+          "voice_recognition_auto_enroll": "Merkitse äänet automaattisesti opeteltaviksi ihmisten puhuessa"
+        },
+        "data_description": {
+          "identity_enabled": "Käyttää tietoa siitä, kuka on kotona, + kameroiden tuoretta kasvojentunnistusta. GPU:ta ei tarvita.",
+          "identity_voice_fingerprint": "Jätä pois päältä, ellei sinulla ole GPU-palvelinta, jossa toimii äänitunnistusmalli.",
+          "identity_min_confidence": "Suurempi = varovaisempi; pysyy neutraalina, kun ei ole varma."
+        }
+      },
+      "email": {
+        "title": "Nova — Sähköposti",
+        "description": "Saapuneet-kansion käyttö vain lukuoikeuksin. IMAP-salasana luetaan Home Assistantin secrets.yaml-tiedostosta — lisää se sinne alla olevalla avaimella (oletus nova_imap_password); sitä ei koskaan tallenneta paneelin asetuksiin.",
+        "data": {
+          "imap_enabled": "Ota sähköpostin lukeminen käyttöön",
+          "imap_host": "IMAP-palvelin (esim. imap.gmail.com)",
+          "imap_port": "IMAP-portti (SSL: 993)",
+          "imap_user": "IMAP-käyttäjätunnus / sähköpostiosoite",
+          "imap_folder": "Postilaatikon kansio (oletus INBOX)",
+          "imap_ssl": "Käytä SSL:ää (suositellaan)",
+          "imap_secret_key": "secrets.yaml-avain, jossa salasana on"
+        }
+      }
+    },
+    "error": {
+      "credential_set_and_clear": "Anna kullekin palvelulle joko uusi avain tai valitse \"Tyhjennä\" — ei molempia.",
+      "confirm_required_for_active_provider": "Pääagentin nykyisen palvelun avaimen tyhjentäminen vaatii, että vahvistusruutu on valittu, jottei se tapahdu vahingossa."
+    }
+  },
+  "issues": {
+    "llm_unavailable": {
+      "title": "Novan päättelymalli ei ole käytettävissä",
+      "description": "Nova ei saanut yhteyttä päättelymalliinsa, joten se toimii rajoitetussa tilassa — laitteiden ohjaus, tila ja tilanteet toimivat yhä. Syy: {detail}\n\nAvaa Nova-paneeli → Asetukset ja tarkista palvelu, malli ja API-avain. Jos palvelu on poistanut mallin käytöstä, valitse se uudelleen luettelosta. Tämä ilmoitus poistuu automaattisesti, kun päättely toimii taas."
+    },
+    "credential_migration_ambiguous": {
+      "title": "Nova: tallennettu tunnistetieto on liitettävä palveluun",
+      "description": "Nova löysi yhteisen tunnistetiedon ajalta ennen palvelukohtaisia tunnistetietoja, mutta ei pystynyt päättelemään, mille palvelulle se kuuluu (ei tallennettua palvelua, eikä avaimen muoto vastannut mitään tunnettua palvelua). Mitään ei muutettu eikä poistettu — vanha tunnistetieto toimii yhä. Viimeistele siirto avaamalla Asetukset → Laitteet & palvelut → Nova → Määrittele → Tunnistetiedot ja anna se oikean palvelun kohdalle. Tämä ilmoitus poistuu automaattisesti, kun se on tehty."
+    },
+    "voice_setup_step_addons": {
+      "title": "Nova määrittää puhetta",
+      "description": "Vaihe {step}/{total}: asennetaan ja käynnistetään lisäosat Piper, Whisper ja openWakeWord. Tämä voi kestää muutaman minuutin. Tämä ilmoitus poistuu itsestään, kun puheen määritys on valmis."
+    },
+    "voice_setup_step_wyoming": {
+      "title": "Nova määrittää puhetta",
+      "description": "Vaihe {step}/{total}: yhdistetään Home Assistant puhelisäosiin (Wyoming). Tämä ilmoitus poistuu itsestään, kun puheen määritys on valmis."
+    },
+    "voice_setup_step_pipeline": {
+      "title": "Nova määrittää puhetta",
+      "description": "Vaihe {step}/{total}: luodaan Novan Assist-linja. Tämä ilmoitus poistuu itsestään, kun puheen määritys on valmis."
+    },
+    "voice_setup_incomplete": {
+      "title": "Novan puheen määritys on kesken",
+      "description": "Nova ei pystynyt viimeistelemään puheen määritystä. Mikä epäonnistui: {failed}.\n\nNäin viimeistelet sen itse: avaa Asetukset → Lisäosat ja asenna ja käynnistä Piper, Whisper ja openWakeWord. Luo sitten kohdassa Asetukset → Ääniavustajat linja, jossa keskusteluagenttina on Nova, puhe tekstiksi -toimintona Whisper ja teksti puheeksi -toimintona Piper. Nova tarkistaa tilanteen uudelleen jokaisen uudelleenkäynnistyksen yhteydessä, ja tämä ilmoitus poistuu itsestään, kun puhe toimii."
+    }
+  },
+  "exceptions": {
+    "no_entry": {
+      "message": "Novaa ei ole määritetty. Lisää Nova-integraatio ja yritä sitten uudelleen."
+    },
+    "not_loaded": {
+      "message": "Novaa ei ole ladattu. Ota Nova-integraatio käyttöön tai lataa se uudelleen ja yritä sitten uudelleen."
+    },
+    "reloading": {
+      "message": "Nova käynnistyy tai latautuu uudelleen. Yritä hetken päästä uudelleen."
+    },
+    "setup_failed": {
+      "message": "Nova ei voinut käynnistyä. Tarkista Home Assistantin loki, korjaa ongelma ja lataa Nova uudelleen."
+    },
+    "multiple_entries": {
+      "message": "Novasta on määritetty useampi kuin yksi merkintä. Poista ylimääräinen merkintä ja yritä sitten uudelleen."
+    }
+  }
+}

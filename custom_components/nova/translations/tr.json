@@ -1,0 +1,233 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Nova'yı kur",
+        "description": "Kullanmak istediğiniz her yapay zekâ sağlayıcısı için bir anahtar, Ollama adresinizi ya da ikisini birden girin. Tüm alanlar isteğe bağlıdır, ancak en az biri gereklidir. Nova her birini denetler.\n\nBulunan kayıtlı anahtarlar: {saved}. Kayıtlı anahtarını korumak için bir alanı boş bırakın.",
+        "data": {
+          "groq_api_key": "Groq API anahtarı",
+          "anthropic_api_key": "Anthropic API anahtarı",
+          "openai_api_key": "OpenAI API anahtarı",
+          "gemini_api_key": "Gemini API anahtarı",
+          "ollama_base_url": "Ollama adresi"
+        },
+        "data_description": {
+          "ollama_base_url": "Örneğin {example}"
+        }
+      },
+      "roles": {
+        "title": "Her rol için bir sağlayıcı seçin",
+        "description": "Her işi hangi sağlayıcının yapacağını seçin. Yalnızca denetimi geçen sağlayıcılar listelenir.\n\nÇalışmayan ve dışarıda bırakılan kayıtlı anahtarlar: {failed}.",
+        "data": {
+          "conversation": "Konuşma",
+          "classifier": "Sınıflandırıcı",
+          "reasoning": "Akıl yürütme",
+          "camera_reasoning": "Kamera akıl yürütmesi",
+          "vision": "Görüntü analizi"
+        },
+        "data_description": {
+          "conversation": "Sizinle konuşur ve evinizi kontrol eder.",
+          "classifier": "Evdeki bir olayın önemli olup olmadığına karar verir. Sık çalışır.",
+          "reasoning": "Bir olayla ilgili ne yapılacağına karar verir ve özetler yazar. Sık çalışır.",
+          "camera_reasoning": "Bir kamera sahnesini görüntü açıklamasına göre değerlendirir.",
+          "vision": "Kamera görüntülerini açıklar. Bunu daha sonra kurmak için Şimdi değil'i seçin."
+        }
+      },
+      "models": {
+        "title": "Her rol için bir model seçin",
+        "description": "Nova, gönderdiğinizde her modeli test eder. Sınıflandırıcı ve akıl yürütme sık çalışır; bu yüzden ücretli bir sağlayıcıda bunlar için küçük ve ucuz bir model seçin. Sağlayıcıyı değiştirmek için kurulumu yeniden başlatın: bu ekranlarda geri düğmesi yoktur.",
+        "data": {
+          "conversation_model": "Konuşma modeli ({conversation_provider})",
+          "classifier_model": "Sınıflandırıcı modeli ({classifier_provider})",
+          "reasoning_model": "Akıl yürütme modeli ({reasoning_provider})",
+          "camera_reasoning_model": "Kamera akıl yürütme modeli ({camera_reasoning_provider})",
+          "vision_model": "Görüntü analizi modeli ({vision_provider})"
+        },
+        "data_description": {
+          "vision_model": "Görüntü analizini daha sonra kurmak için boş bırakın."
+        }
+      }
+    },
+    "error": {
+      "need_llm": "En az bir anahtar ya da bir Ollama adresi girin.",
+      "no_working_provider": "Henüz çalışan bir sağlayıcı yok: bir anahtar ya da bir Ollama adresi girin.",
+      "invalid_auth": "Sağlayıcı bu anahtarı reddetti.",
+      "cannot_connect": "Denetim tamamlanamadı. Biraz sonra yeniden deneyin ve Ollama kullanıyorsanız adresi kontrol edin.",
+      "unknown": "Denetim başarısız oldu. Yeniden deneyin.",
+      "model_required": "Bu rol için bir model seçin.",
+      "model_no_pictures": "Bu model bir test görüntüsünü okuyamadı.",
+      "model_not_found": "Bu sağlayıcı o modeli sunmuyor.",
+      "model_access_denied": "Anahtarınız bu modeli kullanamıyor.",
+      "test_incomplete": "Test tamamlanamadı. Yeniden deneyin.",
+      "test_failed": "Test başarısız oldu. Sağlayıcının belirttiği neden Home Assistant günlüğündedir.",
+      "secrets_write_failed": "Nova, anahtarları secrets.yaml dosyasına kaydedemedi. Dosyaya yazılabildiğini kontrol edip yeniden deneyin.",
+      "config_write_failed": "Nova, seçimlerinizi kendi yapılandırma dosyasına kaydedemedi. nova klasörüne yazılabildiğini kontrol edip yeniden deneyin."
+    },
+    "abort": {
+      "already_configured": "Nova zaten yapılandırılmış.",
+      "import_failed": "Bir Nova yapılandırması bulundu, ancak kullanılabilir bir LLM yok (API anahtarı da yerel bitiş noktası da yok).",
+      "already_in_progress": "Nova kurulumu başka bir pencerede zaten açık."
+    }
+  },
+  "selector": {
+    "setup_provider": {
+      "options": {
+        "groq": "Groq",
+        "anthropic": "Anthropic",
+        "openai": "OpenAI",
+        "gemini": "Gemini",
+        "ollama": "Ollama",
+        "not_now": "Şimdi değil (daha sonra kur)"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Nova — Yapılandır",
+        "menu_options": {
+          "core": "Çekirdek — kişilik, yönerge, konuşma modeli",
+          "routing": "Yönlendirme — yatak odaları, yayın grubu, bildirim hizmeti",
+          "observer": "Gözlemci — proaktif farkındalık (model katmanları, sessiz saatler)",
+          "credentials": "Kimlik bilgileri — sağlayıcı API anahtarları",
+          "identity": "Kimlik — kişi bazında tanıma",
+          "email": "E-posta — salt okunur gelen kutusu (parola secrets.yaml üzerinden)"
+        }
+      },
+      "core": {
+        "title": "Nova — Çekirdek",
+        "description": "Kişilik, yönerge ve konuşma modeli.",
+        "data": {
+          "honorific": "Bana hitap şekli",
+          "directive_preset": "Hazır yönerge",
+          "directive": "Özel yönerge (isteğe bağlı, hazır yönergenin yerine geçer)",
+          "model": "Konuşma modeli",
+          "use_hass_api": "Ev kontrolünü etkinleştir (ışıklar, iklimlendirme, kilitler vb.)"
+        }
+      },
+      "routing": {
+        "title": "Nova — Yönlendirme",
+        "description": "hangi HA alanlarının yatak odası olduğunu (uyku algılama için), yayınlar için hangi media_player grubunun kullanılacağını ve telefonunuzun bildirim hizmetini seçin.",
+        "data": {
+          "bedroom_areas": "Yatak odası alanları (sessiz saatlerde uyku algılama için)",
+          "ground_floor_areas": "Zemin kat alanları (gece izinsiz giriş uyarıları için)",
+          "broadcast_group": "Yayın hoparlör grubu (genellikle evinizin Cast grubu)",
+          "notify_service": "Telefon bildirim hizmeti (ör. notify.mobile_app_yourphone)"
+        },
+        "data_description": {
+          "bedroom_areas": "Bu alanlardaki herhangi bir varlık sensörü sessiz saatlerde uyku modunu başlatır.",
+          "ground_floor_areas": "Herkes uyurken Nova, harekette yalnızca bu alanlardan birinde açık bir dış kapı ya da pencere varsa uyarır. Her katı denetlemek için boş bırakın.",
+          "broadcast_group": "Kritik ve çok acil duyurular için kullanılır.",
+          "notify_service": "Evden uzaktayken ya da uyurken kullanılır."
+        }
+      },
+      "observer": {
+        "title": "Nova — Gözlemci modu",
+        "description": "proaktif farkındalık. Nova evinizi izler ve kayda değer bir şey olduğunda söyler. {note}",
+        "data": {
+          "observer_enabled": "Gözlemci modunu etkinleştir",
+          "classifier_model": "Sınıflandırıcı modeli (Katman 1 — ucuz)",
+          "reasoning_model": "Akıl yürütme modeli (Katman 2 — ana)",
+          "review_model": "İnceleme modeli (Katman 3 — dönemsel)",
+          "observer_quiet_start": "Sessiz saatlerin başlangıcı (HH:MM)",
+          "observer_quiet_end": "Sessiz saatlerin bitişi (HH:MM)"
+        }
+      },
+      "credentials": {
+        "title": "Nova — Kimlik bilgileri",
+        "description": "Her sağlayıcı için ayrı bir API anahtarı — Groq, OpenAI, Anthropic, Gemini, OpenAI uyumlu özel bir bitiş noktası ve korumalı bir Ollama bitiş noktası için isteğe bağlı bir Bearer anahtarı. Yalnızca Home Assistant'ın secrets.yaml dosyasında saklanır, asla panel yapılandırmasında tutulmaz ve burada asla yeniden gösterilmez. Durum: {status}. Bir alanı boş bırakmak o sağlayıcının kayıtlı anahtarını değiştirmez. Ana aracının sağlayıcısı şu anda: {active}.",
+        "data": {
+          "groq_credential": "Groq API anahtarı",
+          "clear_groq": "Kayıtlı Groq anahtarını temizle",
+          "openai_credential": "OpenAI API anahtarı",
+          "clear_openai": "Kayıtlı OpenAI anahtarını temizle",
+          "anthropic_credential": "Anthropic API anahtarı",
+          "clear_anthropic": "Kayıtlı Anthropic anahtarını temizle",
+          "gemini_credential": "Gemini API anahtarı",
+          "clear_gemini": "Kayıtlı Gemini anahtarını temizle",
+          "custom_credential": "Özel bitiş noktası API anahtarı",
+          "clear_custom": "Kayıtlı özel bitiş noktası anahtarını temizle",
+          "ollama_credential": "Ollama Bearer anahtarı (isteğe bağlı — yalnızca korumalı bir bitiş noktası için)",
+          "clear_ollama": "Kayıtlı Ollama anahtarını temizle",
+          "confirm_delete_active": "Evet, ana aracının mevcut sağlayıcısının anahtarını temizlemenin, yeni bir anahtar girilene ya da sağlayıcı değiştirilene kadar onu devre dışı bırakacağını anlıyorum"
+        }
+      },
+      "identity": {
+        "title": "Nova — Kimlik",
+        "description": "kişi bazında tanıma; böylece Nova kendini konuşan kişiye göre ayarlar. Varlık bilgisini ve (kuruluysa) kamera yüz tanımayı kullanarak özel donanım olmadan çalışır. Ses izi en doğru yöntemdir, ancak yerel bir GPU gerektirdiği için varsayılan olarak kapalıdır.",
+        "data": {
+          "identity_enabled": "Kimin konuştuğunu tanı",
+          "identity_voice_fingerprint": "Ses izi (yerel bir GPU gerektirir)",
+          "identity_min_confidence": "Bir kişiye karar vermeden önceki en düşük güven",
+          "voice_recognition_source": "Ses tanıma kaynağı (bir konuşmacı tanıma hizmetinden gelen varlık, ör. binary_sensor.*_voice)",
+          "voice_recognition_auto_enroll": "İnsanlar konuştukça sesleri öğrenme için otomatik işaretle"
+        },
+        "data_description": {
+          "identity_enabled": "Evde kimin olduğunu + son kamera yüz tanımasını kullanır. GPU gerekmez.",
+          "identity_voice_fingerprint": "Ses kimliği modeli çalıştıran bir GPU sunucunuz yoksa kapalı bırakın.",
+          "identity_min_confidence": "Daha yüksek = daha temkinli; emin olmadığında tarafsız kalır."
+        }
+      },
+      "email": {
+        "title": "Nova — E-posta",
+        "description": "Gelen kutusuna salt okunur erişim. IMAP parolası Home Assistant'ın secrets.yaml dosyasından okunur — onu oraya aşağıdaki anahtarla ekleyin (varsayılan nova_imap_password); asla panel yapılandırmasında saklanmaz.",
+        "data": {
+          "imap_enabled": "E-posta okumayı etkinleştir",
+          "imap_host": "IMAP sunucusu (ör. imap.gmail.com)",
+          "imap_port": "IMAP bağlantı noktası (SSL: 993)",
+          "imap_user": "IMAP kullanıcı adı / e-posta adresi",
+          "imap_folder": "Posta kutusu klasörü (varsayılan INBOX)",
+          "imap_ssl": "SSL kullan (önerilir)",
+          "imap_secret_key": "Parolayı tutan secrets.yaml anahtarı"
+        }
+      }
+    },
+    "error": {
+      "credential_set_and_clear": "Her sağlayıcı için ya yeni bir anahtar girin ya da \"Temizle\" kutusunu işaretleyin — ikisini birden değil.",
+      "confirm_required_for_active_provider": "Ana aracının mevcut sağlayıcısının anahtarını temizlemek için onay kutusunun işaretlenmesi gerekir; böylece yanlışlıkla bir tıklamayla olamaz."
+    }
+  },
+  "issues": {
+    "llm_unavailable": {
+      "title": "Nova akıl yürütme modeline erişilemiyor",
+      "description": "Nova akıl yürütme modeline ulaşamadı, bu yüzden sınırlı modda çalışıyor — cihaz kontrolü, durum ve sahneler hâlâ çalışıyor. Neden: {detail}\n\nNova paneli → Ayarlar bölümünü açın ve sağlayıcınızı, modelinizi ve API anahtarınızı kontrol edin. Sağlayıcınız modeli kullanımdan kaldırdıysa listeden yeniden seçin. Akıl yürütme yeniden çalıştığında bu bildirim kendiliğinden kalkar."
+    },
+    "credential_migration_ambiguous": {
+      "title": "Nova: kayıtlı bir kimlik bilgisinin bir sağlayıcıya atanması gerekiyor",
+      "description": "Nova, sağlayıcı başına ayrı kimlik bilgilerinin olmadığı döneme ait ortak bir kimlik bilgisi buldu, ancak hangi sağlayıcıya ait olduğunu anlayamadı (kayıtlı bir sağlayıcı yok ve anahtarın biçimi bilinen hiçbir sağlayıcıyla eşleşmedi). Hiçbir şey değiştirilmedi ya da silinmedi — eski kimlik bilgisi hâlâ çalışıyor. Taşımayı tamamlamak için Ayarlar → Cihazlar ve hizmetler → Nova → Yapılandır → Kimlik bilgileri bölümünü açın ve onu doğru sağlayıcının altına girin. Bu yapıldığında bu bildirim kendiliğinden kalkar."
+    },
+    "voice_setup_step_addons": {
+      "title": "Nova sesi kuruyor",
+      "description": "Adım {step}/{total}: Piper, Whisper ve openWakeWord eklentileri kuruluyor ve başlatılıyor. Bu birkaç dakika sürebilir. Ses kurulumu bittiğinde bu bildirim kendiliğinden kalkar."
+    },
+    "voice_setup_step_wyoming": {
+      "title": "Nova sesi kuruyor",
+      "description": "Adım {step}/{total}: Home Assistant ses eklentilerine (Wyoming) bağlanıyor. Ses kurulumu bittiğinde bu bildirim kendiliğinden kalkar."
+    },
+    "voice_setup_step_pipeline": {
+      "title": "Nova sesi kuruyor",
+      "description": "Adım {step}/{total}: Nova Assist işlem hattı oluşturuluyor. Ses kurulumu bittiğinde bu bildirim kendiliğinden kalkar."
+    },
+    "voice_setup_incomplete": {
+      "title": "Nova ses kurulumu tamamlanmadı",
+      "description": "Nova ses kurulumunu tamamlayamadı. Başarısız olan: {failed}.\n\nElle tamamlamak için: Ayarlar → Eklentiler bölümünde Piper, Whisper ve openWakeWord'ü kurun ve başlatın. Ardından Ayarlar → Sesli yardımcılar bölümünde konuşma aracısı olarak Nova, konuşmadan metne için Whisper ve metinden sese için Piper içeren bir işlem hattı oluşturun. Nova her yeniden başlatmada tekrar kontrol eder ve ses çalıştığında bu bildirim kendiliğinden kalkar."
+    }
+  },
+  "exceptions": {
+    "no_entry": {
+      "message": "Nova kurulu değil. Nova entegrasyonunu ekleyin ve yeniden deneyin."
+    },
+    "not_loaded": {
+      "message": "Nova yüklü değil. Nova entegrasyonunu etkinleştirin ya da yeniden yükleyin ve yeniden deneyin."
+    },
+    "reloading": {
+      "message": "Nova başlatılıyor ya da yeniden yükleniyor. Biraz sonra yeniden deneyin."
+    },
+    "setup_failed": {
+      "message": "Nova başlatılamadı. Home Assistant günlüğünü kontrol edin, sorunu giderin ve Nova'yı yeniden yükleyin."
+    },
+    "multiple_entries": {
+      "message": "Birden fazla Nova girişi yapılandırılmış. Fazla girişi kaldırın ve yeniden deneyin."
+    }
+  }
+}

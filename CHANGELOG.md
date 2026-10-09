@@ -1,3 +1,12 @@
+## [8.16.0] — Setup dialog in 12 more languages
+
+- **New languages.** The setup dialog, the Configure screens, the repair notices and the service errors are now in Brazilian Portuguese, Czech, Danish, Finnish, Norwegian Bokmål, Polish, Romanian, Russian, Slovak, Swedish, Turkish and Ukrainian. With the six already there, that makes 18 besides English.
+- **Words match Home Assistant.** Each language uses Home Assistant's own terms for menus and features, such as Settings, Devices & services and Voice assistants, and the same polite or informal "you" that Home Assistant uses.
+- **Brazilian Portuguese** is its own file, `pt-BR.json`, in Brazilian wording. Home Assistant never falls back from `pt-BR` to `pt`.
+- **Checks.** A new test fails if a language is missing, if a symbol or line break differs from the English, if a value is copied from the English without being on the allow list, or if a placeholder sits in single quotes.
+- **Still English:** two short status texts that Nova fills in itself, on the Observer and Credentials screens.
+- The panel and the safety alerts are not part of this release.
+
 ## [8.15.0] — Translation checks
 
 - **Panel string list.** `frontend/i18n/panel_strings.json` lists the 1,056 fixed English strings the panel shows, built from a render of every tab and a scan of the panel source. `scripts/panel_strings.js` rebuilds it, and CI fails when it is out of date.

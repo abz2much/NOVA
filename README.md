@@ -336,7 +336,7 @@ Nova follows your Home Assistant language automatically, and you can override it
 
 **Panel UI:** translation files currently exist for 18 languages under `custom_components/nova/frontend/i18n/`. Static labels, titles, and placeholders with a matching entry are translated; entity IDs, model names, counts, log content, and other live values are deliberately left unchanged. Missing and newly added strings remain English until their dictionaries are updated.
 
-**Setup dialog:** complete for French, German, Spanish, Italian, Portuguese, and Dutch. Other languages fall back to English here; this is Home Assistant's own translation layer, separate from the panel.
+**Setup dialog:** complete in 18 languages besides English: Brazilian Portuguese, Czech, Danish, Dutch, Finnish, French, German, Italian, Norwegian Bokmål, Polish, Portuguese, Romanian, Russian, Slovak, Spanish, Swedish, Turkish and Ukrainian. Other languages fall back to English here; this is Home Assistant's own translation layer, separate from the panel. Two short status texts inside it, on the Observer and Credentials screens, are still English in every language.
 
 ### Help translate
 

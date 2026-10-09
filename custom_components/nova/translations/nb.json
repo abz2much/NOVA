@@ -1,0 +1,233 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Sett opp Nova",
+        "description": "Skriv inn en nøkkel for hver AI-leverandør du vil bruke, Ollama-adressen din eller begge deler. Alle feltene er valgfrie, men minst ett må fylles ut. Nova sjekker hvert av dem.\n\nLagrede nøkler funnet: {saved}. La et felt stå tomt for å beholde den lagrede nøkkelen.",
+        "data": {
+          "groq_api_key": "API-nøkkel for Groq",
+          "anthropic_api_key": "API-nøkkel for Anthropic",
+          "openai_api_key": "API-nøkkel for OpenAI",
+          "gemini_api_key": "API-nøkkel for Gemini",
+          "ollama_base_url": "Ollama-adresse"
+        },
+        "data_description": {
+          "ollama_base_url": "For eksempel {example}"
+        }
+      },
+      "roles": {
+        "title": "Velg en leverandør for hver rolle",
+        "description": "Velg hvilken leverandør som gjør hvilken jobb. Bare leverandører som besto sjekken, vises.\n\nLagrede nøkler som ikke virket og ble utelatt: {failed}.",
+        "data": {
+          "conversation": "Samtale",
+          "classifier": "Klassifikator",
+          "reasoning": "Resonnering",
+          "camera_reasoning": "Kameraresonnering",
+          "vision": "Bildeanalyse"
+        },
+        "data_description": {
+          "conversation": "Snakker med deg og styrer hjemmet ditt.",
+          "classifier": "Avgjør om en hendelse i hjemmet er viktig. Kjører ofte.",
+          "reasoning": "Avgjør hva som skal gjøres med en hendelse, og skriver oppsummeringer. Kjører ofte.",
+          "camera_reasoning": "Vurderer en kamerascene ut fra bildebeskrivelsen.",
+          "vision": "Beskriver kamerabilder. Velg Ikke nå for å sette opp dette senere."
+        }
+      },
+      "models": {
+        "title": "Velg en modell for hver rolle",
+        "description": "Nova tester hver modell når du sender inn. Klassifikator og resonnering kjører ofte, så hos en betalt leverandør bør du velge en liten, billig modell for dem. For å bytte leverandør må du starte oppsettet på nytt: disse skjermene har ingen tilbakeknapp.",
+        "data": {
+          "conversation_model": "Samtalemodell ({conversation_provider})",
+          "classifier_model": "Klassifikatormodell ({classifier_provider})",
+          "reasoning_model": "Resonneringsmodell ({reasoning_provider})",
+          "camera_reasoning_model": "Modell for kameraresonnering ({camera_reasoning_provider})",
+          "vision_model": "Bildeanalysemodell ({vision_provider})"
+        },
+        "data_description": {
+          "vision_model": "La stå tomt for å sette opp bildeanalyse senere."
+        }
+      }
+    },
+    "error": {
+      "need_llm": "Skriv inn minst én nøkkel eller en Ollama-adresse.",
+      "no_working_provider": "Ingen fungerende leverandør ennå: skriv inn en nøkkel eller en Ollama-adresse.",
+      "invalid_auth": "Leverandøren avviste denne nøkkelen.",
+      "cannot_connect": "Sjekken kunne ikke fullføres. Prøv igjen om litt, og sjekk adressen hvis det gjelder Ollama.",
+      "unknown": "Sjekken mislyktes. Prøv igjen.",
+      "model_required": "Velg en modell for denne rollen.",
+      "model_no_pictures": "Denne modellen kunne ikke lese et testbilde.",
+      "model_not_found": "Denne leverandøren tilbyr ikke den modellen.",
+      "model_access_denied": "Nøkkelen din kan ikke bruke denne modellen.",
+      "test_incomplete": "Testen kunne ikke fullføres. Prøv igjen.",
+      "test_failed": "Testen mislyktes. Leverandørens begrunnelse står i Home Assistant-loggen.",
+      "secrets_write_failed": "Nova kunne ikke lagre nøklene i secrets.yaml. Sjekk at det går an å skrive til filen, og prøv igjen.",
+      "config_write_failed": "Nova kunne ikke lagre valgene dine i konfigurasjonsfilen sin. Sjekk at det går an å skrive til mappen nova, og prøv igjen."
+    },
+    "abort": {
+      "already_configured": "Nova er allerede konfigurert.",
+      "import_failed": "Fant en Nova-konfigurasjon, men ingen brukbar LLM (ingen API-nøkkel og ikke noe lokalt endepunkt).",
+      "already_in_progress": "Oppsettet av Nova er allerede åpent i et annet vindu."
+    }
+  },
+  "selector": {
+    "setup_provider": {
+      "options": {
+        "groq": "Groq",
+        "anthropic": "Anthropic",
+        "openai": "OpenAI",
+        "gemini": "Gemini",
+        "ollama": "Ollama",
+        "not_now": "Ikke nå (sett opp senere)"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Nova — Konfigurer",
+        "menu_options": {
+          "core": "Kjerne — persona, direktiv, samtalemodell",
+          "routing": "Ruting — soveromsområder, kringkastingsgruppe, varslingstjeneste",
+          "observer": "Observatør — proaktiv oppmerksomhet (modellnivåer, stille timer)",
+          "credentials": "Påloggingsinformasjon — API-nøkler for leverandører",
+          "identity": "Identitet — gjenkjenning av hver person",
+          "email": "E-post — skrivebeskyttet innboks (passord via secrets.yaml)"
+        }
+      },
+      "core": {
+        "title": "Nova — Kjerne",
+        "description": "Persona, direktiv og samtalemodell.",
+        "data": {
+          "honorific": "Tiltal meg som",
+          "directive_preset": "Forhåndsinnstilt direktiv",
+          "directive": "Eget direktiv (valgfritt, overstyrer forhåndsinnstillingen)",
+          "model": "Samtalemodell",
+          "use_hass_api": "Slå på styring av hjemmet (lys, klima, låser osv.)"
+        }
+      },
+      "routing": {
+        "title": "Nova — Ruting",
+        "description": "velg hvilke HA-områder som er soverom (for søvnregistrering), hvilken media_player-gruppe som skal brukes til kringkasting, og telefonens varslingstjeneste.",
+        "data": {
+          "bedroom_areas": "Soveromsområder (for søvnregistrering i stille timer)",
+          "ground_floor_areas": "Områder i første etasje (for innbruddsvarsler om natten)",
+          "broadcast_group": "Høyttalergruppe for kringkasting (vanligvis hjemmets Cast-gruppe)",
+          "notify_service": "Telefonens varslingstjeneste (f.eks. notify.mobile_app_yourphone)"
+        },
+        "data_description": {
+          "bedroom_areas": "Enhver tilstedeværelsessensor i disse områdene slår på søvnmodus i stille timer.",
+          "ground_floor_areas": "Mens alle sover, varsler Nova bare om bevegelse hvis ett av disse områdene har en åpen ytterdør eller et åpent vindu. La stå tomt for å sjekke alle etasjer.",
+          "broadcast_group": "Brukes til kritiske og svært hastende kunngjøringer.",
+          "notify_service": "Brukes når du er borte eller sover."
+        }
+      },
+      "observer": {
+        "title": "Nova — Observatørmodus",
+        "description": "proaktiv oppmerksomhet. Nova følger med på hjemmet ditt og sier ifra når noe er verdt å nevne. {note}",
+        "data": {
+          "observer_enabled": "Slå på observatørmodus",
+          "classifier_model": "Klassifikatormodell (nivå 1 — billig)",
+          "reasoning_model": "Resonneringsmodell (nivå 2 — hoved)",
+          "review_model": "Gjennomgangsmodell (nivå 3 — periodisk)",
+          "observer_quiet_start": "Stille timer starter (HH:MM)",
+          "observer_quiet_end": "Stille timer slutter (HH:MM)"
+        }
+      },
+      "credentials": {
+        "title": "Nova — Påloggingsinformasjon",
+        "description": "Én egen API-nøkkel per leverandør — Groq, OpenAI, Anthropic, Gemini, et eget OpenAI-kompatibelt endepunkt og en valgfri Bearer-nøkkel for et beskyttet Ollama-endepunkt. Lagres bare i Home Assistants secrets.yaml, aldri i panelets konfigurasjon, og vises aldri her igjen. Status: {status}. Et tomt felt endrer ikke den lagrede nøkkelen for den leverandøren. Hovedagentens leverandør er nå: {active}.",
+        "data": {
+          "groq_credential": "API-nøkkel for Groq",
+          "clear_groq": "Fjern den lagrede Groq-nøkkelen",
+          "openai_credential": "API-nøkkel for OpenAI",
+          "clear_openai": "Fjern den lagrede OpenAI-nøkkelen",
+          "anthropic_credential": "API-nøkkel for Anthropic",
+          "clear_anthropic": "Fjern den lagrede Anthropic-nøkkelen",
+          "gemini_credential": "API-nøkkel for Gemini",
+          "clear_gemini": "Fjern den lagrede Gemini-nøkkelen",
+          "custom_credential": "API-nøkkel for eget endepunkt",
+          "clear_custom": "Fjern den lagrede nøkkelen for eget endepunkt",
+          "ollama_credential": "Bearer-nøkkel for Ollama (valgfri — bare for et beskyttet endepunkt)",
+          "clear_ollama": "Fjern den lagrede Ollama-nøkkelen",
+          "confirm_delete_active": "Ja, jeg forstår at hvis nøkkelen til hovedagentens nåværende leverandør fjernes, slås den av til en ny nøkkel er lagt inn eller leverandøren er byttet"
+        }
+      },
+      "identity": {
+        "title": "Nova — Identitet",
+        "description": "gjenkjenning av hver person, slik at Nova tilpasser seg den som snakker. Virker uten spesiell maskinvare ved hjelp av tilstedeværelse og (hvis det er satt opp) ansiktsgjenkjenning i kameraer. Stemmeavtrykk er mest nøyaktig, men krever en lokal GPU, så det er slått av som standard.",
+        "data": {
+          "identity_enabled": "Gjenkjenn hvem som snakker",
+          "identity_voice_fingerprint": "Stemmeavtrykk (krever en lokal GPU)",
+          "identity_min_confidence": "Minste sikkerhet før en person velges",
+          "voice_recognition_source": "Kilde for stemmegjenkjenning (entitet fra en tjeneste for talergjenkjenning, f.eks. binary_sensor.*_voice)",
+          "voice_recognition_auto_enroll": "Merk stemmer automatisk for innlæring når folk snakker"
+        },
+        "data_description": {
+          "identity_enabled": "Bruker hvem som er hjemme + nylig ansiktsgjenkjenning i kameraer. Ingen GPU kreves.",
+          "identity_voice_fingerprint": "La være avslått med mindre du har en GPU-server som kjører en modell for stemme-ID.",
+          "identity_min_confidence": "Høyere = mer forsiktig; forblir nøytral ved tvil."
+        }
+      },
+      "email": {
+        "title": "Nova — E-post",
+        "description": "Skrivebeskyttet tilgang til innboksen. IMAP-passordet leses fra Home Assistants secrets.yaml — legg det til der under nøkkelen nedenfor (standard nova_imap_password); det lagres aldri i panelets konfigurasjon.",
+        "data": {
+          "imap_enabled": "Slå på lesing av e-post",
+          "imap_host": "IMAP-vert (f.eks. imap.gmail.com)",
+          "imap_port": "IMAP-port (SSL: 993)",
+          "imap_user": "IMAP-brukernavn / e-postadresse",
+          "imap_folder": "Postboksmappe (standard INBOX)",
+          "imap_ssl": "Bruk SSL (anbefales)",
+          "imap_secret_key": "Nøkkel i secrets.yaml som inneholder passordet"
+        }
+      }
+    },
+    "error": {
+      "credential_set_and_clear": "For hver leverandør skal du enten skrive inn en ny nøkkel eller krysse av for \"Fjern\" — ikke begge deler.",
+      "confirm_required_for_active_provider": "For å fjerne nøkkelen til hovedagentens nåværende leverandør må bekreftelsesboksen være avkrysset, slik at det ikke kan skje ved et feilklikk."
+    }
+  },
+  "issues": {
+    "llm_unavailable": {
+      "title": "Novas resonneringsmodell er ikke tilgjengelig",
+      "description": "Nova fikk ikke kontakt med resonneringsmodellen sin og kjører derfor i begrenset modus — styring av enheter, status og scener virker fortsatt. Årsak: {detail}\n\nÅpne Nova-panelet → Innstillinger og sjekk leverandør, modell og API-nøkkel. Hvis leverandøren har faset ut modellen, velger du den på nytt fra listen. Denne meldingen forsvinner automatisk når resonneringen virker igjen."
+    },
+    "credential_migration_ambiguous": {
+      "title": "Nova: lagret påloggingsinformasjon må knyttes til en leverandør",
+      "description": "Nova fant felles påloggingsinformasjon fra før det fantes egen informasjon per leverandør, men kunne ikke avgjøre hvilken leverandør den hører til (ingen lagret leverandør, og nøkkelens format passet ikke med noen kjent leverandør). Ingenting er endret eller slettet — den gamle informasjonen virker fortsatt. For å fullføre flyttingen åpner du Innstillinger → Enheter og tjenester → Nova → Konfigurer → Påloggingsinformasjon og legger den inn under riktig leverandør. Denne meldingen forsvinner automatisk når det er gjort."
+    },
+    "voice_setup_step_addons": {
+      "title": "Nova setter opp stemme",
+      "description": "Trinn {step} av {total}: installerer og starter tilleggene Piper, Whisper og openWakeWord. Dette kan ta noen minutter. Denne meldingen forsvinner av seg selv når stemmeoppsettet er ferdig."
+    },
+    "voice_setup_step_wyoming": {
+      "title": "Nova setter opp stemme",
+      "description": "Trinn {step} av {total}: kobler Home Assistant til stemmetilleggene (Wyoming). Denne meldingen forsvinner av seg selv når stemmeoppsettet er ferdig."
+    },
+    "voice_setup_step_pipeline": {
+      "title": "Nova setter opp stemme",
+      "description": "Trinn {step} av {total}: oppretter Assist-pipelinen for Nova. Denne meldingen forsvinner av seg selv når stemmeoppsettet er ferdig."
+    },
+    "voice_setup_incomplete": {
+      "title": "Novas stemmeoppsett er ikke ferdig",
+      "description": "Nova kunne ikke fullføre stemmeoppsettet. Det som mislyktes: {failed}.\n\nSlik fullfører du det selv: under Innstillinger → Tillegg installerer og starter du Piper, Whisper og openWakeWord. Deretter oppretter du under Innstillinger → Taleassistenter en pipeline med Nova som samtaleagent, Whisper for tale-til-tekst og Piper for tekst-til-tale. Nova sjekker igjen ved hver omstart, og denne meldingen forsvinner av seg selv når stemmen virker."
+    }
+  },
+  "exceptions": {
+    "no_entry": {
+      "message": "Nova er ikke satt opp. Legg til Nova-integrasjonen, og prøv igjen."
+    },
+    "not_loaded": {
+      "message": "Nova er ikke lastet inn. Slå på eller last inn Nova-integrasjonen på nytt, og prøv igjen."
+    },
+    "reloading": {
+      "message": "Nova starter eller lastes inn på nytt. Prøv igjen om litt."
+    },
+    "setup_failed": {
+      "message": "Nova kunne ikke starte. Sjekk Home Assistant-loggen, rett opp problemet og last inn Nova på nytt."
+    },
+    "multiple_entries": {
+      "message": "Mer enn én Nova-oppføring er konfigurert. Fjern den ekstra oppføringen, og prøv igjen."
+    }
+  }
+}

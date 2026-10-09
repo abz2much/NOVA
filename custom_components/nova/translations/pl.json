@@ -1,0 +1,233 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Konfiguracja Nova",
+        "description": "Wprowadź klucz dla każdego dostawcy AI, którego chcesz używać, adres Ollama albo jedno i drugie. Każde pole jest opcjonalne, ale potrzebne jest co najmniej jedno. Nova sprawdzi każde z nich.\n\nZnalezione zapisane klucze: {saved}. Zostaw pole puste, aby zachować zapisany klucz.",
+        "data": {
+          "groq_api_key": "Klucz API Groq",
+          "anthropic_api_key": "Klucz API Anthropic",
+          "openai_api_key": "Klucz API OpenAI",
+          "gemini_api_key": "Klucz API Gemini",
+          "ollama_base_url": "Adres Ollama"
+        },
+        "data_description": {
+          "ollama_base_url": "Na przykład {example}"
+        }
+      },
+      "roles": {
+        "title": "Wybierz dostawcę dla każdej roli",
+        "description": "Wybierz, który dostawca wykonuje każde zadanie. Na liście są tylko dostawcy, którzy przeszli sprawdzenie.\n\nZapisane klucze, które nie zadziałały i zostały pominięte: {failed}.",
+        "data": {
+          "conversation": "Rozmowa",
+          "classifier": "Klasyfikator",
+          "reasoning": "Wnioskowanie",
+          "camera_reasoning": "Wnioskowanie z kamer",
+          "vision": "Widzenie"
+        },
+        "data_description": {
+          "conversation": "Rozmawia z tobą i steruje twoim domem.",
+          "classifier": "Decyduje, czy zdarzenie w domu jest ważne. Działa często.",
+          "reasoning": "Decyduje, co zrobić ze zdarzeniem, i pisze podsumowania. Działa często.",
+          "camera_reasoning": "Ocenia scenę z kamery na podstawie opisu z widzenia.",
+          "vision": "Opisuje obrazy z kamer. Wybierz Nie teraz, aby skonfigurować to później."
+        }
+      },
+      "models": {
+        "title": "Wybierz model dla każdej roli",
+        "description": "Nova testuje każdy model po zatwierdzeniu. Klasyfikator i wnioskowanie działają często, więc u płatnego dostawcy wybierz dla nich mały, tani model. Aby zmienić dostawcę, zacznij konfigurację od nowa: te ekrany nie mają przycisku wstecz.",
+        "data": {
+          "conversation_model": "Model rozmowy ({conversation_provider})",
+          "classifier_model": "Model klasyfikatora ({classifier_provider})",
+          "reasoning_model": "Model wnioskowania ({reasoning_provider})",
+          "camera_reasoning_model": "Model wnioskowania z kamer ({camera_reasoning_provider})",
+          "vision_model": "Model widzenia ({vision_provider})"
+        },
+        "data_description": {
+          "vision_model": "Zostaw puste, aby skonfigurować widzenie później."
+        }
+      }
+    },
+    "error": {
+      "need_llm": "Wprowadź co najmniej jeden klucz lub adres Ollama.",
+      "no_working_provider": "Nie ma jeszcze działającego dostawcy: wprowadź klucz lub adres Ollama.",
+      "invalid_auth": "Dostawca odrzucił ten klucz.",
+      "cannot_connect": "Nie udało się dokończyć sprawdzenia. Spróbuj ponownie za chwilę, a jeśli to Ollama, sprawdź adres.",
+      "unknown": "Sprawdzenie nie powiodło się. Spróbuj ponownie.",
+      "model_required": "Wybierz model dla tej roli.",
+      "model_no_pictures": "Ten model nie odczytał obrazu testowego.",
+      "model_not_found": "Ten dostawca nie oferuje tego modelu.",
+      "model_access_denied": "Twój klucz nie może używać tego modelu.",
+      "test_incomplete": "Nie udało się dokończyć testu. Spróbuj ponownie.",
+      "test_failed": "Test nie powiódł się. Przyczyna podana przez dostawcę jest w logu Home Assistant.",
+      "secrets_write_failed": "Nova nie mogła zapisać kluczy w secrets.yaml. Sprawdź, czy plik można zapisać, i spróbuj ponownie.",
+      "config_write_failed": "Nova nie mogła zapisać twoich wyborów w swoim pliku konfiguracji. Sprawdź, czy folder nova można zapisać, i spróbuj ponownie."
+    },
+    "abort": {
+      "already_configured": "Nova jest już skonfigurowana.",
+      "import_failed": "Znaleziono konfigurację Nova, ale bez działającego LLM (brak klucza API i lokalnego punktu końcowego).",
+      "already_in_progress": "Konfiguracja Nova jest już otwarta w innym oknie."
+    }
+  },
+  "selector": {
+    "setup_provider": {
+      "options": {
+        "groq": "Groq",
+        "anthropic": "Anthropic",
+        "openai": "OpenAI",
+        "gemini": "Gemini",
+        "ollama": "Ollama",
+        "not_now": "Nie teraz (skonfiguruj później)"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Nova — Konfiguracja",
+        "menu_options": {
+          "core": "Rdzeń — persona, dyrektywa, model rozmowy",
+          "routing": "Kierowanie — sypialnie, grupa nadawania, usługa powiadomień",
+          "observer": "Obserwator — proaktywna świadomość (poziomy modeli, godziny ciszy)",
+          "credentials": "Dane logowania — klucze API dostawców",
+          "identity": "Tożsamość — rozpoznawanie każdej osoby",
+          "email": "E-mail — skrzynka tylko do odczytu (hasło w secrets.yaml)"
+        }
+      },
+      "core": {
+        "title": "Nova — Rdzeń",
+        "description": "Persona, dyrektywa i model rozmowy.",
+        "data": {
+          "honorific": "Zwracaj się do mnie",
+          "directive_preset": "Gotowa dyrektywa",
+          "directive": "Własna dyrektywa (opcjonalna, zastępuje gotową)",
+          "model": "Model rozmowy",
+          "use_hass_api": "Włącz sterowanie domem (światła, klimat, zamki itp.)"
+        }
+      },
+      "routing": {
+        "title": "Nova — Kierowanie",
+        "description": "wybierz, które obszary HA są sypialniami (do wykrywania snu), której grupy media_player używać do komunikatów i jaką usługę powiadomień ma twój telefon.",
+        "data": {
+          "bedroom_areas": "Obszary sypialni (do wykrywania snu w godzinach ciszy)",
+          "ground_floor_areas": "Obszary parteru (do nocnych alertów o włamaniu)",
+          "broadcast_group": "Grupa głośników do komunikatów (zwykle twoja domowa grupa Cast)",
+          "notify_service": "Usługa powiadomień telefonu (np. notify.mobile_app_yourphone)"
+        },
+        "data_description": {
+          "bedroom_areas": "Każdy czujnik obecności w tych obszarach włącza tryb snu w godzinach ciszy.",
+          "ground_floor_areas": "Gdy wszyscy śpią, Nova ostrzega o ruchu tylko wtedy, gdy któryś z tych obszarów ma otwarte drzwi lub okno zewnętrzne. Zostaw puste, aby sprawdzać każde piętro.",
+          "broadcast_group": "Używana do komunikatów krytycznych i bardzo pilnych.",
+          "notify_service": "Używana, gdy jesteś poza domem lub śpisz."
+        }
+      },
+      "observer": {
+        "title": "Nova — Tryb obserwatora",
+        "description": "proaktywna świadomość. Nova obserwuje twój dom i odzywa się, gdy coś jest warte uwagi. {note}",
+        "data": {
+          "observer_enabled": "Włącz tryb obserwatora",
+          "classifier_model": "Model klasyfikatora (poziom 1 — tani)",
+          "reasoning_model": "Model wnioskowania (poziom 2 — główny)",
+          "review_model": "Model przeglądu (poziom 3 — okresowy)",
+          "observer_quiet_start": "Początek godzin ciszy (HH:MM)",
+          "observer_quiet_end": "Koniec godzin ciszy (HH:MM)"
+        }
+      },
+      "credentials": {
+        "title": "Nova — Dane logowania",
+        "description": "Jeden osobny klucz API dla każdego dostawcy — Groq, OpenAI, Anthropic, Gemini, własny punkt końcowy zgodny z OpenAI oraz opcjonalny klucz Bearer dla chronionego punktu końcowego Ollama. Przechowywane tylko w secrets.yaml Home Assistant, nigdy w konfiguracji panelu, i nigdy nie są tu ponownie wyświetlane. Stan: {status}. Puste pole nie zmienia zapisanego klucza tego dostawcy. Obecny dostawca głównego agenta: {active}.",
+        "data": {
+          "groq_credential": "Klucz API Groq",
+          "clear_groq": "Wyczyść zapisany klucz Groq",
+          "openai_credential": "Klucz API OpenAI",
+          "clear_openai": "Wyczyść zapisany klucz OpenAI",
+          "anthropic_credential": "Klucz API Anthropic",
+          "clear_anthropic": "Wyczyść zapisany klucz Anthropic",
+          "gemini_credential": "Klucz API Gemini",
+          "clear_gemini": "Wyczyść zapisany klucz Gemini",
+          "custom_credential": "Klucz API własnego punktu końcowego",
+          "clear_custom": "Wyczyść zapisany klucz własnego punktu końcowego",
+          "ollama_credential": "Klucz Bearer Ollama (opcjonalny — tylko dla chronionego punktu końcowego)",
+          "clear_ollama": "Wyczyść zapisany klucz Ollama",
+          "confirm_delete_active": "Tak, rozumiem, że wyczyszczenie klucza obecnego dostawcy głównego agenta wyłączy go, dopóki nie zostanie ustawiony nowy klucz lub dostawca nie zostanie zmieniony"
+        }
+      },
+      "identity": {
+        "title": "Nova — Tożsamość",
+        "description": "rozpoznawanie każdej osoby, aby Nova dopasowała się do tego, kto mówi. Działa bez specjalnego sprzętu, na podstawie obecności i (jeśli jest skonfigurowane) rozpoznawania twarzy z kamer. Odcisk głosu jest najdokładniejszy, ale wymaga lokalnego GPU, więc domyślnie jest wyłączony.",
+        "data": {
+          "identity_enabled": "Rozpoznawaj, kto mówi",
+          "identity_voice_fingerprint": "Odcisk głosu (wymaga lokalnego GPU)",
+          "identity_min_confidence": "Minimalna pewność przed przypisaniem do osoby",
+          "voice_recognition_source": "Źródło rozpoznawania głosu (encja z usługi rozpoznawania mówcy, np. binary_sensor.*_voice)",
+          "voice_recognition_auto_enroll": "Automatycznie oznaczaj głosy do nauki, gdy ludzie mówią"
+        },
+        "data_description": {
+          "identity_enabled": "Korzysta z tego, kto jest w domu, + niedawnego rozpoznania twarzy z kamer. GPU nie jest wymagane.",
+          "identity_voice_fingerprint": "Zostaw wyłączone, chyba że masz serwer GPU z modelem rozpoznawania głosu.",
+          "identity_min_confidence": "Wyżej = ostrożniej; przy niepewności pozostaje neutralna."
+        }
+      },
+      "email": {
+        "title": "Nova — E-mail",
+        "description": "Dostęp do skrzynki tylko do odczytu. Hasło IMAP jest odczytywane z secrets.yaml Home Assistant — dodaj je tam pod kluczem podanym poniżej (domyślnie nova_imap_password); nigdy nie jest przechowywane w konfiguracji panelu.",
+        "data": {
+          "imap_enabled": "Włącz czytanie poczty",
+          "imap_host": "Host IMAP (np. imap.gmail.com)",
+          "imap_port": "Port IMAP (SSL: 993)",
+          "imap_user": "Nazwa użytkownika IMAP / adres e-mail",
+          "imap_folder": "Folder skrzynki (domyślnie INBOX)",
+          "imap_ssl": "Używaj SSL (zalecane)",
+          "imap_secret_key": "Klucz w secrets.yaml z hasłem"
+        }
+      }
+    },
+    "error": {
+      "credential_set_and_clear": "Dla każdego dostawcy wprowadź nowy klucz albo zaznacz „Wyczyść” — nie oba naraz.",
+      "confirm_required_for_active_provider": "Wyczyszczenie klucza obecnego dostawcy głównego agenta wymaga zaznaczenia pola potwierdzenia, aby nie stało się to przypadkowym kliknięciem."
+    }
+  },
+  "issues": {
+    "llm_unavailable": {
+      "title": "Model wnioskowania Nova jest niedostępny",
+      "description": "Nova nie mogła połączyć się ze swoim modelem wnioskowania, więc działa w trybie ograniczonym — sterowanie urządzeniami, stan i sceny nadal działają. Przyczyna: {detail}\n\nOtwórz panel Nova → Ustawienia i sprawdź dostawcę, model i klucz API. Jeśli dostawca wycofał model, wybierz go ponownie z listy. To powiadomienie zniknie samo, gdy wnioskowanie znów zacznie działać."
+    },
+    "credential_migration_ambiguous": {
+      "title": "Nova: zapisane dane logowania trzeba przypisać do dostawcy",
+      "description": "Nova znalazła wspólne dane logowania sprzed wprowadzenia osobnych danych dla każdego dostawcy, ale nie mogła ustalić, do którego dostawcy należą (brak zapisanego dostawcy, a format klucza nie pasował do żadnego znanego dostawcy). Niczego nie zmieniono ani nie usunięto — stare dane logowania nadal działają. Aby dokończyć przeniesienie, otwórz Ustawienia → Urządzenia oraz usługi → Nova → Konfiguruj → Dane logowania i wprowadź je u właściwego dostawcy. To powiadomienie zniknie samo, gdy to zrobisz."
+    },
+    "voice_setup_step_addons": {
+      "title": "Nova konfiguruje głos",
+      "description": "Krok {step} z {total}: instalowanie i uruchamianie dodatków Piper, Whisper i openWakeWord. Może to potrwać kilka minut. To powiadomienie zniknie samo po zakończeniu konfiguracji głosu."
+    },
+    "voice_setup_step_wyoming": {
+      "title": "Nova konfiguruje głos",
+      "description": "Krok {step} z {total}: łączenie Home Assistant z dodatkami głosowymi (Wyoming). To powiadomienie zniknie samo po zakończeniu konfiguracji głosu."
+    },
+    "voice_setup_step_pipeline": {
+      "title": "Nova konfiguruje głos",
+      "description": "Krok {step} z {total}: tworzenie przepływu Assist dla Novy. To powiadomienie zniknie samo po zakończeniu konfiguracji głosu."
+    },
+    "voice_setup_incomplete": {
+      "title": "Konfiguracja głosu Nova jest niepełna",
+      "description": "Nova nie mogła dokończyć konfiguracji głosu. Co się nie udało: {failed}.\n\nAby dokończyć ręcznie: w Ustawienia → Dodatki zainstaluj i uruchom Piper, Whisper i openWakeWord. Następnie w Ustawienia → Asystenci głosowi utwórz przepływ z Novą jako agentem konwersacji, Whisper do zamiany mowy na tekst i Piper do zamiany tekstu na mowę. Nova sprawdza to ponownie przy każdym uruchomieniu, a to powiadomienie zniknie samo, gdy głos zacznie działać."
+    }
+  },
+  "exceptions": {
+    "no_entry": {
+      "message": "Nova nie jest skonfigurowana. Dodaj integrację Nova i spróbuj ponownie."
+    },
+    "not_loaded": {
+      "message": "Nova nie jest wczytana. Włącz lub wczytaj ponownie integrację Nova i spróbuj ponownie."
+    },
+    "reloading": {
+      "message": "Nova uruchamia się lub jest wczytywana ponownie. Spróbuj ponownie za chwilę."
+    },
+    "setup_failed": {
+      "message": "Nova nie mogła się uruchomić. Sprawdź log Home Assistant, usuń problem i wczytaj Novę ponownie."
+    },
+    "multiple_entries": {
+      "message": "Skonfigurowano więcej niż jeden wpis Nova. Usuń dodatkowy wpis i spróbuj ponownie."
+    }
+  }
+}

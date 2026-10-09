@@ -1,0 +1,233 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configurează Nova",
+        "description": "Introdu o cheie pentru fiecare furnizor de AI pe care vrei să-l folosești, adresa Ollama sau ambele. Toate câmpurile sunt opționale, dar e nevoie de cel puțin unul. Nova le verifică pe fiecare.\n\nChei salvate găsite: {saved}. Lasă un câmp gol ca să păstrezi cheia salvată.",
+        "data": {
+          "groq_api_key": "Cheie API Groq",
+          "anthropic_api_key": "Cheie API Anthropic",
+          "openai_api_key": "Cheie API OpenAI",
+          "gemini_api_key": "Cheie API Gemini",
+          "ollama_base_url": "Adresă Ollama"
+        },
+        "data_description": {
+          "ollama_base_url": "De exemplu {example}"
+        }
+      },
+      "roles": {
+        "title": "Alege un furnizor pentru fiecare rol",
+        "description": "Alege ce furnizor face fiecare sarcină. Sunt afișați doar furnizorii care au trecut verificarea.\n\nChei salvate care nu au funcționat și au fost omise: {failed}.",
+        "data": {
+          "conversation": "Conversație",
+          "classifier": "Clasificator",
+          "reasoning": "Raționament",
+          "camera_reasoning": "Raționament pentru camere",
+          "vision": "Analiză de imagine"
+        },
+        "data_description": {
+          "conversation": "Vorbește cu tine și controlează casa.",
+          "classifier": "Decide dacă un eveniment din casă contează. Rulează des.",
+          "reasoning": "Decide ce să facă în privința unui eveniment și scrie rezumate. Rulează des.",
+          "camera_reasoning": "Evaluează o scenă de la cameră pe baza descrierii imaginii.",
+          "vision": "Descrie imaginile de la camere. Alege Nu acum ca să configurezi asta mai târziu."
+        }
+      },
+      "models": {
+        "title": "Alege un model pentru fiecare rol",
+        "description": "Nova testează fiecare model când trimiți formularul. Clasificatorul și raționamentul rulează des, așa că la un furnizor cu plată alege pentru ele un model mic și ieftin. Ca să schimbi furnizorul, pornește configurarea de la capăt: aceste ecrane nu au buton de întoarcere.",
+        "data": {
+          "conversation_model": "Model de conversație ({conversation_provider})",
+          "classifier_model": "Model de clasificare ({classifier_provider})",
+          "reasoning_model": "Model de raționament ({reasoning_provider})",
+          "camera_reasoning_model": "Model de raționament pentru camere ({camera_reasoning_provider})",
+          "vision_model": "Model de analiză a imaginii ({vision_provider})"
+        },
+        "data_description": {
+          "vision_model": "Lasă gol ca să configurezi analiza imaginii mai târziu."
+        }
+      }
+    },
+    "error": {
+      "need_llm": "Introdu cel puțin o cheie sau o adresă Ollama.",
+      "no_working_provider": "Încă nu există niciun furnizor funcțional: introdu o cheie sau o adresă Ollama.",
+      "invalid_auth": "Furnizorul a refuzat această cheie.",
+      "cannot_connect": "Verificarea nu s-a putut încheia. Încearcă din nou peste puțin timp și, dacă este Ollama, verifică adresa.",
+      "unknown": "Verificarea a eșuat. Încearcă din nou.",
+      "model_required": "Alege un model pentru acest rol.",
+      "model_no_pictures": "Acest model nu a putut citi o imagine de test.",
+      "model_not_found": "Acest furnizor nu oferă modelul respectiv.",
+      "model_access_denied": "Cheia ta nu poate folosi acest model.",
+      "test_incomplete": "Testul nu s-a putut încheia. Încearcă din nou.",
+      "test_failed": "Testul a eșuat. Motivul dat de furnizor se află în jurnalul Home Assistant.",
+      "secrets_write_failed": "Nova nu a putut salva cheile în secrets.yaml. Verifică dacă fișierul poate fi scris, apoi încearcă din nou.",
+      "config_write_failed": "Nova nu a putut salva alegerile tale în fișierul său de configurare. Verifică dacă se poate scrie în folderul nova, apoi încearcă din nou."
+    },
+    "abort": {
+      "already_configured": "Nova este deja configurată.",
+      "import_failed": "S-a găsit o configurare Nova, dar niciun LLM utilizabil (nicio cheie API și niciun endpoint local).",
+      "already_in_progress": "Configurarea Nova este deja deschisă într-o altă fereastră."
+    }
+  },
+  "selector": {
+    "setup_provider": {
+      "options": {
+        "groq": "Groq",
+        "anthropic": "Anthropic",
+        "openai": "OpenAI",
+        "gemini": "Gemini",
+        "ollama": "Ollama",
+        "not_now": "Nu acum (configurează mai târziu)"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Nova — Configurare",
+        "menu_options": {
+          "core": "Nucleu — persona, directivă, model de conversație",
+          "routing": "Direcționare — dormitoare, grup de difuzare, serviciu de notificare",
+          "observer": "Observator — atenție proactivă (niveluri de modele, ore de liniște)",
+          "credentials": "Date de acces — cheile API ale furnizorilor",
+          "identity": "Identitate — recunoașterea fiecărei persoane",
+          "email": "E-mail — inbox doar pentru citire (parola în secrets.yaml)"
+        }
+      },
+      "core": {
+        "title": "Nova — Nucleu",
+        "description": "Persona, directiva și modelul de conversație.",
+        "data": {
+          "honorific": "Cum să mi te adresezi",
+          "directive_preset": "Directivă predefinită",
+          "directive": "Directivă proprie (opțională, înlocuiește directiva predefinită)",
+          "model": "Model de conversație",
+          "use_hass_api": "Activează controlul casei (lumini, climatizare, încuietori etc.)"
+        }
+      },
+      "routing": {
+        "title": "Nova — Direcționare",
+        "description": "alege ce spații HA sunt dormitoare (pentru detectarea somnului), ce grup media_player se folosește pentru difuzări și serviciul de notificare al telefonului tău.",
+        "data": {
+          "bedroom_areas": "Spații de dormitor (pentru detectarea somnului în orele de liniște)",
+          "ground_floor_areas": "Spații de la parter (pentru alertele de efracție din timpul nopții)",
+          "broadcast_group": "Grup de difuzoare pentru difuzări (de obicei grupul Cast al casei)",
+          "notify_service": "Serviciul de notificare al telefonului (de ex. notify.mobile_app_yourphone)"
+        },
+        "data_description": {
+          "bedroom_areas": "Orice senzor de prezență din aceste spații activează modul somn în orele de liniște.",
+          "ground_floor_areas": "Cât timp toată lumea doarme, Nova te alertează la mișcare doar dacă unul dintre aceste spații are o ușă sau o fereastră exterioară deschisă. Lasă gol ca să verifici fiecare etaj.",
+          "broadcast_group": "Folosit pentru anunțurile critice și foarte urgente.",
+          "notify_service": "Folosit când ești plecat de acasă sau dormi."
+        }
+      },
+      "observer": {
+        "title": "Nova — Modul observator",
+        "description": "atenție proactivă. Nova urmărește casa și îți spune când ceva merită menționat. {note}",
+        "data": {
+          "observer_enabled": "Activează modul observator",
+          "classifier_model": "Model de clasificare (nivelul 1 — ieftin)",
+          "reasoning_model": "Model de raționament (nivelul 2 — principal)",
+          "review_model": "Model de revizuire (nivelul 3 — periodic)",
+          "observer_quiet_start": "Începutul orelor de liniște (HH:MM)",
+          "observer_quiet_end": "Sfârșitul orelor de liniște (HH:MM)"
+        }
+      },
+      "credentials": {
+        "title": "Nova — Date de acces",
+        "description": "Câte o cheie API dedicată pentru fiecare furnizor — Groq, OpenAI, Anthropic, Gemini, un endpoint propriu compatibil cu OpenAI și o cheie Bearer opțională pentru un endpoint Ollama protejat. Se păstrează doar în secrets.yaml din Home Assistant, niciodată în configurarea panoului, și nu se mai afișează niciodată aici. Stare: {status}. Un câmp gol nu schimbă cheia salvată a acelui furnizor. Furnizorul agentului principal este acum: {active}.",
+        "data": {
+          "groq_credential": "Cheie API Groq",
+          "clear_groq": "Șterge cheia Groq salvată",
+          "openai_credential": "Cheie API OpenAI",
+          "clear_openai": "Șterge cheia OpenAI salvată",
+          "anthropic_credential": "Cheie API Anthropic",
+          "clear_anthropic": "Șterge cheia Anthropic salvată",
+          "gemini_credential": "Cheie API Gemini",
+          "clear_gemini": "Șterge cheia Gemini salvată",
+          "custom_credential": "Cheie API pentru endpoint propriu",
+          "clear_custom": "Șterge cheia salvată a endpointului propriu",
+          "ollama_credential": "Cheie Bearer pentru Ollama (opțională — doar pentru un endpoint protejat)",
+          "clear_ollama": "Șterge cheia Ollama salvată",
+          "confirm_delete_active": "Da, înțeleg că ștergerea cheii furnizorului actual al agentului principal îl va dezactiva până când se setează o cheie nouă sau se schimbă furnizorul"
+        }
+      },
+      "identity": {
+        "title": "Nova — Identitate",
+        "description": "recunoașterea fiecărei persoane, ca Nova să se adapteze celui care vorbește. Funcționează fără hardware special, pe baza prezenței și (dacă e configurată) a recunoașterii faciale din camere. Amprenta vocală este cea mai precisă, dar are nevoie de un GPU local, așa că este dezactivată implicit.",
+        "data": {
+          "identity_enabled": "Recunoaște cine vorbește",
+          "identity_voice_fingerprint": "Amprentă vocală (necesită un GPU local)",
+          "identity_min_confidence": "Încrederea minimă înainte de a alege o persoană",
+          "voice_recognition_source": "Sursa recunoașterii vocale (entitate dintr-un serviciu de recunoaștere a vorbitorului, de ex. binary_sensor.*_voice)",
+          "voice_recognition_auto_enroll": "Marchează automat vocile pentru învățare când oamenii vorbesc"
+        },
+        "data_description": {
+          "identity_enabled": "Folosește cine este acasă + recunoașterea facială recentă din camere. Nu este nevoie de GPU.",
+          "identity_voice_fingerprint": "Lasă dezactivat dacă nu ai un server cu GPU care rulează un model de identificare vocală.",
+          "identity_min_confidence": "Mai mare = mai prudentă; rămâne neutră când nu e sigură."
+        }
+      },
+      "email": {
+        "title": "Nova — E-mail",
+        "description": "Acces la inbox doar pentru citire. Parola IMAP este citită din secrets.yaml din Home Assistant — adaug-o acolo sub cheia de mai jos (implicit nova_imap_password); nu este niciodată păstrată în configurarea panoului.",
+        "data": {
+          "imap_enabled": "Activează citirea e-mailurilor",
+          "imap_host": "Gazdă IMAP (de ex. imap.gmail.com)",
+          "imap_port": "Port IMAP (SSL: 993)",
+          "imap_user": "Utilizator IMAP / adresă de e-mail",
+          "imap_folder": "Folderul căsuței poștale (implicit INBOX)",
+          "imap_ssl": "Folosește SSL (recomandat)",
+          "imap_secret_key": "Cheia din secrets.yaml care conține parola"
+        }
+      }
+    },
+    "error": {
+      "credential_set_and_clear": "Pentru fiecare furnizor, fie introdu o cheie nouă, fie bifează „Șterge” — nu pe amândouă.",
+      "confirm_required_for_active_provider": "Ștergerea cheii furnizorului actual al agentului principal necesită bifarea casetei de confirmare, ca să nu se întâmple dintr-un clic greșit."
+    }
+  },
+  "issues": {
+    "llm_unavailable": {
+      "title": "Modelul de raționament al Nova nu este disponibil",
+      "description": "Nova nu a putut contacta modelul său de raționament, așa că rulează în mod limitat — controlul dispozitivelor, starea și scenele funcționează în continuare. Motiv: {detail}\n\nDeschide panoul Nova → Setări și verifică furnizorul, modelul și cheia API. Dacă furnizorul a retras modelul, alege-l din nou din listă. Această notificare dispare automat când raționamentul funcționează din nou."
+    },
+    "credential_migration_ambiguous": {
+      "title": "Nova: o cheie salvată trebuie atribuită unui furnizor",
+      "description": "Nova a găsit o cheie comună din perioada dinainte de cheile separate pentru fiecare furnizor, dar nu a putut stabili cărui furnizor îi aparține (niciun furnizor salvat, iar forma cheii nu s-a potrivit cu niciun furnizor cunoscut). Nimic nu a fost schimbat sau șters — vechea cheie funcționează în continuare. Ca să termini mutarea, deschide Setări → Dispozitive și servicii → Nova → Configurează → Date de acces și introdu-o la furnizorul corect. Această notificare dispare automat după ce ai făcut asta."
+    },
+    "voice_setup_step_addons": {
+      "title": "Nova configurează vocea",
+      "description": "Pasul {step} din {total}: instalarea și pornirea suplimentelor Piper, Whisper și openWakeWord. Poate dura câteva minute. Această notificare dispare singură când se termină configurarea vocii."
+    },
+    "voice_setup_step_wyoming": {
+      "title": "Nova configurează vocea",
+      "description": "Pasul {step} din {total}: conectarea Home Assistant la suplimentele vocale (Wyoming). Această notificare dispare singură când se termină configurarea vocii."
+    },
+    "voice_setup_step_pipeline": {
+      "title": "Nova configurează vocea",
+      "description": "Pasul {step} din {total}: crearea pipeline-ului Assist pentru Nova. Această notificare dispare singură când se termină configurarea vocii."
+    },
+    "voice_setup_incomplete": {
+      "title": "Configurarea vocii Nova nu este completă",
+      "description": "Nova nu a putut termina configurarea vocii. Ce a eșuat: {failed}.\n\nCa s-o termini manual: în Setări → Suplimente, instalează și pornește Piper, Whisper și openWakeWord. Apoi, în Setări → Asistenți vocali, creează un pipeline cu Nova ca agent de conversație, Whisper pentru transformarea vocii în text și Piper pentru transformarea textului în voce. Nova verifică din nou la fiecare repornire, iar această notificare dispare singură când vocea funcționează."
+    }
+  },
+  "exceptions": {
+    "no_entry": {
+      "message": "Nova nu este configurată. Adaugă integrarea Nova, apoi încearcă din nou."
+    },
+    "not_loaded": {
+      "message": "Nova nu este încărcată. Activează sau reîncarcă integrarea Nova, apoi încearcă din nou."
+    },
+    "reloading": {
+      "message": "Nova pornește sau se reîncarcă. Încearcă din nou peste puțin timp."
+    },
+    "setup_failed": {
+      "message": "Nova nu a putut porni. Verifică jurnalul Home Assistant, rezolvă problema și reîncarcă Nova."
+    },
+    "multiple_entries": {
+      "message": "Este configurată mai mult de o intrare Nova. Elimină intrarea în plus, apoi încearcă din nou."
+    }
+  }
+}
