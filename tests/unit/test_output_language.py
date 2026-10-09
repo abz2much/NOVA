@@ -249,7 +249,7 @@ def test_panel_language_list_matches_the_table(load):
     ol = load("output_language")
     js = (ROOT / "frontend" / "src" / "panel" / "settings-cards.js").read_text()
     block = js.split('data-cfg-key="output_language"')[1].split("cfg.output_language")[0]
-    codes = re.findall(r'\["([a-z]{2})", "', block)
+    codes = re.findall(r'\["([a-z]{2})(?:-[A-Za-z]+)?", "', block)
     assert "auto" not in codes[:0]
     expected = set(ol.LANG_NAMES) - {"no"}                # "no" is the same language as "nb"
     assert set(codes) == expected
@@ -402,3 +402,43 @@ async def test_scene_pick_is_a_classifier_and_is_never_given_the_directive(
         pass
     assert sent, "the scene picker did not call the model"
     assert "Language" not in _system(sent) and "German" not in _system(sent)
+
+
+# ── Chinese scripts ─────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("raw", ["zh-Hant", "zh-TW", "zh_hant"])
+def test_traditional_chinese_setting_says_traditional(ol, setting, raw):
+    setting["value"] = raw
+    d = ol.directive(_hass("en"))
+    assert "Traditional Chinese (Taiwan wording)" in d
+    assert "Traditional Chinese (Taiwan wording)" in ol.field_directive(_hass("en"), "speak")
+    assert "Traditional Chinese (Taiwan wording)" in ol.with_language(_hass("en"), "x")
+
+
+def test_auto_picks_the_chinese_script_from_home_assistant(ol, setting):
+    setting["value"] = "auto"
+    assert "Traditional Chinese (Taiwan wording)" in ol.directive(_hass("zh-Hant"))
+    assert "Simplified Chinese" in ol.directive(_hass("zh-Hans"))
+
+
+def test_old_saved_zh_still_means_simplified(ol, setting):
+    setting["value"] = "zh"
+    assert ol.is_valid_setting("zh") and ol.resolve(_hass("en")) == "zh"
+    d = ol.directive(_hass("en"))
+    assert "Simplified Chinese" in d and "Traditional" not in d
+
+
+def test_traditional_chinese_safety_alerts_stay_english(load, setting):
+    cc = load("cognitive_core")
+    i18n = load("notify_i18n")
+    setting["value"] = "zh-Hant"
+    lang = cc._hass_lang(_hass("en"))
+    assert lang == "zh-Hant"
+    assert cc._notify_i18n().title("freeze_critical", lang) == i18n.TITLES["freeze_critical"]["en"]
+
+
+def test_panel_picker_offers_both_chinese_scripts_and_keeps_traditional():
+    js = (ROOT / "frontend" / "src" / "panel" / "settings-cards.js").read_text()
+    block = js.split('data-cfg-key="output_language"')[1].split("</select>")[0]
+    assert '["zh", "Simplified Chinese"]' in block
+    assert '["zh-Hant", "Traditional Chinese"]' in block

@@ -33,7 +33,7 @@ BACKEND = ROOT / "custom_components" / "nova"
 # generator stopped counting test data and code fragments: 913 each.
 # Finished languages must have every key: their baseline is empty and stays so.
 FINISHED = {"cs", "de", "es", "fr", "nl", "pl", "pt-br", "ru", "sv", "zh", "zh-hant"}
-BASELINE_MAX = {lang: 919 for lang in ("da", "fi", "it", "nb", "pt", "ro", "sk", "tr", "uk")}  # 913 + 6 new strings in 8.19.0
+BASELINE_MAX = {lang: 918 for lang in ("da", "fi", "it", "nb", "pt", "ro", "sk", "tr", "uk")}  # 913 + 6 new in 8.19.0, less "Chinese" in 8.19.1
 BASELINE_MAX.update({lang: 0 for lang in FINISHED})
 
 PLACEHOLDER = re.compile(r"\{(\w+)\}")

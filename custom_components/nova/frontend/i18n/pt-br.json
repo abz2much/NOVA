@@ -341,7 +341,6 @@
   "Checking models and saving…": "Verificando modelos e salvando…",
   "Checking the hazard sources that are on…": "Verificando as fontes de risco ativas…",
   "Checking…": "Verificando…",
-  "Chinese": "Chinês",
   "Choose a starting profile or configure each role yourself. Profiles only stage changes; nothing is saved until Apply.": "Escolha um perfil inicial ou configure cada função você mesmo. Os perfis só deixam alterações pendentes; nada é salvo antes de Aplicar.",
   "Choose the one alarm Nova uses for security decisions. Automatic lockdown is always opt in.": "Escolha o único alarme que a Nova usa para decisões de segurança. O bloqueio automático fica desligado até você ativar.",
   "Clear Property": "Limpar terreno",
@@ -1118,5 +1117,7 @@
   "Boss": "Chefe",
   "Friend": "Amigo",
   "checks each new learned suggestion with the Suggestion Review model (AI Models card) before showing it; sends device and room names to that provider, or keeps them at home with Ollama": "verifica cada nova sugestão aprendida com o modelo de revisão de sugestões (card Modelos de IA) antes de mostrá-la; envia nomes de dispositivos e cômodos para esse provedor, ou os mantém em casa com o Ollama",
-  "routine alerts get Helpful / Not helpful buttons on your phone; Nova adjusts its timing only from your taps": "os alertas de rotina ganham botões Útil / Não útil no seu celular; a Nova ajusta o horário só com base nos seus toques"
+  "routine alerts get Helpful / Not helpful buttons on your phone; Nova adjusts its timing only from your taps": "os alertas de rotina ganham botões Útil / Não útil no seu celular; a Nova ajusta o horário só com base nos seus toques",
+  "Simplified Chinese": "Chinês simplificado",
+  "Traditional Chinese": "Chinês tradicional"
 }
