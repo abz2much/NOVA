@@ -96,7 +96,8 @@ async def _emit_action(hass, config, action, sleeping):
     except Exception:
         in_quiet = False
 
-    if (sleeping or in_quiet) and urgency != "critical":
+    # phone_only: the first intrusion alert while residents are home.
+    if (sleeping or in_quiet or action.get("phone_only")) and urgency != "critical":
         # Push to phone only (no spoken announcement)
         await _push()
         return

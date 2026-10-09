@@ -60,6 +60,10 @@ needs, what it does by itself, and what it never does without you.
   is asleep, walking from room to room never confirms an intrusion. Only the
   alarm itself going off, or a person on camera that Nova's vision check
   confirms, does. Armed away, vacation and everyone away work as before.
+- In that same case (someone home, armed home or night, or asleep), the first
+  "Motion at … while the house is secured" alert goes to your phone only, not
+  the speakers. Armed away, vacation, everyone away and a confirmed intrusion
+  still use the speakers.
 
 On the **Intrusion** tab you can press **I'M LOOKING (HOLD)** to stop the
 automatic escalation, or **CALL OFF (FALSE ALARM)**. Calling off an intrusion
