@@ -31,9 +31,10 @@ BACKEND = ROOT / "custom_components" / "nova"
 # string that already exists. History: one shared list of 895 (8.15.0),
 # 931 (8.17.0, late drawn text), then per language from 8.18.0, when the
 # generator stopped counting test data and code fragments: 913 each.
-BASELINE_MAX = {lang: 913 for lang in (
-    "cs", "da", "de", "es", "fi", "fr", "it", "nb", "nl", "pl",
-    "pt", "pt-br", "ro", "ru", "sk", "sv", "tr", "uk")}
+# Finished languages must have every key: their baseline is empty and stays so.
+FINISHED = {"cs", "de", "es", "fr", "nl", "pl", "pt-br", "ru", "sv", "zh", "zh-hant"}
+BASELINE_MAX = {lang: 919 for lang in ("da", "fi", "it", "nb", "pt", "ro", "sk", "tr", "uk")}  # 913 + 6 new strings in 8.19.0
+BASELINE_MAX.update({lang: 0 for lang in FINISHED})
 
 PLACEHOLDER = re.compile(r"\{(\w+)\}")
 # "&" and "+" are left out: a translation may rightly say "and".
@@ -99,7 +100,7 @@ def test_the_string_list_is_sorted_and_unique():
 def test_every_language_file_is_checked():
     assert set(_langs()) == {
         "cs", "da", "de", "es", "fi", "fr", "it", "nb", "nl", "pl",
-        "pt", "pt-br", "ro", "ru", "sk", "sv", "tr", "uk"}
+        "pt", "pt-br", "ro", "ru", "sk", "sv", "tr", "uk", "zh", "zh-hant"}
 
 
 @pytest.mark.parametrize("lang", sorted(_langs()))

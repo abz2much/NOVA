@@ -1112,5 +1112,11 @@
   "⬆ Upload Image": "⬆ Ladda upp bild",
   "⬇ Export": "⬇ Exportera",
   "💾 Save edit": "💾 Spara ändring",
-  "🔊 spoken": "🔊 talad"
+  "🔊 spoken": "🔊 talad",
+  "Sir": "Herrn",
+  "Ma'am": "Frun",
+  "Boss": "Chefen",
+  "Friend": "Vän",
+  "checks each new learned suggestion with the Suggestion Review model (AI Models card) before showing it; sends device and room names to that provider, or keeps them at home with Ollama": "kontrollerar varje nytt inlärt förslag med modellen för förslagsgranskning (kortet AI-modeller) innan det visas; skickar enhets- och rumsnamn till den leverantören, eller behåller dem hemma med Ollama",
+  "routine alerts get Helpful / Not helpful buttons on your phone; Nova adjusts its timing only from your taps": "rutinvarningar får knapparna Hjälpsam / Inte hjälpsam i din telefon; Nova justerar sina tider bara utifrån dina tryck"
 }

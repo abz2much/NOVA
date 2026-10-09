@@ -26,6 +26,7 @@ KEEP_ENGLISH = ROOT / "frontend" / "i18n" / "keep_english.json"
 LANGUAGES = {
     "en", "de", "es", "fr", "it", "nl", "pt",
     "cs", "da", "fi", "nb", "pl", "pt-BR", "ro", "ru", "sk", "sv", "tr", "uk",
+    "zh-Hans", "zh-Hant",
 }
 # "&" and "+" are left out: a translation may rightly say "and".
 EXTRA_SYMBOLS = set("·%")

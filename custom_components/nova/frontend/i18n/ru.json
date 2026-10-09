@@ -1112,5 +1112,11 @@
   "⬆ Upload Image": "⬆ Загрузить изображение",
   "⬇ Export": "⬇ Экспорт",
   "💾 Save edit": "💾 Сохранить правку",
-  "🔊 spoken": "🔊 произнесено"
+  "🔊 spoken": "🔊 произнесено",
+  "Sir": "Сэр",
+  "Ma'am": "Мэм",
+  "Boss": "Босс",
+  "Friend": "Друг",
+  "checks each new learned suggestion with the Suggestion Review model (AI Models card) before showing it; sends device and room names to that provider, or keeps them at home with Ollama": "проверяет каждое новое выученное предложение моделью проверки предложений (карточка Модели ИИ) перед показом; отправляет названия устройств и комнат этому поставщику или оставляет их дома с Ollama",
+  "routine alerts get Helpful / Not helpful buttons on your phone; Nova adjusts its timing only from your taps": "оповещения о привычках получают на телефоне кнопки Полезно / Бесполезно; Nova меняет время только по вашим нажатиям"
 }

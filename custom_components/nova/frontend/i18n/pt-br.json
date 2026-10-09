@@ -1112,5 +1112,11 @@
   "⬆ Upload Image": "⬆ Enviar imagem",
   "⬇ Export": "⬇ Exportar",
   "💾 Save edit": "💾 Salvar edição",
-  "🔊 spoken": "🔊 falado"
+  "🔊 spoken": "🔊 falado",
+  "Sir": "Senhor",
+  "Ma'am": "Senhora",
+  "Boss": "Chefe",
+  "Friend": "Amigo",
+  "checks each new learned suggestion with the Suggestion Review model (AI Models card) before showing it; sends device and room names to that provider, or keeps them at home with Ollama": "verifica cada nova sugestão aprendida com o modelo de revisão de sugestões (card Modelos de IA) antes de mostrá-la; envia nomes de dispositivos e cômodos para esse provedor, ou os mantém em casa com o Ollama",
+  "routine alerts get Helpful / Not helpful buttons on your phone; Nova adjusts its timing only from your taps": "os alertas de rotina ganham botões Útil / Não útil no seu celular; a Nova ajusta o horário só com base nos seus toques"
 }

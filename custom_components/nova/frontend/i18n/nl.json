@@ -1112,5 +1112,11 @@
   "⬆ Upload Image": "⬆ Afbeelding uploaden",
   "⬇ Export": "⬇ Exporteren",
   "💾 Save edit": "💾 Bewerking opslaan",
-  "🔊 spoken": "🔊 uitgesproken"
+  "🔊 spoken": "🔊 uitgesproken",
+  "Sir": "Meneer",
+  "Ma'am": "Mevrouw",
+  "Boss": "Baas",
+  "Friend": "Vriend",
+  "checks each new learned suggestion with the Suggestion Review model (AI Models card) before showing it; sends device and room names to that provider, or keeps them at home with Ollama": "controleert elke nieuw geleerde suggestie met het model voor suggestiebeoordeling (kaart AI-modellen) voordat die verschijnt; stuurt apparaat- en kamernamen naar die provider, of houdt ze thuis met Ollama",
+  "routine alerts get Helpful / Not helpful buttons on your phone; Nova adjusts its timing only from your taps": "routinemeldingen krijgen knoppen Nuttig / Niet nuttig op je telefoon; Nova past de timing alleen aan op basis van je tikken"
 }

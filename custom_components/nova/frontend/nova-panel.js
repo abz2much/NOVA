@@ -1082,7 +1082,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v8.18.0
+ * v8.19.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1159,7 +1159,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.18.0 ",
+      console.log("%c Nova Panel %c v8.19.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -4128,6 +4128,8 @@ ${this._htmlDashboardBody()}`;
   // Mirrors const.py's HONORIFIC_OPTIONS — kept in sync by hand, same as
   // AREA_CAP_ORDER/AREA_CAP_ICON below mirror their own backend source.
   static HONORIFIC_OPTIONS = ["sir", "ma'am", "boss", "friend"];
+  // Whole labels, so each one can be translated.
+  static HONORIFIC_LABELS = { sir: "Sir", "ma'am": "Ma'am", boss: "Boss", friend: "Friend" };
 
   static SETTINGS_GROUPS = [
     { id: "general", label: "General" },
@@ -4647,7 +4649,7 @@ ${this._htmlDashboardBody()}`;
             ["nl", "Nederlands"], ["pl", "Polski"], ["pt", "Português"],
             ["pt-br", "Português (Brasil)"], ["ro", "Română"], ["ru", "Русский"],
             ["sk", "Slovenčina"], ["sv", "Svenska"], ["tr", "Türkçe"],
-            ["uk", "Українська"],
+            ["uk", "Українська"], ["zh", "中文（简体）"], ["zh-hant", "中文（繁體）"],
           ], cfg.ui_language || "auto")}
         </select>
       </div>
@@ -4722,7 +4724,7 @@ ${this._htmlDashboardBody()}`;
           <span class="pairing-label">${this._esc(p.name)}</span>
           <select class="person-honorific-select" data-person-id="${this._esc(p.entity_id)}">
             <option value="">— use default —</option>
-            ${opts.map(o => `<option value="${this._esc(o)}"${!isCustom && o === current ? " selected" : ""}>${this._esc(o[0].toUpperCase() + o.slice(1))}</option>`).join("")}
+            ${opts.map(o => `<option value="${this._esc(o)}"${!isCustom && o === current ? " selected" : ""}>${this._esc(NovaPanel.HONORIFIC_LABELS[o] || o)}</option>`).join("")}
             <option value="__custom__"${isCustom ? " selected" : ""}>Custom…</option>
           </select>
           <input type="text" class="person-honorific-custom" data-person-id="${this._esc(p.entity_id)}"
@@ -5934,7 +5936,7 @@ ${this._htmlDashboardBody()}`;
       const on = defaultOn ? cfg[key] !== false : !!cfg[key];
       return `
         <div class="cfg-row">
-          <label>${hint.label}${hint.sub ? `<span class="toggle-desc"> — ${this._esc(hint.sub)}</span>` : ""}</label>
+          <label>${hint.label}${hint.sub ? `<span class="toggle-desc"> — <span>${this._esc(hint.sub)}</span></span>` : ""}</label>
           <button class="toggle-btn ${on ? "on" : "off"}" data-cfg-key="${key}" data-cfg-val="${on ? "false" : "true"}">${on ? "ON" : "OFF"}</button>
         </div>`;
     };

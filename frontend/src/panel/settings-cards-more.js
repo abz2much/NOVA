@@ -437,7 +437,7 @@
       const on = defaultOn ? cfg[key] !== false : !!cfg[key];
       return `
         <div class="cfg-row">
-          <label>${hint.label}${hint.sub ? `<span class="toggle-desc"> — ${this._esc(hint.sub)}</span>` : ""}</label>
+          <label>${hint.label}${hint.sub ? `<span class="toggle-desc"> — <span>${this._esc(hint.sub)}</span></span>` : ""}</label>
           <button class="toggle-btn ${on ? "on" : "off"}" data-cfg-key="${key}" data-cfg-val="${on ? "false" : "true"}">${on ? "ON" : "OFF"}</button>
         </div>`;
     };

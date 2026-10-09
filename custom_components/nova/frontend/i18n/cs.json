@@ -1112,5 +1112,11 @@
   "⬆ Upload Image": "⬆ Nahrát obrázek",
   "⬇ Export": "⬇ Exportovat",
   "💾 Save edit": "💾 Uložit úpravu",
-  "🔊 spoken": "🔊 vysloveno"
+  "🔊 spoken": "🔊 vysloveno",
+  "Sir": "Pane",
+  "Ma'am": "Paní",
+  "Boss": "Šéfe",
+  "Friend": "Příteli",
+  "checks each new learned suggestion with the Suggestion Review model (AI Models card) before showing it; sends device and room names to that provider, or keeps them at home with Ollama": "kontroluje každý nově naučený návrh modelem pro kontrolu návrhů (karta Modely AI), než ho zobrazí; posílá názvy zařízení a místností tomuto poskytovateli, nebo je s Ollama nechá doma",
+  "routine alerts get Helpful / Not helpful buttons on your phone; Nova adjusts its timing only from your taps": "upozornění na zvyky dostanou v telefonu tlačítka Užitečné / Neužitečné; Nova upravuje časování jen podle vašich klepnutí"
 }

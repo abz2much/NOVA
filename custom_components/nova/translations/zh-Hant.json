@@ -1,0 +1,233 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "設定 Nova",
+        "description": "為您想使用的每個 AI 供應商輸入金鑰，或輸入您的 Ollama 網址，或兩者都填。每個欄位都是可選的，但至少需要填寫一個。Nova 會逐一檢查。\n\n找到的已儲存金鑰：{saved}。欄位留空即保留已儲存的金鑰。",
+        "data": {
+          "groq_api_key": "Groq API 金鑰",
+          "anthropic_api_key": "Anthropic API 金鑰",
+          "openai_api_key": "OpenAI API 金鑰",
+          "gemini_api_key": "Gemini API 金鑰",
+          "ollama_base_url": "Ollama 網址"
+        },
+        "data_description": {
+          "ollama_base_url": "例如 {example}"
+        }
+      },
+      "roles": {
+        "title": "為每個角色選擇供應商",
+        "description": "選擇由哪個供應商負責每項工作。這裡只列出通過檢查的供應商。\n\n無法使用並已略過的已儲存金鑰：{failed}。",
+        "data": {
+          "conversation": "對話",
+          "classifier": "分類器",
+          "reasoning": "推理",
+          "camera_reasoning": "攝影機推理",
+          "vision": "視覺"
+        },
+        "data_description": {
+          "conversation": "與您交談並控制您的家。",
+          "classifier": "判斷家中的事件是否重要。執行頻繁。",
+          "reasoning": "決定如何處理事件，並撰寫簡報。執行頻繁。",
+          "camera_reasoning": "根據視覺描述判斷攝影機畫面。",
+          "vision": "描述攝影機畫面。選擇「暫時不要」可稍後再設定。"
+        }
+      },
+      "models": {
+        "title": "為每個角色選擇模型",
+        "description": "提交時，Nova 會測試每個模型。分類器和推理執行頻繁，因此在付費供應商上請為它們選擇小而便宜的模型。如需更換供應商，請重新開始設定：這些頁面沒有返回按鈕。",
+        "data": {
+          "conversation_model": "對話模型（{conversation_provider}）",
+          "classifier_model": "分類器模型（{classifier_provider}）",
+          "reasoning_model": "推理模型（{reasoning_provider}）",
+          "camera_reasoning_model": "攝影機推理模型（{camera_reasoning_provider}）",
+          "vision_model": "視覺模型（{vision_provider}）"
+        },
+        "data_description": {
+          "vision_model": "留空即可稍後再設定視覺。"
+        }
+      }
+    },
+    "error": {
+      "need_llm": "請至少輸入一個金鑰或一個 Ollama 網址。",
+      "no_working_provider": "暫無可用的供應商：請輸入金鑰或 Ollama 網址。",
+      "invalid_auth": "供應商拒絕了此金鑰。",
+      "cannot_connect": "檢查未能完成。請稍後重試；如果是 Ollama，請檢查網址。",
+      "unknown": "檢查失敗。請重試。",
+      "model_required": "請為此角色選擇模型。",
+      "model_no_pictures": "此模型無法讀取測試圖片。",
+      "model_not_found": "此供應商不提供該模型。",
+      "model_access_denied": "您的金鑰無法使用此模型。",
+      "test_incomplete": "測試未能完成。請重試。",
+      "test_failed": "測試失敗。供應商給出的原因見 Home Assistant 日誌。",
+      "secrets_write_failed": "Nova 無法將金鑰儲存到 secrets.yaml。請檢查該檔案是否可寫，然後重試。",
+      "config_write_failed": "Nova 無法將您的選擇儲存到它的設定檔。請檢查 nova 資料夾是否可寫，然後重試。"
+    },
+    "abort": {
+      "already_configured": "Nova 已設定。",
+      "import_failed": "找到了 Nova 設定，但沒有可用的 LLM（沒有 API 金鑰，也沒有本地端點）。",
+      "already_in_progress": "Nova 設定已在另一個視窗中開啟。"
+    }
+  },
+  "selector": {
+    "setup_provider": {
+      "options": {
+        "groq": "Groq",
+        "anthropic": "Anthropic",
+        "openai": "OpenAI",
+        "gemini": "Gemini",
+        "ollama": "Ollama",
+        "not_now": "暫時不要（稍後設定）"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Nova — 設定",
+        "menu_options": {
+          "core": "核心 — 人設、指令、對話模型",
+          "routing": "路由 — 臥室區域、廣播群組、通知服務",
+          "observer": "觀察者 — 主動感知（模型層級、安靜時段）",
+          "credentials": "憑證 — 供應商 API 金鑰",
+          "identity": "身份 — 按人識別",
+          "email": "電子郵件 — 唯讀收件匣（密碼透過 secrets.yaml 提供）"
+        }
+      },
+      "core": {
+        "title": "Nova — 核心",
+        "description": "人設、指令和對話模型。",
+        "data": {
+          "honorific": "稱呼我為",
+          "directive_preset": "預設指令",
+          "directive": "自訂指令（可選，會覆蓋預設）",
+          "model": "對話模型",
+          "use_hass_api": "啟用家居控制（燈光、溫控、門鎖等）"
+        }
+      },
+      "routing": {
+        "title": "Nova — 路由",
+        "description": "選擇哪些 HA 區域是臥室（用於睡眠偵測）、廣播使用哪個 media_player 群組，以及您手機的通知服務。",
+        "data": {
+          "bedroom_areas": "臥室區域（用於安靜時段的睡眠偵測）",
+          "ground_floor_areas": "一樓區域（用於夜間入侵警報）",
+          "broadcast_group": "廣播揚聲器群組（通常是您家中的 Cast 群組）",
+          "notify_service": "手機通知服務（例如 notify.mobile_app_yourphone）"
+        },
+        "data_description": {
+          "bedroom_areas": "在安靜時段，這些區域中的任何人體存在感測器都會觸發睡眠模式。",
+          "ground_floor_areas": "睡眠期間，只有當這些區域之一顯示有外門/窗開啟時，Nova 才會就移動發出警報——留空則檢查所有樓層。",
+          "broadcast_group": "用於關鍵和高度緊急的播報。",
+          "notify_service": "在您離家或睡眠時使用。"
+        }
+      },
+      "observer": {
+        "title": "Nova — 觀察者模式",
+        "description": "主動感知。Nova 會留意您的家，在有值得提及的事情時出聲提醒。{note}",
+        "data": {
+          "observer_enabled": "啟用觀察者模式",
+          "classifier_model": "分類器模型（第 1 層——便宜）",
+          "reasoning_model": "推理模型（第 2 層——主要）",
+          "review_model": "稽核模型（第 3 層——定期）",
+          "observer_quiet_start": "安靜時段開始（HH:MM）",
+          "observer_quiet_end": "安靜時段結束（HH:MM）"
+        }
+      },
+      "credentials": {
+        "title": "Nova — 憑證",
+        "description": "每個供應商一個專用 API 金鑰——Groq、OpenAI、Anthropic、Gemini、一個相容 OpenAI 的自訂端點，以及受保護 Ollama 端點的可選 Bearer 金鑰。僅儲存在 Home Assistant 的 secrets.yaml 中，絕不儲存在面板設定中，也絕不會在此再次顯示。狀態：{status}。欄位留空不會更改該供應商已儲存的金鑰。主代理當前使用的供應商：{active}。",
+        "data": {
+          "groq_credential": "Groq API 金鑰",
+          "clear_groq": "清除已儲存的 Groq 金鑰",
+          "openai_credential": "OpenAI API 金鑰",
+          "clear_openai": "清除已儲存的 OpenAI 金鑰",
+          "anthropic_credential": "Anthropic API 金鑰",
+          "clear_anthropic": "清除已儲存的 Anthropic 金鑰",
+          "gemini_credential": "Gemini API 金鑰",
+          "clear_gemini": "清除已儲存的 Gemini 金鑰",
+          "custom_credential": "自訂端點 API 金鑰",
+          "clear_custom": "清除已儲存的自訂端點金鑰",
+          "ollama_credential": "Ollama Bearer 金鑰（可選——僅用於受保護的端點）",
+          "clear_ollama": "清除已儲存的 Ollama 金鑰",
+          "confirm_delete_active": "是的，我瞭解清除主代理當前供應商的金鑰會使其停用，直到設定新金鑰或更換供應商為止"
+        }
+      },
+      "identity": {
+        "title": "Nova — 身份",
+        "description": "按人識別，讓 Nova 根據說話的人調整自己。無需特殊硬體，利用人體存在以及（如已設定）攝影機人臉識別即可工作。聲紋識別最準確，但需要本地 GPU，因此預設關閉。",
+        "data": {
+          "identity_enabled": "識別說話的人",
+          "identity_voice_fingerprint": "聲紋識別（需要本地 GPU）",
+          "identity_min_confidence": "認定為某人所需的最低可信度",
+          "voice_recognition_source": "語音識別來源（來自說話人識別服務的實體，例如 binary_sensor.*_voice）",
+          "voice_recognition_auto_enroll": "在大家說話時自動標記待登記的聲音"
+        },
+        "data_description": {
+          "identity_enabled": "使用誰在家 + 最近的攝影機人臉識別。無需 GPU。",
+          "identity_voice_fingerprint": "除非您有執行聲紋識別模型的 GPU 伺服器，否則請保持關閉。",
+          "identity_min_confidence": "越高 = 越謹慎；不確定時保持中立。"
+        }
+      },
+      "email": {
+        "title": "Nova — 電子郵件",
+        "description": "唯讀存取收件匣。IMAP 密碼從 Home Assistant 的 secrets.yaml 中讀取——請在下方的鍵名下新增（預設 nova_imap_password）；它絕不會儲存在面板設定中。",
+        "data": {
+          "imap_enabled": "啟用讀取電子郵件",
+          "imap_host": "IMAP 主機（例如 imap.gmail.com）",
+          "imap_port": "IMAP 埠（SSL：993）",
+          "imap_user": "IMAP 使用者名稱 / 電子郵件地址",
+          "imap_folder": "信箱資料夾（預設 INBOX）",
+          "imap_ssl": "使用 SSL（建議）",
+          "imap_secret_key": "儲存密碼的 secrets.yaml 鍵名"
+        }
+      }
+    },
+    "error": {
+      "credential_set_and_clear": "對每個供應商，請輸入新金鑰或勾選「清除」——不能兩者都選。",
+      "confirm_required_for_active_provider": "清除主代理當前供應商的金鑰需要勾選確認框，以免誤點。"
+    }
+  },
+  "issues": {
+    "llm_unavailable": {
+      "title": "Nova 推理後端不可用",
+      "description": "Nova 無法連線其推理模型，因此正以受限模式執行——裝置控制、狀態和場景仍可使用。原因：{detail}\n\n請開啟 Nova 面板 → 設定，檢查您的供應商、模型和 API 金鑰。如果供應商已停用該模型，請從列表中重新選擇。推理恢復正常後，此通知會自動清除。"
+    },
+    "credential_migration_ambiguous": {
+      "title": "Nova：一個已儲存的憑證需要指定供應商",
+      "description": "Nova 找到了一個在區分供應商憑證之前的共用憑證，但無法判斷它屬於哪個供應商（沒有已儲存的供應商，金鑰格式也不匹配任何已知供應商）。沒有更改或刪除任何內容——舊憑證仍可使用。要完成遷移，請開啟 設定 → 裝置與服務 → Nova → 設定 → 憑證，並在正確的供應商下輸入它。完成後，此通知會自動清除。"
+    },
+    "voice_setup_step_addons": {
+      "title": "Nova 正在設定語音",
+      "description": "第 {step} 步，共 {total} 步：正在安裝並啟動 Piper、Whisper 和 openWakeWord 附加元件。這可能需要幾分鐘。語音設定完成後，此通知會自行清除。"
+    },
+    "voice_setup_step_wyoming": {
+      "title": "Nova 正在設定語音",
+      "description": "第 {step} 步，共 {total} 步：正在將 Home Assistant 連線到語音附加元件（Wyoming）。語音設定完成後，此通知會自行清除。"
+    },
+    "voice_setup_step_pipeline": {
+      "title": "Nova 正在設定語音",
+      "description": "第 {step} 步，共 {total} 步：正在建立 Nova 語音助理設定。語音設定完成後，此通知會自行清除。"
+    },
+    "voice_setup_incomplete": {
+      "title": "Nova 語音設定未完成",
+      "description": "Nova 未能完成語音設定。失敗的部分：{failed}。\n\n手動完成方法：在 設定 → 應用程式 中，安裝並啟動 Piper、Whisper 和 openWakeWord。然後在 設定 → 語音助理 中，建立一個助理設定，以 Nova 作為對話助理、Whisper 用於語音轉文字、Piper 用於文字轉語音。Nova 每次重啟都會再次檢查，語音可用後，此通知會自行清除。"
+    }
+  },
+  "exceptions": {
+    "no_entry": {
+      "message": "Nova 尚未設定。請新增 Nova 整合，然後重試。"
+    },
+    "not_loaded": {
+      "message": "Nova 未載入。請啟用或重新載入 Nova 整合，然後重試。"
+    },
+    "reloading": {
+      "message": "Nova 正在啟動或重新載入。請稍後重試。"
+    },
+    "setup_failed": {
+      "message": "Nova 無法啟動。請檢查 Home Assistant 日誌，修復問題後重新載入 Nova。"
+    },
+    "multiple_entries": {
+      "message": "設定了多個 Nova 條目。請移除多餘的條目，然後重試。"
+    }
+  }
+}

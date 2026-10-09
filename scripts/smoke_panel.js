@@ -3612,8 +3612,13 @@ if (require.main === module) setTimeout(async () => {
   elNew._currentTab = "settings";
   elNew._render();
   let langSelect = elNew.shadowRoot.getElementById("uiLanguage");
+  // Auto, English, then one option per shipped dictionary.
+  const shippedLocales = fs.readdirSync(path.join(__dirname, "..", "custom_components/nova/frontend/i18n"))
+    .filter(f => f.endsWith(".json")).map(f => f.slice(0, -5));
+  const offered = langSelect ? [...langSelect.options].map(o => o.value) : [];
   checks.push(["settings restores the panel Language selector for every shipped locale",
-    !!langSelect && langSelect.options.length === 20 && langSelect.value === "auto"]);
+    !!langSelect && offered.length === shippedLocales.length + 2
+      && ["auto", "en", ...shippedLocales].every(l => offered.includes(l)) && langSelect.value === "auto"]);
   langSelect.value = "fr";
   langSelect.dispatchEvent(new window.Event("change", { bubbles: true }));
   await new Promise(r => setTimeout(r, 60));
