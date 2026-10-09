@@ -182,6 +182,25 @@ def _words(text) -> list:
     return out
 
 
+_APPLIANCE_WORDS = frozenset({
+    "fridge", "refrigerator", "freezer", "oven", "dishwasher", "washer",
+    "washing", "dryer", "microwave", "cabinet",
+})
+
+
+def is_appliance_opening(entity_id, friendly_name=None) -> bool:
+    """True when a door or window sensor belongs to an appliance or a cabinet
+    (a fridge door, an oven door), which is never a way into the house. Matched
+    on whole words of the entity id or the name. Pure, never raises."""
+    try:
+        for text in (str(entity_id or "").split(".", 1)[-1], friendly_name or ""):
+            if _APPLIANCE_WORDS.intersection(_words(text)):
+                return True
+    except Exception:
+        return False
+    return False
+
+
 def is_object_sensor(entity_id, friendly_name=None) -> bool:
     """True when a sensor reports a detected object (a car, an animal or a
     package) rather than a person: an object word that ends the name or comes

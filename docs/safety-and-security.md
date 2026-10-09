@@ -53,6 +53,13 @@ needs, what it does by itself, and what it never does without you.
   person sensors do.
 - With **Require confinement for intrusion monitoring** on, Nova only watches
   while a lockdown is on or the alarm is armed.
+- Appliance and cabinet doors never count as a way in: a fridge, freezer,
+  oven, dishwasher, washing machine, dryer, microwave or cabinet. Nor does
+  anything on your exclude list.
+- When someone is home and the alarm is armed home or night, or the household
+  is asleep, walking from room to room never confirms an intrusion. Only the
+  alarm itself going off, or a person on camera that Nova's vision check
+  confirms, does. Armed away, vacation and everyone away work as before.
 
 On the **Intrusion** tab you can press **I'M LOOKING (HOLD)** to stop the
 automatic escalation, or **CALL OFF (FALSE ALARM)**. Calling off an intrusion
