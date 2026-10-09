@@ -74,6 +74,9 @@ _LOGGER = logging.getLogger(__name__)
 
 # ─── Entity / area resolution helpers ────────────────────────────────────────
 
+from .entity_filter import is_object_sensor  # noqa: E402
+
+
 def entity_area(hass: HomeAssistant, entity_id: str) -> Optional[str]:
     """Return the HA area_id for an entity (direct, or via its device).
     Returns None if no area is assigned."""
@@ -222,6 +225,8 @@ def presence_entities_in_area(hass: HomeAssistant, area_id: str) -> list[str]:
         dc = state.attributes.get("device_class")
         if dc not in occupancy_classes:
             continue
+        if is_object_sensor(e, state.attributes.get("friendly_name")):
+            continue  # a car, animal or package is not a person (8.14.0)
         if entity_area(hass, e) == area_id:
             out.append(e)
     return out
@@ -252,6 +257,8 @@ def all_areas_with_presence(hass: HomeAssistant) -> set[str]:
         dc = s.attributes.get("device_class")
         if dc not in occupancy_classes:
             continue
+        if is_object_sensor(s.entity_id, s.attributes.get("friendly_name")):
+            continue  # a car, animal or package is not a person (8.14.0)
         area = entity_area(hass, s.entity_id)
         if area:
             out.add(area)
@@ -288,7 +295,8 @@ def anyone_home(hass: HomeAssistant) -> bool:
     on_states = ("on", "home", "detected", "true", "occupied")
     for s in hass.states.async_all("binary_sensor"):
         if (s.attributes.get("device_class") in occ_classes
-                and str(s.state).lower() in on_states):
+                and str(s.state).lower() in on_states
+                and not is_object_sensor(s.entity_id, s.attributes.get("friendly_name"))):
             return True
     for s in hass.states.async_all("person"):
         if str(s.state).lower() == "home":

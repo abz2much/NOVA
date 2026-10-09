@@ -149,3 +149,53 @@ def excluded_entity_ids(hass: HomeAssistant) -> set:
     except Exception:
         pass
     return out
+
+
+# ── object sensors are not people (8.14.0) ──────────────────────────────────
+# Camera integrations such as Frigate expose one binary_sensor per detected
+# object class, for example binary_sensor.garage_car_occupancy or
+# binary_sensor.kitchen_dog_occupancy, with device_class occupancy. They say an
+# object is in view, not that a person is there, so they must never decide
+# that someone is home or in a room. Their own events are unaffected.
+_OBJECT_LABELS = frozenset({
+    "car", "truck", "bus", "van", "vehicle", "motorcycle", "motorbike",
+    "bicycle", "bike", "boat",
+    "dog", "cat", "bird", "horse", "animal", "pet", "deer", "fox",
+    "package", "parcel",
+})
+_DETECTION_WORDS = frozenset({
+    "occupancy", "occupied", "motion", "presence", "detected", "detection", "active",
+})
+_PERSON_WORDS = frozenset({"person", "people", "human"})
+
+
+def _words(text) -> list:
+    out, cur = [], []
+    for ch in str(text).lower():
+        if ch.isalnum():
+            cur.append(ch)
+        elif cur:
+            out.append("".join(cur))
+            cur = []
+    if cur:
+        out.append("".join(cur))
+    return out
+
+
+def is_object_sensor(entity_id, friendly_name=None) -> bool:
+    """True when a sensor reports a detected object (a car, an animal or a
+    package) rather than a person: an object word that ends the name or comes
+    right before a detection word ("garage car occupancy", "doorbell pet
+    detected"). A name with a person word is never one. Pure, never raises."""
+    try:
+        for text in (str(entity_id or "").split(".", 1)[-1], friendly_name or ""):
+            words = _words(text)
+            if not words or _PERSON_WORDS.intersection(words):
+                continue
+            for i, word in enumerate(words):
+                if word in _OBJECT_LABELS and (
+                        i == len(words) - 1 or words[i + 1] in _DETECTION_WORDS):
+                    return True
+    except Exception:
+        return False
+    return False

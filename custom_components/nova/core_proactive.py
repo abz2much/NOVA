@@ -235,10 +235,14 @@ class ProactiveManager:
 
     # ── Area helpers ─────────────────────────────────────────────────
     def _area_has_presence(self, area_id: str, ent_reg) -> bool:
-        """True if any motion/occupancy/presence sensor in the area is active."""
+        """True if any motion/occupancy/presence sensor in the area is active. A
+        camera's car, animal or package sensor is not a person (8.14.0)."""
+        from .entity_filter import is_object_sensor
         for s in self.hass.states.async_all("binary_sensor"):
             dc = s.attributes.get("device_class")
             if dc not in ("motion", "occupancy", "presence"):
+                continue
+            if is_object_sensor(s.entity_id, s.attributes.get("friendly_name")):
                 continue
             entry = ent_reg.async_get(s.entity_id)
             if entry and entry.area_id == area_id and s.state == "on":

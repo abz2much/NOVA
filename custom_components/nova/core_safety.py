@@ -278,6 +278,7 @@ class SafetyManager:
         """Active indoor motion sensors worth considering — skips outdoor
         sensors and (while asleep) bedroom sensors. Returns [(entity_id, name)]."""
         from . import outdoor
+        from .entity_filter import is_object_sensor
         out = []
         bedroom_areas = self.config.get("bedroom_areas", []) if sleeping else []
         for state in self.hass.states.async_all("binary_sensor"):
@@ -287,6 +288,11 @@ class SafetyManager:
                 continue
             eid = state.entity_id
             fname = (state.attributes.get("friendly_name") or "")
+            # A camera's car, animal or package sensor is not a person, so it
+            # never seeds an intrusion. Real motion and person sensors still do
+            # (8.14.0).
+            if is_object_sensor(eid, fname):
+                continue
             # Outdoor motion never seeds or spreads an *indoor* intrusion — that
             # is the outdoor filter's job to surface (if notable), not ours.
             if outdoor.is_outdoor(self.hass, eid, fname):

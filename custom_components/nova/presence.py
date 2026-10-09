@@ -71,9 +71,10 @@ def get_presence_summary(hass: HomeAssistant) -> dict:
     # with occupancy attributes, or binary_sensor.*_occupancy. We scan both.
     rooms: dict[str, list[str]] = {}
     try:
-        from .entity_filter import is_excluded as _excl
+        from .entity_filter import is_excluded as _excl, is_object_sensor as _is_object
     except Exception:
         _excl = lambda _h, _e: False
+        _is_object = lambda _e, _n=None: False
     for state in hass.states.async_all("binary_sensor"):
         if state.state != "on":
             continue
@@ -82,6 +83,8 @@ def get_presence_summary(hass: HomeAssistant) -> dict:
         if _excl(hass, state.entity_id):
             continue  # user excluded this sensor (e.g. a virtual occupancy sensor)
         name = state.attributes.get("friendly_name", state.entity_id)
+        if _is_object(state.entity_id, name):
+            continue  # a car, animal or package is not a person (8.14.0)
         # Try to extract the room from the name (e.g. "Kitchen Presence")
         room = name.lower().replace("presence", "").replace("occupancy", "").strip()
         if room:
