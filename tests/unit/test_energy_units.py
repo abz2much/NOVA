@@ -182,7 +182,7 @@ async def test_daily_report_converts_wh_battery_totals(solar, monkeypatch):
         return None, "unavailable"
     monkeypatch.setattr(solar, "_read_prefs", _prefs)
     monkeypatch.setattr(solar, "_daily_sum", _sum)
-    monkeypatch.setattr(solar, "_forecast_values", lambda hass: {})
+    monkeypatch.setattr(solar, "_forecast_values", lambda hass, prefer=None: {})
     monkeypatch.setattr(solar, "_cost_today", _cost)
     hass = _Hass({"sensor.pv": _State(unit="kWh"), "sensor.grid_in": _State(unit="kWh"),
                   "sensor.grid_out": _State(unit="kWh"), "sensor.bat_in": _State(unit="Wh"),

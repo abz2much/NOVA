@@ -26,17 +26,33 @@ from typing import Optional
 
 _LOGGER = logging.getLogger(__name__)
 
-# Solar-forecast integrations HA core ships that share the same sensor
-# unique_id key scheme (verified live, Sept 2026: an install's Energy
-# dashboard `config_entry_solar_forecast` link had gone stale — pointed at a
-# deleted config entry after switching forecast providers — so discovery
-# here goes by platform + the entities' own stable unique_id suffix instead
-# of trusting that cross-reference).
-_FORECAST_PLATFORMS = ("forecast_solar", "open_meteo_solar_forecast")
+# Solar-forecast integrations Nova finds by their sensors, in the order one
+# is picked when several are installed and the Energy dashboard links none
+# of them. Verified live, Sept 2026: an install's Energy dashboard
+# `config_entry_solar_forecast` link had gone stale — pointed at a deleted
+# config entry after switching forecast providers — so this discovery goes
+# by platform + the entities' own stable unique_id, and the dashboard link
+# is only a preference (see _linked_forecast_entries).
+_FORECAST_PLATFORMS = ("forecast_solar", "open_meteo_solar_forecast", "solcast_solar")
+# Forecast.Solar and Open-Meteo Solar Forecast (HA core and HACS) share one
+# scheme: "<config entry id>_energy_production_today" and so on.
 _FORECAST_KEY_SUFFIXES = {
     "energy_production_today": "forecast_today_total_kwh",
     "energy_production_today_remaining": "forecast_remaining_kwh",
     "energy_production_tomorrow": "forecast_tomorrow_kwh",
+}
+# Solcast PV Forecast (BJReplay/ha-solcast-solar, HACS) uses the bare sensor
+# key as the unique_id, in kWh (sensor.py, v4.6). Its state follows the
+# estimate chosen in Solcast's own options: p50 unless the user changed it.
+_SOLCAST_KEYS = {
+    "total_kwh_forecast_today": "forecast_today_total_kwh",
+    "get_remaining_today": "forecast_remaining_kwh",
+    "total_kwh_forecast_tomorrow": "forecast_tomorrow_kwh",
+}
+_FORECAST_KEYS = {
+    "forecast_solar": _FORECAST_KEY_SUFFIXES,
+    "open_meteo_solar_forecast": _FORECAST_KEY_SUFFIXES,
+    "solcast_solar": _SOLCAST_KEYS,
 }
 
 
@@ -377,22 +393,70 @@ def _forecast_entries(hass) -> list:
             and getattr(e, "unique_id", None)]
 
 
-def _forecast_values(hass) -> dict:
-    """today/remaining-today/tomorrow straight off an installed solar-forecast
-    integration, matched by platform + the stable unique_id suffix both
-    Forecast.Solar and Open-Meteo Solar Forecast share -- not by the Energy
-    dashboard's config_entry_solar_forecast link, which can go stale. Empty
-    dict if no such integration is installed. Never raises."""
+def _linked_forecast_entries(hass, prefs: Optional[dict]) -> list:
+    """(domain, config entry id) for every forecast the Energy dashboard's
+    solar sources link to (config_entry_solar_forecast), in dashboard order.
+    Any integration counts, not only those in _FORECAST_PLATFORMS. A stale
+    link, to an entry that no longer exists, is skipped. Never raises."""
+    out: list = []
+    try:
+        for src in (prefs or {}).get("energy_sources") or []:
+            if src.get("type") != "solar":
+                continue
+            for entry_id in src.get("config_entry_solar_forecast") or []:
+                entry = hass.config_entries.async_get_entry(entry_id)
+                domain = getattr(entry, "domain", None)
+                if domain and (domain, entry_id) not in out:
+                    out.append((domain, entry_id))
+    except Exception as exc:
+        _LOGGER.debug("solar: forecast link lookup failed: %s", exc)
+    return out
+
+
+def _forecast_key(entry) -> Optional[str]:
+    """The output key (forecast_today_total_kwh and so on) for one forecast
+    sensor's registry entry, from its platform's key scheme, or None."""
+    keys = _FORECAST_KEYS.get(getattr(entry, "platform", None)) or {}
+    uid = getattr(entry, "unique_id", "") or ""
+    for suffix, out_key in keys.items():
+        if uid.endswith(suffix):
+            return out_key
+    return None
+
+
+def _forecast_choice(hass, prefer: Optional[str] = None) -> tuple:
+    """(platform, its forecast sensor registry entries) for the ONE forecast
+    integration to use, so two integrations forecasting the same panels are
+    never added together. The preferred platform (the one the Energy
+    dashboard links to) wins when it has sensors; otherwise the first in
+    _FORECAST_PLATFORMS order that has any. (None, []) when there are none.
+    Raises on a registry failure."""
+    by_platform: dict = {}
+    for e in _forecast_entries(hass):
+        if _forecast_key(e):
+            by_platform.setdefault(e.platform, []).append(e)
+    order = ([prefer] if prefer in by_platform else []) + list(_FORECAST_PLATFORMS)
+    for platform in order:
+        if by_platform.get(platform):
+            return platform, by_platform[platform]
+    return None, []
+
+
+def _forecast_values(hass, prefer: Optional[str] = None) -> dict:
+    """today/remaining-today/tomorrow straight off the installed solar
+    forecast integration (see _forecast_choice), matched by platform + the
+    entities' own stable unique_id, not by the Energy dashboard's link,
+    which can go stale. Several entries of the chosen integration (one per
+    array, as Forecast.Solar sets up) are added together. Empty dict if no
+    such integration is installed. Never raises."""
     out: dict = {}
     try:
-        for entry in _forecast_entries(hass):
-            uid = entry.unique_id
-            for suffix, out_key in _FORECAST_KEY_SUFFIXES.items():
-                if uid.endswith(suffix) and out_key not in out:
-                    val = _live_pct(hass, entry.entity_id)  # plain numeric read
-                    if val is not None:
-                        out[out_key] = round(val, 2)
-                    break
+        _, entries = _forecast_choice(hass, prefer)
+        for entry in entries:
+            val = _live_pct(hass, entry.entity_id)  # plain numeric read
+            if val is not None:
+                key = _forecast_key(entry)
+                out[key] = round(out.get(key, 0.0) + val, 2)
     except Exception as exc:
         _LOGGER.debug("solar: forecast entity discovery failed: %s", exc)
     return out
@@ -521,7 +585,8 @@ async def daily_report(hass) -> dict:
     if self_consumed is not None or imported is not None:
         consumed_today = (self_consumed or 0.0) + (imported or 0.0)
 
-    forecast = _forecast_values(hass)
+    linked = _linked_forecast_entries(hass, prefs)
+    forecast = _forecast_values(hass, linked[0][0] if linked else None)
     cost, cost_source = await _cost_today(hass, imported, exported)
 
     advice = []

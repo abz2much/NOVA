@@ -183,7 +183,7 @@ async def test_daily_report_grid_totals_read_both_layouts(solar, fake_hass, monk
     async def _sum(hass, eid):
         return totals.get(eid)
     monkeypatch.setattr(solar, "_daily_sum", _sum)
-    monkeypatch.setattr(solar, "_forecast_values", lambda hass: {})
+    monkeypatch.setattr(solar, "_forecast_values", lambda hass, prefer=None: {})
     for eid in totals:
         fake_hass.states.set(eid, "0", unit_of_measurement="kWh")
 
