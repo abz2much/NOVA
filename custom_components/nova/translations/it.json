@@ -123,7 +123,7 @@
       },
       "observer": {
         "title": "Nova — Modalità Osservatore",
-        "description": "consapevolezza proattiva. Nova osserva la tua casa e interviene quando qualcosa merita attenzione. {note}",
+        "description": "consapevolezza proattiva. Nova osserva la tua casa e interviene quando qualcosa merita attenzione. Le chiavi API dei provider (Gemini compreso) si impostano in Configura → Credenziali, non qui.",
         "data": {
           "observer_enabled": "Abilita la modalità osservatore",
           "classifier_model": "Modello classificatore (Livello 1 — economico)",

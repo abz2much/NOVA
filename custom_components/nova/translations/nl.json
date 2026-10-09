@@ -123,7 +123,7 @@
       },
       "observer": {
         "title": "Nova — Waarnemermodus",
-        "description": "proactief bewustzijn. Nova houdt uw huis in de gaten en meldt zich wanneer iets het vermelden waard is. {note}",
+        "description": "proactief bewustzijn. Nova houdt uw huis in de gaten en meldt zich wanneer iets het vermelden waard is. API-sleutels van providers (ook Gemini) worden ingesteld bij Configureren → Inloggegevens, niet hier.",
         "data": {
           "observer_enabled": "Waarnemermodus inschakelen",
           "classifier_model": "Classificatiemodel (Niveau 1 — goedkoop)",

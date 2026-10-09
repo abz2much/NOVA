@@ -784,7 +784,8 @@
     if (adviceEl) adviceEl.hidden = !adviceHtml;
 
     const bw = o.error ? null : o.best_window;
-    const bwText = bw ? `Best time for a big appliance: ${this._outlookTime(bw.start)} to ${this._outlookTime(bw.end)} (${bw.reason})` : "";
+    const bwText = bw ? this._t("Best time for a big appliance: {start} to {end} ({reason})",
+      { start: this._outlookTime(bw.start), end: this._outlookTime(bw.end), reason: this._tx(bw.reason) }) : "";
     this._outlookSetText(windowEl, bwText);
     if (windowEl) windowEl.hidden = !bwText;
 

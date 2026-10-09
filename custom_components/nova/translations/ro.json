@@ -123,7 +123,7 @@
       },
       "observer": {
         "title": "Nova — Modul observator",
-        "description": "atenție proactivă. Nova urmărește casa și îți spune când ceva merită menționat. {note}",
+        "description": "atenție proactivă. Nova urmărește casa și îți spune când ceva merită menționat. Cheile API ale furnizorilor (inclusiv Gemini) se setează în Configurează → Date de acces, nu aici.",
         "data": {
           "observer_enabled": "Activează modul observator",
           "classifier_model": "Model de clasificare (nivelul 1 — ieftin)",

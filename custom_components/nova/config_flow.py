@@ -580,10 +580,6 @@ class NovaOptionsFlow(OptionsFlow):
         return self.async_show_form(
             step_id="observer",
             data_schema=schema,
-            description_placeholders={
-                "note": "Provider API keys (Gemini included) are set in "
-                        "Configure → Credentials, not here.",
-            },
         )
 
     async def async_step_credentials(self, user_input: dict[str, Any] | None = None) -> dict:
@@ -645,7 +641,7 @@ class NovaOptionsFlow(OptionsFlow):
             selector.BooleanSelector()
 
         status_note = ", ".join(
-            f"{provider}: {'configured' if configured else 'not set'}"
+            f"{provider} {'✓' if configured else '✗'}"   # no words, so it reads in every language
             for provider, configured in status.items()
         )
         return self.async_show_form(

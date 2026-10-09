@@ -71,6 +71,15 @@ def base(lang: Optional[str]) -> str:
     return (lang or "en").replace("_", "-").split("-")[0].lower() or "en"
 
 
+# Regions that change how a language is written. Any other region, and a
+# plain code, keeps the base name ("pt" is European Portuguese, as before).
+_REGIONAL = {
+    ("pt", "BR"): "Brazilian Portuguese",
+    ("fr", "CA"): "Canadian French",
+    ("es", "419"): "Latin American Spanish",
+    ("de", "CH"): "Swiss German (use ss, not ß)",
+}
+
 # Chinese is named by script, so the model writes the one the household reads.
 # A plain "zh" is Simplified, as it always has been.
 _TRADITIONAL_ZH = {"hant", "tw", "hk", "mo"}
@@ -86,6 +95,10 @@ def name(lang: Optional[str]) -> str:
                 return "Traditional Chinese"
             return "Traditional Chinese (Taiwan wording)"
         return "Simplified Chinese"
+    region = (lang or "").replace("_", "-").split("-")[1:2]
+    regional = _REGIONAL.get((b, region[0].upper() if region else ""))
+    if regional:
+        return regional
     return LANG_NAMES.get(b, b)
 
 

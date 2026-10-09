@@ -84,7 +84,7 @@ Panel, **Settings → General**:
 | Setting | What it does |
 |---|---|
 | Announcements | Master switch for all proactive speech. |
-| Nova speaks | The language Nova talks and writes in. Auto follows Home Assistant. |
+| Nova speaks | The language Nova talks and writes in. Auto follows Home Assistant, including its region, such as Brazilian Portuguese, Canadian French, Latin American Spanish, Swiss German or Traditional Chinese. |
 | Language | The panel's language. Auto follows Home Assistant. Fully translated in Brazilian Portuguese, Czech, Dutch, French, German, Polish, Russian, Simplified Chinese, Spanish, Swedish and Traditional Chinese; other languages are partly translated. |
 
 Panel, **Settings → Room Speakers**, **Satellite → Speaker** and

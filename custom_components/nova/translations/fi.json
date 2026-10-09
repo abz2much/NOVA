@@ -123,7 +123,7 @@
       },
       "observer": {
         "title": "Nova — Tarkkailutila",
-        "description": "ennakoiva tilannetaju. Nova tarkkailee kotiasi ja kertoo, kun jokin on mainitsemisen arvoista. {note}",
+        "description": "ennakoiva tilannetaju. Nova tarkkailee kotiasi ja kertoo, kun jokin on mainitsemisen arvoista. Palveluntarjoajien API-avaimet (myös Gemini) annetaan kohdassa Määritä → Tunnistetiedot, ei tässä.",
         "data": {
           "observer_enabled": "Ota tarkkailutila käyttöön",
           "classifier_model": "Luokittelijan malli (taso 1 — edullinen)",

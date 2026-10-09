@@ -1471,6 +1471,28 @@ if (require.main === module) setTimeout(async () => {
     savedHant && savedHant.value === "zh-Hant" && hantShown === "zh-Hant" && resaved.value === "zh-Hant"
     && twShown === "zh-Hant" && oldZh.value === "zh"
     && oldZh.selectedOptions[0].textContent === "Simplified Chinese"]);
+  // Brazilian Portuguese works the same way. A saved fr-CA, es-419 or de-CH
+  // has no option of its own, so it is shown as its code and kept; an old
+  // saved "pt" is still Portuguese.
+  let ptSel = await speaksAfter("de");
+  ptSel.value = "pt-BR";
+  ptSel.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+  await new Promise(r => setTimeout(r, 20));
+  const savedBr = _updateConfigCalls.filter(c => c.key === "output_language").pop();
+  ptSel = await speaksAfter(savedBr && savedBr.value);
+  const brShown = ptSel.value;
+  ptSel.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+  await new Promise(r => setTimeout(r, 20));
+  const brResaved = _updateConfigCalls.filter(c => c.key === "output_language").pop();
+  const kept = [];
+  for (const code of ["fr-CA", "fr_ca", "es-419", "de-CH"]) kept.push((await speaksAfter(code)).value);
+  const oldPt = await speaksAfter("pt");
+  const plainFr = await speaksAfter("fr");
+  checks.push(["settings tab: Nova speaks saves pt-BR and keeps it; other regional codes are shown and kept; old pt is Portuguese",
+    savedBr && savedBr.value === "pt-BR" && brShown === "pt-BR" && brResaved.value === "pt-BR"
+    && kept.join() === "fr-CA,fr-CA,es-419,de-CH"
+    && oldPt.value === "pt" && oldPt.selectedOptions[0].textContent === "Portuguese"
+    && plainFr.value === "fr" && ![...plainFr.options].some(o => o.value === "fr-CA")]);
   delete PANEL.config.output_language;
   elNew._render();
   sRoot = elNew.shadowRoot;

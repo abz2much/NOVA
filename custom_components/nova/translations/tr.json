@@ -123,7 +123,7 @@
       },
       "observer": {
         "title": "Nova — Gözlemci modu",
-        "description": "proaktif farkındalık. Nova evinizi izler ve kayda değer bir şey olduğunda söyler. {note}",
+        "description": "proaktif farkındalık. Nova evinizi izler ve kayda değer bir şey olduğunda söyler. Sağlayıcı API anahtarları (Gemini dahil) burada değil, Yapılandır → Kimlik bilgileri bölümünde ayarlanır.",
         "data": {
           "observer_enabled": "Gözlemci modunu etkinleştir",
           "classifier_model": "Sınıflandırıcı modeli (Katman 1 — ucuz)",

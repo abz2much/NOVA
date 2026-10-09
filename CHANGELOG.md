@@ -1,3 +1,14 @@
+## [8.20.0] — Regional speech, and backend text in the panel's languages
+
+- **Nova speaks keeps the region.** Brazilian Portuguese (`pt-BR`) has its own option. Nova is told to write in "Brazilian Portuguese", "Canadian French", "Latin American Spanish" or "Swiss German (use ss, not ß)" for `pt-BR`, `fr-CA`, `es-419` and `de-CH`. Auto uses the region Home Assistant reports.
+- **Saved values are kept.** A saved `pt-BR` stays `pt-BR` when the panel saves again. A saved `fr-CA`, `es-419` or `de-CH` shows as its code in the picker and is kept. An old saved `pt` still means European Portuguese.
+- **Safety alerts.** Brazilian Portuguese uses the Portuguese safety alerts. Languages without them still fall back to English.
+- **Backend text in the panel.** The first run checklist, the mode descriptions, the Host Health reading names, the memory sources and the energy best time line are now translated in the 11 finished languages.
+- **Chinese gap fixed.** 38 labels the backend sends, such as "OCCUPIED" and "door left open", were missing from both Chinese files. A new check fails if a finished language lacks any backend label.
+- **Setup dialog.** The Observer note is now part of each language's text, so it is translated. The Credentials status shows ✓ or ✗ per provider instead of English words.
+- **Mode line.** The active mode's description no longer ends in two full stops.
+- Still English: Setup Doctor results, energy outlook notes, the reasons shown with learned suggestions and the Diagnostics service details. No new settings or service calls.
+
 ## [8.19.1] — Nova speaks Traditional Chinese
 
 - **Two Chinese choices.** Settings → General → Nova speaks now offers Simplified Chinese and Traditional Chinese. Traditional saves `zh-Hant`, and saving the settings again keeps it.

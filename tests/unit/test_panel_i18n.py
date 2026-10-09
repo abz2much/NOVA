@@ -13,6 +13,7 @@ to that list:
 """
 from __future__ import annotations
 
+import ast
 import collections
 import json
 import pathlib
@@ -33,7 +34,7 @@ BACKEND = ROOT / "custom_components" / "nova"
 # generator stopped counting test data and code fragments: 913 each.
 # Finished languages must have every key: their baseline is empty and stays so.
 FINISHED = {"cs", "de", "es", "fr", "nl", "pl", "pt-br", "ru", "sv", "zh", "zh-hant"}
-BASELINE_MAX = {lang: 918 for lang in ("da", "fi", "it", "nb", "pt", "ro", "sk", "tr", "uk")}  # 913 + 6 new in 8.19.0, less "Chinese" in 8.19.1
+BASELINE_MAX = {lang: 919 for lang in ("da", "fi", "it", "nb", "pt", "ro", "sk", "tr", "uk")}  # 913 + 6 new in 8.19.0, less "Chinese" in 8.19.1, + 1 in 8.20.0
 BASELINE_MAX.update({lang: 0 for lang in FINISHED})
 
 PLACEHOLDER = re.compile(r"\{(\w+)\}")
@@ -82,6 +83,10 @@ def _backend_literals() -> set[str]:
         text = path.read_text(encoding="utf-8")
         for m in re.finditer(r"([\"'])((?:(?!\1)[^\\\n])*)\1", text):
             out.add(m.group(2).replace("_", " "))
+        # Strings split over several lines are joined by Python; read those too.
+        for node in ast.walk(ast.parse(text)):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                out.add(node.value)
     return out
 
 
@@ -144,6 +149,13 @@ def test_backend_labels_still_come_from_the_backend():
     assert not gone, f"no backend value can show these any more, remove them: {gone}"
     unused = [s for s in labels if not any(s in keys for keys in langs.values())]
     assert not unused, f"no language file has these, remove them: {unused}"
+
+
+@pytest.mark.parametrize("lang", sorted(FINISHED))
+def test_finished_languages_translate_every_backend_label(lang):
+    keys = _langs()[lang]
+    missing = [s for s in _backend_labels() if s not in keys and s not in _keep_english(lang)]
+    assert not missing, f"{lang}.json lacks backend labels: {missing[:10]}"
 
 
 @pytest.mark.parametrize("lang", sorted(_langs()))

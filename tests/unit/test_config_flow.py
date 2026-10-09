@@ -197,8 +197,9 @@ async def test_step_credentials_status_shown_without_values(config_flow, fake_ha
     )
     res = await _flow(config_flow, fake_hass).async_step_credentials(None)
     status_note = res["description_placeholders"]["status"]
-    assert "anthropic: configured" in status_note
-    assert "groq: not set" in status_note
+    assert "anthropic ✓" in status_note
+    assert "groq ✗" in status_note
+    assert not any(w in status_note for w in ("configured", "not set"))
     # has_provider_credential_sync is boolean-only by construction (Phase 2's
     # CRUD layer never returns a value) — the note built from it structurally
     # cannot contain a credential.

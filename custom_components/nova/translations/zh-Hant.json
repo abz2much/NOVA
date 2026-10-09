@@ -123,7 +123,7 @@
       },
       "observer": {
         "title": "Nova — 觀察者模式",
-        "description": "主動感知。Nova 會留意您的家，在有值得提及的事情時出聲提醒。{note}",
+        "description": "主動感知。Nova 會留意您的家，在有值得提及的事情時出聲提醒。供應商 API 金鑰（包括 Gemini）在 設定 → 憑證 中設定，而不是在這裡。",
         "data": {
           "observer_enabled": "啟用觀察者模式",
           "classifier_model": "分類器模型（第 1 層——便宜）",

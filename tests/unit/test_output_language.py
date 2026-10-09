@@ -442,3 +442,52 @@ def test_panel_picker_offers_both_chinese_scripts_and_keeps_traditional():
     block = js.split('data-cfg-key="output_language"')[1].split("</select>")[0]
     assert '["zh", "Simplified Chinese"]' in block
     assert '["zh-Hant", "Traditional Chinese"]' in block
+
+
+# ── regional codes ──────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("raw,expected", [
+    ("pt-BR", "Brazilian Portuguese"),
+    ("fr-CA", "Canadian French"),
+    ("es-419", "Latin American Spanish"),
+    ("de-CH", "Swiss German (use ss, not ß)"),
+])
+def test_regional_setting_keeps_the_region(ol, setting, raw, expected):
+    setting["value"] = raw
+    assert expected in ol.directive(_hass("en"))
+    assert expected in ol.field_directive(_hass("en"), "speak")
+
+
+@pytest.mark.parametrize("ha,expected", [
+    ("pt-BR", "Brazilian Portuguese"), ("fr-CA", "Canadian French"),
+    ("es-419", "Latin American Spanish"), ("de-CH", "Swiss German (use ss, not ß)"),
+])
+def test_auto_uses_the_region_home_assistant_reports(ol, setting, ha, expected):
+    setting["value"] = "auto"
+    assert expected in ol.directive(_hass(ha))
+
+
+@pytest.mark.parametrize("raw,expected,absent", [
+    ("pt", "Portuguese", "Brazilian"), ("pt-PT", "Portuguese", "Brazilian"),
+    ("fr", "French", "Canadian"), ("es", "Spanish", "Latin American"), ("de", "German", "Swiss"),
+])
+def test_plain_codes_keep_their_old_meaning(ol, setting, raw, expected, absent):
+    setting["value"] = raw
+    d = ol.directive(_hass("en"))
+    assert expected in d and absent not in d
+
+
+def test_brazilian_portuguese_safety_alerts_use_portuguese(load, setting):
+    cc = load("cognitive_core")
+    i18n = load("notify_i18n")
+    setting["value"] = "pt-BR"
+    lang = cc._hass_lang(_hass("en"))
+    assert lang == "pt-BR"
+    assert cc._notify_i18n().title("freeze_critical", lang) == i18n.TITLES["freeze_critical"]["pt"]
+
+
+def test_panel_picker_offers_brazilian_portuguese():
+    js = (ROOT / "frontend" / "src" / "panel" / "settings-cards.js").read_text()
+    block = js.split('data-cfg-key="output_language"')[1].split("</select>")[0]
+    assert '["pt-BR", "Brazilian Portuguese"]' in block
+    assert '["pt", "Portuguese"]' in block

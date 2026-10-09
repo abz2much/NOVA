@@ -123,7 +123,7 @@
       },
       "observer": {
         "title": "Nova — Observatörsläge",
-        "description": "proaktiv uppmärksamhet. Nova håller koll på ditt hem och säger till när något är värt att nämna. {note}",
+        "description": "proaktiv uppmärksamhet. Nova håller koll på ditt hem och säger till när något är värt att nämna. Leverantörernas API-nycklar (även Gemini) anges under Konfigurera → Inloggningsuppgifter, inte här.",
         "data": {
           "observer_enabled": "Aktivera observatörsläge",
           "classifier_model": "Klassificerarmodell (nivå 1 — billig)",

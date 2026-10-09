@@ -123,7 +123,7 @@
       },
       "observer": {
         "title": "Nova — Observer Mode",
-        "description": "proactive awareness. Nova watches your home and speaks up when something's worth noting. {note}",
+        "description": "proactive awareness. Nova watches your home and speaks up when something's worth noting. Provider API keys (Gemini included) are set in Configure → Credentials, not here.",
         "data": {
           "observer_enabled": "Enable observer mode",
           "classifier_model": "Classifier model (Tier 1 — cheap)",
