@@ -89,7 +89,9 @@ class SafetyManager:
         try:
             from . import safety_config as _sc
             if _sc.intrusion_requires_confinement(self.config):
-                if is_lockdown() or self._alarm_armed():
+                # A triggered alarm is still confined: it must not drop the
+                # investigation at the moment it has the strongest evidence.
+                if is_lockdown() or self._alarm_armed() or self._alarm_triggered():
                     intrusion = await self._check_intrusion(
                         anyone_home, sleeping, confined=True)
                     if intrusion:
@@ -194,6 +196,28 @@ class SafetyManager:
         return any(st.state in ("armed_away", "armed_vacation")
                    for st in alarm_source.states(self.hass, self.config))
 
+    def _alarm_triggered(self) -> bool:
+        """The alarm itself has gone off, not merely armed."""
+        from . import alarm_source
+        return any(st.state == "triggered"
+                   for st in alarm_source.states(self.hass, self.config))
+
+    def _residents_home_guard(self, sleeping: bool) -> bool:
+        """Residents are home and the house is armed home or night, or asleep.
+        Then a resident walking about looks just like an intruder moving
+        through the house, so motion alone must never confirm an intrusion.
+        Armed away or vacation keeps today's rules."""
+        from . import alarm_source
+        states = {str(st.state).lower() for st in alarm_source.states(self.hass, self.config)}
+        if states & {"armed_away", "armed_vacation"}:
+            return False
+        # "triggered" keeps the guard on, so the alarm going off can confirm.
+        if not (sleeping or states & {"armed_home", "armed_night", "triggered"}):
+            return False
+        return any(str(st.state).lower() == "home"
+                   for domain in ("person", "device_tracker")
+                   for st in self.hass.states.async_all(domain))
+
     def _friendly(self, eid: Optional[str]) -> Optional[str]:
         if not eid:
             return None
@@ -212,11 +236,17 @@ class SafetyManager:
         area_ids (used to scope the sleeping-household check to the ground
         floor — see `_ground_floor_open_entry`)."""
         from . import outdoor
+        from .entity_filter import is_appliance_opening, is_excluded
 
         area_filter = set(areas) if areas else None
 
         def _envelope(st) -> bool:
             fname = st.attributes.get("friendly_name") or ""
+            # A fridge or oven door, or anything the user excluded from Nova,
+            # is never a way in (9 Oct 2026: a fridge door was taken for the
+            # point of entry while residents were home).
+            if is_appliance_opening(st.entity_id, fname) or is_excluded(self.hass, st.entity_id):
+                return False
             if "garage" in (st.entity_id + " " + fname).lower():
                 return True
             return not outdoor.is_outdoor(self.hass, st.entity_id, fname)
@@ -720,6 +750,8 @@ class SafetyManager:
         if not cam_entity:
             cam_entity = self._person_camera_entity()
         camera = cam_entity is not None
+        vision = None
+        quiet_house = "" if not self._residents_away() else " while no one is home"
 
         if camera:
             # Frigate flagged a person — but Frigate false-positives, so get a
@@ -739,7 +771,7 @@ class SafetyManager:
                               "the point of entry")
                 else:
                     confirmed = spread and sustained
-                    reason = "sustained movement through the house while no one is home"
+                    reason = f"sustained movement through the house{quiet_house}"
             else:
                 # Vision inconclusive/unavailable → fall back to prior behavior
                 # (trust the camera) so a broken vision path never suppresses a
@@ -755,7 +787,18 @@ class SafetyManager:
             # No location on the breach — be conservative: sustained multi-room
             # movement, not a momentary blip.
             confirmed = spread and sustained
-            reason = "sustained movement through the house while no one is home"
+            reason = f"sustained movement through the house{quiet_house}"
+
+        # Residents home, armed home or night, or asleep (9 Oct 2026): a
+        # resident walking from room to room is exactly what an inward route
+        # looks like, so that alone never confirms. It takes the alarm itself
+        # going off, or a person on camera that vision confirms; an
+        # inconclusive vision check does not count here.
+        guard = self._residents_home_guard(sleeping)
+        if confirmed and guard and vision is not True:
+            confirmed = False
+        if not confirmed and guard and self._alarm_triggered():
+            confirmed, reason = True, "the alarm has gone off while residents are home"
 
         # User called it off as a false alarm → stand down, don't escalate.
         try:

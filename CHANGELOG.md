@@ -1,3 +1,11 @@
+## [8.20.1] — No false intrusion when a resident walks about at night
+
+- **Appliance doors are not a way in.** A fridge, freezer, oven, dishwasher, washing machine, dryer, microwave or cabinet door never counts as an open entry, and neither does anything on the exclude list. On 9 Oct a fridge door was taken for the point of entry while the alarm was armed home.
+- **Residents home need stronger proof.** When a person or phone reads home and the alarm is armed home or night, or the household is asleep, walking from room to room never confirms an intrusion. It takes the alarm itself going off, or a person on camera that the vision check confirms. A vision check that cannot decide does not count here.
+- **A triggered alarm keeps Nova watching.** With "Require confinement" on, an alarm that goes off no longer ends the investigation it should confirm.
+- **Wording.** A confirmed intrusion only says "while no one is home" when that is true.
+- Armed away, vacation and everyone away work exactly as before. No new settings.
+
 ## [8.20.0] — Regional speech, and backend text in the panel's languages
 
 - **Nova speaks keeps the region.** Brazilian Portuguese (`pt-BR`) has its own option. Nova is told to write in "Brazilian Portuguese", "Canadian French", "Latin American Spanish" or "Swiss German (use ss, not ß)" for `pt-BR`, `fr-CA`, `es-419` and `de-CH`. Auto uses the region Home Assistant reports.
