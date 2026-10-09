@@ -993,7 +993,7 @@
   "ran {count}× · last {when}": "exécuté {count}× · dernière fois {when}",
   "range": "portée",
   "real": "réel",
-  "reopen the mic where you moved to (needs 2+ satellites)": "rouvrir le micro là où vous êtes allé (nécessite 2+ satellites)",
+  "reopen the mic where you moved to (needs 2+ satellites)": "rouvrir le micro là où vous vous trouvez (nécessite 2+ satellites)",
   "sat": "sat",
   "search…": "rechercher…",
   "seen {count}× in 30 days": "vu {count}× en 30 jours",
@@ -1112,5 +1112,11 @@
   "⬆ Upload Image": "⬆ Importer une image",
   "⬇ Export": "⬇ Exporter",
   "💾 Save edit": "💾 Enregistrer la modification",
-  "🔊 spoken": "🔊 parlé"
+  "🔊 spoken": "🔊 parlé",
+  "Sir": "Monsieur",
+  "Ma'am": "Madame",
+  "Boss": "Patron",
+  "Friend": "Ami",
+  "checks each new learned suggestion with the Suggestion Review model (AI Models card) before showing it; sends device and room names to that provider, or keeps them at home with Ollama": "vérifie chaque nouvelle suggestion apprise avec le modèle de revue des suggestions (carte Modèles IA) avant de l'afficher ; envoie les noms d'appareils et de pièces à ce fournisseur, ou les garde chez vous avec Ollama",
+  "routine alerts get Helpful / Not helpful buttons on your phone; Nova adjusts its timing only from your taps": "les alertes de routine reçoivent des boutons Utile / Pas utile sur votre téléphone ; Nova ajuste son horaire uniquement d'après vos appuis"
 }

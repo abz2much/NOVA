@@ -71,7 +71,7 @@
             ["nl", "Nederlands"], ["pl", "Polski"], ["pt", "Português"],
             ["pt-br", "Português (Brasil)"], ["ro", "Română"], ["ru", "Русский"],
             ["sk", "Slovenčina"], ["sv", "Svenska"], ["tr", "Türkçe"],
-            ["uk", "Українська"],
+            ["uk", "Українська"], ["zh", "中文（简体）"], ["zh-hant", "中文（繁體）"],
           ], cfg.ui_language || "auto")}
         </select>
       </div>
@@ -146,7 +146,7 @@
           <span class="pairing-label">${this._esc(p.name)}</span>
           <select class="person-honorific-select" data-person-id="${this._esc(p.entity_id)}">
             <option value="">— use default —</option>
-            ${opts.map(o => `<option value="${this._esc(o)}"${!isCustom && o === current ? " selected" : ""}>${this._esc(o[0].toUpperCase() + o.slice(1))}</option>`).join("")}
+            ${opts.map(o => `<option value="${this._esc(o)}"${!isCustom && o === current ? " selected" : ""}>${this._esc(NovaPanel.HONORIFIC_LABELS[o] || o)}</option>`).join("")}
             <option value="__custom__"${isCustom ? " selected" : ""}>Custom…</option>
           </select>
           <input type="text" class="person-honorific-custom" data-person-id="${this._esc(p.entity_id)}"

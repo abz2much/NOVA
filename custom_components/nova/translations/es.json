@@ -98,7 +98,7 @@
         "title": "Nova — Núcleo",
         "description": "Persona, directiva y modelo de conversación.",
         "data": {
-          "honorific": "Diríjase a mí como",
+          "honorific": "Dirígete a mí como",
           "directive_preset": "Preajuste de directiva",
           "directive": "Directiva personalizada (opcional, anula el preajuste)",
           "model": "Modelo de conversación",
@@ -107,11 +107,11 @@
       },
       "routing": {
         "title": "Nova — Enrutamiento",
-        "description": "elija qué áreas de HA son dormitorios (para la detección del sueño), qué grupo media_player usar para las difusiones y su servicio de notificación al teléfono.",
+        "description": "elige qué áreas de HA son dormitorios (para la detección del sueño), qué grupo media_player usar para las difusiones y el servicio de notificación de tu teléfono.",
         "data": {
           "bedroom_areas": "Áreas de dormitorio (para detección del sueño en horas de silencio)",
           "ground_floor_areas": "Áreas de planta baja (para alertas de intrusión nocturna)",
-          "broadcast_group": "Grupo de altavoces de difusión (normalmente su grupo Cast del hogar)",
+          "broadcast_group": "Grupo de altavoces de difusión (normalmente tu grupo Cast de casa)",
           "notify_service": "Servicio de notificación al teléfono (p. ej. notify.mobile_app_yourphone)"
         },
         "data_description": {
@@ -215,19 +215,19 @@
   },
   "exceptions": {
     "no_entry": {
-      "message": "Nova no está configurado. Añada la integración de Nova e inténtelo de nuevo."
+      "message": "Nova no está configurado. Añade la integración de Nova e inténtalo de nuevo."
     },
     "not_loaded": {
-      "message": "Nova no está cargado. Active o recargue la integración de Nova e inténtelo de nuevo."
+      "message": "Nova no está cargado. Activa o recarga la integración de Nova e inténtalo de nuevo."
     },
     "reloading": {
-      "message": "Nova se está iniciando o recargando. Inténtelo de nuevo en un momento."
+      "message": "Nova se está iniciando o recargando. Inténtalo de nuevo en un momento."
     },
     "setup_failed": {
-      "message": "Nova no pudo iniciarse. Revise el registro de Home Assistant, corrija el problema y recargue Nova."
+      "message": "Nova no pudo iniciarse. Revisa el registro de Home Assistant, corrige el problema y recarga Nova."
     },
     "multiple_entries": {
-      "message": "Hay más de una entrada de Nova configurada. Elimine la entrada sobrante e inténtelo de nuevo."
+      "message": "Hay más de una entrada de Nova configurada. Elimina la entrada sobrante e inténtalo de nuevo."
     }
   }
 }

@@ -1,3 +1,14 @@
+## [8.19.0] — Chinese, and small language fixes
+
+- **Simplified and Traditional Chinese.** The panel and the setup dialog are fully translated in both. Home Assistant's `zh-Hans` loads `translations/zh-Hans.json` and the panel's `zh.json`; `zh-Hant` loads `translations/zh-Hant.json` and the panel's `zh-hant.json`. Words follow Home Assistant's own Chinese. Traditional Chinese uses Taiwan wording.
+- **Language picker.** Settings → General → Language now offers 中文（简体） and 中文（繁體）.
+- **Checks.** A new test fails if the Traditional Chinese files contain a Simplified only character, or if Chinese text uses half width punctuation. Both Chinese languages are in the finished list, so a missing string fails.
+- **Toggle descriptions** such as "needs Google Maps Travel Time" are now whole strings, translated in every finished language.
+- **Honorifics.** "Boss" and "Friend" are now translated in every finished language, like "Sir" and "Ma'am".
+- **Spanish setup dialog** now uses "tú", the same as Home Assistant's Spanish and the panel.
+- **Polish and French.** The follow up mic toggle no longer assumes the user is male.
+- No new settings or service calls. In English, the panel looks the same; only the markup around the seven toggle descriptions changed.
+
 ## [8.18.0] — Panel in 9 languages
 
 - **The panel is fully translated** in Brazilian Portuguese, Czech, Dutch, French, German, Polish, Russian, Spanish and Swedish: all 913 strings that were still English, in each language. A render of every tab shows no fixed panel text left in English in any of the nine.

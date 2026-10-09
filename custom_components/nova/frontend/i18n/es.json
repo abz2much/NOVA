@@ -691,7 +691,7 @@
   "Ollama": "Ollama",
   "Ollama context length": "Longitud de contexto de Ollama",
   "One weather-warning source for your area, with optional earthquake and NASA feeds under Advanced.": "Una fuente de avisos meteorológicos para tu zona, con feeds opcionales de terremotos y de la NASA en Avanzado.",
-  "Only applies while that person is home alone. With nobody home, or more than one person home, Nova doesn't guess — it drops the address entirely. Anyone without an override here uses the global \"Address me as\" setting (Settings → Devices & Services → Nova → Configure).": "Solo se aplica mientras esa persona está sola en casa. Si no hay nadie en casa, o hay más de una persona, Nova no adivina — omite el tratamiento por completo. Quien no tenga un ajuste aquí usa el ajuste general «Diríjase a mí como» (Ajustes → Dispositivos y servicios → Nova → Configurar).",
+  "Only applies while that person is home alone. With nobody home, or more than one person home, Nova doesn't guess — it drops the address entirely. Anyone without an override here uses the global \"Address me as\" setting (Settings → Devices & Services → Nova → Configure).": "Solo se aplica mientras esa persona está sola en casa. Si no hay nadie en casa, o hay más de una persona, Nova no adivina — omite el tratamiento por completo. Quien no tenga un ajuste aquí usa el ajuste general «Dirígete a mí como» (Ajustes → Dispositivos y servicios → Nova → Configurar).",
   "OpenAI-compatible": "Compatible con OpenAI",
   "Orange": "Naranja",
   "Outcome Nova should work toward": "Resultado hacia el que debe trabajar Nova",
@@ -1112,5 +1112,11 @@
   "⬆ Upload Image": "⬆ Subir imagen",
   "⬇ Export": "⬇ Exportar",
   "💾 Save edit": "💾 Guardar cambios",
-  "🔊 spoken": "🔊 hablado"
+  "🔊 spoken": "🔊 hablado",
+  "Sir": "Señor",
+  "Ma'am": "Señora",
+  "Boss": "Jefe",
+  "Friend": "Amigo",
+  "checks each new learned suggestion with the Suggestion Review model (AI Models card) before showing it; sends device and room names to that provider, or keeps them at home with Ollama": "comprueba cada nueva sugerencia aprendida con el modelo de revisión de sugerencias (tarjeta Modelos de IA) antes de mostrarla; envía los nombres de dispositivos y habitaciones a ese proveedor, o los mantiene en casa con Ollama",
+  "routine alerts get Helpful / Not helpful buttons on your phone; Nova adjusts its timing only from your taps": "los avisos de rutina reciben botones Útil / No útil en tu móvil; Nova ajusta su horario solo según tus toques"
 }

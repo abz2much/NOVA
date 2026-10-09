@@ -1112,5 +1112,11 @@
   "⬆ Upload Image": "⬆ Bild hochladen",
   "⬇ Export": "⬇ Exportieren",
   "💾 Save edit": "💾 Bearbeitung speichern",
-  "🔊 spoken": "🔊 gesprochen"
+  "🔊 spoken": "🔊 gesprochen",
+  "Sir": "Herr",
+  "Ma'am": "Frau",
+  "Boss": "Chef",
+  "Friend": "Freund",
+  "checks each new learned suggestion with the Suggestion Review model (AI Models card) before showing it; sends device and room names to that provider, or keeps them at home with Ollama": "prüft jeden neu gelernten Vorschlag mit dem Modell für die Vorschlagsprüfung (Karte KI-Modelle), bevor er erscheint; sendet Geräte- und Raumnamen an diesen Anbieter oder behält sie mit Ollama zu Hause",
+  "routine alerts get Helpful / Not helpful buttons on your phone; Nova adjusts its timing only from your taps": "Routine-Warnungen bekommen auf deinem Handy die Tasten Hilfreich / Nicht hilfreich; Nova passt ihr Timing nur nach deinen Antippern an"
 }
