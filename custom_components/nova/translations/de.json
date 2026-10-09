@@ -123,7 +123,7 @@
       },
       "observer": {
         "title": "Nova — Beobachter-Modus",
-        "description": "proaktives Bewusstsein. Nova beobachtet Ihr Zuhause und meldet sich, wenn etwas erwähnenswert ist. {note}",
+        "description": "proaktives Bewusstsein. Nova beobachtet Ihr Zuhause und meldet sich, wenn etwas erwähnenswert ist. API-Schlüssel der Anbieter (auch Gemini) werden unter Konfigurieren → Anmeldedaten eingegeben, nicht hier.",
         "data": {
           "observer_enabled": "Beobachter-Modus aktivieren",
           "classifier_model": "Klassifizierer-Modell (Stufe 1 — günstig)",

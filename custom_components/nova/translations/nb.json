@@ -123,7 +123,7 @@
       },
       "observer": {
         "title": "Nova — Observatørmodus",
-        "description": "proaktiv oppmerksomhet. Nova følger med på hjemmet ditt og sier ifra når noe er verdt å nevne. {note}",
+        "description": "proaktiv oppmerksomhet. Nova følger med på hjemmet ditt og sier ifra når noe er verdt å nevne. API-nøkler for leverandører (også Gemini) angis under Konfigurer → Påloggingsinformasjon, ikke her.",
         "data": {
           "observer_enabled": "Slå på observatørmodus",
           "classifier_model": "Klassifikatormodell (nivå 1 — billig)",

@@ -325,7 +325,7 @@
         </select>` : "";
       return `
         <div class="cfg-row">
-          <label>${this._esc(m.label)}${m.recommended ? "" : ` <span class="toggle-desc">optional</span>`}</label>
+          <label>${this._esc(this._tx(m.label))}${m.recommended ? "" : ` <span class="toggle-desc">optional</span>`}</label>
           <span style="font-family:var(--font-mono);font-size:11px">${valueText}${stale ? " (stale)" : ""}</span>
           <span class="${STATUS_CLS[m.status] || "diag-off"}">${STATUS_LABEL[m.status] || (m.status || "").toUpperCase()}</span>
         </div>
@@ -334,7 +334,7 @@
 
     const setupNotes = metrics.filter(m => m.recommended && (m.status === "missing" || m.status === "disabled"));
     const setupGuidance = setupNotes.length ? `
-      <div class="stub-body">Missing or disabled recommended readings: ${setupNotes.map(m => this._esc(m.label)).join(", ")}. In Home Assistant: Settings → Devices &amp; services → System Monitor → its entities → enable the ones you want (System Monitor disables several by default), then reopen this card.</div>` : "";
+      <div class="stub-body">Missing or disabled recommended readings: ${setupNotes.map(m => this._esc(this._tx(m.label))).join(", ")}. In Home Assistant: Settings → Devices &amp; services → System Monitor → its entities → enable the ones you want (System Monitor disables several by default), then reopen this card.</div>` : "";
 
     return `
       <div class="stub-body">Reads Home Assistant's own System Monitor sensors for the machine Nova runs on — processor/memory/disk usage, memory &amp; I/O pressure, and (if your hardware exposes it) temperature. Off by default; nothing is read or reported until you turn it on. Disk usage measures capacity, not drive health; I/O pressure measures workload contention, not drive failure. Nova cannot warn you after this machine has completely frozen, since Nova runs on it too.</div>

@@ -123,7 +123,7 @@
       },
       "observer": {
         "title": "Nova — Observatørtilstand",
-        "description": "proaktiv opmærksomhed. Nova holder øje med dit hjem og siger til, når noget er værd at nævne. {note}",
+        "description": "proaktiv opmærksomhed. Nova holder øje med dit hjem og siger til, når noget er værd at nævne. Udbydernes API-nøgler (også Gemini) angives under Konfigurér → Legitimationsoplysninger, ikke her.",
         "data": {
           "observer_enabled": "Aktivér observatørtilstand",
           "classifier_model": "Klassifikatormodel (niveau 1 — billig)",

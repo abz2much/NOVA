@@ -5,6 +5,9 @@
   // into one place. Every card is "real:true" — nothing here is a stub.
   // Mirrors const.py's HONORIFIC_OPTIONS — kept in sync by hand, same as
   // AREA_CAP_ORDER/AREA_CAP_ICON below mirror their own backend source.
+  // Regional "Nova speaks" codes that Nova names (output_language.py) but the
+  // picker has no option for; a saved one is shown as its code.
+  static KEPT_REGIONAL_CODES = ["fr-CA", "es-419", "de-CH"];
   static HONORIFIC_OPTIONS = ["sir", "ma'am", "boss", "friend"];
   // Whole labels, so each one can be translated.
   static HONORIFIC_LABELS = { sir: "Sir", "ma'am": "Ma'am", boss: "Boss", friend: "Friend" };

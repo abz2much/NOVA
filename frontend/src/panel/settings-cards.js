@@ -51,12 +51,21 @@
   }
 
   // The "Nova speaks" choice for a saved code: the base language, except
-  // that Traditional Chinese keeps its own option so a save never turns it
-  // into "zh" (Simplified).
+  // codes whose region or script changes the language. Traditional Chinese
+  // and Brazilian Portuguese have their own options. The regional codes Nova
+  // names but the picker does not offer get an option showing the code, so
+  // the picker shows the true value and a save never turns it into the base.
   _outputLanguageChoice(value) {
-    const v = String(value || "auto").replace(/_/g, "-").toLowerCase();
+    const v = String(value || "auto").trim().replace(/_/g, "-").toLowerCase();
     if (/^zh-(.*-)?(hant|tw|hk|mo)(-|$)/.test(v)) return "zh-Hant";
-    return v.split("-")[0];
+    if (v === "pt-br") return "pt-BR";
+    const kept = NovaPanel.KEPT_REGIONAL_CODES.find(c => c.toLowerCase() === v);
+    return kept || v.split("-")[0];
+  }
+
+  _outputLanguageExtra(value) {
+    const choice = this._outputLanguageChoice(value);
+    return NovaPanel.KEPT_REGIONAL_CODES.includes(choice) ? [[choice, choice]] : [];
   }
 
   _generalCardBody() {
@@ -96,6 +105,7 @@
           ${this._optSelect([
             ["auto", "Auto (follow Home Assistant)"],
             ["ar", "Arabic"],
+            ["pt-BR", "Brazilian Portuguese"],
             ["ca", "Catalan"],
             ["cs", "Czech"],
             ["da", "Danish"],
@@ -125,7 +135,7 @@
             ["tr", "Turkish"],
             ["uk", "Ukrainian"],
             ["vi", "Vietnamese"],
-          ], this._outputLanguageChoice(cfg.output_language))}
+          ].concat(this._outputLanguageExtra(cfg.output_language)), this._outputLanguageChoice(cfg.output_language))}
         </select>
         <span class="toggle-desc">The language Nova speaks and writes in. The panel's own language is set above and is not affected. Safety notifications are translated for English, French, German, Spanish, Italian, Dutch and Portuguese only; in any other language they stay in English, while text Nova generates follows this setting.</span>
       </div>
@@ -283,7 +293,7 @@
         </button>
       </div>
       <div class="stub-body">Active: <strong>${this._esc(active.toUpperCase())}</strong>${m.description
-        ? " " + this._tHtml("— {description}. Safety always stays active.", { description: this._esc(m.description) })
+        ? " " + this._tHtml("— {description}. Safety always stays active.", { description: this._esc(this._tx(m.description).replace(/[.。]\s*$/, "")) })
         : ". Safety always stays active."}</div>
       <div class="mode-grid">${modeChips}</div>
       <details class="mode-bindings"${this._modeBindingsOpen ? " open" : ""}>

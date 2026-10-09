@@ -1082,7 +1082,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v8.19.1
+ * v8.20.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1159,7 +1159,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.19.1 ",
+      console.log("%c Nova Panel %c v8.20.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -1516,7 +1516,7 @@ ${this._htmlDashboardBody()}`;
         <div class="onboarding-progress"><span>${this._tHtml("{done}/{total} DONE", { done: this._esc(onboarding.done_count || 0), total: this._esc(onboarding.total || 0) })}</span><i style="width:${Math.round(((onboarding.done_count || 0) / Math.max(1, onboarding.total || 1)) * 100)}%"></i></div>
         <div class="welcome-checks" id="welcomeChecks"><b>Setup checks</b>${checksLine}</div>
         <div class="onboarding-steps">${(onboarding.steps || []).map(step => `<div class="onboarding-step${step.done ? " done" : ""}">
-          <span>${step.done ? "✓" : "○"}</span><div><b>${this._esc(step.label)}</b><small>${this._esc(step.hint)}</small></div>
+          <span>${step.done ? "✓" : "○"}</span><div><b>${this._esc(this._tx(step.label))}</b><small>${this._esc(this._tx(step.hint))}</small></div>
           ${step.jump ? `<button class="mode-chip onboarding-jump" data-settings-title="${this._esc(step.jump)}">OPEN</button>` : ""}</div>`).join("")}</div>
         <div class="welcome-hello" id="welcomeHello">
           <button class="mode-chip" id="onboardingHello"${hello.busy ? " disabled" : ""}>SAY HELLO</button>
@@ -2324,7 +2324,7 @@ ${this._htmlDashboardBody()}`;
       const items = groups[subj].map(f => {
         const soft = (f.source !== "stated" || (f.confidence ?? 1) < 0.9);
         const hedge = soft
-          ? `<span title="${this._tHtml("{source} · {percent}% sure", { source: this._esc(f.source), percent: Math.round((f.confidence ?? 1) * 100) })}">~</span>`
+          ? `<span title="${this._tHtml("{source} · {percent}% sure", { source: this._esc(this._tx(f.source)), percent: Math.round((f.confidence ?? 1) * 100) })}">~</span>`
           : "";
         const exp = f.expires_at ? `<span title="expires">⌛</span>` : "";
         return `
@@ -3698,7 +3698,8 @@ ${this._htmlDashboardBody()}`;
     if (adviceEl) adviceEl.hidden = !adviceHtml;
 
     const bw = o.error ? null : o.best_window;
-    const bwText = bw ? `Best time for a big appliance: ${this._outlookTime(bw.start)} to ${this._outlookTime(bw.end)} (${bw.reason})` : "";
+    const bwText = bw ? this._t("Best time for a big appliance: {start} to {end} ({reason})",
+      { start: this._outlookTime(bw.start), end: this._outlookTime(bw.end), reason: this._tx(bw.reason) }) : "";
     this._outlookSetText(windowEl, bwText);
     if (windowEl) windowEl.hidden = !bwText;
 
@@ -4127,6 +4128,9 @@ ${this._htmlDashboardBody()}`;
   // into one place. Every card is "real:true" — nothing here is a stub.
   // Mirrors const.py's HONORIFIC_OPTIONS — kept in sync by hand, same as
   // AREA_CAP_ORDER/AREA_CAP_ICON below mirror their own backend source.
+  // Regional "Nova speaks" codes that Nova names (output_language.py) but the
+  // picker has no option for; a saved one is shown as its code.
+  static KEPT_REGIONAL_CODES = ["fr-CA", "es-419", "de-CH"];
   static HONORIFIC_OPTIONS = ["sir", "ma'am", "boss", "friend"];
   // Whole labels, so each one can be translated.
   static HONORIFIC_LABELS = { sir: "Sir", "ma'am": "Ma'am", boss: "Boss", friend: "Friend" };
@@ -4629,12 +4633,21 @@ ${this._htmlDashboardBody()}`;
   }
 
   // The "Nova speaks" choice for a saved code: the base language, except
-  // that Traditional Chinese keeps its own option so a save never turns it
-  // into "zh" (Simplified).
+  // codes whose region or script changes the language. Traditional Chinese
+  // and Brazilian Portuguese have their own options. The regional codes Nova
+  // names but the picker does not offer get an option showing the code, so
+  // the picker shows the true value and a save never turns it into the base.
   _outputLanguageChoice(value) {
-    const v = String(value || "auto").replace(/_/g, "-").toLowerCase();
+    const v = String(value || "auto").trim().replace(/_/g, "-").toLowerCase();
     if (/^zh-(.*-)?(hant|tw|hk|mo)(-|$)/.test(v)) return "zh-Hant";
-    return v.split("-")[0];
+    if (v === "pt-br") return "pt-BR";
+    const kept = NovaPanel.KEPT_REGIONAL_CODES.find(c => c.toLowerCase() === v);
+    return kept || v.split("-")[0];
+  }
+
+  _outputLanguageExtra(value) {
+    const choice = this._outputLanguageChoice(value);
+    return NovaPanel.KEPT_REGIONAL_CODES.includes(choice) ? [[choice, choice]] : [];
   }
 
   _generalCardBody() {
@@ -4674,6 +4687,7 @@ ${this._htmlDashboardBody()}`;
           ${this._optSelect([
             ["auto", "Auto (follow Home Assistant)"],
             ["ar", "Arabic"],
+            ["pt-BR", "Brazilian Portuguese"],
             ["ca", "Catalan"],
             ["cs", "Czech"],
             ["da", "Danish"],
@@ -4703,7 +4717,7 @@ ${this._htmlDashboardBody()}`;
             ["tr", "Turkish"],
             ["uk", "Ukrainian"],
             ["vi", "Vietnamese"],
-          ], this._outputLanguageChoice(cfg.output_language))}
+          ].concat(this._outputLanguageExtra(cfg.output_language)), this._outputLanguageChoice(cfg.output_language))}
         </select>
         <span class="toggle-desc">The language Nova speaks and writes in. The panel's own language is set above and is not affected. Safety notifications are translated for English, French, German, Spanish, Italian, Dutch and Portuguese only; in any other language they stay in English, while text Nova generates follows this setting.</span>
       </div>
@@ -4861,7 +4875,7 @@ ${this._htmlDashboardBody()}`;
         </button>
       </div>
       <div class="stub-body">Active: <strong>${this._esc(active.toUpperCase())}</strong>${m.description
-        ? " " + this._tHtml("— {description}. Safety always stays active.", { description: this._esc(m.description) })
+        ? " " + this._tHtml("— {description}. Safety always stays active.", { description: this._esc(this._tx(m.description).replace(/[.。]\s*$/, "")) })
         : ". Safety always stays active."}</div>
       <div class="mode-grid">${modeChips}</div>
       <details class="mode-bindings"${this._modeBindingsOpen ? " open" : ""}>
@@ -5834,7 +5848,7 @@ ${this._htmlDashboardBody()}`;
         </select>` : "";
       return `
         <div class="cfg-row">
-          <label>${this._esc(m.label)}${m.recommended ? "" : ` <span class="toggle-desc">optional</span>`}</label>
+          <label>${this._esc(this._tx(m.label))}${m.recommended ? "" : ` <span class="toggle-desc">optional</span>`}</label>
           <span style="font-family:var(--font-mono);font-size:11px">${valueText}${stale ? " (stale)" : ""}</span>
           <span class="${STATUS_CLS[m.status] || "diag-off"}">${STATUS_LABEL[m.status] || (m.status || "").toUpperCase()}</span>
         </div>
@@ -5843,7 +5857,7 @@ ${this._htmlDashboardBody()}`;
 
     const setupNotes = metrics.filter(m => m.recommended && (m.status === "missing" || m.status === "disabled"));
     const setupGuidance = setupNotes.length ? `
-      <div class="stub-body">Missing or disabled recommended readings: ${setupNotes.map(m => this._esc(m.label)).join(", ")}. In Home Assistant: Settings → Devices &amp; services → System Monitor → its entities → enable the ones you want (System Monitor disables several by default), then reopen this card.</div>` : "";
+      <div class="stub-body">Missing or disabled recommended readings: ${setupNotes.map(m => this._esc(this._tx(m.label))).join(", ")}. In Home Assistant: Settings → Devices &amp; services → System Monitor → its entities → enable the ones you want (System Monitor disables several by default), then reopen this card.</div>` : "";
 
     return `
       <div class="stub-body">Reads Home Assistant's own System Monitor sensors for the machine Nova runs on — processor/memory/disk usage, memory &amp; I/O pressure, and (if your hardware exposes it) temperature. Off by default; nothing is read or reported until you turn it on. Disk usage measures capacity, not drive health; I/O pressure measures workload contention, not drive failure. Nova cannot warn you after this machine has completely frozen, since Nova runs on it too.</div>

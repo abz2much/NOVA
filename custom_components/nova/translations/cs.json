@@ -123,7 +123,7 @@
       },
       "observer": {
         "title": "Nova — Režim pozorovatele",
-        "description": "proaktivní přehled. Nova sleduje vaši domácnost a ozve se, když stojí něco za zmínku. {note}",
+        "description": "proaktivní přehled. Nova sleduje vaši domácnost a ozve se, když stojí něco za zmínku. API klíče poskytovatelů (včetně Gemini) se zadávají v Nastavit → Přihlašovací údaje, ne zde.",
         "data": {
           "observer_enabled": "Povolit režim pozorovatele",
           "classifier_model": "Model klasifikátoru (úroveň 1 — levný)",

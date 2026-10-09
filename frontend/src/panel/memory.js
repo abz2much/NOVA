@@ -140,7 +140,7 @@
       const items = groups[subj].map(f => {
         const soft = (f.source !== "stated" || (f.confidence ?? 1) < 0.9);
         const hedge = soft
-          ? `<span title="${this._tHtml("{source} · {percent}% sure", { source: this._esc(f.source), percent: Math.round((f.confidence ?? 1) * 100) })}">~</span>`
+          ? `<span title="${this._tHtml("{source} · {percent}% sure", { source: this._esc(this._tx(f.source)), percent: Math.round((f.confidence ?? 1) * 100) })}">~</span>`
           : "";
         const exp = f.expires_at ? `<span title="expires">⌛</span>` : "";
         return `

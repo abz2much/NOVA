@@ -123,7 +123,7 @@
       },
       "observer": {
         "title": "Nova — Tryb obserwatora",
-        "description": "proaktywna świadomość. Nova obserwuje twój dom i odzywa się, gdy coś jest warte uwagi. {note}",
+        "description": "proaktywna świadomość. Nova obserwuje twój dom i odzywa się, gdy coś jest warte uwagi. Klucze API dostawców (także Gemini) ustawia się w Konfiguruj → Dane logowania, nie tutaj.",
         "data": {
           "observer_enabled": "Włącz tryb obserwatora",
           "classifier_model": "Model klasyfikatora (poziom 1 — tani)",

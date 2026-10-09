@@ -123,7 +123,7 @@
       },
       "observer": {
         "title": "Nova — Mode Observateur",
-        "description": "conscience proactive. Nova surveille votre maison et intervient quand quelque chose mérite d'être signalé. {note}",
+        "description": "conscience proactive. Nova surveille votre maison et intervient quand quelque chose mérite d'être signalé. Les clés API des fournisseurs (Gemini compris) se saisissent dans Configurer → Identifiants, pas ici.",
         "data": {
           "observer_enabled": "Activer le mode observateur",
           "classifier_model": "Modèle classificateur (Niveau 1 — économique)",
