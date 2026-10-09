@@ -26,6 +26,7 @@ import datetime
 import json
 import logging
 import math
+import re
 import time
 from collections import deque, namedtuple
 from typing import Optional
@@ -947,6 +948,60 @@ _DEPART_TRAVEL: dict = {}       # lookup key -> (minutes or None, reason, asked_
 _DEPART_STAGES: dict = {}       # event key -> later leave times still to remind about
 
 
+# What is not a place to travel to. A leave alert only makes sense for
+# somewhere you go, so an event whose location is empty, a link, a phone
+# number, a video or phone call, "online", a placeholder, or the home itself
+# gets none (8.14.0). Words are matched whole, case aside.
+_NOT_A_PLACE_RE = re.compile(
+    r"https?://|\bwww\.|\.(?:com|net|org|io|ie|co\.uk)/|"
+    r"\b(?:zoom|teams|meet|webex|skype|facetime|whereby|jitsi|gotomeeting|"
+    r"online|virtual|remote|video\s*call|phone\s*call|conference\s*call|"
+    r"call|phone|dial\s*-?\s*in|tbc|tbd|tba|n/a|to\s+be\s+(?:confirmed|arranged|decided))\b",
+    re.IGNORECASE,
+)
+_HOME_WORDS = {"home", "at home", "my home", "my house", "house", "the house", "here"}
+
+
+def _home_names(hass) -> tuple:
+    """The home's own names: Home Assistant's location name and the home
+    zone's friendly name."""
+    names = []
+    try:
+        names.append(str(getattr(hass.config, "location_name", "") or ""))
+    except Exception:
+        pass
+    try:
+        st = hass.states.get("zone.home")
+        if st is not None:
+            names.append(str(st.attributes.get("friendly_name") or ""))
+    except Exception:
+        pass
+    return tuple(n for n in names if n.strip())
+
+
+def is_real_place(location, home_names=()) -> bool:
+    """True when a calendar event's location reads as somewhere to travel to:
+    an address or a place name. False when it is empty, a web link, mostly a
+    phone number, a video or phone call ("Zoom", "Teams", "online", "dial in"
+    and so on), a placeholder ("TBC"), or the home itself. Pure: no network,
+    never raises."""
+    if not isinstance(location, str):
+        return False
+    text = location.strip()
+    if not text:
+        return False
+    low = " ".join(text.lower().split())
+    if low in _HOME_WORDS or low in {str(n).strip().lower() for n in home_names}:
+        return False
+    if _NOT_A_PLACE_RE.search(text):
+        return False
+    digits = sum(ch.isdigit() for ch in text)
+    letters = sum(ch.isalpha() for ch in text)
+    if digits >= 6 and letters <= 2:
+        return False  # a phone number
+    return True
+
+
 def _current_origin(hass):
     """Where a journey starts, for travel time. An origin entity the owner chose
     always wins. Otherwise home while anyone is home (a leave alert is about
@@ -1265,11 +1320,13 @@ async def predict_departure(hass, now: float = None) -> list:
         osrm_url = str(nova_config.get("departure_osrm_url", "") or "").strip() or None
         origin = _current_origin(hass)
         excluded = _excluded_calendars(nova_config)
+        home_names = _home_names(hass)
 
         from . import comms
         events = [e for e in comms.gather_events(hass)
                   if e.get("start") and not e.get("all_day")
-                  and e.get("calendar") not in excluded]
+                  and e.get("calendar") not in excluded
+                  and is_real_place(e.get("location"), home_names)]
         events.sort(key=lambda e: e["start"])
 
         for ev in events:
