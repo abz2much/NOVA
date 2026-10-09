@@ -119,7 +119,7 @@ def _tool_messages(client):
 
 def test_registry_classifies_every_offered_tool(agent, registry):
     offered = [t["function"]["name"] for t in agent.NOVA_TOOLS]
-    assert len(offered) == 54
+    assert len(offered) == 55
     assert set(offered) == set(registry.TOOL_REGISTRY)
     for name, row in registry.TOOL_REGISTRY.items():
         assert row.executor is agent._TOOL_MAP.get(name)

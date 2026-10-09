@@ -36,6 +36,7 @@ from .capabilities.diagnostics import (
     _exec_system_diagnostics,
 )
 from .capabilities.environment import (
+    _exec_energy_outlook,
     _exec_energy_report,
     _exec_energy_status,
     _exec_hazard_report,
@@ -133,6 +134,7 @@ _TOOL_MAP = {
     "energy_status":       _exec_energy_status,
     "solar_status":        _exec_solar_status,
     "energy_report":       _exec_energy_report,
+    "energy_outlook":      _exec_energy_outlook,
     "hazard_report":       _exec_hazard_report,
     "activity_history":    _exec_activity_history,
     "weather_forecast":    _exec_weather_forecast,
@@ -200,6 +202,7 @@ _CLASSIFICATION = {
     "energy_status":              ("environment", False, False, False, _H),
     "solar_status":               ("environment", False, False, False, _H),
     "energy_report":              ("environment", False, False, False, _H),
+    "energy_outlook":             ("environment", False, False, False, _H),
     "hazard_report":              ("environment", False, False, True, _X),
     "weather_forecast":           ("environment", False, False, False, _H),
     "web_research":               ("communications", False, False, True, _X),

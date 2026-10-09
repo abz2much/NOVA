@@ -1108,6 +1108,33 @@ NOVA_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "energy_outlook",
+            "description": (
+                "Look ahead 36 hours: the tariff's cheap and dear times, the "
+                "solar forecast adjusted by how accurate it has been, the "
+                "household's usual use by hour, the projected battery level "
+                "and grid use, and a few pieces of advice. Use to answer "
+                "'should I charge the battery tonight?', 'when is the "
+                "cheapest time to run the dishwasher?' and 'will I run out "
+                "of battery today?'. best_window is the cheapest time for a "
+                "big appliance. Advice only: it never changes any device. "
+                "Learns from Home Assistant's Energy dashboard history; while "
+                "learning it says what is still missing."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "hours": {
+                        "type": "integer",
+                        "description": "How long the appliance runs, in hours (default 2). Sets the length of best_window.",
+                    },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "hazard_report",
             "description": (
                 "Report real-time natural-hazard and severe-weather activity "

@@ -68,6 +68,22 @@ async def _exec_energy_report(hass: HomeAssistant, args: dict) -> str:
         return json.dumps({"error": str(exc)})
 
 
+async def _exec_energy_outlook(hass: HomeAssistant, args: dict) -> str:
+    """The 36 hour energy outlook and its advice (8.12.0). Advice only.
+    Async, awaited directly: it reads EnergyManager on the event loop and
+    the recorder through its executor. hours sets best_window's length."""
+    try:
+        from ... import energy_outlook
+        try:
+            hours = max(1, min(12, int(args.get("hours", 2) or 2)))
+        except (TypeError, ValueError):
+            hours = 2
+        res = await energy_outlook.energy_outlook_status(hass, hours=hours)
+        return json.dumps(res)
+    except Exception as exc:
+        return json.dumps({"error": str(exc)})
+
+
 async def _exec_hazard_report(hass: HomeAssistant, args: dict) -> str:
     """Live nearby hazard scan — earthquakes, severe weather, disasters (v6.71.0),
     and weather warnings for the chosen counties or areas under "warnings"

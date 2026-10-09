@@ -984,6 +984,22 @@
     },
     {
       "function": {
+        "description": "Look ahead 36 hours: the tariff's cheap and dear times, the solar forecast adjusted by how accurate it has been, the household's usual use by hour, the projected battery level and grid use, and a few pieces of advice. Use to answer 'should I charge the battery tonight?', 'when is the cheapest time to run the dishwasher?' and 'will I run out of battery today?'. best_window is the cheapest time for a big appliance. Advice only: it never changes any device. Learns from Home Assistant's Energy dashboard history; while learning it says what is still missing.",
+        "name": "energy_outlook",
+        "parameters": {
+          "properties": {
+            "hours": {
+              "description": "How long the appliance runs, in hours (default 2). Sets the length of best_window.",
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        }
+      },
+      "type": "function"
+    },
+    {
+      "function": {
         "description": "Report real-time natural-hazard and severe-weather activity near home — recent nearby earthquakes (USGS), active severe weather alerts (NWS), and natural disasters like wildfires or volcanic activity (NASA EONET). Use when asked 'any earthquakes nearby', 'are there weather warnings', 'any wildfires near us', 'is it safe outside', or for a general hazard check. Scoped to the home location. Reports what's currently active; it does not re-announce (that's the background monitor's job).",
         "name": "hazard_report",
         "parameters": {
