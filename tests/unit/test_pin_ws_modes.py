@@ -284,3 +284,41 @@ async def test_energy_flow_today_failure_sends_energy_flow_failed(ws, load, monk
     conn = _Conn()
     await ws.ws_energy_flow(FakeHass(), conn, {"id": 19, "action": "today"})
     assert conn.results == [] and conn.errors[0][:2] == (19, "energy_flow_failed")
+
+
+# ── nova/energy_outlook ────────────────────────────────────────────────────
+
+async def test_energy_outlook_sends_the_outlook(ws, load, monkeypatch):
+    eo = load("energy_outlook")
+    outlook = dict(eo.empty_outlook(), configured=True, status="ok", currency="EUR")
+
+    async def status(hass, hours=2):
+        return outlook
+    monkeypatch.setattr(eo, "energy_outlook_status", status)
+    conn = _Conn()
+    await ws.ws_energy_outlook(FakeHass(), conn, {"id": 20})
+    assert conn.results == [(20, outlook)] and conn.errors == []
+
+
+async def test_energy_outlook_sends_a_learning_outlook_as_a_result(ws, load, monkeypatch):
+    eo = load("energy_outlook")
+    learning = dict(eo.empty_outlook(), configured=True, status="learning",
+                    messages=["Learning your usual usage: 3 of 7 days."])
+
+    async def status(hass, hours=2):
+        return learning
+    monkeypatch.setattr(eo, "energy_outlook_status", status)
+    conn = _Conn()
+    await ws.ws_energy_outlook(FakeHass(), conn, {"id": 21})
+    assert conn.results == [(21, learning)] and conn.errors == []
+
+
+async def test_energy_outlook_failure_sends_energy_outlook_failed(ws, load, monkeypatch):
+    eo = load("energy_outlook")
+
+    async def status(hass, hours=2):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(eo, "energy_outlook_status", status)
+    conn = _Conn()
+    await ws.ws_energy_outlook(FakeHass(), conn, {"id": 22})
+    assert conn.results == [] and conn.errors[0][:2] == (22, "energy_outlook_failed")

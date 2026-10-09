@@ -321,6 +321,15 @@
     "literal_response_keys": [],
     "registered": true
   },
+  "nova/energy_outlook": {
+    "admin": false,
+    "error_codes": [
+      "energy_outlook_failed"
+    ],
+    "fields": {},
+    "literal_response_keys": [],
+    "registered": true
+  },
   "nova/forget_knowledge": {
     "admin": true,
     "error_codes": [

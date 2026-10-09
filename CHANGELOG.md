@@ -1,3 +1,10 @@
+## [8.12.0] — Energy outlook
+
+- **Outlook card.** The Energy tab has an Outlook card. Nova now reads your tariff times, tomorrow's solar forecast and your usual usage, and gives short advice such as when to top up the battery in a cheap window. It learns from your own history, needs no setup and never changes any device. Ask Nova "should I charge the battery tonight?" or "when is the cheapest time to run the dishwasher?"
+- **What it shows.** A 36 hour strip of price bands, the expected sun and the planned battery level, with every price and time also written out. Below it, up to three pieces of advice with the saving, and the best time for a big appliance.
+- **What it learns.** Your tariff times from the last 7 days of the Energy dashboard's price, your usual use by hour from the last 21 days, and how far the solar forecast usually runs high or low. These are read again every 6 hours; the forecast and battery level every 5 minutes. Until there is enough history it says what it is still learning instead of guessing.
+- **Quiet by design.** Battery advice is only given when it saves at least 0.20 in your currency. Nova mentions a piece of advice at most every 6 hours, and a top up at most once a day, through the normal announcements, so quiet hours, modes and mutes apply.
+
 ## [8.11.1] — Energy tab: diagram size and Today units
 
 - **Diagram size.** The Energy tab flow diagram is capped in height on wide screens and sits beside its tiles from 900 px up; phones are unchanged.

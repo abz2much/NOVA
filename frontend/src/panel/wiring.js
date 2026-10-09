@@ -40,6 +40,7 @@
         this._stopEnergyFlowPoll();
         this._flowPrevStates = null;
         this._todayAt = 0;
+        this._outlookAt = 0;
         this._camOpen = false;
         this._currentTab = tab;
         this._render();

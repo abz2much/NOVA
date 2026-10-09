@@ -3,7 +3,8 @@
 Moved verbatim out of websocket.py: nova/intrusion, nova/mode, nova/hazard,
 nova/energy, nova/solar and nova/biometrics. The logger keeps the name it had
 in websocket.py. nova/energy_flow (the Energy tab's live readout) was added
-here later, next to nova/solar.
+here later, next to nova/solar, and nova/energy_outlook (its Outlook card)
+next to that.
 
 websocket.py imports every handler by name (async_register registers them).
 """
@@ -144,6 +145,28 @@ async def ws_energy_flow(
     except Exception as exc:
         _LOGGER.exception("ws_energy_flow failed: %s", exc)
         connection.send_error(msg["id"], "energy_flow_failed", safe_error_message(exc))
+
+
+
+@websocket_api.websocket_command({
+    vol.Required("type"): "nova/energy_outlook",
+})
+@websocket_api.async_response
+async def ws_energy_outlook(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict,
+) -> None:
+    """The next 36 hours of tariff, solar and usage, with a few pieces of
+    advice, for the Energy tab's Outlook card. Advice only. Read only, so
+    not admin gated, the same as nova/energy_flow."""
+    try:
+        from . import energy_outlook
+        res = await energy_outlook.energy_outlook_status(hass)
+        connection.send_result(msg["id"], res)
+    except Exception as exc:
+        _LOGGER.exception("ws_energy_outlook failed: %s", exc)
+        connection.send_error(msg["id"], "energy_outlook_failed", safe_error_message(exc))
 
 
 

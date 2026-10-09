@@ -73,6 +73,8 @@ FILE_FLOORS = {
     "hazard_monitor.py": 74,                            # 78.2%
     # 8.11.0 Energy tab live readout (measured; new file).
     "energy_flow.py": 96,                               # 100.0% (new)
+    # 8.12.0 Energy tab outlook (measured; new file).
+    "energy_outlook.py": 82,                            # 86.1% (new)
     "cognitive_core.py": 90,       # 94.3%: the facade (__delattr__ is unused)
     "core_autonomy.py": 96,        # 100.0%
     "core_bridge.py": 96,          # 100.0%

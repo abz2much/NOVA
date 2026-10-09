@@ -336,6 +336,10 @@ async def _tick():
             e_offer = energy.evaluate_for_proactive(hass)
             if e_offer:
                 actions.append(e_offer)
+            # Energy outlook (8.12.0): advice only, never acts on a device.
+            o_offer = await energy.evaluate_outlook_for_proactive(hass)
+            if o_offer:
+                actions.append(o_offer)
         except Exception as exc:
             _LOGGER.debug("Energy tick error: %s", exc)
 

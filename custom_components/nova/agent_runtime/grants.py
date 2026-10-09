@@ -195,7 +195,7 @@ HEADLESS_TOOLS: frozenset = frozenset({
     "get_entity_state", "search_entities", "get_area_devices", "get_home_summary",
     "activity_history", "cognitive_status", "connectivity_status",
     "system_diagnostics", "root_cause", "energy_status", "solar_status",
-    "energy_report", "hazard_report", "weather_forecast", "wellbeing_context",
+    "energy_report", "energy_outlook", "hazard_report", "weather_forecast", "wellbeing_context",
     "calendar_agenda", "who_do_you_see", "look_at_camera", "update_goal",
 })
 HEADLESS_GRANT = ToolGrant("headless", HEADLESS_TOOLS)

@@ -280,3 +280,71 @@ def evaluate_for_proactive(hass) -> Optional[dict]:
                    f"peak. Staggering them would help.",
         "energy": True,
     }
+
+
+# ── energy outlook (8.12.0) ──────────────────────────────────────────────────
+# The outlook's advice (energy_outlook.py) offered through the same proactive
+# tick and delivery as the offers above. Cooldowns live in memory only, keyed
+# like the proactive manager's _offer_cooldowns (key -> time.time()). Each
+# advice key already carries its kind and the local date.
+OUTLOOK_COOLDOWN_S = 6 * 3600
+_outlook_offered: dict[str, float] = {}
+# Kinds offered at most once per key, so once a day, not every 6 hours.
+_ONCE_A_DAY = ("cheap_topup",)
+_OUTLOOK_KINDS = ("battery_hold", "cheap_topup", "high_use_today")
+
+
+def _outlook_due(key: str, kind: str, now: float) -> bool:
+    last = _outlook_offered.get(key)
+    if last is None:
+        return True
+    return kind not in _ONCE_A_DAY and now - last >= OUTLOOK_COOLDOWN_S
+
+
+async def evaluate_outlook_for_proactive(hass) -> Optional[dict]:
+    """One offer from the energy outlook's advice, or None. Never raises.
+
+    Advice only. The agency ladder (energy_agency) does not apply here: at
+    every level the offer only informs, auto_act is False and it carries no
+    action_data, so nothing can act on a device. The caller gates it exactly
+    as evaluate_for_proactive (kill switch and mode) and delivers it through
+    the normal cognitive action path (quiet hours, urgency routing). The
+    output gate (mutes, rate limit, dedup) is checked here, the way
+    host_health does, since that path does not check it. A gated offer
+    still uses up its cooldown, so it is not retried every tick."""
+    try:
+        import time
+        from . import energy_outlook
+        out = await energy_outlook.energy_outlook_status(hass)
+        if out.get("error") or not out.get("configured"):
+            return None
+        now = time.time()
+        for key in [k for k, t in _outlook_offered.items() if now - t > 2 * 86400]:
+            _outlook_offered.pop(key, None)
+        for advice in out.get("advice") or []:
+            kind, key = advice.get("kind"), advice.get("key")
+            if kind not in _OUTLOOK_KINDS or not key or not _outlook_due(key, kind, now):
+                continue
+            _outlook_offered[key] = now
+            message = advice.get("message") or ""
+            from . import output_gate
+            allowed, reason = output_gate.can_announce(
+                entity_id="energy_outlook", category="energy", urgency="low", message=message)
+            output_gate.record_announcement(
+                entity_id="energy_outlook", category="energy", urgency="low",
+                message=message, was_spoken=allowed)
+            if not allowed:
+                _LOGGER.debug("energy outlook offer suppressed: %s", reason)
+                return None
+            try:
+                from .core_common import _live_honorific, _persona
+                message = _persona().lead_in(_live_honorific(hass), message[:1].lower() + message[1:])
+            except Exception:
+                pass
+            return {
+                "type": "energy_outlook_advice", "urgency": "low", "auto_act": False,
+                "message": message, "energy": True,
+            }
+    except Exception as exc:
+        _LOGGER.debug("energy outlook offer failed: %s", exc)
+    return None

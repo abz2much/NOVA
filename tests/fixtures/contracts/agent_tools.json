@@ -49,6 +49,7 @@
     "create_goal",
     "dismiss_intrusion",
     "dismiss_suggestion",
+    "energy_outlook",
     "energy_report",
     "energy_status",
     "execute_plan",
@@ -528,6 +529,18 @@
       "required": [
         "suggestion_id"
       ]
+    },
+    "energy_outlook": {
+      "parameters": {
+        "properties": {
+          "hours": {
+            "description": "How long the appliance runs, in hours (default 2). Sets the length of best_window.",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "required": []
     },
     "energy_report": {
       "parameters": {
