@@ -1,3 +1,9 @@
+## [8.14.1] — Feature guides
+
+- **New guides.** Short guides for each main feature, in `docs/`: Getting started, Safety and security, Cameras and faces, Weather warnings, Voice and speakers, Presence and alerts, Routines and suggestions, and Memory and knowledge. Each says what the feature needs, what Nova learns by itself, what it never does on its own, its limits, and where its settings are. The Voice recognition guide is rewritten in the same style.
+- **README corrections.** Vision works with any vision capable model, not only Gemini. The Residence tab has door mapping and live room presence; Doorbell Training is a Settings card. Routing, observer, credentials, identity and email are set under Configure, not the panel. Email setup is now explained, `cognition_threshold` is marked as only settable in `config.json`, and the built in modes are named. The README links every guide.
+- Documentation only. No change to how Nova behaves.
+
 ## [8.14.0] — Leave alerts, presence and offers
 
 - **Leave alerts only for a real place.** Leave alerts now only fire for events that have a real place, not video calls or online events. An event with no location, a meeting link, a phone number, "TBC" or your own home no longer gets a "time to leave" alert.
