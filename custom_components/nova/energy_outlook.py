@@ -40,8 +40,8 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from .solar import (
-    _FORECAST_PLATFORMS, _energy_to_kwh, _forecast_entries, _forecast_values, _grid_sensors,
-    _live_pct, _read_prefs, _resolve_price,
+    _energy_to_kwh, _forecast_choice, _forecast_key, _forecast_values, _grid_sensors,
+    _linked_forecast_entries, _live_pct, _read_prefs, _resolve_price,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -821,34 +821,68 @@ def _merge(into: dict, more: dict) -> None:
         into[k] = into.get(k, 0.0) + v
 
 
-async def _forecast_hourly(hass, now: datetime, tz) -> tuple[dict[datetime, float], str]:
-    """Hourly solar forecast in kWh for the next 48 hours, summed over every
-    installed forecast entry, and its shape: "hourly", "estimated" or "none".
+async def _energy_platform_forecast(hass, domain: str, entry_ids) -> dict[datetime, float]:
+    """kWh per hour from an integration's energy platform, the source Home
+    Assistant's own Energy dashboard reads (async_get_solar_forecast, which
+    returns {"wh_hours": {ISO time: Wh}}), added up over the given config
+    entries of that one integration. Half hourly keys, as Solcast gives,
+    fold into their hour. Raises when the platform is missing."""
+    from homeassistant.loader import async_get_integration
+    integration = await async_get_integration(hass, domain)
+    getter = getattr(integration, "async_get_platform", None)
+    mod = await getter("energy") if getter else integration.get_platform("energy")
+    out: dict[datetime, float] = {}
+    for entry_id in entry_ids:
+        data = await mod.async_get_solar_forecast(hass, entry_id)
+        _merge(out, _parse_hourly((data or {}).get("wh_hours"), 0.001))
+    return out
 
-    In order: Forecast.Solar's get_forecast action; the forecast
-    integration's energy platform (the source HA's own Energy dashboard
-    uses, also offered by Open-Meteo Solar Forecast); the daily totals
-    spread along a half sine between sunrise and sunset. Never raises."""
+
+async def _forecast_hourly(hass, now: datetime, tz, prefs: Optional[dict] = None
+                           ) -> tuple[dict[datetime, float], str]:
+    """Hourly solar forecast in kWh for the next 48 hours, and its shape:
+    "hourly", "estimated" or "none". Only ONE forecast integration is ever
+    used, so two that forecast the same panels are never added together;
+    several entries of that one integration (one per array) are.
+
+    In order:
+      1. the energy platform of the integration the Energy dashboard's solar
+         source links to (config_entry_solar_forecast), whatever it is, the
+         way the dashboard itself reads it (a stale link is skipped);
+      2. for the integration found by its sensors (solar._forecast_choice:
+         the linked one if it has sensors, else Forecast.Solar, Open-Meteo
+         Solar Forecast, Solcast in that order): Forecast.Solar's
+         get_forecast action, then that integration's energy platform;
+      3. the daily totals spread along a half sine between sunrise and
+         sunset.
+    Never raises."""
+    start = now.replace(minute=0, second=0, microsecond=0)
+    end = start + timedelta(hours=48)
+    linked = _linked_forecast_entries(hass, prefs)
+    prefer = linked[0][0] if linked else None
+
+    if linked:
+        try:
+            ids = [entry_id for domain, entry_id in linked if domain == prefer]
+            out = await _energy_platform_forecast(hass, prefer, ids)
+            if out:
+                return out, "hourly"
+        except Exception as exc:
+            _LOGGER.debug("energy_outlook: linked forecast failed: %s", exc)
+
     try:
-        entries = _forecast_entries(hass)
+        platform, entries = _forecast_choice(hass, prefer)
     except Exception as exc:
         _LOGGER.debug("energy_outlook: forecast discovery failed: %s", exc)
         return {}, "none"
-    by_platform: dict[str, set] = {}
-    for e in entries:
-        if getattr(e, "config_entry_id", None):
-            by_platform.setdefault(e.platform, set()).add(e.config_entry_id)
-    if not by_platform:
+    if not platform:
         return {}, "none"
-
-    start = now.replace(minute=0, second=0, microsecond=0)
-    end = start + timedelta(hours=48)
+    ids = sorted({e.config_entry_id for e in entries if getattr(e, "config_entry_id", None)})
 
     out: dict[datetime, float] = {}
-    fs = by_platform.get("forecast_solar") or set()
-    if fs and hass.services.has_service("forecast_solar", "get_forecast"):
+    if platform == "forecast_solar" and ids and hass.services.has_service("forecast_solar", "get_forecast"):
         try:
-            for entry_id in fs:
+            for entry_id in ids:
                 resp = await hass.services.async_call(
                     "forecast_solar", "get_forecast",
                     {"config_entry": entry_id, "start": start.isoformat(),
@@ -861,27 +895,18 @@ async def _forecast_hourly(hass, now: datetime, tz) -> tuple[dict[datetime, floa
             _LOGGER.debug("energy_outlook: get_forecast failed: %s", exc)
             out = {}
 
-    try:
-        from homeassistant.loader import async_get_integration
-        for platform in _FORECAST_PLATFORMS:
-            ids = by_platform.get(platform)
-            if not ids:
-                continue
-            integration = await async_get_integration(hass, platform)
-            getter = getattr(integration, "async_get_platform", None)
-            mod = await getter("energy") if getter else integration.get_platform("energy")
-            for entry_id in ids:
-                data = await mod.async_get_solar_forecast(hass, entry_id)
-                _merge(out, _parse_hourly((data or {}).get("wh_hours"), 0.001))
-        if out:
-            return out, "hourly"
-    except Exception as exc:
-        _LOGGER.debug("energy_outlook: energy platform forecast failed: %s", exc)
-        out = {}
+    if ids and platform != prefer:  # the linked one was already tried above
+        try:
+            out = await _energy_platform_forecast(hass, platform, ids)
+            if out:
+                return out, "hourly"
+        except Exception as exc:
+            _LOGGER.debug("energy_outlook: energy platform forecast failed: %s", exc)
+            out = {}
 
     try:
         from homeassistant.helpers.sun import get_astral_event_date
-        totals = _forecast_values(hass)
+        totals = _forecast_values(hass, prefer)
         days = ((now.date(), totals.get("forecast_remaining_kwh")),
                 (now.date() + timedelta(days=1), totals.get("forecast_tomorrow_kwh")))
         hs = hour_starts(start, 48)
@@ -902,14 +927,15 @@ async def _forecast_hourly(hass, now: datetime, tz) -> tuple[dict[datetime, floa
     return {}, "none"
 
 
-def _forecast_today_entity(hass) -> Optional[str]:
+def _forecast_today_entities(hass, prefer: Optional[str] = None) -> list[str]:
+    """The "forecast today" sensors of the forecast integration in use (one
+    per entry), for the accuracy factor. Empty when there are none."""
     try:
-        for e in _forecast_entries(hass):
-            if e.unique_id.endswith("energy_production_today"):
-                return e.entity_id
+        _, entries = _forecast_choice(hass, prefer)
+        return sorted(e.entity_id for e in entries
+                      if _forecast_key(e) == "forecast_today_total_kwh")
     except Exception:
-        pass
-    return None
+        return []
 
 
 def _tz(hass):
@@ -962,8 +988,10 @@ async def _compute(hass, now: datetime, tz) -> dict:
     solar_ids = [s.get("stat_energy_from") for s in sources
                  if s.get("type") == "solar" and s.get("stat_energy_from")]
 
-    learned = await _learned(hass, now, tz, grid, grids, batteries, solar_ids)
-    solar_by_hour, shape = await _forecast_hourly(hass, now, tz)
+    linked = _linked_forecast_entries(hass, prefs)
+    fc_entities = _forecast_today_entities(hass, linked[0][0] if linked else None)
+    learned = await _learned(hass, now, tz, grid, grids, batteries, solar_ids, fc_entities)
+    solar_by_hour, shape = await _forecast_hourly(hass, now, tz, prefs)
     flow = await energy_flow_status(hass)
     battery = flow.get("battery") or {}
     today = await energy_flow_today(hass)
@@ -975,12 +1003,12 @@ async def _compute(hass, now: datetime, tz) -> dict:
 
 
 async def _learned(hass, now: datetime, tz, grid: dict, grids: list, batteries: list,
-                   solar_ids: list) -> dict:
+                   solar_ids: list, fc_entities: list) -> dict:
     """The tariff, export tariff, usual usage profile and forecast factor,
     read from the recorder at most every LEARNED_TTL_S for the same set of
     Energy dashboard sources. Raises _ReadError when a recorder read fails;
     a failure is not cached."""
-    key = repr((grid, grids, batteries, solar_ids))
+    key = repr((grid, grids, batteries, solar_ids, fc_entities))
     hit = _learned_cache.get(key)
     if hit is not None and _clock() - hit["at"] < LEARNED_TTL_S:
         return hit["value"]
@@ -1008,18 +1036,23 @@ async def _learned(hass, now: datetime, tz, grid: dict, grids: list, batteries: 
     series = {k: [changes.get(e, {}) for e in ids] for k, ids in kinds.items()}
     profile = load_profile(home_hours(series), tz)
 
+    # The day's forecast: the "forecast today" sensors of the one forecast
+    # integration in use, added up per day (one per array) where every one
+    # of them has a morning value.
     pairs = []
-    fc_entity = _forecast_today_entity(hass)
-    if fc_entity and solar_ids:
+    if fc_entities and solar_ids:
         days = [now.date() - timedelta(days=d) for d in range(FACTOR_DAYS, 0, -1)]
-        samples = await _state_history(hass, fc_entity, _local_at(days[0], 0, tz),
-                                       _local_at(now.date(), 0, tz))
-        morning = morning_values(samples, days, tz)
+        per_entity = []
+        for fc_entity in fc_entities:
+            samples = await _state_history(hass, fc_entity, _local_at(days[0], 0, tz),
+                                           _local_at(now.date(), 0, tz))
+            per_entity.append({day: _energy_to_kwh(hass, fc_entity, raw)
+                               for day, raw in morning_values(samples, days, tz).items()})
         actual = daily_totals(series["solar"], tz)
-        for day, raw in morning.items():
-            fc = _energy_to_kwh(hass, fc_entity, raw)
-            if day in actual and fc is not None:
-                pairs.append((actual[day], fc))
+        for day in days:
+            values = [m.get(day) for m in per_entity]
+            if day in actual and all(v is not None for v in values):
+                pairs.append((actual[day], sum(values)))
     value = {"tariff": tariff, "export_tariff": export_tariff, "profile": profile,
              "factor": forecast_factor(pairs)}
     _learned_cache.clear()

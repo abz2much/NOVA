@@ -490,7 +490,7 @@ def stubbed(eo, load, monkeypatch):
         return {e: {h: (usual_hour(h.astimezone(TZ).hour) if e == "sensor.imp" else 0.0)
                     for h in hours} for e in ids}
 
-    async def forecast(hass, now, tz):
+    async def forecast(hass, now, tz, prefs=None):
         state["reads"]["forecast"] += 1
         if state["shape"] == "none":
             return {}, "none"
@@ -508,7 +508,7 @@ def stubbed(eo, load, monkeypatch):
     monkeypatch.setattr(eo, "_state_history", hist)
     monkeypatch.setattr(eo, "_hourly_changes", changes)
     monkeypatch.setattr(eo, "_forecast_hourly", forecast)
-    monkeypatch.setattr(eo, "_forecast_today_entity", lambda hass: None)
+    monkeypatch.setattr(eo, "_forecast_today_entities", lambda hass, prefer=None: [])
     monkeypatch.setattr(eo, "_now", lambda hass: (at(NOW_DAY, 19), TZ))
     monkeypatch.setattr(ef, "energy_flow_status", flow)
     monkeypatch.setattr(ef, "energy_flow_today", today)
@@ -621,7 +621,7 @@ def test_forecast_uses_get_forecast_when_registered(eo, monkeypatch):
         return {"watts": {}, "wh_period": {"2026-10-14T10:00:00+01:00": 500,
                                            "2026-10-14T11:00:00+01:00": 1500}}
     hass.services.async_call = call
-    monkeypatch.setattr(eo, "_forecast_entries", lambda h: [_Entry("forecast_solar", "abc-energy_production_today")])
+    monkeypatch.setattr(sys.modules["jc.solar"], "_forecast_entries", lambda h: [_Entry("forecast_solar", "abc-energy_production_today")])
     out, shape = asyncio.run(eo._forecast_hourly(hass, at(NOW_DAY, 9, 20), TZ))
     assert shape == "hourly"
     assert out == {datetime(2026, 10, 14, 9, tzinfo=timezone.utc): 0.5,
@@ -650,7 +650,7 @@ def test_forecast_falls_back_to_the_energy_platform(eo, monkeypatch):
     loader = types.ModuleType("homeassistant.loader")
     loader.async_get_integration = get_integration
     monkeypatch.setitem(sys.modules, "homeassistant.loader", loader)
-    monkeypatch.setattr(eo, "_forecast_entries",
+    monkeypatch.setattr(sys.modules["jc.solar"], "_forecast_entries",
                         lambda h: [_Entry("open_meteo_solar_forecast", "x-energy_production_today")])
     out, shape = asyncio.run(eo._forecast_hourly(_Hass(), at(NOW_DAY, 9), TZ))
     assert shape == "hourly"
@@ -667,9 +667,9 @@ def test_forecast_falls_back_to_an_estimate(eo, monkeypatch):
     sun.get_astral_event_date = lambda hass, event, day: at(day, 8) if event == "sunrise" else at(day, 18)
     monkeypatch.setitem(sys.modules, "homeassistant.loader", loader)
     monkeypatch.setitem(sys.modules, "homeassistant.helpers.sun", sun)
-    monkeypatch.setattr(eo, "_forecast_entries", lambda h: [_Entry("forecast_solar", "x-energy_production_today")])
+    monkeypatch.setattr(sys.modules["jc.solar"], "_forecast_entries", lambda h: [_Entry("forecast_solar", "x-energy_production_today")])
     monkeypatch.setattr(eo, "_forecast_values",
-                        lambda h: {"forecast_remaining_kwh": 3.0, "forecast_tomorrow_kwh": 10.0})
+                        lambda h, prefer=None: {"forecast_remaining_kwh": 3.0, "forecast_tomorrow_kwh": 10.0})
     out, shape = asyncio.run(eo._forecast_hourly(_Hass(), at(NOW_DAY, 13), TZ))
     assert shape == "estimated"
     today = sum(v for k, v in out.items() if k.astimezone(TZ).date() == NOW_DAY)
@@ -680,7 +680,7 @@ def test_forecast_falls_back_to_an_estimate(eo, monkeypatch):
 
 
 def test_no_forecast_integration(eo, monkeypatch):
-    monkeypatch.setattr(eo, "_forecast_entries", lambda h: [])
+    monkeypatch.setattr(sys.modules["jc.solar"], "_forecast_entries", lambda h: [])
     assert asyncio.run(eo._forecast_hourly(_Hass(), at(NOW_DAY, 9), TZ)) == ({}, "none")
 
 
