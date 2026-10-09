@@ -27,10 +27,18 @@ def cal(cog, load, monkeypatch):
     monkeypatch.setattr(comms, "gather_events", lambda hass: holder["list"])
     cfg = {"departure_alerts_enabled": True, "departure_lead_minutes": 30}
     monkeypatch.setattr(jc, "get", lambda k, d=None: cfg.get(k, d))
+    # Events have a real address by default (8.14.0: leave alerts need a real
+    # place), so stub the route lookup: no test reaches the network.
+    travel = load("travel")
+
+    async def _no_route(*a, **k):
+        return None
+    monkeypatch.setattr(travel, "travel_minutes", _no_route)
+    monkeypatch.setattr(travel, "failure_reason", lambda loc: None)
     return holder, cfg
 
 
-def _ev(start_dt, title="Dentist", all_day=False, location=None):
+def _ev(start_dt, title="Dentist", all_day=False, location="12 Main Street, Dundalk"):
     return {"calendar": "calendar.x", "title": title, "start": start_dt,
             "end": start_dt + datetime.timedelta(hours=1),
             "all_day": all_day, "location": location, "active": False}
@@ -128,7 +136,7 @@ async def test_uses_oss_travel_for_located_event(cog, cal, fake_hass, load, monk
 async def test_no_oss_call_without_location(cog, cal, fake_hass, load, monkeypatch):
     holder, cfg = cal
     now, now_dt = _now()
-    holder["list"] = [_ev(now_dt + datetime.timedelta(minutes=40))]   # no location
+    holder["list"] = [_ev(now_dt + datetime.timedelta(minutes=40), location=None)]   # no location
     monkeypatch.setattr(cog, "_current_origin", lambda hass: (40.0, -75.0))
     travel = load("travel")
     called = {"n": 0}

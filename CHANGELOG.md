@@ -1,3 +1,9 @@
+## [8.14.0] — Leave alerts, presence and offers
+
+- **Leave alerts only for a real place.** Leave alerts now only fire for events that have a real place, not video calls or online events. An event with no location, a meeting link, a phone number, "TBC" or your own home no longer gets a "time to leave" alert.
+- **A parked car, an animal or a package is not a person.** A camera's car, animal or package sensor no longer counts as a person being home or in a room. This affects who Nova thinks is home, which rooms it speaks to, the dark room offer and the check that starts an intrusion investigation. Real motion sensors and person sensors still count exactly as before, and package, vehicle and animal events still work as their own events.
+- **Only offers Nova can carry out.** Nova no longer offers to do something it cannot actually control. It checks the device is there, available and supports the action first. Without that, the alert is information only, with no question: a thermostat with no eco preset, a light that cannot be switched, or a high power warning, which used to ask "Want me to hold it?" about an appliance Nova cannot switch. A dark room with no working light gets no message.
+
 ## [8.13.0] — Solcast, README refresh and Energy guide
 
 - **Solcast.** The Energy outlook now works with Solcast as well as Forecast.Solar and Open-Meteo. The README is up to date with the Energy tab, and a new Energy setup guide (docs/energy.md) explains what Nova needs, what it learns and its limits.
