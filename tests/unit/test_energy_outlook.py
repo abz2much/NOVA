@@ -28,9 +28,11 @@ NOW_DAY = date(2026, 10, 14)           # a Wednesday
 def eo(load):
     mod = load("energy_outlook")
     mod._cache.clear()
+    mod._learned_cache.clear()
     mod._lock = None
     yield mod
     mod._cache.clear()
+    mod._learned_cache.clear()
     mod._lock = None
 
 
@@ -474,10 +476,14 @@ def stubbed(eo, load, monkeypatch):
     async def prefs(hass):
         return {"energy_sources": state["prefs"]} if state["prefs"] is not None else None
 
+    state["reads"] = {"history": 0, "stats": 0, "forecast": 0, "flow": 0}
+
     async def hist(hass, eid, start, end):
+        state["reads"]["history"] += 1
         return history(lambda t: tou_price(t.hour * 60 + t.minute))
 
     async def changes(hass, ids, start, end):
+        state["reads"]["stats"] += 1
         if state["stats_error"]:
             raise eo._ReadError("recorder down")
         hours = _hours(21)
@@ -485,11 +491,13 @@ def stubbed(eo, load, monkeypatch):
                     for h in hours} for e in ids}
 
     async def forecast(hass, now, tz):
+        state["reads"]["forecast"] += 1
         if state["shape"] == "none":
             return {}, "none"
         return solar_days(eo, 0, 4), state["shape"]
 
     async def flow(hass):
+        state["reads"]["flow"] += 1
         return {"battery": {"capacity_kwh": state["capacity"],
                             "stored_kwh": 3.0 if state["capacity"] else None}}
 
@@ -683,3 +691,50 @@ def test_only_service_call_is_the_read_only_forecast():
              if isinstance(n, ast.Call) and getattr(n.func, "attr", "") == "async_call"]
     assert len(calls) == 1
     assert [a.value for a in calls[0].args[:2]] == ["forecast_solar", "get_forecast"]
+
+
+def test_time_zone_comes_from_home_assistant(eo, monkeypatch):
+    dt_util = sys.modules["homeassistant.util.dt"]
+    monkeypatch.setattr(dt_util, "get_default_time_zone", lambda: TZ, raising=False)
+    assert eo._tz(_Hass()) is TZ
+    monkeypatch.delattr(dt_util, "get_default_time_zone")
+    monkeypatch.setattr(dt_util, "DEFAULT_TIME_ZONE", timezone.utc, raising=False)
+    assert eo._tz(_Hass()) is timezone.utc
+
+
+def test_learned_inputs_kept_for_six_hours_forecast_and_battery_every_five_minutes(
+        eo, stubbed, monkeypatch):
+    clock = [1000.0]
+    monkeypatch.setattr(eo, "_clock", lambda: clock[0])
+    reads = stubbed["reads"]
+    asyncio.run(eo.energy_outlook_status(_Hass()))
+    learned_once = (reads["history"], reads["stats"])
+    assert reads["forecast"] == reads["flow"] == 1 and learned_once[0] and learned_once[1] == 1
+    for _ in range(3):                      # three more 5 minute refreshes
+        clock[0] += eo.CACHE_TTL_S + 1
+        asyncio.run(eo.energy_outlook_status(_Hass()))
+    assert reads["forecast"] == reads["flow"] == 4
+    assert (reads["history"], reads["stats"]) == learned_once
+    clock[0] += eo.LEARNED_TTL_S            # six hours on: learned again
+    asyncio.run(eo.energy_outlook_status(_Hass()))
+    assert reads["stats"] == 2 and reads["history"] == 2 * learned_once[0]
+
+
+def test_learned_inputs_rebuilt_when_the_energy_sources_change(eo, stubbed, monkeypatch):
+    clock = [1000.0]
+    monkeypatch.setattr(eo, "_clock", lambda: clock[0])
+    asyncio.run(eo.energy_outlook_status(_Hass()))
+    stubbed["prefs"] = [GRID, BATTERY, SOLAR, {"type": "solar", "stat_energy_from": "sensor.pv2"}]
+    clock[0] += eo.CACHE_TTL_S + 1
+    asyncio.run(eo.energy_outlook_status(_Hass()))
+    assert stubbed["reads"]["stats"] == 2
+
+
+def test_a_failed_learned_read_is_not_kept(eo, stubbed, monkeypatch):
+    clock = [1000.0]
+    monkeypatch.setattr(eo, "_clock", lambda: clock[0])
+    stubbed["stats_error"] = True
+    assert asyncio.run(eo.energy_outlook_status(_Hass()))["error"] is True
+    stubbed["stats_error"] = False
+    out = asyncio.run(eo.energy_outlook_status(_Hass()))
+    assert out["error"] is False and out["status"] == "ok"

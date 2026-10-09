@@ -86,8 +86,15 @@ TOPUP_FROM_HOUR = 18
 HIGH_USE_RATIO = 1.4
 HIGH_USE_MIN_KWH = 1.5
 
+# The whole outlook is rebuilt at most every CACHE_TTL_S (the forecast,
+# the battery level and today's use are read fresh then). What it learns
+# from history (tariff, usual usage, forecast factor) changes slowly and
+# is read from the recorder at most every LEARNED_TTL_S, or sooner when the
+# Energy dashboard's sources change.
 CACHE_TTL_S = 300.0
+LEARNED_TTL_S = 6 * 3600.0
 _cache: dict = {}
+_learned_cache: dict = {}
 _lock: Optional[asyncio.Lock] = None
 
 
@@ -906,8 +913,19 @@ def _forecast_today_entity(hass) -> Optional[str]:
 
 
 def _tz(hass):
-    from zoneinfo import ZoneInfo
+    """Home Assistant's own time zone object, already loaded by HA, so
+    nothing reads tzdata from disk on the event loop. ZoneInfo is only the
+    fallback for a Home Assistant without either helper."""
     try:
+        from homeassistant.util import dt as dt_util
+        getter = getattr(dt_util, "get_default_time_zone", None)
+        tz = getter() if getter else getattr(dt_util, "DEFAULT_TIME_ZONE", None)
+        if tz is not None:
+            return tz
+    except Exception:
+        pass
+    try:
+        from zoneinfo import ZoneInfo
         return ZoneInfo(hass.config.time_zone)
     except Exception:
         return timezone.utc
@@ -944,6 +962,29 @@ async def _compute(hass, now: datetime, tz) -> dict:
     solar_ids = [s.get("stat_energy_from") for s in sources
                  if s.get("type") == "solar" and s.get("stat_energy_from")]
 
+    learned = await _learned(hass, now, tz, grid, grids, batteries, solar_ids)
+    solar_by_hour, shape = await _forecast_hourly(hass, now, tz)
+    flow = await energy_flow_status(hass)
+    battery = flow.get("battery") or {}
+    today = await energy_flow_today(hass)
+    currency = getattr(hass.config, "currency", None)
+    return build_outlook(now, learned["tariff"], learned["export_tariff"], learned["profile"],
+                         solar_by_hour, shape, learned["factor"],
+                         battery.get("capacity_kwh"), battery.get("stored_kwh"),
+                         today.get("home_kwh"), currency)
+
+
+async def _learned(hass, now: datetime, tz, grid: dict, grids: list, batteries: list,
+                   solar_ids: list) -> dict:
+    """The tariff, export tariff, usual usage profile and forecast factor,
+    read from the recorder at most every LEARNED_TTL_S for the same set of
+    Energy dashboard sources. Raises _ReadError when a recorder read fails;
+    a failure is not cached."""
+    key = repr((grid, grids, batteries, solar_ids))
+    hit = _learned_cache.get(key)
+    if hit is not None and _clock() - hit["at"] < LEARNED_TTL_S:
+        return hit["value"]
+
     tariff = await _tariff(hass, *grid["import_price"], now, tz)
     export_tariff = None
     exp_entity, exp_number = grid["export_price"]
@@ -979,16 +1020,11 @@ async def _compute(hass, now: datetime, tz) -> dict:
             fc = _energy_to_kwh(hass, fc_entity, raw)
             if day in actual and fc is not None:
                 pairs.append((actual[day], fc))
-    factor = forecast_factor(pairs)
-
-    solar_by_hour, shape = await _forecast_hourly(hass, now, tz)
-    flow = await energy_flow_status(hass)
-    battery = flow.get("battery") or {}
-    today = await energy_flow_today(hass)
-    currency = getattr(hass.config, "currency", None)
-    return build_outlook(now, tariff, export_tariff, profile, solar_by_hour, shape, factor,
-                         battery.get("capacity_kwh"), battery.get("stored_kwh"),
-                         today.get("home_kwh"), currency)
+    value = {"tariff": tariff, "export_tariff": export_tariff, "profile": profile,
+             "factor": forecast_factor(pairs)}
+    _learned_cache.clear()
+    _learned_cache[key] = {"value": value, "at": _clock()}
+    return value
 
 
 def _clock() -> float:
