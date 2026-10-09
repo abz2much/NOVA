@@ -189,6 +189,7 @@ def _area_live_readings(hass: HomeAssistant, area_id: str) -> dict:
     lights_on = 0
     lights_total = 0
     last_motion_seconds = None
+    from .entity_filter import is_object_sensor
 
     for eid in _entities_in_area(hass, area_id):
         state = hass.states.get(eid)
@@ -214,7 +215,10 @@ def _area_live_readings(hass: HomeAssistant, area_id: str) -> dict:
             lights_total += 1
             if state.state == "on":
                 lights_on += 1
-        elif domain == "binary_sensor" and dclass in ("occupancy", "motion", "presence"):
+        elif (domain == "binary_sensor" and dclass in ("occupancy", "motion", "presence")
+              and not is_object_sensor(eid, state.attributes.get("friendly_name"))):
+            # A camera's car, animal or package sensor is not motion in the
+            # room, so it never sets the "last motion" age (8.14.2).
             try:
                 age = (time.time() - state.last_changed.timestamp())
                 if last_motion_seconds is None or age < last_motion_seconds:
