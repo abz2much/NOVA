@@ -469,10 +469,16 @@ class SafetyManager:
             _LOGGER.info("intrusion: initial alert damped for learned-benign "
                          "pattern at %s (still investigating)", breach_area)
             return None
-        return {
+        action = {
             "type": "intrusion_investigating", "urgency": "high",
             "message": msg, "auto_act": True, "entity_id": eid,
         }
+        # Residents home, armed home or night, or asleep: the first alert goes
+        # to phones only, not the speakers. Away cases and the confirmed alert
+        # are unchanged.
+        if self._residents_home_guard(trigger == "sleeping"):
+            action["phone_only"] = True
+        return action
 
     async def _face_stand_down(self, trigger: str, where: str) -> bool:
         """Opt in (face_stand_down): True when a recognised household resident

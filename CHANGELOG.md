@@ -1,3 +1,8 @@
+## [8.20.2] — First intrusion alert to phones only when residents are home
+
+- **Phone only.** When a person or phone reads home and the alarm is armed home or night, or the household is asleep, the first "Motion at … while the house is secured" alert goes to phone notifications only. Nothing is spoken.
+- **Unchanged.** Armed away, vacation, everyone away and the confirmed intrusion alert still use the speakers. No new settings.
+
 ## [8.20.1] — No false intrusion when a resident walks about at night
 
 - **Appliance doors are not a way in.** A fridge, freezer, oven, dishwasher, washing machine, dryer, microwave or cabinet door never counts as an open entry, and neither does anything on the exclude list. On 9 Oct a fridge door was taken for the point of entry while the alarm was armed home.
