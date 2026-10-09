@@ -261,7 +261,7 @@ def normalize_error(exc: BaseException, provider: str = "") -> ProviderError:
     return error
 
 
-# Config-flow error keys (strings.json config.error.*) — unchanged contract.
+# Config-flow error keys (translations/en.json config.error.*) — unchanged contract.
 _CONFIG_FLOW_KEYS = {
     ProviderErrorKind.MISSING_CREDENTIAL: "invalid_auth",
     ProviderErrorKind.AUTHENTICATION_FAILED: "invalid_auth",

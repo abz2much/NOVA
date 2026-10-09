@@ -86,7 +86,7 @@
               this._populateModelSelect(provider, row.querySelector(".new-model-select"), res);
             }
           });
-          if (status) status.textContent = `Connected. ${res.models.length} model${res.models.length === 1 ? "" : "s"} found.`;
+          if (status) status.textContent = this._t(res.models.length === 1 ? "Connected. {count} model found." : "Connected. {count} models found.", { count: res.models.length });
           markDirty("Endpoint tested. Changes are not saved yet.");
         } catch (err) {
           if (status) status.textContent = err?.message || "Could not test this endpoint.";

@@ -21,7 +21,7 @@
             <div class="panel-title">Residents</div>
             <div class="panel-meta" id="facesResidentsMeta">—</div>
           </div>
-          <div class="stub-body">Use the name exactly as Frigate or Double Take reports it. Case and spacing do not matter. Intrusion stand down is <b>${on ? "ON" : "OFF"}</b>${on ? "" : " (the default)"}; change it under Settings → Security alarm.</div>
+          <div class="stub-body">Use the name exactly as Frigate or Double Take reports it. Case and spacing do not matter. Intrusion stand down is <b>${on ? "ON" : "OFF"}</b>${on ? "; change it under Settings → Security alarm." : " (the default); change it under Settings → Security alarm."}</div>
           <div class="cfg-row">
             <input class="cfg-field" id="facesAddName" maxlength="60" placeholder="Resident name">
             <button class="mode-chip" id="facesAdd">ADD RESIDENT</button>
@@ -68,8 +68,8 @@
     const faces = f.faces || [];
     const residents = f.residents || [];
     const src = f.sources || {};
-    if (meta) meta.textContent = `${faces.length} RECENT`;
-    if (resMeta) resMeta.textContent = `${residents.length} RESIDENT${residents.length === 1 ? "" : "S"}`;
+    if (meta) meta.textContent = this._t("{count} RECENT", { count: faces.length });
+    if (resMeta) resMeta.textContent = this._t(residents.length === 1 ? "{count} RESIDENT" : "{count} RESIDENTS", { count: residents.length });
     if (!faces.length) {
       body.innerHTML = src.configured === false
         ? `<div class="stub-body">No face recognition source found. Set up Frigate face recognition or Double Take, and make sure Home Assistant has MQTT. Recent faces appear here once one of them names someone.</div>`
@@ -122,7 +122,7 @@
     if (!this._hass) return;
     try {
       await this._hass.callWS({ type: "nova/remove_resident", name });
-      if (msg) msg.textContent = `${name} removed.`;
+      if (msg) msg.textContent = this._t("{name} removed.", { name });
     } catch (err) {
       if (msg) msg.textContent = (err && err.message) || "Could not remove that name.";
       return;

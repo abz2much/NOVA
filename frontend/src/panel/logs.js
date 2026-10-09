@@ -241,7 +241,7 @@
         return `
           <div class="cfg-row">
             <label>${this._esc(targetName)}</label>
-            <span class="toggle-desc">approval: ${this._esc(t.approval_result)} · execution: ${this._esc(t.execution_result)}</span>
+            <span class="toggle-desc">${this._tHtml("approval: {approval} · execution: {execution}", { approval: this._esc(t.approval_result), execution: this._esc(t.execution_result) })}</span>
           </div>
           ${t.reason_text ? `<div class="stub-body" style="margin:-4px 0 6px;font-size:11px">${this._esc(t.reason_text)}</div>` : ""}`;
       }).join("");
@@ -299,7 +299,7 @@
       this._decisionsCursor = result.next_cursor || null;
       this._renderDecisionRows();
     } catch (err) {
-      if (container) container.innerHTML = `<div class="new-log-entry-error" style="padding:12px">Error loading decisions: ${this._esc(err)}</div>`;
+      if (container) container.innerHTML = `<div class="new-log-entry-error" style="padding:12px">${this._tHtml("Error loading decisions: {error}", { error: this._esc(err) })}</div>`;
     }
   }
 
@@ -308,7 +308,7 @@
     if (!container) return;
     const entries = this._decisions || [];
     const countEl = this.shadowRoot?.getElementById("newDecCount");
-    if (countEl) countEl.textContent = `${entries.length} decision(s) loaded`;
+    if (countEl) countEl.textContent = this._t("{count} decision(s) loaded", { count: entries.length });
     container.innerHTML = entries.length ? entries.map(d => {
       const outcomeCls = d.outcome === "good" ? "diag-ok" : d.outcome === "wrong" ? "diag-down"
         : d.outcome === "unnecessary" ? "diag-warn" : "diag-idle";
@@ -347,7 +347,7 @@
       const row = (label, value) => `<div class="cfg-row"><label>${this._esc(label)}</label><span>${this._esc(
         value === null || value === undefined || value === "" ? "—" : String(value))}</span></div>`;
       drawer.innerHTML = `
-        <div class="panel-head"><div class="panel-title">Decision #${this._esc(d.id)}</div>
+        <div class="panel-head"><div class="panel-title">${this._tHtml("Decision #{id}", { id: this._esc(d.id) })}</div>
           <button class="mode-chip" id="newDecCloseDrawer">CLOSE</button></div>
         ${row("Route", d.kind)}
         ${row("Decision", d.decision)}
@@ -380,7 +380,7 @@
       });
       drawer.querySelector("#newDecReplay")?.addEventListener("click", () => this._replayDecision(d.id));
     } catch (err) {
-      drawer.innerHTML = `<div class="new-log-entry-error" style="padding:12px">Error loading decision: ${this._esc(err)}</div>`;
+      drawer.innerHTML = `<div class="new-log-entry-error" style="padding:12px">${this._tHtml("Error loading decision: {error}", { error: this._esc(err) })}</div>`;
     }
   }
 
@@ -404,7 +404,7 @@
         ${row("Within 0.05 of threshold", r.within_0_05_of_threshold ? "Yes" : "No")}
       `;
     } catch (err) {
-      if (resultEl) resultEl.innerHTML = `<div class="new-log-entry-error" style="padding:12px">Error running replay: ${this._esc(err)}</div>`;
+      if (resultEl) resultEl.innerHTML = `<div class="new-log-entry-error" style="padding:12px">${this._tHtml("Error running replay: {error}", { error: this._esc(err) })}</div>`;
     }
   }
 
@@ -415,7 +415,7 @@
       const disableButtons = () => this.shadowRoot?.querySelectorAll(".new-dec-fb")
         .forEach(b => b.setAttribute("disabled", "disabled"));
       if (result.status === "ok") {
-        if (statusEl) statusEl.textContent = `Recorded: ${verdict}`;
+        if (statusEl) statusEl.textContent = this._t("Recorded: {verdict}", { verdict });
         disableButtons();
         this._fetchDecisions(true);
       } else if (result.status === "already_judged") {
@@ -425,7 +425,7 @@
         if (statusEl) statusEl.textContent = "Decision not found.";
       }
     } catch (err) {
-      if (statusEl) statusEl.textContent = `Error: ${this._esc(err)}`;
+      if (statusEl) statusEl.textContent = this._t("Error: {error}", { error: this._esc(err) });
     }
   }
 
@@ -519,7 +519,7 @@
       // usable cached to fall back on (a genuine first-load failure).
       if (!this._debugLogEntries || !this._debugLogEntries.length) {
         const c = this.shadowRoot?.getElementById("newLogEntries");
-        if (c) c.innerHTML = `<div class="new-log-entry-error" style="padding:12px">Error loading logs: ${this._esc(err)}</div>`;
+        if (c) c.innerHTML = `<div class="new-log-entry-error" style="padding:12px">${this._tHtml("Error loading logs: {error}", { error: this._esc(err) })}</div>`;
       } else {
         console.warn("Nova: System Log refresh failed, keeping cached entries", err);
       }

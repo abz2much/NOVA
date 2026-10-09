@@ -417,7 +417,7 @@ def test_diagnose_doorbell_readiness_needs_a_loaded_entry():
 # ── 11. Translations ────────────────────────────────────────────────────────
 
 def _translation_files():
-    return [COMP / "strings.json", *sorted((COMP / "translations").glob("*.json"))]
+    return sorted((COMP / "translations").glob("*.json"))
 
 
 def test_service_errors_used_in_code_are_translated():
@@ -428,7 +428,7 @@ def test_service_errors_used_in_code_are_translated():
     used |= {v.value for v in mapping.value.values}
     used.add("not_loaded")       # the fallback for an unknown state
     assert used == SERVICE_ERROR_KEYS
-    strings = json.loads((COMP / "strings.json").read_text(encoding="utf-8"))
+    strings = json.loads((COMP / "translations" / "en.json").read_text(encoding="utf-8"))
     assert set(strings["exceptions"]) == SERVICE_ERROR_KEYS
 
 
@@ -444,9 +444,9 @@ def test_exceptions_section_is_aligned(path):
         assert "{" not in msg, (path.name, key)     # no placeholders to leak details
 
 
-def test_translations_mirror_strings_json_top_level_sections():
-    strings = json.loads((COMP / "strings.json").read_text(encoding="utf-8"))
-    for path in _translation_files()[1:]:
+def test_translations_mirror_en_json_top_level_sections():
+    strings = json.loads((COMP / "translations" / "en.json").read_text(encoding="utf-8"))
+    for path in _translation_files():
         data = json.loads(path.read_text(encoding="utf-8"))
         assert list(data) == list(strings), path.name
 

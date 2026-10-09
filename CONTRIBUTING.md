@@ -57,6 +57,30 @@ node --check frontend/nova-panel.js
 bash -n ../run.sh
 ```
 
+## Panel text and translations
+
+The panel's languages live in `custom_components/nova/frontend/i18n/<lang>.json`,
+keyed by the exact English text. CI fails if a language is missing a key, so
+when you add or change panel text:
+
+1. Write fixed text as a whole string. If a value sits inside the text, use
+   `this._t("{count} RECENT", { count })` for plain text, or `this._tHtml(...)`
+   in markup. Use one template per plural form.
+2. Run `NODE_PATH=node_modules node scripts/panel_strings.js --write` to update
+   `frontend/i18n/panel_strings.json`.
+3. Add each new string, with its translation, to every language file. Keep
+   every `{placeholder}` and symbol (→, ·, %, icons) exactly as in the English.
+4. Delete the keys for text you removed. `python -m pytest tests/unit/test_panel_i18n.py`
+   shows any that are left.
+
+Never add to `frontend/i18n/baseline.json`. It lists the strings that were
+untranslated when the checks began, and it may only shrink. A brand or
+technical word that stays in English (LLM, TTS) goes in
+`frontend/i18n/keep_english.json`.
+
+The setup dialog uses `custom_components/nova/translations/`, with `en.json` as
+the English source. There is no `strings.json`.
+
 ## Releasing
 
 Bump the version everywhere it appears with one command:

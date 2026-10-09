@@ -1082,7 +1082,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v8.14.2
+ * v8.15.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1159,7 +1159,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.14.2 ",
+      console.log("%c Nova Panel %c v8.15.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -1377,6 +1377,24 @@ class NovaPanel extends HTMLElement {
     } catch (_) { /* English DOM remains usable if localization fails. */ }
   }
 
+  // Text with a value inside it, such as "{count} OCCUPIED", which the swap
+  // above can never match. The template is the key, so a translation can move
+  // the value. Values go in exactly as given: callers escape them where they
+  // did before. With no translation, the English comes out exactly as before.
+  //   _t      plain text: textContent, confirm()
+  //   _tHtml  markup and attributes: a translation's own text is escaped
+  _t(template, values) { return this._fillTemplate(template, values, false); }
+  _tHtml(template, values) { return this._fillTemplate(template, values, true); }
+
+  _fillTemplate(template, values, html) {
+    const dict = this._uiStrings;
+    const own = !!dict && Object.prototype.hasOwnProperty.call(dict, template);
+    const text = own ? (html ? this._esc(dict[template]) : dict[template]) : template;
+    const vals = values || {};
+    return text.replace(/\{(\w+)\}/g, (m, k) =>
+      (Object.prototype.hasOwnProperty.call(vals, k) ? String(vals[k]) : m));
+  }
+
   _html() {
     const tab = this._currentTab;
     return `
@@ -1460,8 +1478,8 @@ ${this._htmlDashboardBody()}`;
       : problems === null
         ? `<small>Checking…</small>`
         : problems.length === 0
-          ? `<small>All ${this._esc(active.length)} checks passed.</small>`
-          : `<small>${this._esc(problems.length)} need attention:</small>${problems.map(c => `
+          ? `<small>${this._tHtml("All {count} checks passed.", { count: this._esc(active.length) })}</small>`
+          : `<small>${this._tHtml("{count} need attention:", { count: this._esc(problems.length) })}</small>${problems.map(c => `
             <small class="welcome-problem">• <b>${this._esc(c.name)}</b>: ${this._esc(c.detail || "")}${
               c.suggested_fix ? ` Fix: ${this._esc(c.suggested_fix)}` : ""}</small>`).join("")}`;
     const hello = this._helloState || {};
@@ -1474,7 +1492,7 @@ ${this._htmlDashboardBody()}`;
         <div class="panel-head"><div><div class="panel-title">Welcome — get Nova working for you</div>
           <div class="toggle-desc">These steps are optional. Nova can already answer you.</div></div>
           <button class="camera-toggle" id="onboardingDismiss" title="Dismiss">DISMISS</button></div>
-        <div class="onboarding-progress"><span>${this._esc(onboarding.done_count || 0)}/${this._esc(onboarding.total || 0)} DONE</span><i style="width:${Math.round(((onboarding.done_count || 0) / Math.max(1, onboarding.total || 1)) * 100)}%"></i></div>
+        <div class="onboarding-progress"><span>${this._tHtml("{done}/{total} DONE", { done: this._esc(onboarding.done_count || 0), total: this._esc(onboarding.total || 0) })}</span><i style="width:${Math.round(((onboarding.done_count || 0) / Math.max(1, onboarding.total || 1)) * 100)}%"></i></div>
         <div class="welcome-checks" id="welcomeChecks"><b>Setup checks</b>${checksLine}</div>
         <div class="onboarding-steps">${(onboarding.steps || []).map(step => `<div class="onboarding-step${step.done ? " done" : ""}">
           <span>${step.done ? "✓" : "○"}</span><div><b>${this._esc(step.label)}</b><small>${this._esc(step.hint)}</small></div>
@@ -1810,7 +1828,7 @@ ${this._htmlDashboardBody()}`;
         return `
           <div class="cfg-row">
             <label>${this._esc(targetName)}</label>
-            <span class="toggle-desc">approval: ${this._esc(t.approval_result)} · execution: ${this._esc(t.execution_result)}</span>
+            <span class="toggle-desc">${this._tHtml("approval: {approval} · execution: {execution}", { approval: this._esc(t.approval_result), execution: this._esc(t.execution_result) })}</span>
           </div>
           ${t.reason_text ? `<div class="stub-body" style="margin:-4px 0 6px;font-size:11px">${this._esc(t.reason_text)}</div>` : ""}`;
       }).join("");
@@ -1868,7 +1886,7 @@ ${this._htmlDashboardBody()}`;
       this._decisionsCursor = result.next_cursor || null;
       this._renderDecisionRows();
     } catch (err) {
-      if (container) container.innerHTML = `<div class="new-log-entry-error" style="padding:12px">Error loading decisions: ${this._esc(err)}</div>`;
+      if (container) container.innerHTML = `<div class="new-log-entry-error" style="padding:12px">${this._tHtml("Error loading decisions: {error}", { error: this._esc(err) })}</div>`;
     }
   }
 
@@ -1877,7 +1895,7 @@ ${this._htmlDashboardBody()}`;
     if (!container) return;
     const entries = this._decisions || [];
     const countEl = this.shadowRoot?.getElementById("newDecCount");
-    if (countEl) countEl.textContent = `${entries.length} decision(s) loaded`;
+    if (countEl) countEl.textContent = this._t("{count} decision(s) loaded", { count: entries.length });
     container.innerHTML = entries.length ? entries.map(d => {
       const outcomeCls = d.outcome === "good" ? "diag-ok" : d.outcome === "wrong" ? "diag-down"
         : d.outcome === "unnecessary" ? "diag-warn" : "diag-idle";
@@ -1916,7 +1934,7 @@ ${this._htmlDashboardBody()}`;
       const row = (label, value) => `<div class="cfg-row"><label>${this._esc(label)}</label><span>${this._esc(
         value === null || value === undefined || value === "" ? "—" : String(value))}</span></div>`;
       drawer.innerHTML = `
-        <div class="panel-head"><div class="panel-title">Decision #${this._esc(d.id)}</div>
+        <div class="panel-head"><div class="panel-title">${this._tHtml("Decision #{id}", { id: this._esc(d.id) })}</div>
           <button class="mode-chip" id="newDecCloseDrawer">CLOSE</button></div>
         ${row("Route", d.kind)}
         ${row("Decision", d.decision)}
@@ -1949,7 +1967,7 @@ ${this._htmlDashboardBody()}`;
       });
       drawer.querySelector("#newDecReplay")?.addEventListener("click", () => this._replayDecision(d.id));
     } catch (err) {
-      drawer.innerHTML = `<div class="new-log-entry-error" style="padding:12px">Error loading decision: ${this._esc(err)}</div>`;
+      drawer.innerHTML = `<div class="new-log-entry-error" style="padding:12px">${this._tHtml("Error loading decision: {error}", { error: this._esc(err) })}</div>`;
     }
   }
 
@@ -1973,7 +1991,7 @@ ${this._htmlDashboardBody()}`;
         ${row("Within 0.05 of threshold", r.within_0_05_of_threshold ? "Yes" : "No")}
       `;
     } catch (err) {
-      if (resultEl) resultEl.innerHTML = `<div class="new-log-entry-error" style="padding:12px">Error running replay: ${this._esc(err)}</div>`;
+      if (resultEl) resultEl.innerHTML = `<div class="new-log-entry-error" style="padding:12px">${this._tHtml("Error running replay: {error}", { error: this._esc(err) })}</div>`;
     }
   }
 
@@ -1984,7 +2002,7 @@ ${this._htmlDashboardBody()}`;
       const disableButtons = () => this.shadowRoot?.querySelectorAll(".new-dec-fb")
         .forEach(b => b.setAttribute("disabled", "disabled"));
       if (result.status === "ok") {
-        if (statusEl) statusEl.textContent = `Recorded: ${verdict}`;
+        if (statusEl) statusEl.textContent = this._t("Recorded: {verdict}", { verdict });
         disableButtons();
         this._fetchDecisions(true);
       } else if (result.status === "already_judged") {
@@ -1994,7 +2012,7 @@ ${this._htmlDashboardBody()}`;
         if (statusEl) statusEl.textContent = "Decision not found.";
       }
     } catch (err) {
-      if (statusEl) statusEl.textContent = `Error: ${this._esc(err)}`;
+      if (statusEl) statusEl.textContent = this._t("Error: {error}", { error: this._esc(err) });
     }
   }
 
@@ -2088,7 +2106,7 @@ ${this._htmlDashboardBody()}`;
       // usable cached to fall back on (a genuine first-load failure).
       if (!this._debugLogEntries || !this._debugLogEntries.length) {
         const c = this.shadowRoot?.getElementById("newLogEntries");
-        if (c) c.innerHTML = `<div class="new-log-entry-error" style="padding:12px">Error loading logs: ${this._esc(err)}</div>`;
+        if (c) c.innerHTML = `<div class="new-log-entry-error" style="padding:12px">${this._tHtml("Error loading logs: {error}", { error: this._esc(err) })}</div>`;
       } else {
         console.warn("Nova: System Log refresh failed, keeping cached entries", err);
       }
@@ -2235,7 +2253,7 @@ ${this._htmlDashboardBody()}`;
     const groups = this._personRoutines?.groups || {};
     const people = Object.keys(groups).sort();
     if (this._personRoutines?.error) {
-      list.innerHTML = `<div class="stub-body">Couldn't load routines — ${this._esc(this._personRoutines.error)}</div>`;
+      list.innerHTML = `<div class="stub-body">${this._tHtml("Couldn't load routines — {error}", { error: this._esc(this._personRoutines.error) })}</div>`;
       return;
     }
     if (!people.length) {
@@ -2267,7 +2285,7 @@ ${this._htmlDashboardBody()}`;
     const count = this.shadowRoot?.getElementById("newMemCount");
     if (count) count.textContent = facts.length + (facts.length === 1 ? " fact" : " facts");
     if (this._knowledge?.error) {
-      list.innerHTML = `<div class="stub-body">Couldn't load memory — ${this._esc(this._knowledge.error)}</div>`;
+      list.innerHTML = `<div class="stub-body">${this._tHtml("Couldn't load memory — {error}", { error: this._esc(this._knowledge.error) })}</div>`;
       return;
     }
     if (!facts.length) {
@@ -2285,7 +2303,7 @@ ${this._htmlDashboardBody()}`;
       const items = groups[subj].map(f => {
         const soft = (f.source !== "stated" || (f.confidence ?? 1) < 0.9);
         const hedge = soft
-          ? `<span title="${this._esc(f.source)} · ${Math.round((f.confidence ?? 1) * 100)}% sure">~</span>`
+          ? `<span title="${this._tHtml("{source} · {percent}% sure", { source: this._esc(f.source), percent: Math.round((f.confidence ?? 1) * 100) })}">~</span>`
           : "";
         const exp = f.expires_at ? `<span title="expires">⌛</span>` : "";
         return `
@@ -2432,10 +2450,10 @@ ${this._htmlDashboardBody()}`;
     if (!pendingBox || !list) return;
     const rel = this._relations || { pending: [], confirmed: [], cap: 500 };
     const countEl = root.getElementById("newRelationsCount");
-    if (countEl) countEl.textContent = `${rel.confirmed.length} confirmed · ${rel.pending.length} waiting`;
+    if (countEl) countEl.textContent = this._t("{confirmed} confirmed · {waiting} waiting", { confirmed: rel.confirmed.length, waiting: rel.pending.length });
     if (rel.error) {
       pendingBox.innerHTML = "";
-      list.innerHTML = `<div class="stub-body">Couldn't load relations — ${this._esc(rel.error)}</div>`;
+      list.innerHTML = `<div class="stub-body">${this._tHtml("Couldn't load relations — {error}", { error: this._esc(rel.error) })}</div>`;
       return;
     }
     pendingBox.innerHTML = rel.pending.length ? `
@@ -2581,7 +2599,7 @@ ${this._htmlDashboardBody()}`;
     }
     if (statusEl) {
       statusEl.innerHTML = s.called_off
-        ? `<span class="diag-warn">CALLED OFF · ${s.suppressed_for}s</span>`
+        ? `<span class="diag-warn">${this._tHtml("CALLED OFF · {seconds}s", { seconds: s.suppressed_for })}</span>`
         : `<span class="diag-ok">ARMED</span>`;
     }
     const snap = s.last_snapshot;
@@ -2596,7 +2614,7 @@ ${this._htmlDashboardBody()}`;
       html += `<div class="stub-body">No intrusion snapshots captured. This stays empty unless Nova confirms an intruder on camera.</div>`;
     }
     if (s.false_alarms_24h) {
-      html += `<div class="stub-body">${s.false_alarms_24h} false alarm${s.false_alarms_24h === 1 ? "" : "s"} called off in the last 24h</div>`;
+      html += `<div class="stub-body">${this._tHtml(s.false_alarms_24h === 1 ? "{count} false alarm called off in the last 24h" : "{count} false alarms called off in the last 24h", { count: s.false_alarms_24h })}</div>`;
     }
     if (s.acknowledged) {
       html += `<div class="stub-body">✓ Acknowledged — automatic escalation held (you're handling it)</div>`;
@@ -2657,7 +2675,7 @@ ${this._htmlDashboardBody()}`;
       const res = await this._hass.callWS({ type: "nova/intrusion", action: "log", limit: 40 });
       this._ilog = res;
       const L = res?.learning || {};
-      if (side) side.textContent = `${L.labeled || 0}/${L.events || 0} labelled`;
+      if (side) side.textContent = this._t("{labelled}/{events} labelled", { labelled: L.labeled || 0, events: L.events || 0 });
       body.innerHTML = this._renderIntrusionLogHtml(res);
       this._wireIntrusionLabels();
     } catch (err) {
@@ -2673,7 +2691,7 @@ ${this._htmlDashboardBody()}`;
     const damped = ((res.learning || {}).damped_patterns || []).length;
     let html = "";
     if (damped) {
-      html += `<div class="stub-body">Nova has learned ${damped} benign pattern${damped === 1 ? "" : "s"} — low-confidence alerts for these stay quiet.</div>`;
+      html += `<div class="stub-body">${this._tHtml(damped === 1 ? "Nova has learned {count} benign pattern — low-confidence alerts for these stay quiet." : "Nova has learned {count} benign patterns — low-confidence alerts for these stay quiet.", { count: damped })}</div>`;
     }
     for (const e of evs) {
       const when = new Date((e.ts || 0) * 1000).toLocaleString();
@@ -2751,7 +2769,7 @@ ${this._htmlDashboardBody()}`;
             <div class="panel-title">Residents</div>
             <div class="panel-meta" id="facesResidentsMeta">—</div>
           </div>
-          <div class="stub-body">Use the name exactly as Frigate or Double Take reports it. Case and spacing do not matter. Intrusion stand down is <b>${on ? "ON" : "OFF"}</b>${on ? "" : " (the default)"}; change it under Settings → Security alarm.</div>
+          <div class="stub-body">Use the name exactly as Frigate or Double Take reports it. Case and spacing do not matter. Intrusion stand down is <b>${on ? "ON" : "OFF"}</b>${on ? "; change it under Settings → Security alarm." : " (the default); change it under Settings → Security alarm."}</div>
           <div class="cfg-row">
             <input class="cfg-field" id="facesAddName" maxlength="60" placeholder="Resident name">
             <button class="mode-chip" id="facesAdd">ADD RESIDENT</button>
@@ -2798,8 +2816,8 @@ ${this._htmlDashboardBody()}`;
     const faces = f.faces || [];
     const residents = f.residents || [];
     const src = f.sources || {};
-    if (meta) meta.textContent = `${faces.length} RECENT`;
-    if (resMeta) resMeta.textContent = `${residents.length} RESIDENT${residents.length === 1 ? "" : "S"}`;
+    if (meta) meta.textContent = this._t("{count} RECENT", { count: faces.length });
+    if (resMeta) resMeta.textContent = this._t(residents.length === 1 ? "{count} RESIDENT" : "{count} RESIDENTS", { count: residents.length });
     if (!faces.length) {
       body.innerHTML = src.configured === false
         ? `<div class="stub-body">No face recognition source found. Set up Frigate face recognition or Double Take, and make sure Home Assistant has MQTT. Recent faces appear here once one of them names someone.</div>`
@@ -2852,7 +2870,7 @@ ${this._htmlDashboardBody()}`;
     if (!this._hass) return;
     try {
       await this._hass.callWS({ type: "nova/remove_resident", name });
-      if (msg) msg.textContent = `${name} removed.`;
+      if (msg) msg.textContent = this._t("{name} removed.", { name });
     } catch (err) {
       if (msg) msg.textContent = (err && err.message) || "Could not remove that name.";
       return;
@@ -3032,15 +3050,16 @@ ${this._htmlDashboardBody()}`;
     }
     const draw = e.kw == null
       ? `<span class="diag-off">NO METER</span>`
-      : `<span class="${e.over_peak ? "diag-warn" : "diag-ok"}">${e.kw} kW${e.over_peak ? " · OVER PEAK" : ""}</span>`;
-    const agencies = ["advisory", "opt_in", "autonomous"];
-    const agencyChips = agencies.map(a =>
-      `<button class="mode-chip ${a === e.configured_agency ? "mode-chip-on" : ""}" data-agency="${a}">${a.replace("_", "-")}</button>`).join("");
+      : `<span class="${e.over_peak ? "diag-warn" : "diag-ok"}">${e.over_peak ? this._tHtml("{kw} kW · OVER PEAK", { kw: e.kw }) : `${e.kw} kW`}</span>`;
+    // Fixed labels, so each one is a whole string the translations can match.
+    const agencyLabels = { advisory: "advisory", opt_in: "opt-in", autonomous: "autonomous" };
+    const agencyChips = Object.keys(agencyLabels).map(a =>
+      `<button class="mode-chip ${a === e.configured_agency ? "mode-chip-on" : ""}" data-agency="${a}">${agencyLabels[a]}</button>`).join("");
     const advice = (e.advice || []).map(a => `<div class="stub-body">${this._esc(a)}</div>`).join("");
     const running = e.running || [];
     const runRows = running.length
       ? `<div class="mode-bind-head">Running now</div>` + running.map(r =>
-          `<div class="cfg-row"><label>${this._esc(r.name || r.entity)}</label><span class="${r.shed_ok ? "" : "diag-warn"}">${r.watts} W${r.shed_ok ? "" : " · protected"}</span></div>`).join("")
+          `<div class="cfg-row"><label>${this._esc(r.name || r.entity)}</label><span class="${r.shed_ok ? "" : "diag-warn"}">${r.shed_ok ? `${r.watts} W` : this._tHtml("{watts} W · protected", { watts: r.watts })}</span></div>`).join("")
       : "";
     return `
       <div class="cfg-row"><label>Current draw</label>${draw}</div>
@@ -3624,7 +3643,7 @@ ${this._htmlDashboardBody()}`;
     this._outlookSetText(msg, note);
     if (msg) msg.hidden = !note;
     this._outlookSetText(root.getElementById("outlookUpdated"),
-      o.updated_at ? `Updated ${this._outlookTime(o.updated_at)}` : "");
+      o.updated_at ? this._t("Updated {time}", { time: this._outlookTime(o.updated_at) }) : "");
 
     const points = o.error ? [] : (o.points || []);
     const bands = o.error ? [] : (o.bands || []);
@@ -3637,7 +3656,7 @@ ${this._htmlDashboardBody()}`;
             <li class="outlook-item" data-kind="${this._esc(a.kind || "")}">
               <div class="outlook-item-title">${this._esc(a.title || "")}</div>
               <div class="stub-body">${this._esc(a.message || "")}</div>${
-                a.saving != null ? `\n              <div class="outlook-saving">Saves about ${this._esc(this._energyMoney(a.saving, o.currency))}</div>` : ""}
+                a.saving != null ? `\n              <div class="outlook-saving">${this._tHtml("Saves about {amount}", { amount: this._esc(this._energyMoney(a.saving, o.currency)) })}</div>` : ""}
             </li>`).join("") || `<li class="outlook-calm stub-body">Nothing to change right now.</li>`;
     }
     this._outlookSetHtml(adviceEl, adviceHtml);
@@ -3806,14 +3825,14 @@ ${this._htmlDashboardBody()}`;
         <div class="panel new-sug" data-sug-id="${s.id}">
           <div class="panel-head">
             <div class="panel-title">${this._esc(label)}</div>
-            <div class="panel-meta" style="color:${confColor}">${pct}% confident</div>
+            <div class="panel-meta" style="color:${confColor}">${this._tHtml("{percent}% confident", { percent: pct })}</div>
           </div>
           ${s.why_headline ? `<div class="stub-body"><b>${this._esc(s.why_headline)}</b></div>` : ""}
           <div class="stub-body">${this._esc(s.description)}</div>
           ${overlap}
           ${evidence ? `<div class="mode-bind-head">What Nova observed</div><ul style="margin:0 0 10px;padding-left:18px;font-size:12px;color:var(--ink-dim);line-height:1.6">${evidence}</ul>` : ""}
           ${entities}
-          <div class="cfg-row"><span class="toggle-desc">seen ${s.count || "?"}× in 30 days</span></div>
+          <div class="cfg-row"><span class="toggle-desc">${this._tHtml("seen {count}× in 30 days", { count: s.count || "?" })}</span></div>
           <div class="mode-grid">
             <button class="mode-chip new-sug-approve">✓ Create automation</button>
             <button class="mode-chip new-sug-dismiss">✕ Dismiss</button>
@@ -3826,7 +3845,7 @@ ${this._htmlDashboardBody()}`;
       <div class="panel">
         <div class="panel-head">
           <div class="panel-title">Learned Opportunities</div>
-          <div class="panel-meta">${sugs.length} suggestion${sugs.length === 1 ? "" : "s"} to review</div>
+          <div class="panel-meta">${this._tHtml(sugs.length === 1 ? "{count} suggestion to review" : "{count} suggestions to review", { count: sugs.length })}</div>
         </div>
         <div class="stub-body">Automations Nova has learned from watching your routines. Review each — approve to create it in Home Assistant, or dismiss it. Nothing runs until you approve, and you can see the exact automation before deciding.</div>
       </div>
@@ -3853,7 +3872,7 @@ ${this._htmlDashboardBody()}`;
       <details class="panel">
         <summary class="panel-head" style="cursor:pointer">
           <div class="panel-title">Filtered by AI review</div>
-          <div class="panel-meta">${items.length} not suggested</div>
+          <div class="panel-meta">${this._tHtml("{count} not suggested", { count: items.length })}</div>
         </summary>
         <div class="stub-body">These learned patterns were checked by the Suggestion Review model and turned down, so Nova won't suggest them again. Bring one back if you think the review got it wrong.</div>
         ${rows}
@@ -3902,14 +3921,14 @@ ${this._htmlDashboardBody()}`;
       return `
         <div class="cfg-row">
           <label>${this._esc(a.name || a.entity_id)}</label>
-          <span class="toggle-desc">${this._esc(status)} · ${this._esc(origin)} · ${this._esc(scope)} · last triggered ${this._esc(triggered)}</span>
+          <span class="toggle-desc">${this._tHtml("{status} · {origin} · {scope} · last triggered {when}", { status: this._esc(status), origin: this._esc(origin), scope: this._esc(scope), when: this._esc(triggered) })}</span>
         </div>`;
     }).join("");
     return `
       <div class="panel">
         <div class="panel-head">
           <div class="panel-title">Existing Home Assistant Automations</div>
-          <div class="panel-meta">${automations.length} loaded</div>
+          <div class="panel-meta">${this._tHtml("{count} loaded", { count: automations.length })}</div>
         </div>
         <div class="stub-body">Nova uses this read-only inventory to avoid relearning routines Home Assistant already handles. It refreshes at startup and whenever automations are reloaded.</div>
         ${rows}
@@ -3945,12 +3964,12 @@ ${this._htmlDashboardBody()}`;
     const rows = trials.map(t => {
       const when = t.last_run ? new Date(t.last_run * 1000).toLocaleString() : "never";
       const outcome = t.manual_outcome
-        ? `<span class="toggle-desc">Feedback: ${this._esc(t.manual_outcome === "working" ? "Working" : "Needs adjustment")}</span>`
+        ? `<span class="toggle-desc">${t.manual_outcome === "working" ? "Feedback: Working" : "Feedback: Needs adjustment"}</span>`
         : "";
       return `
         <div class="cfg-row">
           <label>${this._esc(t.automation_id)}</label>
-          <span class="toggle-desc">ran ${t.run_count || 0}× · last ${this._esc(when)}</span>
+          <span class="toggle-desc">${this._tHtml("ran {count}× · last {when}", { count: t.run_count || 0, when: this._esc(when) })}</span>
         </div>
         <div class="mode-grid" data-trial-id="${t.id}">
           <button class="mode-chip new-trial-fb" data-verdict="working">WORKING</button>
@@ -3962,7 +3981,7 @@ ${this._htmlDashboardBody()}`;
       <div class="panel">
         <div class="panel-head">
           <div class="panel-title">Created by Nova</div>
-          <div class="panel-meta">${trials.length} tracked</div>
+          <div class="panel-meta">${this._tHtml("{count} tracked", { count: trials.length })}</div>
         </div>
         <div class="stub-body">Installing an automation means you accepted the suggestion — it isn't proof the automation works. This shows what's actually been observed running; "Working" and "Needs adjustment" are your own call, not Nova's.</div>
         ${rows}
@@ -4027,7 +4046,8 @@ ${this._htmlDashboardBody()}`;
           note.style.color = "var(--warn)";
           card.querySelector(".new-sug-approve")?.parentElement?.before(note);
         }
-        note.textContent = `⚠ ${(res && res.reason) || `Could not ${action} this suggestion. Try again.`}`;
+        note.textContent = `⚠ ${(res && res.reason) || this._t(action === "approve"
+          ? "Could not approve this suggestion. Try again." : "Could not dismiss this suggestion. Try again.")}`;
       };
       card.querySelector(".new-sug-approve")?.addEventListener("click", () => act("approve"));
       card.querySelector(".new-sug-dismiss")?.addEventListener("click", () => act("dismiss"));
@@ -4420,16 +4440,20 @@ ${this._htmlDashboardBody()}`;
     if (!list) return;
     const data = this._mmwave || { rooms: [], summary: {} };
     const s = data.summary || {};
-    if (sumEl) sumEl.textContent = s.rooms_with_mmwave ? `◉ ${s.rooms_detecting || 0}/${s.rooms_with_mmwave} OCCUPIED` : "◉ NONE";
+    if (sumEl) sumEl.textContent = s.rooms_with_mmwave ? this._t("◉ {detecting}/{rooms} OCCUPIED", { detecting: s.rooms_detecting || 0, rooms: s.rooms_with_mmwave }) : "◉ NONE";
     if (data.error) { list.innerHTML = `<div class="toggle-desc">Couldn't read sensors — restart Home Assistant after updating, then reopen.</div>`; return; }
     const rooms = data.rooms || [];
     if (!rooms.length) { list.innerHTML = `<div class="toggle-desc">No presence, motion, or mmWave sensors found. Assign occupancy sensors to areas in Home Assistant and they'll appear here.</div>`; return; }
     list.innerHTML = rooms.map(r => {
       const on = r.detecting_count > 0;
-      const sensorLine = r.sensor_count > 1 ? `${r.detecting_count}/${r.sensor_count} sensors` : `${r.sensor_count} sensor`;
+      const sensorLine = r.sensor_count > 1
+        ? this._tHtml("{detecting}/{total} sensors", { detecting: r.detecting_count, total: r.sensor_count })
+        : this._tHtml("{count} sensor", { count: r.sensor_count });
       return `<div class="cfg-row">
         <label>${this._esc(r.name)}${r.outdoor ? " ▲" : ""}</label>
-        <span class="toggle-desc">${on ? "OCCUPIED" : "clear"} · ${sensorLine} · ${on ? "now" : this._esc(r.freshest)}</span>
+        <span class="toggle-desc">${on
+          ? this._tHtml("OCCUPIED · {sensors} · now", { sensors: sensorLine })
+          : this._tHtml("clear · {sensors} · {age}", { sensors: sensorLine, age: this._esc(r.freshest) })}</span>
       </div>`;
     }).join("");
   }
@@ -4789,7 +4813,9 @@ ${this._htmlDashboardBody()}`;
           ${cfg.operational_mode_auto !== false ? "ON" : "OFF"}
         </button>
       </div>
-      <div class="stub-body">Active: <strong>${this._esc(active.toUpperCase())}</strong>${m.description ? " — " + this._esc(m.description) : ""}. Safety always stays active.</div>
+      <div class="stub-body">Active: <strong>${this._esc(active.toUpperCase())}</strong>${m.description
+        ? " " + this._tHtml("— {description}. Safety always stays active.", { description: this._esc(m.description) })
+        : ". Safety always stays active."}</div>
       <div class="mode-grid">${modeChips}</div>
       <details class="mode-bindings"${this._modeBindingsOpen ? " open" : ""}>
       <summary class="mode-bind-head">Mode bindings — scope Lab &amp; Movie to specific rooms</summary>
@@ -5137,7 +5163,7 @@ ${this._htmlDashboardBody()}`;
           // endpoint. Keep it selected and offer the live list alongside
           // it. (Previously this auto-picked and SAVED a different model
           // — often just the alphabetically-first one — on every render.)
-        opts += `<option value="${this._esc(cur)}" selected>${this._esc(cur)} — not in the live list</option>`;
+        opts += `<option value="${this._esc(cur)}" selected>${this._tHtml("{model} — not in the live list", { model: this._esc(cur) })}</option>`;
         opts += models.map(m => `<option value="${this._esc(m)}">${this._esc(label(m))}</option>`).join("");
       } else {
         opts += models.map(m => `<option value="${this._esc(m)}"${m === cur ? " selected" : ""}>${this._esc(label(m))}</option>`).join("");
@@ -5145,7 +5171,7 @@ ${this._htmlDashboardBody()}`;
     } else {
       const err = res && res.error ? ` — ${String(res.error).slice(0, 48)}` : "";
       opts += (cur ? `<option value="${this._esc(cur)}" selected>${this._esc(cur)}</option>` : "");
-      opts += `<option value="" disabled>no models found${this._esc(err)}</option>`;
+      opts += `<option value="" disabled>${this._tHtml("no models found{error}", { error: this._esc(err) })}</option>`;
     }
     opts += `<option value="__custom__">✎ Custom…</option>`;
     selectEl.innerHTML = opts;
@@ -5260,7 +5286,7 @@ ${this._htmlDashboardBody()}`;
               this._populateModelSelect(provider, row.querySelector(".new-model-select"), res);
             }
           });
-          if (status) status.textContent = `Connected. ${res.models.length} model${res.models.length === 1 ? "" : "s"} found.`;
+          if (status) status.textContent = this._t(res.models.length === 1 ? "Connected. {count} model found." : "Connected. {count} models found.", { count: res.models.length });
           markDirty("Endpoint tested. Changes are not saved yet.");
         } catch (err) {
           if (status) status.textContent = err?.message || "Could not test this endpoint.";
@@ -5653,7 +5679,7 @@ ${this._htmlDashboardBody()}`;
           ["custom", "Custom feed"],
         ], source)}</select>
       </div>
-      ${credits[source] ? `<div class="toggle-desc hazard-source-credit">Source: ${this._esc(credits[source])}</div>` : ""}
+      ${credits[source] ? `<div class="toggle-desc hazard-source-credit">${this._tHtml("Source: {source}", { source: this._esc(credits[source]) })}</div>` : ""}
       ${source === "custom" ? `
       <div class="panel-head" style="margin-top:10px"><div class="panel-title">Custom CAP feed (not tested by Nova)</div></div>
       <div class="stub-body">An https address of one CAP alert, or an Atom or RSS list of them. Nova only alerts when an alert's area covers your home, or matches a code or name below.</div>
@@ -5720,7 +5746,7 @@ ${this._htmlDashboardBody()}`;
         <div><b class="hazard-level" style="color:${colour[w.level] || "inherit"}">${this._esc(String(w.level || "").toUpperCase())}</b> ${this._esc(w.headline_text || "")}</div>
         <div class="toggle-desc">${this._esc((w.counties || []).join(", "))}${w.from && w.to ? ` · ${this._esc(w.from)} to ${this._esc(w.to)}` : ""}</div>
         ${w.description_text ? `<div class="stub-body hazard-description" style="white-space:pre-line">${this._esc(w.description_text)}</div>` : ""}
-        <div class="toggle-desc hazard-source">Source: ${this._esc(w.source_label || "")}</div>
+        <div class="toggle-desc hazard-source">${this._tHtml("Source: {source}", { source: this._esc(w.source_label || "") })}</div>
       </div>`).join("");
   }
 
@@ -5810,18 +5836,20 @@ ${this._htmlDashboardBody()}`;
     const q = res.earthquakes || [], w = res.weather || [], d = res.disasters || [];
     const warn = res.warnings || [];
     if (!q.length && !w.length && !d.length && !warn.length) {
-      return `<div class="stub-body">✓ All clear near ${res.center ? res.center[0] + ", " + res.center[1] : "home"} — no weather warnings or other hazards from the sources that are on.</div>`;
+      return `<div class="stub-body">${res.center
+        ? this._tHtml("✓ All clear near {place} — no weather warnings or other hazards from the sources that are on.", { place: res.center[0] + ", " + res.center[1] })
+        : "✓ All clear near home — no weather warnings or other hazards from the sources that are on."}</div>`;
     }
     let html = warn.length ? this._renderHazardWarnings(warn) : "";
     for (const e of q) {
       const mag = (typeof e.mag === "number") ? `M${e.mag.toFixed(1)}` : "M?";
-      html += `<div class="stub-body"><b class="diag-warn">${mag}</b> ${this._esc(e.place)} — ${e.dist_km} km away</div>`;
+      html += `<div class="stub-body"><b class="diag-warn">${mag}</b> ${this._tHtml("{place} — {distance} km away", { place: this._esc(e.place), distance: e.dist_km })}</div>`;
     }
     for (const e of w) {
       html += `<div class="stub-body"><b class="diag-down">${this._esc(e.severity)}</b> ${this._esc(e.event)}${e.area ? " — " + this._esc(e.area) : ""}</div>`;
     }
     for (const e of d) {
-      html += `<div class="stub-body"><b class="diag-warn">${this._esc(e.category)}</b> ${this._esc(e.title)} — ${e.dist_km} km away</div>`;
+      html += `<div class="stub-body"><b class="diag-warn">${this._esc(e.category)}</b> ${this._tHtml("{place} — {distance} km away", { place: this._esc(e.title), distance: e.dist_km })}</div>`;
     }
     return html;
   }
@@ -5958,7 +5986,7 @@ ${this._htmlDashboardBody()}`;
       ${row("Presence Routines", s.cog_presence || 0)}
       ${presenceRows}
       ${row("Cog Escalated", s.cog_escalated || 0)}
-      ${row("Local Decisions", `${s.local_rate || 0}% (${s.local_decisions || 0} local / ${s.cloud_calls || 0} cloud)`)}
+      ${row("Local Decisions", this._tHtml("{rate}% ({local} local / {cloud} cloud)", { rate: s.local_rate || 0, local: s.local_decisions || 0, cloud: s.cloud_calls || 0 }))}
       ${row("Learned Patterns", s.learned_patterns || 0)}
       ${row("LLM Link", llmLabel, llmCls)}`;
   }
@@ -6100,7 +6128,7 @@ ${this._htmlDashboardBody()}`;
     const head = `
       <div class="cfg-row">
         <button class="new-cam-collapse" id="newCamListToggle" aria-expanded="${open}">
-          <span class="new-cam-caret">${open ? "▾" : "▸"}</span> ${nOn} of ${cams.length} cameras in use
+          <span class="new-cam-caret">${open ? "▾" : "▸"}</span> ${this._tHtml("{on} of {total} cameras in use", { on: nOn, total: cams.length })}
         </button>
         <div style="display:flex;gap:6px">
           <button class="mode-chip" id="newCamEnableAll">Enable all</button>
@@ -6123,7 +6151,7 @@ ${this._htmlDashboardBody()}`;
             <input class="cfg-field new-camset-name" style="flex:1" type="text" data-cam="${this._esc(c.entity_id)}" value="${this._esc(custom)}" placeholder="${this._esc(c.raw_name || c.entity_id)}" autocomplete="off">
           </div>
           <div class="mode-grid">
-            ${chip("auto", `AUTO (${resolved})`)}
+            ${chip("auto", resolved === "outdoor" ? "AUTO (outdoor)" : "AUTO (indoor)")}
             ${chip("indoor", "⌂ INDOOR")}
             ${chip("outdoor", "▲ OUTDOOR")}
           </div>
@@ -6289,7 +6317,7 @@ ${this._htmlDashboardBody()}`;
           <button class="mode-chip" id="newDbtScan">Scan backlog</button>
         </div>
       </div>
-      <div class="stub-body">${total} analysed · ${notable} notable · ${this._esc(srcLine)}</div>
+      <div class="stub-body">${this._tHtml("{total} analysed · {notable} notable · {sources}", { total, notable, sources: this._esc(srcLine) })}</div>
       ${patternsBlock}
       ${rows}`;
   }
@@ -6310,7 +6338,7 @@ ${this._htmlDashboardBody()}`;
       return `<div class="stub-body">Couldn't load — restart Home Assistant after updating.</div>`;
     }
     const status = b.enabled
-      ? `<span class="diag-ok">ON · ${b.found || 0} sensor${b.found === 1 ? "" : "s"}</span>`
+      ? `<span class="diag-ok">${this._tHtml(b.found === 1 ? "ON · {count} sensor" : "ON · {count} sensors", { count: b.found || 0 })}</span>`
       : `<span class="diag-off">OFF</span>`;
     const ents = b.entities || [];
     let body;
@@ -6379,13 +6407,13 @@ ${this._htmlDashboardBody()}`;
     if (d.error) return `<div class="stub-body">Couldn't reach the library — restart Home Assistant after updating, then reopen.</div>`;
     const sources = d.sources || [];
     if (!sources.length) {
-      return `<div class="stub-body">No documents ingested yet. Add PDF/.txt/.md files to <code>${this._esc(d.directory || "nova/documents in your config folder")}</code> and press Ingest.${d.chroma ? "" : " (Vector search needs ChromaDB; keyword fallback is active.)"}</div>`;
+      return `<div class="stub-body">No documents ingested yet. Add PDF/.txt/.md files to <code>${this._esc(d.directory || "nova/documents in your config folder")}</code>${d.chroma ? " and press Ingest." : " and press Ingest. (Vector search needs ChromaDB; keyword fallback is active.)"}</div>`;
     }
     return sources.map(s => `
       <div class="cfg-row">
         <label>${this._esc(s.source)}</label>
         <div style="display:flex;align-items:center;gap:8px">
-          <span class="toggle-desc">${s.chunks} chunks</span>
+          <span class="toggle-desc">${this._tHtml("{count} chunks", { count: s.chunks })}</span>
           <button class="new-doclib-del" data-src="${this._esc(s.source)}" title="Remove document">✕</button>
         </div>
       </div>`).join("");
@@ -6417,7 +6445,7 @@ ${this._htmlDashboardBody()}`;
     }
     return `
       <div class="cfg-row"><label>Search</label><span class="diag-off">KEYWORD (FTS)</span></div>
-      <div class="stub-body">Enable semantic search to match on meaning, using your Ollama server (${this._esc(v.model || "nomic-embed-text")}). No install, no ChromaDB. Re-ingest afterward to embed existing docs.</div>
+      <div class="stub-body">${this._tHtml("Enable semantic search to match on meaning, using your Ollama server ({model}). No install, no ChromaDB. Re-ingest afterward to embed existing docs.", { model: this._esc(v.model || "nomic-embed-text") })}</div>
       <div class="cfg-row"><button class="mode-chip" id="newVecbkToggle" data-mode="enable">⬆ ENABLE SEMANTIC SEARCH</button></div>`;
   }
 
@@ -6426,7 +6454,7 @@ ${this._htmlDashboardBody()}`;
     const backend = d.chroma ? "VECTOR" : d.fts ? "KEYWORD" : "NONE";
     return `
       <div class="stub-body">Drop manuals &amp; receipts (PDF, .txt, .md) into <code>${this._esc(d.directory || "nova/documents in your config folder")}</code> or upload below, then ingest. Ask Nova "what's the furnace filter size?" and it answers from your paperwork.</div>
-      <div class="cfg-row"><label>Backend</label><span>${this._esc(backend)} · ${d.chunk_count || 0} chunks</span></div>
+      <div class="cfg-row"><label>Backend</label><span>${this._tHtml("{backend} · {count} chunks", { backend: this._esc(backend), count: d.chunk_count || 0 })}</span></div>
       ${this._renderVectorBackendBody()}
       <div class="mode-bind-head">Library</div>
       <div class="cfg-row">
@@ -6463,7 +6491,7 @@ ${this._htmlDashboardBody()}`;
       btn.addEventListener("click", async () => {
         const src = btn.getAttribute("data-src");
         if (!src || !this._hass) return;
-        if (!window.confirm(`Remove "${src}" from the library? This deletes the file and its indexed chunks.`)) return;
+        if (!window.confirm(this._t("Remove \"{name}\" from the library? This deletes the file and its indexed chunks.", { name: src }))) return;
         try {
           await this._hass.callWS({ type: "nova/documents", action: "delete", filename: src });
           await this._fetchDocLibrary(); // triggers a full _render() when in the settings tab
@@ -6686,7 +6714,7 @@ ${this._htmlDashboardBody()}`;
         </div>`).join("");
     }
     const feedMeta = root.getElementById("feedMeta");
-    if (feedMeta) feedMeta.textContent = `LAST ${entries.length}`;
+    if (feedMeta) feedMeta.textContent = this._t("LAST {count}", { count: entries.length });
 
     // areas
     const areasGridEl = root.getElementById("areasGrid");
@@ -6704,7 +6732,7 @@ ${this._htmlDashboardBody()}`;
       });
     }
     const areasMeta = root.getElementById("areasMeta");
-    if (areasMeta) areasMeta.textContent = `${d.occupied} OCCUPIED · ${d.areasMonitored} MONITORED`;
+    if (areasMeta) areasMeta.textContent = this._t("{occupied} OCCUPIED · {monitored} MONITORED", { occupied: d.occupied, monitored: d.areasMonitored });
 
     this._renderSolarPanel();
     this._renderMutesPanel();
@@ -6735,11 +6763,11 @@ ${this._htmlDashboardBody()}`;
     const goals = d.goals || [];
     const goalList = root.getElementById("goalList");
     const goalsMeta = root.getElementById("goalsMeta");
-    if (goalsMeta) goalsMeta.textContent = `${goals.filter(g => g.status === "active").length} ACTIVE`;
+    if (goalsMeta) goalsMeta.textContent = this._t("{count} ACTIVE", { count: goals.filter(g => g.status === "active").length });
     if (goalList) {
       goalList.innerHTML = goals.length ? goals.map(g => {
         const active = g.status === "active";
-        const progress = g.steps_total ? `${g.steps_done || 0}/${g.steps_total} STEPS` : "OPEN OUTCOME";
+        const progress = g.steps_total ? this._t("{done}/{total} STEPS", { done: g.steps_done || 0, total: g.steps_total }) : "OPEN OUTCOME";
         return `<div class="goal-row">
           <div class="goal-copy"><b>${this._esc(g.title || g.outcome || `Goal ${g.id}`)}</b>
             <span>${this._esc(g.outcome || "")}</span>
@@ -6757,7 +6785,7 @@ ${this._htmlDashboardBody()}`;
       const cams = d.cameras || [];
       camPanel.hidden = cams.length === 0;
       const camToggle = root.getElementById("camToggle");
-      if (camToggle) camToggle.textContent = this._camOpen ? "HIDE CAMERAS ▴" : `SHOW ${cams.length} CAMERA${cams.length === 1 ? "" : "S"} ▾`;
+      if (camToggle) camToggle.textContent = this._camOpen ? "HIDE CAMERAS ▴" : this._t(cams.length === 1 ? "SHOW {count} CAMERA ▾" : "SHOW {count} CAMERAS ▾", { count: cams.length });
       camStrip.classList.toggle("open", this._camOpen);
       camStrip.innerHTML = cams.map(c => {
         const eid = c.entity_id;
@@ -6881,7 +6909,7 @@ ${this._htmlDashboardBody()}`;
     const lit = hasLights && (a.lights_on || 0) > 0;
     const ctlOn = (this._liveData?.config?.light_control_enabled) !== false;
     const lightCtl = hasLights
-      ? `<button class="area-light-toggle${lit ? " on" : ""}"${ctlOn ? ` data-light-area="${this._esc(a.id || "")}" data-area-name="${this._esc(a.name)}"` : " disabled"} title="${a.lights_on}/${a.lights_total} lights on${ctlOn ? " — tap to toggle" : ""}">${lit ? "ON" : "OFF"}</button>`
+      ? `<button class="area-light-toggle${lit ? " on" : ""}"${ctlOn ? ` data-light-area="${this._esc(a.id || "")}" data-area-name="${this._esc(a.name)}"` : " disabled"} title="${this._tHtml(ctlOn ? "{on}/{total} lights on — tap to toggle" : "{on}/{total} lights on", { on: a.lights_on, total: a.lights_total })}">${lit ? "ON" : "OFF"}</button>`
       : "";
     return `
       <div class="area-tile${a.active ? " active" : ""}${(a.temp || a.humidity) ? "" : " no-temp"}">
@@ -6984,7 +7012,10 @@ ${this._htmlDashboardBody()}`;
       try {
         const res = await this._hass.callWS({ type: "nova/run_analysis" });
         const bf = res.backfill || {};
-        const bfNote = bf.imported ? `<br>Imported ${bf.imported} past event${bf.imported === 1 ? "" : "s"} from history for ${bf.entities} new entit${bf.entities === 1 ? "y" : "ies"}.` : "";
+        const bfNote = bf.imported ? "<br>" + this._tHtml(bf.imported === 1
+          ? (bf.entities === 1 ? "Imported {events} past event from history for {entities} new entity." : "Imported {events} past event from history for {entities} new entities.")
+          : (bf.entities === 1 ? "Imported {events} past events from history for {entities} new entity." : "Imported {events} past events from history for {entities} new entities."),
+        { events: bf.imported, entities: bf.entities }) : "";
         if (out) {
           if (res.ran) {
             const nf = res.patterns_found ?? 0;
@@ -7563,7 +7594,7 @@ ${this._htmlDashboardBody()}`;
           const res = await this._hass.callWS({ type: "nova/hazard", action: "scan" });
           if (body) body.innerHTML = this._renderHazardScan(res);
         } catch (err) {
-          if (body) body.innerHTML = `<div class="stub-body">Scan failed: ${this._esc(err?.message || String(err))}</div>`;
+          if (body) body.innerHTML = `<div class="stub-body">${this._tHtml("Scan failed: {error}", { error: this._esc(err?.message || String(err)) })}</div>`;
         } finally {
           hazScan.disabled = false;
           hazScan.textContent = orig;
@@ -8466,7 +8497,7 @@ ${this._htmlDashboardBody()}`;
           <button class="mode-chip" id="fpnAddRoom">+ Add Room</button>
           <button class="mode-chip" id="fpnAddZone">+ Outdoor Zone</button>
           ${this._fpnAddPropertyButton()}
-          <button class="mode-chip" id="fpnUnits">Units: ${this._fpUnits() === "metric" ? "Metric" : "Imperial"}</button>
+          <button class="mode-chip" id="fpnUnits">${this._fpUnits() === "metric" ? "Units: Metric" : "Units: Imperial"}</button>
           <button class="mode-chip" id="fpnZoomFit">⤢ Fit</button>
         </div>
       </div>
@@ -8488,7 +8519,7 @@ ${this._htmlDashboardBody()}`;
     const pp = this._propertyPts();
     const has = pp.length >= 3;
     return `<button class="mode-chip" id="fpnAddProperty">${has ? "Clear Property" : "+ Property Line"}</button>`
-      + (has ? `<span class="toggle-desc">Lot: ${this._propertyArea(pp)}</span>` : "");
+      + (has ? `<span class="toggle-desc">${this._tHtml("Lot: {area}", { area: this._propertyArea(pp) })}</span>` : "");
   }
 
   _renderPlanEntitiesNew(floor) {
@@ -8513,7 +8544,7 @@ ${this._htmlDashboardBody()}`;
       <div class="mode-grid">${chips}</div>
       <div class="mode-bind-head">Imported plan <span class="toggle-desc">${hasBg ? "opacity of the uploaded floor-plan image behind the rooms" : "upload a real floor-plan image to trace rooms over"}</span></div>
       <div class="cfg-row">
-        <button class="mode-chip" id="fpnBgUpload">⬆ ${hasBg ? "Replace" : "Upload"} Image</button>
+        <button class="mode-chip" id="fpnBgUpload">${hasBg ? "⬆ Replace Image" : "⬆ Upload Image"}</button>
         <input type="file" id="fpnBgFile" accept="image/*" style="display:none">
         <label>opacity</label>
         <input id="fpnBgOp" type="range" min="0" max="1" step="0.05" value="${op}">
@@ -8573,7 +8604,7 @@ ${this._htmlDashboardBody()}`;
         : "";
       return `
         <div class="cfg-row cam-row-new" data-ci="${i}">
-          <span class="new-pl-chip">CAM ${i + 1}</span>
+          <span class="new-pl-chip">${this._tHtml("CAM {number}", { number: i + 1 })}</span>
           <select class="cam-field-new" data-cam="entity" data-ci="${i}">${this._cameraEntityOptions(c.entity || "")}</select>
           <label class="fpn-inline-lbl">aim <input class="cam-field-new" data-cam="angle" data-ci="${i}" type="range" min="0" max="359" step="1" value="${c.angle != null ? c.angle : 270}"></label>
           <label class="fpn-inline-lbl">FOV <input class="cam-field-new" data-cam="fov" data-ci="${i}" type="range" min="20" max="170" step="5" value="${c.fov != null ? c.fov : 90}"></label>
