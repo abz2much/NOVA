@@ -50,6 +50,9 @@ class SafetyManager:
         self._investigation = None   # active intrusion investigation, or None
         self._freeze_warned = False
         self._automatic_generation = 0
+        # The household reading for the tick in progress (household.py), or
+        # None between ticks, when the helpers below read the house live.
+        self._house = None
 
     def set_automatic_lockdown(self, enabled: bool) -> None:
         self.config["lockdown_auto_on_arm"] = enabled is True
@@ -60,13 +63,29 @@ class SafetyManager:
         return (generation == self._automatic_generation
                 and safety_config.automatic_lockdown_enabled(self.config))
 
-    async def tick(self, sleeping: bool, anyone_home: bool) -> list[dict]:
+    async def tick(self, sleeping: bool, anyone_home: bool,
+                   house=None) -> list[dict]:
         """Run all safety checks. Returns list of actions taken.
 
         Each stage (freeze, intrusion, nighttime sweep) is guarded on its own:
         an error in one is logged and the others still run, and anything an
         earlier stage already gathered is still returned, so a fault in the
-        safety code can never swallow an alert that was already raised."""
+        safety code can never swallow an alert that was already raised.
+
+        `house` is the tick's household reading (household.snapshot); when it
+        is not given, one is taken here. Every check in this tick uses it."""
+        try:
+            from . import household
+            self._house = house or household.snapshot(self.hass, self.config)
+        except Exception as exc:
+            _LOGGER.warning("Safety tick: household reading failed: %s", exc)
+            self._house = None
+        try:
+            return await self._tick(sleeping, anyone_home)
+        finally:
+            self._house = None
+
+    async def _tick(self, sleeping: bool, anyone_home: bool) -> list[dict]:
         actions = []
         now = time.time()
 
@@ -182,41 +201,32 @@ class SafetyManager:
 
         return None
 
+    def _household(self):
+        """This tick's household reading, or a live one between ticks."""
+        if self._house is not None:
+            return self._house
+        from . import household
+        return household.snapshot(self.hass, self.config)
+
     def _alarm_armed(self) -> bool:
-        from . import alarm_source
-        for st in alarm_source.states(self.hass, self.config):
-            if st.state in ALARM_ARMED_STATES:
-                return True
-        return False
+        return self._household().armed
 
     def _alarm_armed_away(self) -> bool:
         """True only for the armed states that mean nobody is meant to be
         moving about (away or vacation), not home or night."""
-        from . import alarm_source
-        return any(st.state in ("armed_away", "armed_vacation")
-                   for st in alarm_source.states(self.hass, self.config))
+        from . import household
+        return self._household().posture == household.AWAY
 
     def _alarm_triggered(self) -> bool:
         """The alarm itself has gone off, not merely armed."""
-        from . import alarm_source
-        return any(st.state == "triggered"
-                   for st in alarm_source.states(self.hass, self.config))
+        return self._household().triggered
 
     def _residents_home_guard(self, sleeping: bool) -> bool:
-        """Residents are home and the house is armed home or night, or asleep.
-        Then a resident walking about looks just like an intruder moving
-        through the house, so motion alone must never confirm an intrusion.
-        Armed away or vacation keeps today's rules."""
-        from . import alarm_source
-        states = {str(st.state).lower() for st in alarm_source.states(self.hass, self.config)}
-        if states & {"armed_away", "armed_vacation"}:
-            return False
-        # "triggered" keeps the guard on, so the alarm going off can confirm.
-        if not (sleeping or states & {"armed_home", "armed_night", "triggered"}):
-            return False
-        return any(str(st.state).lower() == "home"
-                   for domain in ("person", "device_tracker")
-                   for st in self.hass.states.async_all(domain))
+        """Residents are home and the house is armed for people at home, or
+        asleep. Then a resident walking about looks just like an intruder
+        moving through the house, so motion alone must never confirm an
+        intrusion. The rule lives in household.Household.residents_home_guard."""
+        return self._household().residents_home_guard(sleeping)
 
     def _friendly(self, eid: Optional[str]) -> Optional[str]:
         if not eid:
@@ -235,21 +245,15 @@ class SafetyManager:
         `areas`, when given, restricts qualifying entries to that set of HA
         area_ids (used to scope the sleeping-household check to the ground
         floor — see `_ground_floor_open_entry`)."""
-        from . import outdoor
-        from .entity_filter import is_appliance_opening, is_excluded
+        from . import household
 
         area_filter = set(areas) if areas else None
 
         def _envelope(st) -> bool:
-            fname = st.attributes.get("friendly_name") or ""
-            # A fridge or oven door, or anything the user excluded from Nova,
-            # is never a way in (9 Oct 2026: a fridge door was taken for the
-            # point of entry while residents were home).
-            if is_appliance_opening(st.entity_id, fname) or is_excluded(self.hass, st.entity_id):
-                return False
-            if "garage" in (st.entity_id + " " + fname).lower():
-                return True
-            return not outdoor.is_outdoor(self.hass, st.entity_id, fname)
+            # A fridge or oven door, anything the user excluded from Nova, or
+            # an opening outside the house is never a way in (9 Oct 2026: a
+            # fridge door was taken for the point of entry). household.py.
+            return household.is_way_in(self.hass, st)
 
         def _in_scope(st) -> bool:
             return area_filter is None or self._breach_area(st.entity_id) in area_filter
@@ -307,8 +311,7 @@ class SafetyManager:
     def _qualifying_motion(self, sleeping: bool) -> list:
         """Active indoor motion sensors worth considering — skips outdoor
         sensors and (while asleep) bedroom sensors. Returns [(entity_id, name)]."""
-        from . import outdoor
-        from .entity_filter import is_object_sensor
+        from . import household
         out = []
         bedroom_areas = self.config.get("bedroom_areas", []) if sleeping else []
         for state in self.hass.states.async_all("binary_sensor"):
@@ -318,14 +321,10 @@ class SafetyManager:
                 continue
             eid = state.entity_id
             fname = (state.attributes.get("friendly_name") or "")
-            # A camera's car, animal or package sensor is not a person, so it
-            # never seeds an intrusion. Real motion and person sensors still do
-            # (8.14.0).
-            if is_object_sensor(eid, fname):
-                continue
-            # Outdoor motion never seeds or spreads an *indoor* intrusion — that
-            # is the outdoor filter's job to surface (if notable), not ours.
-            if outdoor.is_outdoor(self.hass, eid, fname):
+            # A camera's car, animal or package sensor (8.14.0), a sensor the
+            # user excluded from Nova (8.21.0) and outdoor motion never seed
+            # or spread an indoor intrusion. household.is_person_motion.
+            if not household.is_person_motion(self.hass, state):
                 continue
             if sleeping and bedroom_areas and self._motion_key(eid) in bedroom_areas:
                 continue
@@ -960,6 +959,9 @@ class SafetyManager:
                 "message": msg, "auto_act": True, "notify_all": True,
                 "can_dismiss": True,
             }
+            # Residents home, as for the first alert: phones only (8.21.0).
+            if guard:
+                action["phone_only"] = True
             notify_url = None
             if snap:
                 try:
@@ -1118,33 +1120,12 @@ class SafetyManager:
         return actions
 
     def _residents_away(self) -> bool:
-        """Confident 'the residents are away' — for intrusion only.
+        """Confident 'the residents are away', for intrusion only.
 
-        Based on tracked presence (person / device_tracker) or an explicitly
-        armed-away alarm, NEVER on motion/occupancy: intrusion exists to judge
-        motion, so motion cannot also be the signal that says whether anyone is
-        home. Crucially, the ABSENCE of tracking is not 'away' — with no person/
-        device_tracker entities we cannot claim the house is empty, so this returns
-        False and motion is never treated as an intruder. That is what prevents the
-        false "motion … while no one is home" alerts when someone is home but their
-        phone isn't tracked."""
-        # A resident's device/person reading 'home' wins outright.
-        for st in self.hass.states.async_all("person"):
-            if str(st.state).lower() == "home":
-                return False
-        for st in self.hass.states.async_all("device_tracker"):
-            if str(st.state).lower() == "home":
-                return False
-        # An intentionally armed-away alarm is a strong 'away' signal.
-        from . import alarm_source
-        for st in alarm_source.states(self.hass, self.config):
-            if str(st.state).lower() in ("armed_away", "armed_vacation"):
-                return True
-        # Otherwise, only 'away' if presence is actually tracked and reads away.
-        tracked = False
-        for st in self.hass.states.async_all("person"):
-            tracked = True
-        for st in self.hass.states.async_all("device_tracker"):
-            if str(st.state).lower() in ("home", "not_home", "away"):
-                tracked = True
-        return tracked
+        From household.py: a person, or a device tracker linked to one,
+        reading home always wins. Otherwise away when every person reads away,
+        or when the alarm is armed away or on vacation. Never from motion, and
+        an unknown person is never away. A device tracker not linked to anyone
+        (a TV, a hub) does not count, so it can no longer switch off away
+        detection while the alarm is armed away."""
+        return self._household().residents_away

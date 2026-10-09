@@ -36,8 +36,9 @@ class _Safety:
     def __init__(self, actions=(), exc=None):
         self.actions, self.exc, self.calls = list(actions), exc, []
 
-    async def tick(self, sleeping, anyone_home):
+    async def tick(self, sleeping, anyone_home, house=None):
         self.calls.append((sleeping, anyone_home))
+        self.houses = getattr(self, "houses", []) + [house]
         if self.exc:
             raise self.exc
         return list(self.actions)
@@ -58,8 +59,9 @@ class _Proactive:
     def __init__(self, offers=(), exc=None):
         self.offers, self.exc, self.calls, self.marked = list(offers), exc, [], []
 
-    async def tick(self, sleeping, anyone_home):
+    async def tick(self, sleeping, anyone_home, nobody_home=None):
         self.calls.append((sleeping, anyone_home))
+        self.nobody = getattr(self, "nobody", []) + [nobody_home]
         if self.exc:
             raise self.exc
         return list(self.offers)
@@ -167,14 +169,40 @@ async def test_tick_counts_itself_and_records_when(cc, env, clock):
     assert cc._CORE.tick_count == 2 and cc._CORE.last_tick == clock["now"]
 
 
-async def test_anyone_home_means_a_person_entity_reads_home_and_nothing_else(cc, env, fake_hass):
+async def test_anyone_home_comes_from_the_household_reading(cc, env, fake_hass):
+    # 8.21.0: household.py decides. Motion never counts, a device tracker not
+    # linked to a person does not count once person entities exist, and an
+    # unknown person leaves the automatic mode alone.
     fake_hass.states.set("binary_sensor.hall_motion", "on", device_class="motion")
-    fake_hass.states.set("device_tracker.phone", "home")
+    fake_hass.states.set("device_tracker.tv", "home")
+    fake_hass.states.set("person.a", "not_home")
+    await cc._tick()
+    fake_hass.states.set("person.a", "unknown")
     await cc._tick()
     fake_hass.states.set("person.a", "home")
     await cc._tick()
-    assert env.safety.calls == [(False, False), (False, True)]
+    assert env.safety.calls == [(False, False), (False, False), (False, True)]
     assert env.modes_calls == [False, True]
+    # The same reading reaches the safety tick, once per tick.
+    assert [h.residents for h in env.safety.houses] == ["away", "unknown", "home"]
+
+
+async def test_the_heating_offer_hears_no_one_is_home_only_when_known(cc, env, fake_hass):
+    cc._CORE.proactive_mgr = env.proactive = _Proactive()
+    fake_hass.states.set("person.a", "unknown")
+    await cc._tick()
+    fake_hass.states.set("person.a", "not_home")
+    await cc._tick()
+    assert env.proactive.nobody == [False, True]
+
+
+async def test_a_home_with_no_person_entities_still_uses_its_device_trackers(cc, env, fake_hass):
+    fake_hass.states.set("device_tracker.phone", "home")
+    await cc._tick()
+    fake_hass.states.set("device_tracker.phone", "not_home")
+    await cc._tick()
+    assert env.safety.calls == [(False, True), (False, False)]
+    assert env.modes_calls == [True, False]
 
 
 async def test_sleep_detection_gets_the_configured_bedrooms_and_quiet_hours(cc, env):

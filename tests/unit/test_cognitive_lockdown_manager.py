@@ -111,29 +111,22 @@ def test_open_openings_lists_every_open_door_window_and_cover(cc, fake_hass):
         "binary_sensor.d", "binary_sensor.w", "cover.g", "cover.o"}
 
 
-@pytest.mark.parametrize("state,expected", [
-    ("home", True), ("not_home", False)])
-def test_anyone_home_by_person_or_tracker(cc, fake_hass, state, expected):
-    mgr = _mgr(cc, fake_hass)
-    fake_hass.states.set("person.a", state)
-    assert mgr._anyone_home() is expected
-    fake_hass.states.remove("person.a")
-    fake_hass.states.set("device_tracker.phone", state)
-    assert mgr._anyone_home() is expected
-
-
-@pytest.mark.parametrize("dc,state,expected", [
-    ("occupancy", "on", True), ("motion", "detected", True), ("presence", "occupied", True),
-    ("presence", "home", True), ("motion", "true", True), ("motion", "ON", True),
-    ("motion", "off", False), ("door", "on", False), (None, "on", False)])
-def test_anyone_home_also_counts_live_occupancy(cc, fake_hass, dc, state, expected):
-    attrs = {"device_class": dc} if dc else {}
-    fake_hass.states.set("binary_sensor.s", state, **attrs)
-    assert _mgr(cc, fake_hass)._anyone_home() is expected
-
-
-def test_nobody_anywhere_is_not_home(cc, fake_hass):
-    assert _mgr(cc, fake_hass)._anyone_home() is False
+def test_open_openings_skip_appliance_excluded_and_outdoor_contacts(cc, load, fake_hass, monkeypatch):
+    """8.21.0: the door and window sensors use household.is_way_in, so arming
+    with the fridge open no longer names the fridge as a gap to close by hand.
+    Covers keep their own class rule, so which covers close is unchanged."""
+    ef = load("entity_filter")
+    monkeypatch.setattr(ef, "_exclusion_config",
+                        lambda hass: ({"binary_sensor.spare_door"}, set(), set()))
+    fake_hass.states.set("binary_sensor.fridge_door", "on", device_class="door",
+                         friendly_name="Fridge door")
+    fake_hass.states.set("binary_sensor.spare_door", "on", device_class="door")
+    fake_hass.states.set("binary_sensor.back_door", "on", device_class="door")
+    fake_hass.states.set("binary_sensor.garage_side_door", "on", device_class="door")
+    fake_hass.states.set("cover.g", "open", device_class="garage")
+    fake_hass.states.set("cover.o", "opening", device_class="gate")
+    assert _mgr(cc, fake_hass)._open_openings() == {
+        "binary_sensor.back_door", "binary_sensor.garage_side_door", "cover.g", "cover.o"}
 
 
 async def test_secure_entity_sends_the_right_service_and_reports_failure(cc, fake_hass):

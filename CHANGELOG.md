@@ -1,3 +1,16 @@
+## [8.21.0] — One answer to who is home
+
+- **One place decides.** A new `household.py` answers who is home, what the alarm means and which sensors count. Intrusion, lockdown, the 30 second loop, packages and briefings all use it.
+- **Who is home.** People count, plus device trackers linked to a person. A tracker linked to nobody, such as a TV or a hub, no longer counts. A person reading unknown is never away. Motion never counts. A home with no person entities still uses its device trackers.
+- **Away detection with a TV tracker.** A TV or hub tracker reading home no longer switches off intrusion detection while everyone is out and the alarm is armed away.
+- **Custom bypass.** Armed custom bypass counts as residents home, like armed home and night. A resident walking about no longer confirms an intrusion in that mode.
+- **The "couldn't reach you" notice.** With residents home and armed home, night or custom bypass, or asleep, it now goes to phones only, like the first alert.
+- **Excluded motion sensors** no longer start an intrusion check.
+- **Packages.** A package taken while nobody is home is now pushed to the phones too, even in quiet hours. The spoken line is unchanged.
+- **Automatic mode and the heating offer.** A person reading unknown no longer switches the mode to away, and the heating offer only says "no one's home" when that is known.
+- **Lockdown.** Arming with the fridge open no longer names the fridge as a gap to close by hand. Excluded sensors and shed or gate contacts are not named either. Which covers close is unchanged.
+- **Unchanged.** Confirmed intrusions still use the speakers. Armed away, vacation and everyone away work as before. Alarm disarm confirmation and which covers the nighttime sweep closes are unchanged. No new settings.
+
 ## [8.20.2] — First intrusion alert to phones only when residents are home
 
 - **Phone only.** When a person or phone reads home and the alarm is armed home or night, or the household is asleep, the first "Motion at … while the house is secured" alert goes to phone notifications only. Nothing is spoken.

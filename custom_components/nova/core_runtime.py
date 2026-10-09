@@ -223,10 +223,12 @@ async def _tick():
     _m_state._CORE.tick_count += 1
     _m_state._CORE.last_tick = time.time()
 
-    # Determine home state
-    anyone_home = any(
-        s.state == "home" for s in hass.states.async_all("person")
-    )
+    # Who is home and what the alarm says, read once for the whole tick
+    # (household.py, 8.21.0). People count, plus device trackers linked to a
+    # person; unknown is never away and motion never counts.
+    from . import household
+    house = household.snapshot(hass, config)
+    anyone_home = house.anyone_home
 
     from . import sleep_detection
     bedroom_areas = config.get("bedroom_areas", []) or []
@@ -250,7 +252,10 @@ async def _tick():
     # unless the user has chosen hands-on control. Never affects safety.
     try:
         from . import modes as _auto_modes
-        _auto_modes.auto_evaluate(anyone_home)
+        # Unknown residents leave the mode as it is: a person entity reading
+        # unknown is not an empty house.
+        if house.residents != household.UNKNOWN:
+            _auto_modes.auto_evaluate(anyone_home)
     except Exception as exc:
         _LOGGER.debug("auto-mode eval error: %s", exc)
 
@@ -258,7 +263,7 @@ async def _tick():
     # (a lockdown announcement: the manager has already changed state and will
     # not announce it again) or stop the rest of the tick.
     try:
-        actions.extend(await _m_state._CORE.safety_mgr.tick(sleeping, anyone_home))
+        actions.extend(await _m_state._CORE.safety_mgr.tick(sleeping, anyone_home, house=house))
     except Exception as exc:
         _LOGGER.warning("Cognitive safety tick error: %s", exc)
 
@@ -280,7 +285,8 @@ async def _tick():
         pass
     if proactive_enabled and _m_state._CORE.proactive_mgr:
         try:
-            offers = await _m_state._CORE.proactive_mgr.tick(sleeping, anyone_home)
+            offers = await _m_state._CORE.proactive_mgr.tick(
+                sleeping, anyone_home, nobody_home=(house.residents == household.AWAY))
             spoke_offer = False  # only ONE spoken offer per tick (avoid stacking
                                  # questions when only one pending_offer is tracked)
             for offer in offers:

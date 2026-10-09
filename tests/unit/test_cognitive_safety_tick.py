@@ -360,9 +360,20 @@ def test_a_resident_at_home_always_wins_over_an_armed_away_alarm(make_safety, fa
     fake_hass.states.set(ALARM, "armed_away")
     fake_hass.states.set("person.username", "Home")                 # case does not matter
     assert safety._residents_away() is False
-    fake_hass.states.set("person.username", "not_home")
+    # A phone linked to the person still counts (8.21.0).
+    fake_hass.states.set("person.username", "not_home",
+                         device_trackers=["device_tracker.phone"])
     fake_hass.states.set("device_tracker.phone", "home")
     assert safety._residents_away() is False
+
+
+def test_a_tracker_linked_to_nobody_does_not_stop_armed_away(make_safety, fake_hass):
+    # Bug 1 (8.21.0): a TV or hub reading home is not a resident.
+    safety = make_safety(security_alarm_entity=ALARM)
+    fake_hass.states.set(ALARM, "armed_away")
+    fake_hass.states.set("person.username", "not_home")
+    fake_hass.states.set("device_tracker.living_room_tv", "home")
+    assert safety._residents_away() is True
 
 
 @pytest.mark.parametrize("alarm,expected", [
@@ -389,14 +400,15 @@ def test_a_device_tracker_in_an_odd_state_does_not_count_as_tracked(safety, fake
     assert safety._residents_away() is False
 
 
-def test_current_behaviour_a_person_entity_in_any_non_home_state_counts_as_away(
-        safety, fake_hass):
-    """The docstring says "only away if presence reads away", but any person
-    entity at all marks presence as tracked, so a person that is merely
-    unavailable or unknown is treated as away when nobody reads home."""
-    for state in ("unavailable", "unknown", "work"):
+def test_an_unknown_person_is_never_away(safety, fake_hass):
+    """Bug 4 (8.21.0): a person reading unavailable or unknown is not away,
+    even when another person is. A zone name such as "work" is away."""
+    fake_hass.states.set("person.other", "not_home")
+    for state in ("unavailable", "unknown"):
         fake_hass.states.set("person.username", state)
-        assert safety._residents_away() is True
+        assert safety._residents_away() is False
+    fake_hass.states.set("person.username", "work")
+    assert safety._residents_away() is True
 
 
 # ── _open_entry / _ground_floor_open_entry ──────────────────────────────────
