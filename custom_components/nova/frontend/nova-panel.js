@@ -2884,7 +2884,8 @@ ${this._htmlDashboardBody()}`;
   // The Live panel polls nova/energy_flow every 5 seconds, only while this
   // tab is open and the page is visible. Its flow diagram and the four tiles
   // under it (the diagram's readable text version) are built once here and
-  // only ever updated in place.
+  // only ever updated in place. The Outlook panel rides the same timer: it
+  // fetches nova/energy_outlook on entry and then at most every 5 minutes.
   _htmlEnergy() {
     const cfg = this._data()?.config || {};
     const e = this._energy || {};
@@ -2912,6 +2913,33 @@ ${this._htmlDashboardBody()}`;
             </div>
           </div>
           <div class="sr-only" id="energyLiveAnnounce" role="status" aria-live="polite"></div>
+        </div>
+
+        <div class="panel" id="energyOutlookPanel" hidden>
+          <div class="panel-head">
+            <div class="panel-title">Outlook</div>
+            <div class="panel-meta" id="outlookUpdated"></div>
+          </div>
+          <div class="stub-body" id="outlookMsg" hidden></div>
+          <div class="outlook-strip-wrap" id="outlookStripWrap" hidden>
+            <div class="outlook-key" aria-hidden="true"><span class="key-sun">Sun</span><span class="key-soc">Battery</span><span class="key-price">Price</span></div>
+            <div class="outlook-chart">
+              <svg class="outlook-strip" id="outlookSvg" viewBox="0 0 360 100" preserveAspectRatio="none" role="img" aria-labelledby="outlookTitle outlookDesc">
+                <title id="outlookTitle">Energy outlook for the next 36 hours</title>
+                <desc id="outlookDesc">No outlook yet.</desc>
+                <g class="outlook-bands"></g>
+                <path class="outlook-solar" d=""/>
+                <polyline class="outlook-soc" points=""/>
+                <line class="outlook-now" x1="0" x2="0" y1="0" y2="100"/>
+              </svg>
+              <div class="outlook-band-labels" aria-hidden="true"></div>
+            </div>
+            <div class="outlook-ticks" aria-hidden="true"></div>
+            <dl class="outlook-rates" id="outlookRates"></dl>
+          </div>
+          <ul class="outlook-advice" id="outlookAdvice" hidden></ul>
+          <div class="outlook-line" id="outlookWindow" hidden></div>
+          <div class="outlook-learned" id="outlookLearned" hidden></div>
         </div>
 
         <div class="panel" id="energyTodayPanel" hidden>
@@ -3185,6 +3213,7 @@ ${this._htmlDashboardBody()}`;
     this._fetchEnergyStatus();
     if (this._flow) this._renderEnergyFlow();
     if (this._today) this._renderEnergyToday();
+    if (this._outlook) this._renderOutlook();
     this._startEnergyFlowPoll();
   }
 
@@ -3291,11 +3320,13 @@ ${this._htmlDashboardBody()}`;
   }
 
   // One tick of the single Live timer: the status every time, today's
-  // totals only when a minute has passed since the last fetch (the tab
-  // switch resets that, so entering the tab fetches them at once).
+  // totals only when a minute has passed since the last fetch, the outlook
+  // only when 5 minutes have (the tab switch resets both, so entering the
+  // tab fetches them at once).
   _energyFlowTick() {
     this._fetchEnergyFlow();
     if (Date.now() - (this._todayAt || 0) >= 60000) this._fetchEnergyToday();
+    if (Date.now() - (this._outlookAt || 0) >= 300000) this._fetchEnergyOutlook();
   }
 
   async _fetchEnergyToday() {
@@ -3524,6 +3555,206 @@ ${this._htmlDashboardBody()}`;
     });
     const region = this.shadowRoot?.getElementById("energyLiveAnnounce");
     if (region && lines.length) region.textContent = lines.join(" ");
+  }
+
+  // ─── Outlook ──────────────────────────────────────────────────────────
+  // The next 36 hours from nova/energy_outlook: price bands, the adjusted
+  // solar forecast and the planned battery level, then the advice. The SVG
+  // only draws shapes and stretches to the panel's width; every word sits in
+  // HTML beside it so text keeps its size on a phone. The rates key under
+  // the strip prints each price with its times, so colour is never the only
+  // signal. Updated in place, never by _render().
+
+  async _fetchEnergyOutlook() {
+    if (!this._hass || this._outlookInFlight) return;
+    this._outlookInFlight = true;
+    this._outlookAt = Date.now();
+    try {
+      this._outlook = await this._hass.callWS({ type: "nova/energy_outlook" });
+    } catch (_) {
+      this._outlook = { error: true, configured: true };
+    } finally {
+      this._outlookInFlight = false;
+    }
+    this._renderOutlook();
+  }
+
+  // Money in the household's currency through the browser's own locale
+  // formatting; a plain number with the code if the currency is unknown.
+  _energyMoney(v, currency, digits = 2) {
+    if (v == null || !Number.isFinite(Number(v))) return "";
+    const n = Number(v);
+    if (currency) {
+      try {
+        return new Intl.NumberFormat(this._resolveUiLang(), {
+          style: "currency", currency, minimumFractionDigits: digits, maximumFractionDigits: digits,
+        }).format(n);
+      } catch (_) { /* unknown code: fall through */ }
+    }
+    return `${n.toFixed(digits)}${currency ? ` ${currency}` : ""}`;
+  }
+
+  // "HH:MM" from the backend's ISO time, which is already in Home
+  // Assistant's time zone (the browser's may differ).
+  _outlookTime(iso) {
+    return typeof iso === "string" && iso.length >= 16 ? iso.slice(11, 16) : "";
+  }
+
+  _outlookSetText(el, t) {
+    if (el && el.textContent !== t) el.textContent = t;
+  }
+
+  _outlookSetHtml(el, html) {
+    if (el && el._novaHtml !== html) { el.innerHTML = html; el._novaHtml = html; }
+  }
+
+  _renderOutlook() {
+    const root = this.shadowRoot;
+    const panel = root?.getElementById("energyOutlookPanel");
+    const o = this._outlook;
+    if (!panel || !o) return;
+    panel.hidden = o.configured === false && !o.error;
+    if (panel.hidden) return;
+    const msg = root.getElementById("outlookMsg");
+    const wrap = root.getElementById("outlookStripWrap");
+    const adviceEl = root.getElementById("outlookAdvice");
+    const windowEl = root.getElementById("outlookWindow");
+    const learnedEl = root.getElementById("outlookLearned");
+    const note = o.error ? "Couldn't read energy data." : (o.messages || []).join(" ");
+    this._outlookSetText(msg, note);
+    if (msg) msg.hidden = !note;
+    this._outlookSetText(root.getElementById("outlookUpdated"),
+      o.updated_at ? `Updated ${this._outlookTime(o.updated_at)}` : "");
+
+    const points = o.error ? [] : (o.points || []);
+    const bands = o.error ? [] : (o.bands || []);
+    if (wrap) wrap.hidden = !points.length && !bands.length;
+    if (wrap && !wrap.hidden) this._renderOutlookStrip(o, points, bands);
+
+    let adviceHtml = "";
+    if (points.length) {
+      adviceHtml = (o.advice || []).map(a => `
+            <li class="outlook-item" data-kind="${this._esc(a.kind || "")}">
+              <div class="outlook-item-title">${this._esc(a.title || "")}</div>
+              <div class="stub-body">${this._esc(a.message || "")}</div>${
+                a.saving != null ? `\n              <div class="outlook-saving">Saves about ${this._esc(this._energyMoney(a.saving, o.currency))}</div>` : ""}
+            </li>`).join("") || `<li class="outlook-calm stub-body">Nothing to change right now.</li>`;
+    }
+    this._outlookSetHtml(adviceEl, adviceHtml);
+    if (adviceEl) adviceEl.hidden = !adviceHtml;
+
+    const bw = o.error ? null : o.best_window;
+    const bwText = bw ? `Best time for a big appliance: ${this._outlookTime(bw.start)} to ${this._outlookTime(bw.end)} (${bw.reason})` : "";
+    this._outlookSetText(windowEl, bwText);
+    if (windowEl) windowEl.hidden = !bwText;
+
+    const learnedText = o.error ? "" : this._outlookLearned(o.learned || {});
+    this._outlookSetText(learnedEl, learnedText);
+    if (learnedEl) learnedEl.hidden = !learnedText;
+  }
+
+  _outlookLearned(l) {
+    const parts = [];
+    if (l.tariff_days) parts.push(`Tariff from ${l.tariff_days} days`);
+    if (l.load_days) parts.push(`usage from ${l.load_days} days`);
+    if (l.forecast_shape && l.forecast_shape !== "none" && l.forecast_factor != null) {
+      parts.push(`forecast adjusted by ${Number(l.forecast_factor).toFixed(2)}${
+        l.factor_source === "default" ? " (a cautious default until it has more days)" : ""}`);
+    }
+    if (!parts.length) return "";
+    const first = parts.join(", ");
+    let text = `${first[0].toUpperCase()}${first.slice(1)}.`;
+    if (l.forecast_shape === "estimated") text += " Hourly sun is estimated from the daily forecast.";
+    return text;
+  }
+
+  // Shapes in the SVG (36 hours across 360 units, plot above, bands below),
+  // words in HTML positioned by percentage of the same 36 hours.
+  _renderOutlookStrip(o, points, bands) {
+    const root = this.shadowRoot;
+    const svg = root.getElementById("outlookSvg");
+    if (!svg) return;
+    const H = 3600000;
+    const span = 36;
+    const t0 = points.length ? Date.parse(points[0].t) : Math.floor(Date.now() / H) * H;
+    const hoursAt = (iso) => (Date.parse(iso) - t0) / H;
+    const clamp = (v) => Math.max(0, Math.min(span, v));
+    const pct = (h) => `${(clamp(h) / span * 100).toFixed(2)}%`;
+    const PLOT_TOP = 6, PLOT_BOTTOM = 70, BAND_TOP = 74;
+
+    const maxSolar = Math.max(0.5, ...points.map(p => Number(p.solar_kwh) || 0));
+    const sy = (v) => (PLOT_BOTTOM - (Number(v) || 0) / maxSolar * (PLOT_BOTTOM - PLOT_TOP)).toFixed(1);
+    const solarD = points.length
+      ? `M0 ${PLOT_BOTTOM} ` + points.map((p, i) => `L${i * 10 + 5} ${sy(p.solar_kwh)}`).join(" ") + ` L${points.length * 10} ${PLOT_BOTTOM} Z`
+      : "";
+    const solarPath = svg.querySelector(".outlook-solar");
+    if (solarPath && solarPath.getAttribute("d") !== solarD) solarPath.setAttribute("d", solarD);
+
+    const socY = (v) => (PLOT_BOTTOM - Math.max(0, Math.min(100, v)) / 100 * (PLOT_BOTTOM - PLOT_TOP)).toFixed(1);
+    const soc = points.filter(p => p.soc_pct != null).length === points.length && points.length
+      ? points.map((p, i) => `${(i + 1) * 10},${socY(p.soc_pct)}`).join(" ") : "";
+    const socLine = svg.querySelector(".outlook-soc");
+    if (socLine && socLine.getAttribute("points") !== soc) socLine.setAttribute("points", soc);
+
+    const now = svg.querySelector(".outlook-now");
+    const nowX = (clamp((Date.now() - t0) / H) * 10).toFixed(1);
+    if (now && now.getAttribute("x1") !== nowX) { now.setAttribute("x1", nowX); now.setAttribute("x2", nowX); }
+
+    const shown = bands.map(b => ({ ...b, h1: clamp(hoursAt(b.start)), h2: clamp(hoursAt(b.end)) }))
+      .filter(b => b.h2 > b.h1);
+    this._outlookSetHtml(svg.querySelector(".outlook-bands"), shown.map(b =>
+      `<rect class="outlook-band" data-label="${this._esc(b.label)}" x="${(b.h1 * 10).toFixed(1)}" y="${BAND_TOP}" width="${((b.h2 - b.h1) * 10).toFixed(1)}" height="${100 - BAND_TOP}"/>`).join(""));
+    // A price inside a band only where three hours or more give it room;
+    // the rates key below always has every price.
+    this._outlookSetHtml(root.querySelector(".outlook-band-labels"), shown.filter(b => b.h2 - b.h1 >= 3).map(b =>
+      `<span class="outlook-band-label" style="left:${pct(b.h1)};width:${pct(b.h2 - b.h1)}"><b>${this._esc(this._energyMoney(b.price, o.currency))}</b> ${this._esc(this._outlookTime(b.start))}</span>`).join(""));
+
+    const ticks = [];
+    for (let h = 0; h <= span; h++) {
+      const iso = points[h]?.t;
+      if (iso && Number(iso.slice(11, 13)) % 6 === 0) ticks.push([h, this._outlookTime(iso)]);
+    }
+    this._outlookSetHtml(root.querySelector(".outlook-ticks"), ticks.map(([h, t]) =>
+      `<span${h === 0 ? ' class="tick-start"' : ""} style="left:${pct(h)}">${t}</span>`).join("") + `<span class="tick-now" style="left:${pct((Date.now() - t0) / H)}">Now</span>`);
+
+    // Rates key: one row per price, cheapest first, each with its times
+    // (a time range repeated tomorrow is listed once).
+    const byPrice = new Map();
+    shown.forEach(b => {
+      const k = String(b.price);
+      if (!byPrice.has(k)) byPrice.set(k, { price: b.price, label: b.label, times: [] });
+      const range = `${this._outlookTime(b.start)} to ${this._outlookTime(b.end)}`;
+      const row = byPrice.get(k);
+      if (!row.times.includes(range)) row.times.push(range);
+    });
+    const rates = [...byPrice.values()].sort((a, b) => a.price - b.price);
+    this._outlookSetHtml(root.getElementById("outlookRates"), rates.map(r => `
+              <div class="outlook-rate" data-label="${this._esc(r.label)}"><dt><i class="rate-swatch"></i>${this._esc(this._energyMoney(r.price, o.currency))} ${this._esc(r.label)}</dt><dd>${this._esc(r.times.join(", "))}</dd></div>`).join(""));
+
+    this._outlookSetText(svg.querySelector("#outlookDesc"), this._outlookSentence(o, points, rates));
+  }
+
+  // The strip in words, for the SVG's desc.
+  _outlookSentence(o, points, rates) {
+    const out = [];
+    const cheap = rates[0];
+    if (cheap && rates.length > 1) {
+      out.push(`Cheapest rate ${cheap.times[0]} at ${this._energyMoney(cheap.price, o.currency)}.`);
+      const dear = rates[rates.length - 1];
+      out.push(`Dearest rate ${dear.times[0]} at ${this._energyMoney(dear.price, o.currency)}.`);
+    } else if (cheap) {
+      out.push(`One rate all day at ${this._energyMoney(cheap.price, o.currency)}.`);
+    }
+    const sun = points.reduce((sum, p) => sum + (Number(p.solar_kwh) || 0), 0);
+    if (points.length) out.push(`About ${sun.toFixed(1)} kWh of sun expected over the next 36 hours.`);
+    const withSoc = points.filter(p => p.soc_pct != null);
+    if (withSoc.length) {
+      // soc_pct is the level at the end of its hour.
+      const low = withSoc.reduce((a, b) => (b.soc_pct < a.soc_pct ? b : a));
+      const hhmm = `${String((Number(low.t.slice(11, 13)) + 1) % 24).padStart(2, "0")}:00`;
+      out.push(`Battery expected to reach its lowest, ${Math.round(low.soc_pct)} percent, at ${hhmm}.`);
+    }
+    return out.join(" ") || "No outlook yet.";
   }
   // ─── Suggestions ──────────────────────────────────────────────────────
   // Ported from Classic's own Suggestions tab. Data rides on the same
@@ -6856,6 +7087,7 @@ ${this._htmlDashboardBody()}`;
         this._stopEnergyFlowPoll();
         this._flowPrevStates = null;
         this._todayAt = 0;
+        this._outlookAt = 0;
         this._camOpen = false;
         this._currentTab = tab;
         this._render();
@@ -9223,7 +9455,8 @@ ${this._htmlDashboardBody()}`;
       .energy-tile .energy-tile-w{font-family:var(--font-mono);font-size:16px}
       .energy-tile .energy-tile-state{font-size:11px;color:var(--ink-dim);min-height:1em}
       .energy-flow-wrap{margin:0 0 10px;display:flex;justify-content:center}
-      .energy-flow{display:block;width:100%;height:auto;max-height:clamp(220px,38vh,320px);margin:0 auto;--c-solar:var(--gold);--c-grid:#6ea8ff;--c-house:var(--ember);--c-battery:#2aa198}
+      .energy-flow,#energyOutlookPanel{--c-solar:var(--gold);--c-grid:#6ea8ff;--c-house:var(--ember);--c-battery:#2aa198}
+      .energy-flow{display:block;width:100%;height:auto;max-height:clamp(220px,38vh,320px);margin:0 auto}
       .energy-flow .flow[data-flow="solar"]{--flow-c:var(--c-solar)}
       .energy-flow .flow[data-flow="grid"]{--flow-c:var(--c-grid)}
       .energy-flow .flow[data-flow="battery"]{--flow-c:var(--c-battery)}
@@ -9270,6 +9503,39 @@ ${this._htmlDashboardBody()}`;
       .battery-pct{font-family:var(--font-mono);font-size:26px;color:var(--ink)}
       .battery-state{font-size:13px;color:var(--ink-dim)}
       .battery-line{font-size:12px;color:var(--ink-dim)}
+      #energyOutlookPanel[hidden],.outlook-strip-wrap[hidden],.outlook-advice[hidden],.outlook-line[hidden],.outlook-learned[hidden]{display:none}
+      .outlook-key{display:flex;gap:14px;font-size:11px;color:var(--ink-dim);margin-bottom:4px}
+      .outlook-key span::before{content:"";display:inline-block;width:10px;height:3px;border-radius:2px;margin-right:5px;vertical-align:middle}
+      .outlook-key .key-sun::before{background:var(--c-solar)}.outlook-key .key-soc::before{background:var(--c-battery)}.outlook-key .key-price::before{background:var(--c-grid);height:8px;opacity:.6}
+      .outlook-chart{position:relative}
+      .outlook-strip{display:block;width:100%;height:116px}
+      .outlook-strip .outlook-band{fill:var(--c-grid);opacity:.18}
+      .outlook-strip .outlook-band[data-label="mid"]{opacity:.4}
+      .outlook-strip .outlook-band[data-label="high"]{opacity:.6}
+      .outlook-strip .outlook-solar{fill:var(--c-solar);fill-opacity:.2;stroke:var(--c-solar);stroke-opacity:.7;stroke-width:1.5;vector-effect:non-scaling-stroke}
+      .outlook-strip .outlook-soc{fill:none;stroke:var(--c-battery);stroke-width:2.5;stroke-linejoin:round;vector-effect:non-scaling-stroke}
+      .outlook-strip .outlook-now{stroke:var(--ink-dim);stroke-width:1;stroke-dasharray:3 4;vector-effect:non-scaling-stroke}
+      .outlook-band-labels{position:absolute;left:0;right:0;bottom:0;height:26%;pointer-events:none}
+      .outlook-band-label{position:absolute;top:0;bottom:0;display:flex;align-items:center;justify-content:center;gap:4px;overflow:hidden;white-space:nowrap;font-size:10.5px;color:var(--ink)}
+      .outlook-band-label b{font-family:var(--font-mono);font-weight:500;color:var(--ink)}
+      .outlook-ticks{position:relative;height:16px;font-family:var(--font-mono);font-size:10px;color:var(--ink-faint)}
+      .outlook-ticks span{position:absolute;top:2px;transform:translateX(-50%);white-space:nowrap}
+      .outlook-ticks .tick-start{transform:none}
+      .outlook-ticks .tick-now{top:auto;bottom:-14px;color:var(--ink-dim)}
+      .outlook-rates{display:grid;grid-template-columns:1fr;gap:3px 16px;margin:20px 0 0;font-size:11px}
+      .outlook-rate{display:flex;gap:8px;min-width:0}
+      .outlook-rate dt{font-family:var(--font-mono);color:var(--ink);white-space:nowrap}
+      .outlook-rate dd{margin:0;color:var(--ink-dim);min-width:0}
+      .outlook-rate .rate-swatch{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;vertical-align:-1px;background:var(--c-grid);opacity:.18}
+      .outlook-rate[data-label="mid"] .rate-swatch{opacity:.4}.outlook-rate[data-label="high"] .rate-swatch{opacity:.6}
+      @media (min-width:600px){.outlook-rates{grid-template-columns:repeat(2,minmax(0,1fr))}}
+      @media (max-width:599px){.outlook-band-labels{display:none}}
+      .outlook-advice{list-style:none;margin:12px 0 0;padding:0;display:flex;flex-direction:column;gap:8px}
+      .outlook-item{background:var(--surface-2);border:1px solid var(--line-soft);border-radius:9px;padding:9px 10px}
+      .outlook-item-title{font-size:13px;color:var(--ink);margin-bottom:2px}
+      .outlook-saving{font-family:var(--font-mono);font-size:11px;color:var(--gold-pale);margin-top:3px}
+      .outlook-line{font-size:12.5px;color:var(--ink-dim);margin-top:10px}
+      .outlook-learned{font-size:11px;color:var(--ink-faint);margin-top:6px}
       @media (prefers-reduced-motion: reduce){.energy-flow .flow-line{animation:none}.energy-flow .battery-arc{transition:none}.battery-tank .tank-fill{transition:none}}
       .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
       .goal-list{display:flex;flex-direction:column;gap:7px;max-height:300px;overflow:auto}

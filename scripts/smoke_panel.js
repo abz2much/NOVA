@@ -204,6 +204,23 @@ const _todayFull = { configured: true, solar_kwh: 12.4, grid_import_kwh: 3, grid
   battery_charged_kwh: 4, battery_discharged_kwh: 2.5, home_kwh: 8.5, self_sufficiency_pct: 64.7 };
 let _todayResp = _todayFull;
 let _todayCalls = 0;
+// nova/energy_outlook (8.12.0): generated from energy_outlook.build_outlook
+// with the unit tests' household fixtures (19:00, a dull day tomorrow, the
+// battery at 30 percent), so the shape is the backend's real one.
+const _outlookOk = {"configured":true,"error":false,"status":"ok","currency":"EUR","points":[{"t":"2026-10-14T19:00:00+01:00","price":0.4047,"solar_kwh":0.0,"load_kwh":1.4,"soc_pct":16.0,"grid_import_kwh":0.0,"grid_export_kwh":0.0,"charge_kwh":0.0,"discharge_kwh":1.4,"cost":0.0},{"t":"2026-10-14T20:00:00+01:00","price":0.4047,"solar_kwh":0.0,"load_kwh":1.4,"soc_pct":10.0,"grid_import_kwh":0.8,"grid_export_kwh":0.0,"charge_kwh":0.0,"discharge_kwh":0.6,"cost":0.3238},{"t":"2026-10-14T21:00:00+01:00","price":0.4047,"solar_kwh":0.0,"load_kwh":1.4,"soc_pct":10.0,"grid_import_kwh":1.4,"grid_export_kwh":0.0,"charge_kwh":0.0,"discharge_kwh":0.0,"cost":0.5666},{"t":"2026-10-14T22:00:00+01:00","price":0.4047,"solar_kwh":0.0,"load_kwh":0.6,"soc_pct":10.0,"grid_import_kwh":0.6,"grid_export_kwh":0.0,"charge_kwh":0.0,"discharge_kwh":0.0,"cost":0.2428},{"t":"2026-10-14T23:00:00+01:00","price":0.2146,"solar_kwh":0.0,"load_kwh":0.6,"soc_pct":10.0,"grid_import_kwh":0.6,"grid_export_kwh":0.0,"charge_kwh":0.0,"discharge_kwh":0.0,"cost":0.1288},{"t":"2026-10-15T00:00:00+01:00","price":0.2146,"solar_kwh":0.0,"load_kwh":0.35,"soc_pct":10.0,"grid_import_kwh":0.35,"grid_export_kwh":0.0,"charge_kwh":0.0,"discharge_kwh":0.0,"cost":0.0751},{"t":"2026-10-15T01:00:00+01:00","price":0.2146,"solar_kwh":0.0,"load_kwh":0.35,"soc_pct":10.0,"grid_import_kwh":0.35,"grid_export_kwh":0.0,"charge_kwh":0.0,"discharge_kwh":0.0,"cost":0.0751},{"t":"2026-10-15T02:00:00+01:00","price":0.0859,"solar_kwh":0.0,"load_kwh":0.35,"soc_pct":10.0,"grid_import_kwh":0.35,"grid_export_kwh":0.0,"charge_kwh":0.0,"discharge_kwh":0.0,"cost":0.0301},{"t":"2026-10-15T03:00:00+01:00","price":0.0859,"solar_kwh":0.0,"load_kwh":0.35,"soc_pct":10.0,"grid_import_kwh":0.35,"grid_export_kwh":0.0,"charge_kwh":0.0,"discharge_kwh":0.0,"cost":0.0301},{"t":"2026-10-15T04:00:00+01:00","price":0.0859,"solar_kwh":0.0,"load_kwh":0.35,"soc_pct":10.0,"grid_import_kwh":0.35,"grid_export_kwh":0.0,"charge_kwh":0.0,"discharge_kwh":0.0,"cost":0.0301},{"t":"2026-10-15T05:00:00+01:00","price":0.0859,"solar_kwh":0.0,"load_kwh":0.35,"soc_pct":10.0,"grid_import_kwh":0.35,"grid_export_kwh":0.0,"charge_kwh":0.0,"discharge_kwh":0.0,"cost":0.0301},{"t":"2026-10-15T06:00:00+01:00","price":0.2146,"solar_kwh":0.0,"load_kwh":0.6,"soc_pct":10.0,"grid_import_kwh":0.6,"grid_export_kwh":0.0,"charge_kwh":0.0,"discharge_kwh":0.0,"cost":0.1288},{"t":"2026-10-15T07:00:00+01:00","price":0.2146,"solar_kwh":0.0,"load_kwh":0.6,"soc_pct":10.0,"grid_import_kwh":0.6,"grid_export_kwh":0.0,"charge_kwh":0.0,"discharge_kwh":0.0,"cost":0.1288},{"t":"2026-10-15T08:00:00+01:00","price":0.4047,"solar_kwh":0.076,"load_kwh":0.6,"soc_pct":10.0,"grid_import_kwh":0.524,"grid_export_kwh":0.0,"charge_kwh":0.0,"discharge_kwh":0.0,"cost":0.2123},{"t":"2026-10-15T09:00:00+01:00","price":0.4047,"solar_kwh":0.22,"load_kwh":0.6,"soc_pct":10.0,"grid_import_kwh":0.38,"grid_export_kwh":0.0,"charge_kwh":0.0,"discharge_kwh":0.0,"cost":0.1538},{"t":"2026-10-15T10:00:00+01:00","price":0.4047,"solar_kwh":0.345,"load_kwh":0.6,"soc_pct":10.0,"grid_import_kwh":0.255,"grid_export_kwh":0.0,"charge_kwh":0.0,"discharge_kwh":0.0,"cost":0.1033},{"t":"2026-10-15T11:00:00+01:00","price":0.4047,"solar_kwh":0.439,"load_kwh":0.6,"soc_pct":10.0,"grid_import_kwh":0.161,"grid_export_kwh":0.0,"charge_kwh":0.0,"discharge_kwh":0.0,"cost":0.0652},{"t":"2026-10-15T12:00:00+01:00","price":0.4047,"solar_kwh":0.494,"load_kwh":0.6,"soc_pct":10.0,"grid_import_kwh":0.106,"grid_export_kwh":0.0,"charge_kwh":0.0,"discharge_kwh":0.0,"cost":0.0429},{"t":"2026-10-15T13:00:00+01:00","price":0.4047,"solar_kwh":0.505,"load_kwh":0.6,"soc_pct":10.0,"grid_import_kwh":0.095,"grid_export_kwh":0.0,"charge_kwh":0.0,"discharge_kwh":0.0,"cost":0.0383},{"t":"2026-10-15T14:00:00+01:00","price":0.4047,"solar_kwh":0.472,"load_kwh":0.6,"soc_pct":10.0,"grid_import_kwh":0.128,"grid_export_kwh":0.0,"charge_kwh":0.0,"discharge_kwh":0.0,"cost":0.0519},{"t":"2026-10-15T15:00:00+01:00","price":0.4047,"solar_kwh":0.396,"load_kwh":0.6,"soc_pct":10.0,"grid_import_kwh":0.204,"grid_export_kwh":0.0,"charge_kwh":0.0,"discharge_kwh":0.0,"cost":0.0825},{"t":"2026-10-15T16:00:00+01:00","price":0.4047,"solar_kwh":0.285,"load_kwh":0.6,"soc_pct":10.0,"grid_import_kwh":0.315,"grid_export_kwh":0.0,"charge_kwh":0.0,"discharge_kwh":0.0,"cost":0.1273},{"t":"2026-10-15T17:00:00+01:00","price":0.4538,"solar_kwh":0.149,"load_kwh":1.4,"soc_pct":10.0,"grid_import_kwh":1.251,"grid_export_kwh":0.0,"charge_kwh":0.0,"discharge_kwh":0.0,"cost":0.5675},{"t":"2026-10-15T18:00:00+01:00","price":0.4538,"solar_kwh":0.019,"load_kwh":1.4,"soc_pct":10.0,"grid_import_kwh":1.381,"grid_export_kwh":0.0,"charge_kwh":0.0,"discharge_kwh":0.0,"cost":0.6267},{"t":"2026-10-15T19:00:00+01:00","price":0.4047,"solar_kwh":0.0,"load_kwh":1.4,"soc_pct":10.0,"grid_import_kwh":1.4,"grid_export_kwh":0.0,"charge_kwh":0.0,"discharge_kwh":0.0,"cost":0.5666},{"t":"2026-10-15T20:00:00+01:00","price":0.4047,"solar_kwh":0.0,"load_kwh":1.4,"soc_pct":10.0,"grid_import_kwh":1.4,"grid_export_kwh":0.0,"charge_kwh":0.0,"discharge_kwh":0.0,"cost":0.5666},{"t":"2026-10-15T21:00:00+01:00","price":0.4047,"solar_kwh":0.0,"load_kwh":1.4,"soc_pct":10.0,"grid_import_kwh":1.4,"grid_export_kwh":0.0,"charge_kwh":0.0,"discharge_kwh":0.0,"cost":0.5666},{"t":"2026-10-15T22:00:00+01:00","price":0.4047,"solar_kwh":0.0,"load_kwh":0.6,"soc_pct":10.0,"grid_import_kwh":0.6,"grid_export_kwh":0.0,"charge_kwh":0.0,"discharge_kwh":0.0,"cost":0.2428},{"t":"2026-10-15T23:00:00+01:00","price":0.2146,"solar_kwh":0.0,"load_kwh":0.6,"soc_pct":10.0,"grid_import_kwh":0.6,"grid_export_kwh":0.0,"charge_kwh":0.0,"discharge_kwh":0.0,"cost":0.1288},{"t":"2026-10-16T00:00:00+01:00","price":0.2146,"solar_kwh":0.0,"load_kwh":0.35,"soc_pct":10.0,"grid_import_kwh":0.35,"grid_export_kwh":0.0,"charge_kwh":0.0,"discharge_kwh":0.0,"cost":0.0751},{"t":"2026-10-16T01:00:00+01:00","price":0.2146,"solar_kwh":0.0,"load_kwh":0.35,"soc_pct":10.0,"grid_import_kwh":0.35,"grid_export_kwh":0.0,"charge_kwh":0.0,"discharge_kwh":0.0,"cost":0.0751},{"t":"2026-10-16T02:00:00+01:00","price":0.0859,"solar_kwh":0.0,"load_kwh":0.35,"soc_pct":10.0,"grid_import_kwh":0.35,"grid_export_kwh":0.0,"charge_kwh":0.0,"discharge_kwh":0.0,"cost":0.0301},{"t":"2026-10-16T03:00:00+01:00","price":0.0859,"solar_kwh":0.0,"load_kwh":0.35,"soc_pct":10.0,"grid_import_kwh":0.35,"grid_export_kwh":0.0,"charge_kwh":0.0,"discharge_kwh":0.0,"cost":0.0301},{"t":"2026-10-16T04:00:00+01:00","price":0.0859,"solar_kwh":0.0,"load_kwh":0.35,"soc_pct":10.0,"grid_import_kwh":0.35,"grid_export_kwh":0.0,"charge_kwh":0.0,"discharge_kwh":0.0,"cost":0.0301},{"t":"2026-10-16T05:00:00+01:00","price":0.0859,"solar_kwh":0.0,"load_kwh":0.35,"soc_pct":10.0,"grid_import_kwh":0.35,"grid_export_kwh":0.0,"charge_kwh":0.0,"discharge_kwh":0.0,"cost":0.0301},{"t":"2026-10-16T06:00:00+01:00","price":0.2146,"solar_kwh":0.0,"load_kwh":0.6,"soc_pct":10.0,"grid_import_kwh":0.6,"grid_export_kwh":0.0,"charge_kwh":0.0,"discharge_kwh":0.0,"cost":0.1288}],"bands":[{"start":"2026-10-14T00:00:00+01:00","end":"2026-10-14T02:00:00+01:00","price":0.2146,"label":"mid"},{"start":"2026-10-14T02:00:00+01:00","end":"2026-10-14T06:00:00+01:00","price":0.0859,"label":"low"},{"start":"2026-10-14T06:00:00+01:00","end":"2026-10-14T08:00:00+01:00","price":0.2146,"label":"mid"},{"start":"2026-10-14T08:00:00+01:00","end":"2026-10-14T17:00:00+01:00","price":0.4047,"label":"high"},{"start":"2026-10-14T17:00:00+01:00","end":"2026-10-14T19:00:00+01:00","price":0.4538,"label":"high"},{"start":"2026-10-14T19:00:00+01:00","end":"2026-10-14T23:00:00+01:00","price":0.4047,"label":"high"},{"start":"2026-10-14T23:00:00+01:00","end":"2026-10-15T02:00:00+01:00","price":0.2146,"label":"mid"},{"start":"2026-10-15T02:00:00+01:00","end":"2026-10-15T06:00:00+01:00","price":0.0859,"label":"low"},{"start":"2026-10-15T06:00:00+01:00","end":"2026-10-15T08:00:00+01:00","price":0.2146,"label":"mid"},{"start":"2026-10-15T08:00:00+01:00","end":"2026-10-15T17:00:00+01:00","price":0.4047,"label":"high"},{"start":"2026-10-15T17:00:00+01:00","end":"2026-10-15T19:00:00+01:00","price":0.4538,"label":"high"},{"start":"2026-10-15T19:00:00+01:00","end":"2026-10-15T23:00:00+01:00","price":0.4047,"label":"high"},{"start":"2026-10-15T23:00:00+01:00","end":"2026-10-16T02:00:00+01:00","price":0.2146,"label":"mid"},{"start":"2026-10-16T02:00:00+01:00","end":"2026-10-16T06:00:00+01:00","price":0.0859,"label":"low"},{"start":"2026-10-16T06:00:00+01:00","end":"2026-10-16T08:00:00+01:00","price":0.2146,"label":"mid"},{"start":"2026-10-16T08:00:00+01:00","end":"2026-10-16T17:00:00+01:00","price":0.4047,"label":"high"},{"start":"2026-10-16T17:00:00+01:00","end":"2026-10-16T19:00:00+01:00","price":0.4538,"label":"high"},{"start":"2026-10-16T19:00:00+01:00","end":"2026-10-16T23:00:00+01:00","price":0.4047,"label":"high"},{"start":"2026-10-16T23:00:00+01:00","end":"2026-10-17T00:00:00+01:00","price":0.2146,"label":"mid"}],"advice":[{"kind":"cheap_topup","key":"cheap_topup:2026-10-14","level":"suggest","title":"Top up in the cheap window.","message":"Tomorrow looks dull, about 3.4 kWh of sun against your usual 17 kWh of use. Charging about 9.0 kWh between 02:00 and 06:00 would save around 2.35.","when":"2026-10-15T02:00:00+01:00","kwh":9.0,"saving":2.35},{"kind":"high_use_today","key":"high_use_today:2026-10-14","level":"info","title":"Using more than usual today.","message":"The home has used 20.0 kWh so far today. By this time it usually uses about 11.5 kWh.","when":"2026-10-14T19:00:00+01:00","kwh":8.5,"saving":null}],"best_window":{"start":"2026-10-15T02:00:00+01:00","end":"2026-10-15T04:00:00+01:00","reason":"cheapest rate","price":0.0859},"messages":[],"learned":{"tariff_days":7,"load_days":21,"forecast_factor":0.85,"factor_source":"default","forecast_shape":"hourly"},"updated_at":"2026-10-14T19:00:00+01:00"};
+const _outlookLearning = { ..._outlookOk, status: "learning", points: [], advice: [], best_window: null,
+  messages: ["Learning your usual usage: 3 of 7 days."], learned: { ..._outlookOk.learned, load_days: 3 } };
+const _outlookFlat = { ..._outlookOk, status: "flat", advice: [], best_window: null,
+  bands: [{ start: _outlookOk.bands[0].start, end: _outlookOk.bands[_outlookOk.bands.length - 1].end, price: 0.3, label: "low" }],
+  points: _outlookOk.points.map(p => ({ ...p, price: 0.3 })),
+  messages: ["Your tariff has one price all day, so there is no cheaper time to move use to."],
+  learned: { ..._outlookOk.learned, tariff_days: 7 } };
+const _outlookNoForecast = { ..._outlookOk, status: "no_forecast", advice: [],
+  points: _outlookOk.points.map(p => ({ ...p, solar_kwh: 0 })),
+  messages: ["No solar forecast is set up, so advice that needs the sun is off."],
+  learned: { ..._outlookOk.learned, forecast_shape: "none" } };
+let _outlookResp = _outlookOk;
+let _outlookCalls = 0;
 let _bioEnabled = false;
 let _pendingFacts = [{ id: 42, key: "bedtime", value: "10pm", subject: "primary" }];
 let _relPending = [{ id: 7, subject: "sam", predicate: "owns", object: "car.jeep", source: "stated", status: "pending" }];
@@ -305,6 +322,11 @@ const hass = {
       _todayCalls++;
       if (_todayResp === "error") throw new Error("energy_flow_failed");
       return _todayResp;
+    }
+    if (m.type === "nova/energy_outlook") {
+      _outlookCalls++;
+      if (_outlookResp === "error") throw new Error("energy_outlook_failed");
+      return _outlookResp;
     }
     if (m.type === "nova/energy_flow") {
       _flowCalls++;
@@ -2203,8 +2225,8 @@ setTimeout(async () => {
     // at most once a minute on the same single timer.
     {
       const titles = Array.from(sRoot.querySelectorAll(".panel > .panel-head .panel-title")).map(t => t.textContent);
-      checks.push(["energy tab: panel order is Live, Today, Battery, Energy Management, Appliances",
-        titles.join(",") === "Live,Today,Battery,Energy Management,Appliances"]);
+      checks.push(["energy tab: panel order is Live, Outlook, Today, Battery, Energy Management, Appliances",
+        titles.join(",") === "Live,Outlook,Today,Battery,Energy Management,Appliances"]);
     }
     const todayText = (k) => sRoot.querySelector(`#energyToday .energy-tile[data-today="${k}"] .energy-tile-w`)?.textContent;
     _todayResp = _todayFull;
@@ -2275,6 +2297,116 @@ setTimeout(async () => {
     checks.push(["energy tab: today is fetched on entry, not on each 5 s tick, and again after a minute",
       todayAfterEntry === todayBefore + 1 && todayAfterTicks === todayAfterEntry && _todayCalls === todayAfterEntry + 1]);
     checks.push(["energy tab: still exactly one timer with Today and Battery added", flowTimers.size === 1]);
+
+    // Outlook (8.12.0): after Live, before Today; fetched on entry and then
+    // at most every 5 minutes from the same Live timer; drawn in place.
+    {
+      const panels = Array.from(sRoot.querySelectorAll(".panel")).map(p => p.id);
+      checks.push(["energy tab: Outlook sits after Live and before Today",
+        panels.indexOf("energyOutlookPanel") === panels.indexOf("energyLivePanel") + 1
+        && panels.indexOf("energyTodayPanel") === panels.indexOf("energyOutlookPanel") + 1]);
+      const ob = (id) => sRoot.getElementById(id);
+      const osvg = ob("outlookSvg");
+      checks.push(["energy tab: Outlook renders the ok outlook: strip, two advice items, best window, learned line",
+        ob("energyOutlookPanel").hidden === false && ob("outlookStripWrap").hidden === false
+        && ob("outlookMsg").hidden === true
+        && sRoot.querySelectorAll("#outlookAdvice .outlook-item").length === 2
+        && sRoot.querySelector("#outlookAdvice .outlook-item-title")?.textContent === "Top up in the cheap window."
+        && /^Saves about €\d+\.\d\d$/.test(sRoot.querySelector("#outlookAdvice .outlook-saving")?.textContent || "")
+        && ob("outlookWindow").textContent === "Best time for a big appliance: 02:00 to 04:00 (cheapest rate)"
+        && ob("outlookLearned").textContent.startsWith("Tariff from 7 days, usage from 21 days, forecast adjusted by 0.85")]);
+      checks.push(["energy tab: Outlook SVG has role img with a title and a desc in words",
+        osvg?.getAttribute("role") === "img"
+        && osvg.getAttribute("aria-labelledby") === "outlookTitle outlookDesc"
+        && osvg.querySelector("title")?.textContent === "Energy outlook for the next 36 hours"
+        && /^Cheapest rate 02:00 to 06:00 at €0\.09\. Dearest rate 17:00 to 19:00 at €0\.45\. About \d+\.\d kWh of sun expected over the next 36 hours\. Battery expected to reach its lowest, 10 percent, at \d\d:00\.$/
+          .test(osvg.querySelector("desc")?.textContent || "")]);
+      const rateRows = Array.from(sRoot.querySelectorAll("#outlookRates .outlook-rate")).map(r => r.textContent.replace(/\s+/g, " ").trim());
+      checks.push(["energy tab: Outlook rates key prints every price with its times, cheapest first",
+        rateRows.length === 4 && rateRows[0] === "€0.09 low02:00 to 06:00"
+        && rateRows[3] === "€0.45 high17:00 to 19:00"
+        && sRoot.querySelectorAll("#outlookSvg .outlook-band").length >= 7
+        && osvg.querySelector(".outlook-soc").getAttribute("points").split(" ").length === 36
+        && osvg.querySelector(".outlook-solar").getAttribute("d").startsWith("M0 70")]);
+
+      // Fetched on entry, not on every 5 s tick, again after 5 minutes,
+      // with no timer of its own.
+      const allMs = [];
+      const wrapped = global.setInterval;
+      global.setInterval = (fn, ms, ...rest) => { allMs.push(ms); return wrapped(fn, ms, ...rest); };
+      Array.from(sRoot.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === "settings").click();
+      await wait();
+      const before = _outlookCalls;
+      Array.from(elNew.shadowRoot.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === "energy").click();
+      await wait();
+      sRoot = elNew.shadowRoot;
+      const afterEntry = _outlookCalls;
+      for (let i = 0; i < 6; i++) { elNew._energyFlowTick(); await wait(5); }
+      const afterTicks = _outlookCalls;
+      elNew._outlookAt -= 301000;
+      elNew._energyFlowTick();
+      await wait();
+      global.setInterval = wrapped;
+      checks.push(["energy tab: outlook fetched on entry, not on each 5 s tick, again after 5 minutes",
+        afterEntry === before + 1 && afterTicks === afterEntry && _outlookCalls === afterEntry + 1]);
+      checks.push(["energy tab: no second poll timer: only the 5 s Live timer exists",
+        flowTimers.size === 1 && allMs.every(ms => ms === 5000) && !elNew._outlookTimer]);
+
+      // The in place path: new advice text, same nodes, no _render().
+      const realRender = elNew._render;
+      let renders = 0;
+      elNew._render = function () { renders++; return realRender.apply(this, arguments); };
+      const svgBefore = sRoot.getElementById("outlookSvg");
+      const listBefore = sRoot.getElementById("outlookAdvice");
+      _outlookResp = { ..._outlookOk, advice: [{ ..._outlookOk.advice[0], message: "Changed advice text." }] };
+      await elNew._fetchEnergyOutlook();
+      checks.push(["energy tab: an outlook update changes the advice text in place, no full render",
+        renders === 0 && sRoot.getElementById("outlookSvg") === svgBefore && sRoot.getElementById("outlookAdvice") === listBefore
+        && sRoot.querySelectorAll("#outlookAdvice .outlook-item").length === 1
+        && sRoot.querySelector("#outlookAdvice .stub-body")?.textContent === "Changed advice text."]);
+      _outlookResp = { ..._outlookOk, advice: [] };
+      await elNew._fetchEnergyOutlook();
+      checks.push(["energy tab: no advice reads 'Nothing to change right now.'",
+        sRoot.querySelector("#outlookAdvice .outlook-calm")?.textContent === "Nothing to change right now."]);
+
+      // With no points the strip starts at the current hour, so pin the
+      // clock to the mock's own time (19:00 on the bands' first day).
+      _outlookResp = _outlookLearning;
+      const realNow = Date.now;
+      Date.now = () => Date.parse(_outlookOk.points[0].t) + 600000;
+      await elNew._fetchEnergyOutlook();
+      Date.now = realNow;
+      checks.push(["energy tab: learning shows the plain message and still draws the known bands",
+        ob("energyOutlookPanel").hidden === false && ob("outlookMsg").textContent === "Learning your usual usage: 3 of 7 days."
+        && ob("outlookStripWrap").hidden === false && sRoot.querySelectorAll("#outlookSvg .outlook-band").length >= 7
+        && ob("outlookAdvice").hidden === true && ob("outlookWindow").hidden === true
+        && ob("outlookLearned").textContent.startsWith("Tariff from 7 days, usage from 3 days")]);
+      _outlookResp = _outlookFlat;
+      await elNew._fetchEnergyOutlook();
+      checks.push(["energy tab: a flat tariff says so, one rate row, no best window",
+        ob("outlookMsg").textContent === "Your tariff has one price all day, so there is no cheaper time to move use to."
+        && sRoot.querySelectorAll("#outlookRates .outlook-rate").length === 1 && ob("outlookWindow").hidden === true
+        && /One rate all day at €0\.30\./.test(sRoot.querySelector("#outlookSvg desc").textContent)]);
+      _outlookResp = _outlookNoForecast;
+      await elNew._fetchEnergyOutlook();
+      checks.push(["energy tab: no forecast says so instead of an empty box",
+        ob("outlookMsg").textContent === "No solar forecast is set up, so advice that needs the sun is off."
+        && ob("outlookStripWrap").hidden === false && ob("outlookLearned").textContent === "Tariff from 7 days, usage from 21 days."]);
+      _outlookResp = "error";
+      await elNew._fetchEnergyOutlook();
+      checks.push(["energy tab: an outlook read failure says so and draws nothing",
+        ob("energyOutlookPanel").hidden === false && ob("outlookMsg").textContent === "Couldn't read energy data."
+        && ob("outlookStripWrap").hidden === true && ob("outlookAdvice").hidden === true
+        && ob("outlookWindow").hidden === true && ob("outlookLearned").hidden === true]);
+      _outlookResp = { configured: false, error: false, status: "unavailable", points: [], bands: [], advice: [] };
+      await elNew._fetchEnergyOutlook();
+      checks.push(["energy tab: not configured hides the Outlook panel", ob("energyOutlookPanel").hidden === true]);
+      elNew._render = realRender;
+      _outlookResp = _outlookOk;
+      await elNew._fetchEnergyOutlook();
+      checks.push(["energy tab: Outlook styles exist and add no animation",
+        /\.outlook-strip\{/.test(elNew._css()) && !/outlook[^{}]*\{[^}]*(animation|transition)/.test(elNew._css())]);
+    }
 
     // Today error, then Live unconfigured hides both panels.
     _todayResp = "error";

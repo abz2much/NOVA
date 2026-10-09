@@ -431,9 +431,11 @@ def test_no_forecast_and_no_capacity(eo):
     assert out["status"] == "no_capacity"
 
 
-def test_points_cover_the_horizon(eo):
+def test_points_and_bands_cover_the_horizon(eo):
     out = outlook(eo, at(NOW_DAY, 19, 40), solar=solar_days(eo, 0, 4))
     assert len(out["points"]) == eo.HORIZON_H
+    assert out["bands"][-1]["end"] >= out["points"][-1]["t"]
+    assert out["bands"][-1]["end"] == at(NOW_DAY + timedelta(days=3), 0).isoformat()
     assert out["points"][0]["t"] == at(NOW_DAY, 19).isoformat()
     assert out["learned"] == {"tariff_days": 7, "load_days": 21, "forecast_factor": 0.85,
                               "factor_source": "default", "forecast_shape": "hourly"}

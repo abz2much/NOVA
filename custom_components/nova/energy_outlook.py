@@ -211,7 +211,7 @@ def bands_from_table(table: list[float]) -> list[dict]:
 
 
 def outlook_bands(tariff: Optional[dict], today: date, tz, days: int = 2) -> list[dict]:
-    """Bands for today and tomorrow with ISO start and end times, labelled
+    """Bands for `days` days from today with ISO start and end times, labelled
     within each day. A band running over midnight at the same price and
     label is one band."""
     out: list[dict] = []
@@ -655,7 +655,10 @@ def build_outlook(now: datetime, tariff: Optional[dict], export_tariff: Optional
         "tariff_days": (tariff or {}).get("days", 0), "load_days": profile.get("days", 0),
         "forecast_factor": f, "factor_source": factor[1], "forecast_shape": forecast_shape,
     }
-    out["bands"] = outlook_bands(tariff, now.date(), tz) if priced else []
+    # Bands from today to the last day the horizon reaches, so the strip's
+    # price bar runs its whole length.
+    out["bands"] = outlook_bands(tariff, now.date(), tz, (hs[-1].date() - now.date()).days + 1) \
+        if priced else []
 
     messages, states = [], []
     if tariff_status == "learning":
