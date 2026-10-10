@@ -1,3 +1,11 @@
+## [8.23.0] — Lockdown and the decision log
+
+- **A medium alert while everyone is away now reaches the phones.** Before, it was neither spoken nor pushed, so "Front Door is unlocked while nobody appears to be home" could reach no one. Spoken alerts are unchanged, and with someone home nothing changes. When presence is unknown it keeps the old behaviour.
+- **One decision log format.** Intrusion (first alert, confirmed, unresolved), lockdown (engaged, lifted, doors opened during it), the nighttime sweep, hazards (including freeze), packages and doors left open are written to the Decision Record the same way, through `alert_path`. The records carry no outcome, so they never change the interruption budget, calibration or adaptive awareness.
+- **Nighttime sweep and lockdown share their lock handling.** Both pick the locks to lock the same way and send the same commands. Which covers each closes is unchanged: the sweep still closes every open cover, blinds included.
+- **Scheduled briefings.** The "everyone away" check now uses `household.py`, people only. A person in another zone, such as Work, now counts as away, and a phone linked to a person and reading home counts as home.
+- **Unchanged.** Confirmed intrusions still use the speakers. Armed away and everyone away work as before. Alarm disarm confirmation, the observer's door opening rule, appliance quiet hours, the doorbell and the live motion rule for core alerts are untouched. No new settings.
+
 ## [8.22.0] — One path for every alert
 
 - **One place decides.** A new `alert_path.py` decides, for every alert, whether it goes out and whether it is spoken, sent to the phones, or both. Hazards, packages, the doorbell, the observer, appliances, the Left open reminders and the cognitive core (intrusion, lockdown, freeze, offers) all go through it. Each kind keeps its own rules.

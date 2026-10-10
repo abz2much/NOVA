@@ -801,14 +801,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
                 return
             # Don't talk to an empty house unless explicitly allowed.
             if bool(_brief_cfg("briefing_require_home", True)):
-                # Only skip when we are CONFIDENT the house is empty — every
-                # tracked person is explicitly away. Unknown/unavailable presence
-                # must not suppress the briefing (fail open); the old check
-                # silenced scheduled briefings whenever presence was not a clean
-                # "home".
+                # Only skip when we are CONFIDENT the house is empty: every
+                # person reads away (household.py, people only, 8.23.0). Unknown
+                # or unavailable presence, or no person entities, must not
+                # suppress the briefing (fail open).
                 try:
-                    from .presence import everyone_confidently_away
-                    if everyone_confidently_away(hass):
+                    from . import household
+                    if household.everyone_away(hass):
                         _LOGGER.debug("Nova: skipping %s briefing — everyone away", kind)
                         return
                 except Exception:

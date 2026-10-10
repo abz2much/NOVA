@@ -215,7 +215,8 @@ def _core(ap, hass, urgency, sit=None, **action):
 
 @pytest.mark.parametrize("urgency,residents,expected", [
     ("high", "home", "both"), ("high", "away", "phones"), ("high", "unknown", "phones"),
-    ("medium", "home", "speakers"), ("medium", "away", "nothing"),
+    # 8.23.0: medium while everyone is away goes to the phones (it reached no one).
+    ("medium", "home", "speakers"), ("medium", "away", "phones"),
     ("medium", "unknown", "nothing"),
     ("critical", "home", "both"), ("critical", "away", "both"), ("critical", "unknown", "both"),
 ])

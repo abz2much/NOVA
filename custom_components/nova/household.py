@@ -102,6 +102,14 @@ def residents(hass, *, people_only: bool = False) -> str:
     return UNKNOWN
 
 
+def everyone_away(hass) -> bool:
+    """True only when every person reads away (people only). Unknown or
+    unavailable presence, or no person entities at all, is False: used where
+    a wrong "away" would wrongly silence something, such as the scheduled
+    briefings (8.23.0)."""
+    return residents(hass, people_only=True) == AWAY
+
+
 @dataclass(frozen=True)
 class Household:
     """One reading of the household, taken once per tick."""

@@ -29,9 +29,11 @@ def test_scheduler_defaults_are_off():
 
 def test_scheduler_skips_only_when_confidently_empty():
     # require_home is honored, but via the fail-open helper so uncertain
-    # presence no longer silences scheduled briefings (v6.95.0).
+    # presence no longer silences scheduled briefings (v6.95.0). Since 8.23.0
+    # the helper is household.everyone_away (people only, unknown is never
+    # away); test_household_briefing.py checks its answers.
     assert "briefing_require_home" in INIT
-    assert "everyone_confidently_away" in INIT
+    assert "household.everyone_away(hass)" in INIT
 
 
 def test_time_parser_present_with_sane_defaults():

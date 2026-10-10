@@ -122,8 +122,21 @@ async def _emit_action(hass, config, action, sleeping):
         except Exception as exc:
             _LOGGER.warning("Cognitive: action routing failed: %s", exc)
 
+    async def _record() -> None:
+        # Safety decisions delivered here go to the Decision Record in the
+        # shared format (8.23.0). The first intrusion alert is recorded where
+        # it is decided (core_safety.py); lockdown and the sweep record their
+        # own decisions.
+        kind = _RECORDED_KINDS.get(action_type)
+        if kind:
+            await alert_path.async_record_decision(
+                hass, kind, source=action_type, sit=sit, plan=plan,
+                entity_id=action.get("entity_id"), message=message,
+                facts={"urgency": urgency})
+
     if plan.phone_only:
         await alert_path.deliver(plan, push=_push)
+        await _record()
         return
 
     # Speak, offer the rating buttons, then push (critical and high, or a
@@ -145,6 +158,16 @@ async def _emit_action(hass, config, action, sleeping):
     # Also push critical/high alerts to phones
     if plan.push:
         await _push()
+    await _record()
+
+
+# Core action types whose delivery is a safety decision of its own (8.23.0).
+_RECORDED_KINDS = {
+    "intrusion_confirmed": "intrusion_confirmed",
+    "intrusion_unresolved": "intrusion_unresolved",
+    "freeze_warning": "hazard",
+    "freeze_critical": "hazard",
+}
 
 
 def _rating_data(decision_id) -> dict:

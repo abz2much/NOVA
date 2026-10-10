@@ -367,6 +367,13 @@ async def evaluate(hass, groq_client, honorific, tts_entity, speakers,
     loc = "the front door"
     spoke = False
 
+    async def _record(event, plan, msg=""):
+        # Package decisions in the shared safety format (8.23.0).
+        await alert_path.async_record_decision(
+            hass, "package", source="package_monitor", entity_id=entity_id,
+            sit=sit, plan=plan, message=msg, facts={"event": event, "detected_by": source},
+            assessment=f"package {event}")
+
     async def _say(msg):
         await async_announce(hass, msg, tts_entity, speakers, context="package")
 
@@ -393,6 +400,7 @@ async def evaluate(hass, groq_client, honorific, tts_entity, speakers,
             await alert_path.deliver(plan, speak=lambda _t: _say(msg))
             _mark_spoken(entity_id, "delivered")
             spoke = True
+            await _record("delivered", plan, msg)
     # Package removed
     elif prev.get("package") and not det.get("package"):
         _log(hass, entity_id, "removed", det, source)
@@ -405,15 +413,20 @@ async def evaluate(hass, groq_client, honorific, tts_entity, speakers,
                 plan, speak=lambda _t: _say(msg), push=lambda: _push_phones(hass, msg))
             spoke = out["spoke"]
             _mark_spoken(entity_id, "removed")
+            await _record("removed", plan, msg)
+        elif not plan.alert:
+            await _record("removed", plan)
 
     # Mail arrival
     if det.get("mail") and not prev.get("mail"):
         _log(hass, entity_id, "mail", det, source)
         plan = alert_path.for_package(sit, "mail", announcements_on=announcements_on)
         if plan.alert and _cooldown_open(entity_id, "mail"):
-            await alert_path.deliver(plan, speak=lambda _t: _say(_lead(f"mail has arrived at {loc}.")))
+            mail_msg = _lead(f"mail has arrived at {loc}.")
+            await alert_path.deliver(plan, speak=lambda _t: _say(mail_msg))
             _mark_spoken(entity_id, "mail")
             spoke = True
+            await _record("mail", plan, mail_msg)
 
     _STATE[entity_id] = {
         "package": bool(det.get("package")),
@@ -533,6 +546,10 @@ async def note_from_eufy(hass, honorific, tts_entity, speakers,
         await alert_path.deliver(plan, speak=lambda _t: async_announce(
             hass, msg, tts_entity, speakers, context="package"))
         _mark_spoken(entity_id, "stranded")
+        await alert_path.async_record_decision(
+            hass, "package", source="package_monitor", entity_id=entity_id,
+            plan=plan, message=msg, facts={"event": "stranded", "detected_by": "eufy"},
+            assessment="package stranded")
         _log(hass, entity_id, "stranded", det, "eufy")
 
 
