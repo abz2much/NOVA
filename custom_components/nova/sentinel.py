@@ -538,7 +538,14 @@ class NovaSentinel:
                 _LOGGER.debug("Sentinel: no notification delivered, speaking instead")
             return sent
 
-        await alert_path.deliver(plan, speak=_speak, push=_push)
+        out = await alert_path.deliver(plan, speak=_speak, push=_push)
+        # The reminder, in the shared safety format (8.23.0).
+        await alert_path.async_record_decision(
+            self.hass, "left_open", source="sentinel", entity_id=entity_id,
+            sit=sit, plan=plan, message=text,
+            facts={"rule": rule.get("id"), "minutes": minutes,
+                   "spoken": bool(out.get("spoke"))},
+            assessment="left open past its limit")
 
     async def _groq_line(
         self, entity_id: str, friendly_name: str, rule: dict, minutes: int

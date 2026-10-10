@@ -479,7 +479,8 @@ async def _deliver(hass, push_text: str, action_key: str, *, speak_text: str = "
     caller's level rule; alert_path.for_hazard turns it into the plan
     (8.22.0). Never raises."""
     from . import alert_path
-    plan = alert_path.for_hazard(alert_path.situation(hass), speak_allowed=bool(speak_text))
+    sit = alert_path.situation(hass)
+    plan = alert_path.for_hazard(sit, speak_allowed=bool(speak_text))
 
     async def _push():
         try:
@@ -510,6 +511,10 @@ async def _deliver(hass, push_text: str, action_key: str, *, speak_text: str = "
         await alert_path.deliver(plan, speak=_speak, push=_push)
     except Exception as exc:
         _LOGGER.debug("hazard: delivery failed: %s", exc)
+    await alert_path.async_record_decision(
+        hass, "hazard", source=_ACTION.get(action_key, action_key), sit=sit, plan=plan,
+        message=push_text, assessment="a nearby hazard or warning",
+        reason="" if speak_text else "below the speak level, or quiet hours")
 
 
 # ── weather warnings (8.8.0) ─────────────────────────────────────────────────

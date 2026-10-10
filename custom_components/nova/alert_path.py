@@ -15,6 +15,8 @@ rules. This module holds all of those decisions:
                functions, in the source's order.
 * nobody_home  the wording rule: "no one is home" is only ever said when the
                residents are known to be away.
+* record_decision  writes a safety decision to the Decision Record in one
+               shared format (8.23.0).
 
 Intrusion decisions stay in core_safety.py; their actions reach the speakers
 and phones through for_core_action(), like every other core action.
@@ -271,13 +273,14 @@ def for_core_action(hass, config: dict, sit: Situation, action: dict) -> Plan:
     """An action from the cognitive core: intrusion, lockdown, freeze, the
     proactive offers and the anticipation alerts.
 
-    Unchanged from before 8.22.0. Below critical, asleep, quiet hours or a
-    phone only action (the first intrusion alert with residents home) is
-    pushed and not spoken. Otherwise the speakers are chosen by urgency
-    (routing still judges presence from live motion as well as people, so an
-    intruder's movement while armed away is still spoken), and high and
-    critical are pushed too. With "announce notify only" on, a lower alert
-    that would have been spoken is pushed instead."""
+    Below critical, asleep, quiet hours or a phone only action (the first
+    intrusion alert with residents home) is pushed and not spoken. Otherwise
+    the speakers are chosen by urgency (routing still judges presence from
+    live motion as well as people, so an intruder's movement while armed away
+    is still spoken), and high and critical are pushed too. A lower alert the
+    speakers would not take is pushed instead when "announce notify only" is
+    on, or (8.23.0) when everyone is away, so a medium alert while everyone
+    is away is never lost."""
     urgency = action.get("urgency", "medium")
     if ((sit.sleeping or sit.quiet or action.get("phone_only"))
             and urgency != "critical"):
@@ -292,12 +295,19 @@ def for_core_action(hass, config: dict, sit: Situation, action: dict) -> Plan:
         mode, targets = "suppressed", []
 
     pushed_instead = False
-    try:
-        from . import nova_config
-        pushed_instead = (mode == "notify_only" and urgency not in HIGH_OR_CRITICAL
-                          and nova_config.announce_notify_only(hass))
-    except Exception:
-        pushed_instead = False
+    if mode == "notify_only" and urgency not in HIGH_OR_CRITICAL:
+        from . import household
+        if sit.residents == household.AWAY:
+            # Everyone is away and no speaker took it: the phones get it, or
+            # it reaches no one (8.23.0). Unknown is never away, so it keeps
+            # its old behaviour.
+            pushed_instead = True
+        else:
+            try:
+                from . import nova_config
+                pushed_instead = bool(nova_config.announce_notify_only(hass))
+            except Exception:
+                pushed_instead = False
     speak = bool(targets) and mode not in ("suppressed",)
     plan = Plan(speak=speak, targets=list(targets or []),
                 push=(urgency in HIGH_OR_CRITICAL or pushed_instead),
@@ -332,3 +342,78 @@ def _core_speakers(hass, config: dict, urgency: str, sleeping: bool):
         announcement_speakers=ann_speakers,
         is_sleeping=sleeping,
     )
+
+
+# ── the decision record (8.23.0) ────────────────────────────────────────────
+# Every safety decision (intrusion, lockdown, the nighttime sweep, hazards,
+# packages and door alerts) is written to the Decision Record in one format:
+#   observation     source, entity, message, residents, alarm posture,
+#                   asleep, quiet hours, plus the decision's own facts
+#   interpretation  {"assessment": what Nova concluded}
+#   evidence        {"spoken", "pushed", "route"} from the delivery plan
+#   decision        what was done, in words
+#   reason          why
+# Records are written with no outcome, so they never change the interruption
+# budget, calibration or adaptive awareness, which read judged records only.
+
+def _plan_words(plan: Optional[Plan]) -> str:
+    if plan is None:
+        return ""
+    if not plan.alert:
+        return "no alert"
+    return {(True, True): "spoken and pushed to phones", (True, False): "spoken",
+            (False, True): "pushed to phones"}.get((plan.speak, plan.push), "not delivered")
+
+
+def decision_fields(kind: str, *, source: str, sit: Optional[Situation] = None,
+                    plan: Optional[Plan] = None, entity_id: Optional[str] = None,
+                    message: str = "", facts: Optional[dict] = None,
+                    assessment: str = "", decision: str = "", reason: str = "") -> dict:
+    """The shared Decision Record fields for one safety decision."""
+    observation: dict = {"source": source}
+    if entity_id:
+        observation["entity_id"] = entity_id
+    if message:
+        observation["message"] = str(message)[:300]
+    if sit is not None:
+        observation.update({
+            "residents": sit.residents,
+            "posture": getattr(sit.house, "posture", None),
+            "asleep": sit.sleeping,
+            "quiet_hours": sit.quiet,
+        })
+    observation.update(facts or {})
+    evidence = {}
+    if plan is not None:
+        evidence = {"spoken": bool(plan.alert and plan.speak),
+                    "pushed": bool(plan.alert and plan.push),
+                    "route": plan.mode or None}
+    return {
+        "kind": kind,
+        "observation": observation,
+        "interpretation": {"assessment": assessment} if assessment else {},
+        "evidence": evidence,
+        "decision": decision or _plan_words(plan),
+        "reason": reason or (plan.reason if plan is not None else ""),
+    }
+
+
+def record_decision(kind: str, **fields) -> Optional[int]:
+    """Write one safety decision. Returns the record id, or None. Never
+    raises: a logging failure must never affect the decision."""
+    try:
+        from . import decision_record
+        return decision_record.record(**decision_fields(kind, **fields))
+    except Exception as exc:
+        _LOGGER.debug("alert_path: decision record failed: %s", exc)
+        return None
+
+
+async def async_record_decision(hass, kind: str, **fields) -> Optional[int]:
+    """record_decision off the event loop. Never raises."""
+    try:
+        return await hass.async_add_executor_job(
+            lambda: record_decision(kind, **fields))
+    except Exception as exc:
+        _LOGGER.debug("alert_path: decision record failed: %s", exc)
+        return None

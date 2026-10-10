@@ -22,7 +22,10 @@ needs, what it does by itself, and what it never does without you.
   nobody answers in time without that proof, it sends a softer notice asking
   you to check.
 - **Lockdown.** When the alarm is armed, Nova can lock the doors and close
-  the covers it controls. It is off until you turn it on. Doors and windows
+  the covers it controls. It is off until you turn it on. With it on, Nova
+  also locks the doors and closes open covers at night while the household
+  is asleep. The night sweep closes every open cover, blinds included; the
+  armed lockdown closes only doors, garages, windows and gates. Doors and windows
   it cannot close are named so you can close them by hand; a fridge or
   cabinet door, a sensor on your exclude list, or a shed door is not.
 - **Packages.** A package taken from the door while nobody is home is sent to
@@ -75,13 +78,17 @@ rules:
 
 | Alert | Spoken | Sent to phones |
 |---|---|---|
-| Intrusion, lockdown, freeze, offers | Below critical, not while asleep or in quiet hours | High and critical; anything not spoken while asleep or in quiet hours |
+| Intrusion, lockdown, freeze, offers | Below critical, not while asleep or in quiet hours | High and critical; anything not spoken while asleep or in quiet hours; anything not spoken while everyone is away |
 | Household events (doors, appliances' problems and so on) | When someone is home and awake, outside quiet hours; critical always | When nobody is home, or high and critical |
 | An appliance finishing | When someone is home and awake | When nobody is home |
 | Left open reminders | Unless asleep | Always |
 | Earthquakes, weather, disasters | Outside quiet hours, by your warning levels | Always |
 | Packages and mail | Outside quiet hours, with announcements on | A package taken while nobody is home, quiet hours or not |
 | Doorbell and camera events | When notable | No |
+
+A medium alert while everyone is away, such as "Front Door is unlocked while
+nobody appears to be home", goes to your phones. When presence is unknown it
+still follows the old rule.
 
 "Someone is home" for household events comes from your people and the
 trackers linked to them. Intrusion, lockdown, offers and appliances still
@@ -119,6 +126,13 @@ while armed away is still spoken.
 On the **Intrusion** tab you can press **I'M LOOKING (HOLD)** to stop the
 automatic escalation, or **CALL OFF (FALSE ALARM)**. Calling off an intrusion
 is always confirmed, and when you ask by voice it needs a tap on your phone.
+
+## The decision log
+
+Every safety decision is written to **Logs → Decisions** in the same form:
+what Nova saw (who was home, the alarm, asleep, quiet hours), what it
+concluded, what it did (spoken, sent to phones, or both) and why. That covers
+intrusion, lockdown, the night sweep, hazards, packages and doors left open.
 
 ## What it learns by itself
 

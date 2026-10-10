@@ -109,6 +109,29 @@ def build_lockdown_message(honorific: str, locked: list, closed: list,
     return i18n.message("lockdown_already_secured", lang, honorific=h)
 
 
+# ── shared with the nighttime sweep (8.23.0) ────────────────────────────────
+# The formal lockdown and the nighttime sweep (core_safety.py) pick the locks
+# to lock the same way and send the same commands. Which covers each closes
+# is still their own: the sweep closes every open cover, lockdown only door,
+# garage, window and gate covers (left as it is; see the 8.23.0 notes).
+
+def unlocked_locks(hass, exempt) -> list:
+    """Every lock reading unlocked that is not on the exempt list."""
+    return [st for st in hass.states.async_all("lock")
+            if st.state == "unlocked" and st.entity_id not in exempt]
+
+
+async def secure_device(hass, entity_id: str, domain: str) -> None:
+    """Lock a lock, or close a cover, and wait for the call. Raises if the
+    call fails; callers log and audit it their own way."""
+    if domain == "lock":
+        await hass.services.async_call(
+            "lock", "lock", {"entity_id": entity_id}, blocking=True)
+    else:
+        await hass.services.async_call(
+            "cover", "close_cover", {"entity_id": entity_id}, blocking=True)
+
+
 class LockdownManager:
     """
     Formal lockdown state — engaged when the alarm is armed or on explicit
@@ -276,14 +299,22 @@ class LockdownManager:
 
     async def _secure_entity(self, eid: str, dom: str) -> bool:
         try:
-            if dom == "lock":
-                await self.hass.services.async_call("lock", "lock", {"entity_id": eid}, blocking=True)
-            else:
-                await self.hass.services.async_call("cover", "close_cover", {"entity_id": eid}, blocking=True)
+            await secure_device(self.hass, eid, dom)
             return True
         except Exception as exc:
             _LOGGER.warning("Lockdown: secure %s failed: %s", eid, exc)
             return False
+
+    async def _record(self, decision: str, reason: str, *, entity_id=None,
+                      assessment: str = "", **facts) -> None:
+        """Write one lockdown decision to the Decision Record in the shared
+        safety format (alert_path, 8.23.0). Never raises."""
+        from . import alert_path
+        await alert_path.async_record_decision(
+            self.hass, "lockdown", source="lockdown", entity_id=entity_id,
+            sit=alert_path.situation(self.hass, self.config),
+            facts=dict(facts, auto=self.auto), assessment=assessment,
+            decision=decision, reason=reason)
 
     def _friendly(self, eid: str) -> str:
         """Friendly name for an entity (falls back to its id)."""
@@ -311,10 +342,7 @@ class LockdownManager:
         request_id, when given, is engage()'s own request_id — every lock
         touched here is logged as a target of THAT one lockdown request, not
         a separate action per lock (start_many, one batch)."""
-        candidates = [
-            st for st in self.hass.states.async_all("lock")
-            if st.entity_id not in self.exempt_locks and st.state == "unlocked"
-        ]
+        candidates = unlocked_locks(self.hass, self.exempt_locks)
         from . import action_log
         row_ids: dict = {}
         if request_id and candidates:
@@ -334,8 +362,7 @@ class LockdownManager:
             fname = st.attributes.get("friendly_name", eid)
             row_id = row_ids.get(eid)
             try:
-                await self.hass.services.async_call(
-                    "lock", "lock", {"entity_id": eid}, blocking=True)
+                await secure_device(self.hass, eid, "lock")
                 if not self._automatic_operation_current(automatic_generation):
                     break
                 locked.append((eid, fname))
@@ -457,6 +484,10 @@ class LockdownManager:
             "lock-failed=%s announce=%s",
             reason, locked, closed, len(uncloseable), failed_locks, announce)
         await self._persist()
+        await self._record(
+            "lockdown engaged", reason, assessment="secure the house",
+            locked=locked, closed=closed, left_open=open_names,
+            failed=failed_locks, announced=announce)
         if not announce:
             return None
         return {
@@ -483,6 +514,8 @@ class LockdownManager:
         _LOGGER.warning("Lockdown DISENGAGED (%s, manual=%s, auto_suppressed=%s)",
                         reason, manual, self._auto_suppressed)
         await self._persist()
+        await self._record("lockdown lifted", reason, manual=manual,
+                           auto_suppressed=self._auto_suppressed)
         return {
             "type": "lockdown_disengaged",
             "urgency": "low",
@@ -523,6 +556,8 @@ class LockdownManager:
             self.exempt_windows.add(eid)
             await self._persist()
             _LOGGER.info("Lockdown: %s opened (not controllable) — treating as intentional", eid)
+            await self._record("left open as intentional", "Nova cannot close it",
+                               entity_id=eid, assessment="opened during lockdown")
             return None
 
         if eid in self._secured_by_us and dom == "lock":
@@ -533,6 +568,9 @@ class LockdownManager:
             if eid in self._alerted:
                 return None
             self._alerted.add(eid)
+            await self._record("critical alert, not locked again",
+                               "unlocked again after Nova locked it",
+                               entity_id=eid, assessment="unlocked during lockdown")
             return {
                 "type": "lockdown_breach", "urgency": "critical", "auto_act": True,
                 "message": _persona().lead_in(honorific,
@@ -545,6 +583,9 @@ class LockdownManager:
             self._secured_by_us.discard(eid)
             self.exempt_windows.add(eid)
             await self._persist()
+            await self._record("left open as intentional",
+                               "reopened after Nova secured it",
+                               entity_id=eid, assessment="reopened during lockdown")
             if eid in self._alerted:
                 return None
             self._alerted.add(eid)
@@ -570,6 +611,9 @@ class LockdownManager:
                 breach_action_id, "accepted" if ok else "failed",
                 reason_code=None if ok else "service_call_failed")
         )
+        await self._record("secured again" if ok else "could not secure",
+                           "opened during lockdown", entity_id=eid,
+                           assessment="opened during lockdown")
         if ok:
             self._secured_by_us.add(eid)
             # Confirm it actually shut (slow covers report late) and alert if not.
@@ -596,6 +640,8 @@ class LockdownManager:
             if eid in self._alerted:
                 return
             self._alerted.add(eid)
+            await self._record("critical alert", "still not secure after Nova tried",
+                               entity_id=eid, assessment="secure check failed")
             honorific = _m_common._live_honorific(self.hass)  # Phase C: presence-aware
             await _emit_action(self.hass, self.config, {
                 "type": "lockdown_breach", "urgency": "critical", "auto_act": True,

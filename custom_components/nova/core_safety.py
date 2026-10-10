@@ -429,15 +429,20 @@ class SafetyManager:
         msg = _i18n.message(
             msg_key, _lang, honorific=honorific.title(),
             where=where, ctx=ctx)
-        # Decision Record (v7.39.0): log the proactive intrusion judgement. Best-effort;
-        # a logging failure must never affect the alert.
+        # Decision Record (v7.39.0): log the proactive intrusion judgement, in
+        # the shared safety format (alert_path, 8.23.0). Best-effort; a logging
+        # failure must never affect the alert. Written here, not at delivery,
+        # so a damped alert is recorded too and a call-off attaches to it.
         try:
-            from . import decision_record
-            _rid = decision_record.record(
-                "intrusion",
-                observation={"location": where, "breach": breach_name,
-                             "alarm_armed": armed, "presence": presence},
-                interpretation={"assessment": "possible intrusion — investigating from the point of entry"},
+            from . import alert_path
+            _rid = alert_path.record_decision(
+                "intrusion", source="intrusion", entity_id=eid, message=msg,
+                sit=alert_path.situation(self.hass, self.config,
+                                         sleeping=(trigger == "sleeping"),
+                                         house=self._household()),
+                facts={"location": where, "breach": breach_name,
+                       "alarm_armed": armed, "presence": presence, "trigger": trigger},
+                assessment="possible intrusion — investigating from the point of entry",
                 decision="raise initial intrusion alert and investigate silently",
                 reason=reason,
             )
@@ -1001,14 +1006,18 @@ class SafetyManager:
         # entities need securing — it owns one request_id for every target
         # it touches this run; nothing it calls creates its own row).
         from . import action_log
+        from .core_lockdown import secure_device, unlocked_locks
         request_id = action_log.new_request_id()
-        candidates: list[tuple[str, str, str]] = []  # (entity_id, domain, service)
-        for state in self.hass.states.async_all("lock"):
-            if state.state == "unlocked" and state.entity_id not in _lockdown_exempt_locks():
-                candidates.append((state.entity_id, "lock", "lock"))
-        for state in self.hass.states.async_all("cover"):
-            if state.state == "open":
-                candidates.append((state.entity_id, "cover", "close_cover"))
+        # The locks are picked the same way as the formal lockdown (8.23.0).
+        # Every open cover is closed, whatever its class: unlike the formal
+        # lockdown, which closes only door, garage, window and gate covers.
+        # That difference is kept on purpose (see the 8.23.0 notes).
+        lock_targets = unlocked_locks(self.hass, _lockdown_exempt_locks())
+        cover_targets = [st for st in self.hass.states.async_all("cover")
+                         if st.state == "open"]
+        candidates: list[tuple[str, str, str]] = (  # (entity_id, domain, service)
+            [(st.entity_id, "lock", "lock") for st in lock_targets]
+            + [(st.entity_id, "cover", "close_cover") for st in cover_targets])
         row_ids = await self.hass.async_add_executor_job(
             lambda: action_log.start_many(
                 request_id, "lockdown", "safety_routine",
@@ -1020,20 +1029,16 @@ class SafetyManager:
         # Check locks
         unlocked = []
         failed = []   # friendly names of anything the sweep could not secure
-        for state in self.hass.states.async_all("lock"):
+        for state in lock_targets:
             if not self._automatic_operation_current(automatic_generation):
                 return []
             if state.state == "unlocked":
                 eid = state.entity_id
-                if eid in _lockdown_exempt_locks():
-                    continue
                 fname = state.attributes.get("friendly_name", eid)
                 row_id = row_ids.get(eid)
                 # Auto-lock
                 try:
-                    await self.hass.services.async_call(
-                        "lock", "lock", {"entity_id": eid}, blocking=True,
-                    )
+                    await secure_device(self.hass, eid, "lock")
                     if not self._automatic_operation_current(automatic_generation):
                         return []
                     unlocked.append(fname)
@@ -1051,7 +1056,7 @@ class SafetyManager:
 
         # Check covers/garage
         open_covers = []
-        for state in self.hass.states.async_all("cover"):
+        for state in cover_targets:
             if not self._automatic_operation_current(automatic_generation):
                 return []
             if state.state == "open":
@@ -1059,9 +1064,7 @@ class SafetyManager:
                 fname = state.attributes.get("friendly_name", eid)
                 row_id = row_ids.get(eid)
                 try:
-                    await self.hass.services.async_call(
-                        "cover", "close_cover", {"entity_id": eid}, blocking=True,
-                    )
+                    await secure_device(self.hass, eid, "cover")
                     if not self._automatic_operation_current(automatic_generation):
                         return []
                     open_covers.append(fname)
@@ -1079,6 +1082,17 @@ class SafetyManager:
 
         if not self._automatic_operation_current(automatic_generation):
             return []
+        if candidates:
+            # The sweep's decision, in the shared safety format (8.23.0).
+            from . import alert_path
+            await alert_path.async_record_decision(
+                self.hass, "lockdown_sweep", source="nighttime_sweep",
+                sit=alert_path.situation(self.hass, self.config, sleeping=True,
+                                         house=self._household()),
+                facts={"locked": unlocked, "closed": open_covers, "failed": failed},
+                assessment="household asleep with locks unlocked or covers open",
+                decision="lock and close" + (", some failed" if failed else ""),
+                reason="automatic lockdown at night")
         if unlocked or open_covers or failed:
             i18n = _notify_i18n()
             lang = _m_common._hass_lang(self.hass)

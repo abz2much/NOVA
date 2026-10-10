@@ -65,7 +65,8 @@ SAID = [("Test alert.", [SPEAKER])]
     ("high", "away", [], ["test_alert"]),
     ("high", "unknown", [], ["test_alert"]),
     ("medium", "home", SAID, []),
-    ("medium", "away", [], []),
+    # 8.23.0: medium while everyone is away goes to the phones (it reached no one).
+    ("medium", "away", [], ["test_alert"]),
     ("medium", "unknown", [], []),
 ])
 async def test_core_action(core, fake_hass, urgency, residents, spoken, pushed):
