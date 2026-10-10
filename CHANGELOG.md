@@ -1,3 +1,9 @@
+## [8.24.0] — Nova's safety kernel
+
+### Stage A: safety alerts never go quiet
+- **Fixed.** "Front Door is unlocked while nobody appears to be home" went quiet for good after three days running, because the alert did not say which device it was about, so habituation could not see it was a lock. Anticipation alerts now carry their device, and habituation never quiets an alert about a lock, a cover or an alarm panel. Any that already went quiet come back.
+- **Covers are now exempt too.** That includes garage doors and gates, and also blinds: an alert about a blind no longer goes quiet after three days.
+
 ## [8.23.1] — Unknown presence reaches the phones too
 
 - **A medium alert while presence is unknown now goes to the phones,** the same as when everyone is away. Before, it was neither spoken nor pushed. Unknown means a person reading unknown or unavailable, or no person entities set up. Pushed only, with the rating buttons; never spoken.
