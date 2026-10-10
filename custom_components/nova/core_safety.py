@@ -490,6 +490,7 @@ class SafetyManager:
         # the shared safety format (alert_path, 8.23.0). Best-effort; a logging
         # failure must never affect the alert. Written here, not at delivery,
         # so a damped alert is recorded too and a call-off attaches to it.
+        _rid = None
         try:
             from . import alert_path
             _rid = alert_path.record_decision(
@@ -523,7 +524,7 @@ class SafetyManager:
                 "investigating", reason=("damped (learned benign)" if damped
                                          else reason),
                 breach=breach_name, breach_area=breach_area,
-                zones=[start_zone], max_depth=start_depth)
+                zones=[start_zone], max_depth=start_depth, decision_id=_rid)
         except Exception:
             pass
         if damped:

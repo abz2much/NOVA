@@ -58,7 +58,7 @@ def db(tmp_path, dr):
 def _judged(dr, db, kind, verdicts, ref=None):
     for v in verdicts:
         rid = dr.record(kind, ref=ref, db_path=db)
-        assert dr.set_outcome(rid, v, source="test", db_path=db) is True
+        assert dr.set_outcome(rid, v, source="phone", db_path=db) is True  # confirmed source (8.24.0)
 
 
 # ── the mapping ─────────────────────────────────────────────────────────────

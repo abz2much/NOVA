@@ -167,6 +167,18 @@ what Nova saw (who was home, the alarm, asleep, quiet hours), what it
 concluded, what it did (spoken, sent to phones, or both) and why. That covers
 intrusion, lockdown, the night sweep, hazards, packages and doors left open.
 
+## What it learns from you
+
+Nova only learns from things you confirmed: a Helpful or Not helpful tap on
+an alert, saying "it's a false alarm", a real or false label on the
+**Intrusion** tab, and accepting or dismissing a suggestion. Nothing it
+guesses for itself changes how it behaves.
+
+Saying "it's a false alarm" also teaches it. After three false alarms at the
+same place and time of day, with none marked real, the first alert for that
+pattern stays quiet. Nova still investigates, and a confirmed intrusion
+always alerts. One "real" label stops it learning to ignore that pattern.
+
 ## What it learns by itself
 
 - The single Alarmo panel, if there is one.

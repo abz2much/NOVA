@@ -18,7 +18,7 @@ def _seed(dr, db, entries):
         rid = dr.record("intrusion", confidence=conf, db_path=db)
         assert rid is not None
         if verdict:
-            assert dr.set_outcome(rid, verdict, source="test", db_path=db) is True
+            assert dr.set_outcome(rid, verdict, source="phone", db_path=db) is True  # confirmed source (8.24.0)
 
 
 def test_calibration_well_calibrated(dr, tmp_path):
@@ -85,9 +85,9 @@ def test_outcome_rate_is_per_kind(dr, tmp_path):
     # two kinds; outcome_rate must isolate the requested one
     for verdict in ("good", "good", "unnecessary", "wrong"):
         rid = dr.record("suggestion", confidence=0.7, db_path=db)
-        dr.set_outcome(rid, verdict, source="t", db_path=db)
+        dr.set_outcome(rid, verdict, source="dismiss_intrusion", db_path=db)  # confirmed (8.24.0)
     rid = dr.record("intrusion", confidence=0.9, db_path=db)
-    dr.set_outcome(rid, "good", source="t", db_path=db)
+    dr.set_outcome(rid, "good", source="dismiss_intrusion", db_path=db)  # confirmed (8.24.0)
 
     r = dr.outcome_rate("suggestion", db_path=db)
     assert r["judged"] == 4 and r["good"] == 2

@@ -31,6 +31,12 @@
 - **Hazards.** The freeze warning is not repeated after a restart, and active weather warnings show as an open situation. Older than 24 hours is dropped.
 - **Fails safe.** A missing or corrupt file starts fresh, exactly as before. A failed save is logged and ignored.
 
+### Stage F: learning only from what you confirmed
+- **One allowlist.** Nova learns only from outcomes a person confirmed: a Helpful / Not helpful rating on the phone, a "false alarm" call-off, a real / false label on the Intrusion tab, and a suggestion accepted or dismissed. The interruption budget, adaptive awareness, suggestion selectivity and learned damping ignore anything else.
+- **A panel label also sets the decision's outcome** in the decision log, unless one was already given.
+- **A call-off now teaches learned damping.** "It's a false alarm" labels that intrusion's first alert as false. After three false labels for the same place and time of day, with none real, the first alert for that pattern stays quiet; the investigation still runs and a confirmed intrusion always alerts. A call-off never overwrites a label you gave on the Intrusion tab.
+- Labels given before 8.24.0 count as panel labels, which is where they came from.
+
 ## [8.23.1] — Unknown presence reaches the phones too
 
 - **A medium alert while presence is unknown now goes to the phones,** the same as when everyone is away. Before, it was neither spoken nor pushed. Unknown means a person reading unknown or unavailable, or no person entities set up. Pushed only, with the rating buttons; never spoken.
