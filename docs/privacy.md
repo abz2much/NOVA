@@ -39,6 +39,24 @@ on its own initiative.
   fact text is sent only to the Ollama server you set up, and forgetting a
   fact deletes its vector too.
 
+### Chat
+
+The Chat tab keeps one thread per Home Assistant user, with the conversation
+id `nova_chat_` followed by the user's id. A thread can only be used by its own
+user.
+
+- Each message and reply is a row in `conversations.db` and is also kept in
+  Nova's conversation memory, like any other conversation. Rows are purged
+  after 30 days.
+- **NEW CHAT** clears your thread in memory and deletes your rows for it from
+  `conversations.db` at once. Other people's threads are not touched.
+- The messages shown in the panel are kept in the browser page only, and are
+  gone when it is reloaded.
+- If your account has a person entity, Nova can use what it knows about that
+  person in the thread. If not, Chat uses household facts only and nothing
+  personal.
+- Chat replies are never spoken.
+
 ### Relations
 
 Nova keeps a small map of how things relate, for example "house member owns

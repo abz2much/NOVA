@@ -87,6 +87,17 @@ with your home's context, calls a tool, looks at the result, and answers.
 The tools are Nova's own, not the generic Home Assistant conversation
 interface. Most tools also have a control in the panel.
 
+### Chat tab
+
+The Chat tab sends your message to the same agent over the `nova/chat`
+command, open to any Home Assistant user. The server builds the conversation
+id from your user (`nova_chat_` plus your user id), so each person has their
+own thread and the panel never sends one. A Chat turn skips the relevance gate
+and the duplicate check, works out who you are from your Home Assistant user,
+and is never routed to a speaker. Unlock, open, disarm and standing down an
+intrusion need a tap on your phone, as for voice. You can send 20 messages a
+minute and one at a time. See [Safety and security](safety-and-security.md#chat).
+
 ### Device control
 
 - Nova can control one device or many, run scenes and scripts, and carry

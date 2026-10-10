@@ -152,7 +152,7 @@ from .ws_modes import (
     ws_solar,
 )
 # The Chat tab's command lives in ws_chat.py. async_register registers it by name.
-from .ws_chat import ws_chat
+from .ws_chat import ws_chat, ws_chat_new
 # The voice and history commands live in ws_voice.py. async_register registers them by name.
 from .ws_voice import (
     ws_get_spoken_history,
@@ -234,6 +234,7 @@ def async_register(hass: HomeAssistant) -> None:
         websocket_api.async_register_command(hass, ws_get_setup_health)
         websocket_api.async_register_command(hass, ws_say_hello)
         websocket_api.async_register_command(hass, ws_chat)
+        websocket_api.async_register_command(hass, ws_chat_new)
         websocket_api.async_register_command(hass, ws_get_provider_activity)
         websocket_api.async_register_command(hass, ws_get_spoken_history)
         websocket_api.async_register_command(hass, ws_list_actions)

@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+import weakref
 from typing import Literal
 
 from homeassistant.components import conversation
@@ -168,6 +169,22 @@ def _current_time_context(hass, now=None) -> str:
             f"{now.strftime('%-I:%M %p')}.")
 
 
+def _turn_user_id(user_input) -> str | None:
+    """The Home Assistant user who sent this turn, if it says."""
+    return getattr(getattr(user_input, "context", None), "user_id", None)
+
+
+_AGENTS: "weakref.WeakSet" = weakref.WeakSet()   # the live NovaAgent instances
+
+
+def clear_chat_thread(conversation_id: str) -> None:
+    """Forget one Chat tab thread in memory (NEW CHAT). The rows in
+    conversations.db are deleted by the caller."""
+    for agent in list(_AGENTS):
+        agent._histories.pop(conversation_id, None)
+        agent._last_seen.pop(conversation_id, None)
+
+
 def _is_addressed_to_nova(text: str) -> bool:
     """
     Relevance gate: does this utterance look like it's actually addressed to
@@ -267,7 +284,9 @@ async def async_setup_entry(
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    async_add_entities([NovaAgent(hass, config_entry)])
+    agent = NovaAgent(hass, config_entry)
+    _AGENTS.add(agent)
+    async_add_entities([agent])
 
 
 class NovaAgent(conversation.ConversationEntity):
@@ -606,7 +625,12 @@ class NovaAgent(conversation.ConversationEntity):
         # instead of HA's opaque "Unexpected error during intent recognition"
         # that leaves nothing in Nova's own diagnostics.
         try:
-            return await self._handle_message_impl(user_input, chat_log)
+            # A Chat tab turn (8.31.0) runs with the gate told so: unlock, open,
+            # disarm and standing down then need a phone tap, as for voice.
+            from . import policy
+            with policy.chat_turn(
+                    getattr(user_input, "conversation_id", None), _turn_user_id(user_input)):
+                return await self._handle_message_impl(user_input, chat_log)
         except Exception:
             import traceback as _tb
             last = _tb.format_exc().strip().splitlines()[-1][:200]
@@ -644,6 +668,21 @@ class NovaAgent(conversation.ConversationEntity):
         # wrapper in _async_handle_message logs it and speaks its error reply.
         get_runtime(self.entry)
 
+        # A Chat tab turn (8.31.0): its conversation id is nova_chat_<user id>.
+        # It skips the relevance gate and the dedup, and is never spoken. Only
+        # that user may use the thread, so Assist cannot read or write it by
+        # sending the same id from another account.
+        from . import policy
+        turn_user = _turn_user_id(user_input)
+        is_chat = str(user_input.conversation_id or "").startswith(policy.CHAT_ID_PREFIX)
+        if is_chat and (not turn_user
+                        or user_input.conversation_id != policy.chat_conversation_id(turn_user)):
+            nova_log("CONV", "chat thread refused: not this user's conversation")
+            ir = intent.IntentResponse(language=user_input.language)
+            ir.async_set_speech("That chat thread belongs to someone else.")
+            return conversation.ConversationResult(
+                response=ir, conversation_id=user_input.conversation_id)
+
         # Transcribed voice text arriving here means STT just worked (HA's
         # pipeline transcribed speech and routed it to us). Record it as a real
         # STT success so the health panel reflects reality, not a synthetic poke
@@ -659,7 +698,9 @@ class NovaAgent(conversation.ConversationEntity):
         # If another satellite already processed this exact text within
         # the dedup window, return the cached response WITHOUT routing
         # audio again. This prevents 3 speakers all talking at once.
-        is_dup, cached = _check_and_claim_dedup(user_input.text, device_id)
+        is_dup, cached = False, None
+        if not is_chat:   # a Chat turn is never a duplicate, and claims no slot
+            is_dup, cached = _check_and_claim_dedup(user_input.text, device_id)
         if is_dup:
             _LOGGER.warning(
                 "Nova dedup: suppressing duplicate from device=%s "
@@ -745,7 +786,9 @@ class NovaAgent(conversation.ConversationEntity):
             cognitive_core = None
             pending_offer = None
         gate_enabled = self._opt("relevance_gate", True)
-        is_addressed = _is_addressed_to_nova(user_input.text)
+        # A Chat tab turn is always addressed to Nova, which also keeps the later
+        # routing gate from dropping it.
+        is_addressed = is_chat or _is_addressed_to_nova(user_input.text)
         relevant = bool(pending_offer) or not gate_enabled or is_addressed
 
         if not relevant:
@@ -773,6 +816,9 @@ class NovaAgent(conversation.ConversationEntity):
             ident = identity_module.resolve(
                 self.hass,
                 device_id=getattr(user_input, "device_id", None),
+                # Chat: the logged in user alone decides who this is. No match
+                # leaves the person unknown, so household facts only.
+                user_id=turn_user if is_chat else None,
             )
             if ident.known:
                 episodic_subject = identity_module.normalize(ident.person)
@@ -1090,7 +1136,7 @@ class NovaAgent(conversation.ConversationEntity):
             # Settings determine which speaker each satellite uses.
             try:
                 device_id_route = getattr(user_input, 'device_id', None)
-                if device_id_route:
+                if device_id_route and not is_chat:
                     from .audio_routing import reply_target
                     sat_pairings = self._satellite_pairings()
 
@@ -1262,7 +1308,7 @@ class NovaAgent(conversation.ConversationEntity):
         # older HA cores may not carry the field.
         try:
             from . import continued_conversation as _cc
-            if _cc.enabled() and _cc.should_continue(response_text):
+            if not is_chat and _cc.enabled() and _cc.should_continue(response_text):
                 sat_ent = (_cc.satellite_for_device(self.hass, reopen_device)
                            if reopen_device else None)
                 if (cast_routed and reopen_speaker and sat_ent

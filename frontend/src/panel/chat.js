@@ -1,8 +1,10 @@
   // ─── Chat ─────────────────────────────────────────────────────────────
-  // Type to Nova from the panel. Each message goes through nova/chat (admin
-  // only) to Nova's own conversation agent, so anything it does to the house
-  // passes the same authorisation gate as Assist. The conversation lives in
-  // memory only and is gone when the panel is reloaded.
+  // Type to Nova from the panel. Each message goes through nova/chat, open to
+  // any Home Assistant user, to Nova's own conversation agent. The server keeps
+  // one thread per user, so the panel sends no conversation id. Unlocking,
+  // opening and disarming need a tap on the user's phone. NEW CHAT calls
+  // nova/chat_new, which clears the thread on the server. The messages shown
+  // here live in the panel only and are gone when it is reloaded.
   _htmlChat() {
     return `
         <div class="panel">
@@ -21,7 +23,7 @@
   }
 
   _chatState() {
-    if (!this._chat) this._chat = { id: null, turns: [], busy: false };
+    if (!this._chat) this._chat = { turns: [], busy: false };
     return this._chat;
   }
 
@@ -30,7 +32,7 @@
     if (!log) return;
     const c = this._chatState();
     if (!c.turns.length) {
-      this._setHtml(log, `<div class="stub-body">Ask about your home or tell Nova what to do. Anything that unlocks, opens or disarms is still checked first, the same as in Assist.</div>`);
+      this._setHtml(log, `<div class="stub-body">Ask about your home or tell Nova what to do. Unlocking, opening and disarming need a tap on your phone.</div>`);
       return;
     }
     this._setHtml(log, c.turns.map(t => `
@@ -54,17 +56,16 @@
     c.busy = true;
     this._renderChat();
     try {
-      const res = await this._hass.callWS({ type: "nova/chat", text, conversation_id: c.id });
+      const res = await this._hass.callWS({ type: "nova/chat", text });
       if (res && res.ok) {
-        if (res.conversation_id) c.id = res.conversation_id;
         c.turns.push({ role: "nova", text: res.reply });
+      } else if (res && res.code === "rate_limited") {
+        c.turns.push({ role: "nova", text: this._t("You're sending too fast, wait a moment"), error: true });
       } else {
         c.turns.push({ role: "nova", text: (res && res.error) || this._t("Could not reach Nova."), error: true });
       }
     } catch (err) {
-      const denied = err && err.code === "unauthorized";
-      c.turns.push({ role: "nova", error: true,
-        text: denied ? this._t("Chat needs a Home Assistant administrator.") : this._t("Could not reach Nova.") });
+      c.turns.push({ role: "nova", error: true, text: this._t("Could not reach Nova.") });
     }
     c.busy = false;
     this._renderChat();
@@ -76,9 +77,14 @@
     root.getElementById("chatInput")?.addEventListener("keydown", e => {
       if (e.key === "Enter") this._chatSend();
     });
-    root.getElementById("chatNew")?.addEventListener("click", () => {
-      this._chat = { id: null, turns: [], busy: false };
+    root.getElementById("chatNew")?.addEventListener("click", async () => {
+      this._chat = { turns: [], busy: false };
       this._renderChat();
+      try {
+        await this._hass.callWS({ type: "nova/chat_new" });
+      } catch (err) {
+        console.error("Nova: chat reset failed", err);
+      }
     });
     this._renderChat();
     root.getElementById("chatInput")?.focus();

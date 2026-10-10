@@ -1139,12 +1139,12 @@
   "Presence sensors": "Aanwezigheidssensoren",
   "Stories, garage and basement, which entity is each door, and the exit doors you leave by.": "Verdiepingen, garage en kelder, welke entiteit elke deur is, en de buitendeuren waardoor je vertrekt.",
   "Ask Nova something": "Vraag Nova iets",
-  "Ask about your home or tell Nova what to do. Anything that unlocks, opens or disarms is still checked first, the same as in Assist.": "Vraag iets over je huis of zeg tegen Nova wat ze moet doen. Alles wat ontgrendelt, opent of uitschakelt wordt nog steeds eerst gecontroleerd, net als in Assist.",
+  "Ask about your home or tell Nova what to do. Unlocking, opening and disarming need a tap on your phone.": "Vraag iets over je huis of zeg tegen Nova wat ze moet doen. Ontgrendelen, openen en uitschakelen vragen om een tik op je telefoon.",
   "Chat": "Chat",
-  "Chat needs a Home Assistant administrator.": "Chat vereist een Home Assistant-beheerder.",
   "Could not reach Nova.": "Kon Nova niet bereiken.",
   "NEW CHAT": "NIEUWE CHAT",
   "Nova is thinking…": "Nova denkt na…",
   "SEND": "VERSTUUR",
-  "You": "Jij"
+  "You": "Jij",
+  "You're sending too fast, wait a moment": "Je verstuurt te snel, wacht even"
 }

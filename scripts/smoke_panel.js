@@ -3610,14 +3610,15 @@ if (require.main === module) setTimeout(async () => {
   // conversation id come back, and a non admin sees a plain message.
   const chatCallWS = hass.callWS;
   const _chatCalls = [];
-  let _chatMode = "ok";                          // ok -> fail -> denied
+  let _chatMode = "ok";                          // ok -> fail -> limited
   hass.callWS = async (m) => {
     if (m.type === "nova/chat") {
       _chatCalls.push({ ...m });
-      if (_chatMode === "denied") { const e = new Error("Unauthorized"); e.code = "unauthorized"; throw e; }
+      if (_chatMode === "limited") return { ok: false, code: "rate_limited", error: "You're sending too fast, wait a moment" };
       if (_chatMode === "fail") return { ok: false, error: "Nova returned an error." };
-      return { ok: true, reply: "The lamp is on.", conversation_id: "conv-1" };
+      return { ok: true, reply: "The lamp is on." };
     }
+    if (m.type === "nova/chat_new") { _chatCalls.push({ ...m }); return { ok: true, removed: 2 }; }
     return chatCallWS(m);
   };
   const chatTabBtn = Array.from(sRoot.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === "chat");
@@ -3631,15 +3632,15 @@ if (require.main === module) setTimeout(async () => {
   await new Promise(r => setTimeout(r, 30));
   sRoot = elNew.shadowRoot;
   checks.push(["chat tab: Send calls nova/chat with the text and shows the reply",
-    _chatCalls.length === 1 && _chatCalls[0].text === "turn on the lamp" && _chatCalls[0].conversation_id === null
+    _chatCalls.length === 1 && _chatCalls[0].text === "turn on the lamp" && !("conversation_id" in _chatCalls[0])
     && /turn on the lamp/.test(sRoot.getElementById("chatLog")?.textContent || "")
     && /The lamp is on\./.test(sRoot.getElementById("chatLog")?.textContent || "")
     && sRoot.getElementById("chatInput").value === ""]);
   sRoot.getElementById("chatInput").value = "and the fan";
   sRoot.getElementById("chatSend").click();
   await new Promise(r => setTimeout(r, 30));
-  checks.push(["chat tab: the next message carries the conversation id",
-    _chatCalls.length === 2 && _chatCalls[1].conversation_id === "conv-1"]);
+  checks.push(["chat tab: the panel never sends a conversation id",
+    _chatCalls.length === 2 && _chatCalls.every(c => !("conversation_id" in c))]);
   _chatMode = "fail";
   sRoot = elNew.shadowRoot;
   sRoot.getElementById("chatInput").value = "again";
@@ -3648,18 +3649,20 @@ if (require.main === module) setTimeout(async () => {
   sRoot = elNew.shadowRoot;
   checks.push(["chat tab: an error from Nova is shown in the log",
     !!sRoot.querySelector("#chatLog .chat-error") && /Nova returned an error\./.test(sRoot.getElementById("chatLog")?.textContent || "")]);
-  _chatMode = "denied";
+  _chatMode = "limited";
   sRoot.getElementById("chatInput").value = "hello";
   sRoot.getElementById("chatSend").click();
   await new Promise(r => setTimeout(r, 30));
   sRoot = elNew.shadowRoot;
-  checks.push(["chat tab: a non admin sees that Chat needs an administrator",
-    /needs a Home Assistant administrator/.test(sRoot.getElementById("chatLog")?.textContent || "")]);
+  checks.push(["chat tab: the rate limit shows as the error state",
+    !!sRoot.querySelector("#chatLog .chat-error")
+    && /sending too fast/.test(sRoot.getElementById("chatLog")?.textContent || "")]);
   sRoot.getElementById("chatNew").click();
   await new Promise(r => setTimeout(r, 10));
   sRoot = elNew.shadowRoot;
-  checks.push(["chat tab: NEW CHAT clears the log",
-    /Ask about your home/.test(sRoot.getElementById("chatLog")?.textContent || "")]);
+  checks.push(["chat tab: NEW CHAT clears the log and calls nova/chat_new",
+    /Ask about your home/.test(sRoot.getElementById("chatLog")?.textContent || "")
+    && _chatCalls.some(c => c.type === "nova/chat_new")]);
   hass.callWS = chatCallWS;
   Array.from(sRoot.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === "intrusion").click();
   await new Promise(r => setTimeout(r, 20));

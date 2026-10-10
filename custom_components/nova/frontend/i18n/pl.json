@@ -1139,12 +1139,12 @@
   "Presence sensors": "Czujniki obecności",
   "Stories, garage and basement, which entity is each door, and the exit doors you leave by.": "Piętra, garaż i piwnica, która encja jest którymi drzwiami, oraz drzwi wyjściowe, którymi wychodzisz.",
   "Ask Nova something": "Zapytaj Novę o coś",
-  "Ask about your home or tell Nova what to do. Anything that unlocks, opens or disarms is still checked first, the same as in Assist.": "Zapytaj o swój dom lub powiedz Novie, co ma zrobić. Wszystko, co odblokowuje, otwiera lub wyłącza alarm, nadal jest najpierw sprawdzane, tak samo jak w Assist.",
+  "Ask about your home or tell Nova what to do. Unlocking, opening and disarming need a tap on your phone.": "Zapytaj o swój dom lub powiedz Novie, co ma zrobić. Odblokowanie, otwarcie i wyłączenie alarmu wymagają potwierdzenia dotknięciem na telefonie.",
   "Chat": "Czat",
-  "Chat needs a Home Assistant administrator.": "Czat wymaga administratora Home Assistant.",
   "Could not reach Nova.": "Nie można połączyć się z Novą.",
   "NEW CHAT": "NOWY CZAT",
   "Nova is thinking…": "Nova myśli…",
   "SEND": "WYŚLIJ",
-  "You": "Ty"
+  "You": "Ty",
+  "You're sending too fast, wait a moment": "Wysyłasz zbyt szybko, chwilę poczekaj"
 }

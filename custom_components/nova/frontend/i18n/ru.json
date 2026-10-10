@@ -1139,12 +1139,12 @@
   "Presence sensors": "Датчики присутствия",
   "Stories, garage and basement, which entity is each door, and the exit doors you leave by.": "Этажи, гараж и подвал, какой объект соответствует каждой двери, и выходные двери, через которые вы уходите.",
   "Ask Nova something": "Спросите Nova о чём-нибудь",
-  "Ask about your home or tell Nova what to do. Anything that unlocks, opens or disarms is still checked first, the same as in Assist.": "Спросите о своём доме или скажите Nova, что делать. Всё, что разблокирует, открывает или снимает с охраны, по-прежнему сначала проверяется, как и в Assist.",
+  "Ask about your home or tell Nova what to do. Unlocking, opening and disarming need a tap on your phone.": "Спросите о своём доме или скажите Nova, что делать. Для разблокировки, открытия и снятия с охраны нужно нажатие на телефоне.",
   "Chat": "Чат",
-  "Chat needs a Home Assistant administrator.": "Для чата нужен администратор Home Assistant.",
   "Could not reach Nova.": "Не удалось связаться с Nova.",
   "NEW CHAT": "НОВЫЙ ЧАТ",
   "Nova is thinking…": "Nova думает…",
   "SEND": "ОТПРАВИТЬ",
-  "You": "Вы"
+  "You": "Вы",
+  "You're sending too fast, wait a moment": "Вы отправляете слишком быстро, подождите немного"
 }

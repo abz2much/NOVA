@@ -1134,12 +1134,12 @@
   "Presence sensors": "存在感測器",
   "Stories, garage and basement, which entity is each door, and the exit doors you leave by.": "樓層、車庫和地下室，每扇門對應哪個實體，以及您離家時經過的出口門。",
   "Ask Nova something": "向 Nova 提問",
-  "Ask about your home or tell Nova what to do. Anything that unlocks, opens or disarms is still checked first, the same as in Assist.": "詢問您的家居狀況，或告訴 Nova 該做什麼。任何會解鎖、開啟或解除警戒的操作，仍會像在 Assist 中一樣先經過檢查。",
+  "Ask about your home or tell Nova what to do. Unlocking, opening and disarming need a tap on your phone.": "詢問您的家居狀況，或告訴 Nova 該做什麼。解鎖、開啟和解除警戒需要在您的手機上點一下確認。",
   "Chat": "聊天",
-  "Chat needs a Home Assistant administrator.": "聊天需要 Home Assistant 管理員。",
   "Could not reach Nova.": "無法連線到 Nova。",
   "NEW CHAT": "新對話",
   "Nova is thinking…": "Nova 正在思考…",
   "SEND": "傳送",
-  "You": "您"
+  "You": "您",
+  "You're sending too fast, wait a moment": "您傳送得太快了，請稍候"
 }

@@ -231,12 +231,12 @@
   "Presence sensors": "Varlık sensörleri",
   "Stories, garage and basement, which entity is each door, and the exit doors you leave by.": "Katlar, garaj ve bodrum, her kapının hangi varlık olduğu ve çıktığın çıkış kapıları.",
   "Ask Nova something": "Nova'ya bir şey sor",
-  "Ask about your home or tell Nova what to do. Anything that unlocks, opens or disarms is still checked first, the same as in Assist.": "Evin hakkında soru sor ya da Nova'ya ne yapacağını söyle. Kilidi açan, açan veya alarmı devre dışı bırakan her şey Assist'te olduğu gibi yine önce kontrol edilir.",
+  "Ask about your home or tell Nova what to do. Unlocking, opening and disarming need a tap on your phone.": "Evin hakkında soru sor ya da Nova'ya ne yapacağını söyle. Kilidi açma, açma ve alarmı devre dışı bırakma için telefonunda dokunman gerekir.",
   "Chat": "Sohbet",
-  "Chat needs a Home Assistant administrator.": "Sohbet için bir Home Assistant yöneticisi gerekir.",
   "Could not reach Nova.": "Nova'ya ulaşılamadı.",
   "NEW CHAT": "YENİ SOHBET",
   "Nova is thinking…": "Nova düşünüyor…",
   "SEND": "GÖNDER",
-  "You": "Sen"
+  "You": "Sen",
+  "You're sending too fast, wait a moment": "Çok hızlı gönderiyorsun, biraz bekle"
 }

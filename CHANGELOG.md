@@ -1,9 +1,14 @@
-## [8.31.0] — Chat tab
+## [8.31.0]
+
+The Chat tab.
 
 ### Added
-- **Chat tab.** Type to Nova from the panel. Each message goes to Nova's own conversation agent through the new admin only command `nova/chat`, so it can answer questions and act on the house like Assist does. The conversation is kept in the panel's memory only and is gone on reload; NEW CHAT starts again. Messages are limited to 1000 characters.
-- The command never passes a device, so a typed message cannot pose as a voice satellite, and every action it triggers still goes through the authorisation gate (`policy.authorize`). Typed chat has no extra way round it, and none was loosened.
-- Nine new panel strings, translated into all 20 languages.
+- **Chat tab.** Type to Nova from the panel. Any Home Assistant user can use it, as with Assist; there is no admin gate. Each message goes through the new `nova/chat` command to Nova's own conversation agent. Messages are limited to 1000 characters.
+- **One thread per user.** The server builds the conversation id as `nova_chat_<user id>` from the signed in user. The panel never sends one, and Assist cannot read or write another user's thread. **NEW CHAT** (`nova/chat_new`) clears your thread in memory and your rows for it in `conversations.db`. Rows are purged after 30 days like any other conversation.
+- **Limits.** One message in flight per user and at most 20 a minute per user. Over the limit, Chat shows "You're sending too fast, wait a moment" and makes no agent call.
+- **Phone tap for chat.** From a Chat turn, unlocking, opening a cover, garage door or door, disarming the alarm and calling off an intrusion always need a tap on the requesting user's own phone, as for voice, even when voice confirmation is off. If that account has no person with a phone, the action is refused and the reply says why. A refused, unanswered or failed tap means it is not done. This only makes the gate stricter. Typed Assist, the companion app, voice and automations behave as before.
+- **Chat turns in the conversation agent.** They skip the relevance gate and the duplicate check, are never spoken, and use the person whose `person.*` entity has the user's id (new `user_id` signal in `identity.py`). With no matching person, Chat uses household facts only.
+- Nine new panel strings, translated into all 20 languages. Docs updated: Getting started, Safety and security, Privacy and How Nova works.
 
 ## [8.30.0] — The 3D house is gone; Home layout moves into Settings
 

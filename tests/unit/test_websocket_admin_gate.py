@@ -75,8 +75,6 @@ ADMIN_GATED_TYPES = [
     "get_debug_log",
     "list_actions",
     "say_hello",
-    # Chat tab (8.31.0): a typed message drives the conversation agent.
-    "chat",
     # Faces tab: the list shows who was seen on which camera, add and remove
     # change who the opt in intrusion stand down trusts.
     "list_faces",
@@ -108,7 +106,7 @@ def test_require_admin_used_at_least_once_per_gated_command():
     # Exactly one decorator per listed command: a new admin gated command that
     # is not added to ADMIN_GATED_TYPES (or a listed one that lost its gate)
     # changes the count and fails here.
-    assert src.count("@websocket_api.require_admin") == len(ADMIN_GATED_TYPES) == 47
+    assert src.count("@websocket_api.require_admin") == len(ADMIN_GATED_TYPES) == 46
 
 
 def test_require_admin_sits_above_websocket_command_not_below():

@@ -231,12 +231,12 @@
   "Presence sensors": "Tilstedeværelsessensorer",
   "Stories, garage and basement, which entity is each door, and the exit doors you leave by.": "Etager, garage og kælder, hvilken enhed der er hver dør, og de yderdøre, du går ud ad.",
   "Ask Nova something": "Spørg Nova om noget",
-  "Ask about your home or tell Nova what to do. Anything that unlocks, opens or disarms is still checked first, the same as in Assist.": "Spørg om dit hjem, eller fortæl Nova, hvad den skal gøre. Alt, der låser op, åbner eller slår alarmen fra, bliver stadig tjekket først, ligesom i Assist.",
+  "Ask about your home or tell Nova what to do. Unlocking, opening and disarming need a tap on your phone.": "Spørg om dit hjem, eller fortæl Nova, hvad den skal gøre. Oplåsning, åbning og afbrydelse af alarmen kræver et tryk på din telefon.",
   "Chat": "Chat",
-  "Chat needs a Home Assistant administrator.": "Chat kræver en Home Assistant-administrator.",
   "Could not reach Nova.": "Kunne ikke nå Nova.",
   "NEW CHAT": "NY CHAT",
   "Nova is thinking…": "Nova tænker…",
   "SEND": "SEND",
-  "You": "Dig"
+  "You": "Dig",
+  "You're sending too fast, wait a moment": "Du sender for hurtigt, vent et øjeblik"
 }

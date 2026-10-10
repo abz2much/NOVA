@@ -80,6 +80,11 @@ A few advanced settings have no control in either place and are only set in
 - **Command Center.** The animated core, your areas with live sensors and a
   light toggle, Cognitive Core, Goals, Activity, Quick Actions, Operational
   Mode, a Muted card, and camera snapshots on request.
+- **Chat.** Type to Nova from the panel. Any Home Assistant user can use it,
+  and each person has their own thread. To unlock a door, open a garage door
+  or disarm the alarm from here, Nova sends a request to your phone and waits
+  for your tap, so link your phone to your person entity. NEW CHAT clears
+  your thread. See [Safety and security](safety-and-security.md).
 - **Intrusion.** The intrusion status and the Intrusion Log.
 - **Faces.** The faces recently named and your list of residents. See
   [Cameras and faces](cameras-and-faces.md).

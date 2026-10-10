@@ -169,6 +169,21 @@ def save_sentinel_event(entity_id: str, event_type: str, detail: str = "") -> No
         _LOGGER.warning("Nova sentinel DB write error: %s", exc)
 
 
+def delete_conversation(conversation_id: str) -> int:
+    """Delete every row of one conversation (the Chat tab's NEW CHAT). Returns
+    the rows deleted, 0 on failure (logged, not raised)."""
+    if not conversation_id:
+        return 0
+    try:
+        with _connect() as conn:
+            cur = conn.execute(
+                "DELETE FROM conversations WHERE device_id = ?", (conversation_id,))
+            return cur.rowcount or 0
+    except Exception as exc:
+        _LOGGER.warning("Nova DB conversation delete error: %s", exc)
+        return 0
+
+
 def purge_old_records(days: int = 30) -> int:
     """Delete entries older than `days`. Returns rows deleted."""
     try:

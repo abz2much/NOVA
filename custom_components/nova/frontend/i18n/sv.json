@@ -1139,12 +1139,12 @@
   "Presence sensors": "Närvarosensorer",
   "Stories, garage and basement, which entity is each door, and the exit doors you leave by.": "Våningar, garage och källare, vilken entitet varje dörr är och utgångsdörrarna du lämnar genom.",
   "Ask Nova something": "Fråga Nova om något",
-  "Ask about your home or tell Nova what to do. Anything that unlocks, opens or disarms is still checked first, the same as in Assist.": "Fråga om ditt hem eller berätta för Nova vad den ska göra. Allt som låser upp, öppnar eller stänger av larmet kontrolleras fortfarande först, precis som i Assist.",
+  "Ask about your home or tell Nova what to do. Unlocking, opening and disarming need a tap on your phone.": "Fråga om ditt hem eller berätta för Nova vad den ska göra. Att låsa upp, öppna och stänga av larmet kräver ett tryck på din telefon.",
   "Chat": "Chatt",
-  "Chat needs a Home Assistant administrator.": "Chatten kräver en Home Assistant-administratör.",
   "Could not reach Nova.": "Kunde inte nå Nova.",
   "NEW CHAT": "NY CHATT",
   "Nova is thinking…": "Nova tänker…",
   "SEND": "SKICKA",
-  "You": "Du"
+  "You": "Du",
+  "You're sending too fast, wait a moment": "Du skickar för snabbt, vänta en stund"
 }

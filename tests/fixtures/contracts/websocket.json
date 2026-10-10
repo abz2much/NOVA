@@ -163,19 +163,28 @@
     "registered": true
   },
   "nova/chat": {
-    "admin": true,
+    "admin": false,
     "error_codes": [],
     "fields": {
-      "conversation_id": {
-        "required": false
-      },
       "text": {
         "required": true
       }
     },
     "literal_response_keys": [
+      "code",
       "error",
       "ok"
+    ],
+    "registered": true
+  },
+  "nova/chat_new": {
+    "admin": false,
+    "error_codes": [],
+    "fields": {},
+    "literal_response_keys": [
+      "error",
+      "ok",
+      "removed"
     ],
     "registered": true
   },
