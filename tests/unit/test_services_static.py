@@ -387,7 +387,9 @@ def test_routine_delegates_through_its_existing_safety_path():
     assert "async_run_routine" in calls
     assert not [c for c in calls if c.endswith("async_call")]
     routines = (COMP / "routines.py").read_text(encoding="utf-8")
-    for guard in ("policy.requires_confirmation(", "policy.confirm_gate(",
+    # Since 8.24.0 the routine reaches the confirmation gate through the one
+    # authority check, policy.authorize / authorize_now.
+    for guard in ("policy.authorize_now(", "policy.authorize(",
                   "action_log.start_many(", "action_log.set_execution("):
         assert guard in routines, guard
 

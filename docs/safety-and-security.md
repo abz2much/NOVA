@@ -143,8 +143,12 @@ intrusion, lockdown, the night sweep, hazards, packages and doors left open.
 
 ## What it will never do on its own
 
-- Unlock a door or open a garage door because of a voice command alone. That
-  always needs a tap on your phone.
+- Unlock a door, open a garage door or disarm the alarm because of a voice
+  command alone. That always needs a tap on your phone.
+- Unlock, open, disarm, or run a scene or script by itself. When Nova acts on
+  its own (lockdown, the night sweep, offers it trusts, a retry) it may only
+  lock, close, and change lights or heating. Every action that can change a
+  lock, cover, alarm, scene or script passes one authority check.
 - Engage lockdown unless you turned on **Automatic lockdown**.
 - Silence a critical alert. Mutes, the blanket shush and quiet hours never
   apply to one.

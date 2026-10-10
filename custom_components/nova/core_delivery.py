@@ -342,6 +342,25 @@ async def _execute_action_data(
             domain=domain, service=service, entity_id=entity_repr,
         )
     )
+    # The one authority check (8.24.0). An offer Nova runs on its own is
+    # automatic and may only do low risk things; one the user said yes to is
+    # checked like any other request.
+    from . import policy
+    automatic = source == "proactive_autonomous"
+    for eid in (entity_ids if isinstance(entity_ids, list) else [entity_ids]):
+        req = policy.AuthorityRequest(
+            domain, service, str(eid), label=service.replace("_", " "),
+            source=policy.SOURCE_AUTOMATIC if automatic else policy.SOURCE_CHAT)
+        decision = (policy.authorize_now(hass, req) if automatic
+                    else await policy.authorize(hass, req))
+        if not decision.allowed:
+            _LOGGER.info("Proactive action %s.%s on %s not authorized: %s",
+                         domain, service, eid, decision.note or decision.approval)
+            await hass.async_add_executor_job(
+                lambda: action_log.set_execution(
+                    action_id, "blocked", reason_code="not_authorized")
+            )
+            return False
     try:
         await hass.services.async_call(
             domain, service,

@@ -123,7 +123,16 @@ def unlocked_locks(hass, exempt) -> list:
 
 async def secure_device(hass, entity_id: str, domain: str) -> None:
     """Lock a lock, or close a cover, and wait for the call. Raises if the
-    call fails; callers log and audit it their own way."""
+    call fails; callers log and audit it their own way. Goes through the one
+    authority check as Nova acting on its own (8.24.0): locking and closing
+    are low risk, so this is allowed; anything else would be refused."""
+    from . import policy
+    service = "lock" if domain == "lock" else "close_cover"
+    decision = policy.authorize_now(hass, policy.AuthorityRequest(
+        "lock" if domain == "lock" else "cover", service, entity_id,
+        source=policy.SOURCE_AUTOMATIC))
+    if not decision.allowed:
+        raise PermissionError(decision.note or "not authorized")
     if domain == "lock":
         await hass.services.async_call(
             "lock", "lock", {"entity_id": entity_id}, blocking=True)

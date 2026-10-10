@@ -153,12 +153,15 @@ async def async_run_routine(
                 if isinstance(step_entity, list):
                     step_entity = step_entity[0] if step_entity else ""
                 from . import policy
-                if policy.requires_confirmation(hass, domain, svc, step_entity):
+                request = policy.AuthorityRequest(
+                    domain, svc, step_entity, label=service.replace(".", " "))
+                if not policy.authorize_now(hass, request).allowed:
                     await hass.async_add_executor_job(
                         lambda rid=row_id: action_log.mark_awaiting_approval(rid)
                     )
-                    ok_gate, gate_note, approval_result = await policy.confirm_gate(
-                        hass, domain, svc, step_entity, service.replace(".", " "))
+                    decision = await policy.authorize(hass, request)
+                    ok_gate, gate_note, approval_result = (
+                        decision.allowed, decision.note, decision.approval)
                     await hass.async_add_executor_job(
                         lambda rid=row_id, ar=approval_result: action_log.set_approval(
                             rid, ar, approval_required=(ar != "not_required"))

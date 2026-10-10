@@ -4,6 +4,13 @@
 - **Fixed.** "Front Door is unlocked while nobody appears to be home" went quiet for good after three days running, because the alert did not say which device it was about, so habituation could not see it was a lock. Anticipation alerts now carry their device, and habituation never quiets an alert about a lock, a cover or an alarm panel. Any that already went quiet come back.
 - **Covers are now exempt too.** That includes garage doors and gates, and also blinds: an alert about a blind no longer goes quiet after three days.
 
+### Stage B: one authority check
+- **One check.** `policy.authorize(request)` takes who asked, from where (voice, chat, panel or Nova on its own), the action and the device. Every call that can change a lock, cover, alarm, scene or script goes through it. The risk rules, voice confirmation, failing closed and the action log are unchanged.
+- **Disarm by voice needs a phone tap,** like unlock and open, whether or not voice confirmation is on.
+- **Nova on its own may only do low risk things:** lock, close, lights, heating. Never unlock, open, disarm or run a scene or script. This covers lockdown, the night sweep, offers it runs by itself, and the automatic retry after a check fails (a retry of a high risk action is no longer sent; it is marked unverified).
+- **Paths that had no check now have one:** the voice "secure" reply (locks and closes in the room), the offers executor, and the `nova.scene_by_intent` service. The voice "secure" reply now writes action log rows. With voice confirmation on, a scene picked by intent is now confirmed first, like every other scene.
+- **A test scans the code** and fails if any lock, cover, alarm, scene or script call skips the check.
+
 ## [8.23.1] — Unknown presence reaches the phones too
 
 - **A medium alert while presence is unknown now goes to the phones,** the same as when everyone is away. Before, it was neither spoken nor pushed. Unknown means a person reading unknown or unavailable, or no person entities set up. Pushed only, with the rating buttons; never spoken.

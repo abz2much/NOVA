@@ -137,9 +137,11 @@ async def _exec_control_device(hass: HomeAssistant, args: dict, device_id: Optio
                 lambda: action_log.mark_awaiting_approval(action_id)
             )
             from ... import policy
-            ok, note, approval_result = await policy.confirm_gate(
-                hass, svc_domain, svc_name, entity_id, action.replace("_", " "),
-                device_id=device_id or "", target_name=display_name(hass, entity_id))
+            decision = await policy.authorize(hass, policy.AuthorityRequest(
+                svc_domain, svc_name, entity_id, device_id=device_id or "",
+                user_id=user_id or "", label=action.replace("_", " "),
+                target_name=display_name(hass, entity_id)))
+            ok, note, approval_result = decision.allowed, decision.note, decision.approval
             await hass.async_add_executor_job(
                 lambda: action_log.set_approval(
                     action_id, approval_result,
@@ -323,9 +325,10 @@ async def _exec_run_scene_script(hass: HomeAssistant, args: dict, device_id: Opt
     await hass.async_add_executor_job(
         lambda: action_log.mark_awaiting_approval(action_id)
     )
-    ok_gate, gate_note, approval_result = await policy.confirm_gate(
-        hass, domain, svc, entity_id, "activate",
-        device_id=device_id or "", target_name=label)
+    decision = await policy.authorize(hass, policy.AuthorityRequest(
+        domain, svc, entity_id, device_id=device_id or "", user_id=user_id or "",
+        label="activate", target_name=label))
+    ok_gate, gate_note, approval_result = decision.allowed, decision.note, decision.approval
     await hass.async_add_executor_job(
         lambda: action_log.set_approval(
             action_id, approval_result,
@@ -413,7 +416,8 @@ async def _exec_bulk_control(hass: HomeAssistant, args: dict, device_id: Optiona
             continue
         sd = svc_map[action][0] or svc_domain
         sn = svc_map[action][1]
-        will_block = policy.requires_confirmation(hass, sd, sn, eid, device_id=device_id or "")
+        will_block = not policy.authorize_now(hass, policy.AuthorityRequest(
+            sd, sn, eid, device_id=device_id or "", user_id=user_id or "")).allowed
         plan.append((eid, sd, sn, not will_block))
         if will_block:
             targets_for_log.append({
@@ -646,9 +650,11 @@ async def _exec_execute_plan(hass: HomeAssistant, args: dict, device_id: Optiona
         await hass.async_add_executor_job(
             lambda rid=row_id: action_log.mark_awaiting_approval(rid)
         )
-        ok_gate, gate_note, approval_result = await policy.confirm_gate(
-            hass, domain, service, entity_id, service.replace("_", " "),
-            device_id=device_id or "", target_name=display_name(hass, entity_id))
+        decision = await policy.authorize(hass, policy.AuthorityRequest(
+            domain, service, entity_id, device_id=device_id or "", user_id=user_id or "",
+            label=service.replace("_", " "), target_name=display_name(hass, entity_id)))
+        ok_gate, gate_note, approval_result = (
+            decision.allowed, decision.note, decision.approval)
         await hass.async_add_executor_job(
             lambda rid=row_id, ar=approval_result: action_log.set_approval(
                 rid, ar, approval_required=(ar != "not_required"))
@@ -784,6 +790,16 @@ async def _verify_control(hass: HomeAssistant, entity_id: str, action: str,
             await hass.async_add_executor_job(
                 lambda: action_log.set_execution(
                     action_id, "unverified", reason_code="not_retried_could_undo_a_lock"))
+            return
+        # A retry is Nova acting on its own: only low risk actions are ever
+        # repeated without asking (8.24.0).
+        from ... import policy
+        retry = policy.authorize_now(hass, policy.AuthorityRequest(
+            svc_domain, svc_name, entity_id, source=policy.SOURCE_AUTOMATIC))
+        if not retry.allowed:
+            await hass.async_add_executor_job(
+                lambda: action_log.set_execution(
+                    action_id, "unverified", reason_code="retry_not_authorized"))
             return
         _LOGGER.info("verify: %s not %s after %s — retrying once",
                      entity_id, "/".join(expected), action)

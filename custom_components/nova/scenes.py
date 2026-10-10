@@ -114,6 +114,18 @@ async def async_activate_by_intent(
             requested_by_user_id=requested_by_user_id,
         )
     )
+    # The one authority check (8.24.0): a scene's contents are opaque, so it
+    # is confirmed when voice confirmation is on, like any other scene.
+    from . import policy
+    decision = await policy.authorize(hass, policy.AuthorityRequest(
+        "scene", "turn_on", pick, user_id=requested_by_user_id or "",
+        label="activate", target_name=pick))
+    if not decision.allowed:
+        await hass.async_add_executor_job(
+            lambda: action_log.set_execution(
+                action_id, "blocked", reason_code="confirmation_not_approved"))
+        return {"success": False, "error": "awaiting_confirmation", "pick": pick,
+                "message": decision.note}
     try:
         await hass.services.async_call(
             "scene", "turn_on", {"entity_id": pick}, blocking=True
