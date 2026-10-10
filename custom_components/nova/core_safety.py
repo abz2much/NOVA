@@ -7,6 +7,7 @@ still exports every name defined here, as the same object.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from typing import Iterable, Optional
@@ -55,9 +56,57 @@ class SafetyManager:
         # Seconds the night sweep waits before rereading what it locked and
         # closed (8.24.0). Slow covers report late.
         self.sweep_verify_delay = LOCKDOWN_SECURE_VERIFY_DELAY
+        # Saving to situations.py (8.24.0) is on only after
+        # restore_situations(), which the running core calls.
+        self._persist = False
+        self._saved: tuple = (None, None)
         # The household reading for the tick in progress (household.py), or
         # None between ticks, when the helpers below read the house live.
         self._house = None
+
+    def restore_situations(self) -> None:
+        """Pick up an intrusion investigation and the freeze warning from
+        situations.py after a restart or reload (8.24.0). Only the state is
+        restored; the investigation logic is unchanged. A stale or missing
+        saved state starts fresh. Never raises."""
+        try:
+            from . import situations
+            if not situations.started():
+                return
+            inv, last = situations.restore_intrusion()
+            if inv is not None:
+                self._investigation = inv
+                self._last_intrusion_alert = last
+                _LOGGER.warning("intrusion: investigation restored after a restart")
+            warned, last_freeze = situations.restore_freeze()
+            self._freeze_warned = warned
+            self._last_freeze_alert = last_freeze
+            self._persist = True
+            self._saved = self._situation_signature()
+        except Exception as exc:
+            _LOGGER.warning("Safety: could not restore situations: %s", exc)
+
+    def _situation_signature(self) -> tuple:
+        from . import situations
+        inv = situations._encode_investigation(self._investigation)
+        return (json.dumps([inv, self._last_intrusion_alert], sort_keys=True, default=str),
+                (self._freeze_warned, self._last_freeze_alert))
+
+    def _save_situations(self) -> None:
+        """Save the intrusion and freeze state when either changed. Never
+        raises: a failed save never affects the safety checks."""
+        if not self._persist:
+            return
+        try:
+            from . import situations
+            intrusion_sig, freeze_sig = self._situation_signature()
+            if intrusion_sig != self._saved[0]:
+                situations.save_intrusion(self._investigation, self._last_intrusion_alert)
+            if freeze_sig != self._saved[1]:
+                situations.save_freeze(self._freeze_warned, self._last_freeze_alert)
+            self._saved = (intrusion_sig, freeze_sig)
+        except Exception as exc:
+            _LOGGER.debug("Safety: could not save situations: %s", exc)
 
     def set_automatic_lockdown(self, enabled: bool) -> None:
         self.config["lockdown_auto_on_arm"] = enabled is True
@@ -89,6 +138,7 @@ class SafetyManager:
             return await self._tick(sleeping, anyone_home)
         finally:
             self._house = None
+            self._save_situations()
 
     async def _tick(self, sleeping: bool, anyone_home: bool) -> list[dict]:
         actions = []

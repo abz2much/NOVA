@@ -81,6 +81,19 @@ whether lockdown is on, and any open situations. Everything Nova decides in
 that moment uses the same snapshot. Anything it cannot read is treated as
 unknown, never as away or secure.
 
+## After a restart
+
+Nova saves what it is in the middle of to `nova/situations.json`, so a
+restart or a settings reload does not lose it:
+
+- an intrusion investigation carries on (if it was saved in the last 10
+  minutes) and can still confirm, without a second first alert;
+- a parcel already on the step is not announced again, and its pickup is
+  still noticed (saved in the last 24 hours);
+- the freeze warning is not repeated.
+
+If the file is missing or damaged, Nova starts fresh, as it always did.
+
 ## How alerts reach you
 
 Every alert goes through one place that decides whether it goes out, and

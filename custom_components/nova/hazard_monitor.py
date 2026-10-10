@@ -579,6 +579,11 @@ async def _poll_warnings(hass, honorific: str, *, in_quiet: bool) -> dict:
             changed = True
         if complete or warnings:
             _LAST_WARNINGS[source] = _active(warnings, now)
+            try:  # for the open situations list (situations.py, 8.24.0)
+                from . import situations
+                situations.note_weather(sum(len(v) for v in _LAST_WARNINGS.values()))
+            except Exception:
+                pass
         for event in events:
             kind = event[0]
             if kind == "cancelled":

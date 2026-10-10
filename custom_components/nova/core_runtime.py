@@ -791,6 +791,9 @@ async def start(hass: HomeAssistant, config: dict, entry=None) -> None:
 
     _m_state._CORE.ignore_mgr = await hass.async_add_executor_job(_m_ignore.IgnoreManager)
     _m_state._CORE.safety_mgr = SafetyManager(hass, config)
+    # An intrusion investigation or freeze warning in progress before a
+    # restart or reload carries on (situations.py, 8.24.0).
+    _m_state._CORE.safety_mgr.restore_situations()
     _m_state._CORE.lockdown_mgr = await hass.async_add_executor_job(
         _m_lockdown.LockdownManager, hass, config)          # __init__ reads lockdown_state.json
     _m_state._CORE.proactive_mgr = ProactiveManager(hass, config)

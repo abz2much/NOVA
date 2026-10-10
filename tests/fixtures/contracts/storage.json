@@ -255,6 +255,12 @@
     ],
     "tables": []
   },
+  "situations": {
+    "paths": [
+      "nova/situations.json"
+    ],
+    "tables": []
+  },
   "spoken_history": {
     "paths": [
       "nova/conversations.db"

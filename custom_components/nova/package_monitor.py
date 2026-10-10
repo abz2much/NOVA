@@ -435,6 +435,13 @@ async def evaluate(hass, groq_client, honorific, tts_entity, speakers,
         "since": datetime.now(timezone.utc).replace(tzinfo=None),
         "desc": det.get("description", ""),
     }
+    # Saved so a restart neither announces a waiting parcel again nor misses
+    # its pickup (situations.py, 8.24.0). A no-op until Nova has started.
+    try:
+        from . import situations
+        situations.save_delivery(entity_id, _STATE[entity_id])
+    except Exception:
+        pass
     return spoke
 
 
@@ -684,3 +691,29 @@ def status() -> dict:
         }
         for eid, s in _STATE.items()
     }
+
+
+def restore_from_situations() -> int:
+    """Put back the per-camera package state saved before a restart
+    (situations.py, 8.24.0): a parcel already seen is not announced as new,
+    and its pickup is still noticed. Returns how many cameras were restored.
+    Never raises; nothing saved means nothing restored."""
+    try:
+        from . import situations
+        restored = situations.restore_deliveries()
+    except Exception:
+        return 0
+    for camera, rec in restored.items():
+        since = rec.get("since")
+        try:
+            since = datetime.fromisoformat(str(since)) if since else None
+        except ValueError:
+            since = None
+        _STATE.setdefault(camera, {
+            "package": bool(rec.get("package")),
+            "mail": bool(rec.get("mail")),
+            "count": int(rec.get("count") or 0),
+            "since": since or datetime.now(timezone.utc).replace(tzinfo=None),
+            "desc": str(rec.get("desc") or ""),
+        })
+    return len(restored)

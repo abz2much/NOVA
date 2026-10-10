@@ -24,6 +24,13 @@
 - **A field that cannot be read is "unknown"**, never an empty list or "no", so it can never be taken to mean away or secure.
 - Nothing you see changes.
 
+### Stage E: situations survive a restart
+- **New `situations.py`**, saved to `nova/situations.json`. It holds what Nova is in the middle of, so a restart or a settings reload (the Configure dialog reloads Nova) no longer loses it.
+- **Intrusion.** An open investigation, and when its first alert went out, are saved after every tick and restored on start, so it carries on and can still confirm, without a second first alert. Only the state is saved and restored; the investigation logic is unchanged. One saved more than 10 minutes ago is dropped.
+- **Deliveries.** Each camera's package state is saved, so a parcel already on the step is not announced as new after a restart, and its pickup is still noticed. State older than 24 hours is dropped.
+- **Hazards.** The freeze warning is not repeated after a restart, and active weather warnings show as an open situation. Older than 24 hours is dropped.
+- **Fails safe.** A missing or corrupt file starts fresh, exactly as before. A failed save is logged and ignored.
+
 ## [8.23.1] — Unknown presence reaches the phones too
 
 - **A medium alert while presence is unknown now goes to the phones,** the same as when everyone is away. Before, it was neither spoken nor pushed. Unknown means a person reading unknown or unavailable, or no person entities set up. Pushed only, with the rating buttons; never spoken.
