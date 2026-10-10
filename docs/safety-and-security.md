@@ -202,9 +202,10 @@ always alerts. One "real" label stops it learning to ignore that pattern.
 - Which sensors are outdoors, so they never start an indoor intrusion.
 - Which locks guard a door. A thermostat's keypad lock is not one, for the
   left unlocked reminder. Lockdown, the night sweep and the "unlocked" lists
-  in briefings skip only the locks in `lockdown_exempt_locks` (config.json),
-  which is empty unless you set it (an install from before 8.28.0 keeps the
-  two locks it used to skip).
+  in briefings skip only the locks you list under **Settings → Security
+  Alarm → Locks left out of lockdown**. The list is empty unless you set it
+  (an install from before 8.28.0 keeps the two locks it used to skip), and a
+  change applies at once.
 
 ## What it will never do on its own
 

@@ -145,6 +145,19 @@
         <span class="toggle-desc">Allow the selected alarm and sleep mode to lock doors and close covers</span>
         <button class="toggle-btn ${automatic ? "on" : "off"}" data-cfg-key="lockdown_auto_on_arm" data-cfg-val="${automatic ? "false" : "true"}">${automatic ? "ON" : "OFF"}</button>
       </div>
+      <div class="mode-bind-head">Locks left out of lockdown</div>
+      <div class="stub-body">Lockdown and the night sweep never lock these, for example a thermostat's keypad lock. They are also left out of the "unlocked" lists in briefings, status and voice answers. Empty by default.</div>
+      <div class="cfg-row">
+        <input id="newExemptLockInput" list="newExemptLockList" class="cfg-field" style="flex:1" placeholder="type to find a lock…" autocomplete="off">
+        <datalist id="newExemptLockList">${this._lockDatalist()}</datalist>
+        <button class="mode-chip" id="newExemptLockAdd">+ Add</button>
+      </div>
+      <div class="mode-grid" id="newExemptLockChips">${(() => {
+        const arr = this._exclArr(cfg.lockdown_exempt_locks);
+        return arr.length
+          ? arr.map((e, i) => `<span class="new-pl-chip">${this._esc(this._entName(e))}<button class="new-exempt-lock-del" data-i="${i}" title="Remove">×</button></span>`).join("")
+          : `<span class="toggle-desc">None.</span>`;
+      })()}</div>
       <div class="toggle-row">
         <span class="toggle-label">Require confinement for intrusion monitoring</span>
         <span class="toggle-desc">Watch for intruders only while a lockdown is on or the alarm is armed. Off keeps the automatic away and asleep behaviour</span>
@@ -619,6 +632,12 @@
   _allEntityDatalist() {
     const states = this._hass?.states || {};
     return Object.keys(states).sort().map(eid => `<option value="${this._esc(eid)}">${this._esc(this._entName(eid))}</option>`).join("");
+  }
+  // The home's own locks, for the lockdown exempt list (8.29.0).
+  _lockDatalist() {
+    const states = this._hass?.states || {};
+    return Object.keys(states).filter(eid => eid.startsWith("lock.")).sort()
+      .map(eid => `<option value="${this._esc(eid)}">${this._esc(this._entName(eid))}</option>`).join("");
   }
   // Sensors and binary sensors, for the infrastructure audit list (8.28.0).
   _sensorDatalist() {

@@ -179,6 +179,7 @@
     "llm_base_url",
     "llm_provider",
     "lockdown_auto_on_arm",
+    "lockdown_exempt_locks",
     "memory_threading_enabled",
     "memory_threading_hours",
     "memory_threading_max",

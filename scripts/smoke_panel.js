@@ -135,6 +135,7 @@ const PANEL = {
     // A home with a garage (8.26.0: garage items show only where one exists).
     has_garage: true,
     garage_mode: "auto",
+    lockdown_exempt_locks: ["lock.keypad"],
     // ... with a basement and a mapped cellar door (8.27.0).
     basement_mode: "auto",
     home_features: { basement: true, cellar_door: true, utility: false },
@@ -259,7 +260,7 @@ const _deleteCredentialCalls = [];
 const _sayHelloCalls = [];
 const hass = {
   config: { location_name: "Springfield IL", latitude: 39.78, longitude: -89.65 },
-  states: { "calendar.family": { state: "off", attributes: { friendly_name: "Family" } }, "calendar.birthdays": { state: "off", attributes: { friendly_name: "Birthdays" } }, "assist_satellite.a": { state: "idle", attributes: {} }, "camera.front": { attributes: { access_token: "tok123" } }, "camera.back": { attributes: { access_token: "tok456" } },
+  states: { "lock.keypad": { state: "unlocked", attributes: { friendly_name: "Keypad Lock" } }, "lock.side_door": { state: "locked", attributes: { friendly_name: "Side Door" } }, "calendar.family": { state: "off", attributes: { friendly_name: "Family" } }, "calendar.birthdays": { state: "off", attributes: { friendly_name: "Birthdays" } }, "assist_satellite.a": { state: "idle", attributes: {} }, "camera.front": { attributes: { access_token: "tok123" } }, "camera.back": { attributes: { access_token: "tok456" } },
     "binary_sensor.mailbox": { state: "off", attributes: { friendly_name: "Mailbox" } } },
   callWS: async (m) => {
     if (m.type === "nova/update_config") {
@@ -1468,6 +1469,32 @@ if (require.main === module) setTimeout(async () => {
     _updateConfigCalls.some(c => c.key === "host_health_mappings"
       && typeof c.value === "string"
       && JSON.parse(c.value).memory_pressure_some === "sensor.mem_p_b")]);
+
+  // ── Locks left out of lockdown (8.29.0) ──
+  {
+    const card = sRoot.getElementById("settings-card-security_alarm");
+    checks.push(["settings tab: Security Alarm card lists the locks left out of lockdown, with add and remove",
+      !!card && /Locks left out of lockdown/.test(card.textContent) && /Keypad Lock/.test(card.querySelector("#newExemptLockChips")?.textContent || "")
+        && !!card.querySelector(".new-exempt-lock-del") && !!card.querySelector("#newExemptLockAdd")
+        && /"unlocked" lists/.test(card.textContent)]);
+    checks.push(["settings tab: the exempt lock picker offers only the home's own locks",
+      Array.from(card.querySelectorAll("#newExemptLockList option")).every(o => o.value.startsWith("lock."))
+        && Array.from(card.querySelectorAll("#newExemptLockList option")).some(o => o.value === "lock.side_door")]);
+    const saves = () => _updateConfigCalls.filter(c => c.key === "lockdown_exempt_locks");
+    const before = saves().length;
+    card.querySelector("#newExemptLockInput").value = "light.not_a_lock";
+    card.querySelector("#newExemptLockAdd").click();
+    await new Promise(r => setTimeout(r, 20));
+    checks.push(["settings tab: a non lock cannot be added to the exempt list", saves().length === before]);
+    const card2 = sRoot.getElementById("settings-card-security_alarm");
+    card2.querySelector("#newExemptLockInput").value = "lock.side_door";
+    card2.querySelector("#newExemptLockAdd").click();
+    await new Promise(r => setTimeout(r, 20));
+    checks.push(["settings tab: adding a lock saves the list as JSON through nova/update_config",
+      saves().length === before + 1
+        && JSON.stringify(JSON.parse(saves().slice(-1)[0].value)) === JSON.stringify(["lock.keypad", "lock.side_door"])]);
+    sRoot = elNew.shadowRoot;
+  }
 
   // Disabled state: rendered directly from the card-body method against an
   // isolated, overridden _data() — avoids disturbing the shared live-

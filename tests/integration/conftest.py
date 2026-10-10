@@ -94,3 +94,27 @@ def _prestart_nova_log_writer():
     _enable_custom_components()
     from custom_components.nova import websocket as _ws
     _ws._ensure_writer()
+
+
+@pytest.fixture(autouse=True)
+def _isolated_situations(tmp_path, monkeypatch):
+    """Each test gets its own situations.json and starts with no remembered
+    parcels (8.29.0).
+
+    Since 8.24.0 Nova saves open situations, a delivered parcel among them
+    for 24 hours, and restores them at setup. In the shared testing_config
+    folder above, a parcel one run saved was restored by the next run, so a
+    test that delivers a parcel saw no new delivery and failed for 24 hours
+    after any earlier local run. That looked like a time of day problem; it
+    was leftover state. CI always starts clean, which is why it passed there.
+    """
+    _enable_custom_components()
+    from custom_components.nova import package_monitor, situations
+    monkeypatch.setattr(situations, "STATE_FILE", str(tmp_path / "situations.json"))
+    for remembered in (package_monitor._STATE, package_monitor._LAST_SPOKEN,
+                       package_monitor._TRIGGER_LAST):
+        remembered.clear()
+    yield
+    for remembered in (package_monitor._STATE, package_monitor._LAST_SPOKEN,
+                       package_monitor._TRIGGER_LAST):
+        remembered.clear()

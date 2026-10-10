@@ -401,6 +401,11 @@
       console.warn(`Nova: "${v}" is not a known sensor`);
       return false;
     });
+    exclAdd("newExemptLockAdd", "newExemptLockInput", "lockdown_exempt_locks", (v) => {
+      if (this._hass && this._hass.states && this._hass.states[v] && v.startsWith("lock.")) return true;
+      console.warn(`Nova: "${v}" is not a known lock`);
+      return false;
+    });
     exclAdd("newExclDomAdd", "newExclDomInput", "excluded_domains", null);
     exclAdd("newExclLabAdd", "newExclLabInput", "excluded_labels", null);
     exclAdd("newDepCalAdd", "newDepCalInput", "departure_excluded_calendars", (v) => {
@@ -420,6 +425,7 @@
     exclDel("new-excl-lab-del", "excluded_labels");
     exclDel("new-dep-cal-del", "departure_excluded_calendars");
     exclDel("new-audit-sensor-del", "infrastructure_audit_sensors");
+    exclDel("new-exempt-lock-del", "lockdown_exempt_locks");
 
     const rateLimitInput = root.getElementById("newObserverRateLimit");
     if (rateLimitInput) {
