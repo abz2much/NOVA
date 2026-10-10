@@ -9,7 +9,6 @@ layout, the development workflow, and the release process.
 nova/                             repo root (HACS integration repository)
 ├── hacs.json                        HACS metadata
 ├── README.md  CHANGELOG.md  LICENSE
-├── icon.png  logo.png               branding (for home-assistant/brands)
 ├── .github/                         funding, issue templates, CI
 ├── scripts/bump_version.sh          one-command version bump
 ├── scripts/build_panel.py           builds the dashboard from frontend/src/
