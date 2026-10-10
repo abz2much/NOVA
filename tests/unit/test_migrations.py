@@ -14,7 +14,7 @@ def m(load):
 
 def test_full_chain_v1_to_current(m):
     data, options, ver = m.migrate_config({}, {}, current_version=1)
-    assert ver == m.CURRENT_SCHEMA_VERSION == 7
+    assert ver == m.CURRENT_SCHEMA_VERSION == 8
     assert "tts_premium_engine" in options                         # v2
     assert options["tts_premium_contexts"] == [
         "briefing", "camera", "doorbell", "recognition"]
@@ -28,8 +28,8 @@ def test_full_chain_v1_to_current(m):
 
 
 def test_already_current_is_noop(m):
-    data, options, ver = m.migrate_config({"x": 1}, {"y": 2}, current_version=7)
-    assert ver == 7 and data == {"x": 1} and options == {"y": 2}
+    data, options, ver = m.migrate_config({"x": 1}, {"y": 2}, current_version=8)
+    assert ver == 8 and data == {"x": 1} and options == {"y": 2}
 
 
 def test_future_version_is_noop(m):
@@ -39,7 +39,7 @@ def test_future_version_is_noop(m):
 
 def test_partial_start_v5_skips_earlier_steps(m):
     _, options, ver = m.migrate_config({}, {}, current_version=5)
-    assert ver == 7
+    assert ver == 8
     assert "observer_enabled" in options        # 5→6 ran
     assert "bedroom_areas" in options           # 6→7 ran
     assert "tts_premium_engine" not in options  # 1→2 did NOT (started at v5)
@@ -51,7 +51,7 @@ def test_legacy_cast_speakers_promoted_to_broadcast_group(m):
     _, options, ver = m.migrate_config(
         {}, {"cast_speakers": ["media_player.kitchen", "media_player.den"]},
         current_version=4)
-    assert ver == 7
+    assert ver == 8
     assert options["broadcast_speakers"] == ["media_player.kitchen", "media_player.den"]
     assert options["broadcast_group"] == "media_player.kitchen"
 

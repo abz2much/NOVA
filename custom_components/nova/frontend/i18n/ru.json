@@ -224,7 +224,6 @@
   "3 min": "3 мин",
   "5 min": "5 мин",
   "A GROUND-FLOOR BREACH WOULD STILL WAKE ME": "ПРОНИКНОВЕНИЕ НА ПЕРВОМ ЭТАЖЕ ВСЁ РАВНО МЕНЯ РАЗБУДИТ",
-  "A separate check every 15 minutes of a fixed set of server and network switch sensors. Sensors that don't exist here are skipped. Pick a room for its alerts, or leave none to only log them.": "Отдельная проверка каждые 15 минут для фиксированного набора датчиков сервера и сетевого коммутатора. Датчики, которых здесь нет, пропускаются. Выберите комнату для оповещений или ни одной, чтобы только записывать их в журнал.",
   "A thing cannot be linked to itself.": "Объект нельзя связать с самим собой.",
   "A welcome briefing fires when someone gets home — but only once this door actually opens, not the moment their phone shows them nearby (still in the driveway or car). Leave unset to keep arrival briefings off entirely.": "Приветственная сводка запускается, когда кто-то приходит домой — но только когда эта дверь действительно открывается, а не когда телефон показывает человека рядом (ещё у дома или в машине). Оставьте пустым, чтобы сводки по прибытии были выключены.",
   "ACTIONS": "ДЕЙСТВИЯ",
@@ -637,7 +636,6 @@
   "No warnings in force for your area.": "Для вашего района нет действующих предупреждений.",
   "No wearable entities found. Connect a wearable integration (Withings, Google Fit, Oura, etc.) to Home Assistant.": "Объекты носимых устройств не найдены. Подключите интеграцию носимого устройства (Withings, Google Fit, Oura и т. д.) к Home Assistant.",
   "None": "Нет",
-  "None yet. Tell Nova how things relate, for example \"Sam owns the Jeep\", then confirm it here. Only you can confirm a link, Nova cannot.": "Пока нет. Расскажите Nova, как связаны вещи, например «у Сэма есть джип», а затем подтвердите здесь. Подтвердить связь можете только вы, не Nova.",
   "None.": "Нет.",
   "Normal Nova alerts go to every selected device.": "Обычные оповещения Nova идут на каждое выбранное устройство.",
   "Norsk bokmål": "Norsk bokmål",
@@ -1159,7 +1157,6 @@
   "Entity not found": "Объект не найден",
   "Exit doors": "Выходные двери",
   "House status": "Состояние дома",
-  "Links between things, such as \"sam owns car.jeep\" or \"kitchen adjacent_to hallway\". Nova proposes them when you tell it how things relate. A new link waits here and is not used until you confirm it. Only confirmed links are shown to Nova. Removing one is permanent: Nova will not add it back on its own.": "Связи между объектами, например «sam owns car.jeep» или «kitchen adjacent_to hallway». Nova предлагает их, когда вы рассказываете, как вещи связаны. Новая связь ждёт здесь и не используется, пока вы её не подтвердите. Nova видит только подтверждённые связи. Удаление окончательное: Nova сама не добавит связь снова.",
   "Lockdown": "Блокировка",
   "Locked": "Заперто",
   "Name (optional)": "Название (необязательно)",
@@ -1173,5 +1170,9 @@
   "Utility Room": "Подсобное помещение",
   "doors you leave the house by. Nova adds nothing until you pick one.": "двери, через которые вы выходите из дома. Nova ничего не добавит, пока вы не выберете.",
   "— pick a door, lock, cover or sensor —": "— выберите дверь, замок, штору или датчик —",
-  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Показывать подвал и его двери. Автоматически ищет зону или этаж с названием Подвал или Погреб либо этаж ниже уровня земли. Меняет только то, что вы видите."
+  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Показывать подвал и его двери. Автоматически ищет зону или этаж с названием Подвал или Погреб либо этаж ниже уровня земли. Меняет только то, что вы видите.",
+  "Links between things, such as \"house member owns bike\" or \"child's room adjacent_to hallway\". Nova proposes them when you tell it how things relate. A new link waits here and is not used until you confirm it. Only confirmed links are shown to Nova. Removing one is permanent: Nova will not add it back on its own.": "Связи между объектами, например «house member owns bike» или «child's room adjacent_to hallway». Nova предлагает их, когда вы рассказываете, как вещи связаны. Новая связь ждёт здесь и не используется, пока вы её не подтвердите. Nova видит только подтверждённые связи. Удаление окончательное: Nova сама не добавит связь снова.",
+  "None yet. Tell Nova how things relate, for example \"House member owns the bike\", then confirm it here. Only you can confirm a link, Nova cannot.": "Пока нет. Расскажите Nova, как связаны вещи, например «у члена семьи есть велосипед», а затем подтвердите здесь. Подтвердить связь можете только вы, не Nova.",
+  "type to find a sensor…": "введите, чтобы найти датчик…",
+  "A separate check every 15 minutes of the sensors you list here. A sensor in percent is flagged above 90 and critical above 96. A binary sensor is flagged when it goes off, or on for a problem sensor. With no sensors listed, the audit does nothing. Pick a room for its alerts, or leave none to only log them.": "Отдельная проверка каждые 15 минут датчиков, которые вы укажете здесь. Датчик в процентах отмечается выше 90 и считается критическим выше 96. Бинарный датчик отмечается, когда выключается, или когда включается, если это датчик проблемы. Без указанных датчиков проверка ничего не делает. Выберите комнату для оповещений или ни одной, чтобы только записывать их в журнал."
 }

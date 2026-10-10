@@ -224,7 +224,6 @@
   "3 min": "3 min",
   "5 min": "5 min",
   "A GROUND-FLOOR BREACH WOULD STILL WAKE ME": "VNIKNUTÍ V PŘÍZEMÍ BY MĚ STEJNĚ PROBUDILO",
-  "A separate check every 15 minutes of a fixed set of server and network switch sensors. Sensors that don't exist here are skipped. Pick a room for its alerts, or leave none to only log them.": "Samostatná kontrola každých 15 minut pevné sady senzorů serveru a síťového přepínače. Senzory, které tu nejsou, se přeskočí. Vyberte místnost pro upozornění, nebo žádnou, aby se jen zapisovala do logu.",
   "A thing cannot be linked to itself.": "Věc nelze propojit sama se sebou.",
   "A welcome briefing fires when someone gets home — but only once this door actually opens, not the moment their phone shows them nearby (still in the driveway or car). Leave unset to keep arrival briefings off entirely.": "Uvítací přehled se spustí, když někdo přijde domů — ale až když se tyto dveře opravdu otevřou, ne jakmile ho telefon ukáže poblíž (ještě na příjezdové cestě nebo v autě). Nechte prázdné, aby přehledy při příchodu zůstaly vypnuté.",
   "ACTIONS": "AKCE",
@@ -637,7 +636,6 @@
   "No warnings in force for your area.": "Pro vaši oblast neplatí žádná varování.",
   "No wearable entities found. Connect a wearable integration (Withings, Google Fit, Oura, etc.) to Home Assistant.": "Nenalezeny žádné entity nositelných zařízení. Připojte k Home Assistant integraci nositelného zařízení (Withings, Google Fit, Oura atd.).",
   "None": "Žádné",
-  "None yet. Tell Nova how things relate, for example \"Sam owns the Jeep\", then confirm it here. Only you can confirm a link, Nova cannot.": "Zatím žádné. Řekněte Nově, jak spolu věci souvisejí, například „Sam vlastní Jeep“, a pak to zde potvrďte. Propojení můžete potvrdit jen vy, ne Nova.",
   "None.": "Žádné.",
   "Normal Nova alerts go to every selected device.": "Běžná upozornění Novy jdou na každé vybrané zařízení.",
   "Norsk bokmål": "Norsk bokmål",
@@ -1159,7 +1157,6 @@
   "Entity not found": "Entita nenalezena",
   "Exit doors": "Výstupní dveře",
   "House status": "Stav domu",
-  "Links between things, such as \"sam owns car.jeep\" or \"kitchen adjacent_to hallway\". Nova proposes them when you tell it how things relate. A new link waits here and is not used until you confirm it. Only confirmed links are shown to Nova. Removing one is permanent: Nova will not add it back on its own.": "Propojení mezi věcmi, například „sam owns car.jeep“ nebo „kitchen adjacent_to hallway“. Nova je navrhuje, když jí řeknete, jak spolu věci souvisejí. Nové propojení čeká zde a nepoužije se, dokud ho nepotvrdíte. Nova vidí jen potvrzená propojení. Odebrání je trvalé: Nova ho sama znovu nepřidá.",
   "Lockdown": "Uzamčení",
   "Locked": "Zamčeno",
   "Name (optional)": "Název (nepovinné)",
@@ -1173,5 +1170,9 @@
   "Utility Room": "Technická místnost",
   "doors you leave the house by. Nova adds nothing until you pick one.": "dveře, kterými odcházíte z domu. Nova nic nepřidá, dokud nějaké nevyberete.",
   "— pick a door, lock, cover or sensor —": "— vyberte dveře, zámek, roletu nebo senzor —",
-  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Zobrazit suterén a jeho dveře. Automaticky hledá oblast nebo podlaží s názvem Suterén nebo Sklep, nebo podlaží pod úrovní terénu. Mění jen to, co vidíte."
+  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Zobrazit suterén a jeho dveře. Automaticky hledá oblast nebo podlaží s názvem Suterén nebo Sklep, nebo podlaží pod úrovní terénu. Mění jen to, co vidíte.",
+  "Links between things, such as \"house member owns bike\" or \"child's room adjacent_to hallway\". Nova proposes them when you tell it how things relate. A new link waits here and is not used until you confirm it. Only confirmed links are shown to Nova. Removing one is permanent: Nova will not add it back on its own.": "Propojení mezi věcmi, například „house member owns bike“ nebo „child's room adjacent_to hallway“. Nova je navrhuje, když jí řeknete, jak spolu věci souvisejí. Nové propojení čeká zde a nepoužije se, dokud ho nepotvrdíte. Nova vidí jen potvrzená propojení. Odebrání je trvalé: Nova ho sama znovu nepřidá.",
+  "None yet. Tell Nova how things relate, for example \"House member owns the bike\", then confirm it here. Only you can confirm a link, Nova cannot.": "Zatím žádné. Řekněte Nově, jak spolu věci souvisejí, například „Člen domácnosti vlastní kolo“, a pak to zde potvrďte. Propojení můžete potvrdit jen vy, ne Nova.",
+  "type to find a sensor…": "pište pro nalezení senzoru…",
+  "A separate check every 15 minutes of the sensors you list here. A sensor in percent is flagged above 90 and critical above 96. A binary sensor is flagged when it goes off, or on for a problem sensor. With no sensors listed, the audit does nothing. Pick a room for its alerts, or leave none to only log them.": "Samostatná kontrola každých 15 minut senzorů, které zde uvedete. Senzor v procentech se označí nad 90 a jako kritický nad 96. Binární senzor se označí, když se vypne, nebo když se zapne u senzoru problému. Bez uvedených senzorů kontrola nedělá nic. Vyberte místnost pro upozornění, nebo žádnou, aby se jen zapisovala do logu."
 }

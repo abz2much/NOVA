@@ -87,7 +87,7 @@ def test_can_secure_only_what_has_an_actuator(cc, fake_hass, dom, dc, expected):
 
 @pytest.mark.parametrize("dom,dc,eid,expected", [
     ("lock", None, "lock.front", True),
-    ("lock", None, "lock.downstairs_thermo_lock", False),           # exempt by default
+    ("lock", None, "lock.downstairs_thermo_lock", True),            # nothing exempt by default (8.28.0)
     ("cover", "garage", "cover.g", True), ("cover", "blind", "cover.b", False),
     ("binary_sensor", "door", "binary_sensor.d", True),
     ("binary_sensor", "window", "binary_sensor.w", True),
@@ -97,6 +97,11 @@ def test_can_secure_only_what_has_an_actuator(cc, fake_hass, dom, dc, expected):
     ("light", None, "light.l", False)])
 def test_is_relevant(cc, fake_hass, dom, dc, eid, expected):
     assert _mgr(cc, fake_hass)._is_relevant(dom, dc, eid) is expected
+
+
+def test_a_lock_on_the_saved_exempt_list_is_not_relevant(cc, fake_hass):
+    mgr = _mgr(cc, fake_hass, lockdown_exempt_locks=["lock.downstairs_thermo_lock"])
+    assert mgr._is_relevant("lock", None, "lock.downstairs_thermo_lock") is False
 
 
 def test_open_openings_lists_every_open_door_window_and_cover(cc, fake_hass):
@@ -501,7 +506,6 @@ async def test_nothing_happens_when_lockdown_is_not_active(cc, fake_hass):
 
 @pytest.mark.parametrize("eid,old,new,attrs", [
     ("light.l", "off", "on", {}),                                   # not a security entity
-    ("lock.downstairs_thermo_lock", "locked", "unlocked", {}),      # exempt lock
     ("binary_sensor.m", "off", "on", {"device_class": "motion"}),
     ("cover.blind", "closed", "open", {"device_class": "blind"}),
     ("lock.front", "unlocked", "locked", {}),                       # became secure
@@ -512,6 +516,16 @@ async def test_nothing_happens_when_lockdown_is_not_active(cc, fake_hass):
 async def test_these_changes_are_ignored(cc, fake_hass, eid, old, new, attrs):
     mgr = await _active(cc, fake_hass)
     assert await mgr.handle_state_change(eid, _st(eid, old, **attrs), _st(eid, new, **attrs)) is None
+    assert fake_hass.service_calls == []
+
+
+async def test_an_exempt_lock_unlocking_is_ignored(cc, fake_hass):
+    # The exempt list now comes only from the saved setting (8.28.0).
+    mgr = _mgr(cc, fake_hass, lockdown_exempt_locks=["lock.downstairs_thermo_lock"])
+    await mgr.engage("x")
+    fake_hass.service_calls.clear()
+    eid = "lock.downstairs_thermo_lock"
+    assert await mgr.handle_state_change(eid, _st(eid, "locked"), _st(eid, "unlocked")) is None
     assert fake_hass.service_calls == []
 
 

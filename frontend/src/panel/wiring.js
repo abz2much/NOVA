@@ -396,6 +396,11 @@
       console.warn(`Nova: "${v}" is not a known entity id`);
       return false;
     });
+    exclAdd("newAuditSensorAdd", "newAuditSensorInput", "infrastructure_audit_sensors", (v) => {
+      if (this._hass && this._hass.states && this._hass.states[v] && /^(binary_)?sensor\./.test(v)) return true;
+      console.warn(`Nova: "${v}" is not a known sensor`);
+      return false;
+    });
     exclAdd("newExclDomAdd", "newExclDomInput", "excluded_domains", null);
     exclAdd("newExclLabAdd", "newExclLabInput", "excluded_labels", null);
     exclAdd("newDepCalAdd", "newDepCalInput", "departure_excluded_calendars", (v) => {
@@ -414,6 +419,7 @@
     exclDel("new-excl-dom-del", "excluded_domains");
     exclDel("new-excl-lab-del", "excluded_labels");
     exclDel("new-dep-cal-del", "departure_excluded_calendars");
+    exclDel("new-audit-sensor-del", "infrastructure_audit_sensors");
 
     const rateLimitInput = root.getElementById("newObserverRateLimit");
     if (rateLimitInput) {

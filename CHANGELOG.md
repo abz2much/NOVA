@@ -1,3 +1,23 @@
+## [8.28.0] — Borrowed and personal leftovers removed
+
+### Behaviour changes
+- **Safety default change: nothing is exempt from lockdown by default.** The built in exempt list named two thermostat locks from one particular home (`lock.downstairs_thermo_lock`, `lock.upstairs_thermo_lock`). It is now empty. **An existing install that never saved `lockdown_exempt_locks` gets those two written into its saved setting once** (config schema v7 to v8), so its lockdown, night sweep and "unlocked" lists behave exactly as before. A fresh install exempts nothing: lockdown and the night sweep lock every lock, and briefings, status and voice answers list every unlocked lock, until you set the list. A value already saved, even an empty one, is never changed.
+- **Infrastructure audit.** It used to check a fixed set of one particular home's server, network switch and freeze sensor ids every 15 minutes, with a power monitor root cause for that switch. It now checks only the sensors you list (new setting, Settings → Host Health → Infrastructure audit). The list starts empty, and with nothing listed the audit does nothing. A sensor in percent is flagged above 90 and critical above 96; a binary sensor when it goes off, or on for a problem sensor.
+- **The "chaise" word fix is gone.** Voice device matching no longer turns "chaise" into "chase". It served one particular lamp.
+- **The hazard monitor's user agent** is now "Nova Home Assistant hazard monitor (github.com/abz2much/nova)", not "Nova-AIO …".
+
+### Examples and wording (display only)
+- Relations examples use roles, not names: "house member owns bike" and "child's room adjacent_to hallway", in the panel, the AI tool descriptions, docs, README and comments. "Sam owns the Jeep" and "the kitchen is next to the garage" are gone.
+- "chase lamp" is now "desk lamp", and the workshop camera is now the back door camera, in the AI prompts and tool descriptions.
+- Comments no longer name another home's devices. The docs image uses House member, Guest and Child.
+- The noise gate's default appliance list is kept; its comment no longer says it is one property's appliances.
+
+### Licence
+- The installed copy now carries the MIT licence: `custom_components/nova/LICENSE`, the same text and copyright line as the repo root. The README credit is unchanged.
+
+### Tests
+- The test home coordinate is now the Royal Observatory, Greenwich.
+
 ## [8.27.0] — Rooms only where the home has them
 
 ### The basement

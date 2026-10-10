@@ -215,7 +215,6 @@
   "Entity not found": "Об'єкт не знайдено",
   "Exit doors": "Вихідні двері",
   "House status": "Стан будинку",
-  "Links between things, such as \"sam owns car.jeep\" or \"kitchen adjacent_to hallway\". Nova proposes them when you tell it how things relate. A new link waits here and is not used until you confirm it. Only confirmed links are shown to Nova. Removing one is permanent: Nova will not add it back on its own.": "Зв'язки між речами, наприклад \"sam owns car.jeep\" або \"kitchen adjacent_to hallway\". Nova пропонує їх, коли ви розповідаєте, як речі пов'язані. Новий зв'язок чекає тут і не використовується, доки ви його не підтвердите. Nova бачить лише підтверджені зв'язки. Видалення остаточне: Nova сама не додасть зв'язок знову.",
   "Lockdown": "Блокування",
   "Locked": "Замкнено",
   "Name (optional)": "Назва (необов'язково)",
@@ -229,5 +228,9 @@
   "Utility Room": "Підсобне приміщення",
   "doors you leave the house by. Nova adds nothing until you pick one.": "двері, якими ви виходите з дому. Nova нічого не додасть, доки ви не виберете.",
   "— pick a door, lock, cover or sensor —": "— виберіть двері, замок, штору або датчик —",
-  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Показувати підвал і його двері. Автоматично шукає зону або поверх із назвою Підвал чи Льох або поверх нижче рівня землі. Змінює лише те, що ви бачите."
+  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Показувати підвал і його двері. Автоматично шукає зону або поверх із назвою Підвал чи Льох або поверх нижче рівня землі. Змінює лише те, що ви бачите.",
+  "Links between things, such as \"house member owns bike\" or \"child's room adjacent_to hallway\". Nova proposes them when you tell it how things relate. A new link waits here and is not used until you confirm it. Only confirmed links are shown to Nova. Removing one is permanent: Nova will not add it back on its own.": "Зв'язки між речами, наприклад \"house member owns bike\" або \"child's room adjacent_to hallway\". Nova пропонує їх, коли ви розповідаєте, як речі пов'язані. Новий зв'язок чекає тут і не використовується, доки ви його не підтвердите. Nova бачить лише підтверджені зв'язки. Видалення остаточне: Nova сама не додасть зв'язок знову.",
+  "None yet. Tell Nova how things relate, for example \"House member owns the bike\", then confirm it here. Only you can confirm a link, Nova cannot.": "Поки немає. Розкажіть Nova, як пов'язані речі, наприклад «у члена родини є велосипед», а потім підтвердіть тут. Підтвердити зв'язок можете лише ви, не Nova.",
+  "type to find a sensor…": "введіть, щоб знайти датчик…",
+  "A separate check every 15 minutes of the sensors you list here. A sensor in percent is flagged above 90 and critical above 96. A binary sensor is flagged when it goes off, or on for a problem sensor. With no sensors listed, the audit does nothing. Pick a room for its alerts, or leave none to only log them.": "Окрема перевірка кожні 15 хвилин датчиків, які ви вкажете тут. Датчик у відсотках позначається понад 90 і є критичним понад 96. Бінарний датчик позначається, коли вимикається, або коли вмикається, якщо це датчик проблеми. Без указаних датчиків перевірка нічого не робить. Виберіть кімнату для сповіщень або жодної, щоб лише записувати їх у журнал."
 }

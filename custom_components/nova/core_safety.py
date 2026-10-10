@@ -423,7 +423,7 @@ class SafetyManager:
             if indoor_only and outdoor.is_outdoor(self.hass, st.entity_id, fname):
                 continue
             # derive a camera entity from the sensor slug, e.g.
-            # binary_sensor.dining_room_person → camera.dining_room
+            # binary_sensor.hallway_person → camera.hallway
             slug = st.entity_id.split(".", 1)[-1]
             for suffix in ("_person", "_person_occupancy", "_occupancy"):
                 if slug.endswith(suffix):

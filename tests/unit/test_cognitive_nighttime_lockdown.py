@@ -112,12 +112,23 @@ async def test_current_behaviour_every_open_cover_is_closed_whatever_its_class(
                       "cover.no_class", "cover.shed_door"]
 
 
-async def test_the_default_thermostat_locks_are_never_touched(safety, fake_hass):
+async def test_saved_exempt_thermostat_locks_are_never_touched(safety, cc, fake_hass):
+    # 8.28.0: the list comes from the saved setting (a migrated install has
+    # these two written there), never from a built in default.
     fake_hass.states.set("lock.downstairs_thermo_lock", "unlocked")
     fake_hass.states.set("lock.upstairs_thermo_lock", "unlocked")
     fake_hass.states.set("lock.front", "unlocked")
+    cc._CORE.lockdown_mgr = cc.LockdownManager(fake_hass, {"lockdown_exempt_locks": [
+        "lock.downstairs_thermo_lock", "lock.upstairs_thermo_lock"]})
     await safety._nighttime_lockdown(0)
     assert [c[2]["entity_id"] for c in service_calls(fake_hass, "lock", "lock")] == ["lock.front"]
+
+
+async def test_with_nothing_saved_no_lock_is_exempt(safety, fake_hass):
+    fake_hass.states.set("lock.downstairs_thermo_lock", "unlocked")
+    await safety._nighttime_lockdown(0)
+    assert [c[2]["entity_id"] for c in service_calls(fake_hass, "lock", "lock")] == [
+        "lock.downstairs_thermo_lock"]
 
 
 async def test_the_exempt_list_comes_from_the_lockdown_manager_when_there_is_one(
@@ -244,7 +255,9 @@ async def test_one_request_covers_every_target_of_one_sweep(safety, fake_hass, a
         ("cover", "close_cover"), ("lock", "lock")]
 
 
-async def test_an_exempt_lock_gets_no_audit_row(safety, fake_hass, al):
+async def test_an_exempt_lock_gets_no_audit_row(safety, cc, fake_hass, al):
+    cc._CORE.lockdown_mgr = cc.LockdownManager(fake_hass, {"lockdown_exempt_locks": [
+        "lock.downstairs_thermo_lock"]})
     fake_hass.states.set("lock.downstairs_thermo_lock", "unlocked")
     await safety._nighttime_lockdown(0)
     assert _rows(al) == []

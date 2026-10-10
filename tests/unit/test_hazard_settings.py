@@ -84,7 +84,7 @@ async def test_a_hazard_source_refuses_other_values(ws, load, store, value):
 ])
 async def test_hazard_coordinates_accept_only_numbers_in_range(ws, load, store, key, value):
     hass = _hass(_entry(load))
-    hass.config = types.SimpleNamespace(latitude=53.607, longitude=-6.209,
+    hass.config = types.SimpleNamespace(latitude=51.478, longitude=-0.001,
                                         country="IE", time_zone="Europe/Dublin")
     conn = await _update(ws, hass, key, value)
     assert conn.errors == []
@@ -108,11 +108,11 @@ async def test_bad_hazard_coordinates_are_refused(
 async def test_home_equivalent_coordinates_are_deleted_not_saved(ws, load, store):
     entry = _entry(load, runtime_config={"hazard_lat": 50.0, "hazard_lon": 1.0})
     hass = _hass(entry)
-    hass.config = types.SimpleNamespace(latitude=53.607, longitude=-6.209,
+    hass.config = types.SimpleNamespace(latitude=51.478, longitude=-0.001,
                                         country="IE", time_zone="Europe/Dublin")
     store.data.update(hazard_lat=50.0, hazard_lon=1.0)
-    await _update(ws, hass, "hazard_lat", 53.607)
-    conn = await _update(ws, hass, "hazard_lon", -6.209)
+    await _update(ws, hass, "hazard_lat", 51.478)
+    conn = await _update(ws, hass, "hazard_lon", -0.001)
     assert conn.errors == []
     assert "hazard_lat" not in store.data and "hazard_lon" not in store.data
     assert "hazard_lat" not in entry.runtime_data.runtime_config
@@ -123,10 +123,10 @@ async def test_a_different_location_saves_both_coordinates_and_clear_deletes_bot
         ws, load, store):
     entry = _entry(load)
     hass = _hass(entry)
-    hass.config = types.SimpleNamespace(latitude=53.607, longitude=-6.209,
+    hass.config = types.SimpleNamespace(latitude=51.478, longitude=-0.001,
                                         country="IE", time_zone="Europe/Dublin")
     await _update(ws, hass, "hazard_lat", 52.66)
-    assert store.data == {"hazard_lat": 52.66, "hazard_lon": -6.209}
+    assert store.data == {"hazard_lat": 52.66, "hazard_lon": -0.001}
     await _update(ws, hass, "hazard_lon", -8.63)
     assert store.data == {"hazard_lat": 52.66, "hazard_lon": -8.63}
     await _update(ws, hass, "hazard_lon", "")

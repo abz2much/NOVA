@@ -1,12 +1,12 @@
 """Infrastructure triage for Nova.
 
-``InfrastructureTriage`` reads a handful of health entities straight off the
-Home Assistant state machine, grades each against thresholds, and synthesises a
+``InfrastructureTriage`` reads the health sensors the user listed straight off
+the Home Assistant state machine, grades each against thresholds, and synthesises a
 single natural-language verdict in Nova's voice. It is intentionally
 defensive: every check is isolated, and unreadable/unknown states are reported
 as a *degraded-visibility* warning rather than silently passing or crashing.
 
-The check table is data-driven so new probes are a one-line addition.
+The checks are built from the listed sensors on every run.
 """
 from __future__ import annotations
 
@@ -61,40 +61,54 @@ def _as_float(value: object) -> float | None:
 
 
 class InfrastructureTriage:
-    """Evaluate core infrastructure entities and produce a spoken verdict."""
+    """Evaluate the infrastructure sensors the user listed and produce a
+    spoken verdict.
 
-    #: Percentage utilisation probes.
-    THRESHOLD_CHECKS: tuple[_ThresholdCheck, ...] = (
-        _ThresholdCheck(
-            "sensor.server_root_storage_usage", "root storage",
-            warn_above=90.0, critical_above=96.0,
-        ),
-        _ThresholdCheck(
-            "sensor.server_ram_usage", "system memory",
-            warn_above=92.0, critical_above=92.0,
-        ),
-    )
+    8.28.0: the sensors come from the "infrastructure_audit_sensors" setting.
+    It starts empty, and with nothing listed the audit does nothing. (Before,
+    a fixed set of one particular home's server, switch and freeze sensor
+    ids was checked.) Each listed sensor is graded by what it is:
+      * a sensor measured in percent: elevated above 90, critical above 96
+      * a binary sensor: a fault when "off", or when "on" for the problem
+        device class
+      * anything else: only reported when it cannot be read
+    """
 
-    #: Connectivity / liveness probes (a binary_sensor in ``bad_state`` is a fault).
-    BINARY_CHECKS: tuple[_BinaryCheck, ...] = (
-        _BinaryCheck(
-            "binary_sensor.core_switch_status", "the core network switch", "off",
-        ),
-        _BinaryCheck(
-            "binary_sensor.basement_freeze_sensor_connectivity",
-            "the basement freeze sensor", "off",
-        ),
-    )
+    PERCENT_WARN_ABOVE = 90.0
+    PERCENT_CRITICAL_ABOVE = 96.0
 
-    #: Root-cause diagnostic tree for the core switch — when it drops offline,
-    #: its upstream power monitor distinguishes a power loss from a link fault.
-    CORE_SWITCH_LABEL = "the core network switch"
-    CORE_SWITCH_POWER_ENTITY = "sensor.core_switch_power_watts"
-    CORE_SWITCH_POWER_FLOOR = 1.0  # watts below this ⇒ treat as unpowered
-
-    def __init__(self, hass, *, honorific: str = "sir") -> None:
+    def __init__(self, hass, *, honorific: str = "sir", sensors=None) -> None:
         self.hass = hass
         self.honorific = honorific
+        self.sensors = [str(e).strip() for e in (sensors or []) if str(e).strip()]
+
+    def _checks(self) -> tuple[list, list]:
+        """(threshold checks, binary checks) for the listed sensors that exist."""
+        thresholds: list[_ThresholdCheck] = []
+        binaries: list[_BinaryCheck] = []
+        seen: set = set()
+        for eid in self.sensors:
+            if eid in seen:
+                continue
+            seen.add(eid)
+            state = self.hass.states.get(eid)
+            if state is None:
+                continue  # not part of this home's setup
+            attrs = getattr(state, "attributes", None) or {}
+            label = str(attrs.get("friendly_name") or eid)
+            if eid.startswith("binary_sensor."):
+                bad = "on" if attrs.get("device_class") == "problem" else "off"
+                binaries.append(_BinaryCheck(eid, label, bad))
+            elif attrs.get("unit_of_measurement") == "%":
+                thresholds.append(_ThresholdCheck(
+                    eid, label, warn_above=self.PERCENT_WARN_ABOVE,
+                    critical_above=self.PERCENT_CRITICAL_ABOVE))
+            elif str(state.state).lower() in _UNKNOWN_STATES:
+                # Not graded, but a listed sensor that cannot be read is
+                # still worth a warning.
+                thresholds.append(_ThresholdCheck(
+                    eid, label, warn_above=float("inf"), critical_above=float("inf")))
+        return thresholds, binaries
 
     # ── Individual checks (each fully guarded) ────────────────────────────
     def _eval_threshold(self, check: _ThresholdCheck) -> Finding | None:
@@ -145,9 +159,10 @@ class InfrastructureTriage:
                     check.label,
                 )
             if value == check.bad_state.lower():
+                what = "a problem" if check.bad_state == "on" else "offline"
                 return Finding(
                     _SEV_CRITICAL,
-                    f"{check.label} is reporting offline",
+                    f"{check.label} is reporting {what}",
                     check.label,
                 )
             return None
@@ -165,18 +180,16 @@ class InfrastructureTriage:
             critical       (bool) – any finding at critical severity
         """
         findings: list[Finding] = []
-        for tcheck in self.THRESHOLD_CHECKS:
+        thresholds, binaries = self._checks()
+        for tcheck in thresholds:
             if (f := self._eval_threshold(tcheck)) is not None:
                 findings.append(f)
-        for bcheck in self.BINARY_CHECKS:
+        for bcheck in binaries:
             if (f := self._eval_binary(bcheck)) is not None:
                 findings.append(f)
 
         if not findings:
             return {"alert_required": False, "message": "", "critical": False, "tags": []}
-
-        # Walk root-cause dependency trees to turn bare symptoms into cause/effect.
-        self._enrich_root_cause(findings)
 
         critical = any(f.severity >= _SEV_CRITICAL for f in findings)
         # Speak the most severe items first.
@@ -188,31 +201,6 @@ class InfrastructureTriage:
             if f.label and f.label not in tags:
                 tags.append(f.label)
         return {"alert_required": True, "message": message, "critical": critical, "tags": tags}
-
-    def _enrich_root_cause(self, findings: list[Finding]) -> None:
-        """Inspect cross-entity dependencies to deduce why a fault occurred and
-        fold the deduction into the finding's spoken clause. Currently models the
-        core switch ← upstream power monitor relationship."""
-        for f in findings:
-            if f.label != self.CORE_SWITCH_LABEL or f.severity < _SEV_CRITICAL:
-                continue
-            state = self.hass.states.get(self.CORE_SWITCH_POWER_ENTITY)
-            watts = _as_float(state.state) if state is not None else None
-            if state is None or str(state.state).lower() in _UNKNOWN_STATES or watts is None:
-                f.phrase += (
-                    ", and its upstream power monitor is unreachable too — "
-                    "most likely an upstream power loss on its utility circuit"
-                )
-            elif watts < self.CORE_SWITCH_POWER_FLOOR:
-                f.phrase += (
-                    f", drawing only {watts:.0f} watts upstream — consistent with "
-                    "a power loss on its utility circuit rather than the switch itself failing"
-                )
-            else:
-                f.phrase += (
-                    f", though it's still drawing {watts:.0f} watts upstream, so this "
-                    "points to a network or uplink fault rather than a power loss"
-                )
 
     def _compose(self, findings: list[Finding], critical: bool) -> str:
         clauses = [f.phrase for f in findings]

@@ -1093,7 +1093,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v8.27.0
+ * v8.28.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1170,7 +1170,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.27.0 ",
+      console.log("%c Nova Panel %c v8.28.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -2236,7 +2236,7 @@ ${this._htmlDashboardBody()}`;
             <div class="panel-title">Relations</div>
             <div class="panel-meta" id="newRelationsCount">—</div>
           </div>
-          <div class="stub-body">Links between things, such as "sam owns car.jeep" or "kitchen adjacent_to hallway". Nova proposes them when you tell it how things relate. A new link waits here and is not used until you confirm it. Only confirmed links are shown to Nova. Removing one is permanent: Nova will not add it back on its own.</div>
+          <div class="stub-body">Links between things, such as "house member owns bike" or "child's room adjacent_to hallway". Nova proposes them when you tell it how things relate. A new link waits here and is not used until you confirm it. Only confirmed links are shown to Nova. Removing one is permanent: Nova will not add it back on its own.</div>
           <div class="toggle-desc" id="newRelationsMsg"></div>
           <div id="newRelationsPending" class="mem-body"></div>
           <div class="mode-bind-head">Confirmed</div>
@@ -2506,7 +2506,7 @@ ${this._htmlDashboardBody()}`;
         <button class="new-rel-remove" data-id="${r.id}" title="Remove this relation" aria-label="Remove">✕ Remove</button>
       </div>`).join("")
       : (this._relationsLoaded
-        ? `<div class="stub-body">None yet. Tell Nova how things relate, for example "Sam owns the Jeep", then confirm it here. Only you can confirm a link, Nova cannot.</div>`
+        ? `<div class="stub-body">None yet. Tell Nova how things relate, for example "House member owns the bike", then confirm it here. Only you can confirm a link, Nova cannot.</div>`
         : `<div class="stub-body">Loading…</div>`));
     const idOf = (el) => parseInt(el.getAttribute("data-id"), 10);
     pendingBox.querySelectorAll(".rel-confirm").forEach(b => b.addEventListener("click", e => this._relationAction(idOf(e.currentTarget), "confirm")));
@@ -6008,7 +6008,18 @@ ${this._htmlDashboardBody()}`;
       <div class="mode-bind-head">Readings</div>
       ${metrics.length ? metrics.map(metricRow).join("") : `<div class="stub-body">Loading detected readings…</div>`}
       <div class="mode-bind-head">Infrastructure audit</div>
-      <div class="stub-body">A separate check every 15 minutes of a fixed set of server and network switch sensors. Sensors that don't exist here are skipped. Pick a room for its alerts, or leave none to only log them.</div>
+      <div class="stub-body">A separate check every 15 minutes of the sensors you list here. A sensor in percent is flagged above 90 and critical above 96. A binary sensor is flagged when it goes off, or on for a problem sensor. With no sensors listed, the audit does nothing. Pick a room for its alerts, or leave none to only log them.</div>
+      <div class="cfg-row">
+        <input id="newAuditSensorInput" list="newAuditSensorList" class="cfg-field" style="flex:1" placeholder="type to find a sensor…" autocomplete="off">
+        <datalist id="newAuditSensorList">${this._sensorDatalist()}</datalist>
+        <button class="mode-chip" id="newAuditSensorAdd">+ Add</button>
+      </div>
+      <div class="mode-grid" id="newAuditSensorChips">${(() => {
+        const arr = this._exclArr(cfg.infrastructure_audit_sensors);
+        return arr.length
+          ? arr.map((e, i) => `<span class="new-pl-chip">${this._esc(e)}<button class="new-audit-sensor-del" data-i="${i}" title="Remove">×</button></span>`).join("")
+          : `<span class="toggle-desc">None.</span>`;
+      })()}</div>
       <div class="cfg-row">
         <label>Audit alerts room</label>
         <select class="cfg-field" data-cfg-key="infrastructure_audit_area">${this._optSelect([["", "— none —"], ...(this._data()?.areas || []).map(a => [a.id, a.name])], cfg.infrastructure_audit_area || "")}</select>
@@ -6251,6 +6262,12 @@ ${this._htmlDashboardBody()}`;
   _allEntityDatalist() {
     const states = this._hass?.states || {};
     return Object.keys(states).sort().map(eid => `<option value="${this._esc(eid)}">${this._esc(this._entName(eid))}</option>`).join("");
+  }
+  // Sensors and binary sensors, for the infrastructure audit list (8.28.0).
+  _sensorDatalist() {
+    const states = this._hass?.states || {};
+    return Object.keys(states).filter(eid => /^(binary_)?sensor\./.test(eid)).sort()
+      .map(eid => `<option value="${this._esc(eid)}">${this._esc(this._entName(eid))}</option>`).join("");
   }
   _domainDatalist() {
     const states = this._hass?.states || {};
@@ -7660,6 +7677,11 @@ ${this._htmlDashboardBody()}`;
       console.warn(`Nova: "${v}" is not a known entity id`);
       return false;
     });
+    exclAdd("newAuditSensorAdd", "newAuditSensorInput", "infrastructure_audit_sensors", (v) => {
+      if (this._hass && this._hass.states && this._hass.states[v] && /^(binary_)?sensor\./.test(v)) return true;
+      console.warn(`Nova: "${v}" is not a known sensor`);
+      return false;
+    });
     exclAdd("newExclDomAdd", "newExclDomInput", "excluded_domains", null);
     exclAdd("newExclLabAdd", "newExclLabInput", "excluded_labels", null);
     exclAdd("newDepCalAdd", "newDepCalInput", "departure_excluded_calendars", (v) => {
@@ -7678,6 +7700,7 @@ ${this._htmlDashboardBody()}`;
     exclDel("new-excl-dom-del", "excluded_domains");
     exclDel("new-excl-lab-del", "excluded_labels");
     exclDel("new-dep-cal-del", "departure_excluded_calendars");
+    exclDel("new-audit-sensor-del", "infrastructure_audit_sensors");
 
     const rateLimitInput = root.getElementById("newObserverRateLimit");
     if (rateLimitInput) {

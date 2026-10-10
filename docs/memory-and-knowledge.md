@@ -8,8 +8,8 @@ inbox, check your calendar and look things up on the web.
 
 - **Facts.** Say "remember that the bins go out on Tuesday" and Nova keeps
   it, once you confirm it.
-- **Relations.** How people, places and things link up, for example "Sam owns
-  Biscuit" or "the kitchen is next to the garage".
+- **Relations.** How people, places and things link up, for example "House
+  member owns the bike" or "the child's room is next to the hallway".
 - **Conversation memory.** What was said recently, for the person speaking.
 - **Your documents.** Answers from manuals and receipts, with the source.
 - **Email.** Reads your inbox, read only.

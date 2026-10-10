@@ -215,7 +215,6 @@
   "Entity not found": "Enheten ble ikke funnet",
   "Exit doors": "Ytterdører",
   "House status": "Husets status",
-  "Links between things, such as \"sam owns car.jeep\" or \"kitchen adjacent_to hallway\". Nova proposes them when you tell it how things relate. A new link waits here and is not used until you confirm it. Only confirmed links are shown to Nova. Removing one is permanent: Nova will not add it back on its own.": "Koblinger mellom ting, for eksempel \"sam owns car.jeep\" eller \"kitchen adjacent_to hallway\". Nova foreslår dem når du forteller hvordan ting henger sammen. En ny kobling venter her og brukes ikke før du bekrefter den. Bare bekreftede koblinger vises for Nova. Å fjerne en er permanent: Nova legger den ikke til igjen på egen hånd.",
   "Lockdown": "Nedstenging",
   "Locked": "Låst",
   "Name (optional)": "Navn (valgfritt)",
@@ -229,5 +228,9 @@
   "Utility Room": "Vaskerom",
   "doors you leave the house by. Nova adds nothing until you pick one.": "dører du forlater huset gjennom. Nova legger ikke til noe før du velger en.",
   "— pick a door, lock, cover or sensor —": "— velg en dør, lås, et dekke eller en sensor —",
-  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Vis kjelleretasjen og dørene dens. Automatisk ser etter et område eller en etasje som heter Kjeller, eller en etasje under bakken. Det endrer bare hva du ser."
+  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Vis kjelleretasjen og dørene dens. Automatisk ser etter et område eller en etasje som heter Kjeller, eller en etasje under bakken. Det endrer bare hva du ser.",
+  "Links between things, such as \"house member owns bike\" or \"child's room adjacent_to hallway\". Nova proposes them when you tell it how things relate. A new link waits here and is not used until you confirm it. Only confirmed links are shown to Nova. Removing one is permanent: Nova will not add it back on its own.": "Koblinger mellom ting, for eksempel \"house member owns bike\" eller \"child's room adjacent_to hallway\". Nova foreslår dem når du forteller hvordan ting henger sammen. En ny kobling venter her og brukes ikke før du bekrefter den. Bare bekreftede koblinger vises for Nova. Å fjerne en er permanent: Nova legger den ikke til igjen på egen hånd.",
+  "None yet. Tell Nova how things relate, for example \"House member owns the bike\", then confirm it here. Only you can confirm a link, Nova cannot.": "Ingen ennå. Fortell Nova hvordan ting henger sammen, for eksempel \"Husstandsmedlem eier sykkelen\", og bekreft det så her. Bare du kan bekrefte en kobling, ikke Nova.",
+  "type to find a sensor…": "skriv for å finne en sensor…",
+  "A separate check every 15 minutes of the sensors you list here. A sensor in percent is flagged above 90 and critical above 96. A binary sensor is flagged when it goes off, or on for a problem sensor. With no sensors listed, the audit does nothing. Pick a room for its alerts, or leave none to only log them.": "En egen sjekk hvert 15. minutt av sensorene du lister opp her. En sensor i prosent flagges over 90 og er kritisk over 96. En binær sensor flagges når den går av, eller på for en problemsensor. Uten sensorer i listen gjør sjekken ingenting. Velg et rom for varslene, eller ingen for bare å logge dem."
 }

@@ -215,7 +215,6 @@
   "Entity not found": "Entidade não encontrada",
   "Exit doors": "Portas de saída",
   "House status": "Estado da casa",
-  "Links between things, such as \"sam owns car.jeep\" or \"kitchen adjacent_to hallway\". Nova proposes them when you tell it how things relate. A new link waits here and is not used until you confirm it. Only confirmed links are shown to Nova. Removing one is permanent: Nova will not add it back on its own.": "Ligações entre coisas, como \"sam owns car.jeep\" ou \"kitchen adjacent_to hallway\". A Nova propõe-nas quando lhe diz como as coisas se relacionam. Uma ligação nova espera aqui e só é usada depois de a confirmar. A Nova só vê ligações confirmadas. Remover uma é permanente: a Nova não a volta a adicionar sozinha.",
   "Lockdown": "Bloqueio",
   "Locked": "Trancada",
   "Name (optional)": "Nome (opcional)",
@@ -229,5 +228,9 @@
   "Utility Room": "Lavandaria",
   "doors you leave the house by. Nova adds nothing until you pick one.": "portas por onde sai de casa. A Nova não adiciona nada até escolher uma.",
   "— pick a door, lock, cover or sensor —": "— escolha uma porta, fechadura, cobertura ou sensor —",
-  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Mostrar a cave e as suas portas. Automático procura uma área ou piso chamado Cave ou Adega, ou um piso abaixo do nível do solo. Só muda o que vê."
+  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Mostrar a cave e as suas portas. Automático procura uma área ou piso chamado Cave ou Adega, ou um piso abaixo do nível do solo. Só muda o que vê.",
+  "Links between things, such as \"house member owns bike\" or \"child's room adjacent_to hallway\". Nova proposes them when you tell it how things relate. A new link waits here and is not used until you confirm it. Only confirmed links are shown to Nova. Removing one is permanent: Nova will not add it back on its own.": "Ligações entre coisas, como \"house member owns bike\" ou \"child's room adjacent_to hallway\". A Nova propõe-nas quando lhe diz como as coisas se relacionam. Uma ligação nova espera aqui e só é usada depois de a confirmar. A Nova só vê ligações confirmadas. Remover uma é permanente: a Nova não a volta a adicionar sozinha.",
+  "None yet. Tell Nova how things relate, for example \"House member owns the bike\", then confirm it here. Only you can confirm a link, Nova cannot.": "Nenhum ainda. Diga à Nova como as coisas se relacionam, por exemplo \"Membro da casa tem a bicicleta\", e confirme aqui. Só você pode confirmar uma ligação, a Nova não.",
+  "type to find a sensor…": "escreva para encontrar um sensor…",
+  "A separate check every 15 minutes of the sensors you list here. A sensor in percent is flagged above 90 and critical above 96. A binary sensor is flagged when it goes off, or on for a problem sensor. With no sensors listed, the audit does nothing. Pick a room for its alerts, or leave none to only log them.": "Uma verificação separada a cada 15 minutos dos sensores que indicar aqui. Um sensor em percentagem é assinalado acima de 90 e é crítico acima de 96. Um sensor binário é assinalado quando desliga, ou quando liga se for um sensor de problema. Sem sensores indicados, a verificação não faz nada. Escolha uma divisão para os alertas, ou nenhuma para só os registar."
 }

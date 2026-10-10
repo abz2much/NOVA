@@ -215,7 +215,6 @@
   "Entity not found": "Kohdetta ei löytynyt",
   "Exit doors": "Ulko-ovet",
   "House status": "Talon tila",
-  "Links between things, such as \"sam owns car.jeep\" or \"kitchen adjacent_to hallway\". Nova proposes them when you tell it how things relate. A new link waits here and is not used until you confirm it. Only confirmed links are shown to Nova. Removing one is permanent: Nova will not add it back on its own.": "Asioiden väliset yhteydet, esimerkiksi \"sam owns car.jeep\" tai \"kitchen adjacent_to hallway\". Nova ehdottaa niitä, kun kerrot, miten asiat liittyvät toisiinsa. Uusi yhteys odottaa täällä eikä sitä käytetä ennen kuin vahvistat sen. Novalle näytetään vain vahvistetut yhteydet. Poistaminen on pysyvää: Nova ei lisää sitä takaisin itse.",
   "Lockdown": "Lukitus",
   "Locked": "Lukossa",
   "Name (optional)": "Nimi (valinnainen)",
@@ -229,5 +228,9 @@
   "Utility Room": "Kodinhoitohuone",
   "doors you leave the house by. Nova adds nothing until you pick one.": "ovet, joista lähdet talosta. Nova ei lisää mitään ennen kuin valitset jonkin.",
   "— pick a door, lock, cover or sensor —": "— valitse ovi, lukko, suoja tai anturi —",
-  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Näytä kellarikerros ja sen ovet. Automaattinen etsii Kellari-nimistä aluetta tai kerrosta tai maanpinnan alapuolista kerrosta. Tämä muuttaa vain sen, mitä näet."
+  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Näytä kellarikerros ja sen ovet. Automaattinen etsii Kellari-nimistä aluetta tai kerrosta tai maanpinnan alapuolista kerrosta. Tämä muuttaa vain sen, mitä näet.",
+  "Links between things, such as \"house member owns bike\" or \"child's room adjacent_to hallway\". Nova proposes them when you tell it how things relate. A new link waits here and is not used until you confirm it. Only confirmed links are shown to Nova. Removing one is permanent: Nova will not add it back on its own.": "Asioiden väliset yhteydet, esimerkiksi \"house member owns bike\" tai \"child's room adjacent_to hallway\". Nova ehdottaa niitä, kun kerrot, miten asiat liittyvät toisiinsa. Uusi yhteys odottaa täällä eikä sitä käytetä ennen kuin vahvistat sen. Novalle näytetään vain vahvistetut yhteydet. Poistaminen on pysyvää: Nova ei lisää sitä takaisin itse.",
+  "None yet. Tell Nova how things relate, for example \"House member owns the bike\", then confirm it here. Only you can confirm a link, Nova cannot.": "Ei vielä yhtään. Kerro Novalle, miten asiat liittyvät toisiinsa, esimerkiksi \"Talouden jäsen omistaa pyörän\", ja vahvista se sitten täällä. Vain sinä voit vahvistaa yhteyden, ei Nova.",
+  "type to find a sensor…": "kirjoita löytääksesi anturin…",
+  "A separate check every 15 minutes of the sensors you list here. A sensor in percent is flagged above 90 and critical above 96. A binary sensor is flagged when it goes off, or on for a problem sensor. With no sensors listed, the audit does nothing. Pick a room for its alerts, or leave none to only log them.": "Erillinen tarkistus 15 minuutin välein tähän lisäämillesi antureille. Prosentteina mittaava anturi merkitään yli 90:n ja kriittiseksi yli 96:n. Binäärianturi merkitään, kun se sammuu, tai ongelma-anturin kohdalla, kun se syttyy. Ilman antureita tarkistus ei tee mitään. Valitse huone hälytyksille tai jätä tyhjäksi, jolloin ne vain kirjataan lokiin."
 }

@@ -38,8 +38,10 @@ _LOGGER = logging.getLogger(__name__)
 # v6 = added observer mode (proactive reasoning, Gemini tier providers, sleep detection)
 # v7 = area-registry-driven routing; flat entity lists removed in favor of
 #      HA area registry + bedroom_areas toggle + broadcast_group entity
+# v8 = the default lockdown exempt list became empty; existing installs keep
+#      the old two thermostat locks in their saved setting (8.28.0)
 
-CURRENT_SCHEMA_VERSION = 7
+CURRENT_SCHEMA_VERSION = 8
 
 
 # ─── Migrations ──────────────────────────────────────────────────────────────
@@ -172,6 +174,30 @@ def migrate_6_to_7(data: dict, options: dict) -> tuple[dict, dict]:
     return data, options
 
 
+def migrate_7_to_8(data: dict, options: dict) -> tuple[dict, dict]:
+    """v7 → v8: the built in lockdown exempt list is now empty.
+
+    Before 8.28.0, an install that never saved "lockdown_exempt_locks" left
+    two thermostat locks out of lockdown by default. Write those two into the
+    saved setting once, so this install's lockdown behaves exactly as before.
+    A value already saved (even an empty list) is left alone. A fresh install
+    starts at v8 and never runs this, so nothing is exempt there.
+    """
+    from .core_common import LEGACY_LOCKDOWN_EXEMPT_LOCKS
+    saved = None
+    try:
+        from . import nova_config
+        saved = nova_config.get("lockdown_exempt_locks", None)
+    except Exception:
+        saved = None
+    if saved is None and "lockdown_exempt_locks" not in options \
+            and "lockdown_exempt_locks" not in data:
+        options["lockdown_exempt_locks"] = list(LEGACY_LOCKDOWN_EXEMPT_LOCKS)
+        _LOGGER.info("Nova migration v7→v8: kept the old lockdown exempt locks %s",
+                     ", ".join(LEGACY_LOCKDOWN_EXEMPT_LOCKS))
+    return data, options
+
+
 # (source_version, migration_function)
 MIGRATIONS: list[tuple[int, Callable]] = [
     (1, migrate_1_to_2),
@@ -180,6 +206,7 @@ MIGRATIONS: list[tuple[int, Callable]] = [
     (4, migrate_4_to_5),
     (5, migrate_5_to_6),
     (6, migrate_6_to_7),
+    (7, migrate_7_to_8),
 ]
 
 

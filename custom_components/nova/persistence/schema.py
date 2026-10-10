@@ -253,7 +253,7 @@ _COMPONENTS = (
         version=1,
         tables=("relations",),
         statements=(
-            # Links between things ("sam owns car.jeep"). Every row starts
+            # Links between things ("house member owns bike"). Every row starts
             # 'pending' and is only used once a person confirms it. A removed
             # row is kept with deleted_at set, so a later non stated write
             # cannot bring back an edge the user took out. The table is new

@@ -1,5 +1,5 @@
 """Thermostat keypad/child locks (lock.downstairs_thermo_lock,
-lock.upstairs_thermo_lock — see cognitive_core.LOCKDOWN_EXEMPT_LOCKS_DEFAULT)
+lock.upstairs_thermo_lock, saved in lockdown_exempt_locks)
 aren't physical security. The formal lockdown sweep already knew to leave
 them alone, but briefing._gather_open_things swept every lock.* entity
 blind, so Nova would list them as "unlocked" and offer to lock them in
@@ -16,7 +16,13 @@ def briefing(load):
     return load("briefing")
 
 
-def test_thermostat_locks_are_not_reported_as_unlocked(briefing, fake_hass):
+def test_thermostat_locks_are_not_reported_as_unlocked(briefing, load, fake_hass, monkeypatch, tmp_path):
+    # 8.28.0: the exempt list comes from the saved setting (as after the one
+    # time migration), never from a built in default.
+    cc = load("cognitive_core")
+    monkeypatch.setattr(cc, "LOCKDOWN_STATE_PATH", str(tmp_path / "lockdown.json"))
+    monkeypatch.setattr(cc._CORE, "lockdown_mgr", cc.LockdownManager(fake_hass, {
+        "lockdown_exempt_locks": ["lock.downstairs_thermo_lock", "lock.upstairs_thermo_lock"]}))
     fake_hass.states.set("lock.downstairs_thermo_lock", "unlocked", friendly_name="Downstairs Thermo Lock")
     fake_hass.states.set("lock.upstairs_thermo_lock", "unlocked", friendly_name="Upstairs Thermo Lock")
     fake_hass.states.set("lock.front_door", "unlocked", friendly_name="Front Door")

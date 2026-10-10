@@ -6,7 +6,7 @@ layout, the development workflow, and the release process.
 ## Repository layout
 
 ```
-nova-aio/                         repo root (HACS integration repository)
+nova/                             repo root (HACS integration repository)
 ├── hacs.json                        HACS metadata
 ├── README.md  CHANGELOG.md  LICENSE
 ├── icon.png  logo.png               branding (for home-assistant/brands)

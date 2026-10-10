@@ -215,7 +215,6 @@
   "Entity not found": "Varlık bulunamadı",
   "Exit doors": "Çıkış kapıları",
   "House status": "Ev durumu",
-  "Links between things, such as \"sam owns car.jeep\" or \"kitchen adjacent_to hallway\". Nova proposes them when you tell it how things relate. A new link waits here and is not used until you confirm it. Only confirmed links are shown to Nova. Removing one is permanent: Nova will not add it back on its own.": "Şeyler arasındaki bağlantılar, örneğin \"sam owns car.jeep\" veya \"kitchen adjacent_to hallway\". Nova, şeylerin nasıl ilişkili olduğunu anlattığında bunları önerir. Yeni bir bağlantı burada bekler ve sen onaylayana kadar kullanılmaz. Nova'ya yalnızca onaylanmış bağlantılar gösterilir. Birini kaldırmak kalıcıdır: Nova onu kendiliğinden geri eklemez.",
   "Lockdown": "Kilitleme",
   "Locked": "Kilitli",
   "Name (optional)": "Ad (isteğe bağlı)",
@@ -229,5 +228,9 @@
   "Utility Room": "Çamaşır odası",
   "doors you leave the house by. Nova adds nothing until you pick one.": "evden çıktığın kapılar. Sen birini seçene kadar Nova hiçbir şey eklemez.",
   "— pick a door, lock, cover or sensor —": "— bir kapı, kilit, örtü veya sensör seç —",
-  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Bodrum katını ve kapılarını göster. Otomatik, Bodrum veya Mahzen adlı bir alan ya da kat veya zemin altındaki bir kat arar. Yalnızca gördüklerini değiştirir."
+  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Bodrum katını ve kapılarını göster. Otomatik, Bodrum veya Mahzen adlı bir alan ya da kat veya zemin altındaki bir kat arar. Yalnızca gördüklerini değiştirir.",
+  "Links between things, such as \"house member owns bike\" or \"child's room adjacent_to hallway\". Nova proposes them when you tell it how things relate. A new link waits here and is not used until you confirm it. Only confirmed links are shown to Nova. Removing one is permanent: Nova will not add it back on its own.": "Şeyler arasındaki bağlantılar, örneğin \"house member owns bike\" veya \"child's room adjacent_to hallway\". Nova, şeylerin nasıl ilişkili olduğunu anlattığında bunları önerir. Yeni bir bağlantı burada bekler ve sen onaylayana kadar kullanılmaz. Nova'ya yalnızca onaylanmış bağlantılar gösterilir. Birini kaldırmak kalıcıdır: Nova onu kendiliğinden geri eklemez.",
+  "None yet. Tell Nova how things relate, for example \"House member owns the bike\", then confirm it here. Only you can confirm a link, Nova cannot.": "Henüz yok. Nova'ya şeylerin nasıl ilişkili olduğunu anlat, örneğin \"Ev üyesinin bisikleti var\", sonra burada onayla. Bir bağlantıyı yalnızca sen onaylayabilirsin, Nova onaylayamaz.",
+  "type to find a sensor…": "bir sensör bulmak için yazın…",
+  "A separate check every 15 minutes of the sensors you list here. A sensor in percent is flagged above 90 and critical above 96. A binary sensor is flagged when it goes off, or on for a problem sensor. With no sensors listed, the audit does nothing. Pick a room for its alerts, or leave none to only log them.": "Burada listelediğin sensörlerin her 15 dakikada bir ayrı denetimi. Yüzde ölçen bir sensör 90'ın üstünde işaretlenir, 96'nın üstünde kritiktir. İkili bir sensör kapandığında, sorun sensörüyse açıldığında işaretlenir. Listelenmiş sensör yoksa denetim hiçbir şey yapmaz. Uyarılar için bir oda seç ya da yalnızca günlüğe yazmak için hiçbirini seçme."
 }

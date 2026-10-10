@@ -20,8 +20,8 @@ _LOGGER = logging.getLogger(__name__)
 DEFAULT_POWER_ON_W = 10.0  # watts above which an appliance counts as "running"
 
 # sensor.<appliance>_power → dB the appliance adds to the room when running.
-# Starting profile for this property's appliances; map to your actual power
-# sensors. Entities that don't exist are simply ignored (no attenuation).
+# A starting profile of common household appliances; map to your actual
+# power sensors. Entities that don't exist are simply ignored (no attenuation).
 DEFAULT_PROFILES: dict[str, float] = {
     "sensor.dishwasher_power": 8.0,
     "sensor.washer_power": 7.0,

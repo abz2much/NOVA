@@ -99,7 +99,7 @@ NOVA_TOOLS: list[dict[str, Any]] = [
                         "type": "string",
                         "description": (
                             "Search term: entity name, area name, or keyword "
-                            "(e.g. 'chase', 'kitchen lights', 'back door')"
+                            "(e.g. 'desk lamp', 'kitchen lights', 'back door')"
                         ),
                     },
                     "domain": {
@@ -296,7 +296,7 @@ NOVA_TOOLS: list[dict[str, Any]] = [
                     },
                     "name": {
                         "type": "string",
-                        "description": "The name/label (e.g. 'chase lamp', 'bedtime')",
+                        "description": "The name/label (e.g. 'desk lamp', 'bedtime')",
                     },
                     "value": {
                         "type": "string",
@@ -356,8 +356,8 @@ NOVA_TOOLS: list[dict[str, Any]] = [
         "function": {
             "name": "propose_relation",
             "description": (
-                "Remember that two things are linked, for example 'sam owns "
-                "car.jeep' or 'kitchen adjacent_to hallway'. Use it when the user "
+                "Remember that two things are linked, for example 'house member owns "
+                "bike' or 'child's room adjacent_to hallway'. Use it when the user "
                 "tells you how two people, places or things relate. It is saved "
                 "as PENDING, not yet trusted and not shown to you again. You cannot "
                 "confirm it: only the user can, in the Memory tab of the Nova "
@@ -371,7 +371,7 @@ NOVA_TOOLS: list[dict[str, Any]] = [
                 "properties": {
                     "subject": {
                         "type": "string",
-                        "description": "The first thing, 1 to 80 characters (for example 'sam' or 'kitchen').",
+                        "description": "The first thing, 1 to 80 characters (for example 'house member' or 'kitchen').",
                     },
                     "predicate": {
                         "type": "string",
@@ -379,7 +379,7 @@ NOVA_TOOLS: list[dict[str, Any]] = [
                     },
                     "object": {
                         "type": "string",
-                        "description": "The second thing, 1 to 80 characters (for example 'car.jeep' or 'hallway').",
+                        "description": "The second thing, 1 to 80 characters (for example 'bike' or 'hallway').",
                     },
                 },
                 "required": ["subject", "predicate", "object"],
@@ -420,7 +420,7 @@ NOVA_TOOLS: list[dict[str, Any]] = [
                 "properties": {
                     "entity": {
                         "type": "string",
-                        "description": "The name to look up, for example 'sam' or 'kitchen'.",
+                        "description": "The name to look up, for example 'house member' or 'kitchen'.",
                     },
                 },
                 "required": ["entity"],
@@ -1357,7 +1357,7 @@ NOVA_TOOLS: list[dict[str, Any]] = [
                 "properties": {
                     "entity_id": {
                         "type": "string",
-                        "description": "The camera entity_id (e.g. camera.workshop).",
+                        "description": "The camera entity_id (e.g. camera.back_door).",
                     },
                     "question": {
                         "type": "string",
