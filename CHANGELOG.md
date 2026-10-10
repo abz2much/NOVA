@@ -1,3 +1,19 @@
+## [8.27.0] — Rooms only where the home has them
+
+### The basement
+- **Detection.** The basement floor tab, the Cellar / Bulkhead and Basement door rows, and the default plan's basement floor show only when Home Assistant has an area or floor named Basement or Cellar, a floor below ground level, or you mapped a Basement or Cellar / Bulkhead door. Names on devices and the default floor plan never count.
+- **The Basement setting is now Auto, Yes or No** (Settings → General → Residence / Home). It used to be a plain yes or no, on unless changed. A value you saved there is still your choice; if you never changed it, it is now Auto.
+- **Display only.** Lockdown, the night sweep, intrusion and the world model never read it.
+
+### The rest of the default floor plan
+- The upper floor shows only when Stories is more than 1. The stairs show only when there is another floor to reach.
+- The basement's sump pump, dehumidifier, home energy and washer labels are gone. They were guesses.
+- With no garage, the garage's space becomes a utility room only when Home Assistant has an area named Utility. Otherwise it is left out.
+- A floor plan you saved is never changed.
+
+### The 3D house
+- The outside cellar door (bulkhead) is drawn only when you mapped a Cellar / Bulkhead door. Before, every home with the default floor plan got one.
+
 ## [8.26.0] — Garage only where one exists, and your own exit doors
 
 ### Garage words only where a garage exists

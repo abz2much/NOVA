@@ -59,6 +59,7 @@
     "appliance_profile",
     "arrival_front_door_entity",
     "banter_level",
+    "basement_mode",
     "biometric_entities",
     "biometrics_enabled",
     "briefing_evening_enabled",

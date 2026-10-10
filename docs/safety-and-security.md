@@ -21,7 +21,10 @@ needs, what it does by itself, and what it never does without you.
   your home has a garage: a garage door cover or sensor, or an area named
   Garage. Set **Settings → General → Residence / Home → Garage** to Yes or
   No to choose yourself. This only changes what you see. Lockdown, the night
-  sweep and intrusion check every door the same way whatever it says.
+  sweep and intrusion check every door the same way whatever it says. The
+  basement works the same way: its floor and door rows show only when there
+  is an area or floor named Basement or Cellar, a floor below ground level,
+  or a mapped basement door, unless you set **Basement** to Yes or No.
 - **Intrusion.** Motion inside while the household is away starts an
   investigation. Nova tells you once and keeps watching. It raises the full
   alarm, on every speaker and device, only when it confirms an intruder: a

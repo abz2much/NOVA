@@ -391,7 +391,6 @@
   "Czech": "Čeština",
   "DECISIONS": "ROZHODNUTÍ",
   "DEDUP": "DEDUP",
-  "DEHUMIDIFIER": "ODVLHČOVAČ",
   "DELETE": "SMAZAT",
   "DET": "DET",
   "DIAGNOSE": "DIAGNOSTIKA",
@@ -502,7 +501,6 @@
   "HELPFUL": "UŽITEČNÉ",
   "HIDE CAMERAS ▴": "SKRÝT KAMERY ▴",
   "HOME": "DOMA",
-  "HOME ENERGY": "ENERGIE DOMU",
   "HOMER — diagnostic sub-agent": "HOMER — diagnostický podagent",
   "HYBRID": "HYBRID",
   "Habits Nova has confidently attributed to one person, from 30 days of sole-occupant activity — separate from household-wide facts above.": "Zvyky, které Nova s jistotou přiřazuje jedné osobě, z 30 dnů aktivity, kdy byla doma sama — oddělené od faktů o celé domácnosti výše.",
@@ -594,7 +592,6 @@
   "Muted": "Ztlumeno",
   "NASA disasters": "Katastrofy NASA",
   "NEEDS ADJUSTMENT": "POTŘEBUJE ÚPRAVU",
-  "NO": "NE",
   "NO SNAPSHOT": "ŽÁDNÝ SNÍMEK",
   "NONE": "ŽÁDNÉ",
   "NOVA COMMAND CENTER": "VELÍN NOVA",
@@ -779,7 +776,6 @@
   "SPOKEN HISTORY": "HISTORIE ŘEČENÉHO",
   "STAIRS": "SCHODIŠTĚ",
   "STOPPED": "ZASTAVENO",
-  "SUMP PUMP": "ČERPADLO V JÍMCE",
   "SYSTEM": "SYSTEM",
   "SYSTEM LOG": "SYSTÉMOVÝ LOG",
   "Satellites": "Satelity",
@@ -878,7 +874,6 @@
   "Voice & Speakers": "Hlas a reproduktory",
   "WARN": "VAROVÁNÍ",
   "WARNING": "WARNING",
-  "WASHER": "PRAČKA",
   "WORKING": "FUNGUJE",
   "WRONG": "CHYBNÉ",
   "Waiting for Nova…": "Čekám na Novu…",
@@ -1177,5 +1172,6 @@
   "Unlocked": "Odemčeno",
   "Utility Room": "Technická místnost",
   "doors you leave the house by. Nova adds nothing until you pick one.": "dveře, kterými odcházíte z domu. Nova nic nepřidá, dokud nějaké nevyberete.",
-  "— pick a door, lock, cover or sensor —": "— vyberte dveře, zámek, roletu nebo senzor —"
+  "— pick a door, lock, cover or sensor —": "— vyberte dveře, zámek, roletu nebo senzor —",
+  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Zobrazit suterén a jeho dveře. Automaticky hledá oblast nebo podlaží s názvem Suterén nebo Sklep, nebo podlaží pod úrovní terénu. Mění jen to, co vidíte."
 }

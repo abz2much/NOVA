@@ -29,7 +29,7 @@ const NOVA3D = (function () {
   var CENTER = [(XG0 + XHE) / 2, RY, WALL * 0.5]; // rotate about model center
 
   // ---------- per-render home spec (type/specs); fields left unset = approved default ----------
-  // garageBays, dormersFront, dormersRear: counts · noGarage: true hides every garage part · chimney: 'right'|'left'|'none' · pitch: roof-rise scale
+  // garageBays, dormersFront, dormersRear: counts · noGarage: true hides every garage part · cellar: false hides the cellar door · chimney: 'right'|'left'|'none' · pitch: roof-rise scale
   var SPEC = {};
   function applySpec(s) {
     SPEC = s || {};
@@ -885,7 +885,8 @@ const NOVA3D = (function () {
       });
     }
     // auto bulkhead only when nothing is placed on the 1st floor or basement
-    if (!placed.length && !placedB.length && plan['bsmt'] && plan['bsmt'].length) {
+    // ... and only in a home with a cellar door (SPEC.cellar false hides it, 8.27.0)
+    if (SPEC.cellar !== false && !placed.length && !placedB.length && plan['bsmt'] && plan['bsmt'].length) {
       bulkheadDoor(L, GL, 'back', (minx + maxx) / 2, maxy, 6, false);
     }
 
@@ -1007,7 +1008,7 @@ const NOVA3D = (function () {
     winY(L, GL, D, XGH + 3, XGH + 9, 3, 7, stOf('kitchen'), true, 0.06);
     winY(L, GL, D, XGH + 22, XGH + 28, 3, 7, stOf('guest room'), true, 0.06);
     doorY(L, GL, D, 25.2, 28.2, 0, 6.8, 0.06, 'right', dOf('garage_rear'));            // garage rear man-door (~3ft W of junction)
-    bulkhead(L, GL, 33.5, 38.5, dOf('cellar'));                                        // cellar door under the kitchen window
+    if (SPEC.cellar !== false) bulkhead(L, GL, 33.5, 38.5, dOf('cellar'));             // cellar door under the kitchen window
 
     return { faces: L, glow: GL, labels: LBL };
   }
@@ -1092,7 +1093,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v8.26.0
+ * v8.27.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1169,7 +1170,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.26.0 ",
+      console.log("%c Nova Panel %c v8.27.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -4261,6 +4262,7 @@ ${this._htmlDashboardBody()}`;
     spec.dormersRear = rEx != null ? rEx : sd.dormersRear;
     if (num(c.garage_bays) != null) spec.garageBays = num(c.garage_bays);
     if (!this._hasGarage()) { spec.garageBays = 0; spec.noGarage = true; }
+    spec.cellar = this._hasFeature("cellar_door");
     if (c.chimney_side) spec.chimney = c.chimney_side;
     return spec;
   }
@@ -4317,6 +4319,8 @@ ${this._htmlDashboardBody()}`;
   _house3dElements() { return this._elementsToFeet(this._getFloorElements()); }
   // Display only (8.26.0): hides garage words and parts, never a safety check.
   _hasGarage() { return !!(this._data()?.config?.has_garage); }
+  // basement, cellar_door, utility (8.27.0): home_doors.home_features(). Display only.
+  _hasFeature(name) { return !!(this._data()?.config?.home_features || {})[name]; }
   _house3dGarage() {
     if (!this._hasGarage()) return [];
     const cfg = this._data()?.config || {};
@@ -4358,10 +4362,16 @@ ${this._htmlDashboardBody()}`;
     if (!bays) garage.push(["garage", "Garage Door"]);
     return [["front", "Front Door"], ...garage, ["garage_rear", "Back / Rear Door"], ["kitchen_garage", "Kitchen ↔ Garage"], ["cellar", "Cellar / Bulkhead"], ["basement", "Basement"]];
   }
-  // Garage rows are hidden when there is no garage; their saved values stay.
+  // Garage rows are hidden when there is no garage, and the Cellar /
+  // Bulkhead and Basement rows when there is no basement (8.27.0). Their
+  // saved values stay.
   _visibleDoorSlots() {
-    if (this._hasGarage()) return this._doorSlots();
-    return this._doorSlots().filter(([slot]) => !/^garage(_[0-9]+)?$/.test(slot) && slot !== "kitchen_garage");
+    const garage = this._hasGarage(), basement = this._hasFeature("basement");
+    return this._doorSlots().filter(([slot]) => {
+      if (/^garage(_[0-9]+)?$/.test(slot) || slot === "kitchen_garage") return garage;
+      if (slot === "cellar" || slot === "basement") return basement;
+      return true;
+    });
   }
   _renderDoorMappingNew(d) {
     const map = (d.config && d.config.door_mapping) || {};
@@ -4646,7 +4656,7 @@ ${this._htmlDashboardBody()}`;
     if (!this._currentFloor) this._currentFloor = "all";
     const floors = [["all", "All"], ["1f", "1st Floor"]];
     if (String(cfg.home_stories ?? "1.5") !== "1") floors.push(["2f", "2nd Floor"]);
-    if (cfg.has_basement !== false) floors.push(["bsmt", "Basement"]);
+    if (this._hasFeature("basement")) floors.push(["bsmt", "Basement"]);
     return `
       <div class="res-tab-new">
         <div class="res-main-new">
@@ -4942,9 +4952,10 @@ ${this._htmlDashboardBody()}`;
       </div>
       <div class="cfg-row">
         <label>Basement</label>
-        <button class="toggle-btn ${(cfg.has_basement !== false) ? "on" : "off"}" data-cfg-key="has_basement" data-cfg-val="${(cfg.has_basement !== false) ? "false" : "true"}">
-          ${(cfg.has_basement !== false) ? "YES" : "NO"}
-        </button>
+        <select class="cfg-field" data-cfg-key="basement_mode">
+          ${this._optSelect([["auto", "Auto"], ["yes", "Yes"], ["no", "No"]], cfg.basement_mode || "auto")}
+        </select>
+        <span class="toggle-desc">Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.</span>
       </div>
       <div class="cfg-row">
         <label>Bedrooms</label>
@@ -8273,16 +8284,27 @@ ${this._htmlDashboardBody()}`;
   // Classic-only for now ("Edit advanced layout in Classic" below) — ported
   // separately later if it turns out to matter.
 
+  // The starting plan for a home with no saved plan. It shows only what the
+  // home has (8.26.0 garage, 8.27.0 the rest). A saved plan is never changed.
   _defaultFloorPlan() {
+    const cfg = this._data()?.config || {};
+    const feat = cfg.home_features || {};
     const plan = this._defaultFloorPlanBase();
-    if (this._data()?.config?.has_garage) return plan;
-    // No garage (8.26.0): the garage becomes a utility room, and a back door
-    // opens from the kitchen at the rear. A saved plan is never changed.
+    // The basement floor only in a home with a basement. (Its old device
+    // labels, sump pump and washer among them, were guesses: gone in 8.27.0.)
+    if (!feat.basement) delete plan.bsmt;
+    // The upper floor only when Stories is more than 1, and stairs only
+    // where there is another floor to reach.
+    if (String(cfg.home_stories ?? "1.5") === "1") delete plan["2f"];
+    if (!plan["2f"] && !plan.bsmt) plan["1f"].rooms = plan["1f"].rooms.filter(r => r.type !== "stairs");
+    if (cfg.has_garage) return plan;
+    // No garage: a back door opens from the kitchen at the rear. The garage's
+    // space is a utility room only when Home Assistant has a Utility area.
     const f = plan["1f"];
     f.viewBox = "0 0 320 162";
-    f.rooms = f.rooms.map(r => r.name === "Garage"
-      ? { ...r, name: "Utility Room", y: r.y + 12 }
-      : { ...r, y: r.y + 12 });
+    f.rooms = f.rooms
+      .filter(r => r.name !== "Garage" || feat.utility)
+      .map(r => r.name === "Garage" ? { ...r, name: "Utility Room", y: r.y + 12 } : { ...r, y: r.y + 12 });
     f.rooms.push({ name: "Back Door", x: 125, y: 3, w: 45, h: 10, type: "door" });
     return plan;
   }
@@ -8317,10 +8339,6 @@ ${this._htmlDashboardBody()}`;
         rooms: [
           { name: "Basement", x: 50, y: 10, w: 220, h: 90, type: "room" },
           { name: "Stairs", x: 120, y: 20, w: 28, h: 35, type: "stairs" },
-        ],
-        labels: [
-          { text: "SUMP PUMP", x: 95, y: 55 }, { text: "DEHUMIDIFIER", x: 95, y: 75 },
-          { text: "HOME ENERGY", x: 235, y: 55 }, { text: "WASHER", x: 235, y: 75 },
         ],
       },
     };

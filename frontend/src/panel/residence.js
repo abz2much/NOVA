@@ -53,6 +53,7 @@
     spec.dormersRear = rEx != null ? rEx : sd.dormersRear;
     if (num(c.garage_bays) != null) spec.garageBays = num(c.garage_bays);
     if (!this._hasGarage()) { spec.garageBays = 0; spec.noGarage = true; }
+    spec.cellar = this._hasFeature("cellar_door");
     if (c.chimney_side) spec.chimney = c.chimney_side;
     return spec;
   }
@@ -109,6 +110,8 @@
   _house3dElements() { return this._elementsToFeet(this._getFloorElements()); }
   // Display only (8.26.0): hides garage words and parts, never a safety check.
   _hasGarage() { return !!(this._data()?.config?.has_garage); }
+  // basement, cellar_door, utility (8.27.0): home_doors.home_features(). Display only.
+  _hasFeature(name) { return !!(this._data()?.config?.home_features || {})[name]; }
   _house3dGarage() {
     if (!this._hasGarage()) return [];
     const cfg = this._data()?.config || {};
@@ -150,10 +153,16 @@
     if (!bays) garage.push(["garage", "Garage Door"]);
     return [["front", "Front Door"], ...garage, ["garage_rear", "Back / Rear Door"], ["kitchen_garage", "Kitchen ↔ Garage"], ["cellar", "Cellar / Bulkhead"], ["basement", "Basement"]];
   }
-  // Garage rows are hidden when there is no garage; their saved values stay.
+  // Garage rows are hidden when there is no garage, and the Cellar /
+  // Bulkhead and Basement rows when there is no basement (8.27.0). Their
+  // saved values stay.
   _visibleDoorSlots() {
-    if (this._hasGarage()) return this._doorSlots();
-    return this._doorSlots().filter(([slot]) => !/^garage(_[0-9]+)?$/.test(slot) && slot !== "kitchen_garage");
+    const garage = this._hasGarage(), basement = this._hasFeature("basement");
+    return this._doorSlots().filter(([slot]) => {
+      if (/^garage(_[0-9]+)?$/.test(slot) || slot === "kitchen_garage") return garage;
+      if (slot === "cellar" || slot === "basement") return basement;
+      return true;
+    });
   }
   _renderDoorMappingNew(d) {
     const map = (d.config && d.config.door_mapping) || {};
@@ -438,7 +447,7 @@
     if (!this._currentFloor) this._currentFloor = "all";
     const floors = [["all", "All"], ["1f", "1st Floor"]];
     if (String(cfg.home_stories ?? "1.5") !== "1") floors.push(["2f", "2nd Floor"]);
-    if (cfg.has_basement !== false) floors.push(["bsmt", "Basement"]);
+    if (this._hasFeature("basement")) floors.push(["bsmt", "Basement"]);
     return `
       <div class="res-tab-new">
         <div class="res-main-new">

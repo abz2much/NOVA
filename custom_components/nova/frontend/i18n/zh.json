@@ -240,7 +240,6 @@
   "Czech": "捷克语",
   "DECISIONS": "决策",
   "DEDUP": "DEDUP",
-  "DEHUMIDIFIER": "除湿机",
   "DELETE": "删除",
   "DET": "DET",
   "DIAGNOSE": "诊断",
@@ -383,7 +382,6 @@
   "HELPFUL": "有帮助",
   "HIDE CAMERAS ▴": "隐藏摄像头 ▴",
   "HOME": "在家",
-  "HOME ENERGY": "家庭能源",
   "HOMER — diagnostic sub-agent": "HOMER——诊断子代理",
   "HYBRID": "混合",
   "Habits Nova has confidently attributed to one person, from 30 days of sole-occupant activity — separate from household-wide facts above.": "Nova 根据 30 天独自在家的活动，确定归属某一个人的习惯——与上方的全家事实分开。",
@@ -523,7 +521,6 @@
   "Muted": "已静音",
   "NASA disasters": "NASA 灾害",
   "NEEDS ADJUSTMENT": "需要调整",
-  "NO": "否",
   "NO METER": "无电表",
   "NO SNAPSHOT": "无快照",
   "NONE": "无",
@@ -762,7 +759,6 @@
   "STAIRS": "楼梯",
   "STATS": "统计",
   "STOPPED": "已停止",
-  "SUMP PUMP": "排水泵",
   "SYSTEM": "SYSTEM",
   "SYSTEM DIAGNOSTICS": "系统诊断",
   "SYSTEM LOG": "系统日志",
@@ -895,7 +891,6 @@
   "Voice confirmation": "语音确认",
   "WARN": "警告",
   "WARNING": "WARNING",
-  "WASHER": "洗衣机",
   "WEATHER": "天气",
   "WELLBEING CONTEXT": "健康状况参考",
   "WORKING": "正常运行",
@@ -1172,5 +1167,6 @@
   "Unlocked": "未上锁",
   "Utility Room": "杂物间",
   "doors you leave the house by. Nova adds nothing until you pick one.": "您离家时经过的门。在您选择之前，Nova 不会添加任何门。",
-  "— pick a door, lock, cover or sensor —": "— 选择门、锁、遮盖物或传感器 —"
+  "— pick a door, lock, cover or sensor —": "— 选择门、锁、遮盖物或传感器 —",
+  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "显示地下室楼层及其门。自动会查找名为地下室或地窖的区域或楼层，或低于地面的楼层。这只改变您看到的内容。"
 }

@@ -391,7 +391,6 @@
   "Czech": "Tsjechisch",
   "DECISIONS": "BESLISSINGEN",
   "DEDUP": "DEDUP",
-  "DEHUMIDIFIER": "LUCHTONTVOCHTIGER",
   "DELETE": "VERWIJDEREN",
   "DET": "DET",
   "DIAGNOSE": "DIAGNOSE",
@@ -502,7 +501,6 @@
   "HELPFUL": "NUTTIG",
   "HIDE CAMERAS ▴": "CAMERA'S VERBERGEN ▴",
   "HOME": "THUIS",
-  "HOME ENERGY": "ENERGIE IN HUIS",
   "HOMER — diagnostic sub-agent": "HOMER — diagnose-subagent",
   "HYBRID": "HYBRIDE",
   "Habits Nova has confidently attributed to one person, from 30 days of sole-occupant activity — separate from household-wide facts above.": "Gewoonten die Nova met zekerheid aan één persoon toeschrijft, uit 30 dagen activiteit waarin die alleen thuis was — los van de huishoudfeiten hierboven.",
@@ -594,7 +592,6 @@
   "Muted": "Gedempt",
   "NASA disasters": "NASA-rampen",
   "NEEDS ADJUSTMENT": "MOET AANGEPAST",
-  "NO": "NEE",
   "NO SNAPSHOT": "GEEN SNAPSHOT",
   "NONE": "GEEN",
   "NOVA COMMAND CENTER": "NOVA COMMANDOCENTRUM",
@@ -779,7 +776,6 @@
   "SPOKEN HISTORY": "GESPROKEN GESCHIEDENIS",
   "STAIRS": "TRAP",
   "STOPPED": "GESTOPT",
-  "SUMP PUMP": "DOMPELPOMP",
   "SYSTEM": "SYSTEM",
   "SYSTEM LOG": "SYSTEEMLOG",
   "Satellites": "Satellieten",
@@ -878,7 +874,6 @@
   "Voice & Speakers": "Stem & luidsprekers",
   "WARN": "WAARSCHUWING",
   "WARNING": "WARNING",
-  "WASHER": "WASMACHINE",
   "WORKING": "WERKT",
   "WRONG": "FOUT",
   "Waiting for Nova…": "Wachten op Nova…",
@@ -1177,5 +1172,6 @@
   "Unlocked": "Niet op slot",
   "Utility Room": "Bijkeuken",
   "doors you leave the house by. Nova adds nothing until you pick one.": "deuren waardoor je het huis verlaat. Nova voegt niets toe tot je er een kiest.",
-  "— pick a door, lock, cover or sensor —": "— kies een deur, slot, afdekking of sensor —"
+  "— pick a door, lock, cover or sensor —": "— kies een deur, slot, afdekking of sensor —",
+  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "De kelder en de deuren ervan tonen. Automatisch zoekt naar een ruimte of verdieping met de naam Kelder, of een verdieping onder de grond. Dit verandert alleen wat je ziet."
 }

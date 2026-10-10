@@ -1,4 +1,7 @@
-"""Does the home have a garage, and which exit doors did the user pick (8.26.0).
+"""Which rooms the home has, and which exit doors the user picked.
+
+8.26.0: the garage and exit doors. 8.27.0: the basement, a cellar door and a
+utility room, by the same rules (see has_basement() and home_features()).
 
 Display only. Nothing here changes what Nova secures, checks or alerts on:
 lockdown, the night sweep, intrusion and the world model go by device class
@@ -182,3 +185,87 @@ def exit_door_candidates(hass, config: Optional[dict] = None, limit: int = 30) -
             out.append({"entity_id": st.entity_id, "name": name})
     out.sort(key=lambda r: (r["name"].lower(), r["entity_id"]))
     return out[:limit]
+
+
+# ── other rooms (8.27.0) ────────────────────────────────────────────────────
+# Same rules as the garage: a reliable signal, or the user's own choice. A
+# name on a device, the default floor plan and old defaults never count.
+# Display only, like the garage flag.
+
+BASEMENT_MODES = GARAGE_MODES
+_BASEMENT_WORD = re.compile(r"\b(basements?|cellars?)\b", re.IGNORECASE)
+_UTILITY_WORD = re.compile(r"\butility\b", re.IGNORECASE)
+
+
+def basement_mode(config: Optional[dict]) -> str:
+    """auto, yes or no. The Basement setting before 8.27.0 was a plain
+    yes/no (has_basement, on unless changed). A value the user saved there is
+    still their choice; one never saved is Auto."""
+    cfg = config or {}
+    mode = str(cfg.get("basement_mode") or "").lower()
+    if mode in BASEMENT_MODES:
+        return mode
+    legacy = cfg.get("has_basement")
+    if legacy is True:
+        return "yes"
+    if legacy is False:
+        return "no"
+    return "auto"
+
+
+def _floors(hass) -> list:
+    """(name, level) for each Home Assistant floor."""
+    try:
+        from homeassistant.helpers import floor_registry as fr
+        return [(str(getattr(f, "name", "") or ""), getattr(f, "level", None))
+                for f in fr.async_get(hass).async_list_floors()]
+    except Exception:
+        return []
+
+
+def _mapped(config: Optional[dict], slot: str) -> bool:
+    return bool(_json((config or {}).get("door_mapping"), {}).get(slot))
+
+
+def basement_signals(hass, config: Optional[dict] = None) -> list:
+    """The reliable basement signals found: an area or floor named basement
+    or cellar, a floor below ground level, or a mapped Basement or Cellar /
+    Bulkhead door slot."""
+    found = [f"area:{n}" for n in _area_names(hass) if _BASEMENT_WORD.search(n)]
+    for name, level in _floors(hass):
+        if _BASEMENT_WORD.search(name):
+            found.append(f"floor:{name}")
+        elif isinstance(level, (int, float)) and not isinstance(level, bool) and level < 0:
+            found.append(f"floor_level:{name}")
+    found += [f"mapped:{slot}" for slot in ("basement", "cellar") if _mapped(config, slot)]
+    return found
+
+
+def has_basement(hass, config: Optional[dict] = None) -> bool:
+    """Does this home have a basement? Yes and No override everything."""
+    mode = basement_mode(config)
+    if mode in ("yes", "no"):
+        return mode == "yes"
+    try:
+        return bool(basement_signals(hass, config))
+    except Exception:
+        return False
+
+
+def home_features(hass, config: Optional[dict] = None) -> dict:
+    """What the panel may show beyond the garage. Never raises.
+      basement     the Basement floor tab, its door rows, the default plan's
+                   basement floor
+      cellar_door  an outside cellar (bulkhead) door in the 3D house: only
+                   when the user mapped one
+      utility      a utility room in place of the garage in the default plan:
+                   only when Home Assistant has an area named utility"""
+    try:
+        utility = any(_UTILITY_WORD.search(n) for n in _area_names(hass))
+    except Exception:
+        utility = False
+    return {
+        "basement": has_basement(hass, config),
+        "cellar_door": _mapped(config, "cellar"),
+        "utility": utility,
+    }

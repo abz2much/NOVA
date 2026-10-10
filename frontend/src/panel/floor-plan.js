@@ -6,16 +6,27 @@
   // Classic-only for now ("Edit advanced layout in Classic" below) — ported
   // separately later if it turns out to matter.
 
+  // The starting plan for a home with no saved plan. It shows only what the
+  // home has (8.26.0 garage, 8.27.0 the rest). A saved plan is never changed.
   _defaultFloorPlan() {
+    const cfg = this._data()?.config || {};
+    const feat = cfg.home_features || {};
     const plan = this._defaultFloorPlanBase();
-    if (this._data()?.config?.has_garage) return plan;
-    // No garage (8.26.0): the garage becomes a utility room, and a back door
-    // opens from the kitchen at the rear. A saved plan is never changed.
+    // The basement floor only in a home with a basement. (Its old device
+    // labels, sump pump and washer among them, were guesses: gone in 8.27.0.)
+    if (!feat.basement) delete plan.bsmt;
+    // The upper floor only when Stories is more than 1, and stairs only
+    // where there is another floor to reach.
+    if (String(cfg.home_stories ?? "1.5") === "1") delete plan["2f"];
+    if (!plan["2f"] && !plan.bsmt) plan["1f"].rooms = plan["1f"].rooms.filter(r => r.type !== "stairs");
+    if (cfg.has_garage) return plan;
+    // No garage: a back door opens from the kitchen at the rear. The garage's
+    // space is a utility room only when Home Assistant has a Utility area.
     const f = plan["1f"];
     f.viewBox = "0 0 320 162";
-    f.rooms = f.rooms.map(r => r.name === "Garage"
-      ? { ...r, name: "Utility Room", y: r.y + 12 }
-      : { ...r, y: r.y + 12 });
+    f.rooms = f.rooms
+      .filter(r => r.name !== "Garage" || feat.utility)
+      .map(r => r.name === "Garage" ? { ...r, name: "Utility Room", y: r.y + 12 } : { ...r, y: r.y + 12 });
     f.rooms.push({ name: "Back Door", x: 125, y: 3, w: 45, h: 10, type: "door" });
     return plan;
   }
@@ -50,10 +61,6 @@
         rooms: [
           { name: "Basement", x: 50, y: 10, w: 220, h: 90, type: "room" },
           { name: "Stairs", x: 120, y: 20, w: 28, h: 35, type: "stairs" },
-        ],
-        labels: [
-          { text: "SUMP PUMP", x: 95, y: 55 }, { text: "DEHUMIDIFIER", x: 95, y: 75 },
-          { text: "HOME ENERGY", x: 235, y: 55 }, { text: "WASHER", x: 235, y: 75 },
         ],
       },
     };

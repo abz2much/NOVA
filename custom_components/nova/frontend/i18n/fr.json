@@ -391,7 +391,6 @@
   "Czech": "Tchèque",
   "DECISIONS": "DÉCISIONS",
   "DEDUP": "DEDUP",
-  "DEHUMIDIFIER": "DÉSHUMIDIFICATEUR",
   "DELETE": "SUPPRIMER",
   "DET": "DET",
   "DIAGNOSE": "DIAGNOSTIQUER",
@@ -502,7 +501,6 @@
   "HELPFUL": "UTILE",
   "HIDE CAMERAS ▴": "MASQUER LES CAMÉRAS ▴",
   "HOME": "DOMICILE",
-  "HOME ENERGY": "ÉNERGIE DE LA MAISON",
   "HOMER — diagnostic sub-agent": "HOMER — sous-agent de diagnostic",
   "HYBRID": "HYBRIDE",
   "Habits Nova has confidently attributed to one person, from 30 days of sole-occupant activity — separate from household-wide facts above.": "Habitudes que Nova attribue avec certitude à une personne, sur 30 jours d'activité où elle était seule — distinctes des faits du foyer ci-dessus.",
@@ -594,7 +592,6 @@
   "Muted": "En sourdine",
   "NASA disasters": "Catastrophes NASA",
   "NEEDS ADJUSTMENT": "À AJUSTER",
-  "NO": "NON",
   "NO SNAPSHOT": "PAS D'INSTANTANÉ",
   "NONE": "AUCUN",
   "NOVA COMMAND CENTER": "CENTRE DE COMMANDE NOVA",
@@ -779,7 +776,6 @@
   "SPOKEN HISTORY": "HISTORIQUE PARLÉ",
   "STAIRS": "ESCALIER",
   "STOPPED": "ARRÊTÉ",
-  "SUMP PUMP": "POMPE DE PUISARD",
   "SYSTEM": "SYSTEM",
   "SYSTEM LOG": "JOURNAL SYSTÈME",
   "Satellites": "Satellites",
@@ -878,7 +874,6 @@
   "Voice & Speakers": "Voix & haut-parleurs",
   "WARN": "AVERT.",
   "WARNING": "WARNING",
-  "WASHER": "LAVE-LINGE",
   "WORKING": "FONCTIONNE",
   "WRONG": "FAUX",
   "Waiting for Nova…": "En attente de Nova…",
@@ -1177,5 +1172,6 @@
   "Unlocked": "Déverrouillée",
   "Utility Room": "Buanderie",
   "doors you leave the house by. Nova adds nothing until you pick one.": "les portes par lesquelles vous quittez la maison. Nova n'ajoute rien tant que vous n'en choisissez pas une.",
-  "— pick a door, lock, cover or sensor —": "— choisir une porte, serrure, volet ou capteur —"
+  "— pick a door, lock, cover or sensor —": "— choisir une porte, serrure, volet ou capteur —",
+  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Afficher le sous-sol et ses portes. Automatique cherche une pièce ou un étage nommé Sous-sol ou Cave, ou un étage sous le niveau du sol. Cela ne change que ce que vous voyez."
 }

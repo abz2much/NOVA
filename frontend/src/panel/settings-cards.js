@@ -258,9 +258,10 @@
       </div>
       <div class="cfg-row">
         <label>Basement</label>
-        <button class="toggle-btn ${(cfg.has_basement !== false) ? "on" : "off"}" data-cfg-key="has_basement" data-cfg-val="${(cfg.has_basement !== false) ? "false" : "true"}">
-          ${(cfg.has_basement !== false) ? "YES" : "NO"}
-        </button>
+        <select class="cfg-field" data-cfg-key="basement_mode">
+          ${this._optSelect([["auto", "Auto"], ["yes", "Yes"], ["no", "No"]], cfg.basement_mode || "auto")}
+        </select>
+        <span class="toggle-desc">Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.</span>
       </div>
       <div class="cfg-row">
         <label>Bedrooms</label>
