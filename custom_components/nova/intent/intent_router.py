@@ -19,6 +19,12 @@ import re
 
 _LOGGER = logging.getLogger(__name__)
 
+class _Rows(dict):
+    """{entity_id: action log row} for one voice reply, carrying the action
+    log request it belongs to (8.25.0)."""
+    request_id: str | None = None
+
+
 # Fired when an actionable announcement opens a confirmation window; the voice
 # satellite layer listens for this to start a short, wake-word-free capture.
 EVENT_FEEDBACK_WINDOW = "nova_feedback_window"
@@ -185,16 +191,18 @@ class LocalIntentRouter:
                   "reason_code": "confirmation_unavailable_in_voice_reply"}
                  for e in held]
         if not rows:
-            return {}
+            return _Rows()
         try:
             from .. import action_log
             request_id = action_log.new_request_id()
-            return await self.hass.async_add_executor_job(
+            out = _Rows(await self.hass.async_add_executor_job(
                 lambda: action_log.start_many(
                     request_id, f"voice_reply:{intent}", "voice", rows,
-                    requested_by_user_id=user_id or None)) or {}
+                    requested_by_user_id=user_id or None)) or {})
+            out.request_id = request_id
+            return out
         except Exception:  # noqa: BLE001
-            return {}
+            return _Rows()
 
     async def _log_set(self, row_ids: dict, entity_ids: list[str], result: str,
                        reason_code: str | None = None) -> None:
@@ -247,7 +255,8 @@ class LocalIntentRouter:
                 assessment="asked by voice to secure the room",
                 decision="checked, secured" if not not_secured
                 else "checked, some not secured",
-                reason="the voice reply's check after acting")
+                reason="the voice reply's check after acting",
+                request_ids=[getattr(row_ids, "request_id", None)])
             if not_secured:
                 from .. import core_state
                 from ..core_bridge import _emit_action

@@ -274,6 +274,27 @@ MESSAGES: dict[str, dict[str, str]] = {
     },
     # Failure wording (8.7.16). {names} is a comma joined device list. The
     # clause is impersonal so it reads the same whatever the device is.
+    # The night sweep left something alone until morning because it was
+    # opened again after the sweep secured it (8.25.0).
+    "lockdown_left_alone": {
+        "en": "{names} was opened again after I secured it, so I'll leave it until morning",
+        "fr": "{names} a été rouvert après que je l'ai sécurisé, je n'y touche plus jusqu'au matin",
+        "de": "{names} wurde wieder geöffnet, nachdem ich es gesichert hatte, ich lasse es bis zum Morgen",
+        "es": "{names} se volvió a abrir después de asegurarlo, así que lo dejo hasta mañana",
+        "it": "{names} è stato riaperto dopo che l'avevo messo in sicurezza, lo lascio stare fino al mattino",
+        "nl": "{names} is weer geopend nadat ik het had beveiligd, dus ik laat het tot de ochtend",
+        "pt": "{names} foi aberto de novo depois de eu o proteger, por isso deixo-o até de manhã",
+    },
+    # Lockdown could not read these doors or windows (8.25.0).
+    "lockdown_unreadable": {
+        "en": "I can't tell if {names} is closed",
+        "fr": "je ne sais pas si {names} est fermé",
+        "de": "ich kann nicht erkennen, ob {names} geschlossen ist",
+        "es": "no sé si {names} está cerrado",
+        "it": "non riesco a capire se {names} è chiuso",
+        "nl": "ik kan niet zien of {names} dicht is",
+        "pt": "não consigo saber se {names} está fechado",
+    },
     "lockdown_secure_failed": {
         "en": "I couldn't secure {names} — please check by hand",
         "fr": "je n'ai pas pu sécuriser {names} — à vérifier manuellement",

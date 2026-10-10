@@ -28,9 +28,14 @@ needs, what it does by itself, and what it never does without you.
   armed lockdown closes only doors, garages, windows and gates. About 25
   seconds later the night sweep checks each one, and only says the house is
   secured when every lock reads locked and every cover reads closed. Anything
-  that did not take is named and sent to your phones. Doors and windows
+  that did not take is named and sent to your phones once, then left alone
+  until morning. If you unlock or open something the sweep secured, it
+  leaves it alone until morning too, and tells you once. It never sends more
+  than 12 commands in an hour. Doors and windows
   it cannot close are named so you can close them by hand; a fridge or
-  cabinet door, a sensor on your exclude list, or a shed door is not.
+  cabinet door, a sensor on your exclude list, or a shed door is not. A door
+  or window whose sensor cannot be read is named too ("I can't tell if it's
+  closed"), and lockdown never says the home is fully secured while one is.
 - **Packages.** A package taken from the door while nobody is home is sent to
   your phones, as well as spoken.
 
@@ -164,7 +169,9 @@ cannot see what they do.
 
 Every safety decision is written to **Logs → Decisions** in the same form:
 what Nova saw (who was home, the alarm, asleep, quiet hours), what it
-concluded, what it did (spoken, sent to phones, or both) and why. That covers
+concluded, what it did (spoken, sent to phones, or both) and why. Where a
+decision sent commands (lockdown, the night sweep, the voice "secure" reply),
+it lists their request ids, which match the entries in **Logs → Actions**. That covers
 intrusion, lockdown, the night sweep, hazards, packages and doors left open.
 
 ## What it learns from you

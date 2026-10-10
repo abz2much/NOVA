@@ -245,11 +245,15 @@ async def test_nighttime_sweep_repeats_no_more_often_than_every_300_seconds(
     fake_hass.states.set("lock.front", "unlocked", friendly_name="Front")
     first = await _tick(safety, fake_hass, sleeping=True)
     assert _types(first) == ["lockdown"]
+    # 8.25.0: a lock the sweep could not secure is left alone until morning,
+    # so the later sweep needs a different unlocked lock to act on.
+    fake_hass.states.set("lock.back", "unlocked", friendly_name="Back")
     clock["now"] += 300                                             # exactly the interval: not yet
     assert _types(await _tick(safety, fake_hass, sleeping=True)) == []
     clock["now"] += 1
     assert _types(await _tick(safety, fake_hass, sleeping=True)) == ["lockdown"]
-    assert len(service_calls(fake_hass, "lock", "lock")) == 2
+    assert [c[2]["entity_id"] for c in service_calls(fake_hass, "lock", "lock")] == [
+        "lock.front", "lock.back"]
 
 
 # ── _check_freeze ───────────────────────────────────────────────────────────

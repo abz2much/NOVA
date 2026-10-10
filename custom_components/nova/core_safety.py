@@ -38,6 +38,10 @@ from .core_common import (
 
 _LOGGER = logging.getLogger(f"{__package__}.cognitive_core")
 
+# The night sweep's backstop (8.25.0): at most this many lock and close
+# commands in any hour, whatever else happens.
+SWEEP_MAX_COMMANDS_PER_HOUR = 12
+
 
 # ── Safety Manager ──────────────────────────────────────────────────────────
 
@@ -56,6 +60,10 @@ class SafetyManager:
         # Seconds the night sweep waits before rereading what it locked and
         # closed (8.24.0). Slow covers report late.
         self.sweep_verify_delay = LOCKDOWN_SECURE_VERIFY_DELAY
+        # The night sweep's memory of tonight (8.25.0): what it secured, what
+        # it is leaving alone until morning and why, and when it sent
+        # commands. A new night (noon to noon) starts it afresh.
+        self._sweep_night: dict = {}
         # Saving to situations.py (8.24.0) is on only after
         # restore_situations(), which the running core calls.
         self._persist = False
@@ -1065,10 +1073,28 @@ class SafetyManager:
         except Exception as exc:
             _LOGGER.warning("Safety tick: nighttime lockdown failed: %s", exc)
 
+    def _sweep_memory(self, now: float) -> dict:
+        """Tonight's sweep memory, started afresh at the first sweep of a new
+        night. A night runs noon to noon, so one night's sleep is one night."""
+        import datetime as _dt
+        night = _dt.datetime.fromtimestamp(now - 12 * 3600).date().toordinal()
+        if self._sweep_night.get("night") != night:
+            self._sweep_night = {"night": night, "secured": set(),
+                                 "left_alone": {}, "commands": []}
+        return self._sweep_night
+
     async def _nighttime_lockdown(self, automatic_generation: int) -> list[dict]:
-        """Check and secure all locks and doors during sleep."""
+        """Check and secure all locks and doors during sleep.
+
+        Nova does not fight a person at the door (8.7.20), and since 8.25.0
+        the sweep follows that rule too: a device the sweep could not secure,
+        or one opened again after it secured it, is left alone until morning
+        and named once. An hourly cap on commands is the backstop."""
         actions = []
         honorific = _m_common._live_honorific(self.hass)  # Phase C: presence-aware
+        now = time.time()
+        memory = self._sweep_memory(now)
+        left_alone: dict = memory["left_alone"]
 
         # Action Audit Log (top-level boundary: this sweep decides which
         # entities need securing — it owns one request_id for every target
@@ -1083,6 +1109,35 @@ class SafetyManager:
         lock_targets = unlocked_locks(self.hass, _lockdown_exempt_locks())
         cover_targets = [st for st in self.hass.states.async_all("cover")
                          if st.state == "open"]
+
+        # Tonight's memory (8.25.0). Something already left alone gets no
+        # command and no second alert. Something the sweep secured earlier
+        # tonight that is open or unlocked again was opened on purpose, so it
+        # is left alone too, and named once.
+        reopened: list = []
+        def _keep(st) -> bool:
+            eid = st.entity_id
+            if eid in left_alone:
+                return False
+            if eid in memory["secured"]:
+                left_alone[eid] = "opened again after the sweep secured it"
+                reopened.append(st.attributes.get("friendly_name", eid))
+                return False
+            return True
+        lock_targets = [st for st in lock_targets if _keep(st)]
+        cover_targets = [st for st in cover_targets if _keep(st)]
+
+        # The hourly backstop: never more than SWEEP_MAX_COMMANDS_PER_HOUR
+        # commands in any hour. What is over the cap waits for a later sweep.
+        memory["commands"] = [t for t in memory["commands"] if now - t < 3600]
+        room = max(0, SWEEP_MAX_COMMANDS_PER_HOUR - len(memory["commands"]))
+        if len(lock_targets) + len(cover_targets) > room:
+            _LOGGER.warning("Cognitive lockdown: hourly command cap reached; "
+                            "%d device(s) wait for a later sweep",
+                            len(lock_targets) + len(cover_targets) - room)
+            lock_targets = lock_targets[:room]
+            cover_targets = cover_targets[:max(0, room - len(lock_targets))]
+        memory["commands"].extend([now] * (len(lock_targets) + len(cover_targets)))
         candidates: list[tuple[str, str, str]] = (  # (entity_id, domain, service)
             [(st.entity_id, "lock", "lock") for st in lock_targets]
             + [(st.entity_id, "cover", "close_cover") for st in cover_targets])
@@ -1097,6 +1152,7 @@ class SafetyManager:
         # Check locks
         unlocked = []
         failed = []   # friendly names of anything the sweep could not secure
+        failed_eids: list = []   # and their entity ids, to leave alone until morning
         sent: list = []   # (entity_id, name, domain, row_id) of every command sent
         for state in lock_targets:
             if not self._automatic_operation_current(automatic_generation):
@@ -1119,6 +1175,7 @@ class SafetyManager:
                 except Exception as exc:
                     _LOGGER.warning("Cognitive lockdown: failed to lock %s: %s", eid, exc)
                     failed.append(fname)
+                    failed_eids.append(eid)
                     await self.hass.async_add_executor_job(
                         lambda rid=row_id: action_log.set_execution(
                             rid, "failed", reason_code="service_call_failed")
@@ -1146,6 +1203,7 @@ class SafetyManager:
                 except Exception as exc:
                     _LOGGER.warning("Cognitive lockdown: failed to close %s: %s", eid, exc)
                     failed.append(fname)
+                    failed_eids.append(eid)
                     await self.hass.async_add_executor_job(
                         lambda rid=row_id: action_log.set_execution(
                             rid, "failed", reason_code="service_call_failed")
@@ -1170,13 +1228,21 @@ class SafetyManager:
                     self.hass, eid, "locked" if dom == "lock" else "closed")
                 (unlocked if dom == "lock" else open_covers).append(fname) if ok \
                     else not_secured.append(fname)
+                if ok:
+                    memory["secured"].add(eid)
+                else:
+                    failed_eids.append(eid)
                 if row_id is not None:
                     await self.hass.async_add_executor_job(
                         lambda rid=row_id, good=ok: action_log.set_execution(
                             rid, "verified" if good else "unverified",
                             reason_code=None if good else "not_secure_after_check"))
             failed = not_secured + failed
-        if candidates:
+        # One try a night: anything that did not take is left alone until
+        # morning, so it is never commanded or named again tonight (8.25.0).
+        for eid in failed_eids:
+            left_alone.setdefault(eid, "did not secure")
+        if candidates or reopened:
             # The sweep's decision, in the shared safety format (8.23.0),
             # written after the check so it carries what was confirmed.
             from . import alert_path
@@ -1186,12 +1252,14 @@ class SafetyManager:
                                          house=self._household()),
                 facts={"locked": unlocked, "closed": open_covers,
                        "not_secured_after_check": not_secured,
-                       "failed": [f for f in failed if f not in not_secured]},
+                       "failed": [f for f in failed if f not in not_secured],
+                       "left_alone_reopened": reopened},
+                request_ids=[request_id] if candidates else None,
                 assessment="household asleep with locks unlocked or covers open",
                 decision="lock and close, checked" + (
                     ", some not secured" if failed else ""),
                 reason="automatic lockdown at night")
-        if unlocked or open_covers or failed:
+        if unlocked or open_covers or failed or reopened:
             i18n = _notify_i18n()
             lang = _m_common._hass_lang(self.hass)
             parts = []
@@ -1201,16 +1269,23 @@ class SafetyManager:
             if open_covers:
                 parts.append(i18n.message("lockdown_closed", lang,
                                           names=i18n.join_names(open_covers, lang)))
-            if not failed:
+            if not failed and not reopened:
                 message = i18n.message(
                     "lockdown_nighttime", lang,
                     honorific=honorific.title(),
                     body=i18n.join_names(parts, lang),
                 )
             else:
-                # "The house is secured." is only said when nothing failed.
-                problem = i18n.message("lockdown_secure_failed", lang,
-                                       names=i18n.join_names(failed, lang))
+                # "The house is secured." is only said when nothing failed and
+                # nothing was left alone.
+                problems = []
+                if failed:
+                    problems.append(i18n.message("lockdown_secure_failed", lang,
+                                                 names=i18n.join_names(failed, lang)))
+                if reopened:
+                    problems.append(i18n.message("lockdown_left_alone", lang,
+                                                 names=i18n.join_names(reopened, lang)))
+                problem = "; ".join(problems)
                 if parts:
                     message = i18n.message(
                         "lockdown_nighttime_partial", lang,
@@ -1225,7 +1300,7 @@ class SafetyManager:
                 # A failure to secure (the command failed, or the device did
                 # not read secured on the check) is high. The sweep runs while
                 # the house is asleep, so it goes to the phones, not spoken.
-                "urgency": "high" if failed else "low",
+                "urgency": "high" if (failed or reopened) else "low",
                 "message": message,
                 "auto_act": True,
             })

@@ -545,7 +545,7 @@ class NovaSentinel:
             sit=sit, plan=plan, message=text,
             facts={"rule": rule.get("id"), "minutes": minutes,
                    "spoken": bool(out.get("spoke"))},
-            assessment="left open past its limit")
+            assessment="left open past its limit", request_ids=[request_id])
 
     async def _groq_line(
         self, entity_id: str, friendly_name: str, rule: dict, minutes: int
