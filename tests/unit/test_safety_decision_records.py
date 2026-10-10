@@ -200,10 +200,12 @@ async def test_a_medium_alert_with_someone_home_is_unchanged(core, fake_hass):
     assert core["spoken"] == [("Porch light is on.", [SPEAKER])] and core["pushed"] == []
 
 
-async def test_a_medium_alert_with_presence_unknown_is_unchanged(core, fake_hass):
+async def test_a_medium_alert_with_presence_unknown_is_pushed(core, fake_hass):
+    # 8.23.1: unknown presence goes to the phones too, like everyone away.
     _people(fake_hass, "unknown")
-    await _emit(core, fake_hass, "medium", type="anticipation", message="Porch light is on.")
-    assert core["spoken"] == [] and core["pushed"] == []
+    msg = "Front Door is unlocked while nobody appears to be home."
+    await _emit(core, fake_hass, "medium", type="anticipation", message=msg)
+    assert core["spoken"] == [] and core["pushed"] == [("anticipation", msg)]
 
 
 async def test_the_away_push_carries_the_rating_buttons(core, fake_hass, load, monkeypatch):
@@ -223,3 +225,53 @@ async def test_the_away_push_carries_the_rating_buttons(core, fake_hass, load, m
     _people(fake_hass, "away")
     await _emit(core, fake_hass, "medium", type="anticipation", decision_id=7)
     assert seen == [{"rate": 7}] and prompts == []
+
+
+# ── 8.23.1: unknown presence reaches the phones too ─────────────────────────
+
+@pytest.mark.parametrize("people", [
+    {"person.abi": "unknown"},
+    {"person.abi": "unavailable"},
+    {"person.abi": "not_home", "person.rachel": "unknown"},
+    {},                                                   # no person entities at all
+])
+async def test_unknown_presence_medium_alert_is_pushed_not_spoken(core, fake_hass, people):
+    for eid, state in people.items():
+        fake_hass.states.set(eid, state)
+    await _emit(core, fake_hass, "medium", type="anticipation", message="Garage is open.")
+    assert core["spoken"] == [] and core["pushed"] == [("anticipation", "Garage is open.")]
+
+
+async def test_unknown_presence_push_carries_the_rating_buttons(core, fake_hass, load, monkeypatch):
+    aa = load("adaptive_awareness")
+    prompts, seen = [], []
+
+    async def _prompt(*a, **k):
+        prompts.append(a)
+    monkeypatch.setattr(aa, "async_send_rating_prompt", _prompt)
+    monkeypatch.setattr(aa, "rating_push_data", lambda decision_id: {"rate": decision_id})
+
+    async def _push(hass, config, message, action_type, snap=None, *, request_id=None,
+                    extra_data=None):
+        seen.append(extra_data)
+    monkeypatch.setattr(core["cc"], "_push_notification", _push)
+    _people(fake_hass, "unknown")
+    await _emit(core, fake_hass, "medium", type="anticipation", decision_id=9)
+    assert seen == [{"rate": 9}] and prompts == []
+
+
+async def test_unknown_presence_with_live_motion_is_still_spoken(core, fake_hass):
+    # Spoken behaviour is unchanged: live motion still makes the speakers
+    # route as someone home, so it is spoken and not pushed, as before.
+    _people(fake_hass, "unknown")
+    fake_hass.states.set("binary_sensor.hall_motion", "on", device_class="motion")
+    await _emit(core, fake_hass, "medium", type="anticipation", message="Garage is open.")
+    assert core["spoken"] == [("Garage is open.", [SPEAKER])] and core["pushed"] == []
+
+
+async def test_unknown_presence_high_and_critical_are_unchanged(core, fake_hass):
+    _people(fake_hass, "unknown")
+    await _emit(core, fake_hass, "high", message="High.")
+    await _emit(core, fake_hass, "critical", message="Critical.")
+    assert core["spoken"] == [("Critical.", [SPEAKER])]
+    assert [m for _, m in core["pushed"]] == ["High.", "Critical."]

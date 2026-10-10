@@ -65,9 +65,10 @@ SAID = [("Test alert.", [SPEAKER])]
     ("high", "away", [], ["test_alert"]),
     ("high", "unknown", [], ["test_alert"]),
     ("medium", "home", SAID, []),
-    # 8.23.0: medium while everyone is away goes to the phones (it reached no one).
+    # Medium while nobody is known to be home goes to the phones (it reached
+    # no one): everyone away since 8.23.0, presence unknown since 8.23.1.
     ("medium", "away", [], ["test_alert"]),
-    ("medium", "unknown", [], []),
+    ("medium", "unknown", [], ["test_alert"]),
 ])
 async def test_core_action(core, fake_hass, urgency, residents, spoken, pushed):
     _people(fake_hass, residents)
