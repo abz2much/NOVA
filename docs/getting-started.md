@@ -80,8 +80,6 @@ A few advanced settings have no control in either place and are only set in
 - **Command Center.** The animated core, your areas with live sensors and a
   light toggle, Cognitive Core, Goals, Activity, Quick Actions, Operational
   Mode, a Muted card, and camera snapshots on request.
-- **Residence.** A 3D view of the house built from your floor plan, with door
-  mapping and live room presence.
 - **Intrusion.** The intrusion status and the Intrusion Log.
 - **Faces.** The faces recently named and your list of residents. See
   [Cameras and faces](cameras-and-faces.md).
@@ -90,8 +88,10 @@ A few advanced settings have no control in either place and are only set in
   [Routines and suggestions](routines-and-suggestions.md).
 - **Settings.** The setting cards.
 - **Logs.** System Log, Decisions, Spoken History and Actions.
-- **Diagnostics.** Core services, Setup Doctor, Provider Activity, and HOMER,
-  a read only helper that looks into "why is this broken" questions.
+- **Diagnostics.** Core services, Setup Doctor, Provider Activity, HOMER (a
+  read only helper that looks into "why is this broken" questions), and
+  Presence sensors, the live presence, motion and mmWave sensors in each
+  room.
 - **Memory.** What Nova Knows, facts Pending Confirmation, Relations and
   Person Routines.
 - **Energy.** See [Energy](energy.md).
@@ -103,13 +103,13 @@ with icons for what each room has, temperature and humidity trends, and a
 light switch. A first run checklist shows the main setup steps, and the
 Lockdown control asks before it acts.
 
-The Residence tab's 3D house can be rotated and zoomed. It has a home style
-choice, floor tabs, view presets, room lighting from presence and mmWave
-sensors, and door mapping. You can also pick your own exit doors. Garage,
-basement and other room parts only appear when your home has them.
+**Settings → Home & Extras → Home layout** holds the number of stories,
+whether you have a garage and a basement, which entity is each door, and the
+exit doors you leave the house by. Garage and basement rows only appear when
+your home has them.
 
-The house is built from the floor plan you draw in **Settings → Home &
-Extras → Floor Plan Editor**: rooms, outdoor zones, the property line,
+You draw the house in **Settings → Home & Extras → Floor Plan Editor**:
+rooms, outdoor zones, the property line,
 windows, doors and dormers, camera positions, and a background image whose
 opacity you can change. You can export the plan as JSON to back it up or move
 it to another install, and import it again. The editor can also estimate how

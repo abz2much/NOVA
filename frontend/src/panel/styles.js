@@ -374,13 +374,6 @@
       .op-row-new input[type="range"],.cam-row-new input[type="range"]{flex:0 0 auto;width:70px}
       .op-row-new input[type="number"],.cam-row-new input[type="number"]{flex:0 0 auto;width:44px}
       .fpn-inline-lbl{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--ink-dim)}
-      .res-tab-new{display:grid;grid-template-columns:1fr 260px;gap:16px}
-      .res-scene-new{min-height:360px;background:var(--surface-2);border:1px solid var(--line-soft);border-radius:10px;
         margin-bottom:10px;cursor:grab;touch-action:none;display:flex;align-items:center;justify-content:center;overflow:hidden}
-      .res-scene-new.dragging{cursor:grabbing}
-      .res-scene-new svg{max-width:100%;height:auto}
-      .res-stats-new{margin-top:6px}
-      .res-side-new{display:flex;flex-direction:column;gap:6px}
-      @media (max-width:720px){.res-tab-new{grid-template-columns:1fr}}
     `;
   }

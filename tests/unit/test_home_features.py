@@ -1,8 +1,8 @@
 """Rooms only where the home has them (8.27.0).
 
-home_doors.home_features() tells the panel whether to show the basement, an
-outside cellar door and a utility room. Each is shown only on a reliable
-signal or the user's own choice, never on a name on a device or a default.
+home_doors.home_features() tells the panel whether to show the basement and
+a utility room. Each is shown only on a reliable signal or the user's own
+choice, never on a name on a device or a default.
 Display only, like the garage flag. All state is fake.
 """
 import pathlib
@@ -51,17 +51,17 @@ def test_a_plain_home_has_none_of_them(hd, fake_hass, areas, floors):
     floors += [("Ground floor", 0), ("First floor", 1)]
     fake_hass.states.set("sensor.basement_temperature", "12")      # a name only
     fake_hass.states.set("binary_sensor.cellar_door", "off", device_class="door")
-    assert _f(hd, fake_hass) == {"basement": False, "cellar_door": False, "utility": False}
+    assert _f(hd, fake_hass) == {"basement": False, "utility": False}
 
 
 def test_old_defaults_never_count(hd, fake_hass):
     cfg = {"floor_plan_rooms": {"bsmt": {"rooms": [{"name": "Basement"}]}},
            "door_mapping": {"basement": "", "cellar": ""}}
-    assert _f(hd, fake_hass, cfg) == {"basement": False, "cellar_door": False, "utility": False}
+    assert _f(hd, fake_hass, cfg) == {"basement": False, "utility": False}
 
 
 def test_no_registries_at_all_is_none(hd, fake_hass):
-    assert _f(hd, fake_hass) == {"basement": False, "cellar_door": False, "utility": False}
+    assert _f(hd, fake_hass) == {"basement": False, "utility": False}
 
 
 # ── basement signals ────────────────────────────────────────────────────────
@@ -127,10 +127,11 @@ def test_a_failed_read_is_no_basement(hd, fake_hass, monkeypatch):
 
 # ── cellar door and utility room ────────────────────────────────────────────
 
-def test_a_cellar_door_only_when_mapped(hd, fake_hass, areas):
-    areas.append("Cellar")                          # a basement, but no outside door known
-    assert _f(hd, fake_hass)["cellar_door"] is False
-    assert _f(hd, fake_hass, {"door_mapping": '{"cellar": "binary_sensor.bulkhead"}'})["cellar_door"] is True
+def test_a_mapped_cellar_slot_counts_as_a_basement(hd, fake_hass):
+    # The 3D cellar door is gone (8.30.0); a mapped Cellar / Bulkhead door
+    # still means the home has a basement.
+    assert _f(hd, fake_hass, {"door_mapping": '{"cellar": "binary_sensor.bulkhead"}'}) == {
+        "basement": True, "utility": False}
 
 
 @pytest.mark.parametrize("name,want", [("Utility", True), ("Utility room", True),

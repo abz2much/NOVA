@@ -12,8 +12,7 @@ nova/                             repo root (HACS integration repository)
 ├── .github/                         funding, issue templates, CI
 ├── scripts/bump_version.sh          one-command version bump
 ├── scripts/build_panel.py           builds the dashboard from frontend/src/
-├── frontend/src/                    dashboard source (NOVA3D engine + panel parts)
-├── frontend/dev/                    3D model viewer and renderer (not shipped)
+├── frontend/src/                    dashboard source (panel parts)
 └── custom_components/nova/        the integration (domain: nova)
     ├── manifest.json
     ├── __init__.py and modules

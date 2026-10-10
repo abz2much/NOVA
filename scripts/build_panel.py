@@ -3,7 +3,7 @@
 
 The panel ships as one plain script with no runtime dependencies; HACS
 installs it as is. Its source lives in frontend/src/ as ordered parts:
-the NOVA3D engine, then the NovaPanel class split by area. The build joins
+the NovaPanel class split by area. The build joins
 them in SOURCES order behind a generated banner. It is pure concatenation:
 no transform, no timestamps, no source maps and no local paths, so the
 same sources always give the same bytes.
@@ -11,8 +11,8 @@ same sources always give the same bytes.
   python scripts/build_panel.py           write nova-panel.js
   python scripts/build_panel.py --check   exit 1 if nova-panel.js is stale
 
-Panel parts other than nova3d.js are fragments of one class body and are
-not valid JavaScript on their own; `node --check` runs on the built file.
+Panel parts are fragments of one class body and are not valid JavaScript
+on their own; `node --check` runs on the built file.
 """
 from __future__ import annotations
 
@@ -24,7 +24,6 @@ SRC = ROOT / "frontend" / "src"
 OUT = ROOT / "custom_components" / "nova" / "frontend" / "nova-panel.js"
 
 SOURCES = (
-    "nova3d.js",                     # NOVA3D engine, also loaded by frontend/dev
     "panel/core.js",                 # class opening, lifecycle, HA contract, data
     "panel/render.js",               # tab shell and dashboard
     "panel/logs.js",                 # system log, spoken history, actions, decisions
@@ -34,7 +33,7 @@ SOURCES = (
     "panel/energy.js",               # Energy tab: energy management, solar, appliances
     "panel/suggestions.js",          # suggestions and automation probation
     "panel/settings-catalogue.js",   # settings groups and cards
-    "panel/residence.js",            # Residence 3D tab
+    "panel/home-layout.js",          # Settings: Home layout card (doors, exit doors)
     "panel/settings-cards.js",
     "panel/settings-models.js",      # AI model roles and credentials wiring
     "panel/settings-cards-more.js",

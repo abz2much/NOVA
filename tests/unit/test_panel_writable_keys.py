@@ -52,14 +52,23 @@ def test_every_panel_saved_key_is_writable():
     )
 
 
-def test_residence_keys_specifically_writable():
-    # The exact keys behind the Residence-tab save failure — pinned so this can't
-    # regress silently.
+def test_home_layout_keys_specifically_writable():
+    # The keys the Settings → Home layout card saves (the Residence tab's
+    # door and layout keys, which moved there in 8.30.0).
     allow = _allowlist()
-    for key in ("residence_style", "floor_plan_sqft", "home_stories",
-                "has_basement", "dormers_front", "dormers_rear",
-                "garage_bays", "chimney_side", "garage_mode", "exit_doors", "basement_mode"):
+    for key in ("home_stories", "has_basement", "garage_bays", "garage_mode",
+                "exit_doors", "basement_mode", "door_mapping"):
         assert key in allow, f"{key} missing from PANEL_WRITABLE_KEYS"
+
+
+def test_3d_house_keys_are_no_longer_writable_or_surfaced():
+    # Only the removed 3D house used these (8.30.0). Old saved values stay in
+    # config.json and are ignored.
+    allow = _allowlist()
+    surfaced = _panel_data_config_keys()
+    for key in ("residence_style", "floor_plan_sqft", "dormers_front", "dormers_rear",
+                "chimney_side", "home_bedrooms", "home_bathrooms"):
+        assert key not in allow and key not in surfaced, key
 
 
 def test_garage_flag_and_exit_doors_are_surfaced():

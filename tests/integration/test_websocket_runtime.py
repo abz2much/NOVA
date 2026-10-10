@@ -159,7 +159,7 @@ def _planted(hass, entry, damage):
         hass.data[DOMAIN] = {entry.entry_id: {"observer_running": True}}
     elif damage == "drifted":
         hass.data[DOMAIN] = {entry.entry_id: {"runtime_config": {
-            "chimney_side": "bridge", "floor_plan_elements": {"bridge": 1},
+            "floor_plan_units": "bridge", "floor_plan_elements": {"bridge": 1},
             "disabled_sentinel_rules": ["bridge"], "ollama_base_url": "http://bridge:11434",
             "custom_base_url": "http://bridge:8000/v1", MARK: "bridge"}}}
     try:
@@ -249,14 +249,14 @@ async def test_runtime_str_parsing(hass):
     entry = await _setup(hass)
     rc = entry.runtime_data.runtime_config
 
-    assert _get_runtime_str(hass, entry, "chimney_side", "right") == "right"
-    nova_config.set("chimney_side", "json")
-    assert _get_runtime_str(hass, entry, "chimney_side", "right") == "json"
+    assert _get_runtime_str(hass, entry, "floor_plan_units", "imperial") == "imperial"
+    nova_config.set("floor_plan_units", "json")
+    assert _get_runtime_str(hass, entry, "floor_plan_units", "imperial") == "json"
     for raw, expected in (("left", "left"), ("", ""), (0, "0"), (False, "False")):
-        rc["chimney_side"] = raw
-        assert _get_runtime_str(hass, entry, "chimney_side", "right") == expected
-    rc["chimney_side"] = None
-    assert _get_runtime_str(hass, entry, "chimney_side", "right") == "json"
+        rc["floor_plan_units"] = raw
+        assert _get_runtime_str(hass, entry, "floor_plan_units", "imperial") == expected
+    rc["floor_plan_units"] = None
+    assert _get_runtime_str(hass, entry, "floor_plan_units", "imperial") == "json"
 
 
 async def test_disabled_rules_read_runtime(hass):
@@ -280,11 +280,11 @@ async def test_readers_ignore_hass_data(hass, damage):
         _get_disabled_rules, _get_runtime_json, _get_runtime_str, _runtime_opt)
     entry = await _setup(hass)
     rc = entry.runtime_data.runtime_config
-    rc.update({"chimney_side": "left", "floor_plan_elements": {"live": 1},
+    rc.update({"floor_plan_units": "left", "floor_plan_elements": {"live": 1},
                "disabled_sentinel_rules": ["live"]})
     with _planted(hass, entry, damage):
-        assert _runtime_opt(hass, entry, "chimney_side", "right") == "left"
-        assert _get_runtime_str(hass, entry, "chimney_side", "right") == "left"
+        assert _runtime_opt(hass, entry, "floor_plan_units", "imperial") == "left"
+        assert _get_runtime_str(hass, entry, "floor_plan_units", "imperial") == "left"
         assert _get_runtime_json(hass, entry, "floor_plan_elements", {}) == {"live": 1}
         assert _get_disabled_rules(hass, entry) == ["live"]
 
@@ -301,14 +301,14 @@ async def test_panel_request_sees_in_place_runtime_changes(
         return resp["result"]["config"]
 
     first = await _config()
-    assert first["chimney_side"] == "right"
+    assert first["floor_plan_units"] == "imperial"
     assert first["disabled_sentinel_rules"] == []
 
-    rc.update({"chimney_side": "left", "disabled_sentinel_rules": ["co_alarm"],
+    rc.update({"floor_plan_units": "left", "disabled_sentinel_rules": ["co_alarm"],
                "floor_plan_elements": {"door": 1}})
     with _planted(hass, entry, "drifted"):
         second = await _config()
-    assert second["chimney_side"] == "left"
+    assert second["floor_plan_units"] == "left"
     assert second["disabled_sentinel_rules"] == ["co_alarm"]
     assert second["floor_plan_elements"] == {"door": 1}
     assert set(second) == set(first)             # shape unchanged
@@ -319,10 +319,10 @@ async def test_loaded_entry_without_runtime_fails_visibly(hass):
     from custom_components.nova.websocket import (
         _get_disabled_rules, _get_runtime_json, _get_runtime_str, _runtime_opt)
     entry = await _setup(hass)
-    entry.runtime_data.runtime_config["chimney_side"] = "left"
+    entry.runtime_data.runtime_config["floor_plan_units"] = "left"
     with _runtime_missing(entry):
-        for read in (lambda: _runtime_opt(hass, entry, "chimney_side", "right"),
-                     lambda: _get_runtime_str(hass, entry, "chimney_side", "right"),
+        for read in (lambda: _runtime_opt(hass, entry, "floor_plan_units", "imperial"),
+                     lambda: _get_runtime_str(hass, entry, "floor_plan_units", "imperial"),
                      lambda: _get_runtime_json(hass, entry, "floor_plan_rooms", {}),
                      lambda: _get_disabled_rules(hass, entry)):
             with pytest.raises(NovaRuntimeUnavailable):
@@ -337,8 +337,8 @@ async def test_unloaded_or_missing_entry_keeps_defaults(hass):
     await hass.async_block_till_done()
     assert entry.state is ConfigEntryState.NOT_LOADED
     for e in (entry, None):
-        assert _runtime_opt(hass, e, "chimney_side", "right") == "right"
-        assert _get_runtime_str(hass, e, "chimney_side", "right") == "right"
+        assert _runtime_opt(hass, e, "floor_plan_units", "imperial") == "imperial"
+        assert _get_runtime_str(hass, e, "floor_plan_units", "imperial") == "imperial"
         assert _get_runtime_json(hass, e, "floor_plan_rooms", {"d": 1}) == {"d": 1}
         assert _get_disabled_rules(hass, e) == []
 
@@ -437,22 +437,22 @@ async def test_update_config_writes_runtime_and_never_hass_data(
     entry = await _setup(hass)
     runtime = entry.runtime_data
     if damage is None:
-        resp = await _update(hass, hass_ws_client, "chimney_side", "left")
+        resp = await _update(hass, hass_ws_client, "floor_plan_units", "left")
         assert DOMAIN not in hass.data
     else:
         with _planted(hass, entry, damage):
             before = repr(hass.data.get(DOMAIN))
-            resp = await _update(hass, hass_ws_client, "chimney_side", "left")
+            resp = await _update(hass, hass_ws_client, "floor_plan_units", "left")
             # Planted data is neither read, repaired nor written.
             assert repr(hass.data.get(DOMAIN)) == before
     assert resp["success"], resp
-    assert resp["result"] == {"key": "chimney_side", "value": "left", "persisted": True}
-    assert runtime.runtime_config["chimney_side"] == "left"
-    assert nova_config.get("chimney_side") == "left"
+    assert resp["result"] == {"key": "floor_plan_units", "value": "left", "persisted": True}
+    assert runtime.runtime_config["floor_plan_units"] == "left"
+    assert nova_config.get("floor_plan_units") == "left"
 
 
 MISSING_RUNTIME_CASES = [
-    ("chimney_side", "left"),
+    ("floor_plan_units", "left"),
     ("custom_base_url", "http://new:8000/v1"),
     ("llm_base_url", "http://new:11434"),
     ("sleep_override", "asleep"),
@@ -500,10 +500,10 @@ async def test_update_config_persist_failure_is_session_only(
     entry = await _setup(hass)
     persist_spy.result = False
     persist_spy.raise_ = raise_
-    resp = await _update(hass, hass_ws_client, "chimney_side", "left")
+    resp = await _update(hass, hass_ws_client, "floor_plan_units", "left")
     assert resp["success"], resp
-    assert resp["result"] == {"key": "chimney_side", "value": "left", "persisted": False}
-    assert entry.runtime_data.runtime_config["chimney_side"] == "left"
+    assert resp["result"] == {"key": "floor_plan_units", "value": "left", "persisted": False}
+    assert entry.runtime_data.runtime_config["floor_plan_units"] == "left"
     assert "will revert on restart" in caplog.text
 
 
@@ -533,7 +533,7 @@ async def test_update_config_refuses_endpoint_keys_and_drops_no_cache(
 async def test_update_config_ordinary_key_drops_no_cache(hass, hass_ws_client, side_effects):
     await _setup(hass)
     side_effects.clear()
-    resp = await _update(hass, hass_ws_client, "chimney_side", "left")
+    resp = await _update(hass, hass_ws_client, "floor_plan_units", "left")
     assert resp["success"], resp
     assert [e for e in side_effects if e[0] == "invalidate"] == []
 

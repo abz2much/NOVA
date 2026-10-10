@@ -46,12 +46,12 @@ def test_panel_has_no_control_bytes_or_local_paths():
         assert leak not in text, leak
 
 
-def test_panel_defines_one_element_and_one_engine():
+def test_panel_defines_one_element_and_no_3d_engine():
     text = PANEL.read_text(encoding="utf-8")
     assert text.count('customElements.define("nova-panel", NovaPanel)') == 1
     assert text.count("class NovaPanel extends HTMLElement") == 1
-    assert text.count("const NOVA3D = (function () {") == 1
-    assert text.count("window.NOVA3D = NOVA3D") == 1
+    # The 3D house and its NOVA3D engine were removed (8.30.0).
+    assert "const NOVA3D" not in text and "window.NOVA3D" not in text
 
 
 def test_no_panel_method_is_defined_twice():
