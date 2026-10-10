@@ -67,8 +67,9 @@ def test_setting_is_panel_writable_and_surfaced():
     assert '"announce_notify_only": bool(_runtime_opt(hass, entry, "announce_notify_only", False))' in ws
 
 
-def test_setting_is_in_the_readme_table():
-    assert "`announce_notify_only`" in (ROOT / "README.md").read_text()
+def test_setting_is_in_the_settings_reference():
+    # The settings table moved from the README to docs/settings-reference.md.
+    assert "`announce_notify_only`" in (ROOT / "docs" / "settings-reference.md").read_text()
 
 
 # ── routing: every urgency, setting on and off ──────────────────────────────

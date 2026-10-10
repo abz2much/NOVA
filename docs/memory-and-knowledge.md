@@ -14,6 +14,8 @@ inbox, check your calendar and look things up on the web.
 - **Your documents.** Answers from manuals and receipts, with the source.
 - **Email.** Reads your inbox, read only.
 - **Calendar.** Upcoming events, overlaps and tight back to back events.
+- **Activity history.** Ask "what happened while I was out?" and Nova reads
+  Home Assistant's history and logbook to tell you.
 - **Web research.** Current events and facts, through DuckDuckGo or your own
   SearXNG.
 
@@ -116,3 +118,7 @@ Panel, **Settings → Anticipation & Memory**:
 **Configure → Email**: "Enable email reading", "IMAP host", "IMAP port",
 "IMAP username / email address", "Mailbox folder" (INBOX by default), "Use
 SSL", and "secrets.yaml key holding the password".
+
+## See also
+
+- [Privacy and your data](privacy.md): how facts, relations and documents are stored

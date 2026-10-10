@@ -274,3 +274,8 @@ Only in `/config/nova/config.json`:
 | Setting | What it does |
 |---|---|
 | `intrusion_require_corroboration` | `true` by default. `false` lets bare motion while away open an investigation. |
+
+## See also
+
+- [Settings reference](settings-reference.md): every setting in one place
+- [How Nova works](how-nova-works.md): the safety rules in more detail

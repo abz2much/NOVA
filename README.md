@@ -2,9 +2,9 @@
 
 # Nova AI Assistant
 
-An autonomous AI butler for Home Assistant: voice, vision, and a reasoning core that learns your home and watches over it.
+A home butler for Home Assistant. You talk to it, it watches over your home, and it learns how you live.
 
-<img src="docs/media/hero-stellar-core.svg" alt="Nova Command Center — animated stellar-core dashboard" width="100%">
+<img src="docs/media/hero-stellar-core.svg" alt="The Nova Command Center dashboard, with an animated glowing core in the middle" width="100%">
 
 [![HACS Integration](https://img.shields.io/badge/HACS-Integration-41BDF5?logo=home-assistant&logoColor=white)](https://github.com/abz2much/NOVA)
 [![Release](https://img.shields.io/github/v/release/abz2much/NOVA?color=00d9ff)](https://github.com/abz2much/NOVA/releases)
@@ -12,459 +12,158 @@ An autonomous AI butler for Home Assistant: voice, vision, and a reasoning core 
 
 </div>
 
----
+## What Nova is
 
-Nova installs as a Home Assistant custom integration through HACS and runs entirely inside HA, with no separate container and no cloud account required to start. Nova starts conservative and tells you what it notices, but it isn't observation-only: it can control your home directly when you ask it to. What stays deliberately gated is autonomy and trust — a suggested automation is never installed without your explicit approval, sensitive actions (unlocking, opening a garage) keep a confirmation step, and Nova reports honestly what it actually knows: a physically confirmed ("verified") outcome is never worded the same as a command it merely sent and accepted.
+Nova is a custom integration for Home Assistant. You install it through HACS and it runs inside Home Assistant. There is no extra server, and you don't need a Nova account.
 
-> **Active development.** Nova is a solo-maintained project under heavy, ongoing change — expect frequent releases, including breaking changes between versions, while things settle. It's genuinely usable today, but not a "set it up once and forget it" integration yet. Check `CHANGELOG.md` before updating if you want to know what changed.
+You can talk to Nova by voice or text. Ask it to turn on a light, lock the door or tell you what is open. Ask about your calendar, your solar panels or something on the web. It also keeps an eye on the house in the background. It tells you about a door left open, a leak or someone at the front door, and it suggests automations based on your routines.
 
-## Quick start (5 minutes, no cameras required)
+You don't need cameras or voice hardware to start. All you need is Home Assistant and an AI to think with: either a cloud key (Groq, Anthropic, OpenAI or Gemini) or a local Ollama server. Cameras, speakers and more can be added whenever you like.
 
-Nova looks elaborate, but the floor is low. You can be talking to it in five minutes with nothing but Home Assistant and either a supported cloud-provider API key or a local Ollama endpoint. Cameras, voice hardware, and local GPU inference are all optional upgrades you add later.
+## How Nova behaves
 
-1. **Install via HACS.** Add this repo (badge below), install "Nova AI Assistant," restart Home Assistant.
-2. **Add the integration.** Go to *Settings → Devices & Services → Add Integration → Nova*. Enter a key for each cloud provider you use ([Groq](https://console.groq.com), Anthropic, OpenAI, Gemini), your local Ollama address, or both. Then pick the provider and model for each of Nova's roles. Nova fills in sensible choices and tests each one. If an old Nova config.json is found, it is imported instead and these screens are skipped.
-3. **That's it.** Nova registers its conversation agent and appears in your sidebar. A one time "Nova is ready" notification then lists anything that still needs attention. Ask it about your home, your calendar, or the outside world.
+Nova can control your home when you ask. What it won't do on its own is take big steps without you.
 
-Everything past this point (vision, doorbell analysis, the live 3D floor plan, proactive safety) layers on top as you connect cameras and voice. None of it is required to start. Jump to [Installation](#installation) for the full walkthrough.
+- It never installs a suggested automation until you approve it.
+- It can't unlock a door, open a garage or disarm the alarm by voice alone. Those need a tap on your phone.
+- It tells you what it knows. "The lock is locked" means Nova checked. "I sent the command" means it hasn't confirmed yet.
+- If a device name is unclear, it asks which one you mean instead of guessing.
+- Smoke, carbon monoxide, water leak and confirmed intrusion alerts can't be muted.
 
-## Guides
+## What you need
 
-Short guides for each main feature: what it needs, what Nova learns by itself, what it never does on its own, and the settings.
+- Home Assistant 2024.10.0 or newer, with [HACS](https://hacs.xyz) installed.
+- An AI for Nova to use. Pick one: a key from [Groq](https://console.groq.com), Anthropic, OpenAI or Gemini, or the address of a local Ollama server.
 
-- [Getting started](docs/getting-started.md): setup, AI models, where settings live, a tour of the panel
-- [Safety and security](docs/safety-and-security.md): intrusion, lockdown, things left open, smoke, leaks and freezing pipes
-- [Cameras and faces](docs/cameras-and-faces.md): doorbell, packages and mail, scene memory, faces
-- [Weather warnings](docs/weather-warnings.md): Met Éireann, the US National Weather Service, or a CAP feed
-- [Voice and speakers](docs/voice-and-speakers.md): speakers per room, broadcasts, language, how Nova addresses people
-- [Presence and alerts](docs/presence-and-alerts.md): who is home, rooms, sleep, quiet hours, mutes, excluded entities
-- [Routines and suggestions](docs/routines-and-suggestions.md): leave alerts, offers, suggested automations, briefings, modes
-- [Memory and knowledge](docs/memory-and-knowledge.md): facts, relations, documents, email, web research
-- [Voice recognition](docs/voice-recognition.md): knowing who is speaking
-- [Energy](docs/energy.md): the Energy tab and the Energy outlook
+Everything else is optional. Cameras are covered in [Camera setup](docs/camera-setup.md). On Home Assistant OS or Supervised, Nova sets up the voice add-ons (Piper, Whisper and openWakeWord) for you. On Container or Core installs you add them yourself.
 
-## What it does
+## Install
 
-### Voice and conversation
+1. Add the repository to HACS. Click the button below, or open HACS, choose the three dots, then Custom repositories, and add `https://github.com/abz2much/NOVA` as an Integration.
 
-A pluggable LLM brain (Groq, Gemini, OpenAI, Anthropic, or a local Ollama server) drives natural conversation through the Home Assistant voice pipeline. Nova speaks with Home Assistant's default voice and never forces one of its own. By default it picks a free local Piper entity; flip on "use Home Assistant's default voice" and it speaks through whichever TTS provider your preferred Assist pipeline uses — Fish Audio, ElevenLabs, Home Assistant Cloud, or anything else exposed as a `tts.*` entity. Works with ESP32-S3 satellites, Wyoming, and Google speakers.
+   [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=abz2much&repository=NOVA&category=Integration)
 
-### Web research and schedule awareness
+2. Install "Nova AI Assistant" from HACS and restart Home Assistant.
+3. Go to Settings, Devices & Services, Add Integration, and choose Nova. Enter a key for each cloud provider you use, your Ollama address, or both. Then pick a provider and model for each job. Nova suggests sensible choices and tests each one. Keys are saved in `secrets.yaml`, not in plain settings.
+4. Nova appears in your sidebar. A one time "Nova is ready" notification lists anything that still needs attention.
 
-Ask about the outside world: current events, facts, "what's the latest on…" and Nova looks it up. DuckDuckGo works out of the box with no key, or point it at a self-hosted SearXNG. It also reads your `calendar.*` entities, surfacing upcoming events and flagging conflicts such as overlaps and tight back-to-back transitions.
+If you had an older Nova `config.json`, Nova imports it and skips the setup screens.
 
-### Answers from your own paperwork
+After every update, refresh the panel with Ctrl+Shift+R (Cmd+Shift+R on a Mac). Your browser caches the dashboard, and the old version can linger.
 
-Drop appliance manuals and receipts (PDF, `.txt`, `.md`) into `/config/nova/documents`, then ask "what's the filter size for the furnace?" or "when did we buy the dishwasher?" Nova answers from your documents and cites the source. Retrieval is keyword-based out of the box; with Ollama running, flip on semantic search for meaning-based matching, nothing extra to install.
+## Your first five minutes
 
-### The Nova voice
+Open the Nova panel in the sidebar, or talk to Nova through your Assist pipeline. Try:
 
-Nova's persona is its own: precise, calm, proactive, protective, and quietly witty, but strictly situational about it. The wit stays out of the way the moment something is wrong; Nova does not joke during a smoke alarm. A banter level setting (plain / dry / full) tunes how much character surfaces, and urgent or grave events always speak plainly no matter what that setting is.
+- "Turn off the lights in the kitchen."
+- "What's open in the house?"
+- "What's on my calendar tomorrow?"
+- "What's the latest news on the Mars mission?"
 
-### Vision and cameras
+Nova's settings live in two places. Day to day settings (AI models, cameras, safety, language) are in the Nova panel under Settings. Routing settings such as which phone to notify, quiet hours and credentials are under Settings, Devices & Services, Nova, Configure. [Getting started](docs/getting-started.md) has a tour of the panel.
 
-Automatic doorbell-press analysis using a two-pass live-clip and recorded-event approach, package and mail detection on porch cameras, and silent visitor learning that quietly builds a picture of who comes and goes. Nest and Frigate feeds are reasoned over with vision models; a Eufy Security doorbell instead drives this natively off its own on-device sensors (ringing, stranger-vs-known-face, package delivered/stranded/taken) with no vision call needed for the routine cases — only an actual stranger triggers one.
+## What Nova can do
 
-### The Cognitive Core
+| You want to | What Nova does | Guide |
+|---|---|---|
+| Talk to your home | Voice and text conversation, with a calm, dry personality you can turn up or down | [Voice and speakers](docs/voice-and-speakers.md) |
+| Keep the home safe | Watches for intrusion, smoke, carbon monoxide, leaks, freezing pipes, and doors or windows left open. Can lock up at night | [Safety and security](docs/safety-and-security.md) |
+| Know who comes to the door | Analyses doorbell presses, spots packages and mail, and learns regular visitors. Can recognise faces through Frigate or Double Take | [Cameras and faces](docs/cameras-and-faces.md) |
+| Stop being nagged at the wrong time | Knows who is home, who is asleep and when quiet hours are, and speaks to the right person in the right room | [Presence and alerts](docs/presence-and-alerts.md) |
+| Save effort | Suggests automations from your habits, reminds you when to leave for appointments, and gives morning and evening briefings | [Routines and suggestions](docs/routines-and-suggestions.md) |
+| Understand your energy | Shows solar, battery and grid in one place, today's totals and a 36 hour outlook with advice | [Energy](docs/energy.md) |
+| Remember things | Keeps facts you tell it, answers from your manuals and receipts, and can read your email (read only) | [Memory and knowledge](docs/memory-and-knowledge.md) |
+| Know who is speaking | Recognises voices so it can answer the right person | [Voice recognition](docs/voice-recognition.md) |
+| Hear about bad weather | Weather warnings from Met Éireann, the US National Weather Service or a CAP feed | [Weather warnings](docs/weather-warnings.md) |
+| Find out why something broke | Checks your setup for problems and explains what it found, with fixes you apply yourself | [Getting started](docs/getting-started.md#when-something-is-not-working) |
 
-A reasoning loop that classifies every household event by urgency and decides whether it's worth your attention. It grounds decisions in your home's actual history ("the kitchen light at 7am is routine; the basement window has never opened before"), escalates security-relevant events when you're away, and proposes automations from patterns it observes.
-
-### Current intelligence and observability
-
-Nova is built to show its work rather than ask for blind trust:
-
-- **Decisions browser** (Logs → Decisions): every proactive decision, with the evidence and confidence behind it, the model that made the call, and Helpful/Unnecessary/Wrong feedback.
-- **Decision Lab**: replay a past decision against your *current* settings to see whether it would pass today's confidence threshold — a policy check, not a reconstruction of what actually happened.
-- **Setup Doctor**: a read-only health check across entity references, room speakers, camera overrides, the notification service, and more, each with a plain-language fix — never applied automatically.
-- **Automation-aware Suggestions**: lists every automation Home Assistant has loaded, separates them from new learned opportunities and automations created by Nova, detects exact duplicates and likely overlaps without an LLM call, and tracks whether a Nova-created automation actually *runs* after installation.
-- **Provider Activity**: bounded daily aggregates of LLM calls (provider, model, role, token/latency counts) — never the prompts, responses, tool arguments, images, or credentials behind them.
-- **Spoken History** (Logs → Spoken History): the last 100 confirmed announcements Nova actually delivered, each repeatable from the panel or by asking "what did you just say."
-- **Conversation memory that knows whose it is**: continuity is scoped to the person speaking, with the shared conversation itself still available as context, and irrelevant ambient speech (background chatter, TV dialogue) is rejected before it can ever be written into that memory.
-- **Honest device control**: an ambiguous device name gets a clarifying question instead of Nova silently guessing the closest match, and a command's result is reported as verified, accepted, unverified, or failed — Nova never claims a lock is locked or a light is on before it's actually confirmed that.
-
-### The Local Mind
-
-When the cloud is unreachable, Nova doesn't go dumb. An offline reasoning brain judges household events locally — self-awareness (is this sensor flapping?), historical grounding against `patterns.db`, case-based memory from cached past decisions, situational judgment, and persona-voiced phrasing — so routine events keep getting sound, well-spoken calls with no internet at all. Deterministic voice/text commands (turn on a light, lock a door, ask what's open) also run entirely locally, with no LLM call either way. What the Local Mind does *not* replicate is open-ended reasoning about a genuinely novel situation, web research, or vision analysis — those still need a configured cloud or local-GPU provider when the moment calls for them.
-
-### Safety and security
-
-Proactive monitoring for freezing pipes, smoke, CO, water, unauthorized entry, and nighttime lockdown. Enforcement is occupancy-gated, so it only kicks in when it should.
-
-### The dashboard
-
-**Command Center**: a warm ember/gold "stellar core" centerpiece — an animated particle core whose state (idle, reasoning, asleep) reflects what Nova is actually doing, so the dashboard looks and feels the same whether you have zero cameras or twelve. Areas show live capability icons, temperature/humidity sparklines, and a light toggle per room; Cognitive Core and standing Goals are visible beside the activity feed; authenticated Camera Watch snapshots stay collapsed until requested. Settings is reorganized around what you're doing rather than which subsystem it touches, right down to a per-person "who does Nova call whom" card. A Residence tab gives you a live, rotatable 3D house view built from the same floor plan you edit in Settings, with door mapping and live room presence. Doorbell Training is a Settings card in the Cameras group. An **Energy** tab shows live power flow between solar, the house, the battery and the grid, today's totals, the battery, and a 36 hour **Outlook** with advice, followed by **Energy Management** and **Appliances** (both moved off Settings in v8.10.0); see the [Energy setup guide](docs/energy.md). The Logs tab has four subviews — **System Log**, **Decisions**, **Spoken History**, and **Actions** — and the **Diagnostics** tab holds **Setup Doctor** and **Provider Activity**; Suggestions separates **Existing Home Assistant Automations**, **Learned Opportunities**, and **Created by Nova**.
+Nova also shows its reasoning. The Logs tab lists every decision it made, why, and how confident it was. You can tell it when a decision was helpful or unnecessary.
 
 <div align="center">
 <table border="0">
 <tr>
-<td width="50%"><img src="docs/media/areas-card.svg" alt="Command Center Areas card with capability icons, sparklines, and a light toggle" width="100%"></td>
-<td width="50%"><img src="docs/media/settings-card.svg" alt="Command Center Settings tab, showing the per-person Honorifics card" width="100%"></td>
+<td width="50%"><img src="docs/media/areas-card.svg" alt="The Areas card, with an icon for each capability, temperature and humidity trends, and a light switch" width="100%"></td>
+<td width="50%"><img src="docs/media/settings-card.svg" alt="The Settings tab, showing what Nova calls each person" width="100%"></td>
 </tr>
 <tr>
-<td align="center"><em>Every monitored room, its live capability icons, a temperature/humidity trend, and a one-tap light toggle.</em></td>
-<td align="center"><em>Settings reorganized by task, not subsystem — down to what Nova calls each person when they're home alone.</em></td>
+<td align="center"><em>Every room, with live icons, trends and a light switch.</em></td>
+<td align="center"><em>Settings are grouped by what you want to do.</em></td>
 </tr>
 </table>
-
-<sub>Visuals reflect the panel's actual design system. The live dashboard renders in your browser inside Home Assistant.</sub>
 </div>
 
-## Full capability reference
+## Choosing an AI
 
-Everything Nova can do today, grouped by domain. In conversation these surface as tools the agent invokes on its own; most also have a panel control.
+You can use a cloud AI, a local one, or both. Each of Nova's jobs (conversation, reasoning, camera analysis and so on) can use a different one.
 
-**Conversation and delegation**
-- Natural voice and text conversation through the Home Assistant pipeline, in Nova's dry, precise persona with a tunable banter level.
-- Ephemeral sub-agents (`delegate_task`): for a complex, self-contained slice of a request, Nova spins up a focused in-process sub-agent with a minimal objective, a curated read-only tool subset, and a small turn budget, then folds the result back. Sub-agents can't actuate or recurse, and depth is capped. On a single-GPU host they run serially, so the benefit is a tight, focused context rather than parallelism.
-- HOMER — Nova's single, canonical read-only diagnostic specialist, a named `delegate_task` profile (`profile: "homer"`; `capability: "diagnostics"` is kept working as an alias for the same profile, not a second implementation). For a fault ("why is this device unavailable", "why did this automation fail", "is the host running out of memory", "check Nova's connectivity and system health"), Nova can hand the question to HOMER instead of guessing: it investigates with a fixed set of diagnostic and state-reading tools only (system health, cognitive-core status, connectivity, energy status, activity history, entity state/search, root-cause analysis), separates what it observed from what it inferred, and reports a likely cause, its confidence, and a recommended next step back to Nova — it never addresses a device directly and never claims to have fixed anything. It has no device-control, configuration, memory-writing, or delegation tool, capped at 4 tool turns, and — like every sub-agent — can't delegate further. Always available; nothing to turn on.
-- Five specialist bridge tools (`ask_executive_assistant`, `ask_marketing_agent`, `ask_security_privacy_agent`, `ask_homelab_infra_agent`, `ask_house_manager_agent`) hand off to separate n8n-orchestrated agents over a private webhook. These need their own n8n setup to work and aren't something a fresh install has access to out of the box: each stays off until you set both the webhook base URL (`n8n_webhook_base_url`) and the shared secret (`nova_specialist_webhook_key` in secrets.yaml). There is no built-in address, redirects are never followed, and sub-agents can't call them.
+- **Cloud** (Groq, Anthropic, OpenAI, Gemini) is the easiest start. Your requests go to that provider, and you pay their normal usage rates.
+- **Local** (Ollama) keeps everything on your own network and costs nothing per request, but needs a computer with a decent graphics card.
+- **Offline** is covered too. If the internet drops, Nova keeps handling routine events and simple commands such as "turn on the lamp" or "lock the door" on its own.
 
-**Devices, scenes and home state**
-- Control one device or many at once, run scenes and scripts, and execute multi-step plans (`control_device`, `bulk_control`, `run_scene_or_script`, `execute_plan`). Names resolve in a fixed order (entity ID, exact name or alias, the domain you name, such as "the lights", then close matches with a clear margin); an ambiguous name ("turn off the light" with three candidates) gets a clarifying question naming each candidate and its area instead of Nova silently picking the closest match, a request that says not to change anything never changes anything, a question about reaching Home Assistant itself gets a status answer instead of a who's-home reply, and Home Assistant merely *accepting* a command is never reported the same way as Nova actually *confirming* it took effect.
-- Query live state, search entities, list a room's devices, and summarize the whole home (`get_entity_state`, `search_entities`, `get_area_devices`, `get_home_summary`).
-- Read Home Assistant's recorded history and logbook to answer "what happened while I was out" (`activity_history`).
+You can change providers any time under Settings, AI Models. See [Getting started](docs/getting-started.md).
 
-**Schedule and communications**
-- Read household `calendar.*` entities, surface upcoming events, and flag overlaps and tight back-to-back transitions (`calendar_agenda`).
-- Read-only email (`read_email`): checks the inbox over IMAP, read-only by construction (opens with EXAMINE, fetches with BODY.PEEK, never marks, moves, or deletes). Fetched mail is sanitized and treated as untrusted. Set it up under **Configure → Email**; the password lives in `secrets.yaml`, under the key you name there.
-- Scheduled morning and evening briefings covering weather, calendar, overnight events, energy, and active hazards, occupancy-gated.
-- Leave alerts for upcoming calendar events. One heads up says when to leave on foot, by public transport and by car. Times come from Home Assistant's Google Maps Travel Time integration when you have it set up (Nova never sees the Google key); driving falls back to a travel sensor, then an open source router, then a default lead. Journeys start from home while anyone is home. Only events with a real place count: not a video call, an online meeting, a phone number or your own home. The toggles are in Settings → Learning & Memory → Anticipation & Memory.
+## Privacy
 
-**Web and your documents**
-- Look up the outside world (`web_research`) using DuckDuckGo out of the box, or a self-hosted SearXNG.
-- Answer from your own manuals and receipts (`search_documents`, `ingest_documents`), keyword-based out of the box or Ollama-embedded semantic search.
+Everything Nova learns and stores stays in your Home Assistant, mostly in the `nova/` folder of your config directory. Nova has no cloud service and no telemetry. It never sends anything on its own.
 
-**Cameras and vision**
-- Look at a camera on demand and describe it (`look_at_camera`); report who's recognized at the door (`who_do_you_see`).
-- Automatic doorbell-press analysis, package and mail detection, and silent visitor learning — over Nest/Frigate vision, or natively off a Eufy Security doorbell's own sensors.
-- With scene memory turned on (off by default), answer "where did I last see my keys?" (`where_last_seen`) and "what has changed in the hallway since yesterday?" (`what_changed`) from what the cameras described.
-- Package and mail alerts skip wide views (yard, driveway, garden and similar), recognise common Irish and UK carriers, speak at most once per camera and kind every 30 minutes, and can start early from a porch motion sensor or a mailbox sensor.
+Data leaves your network only when you turn on a feature that needs it:
 
-**Awareness, diagnostics and energy**
-- Report the cognitive core's state, connectivity, and a full self-diagnostic (`cognitive_status`, `connectivity_status`, `system_diagnostics`); reason about the root cause of a fault (`root_cause`).
-- Whole-home energy: current draw, peak awareness, and load advice with tunable agency (`energy_status`).
-- Solar, battery and grid right now (`solar_status`), today's totals with the forecast and cost (`energy_report`), and a 36 hour outlook with advice and the cheapest time for a big appliance (`energy_outlook`). The Energy tab reads the same data through the `nova/energy_flow` and `nova/energy_outlook` commands. See the [Energy setup guide](docs/energy.md).
+- The AI provider you chose, for the messages Nova sends it.
+- Web research (DuckDuckGo or your own SearXNG), email, weather and hazard feeds, and travel times, if you enable them.
+- A text to speech service, if it isn't the local Piper voice.
 
-**Weather and hazards**
-- Local forecast (`weather_forecast`) and a live hazard report (`hazard_report`).
-- **Weather warnings.** The Hazard Monitor uses one weather-warning source: Met Éireann for Ireland, NWS for the US, or a custom CAP feed. Ireland and the US are selected automatically; other countries default to Custom. A warning is announced once, again if its level changes, and followed by a phone-only notice if it is cancelled. Yellow goes to your phone; Orange and Red are also spoken outside quiet hours. During quiet hours only Red is spoken by default, with a separate level that can also be set to Off. Met Éireann uses the nearest county unless an older saved county list exists.
-- **Custom feeds.** You can point Nova at a CAP (Common Alerting Protocol) feed from your own national warning service. Nova only alerts when an alert's area covers your home, or matches an area code or name you give. This option is marked "not tested by Nova".
-- Earthquake (USGS) and NASA disaster monitoring remain independent options in the card's Advanced section.
-
-**Safety and security**
-- Proactive monitoring for freezing pipes, smoke, CO, water, unauthorized entry, and nighttime lockdown, occupancy-gated so enforcement only happens when it should.
-- Confirm or dismiss intrusion events and acknowledge alerts by voice (`dismiss_intrusion`, `acknowledge_alert`); optional voice confirmation before sensitive actions like unlocking.
-
-**Modes, memory, goals and suggestions**
-- Set operational modes (normal, party, movie, guest, away, focus, and room scoped lab, plus custom ones) with `set_mode` or the Command Center's Operational Mode card, and tune how much Nova acts on its own (`manage_autonomy`).
-- Remember facts you tell it (`remember`), curated in the panel's Memory tab and confirmed with you before it's trusted (`confirm_pending_fact`, `reject_pending_fact`); open and track standing goals (`create_goal`, `update_goal`, `manage_goals`) and schedule follow-ups (`schedule_followup`, `manage_followups`). Goals and follow-ups later run on their own with no one present, so those runs can check, look and report back — including anything they think needs doing — but never control devices or change anything themselves.
-- Keep a small map of how people, places and things relate: propose a link (`propose_relation`), drop a pending one (`reject_pending_relation`), and look up confirmed ones (`lookup_relations`). Only a person can confirm a link, in the Memory tab.
-- Conversation continuity is scoped to the person speaking rather than searched globally, while the current conversation itself still carries shared household context — nobody's private recall becomes everyone's, but the room you're standing in isn't a stranger to Nova either.
-- Spoken History (Logs tab) keeps the last 100 confirmed announcements Nova actually delivered, replayable from the panel or by asking Nova to repeat itself.
-- Review, approve, or dismiss the automations it proposes from observed patterns (`review_suggestions`, `approve_suggestion`, `dismiss_suggestion`). Suggestions are scored on plain evidence (distinct days, coverage, how tightly the timing clusters, how recent it is, and for "after A, B" how often A is actually followed by B), so repeats on a single day, routines that have stopped, and busy sensors that only sometimes precede an action are not proposed.
-- Mute a noisy entity from awareness, or bring it back (`ignore_entity`, `unignore_entity`); read opt-in wearable and wellbeing context (`wellbeing_context`).
-
-**Resilience and privacy**
-- The Local Mind replicates the full decision procedure offline, so Nova stays useful with no internet at all.
-- All LLM credentials live in Home Assistant's `secrets.yaml`, never in plaintext panel config. Any existing plaintext keys are relocated automatically and safely (verify-before-strip) on upgrade.
-- A single config resolver acts as the one source of truth for which model each part of Nova runs on.
-
-## Requirements
-
-To start, you need exactly two things:
-
-- **Home Assistant** 2024.10.0 or newer, with [HACS](https://hacs.xyz) installed.
-- **Either a supported cloud-provider API key or a compatible local Ollama/custom endpoint.** [Groq](https://console.groq.com), Anthropic, OpenAI, and Gemini are all supported cloud options, or point Nova at a local Ollama server and run with no cloud account at all.
-
-Optional add-ons unlock more, but none are required to begin:
-
-- *Voice*: HA OS / Supervised is recommended; Nova auto-installs the Piper, Whisper, and openWakeWord voice stack through the Supervisor. On Container/Core you'd add those yourself.
-- *Vision*: a vision capable model from any supported provider (Gemini, OpenAI, Anthropic, Groq, or a local Ollama model), plus cameras. Any HA camera works, but Frigate is the recommended backbone for detection and snapshots, and Nest cameras and doorbells are supported through it. A Eufy Security doorbell needs neither — it's detected natively, no plumbing required.
-- *Voice hardware*: ESP32-S3 satellites and any Home Assistant TTS voice.
-- *Fully local inference*: a GPU box running Ollama. In Nova's **Settings → AI Models**, enter its Ollama URL, test the connection, choose a discovered model, and apply a Local Text or Hybrid profile. No cloud account is required.
-
-## Installation
-
-**1. Add this repository to HACS.**
-
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=abz2much&repository=NOVA&category=Integration)
-
-Click the badge above, or do it manually: in **HACS → ⋮ (top right) → Custom repositories**, add the URL below with category **Integration**.
-
-```
-https://github.com/abz2much/NOVA
-```
-
-**2. Install "Nova AI Assistant"** from HACS, then restart Home Assistant.
-
-**3. Add the integration.** Go to **Settings → Devices & Services → Add Integration → Nova**. Enter a key for each cloud provider you want (Groq, Anthropic, OpenAI or Gemini), your Ollama address (for example `http://ollama-host.local:11434`), or both. On the next two screens, choose the provider and then the model for each role: conversation, classifier, reasoning, camera reasoning and vision. Nova tests each model, including a small test picture for vision if you set vision up, and saves the keys in `secrets.yaml`. If an old Nova config.json is found, it is imported instead and these screens are skipped. Nova registers its conversation agent and appears in the sidebar. Once setup finishes, a one time "Nova is ready" notification shows the Setup Doctor results and lists anything that needs a fix. You can also configure or change a self-hosted endpoint later under **Nova → Settings → AI Models**.
-
-**4. Set up voice (optional).** On Home Assistant OS / Supervised, Nova bootstraps the voice stack itself on first run: it installs and starts the Piper, Whisper, and openWakeWord add-ons, and creates an Assist pipeline with Nova as the conversation agent. On Container/Core installs, with no Supervisor, install those pieces yourself and create the pipeline through Settings → Voice Assistants.
-
-**5. Fine-tune (optional).** Most settings, including camera watching and the AI model for each role, are in the Nova panel under **Settings**. Routing (bedroom and ground floor areas, the broadcast speaker group, the phone notify service), observer mode and quiet hours, provider credentials, identity and email are under **Settings → Devices & Services → Nova → Configure**. See [Getting started](docs/getting-started.md#where-settings-live).
-
-> **Hard-refresh after updates.** The dashboard JavaScript is cached aggressively; after upgrading, refresh with `Ctrl+Shift+R` so the new panel loads.
-
-## Advanced setup: cameras and continuous streaming
-
-Everything in this section is optional. You only need it for the vision features (doorbell analysis, package detection, the HUD's live camera tiles). Skip it if you're starting with voice and reasoning and come back when you want cameras.
-
-### How Nova uses cameras
-
-Nova doesn't require any specific camera brand. It works with any camera Home Assistant exposes as a `camera.*` entity, pulling stills through the standard image API. But it's built to lean on [Frigate](https://frigate.video) as the backbone, and that's the recommended setup.
-
-Frigate is the funnel: its on-camera object detection for people and packages, fired over MQTT, is far more reliable than a vision model guessing at a raw feed, and its event snapshots are high-resolution and cropped to the detection. Nova listens to `frigate/events`, consumes those snapshots directly, and its face recognition reads Frigate's `tracked_object_update` and `last_recognized_face` channels. If you run cameras at all, routing them through Frigate is what makes the vision features sharp.
-
-Nest is a supported source, not a requirement. Nova can consume Nest cameras and doorbells too, but Google's cameras need extra plumbing (below) because of how their stream API behaves. If you have Nest gear, route it into Frigate through go2rtc and you get the best of both: Nest's doorbell events plus Frigate's detection and durable frames.
-
-Eufy Security is also a supported source, and needs *no* extra plumbing at all. If the [eufy_security HACS integration](https://github.com/fuatakgun/eufy_security) is set up, Nova auto-detects each Eufy camera/doorbell and drives doorbell press, stranger-vs-known-face, and package detection off its own native sensors directly — no Frigate, no go2rtc, no vision-LLM call for the routine cases (a known face, a normal delivery). Discovery is by the device's unique_id, so renaming it in HA never breaks it.
-
-Any other camera, generic RTSP, local ONVIF, and so on, works through the standard snapshot path with no special setup. Add it to Frigate for detection, or let Nova pull stills directly.
-
-The rest of this section is Nest-specific. If you don't use Nest, skip it entirely: Eufy needs nothing below, and everything else just needs Frigate pointed at your cameras.
-
-### Eufy Security cameras (only if you use Eufy)
-
-Install the [eufy_security integration](https://github.com/fuatakgun/eufy_security) via HACS, add it in **Settings → Devices & Services**, and sign in with your Eufy account. That's the entire setup — Nova needs no configuration of its own. On the next Nova reload it discovers every Eufy camera automatically and starts watching its `ringing`, `stranger_person_detected`, `person_detected`, `motion_detection_type_vehicle`, `pet_detected`, and `package_delivered`/`package_stranded`/`package_taken` sensors directly — all of it native, at zero vision-LLM cost for routine detections.
-
-A camera added to Eufy *after* Nova has already started needs a Nova reload (not a full HA restart) to be picked up — same as every other camera-discovery path in the integration.
-
-### Nest cameras (only if you use Nest)
-
-Nova consumes Nest cameras and doorbells through the official [Google Nest integration](https://www.home-assistant.io/integrations/nest/). It does not, and legally cannot, talk to Google's Smart Device Management API with its own credentials, because Google binds SDM access to your Google account and Device Access project. One-time setup:
-
-1. **Google SDM API.** Create a project in the [Device Access Console](https://console.nest.google.com/device-access) (US $5 one-time fee) and a Google Cloud project with the SDM API enabled and OAuth credentials.
-2. **Credentials in HA.** Add your OAuth Client ID and Secret under *Settings → Devices & Services → Application Credentials*, then add the Google Nest integration and authorize it. Your cameras and doorbell appear as `camera.*` entities.
-3. **That's it for Nova.** It auto-detects Nest-platform cameras and uses the right frame source for each event (event media, stream-wake, or its own snapshot path). Battery/WebRTC-only Nest cameras can't produce ordinary still images while idle; the Nova panel handles this by escalating to its own snapshot tier automatically, so the tile shows frames instead of going blank.
-
-### Continuous streaming for Nest cameras (recommended if you use Nest)
-
-Google's SDM API hands out WebRTC/RTSP stream URLs that expire roughly every five minutes and won't reliably produce a still image while a camera is idle. That's fine for the occasional glance, but it means live tiles can stall and 24/7 NVR recording (Frigate) chokes.
-
-The durable fix, and the one Nova is built to lean on, is restreaming each Nest camera through [go2rtc](https://github.com/AlexxIT/go2rtc), which speaks Google's SDM protocol natively, renews the expiring stream transparently, and republishes a solid RTSP/WebRTC feed that Home Assistant, Frigate, and Nova all consume like any local camera. If you already run Frigate, you already have a go2rtc instance bundled with it, which is the other reason Frigate is the recommended backbone: it does double duty as both your detector and your Nest restreamer.
-
-**1. Point go2rtc at your Nest account.** In your go2rtc (or Frigate) config, add a `nest:` source per camera. You need five values, all from the same Device Access setup above:
-
-```yaml
-go2rtc:
-  streams:
-    bedroom2_restream:
-      - "nest:?client_id=CLIENT_ID&client_secret=CLIENT_SECRET&refresh_token=REFRESH_TOKEN&project_id=DEVICE_ACCESS_PROJECT_ID&device_id=DEVICE_ID"
-    front_doorbell_restream:
-      - "nest:?client_id=CLIENT_ID&client_secret=CLIENT_SECRET&refresh_token=REFRESH_TOKEN&project_id=DEVICE_ACCESS_PROJECT_ID&device_id=DOORBELL_DEVICE_ID"
-```
-
-- `client_id` / `client_secret`: the same OAuth pair you added under Application Credentials.
-- `project_id`: the Device Access Console project UUID (not the Google Cloud project).
-- `refresh_token`: from the Nest integration's stored config. In *Settings → Apps → File editor* (or SSH), open `.storage/core.config_entries`, find the `nest` entry, and copy its `refresh_token`.
-- `device_id`: easiest through the go2rtc web UI (Frigate exposes it on port `1984`). Choose Add → nest, supply the other four values, and it lists your devices with their IDs. Copy the one you want.
-
-**2. (Optional) add the restreams as Frigate cameras.** If you want continuous recording and object detection, add each `*_restream` as a Frigate camera and enable `detect`/`record`. Frigate's on-camera object detection for people and packages is more reliable than vision-LLM guessing, and Nova will happily consume Frigate's snapshots.
-
-**3. Tell Nova to source frames from the twins.** Restart Home Assistant so the new `camera.*_restream` entities exist, then map each Nest camera to its restream in Nova's config (`camera_overrides`). The Nest entity keeps its identity (chips, names, doorbell events), while every frame comes from the durable restream:
-
-```json
-{
-  "camera_overrides": {
-    "camera.bedroom2_camera": "camera.bedroom2_restream",
-    "camera.front_doorbell": "camera.front_doorbell_restream"
-  }
-}
-```
-
-This lives in `/config/nova/config.json`; merge it into the existing object rather than replacing the file. Nova validates this on load, so a typo is sidelined with a notification rather than breaking the panel. Then open **Camera Watch → DIAG** on the camera. It should report `override → camera.bedroom2_restream` and a healthy full-size frame instead of a blank or black tile.
-
-> **Note:** go2rtc's Nest source is a third-party bridge, and Google occasionally changes its auth behavior. If a restream ever drops, Nova falls back to the original Nest entity automatically; worst case is the pre-restream behavior, never worse.
-
-## Host health awareness (optional)
-
-Nova can give itself structured visibility into the health of the machine it runs on — CPU/memory/disk usage, memory and I/O pressure, and (where the hardware exposes it) temperature — entirely through Home Assistant's own built-in **System Monitor** integration. Nova never reads `/proc`, `/sys`, or any other filesystem path directly, never shells out, and never calls a Supervisor API; it only reads System Monitor's own sensor entities through Home Assistant's state machine, the same way it reads any other sensor. Off by default.
-
-**Setup:**
-1. Settings → Devices & services.
-2. Add or open the **System Monitor** integration.
-3. Open its entities.
-4. Enable the recommended entities below — System Monitor disables several of them by default.
-5. Enable any optional entities your hardware actually exposes.
-6. Come back to Nova's **Settings → Host Health**.
-7. Review the auto-detected mappings, and manually pick a source for anything ambiguous (most commonly disk usage, if you have more than one mount monitored).
-8. Turn on **Host health awareness**.
-9. Turn on **Alerts** separately, if you want Nova to say something when a problem persists — it's a distinct toggle from awareness itself, and turning it off silences alerts immediately.
-
-**Recommended entities:** Processor use, Memory usage, Memory Pressure Some 60s Average, Memory Pressure Full 60s Average, IO Pressure Some 60s Average, IO Pressure Full 60s Average, Disk usage percentage (for your Home Assistant data disk).
-
-**Optional entities:** Processor temperature, Swap usage, CPU Pressure Some 60s Average, Load 5 min, Uptime.
-
-**Worth knowing:**
-- Nova samples host health every 2 minutes. Right after you first turn on Host health awareness, the panel can show dashes for a short while — that's the normal gap before the first sample, not a failure. Wait up to 3 minutes and refresh the Nova panel.
-- Some hardware doesn't expose processor temperature at all, and pressure (PSI) sensor availability depends on your platform and kernel — Home Assistant just won't have those sensors on every machine. A missing optional entity (temperature, PSI, swap, load, uptime) is not a setup failure; Nova simply reports it as not available and runs with whatever readings it does have.
-- Disk usage measures capacity, not drive health — a full disk and a failing disk are different problems, and Nova only reports the former.
-- I/O pressure measures workload contention (processes waiting on I/O), not drive failure — Nova never claims to measure NVMe/SSD health.
-- Nova cannot warn you after this machine has completely frozen or lost power, because Nova itself runs on it. This is visibility into degradation, not a substitute for real infrastructure monitoring.
-- If you've renamed an entity, or run Home Assistant in another language, that's fine — Nova identifies System Monitor entities by integration ownership and their own internal type, never by friendly name or entity_id text.
-
-**Infrastructure audit.** A separate check every 15 minutes of the sensors you list under **Settings → Host Health → Infrastructure audit**: a sensor in percent is flagged above 90 and critical above 96, and a binary sensor when it goes off (or on, for a problem sensor). The list starts empty, and with nothing listed the audit does nothing.
-
-A persistent problem (sustained past a configurable window, not a brief spike) can optionally speak or push a notification through Nova's existing presence-aware announcement and multi-device notification paths — the same ones used for every other Nova alert. Host resource load is never treated as a household safety emergency.
-
-## Configuration highlights
-
-| Setting | What it does |
-| --- | --- |
-| `llm_provider` / per-role models | Choose Groq, Gemini, OpenAI, Anthropic, Ollama, or custom independently for the Main Agent, Classifier, Reasoning, Vision, and Camera Reasoning roles. A saved model missing from live discovery is kept, never silently replaced. |
-| `ollama_base_url` | The Ollama server used by Ollama roles (for example `http://ollama-host.local:11434`). Nova uses Ollama's native chat API and can discover the server's models and reported capabilities. |
-| `custom_base_url` | A separate OpenAI-compatible endpoint used only by custom-provider roles. It never inherits the Ollama URL or another provider's credential. |
-| Provider credentials | Settings → AI Models (or Configure → Credentials) — one dedicated key per provider, stored only in `secrets.yaml`. Each role above uses only its own provider's key, never another's. |
-| `observer_enabled` | Let Nova watch the event stream and decide what's worth surfacing. |
-| `face_stand_down` | Settings → Security alarm. **Off by default.** When on, a resident on the Faces roster (recognised by Frigate or Double Take at or above the confidence threshold on a camera in the last 3 minutes) stops Nova opening a **new** intrusion investigation, as long as no unknown face or unexplained person was also seen. It never closes an investigation that is already open, never affects critical alerts, lockdown, freeze or mutes, and every stand down is logged in the Actions log. A face can be a photo or a lookalike, so treat it as a convenience, not a security control. |
-| `output_language` | Settings → General → Nova speaks. Auto (the default) follows Home Assistant's language. Pick a language to make Nova speak and write in it while Home Assistant and the panel stay as they are. Brazilian Portuguese and Traditional Chinese have their own options. Canadian French (`fr-CA`), Latin American Spanish (`es-419`) and Swiss German (`de-CH`) work on Auto, or when saved another way; the picker then shows the code and keeps it. Safety notifications are translated for English, French, German, Spanish, Italian, Dutch and Portuguese; in any other language they stay in English, while text Nova generates follows the setting. Fixed templates such as package announcements and the panel itself are not translated by this setting. |
-| `hazard_source` / `hazard_counties` / `hazard_push_level` / `hazard_speak_level` / `hazard_night_speak_level` | Settings → Safety → Hazard Monitor. Choose Met Éireann, NWS, or a custom CAP feed; Ireland and the US get regional defaults and other countries default to Custom. The nearest county is automatic, while an older saved `hazard_counties` list remains honoured without panel controls. Yellow and above goes to your phone; Orange and above is also spoken outside quiet hours. At night the separate level defaults to Red, and Off makes every warning phone-only. Optional location overrides are saved only when they differ from Home Assistant's home coordinates. |
-| `announce_notify_only` | Settings → General → Notifications only. Off by default. When on, proactive alerts go to your phone instead of being spoken. Critical safety alerts still speak. Reminders, package and camera announcements, scheduled briefings, the infrastructure audit and hazard alerts are not covered by this switch; hazard speech still follows its own quiet-hours level. Replies to you are never affected. |
-| Mutes (`nova.shush` / `nova.unshush`) | Entity, category and blanket mutes are saved in `nova/output_mutes.json` and survive a restart. The dashboard's Muted card lists them with an Unmute button, and shows a banner when the blanket shush is on. Critical safety alerts are never muted. |
-| `rich_reasoning` | Cloud-first judgment for medium/high-urgency events: costs a bit more, reasons better. |
-| `visitor_learning` | Silently learn from person events at the door. Never spoken. |
-| `package_detection` | Watch porch cameras for packages and mail. |
-| `cognition_threshold` | How salient an event must be before Nova escalates it. Only settable in `/config/nova/config.json`. |
-| `camera_event_learning` | Settings → Learning & Memory → Routine Learning. Feed Eufy/Frigate/Nest/vision detections into pattern learning. On by default; off automatically whenever Nova's learning system itself is off. |
-| `camera_event_confidence_floor` / `camera_event_dedup_window` | Minimum source-supplied confidence (0–100, floor of 0 disables filtering) and the cross-source deduplication window in seconds (default 300) for camera-event learning. |
-| `camera_historical_awareness` / `camera_awareness_min_observations` | Add repeated historical camera patterns to interactive conversation prompts, with a separate opt-out and a minimum evidence threshold from 3 to 12 observations across more than one day. Inactive whenever master learning or camera-event learning is off. |
-| `energy_agency` / `energy_peak_watts` / `energy_cost_today_entity` / `energy_cost_net_entity` | Energy tab → Energy Management. How much say Nova has over high draw loads (advisory by default), the whole home peak in watts, and optional sensors of your own for today's cost and net cost (otherwise the daily report estimates cost from the Energy dashboard's price). |
-| `host_health_enabled` / `host_health_alerts_enabled` | Settings → Host Health. Reads Home Assistant's own System Monitor entities for the machine Nova runs on; awareness and alerts are two separate off-by-default toggles. |
-| `host_health_mappings` / `host_health_thresholds` / `host_health_persistence_minutes` / `host_health_cooldown_minutes` | Manual System Monitor entity mapping (only needed when more than one candidate exists for a reading), per-metric alert thresholds, how long a problem must persist before the first alert (2–120 min), and the minimum gap between repeat alerts (5–720 min). |
+If you run Ollama and the local Piper voice, nothing leaves your network. Wearable and sleep data are never sent to a cloud AI. Camera images are not kept, apart from confirmed intrusion snapshots, which are stored privately and shown only in your panel. The full list is in [Privacy and your data](docs/privacy.md).
 
 ## Languages
 
-Nova follows your Home Assistant language automatically, and you can override it under **Settings → General → Language** (or leave it on Auto). The setup and configuration dialogs are localized through Home Assistant's own translation system. The in-panel Command Center loads its own exact-string dictionaries. Regional tags try the full locale first and then the base language (`pt-BR` → `pt-br.json`, `fr-CA` → `fr.json`). Simplified Chinese (`zh-Hans`) uses `zh.json` and Traditional Chinese (`zh-Hant`) uses `zh-hant.json`. Anything not translated falls back cleanly to English, so nothing breaks.
+Nova follows Home Assistant's language, and you can choose another under Settings, General. The setup dialog is available in 21 languages. The panel is fully translated in 11 (German, Dutch, French, Spanish, Brazilian Portuguese, Swedish, Polish, Russian, Czech, Simplified Chinese and Traditional Chinese). Others show English where a translation is missing. Safety alerts are translated for English, French, German, Spanish, Italian, Dutch and Portuguese. See [Translating Nova](docs/translating.md) if you'd like to help.
 
-**Panel UI:** fully translated in Brazilian Portuguese, Czech, Dutch, French, German, Polish, Russian, Simplified Chinese, Spanish, Swedish and Traditional Chinese. Danish, Finnish, Italian, Norwegian Bokmål, Portuguese, Romanian, Slovak, Turkish and Ukrainian have files under `custom_components/nova/frontend/i18n/` but are only partly translated so far; the rest of their text shows in English. Entity IDs, model names, counts, log content and other live values are deliberately left unchanged, and some text the backend sends (Setup Doctor results, the energy outlook notes and the reasons shown with learned suggestions) is still English in every language. Mode descriptions, the first run checklist, Host Health reading names and memory sources are translated in the finished languages.
+## Common questions
 
-**Setup dialog:** complete in 20 languages besides English: Brazilian Portuguese, Czech, Danish, Dutch, Finnish, French, German, Italian, Norwegian Bokmål, Polish, Portuguese, Romanian, Russian, Simplified Chinese, Slovak, Spanish, Swedish, Traditional Chinese (Taiwan wording), Turkish and Ukrainian. Other languages fall back to English here; this is Home Assistant's own translation layer, separate from the panel.
+**The panel looks old after an update.** Hard refresh with Ctrl+Shift+R.
 
-### Help translate
+**Nova doesn't speak.** Check that each room has a speaker assigned under Settings, Room Speakers. Then check Notifications only mode and quiet hours.
 
-Translations are plain JSON files; no code required.
+**A camera tile is blank.** Nest cameras need an extra step. See [Camera setup](docs/camera-setup.md).
 
-- **Panel UI:** `custom_components/nova/frontend/i18n/<lang>.json`, keyed by the exact English string.
-- **Setup dialog:** `custom_components/nova/translations/<lang>.json` (Home Assistant's format).
+**Nova talks too much.** Lower the banter level, turn on Notifications only, or set quiet hours. Critical safety alerts still speak.
 
-To add a language or refine an existing one, copy an existing file, translate the values, and keep the keys and technical tokens (entity IDs, model names, URLs) unchanged. Corrections are welcome, especially native-speaker fixes to machine-assisted translations. Right-to-left languages (Arabic, Hebrew, and so on) also need panel layout support, so that's a good area to help with if you're interested.
+**Nova says nothing about something I expected.** Open Logs, then Decisions. It shows what Nova saw and why it stayed quiet.
 
-## Architecture
+**Something isn't working.** Open the Diagnostics tab and run Setup Doctor. It lists problems with a plain fix for each.
 
-Nova is a Home Assistant custom integration (domain `nova`) installed through HACS into `custom_components/nova/`. It runs in-process: it registers the conversation agent and voice pipeline and serves the custom dashboard panel directly. State and learned behavior persist under Home Assistant's own reported configuration directory — typically `/config/nova/` — mostly as local SQLite: `patterns.db` (state-change/command history behind proposed automations and historical grounding), `conversations.db` (conversation history and Spoken History together), `decisions.db` (the Decisions browser's evidence/confidence/outcome records), and `knowledge.db` (curated facts from `remember`). That's not an exhaustive list of everything under the directory — the doorbell-training dataset, lockdown state, and the reasoning cache live there too, among other files. One exception: Nova's semantic-memory database, `nova.db`, currently lives at the configuration root itself (typically `/config/nova.db`), not inside the `nova/` subdirectory.
+**How do I update?** Update through HACS, restart Home Assistant, then hard refresh the panel.
 
-The reasoning pipeline is layered for resilience and cost: local templates, then a learned cache, then cloud (or eventually a local model), with the Local Mind offline brain as the floor beneath everything. A connectivity breaker guards cloud calls, and every local decision logs its reasoning chain to the dashboard's log view.
+**How do I remove Nova?** Remove the integration under Devices & Services, then remove it in HACS. Your `nova/` folder stays until you delete it.
 
-## Privacy and your data
+**Can I change every setting?** Yes. The full list is in [Settings reference](docs/settings-reference.md).
 
-Nova is local-first. Everything it learns and stores lives inside your Home Assistant instance, mostly under the `nova/` folder in Home Assistant's config directory (`/config/nova/` on HA OS and Container). Nova follows whatever config directory Home Assistant reports, so it never writes outside it. There is no Nova cloud and no telemetry — nothing is ever sent anywhere on Nova's own initiative.
+## Guides
 
-What's stored, and where:
+- [Getting started](docs/getting-started.md): setup, AI models, where settings live, a tour of the panel
+- [Safety and security](docs/safety-and-security.md): intrusion, lockdown, things left open, smoke, leaks and freezing pipes
+- [Cameras and faces](docs/cameras-and-faces.md): doorbell, packages and mail, scene memory, faces
+- [Camera setup](docs/camera-setup.md): Frigate, Eufy, Nest and go2rtc
+- [Weather warnings](docs/weather-warnings.md): Met Éireann, the US National Weather Service or a CAP feed
+- [Voice and speakers](docs/voice-and-speakers.md): speakers per room, broadcasts, language, how Nova addresses people
+- [Presence and alerts](docs/presence-and-alerts.md): who is home, rooms, sleep, quiet hours, mutes
+- [Routines and suggestions](docs/routines-and-suggestions.md): leave alerts, offers, suggested automations, briefings, modes
+- [Memory and knowledge](docs/memory-and-knowledge.md): facts, relations, documents, email, web research
+- [Voice recognition](docs/voice-recognition.md): knowing who is speaking
+- [Energy](docs/energy.md): the Energy tab and the outlook
+- [Host health](docs/host-health.md): watching the machine Nova runs on
+- [Settings reference](docs/settings-reference.md): every setting
+- [Privacy and your data](docs/privacy.md): what is stored and what leaves
+- [How Nova works](docs/how-nova-works.md): for developers and the curious
+- [Translating Nova](docs/translating.md): help add or fix a language
+- [Roadmap](docs/roadmap.md): ideas under consideration
 
-- **Learned behavior and patterns:** `patterns.db` (state changes and commands used to propose automations), `person_patterns` (per-person routines), and the reasoning cache. All local SQLite. State-change rows retain bounded source attribution so Nova can exclude outcomes caused by an existing automation instead of relearning them as a household routine. Meaningful camera detections (Eufy, Frigate, Nest, or Nova's own vision analysis) feed the same table as a bounded, structured row — canonical label, camera/area, source, a confidence number only when the source supplied one, a resident name only when Nova's recognition cache has a fresh, confident match for that camera — never an image, face embedding, raw provider payload, or raw vision-model response.
-- **Knowledge and memory:** the curated `knowledge.db`, conversation history, and vector/FTS conversation memory — scoped to the right conversation or person rather than searched globally. All local SQLite, editable and erasable from the dashboard. With semantic search turned on, each confirmed fact also gets a vector (`fact_vectors` in `knowledge.db`) so it can be found by meaning; the fact text is sent only to the Ollama server you configured, and a forgotten fact takes its vector with it.
-- **Relations:** a small graph of how things relate ("house member owns bike", "child's room adjacent_to hallway") kept in `knowledge.db`. Every relation starts pending, whoever or whatever proposed it, and only a person confirming it in the Memory tab makes it live. Nova cannot confirm a relation, there is no agent tool for it (it can only propose, reject a pending one, and look up confirmed ones). Facts are different: the model can still confirm a pending fact. Only confirmed relations reach the model (a short fenced block of up to 12 edges) or the lookup tool. Nothing infers relations on its own. The table holds at most 500 live rows; at the cap new proposals are refused, nothing is evicted. A relation you remove stays removed against anything but you stating it again.
-- **Decisions and activity:** `decisions.db` (the Decisions browser's evidence, confidence, and outcome feedback) and bounded Provider Activity aggregates — call counts, model, token/latency numbers — which never include the prompts, responses, tool arguments, images, or credentials behind a call.
-- **Documents:** anything you drop in `/config/nova/documents` for the RAG agent, plus its index and vectors. Ingestion is path-guarded so it only ever reads inside that folder.
-- **Scene memory:** off by default and opt in. When on, Nova keeps the text of what its cameras described (never images or faces) in `scene_memory.db`, so it can answer "where did I last see my keys?". Entries expire after 14 days by default (1 to 90 in Settings), each camera keeps a bounded number, and Settings has a button to forget everything. Questions you ask about a camera are never stored.
-- **Camera and vision:** snapshots analyzed on demand aren't retained. Confirmed-intrusion snapshots are the one exception (last 40, for the panel's review/labeling history) — stored privately under `/config/nova/`, never in a web-servable location, and delivered to the panel only over its own authenticated connection. A push notification's photo is a short-lived, cryptographically signed copy that expires and deletes itself. Recording is Frigate's job, under your control.
-- **Biometrics:** off by default and opt-in. When enabled, Nova reads wearable entities Home Assistant already exposes for comfort context (being quieter when a sleep sensor says you're resting, for example). This context only ever reaches the model when you're running a local Ollama provider — with a cloud provider configured (Groq, OpenAI, Anthropic, Gemini) it's withheld entirely, so heart-rate/sleep readings never leave your network. It is explicitly not medical: it never diagnoses, alarms on, or clinically interprets a reading, and anything concerning is left to your own device or a medical professional.
+## Project status
 
-What leaves your network is only what the features you actually enable need: your configured LLM and vision providers, whichever HA TTS provider you've chosen if it isn't the local Piper voice, and — only if you turn them on — web research (DuckDuckGo or your own SearXNG), read-only email over IMAP, hazard feeds (Met Éireann, a CAP feed you set, or USGS/NWS/EONET), Google Maps Travel Time lookups for leave alerts (made through Home Assistant's own integration), and the optional n8n specialist-agent bridges, each reached only when the feature that needs it runs. Run everything through Ollama and a purely local TTS voice, and the pipeline stays entirely on your own network. Sensitive integration credentials are held by Home Assistant, not Nova.
+Nova is a solo project and changes quickly. Releases can include breaking changes, so read [CHANGELOG.md](CHANGELOG.md) before you update. It is usable today, but it isn't a set and forget integration yet.
 
-## Nova's architecture and capabilities
+Found a bug or have an idea? Issues and pull requests are welcome.
 
-This section summarises how Nova is built and what it does, grouped by area: its security controls, how it stays aware of the home without nagging, its capabilities, how it reports its own decisions, and how it fits Home Assistant's lifecycle. It is not a release-by-release history; see `CHANGELOG.md` for that.
+## Credit and licence
 
-**Security hardening**
-- Critical safety announcements can't be silenced by the announcement rate limit, targeted entity or category mutes, or a blanket `nova.shush` — they always pass Nova's output gate.
-- Active smoke, gas, moisture, and carbon-monoxide hazards are recognized from Home Assistant device metadata before occupancy and duplicate-announcement suppression, so a generic sensor name cannot hide an emergency. A hazard that trips again quickly, or while a sensor is muted, debounced or the classifier budget is used up, still gets through; only an entity you excluded yourself is skipped.
-- A provider reply Nova cannot read is treated as a provider failure: the offline Local Mind decides instead, and the unreadable reply is never cached or mistaken for "stay silent".
-- Voice commands can lock a door instantly, but can never unlock one or open a garage — that always requires a tap on your phone, so a spoofed or deepfaked voice can't grant physical access on its own.
-- Nova uses one explicit household alarm for security decisions instead of trusting every alarm-shaped entity exposed by camera hubs and vendor bridges. A single Alarmo panel is detected automatically, other setups can select their source, and automatic lockdown is opt in rather than silently enabled.
-- The `execute_plan` tool (multi-step device automation from a single request) is restricted to an explicit allowlist of home-control domains, so a hallucinated or injected plan step can't reach a system-level service like `homeassistant.restart` or `shell_command`.
-- Biometric/wellbeing data (heart rate, sleep stage) is withheld entirely from cloud LLM calls — it only ever reaches the model when you're running a local Ollama provider.
-- Every memory store Nova has — cross-session conversation recall, long-term semantic search, and curated facts/preferences from "remember that…" — is scoped to the right conversation or person rather than searched globally, and anything pulled back into a live conversation is wrapped against prompt injection rather than trusted verbatim.
-- A new preference or routine from "remember that…" isn't trusted immediately — Nova asks you to confirm it in the same conversation, and if you don't, it waits in the panel's Memory tab for you to approve, edit, or reject, rather than something Nova merely read (an email, a calendar invite) quietly becoming an accepted fact.
-- Confirmed intrusion snapshots are stored privately under Nova's config directory and retrieved through the admin-gated websocket command. Temporary notification copies use signed URLs and are deleted after expiry.
-- Every LLM provider (Groq, OpenAI, Anthropic, Gemini, a custom OpenAI-compatible endpoint, and an optional Bearer key for a protected Ollama endpoint) gets its own dedicated credential in Home Assistant's `secrets.yaml`, so a key configured for one provider can never be sent to another — a role (a tier, vision, camera-reasoning) pointed at a different provider than the Main Agent used to be able to receive the Main Agent's key by mistake. Credential values are never returned to any UI, only whether a provider is configured; migrating an existing shared key never guesses which provider it belongs to, and leaves it in place untouched if that can't be determined safely.
-- Model discovery and endpoint tests for self-hosted servers check every redirect before following it, refuse link-local and cloud-metadata destinations, and never forward a credential to a different origin, while LAN and private endpoints keep working. Cloud providers are only ever contacted at their fixed addresses.
-- Every chat request passes through one bounded Provider Activity boundary. Hidden reasoning, SDK response objects, credentials, request bodies, images and headers are kept out of both the activity records and the responses older integrations receive.
-- Nova's config file, the copy of `secrets.yaml` it backs up and its state backups are readable only by Home Assistant's own user. Errors returned to the model and the panel carry only the error type, not file paths or library detail, and diagnostics downloads scrub passwords, tokens and webhook addresses out of every value, including error lines, the log tails and service health.
-
-**Smarter, less noisy home awareness**
-- Intrusion never confirms on a resident walking about while the alarm is armed home or night, or the household is asleep: that takes the alarm going off or a person confirmed on camera. Appliance doors, such as a fridge, never count as a way in.
-- One answer to who is home for intrusion, lockdown, packages, briefings and offers: people, plus device trackers linked to a person. A TV or hub tracker can no longer switch off away detection, and a person reading unknown is never treated as away.
-- A medium alert while everyone is away, such as a door left unlocked, now always reaches the phones instead of no one, and every safety decision is written to the decision log in one format.
-- A safety kernel of Nova's own: one authority check for every lock, cover, alarm, scene and script action (disarm by voice needs a phone tap, and Nova acting on its own may only lock, close or adjust comfort), checks after acting before anything is called secured, one read-only snapshot of the house per tick, situations that survive a restart, and learning only from outcomes you confirmed.
-- The night sweep no longer fights people: anything it could not secure, or that someone opened again, gets one try and one alert a night. Lockdown never says "fully secured" when it cannot read a door or window, and each decision links to the commands it sent.
-- Learned suggestions only link things in the same area (arrivals and departures excepted), need the trigger to be followed by the action most of the time (and, for thresholds, the sensor to cross shortly before the device changes), keep one suggestion per device, and only appear when Nova can actually install them. With "Review suggestions with AI" on, each new suggestion is checked by the Suggestion Review model (chosen in the AI Models card) before you see it; rejected ones are never suggested again, and are listed with the reason so you can bring one back.
-- Learned sequence and numeric-threshold suggestions can use same-area presence as a condition when the history supports it. A gated sequence can also learn to turn its device off after that same presence signal clears, with trigger-time sampling and restart-safe generated automations so delayed or repeated activity does not strand the device on.
-- Nova reads Home Assistant's already-loaded automation runtime inventory (UI, YAML, packages, and blueprints) at startup and automation reload, not on each event. Automation-trigger contexts are matched to resulting state changes in a bounded in-memory map, so existing automations cannot teach Nova their own output as if it were a new human routine. New suggestions are compared deterministically against the inventory; exact duplicates are suppressed, opaque blueprints/templates and same-target rules are shown as review warnings, and no LLM call or continuous scan is added.
-- A **Faces** tab lists the faces Frigate or Double Take recently named (known or unknown, resident or not) and keeps a household resident roster (`<config>/nova/face_roster.json`, names only, readable only by Home Assistant's user). Nova has no face engine of its own and shows no images. An opt in setting lets a resident stop a new intrusion alert from opening, never one already open.
-- "Nova speaks" sets the language Nova talks and writes in, separate from Home Assistant's own language and from the panel's. It keeps the region or script where it changes the language, such as Brazilian Portuguese or Traditional Chinese.
-- The panel is fully translated in 11 languages, including Simplified and Traditional Chinese, and the setup dialog in 20. Checks in CI keep every finished language complete.
-- Mutes survive a restart, and a Muted card on the dashboard lists them. "Notifications only" mode sends proactive alerts to your phone instead of the speakers; critical safety alerts still speak.
-- Sleep state is explicit (Auto / Awake / Asleep), not inferred purely from bedroom occupancy — one person going to bed no longer marks the whole house "asleep" while someone else is still up.
-- Night-time intrusion alerts require an actual breach (a ground-floor door or window genuinely open), not just ordinary movement — a trip to the bathroom no longer triggers a security alert, while a real breach still escalates exactly as before.
-- Speakers are assigned per room explicitly (Settings → Room Speakers) instead of auto-discovered — Nova only ever uses the one speaker you've assigned to a room, so a stray Music Assistant/AirPlay/Cast duplicate for a TV can no longer get spoken through.
-- Nova addresses whoever's actually home instead of one fixed honorific for everyone — exactly one person home gets their own configured address term (or the existing global default); with nobody home, or more than one person home, it drops the address entirely rather than guessing whose preference to use. Configurable per person from Settings → Person Honorifics.
-- Appliance cycle completion is only ever announced from native or explicitly declared evidence: a washer/dryer/dishwasher's own job-state sensor, or an appliance you've mapped yourself (Energy tab → Appliances). Generic auto-discovery and power-profile fingerprint guessing keep running in the background to support Nova's own learning, but an unconfirmed guess — an ordinary light or plug that happens to look like a power cycle — never gets to speak or push a notification on its own. It also ignores whatever state a status sensor happens to already be sitting in the moment Nova starts (a restart, or the device just hadn't reported back in yet) — only a genuine transition into "done" that Nova actually watched happen gets announced, so restarting Home Assistant can't itself trigger a false "the dishwasher has finished."
-- State anticipation ("around this time, X is usually Y") never nags you back toward a less-secure historical habit — a window that's usually open but is currently closed stays silent, full stop. The reverse case (currently open, unlocked, or disarmed when that's unusual) only speaks up when there's a separate, concrete reason — everyone in the house confirmed away, or a security system that's actually armed — never "usually" on its own.
-- A door or window left open escalates properly on repeat nags (10 → 20 → 30 minutes, not the same "10 minutes" forever), and stays quiet altogether once outside is above 10°C — an open door isn't a heat-loss concern on a mild day.
-- Thermostat keypad/child locks can be treated as what they are, not physical security: locks you list under **Settings → Security Alarm → Locks left out of lockdown** are excluded from lockdown's auto-lock sweep and from every briefing/status/intent that lists "unlocked" locks. Since v8.28.0 nothing is listed by default; an install from before then keeps the two locks it used to exclude. The Sentinel's left-unlocked reminder recognises a thermostat's keypad lock by its device on its own.
-- A camera's car, animal or package sensor never counts as a person: it does not make Nova think someone is home, pick a room to speak in, or start an intrusion check. Nova also only offers what it can actually do: a device that is missing, unavailable or lacks the feature gets a plain alert with no question.
-- The last person leaving the house stays fully silent. Household presence comes only from registered people, so fixed infrastructure exposed as a device tracker cannot create an audience that is not there.
-- Arrival briefings address the person who just walked in directly ("Welcome home, sir") instead of a generic time-of-day greeting followed by a redundant restatement of their own name, and skip reporting the front door as "open" on the very briefing that opening it caused.
-
-**New capabilities**
-- Self-hosted model setup is now a first-class, guided workflow: Ollama and custom OpenAI-compatible servers have separate endpoints, connection tests and server-reported model discovery, capability-aware Local Text/Hybrid profiles, manual-model fallback, and one atomic Apply action that validates every role before changing the running configuration. Ollama uses its native `/api/chat` contract (including tools, images, and explicit thinking control) rather than pretending to be OpenAI-compatible. Legacy shared endpoints migrate without tying the public integration to any host, address, or model.
-- Command Center once again loads Nova's 18 shipped panel-language dictionaries, follows Home Assistant's locale automatically, supports a saved override under Settings → General → Language, falls back from regional to base-language files, and leaves missing strings safely in English. The same parity repair restores the first-run checklist, Cognitive Core status, standing Goals, guarded Lockdown control, authenticated Camera Watch snapshots/analysis/diagnostics, and settings that had disappeared when Classic was removed.
-- Live model discovery for Groq, OpenAI, Anthropic, Gemini, Ollama, and custom endpoints paginates the providers that officially support it (Gemini, Anthropic) with strict page/model-count bounds, briefly caches results per provider so switching tabs doesn't re-fetch every time, and never silently replaces a saved model just because a live list doesn't happen to include it — a real fix, since that used to happen on every Settings visit for any private, preview, or newly-released model.
-- Normal Nova push alerts can target multiple selected phones or notification services. Existing single device settings carry forward automatically, and one unavailable device cannot block delivery to the others. Critical intrusion and confirmation broadcasts remain household wide.
-- Native Eufy Security doorbell/camera support: doorbell press, stranger-vs-known-face detection, and package delivered/stranded/taken all use Eufy's own on-device sensors directly (discovered by unique_id, so a rename can't break it), alongside the Nest and Frigate pipelines. A known/regular face and routine package events cost zero vision-LLM calls — only an actual stranger triggers one.
-- Semantic camera-event learning: Eufy, Frigate, Nest, and Nova's own vision analysis now feed one shared pipeline that normalises a meaningful detection (person, vehicle, animal, package, or generic activity) into Nova's existing pattern learner — the same store and sequence detector that already learns from every other entity in the home, not a separate system. This is what lets Nova learn things like "a person usually appears at the front door around this time" or "the porch light tends to follow a driveway detection," on top of the routine handling above, which is completely unchanged: native Eufy detections still never call a vision model, and package/notification behaviour is identical. Deduplicated across sources and cameras within a short window, filtered by a configurable confidence floor only when a source actually supplies one, and a resident is only ever named when Nova's existing recognition cache has a fresh, confident match for that specific camera — never guessed from "someone's home." No image, face data, or raw provider payload is ever stored; recorded events are a synthetic, non-actuating entity (`camera_event.<location>`) that can be a pattern *trigger* but can never become an action target. On by default (Settings → Learning & Memory → Routine Learning), with its own opt-out, and inactive whenever Nova's learning system itself is off.
-- Historical camera awareness: Nova can turn repeated Phase 4 camera events into a short, evidence-based "What I've noticed lately" conversation block. It stays explicitly historical, needs observations across multiple days, uses broad time wording only when the evidence supports it, and never claims that a person, vehicle, animal, or package is present now. The shared pattern store is read through a bounded, prompt-fenced path with no image access, no extra model call, no extra database, and a separate Learning & Memory opt-out.
-- Solar/battery/grid visibility: the Energy tab's Live panel shows a power flow diagram and tiles for solar, house, battery and grid, refreshed every 5 seconds, with self-sufficiency, plus Today totals and a Battery panel; and a voice/chat tool ("how's our solar doing"). Reads straight from Home Assistant's own Energy dashboard configuration, so any install that's already set that up needs no separate setup for this.
-- Daily solar/energy report: ask "how much solar today," "how much is left," "what did we use," or "what did it cost" for today's totals — generated, self-consumed, exported, imported, forecast remaining, and cost — on top of the same live solar tool above.
-- Energy outlook: the Energy tab's Outlook card looks 36 hours ahead using your tariff times (learned from the price history in Home Assistant's Energy dashboard), the solar forecast corrected by how accurate it has been, and your usual usage by hour. It gives a few pieces of advice, such as topping up the battery in a cheap window before a dull day or keeping the battery for dearer hours, and the cheapest time for a big appliance. Ask "should I charge the battery tonight?" or "when is the cheapest time to run the dishwasher?". Advice only: it never changes any device. It needs a few things from the Energy dashboard: a grid price that changes by time of day for tariff advice, the battery capacity for battery advice, and a solar forecast (Forecast.Solar, Open-Meteo Solar Forecast or Solcast) for advice that depends on the sun. It learns from your own history first, so advice starts after a few days. See the [Energy setup guide](docs/energy.md).
-- Command Center: an animated "stellar core" centerpiece instead of a camera feed, so the dashboard looks and feels the same whether you have zero cameras or twelve, with Command Center/Residence/Intrusion/Faces/Suggestions/Settings/Logs/Diagnostics/Memory/Energy navigation, a Settings tab reorganized around what you're doing rather than which subsystem it touches, and Areas cards showing every monitored room (no hard cap) with capability icons, live temperature/humidity sparklines, and a light toggle. Includes a full Floor Plan Editor (rooms, outdoor zones, property-line boundary, windows/doors/dormers, camera placement, an uploadable/opacity-adjustable background image, JSON export/import for backup or moving a layout between installs, and AI camera-coverage estimation) and a Residence tab with a live, rotatable and scroll-to-zoomable 3D house view built from that same floor plan — home style selector, floor tabs, view presets, live room lighting from occupancy/mmWave presence, and door/garage entity mapping.
-- Command Center is now Nova's only dashboard (v7.101.30): it started as an optional alternate look, reached full feature parity with the original "Classic" dashboard, and Classic was deleted rather than maintaining two UIs indefinitely.
-- Garage only where one exists (v8.26.0): a home with no garage door, garage sensor or area named Garage never sees garage settings, rows, 3D garage or garage wording, and the AI's examples no longer suggest one. A Garage setting (Auto, Yes, No) overrides it, and it only changes what you see, never what Nova secures. The Residence tab also lets you pick and name your own exit doors and shows which safety checks already cover each one.
-- Rooms only where they exist (v8.27.0): the basement floor and its door rows, the stairs, the upper floor, a utility room and the 3D cellar door show only when the home has them, by the same rules as the garage. The Basement setting is now Auto, Yes or No.
-- HOMER, a named read-only diagnostic specialist (`delegate_task` profile `"homer"`) built on Nova's existing sub-agent delegation system — not a separate diagnostic engine. It replaces what used to be a standalone `"diagnostics"` capability group with one canonical tool grant, prompt, and turn limit; `capability="diagnostics"` still works, as a compatibility alias for the same profile. For a fault ("why is this unavailable," "why is Nova slow," "check connectivity and system health"), Nova can delegate to HOMER with a fixed diagnostic/telemetry/state tool set — no device control, configuration, memory-writing, or delegation tool, and no `solar_status`/`energy_report` either (those report totals and forecasts, not fault evidence, and remain ordinary main-agent tools) — that separates observation from inference and reports a likely cause, its confidence, and a recommended next step back to Nova rather than acting on it. HOMER gets a genuinely separate system prompt, not a directive layered on top of the standard one, so it never carries the standard prompt's unconditional claim that the agent "has tools to control devices." A related hardening found while building this: the tool schema offered to a model was never itself an execution-time boundary — the dispatch loop now refuses any tool call outside a sub-agent's actual grant, for every scoped sub-agent, not only HOMER. Always on, capped at 4 tool turns, and — like every sub-agent — unable to delegate further.
-- Host health awareness: Nova can read Home Assistant's own System Monitor entities for the machine it runs on (CPU/memory/disk, memory and I/O pressure, optionally temperature) and fold a structured summary into `system_diagnostics` — the same tool HOMER already had, so diagnosing "why is Nova slow" now includes host resource evidence, with no new HOMER tool and no change to HOMER's eight-tool grant. Entities are discovered by System Monitor integration ownership and internal type, never by friendly name or entity_id (both renamable) — a single unambiguous candidate can auto-map, multiple candidates require a manual pick in Settings → Host Health, and a disabled System Monitor entity is reported with setup guidance, never silently force-enabled. A deterministic evaluator (no LLM) requires a problem to persist across multiple consecutive valid samples — never a brief spike — before the first alert, applies a configurable cooldown to repeats, and requires a comparably stable recovery streak before announcing recovery; a restart or reload starts persistence tracking from zero rather than reconstructing it from anything stored. Off by default, and — since a host isn't a household safety emergency — alerts route through the same presence-aware announcement and multi-notification-target paths every other Nova alert uses, never a separate dispatcher. No `/proc`, `/sys`, shell, SSH, or Supervisor API access anywhere in the implementation, and no host-control, restart, or remediation action exists.
-
-**Decision transparency and honest reporting**
-- A browsable Decisions view, a Decision Lab policy-replay tool, a read-only Setup Doctor, run-tracking for installed automations, and bounded Provider Activity aggregates give you visibility into what Nova decided and why, without ever storing the prompts or responses behind a call.
-- Device actions report what actually happened, not just what was attempted: a confirmed outcome is worded differently from a command Home Assistant merely accepted, bulk/plan/scene/script/lockdown actions no longer claim completion they haven't observed, and an ambiguous device name gets a clarifying question instead of a silent best guess.
-- Appliance cycle announcements and "this is usually different" alerts are both now evidence-gated: only a native or explicitly declared appliance can announce a finished cycle, and a habit-based alert only interrupts you when there's a separate, concrete reason (everyone confirmed away, or the alarm actually armed) — never just because something's uncommon for the hour.
-- Conversation memory is scoped to the person speaking (falling back cleanly to the shared conversation itself), and background chatter that isn't addressed to Nova is rejected before it can ever be written into that memory.
-
-**Reliability and Home Assistant integration**
-- Runtime paths use Home Assistant's reported configuration directory instead of assuming `/config`.
-- A partial setup failure cleans up registered services, listeners, entities, scheduler jobs, and other resources before the setup error is returned.
-- Configuration and database write failures are reported instead of silently treated as successful.
-- Nova's SQLite schema has a single owner. Existing databases are upgraded once at startup, one file at a time and all or nothing, and are checked against the real schema before the upgrade is recorded. A store that fails to upgrade is logged and retried at the next start without stopping Nova, and older releases can still open an upgraded file.
-- The dashboard is built from ordered source files into the single `nova-panel.js` HACS installs, by a dependency free build that CI checks is current. The 3D residence engine has one source, and its output is pinned by a test.
-- CI enforces the architecture: type checks for the capability packages (strict for persistence), no import cycles, a pinned package dependency direction, compatibility modules that can't grow, and per package coverage floors. Unit tests run fully isolated from `/config`.
-- Provider clients belong to the loaded Nova runtime. Roles with identical settings share one client, and a client that is replaced, reloaded or unloaded is closed exactly once, after its in-flight work finishes.
-- A PHACC integration suite now tests setup, reload, config flow, websocket permissions, snapshot retrieval, and setup-failure cleanup in CI.
-
-This list grows as real fixes ship — see `CHANGELOG.md` for the full history.
-
-## Possible future development
-
-These are ideas under consideration, not promised or scheduled features. None of the below is implemented.
-
-- **Driving Mode** — routing travel reminders, briefings, and alerts differently while away from home (e.g. through an Android Auto connection). Deferred: no current use case.
-- **Automation specialist sub-agent** — a second, actuating sub-agent. Deferred: Nova's main agent already controls devices directly, so a second actuator path would expand the safety boundary that needs defending without a clear distinct benefit today.
-- **Proximity-adjusted speech** — adjusting a speaker's volume based on how close a person is to it. Deferred: it depends on a suitable mmWave sensor being positioned relative to each speaker, and would behave inconsistently in any room without one.
-
-## Credit
-
-Nova includes work originally created by sam3gp8 and is distributed under the MIT License. See [LICENSE](LICENSE) for copyright and license details. This repo is public: issues and pull requests are welcome.
-
-## License
-
-[MIT](LICENSE)
+Nova includes work originally created by sam3gp8 and is distributed under the [MIT License](LICENSE).
