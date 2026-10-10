@@ -228,5 +228,6 @@
   "Unlocked": "Avattu",
   "Utility Room": "Kodinhoitohuone",
   "doors you leave the house by. Nova adds nothing until you pick one.": "ovet, joista lähdet talosta. Nova ei lisää mitään ennen kuin valitset jonkin.",
-  "— pick a door, lock, cover or sensor —": "— valitse ovi, lukko, suoja tai anturi —"
+  "— pick a door, lock, cover or sensor —": "— valitse ovi, lukko, suoja tai anturi —",
+  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Näytä kellarikerros ja sen ovet. Automaattinen etsii Kellari-nimistä aluetta tai kerrosta tai maanpinnan alapuolista kerrosta. Tämä muuttaa vain sen, mitä näet."
 }

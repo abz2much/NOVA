@@ -391,7 +391,6 @@
   "Czech": "Tjeckiska",
   "DECISIONS": "BESLUT",
   "DEDUP": "DEDUP",
-  "DEHUMIDIFIER": "AVFUKTARE",
   "DELETE": "TA BORT",
   "DET": "DET",
   "DIAGNOSE": "DIAGNOSTISERA",
@@ -502,7 +501,6 @@
   "HELPFUL": "HJÄLPSAM",
   "HIDE CAMERAS ▴": "DÖLJ KAMEROR ▴",
   "HOME": "HEMMA",
-  "HOME ENERGY": "ENERGI I HEMMET",
   "HOMER — diagnostic sub-agent": "HOMER — underagent för diagnostik",
   "HYBRID": "HYBRID",
   "Habits Nova has confidently attributed to one person, from 30 days of sole-occupant activity — separate from household-wide facts above.": "Vanor som Nova säkert kopplar till en person, från 30 dagars aktivitet när personen var ensam hemma — skilda från hushållets fakta ovan.",
@@ -594,7 +592,6 @@
   "Muted": "Tystad",
   "NASA disasters": "NASA-katastrofer",
   "NEEDS ADJUSTMENT": "BEHÖVER JUSTERAS",
-  "NO": "NEJ",
   "NO SNAPSHOT": "INGEN ÖGONBLICKSBILD",
   "NONE": "INGEN",
   "NOVA COMMAND CENTER": "NOVA KOMMANDOCENTRAL",
@@ -779,7 +776,6 @@
   "SPOKEN HISTORY": "TALHISTORIK",
   "STAIRS": "TRAPPA",
   "STOPPED": "STOPPAD",
-  "SUMP PUMP": "DRÄNERINGSPUMP",
   "SYSTEM": "SYSTEM",
   "SYSTEM LOG": "SYSTEMLOGG",
   "Satellites": "Satelliter",
@@ -878,7 +874,6 @@
   "Voice & Speakers": "Röst & högtalare",
   "WARN": "VARNING",
   "WARNING": "WARNING",
-  "WASHER": "TVÄTTMASKIN",
   "WORKING": "FUNGERAR",
   "WRONG": "FEL",
   "Waiting for Nova…": "Väntar på Nova…",
@@ -1177,5 +1172,6 @@
   "Unlocked": "Olåst",
   "Utility Room": "Grovkök",
   "doors you leave the house by. Nova adds nothing until you pick one.": "dörrar du lämnar huset genom. Nova lägger inte till något förrän du väljer en.",
-  "— pick a door, lock, cover or sensor —": "— välj en dörr, ett lås, ett skydd eller en sensor —"
+  "— pick a door, lock, cover or sensor —": "— välj en dörr, ett lås, ett skydd eller en sensor —",
+  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Visa källarvåningen och dess dörrar. Automatiskt letar efter ett område eller en våning som heter Källare, eller en våning under marken. Det ändrar bara vad du ser."
 }

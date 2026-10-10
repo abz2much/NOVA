@@ -135,6 +135,9 @@ const PANEL = {
     // A home with a garage (8.26.0: garage items show only where one exists).
     has_garage: true,
     garage_mode: "auto",
+    // ... with a basement and a mapped cellar door (8.27.0).
+    basement_mode: "auto",
+    home_features: { basement: true, cellar_door: true, utility: false },
     exit_doors: [{ entity_id: "lock.garden_door", name: "Garden door" }, { entity_id: "binary_sensor.shed_contact", name: "Shed" },
       { entity_id: "binary_sensor.gone_door", name: "Old door" }, { entity_id: "lock.side_door", name: "Side" },
       { entity_id: "cover.patio_door", name: "Patio" }, { entity_id: "binary_sensor.porch_door", name: "Porch" }],
@@ -834,7 +837,7 @@ if (require.main === module) setTimeout(async () => {
         return !!rh && !rh.querySelector(".stub-tag")
           && rh.querySelector('select[data-cfg-key="residence_style"]')
           && rh.querySelector('input[data-cfg-key="home_bedrooms"]')
-          && rh.querySelector('button[data-cfg-key="has_basement"]');
+          && rh.querySelector('select[data-cfg-key="basement_mode"]');
       })()],
     ["settings tab: numeric Residence field autosaves as a Number, matching Classic",
       (() => {
@@ -1180,6 +1183,46 @@ if (require.main === module) setTimeout(async () => {
       !rooms1f.some(n => /garage/i.test(n)) && rooms1f.includes("Front Door") && rooms1f.includes("Back Door")]);
     checks.push(["no garage: the 3D house draws no garage doors", !/gdoor/.test(svg) && !/GARAGE/.test(svg)]);
     checks.push(["garage home: the 3D house still draws its garage doors", /gdoor/.test(svgWithGarage)]);
+    {
+      // ── Rooms only where they exist (8.27.0) ──
+      const plain = { ...realData(), config: { ...realData().config, has_garage: false, home_stories: "1",
+        home_features: { basement: false, cellar_door: false, utility: false },
+        door_mapping: { basement: "", front: "cover.test_front_door" } } };
+      elNew._data = () => plain;
+      const html = elNew._htmlResidence();
+      const plainPlan = elNew._defaultFloorPlan();
+      const plainSvg = window.NOVA3D.renderSVG({ theta: 35, floor: "all", lit: {}, doors: {}, spec: elNew._houseSpec(),
+        plan: elNew._planToFeet(plainPlan), elements: {}, garage: [] });
+      const withUtility = { ...plain, config: { ...plain.config, home_features: { basement: false, cellar_door: false, utility: true } } };
+      elNew._data = () => withUtility;
+      const utilityPlan = elNew._defaultFloorPlan();
+      const withBasement = { ...plain, config: { ...plain.config, home_stories: "1.5", home_features: { basement: true, cellar_door: false, utility: false } } };
+      elNew._data = () => withBasement;
+      const bHtml = elNew._htmlResidence();
+      const bPlan = elNew._defaultFloorPlan();
+      const bSvg = window.NOVA3D.renderSVG({ theta: 35, floor: "all", lit: {}, doors: {}, spec: elNew._houseSpec(),
+        plan: elNew._planToFeet(bPlan), elements: {}, garage: [] });
+      elNew._data = realData;
+      const pdoc = new resRoot.ownerDocument.defaultView.DOMParser().parseFromString(`<div>${html}</div>`, "text/html");
+      const bdoc = new resRoot.ownerDocument.defaultView.DOMParser().parseFromString(`<div>${bHtml}</div>`, "text/html");
+      const names = p => Object.values(p).flatMap(f => (f.rooms || []).map(r => r.name));
+      checks.push(["no basement: no Basement floor tab, no Cellar / Bulkhead or Basement door rows",
+        !pdoc.querySelector('[data-res-floor="bsmt"]') && !pdoc.querySelector('[data-slot="cellar"]')
+          && !pdoc.querySelector('[data-slot="basement"]') && !/basement|cellar|bulkhead/i.test(pdoc.body.textContent)
+          && !!pdoc.querySelector('[data-slot="garage_rear"]')]);
+      checks.push(["no basement: the default plan has no basement floor, stairs, utility room or device labels",
+        !plainPlan.bsmt && !plainPlan["2f"] && !names(plainPlan).some(n => /^(Stairs|Utility Room|Basement)$/.test(n))
+          && names(plainPlan).includes("Front Door") && names(plainPlan).includes("Back Door")]);
+      checks.push(["no cellar door: the 3D house draws no cellar door", !/cellar-door/.test(plainSvg) && !/cellar-door/.test(bSvg)]);
+      checks.push(["utility area: the space the garage used is a utility room", names(utilityPlan).includes("Utility Room")]);
+      checks.push(["basement home: Basement tab and rows show, the plan has a basement but no device labels",
+        !!bdoc.querySelector('[data-res-floor="bsmt"]') && !!bdoc.querySelector('[data-slot="cellar"]')
+          && !!bdoc.querySelector('[data-slot="basement"]') && !!bPlan.bsmt && !bPlan.bsmt.labels
+          && names(bPlan).includes("Stairs")]);
+      checks.push(["mapped cellar door: the 3D house still draws it",
+        /cellar-door/.test(window.NOVA3D.renderSVG({ theta: 35, floor: "all", lit: {}, doors: {}, spec: { cellar: true },
+          plan: elNew._planToFeet(bPlan), elements: {}, garage: [] }))]);
+    }
     checks.push(["3D house: 0 garage bays draws no garage doors",
       !/gdoor/.test(window.NOVA3D.renderSVG({ theta: 35, floor: "all", lit: {}, doors: {}, spec: { garageBays: 0 },
         plan: elNew._planToFeet(elNew._defaultFloorPlanBase()), elements: {}, garage: [] }))]);

@@ -27,7 +27,7 @@ const NOVA3D = (function () {
   var CENTER = [(XG0 + XHE) / 2, RY, WALL * 0.5]; // rotate about model center
 
   // ---------- per-render home spec (type/specs); fields left unset = approved default ----------
-  // garageBays, dormersFront, dormersRear: counts · noGarage: true hides every garage part · chimney: 'right'|'left'|'none' · pitch: roof-rise scale
+  // garageBays, dormersFront, dormersRear: counts · noGarage: true hides every garage part · cellar: false hides the cellar door · chimney: 'right'|'left'|'none' · pitch: roof-rise scale
   var SPEC = {};
   function applySpec(s) {
     SPEC = s || {};
@@ -883,7 +883,8 @@ const NOVA3D = (function () {
       });
     }
     // auto bulkhead only when nothing is placed on the 1st floor or basement
-    if (!placed.length && !placedB.length && plan['bsmt'] && plan['bsmt'].length) {
+    // ... and only in a home with a cellar door (SPEC.cellar false hides it, 8.27.0)
+    if (SPEC.cellar !== false && !placed.length && !placedB.length && plan['bsmt'] && plan['bsmt'].length) {
       bulkheadDoor(L, GL, 'back', (minx + maxx) / 2, maxy, 6, false);
     }
 
@@ -1005,7 +1006,7 @@ const NOVA3D = (function () {
     winY(L, GL, D, XGH + 3, XGH + 9, 3, 7, stOf('kitchen'), true, 0.06);
     winY(L, GL, D, XGH + 22, XGH + 28, 3, 7, stOf('guest room'), true, 0.06);
     doorY(L, GL, D, 25.2, 28.2, 0, 6.8, 0.06, 'right', dOf('garage_rear'));            // garage rear man-door (~3ft W of junction)
-    bulkhead(L, GL, 33.5, 38.5, dOf('cellar'));                                        // cellar door under the kitchen window
+    if (SPEC.cellar !== false) bulkhead(L, GL, 33.5, 38.5, dOf('cellar'));             // cellar door under the kitchen window
 
     return { faces: L, glow: GL, labels: LBL };
   }

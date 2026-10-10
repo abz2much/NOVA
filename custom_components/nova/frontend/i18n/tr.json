@@ -228,5 +228,6 @@
   "Unlocked": "Kilitsiz",
   "Utility Room": "Çamaşır odası",
   "doors you leave the house by. Nova adds nothing until you pick one.": "evden çıktığın kapılar. Sen birini seçene kadar Nova hiçbir şey eklemez.",
-  "— pick a door, lock, cover or sensor —": "— bir kapı, kilit, örtü veya sensör seç —"
+  "— pick a door, lock, cover or sensor —": "— bir kapı, kilit, örtü veya sensör seç —",
+  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Bodrum katını ve kapılarını göster. Otomatik, Bodrum veya Mahzen adlı bir alan ya da kat veya zemin altındaki bir kat arar. Yalnızca gördüklerini değiştirir."
 }

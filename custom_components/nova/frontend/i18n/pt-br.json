@@ -391,7 +391,6 @@
   "Czech": "Tcheco",
   "DECISIONS": "DECISÕES",
   "DEDUP": "DEDUP",
-  "DEHUMIDIFIER": "DESUMIDIFICADOR",
   "DELETE": "EXCLUIR",
   "DET": "DET",
   "DIAGNOSE": "DIAGNOSTICAR",
@@ -502,7 +501,6 @@
   "HELPFUL": "ÚTIL",
   "HIDE CAMERAS ▴": "OCULTAR CÂMERAS ▴",
   "HOME": "EM CASA",
-  "HOME ENERGY": "ENERGIA DA CASA",
   "HOMER — diagnostic sub-agent": "HOMER — subagente de diagnóstico",
   "HYBRID": "HÍBRIDO",
   "Habits Nova has confidently attributed to one person, from 30 days of sole-occupant activity — separate from household-wide facts above.": "Hábitos que a Nova atribui com segurança a uma pessoa, a partir de 30 dias de atividade dela sozinha em casa — separados dos fatos da casa toda acima.",
@@ -594,7 +592,6 @@
   "Muted": "Silenciado",
   "NASA disasters": "Desastres da NASA",
   "NEEDS ADJUSTMENT": "PRECISA DE AJUSTE",
-  "NO": "NÃO",
   "NO SNAPSHOT": "SEM INSTANTÂNEO",
   "NONE": "NENHUM",
   "NOVA COMMAND CENTER": "CENTRAL DE COMANDO NOVA",
@@ -779,7 +776,6 @@
   "SPOKEN HISTORY": "HISTÓRICO FALADO",
   "STAIRS": "ESCADA",
   "STOPPED": "PARADO",
-  "SUMP PUMP": "BOMBA DE ESGOTAMENTO",
   "SYSTEM": "SYSTEM",
   "SYSTEM LOG": "LOG DO SISTEMA",
   "Satellites": "Satélites",
@@ -878,7 +874,6 @@
   "Voice & Speakers": "Voz e alto-falantes",
   "WARN": "AVISO",
   "WARNING": "WARNING",
-  "WASHER": "LAVA-ROUPAS",
   "WORKING": "FUNCIONANDO",
   "WRONG": "ERRADO",
   "Waiting for Nova…": "Aguardando a Nova…",
@@ -1177,5 +1172,6 @@
   "Unlocked": "Destrancada",
   "Utility Room": "Lavanderia",
   "doors you leave the house by. Nova adds nothing until you pick one.": "portas por onde você sai de casa. A Nova não adiciona nada até você escolher uma.",
-  "— pick a door, lock, cover or sensor —": "— escolha uma porta, fechadura, cobertura ou sensor —"
+  "— pick a door, lock, cover or sensor —": "— escolha uma porta, fechadura, cobertura ou sensor —",
+  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Mostrar o porão e suas portas. Automático procura uma área ou andar chamado Porão ou Adega, ou um andar abaixo do nível do solo. Só muda o que você vê."
 }

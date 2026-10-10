@@ -228,5 +228,6 @@
   "Unlocked": "Odomknuté",
   "Utility Room": "Technická miestnosť",
   "doors you leave the house by. Nova adds nothing until you pick one.": "dvere, ktorými odchádzate z domu. Nova nič nepridá, kým nejaké nevyberiete.",
-  "— pick a door, lock, cover or sensor —": "— vyberte dvere, zámok, roletu alebo senzor —"
+  "— pick a door, lock, cover or sensor —": "— vyberte dvere, zámok, roletu alebo senzor —",
+  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Zobraziť suterén a jeho dvere. Automaticky hľadá oblasť alebo podlažie s názvom Suterén alebo Pivnica, alebo podlažie pod úrovňou terénu. Mení len to, čo vidíte."
 }

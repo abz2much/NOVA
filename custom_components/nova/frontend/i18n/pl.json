@@ -391,7 +391,6 @@
   "Czech": "Czeski",
   "DECISIONS": "DECYZJE",
   "DEDUP": "DEDUP",
-  "DEHUMIDIFIER": "OSUSZACZ",
   "DELETE": "USUŃ",
   "DET": "DET",
   "DIAGNOSE": "DIAGNOZUJ",
@@ -502,7 +501,6 @@
   "HELPFUL": "POMOCNE",
   "HIDE CAMERAS ▴": "UKRYJ KAMERY ▴",
   "HOME": "W DOMU",
-  "HOME ENERGY": "ENERGIA W DOMU",
   "HOMER — diagnostic sub-agent": "HOMER — podagent diagnostyczny",
   "HYBRID": "HYBRYDA",
   "Habits Nova has confidently attributed to one person, from 30 days of sole-occupant activity — separate from household-wide facts above.": "Nawyki, które Nova z pewnością przypisuje jednej osobie, na podstawie 30 dni aktywności, gdy była sama w domu — oddzielone od faktów o całym domu powyżej.",
@@ -594,7 +592,6 @@
   "Muted": "Wyciszone",
   "NASA disasters": "Katastrofy NASA",
   "NEEDS ADJUSTMENT": "WYMAGA POPRAWEK",
-  "NO": "NIE",
   "NO SNAPSHOT": "BRAK ZRZUTU",
   "NONE": "BRAK",
   "NOVA COMMAND CENTER": "CENTRUM DOWODZENIA NOVA",
@@ -779,7 +776,6 @@
   "SPOKEN HISTORY": "HISTORIA WYPOWIEDZI",
   "STAIRS": "SCHODY",
   "STOPPED": "ZATRZYMANO",
-  "SUMP PUMP": "POMPA ZATAPIALNA",
   "SYSTEM": "SYSTEM",
   "SYSTEM LOG": "LOG SYSTEMU",
   "Satellites": "Satelity",
@@ -878,7 +874,6 @@
   "Voice & Speakers": "Głos i głośniki",
   "WARN": "OSTRZEŻENIE",
   "WARNING": "WARNING",
-  "WASHER": "PRALKA",
   "WORKING": "DZIAŁA",
   "WRONG": "ŹLE",
   "Waiting for Nova…": "Czekam na Novę…",
@@ -1177,5 +1172,6 @@
   "Unlocked": "Odblokowany",
   "Utility Room": "Pomieszczenie gospodarcze",
   "doors you leave the house by. Nova adds nothing until you pick one.": "drzwi, którymi wychodzisz z domu. Nova nic nie doda, dopóki ich nie wybierzesz.",
-  "— pick a door, lock, cover or sensor —": "— wybierz drzwi, zamek, roletę lub czujnik —"
+  "— pick a door, lock, cover or sensor —": "— wybierz drzwi, zamek, roletę lub czujnik —",
+  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Pokaż piwnicę i jej drzwi. Automatycznie szuka obszaru lub piętra o nazwie Piwnica albo piętra poniżej poziomu gruntu. Zmienia tylko to, co widzisz."
 }

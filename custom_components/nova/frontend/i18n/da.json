@@ -228,5 +228,6 @@
   "Unlocked": "Ulåst",
   "Utility Room": "Bryggers",
   "doors you leave the house by. Nova adds nothing until you pick one.": "døre, du forlader huset gennem. Nova tilføjer intet, før du vælger en.",
-  "— pick a door, lock, cover or sensor —": "— vælg en dør, lås, afdækning eller sensor —"
+  "— pick a door, lock, cover or sensor —": "— vælg en dør, lås, afdækning eller sensor —",
+  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Vis kælderetagen og dens døre. Automatisk leder efter et område eller en etage, der hedder Kælder, eller en etage under jorden. Det ændrer kun, hvad du ser."
 }

@@ -391,7 +391,6 @@
   "Czech": "Checo",
   "DECISIONS": "DECISIONES",
   "DEDUP": "DEDUP",
-  "DEHUMIDIFIER": "DESHUMIDIFICADOR",
   "DELETE": "ELIMINAR",
   "DET": "DET",
   "DIAGNOSE": "DIAGNOSTICAR",
@@ -502,7 +501,6 @@
   "HELPFUL": "ÚTIL",
   "HIDE CAMERAS ▴": "OCULTAR CÁMARAS ▴",
   "HOME": "EN CASA",
-  "HOME ENERGY": "ENERGÍA DE LA CASA",
   "HOMER — diagnostic sub-agent": "HOMER — subagente de diagnóstico",
   "HYBRID": "HÍBRIDO",
   "Habits Nova has confidently attributed to one person, from 30 days of sole-occupant activity — separate from household-wide facts above.": "Hábitos que Nova atribuye con seguridad a una persona, a partir de 30 días de actividad estando sola — separados de los datos de todo el hogar de arriba.",
@@ -594,7 +592,6 @@
   "Muted": "Silenciado",
   "NASA disasters": "Desastres NASA",
   "NEEDS ADJUSTMENT": "NECESITA AJUSTES",
-  "NO": "NO",
   "NO SNAPSHOT": "SIN INSTANTÁNEA",
   "NONE": "NINGUNO",
   "NOVA COMMAND CENTER": "CENTRO DE MANDO NOVA",
@@ -779,7 +776,6 @@
   "SPOKEN HISTORY": "HISTORIAL HABLADO",
   "STAIRS": "ESCALERA",
   "STOPPED": "DETENIDO",
-  "SUMP PUMP": "BOMBA DE ACHIQUE",
   "SYSTEM": "SYSTEM",
   "SYSTEM LOG": "REGISTRO DEL SISTEMA",
   "Satellites": "Satélites",
@@ -878,7 +874,6 @@
   "Voice & Speakers": "Voz y altavoces",
   "WARN": "AVISO",
   "WARNING": "WARNING",
-  "WASHER": "LAVADORA",
   "WORKING": "FUNCIONA",
   "WRONG": "INCORRECTO",
   "Waiting for Nova…": "Esperando a Nova…",
@@ -1177,5 +1172,6 @@
   "Unlocked": "Desbloqueada",
   "Utility Room": "Lavadero",
   "doors you leave the house by. Nova adds nothing until you pick one.": "puertas por las que sales de casa. Nova no añade nada hasta que elijas una.",
-  "— pick a door, lock, cover or sensor —": "— elige una puerta, cerradura, cubierta o sensor —"
+  "— pick a door, lock, cover or sensor —": "— elige una puerta, cerradura, cubierta o sensor —",
+  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Mostrar el sótano y sus puertas. Automático busca un área o planta llamada Sótano o Bodega, o una planta bajo tierra. Solo cambia lo que ves."
 }

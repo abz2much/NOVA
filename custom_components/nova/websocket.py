@@ -631,6 +631,8 @@ async def ws_get_panel_data(
                 "exit_doors": home["exit_doors"],
                 "exit_door_status": home["exit_door_status"],
                 "exit_door_candidates": home["exit_door_candidates"],
+                "basement_mode": home["basement_mode"],
+                "home_features": home["home_features"],
                 "arrival_front_door_entity": str(_runtime_opt(hass, entry, "arrival_front_door_entity", "") or ""),
                 # AI model selection (provider + model per role) — for the
                 # Settings "AI Models" section's live-fetched dropdowns.
@@ -785,7 +787,8 @@ def _door_entity_open(state_obj) -> bool:
 
 
 def _get_home_doors(hass: HomeAssistant, entry) -> dict:
-    """The garage flag and the user's exit doors for the panel (8.26.0).
+    """The garage flag, the user's exit doors (8.26.0) and the other rooms
+    the home has (8.27.0) for the panel.
     Display only: none of this changes a safety check. Read each time the
     panel data loads, so a garage added or removed shows up on the next load."""
     from . import home_doors
@@ -793,6 +796,8 @@ def _get_home_doors(hass: HomeAssistant, entry) -> dict:
         "garage_mode": _runtime_opt(hass, entry, "garage_mode", home_doors.DEFAULT_GARAGE_MODE),
         "door_mapping": _get_runtime_json(hass, entry, "door_mapping", {}),
         "exit_doors": _get_runtime_json(hass, entry, "exit_doors", []),
+        "basement_mode": _runtime_opt(hass, entry, "basement_mode", None),
+        "has_basement": _runtime_opt(hass, entry, "has_basement", None),
     }
     try:
         from .core_lockdown_sync import _lockdown_exempt_locks
@@ -806,11 +811,15 @@ def _get_home_doors(hass: HomeAssistant, entry) -> dict:
             "exit_doors": home_doors.exit_doors(cfg),
             "exit_door_status": home_doors.exit_door_status(hass, cfg, exempt),
             "exit_door_candidates": home_doors.exit_door_candidates(hass, cfg),
+            "basement_mode": home_doors.basement_mode(cfg),
+            "home_features": home_doors.home_features(hass, cfg),
         }
     except Exception as exc:
         _LOGGER.debug("home doors read failed: %s", exc)
         return {"garage_mode": home_doors.garage_mode(cfg), "has_garage": False,
-                "exit_doors": [], "exit_door_status": [], "exit_door_candidates": []}
+                "exit_doors": [], "exit_door_status": [], "exit_door_candidates": [],
+                "basement_mode": home_doors.basement_mode(cfg),
+                "home_features": {"basement": False, "cellar_door": False, "utility": False}}
 
 
 def _get_door_states(hass: HomeAssistant) -> dict:
@@ -991,7 +1000,7 @@ PANEL_WRITABLE_KEYS = {
     "home_context_max_entities", # int: entity names per domain in the system prompt (0=counts only) (v7.23.1)
     "disabled_cameras",          # JSON list: camera entity_ids Nova must not use
     "home_stories",              # str: number of stories (controls floor tabs)
-    "has_basement",              # bool: whether to show the basement floor
+    "has_basement",              # bool: the Basement setting before 8.27.0; a saved value still counts
     "dormers_front",             # int: front dormer count override
     "dormers_rear",              # int: rear dormer count override
     "garage_bays",               # int: garage bay count
@@ -1138,6 +1147,7 @@ PANEL_WRITABLE_KEYS = {
     # Residence doors (8.26.0)
     "garage_mode",               # str: auto | yes | no — show garage items (display only, 8.26.0)
     "exit_doors",                # JSON list: [{entity_id, name}] exit doors the user picked (8.26.0)
+    "basement_mode",             # str: auto | yes | no — show the basement (display only, 8.27.0)
 }
 
 # ── Integration version ──────────────────────────────────────────────────────

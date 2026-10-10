@@ -228,5 +228,6 @@
   "Unlocked": "Відімкнено",
   "Utility Room": "Підсобне приміщення",
   "doors you leave the house by. Nova adds nothing until you pick one.": "двері, якими ви виходите з дому. Nova нічого не додасть, доки ви не виберете.",
-  "— pick a door, lock, cover or sensor —": "— виберіть двері, замок, штору або датчик —"
+  "— pick a door, lock, cover or sensor —": "— виберіть двері, замок, штору або датчик —",
+  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Показувати підвал і його двері. Автоматично шукає зону або поверх із назвою Підвал чи Льох або поверх нижче рівня землі. Змінює лише те, що ви бачите."
 }

@@ -58,7 +58,7 @@ def test_residence_keys_specifically_writable():
     allow = _allowlist()
     for key in ("residence_style", "floor_plan_sqft", "home_stories",
                 "has_basement", "dormers_front", "dormers_rear",
-                "garage_bays", "chimney_side", "garage_mode", "exit_doors"):
+                "garage_bays", "chimney_side", "garage_mode", "exit_doors", "basement_mode"):
         assert key in allow, f"{key} missing from PANEL_WRITABLE_KEYS"
 
 
@@ -67,7 +67,7 @@ def test_garage_flag_and_exit_doors_are_surfaced():
     # list the exit doors the user picked.
     surfaced = _panel_data_config_keys()
     for key in ("garage_mode", "has_garage", "exit_doors", "exit_door_status",
-                "exit_door_candidates"):
+                "exit_door_candidates", "basement_mode", "home_features"):
         assert key in surfaced, key
 
 

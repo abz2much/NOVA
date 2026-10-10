@@ -391,7 +391,6 @@
   "Czech": "Tschechisch",
   "DECISIONS": "ENTSCHEIDUNGEN",
   "DEDUP": "DEDUP",
-  "DEHUMIDIFIER": "LUFTENTFEUCHTER",
   "DELETE": "LÖSCHEN",
   "DET": "DET",
   "DIAGNOSE": "DIAGNOSE",
@@ -502,7 +501,6 @@
   "HELPFUL": "HILFREICH",
   "HIDE CAMERAS ▴": "KAMERAS AUSBLENDEN ▴",
   "HOME": "ZU HAUSE",
-  "HOME ENERGY": "ENERGIE IM HAUS",
   "HOMER — diagnostic sub-agent": "HOMER — Diagnose-Unteragent",
   "HYBRID": "HYBRID",
   "Habits Nova has confidently attributed to one person, from 30 days of sole-occupant activity — separate from household-wide facts above.": "Gewohnheiten, die Nova sicher einer Person zuordnet, aus 30 Tagen Aktivität, als sie allein zu Hause war — getrennt von den Fakten des ganzen Haushalts oben.",
@@ -594,7 +592,6 @@
   "Muted": "Stumm",
   "NASA disasters": "NASA-Katastrophen",
   "NEEDS ADJUSTMENT": "MUSS ANGEPASST WERDEN",
-  "NO": "NEIN",
   "NO SNAPSHOT": "KEIN SCHNAPPSCHUSS",
   "NONE": "KEINE",
   "NOVA COMMAND CENTER": "NOVA KOMMANDOZENTRALE",
@@ -779,7 +776,6 @@
   "SPOKEN HISTORY": "GESPROCHENER VERLAUF",
   "STAIRS": "TREPPE",
   "STOPPED": "GESTOPPT",
-  "SUMP PUMP": "SUMPFPUMPE",
   "SYSTEM": "SYSTEM",
   "SYSTEM LOG": "SYSTEMLOG",
   "Satellites": "Satelliten",
@@ -878,7 +874,6 @@
   "Voice & Speakers": "Stimme & Lautsprecher",
   "WARN": "WARNUNG",
   "WARNING": "WARNING",
-  "WASHER": "WASCHMASCHINE",
   "WORKING": "FUNKTIONIERT",
   "WRONG": "FALSCH",
   "Waiting for Nova…": "Warte auf Nova…",
@@ -1177,5 +1172,6 @@
   "Unlocked": "Entriegelt",
   "Utility Room": "Hauswirtschaftsraum",
   "doors you leave the house by. Nova adds nothing until you pick one.": "Türen, durch die du das Haus verlässt. Nova fügt nichts hinzu, bis du eine auswählst.",
-  "— pick a door, lock, cover or sensor —": "— Tür, Schloss, Abdeckung oder Sensor wählen —"
+  "— pick a door, lock, cover or sensor —": "— Tür, Schloss, Abdeckung oder Sensor wählen —",
+  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Kellergeschoss und seine Türen anzeigen. Automatisch sucht nach einem Bereich oder Stockwerk namens Keller oder einem Stockwerk unter der Erde. Das ändert nur, was du siehst."
 }

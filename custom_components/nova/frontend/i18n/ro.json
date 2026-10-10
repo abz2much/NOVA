@@ -228,5 +228,6 @@
   "Unlocked": "Descuiată",
   "Utility Room": "Cameră tehnică",
   "doors you leave the house by. Nova adds nothing until you pick one.": "ușile prin care ieși din casă. Nova nu adaugă nimic până nu alegi una.",
-  "— pick a door, lock, cover or sensor —": "— alege o ușă, încuietoare, acoperire sau senzor —"
+  "— pick a door, lock, cover or sensor —": "— alege o ușă, încuietoare, acoperire sau senzor —",
+  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Afișează subsolul și ușile lui. Automat caută o zonă sau un etaj numit Subsol sau Pivniță, ori un etaj sub nivelul solului. Schimbă doar ce vezi."
 }

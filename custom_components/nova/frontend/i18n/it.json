@@ -228,5 +228,6 @@
   "Unlocked": "Sbloccata",
   "Utility Room": "Lavanderia",
   "doors you leave the house by. Nova adds nothing until you pick one.": "le porte da cui esci di casa. Nova non aggiunge nulla finché non ne scegli una.",
-  "— pick a door, lock, cover or sensor —": "— scegli una porta, serratura, copertura o sensore —"
+  "— pick a door, lock, cover or sensor —": "— scegli una porta, serratura, copertura o sensore —",
+  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Mostra il seminterrato e le sue porte. Automatico cerca un'area o un piano chiamato Seminterrato o Cantina, o un piano sotto il livello del suolo. Cambia solo ciò che vedi."
 }

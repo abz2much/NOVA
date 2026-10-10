@@ -391,7 +391,6 @@
   "Czech": "Чешский",
   "DECISIONS": "РЕШЕНИЯ",
   "DEDUP": "DEDUP",
-  "DEHUMIDIFIER": "ОСУШИТЕЛЬ",
   "DELETE": "УДАЛИТЬ",
   "DET": "DET",
   "DIAGNOSE": "ДИАГНОСТИКА",
@@ -502,7 +501,6 @@
   "HELPFUL": "ПОЛЕЗНО",
   "HIDE CAMERAS ▴": "СКРЫТЬ КАМЕРЫ ▴",
   "HOME": "ДОМА",
-  "HOME ENERGY": "ЭНЕРГИЯ ДОМА",
   "HOMER — diagnostic sub-agent": "HOMER — диагностический субагент",
   "HYBRID": "ГИБРИД",
   "Habits Nova has confidently attributed to one person, from 30 days of sole-occupant activity — separate from household-wide facts above.": "Привычки, которые Nova уверенно связывает с одним человеком, по 30 дням активности, когда он был дома один — отдельно от фактов о всём доме выше.",
@@ -594,7 +592,6 @@
   "Muted": "Без звука",
   "NASA disasters": "Катастрофы NASA",
   "NEEDS ADJUSTMENT": "НУЖНА ДОРАБОТКА",
-  "NO": "НЕТ",
   "NO SNAPSHOT": "НЕТ СНИМКА",
   "NONE": "ПУСТО",
   "NOVA COMMAND CENTER": "КОМАНДНЫЙ ЦЕНТР NOVA",
@@ -779,7 +776,6 @@
   "SPOKEN HISTORY": "ИСТОРИЯ СКАЗАННОГО",
   "STAIRS": "ЛЕСТНИЦА",
   "STOPPED": "ОСТАНОВЛЕНО",
-  "SUMP PUMP": "ДРЕНАЖНЫЙ НАСОС",
   "SYSTEM": "SYSTEM",
   "SYSTEM LOG": "СИСТЕМНЫЙ ЖУРНАЛ",
   "Satellites": "Спутники",
@@ -878,7 +874,6 @@
   "Voice & Speakers": "Голос и динамики",
   "WARN": "ПРЕДУПРЕЖДЕНИЕ",
   "WARNING": "WARNING",
-  "WASHER": "СТИРАЛЬНАЯ МАШИНА",
   "WORKING": "РАБОТАЕТ",
   "WRONG": "НЕВЕРНО",
   "Waiting for Nova…": "Ожидание Nova…",
@@ -1177,5 +1172,6 @@
   "Unlocked": "Не заперто",
   "Utility Room": "Подсобное помещение",
   "doors you leave the house by. Nova adds nothing until you pick one.": "двери, через которые вы выходите из дома. Nova ничего не добавит, пока вы не выберете.",
-  "— pick a door, lock, cover or sensor —": "— выберите дверь, замок, штору или датчик —"
+  "— pick a door, lock, cover or sensor —": "— выберите дверь, замок, штору или датчик —",
+  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Показывать подвал и его двери. Автоматически ищет зону или этаж с названием Подвал или Погреб либо этаж ниже уровня земли. Меняет только то, что вы видите."
 }
