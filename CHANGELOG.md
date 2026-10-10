@@ -1,3 +1,8 @@
+## [8.23.1] — Unknown presence reaches the phones too
+
+- **A medium alert while presence is unknown now goes to the phones,** the same as when everyone is away. Before, it was neither spoken nor pushed. Unknown means a person reading unknown or unavailable, or no person entities set up. Pushed only, with the rating buttons; never spoken.
+- **Unchanged.** Alerts with someone home, and every spoken alert, work as before. Live motion still routes an alert to the speakers. High and critical alerts are unchanged. No new settings.
+
 ## [8.23.0] — Lockdown and the decision log
 
 - **A medium alert while everyone is away now reaches the phones.** Before, it was neither spoken nor pushed, so "Front Door is unlocked while nobody appears to be home" could reach no one. Spoken alerts are unchanged, and with someone home nothing changes. When presence is unknown it keeps the old behaviour.

@@ -240,6 +240,9 @@ async def test_cognitive_alert_is_pushed_instead_of_spoken_when_on(cc_env, fake_
 async def test_cognitive_alert_old_behaviour_when_off(cc_env, fake_hass):
     cc, env = cc_env
     env.on = False
+    # Someone home: since 8.23.1 a medium alert with nobody known to be home
+    # is pushed whatever this setting says, so the setting is tested here.
+    fake_hass.states.set("person.abi", "home")
     await cc._emit_action(fake_hass, {}, _alert("medium"), sleeping=False)
     assert env.spoken == [] and env.pushes == []      # notify_only: no push for medium, as before
 

@@ -279,8 +279,8 @@ def for_core_action(hass, config: dict, sit: Situation, action: dict) -> Plan:
     live motion as well as people, so an intruder's movement while armed away
     is still spoken), and high and critical are pushed too. A lower alert the
     speakers would not take is pushed instead when "announce notify only" is
-    on, or (8.23.0) when everyone is away, so a medium alert while everyone
-    is away is never lost."""
+    on, or when nobody is known to be home (everyone away, 8.23.0, or
+    presence unknown, 8.23.1), so such an alert is never lost."""
     urgency = action.get("urgency", "medium")
     if ((sit.sleeping or sit.quiet or action.get("phone_only"))
             and urgency != "critical"):
@@ -297,10 +297,10 @@ def for_core_action(hass, config: dict, sit: Situation, action: dict) -> Plan:
     pushed_instead = False
     if mode == "notify_only" and urgency not in HIGH_OR_CRITICAL:
         from . import household
-        if sit.residents == household.AWAY:
-            # Everyone is away and no speaker took it: the phones get it, or
-            # it reaches no one (8.23.0). Unknown is never away, so it keeps
-            # its old behaviour.
+        if sit.residents != household.HOME:
+            # Nobody is known to be home and no speaker took it: the phones
+            # get it, or it reaches no one. Everyone away since 8.23.0,
+            # unknown presence since 8.23.1.
             pushed_instead = True
         else:
             try:

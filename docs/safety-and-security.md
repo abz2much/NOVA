@@ -78,7 +78,7 @@ rules:
 
 | Alert | Spoken | Sent to phones |
 |---|---|---|
-| Intrusion, lockdown, freeze, offers | Below critical, not while asleep or in quiet hours | High and critical; anything not spoken while asleep or in quiet hours; anything not spoken while everyone is away |
+| Intrusion, lockdown, freeze, offers | Below critical, not while asleep or in quiet hours | High and critical; anything not spoken while asleep or in quiet hours; anything not spoken while nobody is known to be home |
 | Household events (doors, appliances' problems and so on) | When someone is home and awake, outside quiet hours; critical always | When nobody is home, or high and critical |
 | An appliance finishing | When someone is home and awake | When nobody is home |
 | Left open reminders | Unless asleep | Always |
@@ -86,9 +86,10 @@ rules:
 | Packages and mail | Outside quiet hours, with announcements on | A package taken while nobody is home, quiet hours or not |
 | Doorbell and camera events | When notable | No |
 
-A medium alert while everyone is away, such as "Front Door is unlocked while
-nobody appears to be home", goes to your phones. When presence is unknown it
-still follows the old rule.
+A medium alert while nobody is known to be home, such as "Front Door is
+unlocked while nobody appears to be home", goes to your phones. That covers
+everyone away and presence unknown (for example a person reading unknown, or
+no person entities set up).
 
 "Someone is home" for household events comes from your people and the
 trackers linked to them. Intrusion, lockdown, offers and appliances still
