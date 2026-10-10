@@ -47,7 +47,9 @@ is optional.
 - Each camera announces each kind (delivered, mail, removed, left out) at
   most once every 30 minutes.
 - A camera with Eufy's own package sensors uses those instead of a picture.
-- Nova recognises common Irish and UK carriers in what a camera describes.
+- Nova recognises common carriers in Ireland, the UK and the US in what a
+  camera describes: Amazon, UPS, FedEx, USPS, DHL, An Post, DPD, GLS, Evri,
+  Hermes, Yodel, Parcelforce and Royal Mail, as well as the word "courier".
 
 Sensors are found when Nova starts, so a new one needs a Nova reload.
 
