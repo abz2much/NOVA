@@ -457,7 +457,7 @@ speak:
       name: Message
       description: The text for Nova to speak.
       required: true
-      example: "The garage door has been open for twenty minutes."
+      example: "The back door has been open for twenty minutes."
       selector:
         text:
           multiline: true
@@ -509,7 +509,7 @@ process_intent:
     Route a spoken or typed phrase to a local Nova command (no cloud). If a
     confirmation window from a prior nova.speak is open, an affirmative phrase
     completes that pending action; otherwise the phrase is matched as a fresh
-    command (e.g. "secure the garage", "turn off the lights", "turn it off").
+    command (e.g. "lock the back door", "turn off the lights", "turn it off").
   fields:
     phrase:
       name: Phrase
@@ -538,7 +538,7 @@ remember:
   fields:
     key:
       name: What
-      description: "The thing to remember (e.g. 'trash day', 'garage code')."
+      description: "The thing to remember (e.g. 'trash day', 'gate code')."
       required: true
       example: "trash day"
       selector:

@@ -21,7 +21,7 @@ NOVA_TOOLS: list[dict[str, Any]] = [
             "name": "control_device",
             "description": (
                 "Control a Home Assistant device. Turn lights/switches/fans "
-                "on or off, lock/unlock locks, open/close covers/garage doors, "
+                "on or off, lock/unlock locks, open/close covers (doors, gates, blinds), "
                 "set brightness, set climate temperature. Use the entity_id "
                 "from the home context or from get_entities results."
             ),
@@ -99,7 +99,7 @@ NOVA_TOOLS: list[dict[str, Any]] = [
                         "type": "string",
                         "description": (
                             "Search term: entity name, area name, or keyword "
-                            "(e.g. 'chase', 'kitchen lights', 'garage door')"
+                            "(e.g. 'chase', 'kitchen lights', 'back door')"
                         ),
                     },
                     "domain": {
@@ -357,7 +357,7 @@ NOVA_TOOLS: list[dict[str, Any]] = [
             "name": "propose_relation",
             "description": (
                 "Remember that two things are linked, for example 'sam owns "
-                "car.jeep' or 'kitchen adjacent_to garage'. Use it when the user "
+                "car.jeep' or 'kitchen adjacent_to hallway'. Use it when the user "
                 "tells you how two people, places or things relate. It is saved "
                 "as PENDING, not yet trusted and not shown to you again. You cannot "
                 "confirm it: only the user can, in the Memory tab of the Nova "
@@ -379,7 +379,7 @@ NOVA_TOOLS: list[dict[str, Any]] = [
                     },
                     "object": {
                         "type": "string",
-                        "description": "The second thing, 1 to 80 characters (for example 'car.jeep' or 'garage').",
+                        "description": "The second thing, 1 to 80 characters (for example 'car.jeep' or 'hallway').",
                     },
                 },
                 "required": ["subject", "predicate", "object"],
@@ -433,9 +433,9 @@ NOVA_TOOLS: list[dict[str, Any]] = [
             "name": "ignore_entity",
             "description": (
                 "Tell Nova to ignore an entity or area for a specified duration. "
-                "Use when the user says things like 'ignore the garage door for "
+                "Use when the user says things like 'ignore the back door for "
                 "2 hours' or 'stop alerting me about the backyard'. Supports "
-                "glob patterns like 'binary_sensor.garage*'. This is the ONLY "
+                "glob patterns like 'binary_sensor.back_door*'. This is the ONLY "
                 "tool that actually changes alerting behavior at runtime — a "
                 "success result here (enforced: true) means sentinel/cognitive "
                 "alerting will genuinely skip this entity, unlike remember, which "
@@ -448,7 +448,7 @@ NOVA_TOOLS: list[dict[str, Any]] = [
                         "type": "string",
                         "description": (
                             "Entity ID or glob pattern to ignore "
-                            "(e.g. 'binary_sensor.garage_door', 'sensor.backyard*')"
+                            "(e.g. 'binary_sensor.back_door', 'sensor.backyard*')"
                         ),
                     },
                     "duration_minutes": {
@@ -634,7 +634,7 @@ NOVA_TOOLS: list[dict[str, Any]] = [
                 "Schedule YOURSELF a follow-up: an instruction you will execute "
                 "later, autonomously, with full tool access. Use it to close "
                 "loops across time — verify an action took hold ('check the "
-                "garage door actually closed'), re-check after a change has had "
+                "back door actually locked'), re-check after a change has had "
                 "time to work ('confirm the living room reached 72F'), or handle "
                 "deferred requests ('remind sir the oven is on in 45 minutes'). "
                 "Write the instruction to your future self: imperative and "
@@ -652,8 +652,8 @@ NOVA_TOOLS: list[dict[str, Any]] = [
                         "type": "string",
                         "description": (
                             "The self-contained instruction to execute later, "
-                            "e.g. 'Check cover.garage_door is closed; if not, "
-                            "close it and report.'"
+                            "e.g. 'Check lock.back_door is locked; if not, "
+                            "lock it and report.'"
                         ),
                     },
                     "context": {
@@ -1159,7 +1159,7 @@ NOVA_TOOLS: list[dict[str, Any]] = [
                 "happened in the home over a time window. Two lenses via 'kind': "
                 "'history' gives the device timeline and counts (every state "
                 "change with timestamps) for an entity or area — use for 'when "
-                "did the front door open?', 'how many times did the garage open "
+                "did the front door open?', 'how many times did the back door open "
                 "today?', 'what was the thermostat overnight?'. 'logbook' gives "
                 "the readable activity narrative — use for 'what happened while I "
                 "was out?', 'what's been going on in the house?'. This reads HA's "
@@ -1178,7 +1178,7 @@ NOVA_TOOLS: list[dict[str, Any]] = [
                     "entity": {
                         "type": "string",
                         "description": "Entity name or entity_id to look up "
-                                       "(e.g. 'front door', 'binary_sensor.garage').",
+                                       "(e.g. 'front door', 'binary_sensor.back_door').",
                     },
                     "area": {
                         "type": "string",
@@ -1344,7 +1344,7 @@ NOVA_TOOLS: list[dict[str, Any]] = [
             "description": (
                 "Look at a camera right now and answer a specific visual "
                 "question about what's there — e.g. 'is there a tool left on "
-                "the workbench', 'is the garage door open', 'did a package "
+                "the workbench', 'is the back door open', 'did a package "
                 "arrive', 'is anyone in the backyard'. Captures a fresh "
                 "snapshot and reasons over it with the vision model. Use for "
                 "on-demand visual checks and for standing 'watch the X' "
@@ -1423,7 +1423,7 @@ NOVA_TOOLS: list[dict[str, Any]] = [
             "description": (
                 "Find the last time something was described by a camera, from "
                 "Nova's scene memory — e.g. 'where did I last see my keys', "
-                "'when was the red bike last in the garage'. Searches past "
+                "'when was the red bike last in the hallway'. Searches past "
                 "camera descriptions, so the answer can be hours or days old "
                 "and is not a live view. Needs Scene memory turned on in "
                 "Settings. For what is there right now, use look_at_camera."
@@ -1447,7 +1447,7 @@ NOVA_TOOLS: list[dict[str, Any]] = [
             "description": (
                 "Compare what a camera described most recently with what it "
                 "described earlier, from Nova's scene memory — e.g. 'what has "
-                "changed in the garage since yesterday'. Gives words that "
+                "changed in the hallway since yesterday'. Gives words that "
                 "appeared and words that went away, so treat it as a hint, not "
                 "proof. Needs Scene memory turned on in Settings."
             ),
@@ -1456,7 +1456,7 @@ NOVA_TOOLS: list[dict[str, Any]] = [
                 "properties": {
                     "camera": {
                         "type": "string",
-                        "description": "A camera entity_id or its area name, e.g. 'garage'.",
+                        "description": "A camera entity_id or its area name, e.g. 'hallway'.",
                     },
                     "hours": {
                         "type": "number",

@@ -29,7 +29,7 @@ const NOVA3D = (function () {
   var CENTER = [(XG0 + XHE) / 2, RY, WALL * 0.5]; // rotate about model center
 
   // ---------- per-render home spec (type/specs); fields left unset = approved default ----------
-  // garageBays, dormersFront, dormersRear: counts · chimney: 'right'|'left'|'none' · pitch: roof-rise scale
+  // garageBays, dormersFront, dormersRear: counts · noGarage: true hides every garage part · chimney: 'right'|'left'|'none' · pitch: roof-rise scale
   var SPEC = {};
   function applySpec(s) {
     SPEC = s || {};
@@ -194,8 +194,15 @@ const NOVA3D = (function () {
   }
 
   // ---------- garage doors (count = SPEC.garageBays, default 3; fill the garage front) ----------
+  // Unset means the default 3; 0 means no garage doors at all (8.26.0: 0 used to mean 3).
+  function _bays() {
+    if (SPEC.noGarage) return 0;
+    var n = Number(SPEC.garageBays);
+    return (SPEC.garageBays == null || SPEC.garageBays === '' || !isFinite(n) || n < 0) ? 3 : Math.floor(n);
+  }
   function garageDoors(L, GL, state, openState) {
-    var bays = SPEC.garageBays > 0 ? SPEC.garageBays : 3, gap = 1.8;
+    var bays = _bays(), gap = 1.8;
+    if (!bays) return;
     var dw = (GW - gap * (bays + 1)) / bays, z0 = 0.4, z1 = 7.4, i, x0;
     var open = openState === 'open', lit = state === 'on' || state === 'dom';
     var f = open ? C.doorOpen : lit ? C.doorOn : C.doorOff;
@@ -605,7 +612,8 @@ const NOVA3D = (function () {
   }
 
   function garageDoorsOn(L, GL, x0, x1, yF, state, baysState) {
-    var bays = SPEC.garageBays > 0 ? SPEC.garageBays : 3, gap = 1.8;
+    var bays = _bays(), gap = 1.8;
+    if (!bays) return;
     var W = x1 - x0, dw = (W - gap * (bays + 1)) / bays, z0 = 0.4, z1 = 7.2, n = -0.06, i, gx, k;
     if (dw <= 1) { gap = 0.6; dw = (W - gap * (bays + 1)) / bays; }
     if (dw <= 0) return;
@@ -713,7 +721,9 @@ const NOVA3D = (function () {
     else extWalls(L, minx, miny, maxx, maxy, 0, eave);
 
     var TOL = 1.5, EDGE = 3, z0 = 3, z1 = 7, garageRoom = null;
-    (plan['1f'] || []).forEach(function (r) { if (String(r.name).toLowerCase().indexOf('garage') >= 0 && !garageRoom) garageRoom = r; });
+    // A home with no garage (SPEC.noGarage, 8.26.0) gets no garage doors or low garage roof,
+    // even if a saved plan has a room named garage: it is drawn as an ordinary room.
+    if (!SPEC.noGarage) (plan['1f'] || []).forEach(function (r) { if (String(r.name).toLowerCase().indexOf('garage') >= 0 && !garageRoom) garageRoom = r; });
 
     var winOcc = function (cx, cy) {
       var best = 'off';
@@ -759,7 +769,7 @@ const NOVA3D = (function () {
     } else {
       // auto: a window on each room's exterior-facing wall (fallback when nothing placed)
       (plan['1f'] || []).forEach(function (r) {
-        if (String(r.name).toLowerCase().indexOf('garage') >= 0) return;
+        if (!SPEC.noGarage && String(r.name).toLowerCase().indexOf('garage') >= 0) return;
         if (r.type && r.type !== 'room' && r.type !== 'bath') return;
         var x0r = r.x, x1r = r.x + r.w, y0r = r.y, y1r = r.y + r.d, st = wOf(r.name);
         if (x1r - x0r < 6 || y1r - y0r < 6) return;
@@ -1082,7 +1092,7 @@ if (typeof window !== "undefined") window.NOVA3D = NOVA3D;
 
 /*
  * Nova Command Center Panel.
- * v8.25.0
+ * v8.26.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -1159,7 +1169,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.25.0 ",
+      console.log("%c Nova Panel %c v8.26.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -2225,7 +2235,7 @@ ${this._htmlDashboardBody()}`;
             <div class="panel-title">Relations</div>
             <div class="panel-meta" id="newRelationsCount">—</div>
           </div>
-          <div class="stub-body">Links between things, such as "sam owns car.jeep" or "kitchen adjacent_to garage". Nova proposes them when you tell it how things relate. A new link waits here and is not used until you confirm it. Only confirmed links are shown to Nova. Removing one is permanent: Nova will not add it back on its own.</div>
+          <div class="stub-body">Links between things, such as "sam owns car.jeep" or "kitchen adjacent_to hallway". Nova proposes them when you tell it how things relate. A new link waits here and is not used until you confirm it. Only confirmed links are shown to Nova. Removing one is permanent: Nova will not add it back on its own.</div>
           <div class="toggle-desc" id="newRelationsMsg"></div>
           <div id="newRelationsPending" class="mem-body"></div>
           <div class="mode-bind-head">Confirmed</div>
@@ -4168,7 +4178,7 @@ ${this._htmlDashboardBody()}`;
     { id: "security_alarm", group: "safety", title: "Security Alarm", real: true,
       desc: "Choose the one alarm Nova uses for security decisions. Automatic lockdown is always opt in." },
     { id: "sentinel_rules", group: "safety", title: "Sentinel Rules", real: true,
-      desc: "Enable or disable individual door/lock/garage anomaly rules." },
+      desc: "Enable or disable individual door and lock anomaly rules." },
     { id: "hazard_monitor", group: "safety", title: "Hazard Monitor", real: true,
       desc: "One weather-warning source for your area, with optional earthquake and NASA feeds under Advanced." },
     { id: "host_health", group: "safety", title: "Host Health", real: true,
@@ -4250,6 +4260,7 @@ ${this._htmlDashboardBody()}`;
     spec.dormersFront = fEx != null ? fEx : sd.dormersFront;
     spec.dormersRear = rEx != null ? rEx : sd.dormersRear;
     if (num(c.garage_bays) != null) spec.garageBays = num(c.garage_bays);
+    if (!this._hasGarage()) { spec.garageBays = 0; spec.noGarage = true; }
     if (c.chimney_side) spec.chimney = c.chimney_side;
     return spec;
   }
@@ -4304,7 +4315,10 @@ ${this._htmlDashboardBody()}`;
     return out;
   }
   _house3dElements() { return this._elementsToFeet(this._getFloorElements()); }
+  // Display only (8.26.0): hides garage words and parts, never a safety check.
+  _hasGarage() { return !!(this._data()?.config?.has_garage); }
   _house3dGarage() {
+    if (!this._hasGarage()) return [];
     const cfg = this._data()?.config || {};
     const map = cfg.door_mapping || {};
     const bays = Math.max(0, Math.min(Number(cfg.garage_bays) || 0, 8));
@@ -4334,21 +4348,86 @@ ${this._htmlDashboardBody()}`;
     const d = this._data() || {};
     return d.doors || {};
   }
+  // Every slot, garage ones included. The keys never change (door_state.py
+  // DOOR_SLOTS); only labels and which rows show do. "garage_rear" is shown
+  // as the back door (8.26.0).
   _doorSlots() {
     const bays = Math.max(0, Math.min(Number((this._data()?.config || {}).garage_bays) || 0, 8));
     const garage = [];
     for (let i = 1; i <= bays; i++) garage.push(["garage_" + i, "Garage Door " + i]);
     if (!bays) garage.push(["garage", "Garage Door"]);
-    return [["front", "Front Door"], ...garage, ["garage_rear", "Garage Side / Rear"], ["kitchen_garage", "Kitchen ↔ Garage"], ["cellar", "Cellar / Bulkhead"], ["basement", "Basement"]];
+    return [["front", "Front Door"], ...garage, ["garage_rear", "Back / Rear Door"], ["kitchen_garage", "Kitchen ↔ Garage"], ["cellar", "Cellar / Bulkhead"], ["basement", "Basement"]];
+  }
+  // Garage rows are hidden when there is no garage; their saved values stay.
+  _visibleDoorSlots() {
+    if (this._hasGarage()) return this._doorSlots();
+    return this._doorSlots().filter(([slot]) => !/^garage(_[0-9]+)?$/.test(slot) && slot !== "kitchen_garage");
   }
   _renderDoorMappingNew(d) {
     const map = (d.config && d.config.door_mapping) || {};
-    const rows = this._doorSlots().map(([slot, label]) => `
+    const rows = this._visibleDoorSlots().map(([slot, label]) => `
       <div class="cfg-row">
         <label>${label}</label>
         <select class="door-map-sel-new" id="resDoorMap-${slot}" data-slot="${slot}">${this._doorEntityOptions(map[slot] || "")}</select>
       </div>`).join("");
     return rows;
+  }
+  // Exit doors the user picked (8.26.0). Display only: picking a door never
+  // adds it to a safety check. Each row says which checks already cover it,
+  // by the same rules those checks use (home_doors.safety_coverage).
+  _exitDoorChecks() {
+    return { lockdown: "Lockdown", night_sweep: "Night sweep", intrusion: "Intrusion", world_model: "House status" };
+  }
+  _exitDoorState(r) {
+    if (r.state == null) return "Entity not found";
+    const s = String(r.state).toLowerCase(), dom = String(r.entity_id || "").split(".")[0];
+    if (s === "unknown" || s === "unavailable") return "Unavailable";
+    if (dom === "lock") return s === "locked" ? "Locked" : s === "unlocked" ? "Unlocked" : this._esc(r.state);
+    if (s === "on" || s === "open" || s === "opening") return "Open";
+    if (s === "off" || s === "closed" || s === "closing") return "Closed";
+    return this._esc(r.state);
+  }
+  _renderExitDoors(d) {
+    const cfg = (d && d.config) || {};
+    const status = Array.isArray(cfg.exit_door_status) ? cfg.exit_door_status : [];
+    const names = this._exitDoorChecks();
+    const rows = status.map((r, i) => {
+      const checks = (r.checks || []).map(c => `<span class="new-pl-chip">${names[c] || this._esc(c)}</span>`).join("");
+      const state = `<span class="toggle-desc">${this._exitDoorState(r)}</span>`;
+      return `
+      <div class="cfg-row res-exit-row">
+        <label>${this._esc(r.name || r.entity_id)}</label>
+        <span class="toggle-desc">${this._esc(this._entName(r.entity_id))}</span>
+        ${state}
+        <button class="mode-chip res-exit-remove" data-i="${i}" title="Remove">×</button>
+      </div>
+      <div class="toggle-desc res-exit-checks">${checks
+        ? `Already checked by: ${checks}`
+        : `Not in Nova's safety checks. To include it, give it a door or window device class in Home Assistant.`}</div>`;
+    }).join("");
+    return `
+      <div class="mode-bind-head">Exit doors <span class="toggle-desc">doors you leave the house by. Nova adds nothing until you pick one.</span></div>
+      ${rows}
+      <div class="cfg-row res-exit-add">
+        <select id="resExitPick">${this._exitDoorOptions(cfg)}</select>
+        <input id="resExitName" type="text" maxlength="40" placeholder="Name (optional)">
+        <button class="mode-chip" id="resExitAdd">Add another exit door</button>
+      </div>`;
+  }
+  _exitDoorOptions(cfg) {
+    const states = this._hass?.states || {};
+    const taken = new Set((cfg.exit_doors || []).map(x => x.entity_id));
+    const sugg = (cfg.exit_door_candidates || []).map(x => x.entity_id).filter(e => !taken.has(e));
+    const all = Object.keys(states).filter(e => ["binary_sensor", "lock", "cover"].includes(e.split(".")[0])
+      && !taken.has(e) && !sugg.includes(e)).sort();
+    const opt = e => `<option value="${this._esc(e)}">${this._esc(this._entName(e))}</option>`;
+    return `<option value="">— pick a door, lock, cover or sensor —</option>`
+      + (sugg.length ? `<optgroup label="${this._esc(this._tx("Suggested"))}">${sugg.map(opt).join("")}</optgroup>` : "")
+      + (all.length ? `<optgroup label="${this._esc(this._tx("All doors, locks, covers and sensors"))}">${all.map(opt).join("")}</optgroup>` : "");
+  }
+  async _saveExitDoors(list) {
+    if (this._liveData?.config) this._liveData.config.exit_doors = list;
+    await this._saveSetting("exit_doors", JSON.stringify(list));
   }
   _renderHouse3dNew() {
     const mount = this.shadowRoot?.getElementById("resIso");
@@ -4522,6 +4601,28 @@ ${this._htmlDashboardBody()}`;
         this._renderHouse3dNew();
       });
     });
+    const exitAdd = root.getElementById("resExitAdd");
+    if (exitAdd && !exitAdd._wired) {
+      exitAdd._wired = true;
+      exitAdd.addEventListener("click", async () => {
+        const eid = root.getElementById("resExitPick")?.value || "";
+        if (!eid) return;            // nothing is added until the user picks
+        const name = (root.getElementById("resExitName")?.value || "").trim().slice(0, 40);
+        const list = [...((this._data()?.config || {}).exit_doors || [])];
+        if (!list.some(x => x.entity_id === eid)) list.push({ entity_id: eid, name });
+        await this._saveExitDoors(list);
+      });
+    }
+    root.querySelectorAll(".res-exit-remove").forEach(btn => {
+      if (btn._wired) return;
+      btn._wired = true;
+      btn.addEventListener("click", async () => {
+        const i = Number(btn.getAttribute("data-i"));
+        const list = [...((this._data()?.config || {}).exit_doors || [])];
+        list.splice(i, 1);
+        await this._saveExitDoors(list);
+      });
+    });
     this._doorSlots().forEach(([slot]) => {
       const ds = root.getElementById("resDoorMap-" + slot);
       if (ds && !ds._wired) {
@@ -4571,6 +4672,7 @@ ${this._htmlDashboardBody()}`;
           </div>
           <div class="mode-bind-head">Doors <span class="toggle-desc">map to your entities — blank = auto-detect by name</span></div>
           ${this._renderDoorMappingNew(d)}
+          ${this._renderExitDoors(d)}
         </div>
         <div class="res-side-new">
           <div class="mode-bind-head">mmWave Presence <span class="toggle-desc" id="resMmwaveSummary">◉ scan</span></div>
@@ -4724,7 +4826,7 @@ ${this._htmlDashboardBody()}`;
       <div class="toggle-list">
         ${onOff("announcements_enabled", "Announcements", "Master switch — all proactive speech")}
         ${onOff("announce_notify_only", "Notifications only", "Send proactive alerts to your phone instead of speaking them. Critical safety alerts still speak. Reminders, package and camera announcements, scheduled briefings and the infrastructure audit are not covered and still speak")}
-        ${onOff("sentinel_enabled", "Sentinel", "Door/garage/lock-left-open alerts")}
+        ${onOff("sentinel_enabled", "Sentinel", "Doors, windows and locks left open")}
         ${onOff("observer_enabled", "Observer", "AI event awareness (uses API)")}
         ${onOff("cognition_enabled", "Cognition", "Local triage — sees telemetry and decides what deserves deeper reasoning")}
         ${onOff("rich_reasoning", "Rich Reasoning", "Use the configured reasoning model first for medium and high-priority events")}
@@ -4808,11 +4910,18 @@ ${this._htmlDashboardBody()}`;
         </select>
       </div>
       <div class="cfg-row">
+        <label>Garage</label>
+        <select class="cfg-field" data-cfg-key="garage_mode">
+          ${this._optSelect([["auto", "Auto"], ["yes", "Yes"], ["no", "No"]], cfg.garage_mode || "auto")}
+        </select>
+        <span class="toggle-desc">Show garage settings and wording. Auto looks for a garage door or an area named Garage. This only changes what you see: Nova secures and checks every door the same way.</span>
+      </div>
+      ${cfg.has_garage ? `<div class="cfg-row">
         <label>Garage bays</label>
         <select class="cfg-field" data-cfg-key="garage_bays">
           ${this._optSelect(["0", "1", "2", "3", "4"].map(v => [v, v]), String(cfg.garage_bays ?? "3"))}
         </select>
-      </div>
+      </div>` : ""}
       <div class="cfg-row">
         <label>Front dormers</label>
         <select class="cfg-field" data-cfg-key="dormers_front">
@@ -5572,7 +5681,7 @@ ${this._htmlDashboardBody()}`;
     const cfg = this._data()?.config || {};
     const on = !!cfg.voice_confirm_enabled;
     return `
-      <div class="stub-body">Ask out loud before sensitive actions (unlock, garage, disarm) and listen for a spoken yes/no. Native mode uses the satellite's own audio; gated mode speaks through the room speaker — run the test to see which your setup supports.</div>
+      <div class="stub-body">Ask out loud before sensitive actions (unlock, open a door, disarm) and listen for a spoken yes/no. Native mode uses the satellite's own audio; gated mode speaks through the room speaker — run the test to see which your setup supports.</div>
       <div class="cfg-row">
         <label>Voice confirmation</label>
         <button class="toggle-btn ${on ? "on" : "off"}" data-cfg-key="voice_confirm_enabled" data-cfg-val="${on ? "false" : "true"}">${on ? "ON" : "OFF"}</button>
@@ -5685,7 +5794,10 @@ ${this._htmlDashboardBody()}`;
     const rules = cfg.sentinel_rules || [];
     const disabled = cfg.disabled_sentinel_rules || [];
     if (!rules.length) return `<div class="stub-body">No sentinel rules found.</div>`;
-    const rows = rules.map(r => {
+    // The garage rule's toggle shows only in a home with a garage (8.26.0).
+    // Display only: the rule keeps running either way.
+    const shown = cfg.has_garage ? rules : rules.filter(r => r.id !== "garage_left_open");
+    const rows = shown.map(r => {
       const isOff = disabled.includes(r.id);
       const name = r.id.replace(/_/g, " ");
       const desc = (r.desc || "").slice(0, 60);
@@ -6102,7 +6214,7 @@ ${this._htmlDashboardBody()}`;
           <input class="cfg-field cfg-num" type="number" min="1" max="90" step="1" data-cfg-key="scene_memory_retention_days" value="${Math.max(1, Math.min(90, Number(cfg.scene_memory_retention_days ?? 14) || 14))}" ${cfg.scene_memory_enabled ? "" : "disabled"}>
           <button class="mode-chip" id="sceneMemoryClear">Forget everything</button>
         </div>
-        ${onOff("pattern_learn_doors", "Learn doors & windows", "Door, window and garage contact sensors")}
+        ${onOff("pattern_learn_doors", "Learn doors & windows", "Door and window contact sensors")}
         ${onOff("pattern_learn_presence", "Learn presence & arrivals", "People and device trackers (home / away)")}
         ${onOff("pattern_learn_buttons", "Learn button & remote presses", "Suggest “press → scene / action” automations")}
       </div>
@@ -8162,6 +8274,19 @@ ${this._htmlDashboardBody()}`;
   // separately later if it turns out to matter.
 
   _defaultFloorPlan() {
+    const plan = this._defaultFloorPlanBase();
+    if (this._data()?.config?.has_garage) return plan;
+    // No garage (8.26.0): the garage becomes a utility room, and a back door
+    // opens from the kitchen at the rear. A saved plan is never changed.
+    const f = plan["1f"];
+    f.viewBox = "0 0 320 162";
+    f.rooms = f.rooms.map(r => r.name === "Garage"
+      ? { ...r, name: "Utility Room", y: r.y + 12 }
+      : { ...r, y: r.y + 12 });
+    f.rooms.push({ name: "Back Door", x: 125, y: 3, w: 45, h: 10, type: "door" });
+    return plan;
+  }
+  _defaultFloorPlanBase() {
     return {
       "1f": {
         label: "1st Floor", viewBox: "0 0 320 150",

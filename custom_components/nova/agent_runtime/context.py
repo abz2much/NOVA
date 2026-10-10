@@ -232,7 +232,7 @@ def _main_prompt(persona: str, home_context: str, situation_block: str,
         f"naming the source document. Don't invent specs; if the documents "
         f"don't contain it, say so.\n"
         f"11. To check what's physically on a camera right now — 'is a tool "
-        f"left on the workbench', 'is the garage open', 'did a package come' — "
+        f"left on the workbench', 'is the back door open', 'did a package come' — "
         f"use look_at_camera with a specific question. For a standing watch "
         f"('keep an eye on the workshop for tools left out'), create a goal "
         f"whose recurring action is a look_at_camera check: alert only when the "

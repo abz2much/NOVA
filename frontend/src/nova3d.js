@@ -27,7 +27,7 @@ const NOVA3D = (function () {
   var CENTER = [(XG0 + XHE) / 2, RY, WALL * 0.5]; // rotate about model center
 
   // ---------- per-render home spec (type/specs); fields left unset = approved default ----------
-  // garageBays, dormersFront, dormersRear: counts · chimney: 'right'|'left'|'none' · pitch: roof-rise scale
+  // garageBays, dormersFront, dormersRear: counts · noGarage: true hides every garage part · chimney: 'right'|'left'|'none' · pitch: roof-rise scale
   var SPEC = {};
   function applySpec(s) {
     SPEC = s || {};
@@ -192,8 +192,15 @@ const NOVA3D = (function () {
   }
 
   // ---------- garage doors (count = SPEC.garageBays, default 3; fill the garage front) ----------
+  // Unset means the default 3; 0 means no garage doors at all (8.26.0: 0 used to mean 3).
+  function _bays() {
+    if (SPEC.noGarage) return 0;
+    var n = Number(SPEC.garageBays);
+    return (SPEC.garageBays == null || SPEC.garageBays === '' || !isFinite(n) || n < 0) ? 3 : Math.floor(n);
+  }
   function garageDoors(L, GL, state, openState) {
-    var bays = SPEC.garageBays > 0 ? SPEC.garageBays : 3, gap = 1.8;
+    var bays = _bays(), gap = 1.8;
+    if (!bays) return;
     var dw = (GW - gap * (bays + 1)) / bays, z0 = 0.4, z1 = 7.4, i, x0;
     var open = openState === 'open', lit = state === 'on' || state === 'dom';
     var f = open ? C.doorOpen : lit ? C.doorOn : C.doorOff;
@@ -603,7 +610,8 @@ const NOVA3D = (function () {
   }
 
   function garageDoorsOn(L, GL, x0, x1, yF, state, baysState) {
-    var bays = SPEC.garageBays > 0 ? SPEC.garageBays : 3, gap = 1.8;
+    var bays = _bays(), gap = 1.8;
+    if (!bays) return;
     var W = x1 - x0, dw = (W - gap * (bays + 1)) / bays, z0 = 0.4, z1 = 7.2, n = -0.06, i, gx, k;
     if (dw <= 1) { gap = 0.6; dw = (W - gap * (bays + 1)) / bays; }
     if (dw <= 0) return;
@@ -711,7 +719,9 @@ const NOVA3D = (function () {
     else extWalls(L, minx, miny, maxx, maxy, 0, eave);
 
     var TOL = 1.5, EDGE = 3, z0 = 3, z1 = 7, garageRoom = null;
-    (plan['1f'] || []).forEach(function (r) { if (String(r.name).toLowerCase().indexOf('garage') >= 0 && !garageRoom) garageRoom = r; });
+    // A home with no garage (SPEC.noGarage, 8.26.0) gets no garage doors or low garage roof,
+    // even if a saved plan has a room named garage: it is drawn as an ordinary room.
+    if (!SPEC.noGarage) (plan['1f'] || []).forEach(function (r) { if (String(r.name).toLowerCase().indexOf('garage') >= 0 && !garageRoom) garageRoom = r; });
 
     var winOcc = function (cx, cy) {
       var best = 'off';
@@ -757,7 +767,7 @@ const NOVA3D = (function () {
     } else {
       // auto: a window on each room's exterior-facing wall (fallback when nothing placed)
       (plan['1f'] || []).forEach(function (r) {
-        if (String(r.name).toLowerCase().indexOf('garage') >= 0) return;
+        if (!SPEC.noGarage && String(r.name).toLowerCase().indexOf('garage') >= 0) return;
         if (r.type && r.type !== 'room' && r.type !== 'bath') return;
         var x0r = r.x, x1r = r.x + r.w, y0r = r.y, y1r = r.y + r.d, st = wOf(r.name);
         if (x1r - x0r < 6 || y1r - y0r < 6) return;

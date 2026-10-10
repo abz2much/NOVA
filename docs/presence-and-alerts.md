@@ -101,7 +101,7 @@ Panel, **Settings → General**:
 |---|---|
 | Announcements | Master switch for all proactive speech. |
 | Notifications only | Send proactive alerts to your phone instead of speaking them. Critical safety alerts still speak. |
-| Sentinel | Door, garage and lock left open alerts. |
+| Sentinel | Doors, windows and locks left open. Garage settings and wording show only when your home has a garage; see Settings → General → Residence / Home → Garage (Auto, Yes or No). |
 | Observer | AI event awareness. |
 | Cognition | Local first look at events, deciding what deserves deeper reasoning. |
 | Rich Reasoning | Use the reasoning model first for medium and high priority events. |
