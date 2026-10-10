@@ -92,3 +92,31 @@ def motion(hass, eid="binary_sensor.living_motion", on=True):
 
 def service_calls(hass, domain, service):
     return [c for c in hass.service_calls if c[0] == domain and c[1] == service]
+
+
+async def run_sweeps(safety, hass) -> list:
+    """Run the night sweep tasks a tick scheduled (8.24.0), with no wait for
+    the check, and return the actions they delivered. Other pending tasks are
+    closed unrun, as before."""
+    import sys
+    bridge = sys.modules["jc.core_bridge"]
+    sweeps = [c for c in hass._tasks
+              if getattr(getattr(c, "cr_code", None), "co_name", "") == "_sweep_and_report"]
+    others = [c for c in hass._tasks if c not in sweeps]
+    hass._tasks = []
+    for c in others:
+        c.close()
+    delivered = []
+
+    async def collect(_hass, _config, action, _sleeping):
+        delivered.append(action)
+    real = bridge._emit_action
+    bridge._emit_action = collect
+    safety.sweep_verify_delay = 0
+    try:
+        for c in sweeps:
+            await c
+    finally:
+        bridge._emit_action = real
+    hass.close_pending()
+    return delivered

@@ -140,6 +140,8 @@ async def async_activate_by_intent(
     await hass.async_add_executor_job(
         lambda: action_log.set_execution(action_id, "accepted")
     )
+    await hass.async_add_executor_job(
+        lambda: action_log.mark_not_checkable(action_id))
 
     scene_name = next((s["name"] for s in scenes if s["entity_id"] == pick), pick)
     msg = f"Activating {scene_name}{addr}."

@@ -6,6 +6,7 @@ still exports every name defined here, as the same object.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Iterable, Optional
@@ -25,6 +26,7 @@ from .core_common import (
     INTRUSION_SPREAD_ZONES,
     INTRUSION_SUSTAINED_SECS,
     LOCKDOWN_CHECK_INTERVAL,
+    LOCKDOWN_SECURE_VERIFY_DELAY,
     _f_to_unit,
     _fmt_temp,
     _notify_i18n,
@@ -50,6 +52,9 @@ class SafetyManager:
         self._investigation = None   # active intrusion investigation, or None
         self._freeze_warned = False
         self._automatic_generation = 0
+        # Seconds the night sweep waits before rereading what it locked and
+        # closed (8.24.0). Slow covers report late.
+        self.sweep_verify_delay = LOCKDOWN_SECURE_VERIFY_DELAY
         # The household reading for the tick in progress (household.py), or
         # None between ticks, when the helpers below read the house live.
         self._house = None
@@ -139,9 +144,11 @@ class SafetyManager:
                     and (now - self._last_lockdown_check) > LOCKDOWN_CHECK_INTERVAL):
                 self._last_lockdown_check = now
                 generation = self._automatic_generation
-                lockdown = await self._nighttime_lockdown(generation)
-                if lockdown:
-                    actions.extend(lockdown)
+                # Runs in the background (8.24.0): the sweep waits to check
+                # what it secured, and must never hold up the safety loop.
+                # Its message goes to the phones, as a sleeping house's alerts
+                # always do; it is never spoken at night.
+                self.hass.async_create_task(self._sweep_and_report(generation))
         except Exception as exc:
             _LOGGER.warning("Safety tick: nighttime lockdown failed: %s", exc)
 
@@ -997,6 +1004,16 @@ class SafetyManager:
             self._investigation = None            # situation settled
         return None
 
+    async def _sweep_and_report(self, automatic_generation: int) -> None:
+        """Run the night sweep and deliver its message as a sleeping-house
+        alert (phones only below critical). Never raises."""
+        try:
+            from .core_bridge import _emit_action
+            for action in await self._nighttime_lockdown(automatic_generation):
+                await _emit_action(self.hass, self.config, action, True)
+        except Exception as exc:
+            _LOGGER.warning("Safety tick: nighttime lockdown failed: %s", exc)
+
     async def _nighttime_lockdown(self, automatic_generation: int) -> list[dict]:
         """Check and secure all locks and doors during sleep."""
         actions = []
@@ -1029,6 +1046,7 @@ class SafetyManager:
         # Check locks
         unlocked = []
         failed = []   # friendly names of anything the sweep could not secure
+        sent: list = []   # (entity_id, name, domain, row_id) of every command sent
         for state in lock_targets:
             if not self._automatic_operation_current(automatic_generation):
                 return []
@@ -1042,6 +1060,7 @@ class SafetyManager:
                     if not self._automatic_operation_current(automatic_generation):
                         return []
                     unlocked.append(fname)
+                    sent.append((eid, fname, "lock", row_id))
                     _LOGGER.info("Cognitive lockdown: locked %s", eid)
                     await self.hass.async_add_executor_job(
                         lambda rid=row_id: action_log.set_execution(rid, "accepted")
@@ -1068,6 +1087,7 @@ class SafetyManager:
                     if not self._automatic_operation_current(automatic_generation):
                         return []
                     open_covers.append(fname)
+                    sent.append((eid, fname, "cover", row_id))
                     _LOGGER.info("Cognitive lockdown: closed %s", eid)
                     await self.hass.async_add_executor_job(
                         lambda rid=row_id: action_log.set_execution(rid, "accepted")
@@ -1082,16 +1102,43 @@ class SafetyManager:
 
         if not self._automatic_operation_current(automatic_generation):
             return []
+
+        # Check what was sent (8.24.0): after a short wait, each lock must
+        # read locked and each cover closed. Only those count as secured; a
+        # device that reads anything else, or cannot be read, is named as
+        # not secured, so the message never says "secured" before checking.
+        not_secured: list = []
+        if sent:
+            await asyncio.sleep(self.sweep_verify_delay)
+            if not self._automatic_operation_current(automatic_generation):
+                return []
+            from . import entity_verify
+            unlocked, open_covers = [], []
+            for eid, fname, dom, row_id in sent:
+                ok = entity_verify.check_state_once(
+                    self.hass, eid, "locked" if dom == "lock" else "closed")
+                (unlocked if dom == "lock" else open_covers).append(fname) if ok \
+                    else not_secured.append(fname)
+                if row_id is not None:
+                    await self.hass.async_add_executor_job(
+                        lambda rid=row_id, good=ok: action_log.set_execution(
+                            rid, "verified" if good else "unverified",
+                            reason_code=None if good else "not_secure_after_check"))
+            failed = not_secured + failed
         if candidates:
-            # The sweep's decision, in the shared safety format (8.23.0).
+            # The sweep's decision, in the shared safety format (8.23.0),
+            # written after the check so it carries what was confirmed.
             from . import alert_path
             await alert_path.async_record_decision(
                 self.hass, "lockdown_sweep", source="nighttime_sweep",
                 sit=alert_path.situation(self.hass, self.config, sleeping=True,
                                          house=self._household()),
-                facts={"locked": unlocked, "closed": open_covers, "failed": failed},
+                facts={"locked": unlocked, "closed": open_covers,
+                       "not_secured_after_check": not_secured,
+                       "failed": [f for f in failed if f not in not_secured]},
                 assessment="household asleep with locks unlocked or covers open",
-                decision="lock and close" + (", some failed" if failed else ""),
+                decision="lock and close, checked" + (
+                    ", some not secured" if failed else ""),
                 reason="automatic lockdown at night")
         if unlocked or open_covers or failed:
             i18n = _notify_i18n()
@@ -1124,8 +1171,9 @@ class SafetyManager:
                         honorific=honorific.title(), failed=problem)
             actions.append({
                 "type": "lockdown",
-                # A failure to secure at night is raised to high so it is
-                # pushed to the phone and spoken when someone is awake.
+                # A failure to secure (the command failed, or the device did
+                # not read secured on the check) is high. The sweep runs while
+                # the house is asleep, so it goes to the phones, not spoken.
                 "urgency": "high" if failed else "low",
                 "message": message,
                 "auto_act": True,

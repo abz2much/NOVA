@@ -113,6 +113,16 @@ async def test_a_door_opened_during_lockdown(load, fake_hass, records):
 async def test_the_nighttime_sweep(load, fake_hass, records):
     cc = load("cognitive_core")
     safety = cc.SafetyManager(fake_hass, {"honorific": "sir", "lockdown_auto_on_arm": True})
+    # 8.24.0: the sweep checks what it secured, so the fake devices obey.
+    safety.sweep_verify_delay = 0
+    real = fake_hass.services.async_call
+
+    async def obey(domain, service, data=None, blocking=False, **kw):
+        await real(domain, service, data, blocking=blocking, **kw)
+        eid = data["entity_id"]
+        fake_hass.states.set(eid, "locked" if domain == "lock" else "closed",
+                             **dict(fake_hass.states.get(eid).attributes))
+    fake_hass.services.async_call = obey
     fake_hass.states.set("lock.front", "unlocked", friendly_name="Front")
     fake_hass.states.set("cover.living_blind", "open", device_class="blind",
                          friendly_name="Living blind")

@@ -368,7 +368,8 @@ def _plan_words(plan: Optional[Plan]) -> str:
 def decision_fields(kind: str, *, source: str, sit: Optional[Situation] = None,
                     plan: Optional[Plan] = None, entity_id: Optional[str] = None,
                     message: str = "", facts: Optional[dict] = None,
-                    assessment: str = "", decision: str = "", reason: str = "") -> dict:
+                    assessment: str = "", decision: str = "", reason: str = "",
+                    ref: Optional[str] = None) -> dict:
     """The shared Decision Record fields for one safety decision."""
     observation: dict = {"source": source}
     if entity_id:
@@ -395,6 +396,9 @@ def decision_fields(kind: str, *, source: str, sit: Optional[Situation] = None,
         "evidence": evidence,
         "decision": decision or _plan_words(plan),
         "reason": reason or (plan.reason if plan is not None else ""),
+        # Links the entries of one episode, e.g. a lockdown and the checks of
+        # what it secured (8.24.0). Records themselves are never edited.
+        "ref": ref,
     }
 
 

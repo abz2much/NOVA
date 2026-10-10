@@ -323,7 +323,8 @@ class LockdownManager:
             self.hass, "lockdown", source="lockdown", entity_id=entity_id,
             sit=alert_path.situation(self.hass, self.config),
             facts=dict(facts, auto=self.auto), assessment=assessment,
-            decision=decision, reason=reason)
+            decision=decision, reason=reason,
+            ref=f"lockdown:{int(self.since)}" if self.since else None)
 
     def _friendly(self, eid: str) -> str:
         """Friendly name for an entity (falls back to its id)."""
@@ -644,7 +645,15 @@ class LockdownManager:
             if not self.active or eid in self.exempt_windows:
                 return
             st = self.hass.states.get(eid)
-            if st is None or self._is_secure(dom, st.state):
+            if st is None:
+                # It cannot be read, so it is unverified, never secured
+                # (8.24.0). Recorded; no alarm on a missing reading.
+                await self._record("could not check", "no reading after the command",
+                                   entity_id=eid, assessment="unverified")
+                return
+            if self._is_secure(dom, st.state):
+                await self._record("checked, secured", "read secure after the command",
+                                   entity_id=eid, assessment="verified")
                 return  # secure now — nothing to report
             if eid in self._alerted:
                 return

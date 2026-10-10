@@ -1395,6 +1395,8 @@ async def try_local(hass, text, honorific="sir", force=False, device_id=None):
                 await hass.async_add_executor_job(
                     lambda: action_log.set_execution(_action_id, "accepted")
                 )
+                await hass.async_add_executor_job(
+                    lambda: action_log.mark_not_checkable(_action_id))
                 return LocalResult(text=f"Activating {fname} now{addr}.", success=True)
             except Exception as exc:
                 await hass.async_add_executor_job(
@@ -1424,6 +1426,8 @@ async def try_local(hass, text, honorific="sir", force=False, device_id=None):
                 await hass.async_add_executor_job(
                     lambda: action_log.set_execution(_action_id, "accepted")
                 )
+                await hass.async_add_executor_job(
+                    lambda: action_log.mark_not_checkable(_action_id))
                 return LocalResult(text=f"Goodnight{addr}. I've triggered {fname}. Rest well.", success=True)
             except Exception:
                 await hass.async_add_executor_job(

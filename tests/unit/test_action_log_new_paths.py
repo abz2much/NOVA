@@ -178,7 +178,7 @@ async def test_scene_by_intent_logs_one_action(load, fake_hass, isolated_db, al)
     row = page["requests"][0]
     assert row["action"] == "scene_by_intent"
     assert row["source"] == "ha_service"
-    assert row["targets"][0]["execution_result"] == "accepted"
+    assert row["targets"][0]["execution_result"] == "unverified"  # ran, not checkable (8.24.0)
 
 
 # ── cognitive_core.py: LockdownManager.engage — locks + covers, one request ─
@@ -381,7 +381,7 @@ async def test_local_engine_scene_fast_path_logs_one_action(le, fake_hass, isola
     assert len(page["requests"]) == 1
     row = page["requests"][0]
     assert row["action"] == "scene_activation"
-    assert row["targets"][0]["execution_result"] == "accepted"
+    assert row["targets"][0]["execution_result"] == "unverified"  # ran, not checkable (8.24.0)
 
 
 # ── local_engine.py: goodnight shortcut ──────────────────────────────────────

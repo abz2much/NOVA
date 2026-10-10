@@ -25,7 +25,10 @@ needs, what it does by itself, and what it never does without you.
   the covers it controls. It is off until you turn it on. With it on, Nova
   also locks the doors and closes open covers at night while the household
   is asleep. The night sweep closes every open cover, blinds included; the
-  armed lockdown closes only doors, garages, windows and gates. Doors and windows
+  armed lockdown closes only doors, garages, windows and gates. About 25
+  seconds later the night sweep checks each one, and only says the house is
+  secured when every lock reads locked and every cover reads closed. Anything
+  that did not take is named and sent to your phones. Doors and windows
   it cannot close are named so you can close them by hand; a fridge or
   cabinet door, a sensor on your exclude list, or a shed door is not.
 - **Packages.** A package taken from the door while nobody is home is sent to
@@ -127,6 +130,14 @@ while armed away is still spoken.
 On the **Intrusion** tab you can press **I'M LOOKING (HOLD)** to stop the
 automatic escalation, or **CALL OFF (FALSE ALARM)**. Calling off an intrusion
 is always confirmed, and when you ask by voice it needs a tap on your phone.
+
+## Checking what Nova did
+
+After Nova locks or closes something it checks the device afterwards: the
+night sweep, lockdown, the voice "secure" reply and devices you ask it to
+control. **Logs → Actions** shows verified, unverified or failed for each.
+Scenes, scripts and automations are shown as "not checkable", because Nova
+cannot see what they do.
 
 ## The decision log
 

@@ -38,7 +38,26 @@ def audit_db(al, monkeypatch):
 
 @pytest.fixture
 def safety(cc, fake_hass):
-    return cc.SafetyManager(fake_hass, {"honorific": "sir", "lockdown_auto_on_arm": True})
+    s = cc.SafetyManager(fake_hass, {"honorific": "sir", "lockdown_auto_on_arm": True})
+    s.sweep_verify_delay = 0     # 8.24.0: the sweep checks what it secured
+    return s
+
+
+@pytest.fixture(autouse=True)
+def devices_obey(fake_hass):
+    """8.24.0: the sweep rereads each lock and cover after acting, so the
+    fake devices change state when commanded, as real ones do."""
+    real = fake_hass.services.async_call
+
+    async def call(domain, service, data=None, blocking=False, **kw):
+        await real(domain, service, data, blocking=blocking, **kw)
+        eid = (data or {}).get("entity_id")
+        st = fake_hass.states.get(eid) if isinstance(eid, str) else None
+        new = {("lock", "lock"): "locked", ("cover", "close_cover"): "closed"}.get(
+            (domain, service))
+        if st is not None and new:
+            fake_hass.states.set(eid, new, **dict(st.attributes))
+    fake_hass.services.async_call = call
 
 
 def _rows(al):
@@ -176,7 +195,7 @@ async def test_one_lock_that_fails_does_not_stop_the_others_and_is_named_as_not_
     assert action["urgency"] == "high"                              # a failure is raised so it reaches the phone
     assert "failed to lock lock.back" in caplog.text
     by_entity = {r["entity_id"]: r for r in _rows(al)}
-    assert by_entity["lock.front"]["execution_result"] == "accepted"
+    assert by_entity["lock.front"]["execution_result"] == "verified"   # checked (8.24.0)
     assert by_entity["lock.back"]["execution_result"] == "failed"
     assert by_entity["lock.back"]["reason_code"] == "service_call_failed"
 
@@ -190,7 +209,7 @@ async def test_a_failing_cover_does_not_stop_the_locks_and_is_named_as_not_secur
     assert "Front" in action["message"] and "Garage" in action["message"]
     assert "not fully secured" in action["message"] and "The house is secured." not in action["message"]
     assert {r["entity_id"]: r["execution_result"] for r in _rows(al)} == {
-        "lock.front": "accepted", "cover.garage": "failed"}
+        "lock.front": "verified", "cover.garage": "failed"}         # checked (8.24.0)
 
 
 async def test_when_everything_fails_the_message_says_so_and_never_claims_success(
@@ -220,7 +239,7 @@ async def test_one_request_covers_every_target_of_one_sweep(safety, fake_hass, a
     assert len(pages) == 1
     assert pages[0]["action"] == "lockdown" and pages[0]["source"] == "safety_routine"
     assert sorted(t["entity_id"] for t in pages[0]["targets"]) == ["cover.garage", "lock.front"]
-    assert {t["execution_result"] for t in pages[0]["targets"]} == {"accepted"}
+    assert {t["execution_result"] for t in pages[0]["targets"]} == {"verified"}  # checked (8.24.0)
     assert sorted((t["domain"], t["service"]) for t in pages[0]["targets"]) == [
         ("cover", "close_cover"), ("lock", "lock")]
 

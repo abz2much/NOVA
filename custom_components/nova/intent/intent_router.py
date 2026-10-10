@@ -13,6 +13,7 @@ is imported lazily inside the methods that need it.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 
@@ -114,6 +115,9 @@ class LocalIntentRouter:
         self.mutex = mutex    # optional EntityLockRegistry (duck-typed); concurrency control
         self._pending_feedback: dict | None = None
         self._feedback_cancel = None
+        # Seconds to wait before rereading what a voice reply locked or
+        # closed (8.24.0), the same wait lockdown uses.
+        self.verify_delay = 25.0
 
     # ── Area helper (lazy import keeps the module HA-free at import time) ──
     def _area_of(self, entity_id: str):
@@ -205,6 +209,60 @@ class LocalIntentRouter:
         except Exception:  # noqa: BLE001
             pass
 
+    def _schedule_check(self, intent: str, domain: str, targets: list[str],
+                        row_ids: dict, user_id: str | None) -> None:
+        """Locks and covers a voice reply secured are checked in the
+        background (8.24.0). Never raises."""
+        if domain not in ("lock", "cover") or not targets:
+            return
+        try:
+            self.hass.async_create_task(
+                self._check_secured(intent, domain, list(targets), row_ids, user_id))
+        except Exception:  # noqa: BLE001
+            pass
+
+    async def _check_secured(self, intent: str, domain: str, targets: list[str],
+                             row_ids: dict, user_id: str | None) -> None:
+        """After the wait, each lock must read locked and each cover closed.
+        The action log rows become verified or unverified (a device that
+        cannot be read is unverified), the result goes to the decision log,
+        and anything not secured is raised as a high alert. Never raises."""
+        try:
+            await asyncio.sleep(self.verify_delay)
+            from .. import alert_path, entity_verify
+            expected = "locked" if domain == "lock" else "closed"
+            secured: list[str] = []
+            not_secured: list[str] = []
+            for eid in targets:
+                (secured if entity_verify.check_state_once(self.hass, eid, expected)
+                 else not_secured).append(eid)
+            await self._log_set(row_ids, secured, "verified")
+            await self._log_set(row_ids, not_secured, "unverified",
+                                "not_secure_after_check")
+            await alert_path.async_record_decision(
+                self.hass, "voice_secure", source="voice_reply",
+                sit=alert_path.situation(self.hass),
+                facts={"intent": intent, "secured": secured,
+                       "not_secured_after_check": not_secured},
+                assessment="asked by voice to secure the room",
+                decision="checked, secured" if not not_secured
+                else "checked, some not secured",
+                reason="the voice reply's check after acting")
+            if not_secured:
+                from .. import core_state
+                from ..core_bridge import _emit_action
+                names = ", ".join(
+                    (self.hass.states.get(e).attributes.get("friendly_name", e)
+                     if self.hass.states.get(e) else e) for e in not_secured)
+                await _emit_action(self.hass, core_state._CORE.config or {}, {
+                    "type": "voice_secure_failed", "urgency": "high",
+                    "message": f"I tried to secure {names}, but it is not secured yet. "
+                               f"Please check it.",
+                    "entity_id": not_secured[0], "auto_act": True,
+                }, False)
+        except Exception:  # noqa: BLE001
+            _LOGGER.debug("intent: secure check failed", exc_info=True)
+
     # ── Execution ─────────────────────────────────────────────────────────
     async def _call_domain_in_area(
         self, domain: str, service: str, area_id: str,
@@ -274,6 +332,8 @@ class LocalIntentRouter:
             self._release_all(tokens)
             return []
         await self._log_set(row_ids, targets, "accepted")
+        self._schedule_check(intent or f"{domain}.{service}", domain, targets,
+                             row_ids, user_id)
 
         for txn in txns:
             try:
@@ -367,6 +427,7 @@ class LocalIntentRouter:
                     self.mutex.release(token)
                 return {"executed": False, "intent": intent, "entity_id": entity_id}
             await self._log_set(row_ids, [entity_id], "accepted")
+            self._schedule_check(intent, str(domain), [entity_id], row_ids, user_id)
             if token is not None:
                 self.mutex.release(token)
             return {"executed": True, "intent": intent, "entity_id": entity_id}

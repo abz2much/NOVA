@@ -628,3 +628,14 @@ def get_request(request_id: str, db_path: Optional[str] = None) -> Optional[dict
         "status": _aggregate_status(targets),
         "targets": targets,
     }
+
+
+NOT_CHECKABLE = "not_checkable"
+
+
+def mark_not_checkable(action_id: Optional[int]) -> bool:
+    """A scene, script or automation ran, but what it does is not visible to
+    Nova, so whether it worked cannot be checked (8.24.0). The row moves from
+    accepted to unverified with reason not_checkable; nothing more is
+    promised. Blocking (SQLite), so call it from the executor."""
+    return set_execution(action_id, "unverified", reason_code=NOT_CHECKABLE)

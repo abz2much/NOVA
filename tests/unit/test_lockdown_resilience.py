@@ -344,7 +344,10 @@ async def test_disabling_auto_cancels_remaining_sleep_sweep(
             await release.wait()
 
     fake_hass.services.async_call = paused_call
-    task = asyncio.create_task(safety.tick(sleeping=True, anyone_home=True))
+    # 8.24.0: the sweep runs in the background, not inside tick(), so it is
+    # driven directly here; the setting is switched off mid sweep as before.
+    safety.sweep_verify_delay = 0
+    task = asyncio.create_task(safety._nighttime_lockdown(safety._automatic_generation))
     await started.wait()
     await cognitive_core.apply_runtime_config("lockdown_auto_on_arm", False)
     release.set()

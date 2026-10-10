@@ -352,6 +352,8 @@ async def _exec_run_scene_script(hass: HomeAssistant, args: dict, device_id: Opt
         await hass.async_add_executor_job(
             lambda: action_log.set_execution(action_id, "accepted")
         )
+        await hass.async_add_executor_job(
+            lambda: action_log.mark_not_checkable(action_id))
         return json.dumps({
             "success": True, "status": "accepted", "entity_id": entity_id,
             "action": "activated",
@@ -684,6 +686,9 @@ async def _exec_execute_plan(hass: HomeAssistant, args: dict, device_id: Optiona
             await hass.async_add_executor_job(
                 lambda rid=row_id: action_log.set_execution(rid, "accepted")
             )
+            if domain in ("scene", "script", "automation"):
+                await hass.async_add_executor_job(
+                    lambda rid=row_id: action_log.mark_not_checkable(rid))
         except Exception as exc:
             results.append({"step": i + 1, "description": desc,
                             "ok": False, "status": "error", "error": str(exc)})

@@ -11,6 +11,13 @@
 - **Paths that had no check now have one:** the voice "secure" reply (locks and closes in the room), the offers executor, and the `nova.scene_by_intent` service. The voice "secure" reply now writes action log rows. With voice confirmation on, a scene picked by intent is now confirmed first, like every other scene.
 - **A test scans the code** and fails if any lock, cover, alarm, scene or script call skips the check.
 
+### Stage C: check after acting
+- **The night sweep checks before it says "secured".** About 25 seconds after locking and closing, it rereads each lock and cover. Only a lock that reads locked, or a cover that reads closed, counts. Anything else, or anything that cannot be read, is named as not secured and raised as a high alert. The sweep runs while the house is asleep, so its message goes to your phones and is never spoken. It now runs in the background, so it never holds up the 30 second safety loop.
+- **The voice "secure" reply checks the same way.** Its action log rows become verified or unverified, the result goes to the decision log, and anything not secured is raised as a high alert.
+- **Lockdown's own check is logged.** Each device it checks is written to the decision log, linked to the lockdown it belongs to. A device that cannot be read is recorded as "could not check", never as secured.
+- **Scenes, scripts and automations are marked "not checkable"** in the action log after they run, because what they do is not visible to Nova. Nothing more is promised.
+- **A check that cannot run is "unverified", never "verified".**
+
 ## [8.23.1] — Unknown presence reaches the phones too
 
 - **A medium alert while presence is unknown now goes to the phones,** the same as when everyone is away. Before, it was neither spoken nor pushed. Unknown means a person reading unknown or unavailable, or no person entities set up. Pushed only, with the rating buttons; never spoken.

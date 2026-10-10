@@ -188,6 +188,9 @@ async def async_run_routine(
                     await hass.async_add_executor_job(
                         lambda rid=row_id: action_log.set_execution(rid, "accepted")
                     )
+                    if domain in ("scene", "script", "automation"):
+                        await hass.async_add_executor_job(
+                            lambda rid=row_id: action_log.mark_not_checkable(rid))
                 except Exception as exc:
                     if step.get("optional"):
                         _LOGGER.debug("Nova: optional step '%s' skipped: %s", service, exc)
