@@ -365,7 +365,18 @@
       <div class="mode-bind-head">Readings</div>
       ${metrics.length ? metrics.map(metricRow).join("") : `<div class="stub-body">Loading detected readings…</div>`}
       <div class="mode-bind-head">Infrastructure audit</div>
-      <div class="stub-body">A separate check every 15 minutes of a fixed set of server and network switch sensors. Sensors that don't exist here are skipped. Pick a room for its alerts, or leave none to only log them.</div>
+      <div class="stub-body">A separate check every 15 minutes of the sensors you list here. A sensor in percent is flagged above 90 and critical above 96. A binary sensor is flagged when it goes off, or on for a problem sensor. With no sensors listed, the audit does nothing. Pick a room for its alerts, or leave none to only log them.</div>
+      <div class="cfg-row">
+        <input id="newAuditSensorInput" list="newAuditSensorList" class="cfg-field" style="flex:1" placeholder="type to find a sensor…" autocomplete="off">
+        <datalist id="newAuditSensorList">${this._sensorDatalist()}</datalist>
+        <button class="mode-chip" id="newAuditSensorAdd">+ Add</button>
+      </div>
+      <div class="mode-grid" id="newAuditSensorChips">${(() => {
+        const arr = this._exclArr(cfg.infrastructure_audit_sensors);
+        return arr.length
+          ? arr.map((e, i) => `<span class="new-pl-chip">${this._esc(e)}<button class="new-audit-sensor-del" data-i="${i}" title="Remove">×</button></span>`).join("")
+          : `<span class="toggle-desc">None.</span>`;
+      })()}</div>
       <div class="cfg-row">
         <label>Audit alerts room</label>
         <select class="cfg-field" data-cfg-key="infrastructure_audit_area">${this._optSelect([["", "— none —"], ...(this._data()?.areas || []).map(a => [a.id, a.name])], cfg.infrastructure_audit_area || "")}</select>
@@ -608,6 +619,12 @@
   _allEntityDatalist() {
     const states = this._hass?.states || {};
     return Object.keys(states).sort().map(eid => `<option value="${this._esc(eid)}">${this._esc(this._entName(eid))}</option>`).join("");
+  }
+  // Sensors and binary sensors, for the infrastructure audit list (8.28.0).
+  _sensorDatalist() {
+    const states = this._hass?.states || {};
+    return Object.keys(states).filter(eid => /^(binary_)?sensor\./.test(eid)).sort()
+      .map(eid => `<option value="${this._esc(eid)}">${this._esc(this._entName(eid))}</option>`).join("");
   }
   _domainDatalist() {
     const states = this._hass?.states || {};

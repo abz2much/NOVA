@@ -224,7 +224,6 @@
   "3 min": "3 Min.",
   "5 min": "5 Min.",
   "A GROUND-FLOOR BREACH WOULD STILL WAKE ME": "EIN EINBRUCH IM ERDGESCHOSS WÜRDE MICH TROTZDEM WECKEN",
-  "A separate check every 15 minutes of a fixed set of server and network switch sensors. Sensors that don't exist here are skipped. Pick a room for its alerts, or leave none to only log them.": "Eine eigene Prüfung alle 15 Minuten für eine feste Reihe von Server- und Netzwerk-Switch-Sensoren. Sensoren, die es hier nicht gibt, werden übersprungen. Wähle einen Raum für die Warnungen, oder keinen, um sie nur zu protokollieren.",
   "A thing cannot be linked to itself.": "Ein Ding kann nicht mit sich selbst verknüpft werden.",
   "A welcome briefing fires when someone gets home — but only once this door actually opens, not the moment their phone shows them nearby (still in the driveway or car). Leave unset to keep arrival briefings off entirely.": "Eine Willkommensbegrüßung startet, wenn jemand nach Hause kommt — aber erst, wenn diese Tür wirklich aufgeht, nicht schon, wenn das Handy die Person in der Nähe zeigt (noch in der Einfahrt oder im Auto). Leer lassen, um Ankunftsbegrüßungen ganz auszuschalten.",
   "ACTIONS": "AKTIONEN",
@@ -637,7 +636,6 @@
   "No warnings in force for your area.": "Keine Warnungen für dein Gebiet in Kraft.",
   "No wearable entities found. Connect a wearable integration (Withings, Google Fit, Oura, etc.) to Home Assistant.": "Keine Wearable-Entitäten gefunden. Verbinde eine Wearable-Integration (Withings, Google Fit, Oura usw.) mit Home Assistant.",
   "None": "Keine",
-  "None yet. Tell Nova how things relate, for example \"Sam owns the Jeep\", then confirm it here. Only you can confirm a link, Nova cannot.": "Noch keine. Erzähl Nova, wie Dinge zusammenhängen, zum Beispiel „Sam besitzt den Jeep“, und bestätige es dann hier. Nur du kannst eine Verknüpfung bestätigen, Nova nicht.",
   "None.": "Keine.",
   "Normal Nova alerts go to every selected device.": "Normale Nova-Warnungen gehen an jedes gewählte Gerät.",
   "Norsk bokmål": "Norsk bokmål",
@@ -1159,7 +1157,6 @@
   "Entity not found": "Entität nicht gefunden",
   "Exit doors": "Ausgangstüren",
   "House status": "Hausstatus",
-  "Links between things, such as \"sam owns car.jeep\" or \"kitchen adjacent_to hallway\". Nova proposes them when you tell it how things relate. A new link waits here and is not used until you confirm it. Only confirmed links are shown to Nova. Removing one is permanent: Nova will not add it back on its own.": "Verknüpfungen zwischen Dingen, etwa „sam owns car.jeep“ oder „kitchen adjacent_to hallway“. Nova schlägt sie vor, wenn du ihr erzählst, wie Dinge zusammenhängen. Eine neue Verknüpfung wartet hier und wird erst genutzt, wenn du sie bestätigst. Nur bestätigte Verknüpfungen sieht Nova. Entfernen ist endgültig: Nova fügt sie nicht von selbst wieder hinzu.",
   "Lockdown": "Sperrung",
   "Locked": "Verriegelt",
   "Name (optional)": "Name (optional)",
@@ -1173,5 +1170,9 @@
   "Utility Room": "Hauswirtschaftsraum",
   "doors you leave the house by. Nova adds nothing until you pick one.": "Türen, durch die du das Haus verlässt. Nova fügt nichts hinzu, bis du eine auswählst.",
   "— pick a door, lock, cover or sensor —": "— Tür, Schloss, Abdeckung oder Sensor wählen —",
-  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Kellergeschoss und seine Türen anzeigen. Automatisch sucht nach einem Bereich oder Stockwerk namens Keller oder einem Stockwerk unter der Erde. Das ändert nur, was du siehst."
+  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Kellergeschoss und seine Türen anzeigen. Automatisch sucht nach einem Bereich oder Stockwerk namens Keller oder einem Stockwerk unter der Erde. Das ändert nur, was du siehst.",
+  "Links between things, such as \"house member owns bike\" or \"child's room adjacent_to hallway\". Nova proposes them when you tell it how things relate. A new link waits here and is not used until you confirm it. Only confirmed links are shown to Nova. Removing one is permanent: Nova will not add it back on its own.": "Verknüpfungen zwischen Dingen, etwa „house member owns bike“ oder „child's room adjacent_to hallway“. Nova schlägt sie vor, wenn du ihr erzählst, wie Dinge zusammenhängen. Eine neue Verknüpfung wartet hier und wird erst genutzt, wenn du sie bestätigst. Nur bestätigte Verknüpfungen sieht Nova. Entfernen ist endgültig: Nova fügt sie nicht von selbst wieder hinzu.",
+  "None yet. Tell Nova how things relate, for example \"House member owns the bike\", then confirm it here. Only you can confirm a link, Nova cannot.": "Noch keine. Erzähl Nova, wie Dinge zusammenhängen, zum Beispiel „Haushaltsmitglied besitzt das Fahrrad“, und bestätige es dann hier. Nur du kannst eine Verknüpfung bestätigen, Nova nicht.",
+  "type to find a sensor…": "Tippen, um einen Sensor zu finden…",
+  "A separate check every 15 minutes of the sensors you list here. A sensor in percent is flagged above 90 and critical above 96. A binary sensor is flagged when it goes off, or on for a problem sensor. With no sensors listed, the audit does nothing. Pick a room for its alerts, or leave none to only log them.": "Eine eigene Prüfung alle 15 Minuten für die Sensoren, die du hier auflistest. Ein Sensor in Prozent wird über 90 gemeldet und ist über 96 kritisch. Ein binärer Sensor wird gemeldet, wenn er ausgeht, oder bei einem Problemsensor, wenn er angeht. Ohne aufgelistete Sensoren tut die Prüfung nichts. Wähle einen Raum für die Warnungen, oder keinen, um sie nur zu protokollieren."
 }

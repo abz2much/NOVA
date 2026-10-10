@@ -1,7 +1,7 @@
 """
 Nova — Mail Agent (v6.81.0).
 
-On-demand, read-only inbox access, native to the integration. AIO principle:
+On-demand, read-only inbox access, native to the integration. All in one:
 no separate mail server, no extra long-running process, no new dependency —
 just the Python standard library (imaplib + email), with every blocking IMAP
 call offloaded to Home Assistant's executor.

@@ -41,7 +41,7 @@
             <div class="panel-title">Relations</div>
             <div class="panel-meta" id="newRelationsCount">—</div>
           </div>
-          <div class="stub-body">Links between things, such as "sam owns car.jeep" or "kitchen adjacent_to hallway". Nova proposes them when you tell it how things relate. A new link waits here and is not used until you confirm it. Only confirmed links are shown to Nova. Removing one is permanent: Nova will not add it back on its own.</div>
+          <div class="stub-body">Links between things, such as "house member owns bike" or "child's room adjacent_to hallway". Nova proposes them when you tell it how things relate. A new link waits here and is not used until you confirm it. Only confirmed links are shown to Nova. Removing one is permanent: Nova will not add it back on its own.</div>
           <div class="toggle-desc" id="newRelationsMsg"></div>
           <div id="newRelationsPending" class="mem-body"></div>
           <div class="mode-bind-head">Confirmed</div>
@@ -311,7 +311,7 @@
         <button class="new-rel-remove" data-id="${r.id}" title="Remove this relation" aria-label="Remove">✕ Remove</button>
       </div>`).join("")
       : (this._relationsLoaded
-        ? `<div class="stub-body">None yet. Tell Nova how things relate, for example "Sam owns the Jeep", then confirm it here. Only you can confirm a link, Nova cannot.</div>`
+        ? `<div class="stub-body">None yet. Tell Nova how things relate, for example "House member owns the bike", then confirm it here. Only you can confirm a link, Nova cannot.</div>`
         : `<div class="stub-body">Loading…</div>`));
     const idOf = (el) => parseInt(el.getAttribute("data-id"), 10);
     pendingBox.querySelectorAll(".rel-confirm").forEach(b => b.addEventListener("click", e => this._relationAction(idOf(e.currentTarget), "confirm")));

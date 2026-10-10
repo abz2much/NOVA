@@ -82,7 +82,7 @@ def _dt(ts) -> Optional[datetime]:
 
 def _tokens(entity_id: str) -> set:
     """Distinctive name tokens of an entity (device-family fingerprint):
-    'binary_sensor.garage_hub_motion' -> {'garage', 'hub', 'motion'}."""
+    'binary_sensor.hall_hub_motion' -> {'hall', 'hub', 'motion'}."""
     obj = (entity_id or "").split(".", 1)[-1]
     return {t for t in re.split(r"[^a-z0-9]+", obj.lower())
             if len(t) > 2 and t not in _GENERIC_TOKENS}

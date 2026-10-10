@@ -58,7 +58,7 @@ _EONET_EVENTS = "https://eonet.gsfc.nasa.gov/api/v3/events"
 
 # A descriptive User-Agent. NWS mandates one; EONET/USGS appreciate one. Generic
 # on purpose — no personal data (contact is the project, not the user).
-_USER_AGENT = "Nova-AIO Home Assistant hazard monitor (github.com/abz2much/nova)"
+_USER_AGENT = "Nova Home Assistant hazard monitor (github.com/abz2much/nova)"
 
 # ── defaults (all overridable via config) ────────────────────────────────────
 _DEF_QUAKE_RADIUS_KM = 300.0     # earthquakes within this of home

@@ -36,13 +36,14 @@ LOCKDOWN_SECURE_VERIFY_DELAY = 25  # seconds to wait before confirming a close a
 
 # Locks that are NOT physical security (thermostat keypad/child locks, etc).
 # Lockdown's "lock every unlocked lock" sweep and breach re-lock both skip
-# these entities. Overridable via the "lockdown_exempt_locks" config key
-# (panel / config.json) — this set is just the default so it works out of
-# the box even with no config.json entry.
-LOCKDOWN_EXEMPT_LOCKS_DEFAULT = {
-    "lock.downstairs_thermo_lock",
-    "lock.upstairs_thermo_lock",
-}
+# the entities in the "lockdown_exempt_locks" config key (config.json). With
+# the key never saved, nothing is exempt (8.28.0). The default used to name
+# two thermostat locks from one particular home; an install that already
+# relied on it has them written into its saved setting once (migrations.py
+# v7 to v8), so its lockdown does not change.
+LOCKDOWN_EXEMPT_LOCKS_DEFAULT: set = set()
+# The old default, kept only for that one time migration.
+LEGACY_LOCKDOWN_EXEMPT_LOCKS = ("lock.downstairs_thermo_lock", "lock.upstairs_thermo_lock")
 FREEZE_WARN_TEMP_F = 35  # outdoor temp (°F) that triggers pipe concern
 FREEZE_CRITICAL_TEMP_F = 20  # act immediately
 

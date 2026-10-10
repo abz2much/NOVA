@@ -350,7 +350,6 @@ _STT_CORRECTIONS = {
     "nite": "night", "nitestand": "nightstand",
     "night stand": "nightstand",
     "bed side": "bedside", "bed lamp": "bedside light",
-    "chase": "chase", "chaise": "chase",
     "tv": "television", "teevee": "tv",
     "a.c.": "ac", "air con": "air conditioner",
     "thermos": "thermostat", "thermo": "thermostat",

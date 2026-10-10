@@ -215,7 +215,6 @@
   "Entity not found": "Entità non trovata",
   "Exit doors": "Porte d'uscita",
   "House status": "Stato della casa",
-  "Links between things, such as \"sam owns car.jeep\" or \"kitchen adjacent_to hallway\". Nova proposes them when you tell it how things relate. A new link waits here and is not used until you confirm it. Only confirmed links are shown to Nova. Removing one is permanent: Nova will not add it back on its own.": "Collegamenti tra cose, come \"sam owns car.jeep\" o \"kitchen adjacent_to hallway\". Nova li propone quando le dici come le cose sono collegate. Un nuovo collegamento attende qui e non viene usato finché non lo confermi. Solo i collegamenti confermati sono mostrati a Nova. Rimuoverne uno è definitivo: Nova non lo aggiungerà di nuovo da sola.",
   "Lockdown": "Blocco",
   "Locked": "Chiusa a chiave",
   "Name (optional)": "Nome (facoltativo)",
@@ -229,5 +228,9 @@
   "Utility Room": "Lavanderia",
   "doors you leave the house by. Nova adds nothing until you pick one.": "le porte da cui esci di casa. Nova non aggiunge nulla finché non ne scegli una.",
   "— pick a door, lock, cover or sensor —": "— scegli una porta, serratura, copertura o sensore —",
-  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Mostra il seminterrato e le sue porte. Automatico cerca un'area o un piano chiamato Seminterrato o Cantina, o un piano sotto il livello del suolo. Cambia solo ciò che vedi."
+  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Mostra il seminterrato e le sue porte. Automatico cerca un'area o un piano chiamato Seminterrato o Cantina, o un piano sotto il livello del suolo. Cambia solo ciò che vedi.",
+  "Links between things, such as \"house member owns bike\" or \"child's room adjacent_to hallway\". Nova proposes them when you tell it how things relate. A new link waits here and is not used until you confirm it. Only confirmed links are shown to Nova. Removing one is permanent: Nova will not add it back on its own.": "Collegamenti tra cose, come \"house member owns bike\" o \"child's room adjacent_to hallway\". Nova li propone quando le dici come le cose sono collegate. Un nuovo collegamento attende qui e non viene usato finché non lo confermi. Solo i collegamenti confermati sono mostrati a Nova. Rimuoverne uno è definitivo: Nova non lo aggiungerà di nuovo da sola.",
+  "None yet. Tell Nova how things relate, for example \"House member owns the bike\", then confirm it here. Only you can confirm a link, Nova cannot.": "Ancora nessuno. Di' a Nova come sono collegate le cose, per esempio \"Membro della casa possiede la bici\", poi confermalo qui. Solo tu puoi confermare un collegamento, Nova no.",
+  "type to find a sensor…": "digita per trovare un sensore…",
+  "A separate check every 15 minutes of the sensors you list here. A sensor in percent is flagged above 90 and critical above 96. A binary sensor is flagged when it goes off, or on for a problem sensor. With no sensors listed, the audit does nothing. Pick a room for its alerts, or leave none to only log them.": "Un controllo separato ogni 15 minuti dei sensori che elenchi qui. Un sensore in percentuale viene segnalato sopra 90 ed è critico sopra 96. Un sensore binario viene segnalato quando si spegne, o quando si accende se è un sensore di problema. Senza sensori elencati, il controllo non fa nulla. Scegli una stanza per i suoi avvisi, o nessuna per registrarli soltanto."
 }

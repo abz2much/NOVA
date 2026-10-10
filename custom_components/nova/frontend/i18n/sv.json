@@ -224,7 +224,6 @@
   "3 min": "3 min",
   "5 min": "5 min",
   "A GROUND-FLOOR BREACH WOULD STILL WAKE ME": "ETT INBROTT PÅ BOTTENVÅNINGEN SKULLE ÄNDÅ VÄCKA MIG",
-  "A separate check every 15 minutes of a fixed set of server and network switch sensors. Sensors that don't exist here are skipped. Pick a room for its alerts, or leave none to only log them.": "En separat kontroll var 15:e minut av en fast uppsättning server- och nätverksswitchsensorer. Sensorer som inte finns här hoppas över. Välj ett rum för varningarna, eller inget för att bara logga dem.",
   "A thing cannot be linked to itself.": "En sak kan inte länkas till sig själv.",
   "A welcome briefing fires when someone gets home — but only once this door actually opens, not the moment their phone shows them nearby (still in the driveway or car). Leave unset to keep arrival briefings off entirely.": "En välkomstgenomgång startar när någon kommer hem — men först när den här dörren faktiskt öppnas, inte så fort telefonen visar personen i närheten (fortfarande på uppfarten eller i bilen). Lämna tomt för att hålla ankomstgenomgångar avstängda.",
   "ACTIONS": "ÅTGÄRDER",
@@ -637,7 +636,6 @@
   "No warnings in force for your area.": "Inga varningar gäller för ditt område.",
   "No wearable entities found. Connect a wearable integration (Withings, Google Fit, Oura, etc.) to Home Assistant.": "Inga entiteter för bärbara enheter hittades. Anslut en integration för bärbara enheter (Withings, Google Fit, Oura m.fl.) till Home Assistant.",
   "None": "Ingen",
-  "None yet. Tell Nova how things relate, for example \"Sam owns the Jeep\", then confirm it here. Only you can confirm a link, Nova cannot.": "Inga ännu. Berätta för Nova hur saker hänger ihop, till exempel \"Sam äger jeepen\", och bekräfta det sedan här. Bara du kan bekräfta en länk, inte Nova.",
   "None.": "Ingen.",
   "Normal Nova alerts go to every selected device.": "Vanliga Nova-varningar går till varje vald enhet.",
   "Norsk bokmål": "Norsk bokmål",
@@ -1159,7 +1157,6 @@
   "Entity not found": "Entiteten hittades inte",
   "Exit doors": "Utgångsdörrar",
   "House status": "Husets status",
-  "Links between things, such as \"sam owns car.jeep\" or \"kitchen adjacent_to hallway\". Nova proposes them when you tell it how things relate. A new link waits here and is not used until you confirm it. Only confirmed links are shown to Nova. Removing one is permanent: Nova will not add it back on its own.": "Länkar mellan saker, som \"sam owns car.jeep\" eller \"kitchen adjacent_to hallway\". Nova föreslår dem när du berättar hur saker hänger ihop. En ny länk väntar här och används inte förrän du bekräftar den. Bara bekräftade länkar visas för Nova. Att ta bort en är permanent: Nova lägger inte tillbaka den på egen hand.",
   "Lockdown": "Lockdown",
   "Locked": "Låst",
   "Name (optional)": "Namn (valfritt)",
@@ -1173,5 +1170,9 @@
   "Utility Room": "Grovkök",
   "doors you leave the house by. Nova adds nothing until you pick one.": "dörrar du lämnar huset genom. Nova lägger inte till något förrän du väljer en.",
   "— pick a door, lock, cover or sensor —": "— välj en dörr, ett lås, ett skydd eller en sensor —",
-  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Visa källarvåningen och dess dörrar. Automatiskt letar efter ett område eller en våning som heter Källare, eller en våning under marken. Det ändrar bara vad du ser."
+  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Visa källarvåningen och dess dörrar. Automatiskt letar efter ett område eller en våning som heter Källare, eller en våning under marken. Det ändrar bara vad du ser.",
+  "Links between things, such as \"house member owns bike\" or \"child's room adjacent_to hallway\". Nova proposes them when you tell it how things relate. A new link waits here and is not used until you confirm it. Only confirmed links are shown to Nova. Removing one is permanent: Nova will not add it back on its own.": "Länkar mellan saker, som \"house member owns bike\" eller \"child's room adjacent_to hallway\". Nova föreslår dem när du berättar hur saker hänger ihop. En ny länk väntar här och används inte förrän du bekräftar den. Bara bekräftade länkar visas för Nova. Att ta bort en är permanent: Nova lägger inte tillbaka den på egen hand.",
+  "None yet. Tell Nova how things relate, for example \"House member owns the bike\", then confirm it here. Only you can confirm a link, Nova cannot.": "Inga ännu. Berätta för Nova hur saker hänger ihop, till exempel \"Hushållsmedlem äger cykeln\", och bekräfta det sedan här. Bara du kan bekräfta en länk, inte Nova.",
+  "type to find a sensor…": "skriv för att hitta en sensor…",
+  "A separate check every 15 minutes of the sensors you list here. A sensor in percent is flagged above 90 and critical above 96. A binary sensor is flagged when it goes off, or on for a problem sensor. With no sensors listed, the audit does nothing. Pick a room for its alerts, or leave none to only log them.": "En separat kontroll var 15:e minut av sensorerna du listar här. En sensor i procent flaggas över 90 och är kritisk över 96. En binär sensor flaggas när den slås av, eller på för en problemsensor. Utan listade sensorer gör kontrollen ingenting. Välj ett rum för varningarna, eller inget för att bara logga dem."
 }

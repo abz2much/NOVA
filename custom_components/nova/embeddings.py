@@ -13,7 +13,8 @@ build, Nova reuses the Ollama server it already talks to:
   - Similarity is plain cosine over stored vectors, computed in stdlib Python.
     A few hundred chunks dotted against one query vector is trivial; no numpy.
 
-This is genuinely more in the spirit of Nova-AIO than ChromaDB was: it
+This is genuinely more in the spirit of Nova, all in one integration, than
+ChromaDB was: it
 leans on infrastructure the user already runs and adds zero install weight.
 
 Enable it from Settings; it degrades to keyword (FTS5) search whenever Ollama

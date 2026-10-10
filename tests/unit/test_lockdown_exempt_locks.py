@@ -2,6 +2,9 @@
 child/keypad locks that happen to live in the `lock` domain but aren't
 physical security). Covers both the engage-time sweep and the breach
 re-lock path.
+
+8.28.0: nothing is exempt by default. These two use the list an install
+from before 8.28.0 has saved after its one time migration.
 """
 import pytest
 
@@ -25,13 +28,17 @@ def _calls(fake_hass, domain, service):
     return [c for c in fake_hass.service_calls if c[0] == domain and c[1] == service]
 
 
-async def test_default_exempt_locks_are_not_locked_on_engage(cc, fake_hass):
+SAVED = {"honorific": "sir",
+         "lockdown_exempt_locks": ["lock.downstairs_thermo_lock", "lock.upstairs_thermo_lock"]}
+
+
+async def test_saved_exempt_locks_are_not_locked_on_engage(cc, fake_hass):
     fake_hass.states.set("lock.front", "unlocked", friendly_name="Front Lock")
     fake_hass.states.set("lock.downstairs_thermo_lock", "unlocked",
                          friendly_name="Downstairs Thermo Lock")
     fake_hass.states.set("lock.upstairs_thermo_lock", "unlocked",
                          friendly_name="Upstairs Thermo Lock")
-    mgr = _mgr(cc, fake_hass)
+    mgr = _mgr(cc, fake_hass, SAVED)
 
     await mgr.engage("test")
     fake_hass.close_pending()
@@ -45,7 +52,7 @@ async def test_default_exempt_locks_are_not_locked_on_engage(cc, fake_hass):
 async def test_exempt_lock_unlocked_during_lockdown_is_not_relocked(cc, fake_hass):
     fake_hass.states.set("lock.downstairs_thermo_lock", "locked",
                          friendly_name="Downstairs Thermo Lock")
-    mgr = _mgr(cc, fake_hass)
+    mgr = _mgr(cc, fake_hass, SAVED)
     await mgr.engage("test")
     fake_hass.close_pending()
 

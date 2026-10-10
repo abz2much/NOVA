@@ -65,6 +65,25 @@ AUDIT_STARTUP_DELAY = timedelta(seconds=60)
 # The area the infrastructure audit speaks in, from the "infrastructure_audit_area"
 # setting. Unset means the audit only logs what it finds.
 AUDIT_AREA_KEY = "infrastructure_audit_area"
+# The sensors the infrastructure audit watches (8.28.0). Starts empty; with
+# nothing listed the audit does nothing.
+AUDIT_SENSORS_KEY = "infrastructure_audit_sensors"
+
+
+def _audit_sensors(hass, entry) -> list:
+    """The listed sensors, as a list of entity ids. Never raises."""
+    import json as _json
+    from . import nova_config
+    try:
+        raw = nova_config.runtime_get(hass, entry, AUDIT_SENSORS_KEY, [])
+    except Exception:
+        return []
+    if isinstance(raw, str):
+        try:
+            raw = _json.loads(raw) if raw.strip() else []
+        except ValueError:
+            return []
+    return [str(e) for e in raw if isinstance(e, str) and e.strip()] if isinstance(raw, list) else []
 
 # Predictive habit matrix: record occupancy each audit tick and surface likely
 # upcoming actions. Pre-emptive *execution* is OFF by default — Nova earns
@@ -554,7 +573,8 @@ async def async_setup_proactive_audio(hass: HomeAssistant, entry: ConfigEntry) -
         # actually home changes over that time.
         honorific = _resolve_honorific(hass, entry)
         try:
-            verdict = InfrastructureTriage(hass, honorific=honorific).evaluate()
+            verdict = InfrastructureTriage(
+                hass, honorific=honorific, sensors=_audit_sensors(hass, entry)).evaluate()
             if verdict["alert_required"]:
                 message = verdict["message"]
                 tags = verdict.get("tags", [])

@@ -307,7 +307,7 @@ async def test_a_switched_off_routes_api_is_retried_slowly(env):
 
 # ── where a journey starts ──────────────────────────────────────────────────
 
-HOME = (53.607, -6.209)
+HOME = (51.478, -0.001)     # the Royal Observatory, Greenwich: a public landmark
 WORK = (53.350, -6.260)
 
 

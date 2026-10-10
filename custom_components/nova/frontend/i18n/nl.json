@@ -224,7 +224,6 @@
   "3 min": "3 min",
   "5 min": "5 min",
   "A GROUND-FLOOR BREACH WOULD STILL WAKE ME": "EEN INBRAAK OP DE BEGANE GROND ZOU ME TOCH WEKKEN",
-  "A separate check every 15 minutes of a fixed set of server and network switch sensors. Sensors that don't exist here are skipped. Pick a room for its alerts, or leave none to only log them.": "Een aparte controle elke 15 minuten van een vaste set server- en netwerkswitchsensoren. Sensoren die hier niet bestaan, worden overgeslagen. Kies een kamer voor de meldingen, of geen om ze alleen te loggen.",
   "A thing cannot be linked to itself.": "Een ding kan niet aan zichzelf gekoppeld worden.",
   "A welcome briefing fires when someone gets home — but only once this door actually opens, not the moment their phone shows them nearby (still in the driveway or car). Leave unset to keep arrival briefings off entirely.": "Een welkomstbriefing start wanneer iemand thuiskomt — maar pas als deze deur echt opengaat, niet zodra de telefoon iemand in de buurt toont (nog op de oprit of in de auto). Laat leeg om aankomstbriefings helemaal uit te houden.",
   "ACTIONS": "ACTIES",
@@ -637,7 +636,6 @@
   "No warnings in force for your area.": "Geen waarschuwingen van kracht voor jouw gebied.",
   "No wearable entities found. Connect a wearable integration (Withings, Google Fit, Oura, etc.) to Home Assistant.": "Geen wearable-entiteiten gevonden. Koppel een wearable-integratie (Withings, Google Fit, Oura, enz.) aan Home Assistant.",
   "None": "Geen",
-  "None yet. Tell Nova how things relate, for example \"Sam owns the Jeep\", then confirm it here. Only you can confirm a link, Nova cannot.": "Nog geen. Vertel Nova hoe dingen samenhangen, bijvoorbeeld \"Sam heeft de Jeep\", en bevestig het dan hier. Alleen jij kunt een koppeling bevestigen, Nova niet.",
   "None.": "Geen.",
   "Normal Nova alerts go to every selected device.": "Gewone Nova-meldingen gaan naar elk gekozen apparaat.",
   "Norsk bokmål": "Norsk bokmål",
@@ -1159,7 +1157,6 @@
   "Entity not found": "Entiteit niet gevonden",
   "Exit doors": "Buitendeuren",
   "House status": "Huisstatus",
-  "Links between things, such as \"sam owns car.jeep\" or \"kitchen adjacent_to hallway\". Nova proposes them when you tell it how things relate. A new link waits here and is not used until you confirm it. Only confirmed links are shown to Nova. Removing one is permanent: Nova will not add it back on its own.": "Koppelingen tussen dingen, zoals \"sam owns car.jeep\" of \"kitchen adjacent_to hallway\". Nova stelt ze voor als je vertelt hoe dingen samenhangen. Een nieuwe koppeling wacht hier en wordt pas gebruikt als je hem bevestigt. Alleen bevestigde koppelingen ziet Nova. Verwijderen is definitief: Nova voegt hem niet zelf terug.",
   "Lockdown": "Vergrendeling",
   "Locked": "Op slot",
   "Name (optional)": "Naam (optioneel)",
@@ -1173,5 +1170,9 @@
   "Utility Room": "Bijkeuken",
   "doors you leave the house by. Nova adds nothing until you pick one.": "deuren waardoor je het huis verlaat. Nova voegt niets toe tot je er een kiest.",
   "— pick a door, lock, cover or sensor —": "— kies een deur, slot, afdekking of sensor —",
-  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "De kelder en de deuren ervan tonen. Automatisch zoekt naar een ruimte of verdieping met de naam Kelder, of een verdieping onder de grond. Dit verandert alleen wat je ziet."
+  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "De kelder en de deuren ervan tonen. Automatisch zoekt naar een ruimte of verdieping met de naam Kelder, of een verdieping onder de grond. Dit verandert alleen wat je ziet.",
+  "Links between things, such as \"house member owns bike\" or \"child's room adjacent_to hallway\". Nova proposes them when you tell it how things relate. A new link waits here and is not used until you confirm it. Only confirmed links are shown to Nova. Removing one is permanent: Nova will not add it back on its own.": "Koppelingen tussen dingen, zoals \"house member owns bike\" of \"child's room adjacent_to hallway\". Nova stelt ze voor als je vertelt hoe dingen samenhangen. Een nieuwe koppeling wacht hier en wordt pas gebruikt als je hem bevestigt. Alleen bevestigde koppelingen ziet Nova. Verwijderen is definitief: Nova voegt hem niet zelf terug.",
+  "None yet. Tell Nova how things relate, for example \"House member owns the bike\", then confirm it here. Only you can confirm a link, Nova cannot.": "Nog geen. Vertel Nova hoe dingen samenhangen, bijvoorbeeld \"Huisgenoot heeft de fiets\", en bevestig het dan hier. Alleen jij kunt een koppeling bevestigen, Nova niet.",
+  "type to find a sensor…": "typ om een sensor te vinden…",
+  "A separate check every 15 minutes of the sensors you list here. A sensor in percent is flagged above 90 and critical above 96. A binary sensor is flagged when it goes off, or on for a problem sensor. With no sensors listed, the audit does nothing. Pick a room for its alerts, or leave none to only log them.": "Een aparte controle elke 15 minuten van de sensoren die je hier opgeeft. Een sensor in procenten wordt gemeld boven 90 en is kritiek boven 96. Een binaire sensor wordt gemeld als hij uitgaat, of aangaat bij een probleemsensor. Zonder opgegeven sensoren doet de controle niets. Kies een kamer voor de meldingen, of geen om ze alleen te loggen."
 }

@@ -215,7 +215,6 @@
   "Entity not found": "Entitatea nu a fost găsită",
   "Exit doors": "Uși de ieșire",
   "House status": "Starea casei",
-  "Links between things, such as \"sam owns car.jeep\" or \"kitchen adjacent_to hallway\". Nova proposes them when you tell it how things relate. A new link waits here and is not used until you confirm it. Only confirmed links are shown to Nova. Removing one is permanent: Nova will not add it back on its own.": "Legături între lucruri, de exemplu \"sam owns car.jeep\" sau \"kitchen adjacent_to hallway\". Nova le propune când îi spui cum se leagă lucrurile. O legătură nouă așteaptă aici și nu este folosită până nu o confirmi. Nova vede doar legăturile confirmate. Eliminarea uneia este definitivă: Nova nu o va adăuga din nou singură.",
   "Lockdown": "Blocare",
   "Locked": "Încuiată",
   "Name (optional)": "Nume (opțional)",
@@ -229,5 +228,9 @@
   "Utility Room": "Cameră tehnică",
   "doors you leave the house by. Nova adds nothing until you pick one.": "ușile prin care ieși din casă. Nova nu adaugă nimic până nu alegi una.",
   "— pick a door, lock, cover or sensor —": "— alege o ușă, încuietoare, acoperire sau senzor —",
-  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Afișează subsolul și ușile lui. Automat caută o zonă sau un etaj numit Subsol sau Pivniță, ori un etaj sub nivelul solului. Schimbă doar ce vezi."
+  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "Afișează subsolul și ușile lui. Automat caută o zonă sau un etaj numit Subsol sau Pivniță, ori un etaj sub nivelul solului. Schimbă doar ce vezi.",
+  "Links between things, such as \"house member owns bike\" or \"child's room adjacent_to hallway\". Nova proposes them when you tell it how things relate. A new link waits here and is not used until you confirm it. Only confirmed links are shown to Nova. Removing one is permanent: Nova will not add it back on its own.": "Legături între lucruri, de exemplu \"house member owns bike\" sau \"child's room adjacent_to hallway\". Nova le propune când îi spui cum se leagă lucrurile. O legătură nouă așteaptă aici și nu este folosită până nu o confirmi. Nova vede doar legăturile confirmate. Eliminarea uneia este definitivă: Nova nu o va adăuga din nou singură.",
+  "None yet. Tell Nova how things relate, for example \"House member owns the bike\", then confirm it here. Only you can confirm a link, Nova cannot.": "Niciuna încă. Spune-i Novei cum se leagă lucrurile, de exemplu \"Membrul casei deține bicicleta\", apoi confirmă aici. Doar tu poți confirma o legătură, nu Nova.",
+  "type to find a sensor…": "scrie pentru a găsi un senzor…",
+  "A separate check every 15 minutes of the sensors you list here. A sensor in percent is flagged above 90 and critical above 96. A binary sensor is flagged when it goes off, or on for a problem sensor. With no sensors listed, the audit does nothing. Pick a room for its alerts, or leave none to only log them.": "O verificare separată la fiecare 15 minute a senzorilor pe care îi listezi aici. Un senzor în procente este semnalat peste 90 și critic peste 96. Un senzor binar este semnalat când se oprește, sau când pornește dacă e un senzor de problemă. Fără senzori listați, verificarea nu face nimic. Alege o cameră pentru alerte, sau niciuna pentru a le doar înregistra."
 }

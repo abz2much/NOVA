@@ -17,8 +17,8 @@ Storage: /config/nova/knowledge.db (sibling of patterns.db). Pure SQLite —
 keyword + recency + salience recall now; an embedding column can be added later
 for semantic search without reshaping callers.
 
-Relations (8.7.13) are the other half: simple links between things ("sam owns
-car.jeep", "kitchen adjacent_to garage"). They live in the same file, start
+Relations (8.7.13) are the other half: simple links between things ("house
+member owns bike", "child's room adjacent_to hallway"). They live in the same file, start
 PENDING whatever their source, and are only read, or shown to the model, once a
 person has confirmed them. See the "Relations" section below.
 
@@ -515,7 +515,7 @@ def stats(now: Optional[float] = None) -> dict:
 
 
 # ── Relations (8.7.13) ───────────────────────────────────────────────────────
-# Links between two things: subject, predicate, object ("sam owns car.jeep").
+# Links between two things: subject, predicate, object ("house member owns bike").
 #
 # Trust model, the same as pending facts but stricter:
 #   • EVERY relation starts 'pending', whatever its source. Nothing is read
@@ -523,8 +523,8 @@ def stats(now: Optional[float] = None) -> dict:
 #   • Nothing infers relations by itself. Nova only learns from confirmations.
 #   • Removing a relation is a SOFT delete (deleted_at). A later write that is
 #     not user stated can never bring an edge back that a person removed.
-#   • Nodes are stored normalized (like identity.normalize), so "Sam" and "sam"
-#     are one node; a predicate is lowercase snake case.
+#   • Nodes are stored normalized (like identity.normalize), so "Guest" and
+#     "guest" are one node; a predicate is lowercase snake case.
 # Every write path validates, and none raises.
 
 RELATION_LIVE_CAP = 500            # live (non removed) rows, pending and confirmed

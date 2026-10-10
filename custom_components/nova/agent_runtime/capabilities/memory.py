@@ -156,7 +156,7 @@ async def _exec_reject_pending_fact(hass: HomeAssistant, args: dict) -> str:
 
 
 # ── Relations (8.7.13) ──────────────────────────────────────────────────────
-# Links between things ("sam owns car.jeep"). Same trust model as pending
+# Links between things ("house member owns bike"). Same trust model as pending
 # facts, stricter: propose_relation can only STAGE a pending relation, nothing
 # reads it until a person confirms it in the panel's Memory tab (8.7.14: there
 # is deliberately NO agent tool that confirms a relation), and a confirmed one

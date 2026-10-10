@@ -233,7 +233,7 @@ async def test_audit_tick_uses_the_runtime_flag(hass, monkeypatch):
         return real_call_later(hass_, delay, action)
 
     class _Triage:
-        def __init__(self, hass_, honorific=""):
+        def __init__(self, hass_, honorific="", **_kw):     # sensors= (8.28.0)
             pass
 
         def evaluate(self):
@@ -279,7 +279,7 @@ async def test_audit_speaks_only_in_the_chosen_area(hass, monkeypatch, spoken):
         return real_call_later(hass_, delay, action)
 
     class _Triage:
-        def __init__(self, hass_, honorific=""):
+        def __init__(self, hass_, honorific="", **_kw):     # sensors= (8.28.0)
             pass
 
         def evaluate(self):

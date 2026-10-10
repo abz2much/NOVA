@@ -154,7 +154,7 @@ def excluded_entity_ids(hass: HomeAssistant) -> set:
 # ── object sensors are not people (8.14.0) ──────────────────────────────────
 # Camera integrations such as Frigate expose one binary_sensor per detected
 # object class, for example binary_sensor.garage_car_occupancy or
-# binary_sensor.kitchen_dog_occupancy, with device_class occupancy. They say an
+# binary_sensor.driveway_bicycle_occupancy, with device_class occupancy. They say an
 # object is in view, not that a person is there, so they must never decide
 # that someone is home or in a room. Their own events are unaffected.
 _OBJECT_LABELS = frozenset({

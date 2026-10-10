@@ -25,7 +25,6 @@
   "3 min": "3 分钟",
   "5 min": "5 分钟",
   "A GROUND-FLOOR BREACH WOULD STILL WAKE ME": "一楼有人闯入时仍要叫醒我",
-  "A separate check every 15 minutes of a fixed set of server and network switch sensors. Sensors that don't exist here are skipped. Pick a room for its alerts, or leave none to only log them.": "每 15 分钟单独检查一组固定的服务器和网络交换机传感器。不存在的传感器会被跳过。为警报选择一个房间，或不选以仅记录到日志。",
   "A thing cannot be linked to itself.": "事物不能与自身关联。",
   "A welcome briefing fires when someone gets home — but only once this door actually opens, not the moment their phone shows them nearby (still in the driveway or car). Leave unset to keep arrival briefings off entirely.": "有人回家时会播报欢迎简报——但只有这扇门真正打开时才会播报，而不是手机显示其在附近时（仍在车道或车里）。留空则完全关闭到家简报。",
   "ACTIONS": "操作",
@@ -573,7 +572,6 @@
   "No warnings in force for your area.": "您所在地区目前没有生效的预警。",
   "No wearable entities found. Connect a wearable integration (Withings, Google Fit, Oura, etc.) to Home Assistant.": "未找到可穿戴设备实体。请将可穿戴设备集成（Withings、Google Fit、Oura 等）连接到 Home Assistant。",
   "None": "无",
-  "None yet. Tell Nova how things relate, for example \"Sam owns the Jeep\", then confirm it here. Only you can confirm a link, Nova cannot.": "暂无。告诉 Nova 事物之间的关系，例如“Sam 拥有那辆 Jeep”，然后在此确认。只有您可以确认关联，Nova 不能。",
   "None.": "无。",
   "Normal Nova alerts go to every selected device.": "普通的 Nova 警报会发送到每个已选设备。",
   "Norsk bokmål": "Norsk bokmål",
@@ -1154,7 +1152,6 @@
   "Entity not found": "未找到实体",
   "Exit doors": "出口门",
   "House status": "房屋状态",
-  "Links between things, such as \"sam owns car.jeep\" or \"kitchen adjacent_to hallway\". Nova proposes them when you tell it how things relate. A new link waits here and is not used until you confirm it. Only confirmed links are shown to Nova. Removing one is permanent: Nova will not add it back on its own.": "事物之间的关联，例如“sam owns car.jeep”或“kitchen adjacent_to hallway”。当您告诉 Nova 事物之间的关系时，它会提出关联。新关联会在此等待，在您确认前不会使用。Nova 只能看到已确认的关联。移除是永久的：Nova 不会自行重新添加。",
   "Lockdown": "封锁",
   "Locked": "已上锁",
   "Name (optional)": "名称（可选）",
@@ -1168,5 +1165,9 @@
   "Utility Room": "杂物间",
   "doors you leave the house by. Nova adds nothing until you pick one.": "您离家时经过的门。在您选择之前，Nova 不会添加任何门。",
   "— pick a door, lock, cover or sensor —": "— 选择门、锁、遮盖物或传感器 —",
-  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "显示地下室楼层及其门。自动会查找名为地下室或地窖的区域或楼层，或低于地面的楼层。这只改变您看到的内容。"
+  "Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.": "显示地下室楼层及其门。自动会查找名为地下室或地窖的区域或楼层，或低于地面的楼层。这只改变您看到的内容。",
+  "Links between things, such as \"house member owns bike\" or \"child's room adjacent_to hallway\". Nova proposes them when you tell it how things relate. A new link waits here and is not used until you confirm it. Only confirmed links are shown to Nova. Removing one is permanent: Nova will not add it back on its own.": "事物之间的关联，例如“house member owns bike”或“child's room adjacent_to hallway”。当您告诉 Nova 事物之间的关系时，它会提出关联。新关联会在此等待，在您确认前不会使用。Nova 只能看到已确认的关联。移除是永久的：Nova 不会自行重新添加。",
+  "None yet. Tell Nova how things relate, for example \"House member owns the bike\", then confirm it here. Only you can confirm a link, Nova cannot.": "暂无。告诉 Nova 事物之间的关系，例如“家庭成员拥有那辆自行车”，然后在此确认。只有您可以确认关联，Nova 不能。",
+  "type to find a sensor…": "输入以查找传感器…",
+  "A separate check every 15 minutes of the sensors you list here. A sensor in percent is flagged above 90 and critical above 96. A binary sensor is flagged when it goes off, or on for a problem sensor. With no sensors listed, the audit does nothing. Pick a room for its alerts, or leave none to only log them.": "每 15 分钟单独检查您在此列出的传感器。百分比传感器高于 90 时标记，高于 96 时为严重。二元传感器关闭时标记，问题传感器则在开启时标记。未列出传感器时，此检查不做任何事。为警报选择一个房间，或不选以仅记录到日志。"
 }

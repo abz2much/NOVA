@@ -39,17 +39,17 @@
     <text x="22" y="54" fill="#7a6d5e" font-size="11" width="490">What Nova calls each person when they&#8217;re home alone.</text>
     <line x1="22" y1="66" x2="518" y2="66" stroke="#33291f"/>
 
-    <!-- row: Alex -->
+    <!-- row: House member -->
     <g transform="translate(22,84)">
-      <text y="18" fill="#a89a89" font-size="12.5">Alex</text>
+      <text y="18" fill="#a89a89" font-size="12.5">House member</text>
       <rect x="340" y="0" width="156" height="30" rx="8" fill="#2a2119" stroke="#33291f"/>
       <text x="352" y="20" fill="#f3ece1" font-size="11.5">Boss</text>
       <path d="M478 12 L484 18 L490 12" fill="none" stroke="#a89a89" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
     </g>
 
-    <!-- row: Morgan -->
+    <!-- row: Guest -->
     <g transform="translate(22,132)">
-      <text y="18" fill="#a89a89" font-size="12.5">Morgan</text>
+      <text y="18" fill="#a89a89" font-size="12.5">Guest</text>
       <rect x="340" y="0" width="156" height="30" rx="8" fill="#2a2119" stroke="#33291f"/>
       <text x="352" y="20" fill="#f3ece1" font-size="11.5">Custom&#8230;</text>
       <path d="M478 12 L484 18 L490 12" fill="none" stroke="#a89a89" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -57,9 +57,9 @@
       <text x="352" y="55" fill="#ffe3ad" font-size="11">&#8220;ma&#8217;am&#8221;</text>
     </g>
 
-    <!-- row: Lien -->
+    <!-- row: Child -->
     <g transform="translate(22,220)">
-      <text y="18" fill="#a89a89" font-size="12.5">Lien</text>
+      <text y="18" fill="#a89a89" font-size="12.5">Child</text>
       <rect x="340" y="0" width="156" height="30" rx="8" fill="#2a2119" stroke="#33291f"/>
       <text x="352" y="20" fill="#7a6d5e" font-size="11.5">&#8212; use default &#8212;</text>
       <path d="M478 12 L484 18 L490 12" fill="none" stroke="#a89a89" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>

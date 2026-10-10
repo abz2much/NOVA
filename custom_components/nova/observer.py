@@ -490,7 +490,7 @@ def _cognition_threshold() -> float:
 
 # ── Sibling-burst coalescing ────────────────────────────────────────────────
 # An alarm panel (or similar) can toggle a whole bank of numbered entities at
-# once — e.g. binary_sensor.home_cove_alarm_zone_49 .. _63 firing 15/sec. Each is
+# once — e.g. binary_sensor.alarm_zone_49 .. _63 firing 15/sec. Each is
 # a distinct entity_id, so the per-entity debounce can't collapse them, and every
 # one would trigger its own classifier call — flooding the LLM and evicting the
 # activity log. We collapse a burst of numbered siblings to a single escalation
@@ -503,7 +503,7 @@ _SEQ_SUFFIX_RE = re.compile(r"^(.*?)_(\d+)$")
 def _group_key(entity_id: str) -> Optional[str]:
     """Shared prefix for a numbered-sibling entity, else None.
 
-    binary_sensor.home_cove_alarm_zone_49 -> binary_sensor.home_cove_alarm_zone.
+    binary_sensor.alarm_zone_49 -> binary_sensor.alarm_zone.
     Only entities whose object_id ends in _<number> get a key; anything else
     returns None and is never coalesced.
     """
@@ -619,7 +619,7 @@ def _on_state_changed(event: Event) -> None:
         pass
 
     # v7.54.0: Coalesce a burst of numbered sibling entities (e.g. an alarm panel
-    # toggling home_cove_alarm_zone_49..63 at once). Each sibling is a distinct
+    # toggling alarm_zone_49..63 at once). Each sibling is a distinct
     # entity_id, so the per-entity debounce below can't catch them and each would
     # trigger its own classifier call — flooding the LLM and evicting the activity
     # log. Intrusion detection is unaffected (separate periodic check).

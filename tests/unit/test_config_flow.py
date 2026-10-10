@@ -848,7 +848,7 @@ async def test_success_saves_typed_keys_and_creates_the_entry(config_flow, monke
     assert data["vision_provider"] == "ollama" and data["vision_model"] == "llava"
     assert data["ollama_base_url"] == "http://192.168.1.50:11434"
     assert data["self_hosted_endpoints_migrated"] is True
-    assert data["welcome_pending"] is True and data["schema_version"] == 7
+    assert data["welcome_pending"] is True and data["schema_version"] == 8   # fresh: no migration (8.28.0)
     assert data["honorific"]
 
 

@@ -27,6 +27,7 @@ from homeassistant.config_entries import ConfigFlow, ConfigEntry, OptionsFlow
 from homeassistant.core import callback
 from homeassistant.helpers import selector
 
+from .migrations import CURRENT_SCHEMA_VERSION
 from .const import (
     CONF_API_KEY,
     CONF_HONORIFIC,
@@ -401,7 +402,9 @@ class NovaConfigFlow(ConfigFlow, domain=DOMAIN):
         from . import setup_roles
         data: dict[str, Any] = {
             CONF_HONORIFIC: DEFAULT_HONORIFIC,
-            "schema_version": 7,
+            # A fresh install starts at the current schema, so no migration
+            # runs (8.28.0: nothing is exempt from lockdown by default).
+            "schema_version": CURRENT_SCHEMA_VERSION,
             # Fresh install only: welcome.py posts "Nova is ready" once.
             "welcome_pending": True,
             # Only Ollama's own address field is used; the old shared one is not.
@@ -454,6 +457,8 @@ class NovaConfigFlow(ConfigFlow, domain=DOMAIN):
                 "llm_base_url": base_url,
                 "ollama_base_url": base_url if provider == "ollama" else "",
                 "custom_base_url": base_url if provider == "custom" else "",
+                # Imported from an existing install's config.json: start at v7
+                # so the v7 to v8 migration keeps its lockdown exempt locks.
                 "schema_version": 7,
             },
             options={k: v for k, v in import_data.items()

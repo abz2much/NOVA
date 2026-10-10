@@ -253,14 +253,16 @@
   },
   {
     "category": "child_lock",
-    "description": "What's open lists the unlocked front door but not the default exempt thermostat locks.",
+    "description": "With no exempt locks saved (8.28.0: nothing is exempt by default), what's open lists every unlocked lock, thermostat keypad locks included.",
     "expected": {
       "announcement_allowed": null,
       "clarification_required": false,
       "confirmation_required": null,
       "decision": "answered",
       "entities": [
-        "lock.front_door"
+        "lock.downstairs_thermo_lock",
+        "lock.front_door",
+        "lock.upstairs_thermo_lock"
       ],
       "tool": null
     },
