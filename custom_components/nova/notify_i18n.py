@@ -285,6 +285,16 @@ MESSAGES: dict[str, dict[str, str]] = {
         "nl": "{names} is weer geopend nadat ik het had beveiligd, dus ik laat het tot de ochtend",
         "pt": "{names} foi aberto de novo depois de eu o proteger, por isso deixo-o até de manhã",
     },
+    # Lockdown could not read these doors or windows (8.25.0).
+    "lockdown_unreadable": {
+        "en": "I can't tell if {names} is closed",
+        "fr": "je ne sais pas si {names} est fermé",
+        "de": "ich kann nicht erkennen, ob {names} geschlossen ist",
+        "es": "no sé si {names} está cerrado",
+        "it": "non riesco a capire se {names} è chiuso",
+        "nl": "ik kan niet zien of {names} dicht is",
+        "pt": "não consigo saber se {names} está fechado",
+    },
     "lockdown_secure_failed": {
         "en": "I couldn't secure {names} — please check by hand",
         "fr": "je n'ai pas pu sécuriser {names} — à vérifier manuellement",

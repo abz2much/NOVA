@@ -13,6 +13,8 @@ The snapshot holds:
   * open_ways_in    doors, windows and garage doors open into the house
   * unlocked_locks  locks reading unlocked
   * unreadable_locks locks reading unknown, unavailable or jammed
+  * unreadable_openings doors, windows and garage doors into the house
+                    reading unknown or unavailable (8.25.0)
   * open_covers     covers reading open or opening
   * person_motion   motion, occupancy and presence sensors showing a person
   * lockdown_active True, False or UNKNOWN
@@ -46,6 +48,7 @@ class World:
     open_ways_in: Any = UNKNOWN
     unlocked_locks: Any = UNKNOWN
     unreadable_locks: Any = UNKNOWN
+    unreadable_openings: Any = UNKNOWN
     open_covers: Any = UNKNOWN
     person_motion: Any = UNKNOWN
     lockdown_active: Any = UNKNOWN
@@ -58,12 +61,19 @@ class World:
         return getattr(self.house, "residents", household.UNKNOWN)
 
     def secure(self) -> Any:
-        """True only when nothing is open, unlocked or unreadable; UNKNOWN
-        when any of that cannot be read. Never True on a guess."""
-        parts = (self.open_ways_in, self.unlocked_locks, self.unreadable_locks)
+        """False when something is known to be open or unlocked. UNKNOWN when
+        anything could not be read, or a lock, door or window reads unknown
+        (8.25.0). True only when everything was read and is shut. Never True
+        on a guess."""
+        parts = (self.open_ways_in, self.unlocked_locks, self.unreadable_locks,
+                 self.unreadable_openings)
         if any(p == UNKNOWN for p in parts):
             return UNKNOWN
-        return not any(parts)
+        if self.open_ways_in or self.unlocked_locks:
+            return False
+        if self.unreadable_locks or self.unreadable_openings:
+            return UNKNOWN
+        return True
 
 
 def _read(label: str, fn, *args):
@@ -84,6 +94,23 @@ def _open_ways_in(hass) -> tuple:
     for st in hass.states.async_all("cover"):
         if (st.attributes.get("device_class") in _ENTRY_COVERS
                 and st.state in ("open", "opening") and household.is_way_in(hass, st)):
+            out.append(st.entity_id)
+    return tuple(sorted(out))
+
+
+def _unreadable_openings(hass) -> tuple:
+    """Ways into the house whose sensor cannot be read: Nova cannot tell if
+    they are closed, so the house is never "secure" while any are listed."""
+    from . import household
+    blank = ("unknown", "unavailable", "none", "")
+    out = []
+    for st in hass.states.async_all("binary_sensor"):
+        if (st.attributes.get("device_class") in _OPENING_SENSORS
+                and str(st.state).lower() in blank and household.is_way_in(hass, st)):
+            out.append(st.entity_id)
+    for st in hass.states.async_all("cover"):
+        if (st.attributes.get("device_class") in _ENTRY_COVERS
+                and str(st.state).lower() in blank and household.is_way_in(hass, st)):
             out.append(st.entity_id)
     return tuple(sorted(out))
 
@@ -140,6 +167,7 @@ def read(hass, config: Optional[dict] = None, *, asleep: Any = UNKNOWN,
         unlocked_locks=_read("unlocked locks", _locks, hass, ("unlocked",)),
         unreadable_locks=_read("unreadable locks", _locks, hass,
                                ("unknown", "unavailable", "jammed")),
+        unreadable_openings=_read("unreadable openings", _unreadable_openings, hass),
         open_covers=_read("open covers", _open_covers, hass),
         person_motion=_read("person motion", _person_motion, hass),
         lockdown_active=_read("lockdown", _lockdown_active),

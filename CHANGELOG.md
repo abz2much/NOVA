@@ -6,6 +6,11 @@
 - **An hourly cap.** The sweep sends at most 12 lock and close commands in any hour, as a backstop. Anything over waits for a later sweep.
 - A night runs noon to noon. A normal night is unchanged: one message, "The house is secured."
 
+### Gap 2: doors and windows Nova cannot read
+- **Lockdown no longer says "fully secured" when it cannot read a door or window.** A door or window sensor, or a garage or gate cover, reading unknown or unavailable is named: "I can't tell if Back door is closed". Before, it was quietly taken as closed.
+- **The world model** lists them as unreadable openings, and its "is the house secure" answer is unknown while any are listed (or any lock is unreadable). Something known to be open or unlocked still makes it "not secure".
+- **Intrusion is unchanged:** an unreadable sensor is still not a way in, so it never starts an alert on its own.
+
 ## [8.24.0] — Nova's safety kernel
 
 ### Stage A: safety alerts never go quiet

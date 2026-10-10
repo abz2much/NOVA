@@ -27,12 +27,16 @@ from .core_common import (
 
 _LOGGER = logging.getLogger(f"{__package__}.cognitive_core")
 
+# States that say nothing about whether something is open or closed.
+_UNREADABLE = {"unknown", "unavailable", "none", ""}
+
 
 # ── Lockdown (v5.9.36) ──────────────────────────────────────────────────────
 
 def build_lockdown_message(honorific: str, locked: list, closed: list,
                            open_names: list, lang: str = "en",
-                           failed: Optional[list] = None) -> str:
+                           failed: Optional[list] = None,
+                           unreadable: Optional[list] = None) -> str:
     """
     Compose the lockdown-engaged announcement. Pure (no I/O) so it's unit-tested.
 
@@ -94,6 +98,11 @@ def build_lockdown_message(honorific: str, locked: list, closed: list,
                                      names=i18n.join_names(list(failed), lang)))
     if open_names:
         problems.append(gap(open_names))
+    # A door or window that cannot be read is never taken as closed
+    # (8.25.0): it is named, and "fully secured" is never said.
+    if unreadable:
+        problems.append(i18n.message("lockdown_unreadable", lang,
+                                     names=i18n.join_names(list(unreadable), lang)))
     problem = "; ".join(problems)
 
     if did and problem:
@@ -103,7 +112,7 @@ def build_lockdown_message(honorific: str, locked: list, closed: list,
         return i18n.message("lockdown_did_pending", lang, honorific=h, did=did)
     if failed:
         return i18n.message("lockdown_failed_only", lang, honorific=h, gap=problem)
-    if open_names:
+    if open_names or unreadable:
         return i18n.message("lockdown_gap_only", lang, honorific=h,
                             gap=problem)
     return i18n.message("lockdown_already_secured", lang, honorific=h)
@@ -278,6 +287,23 @@ class LockdownManager:
             if st.attributes.get("device_class") in self._CLOSEABLE_COVERS and st.state in ("open", "opening"):
                 out.add(st.entity_id)
         return out
+
+    def _unreadable_openings(self) -> list:
+        """Doors and windows that are ways in, and closeable covers, that
+        read unknown or unavailable: Nova cannot tell if they are closed
+        (8.25.0). Sorted friendly names."""
+        from . import household
+        out = []
+        for st in self.hass.states.async_all("binary_sensor"):
+            if (st.attributes.get("device_class") in self._DOOR_WINDOW_BS
+                    and str(st.state).lower() in _UNREADABLE
+                    and household.is_way_in(self.hass, st)):
+                out.append(self._friendly(st.entity_id))
+        for st in self.hass.states.async_all("cover"):
+            if (st.attributes.get("device_class") in self._CLOSEABLE_COVERS
+                    and str(st.state).lower() in _UNREADABLE):
+                out.append(self._friendly(st.entity_id))
+        return sorted(out)
 
     def _is_relevant(self, dom: str, dc, eid: str = None) -> bool:
         if dom == "lock":
@@ -486,9 +512,10 @@ class LockdownManager:
 
         if not self._automatic_operation_current(automatic_generation):
             return None
+        unreadable = self._unreadable_openings()
         message = build_lockdown_message(honorific, locked, closed, open_names,
                                           lang=_m_common._hass_lang(self.hass),
-                                          failed=failed_locks)
+                                          failed=failed_locks, unreadable=unreadable)
         _LOGGER.warning(
             "Lockdown ENGAGED (%s): locked=%s closed=%s left-open=%d "
             "lock-failed=%s announce=%s",
@@ -497,7 +524,7 @@ class LockdownManager:
         await self._record(
             "lockdown engaged", reason, assessment="secure the house",
             locked=locked, closed=closed, left_open=open_names,
-            failed=failed_locks, announced=announce)
+            failed=failed_locks, unreadable=unreadable, announced=announce)
         if not announce:
             return None
         return {

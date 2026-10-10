@@ -33,7 +33,9 @@ needs, what it does by itself, and what it never does without you.
   leaves it alone until morning too, and tells you once. It never sends more
   than 12 commands in an hour. Doors and windows
   it cannot close are named so you can close them by hand; a fridge or
-  cabinet door, a sensor on your exclude list, or a shed door is not.
+  cabinet door, a sensor on your exclude list, or a shed door is not. A door
+  or window whose sensor cannot be read is named too ("I can't tell if it's
+  closed"), and lockdown never says the home is fully secured while one is.
 - **Packages.** A package taken from the door while nobody is home is sent to
   your phones, as well as spoken.
 
