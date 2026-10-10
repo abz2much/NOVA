@@ -28,7 +28,10 @@ needs, what it does by itself, and what it never does without you.
   armed lockdown closes only doors, garages, windows and gates. About 25
   seconds later the night sweep checks each one, and only says the house is
   secured when every lock reads locked and every cover reads closed. Anything
-  that did not take is named and sent to your phones. Doors and windows
+  that did not take is named and sent to your phones once, then left alone
+  until morning. If you unlock or open something the sweep secured, it
+  leaves it alone until morning too, and tells you once. It never sends more
+  than 12 commands in an hour. Doors and windows
   it cannot close are named so you can close them by hand; a fridge or
   cabinet door, a sensor on your exclude list, or a shed door is not.
 - **Packages.** A package taken from the door while nobody is home is sent to

@@ -1,3 +1,11 @@
+## [8.25.0] — The night sweep stops fighting, unreadable doors, linked logs
+
+### Gap 1: the night sweep stops fighting people
+- **One try a night.** Nova does not fight a person at the door (8.7.20), and now the night sweep follows that rule. A device the sweep could not secure (a garage that reverses on an obstruction, a lock that jams) gets one attempt and one phone alert, then is left alone until morning. Before, it was tried again, with another alert, every five minutes all night.
+- **Opened again on purpose.** A lock or cover the sweep secured that is unlocked or opened again (someone stepping into the garden) is left alone until morning and named once: "was opened again after I secured it, so I'll leave it until morning".
+- **An hourly cap.** The sweep sends at most 12 lock and close commands in any hour, as a backstop. Anything over waits for a later sweep.
+- A night runs noon to noon. A normal night is unchanged: one message, "The house is secured."
+
 ## [8.24.0] — Nova's safety kernel
 
 ### Stage A: safety alerts never go quiet
