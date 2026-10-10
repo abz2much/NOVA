@@ -169,7 +169,9 @@ cannot see what they do.
 
 Every safety decision is written to **Logs → Decisions** in the same form:
 what Nova saw (who was home, the alarm, asleep, quiet hours), what it
-concluded, what it did (spoken, sent to phones, or both) and why. That covers
+concluded, what it did (spoken, sent to phones, or both) and why. Where a
+decision sent commands (lockdown, the night sweep, the voice "secure" reply),
+it lists their request ids, which match the entries in **Logs → Actions**. That covers
 intrusion, lockdown, the night sweep, hazards, packages and doors left open.
 
 ## What it learns from you

@@ -132,7 +132,7 @@ async def _emit_action(hass, config, action, sleeping):
             await alert_path.async_record_decision(
                 hass, kind, source=action_type, sit=sit, plan=plan,
                 entity_id=action.get("entity_id"), message=message,
-                facts={"urgency": urgency})
+                facts={"urgency": urgency}, request_ids=[request_id])
 
     if plan.phone_only:
         await alert_path.deliver(plan, push=_push)

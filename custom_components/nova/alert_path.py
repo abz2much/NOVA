@@ -352,7 +352,8 @@ def _core_speakers(hass, config: dict, urgency: str, sleeping: bool):
 #   observation     source, entity, message, residents, alarm posture,
 #                   asleep, quiet hours, plus the decision's own facts
 #   interpretation  {"assessment": what Nova concluded}
-#   evidence        {"spoken", "pushed", "route"} from the delivery plan
+#   evidence        {"spoken", "pushed", "route"} from the delivery plan,
+#                   and "request_ids": the Actions log requests it caused
 #   decision        what was done, in words
 #   reason          why
 # Records are written with no outcome, so they never change the interruption
@@ -371,7 +372,8 @@ def decision_fields(kind: str, *, source: str, sit: Optional[Situation] = None,
                     plan: Optional[Plan] = None, entity_id: Optional[str] = None,
                     message: str = "", facts: Optional[dict] = None,
                     assessment: str = "", decision: str = "", reason: str = "",
-                    ref: Optional[str] = None) -> dict:
+                    ref: Optional[str] = None,
+                    request_ids: Optional[list] = None) -> dict:
     """The shared Decision Record fields for one safety decision."""
     observation: dict = {"source": source}
     if entity_id:
@@ -386,11 +388,15 @@ def decision_fields(kind: str, *, source: str, sit: Optional[Situation] = None,
             "quiet_hours": sit.quiet,
         })
     observation.update(facts or {})
-    evidence = {}
+    evidence: dict = {}
     if plan is not None:
         evidence = {"spoken": bool(plan.alert and plan.speak),
                     "pushed": bool(plan.alert and plan.push),
                     "route": plan.mode or None}
+    if request_ids:
+        # The Actions log requests this decision caused (8.25.0), so a
+        # decision can be traced to its commands and their checks.
+        evidence["request_ids"] = [str(r) for r in request_ids if r]
     return {
         "kind": kind,
         "observation": observation,

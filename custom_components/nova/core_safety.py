@@ -1254,6 +1254,7 @@ class SafetyManager:
                        "not_secured_after_check": not_secured,
                        "failed": [f for f in failed if f not in not_secured],
                        "left_alone_reopened": reopened},
+                request_ids=[request_id] if candidates else None,
                 assessment="household asleep with locks unlocked or covers open",
                 decision="lock and close, checked" + (
                     ", some not secured" if failed else ""),

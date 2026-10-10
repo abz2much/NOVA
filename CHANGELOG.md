@@ -11,6 +11,10 @@
 - **The world model** lists them as unreadable openings, and its "is the house secure" answer is unknown while any are listed (or any lock is unreadable). Something known to be open or unlocked still makes it "not secure".
 - **Intrusion is unchanged:** an unreadable sensor is still not a way in, so it never starts an alert on its own.
 
+### Gap 3: the two logs are linked
+- **A decision now points to its commands.** Decision log entries carry the Actions log request ids of what they caused: the night sweep, lockdown (and its checks, which share the lockdown's request), the voice "secure" reply's check, intrusion and freeze alerts, and doors left open. From "Nova decided to lock up" you can find the exact commands and whether each was verified.
+- No behaviour change.
+
 ## [8.24.0] — Nova's safety kernel
 
 ### Stage A: safety alerts never go quiet

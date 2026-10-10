@@ -341,7 +341,7 @@ class LockdownManager:
             return False
 
     async def _record(self, decision: str, reason: str, *, entity_id=None,
-                      assessment: str = "", **facts) -> None:
+                      assessment: str = "", request_ids=None, **facts) -> None:
         """Write one lockdown decision to the Decision Record in the shared
         safety format (alert_path, 8.23.0). Never raises."""
         from . import alert_path
@@ -350,7 +350,12 @@ class LockdownManager:
             sit=alert_path.situation(self.hass, self.config),
             facts=dict(facts, auto=self.auto), assessment=assessment,
             decision=decision, reason=reason,
-            ref=f"lockdown:{int(self.since)}" if self.since else None)
+            ref=f"lockdown:{int(self.since)}" if self.since else None,
+            request_ids=request_ids)
+
+    def _engage_ids(self) -> Optional[list]:
+        rid = getattr(self, "_engage_request_id", None)
+        return [rid] if rid else None
 
     def _friendly(self, eid: str) -> str:
         """Friendly name for an entity (falls back to its id)."""
@@ -438,6 +443,8 @@ class LockdownManager:
         # separate logged actions.
         from . import action_log
         request_id = action_log.new_request_id()
+        # Kept so the checks of what this lockdown secured link to it (8.25.0).
+        self._engage_request_id = request_id
 
         # 1) Lock every closed-but-unlocked lock.
         locked_pairs = await self._lock_all(
@@ -524,7 +531,8 @@ class LockdownManager:
         await self._record(
             "lockdown engaged", reason, assessment="secure the house",
             locked=locked, closed=closed, left_open=open_names,
-            failed=failed_locks, unreadable=unreadable, announced=announce)
+            failed=failed_locks, unreadable=unreadable, announced=announce,
+            request_ids=[request_id])
         if not announce:
             return None
         return {
@@ -650,7 +658,8 @@ class LockdownManager:
         )
         await self._record("secured again" if ok else "could not secure",
                            "opened during lockdown", entity_id=eid,
-                           assessment="opened during lockdown")
+                           assessment="opened during lockdown",
+                           request_ids=[breach_request_id])
         if ok:
             self._secured_by_us.add(eid)
             # Confirm it actually shut (slow covers report late) and alert if not.
@@ -676,17 +685,20 @@ class LockdownManager:
                 # It cannot be read, so it is unverified, never secured
                 # (8.24.0). Recorded; no alarm on a missing reading.
                 await self._record("could not check", "no reading after the command",
-                                   entity_id=eid, assessment="unverified")
+                                   entity_id=eid, assessment="unverified",
+                                   request_ids=self._engage_ids())
                 return
             if self._is_secure(dom, st.state):
                 await self._record("checked, secured", "read secure after the command",
-                                   entity_id=eid, assessment="verified")
+                                   entity_id=eid, assessment="verified",
+                                   request_ids=self._engage_ids())
                 return  # secure now — nothing to report
             if eid in self._alerted:
                 return
             self._alerted.add(eid)
             await self._record("critical alert", "still not secure after Nova tried",
-                               entity_id=eid, assessment="secure check failed")
+                               entity_id=eid, assessment="secure check failed",
+                               request_ids=self._engage_ids())
             honorific = _m_common._live_honorific(self.hass)  # Phase C: presence-aware
             await _emit_action(self.hass, self.config, {
                 "type": "lockdown_breach", "urgency": "critical", "auto_act": True,
