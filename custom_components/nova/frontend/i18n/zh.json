@@ -1132,5 +1132,14 @@
   "type to find a lock…": "输入以查找锁…",
   "Home layout": "房屋布局",
   "Presence sensors": "存在传感器",
-  "Stories, garage and basement, which entity is each door, and the exit doors you leave by.": "楼层、车库和地下室，每扇门对应哪个实体，以及您离家时经过的出口门。"
+  "Stories, garage and basement, which entity is each door, and the exit doors you leave by.": "楼层、车库和地下室，每扇门对应哪个实体，以及您离家时经过的出口门。",
+  "Ask Nova something": "向 Nova 提问",
+  "Ask about your home or tell Nova what to do. Unlocking, opening and disarming need a tap on your phone.": "询问您的家居情况，或告诉 Nova 该做什么。解锁、打开和撤防需要在您的手机上点一下确认。",
+  "Chat": "聊天",
+  "Could not reach Nova.": "无法连接到 Nova。",
+  "NEW CHAT": "新对话",
+  "Nova is thinking…": "Nova 正在思考…",
+  "SEND": "发送",
+  "You": "您",
+  "You're sending too fast, wait a moment": "您发送得太快了，请稍候"
 }

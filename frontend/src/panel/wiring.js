@@ -69,6 +69,7 @@
     if (this._currentTab === "memory") { this._wireMemory(); this._fetchKnowledge(); this._fetchPersonRoutines(); }
     if (this._currentTab === "intrusion") this._wireIntrusion();
     if (this._currentTab === "faces") this._wireFaces();
+    if (this._currentTab === "chat") this._wireChat();
     if (this._currentTab === "energy") this._wireEnergy();
     if (this._currentTab === "suggestions") {
       this._wireSuggestions();

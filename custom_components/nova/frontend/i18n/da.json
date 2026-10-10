@@ -229,5 +229,14 @@
   "type to find a lock…": "skriv for at finde en lås…",
   "Home layout": "Boligens indretning",
   "Presence sensors": "Tilstedeværelsessensorer",
-  "Stories, garage and basement, which entity is each door, and the exit doors you leave by.": "Etager, garage og kælder, hvilken enhed der er hver dør, og de yderdøre, du går ud ad."
+  "Stories, garage and basement, which entity is each door, and the exit doors you leave by.": "Etager, garage og kælder, hvilken enhed der er hver dør, og de yderdøre, du går ud ad.",
+  "Ask Nova something": "Spørg Nova om noget",
+  "Ask about your home or tell Nova what to do. Unlocking, opening and disarming need a tap on your phone.": "Spørg om dit hjem, eller fortæl Nova, hvad den skal gøre. Oplåsning, åbning og afbrydelse af alarmen kræver et tryk på din telefon.",
+  "Chat": "Chat",
+  "Could not reach Nova.": "Kunne ikke nå Nova.",
+  "NEW CHAT": "NY CHAT",
+  "Nova is thinking…": "Nova tænker…",
+  "SEND": "SEND",
+  "You": "Dig",
+  "You're sending too fast, wait a moment": "Du sender for hurtigt, vent et øjeblik"
 }

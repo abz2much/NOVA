@@ -19,9 +19,11 @@ through the same gate.
 """
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import logging
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Iterator, Optional, Tuple
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -87,6 +89,44 @@ _VOICE_BLOCKED_OPENING = {
     # imitated must not be able to switch the alarm off on its own.
     ("alarm_control_panel", "alarm_disarm"),
 }
+
+
+# The Chat tab (8.31.0). Tools build their requests with only a device_id and
+# user_id, so the gate cannot tell a typed Chat turn from any other typed
+# request. The conversation sets this for the length of a Chat turn, and the
+# gate then treats the turn like voice for the actions in
+# _VOICE_BLOCKED_OPENING and for standing down an intrusion: they always need
+# a phone tap, whatever voice_confirm_enabled says. It only ever makes the gate
+# stricter. A context variable follows the turn into the tasks and executor
+# jobs it starts, and is reset when the turn ends.
+CHAT_ID_PREFIX = "nova_chat_"
+_CHAT_USER: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+    "nova_chat_user", default=None)
+
+
+def chat_conversation_id(user_id: str) -> str:
+    """The one conversation id a user's Chat tab thread uses."""
+    return f"{CHAT_ID_PREFIX}{user_id}"
+
+
+@contextlib.contextmanager
+def chat_turn(conversation_id: Optional[str], user_id: Optional[str]) -> Iterator[bool]:
+    """Mark the code run inside as a Chat turn when the conversation id is a
+    Chat id. Yields whether it is one. An empty user id still marks the turn;
+    the gate then finds no phone and refuses."""
+    active = str(conversation_id or "").startswith(CHAT_ID_PREFIX)
+    token = _CHAT_USER.set(str(user_id or "")) if active else None
+    try:
+        yield active
+    finally:
+        if token is not None:
+            _CHAT_USER.reset(token)
+
+
+def _chat_user() -> Optional[str]:
+    """The user of the Chat turn being run, "" if it has none, or None when
+    this is not a Chat turn."""
+    return _CHAT_USER.get()
 
 
 def _voice_satellite_request(hass, device_id: str) -> bool:
@@ -177,7 +217,8 @@ def requires_confirmation(hass, domain: str, service: str, entity_id: str = "",
     confirmation toggle happens to be on.
     """
     if (domain, service) in _VOICE_BLOCKED_OPENING and (
-            voice or _voice_satellite_request(hass, device_id)):
+            voice or _chat_user() is not None
+            or _voice_satellite_request(hass, device_id)):
         return True
     if (domain, service) in _SECURITY_STANDDOWN:
         return True
@@ -192,6 +233,41 @@ def requires_confirmation(hass, domain: str, service: str, entity_id: str = "",
             "policy: could not consult voice_confirm for %s.%s (%s); "
             "requiring confirmation for %s-risk action", domain, service, exc, risk)
         return True
+
+
+async def _confirm_from_chat(hass, label: str, ent: str, user_id: str,
+                             standdown: bool, domain: str) -> Tuple[bool, str, str]:
+    """A Chat turn asked to unlock, open, disarm or stand down: only a tap on
+    that user's own phone can allow it, as for voice. No phone found for the
+    user refuses the action and says why; a refused, unanswered or failed tap
+    denies it."""
+    try:
+        from . import voice_confirm
+        phones = voice_confirm.phone_services_for_user(hass, user_id)
+    except Exception as exc:
+        _LOGGER.warning("policy: chat phone lookup failed (%s); denying", exc)
+        return False, "phone confirmation unavailable, so this was not done", "error"
+    what = (f"{label} {ent}").strip()
+    if not phones:
+        return False, (f"{what} needs a tap on your phone to confirm, and no phone is "
+                       f"registered for your Home Assistant account, so it was not done"), "denied"
+    if standdown:
+        why = "stand down a security alert"
+    elif domain == "alarm_control_panel":
+        why = "disarm the alarm"
+    else:
+        why = "unlock or open this"
+    question = f"{what} was requested from Nova chat. Confirm on your phone to proceed. Chat alone can't {why}."
+    try:
+        result = await voice_confirm.confirm_via_phone_only_typed(
+            hass, question, services=phones)
+    except Exception as exc:
+        _LOGGER.warning("policy: chat phone-confirm failed for %s (%s); denying", what, exc)
+        return False, "phone confirmation unavailable, so this was not done", "error"
+    if result == "approved":
+        return True, "", "approved"
+    return False, (f"{what} was requested from chat. A request was sent to your phone and "
+                   f"was not approved, so it was not done"), result
 
 
 async def confirm_gate(
@@ -242,6 +318,10 @@ async def confirm_gate(
     ent = (str(target_name).strip() if target_name else
            (entity_id.split(".")[-1].replace("_", " ").strip() if entity_id else ""))
     standdown = (domain, service) in _SECURITY_STANDDOWN
+    chat_user = _chat_user()
+    if (((domain, service) in _VOICE_BLOCKED_OPENING or standdown)
+            and chat_user is not None):
+        return await _confirm_from_chat(hass, label, ent, chat_user, standdown, domain)
     if (((domain, service) in _VOICE_BLOCKED_OPENING or standdown)
             and (voice or _voice_satellite_request(hass, device_id))):
         try:

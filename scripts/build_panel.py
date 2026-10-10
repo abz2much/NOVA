@@ -29,6 +29,7 @@ SOURCES = (
     "panel/logs.js",                 # system log, spoken history, actions, decisions
     "panel/memory.js",
     "panel/intrusion.js",
+    "panel/chat.js",                 # Chat tab: type to Nova
     "panel/faces.js",                # Faces tab: recent faces and the resident roster
     "panel/energy.js",               # Energy tab: energy management, solar, appliances
     "panel/suggestions.js",          # suggestions and automation probation

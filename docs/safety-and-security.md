@@ -165,7 +165,24 @@ while armed away is still spoken.
 
 On the **Intrusion** tab you can press **I'M LOOKING (HOLD)** to stop the
 automatic escalation, or **CALL OFF (FALSE ALARM)**. Calling off an intrusion
-is always confirmed, and when you ask by voice it needs a tap on your phone.
+is always confirmed, and when you ask by voice or from the Chat tab it needs a
+tap on your phone.
+
+## Chat
+
+Any Home Assistant user can use the Chat tab, as with Assist. Everything Nova
+does from there passes the same authority check as every other request, with
+one extra rule. When a Chat message leads to unlocking a door, opening a
+cover, garage door or door, disarming the alarm or calling off an intrusion,
+Nova sends a request to the phone of the person who typed it and waits for
+their tap. This holds even when **Voice confirmation** is off.
+
+- Only the phone linked to the person entity for that account is asked, not
+  the whole household.
+- If that account has no person, or the person has no phone, Nova refuses the
+  action and says why in the reply.
+- A refused, unanswered or failed tap means the action is not done.
+- Locking, closing, lights and heating need no tap.
 
 ## Checking what Nova did
 
@@ -210,7 +227,8 @@ always alerts. One "real" label stops it learning to ignore that pattern.
 ## What it will never do on its own
 
 - Unlock a door, open a garage door or disarm the alarm because of a voice
-  command alone. That always needs a tap on your phone.
+  command alone, or because of a message in the Chat tab alone. That always
+  needs a tap on your phone.
 - Unlock, open, disarm, or run a scene or script by itself. When Nova acts on
   its own (lockdown, the night sweep, offers it trusts, a retry) it may only
   lock, close, and change lights or heating. Every action that can change a
@@ -228,8 +246,11 @@ always alerts. One "real" label stops it learning to ignore that pattern.
 
 - Nova only knows the house is empty from person entities and the trackers
   linked to them, or an armed away alarm. Without them, intrusion stays quiet.
-- A scene or script that unlocks a door is not checked by the voice rule,
-  because Nova cannot see inside it.
+- A scene or script that unlocks a door is not checked by the voice rule or
+  the Chat rule, because Nova cannot see inside it.
+- The Chat rule applies to the Chat tab only. Text typed into Assist, the
+  Home Assistant companion app and automations follow the settings they
+  always did.
 - Freeze alerts need an outdoor temperature.
 
 ## Troubleshooting
@@ -241,6 +262,7 @@ always alerts. One "real" label stops it learning to ignore that pattern.
 | A thermostat lock is ignored | It is not a door lock | Nothing to do. |
 | Lockdown never engages | **Automatic lockdown** is off, or the alarm entity is not the one you arm | Check **Settings → Security Alarm**. |
 | A door reminder does not come in summer | It is above 10°C outside | Nothing to do. |
+| Chat says no phone is registered | Your Home Assistant account has no person entity, or that person has no phone with the companion app linked to it | Add a person for your account and link your phone to it. Chat refuses the action until you do. |
 
 ## Settings
 

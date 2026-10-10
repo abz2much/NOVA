@@ -229,5 +229,14 @@
   "type to find a lock…": "escreva para encontrar uma fechadura…",
   "Home layout": "Disposição da casa",
   "Presence sensors": "Sensores de presença",
-  "Stories, garage and basement, which entity is each door, and the exit doors you leave by.": "Pisos, garagem e cave, que entidade é cada porta e as portas de saída por onde sai."
+  "Stories, garage and basement, which entity is each door, and the exit doors you leave by.": "Pisos, garagem e cave, que entidade é cada porta e as portas de saída por onde sai.",
+  "Ask Nova something": "Pergunte algo à Nova",
+  "Ask about your home or tell Nova what to do. Unlocking, opening and disarming need a tap on your phone.": "Pergunte sobre a sua casa ou diga à Nova o que fazer. Destrancar, abrir e desarmar exigem um toque no seu telemóvel.",
+  "Chat": "Chat",
+  "Could not reach Nova.": "Não foi possível contactar a Nova.",
+  "NEW CHAT": "NOVO CHAT",
+  "Nova is thinking…": "A Nova está a pensar…",
+  "SEND": "ENVIAR",
+  "You": "Você",
+  "You're sending too fast, wait a moment": "Está a enviar demasiado depressa, aguarde um momento"
 }

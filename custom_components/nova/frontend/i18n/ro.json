@@ -229,5 +229,14 @@
   "type to find a lock…": "scrie pentru a găsi o încuietoare…",
   "Home layout": "Planul casei",
   "Presence sensors": "Senzori de prezență",
-  "Stories, garage and basement, which entity is each door, and the exit doors you leave by.": "Etaje, garaj și subsol, ce entitate este fiecare ușă și ușile de ieșire pe care le folosești."
+  "Stories, garage and basement, which entity is each door, and the exit doors you leave by.": "Etaje, garaj și subsol, ce entitate este fiecare ușă și ușile de ieșire pe care le folosești.",
+  "Ask Nova something": "Întreabă-o pe Nova ceva",
+  "Ask about your home or tell Nova what to do. Unlocking, opening and disarming need a tap on your phone.": "Întreabă despre casa ta sau spune-i Novei ce să facă. Deblocarea, deschiderea și dezarmarea necesită o atingere pe telefonul tău.",
+  "Chat": "Chat",
+  "Could not reach Nova.": "Nu s-a putut contacta Nova.",
+  "NEW CHAT": "CHAT NOU",
+  "Nova is thinking…": "Nova se gândește…",
+  "SEND": "TRIMITE",
+  "You": "Tu",
+  "You're sending too fast, wait a moment": "Trimiți prea repede, așteaptă un moment"
 }

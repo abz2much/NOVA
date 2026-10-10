@@ -279,13 +279,39 @@ def _owner_from_tracker(hass: HomeAssistant, tracker_id: str) -> Optional[str]:
     return None
 
 
+def person_for_user(hass: HomeAssistant, user_id: Optional[str]) -> Optional[str]:
+    """The name of the person.* entity that belongs to this Home Assistant user
+    (the entity's user_id attribute), or None when there is none."""
+    if not user_id:
+        return None
+    try:
+        for st in hass.states.async_all("person"):
+            if st.attributes.get("user_id") == user_id:
+                return (st.attributes.get("friendly_name")
+                        or st.entity_id.split(".")[-1].replace("_", " ").title())
+    except Exception as exc:
+        _LOGGER.debug("identity: person lookup for user failed: %s", exc)
+    return None
+
+
 def resolve(hass: HomeAssistant, *, device_id: Optional[str] = None,
-            area_id: Optional[str] = None, now: Optional[float] = None) -> Identification:
+            area_id: Optional[str] = None, now: Optional[float] = None,
+            user_id: Optional[str] = None) -> Identification:
     """
     Fuse available signals into a best-guess person + confidence. Returns an
     Identification with person == 'unknown' when nothing is confident enough.
     Pure-ish (reads hass state); safe to call on every turn.
+
+    `user_id` (8.31.0) is the logged in Home Assistant user, for a typed Chat
+    turn. It is the one signal that is certain, so it settles the answer alone:
+    the person.* entity with that user_id, or unknown when there is none. It is
+    never mixed with presence or faces, which could name someone else.
     """
+    if user_id is not None:
+        name = person_for_user(hass, user_id)
+        if name:
+            return Identification(name, 1.0, "user", {name: 1.0})
+        return Identification(UNKNOWN, 0.0, "user_unmatched")
     if not bool(_cfg("identity_enabled", True)):
         return Identification(UNKNOWN, 0.0, "disabled")
 

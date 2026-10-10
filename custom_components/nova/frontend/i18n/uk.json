@@ -229,5 +229,14 @@
   "type to find a lock…": "введіть, щоб знайти замок…",
   "Home layout": "Планування будинку",
   "Presence sensors": "Датчики присутності",
-  "Stories, garage and basement, which entity is each door, and the exit doors you leave by.": "Поверхи, гараж і підвал, який об'єкт відповідає кожним дверям, і вихідні двері, якими ви виходите."
+  "Stories, garage and basement, which entity is each door, and the exit doors you leave by.": "Поверхи, гараж і підвал, який об'єкт відповідає кожним дверям, і вихідні двері, якими ви виходите.",
+  "Ask Nova something": "Запитайте Nova про що-небудь",
+  "Ask about your home or tell Nova what to do. Unlocking, opening and disarming need a tap on your phone.": "Запитайте про свій дім або скажіть Nova, що робити. Для розблокування, відчинення та зняття з охорони потрібне натискання на телефоні.",
+  "Chat": "Чат",
+  "Could not reach Nova.": "Не вдалося зв'язатися з Nova.",
+  "NEW CHAT": "НОВИЙ ЧАТ",
+  "Nova is thinking…": "Nova думає…",
+  "SEND": "НАДІСЛАТИ",
+  "You": "Ви",
+  "You're sending too fast, wait a moment": "Ви надсилаєте надто швидко, зачекайте трохи"
 }

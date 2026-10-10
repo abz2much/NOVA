@@ -229,5 +229,14 @@
   "type to find a lock…": "píšte na nájdenie zámku…",
   "Home layout": "Usporiadanie domu",
   "Presence sensors": "Senzory prítomnosti",
-  "Stories, garage and basement, which entity is each door, and the exit doors you leave by.": "Podlažia, garáž a suterén, ktorá entita je ktorými dverami a výstupné dvere, ktorými odchádzate."
+  "Stories, garage and basement, which entity is each door, and the exit doors you leave by.": "Podlažia, garáž a suterén, ktorá entita je ktorými dverami a výstupné dvere, ktorými odchádzate.",
+  "Ask Nova something": "Opýtajte sa Novy na niečo",
+  "Ask about your home or tell Nova what to do. Unlocking, opening and disarming need a tap on your phone.": "Opýtajte sa na svoj domov alebo povedzte Nove, čo má urobiť. Odomknutie, otvorenie a vypnutie zabezpečenia vyžadujú ťuknutie na telefóne.",
+  "Chat": "Chat",
+  "Could not reach Nova.": "Novu sa nepodarilo kontaktovať.",
+  "NEW CHAT": "NOVÝ CHAT",
+  "Nova is thinking…": "Nova premýšľa…",
+  "SEND": "ODOSLAŤ",
+  "You": "Vy",
+  "You're sending too fast, wait a moment": "Posielate príliš rýchlo, chvíľu počkajte"
 }

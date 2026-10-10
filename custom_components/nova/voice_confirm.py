@@ -293,12 +293,48 @@ def is_voice_satellite_device(hass, device_id: str, *, strict: bool = False) -> 
     return False
 
 
-async def confirm_via_phone_only_typed(hass, question: str, *,
-                                       timeout: float = _NOTIFY_CONFIRM_TIMEOUT) -> ConfirmResult:
-    """Typed counterpart of confirm_via_phone_only() — see ConfirmResult
-    above. Never raises; an internal failure returns "error"."""
+def phone_services_for_user(hass, user_id: str) -> list[str]:
+    """The notify.mobile_app_* services of the phones that belong to this Home
+    Assistant user (8.31.0): the mobile_app trackers of the person whose
+    user_id it is. Empty when the user has no person, or the person has no
+    phone. Never raises; an unreadable registry reads as no phone."""
+    if not user_id:
+        return []
     try:
-        return await _confirm_via_notification(hass, question, timeout)
+        from homeassistant.helpers import entity_registry as er
+        from homeassistant.util import slugify
+        reg = er.async_get(hass)
+        services = hass.services.async_services().get("notify", {})
+        out: list[str] = []
+        for st in hass.states.async_all("person"):
+            if st.attributes.get("user_id") != user_id:
+                continue
+            for tracker in st.attributes.get("device_trackers") or []:
+                ent = reg.async_get(tracker) if reg is not None else None
+                if not ent or ent.platform != "mobile_app" or not ent.config_entry_id:
+                    continue
+                entry = hass.config_entries.async_get_entry(ent.config_entry_id)
+                device_name = (entry.data.get("device_name") if entry else "") or ""
+                name = f"mobile_app_{slugify(device_name)}"
+                if device_name and name in services and name not in out:
+                    out.append(name)
+        return out
+    except Exception as exc:
+        _LOGGER.debug("voice_confirm.phone_services_for_user failed: %s", exc)
+        return []
+
+
+async def confirm_via_phone_only_typed(hass, question: str, *,
+                                       timeout: float = _NOTIFY_CONFIRM_TIMEOUT,
+                                       services: Optional[Sequence[str]] = None) -> ConfirmResult:
+    """Typed counterpart of confirm_via_phone_only() — see ConfirmResult
+    above. Never raises; an internal failure returns "error". `services`
+    limits the push to those notify.mobile_app_* services (a Chat turn asks
+    only the requesting user's own phones); None asks every phone."""
+    try:
+        if services is None:
+            return await _confirm_via_notification(hass, question, timeout)
+        return await _confirm_via_notification(hass, question, timeout, services=services)
     except Exception as exc:
         _LOGGER.warning("voice_confirm.confirm_via_phone_only failed (treating as error): %s", exc)
         return "error"
@@ -407,7 +443,8 @@ async def _confirm_gated(hass, satellite: str, question: str,
 
 
 async def _confirm_via_notification(hass, question: str,
-                                    timeout: float = _NOTIFY_CONFIRM_TIMEOUT) -> ConfirmResult:
+                                    timeout: float = _NOTIFY_CONFIRM_TIMEOUT,
+                                    services: Optional[Sequence[str]] = None) -> ConfirmResult:
     """Fallback when no assist_satellite is available at all: push an
     actionable notification (Confirm / Deny) to every registered phone —
     every `notify.mobile_app_*` service, same enumeration Nova's other
@@ -423,9 +460,11 @@ async def _confirm_via_notification(hass, question: str,
 
     sent = 0
     try:
-        services = hass.services.async_services().get("notify", {})
-        for name in list(services):
+        notify_services = hass.services.async_services().get("notify", {})
+        for name in list(notify_services):
             if not name.startswith("mobile_app_"):
+                continue
+            if services is not None and name not in services:
                 continue
             try:
                 await hass.services.async_call(

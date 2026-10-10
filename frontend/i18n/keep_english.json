@@ -10,6 +10,7 @@
    "CMD",
    "CONFIG",
    "CONV",
+   "Chat",
    "DEDUP",
    "DET",
    "Dansk",
@@ -78,6 +79,7 @@
    "HYBRID"
   ],
   "da": [
+   "SEND",
    "Status"
   ],
   "de": [
@@ -165,6 +167,7 @@
    "SATELLITE"
   ],
   "nb": [
+   "SEND",
    "Status"
   ],
   "nl": [

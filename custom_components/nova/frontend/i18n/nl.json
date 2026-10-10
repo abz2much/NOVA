@@ -1137,5 +1137,14 @@
   "type to find a lock…": "typ om een slot te vinden…",
   "Home layout": "Indeling van het huis",
   "Presence sensors": "Aanwezigheidssensoren",
-  "Stories, garage and basement, which entity is each door, and the exit doors you leave by.": "Verdiepingen, garage en kelder, welke entiteit elke deur is, en de buitendeuren waardoor je vertrekt."
+  "Stories, garage and basement, which entity is each door, and the exit doors you leave by.": "Verdiepingen, garage en kelder, welke entiteit elke deur is, en de buitendeuren waardoor je vertrekt.",
+  "Ask Nova something": "Vraag Nova iets",
+  "Ask about your home or tell Nova what to do. Unlocking, opening and disarming need a tap on your phone.": "Vraag iets over je huis of zeg tegen Nova wat ze moet doen. Ontgrendelen, openen en uitschakelen vragen om een tik op je telefoon.",
+  "Chat": "Chat",
+  "Could not reach Nova.": "Kon Nova niet bereiken.",
+  "NEW CHAT": "NIEUWE CHAT",
+  "Nova is thinking…": "Nova denkt na…",
+  "SEND": "VERSTUUR",
+  "You": "Jij",
+  "You're sending too fast, wait a moment": "Je verstuurt te snel, wacht even"
 }
