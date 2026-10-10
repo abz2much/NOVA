@@ -4,7 +4,7 @@
  * node --check only validates syntax — it can't catch an orphaned stylesheet, a
  * data-contract mismatch, or a camera module that never renders. This renders the
  * real component under jsdom with a realistic nova/get_panel_data payload and
- * asserts the dashboard actually draws: styles, the 3D residence, AND the folded-in
+ * asserts the dashboard actually draws: styles, the settings cards, AND the folded-in
  * Camera Watch (live feed + chips from config.cameras + auto-selected stream).
  *
  * Run:  npm install jsdom --no-save && NODE_PATH=node_modules node scripts/smoke_panel.js
@@ -138,7 +138,7 @@ const PANEL = {
     lockdown_exempt_locks: ["lock.keypad"],
     // ... with a basement and a mapped cellar door (8.27.0).
     basement_mode: "auto",
-    home_features: { basement: true, cellar_door: true, utility: false },
+    home_features: { basement: true, utility: false },
     exit_doors: [{ entity_id: "lock.garden_door", name: "Garden door" }, { entity_id: "binary_sensor.shed_contact", name: "Shed" },
       { entity_id: "binary_sensor.gone_door", name: "Old door" }, { entity_id: "lock.side_door", name: "Side" },
       { entity_id: "cover.patio_door", name: "Patio" }, { entity_id: "binary_sensor.porch_door", name: "Porch" }],
@@ -832,21 +832,21 @@ if (require.main === module) setTimeout(async () => {
         const alexCustom = ph.querySelector('input[data-person-id="person.alex"]');
         return alexSel && alexSel.value === "__custom__" && !alexCustom.hidden && alexCustom.value === "captain";
       })()],
-    ["settings tab: Residence / Home card is real, not a stub",
+    ["settings tab: Home layout card is real, not a stub",
       (() => {
-        const rh = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Residence \/ Home/.test(c.querySelector(".panel-title")?.textContent || ""));
+        const rh = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Home layout/.test(c.querySelector(".panel-title")?.textContent || ""));
         return !!rh && !rh.querySelector(".stub-tag")
-          && rh.querySelector('select[data-cfg-key="residence_style"]')
-          && rh.querySelector('input[data-cfg-key="home_bedrooms"]')
-          && rh.querySelector('select[data-cfg-key="basement_mode"]');
+          && rh.querySelector('select[data-cfg-key="home_stories"]')
+          && rh.querySelector('select[data-cfg-key="basement_mode"]')
+          && !rh.querySelector('[data-cfg-key="residence_style"]') && !rh.querySelector('[data-cfg-key="home_bedrooms"]');
       })()],
-    ["settings tab: numeric Residence field autosaves as a Number, matching Classic",
+    ["settings tab: a numeric field autosaves as a Number, matching Classic",
       (() => {
-        const sqftInput = sRoot.querySelector('input[data-cfg-key="floor_plan_sqft"]');
-        sqftInput.value = "2200";
-        sqftInput.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
-        const call = _updateConfigCalls.find(c => c.key === "floor_plan_sqft");
-        return !!call && call.value === 2200;
+        const numInput = sRoot.querySelector('input[data-cfg-key="calendar_tight_gap_min"]');
+        numInput.value = "25";
+        numInput.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+        const call = _updateConfigCalls.find(c => c.key === "calendar_tight_gap_min");
+        return !!call && call.value === 25;
       })()],
     ["settings tab: Operational Mode and Diagnostics moved out of Settings (8.0.0)",
       !Array.from(sRoot.querySelectorAll(".settings-card")).some(c =>
@@ -1054,124 +1054,70 @@ if (require.main === module) setTimeout(async () => {
     fpeCardNow.querySelectorAll(".fpn-op-marker").length === 0]);
   sRoot = elNew.shadowRoot;
 
-  // ── New look: Residence tab (v7.101.24) — reuses Classic's NOVA3D engine
-  // via window.NOVA3D rather than re-deriving the 3D geometry ──
+  // ── Settings → Home layout (8.30.0): door mapping and exit doors, moved
+  // from the Residence tab when the 3D house was removed ──
   hass.states["cover.test_front_door"] = { state: "closed", attributes: { friendly_name: "Front Door Cover" } };
-  const residenceTabBtn = Array.from(newRoot.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === "residence");
-  residenceTabBtn.click();
-  await new Promise(r => setTimeout(r, 20));
-  let resRoot = elNew.shadowRoot;
-  checks.push(
-    ["residence tab: nav tab switch marks it active and updates the brand tag",
-      resRoot.querySelector('.nav-tab[data-tab="residence"]')?.classList.contains("active")
-      && /Residence/.test(resRoot.querySelector(".brand-tag")?.textContent || "")],
-    ["residence tab: renders the home-style selector, floor tabs, and view-preset buttons",
-      !!resRoot.querySelector('select[data-cfg-key="residence_style"]')
-      && resRoot.querySelectorAll(".res-floor-tab").length >= 2
-      && resRoot.querySelectorAll(".res-view-btn").length === 5],
-    ["residence tab: 3D scene mount renders a real SVG from window.NOVA3D",
-      (() => { const svg = resRoot.querySelector("#resIso svg"); return !!svg && svg.outerHTML.length > 100; })()],
-    ["residence tab: stats panel shows style/occupied from live data",
-      /Cape Cod/.test(resRoot.getElementById("resStyleTag")?.textContent || "")
-      && /\//.test(resRoot.getElementById("resOcc")?.textContent || "")],
-    ["residence tab: door mapping renders one select per door slot",
-      resRoot.querySelectorAll(".door-map-sel-new").length === elNew._doorSlots().length],
-  );
-
-  // NOVA3D output is pinned: the engine is built from frontend/src/nova3d.js,
-  // and any change to its geometry or SVG text must be deliberate (update the
-  // hash in the same change, after checking the model in frontend/dev).
-  {
-    const N = window.NOVA3D, lit = { "master bedroom": "dom", kitchen: "on", garage: "on" };
-    const out = [35, 160, 290].map(t => N.renderSVG({ theta: t, floor: "all", lit })).join("|")
-      + "|" + N.renderSVG({ theta: 35, floor: "1f", lit }) + "|" + JSON.stringify(N.fixedBox({ floor: "all" }));
-    const hash = require("crypto").createHash("sha256").update(out).digest("hex");
-    checks.push(["NOVA3D engine output matches the pinned hash",
-      hash === "3073a7225ac19e39c063b2325776c882d5a4b280710a0b8e7f02f3c368cc7c73"]);
-  }
-
-  await elNew._fetchMmwaveNew();
-  resRoot = elNew.shadowRoot;
-  checks.push(["residence tab: mmWave list renders live per-room presence after fetch",
-    /Kitchen/.test(resRoot.getElementById("resMmwaveList")?.textContent || "")
-    && /OCCUPIED/.test(resRoot.getElementById("resMmwaveSummary")?.textContent || "")]);
-
-  const priorSceneHtml = resRoot.getElementById("resIso")?.innerHTML || "";
-  const view90Btn = Array.from(resRoot.querySelectorAll(".res-view-btn")).find(b => b.getAttribute("data-res-theta") === "90");
-  view90Btn.click();
-  checks.push(["residence tab: clicking a view-preset button rotates the model without a full re-render",
-    elNew._house3dTheta === 90 && resRoot.getElementById("resIso")?.innerHTML !== priorSceneHtml]);
-
-  const floor1fBtn = resRoot.querySelector('.res-floor-tab[data-res-floor="1f"]');
-  floor1fBtn.click();
-  checks.push(["residence tab: switching floor tabs updates the active floor",
-    elNew._currentFloor === "1f" && floor1fBtn.classList.contains("active")]);
-
-  // Scroll-to-zoom on the 3D scene (v7.101.27) — regression found while zooming in on
-  // the model and finding only rotate was wired, so any drag just spun the house.
-  const priorZoomSceneHtml = resRoot.getElementById("resIso")?.innerHTML || "";
-  const zoomInEvt = new resRoot.ownerDocument.defaultView.WheelEvent("wheel", { deltaY: -100, bubbles: true, cancelable: true });
-  resRoot.getElementById("resScene").dispatchEvent(zoomInEvt);
-  await new Promise(r => setTimeout(r, 30));
-  checks.push(["residence tab: scrolling up on the 3D scene zooms in",
-    elNew._house3dZoom > 1 && resRoot.getElementById("resIso")?.innerHTML !== priorZoomSceneHtml]);
-  const priorZoom = elNew._house3dZoom;
-  const zoomOutEvt = new resRoot.ownerDocument.defaultView.WheelEvent("wheel", { deltaY: 100, bubbles: true, cancelable: true });
-  resRoot.getElementById("resScene").dispatchEvent(zoomOutEvt);
-  await new Promise(r => setTimeout(r, 30));
-  checks.push(["residence tab: scrolling down on the 3D scene zooms back out",
-    elNew._house3dZoom < priorZoom]);
-
-  const doorMapSel = resRoot.querySelector('.door-map-sel-new[data-slot="front"]');
-  const priorDoorMappingSaves = _updateConfigCalls.filter(c => c.key === "door_mapping").length;
+  elNew._render();
+  sRoot = elNew.shadowRoot;
+  let hlCard = sRoot.getElementById("settings-card-home_layout");
+  checks.push(["residence tab: gone, with no 3D engine left in the panel",
+    !sRoot.querySelector('.nav-tab[data-tab="residence"]') && typeof window.NOVA3D === "undefined"
+      && !sRoot.getElementById("settings-card-residence_home")]);
+  checks.push(["home layout: a Settings card in Home & Extras with stories, garage, basement and the door rows",
+    !!hlCard && hlCard.getAttribute("data-settings-group") === "home"
+      && !!hlCard.querySelector('select[data-cfg-key="home_stories"]')
+      && !!hlCard.querySelector('select[data-cfg-key="garage_mode"]')
+      && !!hlCard.querySelector('select[data-cfg-key="basement_mode"]')
+      && hlCard.querySelectorAll(".door-map-sel-new").length === elNew._visibleDoorSlots().length]);
+  const doorMapSel = hlCard.querySelector('.door-map-sel-new[data-slot="front"]');
   doorMapSel.value = "cover.test_front_door";
-  doorMapSel.dispatchEvent(new resRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+  doorMapSel.dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
   await new Promise(r => setTimeout(r, 20));
-  checks.push(["residence tab: mapping a door slot to an entity saves door_mapping",
+  checks.push(["home layout: mapping a door slot to an entity saves door_mapping",
     _updateConfigCalls.some(c => c.key === "door_mapping" && c.value === JSON.stringify({ front: "cover.test_front_door" }))]);
 
   // ── Garage only where one exists (8.26.0) ──
-  const resText = resRoot.querySelector(".res-tab-new")?.textContent || "";
-  checks.push(["residence tab: a garage home shows the garage door rows and the back door label",
-    !!resRoot.querySelector('.door-map-sel-new[data-slot="kitchen_garage"]')
-      && !!resRoot.querySelector('.door-map-sel-new[data-slot^="garage"]:not([data-slot="garage_rear"])')
-      && /Back \/ Rear Door/.test(resText) && !/Garage Side/.test(resText)]);
-  checks.push(["residence tab: exit doors list each picked door with the checks that cover it",
-    /Garden door/.test(resText) && /Already checked by:/.test(resText) && /Lockdown/.test(resText)
-      && /Not in Nova's safety checks/.test(resText) && /Entity not found/.test(resText)]);
+  sRoot = elNew.shadowRoot;
+  hlCard = sRoot.getElementById("settings-card-home_layout");
+  const hlText = hlCard?.textContent || "";
+  checks.push(["home layout: a garage home shows the garage door rows and the back door label",
+    !!hlCard.querySelector('.door-map-sel-new[data-slot="kitchen_garage"]')
+      && !!hlCard.querySelector('.door-map-sel-new[data-slot^="garage"]:not([data-slot="garage_rear"])')
+      && /Back \/ Rear Door/.test(hlText) && !/Garage Side/.test(hlText)]);
+  checks.push(["home layout: exit doors list each picked door with the checks that cover it",
+    /Garden door/.test(hlText) && /Already checked by:/.test(hlText) && /Lockdown/.test(hlText)
+      && /Not in Nova's safety checks/.test(hlText) && /Entity not found/.test(hlText)]);
   const exitSaves = () => _updateConfigCalls.filter(c => c.key === "exit_doors");
   const priorExitSaves = exitSaves().length;
-  resRoot.getElementById("resExitAdd").click();
+  sRoot.getElementById("resExitAdd").click();
   await new Promise(r => setTimeout(r, 20));
-  checks.push(["residence tab: Add with nothing picked adds nothing", exitSaves().length === priorExitSaves]);
-  const exitPick = resRoot.getElementById("resExitPick");
-  checks.push(["residence tab: the exit door picker suggests candidates first",
+  checks.push(["home layout: Add with nothing picked adds nothing", exitSaves().length === priorExitSaves]);
+  sRoot = elNew.shadowRoot;
+  const exitPick = sRoot.getElementById("resExitPick");
+  checks.push(["home layout: the exit door picker suggests candidates first",
     exitPick.querySelector("optgroup option")?.value === "binary_sensor.back_door"]);
   exitPick.value = "binary_sensor.back_door";
-  resRoot.getElementById("resExitName").value = "Back";
-  resRoot.getElementById("resExitAdd").click();
+  sRoot.getElementById("resExitName").value = "Back";
+  sRoot.getElementById("resExitAdd").click();
   await new Promise(r => setTimeout(r, 20));
-  checks.push(["residence tab: picking a door and Add saves it with the user's name",
+  checks.push(["home layout: picking a door and Add saves it with the user's name",
     exitSaves().length === priorExitSaves + 1
       && JSON.parse(exitSaves().slice(-1)[0].value).some(x => x.entity_id === "binary_sensor.back_door" && x.name === "Back")]);
-  resRoot = elNew.shadowRoot;
+  sRoot = elNew.shadowRoot;
   {
     const realData = elNew._data.bind(elNew);
+    const doorRows = () => elNew._renderDoorMappingNew(elNew._data()) + elNew._renderExitDoors(elNew._data());
+    const parse = html => new sRoot.ownerDocument.defaultView.DOMParser().parseFromString(`<div>${html}</div>`, "text/html");
     const noGarage = { ...realData(), config: { ...realData().config, has_garage: false, garage_bays: 2,
       door_mapping: { garage: "cover.test_front_door", kitchen_garage: "lock.garden_door" } } };
     elNew._data = () => noGarage;
-    const resHtml = elNew._htmlResidence();
+    const rowsHtml = doorRows();
     const sentHtml = elNew._sentinelRulesCardBody();
-    const homeHtml = elNew._residenceHomeCardBody();
+    const homeHtml = elNew._homeLayoutCardBody();
     const plan = elNew._defaultFloorPlan();
-    const spec = elNew._houseSpec();
-    const svg = window.NOVA3D.renderSVG({ theta: 35, floor: "all", lit: {}, doors: {}, spec,
-      plan: elNew._planToFeet(plan), elements: {}, garage: elNew._house3dGarage() });
-    const svgWithGarage = window.NOVA3D.renderSVG({ theta: 35, floor: "all", lit: {}, doors: {},
-      spec: { garageBays: 2 }, plan: elNew._planToFeet(elNew._defaultFloorPlanBase()), elements: {}, garage: [{ open: false }, { open: false }] });
     elNew._data = realData;
-    const doc = new resRoot.ownerDocument.defaultView.DOMParser().parseFromString(`<div>${resHtml}</div>`, "text/html");
-    checks.push(["no garage: the Residence tab never shows the word garage", !/garage/i.test(doc.body.textContent)]);
+    const doc = parse(rowsHtml);
+    checks.push(["no garage: the door rows and exit doors never show the word garage", !/garage/i.test(doc.body.textContent)]);
     checks.push(["no garage: hidden garage rows keep their saved slots out of view only",
       !doc.querySelector('[data-slot="garage"]') && !doc.querySelector('[data-slot="kitchen_garage"]')
         && !!doc.querySelector('[data-slot="garage_rear"]') && !!doc.querySelector('[data-slot="front"]')
@@ -1182,67 +1128,38 @@ if (require.main === module) setTimeout(async () => {
     const rooms1f = plan["1f"].rooms.map(r => r.name);
     checks.push(["no garage: the default floor plan has a front door and a back door and no garage",
       !rooms1f.some(n => /garage/i.test(n)) && rooms1f.includes("Front Door") && rooms1f.includes("Back Door")]);
-    checks.push(["no garage: the 3D house draws no garage doors", !/gdoor/.test(svg) && !/GARAGE/.test(svg)]);
-    checks.push(["garage home: the 3D house still draws its garage doors", /gdoor/.test(svgWithGarage)]);
     {
       // ── Rooms only where they exist (8.27.0) ──
       const plain = { ...realData(), config: { ...realData().config, has_garage: false, home_stories: "1",
-        home_features: { basement: false, cellar_door: false, utility: false },
+        home_features: { basement: false, utility: false },
         door_mapping: { basement: "", front: "cover.test_front_door" } } };
       elNew._data = () => plain;
-      const html = elNew._htmlResidence();
+      const html = doorRows();
       const plainPlan = elNew._defaultFloorPlan();
-      const plainSvg = window.NOVA3D.renderSVG({ theta: 35, floor: "all", lit: {}, doors: {}, spec: elNew._houseSpec(),
-        plan: elNew._planToFeet(plainPlan), elements: {}, garage: [] });
-      const withUtility = { ...plain, config: { ...plain.config, home_features: { basement: false, cellar_door: false, utility: true } } };
+      const withUtility = { ...plain, config: { ...plain.config, home_features: { basement: false, utility: true } } };
       elNew._data = () => withUtility;
       const utilityPlan = elNew._defaultFloorPlan();
-      const withBasement = { ...plain, config: { ...plain.config, home_stories: "1.5", home_features: { basement: true, cellar_door: false, utility: false } } };
+      const withBasement = { ...plain, config: { ...plain.config, home_stories: "1.5", home_features: { basement: true, utility: false } } };
       elNew._data = () => withBasement;
-      const bHtml = elNew._htmlResidence();
+      const bHtml = doorRows();
       const bPlan = elNew._defaultFloorPlan();
-      const bSvg = window.NOVA3D.renderSVG({ theta: 35, floor: "all", lit: {}, doors: {}, spec: elNew._houseSpec(),
-        plan: elNew._planToFeet(bPlan), elements: {}, garage: [] });
       elNew._data = realData;
-      const pdoc = new resRoot.ownerDocument.defaultView.DOMParser().parseFromString(`<div>${html}</div>`, "text/html");
-      const bdoc = new resRoot.ownerDocument.defaultView.DOMParser().parseFromString(`<div>${bHtml}</div>`, "text/html");
+      const pdoc = parse(html), bdoc = parse(bHtml);
       const names = p => Object.values(p).flatMap(f => (f.rooms || []).map(r => r.name));
-      checks.push(["no basement: no Basement floor tab, no Cellar / Bulkhead or Basement door rows",
-        !pdoc.querySelector('[data-res-floor="bsmt"]') && !pdoc.querySelector('[data-slot="cellar"]')
-          && !pdoc.querySelector('[data-slot="basement"]') && !/basement|cellar|bulkhead/i.test(pdoc.body.textContent)
+      checks.push(["no basement: no Cellar / Bulkhead or Basement door rows",
+        !pdoc.querySelector('[data-slot="cellar"]') && !pdoc.querySelector('[data-slot="basement"]')
+          && !/basement|cellar|bulkhead/i.test(pdoc.body.textContent)
           && !!pdoc.querySelector('[data-slot="garage_rear"]')]);
       checks.push(["no basement: the default plan has no basement floor, stairs, utility room or device labels",
         !plainPlan.bsmt && !plainPlan["2f"] && !names(plainPlan).some(n => /^(Stairs|Utility Room|Basement)$/.test(n))
           && names(plainPlan).includes("Front Door") && names(plainPlan).includes("Back Door")]);
-      checks.push(["no cellar door: the 3D house draws no cellar door", !/cellar-door/.test(plainSvg) && !/cellar-door/.test(bSvg)]);
       checks.push(["utility area: the space the garage used is a utility room", names(utilityPlan).includes("Utility Room")]);
-      checks.push(["basement home: Basement tab and rows show, the plan has a basement but no device labels",
-        !!bdoc.querySelector('[data-res-floor="bsmt"]') && !!bdoc.querySelector('[data-slot="cellar"]')
-          && !!bdoc.querySelector('[data-slot="basement"]') && !!bPlan.bsmt && !bPlan.bsmt.labels
-          && names(bPlan).includes("Stairs")]);
-      checks.push(["mapped cellar door: the 3D house still draws it",
-        /cellar-door/.test(window.NOVA3D.renderSVG({ theta: 35, floor: "all", lit: {}, doors: {}, spec: { cellar: true },
-          plan: elNew._planToFeet(bPlan), elements: {}, garage: [] }))]);
+      checks.push(["basement home: the Cellar / Bulkhead and Basement rows show, the plan has a basement but no device labels",
+        !!bdoc.querySelector('[data-slot="cellar"]') && !!bdoc.querySelector('[data-slot="basement"]')
+          && !!bPlan.bsmt && !bPlan.bsmt.labels && names(bPlan).includes("Stairs")]);
     }
-    checks.push(["3D house: 0 garage bays draws no garage doors",
-      !/gdoor/.test(window.NOVA3D.renderSVG({ theta: 35, floor: "all", lit: {}, doors: {}, spec: { garageBays: 0 },
-        plan: elNew._planToFeet(elNew._defaultFloorPlanBase()), elements: {}, garage: [] }))]);
   }
-
-  const styleSel = elNew.shadowRoot.querySelector('select[data-cfg-key="residence_style"]');
-  styleSel.value = "ranch";
-  styleSel.dispatchEvent(new elNew.shadowRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
-  await new Promise(r => setTimeout(r, 20));
-  checks.push(["residence tab: changing home style autosaves residence_style via nova/update_config",
-    _updateConfigCalls.some(c => c.key === "residence_style" && c.value === "ranch")]);
-  checks.push(["residence tab: post-save re-render lands back on the residence tab with a live scene",
-    !!elNew.shadowRoot.getElementById("resIso")?.querySelector("svg")]);
   delete hass.states["cover.test_front_door"];
-
-  // Back to settings for the tests that follow.
-  const backToSettingsBtn = Array.from(elNew.shadowRoot.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === "settings");
-  backToSettingsBtn.click();
-  await new Promise(r => setTimeout(r, 20));
   sRoot = elNew.shadowRoot;
 
   // Person Honorifics: picking "Custom…" reveals the text input without saving
@@ -1550,6 +1467,12 @@ if (require.main === module) setTimeout(async () => {
   hass.callWS = setupHealthCallWS;
   await elNew._fetchDiagnosticsData();
   sRoot = elNew.shadowRoot;
+  // Presence sensors moved here from the Residence tab (8.30.0).
+  await elNew._fetchMmwaveNew();
+  sRoot = elNew.shadowRoot;
+  checks.push(["diagnostics: Presence sensors lists live per room presence after fetch",
+    /Kitchen/.test(sRoot.getElementById("resMmwaveList")?.textContent || "")
+    && /OCCUPIED/.test(sRoot.getElementById("resMmwaveSummary")?.textContent || "")]);
   const providerActivityCallWS = hass.callWS;
   hass.callWS = async (m) => {
     if (m.type === "nova/get_provider_activity") throw new Error("boom");

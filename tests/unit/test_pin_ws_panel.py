@@ -60,7 +60,7 @@ async def test_panel_data_has_every_section(ws, load):
     assert conn.errors == []
     res = conn.results[0][1]
     assert set(res) == {"status", "version", "meta", "dominant", "areas", "sleep_reason",
-                        "doorbell_training", "doors", "lockdown", "intrusion", "knowledge",
+                        "doorbell_training", "lockdown", "intrusion", "knowledge",
                         "suggestions", "suggestions_filtered", "goals", "config"}
     assert res["version"] == ws._INTEGRATION_VERSION
     assert set(res["status"]) == {"observer", "sleep", "gemini", "broadcast", "notify",

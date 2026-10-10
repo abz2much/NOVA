@@ -487,7 +487,6 @@ async def ws_get_panel_data(
             "areas":          areas_list,
             "sleep_reason":   sleep_reason if sleeping else None,
             "doorbell_training": doorbell_training_data,
-            "doors":          _get_door_states(hass),
             "lockdown":       _get_lockdown_status(),
             "intrusion":      _get_intrusion_status(),
             "knowledge":      _get_knowledge_stats(),
@@ -701,10 +700,8 @@ async def ws_get_panel_data(
                 "hazard_cap_area_names":  _get_runtime_json(hass, entry, "hazard_cap_area_names", []),
                 "hazard_quake_radius_km": _runtime_opt(hass, entry, "hazard_quake_radius_km", 300),
                 "hazard_quake_min_mag":   _runtime_opt(hass, entry, "hazard_quake_min_mag", 2.5),
-                # Residence model detail controls — same read-back requirement:
-                # these save fine but reset on re-render unless surfaced here.
-                "residence_style":      str(_runtime_opt(hass, entry, "residence_style", "cape_cod") or "cape_cod"),
-                "floor_plan_sqft":      _runtime_opt(hass, entry, "floor_plan_sqft", ""),
+                # Floor plan controls — same read-back requirement: these
+                # save fine but reset on re-render unless surfaced here.
                 "floor_plan_units":     str(_runtime_opt(hass, entry, "floor_plan_units", "imperial") or "imperial"),
                 "floor_plan_elements":  _get_runtime_json(hass, entry, "floor_plan_elements", {}),
                 "floor_plan_cameras":   _get_runtime_json(hass, entry, "floor_plan_cameras", {}),
@@ -717,12 +714,7 @@ async def ws_get_panel_data(
                 "disabled_cameras":     _get_runtime_json(hass, entry, "disabled_cameras", []),
                 "home_stories":         _runtime_opt(hass, entry, "home_stories", "1.5"),
                 "has_basement":         _runtime_opt(hass, entry, "has_basement", True),
-                "dormers_front":        _runtime_opt(hass, entry, "dormers_front", 2),
-                "dormers_rear":         _runtime_opt(hass, entry, "dormers_rear", 1),
                 "garage_bays":          _runtime_opt(hass, entry, "garage_bays", 3),
-                "chimney_side":         str(_runtime_opt(hass, entry, "chimney_side", "right") or "right"),
-                "home_bedrooms":        _runtime_opt(hass, entry, "home_bedrooms", ""),
-                "home_bathrooms":       _runtime_opt(hass, entry, "home_bathrooms", ""),
             },
         }
         connection.send_result(msg["id"], result)
@@ -782,12 +774,6 @@ def _masked_url(value) -> str:
         return REDACTED if "@" in text else text
 
 
-def _door_entity_open(state_obj) -> bool:
-    """Back-compat shim — door open logic now lives in door_state.py."""
-    from . import door_state
-    return door_state.entity_is_open(state_obj)
-
-
 def _get_lockdown_exempt_locks() -> list:
     """The locks lockdown leaves out right now, from the running manager,
     the one source the sweep and the "unlocked" lists also read (8.29.0)."""
@@ -831,23 +817,7 @@ def _get_home_doors(hass: HomeAssistant, entry) -> dict:
         return {"garage_mode": home_doors.garage_mode(cfg), "has_garage": False,
                 "exit_doors": [], "exit_door_status": [], "exit_door_candidates": [],
                 "basement_mode": home_doors.basement_mode(cfg),
-                "home_features": {"basement": False, "cellar_door": False, "utility": False}}
-
-
-def _get_door_states(hass: HomeAssistant) -> dict:
-    """
-    Open/closed state of the home's doors for the Residence 3D model. Reads the
-    explicit ``door_mapping`` (slot -> entity_id) the user set on the Residence
-    tab, then delegates to door_state.get_door_states which honours it and
-    auto-detects the rest. Never raises.
-    """
-    try:
-        from . import door_state
-        entry = _get_entry(hass)
-        mapping = _get_runtime_json(hass, entry, "door_mapping", {}) or {}
-        return door_state.get_door_states(hass, mapping)
-    except Exception:
-        return {}
+                "home_features": {"basement": False, "utility": False}}
 
 
 def _get_disabled_rules(hass: HomeAssistant, entry) -> list[str]:
@@ -1001,9 +971,7 @@ PANEL_WRITABLE_KEYS = {
                                   # that person is home alone; see honorific.py (v7.99.0)
     "floor_plan_rooms",          # JSON: floor plan room positions per floor
     "floor_plan_bg",             # JSON: base64 background images per floor
-    # Residence model (the 3D house on the Residence tab)
-    "residence_style",           # str: home style template (cape_cod, ranch, …)
-    "floor_plan_sqft",           # str/int: estimated square footage
+    # Floor plan and home layout
     "floor_plan_units",          # "imperial" | "metric" for room dimensions
     "floor_plan_elements",       # JSON: placed windows/doors per floor (+ sensor map)
     "floor_plan_cameras",        # JSON: placed cameras per floor (pos/angle/fov/range) (v7.17.0)
@@ -1012,15 +980,10 @@ PANEL_WRITABLE_KEYS = {
     "floor_plan_bg_opacity",     # str/float 0-1: opacity of the imported floor-plan background image (v7.101.18)
     "home_context_max_entities", # int: entity names per domain in the system prompt (0=counts only) (v7.23.1)
     "disabled_cameras",          # JSON list: camera entity_ids Nova must not use
-    "home_stories",              # str: number of stories (controls floor tabs)
+    "home_stories",              # str: number of stories (shapes the default floor plan)
     "has_basement",              # bool: the Basement setting before 8.27.0; a saved value still counts
-    "dormers_front",             # int: front dormer count override
-    "dormers_rear",              # int: rear dormer count override
     "garage_bays",               # int: garage bay count
-    "chimney_side",              # str: chimney placement (left/right)
-    "home_bedrooms",             # int: bedroom count (Residence stats)
-    "home_bathrooms",            # int: bathroom count (Residence stats)
-    "door_mapping",              # JSON: {model door slot -> entity_id}
+    "door_mapping",              # JSON: {door slot -> entity_id} (Home layout card)
     "arrival_front_door_entity", # str: binary_sensor gating the arrival-briefing trigger
     # Outdoor classification (feeds the intrusion false-alarm guards)
     "outdoor_areas",             # JSON list: extra area names treated as outdoor

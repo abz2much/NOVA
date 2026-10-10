@@ -1,6 +1,6 @@
 /*
  * Nova Command Center Panel.
- * v8.29.0
+ * v8.30.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -13,7 +13,7 @@
  * trying to do rather than which subsystem it touches (General, Voice &
  * Speakers, Awareness & Safety, Learning & Memory, Cameras, Home &
  * Extras), plus a search box across every setting. All 27 Settings cards
- * are real. Residence, Intrusion, Suggestions, Logs, and Memory are all
+ * are real. Intrusion, Faces, Suggestions, Logs, Memory and Energy are all
  * full nav tabs here.
  *
  * Design: an animated "stellar core" (Nova = a star's sudden brightening)
@@ -48,7 +48,7 @@ class NovaPanel extends HTMLElement {
     this._cameraInterval = null;
     this._cognitive = null;
     this._modeBindingsOpen = false;
-    this._currentTab = "dashboard"; // "dashboard" | "settings" | "logs" | "diagnostics" | "memory" | "intrusion" | "faces" | "suggestions" | "residence" | "energy"
+    this._currentTab = "dashboard"; // "dashboard" | "settings" | "logs" | "diagnostics" | "memory" | "intrusion" | "faces" | "suggestions" | "energy"
     this._logFilter = "all";
     this._logSearch = "";
     this._settingsSection = "general";
@@ -77,7 +77,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.29.0 ",
+      console.log("%c Nova Panel %c v8.30.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -189,7 +189,6 @@ class NovaPanel extends HTMLElement {
     return {
       status: live.status || {},
       areas: live.areas || [],
-      doors: live.doors || {},
       cameras: live.config?.cameras || [],
       areasMonitored: live.meta?.areas_monitored ?? "—",
       occupied: (live.areas || []).filter(a => a.active).length,

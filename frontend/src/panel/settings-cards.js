@@ -17,7 +17,7 @@
       ? (c.id === "general" ? this._generalCardBody()
         : c.id === "person_honorifics" ? this._personHonorificsCardBody()
         : c.id === "room_speakers" ? this._roomSpeakersCardBody()
-        : c.id === "residence_home" ? this._residenceHomeCardBody()
+        : c.id === "home_layout" ? this._homeLayoutCardBody()
         : c.id === "ai_models" ? this._aiModelsCardBody()
         : c.id === "briefings" ? this._briefingsCardBody()
         : c.id === "voice_confirmation" ? this._voiceConfirmationCardBody()
@@ -205,79 +205,6 @@
       </div>`;
   }
 
-  _residenceHomeCardBody() {
-    const cfg = this._data()?.config || {};
-    const styles = {
-      cape_cod: "Cape Cod", colonial: "Colonial", dutch_colonial: "Dutch Colonial",
-      ranch: "Ranch", two_story: "Two-Story", craftsman: "Craftsman",
-      modern: "Modern", townhouse: "Townhouse", apartment: "Apartment", cabin: "Cabin",
-    };
-    return `
-      <div class="cfg-row">
-        <label>Home type</label>
-        <select class="cfg-field" data-cfg-key="residence_style">
-          ${this._optSelect(Object.entries(styles), cfg.residence_style || "cape_cod")}
-        </select>
-      </div>
-      <div class="cfg-row">
-        <label>Stories</label>
-        <select class="cfg-field" data-cfg-key="home_stories">
-          ${this._optSelect(["1", "1.5", "2", "3"].map(v => [v, v]), String(cfg.home_stories ?? "1.5"))}
-        </select>
-      </div>
-      <div class="cfg-row">
-        <label>Garage</label>
-        <select class="cfg-field" data-cfg-key="garage_mode">
-          ${this._optSelect([["auto", "Auto"], ["yes", "Yes"], ["no", "No"]], cfg.garage_mode || "auto")}
-        </select>
-        <span class="toggle-desc">Show garage settings and wording. Auto looks for a garage door or an area named Garage. This only changes what you see: Nova secures and checks every door the same way.</span>
-      </div>
-      ${cfg.has_garage ? `<div class="cfg-row">
-        <label>Garage bays</label>
-        <select class="cfg-field" data-cfg-key="garage_bays">
-          ${this._optSelect(["0", "1", "2", "3", "4"].map(v => [v, v]), String(cfg.garage_bays ?? "3"))}
-        </select>
-      </div>` : ""}
-      <div class="cfg-row">
-        <label>Front dormers</label>
-        <select class="cfg-field" data-cfg-key="dormers_front">
-          ${this._optSelect(["0", "1", "2", "3"].map(v => [v, v]), String(cfg.dormers_front ?? "2"))}
-        </select>
-      </div>
-      <div class="cfg-row">
-        <label>Rear dormers</label>
-        <select class="cfg-field" data-cfg-key="dormers_rear">
-          ${this._optSelect(["0", "1", "2"].map(v => [v, v]), String(cfg.dormers_rear ?? "1"))}
-        </select>
-      </div>
-      <div class="cfg-row">
-        <label>Chimney</label>
-        <select class="cfg-field" data-cfg-key="chimney_side">
-          ${this._optSelect([["right", "East / right"], ["left", "West / left"], ["none", "None"]], cfg.chimney_side || "right")}
-        </select>
-      </div>
-      <div class="cfg-row">
-        <label>Basement</label>
-        <select class="cfg-field" data-cfg-key="basement_mode">
-          ${this._optSelect([["auto", "Auto"], ["yes", "Yes"], ["no", "No"]], cfg.basement_mode || "auto")}
-        </select>
-        <span class="toggle-desc">Show the basement floor and its doors. Auto looks for an area or floor named Basement or Cellar, or a floor below ground level. This only changes what you see.</span>
-      </div>
-      <div class="cfg-row">
-        <label>Bedrooms</label>
-        <input class="cfg-field cfg-num" type="number" min="0" max="12" data-cfg-key="home_bedrooms" value="${cfg.home_bedrooms ?? ""}" placeholder="3">
-      </div>
-      <div class="cfg-row">
-        <label>Bathrooms</label>
-        <input class="cfg-field cfg-num" type="number" min="0" max="12" step="0.5" data-cfg-key="home_bathrooms" value="${cfg.home_bathrooms ?? ""}" placeholder="2">
-      </div>
-      <div class="cfg-row">
-        <label>Square feet</label>
-        <input class="cfg-field cfg-num" type="number" min="0" max="20000" step="50" data-cfg-key="floor_plan_sqft" value="${cfg.floor_plan_sqft ?? ""}" placeholder="1800">
-      </div>
-      <div class="stub-body">Detailed room layout is edited in the Floor Plan Editor. This feeds the Residence 3D view.</div>`;
-  }
-
   _operationalModeCardBody() {
     const cfg = this._data()?.config || {};
     const areas = this._data()?.areas || [];
@@ -423,6 +350,42 @@
         </div>`;
   }
 
+  // Presence sensors (moved from the Residence tab when the 3D house went):
+  // the per room presence, motion and mmWave sensors, from nova/mmwave_overview.
+  async _fetchMmwaveNew() {
+    if (!this._hass) return;
+    try {
+      const res = await this._hass.callWS({ type: "nova/mmwave_overview" });
+      this._mmwave = res || { rooms: [], summary: {} };
+    } catch (_) {
+      this._mmwave = { rooms: [], summary: {}, error: true };
+    }
+    this._renderMmwaveNew();
+  }
+  _renderMmwaveNew() {
+    const list = this.shadowRoot?.getElementById("resMmwaveList");
+    const sumEl = this.shadowRoot?.getElementById("resMmwaveSummary");
+    if (!list) return;
+    const data = this._mmwave || { rooms: [], summary: {} };
+    const s = data.summary || {};
+    if (sumEl) this._setText(sumEl, s.rooms_with_mmwave ? this._t("◉ {detecting}/{rooms} OCCUPIED", { detecting: s.rooms_detecting || 0, rooms: s.rooms_with_mmwave }) : "◉ NONE");
+    if (data.error) { this._setHtml(list, `<div class="toggle-desc">Couldn't read sensors — restart Home Assistant after updating, then reopen.</div>`); return; }
+    const rooms = data.rooms || [];
+    if (!rooms.length) { this._setHtml(list, `<div class="toggle-desc">No presence, motion, or mmWave sensors found. Assign occupancy sensors to areas in Home Assistant and they'll appear here.</div>`); return; }
+    this._setHtml(list, rooms.map(r => {
+      const on = r.detecting_count > 0;
+      const sensorLine = r.sensor_count > 1
+        ? this._tHtml("{detecting}/{total} sensors", { detecting: r.detecting_count, total: r.sensor_count })
+        : this._tHtml("{count} sensor", { count: r.sensor_count });
+      return `<div class="cfg-row">
+        <label>${this._esc(r.name)}${r.outdoor ? " ▲" : ""}</label>
+        <span class="toggle-desc">${on
+          ? this._tHtml("OCCUPIED · {sensors} · now", { sensors: sensorLine })
+          : this._tHtml("clear · {sensors} · {age}", { sensors: sensorLine, age: this._esc(r.freshest) })}</span>
+      </div>`;
+    }).join(""));
+  }
+
   _diagnosticsCardBody() {
     const cfg = this._data()?.config || {};
     const diag = this._diag || {};
@@ -456,6 +419,9 @@
       <div class="mode-bind-head"></div>
       ${this._setupHealthCardBody()}
       ${this._providerActivityCardBody()}
+      <div class="mode-bind-head">Presence sensors <span class="toggle-desc" id="resMmwaveSummary">◉ scan</span></div>
+      <div class="toggle-desc">Live occupancy per room from presence/motion/mmWave sensors.</div>
+      <div id="resMmwaveList"><div class="toggle-desc">Reading sensors…</div></div>
       <div class="panel-head"><div class="panel-title">Service tests</div></div>
       ${svcTest("nova.test_tts", "TTS — Nova voice test")}
       ${svcTest("nova.observer_status", "Observer — fire status event")}

@@ -1,20 +1,20 @@
 """Which rooms the home has, and which exit doors the user picked.
 
-8.26.0: the garage and exit doors. 8.27.0: the basement, a cellar door and a
-utility room, by the same rules (see has_basement() and home_features()).
+8.26.0: the garage and exit doors. 8.27.0: the basement and a utility room,
+by the same rules (see has_basement() and home_features()).
 
 Display only. Nothing here changes what Nova secures, checks or alerts on:
 lockdown, the night sweep, intrusion and the world model go by device class
 over every entity, whatever this module says. It decides only whether the
 panel and the AI show garage words, and it describes the exit doors the user
-picked on the Residence tab.
+picked in Settings → Home layout.
 
 has_garage() is True only on a reliable signal, unless the user's "Garage"
 setting overrides it:
   * a cover with device class garage
   * a binary_sensor with device class garage_door
   * a Home Assistant area named garage
-  * a Garage Door slot the user mapped on the Residence tab
+  * a Garage Door slot the user mapped in Settings → Home layout
 A name that merely contains "garage", the default floor plan's Garage room and
 the garage bays count never count: a gate or a car sensor can be named garage.
 """
@@ -254,10 +254,8 @@ def has_basement(hass, config: Optional[dict] = None) -> bool:
 
 def home_features(hass, config: Optional[dict] = None) -> dict:
     """What the panel may show beyond the garage. Never raises.
-      basement     the Basement floor tab, its door rows, the default plan's
-                   basement floor
-      cellar_door  an outside cellar (bulkhead) door in the 3D house: only
-                   when the user mapped one
+      basement     the Basement door rows and the default plan's basement
+                   floor
       utility      a utility room in place of the garage in the default plan:
                    only when Home Assistant has an area named utility"""
     try:
@@ -266,6 +264,5 @@ def home_features(hass, config: Optional[dict] = None) -> dict:
         utility = False
     return {
         "basement": has_basement(hass, config),
-        "cellar_door": _mapped(config, "cellar"),
         "utility": utility,
     }

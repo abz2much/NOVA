@@ -1,3 +1,17 @@
+## [8.30.0] — The 3D house is gone; Home layout moves into Settings
+
+### Removed
+- **The Residence tab and its 3D house view.** No rotating house, view presets, floor tabs, live room lighting, home style, dormers, chimney, or the square feet, bedrooms and bathrooms stats. The NOVA3D engine, its developer tools (`frontend/dev/`, `scripts/render_residence.js`) and `door_state.py`, which only fed the 3D doors, are deleted. The panel is about 1,450 lines smaller.
+- The settings only the 3D house used (`residence_style`, `dormers_front`, `dormers_rear`, `chimney_side`, `floor_plan_sqft`, `home_bedrooms`, `home_bathrooms`) are no longer saved or sent to the panel. Values already in `config.json` stay there and are ignored.
+- The "cellar door" home feature, which only drew the 3D cellar door. A mapped Cellar / Bulkhead door still means the home has a basement.
+
+### Moved
+- **Settings → Home & Extras → Home layout** (replaces Residence / Home in General): Stories, Garage, Garage bays, Basement, the door mapping and the exit doors. Same saved keys and door slots, so garage and basement detection is unchanged.
+- **Presence sensors** (the per room presence, motion and mmWave list) moved to the Diagnostics tab.
+
+### Unchanged
+- The Floor Plan Editor, camera placement and the camera coverage estimate, the room graph intrusion uses, and the Command Center Areas card.
+
 ## [8.29.0] — Locks left out of lockdown, in the panel
 
 - **New control: Settings → Security Alarm → Locks left out of lockdown.** Pick any of your own locks, for example a thermostat's keypad lock. Lockdown and the night sweep never lock them, and they are left out of the "unlocked" lists in briefings, status and voice answers. Empty by default. A change applies at once, with no reload. It edits the same `lockdown_exempt_locks` setting as before, so an install migrated in 8.28.0 sees its two thermostat locks listed there and can remove them.

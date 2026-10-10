@@ -70,11 +70,6 @@
     if (this._currentTab === "intrusion") this._wireIntrusion();
     if (this._currentTab === "faces") this._wireFaces();
     if (this._currentTab === "energy") this._wireEnergy();
-    if (this._currentTab === "residence") {
-      this._build3DHouseNew();
-      this._wireResidenceControlsNew();
-      this._fetchMmwaveNew();
-    }
     if (this._currentTab === "suggestions") {
       this._wireSuggestions();
       this._wireAnalyzeButton("sugRunAnalysis", "sugAnalysisResult");
@@ -162,6 +157,7 @@
 
   _wireSettings() {
     const root = this.shadowRoot;
+    this._wireHomeLayout();
 
     root.querySelectorAll(".settings-nav-btn").forEach(btn => {
       btn.addEventListener("click", () => {
@@ -581,6 +577,13 @@
     if (!this._diagFetchedOnce) {
       this._diagFetchedOnce = true;
       this._fetchDiagnosticsData();
+    }
+    // Presence sensors: draw what we have, refresh at most every 10 seconds
+    // (Diagnostics re-renders after each of its own fetches).
+    if (this._mmwave) this._renderMmwaveNew();
+    if (!this._mmwaveAt || Date.now() - this._mmwaveAt > 10000) {
+      this._mmwaveAt = Date.now();
+      this._fetchMmwaveNew();
     }
     root.getElementById("newDiagRefresh")?.addEventListener("click", () => this._fetchDiagnosticsData());
     root.querySelectorAll(".diag-panel [data-svc]").forEach(btn => {

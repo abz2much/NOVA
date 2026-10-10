@@ -19,7 +19,7 @@ needs, what it does by itself, and what it never does without you.
   Door and window reminders stay quiet when it is above 10°C outside.
 - **Garage or no garage.** Nova shows garage settings and wording only when
   your home has a garage: a garage door cover or sensor, or an area named
-  Garage. Set **Settings → General → Residence / Home → Garage** to Yes or
+  Garage. Set **Settings → Home & Extras → Home layout → Garage** to Yes or
   No to choose yourself. This only changes what you see. Lockdown, the night
   sweep and intrusion check every door the same way whatever it says. The
   basement works the same way: its floor and door rows show only when there

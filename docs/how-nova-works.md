@@ -365,8 +365,7 @@ Nova tries hard not to nag you. A few of the rules:
 
 - The dashboard is built from ordered source files into the single
   `nova-panel.js` that HACS installs, by a build with no dependencies. CI
-  checks the built file is current. The 3D house engine has one source, and
-  a test pins its output.
+  checks the built file is current.
 - CI checks the architecture: type checks for the capability packages
   (strict for persistence), no import cycles, a fixed direction for package
   dependencies, compatibility modules that can't grow, and coverage floors
