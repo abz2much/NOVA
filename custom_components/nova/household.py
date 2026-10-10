@@ -156,6 +156,20 @@ class Household:
 
 
 def snapshot(hass, config: dict | None = None) -> Household:
+    """The household reading. While a 30 second tick runs this is the
+    tick's reading from world.py (8.24.0), so every source in the tick sees
+    the same answer; between ticks it is read now."""
+    try:
+        from . import world
+        current = world.current()
+        if current is not None and current.house is not None:
+            return current.house
+    except Exception:
+        pass
+    return _live_snapshot(hass, config)
+
+
+def _live_snapshot(hass, config: dict | None = None) -> Household:
     """Read the household now: residents, and the selected alarm's state."""
     from . import alarm_source
     states = frozenset(_lower(st) for st in alarm_source.states(hass, config))

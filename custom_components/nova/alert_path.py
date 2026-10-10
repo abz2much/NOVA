@@ -54,7 +54,9 @@ class Situation:
 def situation(hass, config: Optional[dict] = None, *, sleeping: bool = False,
               quiet: bool = False, house=None) -> Situation:
     """Read the household (household.py) and pair it with the sleep and quiet
-    hours readings the source already took. Never raises."""
+    hours readings the source already took. While a 30 second tick runs, the
+    household comes from that tick's world snapshot (world.py, 8.24.0).
+    Never raises."""
     if house is None:
         try:
             from . import household

@@ -18,6 +18,12 @@
 - **Scenes, scripts and automations are marked "not checkable"** in the action log after they run, because what they do is not visible to Nova. Nothing more is promised.
 - **A check that cannot run is "unverified", never "verified".**
 
+### Stage D: one read-only picture of the house
+- **New `world.py`.** At the start of each 30 second tick Nova takes one snapshot of the house: who is home and what the alarm means (`household.py`), asleep, quiet hours, doors and windows open into the house, unlocked locks, locks it cannot read (unknown, unavailable or jammed), open covers, person motion, whether lockdown is on, and open situations.
+- **Every source in a tick sees the same snapshot.** `household.snapshot()` and `alert_path.situation()` hand out the tick's reading while it runs, and the safety tick receives it. Between ticks they read the house live, as before.
+- **A field that cannot be read is "unknown"**, never an empty list or "no", so it can never be taken to mean away or secure.
+- Nothing you see changes.
+
 ## [8.23.1] — Unknown presence reaches the phones too
 
 - **A medium alert while presence is unknown now goes to the phones,** the same as when everyone is away. Before, it was neither spoken nor pushed. Unknown means a person reading unknown or unavailable, or no person entities set up. Pushed only, with the rating buttons; never spoken.

@@ -73,6 +73,14 @@ And one answer to what the alarm means:
 | Armed home, armed night, armed custom bypass | Residents are expected to move about |
 | Disarmed, arming, pending, disarming, triggered, unavailable | Says nothing either way |
 
+## One picture of the house
+
+Every 30 seconds Nova takes one snapshot of the house: who is home, the
+alarm, whether the house is asleep, quiet hours, what is open or unlocked,
+whether lockdown is on, and any open situations. Everything Nova decides in
+that moment uses the same snapshot. Anything it cannot read is treated as
+unknown, never as away or secure.
+
 ## How alerts reach you
 
 Every alert goes through one place that decides whether it goes out, and
