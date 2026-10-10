@@ -3605,6 +3605,62 @@ if (require.main === module) setTimeout(async () => {
   checks.push(["faces tab: a non admin sees that Faces needs an administrator, not a broken page",
     /needs a Home Assistant administrator/.test(sRoot.getElementById("facesBody")?.textContent || "")]);
   hass.callWS = facesCallWS;
+
+  // Chat tab: a typed message goes to nova/chat; the reply and the
+  // conversation id come back, and a non admin sees a plain message.
+  const chatCallWS = hass.callWS;
+  const _chatCalls = [];
+  let _chatMode = "ok";                          // ok -> fail -> denied
+  hass.callWS = async (m) => {
+    if (m.type === "nova/chat") {
+      _chatCalls.push({ ...m });
+      if (_chatMode === "denied") { const e = new Error("Unauthorized"); e.code = "unauthorized"; throw e; }
+      if (_chatMode === "fail") return { ok: false, error: "Nova returned an error." };
+      return { ok: true, reply: "The lamp is on.", conversation_id: "conv-1" };
+    }
+    return chatCallWS(m);
+  };
+  const chatTabBtn = Array.from(sRoot.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === "chat");
+  checks.push(["chat tab: a Chat nav tab exists", !!chatTabBtn]);
+  chatTabBtn.click();
+  await new Promise(r => setTimeout(r, 30));
+  sRoot = elNew.shadowRoot;
+  checks.push(["chat tab: starts empty with a hint", /Ask about your home/.test(sRoot.getElementById("chatLog")?.textContent || "")]);
+  sRoot.getElementById("chatInput").value = "turn on the lamp";
+  sRoot.getElementById("chatSend").click();
+  await new Promise(r => setTimeout(r, 30));
+  sRoot = elNew.shadowRoot;
+  checks.push(["chat tab: Send calls nova/chat with the text and shows the reply",
+    _chatCalls.length === 1 && _chatCalls[0].text === "turn on the lamp" && _chatCalls[0].conversation_id === null
+    && /turn on the lamp/.test(sRoot.getElementById("chatLog")?.textContent || "")
+    && /The lamp is on\./.test(sRoot.getElementById("chatLog")?.textContent || "")
+    && sRoot.getElementById("chatInput").value === ""]);
+  sRoot.getElementById("chatInput").value = "and the fan";
+  sRoot.getElementById("chatSend").click();
+  await new Promise(r => setTimeout(r, 30));
+  checks.push(["chat tab: the next message carries the conversation id",
+    _chatCalls.length === 2 && _chatCalls[1].conversation_id === "conv-1"]);
+  _chatMode = "fail";
+  sRoot = elNew.shadowRoot;
+  sRoot.getElementById("chatInput").value = "again";
+  sRoot.getElementById("chatSend").click();
+  await new Promise(r => setTimeout(r, 30));
+  sRoot = elNew.shadowRoot;
+  checks.push(["chat tab: an error from Nova is shown in the log",
+    !!sRoot.querySelector("#chatLog .chat-error") && /Nova returned an error\./.test(sRoot.getElementById("chatLog")?.textContent || "")]);
+  _chatMode = "denied";
+  sRoot.getElementById("chatInput").value = "hello";
+  sRoot.getElementById("chatSend").click();
+  await new Promise(r => setTimeout(r, 30));
+  sRoot = elNew.shadowRoot;
+  checks.push(["chat tab: a non admin sees that Chat needs an administrator",
+    /needs a Home Assistant administrator/.test(sRoot.getElementById("chatLog")?.textContent || "")]);
+  sRoot.getElementById("chatNew").click();
+  await new Promise(r => setTimeout(r, 10));
+  sRoot = elNew.shadowRoot;
+  checks.push(["chat tab: NEW CHAT clears the log",
+    /Ask about your home/.test(sRoot.getElementById("chatLog")?.textContent || "")]);
+  hass.callWS = chatCallWS;
   Array.from(sRoot.querySelectorAll(".nav-tab")).find(b => b.getAttribute("data-tab") === "intrusion").click();
   await new Promise(r => setTimeout(r, 20));
   sRoot = elNew.shadowRoot;

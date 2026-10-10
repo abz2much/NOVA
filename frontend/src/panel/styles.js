@@ -373,6 +373,14 @@
       .op-row-new select,.cam-row-new select{flex:0 1 auto;max-width:110px}
       .op-row-new input[type="range"],.cam-row-new input[type="range"]{flex:0 0 auto;width:70px}
       .op-row-new input[type="number"],.cam-row-new input[type="number"]{flex:0 0 auto;width:44px}
+      .chat-log{max-height:55vh;overflow-y:auto;margin-bottom:10px}
+      .chat-turn{padding:8px 0;border-bottom:1px solid var(--line-soft);display:flex;gap:10px;font-size:13px;line-height:1.5}
+      .chat-turn:last-child{border-bottom:none}
+      .chat-who{flex:0 0 52px;font-family:var(--font-mono);font-size:10.5px;color:var(--ink-faint);padding-top:2px}
+      .chat-turn.nova .chat-who{color:var(--gold)}
+      .chat-text{flex:1;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere}
+      .chat-error .chat-text{color:var(--warn)}
+      .chat-compose{display:flex;gap:8px}.chat-compose .cfg-field{flex:1;min-width:0}
       .fpn-inline-lbl{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--ink-dim)}
         margin-bottom:10px;cursor:grab;touch-action:none;display:flex;align-items:center;justify-content:center;overflow:hidden}
     `;

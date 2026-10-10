@@ -162,6 +162,23 @@
     ],
     "registered": true
   },
+  "nova/chat": {
+    "admin": true,
+    "error_codes": [],
+    "fields": {
+      "conversation_id": {
+        "required": false
+      },
+      "text": {
+        "required": true
+      }
+    },
+    "literal_response_keys": [
+      "error",
+      "ok"
+    ],
+    "registered": true
+  },
   "nova/clear_scene_memory": {
     "admin": true,
     "error_codes": [

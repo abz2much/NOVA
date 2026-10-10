@@ -2,7 +2,7 @@
  * frontend/src/. Edit the sources there, then run the build. */
 /*
  * Nova Command Center Panel.
- * v8.30.0
+ * v8.31.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -50,7 +50,7 @@ class NovaPanel extends HTMLElement {
     this._cameraInterval = null;
     this._cognitive = null;
     this._modeBindingsOpen = false;
-    this._currentTab = "dashboard"; // "dashboard" | "settings" | "logs" | "diagnostics" | "memory" | "intrusion" | "faces" | "suggestions" | "energy"
+    this._currentTab = "dashboard"; // "dashboard" | "settings" | "logs" | "diagnostics" | "memory" | "intrusion" | "faces" | "suggestions" | "energy" | "chat"
     this._logFilter = "all";
     this._logSearch = "";
     this._settingsSection = "general";
@@ -79,7 +79,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.30.0 ",
+      console.log("%c Nova Panel %c v8.31.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -345,12 +345,13 @@ class NovaPanel extends HTMLElement {
             <div class="brand-mark"></div>
             <div>
               <div class="brand-name">Nova</div>
-              <div class="brand-tag">${tab === "settings" ? "Settings" : tab === "logs" ? "Logs" : tab === "memory" ? "Memory" : tab === "diagnostics" ? "Diagnostics" : tab === "intrusion" ? "Intrusion" : tab === "faces" ? "Faces" : tab === "suggestions" ? "Suggestions" : tab === "energy" ? "Energy" : "Command Center"}</div>
+              <div class="brand-tag">${tab === "settings" ? "Settings" : tab === "logs" ? "Logs" : tab === "memory" ? "Memory" : tab === "diagnostics" ? "Diagnostics" : tab === "intrusion" ? "Intrusion" : tab === "faces" ? "Faces" : tab === "suggestions" ? "Suggestions" : tab === "energy" ? "Energy" : tab === "chat" ? "Chat" : "Command Center"}</div>
             </div>
           </div>
           <nav class="top-nav">
             <button class="nav-tab${tab === "dashboard" ? " active" : ""}" data-tab="dashboard">Command Center</button>
             <button class="nav-tab${tab === "intrusion" ? " active" : ""}" data-tab="intrusion">Intrusion</button>
+            <button class="nav-tab${tab === "chat" ? " active" : ""}" data-tab="chat">Chat</button>
             <button class="nav-tab${tab === "faces" ? " active" : ""}" data-tab="faces">Faces</button>
             <button class="nav-tab${tab === "suggestions" ? " active" : ""}" data-tab="suggestions">Suggestions</button>
             <button class="nav-tab${tab === "settings" ? " active" : ""}" data-tab="settings">Settings</button>
@@ -362,7 +363,7 @@ class NovaPanel extends HTMLElement {
           <button class="lockdown-control" id="lockdownControl" hidden></button>
         </div>
 
-        ${tab === "settings" ? this._htmlSettings() : tab === "logs" ? this._htmlLogs() : tab === "memory" ? this._htmlMemory() : tab === "diagnostics" ? this._htmlDiagnostics() : tab === "intrusion" ? this._htmlIntrusion() : tab === "faces" ? this._htmlFaces() : tab === "suggestions" ? this._htmlSuggestions() : tab === "energy" ? this._htmlEnergy() : this._htmlDashboard()}
+        ${tab === "settings" ? this._htmlSettings() : tab === "logs" ? this._htmlLogs() : tab === "memory" ? this._htmlMemory() : tab === "diagnostics" ? this._htmlDiagnostics() : tab === "intrusion" ? this._htmlIntrusion() : tab === "faces" ? this._htmlFaces() : tab === "suggestions" ? this._htmlSuggestions() : tab === "energy" ? this._htmlEnergy() : tab === "chat" ? this._htmlChat() : this._htmlDashboard()}
 
         <div class="footnote">NOVA COMMAND CENTER</div>
       </div>
@@ -1683,6 +1684,92 @@ ${this._htmlDashboardBody()}`;
     } else {
       this._fetchIntrusionLog();
     }
+  }
+
+  // ─── Chat ─────────────────────────────────────────────────────────────
+  // Type to Nova from the panel. Each message goes through nova/chat (admin
+  // only) to Nova's own conversation agent, so anything it does to the house
+  // passes the same authorisation gate as Assist. The conversation lives in
+  // memory only and is gone when the panel is reloaded.
+  _htmlChat() {
+    return `
+        <div class="panel">
+          <div class="panel-head">
+            <div class="panel-title">Chat</div>
+            <div class="panel-meta"><button class="mode-chip" id="chatNew">NEW CHAT</button></div>
+          </div>
+          <div class="chat-log" id="chatLog"></div>
+          <div class="chat-compose">
+            <input class="cfg-field" id="chatInput" maxlength="1000" placeholder="Ask Nova something">
+            <button class="mode-chip" id="chatSend">SEND</button>
+          </div>
+          <div class="toggle-desc" id="chatMsg"></div>
+        </div>
+    `;
+  }
+
+  _chatState() {
+    if (!this._chat) this._chat = { id: null, turns: [], busy: false };
+    return this._chat;
+  }
+
+  _renderChat() {
+    const log = this.shadowRoot?.getElementById("chatLog");
+    if (!log) return;
+    const c = this._chatState();
+    if (!c.turns.length) {
+      this._setHtml(log, `<div class="stub-body">Ask about your home or tell Nova what to do. Anything that unlocks, opens or disarms is still checked first, the same as in Assist.</div>`);
+      return;
+    }
+    this._setHtml(log, c.turns.map(t => `
+        <div class="chat-turn ${t.role}${t.error ? " chat-error" : ""}">
+          <span class="chat-who">${t.role === "user" ? this._t("You") : this._t("Nova")}</span>
+          <span class="chat-text">${this._esc(t.text)}</span>
+        </div>`).join("") + (c.busy ? `<div class="stub-body">${this._t("Nova is thinking…")}</div>` : ""));
+    log.scrollTop = log.scrollHeight;
+  }
+
+  async _chatSend() {
+    const root = this.shadowRoot;
+    const input = root?.getElementById("chatInput");
+    const msg = root?.getElementById("chatMsg");
+    const c = this._chatState();
+    const text = String(input?.value || "").trim();
+    if (!this._hass || !text || c.busy) return;
+    input.value = "";
+    if (msg) this._setText(msg, "");
+    c.turns.push({ role: "user", text });
+    c.busy = true;
+    this._renderChat();
+    try {
+      const res = await this._hass.callWS({ type: "nova/chat", text, conversation_id: c.id });
+      if (res && res.ok) {
+        if (res.conversation_id) c.id = res.conversation_id;
+        c.turns.push({ role: "nova", text: res.reply });
+      } else {
+        c.turns.push({ role: "nova", text: (res && res.error) || this._t("Could not reach Nova."), error: true });
+      }
+    } catch (err) {
+      const denied = err && err.code === "unauthorized";
+      c.turns.push({ role: "nova", error: true,
+        text: denied ? this._t("Chat needs a Home Assistant administrator.") : this._t("Could not reach Nova.") });
+    }
+    c.busy = false;
+    this._renderChat();
+  }
+
+  _wireChat() {
+    const root = this.shadowRoot;
+    root.getElementById("chatSend")?.addEventListener("click", () => this._chatSend());
+    root.getElementById("chatInput")?.addEventListener("keydown", e => {
+      if (e.key === "Enter") this._chatSend();
+    });
+    root.getElementById("chatNew")?.addEventListener("click", () => {
+      this._chat = { id: null, turns: [], busy: false };
+      this._renderChat();
+    });
+    this._renderChat();
+    root.getElementById("chatInput")?.focus();
   }
 
   // ─── Faces ────────────────────────────────────────────────────────────
@@ -5930,6 +6017,7 @@ ${this._htmlDashboardBody()}`;
     if (this._currentTab === "memory") { this._wireMemory(); this._fetchKnowledge(); this._fetchPersonRoutines(); }
     if (this._currentTab === "intrusion") this._wireIntrusion();
     if (this._currentTab === "faces") this._wireFaces();
+    if (this._currentTab === "chat") this._wireChat();
     if (this._currentTab === "energy") this._wireEnergy();
     if (this._currentTab === "suggestions") {
       this._wireSuggestions();
@@ -8595,6 +8683,14 @@ ${this._htmlDashboardBody()}`;
       .op-row-new select,.cam-row-new select{flex:0 1 auto;max-width:110px}
       .op-row-new input[type="range"],.cam-row-new input[type="range"]{flex:0 0 auto;width:70px}
       .op-row-new input[type="number"],.cam-row-new input[type="number"]{flex:0 0 auto;width:44px}
+      .chat-log{max-height:55vh;overflow-y:auto;margin-bottom:10px}
+      .chat-turn{padding:8px 0;border-bottom:1px solid var(--line-soft);display:flex;gap:10px;font-size:13px;line-height:1.5}
+      .chat-turn:last-child{border-bottom:none}
+      .chat-who{flex:0 0 52px;font-family:var(--font-mono);font-size:10.5px;color:var(--ink-faint);padding-top:2px}
+      .chat-turn.nova .chat-who{color:var(--gold)}
+      .chat-text{flex:1;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere}
+      .chat-error .chat-text{color:var(--warn)}
+      .chat-compose{display:flex;gap:8px}.chat-compose .cfg-field{flex:1;min-width:0}
       .fpn-inline-lbl{display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--ink-dim)}
         margin-bottom:10px;cursor:grab;touch-action:none;display:flex;align-items:center;justify-content:center;overflow:hidden}
     `;

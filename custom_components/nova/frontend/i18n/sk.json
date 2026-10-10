@@ -229,5 +229,14 @@
   "type to find a lock…": "píšte na nájdenie zámku…",
   "Home layout": "Usporiadanie domu",
   "Presence sensors": "Senzory prítomnosti",
-  "Stories, garage and basement, which entity is each door, and the exit doors you leave by.": "Podlažia, garáž a suterén, ktorá entita je ktorými dverami a výstupné dvere, ktorými odchádzate."
+  "Stories, garage and basement, which entity is each door, and the exit doors you leave by.": "Podlažia, garáž a suterén, ktorá entita je ktorými dverami a výstupné dvere, ktorými odchádzate.",
+  "Ask Nova something": "Opýtajte sa Novy na niečo",
+  "Ask about your home or tell Nova what to do. Anything that unlocks, opens or disarms is still checked first, the same as in Assist.": "Opýtajte sa na svoj domov alebo povedzte Nove, čo má urobiť. Všetko, čo odomyká, otvára alebo vypína zabezpečenie, sa stále najprv overuje, rovnako ako v Assist.",
+  "Chat": "Chat",
+  "Chat needs a Home Assistant administrator.": "Chat vyžaduje správcu Home Assistant.",
+  "Could not reach Nova.": "Novu sa nepodarilo kontaktovať.",
+  "NEW CHAT": "NOVÝ CHAT",
+  "Nova is thinking…": "Nova premýšľa…",
+  "SEND": "ODOSLAŤ",
+  "You": "Vy"
 }

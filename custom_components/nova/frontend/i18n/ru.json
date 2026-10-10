@@ -1137,5 +1137,14 @@
   "type to find a lock…": "введите, чтобы найти замок…",
   "Home layout": "Планировка дома",
   "Presence sensors": "Датчики присутствия",
-  "Stories, garage and basement, which entity is each door, and the exit doors you leave by.": "Этажи, гараж и подвал, какой объект соответствует каждой двери, и выходные двери, через которые вы уходите."
+  "Stories, garage and basement, which entity is each door, and the exit doors you leave by.": "Этажи, гараж и подвал, какой объект соответствует каждой двери, и выходные двери, через которые вы уходите.",
+  "Ask Nova something": "Спросите Nova о чём-нибудь",
+  "Ask about your home or tell Nova what to do. Anything that unlocks, opens or disarms is still checked first, the same as in Assist.": "Спросите о своём доме или скажите Nova, что делать. Всё, что разблокирует, открывает или снимает с охраны, по-прежнему сначала проверяется, как и в Assist.",
+  "Chat": "Чат",
+  "Chat needs a Home Assistant administrator.": "Для чата нужен администратор Home Assistant.",
+  "Could not reach Nova.": "Не удалось связаться с Nova.",
+  "NEW CHAT": "НОВЫЙ ЧАТ",
+  "Nova is thinking…": "Nova думает…",
+  "SEND": "ОТПРАВИТЬ",
+  "You": "Вы"
 }

@@ -1137,5 +1137,14 @@
   "type to find a lock…": "saisir pour rechercher une serrure…",
   "Home layout": "Agencement de la maison",
   "Presence sensors": "Capteurs de présence",
-  "Stories, garage and basement, which entity is each door, and the exit doors you leave by.": "Étages, garage et sous-sol, quelle entité correspond à chaque porte, et les portes de sortie que vous utilisez."
+  "Stories, garage and basement, which entity is each door, and the exit doors you leave by.": "Étages, garage et sous-sol, quelle entité correspond à chaque porte, et les portes de sortie que vous utilisez.",
+  "Ask Nova something": "Demandez quelque chose à Nova",
+  "Ask about your home or tell Nova what to do. Anything that unlocks, opens or disarms is still checked first, the same as in Assist.": "Posez une question sur votre maison ou dites à Nova quoi faire. Tout ce qui déverrouille, ouvre ou désarme est toujours vérifié d'abord, comme dans Assist.",
+  "Chat": "Chat",
+  "Chat needs a Home Assistant administrator.": "Le chat nécessite un administrateur Home Assistant.",
+  "Could not reach Nova.": "Impossible de joindre Nova.",
+  "NEW CHAT": "NOUVEAU CHAT",
+  "Nova is thinking…": "Nova réfléchit…",
+  "SEND": "ENVOYER",
+  "You": "Vous"
 }

@@ -1,3 +1,10 @@
+## [8.31.0] — Chat tab
+
+### Added
+- **Chat tab.** Type to Nova from the panel. Each message goes to Nova's own conversation agent through the new admin only command `nova/chat`, so it can answer questions and act on the house like Assist does. The conversation is kept in the panel's memory only and is gone on reload; NEW CHAT starts again. Messages are limited to 1000 characters.
+- The command never passes a device, so a typed message cannot pose as a voice satellite, and every action it triggers still goes through the authorisation gate (`policy.authorize`). Typed chat has no extra way round it, and none was loosened.
+- Nine new panel strings, translated into all 20 languages.
+
 ## [8.30.0] — The 3D house is gone; Home layout moves into Settings
 
 ### Removed

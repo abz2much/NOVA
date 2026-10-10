@@ -229,5 +229,14 @@
   "type to find a lock…": "kirjoita löytääksesi lukon…",
   "Home layout": "Kodin pohjaratkaisu",
   "Presence sensors": "Läsnäoloanturit",
-  "Stories, garage and basement, which entity is each door, and the exit doors you leave by.": "Kerrokset, autotalli ja kellari, mikä kohde kukin ovi on, ja ulko-ovet, joista lähdet."
+  "Stories, garage and basement, which entity is each door, and the exit doors you leave by.": "Kerrokset, autotalli ja kellari, mikä kohde kukin ovi on, ja ulko-ovet, joista lähdet.",
+  "Ask Nova something": "Kysy Novalta jotain",
+  "Ask about your home or tell Nova what to do. Anything that unlocks, opens or disarms is still checked first, the same as in Assist.": "Kysy kodistasi tai kerro Novalle, mitä tehdä. Kaikki, mikä avaa lukituksen, avaa tai poistaa hälytyksen käytöstä, tarkistetaan edelleen ensin, kuten Assistissa.",
+  "Chat": "Chat",
+  "Chat needs a Home Assistant administrator.": "Chat vaatii Home Assistantin ylläpitäjän.",
+  "Could not reach Nova.": "Novaan ei saatu yhteyttä.",
+  "NEW CHAT": "UUSI CHAT",
+  "Nova is thinking…": "Nova miettii…",
+  "SEND": "LÄHETÄ",
+  "You": "Sinä"
 }
