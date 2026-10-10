@@ -475,30 +475,41 @@ def _fmt_disaster(d: dict, honorific: str) -> str:
 
 async def _deliver(hass, push_text: str, action_key: str, *, speak_text: str = "") -> None:
     """Push to the phones, and speak ``speak_text`` when given, through the
-    same paths every other Nova alert uses. Never raises."""
+    same paths every other Nova alert uses. Whether it is spoken is the
+    caller's level rule; alert_path.for_hazard turns it into the plan
+    (8.22.0). Never raises."""
+    from . import alert_path
+    plan = alert_path.for_hazard(alert_path.situation(hass), speak_allowed=bool(speak_text))
+
+    async def _push():
+        try:
+            from . import cognitive_core as cc
+            config = getattr(cc, "_CORE", None)
+            cfg_obj = getattr(config, "config", None) if config else None
+            await cc._notify_all_devices(hass, cfg_obj, push_text, _ACTION[action_key])
+        except Exception as exc:
+            _LOGGER.debug("hazard: notify failed: %s", exc)
+
+    async def _speak(_targets):
+        # a whole-house broadcast (earthquakes/severe weather are relevant
+        # everywhere), same resolution sentinel.py uses for its own alerts
+        try:
+            from . import tts_helper, audio_routing
+            tts = tts_helper.find_best_tts_entity(hass)
+            spk = audio_routing.broadcast_target(
+                hass,
+                broadcast_group=_cfg("broadcast_group", "") or None,
+                announcement_speakers=_cfg("announcement_speakers", None),
+            )
+            if tts and spk:
+                await tts_helper.async_announce(hass, speak_text, tts, spk, context="hazard")
+        except Exception:
+            pass
+
     try:
-        from . import cognitive_core as cc
-        config = getattr(cc, "_CORE", None)
-        cfg_obj = getattr(config, "config", None) if config else None
-        await cc._notify_all_devices(hass, cfg_obj, push_text, _ACTION[action_key])
+        await alert_path.deliver(plan, speak=_speak, push=_push)
     except Exception as exc:
-        _LOGGER.debug("hazard: notify failed: %s", exc)
-    if not speak_text:
-        return
-    # a whole-house broadcast (earthquakes/severe weather are relevant
-    # everywhere), same resolution sentinel.py uses for its own alerts
-    try:
-        from . import tts_helper, audio_routing
-        tts = tts_helper.find_best_tts_entity(hass)
-        spk = audio_routing.broadcast_target(
-            hass,
-            broadcast_group=_cfg("broadcast_group", "") or None,
-            announcement_speakers=_cfg("announcement_speakers", None),
-        )
-        if tts and spk:
-            await tts_helper.async_announce(hass, speak_text, tts, spk, context="hazard")
-    except Exception:
-        pass
+        _LOGGER.debug("hazard: delivery failed: %s", exc)
 
 
 # ── weather warnings (8.8.0) ─────────────────────────────────────────────────

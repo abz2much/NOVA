@@ -1,3 +1,11 @@
+## [8.22.0] — One path for every alert
+
+- **One place decides.** A new `alert_path.py` decides, for every alert, whether it goes out and whether it is spoken, sent to the phones, or both. Hazards, packages, the doorbell, the observer, appliances, the Left open reminders and the cognitive core (intrusion, lockdown, freeze, offers) all go through it. Each kind keeps its own rules.
+- **No wording or delivery changed.** A new test drives every source with the residents home, away and unknown, and pins the exact words and where they went. It passes on 8.21.0 and on 8.22.0.
+- **Observer presence.** "Is anyone home" for household events now comes from `household.py`: people, plus device trackers linked to a person. A phone linked to a person and reading home now counts. A home with no person entities now uses its device trackers.
+- **Anticipation alerts.** "While nobody appears to be home" now comes from `household.py`, people only. A person in another zone, such as Work, now counts as away. A phone linked to a person and reading home now counts as home.
+- **Unchanged.** Confirmed intrusions still use the speakers. Armed away and everyone away work as before. The intrusion investigation, alarm disarm confirmation and the nighttime sweep are untouched. No new settings.
+
 ## [8.21.0] — One answer to who is home
 
 - **One place decides.** A new `household.py` answers who is home, what the alarm means and which sensors count. Intrusion, lockdown, the 30 second loop, packages and briefings all use it.

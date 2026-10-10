@@ -775,14 +775,13 @@ async def _process_event(event: Event) -> None:
 
         # Whether a registered user is home — open windows / unlocked doors are
         # normal household state when someone's in, only notable when away.
-        # Household occupancy comes from registered people only. A large
-        # number of integrations expose fixed appliances and hubs as
-        # device_tracker entities which remain "home" permanently; counting
-        # them made an empty house look occupied and caused departure speech.
-        anyone_home = any(
-            str(s.state).lower() == "home"
-            for s in _STATE.hass.states.async_all("person")
-        )
+        # From household.py (8.22.0): people, plus device trackers linked to
+        # a person. A tracker linked to nobody (a hub, a TV) reads "home"
+        # permanently and must never make an empty house look occupied.
+        from . import alert_path
+        sit = alert_path.situation(
+            _STATE.hass, _STATE.config, sleeping=sleeping, quiet=in_quiet_hours)
+        anyone_home = sit.anyone_home
 
         # Tier 2: reason
         decision = await reasoning_loop.decide(
@@ -831,38 +830,34 @@ async def _process_event(event: Event) -> None:
             )
             final_urgency = capped
 
-        # EXTRA SAFETY: during sleep, suppress anything below critical that
-        # would broadcast. HIGH during sleep already routes to notify_only,
-        # so this is redundant but defensive.
-        if cognitive_rules.held_for_sleep(final_urgency, sleeping):
+        def _record(was_spoken: bool) -> None:
+            output_gate.record_announcement(
+                entity_id=entity_id, category=category,
+                urgency=final_urgency, message=message, was_spoken=was_spoken,
+            )
+
+        # EXTRA SAFETY: during sleep, suppress anything below critical. The
+        # rule lives in alert_path.for_observer; checked first, before the
+        # output gate, as before.
+        if alert_path.held(sit, final_urgency):
             _LOGGER.info(
                 "Observer: user sleeping, suppressing %s urgency message '%s'",
                 final_urgency, message[:80],
             )
-            output_gate.record_announcement(
-                entity_id=entity_id, category=category,
-                urgency=final_urgency, message=message, was_spoken=False,
-            )
+            _record(False)
             return
 
-        # Output gate
-        allowed, gate_reason = output_gate.can_announce(
+        # Output gate (mute list, rate limit, repeats)
+        allowed, message = alert_path.gate(
             entity_id=entity_id, category=category,
             urgency=final_urgency, message=message,
         )
         if not allowed:
-            _LOGGER.info("Observer suppressed '%s' — %s", message, gate_reason)
-            output_gate.record_announcement(
-                entity_id=entity_id, category=category,
-                urgency=final_urgency, message=message, was_spoken=False,
-            )
             return
-        message = output_gate.habit_note(
-            entity_id=entity_id, category=category,
-            urgency=final_urgency, message=message,
-        )
 
-        # Route audio based on urgency + presence + sleep
+        # Who hears it: alert_path.for_observer decides from urgency,
+        # presence, sleep and quiet hours (critical still broadcasts;
+        # high→notify; medium/low→suppressed while asleep or in quiet hours).
         broadcast_group = _STATE.config.get("broadcast_group") or None
         ann_speakers = _get_announcement_speakers()
         _LOGGER.warning(
@@ -870,85 +865,53 @@ async def _process_event(event: Event) -> None:
             "ann_speakers=%s, sleeping=%s",
             final_urgency, broadcast_group, ann_speakers, sleeping,
         )
-        # During quiet hours, force non-critical to stay quiet by routing as if
-        # asleep (critical still broadcasts; high→notify; medium/low→suppressed).
         if in_quiet_hours and final_urgency != "critical":
             try:
                 from .websocket import nova_log
                 nova_log("GATE", f"quiet hours — holding {final_urgency} announcement (not critical)")
             except Exception:
                 pass
-        targets, mode = audio_routing.observer_speak_target(
-            _STATE.hass,
-            urgency=final_urgency,
+        # v5.5.2: announcements_enabled is read here, after classification
+        # and logging, so the activity feed populates even when they're off.
+        plan = alert_path.for_observer(
+            _STATE.hass, sit, final_urgency,
             broadcast_group=broadcast_group,
             announcement_speakers=ann_speakers,
-            is_sleeping=(sleeping or in_quiet_hours),
-            authoritative_anyone_home=anyone_home,
+            announcements_on=_is_announcements_enabled(),
         )
         _LOGGER.warning(
-            "Observer routing result: targets=%s, mode=%s", targets, mode,
+            "Observer routing result: targets=%s, mode=%s", plan.targets, plan.mode,
         )
 
-        if mode == "suppressed":
-            _LOGGER.info("Observer route-suppressed '%s'", message)
-            output_gate.record_announcement(
-                entity_id=entity_id, category=category,
-                urgency=final_urgency, message=message, was_spoken=False,
-            )
-            return
+        async def _speak_and_remember(targets):
+            spoken_to = await _speak(message, targets=targets)
+            if spoken_to:
+                try:
+                    from . import spoken_history
+                    await _STATE.hass.async_add_executor_job(
+                        spoken_history.record, message, "alert", spoken_to, None,
+                    )
+                except Exception:
+                    pass  # recording must never turn a delivered announcement into a failed one
+            # Recorded before the push, as before.
+            _record(True)
 
-        if mode == "notify_only":
-            _LOGGER.info("Observer notify-only '%s'", message)
+        async def _push():
             await _send_notification(message, urgency=final_urgency)
-            output_gate.record_announcement(
-                entity_id=entity_id, category=category,
-                urgency=final_urgency, message=message, was_spoken=False,
-            )
+
+        if not plan.speak:
+            _LOGGER.info("Observer not spoken '%s' — %s", message, plan.reason)
+            if plan.mode == "notify_only":
+                await alert_path.deliver(plan, push=_push)
+                _record(False)
+            else:
+                # Announcements off: recorded, then high and critical pushed.
+                if plan.record:
+                    _record(False)
+                await alert_path.deliver(plan, push=_push)
             return
 
-        if not targets:
-            _LOGGER.debug("Observer had mode=%s but no targets — skipping", mode)
-            return
-
-        # v5.5.2: Check announcements_enabled BEFORE speaking but AFTER
-        # classification and logging. This way the activity feed populates
-        # even when announcements are off.
-        _ann_enabled = _is_announcements_enabled()
-        if not _ann_enabled:
-            _LOGGER.debug(
-                "Observer: announcements disabled, logging but not speaking: %s",
-                message[:80],
-            )
-            output_gate.record_announcement(
-                entity_id=entity_id, category=category,
-                urgency=final_urgency, message=message, was_spoken=False,
-            )
-            # v5.6.2: Still push phone notification for high/critical
-            # even when announcements (voice) are disabled
-            if final_urgency in ("high", "critical"):
-                await _send_notification(message, urgency=final_urgency)
-            return
-
-        # Actually speak
-        spoken_to = await _speak(message, targets=targets)
-        if spoken_to:
-            try:
-                from . import spoken_history
-                await _STATE.hass.async_add_executor_job(
-                    spoken_history.record, message, "alert", spoken_to, None,
-                )
-            except Exception:
-                pass  # recording must never turn a delivered announcement into a failed one
-
-        output_gate.record_announcement(
-            entity_id=entity_id, category=category,
-            urgency=final_urgency, message=message, was_spoken=True,
-        )
-
-        # Additionally push phone for high/critical
-        if final_urgency in ("high", "critical"):
-            await _send_notification(message, urgency=final_urgency)
+        await alert_path.deliver(plan, speak=_speak_and_remember, push=_push)
 
     except Exception as exc:
         _LOGGER.exception("Observer pipeline error: %s", exc)

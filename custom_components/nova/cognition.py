@@ -542,15 +542,13 @@ def _security_direction(domain: str, dclass, state) -> Optional[bool]:
 def _all_tracked_residents_away(hass) -> bool:
     """Positively confirmed absence of every configured household member.
 
-    Delegates to presence.everyone_confidently_away(hass) -- the existing,
-    already-correct source of truth (household residents are person.*
-    entities only, never arbitrary device_tracker.* entities; every one of
-    them must read an explicitly-away state; missing/unknown/unavailable
-    presence, or no configured people at all, returns False) -- rather than
-    duplicating that logic here with its own, subtly different rules."""
+    From household.py (8.22.0), people only: every person reads away (not
+    home, or another zone) and none is unknown or unavailable, and no device
+    tracker linked to one reads home. No person entities at all, or an
+    arbitrary device_tracker (a car, a courier's phone), returns False."""
     try:
-        from . import presence
-        return bool(presence.everyone_confidently_away(hass))
+        from . import household
+        return household.residents(hass, people_only=True) == household.AWAY
     except Exception:
         return False
 
@@ -559,11 +557,8 @@ def _conflicting_armed_alarm(hass) -> bool:
     """A currently-armed alarm is itself a deterministic, actionable reason
     to flag a less-secure deviation -- the house is meant to be secured
     right now regardless of who's tracked as home or away."""
-    from . import alarm_source
-    for st in alarm_source.states(hass):
-        if str(st.state).lower().startswith("armed"):
-            return True
-    return False
+    from . import household
+    return household.snapshot(hass).armed
 
 
 def predict(hass, now: float = None) -> list:
