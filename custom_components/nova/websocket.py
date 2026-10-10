@@ -596,6 +596,7 @@ async def ws_get_panel_data(
                     hass, entry, "security_alarm_entity", "") or ""),
                 "lockdown_auto_on_arm": _runtime_opt(
                     hass, entry, "lockdown_auto_on_arm", False) is True,
+                "lockdown_exempt_locks": _get_lockdown_exempt_locks(),
                 "intrusion_requires_confinement": _runtime_opt(
                     hass, entry, "intrusion_requires_confinement", False) is True,
                 "face_stand_down": _runtime_opt(
@@ -787,6 +788,16 @@ def _door_entity_open(state_obj) -> bool:
     return door_state.entity_is_open(state_obj)
 
 
+def _get_lockdown_exempt_locks() -> list:
+    """The locks lockdown leaves out right now, from the running manager,
+    the one source the sweep and the "unlocked" lists also read (8.29.0)."""
+    try:
+        from .core_lockdown_sync import _lockdown_exempt_locks
+        return sorted(_lockdown_exempt_locks())
+    except Exception:
+        return []
+
+
 def _get_home_doors(hass: HomeAssistant, entry) -> dict:
     """The garage flag, the user's exit doors (8.26.0) and the other rooms
     the home has (8.27.0) for the panel.
@@ -960,6 +971,7 @@ PANEL_WRITABLE_KEYS = {
     "notify_services",             # JSON list: normal alert push targets
     "security_alarm_entity",       # str: authoritative household alarm panel
     "lockdown_auto_on_arm",        # bool: explicit opt in for automatic lockdown
+    "lockdown_exempt_locks",       # JSON list: locks left out of lockdown and the night sweep (8.29.0)
     "intrusion_requires_confinement",  # bool: intrusion monitoring only while locked down or alarm armed
     "face_stand_down",             # bool, off by default: a recognised resident can stop a NEW intrusion investigation opening
     "departure_alerts_enabled",
@@ -1440,6 +1452,9 @@ async def ws_update_config(
 
         if key in ("security_alarm_entity", "lockdown_auto_on_arm",
                    "intrusion_requires_confinement", "face_stand_down"):
+            from . import cognitive_core
+            await cognitive_core.apply_runtime_config(key, value)
+        if key == "lockdown_exempt_locks":   # takes effect at once (8.29.0)
             from . import cognitive_core
             await cognitive_core.apply_runtime_config(key, value)
 

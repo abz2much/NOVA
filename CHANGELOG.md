@@ -1,3 +1,9 @@
+## [8.29.0] — Locks left out of lockdown, in the panel
+
+- **New control: Settings → Security Alarm → Locks left out of lockdown.** Pick any of your own locks, for example a thermostat's keypad lock. Lockdown and the night sweep never lock them, and they are left out of the "unlocked" lists in briefings, status and voice answers. Empty by default. A change applies at once, with no reload. It edits the same `lockdown_exempt_locks` setting as before, so an install migrated in 8.28.0 sees its two thermostat locks listed there and can remove them.
+- **Fixed:** a list saved from the panel arrives as JSON text. Lockdown now reads that the same way as the list the 8.28.0 migration saved. Anything unreadable leaves out no locks, so every lock is locked.
+- **Tests:** the integration test that seemed to fail at some times of day was not about the clock. The integration tests share one Home Assistant config folder that is never reset, and a parcel one run saved (situations, 8.24.0) was restored by the next run for 24 hours. Each integration test now gets its own situations file and starts with no remembered parcels. Every suite was run at four local times (01:28, 04:30, 12:30 and 20:31) and the integration suite four times back to back, with no other failure.
+
 ## [8.28.0] — Borrowed and personal leftovers removed
 
 ### Behaviour changes

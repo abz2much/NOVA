@@ -559,7 +559,8 @@ def intrusion_status() -> dict:
 async def apply_runtime_config(key: str, value) -> None:
     """Apply safety settings immediately without reloading the integration."""
     if key not in ("lockdown_auto_on_arm", "security_alarm_entity",
-                   "intrusion_requires_confinement", "face_stand_down"):
+                   "intrusion_requires_confinement", "face_stand_down",
+                   "lockdown_exempt_locks"):
         return
     if not isinstance(_m_state._CORE.config, dict):
         _m_state._CORE.config = {}
@@ -569,6 +570,16 @@ async def apply_runtime_config(key: str, value) -> None:
         for component in (_m_state._CORE.safety_mgr, _m_state._CORE.lockdown_mgr):
             if component is not None:
                 component.set_automatic_lockdown(enabled)
+    elif key == "lockdown_exempt_locks":
+        # Takes effect at once for lockdown, the night sweep and the
+        # "unlocked" lists, which all read the manager's set (8.29.0).
+        from .core_lockdown import exempt_lock_set
+        locks = sorted(exempt_lock_set(value))
+        _m_state._CORE.config[key] = locks
+        if _m_state._CORE.lockdown_mgr is not None:
+            _m_state._CORE.lockdown_mgr.exempt_locks = set(locks)
+            if isinstance(_m_state._CORE.lockdown_mgr.config, dict):
+                _m_state._CORE.lockdown_mgr.config[key] = locks
     elif key in ("intrusion_requires_confinement", "face_stand_down"):
         enabled = value is True
         _m_state._CORE.config[key] = enabled

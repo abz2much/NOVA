@@ -124,6 +124,21 @@ def build_lockdown_message(honorific: str, locked: list, closed: list,
 # is still their own: the sweep closes every open cover, lockdown only door,
 # garage, window and gate covers (left as it is; see the 8.23.0 notes).
 
+def exempt_lock_set(value) -> set:
+    """The saved exempt list as a set of lock ids. The panel saves it as a
+    JSON string (8.29.0), the v8 migration as a list. Anything unreadable is
+    an empty set: every lock is locked, never fewer."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value) if value.strip() else []
+        except ValueError:
+            _LOGGER.warning("lockdown_exempt_locks is not a JSON list; exempting nothing")
+            return set()
+    if not isinstance(value, (list, tuple, set)):
+        return set()
+    return {v for v in value if isinstance(v, str) and v.startswith("lock.")}
+
+
 def unlocked_locks(hass, exempt) -> list:
     """Every lock reading unlocked that is not on the exempt list."""
     return [st for st in hass.states.async_all("lock")
@@ -176,8 +191,8 @@ class LockdownManager:
         # explicit empty list (a deliberate "exempt nothing" override) — an
         # `or` here would silently discard a real [] override (falsy).
         _exempt_cfg = config.get("lockdown_exempt_locks", None)
-        self.exempt_locks: set = set(
-            _exempt_cfg if _exempt_cfg is not None else LOCKDOWN_EXEMPT_LOCKS_DEFAULT)
+        self.exempt_locks: set = (exempt_lock_set(_exempt_cfg) if _exempt_cfg is not None
+                                  else set(LOCKDOWN_EXEMPT_LOCKS_DEFAULT))
         self._secured_by_us: set = set()   # entities Nova closed/locked this lockdown (reopen ⇒ intentional)
         self._alerted: set = set()         # entities already alerted about this lockdown
         self._last_breach_alert = 0.0

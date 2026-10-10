@@ -1169,5 +1169,8 @@
   "Links between things, such as \"house member owns bike\" or \"child's room adjacent_to hallway\". Nova proposes them when you tell it how things relate. A new link waits here and is not used until you confirm it. Only confirmed links are shown to Nova. Removing one is permanent: Nova will not add it back on its own.": "事物之间的关联，例如“house member owns bike”或“child's room adjacent_to hallway”。当您告诉 Nova 事物之间的关系时，它会提出关联。新关联会在此等待，在您确认前不会使用。Nova 只能看到已确认的关联。移除是永久的：Nova 不会自行重新添加。",
   "None yet. Tell Nova how things relate, for example \"House member owns the bike\", then confirm it here. Only you can confirm a link, Nova cannot.": "暂无。告诉 Nova 事物之间的关系，例如“家庭成员拥有那辆自行车”，然后在此确认。只有您可以确认关联，Nova 不能。",
   "type to find a sensor…": "输入以查找传感器…",
-  "A separate check every 15 minutes of the sensors you list here. A sensor in percent is flagged above 90 and critical above 96. A binary sensor is flagged when it goes off, or on for a problem sensor. With no sensors listed, the audit does nothing. Pick a room for its alerts, or leave none to only log them.": "每 15 分钟单独检查您在此列出的传感器。百分比传感器高于 90 时标记，高于 96 时为严重。二元传感器关闭时标记，问题传感器则在开启时标记。未列出传感器时，此检查不做任何事。为警报选择一个房间，或不选以仅记录到日志。"
+  "A separate check every 15 minutes of the sensors you list here. A sensor in percent is flagged above 90 and critical above 96. A binary sensor is flagged when it goes off, or on for a problem sensor. With no sensors listed, the audit does nothing. Pick a room for its alerts, or leave none to only log them.": "每 15 分钟单独检查您在此列出的传感器。百分比传感器高于 90 时标记，高于 96 时为严重。二元传感器关闭时标记，问题传感器则在开启时标记。未列出传感器时，此检查不做任何事。为警报选择一个房间，或不选以仅记录到日志。",
+  "Lockdown and the night sweep never lock these, for example a thermostat's keypad lock. They are also left out of the \"unlocked\" lists in briefings, status and voice answers. Empty by default.": "封锁和夜间巡查从不锁定这些锁，例如恒温器的按键锁。它们也不会出现在简报、状态和语音回答的“未上锁”列表中。默认为空。",
+  "Locks left out of lockdown": "封锁时跳过的锁",
+  "type to find a lock…": "输入以查找锁…"
 }
