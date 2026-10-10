@@ -67,6 +67,27 @@ And one answer to what the alarm means:
 | Armed home, armed night, armed custom bypass | Residents are expected to move about |
 | Disarmed, arming, pending, disarming, triggered, unavailable | Says nothing either way |
 
+## How alerts reach you
+
+Every alert goes through one place that decides whether it goes out, and
+whether it is spoken, sent to your phones, or both. Each kind keeps its own
+rules:
+
+| Alert | Spoken | Sent to phones |
+|---|---|---|
+| Intrusion, lockdown, freeze, offers | Below critical, not while asleep or in quiet hours | High and critical; anything not spoken while asleep or in quiet hours |
+| Household events (doors, appliances' problems and so on) | When someone is home and awake, outside quiet hours; critical always | When nobody is home, or high and critical |
+| An appliance finishing | When someone is home and awake | When nobody is home |
+| Left open reminders | Unless asleep | Always |
+| Earthquakes, weather, disasters | Outside quiet hours, by your warning levels | Always |
+| Packages and mail | Outside quiet hours, with announcements on | A package taken while nobody is home, quiet hours or not |
+| Doorbell and camera events | When notable | No |
+
+"Someone is home" for household events comes from your people and the
+trackers linked to them. Intrusion, lockdown, offers and appliances still
+also count live motion when choosing speakers, so an intruder's movement
+while armed away is still spoken.
+
 ## How intrusion decides
 
 - Intrusion only runs when the residents are away, or their presence is

@@ -500,42 +500,45 @@ class NovaSentinel:
             )
         except Exception:
             pass
-        from . import action_log
+        from . import action_log, alert_path
         request_id = action_log.new_request_id()
-        # announce_notify_only: the phone push below is the alert, nothing is
-        # spoken. If no notification service accepts it, speak after all
-        # rather than lose the alert.
-        notify_only = (not sleeping) and nova_config.announce_notify_only(self.hass)
-        if not sleeping and not notify_only:
+        # Who hears it is decided in alert_path.for_sentinel (8.22.0): always
+        # pushed; spoken unless asleep; with announce_notify_only the push is
+        # the alert, spoken only if no notification service accepts it.
+        sit = alert_path.situation(self.hass, sleeping=sleeping)
+        plan = alert_path.for_sentinel(
+            sit, notify_only_setting=nova_config.announce_notify_only(self.hass))
+
+        async def _speak(_targets):
             await async_announce(
                 self.hass, text, self._tts_entity(), self._speakers(), context="sentinel",
                 action_request_id=request_id,
             )
 
-        # v5.6.5: Also send phone push notification for sentinel alerts
-        sent: list[str] = []
-        try:
-            from .notify_targets import async_send_configured_notifications
-            notify_config = {
-                "notify_services": nova_config.runtime_get(
-                    self.hass, self._entry, "notify_services", None),
-                "notify_service": nova_config.runtime_get(
-                    self.hass, self._entry, "notify_service", ""),
-            }
-            sent = await async_send_configured_notifications(
-                self.hass, notify_config,
-                {"title": "Nova", "message": text},
-                request_id=request_id, action="notify", source="proactive",
-                entity_id=entity_id,
-            )
-        except Exception as exc:
-            _LOGGER.debug("Sentinel phone notify failed: %s", exc)
-        if notify_only and not sent:
-            _LOGGER.debug("Sentinel: no notification delivered, speaking instead")
-            await async_announce(
-                self.hass, text, self._tts_entity(), self._speakers(), context="sentinel",
-                action_request_id=request_id,
-            )
+        async def _push():
+            # v5.6.5: Also send phone push notification for sentinel alerts
+            sent: list[str] = []
+            try:
+                from .notify_targets import async_send_configured_notifications
+                notify_config = {
+                    "notify_services": nova_config.runtime_get(
+                        self.hass, self._entry, "notify_services", None),
+                    "notify_service": nova_config.runtime_get(
+                        self.hass, self._entry, "notify_service", ""),
+                }
+                sent = await async_send_configured_notifications(
+                    self.hass, notify_config,
+                    {"title": "Nova", "message": text},
+                    request_id=request_id, action="notify", source="proactive",
+                    entity_id=entity_id,
+                )
+            except Exception as exc:
+                _LOGGER.debug("Sentinel phone notify failed: %s", exc)
+            if plan.speak_if_unsent and not sent:
+                _LOGGER.debug("Sentinel: no notification delivered, speaking instead")
+            return sent
+
+        await alert_path.deliver(plan, speak=_speak, push=_push)
 
     async def _groq_line(
         self, entity_id: str, friendly_name: str, rule: dict, minutes: int

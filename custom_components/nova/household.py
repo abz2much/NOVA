@@ -77,9 +77,15 @@ def _person_reading(hass, person) -> str:
     return AWAY
 
 
-def residents(hass) -> str:
-    """HOME, AWAY or UNKNOWN for the household."""
+def residents(hass, *, people_only: bool = False) -> str:
+    """HOME, AWAY or UNKNOWN for the household.
+
+    `people_only`: with no person entities the answer is UNKNOWN, never the
+    device tracker fallback. For alerts that must not let a loose tracker (a
+    car, a courier's phone) stand in for a resident."""
     people = list(hass.states.async_all("person"))
+    if not people and people_only:
+        return UNKNOWN
     if people:
         readings = {_person_reading(hass, p) for p in people}
         if HOME in readings:

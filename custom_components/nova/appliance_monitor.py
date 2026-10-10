@@ -1080,25 +1080,20 @@ async def _announce_done(sensor: _SensorState, appliance_label: str) -> None:
         message, sensor.peak_power, sensor.discovery_method,
     )
 
-    # Route through output gate
-    from . import output_gate
-    allowed, reason = output_gate.can_announce(
-        entity_id=sensor.entity_id,
-        category="appliance",
-        urgency="medium",
-        message=message,
-    )
-    if not allowed:
-        _LOGGER.debug("Appliance announcement suppressed: %s", reason)
-        output_gate.record_announcement(
-            entity_id=sensor.entity_id, category="appliance",
-            urgency="medium", message=message, was_spoken=False,
-        )
-        return
-    message = output_gate.habit_note(
+    # Whether and how it goes out is decided in alert_path (8.22.0).
+    from . import alert_path, output_gate
+    allowed, message = alert_path.gate(
         entity_id=sensor.entity_id, category="appliance",
         urgency="medium", message=message,
     )
+    if not allowed:
+        return
+
+    def _record(was_spoken: bool) -> None:
+        output_gate.record_announcement(
+            entity_id=sensor.entity_id, category="appliance",
+            urgency="medium", message=message, was_spoken=was_spoken,
+        )
 
     # Check announcements_enabled
     rc = _live_runtime_config()
@@ -1108,16 +1103,12 @@ async def _announce_done(sensor: _SensorState, appliance_label: str) -> None:
 
     if not announcements_on:
         _LOGGER.debug("Appliance: announcements disabled, logging only")
-        output_gate.record_announcement(
-            entity_id=sensor.entity_id, category="appliance",
-            urgency="medium", message=message, was_spoken=False,
-        )
+        _record(False)
         return
 
     # Resolve TTS and speakers
     try:
         from .tts_helper import resolve_tts_for_context, async_announce
-        from .audio_routing import observer_speak_target
         from . import sleep_detection
 
         bedroom_areas = config.get("bedroom_areas", []) or []
@@ -1142,52 +1133,45 @@ async def _announce_done(sensor: _SensorState, appliance_label: str) -> None:
         except Exception:
             pass
 
-        targets, mode = observer_speak_target(
-            hass,
-            urgency="medium",
-            broadcast_group=broadcast_group,
-            announcement_speakers=ann_speakers,
-            is_sleeping=sleeping,
+        sit = alert_path.situation(hass, config, sleeping=sleeping)
+        plan = alert_path.for_appliance(
+            hass, sit, broadcast_group=broadcast_group,
+            announcement_speakers=ann_speakers, announcements_on=announcements_on,
         )
 
-        if mode in ("suppressed", "notify_only") or not targets:
-            output_gate.record_announcement(
-                entity_id=sensor.entity_id, category="appliance",
-                urgency="medium", message=message, was_spoken=False,
-            )
-            if mode == "notify_only":
-                try:
-                    from .notify_targets import async_send_configured_notifications
-                    await async_send_configured_notifications(
-                        hass, config, {"message": message, "title": "Nova"},
-                        action="notify", source="proactive",
-                        entity_id=sensor.entity_id,
-                    )
-                except Exception as exc:
-                    _LOGGER.debug("Appliance phone notification failed: %s", exc)
+        async def _push():
+            try:
+                from .notify_targets import async_send_configured_notifications
+                await async_send_configured_notifications(
+                    hass, config, {"message": message, "title": "Nova"},
+                    action="notify", source="proactive",
+                    entity_id=sensor.entity_id,
+                )
+            except Exception as exc:
+                _LOGGER.debug("Appliance phone notification failed: %s", exc)
+
+        if not plan.speak:
+            _record(False)
+            await alert_path.deliver(plan, push=_push)
             return
 
-        # Speak
-        tts_entity = resolve_tts_for_context(
-            hass, "sentinel",
-            config.get("tts_engine", "auto"),
-            config.get("tts_premium_engine") or None,
-            config.get("tts_premium_contexts") or [],
-        )
-        if tts_entity and targets:
-            await async_announce(
-                hass, message, tts_entity, targets,
-                context="appliance",
+        async def _speak(targets):
+            tts_entity = resolve_tts_for_context(
+                hass, "sentinel",
+                config.get("tts_engine", "auto"),
+                config.get("tts_premium_engine") or None,
+                config.get("tts_premium_contexts") or [],
             )
-            output_gate.record_announcement(
-                entity_id=sensor.entity_id, category="appliance",
-                urgency="medium", message=message, was_spoken=True,
-            )
-        else:
-            output_gate.record_announcement(
-                entity_id=sensor.entity_id, category="appliance",
-                urgency="medium", message=message, was_spoken=False,
-            )
+            if tts_entity and targets:
+                await async_announce(
+                    hass, message, tts_entity, targets,
+                    context="appliance",
+                )
+                _record(True)
+            else:
+                _record(False)
+
+        await alert_path.deliver(plan, speak=_speak)
 
     except Exception as exc:
         _LOGGER.warning("Appliance announce error: %s", exc)

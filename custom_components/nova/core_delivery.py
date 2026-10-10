@@ -96,47 +96,18 @@ async def _emit_action(hass, config, action, sleeping):
     except Exception:
         in_quiet = False
 
-    # phone_only: the first intrusion alert while residents are home.
-    if (sleeping or in_quiet or action.get("phone_only")) and urgency != "critical":
-        # Push to phone only (no spoken announcement)
-        await _push()
-        return
+    # Who hears it is decided in alert_path.for_core_action (8.22.0): phone
+    # only while asleep, in quiet hours or for a phone only action (the first
+    # intrusion alert while residents are home), unless critical.
+    from . import alert_path
+    sit = alert_path.situation(hass, config, sleeping=sleeping, quiet=in_quiet)
+    plan = alert_path.for_core_action(hass, config, sit, action)
 
-    # Speech. "suppressed" is what a failure here means for the push decision
-    # below: critical and high alerts are pushed whatever the speech did.
-    mode = "suppressed"
-    try:
-        from .tts_helper import resolve_tts_for_context, async_announce
-        from .audio_routing import observer_speak_target
-
-        # Get announcement speakers from config. A loaded entry that has lost
-        # its runtime raises here; fall back to no panel selection (the
-        # broadcast group in config still applies) and carry on.
-        ann_speakers = None
+    async def _speak(targets) -> None:
+        # Speech has its own error handling (8.7.16): a failure here never
+        # skips the push for a critical or high alert.
         try:
-            rc = _live_runtime_config()
-        except Exception as exc:
-            _LOGGER.warning(
-                "Cognitive: live settings unavailable, using defaults: %s", exc)
-            rc = {}
-        try:
-            raw = rc.get("announcement_speakers")
-            if raw:
-                parsed = json.loads(raw) if isinstance(raw, str) else raw
-                if isinstance(parsed, list) and parsed:
-                    ann_speakers = parsed
-        except Exception:
-            pass
-
-        broadcast_group = config.get("broadcast_group") or None
-        targets, mode = observer_speak_target(
-            hass, urgency=urgency,
-            broadcast_group=broadcast_group,
-            announcement_speakers=ann_speakers,
-            is_sleeping=sleeping,
-        )
-
-        if targets and mode not in ("suppressed",):
+            from .tts_helper import resolve_tts_for_context, async_announce
             tts_entity = resolve_tts_for_context(
                 hass, "sentinel",
                 config.get("tts_engine", "auto"),
@@ -148,22 +119,17 @@ async def _emit_action(hass, config, action, sleeping):
                     hass, message, tts_entity, targets,
                     context="sentinel", action_request_id=request_id,
                 )
-    except Exception as exc:
-        _LOGGER.warning("Cognitive: action routing failed: %s", exc)
+        except Exception as exc:
+            _LOGGER.warning("Cognitive: action routing failed: %s", exc)
 
-    # announce_notify_only: a non-critical alert that would have been
-    # spoken is routed to notify_only, so the phone gets the alert
-    # itself (with the rating buttons) in place of the speech. With
-    # the setting off, notify_only keeps its old meaning here (only
-    # critical and high alerts are pushed).
-    try:
-        from . import nova_config
-        alert_pushed_instead = (
-            mode == "notify_only" and urgency not in ("critical", "high")
-            and nova_config.announce_notify_only(hass)
-        )
-    except Exception:
-        alert_pushed_instead = False
+    if plan.phone_only:
+        await alert_path.deliver(plan, push=_push)
+        return
+
+    # Speak, offer the rating buttons, then push (critical and high, or a
+    # lower alert pushed instead of spoken).
+    await alert_path.deliver(plan, speak=_speak)
+    alert_pushed_instead = plan.pushed_instead
 
     # Adaptive awareness: a spoken alert gets a silent phone
     # notification with the rating buttons, so it can be rated too.
@@ -177,7 +143,7 @@ async def _emit_action(hass, config, action, sleeping):
             _LOGGER.debug("rating prompt failed: %s", exc)
 
     # Also push critical/high alerts to phones
-    if urgency in ("critical", "high") or alert_pushed_instead:
+    if plan.push:
         await _push()
 
 

@@ -200,15 +200,20 @@ def test_no_new_announcement_path():
 
 
 def test_observer_speaks_only_after_the_output_gate():
-    """In _process_event, can_announce is consulted before _speak, and the
-    decision comes from reasoning_loop.decide (the coordinator)."""
+    """In _process_event, the output gate is consulted before _speak, and the
+    decision comes from reasoning_loop.decide (the coordinator). Since 8.22.0
+    the observer reaches the gate through alert_path.gate, which calls
+    output_gate.can_announce."""
     tree = _tree(ROOT / "observer.py")
     fn = next(n for n in ast.walk(tree)
               if isinstance(n, ast.AsyncFunctionDef) and n.name == "_process_event")
     src = ast.unparse(fn)
-    assert src.index("reasoning_loop.decide(") < src.index("output_gate.can_announce(")
-    assert src.index("output_gate.can_announce(") < src.index("await _speak(")
+    assert src.index("reasoning_loop.decide(") < src.index("alert_path.gate(")
+    assert src.index("alert_path.gate(") < src.index("await _speak(")
     assert src.count("await _speak(") == 1
+    gate = next(n for n in ast.walk(_tree(ROOT / "alert_path.py"))
+                if isinstance(n, ast.FunctionDef) and n.name == "gate")
+    assert "output_gate.can_announce(" in ast.unparse(gate)
 
 
 def test_reasoning_loop_decide_delegates_to_the_coordinator():

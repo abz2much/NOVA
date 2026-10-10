@@ -1186,7 +1186,13 @@ async def async_analyze_camera(
     spoke = False
     if announce:
         if judgment["notable"] and judgment.get("speak"):
-            await async_announce(hass, judgment["speak"], tts_entity, speakers, context="camera")
+            # A notable camera event is an alert: alert_path.for_doorbell
+            # decides how it goes out (8.22.0; spoken, as before).
+            from . import alert_path
+            await alert_path.deliver(
+                alert_path.for_doorbell(alert_path.situation(hass)),
+                speak=lambda _t: async_announce(
+                    hass, judgment["speak"], tts_entity, speakers, context="camera"))
             spoke = True
         elif not gate_announce:
             # Manual analyze request on a non-notable scene — still report it.
@@ -1515,7 +1521,11 @@ async def _analyze_doorbell_press(
     # Single, notability-gated announcement for the chosen result
     if res.get("success"):
         if res.get("notable") and res.get("speak"):
-            await async_announce(hass, res["speak"], tts_entity, speakers, context="camera")
+            from . import alert_path
+            await alert_path.deliver(
+                alert_path.for_doorbell(alert_path.situation(hass)),
+                speak=lambda _t: async_announce(
+                    hass, res["speak"], tts_entity, speakers, context="camera"))
             res["spoke"] = True
         # Training data — every analysed press, regardless of whether it spoke
         try:
