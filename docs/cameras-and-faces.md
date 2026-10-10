@@ -13,7 +13,7 @@ is optional.
   and says when one arrives, is left out, or is taken.
 - **Scene memory.** If you turn it on, Nova keeps the words its cameras
   produced, so it can answer "where did I last see my keys?" or "what has
-  changed in the garage since yesterday?".
+  changed in the hallway since yesterday?".
 - **Faces.** Nova reads names from Frigate or Double Take, and keeps a list of
   the residents.
 - **Learning.** Camera detections feed Nova's routine learning, for example

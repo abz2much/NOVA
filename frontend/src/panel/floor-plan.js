@@ -7,6 +7,19 @@
   // separately later if it turns out to matter.
 
   _defaultFloorPlan() {
+    const plan = this._defaultFloorPlanBase();
+    if (this._data()?.config?.has_garage) return plan;
+    // No garage (8.26.0): the garage becomes a utility room, and a back door
+    // opens from the kitchen at the rear. A saved plan is never changed.
+    const f = plan["1f"];
+    f.viewBox = "0 0 320 162";
+    f.rooms = f.rooms.map(r => r.name === "Garage"
+      ? { ...r, name: "Utility Room", y: r.y + 12 }
+      : { ...r, y: r.y + 12 });
+    f.rooms.push({ name: "Back Door", x: 125, y: 3, w: 45, h: 10, type: "door" });
+    return plan;
+  }
+  _defaultFloorPlanBase() {
     return {
       "1f": {
         label: "1st Floor", viewBox: "0 0 320 150",

@@ -472,6 +472,7 @@ async def ws_get_panel_data(
         doorbell_training_data = await hass.async_add_executor_job(
             _get_doorbell_training, hass)
 
+        home = _get_home_doors(hass, entry)
         result = {
             "status":         status,
             "version":        _INTEGRATION_VERSION,
@@ -625,6 +626,11 @@ async def ws_get_panel_data(
                 "floor_plan_rooms": _get_runtime_json(hass, entry, "floor_plan_rooms", {}),
                 "floor_plan_bg": _get_runtime_json(hass, entry, "floor_plan_bg", {}),
                 "door_mapping": _get_runtime_json(hass, entry, "door_mapping", {}),
+                "garage_mode": home["garage_mode"],
+                "has_garage": home["has_garage"],
+                "exit_doors": home["exit_doors"],
+                "exit_door_status": home["exit_door_status"],
+                "exit_door_candidates": home["exit_door_candidates"],
                 "arrival_front_door_entity": str(_runtime_opt(hass, entry, "arrival_front_door_entity", "") or ""),
                 # AI model selection (provider + model per role) — for the
                 # Settings "AI Models" section's live-fetched dropdowns.
@@ -776,6 +782,35 @@ def _door_entity_open(state_obj) -> bool:
     """Back-compat shim — door open logic now lives in door_state.py."""
     from . import door_state
     return door_state.entity_is_open(state_obj)
+
+
+def _get_home_doors(hass: HomeAssistant, entry) -> dict:
+    """The garage flag and the user's exit doors for the panel (8.26.0).
+    Display only: none of this changes a safety check. Read each time the
+    panel data loads, so a garage added or removed shows up on the next load."""
+    from . import home_doors
+    cfg = {
+        "garage_mode": _runtime_opt(hass, entry, "garage_mode", home_doors.DEFAULT_GARAGE_MODE),
+        "door_mapping": _get_runtime_json(hass, entry, "door_mapping", {}),
+        "exit_doors": _get_runtime_json(hass, entry, "exit_doors", []),
+    }
+    try:
+        from .core_lockdown_sync import _lockdown_exempt_locks
+        exempt = _lockdown_exempt_locks()
+    except Exception:
+        exempt = set()
+    try:
+        return {
+            "garage_mode": home_doors.garage_mode(cfg),
+            "has_garage": home_doors.has_garage(hass, cfg),
+            "exit_doors": home_doors.exit_doors(cfg),
+            "exit_door_status": home_doors.exit_door_status(hass, cfg, exempt),
+            "exit_door_candidates": home_doors.exit_door_candidates(hass, cfg),
+        }
+    except Exception as exc:
+        _LOGGER.debug("home doors read failed: %s", exc)
+        return {"garage_mode": home_doors.garage_mode(cfg), "has_garage": False,
+                "exit_doors": [], "exit_door_status": [], "exit_door_candidates": []}
 
 
 def _get_door_states(hass: HomeAssistant) -> dict:
@@ -1100,6 +1135,9 @@ PANEL_WRITABLE_KEYS = {
     "sleep_override",               # str: "auto" | "awake" | "asleep" — panel dropdown
     "sleep_prompt_enabled",         # bool: send the nightly "Heading to bed?" prompt
     "sleep_prompt_time",            # str: HH:MM — earliest the prompt may fire
+    # Residence doors (8.26.0)
+    "garage_mode",               # str: auto | yes | no — show garage items (display only, 8.26.0)
+    "exit_doors",                # JSON list: [{entity_id, name}] exit doors the user picked (8.26.0)
 }
 
 # ── Integration version ──────────────────────────────────────────────────────

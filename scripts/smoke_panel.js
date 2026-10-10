@@ -132,6 +132,21 @@ const PANEL = {
       { id: "garage_left_open", desc: "The garage has been open overnight" },
     ],
     disabled_sentinel_rules: ["garage_left_open"],
+    // A home with a garage (8.26.0: garage items show only where one exists).
+    has_garage: true,
+    garage_mode: "auto",
+    exit_doors: [{ entity_id: "lock.garden_door", name: "Garden door" }, { entity_id: "binary_sensor.shed_contact", name: "Shed" },
+      { entity_id: "binary_sensor.gone_door", name: "Old door" }, { entity_id: "lock.side_door", name: "Side" },
+      { entity_id: "cover.patio_door", name: "Patio" }, { entity_id: "binary_sensor.porch_door", name: "Porch" }],
+    exit_door_status: [
+      { entity_id: "lock.garden_door", name: "Garden door", state: "locked", checks: ["lockdown", "night_sweep"] },
+      { entity_id: "binary_sensor.shed_contact", name: "Shed", state: "off", checks: [] },
+      { entity_id: "binary_sensor.gone_door", name: "Old door", state: null, checks: [] },
+      { entity_id: "lock.side_door", name: "Side", state: "unlocked", checks: ["lockdown", "night_sweep"] },
+      { entity_id: "cover.patio_door", name: "Patio", state: "open", checks: ["lockdown", "night_sweep", "intrusion", "world_model"] },
+      { entity_id: "binary_sensor.porch_door", name: "Porch", state: "unavailable", checks: ["intrusion", "world_model"] },
+    ],
+    exit_door_candidates: [{ entity_id: "binary_sensor.back_door", name: "Back Door" }],
     appliance_profile: [{ name: "Dryer", type: "dryer", entity: "", watts: 4200 }],
     memory_stats: { backend: "sqlite-vec", total_memories: 214 },
     output_mutes: { entities: ["light.hall"], categories: ["appliance"], all: true },
@@ -1110,6 +1125,65 @@ if (require.main === module) setTimeout(async () => {
   await new Promise(r => setTimeout(r, 20));
   checks.push(["residence tab: mapping a door slot to an entity saves door_mapping",
     _updateConfigCalls.some(c => c.key === "door_mapping" && c.value === JSON.stringify({ front: "cover.test_front_door" }))]);
+
+  // ── Garage only where one exists (8.26.0) ──
+  const resText = resRoot.querySelector(".res-tab-new")?.textContent || "";
+  checks.push(["residence tab: a garage home shows the garage door rows and the back door label",
+    !!resRoot.querySelector('.door-map-sel-new[data-slot="kitchen_garage"]')
+      && !!resRoot.querySelector('.door-map-sel-new[data-slot^="garage"]:not([data-slot="garage_rear"])')
+      && /Back \/ Rear Door/.test(resText) && !/Garage Side/.test(resText)]);
+  checks.push(["residence tab: exit doors list each picked door with the checks that cover it",
+    /Garden door/.test(resText) && /Already checked by:/.test(resText) && /Lockdown/.test(resText)
+      && /Not in Nova's safety checks/.test(resText) && /Entity not found/.test(resText)]);
+  const exitSaves = () => _updateConfigCalls.filter(c => c.key === "exit_doors");
+  const priorExitSaves = exitSaves().length;
+  resRoot.getElementById("resExitAdd").click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["residence tab: Add with nothing picked adds nothing", exitSaves().length === priorExitSaves]);
+  const exitPick = resRoot.getElementById("resExitPick");
+  checks.push(["residence tab: the exit door picker suggests candidates first",
+    exitPick.querySelector("optgroup option")?.value === "binary_sensor.back_door"]);
+  exitPick.value = "binary_sensor.back_door";
+  resRoot.getElementById("resExitName").value = "Back";
+  resRoot.getElementById("resExitAdd").click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["residence tab: picking a door and Add saves it with the user's name",
+    exitSaves().length === priorExitSaves + 1
+      && JSON.parse(exitSaves().slice(-1)[0].value).some(x => x.entity_id === "binary_sensor.back_door" && x.name === "Back")]);
+  resRoot = elNew.shadowRoot;
+  {
+    const realData = elNew._data.bind(elNew);
+    const noGarage = { ...realData(), config: { ...realData().config, has_garage: false, garage_bays: 2,
+      door_mapping: { garage: "cover.test_front_door", kitchen_garage: "lock.garden_door" } } };
+    elNew._data = () => noGarage;
+    const resHtml = elNew._htmlResidence();
+    const sentHtml = elNew._sentinelRulesCardBody();
+    const homeHtml = elNew._residenceHomeCardBody();
+    const plan = elNew._defaultFloorPlan();
+    const spec = elNew._houseSpec();
+    const svg = window.NOVA3D.renderSVG({ theta: 35, floor: "all", lit: {}, doors: {}, spec,
+      plan: elNew._planToFeet(plan), elements: {}, garage: elNew._house3dGarage() });
+    const svgWithGarage = window.NOVA3D.renderSVG({ theta: 35, floor: "all", lit: {}, doors: {},
+      spec: { garageBays: 2 }, plan: elNew._planToFeet(elNew._defaultFloorPlanBase()), elements: {}, garage: [{ open: false }, { open: false }] });
+    elNew._data = realData;
+    const doc = new resRoot.ownerDocument.defaultView.DOMParser().parseFromString(`<div>${resHtml}</div>`, "text/html");
+    checks.push(["no garage: the Residence tab never shows the word garage", !/garage/i.test(doc.body.textContent)]);
+    checks.push(["no garage: hidden garage rows keep their saved slots out of view only",
+      !doc.querySelector('[data-slot="garage"]') && !doc.querySelector('[data-slot="kitchen_garage"]')
+        && !!doc.querySelector('[data-slot="garage_rear"]') && !!doc.querySelector('[data-slot="front"]')
+        && noGarage.config.door_mapping.garage === "cover.test_front_door"]);
+    checks.push(["no garage: the Sentinel list hides the garage rule toggle", !/garage/i.test(sentHtml)]);
+    checks.push(["no garage: Garage bays is hidden, the Garage setting stays",
+      !/garage_bays/.test(homeHtml) && /data-cfg-key="garage_mode"/.test(homeHtml)]);
+    const rooms1f = plan["1f"].rooms.map(r => r.name);
+    checks.push(["no garage: the default floor plan has a front door and a back door and no garage",
+      !rooms1f.some(n => /garage/i.test(n)) && rooms1f.includes("Front Door") && rooms1f.includes("Back Door")]);
+    checks.push(["no garage: the 3D house draws no garage doors", !/gdoor/.test(svg) && !/GARAGE/.test(svg)]);
+    checks.push(["garage home: the 3D house still draws its garage doors", /gdoor/.test(svgWithGarage)]);
+    checks.push(["3D house: 0 garage bays draws no garage doors",
+      !/gdoor/.test(window.NOVA3D.renderSVG({ theta: 35, floor: "all", lit: {}, doors: {}, spec: { garageBays: 0 },
+        plan: elNew._planToFeet(elNew._defaultFloorPlanBase()), elements: {}, garage: [] }))]);
+  }
 
   const styleSel = elNew.shadowRoot.querySelector('select[data-cfg-key="residence_style"]');
   styleSel.value = "ranch";

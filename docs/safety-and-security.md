@@ -12,9 +12,16 @@ needs, what it does by itself, and what it never does without you.
 - **Freezing pipes.** When the outdoor temperature reaches 35°F (about 2°C)
   Nova warns once. At 20°F (about −7°C) it raises a critical alert.
 - **Left open (Sentinel).** A door open for 10 minutes, a window for 30, a
-  garage door for 15, or a door lock unlocked for 20, gets a reminder. It
-  repeats at the same interval, so a door says 10, then 20, then 30 minutes.
+  garage door for 15, or a door lock unlocked for 20, gets a reminder. A
+  garage door counts whether Home Assistant shows it as a sensor or as a
+  cover. It repeats at the same interval, so a door says 10, then 20, then
+  30 minutes.
   Door and window reminders stay quiet when it is above 10°C outside.
+- **Garage or no garage.** Nova shows garage settings and wording only when
+  your home has a garage: a garage door cover or sensor, or an area named
+  Garage. Set **Settings → General → Residence / Home → Garage** to Yes or
+  No to choose yourself. This only changes what you see. Lockdown, the night
+  sweep and intrusion check every door the same way whatever it says.
 - **Intrusion.** Motion inside while the household is away starts an
   investigation. Nova tells you once and keeps watching. It raises the full
   alarm, on every speaker and device, only when it confirms an intruder: a

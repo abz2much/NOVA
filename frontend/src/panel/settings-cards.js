@@ -142,7 +142,7 @@
       <div class="toggle-list">
         ${onOff("announcements_enabled", "Announcements", "Master switch — all proactive speech")}
         ${onOff("announce_notify_only", "Notifications only", "Send proactive alerts to your phone instead of speaking them. Critical safety alerts still speak. Reminders, package and camera announcements, scheduled briefings and the infrastructure audit are not covered and still speak")}
-        ${onOff("sentinel_enabled", "Sentinel", "Door/garage/lock-left-open alerts")}
+        ${onOff("sentinel_enabled", "Sentinel", "Doors, windows and locks left open")}
         ${onOff("observer_enabled", "Observer", "AI event awareness (uses API)")}
         ${onOff("cognition_enabled", "Cognition", "Local triage — sees telemetry and decides what deserves deeper reasoning")}
         ${onOff("rich_reasoning", "Rich Reasoning", "Use the configured reasoning model first for medium and high-priority events")}
@@ -226,11 +226,18 @@
         </select>
       </div>
       <div class="cfg-row">
+        <label>Garage</label>
+        <select class="cfg-field" data-cfg-key="garage_mode">
+          ${this._optSelect([["auto", "Auto"], ["yes", "Yes"], ["no", "No"]], cfg.garage_mode || "auto")}
+        </select>
+        <span class="toggle-desc">Show garage settings and wording. Auto looks for a garage door or an area named Garage. This only changes what you see: Nova secures and checks every door the same way.</span>
+      </div>
+      ${cfg.has_garage ? `<div class="cfg-row">
         <label>Garage bays</label>
         <select class="cfg-field" data-cfg-key="garage_bays">
           ${this._optSelect(["0", "1", "2", "3", "4"].map(v => [v, v]), String(cfg.garage_bays ?? "3"))}
         </select>
-      </div>
+      </div>` : ""}
       <div class="cfg-row">
         <label>Front dormers</label>
         <select class="cfg-field" data-cfg-key="dormers_front">

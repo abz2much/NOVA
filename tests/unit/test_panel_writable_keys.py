@@ -58,8 +58,17 @@ def test_residence_keys_specifically_writable():
     allow = _allowlist()
     for key in ("residence_style", "floor_plan_sqft", "home_stories",
                 "has_basement", "dormers_front", "dormers_rear",
-                "garage_bays", "chimney_side"):
+                "garage_bays", "chimney_side", "garage_mode", "exit_doors"):
         assert key in allow, f"{key} missing from PANEL_WRITABLE_KEYS"
+
+
+def test_garage_flag_and_exit_doors_are_surfaced():
+    # 8.26.0: the panel reads these back to show or hide garage items and to
+    # list the exit doors the user picked.
+    surfaced = _panel_data_config_keys()
+    for key in ("garage_mode", "has_garage", "exit_doors", "exit_door_status",
+                "exit_door_candidates"):
+        assert key in surfaced, key
 
 
 def test_multiple_notify_services_are_writable():

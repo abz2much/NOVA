@@ -45,7 +45,7 @@
     { id: "security_alarm", group: "safety", title: "Security Alarm", real: true,
       desc: "Choose the one alarm Nova uses for security decisions. Automatic lockdown is always opt in." },
     { id: "sentinel_rules", group: "safety", title: "Sentinel Rules", real: true,
-      desc: "Enable or disable individual door/lock/garage anomaly rules." },
+      desc: "Enable or disable individual door and lock anomaly rules." },
     { id: "hazard_monitor", group: "safety", title: "Hazard Monitor", real: true,
       desc: "One weather-warning source for your area, with optional earthquake and NASA feeds under Advanced." },
     { id: "host_health", group: "safety", title: "Host Health", real: true,

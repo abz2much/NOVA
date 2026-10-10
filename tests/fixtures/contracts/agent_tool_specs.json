@@ -12,7 +12,7 @@
   "tools": [
     {
       "function": {
-        "description": "Control a Home Assistant device. Turn lights/switches/fans on or off, lock/unlock locks, open/close covers/garage doors, set brightness, set climate temperature. Use the entity_id from the home context or from get_entities results.",
+        "description": "Control a Home Assistant device. Turn lights/switches/fans on or off, lock/unlock locks, open/close covers (doors, gates, blinds), set brightness, set climate temperature. Use the entity_id from the home context or from get_entities results.",
         "name": "control_device",
         "parameters": {
           "properties": {
@@ -88,7 +88,7 @@
               "type": "string"
             },
             "query": {
-              "description": "Search term: entity name, area name, or keyword (e.g. 'chase', 'kitchen lights', 'garage door')",
+              "description": "Search term: entity name, area name, or keyword (e.g. 'chase', 'kitchen lights', 'back door')",
               "type": "string"
             },
             "require_unique": {
@@ -324,12 +324,12 @@
     },
     {
       "function": {
-        "description": "Remember that two things are linked, for example 'sam owns car.jeep' or 'kitchen adjacent_to garage'. Use it when the user tells you how two people, places or things relate. It is saved as PENDING, not yet trusted and not shown to you again. You cannot confirm it: only the user can, in the Memory tab of the Nova panel, so tell them to confirm it there (or call reject_pending_relation if they say it is wrong). It only stores a link you can recall later; it never changes what any alerting, automation or device does.",
+        "description": "Remember that two things are linked, for example 'sam owns car.jeep' or 'kitchen adjacent_to hallway'. Use it when the user tells you how two people, places or things relate. It is saved as PENDING, not yet trusted and not shown to you again. You cannot confirm it: only the user can, in the Memory tab of the Nova panel, so tell them to confirm it there (or call reject_pending_relation if they say it is wrong). It only stores a link you can recall later; it never changes what any alerting, automation or device does.",
         "name": "propose_relation",
         "parameters": {
           "properties": {
             "object": {
-              "description": "The second thing, 1 to 80 characters (for example 'car.jeep' or 'garage').",
+              "description": "The second thing, 1 to 80 characters (for example 'car.jeep' or 'hallway').",
               "type": "string"
             },
             "predicate": {
@@ -391,7 +391,7 @@
     },
     {
       "function": {
-        "description": "Tell Nova to ignore an entity or area for a specified duration. Use when the user says things like 'ignore the garage door for 2 hours' or 'stop alerting me about the backyard'. Supports glob patterns like 'binary_sensor.garage*'. This is the ONLY tool that actually changes alerting behavior at runtime — a success result here (enforced: true) means sentinel/cognitive alerting will genuinely skip this entity, unlike remember, which only saves a fact for later conversation.",
+        "description": "Tell Nova to ignore an entity or area for a specified duration. Use when the user says things like 'ignore the back door for 2 hours' or 'stop alerting me about the backyard'. Supports glob patterns like 'binary_sensor.back_door*'. This is the ONLY tool that actually changes alerting behavior at runtime — a success result here (enforced: true) means sentinel/cognitive alerting will genuinely skip this entity, unlike remember, which only saves a fact for later conversation.",
         "name": "ignore_entity",
         "parameters": {
           "properties": {
@@ -400,7 +400,7 @@
               "type": "integer"
             },
             "entity_pattern": {
-              "description": "Entity ID or glob pattern to ignore (e.g. 'binary_sensor.garage_door', 'sensor.backyard*')",
+              "description": "Entity ID or glob pattern to ignore (e.g. 'binary_sensor.back_door', 'sensor.backyard*')",
               "type": "string"
             },
             "reason": {
@@ -562,7 +562,7 @@
     },
     {
       "function": {
-        "description": "Schedule YOURSELF a follow-up: an instruction you will execute later, autonomously, with full tool access. Use it to close loops across time — verify an action took hold ('check the garage door actually closed'), re-check after a change has had time to work ('confirm the living room reached 72F'), or handle deferred requests ('remind sir the oven is on in 45 minutes'). Write the instruction to your future self: imperative and self-contained, since you won't have this conversation's context. The result is announced when it runs.",
+        "description": "Schedule YOURSELF a follow-up: an instruction you will execute later, autonomously, with full tool access. Use it to close loops across time — verify an action took hold ('check the back door actually locked'), re-check after a change has had time to work ('confirm the living room reached 72F'), or handle deferred requests ('remind sir the oven is on in 45 minutes'). Write the instruction to your future self: imperative and self-contained, since you won't have this conversation's context. The result is announced when it runs.",
         "name": "schedule_followup",
         "parameters": {
           "properties": {
@@ -575,7 +575,7 @@
               "type": "number"
             },
             "instruction": {
-              "description": "The self-contained instruction to execute later, e.g. 'Check cover.garage_door is closed; if not, close it and report.'",
+              "description": "The self-contained instruction to execute later, e.g. 'Check lock.back_door is locked; if not, lock it and report.'",
               "type": "string"
             }
           },
@@ -1011,7 +1011,7 @@
     },
     {
       "function": {
-        "description": "Read Home Assistant's actual recorded history — what has happened in the home over a time window. Two lenses via 'kind': 'history' gives the device timeline and counts (every state change with timestamps) for an entity or area — use for 'when did the front door open?', 'how many times did the garage open today?', 'what was the thermostat overnight?'. 'logbook' gives the readable activity narrative — use for 'what happened while I was out?', 'what's been going on in the house?'. This reads HA's real records, not a guess. Specify 'entity' (name or entity_id) or 'area', and 'hours' to look back (default 24).",
+        "description": "Read Home Assistant's actual recorded history — what has happened in the home over a time window. Two lenses via 'kind': 'history' gives the device timeline and counts (every state change with timestamps) for an entity or area — use for 'when did the front door open?', 'how many times did the back door open today?', 'what was the thermostat overnight?'. 'logbook' gives the readable activity narrative — use for 'what happened while I was out?', 'what's been going on in the house?'. This reads HA's real records, not a guess. Specify 'entity' (name or entity_id) or 'area', and 'hours' to look back (default 24).",
         "name": "activity_history",
         "parameters": {
           "properties": {
@@ -1020,7 +1020,7 @@
               "type": "string"
             },
             "entity": {
-              "description": "Entity name or entity_id to look up (e.g. 'front door', 'binary_sensor.garage').",
+              "description": "Entity name or entity_id to look up (e.g. 'front door', 'binary_sensor.back_door').",
               "type": "string"
             },
             "hours": {
@@ -1148,7 +1148,7 @@
     },
     {
       "function": {
-        "description": "Look at a camera right now and answer a specific visual question about what's there — e.g. 'is there a tool left on the workbench', 'is the garage door open', 'did a package arrive', 'is anyone in the backyard'. Captures a fresh snapshot and reasons over it with the vision model. Use for on-demand visual checks and for standing 'watch the X' monitors. Search for the camera entity_id first if unsure. Vision LLMs are reliable for presence/absence and coarse identification, not fine detail (exact model numbers).",
+        "description": "Look at a camera right now and answer a specific visual question about what's there — e.g. 'is there a tool left on the workbench', 'is the back door open', 'did a package arrive', 'is anyone in the backyard'. Captures a fresh snapshot and reasons over it with the vision model. Use for on-demand visual checks and for standing 'watch the X' monitors. Search for the camera entity_id first if unsure. Vision LLMs are reliable for presence/absence and coarse identification, not fine detail (exact model numbers).",
         "name": "look_at_camera",
         "parameters": {
           "properties": {
@@ -1206,7 +1206,7 @@
     },
     {
       "function": {
-        "description": "Find the last time something was described by a camera, from Nova's scene memory — e.g. 'where did I last see my keys', 'when was the red bike last in the garage'. Searches past camera descriptions, so the answer can be hours or days old and is not a live view. Needs Scene memory turned on in Settings. For what is there right now, use look_at_camera.",
+        "description": "Find the last time something was described by a camera, from Nova's scene memory — e.g. 'where did I last see my keys', 'when was the red bike last in the hallway'. Searches past camera descriptions, so the answer can be hours or days old and is not a live view. Needs Scene memory turned on in Settings. For what is there right now, use look_at_camera.",
         "name": "where_last_seen",
         "parameters": {
           "properties": {
@@ -1225,12 +1225,12 @@
     },
     {
       "function": {
-        "description": "Compare what a camera described most recently with what it described earlier, from Nova's scene memory — e.g. 'what has changed in the garage since yesterday'. Gives words that appeared and words that went away, so treat it as a hint, not proof. Needs Scene memory turned on in Settings.",
+        "description": "Compare what a camera described most recently with what it described earlier, from Nova's scene memory — e.g. 'what has changed in the hallway since yesterday'. Gives words that appeared and words that went away, so treat it as a hint, not proof. Needs Scene memory turned on in Settings.",
         "name": "what_changed",
         "parameters": {
           "properties": {
             "camera": {
-              "description": "A camera entity_id or its area name, e.g. 'garage'.",
+              "description": "A camera entity_id or its area name, e.g. 'hallway'.",
               "type": "string"
             },
             "hours": {

@@ -54,6 +54,8 @@ DEFAULT_RULES = [
         "domain": "binary_sensor",
         "device_class": "garage_door",
         "state": "on",
+        # A garage door is often a cover, not a contact sensor (8.26.0).
+        "also": [{"domain": "cover", "device_class": "garage", "state": "open"}],
         "for_minutes": 15,
         "message": "{honorific}, {friendly_name} has been open for {minutes} minutes.",
     },
@@ -84,6 +86,18 @@ DEFAULT_RULES = [
 # off by an ignore request (8.7.20): `ignore_entity` quiets Nova's
 # announcements, not these checks. Only entity_filter.py's user-configured
 # exclusion list removes an entity from Sentinel.
+
+
+def _variants(rule: dict) -> list:
+    """The rule itself, then any `also` variants of it (8.26.0)."""
+    also = rule.get("also") or []
+    return [rule] + [v for v in also if isinstance(v, dict)]
+
+
+def _watched_states(entity_id: str, rule: dict) -> set:
+    """The state(s) the rule alerts on for this entity's domain."""
+    return {v.get("state") for v in _variants(rule)
+            if not v.get("domain") or entity_id.startswith(v["domain"] + ".")}
 
 
 def _is_security_relevant_lock(hass: HomeAssistant, entity_id: str) -> bool:
@@ -273,7 +287,8 @@ class NovaSentinel:
 
         for rule in self._rules:
             key = f"{entity_id}:{rule['id']}"
-            if self._entity_matches_rule(entity_id, rule) and state_val == rule.get("state"):
+            if (self._entity_matches_rule(entity_id, rule)
+                    and state_val in _watched_states(entity_id, rule)):
                 self._state_start.setdefault(key, now)
                 # Instant time-window rules (no duration)
                 if "time_window" in rule and "for_minutes" not in rule and not recovery:
@@ -602,35 +617,40 @@ class NovaSentinel:
                 if not is_excluded(self.hass, rule["entity_id"]):
                     ids.add(rule["entity_id"])
             else:
-                domain       = rule.get("domain")
-                device_class = rule.get("device_class")
                 requires_security_lock = rule.get("requires_security_lock", False)
-                for state in self.hass.states.async_all():
-                    if domain and not state.entity_id.startswith(domain + "."):
-                        continue
-                    if device_class and state.attributes.get("device_class") != device_class:
-                        continue
-                    if requires_security_lock and not _is_security_relevant_lock(
-                            self.hass, state.entity_id):
-                        continue
-                    if is_excluded(self.hass, state.entity_id):
-                        continue
-                    ids.add(state.entity_id)
+                for variant in _variants(rule):
+                    domain       = variant.get("domain")
+                    device_class = variant.get("device_class")
+                    for state in self.hass.states.async_all():
+                        if domain and not state.entity_id.startswith(domain + "."):
+                            continue
+                        if device_class and state.attributes.get("device_class") != device_class:
+                            continue
+                        if requires_security_lock and not _is_security_relevant_lock(
+                                self.hass, state.entity_id):
+                            continue
+                        if is_excluded(self.hass, state.entity_id):
+                            continue
+                        ids.add(state.entity_id)
         return list(ids)
 
     def _entity_matches_rule(self, entity_id: str, rule: dict) -> bool:
+        """Does the entity fit the rule? A rule may list `also` variants
+        (another domain and device class), and the entity may fit any one."""
         if rule.get("entity_id") and rule["entity_id"] != entity_id:
             return False
-        if rule.get("domain") and not entity_id.startswith(rule["domain"] + "."):
-            return False
-        if rule.get("device_class"):
-            state = self.hass.states.get(entity_id)
-            if state and state.attributes.get("device_class") != rule["device_class"]:
-                return False
         if rule.get("requires_security_lock") and not _is_security_relevant_lock(
                 self.hass, entity_id):
             return False
-        return True
+        for variant in _variants(rule):
+            if variant.get("domain") and not entity_id.startswith(variant["domain"] + "."):
+                continue
+            if variant.get("device_class"):
+                state = self.hass.states.get(entity_id)
+                if state and state.attributes.get("device_class") != variant["device_class"]:
+                    continue
+            return True
+        return False
 
     def _in_time_window(self, window: dict) -> bool:
         now   = datetime.now().strftime("%H:%M")

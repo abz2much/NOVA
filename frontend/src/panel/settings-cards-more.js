@@ -49,7 +49,7 @@
     const cfg = this._data()?.config || {};
     const on = !!cfg.voice_confirm_enabled;
     return `
-      <div class="stub-body">Ask out loud before sensitive actions (unlock, garage, disarm) and listen for a spoken yes/no. Native mode uses the satellite's own audio; gated mode speaks through the room speaker — run the test to see which your setup supports.</div>
+      <div class="stub-body">Ask out loud before sensitive actions (unlock, open a door, disarm) and listen for a spoken yes/no. Native mode uses the satellite's own audio; gated mode speaks through the room speaker — run the test to see which your setup supports.</div>
       <div class="cfg-row">
         <label>Voice confirmation</label>
         <button class="toggle-btn ${on ? "on" : "off"}" data-cfg-key="voice_confirm_enabled" data-cfg-val="${on ? "false" : "true"}">${on ? "ON" : "OFF"}</button>
@@ -162,7 +162,10 @@
     const rules = cfg.sentinel_rules || [];
     const disabled = cfg.disabled_sentinel_rules || [];
     if (!rules.length) return `<div class="stub-body">No sentinel rules found.</div>`;
-    const rows = rules.map(r => {
+    // The garage rule's toggle shows only in a home with a garage (8.26.0).
+    // Display only: the rule keeps running either way.
+    const shown = cfg.has_garage ? rules : rules.filter(r => r.id !== "garage_left_open");
+    const rows = shown.map(r => {
       const isOff = disabled.includes(r.id);
       const name = r.id.replace(/_/g, " ");
       const desc = (r.desc || "").slice(0, 60);
@@ -579,7 +582,7 @@
           <input class="cfg-field cfg-num" type="number" min="1" max="90" step="1" data-cfg-key="scene_memory_retention_days" value="${Math.max(1, Math.min(90, Number(cfg.scene_memory_retention_days ?? 14) || 14))}" ${cfg.scene_memory_enabled ? "" : "disabled"}>
           <button class="mode-chip" id="sceneMemoryClear">Forget everything</button>
         </div>
-        ${onOff("pattern_learn_doors", "Learn doors & windows", "Door, window and garage contact sensors")}
+        ${onOff("pattern_learn_doors", "Learn doors & windows", "Door and window contact sensors")}
         ${onOff("pattern_learn_presence", "Learn presence & arrivals", "People and device trackers (home / away)")}
         ${onOff("pattern_learn_buttons", "Learn button & remote presses", "Suggest “press → scene / action” automations")}
       </div>

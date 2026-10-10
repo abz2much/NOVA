@@ -1,3 +1,22 @@
+## [8.26.0] — Garage only where one exists, and your own exit doors
+
+### Garage words only where a garage exists
+- **Detection.** New `home_doors.has_garage()`. A home has a garage when it has a cover with device class garage, a binary sensor with device class garage_door, an area named Garage, or a Garage Door slot you mapped on the Residence tab. A name that merely contains "garage", the default floor plan's Garage room and the garage bays count never count.
+- **Override.** New setting, Settings → General → Residence / Home → Garage: Auto (the default), Yes or No. It is read each time the panel loads, so a garage added or removed later shows up on the next load.
+- **Display only.** The setting never changes safety. Lockdown, the night sweep, intrusion and the world model keep securing and checking every garage cover by device class, whatever it says. A test proves it.
+- **With no garage:** Garage bays, the Garage Door and Kitchen ↔ Garage rows, and the "garage left open" toggle are hidden. Saved values are kept. The default floor plan has a utility room and a back door instead of a garage, and the 3D house draws no garage doors or garage roof. A floor plan you saved is never changed.
+- **Fixed.** 0 garage bays drew 3 garage doors in the 3D house. 0 now means none.
+- **Neutral wording for everyone.** Help text no longer says garage where any door would do. The AI's tool descriptions, prompt examples and service examples use a back door or a hallway instead of a garage, so the model stops suggesting a garage a home does not have. The briefing's check against invented devices stays.
+- The unused `intent/templates.py` is removed. Nothing imported it.
+
+### The back door and your own exit doors
+- **"Garage Side / Rear" is now "Back / Rear Door".** Same slot, same saved value. Only the label changed.
+- **Exit doors.** On the Residence tab you can pick any lock, cover or binary sensor as an exit door and give it your own name. Nova suggests door sensors, door covers and locks, but adds nothing until you pick one. Each door shows its state and which safety checks already cover it (lockdown, night sweep, intrusion, house status), using the same rules those checks use.
+- **Picking a door does not add it to a safety check.** Doing that would change what lockdown closes and what intrusion counts as a way in. A door that no check covers says so, and how to include it: give it a door or window device class in Home Assistant.
+
+### Behaviour change: the Sentinel garage rule also watches garage covers
+- "Garage left open" used to check only binary sensors with device class garage_door. A garage door that Home Assistant shows as a cover with device class garage was never reminded about. It now is, after the same 15 minutes, and it repeats the same way. **This changes what can alert.**
+
 ## [8.25.0] — The night sweep stops fighting, unreadable doors, linked logs
 
 ### Gap 1: the night sweep stops fighting people

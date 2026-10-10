@@ -41,7 +41,7 @@
             <div class="panel-title">Relations</div>
             <div class="panel-meta" id="newRelationsCount">—</div>
           </div>
-          <div class="stub-body">Links between things, such as "sam owns car.jeep" or "kitchen adjacent_to garage". Nova proposes them when you tell it how things relate. A new link waits here and is not used until you confirm it. Only confirmed links are shown to Nova. Removing one is permanent: Nova will not add it back on its own.</div>
+          <div class="stub-body">Links between things, such as "sam owns car.jeep" or "kitchen adjacent_to hallway". Nova proposes them when you tell it how things relate. A new link waits here and is not used until you confirm it. Only confirmed links are shown to Nova. Removing one is permanent: Nova will not add it back on its own.</div>
           <div class="toggle-desc" id="newRelationsMsg"></div>
           <div id="newRelationsPending" class="mem-body"></div>
           <div class="mode-bind-head">Confirmed</div>
