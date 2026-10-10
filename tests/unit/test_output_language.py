@@ -237,7 +237,8 @@ def test_key_is_panel_writable_surfaced_and_documented():
                 and any(getattr(t, "id", "") == "PANEL_WRITABLE_KEYS" for t in n.targets))
     assert "output_language" in keys
     assert '"output_language": str(_runtime_opt(hass, entry, "output_language", "") or "")' in ws
-    assert "`output_language`" in (ROOT / "README.md").read_text()
+    # The settings table moved from the README to docs/settings-reference.md.
+    assert "`output_language`" in (ROOT / "docs" / "settings-reference.md").read_text()
 
 
 def test_ui_language_is_untouched():

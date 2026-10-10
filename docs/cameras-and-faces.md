@@ -16,6 +16,8 @@ is optional.
   changed in the hallway since yesterday?".
 - **Faces.** Nova reads names from Frigate or Double Take, and keeps a list of
   the residents.
+- **On request.** Ask Nova to look at a camera and describe what it sees, or
+  to tell you who it recognises at the door.
 - **Learning.** Camera detections feed Nova's routine learning, for example
   "a person usually appears at the front door around this time".
 
@@ -28,7 +30,7 @@ is optional.
   detection is more reliable than a model guessing, and its snapshots are
   sharper.
 - [ ] **Nest:** the official Google Nest integration. Nest streams expire, so
-  the README explains how to restream them through go2rtc.
+  [Camera setup](camera-setup.md) explains how to restream them through go2rtc.
 - [ ] **Eufy:** the [eufy_security](https://github.com/fuatakgun/eufy_security)
   integration. Nova finds each Eufy camera by itself and uses its own
   doorbell, face and package sensors, with no vision call for routine events.
@@ -45,6 +47,7 @@ is optional.
 - Each camera announces each kind (delivered, mail, removed, left out) at
   most once every 30 minutes.
 - A camera with Eufy's own package sensors uses those instead of a picture.
+- Nova recognises common Irish and UK carriers in what a camera describes.
 
 Sensors are found when Nova starts, so a new one needs a Nova reload.
 
@@ -103,10 +106,10 @@ Panel, **Settings → Cameras**:
 
 | Setting | What it does |
 |---|---|
-| Camera Watch — auto-analyze doorbell and person events | Looks at the picture on a doorbell press or person event. |
+| Camera Watch | Looks at the picture on a doorbell press or person event. |
 | Also analyze motion events | Also looks at Frigate detection events that are not doorbell presses. Noisier. Off by default. |
-| Package Watch — detect packages and mail at the door | Watches porch cameras for packages and mail. |
-| Visitor Learning — silently log strangers seen at the door | Keeps a quiet log of visitors. Never spoken. |
+| Package Watch | Watches porch cameras for packages and mail. |
+| Visitor Learning | Keeps a quiet log of visitors. Never spoken. |
 | Face recognition source | Both (Double Take + Frigate), Frigate only, or Double Take only. |
 | Recognition confidence | How sure a face match must be before Nova uses it. |
 | Each camera | A name for Nova, and its location. AUTO shows what Nova worked out. |
@@ -128,3 +131,8 @@ Only in `/config/nova/config.json`:
 | Setting | What it does |
 |---|---|
 | `camera_overrides` | Takes every frame for a camera from another one, for example a Nest camera from its go2rtc restream: `{"camera.front_doorbell": "camera.front_doorbell_restream"}`. Merge it into the existing file. |
+
+## See also
+
+- [Camera setup](camera-setup.md): connecting Frigate, Eufy, Nest and go2rtc
+- [Privacy and your data](privacy.md): what is kept from your cameras

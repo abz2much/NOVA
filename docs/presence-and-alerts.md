@@ -135,3 +135,8 @@ Only in `/config/nova/config.json`:
 | Setting | What it does |
 |---|---|
 | `cognition_threshold` | How important an event must be before Nova escalates it. |
+
+## See also
+
+- [Settings reference](settings-reference.md): every setting in one place
+- [Host health](host-health.md): alerts about the machine Nova runs on

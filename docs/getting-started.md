@@ -96,12 +96,54 @@ A few advanced settings have no control in either place and are only set in
   Person Routines.
 - **Energy.** See [Energy](energy.md).
 
+The Command Center is Nova's only dashboard. Its animated core shows what
+Nova is doing (idle, reasoning or asleep), so it looks the same whether you
+have no cameras or twelve. The Areas card shows every room Nova watches,
+with icons for what each room has, temperature and humidity trends, and a
+light switch. A first run checklist shows the main setup steps, and the
+Lockdown control asks before it acts.
+
+The Residence tab's 3D house can be rotated and zoomed. It has a home style
+choice, floor tabs, view presets, room lighting from presence and mmWave
+sensors, and door mapping. You can also pick your own exit doors. Garage,
+basement and other room parts only appear when your home has them.
+
+The house is built from the floor plan you draw in **Settings → Home &
+Extras → Floor Plan Editor**: rooms, outdoor zones, the property line,
+windows, doors and dormers, camera positions, and a background image whose
+opacity you can change. You can export the plan as JSON to back it up or move
+it to another install, and import it again. The editor can also estimate how
+much each camera covers. **Doorbell Training** is a card in the Cameras group
+of Settings.
+
 ## What it will never do on its own
 
 - Install an automation without your approval.
 - Unlock a door or open a garage door because of a voice command alone. That
   always needs a tap on your phone.
 - Replace a model you saved because a provider's model list did not show it.
+
+## When something is not working
+
+Start with the **Diagnostics** tab.
+
+- **Setup Doctor** checks your setup and gives a plain fix for each problem.
+  It looks at entity references, room speakers, camera overrides, the
+  notification services, the Assist pipeline, person entities, the
+  integrations Nova needs, saving to disk, the AI roles and Nova's own
+  services. It only reads. It never changes anything for you, and it needs a
+  Home Assistant admin account.
+- **Provider Activity** shows how many AI calls each role made, with the
+  model and timings. It never shows what was asked or answered.
+- **HOMER** is a read only helper. Ask Nova "why is this device
+  unavailable?" or "why is Nova slow?" and it looks into it, then tells you
+  the likely cause, how sure it is, and what to try next.
+
+To see why Nova did or did not say something, open **Logs → Decisions**.
+Each decision shows what Nova saw, how sure it was and which model decided.
+Open one and press **REPLAY** in the Decision Lab to check whether it would
+pass your current confidence threshold. **Logs → Actions** lists every command Nova sent
+and whether it was confirmed.
 
 ## Troubleshooting
 
@@ -123,3 +165,13 @@ A few advanced settings have no control in either place and are only set in
 - [Memory and knowledge](memory-and-knowledge.md)
 - [Voice recognition](voice-recognition.md)
 - [Energy](energy.md)
+
+More pages:
+
+- [Camera setup](camera-setup.md)
+- [Host health](host-health.md)
+- [Settings reference](settings-reference.md)
+- [Privacy and your data](privacy.md)
+- [How Nova works](how-nova-works.md)
+- [Translating Nova](translating.md)
+- [Roadmap](roadmap.md)

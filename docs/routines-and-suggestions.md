@@ -21,7 +21,8 @@ change how chatty it is.
 - **Briefings.** A morning and an evening summary, and a welcome briefing
   when someone gets home.
 - **Modes.** Party, movie, guest, away and focus change how much Nova speaks
-  and offers.
+  and offers. There is also a lab mode for chosen rooms, and you can add
+  modes of your own.
 
 ## What it needs
 

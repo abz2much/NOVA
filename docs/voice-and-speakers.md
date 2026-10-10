@@ -21,7 +21,8 @@ Nova uses where, the language it speaks, and how it addresses people.
   and creates an Assist pipeline with Nova as the conversation agent. On
   Container or Core, install them yourself and create the pipeline in
   **Settings → Voice Assistants**.
-- [ ] **Optional: voice satellites**, such as ESP32 boards running Assist.
+- [ ] **Optional: voice satellites**, such as ESP32-S3 boards running Assist
+  or Wyoming satellites. Google speakers work for replies and announcements.
 - [ ] **Speakers in Home Assistant**, as media players.
 - [ ] **One speaker per room** in **Settings → Room Speakers**.
 
@@ -94,8 +95,8 @@ Panel, **Settings → Person Honorifics**: what Nova calls each person when they
 are home alone, or a custom address.
 
 Panel, **Settings → Nova Character & Research**: **Banter level**, from
-"Plain — no wit" through "Dry — occasional wit (default)" to "Full —
-expressive wit". Urgent or grave events are always spoken plainly.
+Plain (no wit) through Dry (occasional wit, the default) to Full (expressive
+wit). Urgent or grave events are always spoken plainly.
 
 Panel, **Settings → Anticipation & Memory**:
 
@@ -108,3 +109,7 @@ Panel, **Settings → Anticipation & Memory**:
 In **Configure → Core**, "Address me as" is the default address when no
 person specific one applies. **Configure → Routing** holds the "Broadcast
 speaker group".
+
+## See also
+
+- [Translating Nova](translating.md): languages and how to help
