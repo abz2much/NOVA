@@ -355,6 +355,10 @@ def dismiss_intrusion(reason: str = "") -> dict:
         del _false_alarms[:-50]
     _LOGGER.info("Nova: intrusion called off by user%s — suppressing escalation "
                  "for %ds", f" ({reason})" if reason else "", int(_CALLOFF_COOLDOWN))
+    try:  # a confirmed call-off teaches learned damping (8.24.0)
+        _label_call_off(_last_decision_id, time.time())
+    except Exception:
+        pass
     try:  # Decision Record outcome: a called-off intrusion was a false alarm.
         from . import decision_record
         if _last_decision_id is not None:
@@ -469,7 +473,8 @@ def _pattern_key(area: Optional[str], camera: Optional[str],
 def record_event(kind: str, reason: str = "", breach: Optional[str] = None,
                  breach_area: Optional[str] = None, camera: Optional[str] = None,
                  snapshot: Optional[dict] = None, zones: Optional[list] = None,
-                 max_depth: Optional[int] = None) -> dict:
+                 max_depth: Optional[int] = None,
+                 decision_id: Optional[int] = None) -> dict:
     """Append an intrusion event to the reviewable log. kind is one of
     'investigating' | 'unresolved' | 'confirmed' | 'false_alarm'. Never raises."""
     _load_log()
@@ -487,6 +492,9 @@ def record_event(kind: str, reason: str = "", breach: Optional[str] = None,
         "max_depth": max_depth,
         "label": None,
         "pattern": _pattern_key(breach_area, camera, ts),
+        # The Decision Record entry for this alert, so a label on the
+        # Intrusion tab also sets that decision's outcome (8.24.0).
+        "decision_id": decision_id,
     }
     _log.append(ev)
     if len(_log) > _MAX_LOG:
@@ -505,9 +513,21 @@ def get_log(limit: int = 50) -> list:
     return list(reversed(_log[-limit:]))
 
 
-def label_event(event_id: str, label: str) -> dict:
+LABEL_SOURCE_PANEL = "panel_label"
+LABEL_SOURCE_CALL_OFF = "dismiss_intrusion"
+# Learned damping only learns from labels a person gave (8.24.0). A label
+# saved before 8.24.0 has no source; it could only come from the panel.
+_CONFIRMED_LABEL_SOURCES = {LABEL_SOURCE_PANEL, LABEL_SOURCE_CALL_OFF}
+
+
+def _label_source(ev: dict) -> str:
+    return ev.get("label_source") or LABEL_SOURCE_PANEL
+
+
+def label_event(event_id: str, label: str, source: str = LABEL_SOURCE_PANEL) -> dict:
     """Mark an event 'real' or 'false' (or None to clear). This is the training
-    signal. Never raises."""
+    signal. A panel label also sets the outcome of the event's Decision Record
+    entry, when it has one and it is not yet judged (8.24.0). Never raises."""
     _load_log()
     if label not in ("real", "false", None, ""):
         return {"ok": False, "error": "label must be 'real' or 'false'"}
@@ -515,10 +535,44 @@ def label_event(event_id: str, label: str) -> dict:
     for ev in _log:
         if ev.get("id") == event_id:
             ev["label"] = label
+            ev["label_source"] = source if label else None
             ev["labeled_ts"] = time.time()
             _save_log()
+            if label and source == LABEL_SOURCE_PANEL and ev.get("decision_id") is not None:
+                try:
+                    from . import decision_record
+                    decision_record.set_outcome(
+                        int(ev["decision_id"]),
+                        decision_record.OUTCOME_WRONG if label == "false"
+                        else decision_record.OUTCOME_GOOD,
+                        decision_record.SOURCE_PANEL_LABEL)
+                except Exception:
+                    pass
             return {"ok": True, "id": event_id, "label": label}
     return {"ok": False, "error": "event not found"}
+
+
+def _label_call_off(decision_id: Optional[int], now: float) -> Optional[str]:
+    """A confirmed "it's a false alarm" labels the intrusion's first alert
+    "false", so call-offs teach learned damping (8.24.0). The event for this
+    decision is preferred; otherwise the latest unlabelled first alert in the
+    last two hours. A label already given (say "real" from the panel) is
+    never overwritten. Returns the event id labelled, or None."""
+    _load_log()
+    candidates = [e for e in _log if e.get("kind") == "investigating"
+                  and now - float(e.get("ts") or 0) <= 7200.0]
+    match = [e for e in candidates
+             if decision_id is not None and e.get("decision_id") == decision_id]
+    pool = match or candidates
+    for ev in reversed(pool):
+        if ev.get("label"):
+            return None
+        ev["label"] = "false"
+        ev["label_source"] = LABEL_SOURCE_CALL_OFF
+        ev["labeled_ts"] = now
+        _save_log()
+        return ev.get("id")
+    return None
 
 
 def pattern_verdict(area: Optional[str], camera: Optional[str],
@@ -534,6 +588,8 @@ def pattern_verdict(area: Optional[str], camera: Optional[str],
     false_n = real_n = 0
     for ev in _log:
         if ev.get("pattern") != key or ev.get("ts", 0) < cutoff:
+            continue
+        if _label_source(ev) not in _CONFIRMED_LABEL_SOURCES:
             continue
         if ev.get("label") == "false":
             false_n += 1

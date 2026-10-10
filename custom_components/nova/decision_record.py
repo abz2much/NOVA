@@ -43,6 +43,25 @@ OUTCOME_GOOD = "good"            # the decision was useful / acted upon
 OUTCOME_UNNECESSARY = "unnecessary"  # dismissed as not needed (not wrong, just noise)
 OUTCOME_WRONG = "wrong"          # false alarm / incorrect
 
+# The outcome sources a person confirmed (8.24.0). Learning (the interruption
+# budget, adaptive awareness, suggestion selectivity) reads only outcomes set
+# by one of these; anything else is stored and shown but never learned from.
+SOURCE_PHONE_RATING = "phone"               # Helpful / Not helpful on the phone
+SOURCE_CALL_OFF = "dismiss_intrusion"       # "it's a false alarm", confirmed
+SOURCE_PANEL_LABEL = "panel_label"          # real / false on the Intrusion tab
+SOURCE_SUGGESTION_ACCEPTED = "installed"
+SOURCE_SUGGESTION_DISMISSED = "dismiss_suggestion"
+CONFIRMED_SOURCES = frozenset({
+    SOURCE_PHONE_RATING, SOURCE_CALL_OFF, SOURCE_PANEL_LABEL,
+    SOURCE_SUGGESTION_ACCEPTED, SOURCE_SUGGESTION_DISMISSED,
+})
+
+
+def _confirmed_sql() -> tuple[str, list]:
+    """The SQL filter and parameters for confirmed outcomes only."""
+    names = sorted(CONFIRMED_SOURCES)
+    return (" AND outcome_source IN (%s)" % ", ".join("?" * len(names)), list(names))
+
 
 def _resolve(db_path: Optional[str]) -> str:
     return db_path or _default_db()
@@ -576,6 +595,7 @@ def interruption_budget(db_path: Optional[str] = None,
                         window_s: float = 86400.0, floor: float = 0.25) -> dict:
     """Judge whether Nova is interrupting without payoff, from recent outcomes.
 
+    Only outcomes a person confirmed count (CONFIRMED_SOURCES, 8.24.0).
     Over judged records in the last ``window_s`` seconds, the more that were judged
     ``unnecessary`` or ``wrong`` (noise / false alarm) rather than ``good``, the
     more Nova is intruding without value. Returns a ``multiplier`` between
@@ -595,10 +615,11 @@ def interruption_budget(db_path: Optional[str] = None,
     except Exception:
         return out
     try:
+        confirmed, names = _confirmed_sql()
         rows = conn.execute(
             "SELECT outcome, COUNT(*) FROM decision_records "
-            "WHERE outcome IS NOT NULL AND ts >= ? GROUP BY outcome",
-            (since,)).fetchall()
+            "WHERE outcome IS NOT NULL AND ts >= ?" + confirmed + " GROUP BY outcome",
+            [since, *names]).fetchall()
     except Exception:
         return out
     finally:
@@ -649,6 +670,7 @@ def outcome_rate(kind: str, window_s: Optional[float] = None,
     kind that starts with it ("anticipation" covers anticipation_overdue and the
     rest). Pure DB read; never raises.
 
+    Only outcomes a person confirmed count (CONFIRMED_SOURCES, 8.24.0).
     Returns judged/good/unnecessary/wrong counts plus good_rate and
     unwelcome_rate (= (unnecessary + wrong) / judged), so a proactive surface can
     steer how selective it is from how its own past output was received.
@@ -676,6 +698,9 @@ def outcome_rate(kind: str, window_s: Optional[float] = None,
         if window_s is not None:
             sql += " AND ts >= ?"
             params.append(time.time() - float(window_s))
+        confirmed, names = _confirmed_sql()
+        sql += confirmed
+        params.extend(names)
         sql += " GROUP BY outcome"
         rows = conn.execute(sql, params).fetchall()
     except Exception:

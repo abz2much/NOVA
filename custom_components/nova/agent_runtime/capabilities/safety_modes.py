@@ -120,9 +120,10 @@ async def _exec_dismiss_intrusion(hass: HomeAssistant, args: dict,
                        "asking. Please ask from the Nova app or a voice satellite.",
         })
     await hass.async_add_executor_job(lambda: action_log.mark_awaiting_approval(action_id))
-    ok, note, approval_result = await policy.confirm_gate(
-        hass, "nova", "dismiss_intrusion", "", "call off",
-        device_id=device_id or "", target_name="the intrusion alert")
+    decision = await policy.authorize(hass, policy.AuthorityRequest(
+        "nova", "dismiss_intrusion", "", device_id=device_id or "",
+        user_id=user_id or "", label="call off", target_name="the intrusion alert"))
+    ok, note, approval_result = decision.allowed, decision.note, decision.approval
     await hass.async_add_executor_job(
         lambda: action_log.set_approval(
             action_id, approval_result,

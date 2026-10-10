@@ -54,7 +54,9 @@ class Situation:
 def situation(hass, config: Optional[dict] = None, *, sleeping: bool = False,
               quiet: bool = False, house=None) -> Situation:
     """Read the household (household.py) and pair it with the sleep and quiet
-    hours readings the source already took. Never raises."""
+    hours readings the source already took. While a 30 second tick runs, the
+    household comes from that tick's world snapshot (world.py, 8.24.0).
+    Never raises."""
     if house is None:
         try:
             from . import household
@@ -368,7 +370,8 @@ def _plan_words(plan: Optional[Plan]) -> str:
 def decision_fields(kind: str, *, source: str, sit: Optional[Situation] = None,
                     plan: Optional[Plan] = None, entity_id: Optional[str] = None,
                     message: str = "", facts: Optional[dict] = None,
-                    assessment: str = "", decision: str = "", reason: str = "") -> dict:
+                    assessment: str = "", decision: str = "", reason: str = "",
+                    ref: Optional[str] = None) -> dict:
     """The shared Decision Record fields for one safety decision."""
     observation: dict = {"source": source}
     if entity_id:
@@ -395,6 +398,9 @@ def decision_fields(kind: str, *, source: str, sit: Optional[Situation] = None,
         "evidence": evidence,
         "decision": decision or _plan_words(plan),
         "reason": reason or (plan.reason if plan is not None else ""),
+        # Links the entries of one episode, e.g. a lockdown and the checks of
+        # what it secured (8.24.0). Records themselves are never edited.
+        "ref": ref,
     }
 
 

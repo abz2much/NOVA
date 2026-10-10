@@ -44,11 +44,14 @@ def safety(make_safety):
 
 
 async def _tick(safety, hass, sleeping=False, anyone_home=None):
+    """One tick. Since 8.24.0 the night sweep runs in the background (it
+    waits to check what it secured), so it is run here with no wait and what
+    it delivers is appended after the tick's own actions, in order."""
     if anyone_home is None:
         anyone_home = not sleeping
     actions = await safety.tick(sleeping=sleeping, anyone_home=anyone_home)
-    hass.close_pending()
-    return actions
+    from cognitive_safety_kit import run_sweeps
+    return actions + await run_sweeps(safety, hass)
 
 
 def _types(actions):

@@ -633,6 +633,10 @@ def predict(hass, now: float = None) -> list:
                 "urgency": urgency,
                 "message": msg,
                 "pattern_key": f"anticipate:{eid}",
+                # Carried so habituation can see a lock, cover or alarm and
+                # never quiet it (8.24.0). Without it, "unlocked while nobody
+                # appears to be home" went quiet after three days.
+                "entity_id": eid,
                 "offer": False,
             })
     except Exception as exc:

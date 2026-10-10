@@ -1034,6 +1034,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
         clear_runtime(entry)
         raise
 
+    # ── Situations in progress (8.24.0) ────────────────────────────────────
+    # An intrusion investigation, a waiting parcel or a freeze warning that
+    # was open before a restart or reload carries on: situations.py saves
+    # them. Started before the observer, which starts the cognitive core.
+    # Non-fatal: if this fails Nova starts fresh, exactly as before.
+    try:
+        from . import package_monitor, situations
+        await situations.async_start(hass)
+        package_monitor.restore_from_situations()
+    except Exception as exc:
+        _LOGGER.warning("Nova situations restore failed (non-fatal): %s", exc)
+
     # ── v5.2 Observer Mode ──────────────────────────────────────────────────
     # Observer subscribes to state_changed events and proactively announces
     # interesting things through the LLM tier pipeline. OFF by default. Enabled
@@ -1187,6 +1199,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> boo
         cognitive_core.release_runtime()
     except Exception as exc:
         _LOGGER.debug("Cognitive core release failed: %s", exc)
+    # The saved situations stay on disk for the next start (8.24.0).
+    try:
+        from . import situations
+        situations.stop()
+    except Exception as exc:
+        _LOGGER.debug("Situations stop failed: %s", exc)
 
     # Clear the voice-fingerprint provider registered at setup.
     try:

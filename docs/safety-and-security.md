@@ -25,7 +25,10 @@ needs, what it does by itself, and what it never does without you.
   the covers it controls. It is off until you turn it on. With it on, Nova
   also locks the doors and closes open covers at night while the household
   is asleep. The night sweep closes every open cover, blinds included; the
-  armed lockdown closes only doors, garages, windows and gates. Doors and windows
+  armed lockdown closes only doors, garages, windows and gates. About 25
+  seconds later the night sweep checks each one, and only says the house is
+  secured when every lock reads locked and every cover reads closed. Anything
+  that did not take is named and sent to your phones. Doors and windows
   it cannot close are named so you can close them by hand; a fridge or
   cabinet door, a sensor on your exclude list, or a shed door is not.
 - **Packages.** A package taken from the door while nobody is home is sent to
@@ -69,6 +72,27 @@ And one answer to what the alarm means:
 | Armed away, armed vacation | Nobody should be moving about |
 | Armed home, armed night, armed custom bypass | Residents are expected to move about |
 | Disarmed, arming, pending, disarming, triggered, unavailable | Says nothing either way |
+
+## One picture of the house
+
+Every 30 seconds Nova takes one snapshot of the house: who is home, the
+alarm, whether the house is asleep, quiet hours, what is open or unlocked,
+whether lockdown is on, and any open situations. Everything Nova decides in
+that moment uses the same snapshot. Anything it cannot read is treated as
+unknown, never as away or secure.
+
+## After a restart
+
+Nova saves what it is in the middle of to `nova/situations.json`, so a
+restart or a settings reload does not lose it:
+
+- an intrusion investigation carries on (if it was saved in the last 10
+  minutes) and can still confirm, without a second first alert;
+- a parcel already on the step is not announced again, and its pickup is
+  still noticed (saved in the last 24 hours);
+- the freeze warning is not repeated.
+
+If the file is missing or damaged, Nova starts fresh, as it always did.
 
 ## How alerts reach you
 
@@ -128,12 +152,32 @@ On the **Intrusion** tab you can press **I'M LOOKING (HOLD)** to stop the
 automatic escalation, or **CALL OFF (FALSE ALARM)**. Calling off an intrusion
 is always confirmed, and when you ask by voice it needs a tap on your phone.
 
+## Checking what Nova did
+
+After Nova locks or closes something it checks the device afterwards: the
+night sweep, lockdown, the voice "secure" reply and devices you ask it to
+control. **Logs → Actions** shows verified, unverified or failed for each.
+Scenes, scripts and automations are shown as "not checkable", because Nova
+cannot see what they do.
+
 ## The decision log
 
 Every safety decision is written to **Logs → Decisions** in the same form:
 what Nova saw (who was home, the alarm, asleep, quiet hours), what it
 concluded, what it did (spoken, sent to phones, or both) and why. That covers
 intrusion, lockdown, the night sweep, hazards, packages and doors left open.
+
+## What it learns from you
+
+Nova only learns from things you confirmed: a Helpful or Not helpful tap on
+an alert, saying "it's a false alarm", a real or false label on the
+**Intrusion** tab, and accepting or dismissing a suggestion. Nothing it
+guesses for itself changes how it behaves.
+
+Saying "it's a false alarm" also teaches it. After three false alarms at the
+same place and time of day, with none marked real, the first alert for that
+pattern stays quiet. Nova still investigates, and a confirmed intrusion
+always alerts. One "real" label stops it learning to ignore that pattern.
 
 ## What it learns by itself
 
@@ -143,11 +187,18 @@ intrusion, lockdown, the night sweep, hazards, packages and doors left open.
 
 ## What it will never do on its own
 
-- Unlock a door or open a garage door because of a voice command alone. That
-  always needs a tap on your phone.
+- Unlock a door, open a garage door or disarm the alarm because of a voice
+  command alone. That always needs a tap on your phone.
+- Unlock, open, disarm, or run a scene or script by itself. When Nova acts on
+  its own (lockdown, the night sweep, offers it trusts, a retry) it may only
+  lock, close, and change lights or heating. Every action that can change a
+  lock, cover, alarm, scene or script passes one authority check.
 - Engage lockdown unless you turned on **Automatic lockdown**.
 - Silence a critical alert. Mutes, the blanket shush and quiet hours never
   apply to one.
+- Stop mentioning a lock, a cover (garage door, gate, door or blind) or the
+  alarm because it came up three days running. Other repeats go quiet after
+  three days; these never do.
 - Keep camera pictures. The one exception is up to 40 pictures from confirmed
   intrusions, stored privately for the Intrusion tab.
 

@@ -20,6 +20,7 @@ through the same gate.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import Tuple
 
 _LOGGER = logging.getLogger(__name__)
@@ -82,6 +83,9 @@ _VOICE_BLOCKED_OPENING = {
     ("lock", "unlock"),
     ("cover", "open"),
     ("cover", "open_cover"),
+    # Disarming by voice needs a phone tap too (8.24.0): a voice that can be
+    # imitated must not be able to switch the alarm off on its own.
+    ("alarm_control_panel", "alarm_disarm"),
 }
 
 
@@ -158,7 +162,7 @@ def classify(domain: str, service: str, entity_id: str = "") -> Tuple[str, str]:
 
 
 def requires_confirmation(hass, domain: str, service: str, entity_id: str = "",
-                          device_id: str = "") -> bool:
+                          device_id: str = "", *, voice: bool = False) -> bool:
     """Whether this action must be confirmed before it runs.
 
     Delegates to ``voice_confirm.action_is_protected`` (which honours the
@@ -172,7 +176,8 @@ def requires_confirmation(hass, domain: str, service: str, entity_id: str = "",
     skips protected actions) skips it too — not just when the general
     confirmation toggle happens to be on.
     """
-    if (domain, service) in _VOICE_BLOCKED_OPENING and _voice_satellite_request(hass, device_id):
+    if (domain, service) in _VOICE_BLOCKED_OPENING and (
+            voice or _voice_satellite_request(hass, device_id)):
         return True
     if (domain, service) in _SECURITY_STANDDOWN:
         return True
@@ -197,6 +202,8 @@ async def confirm_gate(
     action_label: str = "",
     device_id: str = "",
     target_name: str = "",
+    *,
+    voice: bool = False,
 ) -> Tuple[bool, str, str]:
     """May this action proceed now? Returns ``(allowed, note, approval_result)``.
 
@@ -236,13 +243,17 @@ async def confirm_gate(
            (entity_id.split(".")[-1].replace("_", " ").strip() if entity_id else ""))
     standdown = (domain, service) in _SECURITY_STANDDOWN
     if (((domain, service) in _VOICE_BLOCKED_OPENING or standdown)
-            and _voice_satellite_request(hass, device_id)):
+            and (voice or _voice_satellite_request(hass, device_id))):
         try:
             from . import voice_confirm
+            if standdown:
+                what = "stand down a security alert"
+            elif domain == "alarm_control_panel":
+                what = "disarm the alarm"
+            else:
+                what = "unlock or open this"
             question = (f"{label} {ent} was requested by voice — confirm on your phone "
-                        f"to proceed. Voice alone can't "
-                        f"{'stand down a security alert' if standdown else 'unlock or open this'}."
-                        ).strip()
+                        f"to proceed. Voice alone can't {what}.").strip()
             result = await voice_confirm.confirm_via_phone_only_typed(hass, question)
         except Exception as exc:
             _LOGGER.warning("policy: voice-unlock phone-confirm failed for %s.%s (%s); denying",
@@ -293,3 +304,114 @@ async def confirm_gate(
         return True, "", "approved"
     return False, (f"asked for spoken confirmation before {label} "
                    f"on {ent or entity_id}; not yet confirmed"), result
+
+
+# ── authorize: the one authority check (8.24.0) ─────────────────────────────
+# Every call that can change a lock, cover, alarm, scene or script goes
+# through authorize() (or authorize_now() where nothing may be asked). A test
+# scans the package and fails if one does not, and fails if anything outside
+# this module calls confirm_gate() or requires_confirmation() directly: those
+# two are the confirmation mechanism authorize() uses, not entry points.
+
+SOURCE_VOICE = "voice"          # a voice satellite, or Nova's voice reply window
+SOURCE_CHAT = "chat"            # the chat, the app or an automation
+SOURCE_PANEL = "panel"          # the Nova panel
+SOURCE_AUTOMATIC = "automatic"  # Nova acting on its own (lockdown, sweep, offers it trusts)
+SOURCES = (SOURCE_VOICE, SOURCE_CHAT, SOURCE_PANEL, SOURCE_AUTOMATIC)
+
+
+@dataclass(frozen=True)
+class AuthorityRequest:
+    """Who asked, from where, to do what, to which device."""
+    domain: str
+    service: str
+    entity_id: str = ""
+    source: str = ""            # one of SOURCES; "" works it out from device_id
+    device_id: str = ""
+    user_id: str = ""
+    label: str = ""             # for the question a person hears or reads
+    target_name: str = ""       # ditto; never part of the decision
+
+
+@dataclass(frozen=True)
+class AuthorityDecision:
+    allowed: bool
+    approval: str               # not_required / approved / rejected / expired / deferred / error / denied
+    note: str = ""
+    risk: str = "low"
+    source: str = ""
+
+
+def _automatic(req: AuthorityRequest, risk: str) -> AuthorityDecision:
+    """Nova acting on its own may only do low risk things: lock, close,
+    lights, heating. Never unlock, open, disarm or run a scene or script."""
+    if risk == "low":
+        return AuthorityDecision(True, "not_required", "", risk, SOURCE_AUTOMATIC)
+    return AuthorityDecision(
+        False, "denied",
+        f"Nova never does {req.domain}.{req.service} on its own", risk, SOURCE_AUTOMATIC)
+
+
+def _kwargs(request: AuthorityRequest, *, with_target: bool) -> dict:
+    """Only what was given, so the gate sees exactly the call it always did.
+    voice is passed only when the source says so; otherwise the gate works
+    it out from device_id, as before."""
+    kw: dict = {}
+    if request.device_id:
+        kw["device_id"] = request.device_id
+    if with_target and request.target_name:
+        kw["target_name"] = request.target_name
+    if request.source == SOURCE_VOICE:
+        kw["voice"] = True
+    return kw
+
+
+def authorize_now(hass, request: AuthorityRequest) -> AuthorityDecision:
+    """The decision without asking anyone: allowed, or held because it would
+    need a confirmation (approval "deferred"). For paths that cannot ask
+    (bulk control, the local fast path). Fails closed above low risk."""
+    try:
+        risk, _ = classify(request.domain, request.service, request.entity_id)
+    except Exception:
+        risk = "critical"
+    source = request.source or SOURCE_CHAT
+    if source == SOURCE_AUTOMATIC:
+        return _automatic(request, risk)
+    try:
+        held = bool(requires_confirmation(
+            hass, request.domain, request.service, request.entity_id,
+            **_kwargs(request, with_target=False)))
+    except Exception as exc:
+        _LOGGER.warning("policy: authorize_now failed for %s.%s (%s)",
+                        request.domain, request.service, exc)
+        held = risk != "low"
+    if held:
+        return AuthorityDecision(False, "deferred", "needs confirmation", risk, source)
+    return AuthorityDecision(True, "not_required", "", risk, source)
+
+
+async def authorize(hass, request: AuthorityRequest) -> AuthorityDecision:
+    """May this action run now? Asks for confirmation when it must (a
+    spoken yes, or a phone tap for unlock, open, disarm and standing down an
+    intrusion when asked by voice). Fails closed: any error denies anything
+    above low risk."""
+    try:
+        risk, _ = classify(request.domain, request.service, request.entity_id)
+    except Exception:
+        risk = "critical"
+    source = request.source or SOURCE_CHAT
+    if source == SOURCE_AUTOMATIC:
+        return _automatic(request, risk)
+    try:
+        ok, note, approval = await confirm_gate(
+            hass, request.domain, request.service, request.entity_id,
+            request.label, **_kwargs(request, with_target=True))
+        return AuthorityDecision(bool(ok), approval, note, risk, source)
+    except Exception as exc:
+        _LOGGER.warning("policy: authorize failed for %s.%s (%s)",
+                        request.domain, request.service, exc)
+        if risk == "low":
+            return AuthorityDecision(True, "not_required", "", risk, source)
+        return AuthorityDecision(False, "error",
+                                 "authorization failed — action denied for safety",
+                                 risk, source)

@@ -223,13 +223,6 @@ async def _tick():
     _m_state._CORE.tick_count += 1
     _m_state._CORE.last_tick = time.time()
 
-    # Who is home and what the alarm says, read once for the whole tick
-    # (household.py, 8.21.0). People count, plus device trackers linked to a
-    # person; unknown is never away and motion never counts.
-    from . import household
-    house = household.snapshot(hass, config)
-    anyone_home = house.anyone_home
-
     from . import sleep_detection
     bedroom_areas = config.get("bedroom_areas", []) or []
     # (offer-area resolution for room-scoped modes lives in _offer_area, below.)
@@ -240,234 +233,255 @@ async def _tick():
         quiet_end=config.get("observer_quiet_end", "07:00"),
     )
 
-    # Lockdown runs first so the nighttime sweep can defer to it when active.
-    actions = []
-    if _m_state._CORE.lockdown_mgr:
-        try:
-            actions.extend(await _m_state._CORE.lockdown_mgr.tick())
-        except Exception as exc:
-            _LOGGER.debug("Lockdown tick error: %s", exc)
-
-    # Auto operational-mode (v7.14.0): keep AWAY/NORMAL in step with occupancy
-    # unless the user has chosen hands-on control. Never affects safety.
+    # One read-only snapshot of the house for the whole tick (world.py,
+    # 8.24.0): the household.py answer (people, plus device trackers linked
+    # to a person; unknown is never away, motion never counts), asleep,
+    # quiet hours, what is open or unlocked, lockdown, open situations.
+    # Every source in this tick reads it; it is dropped when the tick ends.
+    from . import world
     try:
-        from . import modes as _auto_modes
-        # Unknown residents leave the mode as it is: a person entity reading
-        # unknown is not an empty house.
-        if house.residents != household.UNKNOWN:
-            _auto_modes.auto_evaluate(anyone_home)
-    except Exception as exc:
-        _LOGGER.debug("auto-mode eval error: %s", exc)
-
-    # Run safety checks. An error here must not lose what is already gathered
-    # (a lockdown announcement: the manager has already changed state and will
-    # not announce it again) or stop the rest of the tick.
-    try:
-        actions.extend(await _m_state._CORE.safety_mgr.tick(sleeping, anyone_home, house=house))
-    except Exception as exc:
-        _LOGGER.warning("Cognitive safety tick error: %s", exc)
-
-    # ── Proactive comfort/efficiency offers (v5.9.07) ───────────────
-    # Gated by the global proactive kill-switch AND the active operational mode
-    # (a mode like party/movie/lab can silence convenience offers). Safety always
-    # runs regardless — mode never gates SafetyManager.
-    proactive_enabled = _m_state._CORE.config.get("observer_proactive", True)
-    mode_scope_areas = []
-    try:
-        from . import modes
-        mode_scope_areas = modes.mode_scoped_to_areas()
-        # A room-scoped mode (lab/movie bound to rooms) keeps the house proactive;
-        # only offers about the bound rooms are dropped in the loop below. An
-        # unscoped suppressing mode still silences proactivity house-wide.
-        if not mode_scope_areas and not modes.mode_allows_proactive():
-            proactive_enabled = False
+        quiet = sleep_detection._in_quiet_hours(
+            config.get("observer_quiet_start", "22:00"),
+            config.get("observer_quiet_end", "07:00"))
     except Exception:
-        pass
-    if proactive_enabled and _m_state._CORE.proactive_mgr:
+        quiet = world.UNKNOWN
+    snap = world.begin_tick(hass, config, asleep=sleeping, quiet_hours=quiet,
+                            tick=_m_state._CORE.tick_count)
+    try:
+        from . import household
+        house = snap.house if snap.house is not None else household.snapshot(hass, config)
+        anyone_home = house.anyone_home
+
+        # Lockdown runs first so the nighttime sweep can defer to it when active.
+        actions = []
+        if _m_state._CORE.lockdown_mgr:
+            try:
+                actions.extend(await _m_state._CORE.lockdown_mgr.tick())
+            except Exception as exc:
+                _LOGGER.debug("Lockdown tick error: %s", exc)
+
+        # Auto operational-mode (v7.14.0): keep AWAY/NORMAL in step with occupancy
+        # unless the user has chosen hands-on control. Never affects safety.
         try:
-            offers = await _m_state._CORE.proactive_mgr.tick(
-                sleeping, anyone_home, nobody_home=(house.residents == household.AWAY))
-            spoke_offer = False  # only ONE spoken offer per tick (avoid stacking
-                                 # questions when only one pending_offer is tracked)
-            for offer in offers:
-                # Room-scoped mode: stay quiet about the focused room(s) only.
-                if mode_scope_areas:
-                    _oa = _offer_area(_m_state._CORE.hass, offer)
-                    if _oa and _oa in mode_scope_areas:
-                        continue
-                pkey = offer.get("pattern_key", "")
-                # Graduated autonomy: trusted actions execute silently — all of
-                # them, since they don't need a yes/no.
-                if pkey and _m_state._CORE.autonomy_mgr and _m_state._CORE.autonomy_mgr.is_autonomous(pkey):
-                    ok = await _m_delivery._execute_action_data(
-                        _m_state._CORE.hass, offer.get("action_data", {}),
-                        source="proactive_autonomous")
-                    if ok:
-                        _m_state._CORE.autonomous_actions += 1
-                        # Mark cooldown so the same autonomous action doesn't
-                        # re-fire every proactive cycle.
+            from . import modes as _auto_modes
+            # Unknown residents leave the mode as it is: a person entity reading
+            # unknown is not an empty house.
+            if house.residents != household.UNKNOWN:
+                _auto_modes.auto_evaluate(anyone_home)
+        except Exception as exc:
+            _LOGGER.debug("auto-mode eval error: %s", exc)
+
+        # Run safety checks. An error here must not lose what is already gathered
+        # (a lockdown announcement: the manager has already changed state and will
+        # not announce it again) or stop the rest of the tick.
+        try:
+            actions.extend(await _m_state._CORE.safety_mgr.tick(sleeping, anyone_home, house=house))
+        except Exception as exc:
+            _LOGGER.warning("Cognitive safety tick error: %s", exc)
+
+        # ── Proactive comfort/efficiency offers (v5.9.07) ───────────────
+        # Gated by the global proactive kill-switch AND the active operational mode
+        # (a mode like party/movie/lab can silence convenience offers). Safety always
+        # runs regardless — mode never gates SafetyManager.
+        proactive_enabled = _m_state._CORE.config.get("observer_proactive", True)
+        mode_scope_areas = []
+        try:
+            from . import modes
+            mode_scope_areas = modes.mode_scoped_to_areas()
+            # A room-scoped mode (lab/movie bound to rooms) keeps the house proactive;
+            # only offers about the bound rooms are dropped in the loop below. An
+            # unscoped suppressing mode still silences proactivity house-wide.
+            if not mode_scope_areas and not modes.mode_allows_proactive():
+                proactive_enabled = False
+        except Exception:
+            pass
+        if proactive_enabled and _m_state._CORE.proactive_mgr:
+            try:
+                offers = await _m_state._CORE.proactive_mgr.tick(
+                    sleeping, anyone_home, nobody_home=(house.residents == household.AWAY))
+                spoke_offer = False  # only ONE spoken offer per tick (avoid stacking
+                                     # questions when only one pending_offer is tracked)
+                for offer in offers:
+                    # Room-scoped mode: stay quiet about the focused room(s) only.
+                    if mode_scope_areas:
+                        _oa = _offer_area(_m_state._CORE.hass, offer)
+                        if _oa and _oa in mode_scope_areas:
+                            continue
+                    pkey = offer.get("pattern_key", "")
+                    # Graduated autonomy: trusted actions execute silently — all of
+                    # them, since they don't need a yes/no.
+                    if pkey and _m_state._CORE.autonomy_mgr and _m_state._CORE.autonomy_mgr.is_autonomous(pkey):
+                        ok = await _m_delivery._execute_action_data(
+                            _m_state._CORE.hass, offer.get("action_data", {}),
+                            source="proactive_autonomous")
+                        if ok:
+                            _m_state._CORE.autonomous_actions += 1
+                            # Mark cooldown so the same autonomous action doesn't
+                            # re-fire every proactive cycle.
+                            okey = offer.get("offer_key")
+                            if okey:
+                                _m_state._CORE.proactive_mgr._mark_offered(okey)
+                            done_msg = _autonomous_done_message(offer)
+                            actions.append({
+                                "type": offer.get("type", "proactive") + "_auto",
+                                "urgency": "low",
+                                "message": done_msg,
+                                "auto_act": True,
+                            })
+                            from .websocket import nova_log
+                            nova_log("AUTO", f"autonomous: {pkey} → {done_msg[:60]}")
+                    elif not spoke_offer:
+                        # Offer the FIRST non-autonomous opportunity; remaining ones
+                        # wait for a later tick (their cooldown isn't marked, so they
+                        # re-surface naturally next cycle).
+                        if offer.get("offer") is not False:
+                            # An information only alert (8.14.0) has nothing for
+                            # a "yes" to do, so it is never the pending offer.
+                            _m_state._CORE.offers_made += 1
+                            _m_state._CORE.pending_offer = offer
                         okey = offer.get("offer_key")
                         if okey:
                             _m_state._CORE.proactive_mgr._mark_offered(okey)
-                        done_msg = _autonomous_done_message(offer)
-                        actions.append({
-                            "type": offer.get("type", "proactive") + "_auto",
-                            "urgency": "low",
-                            "message": done_msg,
-                            "auto_act": True,
-                        })
-                        from .websocket import nova_log
-                        nova_log("AUTO", f"autonomous: {pkey} → {done_msg[:60]}")
-                elif not spoke_offer:
-                    # Offer the FIRST non-autonomous opportunity; remaining ones
-                    # wait for a later tick (their cooldown isn't marked, so they
-                    # re-surface naturally next cycle).
-                    if offer.get("offer") is not False:
-                        # An information only alert (8.14.0) has nothing for
-                        # a "yes" to do, so it is never the pending offer.
-                        _m_state._CORE.offers_made += 1
-                        _m_state._CORE.pending_offer = offer
-                    okey = offer.get("offer_key")
-                    if okey:
-                        _m_state._CORE.proactive_mgr._mark_offered(okey)
-                    actions.append(offer)
-                    spoke_offer = True
-        except Exception as exc:
-            _LOGGER.debug("Proactive tick error: %s", exc)
+                        actions.append(offer)
+                        spoke_offer = True
+            except Exception as exc:
+                _LOGGER.debug("Proactive tick error: %s", exc)
 
-    # ── Energy management (v6.62.0) ─────────────────────────────────
-    # Same gating as proactive offers (kill-switch + mode). Surfaces high-draw
-    # situations; at higher agency levels may propose/auto-defer a load. Never
-    # sheds a critical load (handled inside energy.evaluate_for_proactive).
-    if proactive_enabled:
+        # ── Energy management (v6.62.0) ─────────────────────────────────
+        # Same gating as proactive offers (kill-switch + mode). Surfaces high-draw
+        # situations; at higher agency levels may propose/auto-defer a load. Never
+        # sheds a critical load (handled inside energy.evaluate_for_proactive).
+        if proactive_enabled:
+            try:
+                from . import energy
+                e_offer = energy.evaluate_for_proactive(hass)
+                if e_offer:
+                    actions.append(e_offer)
+                # Energy outlook (8.12.0): advice only, never acts on a device.
+                o_offer = await energy.evaluate_outlook_for_proactive(hass)
+                if o_offer:
+                    actions.append(o_offer)
+            except Exception as exc:
+                _LOGGER.debug("Energy tick error: %s", exc)
+
+        # Run pattern analysis periodically
         try:
-            from . import energy
-            e_offer = energy.evaluate_for_proactive(hass)
-            if e_offer:
-                actions.append(e_offer)
-            # Energy outlook (8.12.0): advice only, never acts on a device.
-            o_offer = await energy.evaluate_outlook_for_proactive(hass)
-            if o_offer:
-                actions.append(o_offer)
+            from .automation.patterns import get_analyzer, set_thresholds
+            analyzer = get_analyzer()
+            # should_analyze reads patterns.db: keep SQLite off the event loop.
+            # A manual analysis already running covers this tick (single flight).
+            if not analyzer.analysis_running and await hass.async_add_executor_job(
+                    analyzer.should_analyze):
+                # Loosened-reins defaults (occurrences 4, confidence 0.55) — API spend
+                # is no longer the constraint; user can tune via panel-saved keys.
+                try:
+                    _occ = int(config.get("pattern_min_occurrences", 4) or 4)
+                except Exception:
+                    _occ = 4
+                try:
+                    _conf = float(config.get("pattern_confidence", 0.55) or 0.55)
+                except Exception:
+                    _conf = 0.55
+                set_thresholds(_occ, _conf)
+                from . import suggestion_review
+                _reviewer = await suggestion_review.reviewer_for(hass)
+                if _reviewer is not None:
+                    patterns = await analyzer.analyze(hass, reviewer=_reviewer)
+                else:
+                    patterns = await analyzer.analyze(hass)
+                if patterns:
+                    from .websocket import nova_log
+                    nova_log("LEARN", f"Pattern analysis: {len(patterns)} patterns found")
+                    # Notify about new high-confidence suggestions
+                    pending = await hass.async_add_executor_job(
+                        analyzer.get_pending_suggestions)
+                    if pending:
+                        honorific = config.get("honorific", "sir")
+                        nova_log(
+                            "LEARN",
+                            f"{len(pending)} automation suggestion(s) pending review",
+                        )
         except Exception as exc:
-            _LOGGER.debug("Energy tick error: %s", exc)
+            _LOGGER.debug("Pattern analysis tick error: %s", exc)
 
-    # Run pattern analysis periodically
-    try:
-        from .automation.patterns import get_analyzer, set_thresholds
-        analyzer = get_analyzer()
-        # should_analyze reads patterns.db: keep SQLite off the event loop.
-        # A manual analysis already running covers this tick (single flight).
-        if not analyzer.analysis_running and await hass.async_add_executor_job(
-                analyzer.should_analyze):
-            # Loosened-reins defaults (occurrences 4, confidence 0.55) — API spend
-            # is no longer the constraint; user can tune via panel-saved keys.
+        # ── Local cognition: anticipation (v5.9.30) ─────────────────────────────
+        # Every ~15 min, sample occupancy and flag entities in a state that's
+        # unusual for this time of day ("garage usually closed by now"). Gated by
+        # the proactive kill-switch + the cognition toggle. Predictions are appended
+        # as actions and flow through the same gated announce path below (so they
+        # push-instead-of-speak while you're asleep). Model is persisted each cycle.
+        try:
+            from . import cognition
+            cog_on = True
             try:
-                _occ = int(config.get("pattern_min_occurrences", 4) or 4)
+                from . import observer as _obs
+                cog_on = _obs._cognition_enabled()
             except Exception:
-                _occ = 4
-            try:
-                _conf = float(config.get("pattern_confidence", 0.55) or 0.55)
-            except Exception:
-                _conf = 0.55
-            set_thresholds(_occ, _conf)
-            from . import suggestion_review
-            _reviewer = await suggestion_review.reviewer_for(hass)
-            if _reviewer is not None:
-                patterns = await analyzer.analyze(hass, reviewer=_reviewer)
-            else:
-                patterns = await analyzer.analyze(hass)
-            if patterns:
-                from .websocket import nova_log
-                nova_log("LEARN", f"Pattern analysis: {len(patterns)} patterns found")
-                # Notify about new high-confidence suggestions
-                pending = await hass.async_add_executor_job(
-                    analyzer.get_pending_suggestions)
-                if pending:
-                    honorific = config.get("honorific", "sir")
-                    nova_log(
-                        "LEARN",
-                        f"{len(pending)} automation suggestion(s) pending review",
+                cog_on = bool(config.get("cognition_enabled", True))
+
+            if proactive_enabled and cog_on:
+                now_t = time.time()
+                cycle = now_t - getattr(_m_state._CORE, "_last_cog_cycle", 0.0) >= cognition.OCC_SAMPLE_INTERVAL
+                if cycle:
+                    _m_state._CORE._last_cog_cycle = now_t
+                    cognition.sample_occupancy(hass, now_t)
+                    cognition.sample_presence(hass, now_t)
+                # Keep the adaptive awareness adjustment warm from off the loop; the
+                # predictors below only read its cache.
+                try:
+                    from . import adaptive_awareness
+                    await adaptive_awareness.async_refresh(hass)
+                except Exception:
+                    pass
+                # Departure reminders are due at a minute, not a 15-minute cycle,
+                # so both departure predictors run every tick. Each event's route
+                # is looked up once and reused, so a tick is mostly an in-memory
+                # check.
+                preds = cognition.predict_presence(hass, now_t)
+                if cycle:
+                    preds += (cognition.predict(hass, now_t)
+                              + cognition.predict_overdue(hass, now_t)
+                              + cognition.predict_proximity(hass, now_t)
+                              + cognition.predict_routine_start(hass, now_t))
+                preds += await cognition.predict_departure(hass, now_t)
+                for pred in preds:
+                    actions.append(pred)
+                    from .websocket import nova_log
+                    nova_log("LEARN", f"anticipation: {pred.get('message','')[:80]}")
+                if cycle or preds:
+                    # Persist the model and the once-a-day ledger; a reminder
+                    # between cycles is saved at once so a restart can't repeat it.
+                    await hass.async_add_executor_job(
+                        cognition.save_to_db, _patterns_db()
                     )
-    except Exception as exc:
-        _LOGGER.debug("Pattern analysis tick error: %s", exc)
+        except Exception as exc:
+            _LOGGER.debug("Cognition anticipation tick error: %s", exc)
 
-    # ── Local cognition: anticipation (v5.9.30) ─────────────────────────────
-    # Every ~15 min, sample occupancy and flag entities in a state that's
-    # unusual for this time of day ("garage usually closed by now"). Gated by
-    # the proactive kill-switch + the cognition toggle. Predictions are appended
-    # as actions and flow through the same gated announce path below (so they
-    # push-instead-of-speak while you're asleep). Model is persisted each cycle.
-    try:
-        from . import cognition
-        cog_on = True
+        # v6.38: Execute the agent's self-scheduled follow-ups. The agent queued
+        # these itself ("check the garage actually closed in 5 minutes") — running
+        # them back through its own brain closes the loop across time. Results join
+        # the normal action flow so quiet hours / urgency routing apply.
         try:
-            from . import observer as _obs
-            cog_on = _obs._cognition_enabled()
-        except Exception:
-            cog_on = bool(config.get("cognition_enabled", True))
+            from . import followups as _fu
+            actions.extend(await _fu.async_process_due(
+                hass, config, runner=_make_followup_runner(hass, config)))
+        except Exception as exc:
+            _LOGGER.debug("Follow-up tick error: %s", exc)
 
-        if proactive_enabled and cog_on:
-            now_t = time.time()
-            cycle = now_t - getattr(_m_state._CORE, "_last_cog_cycle", 0.0) >= cognition.OCC_SAMPLE_INTERVAL
-            if cycle:
-                _m_state._CORE._last_cog_cycle = now_t
-                cognition.sample_occupancy(hass, now_t)
-                cognition.sample_presence(hass, now_t)
-            # Keep the adaptive awareness adjustment warm from off the loop; the
-            # predictors below only read its cache.
-            try:
-                from . import adaptive_awareness
-                await adaptive_awareness.async_refresh(hass)
-            except Exception:
-                pass
-            # Departure reminders are due at a minute, not a 15-minute cycle,
-            # so both departure predictors run every tick. Each event's route
-            # is looked up once and reused, so a tick is mostly an in-memory
-            # check.
-            preds = cognition.predict_presence(hass, now_t)
-            if cycle:
-                preds += (cognition.predict(hass, now_t)
-                          + cognition.predict_overdue(hass, now_t)
-                          + cognition.predict_proximity(hass, now_t)
-                          + cognition.predict_routine_start(hass, now_t))
-            preds += await cognition.predict_departure(hass, now_t)
-            for pred in preds:
-                actions.append(pred)
-                from .websocket import nova_log
-                nova_log("LEARN", f"anticipation: {pred.get('message','')[:80]}")
-            if cycle or preds:
-                # Persist the model and the once-a-day ledger; a reminder
-                # between cycles is saved at once so a restart can't repeat it.
-                await hass.async_add_executor_job(
-                    cognition.save_to_db, _patterns_db()
-                )
-    except Exception as exc:
-        _LOGGER.debug("Cognition anticipation tick error: %s", exc)
+        # v6.40: Engage due goals — outcomes Nova is pursuing across time. Same
+        # headless brain as follow-ups; quiet while working, speaks on completion.
+        try:
+            from . import goals as _goals
+            actions.extend(await _goals.async_process_due(
+                hass, config, runner=_make_followup_runner(hass, config)))
+        except Exception as exc:
+            _LOGGER.debug("Goal tick error: %s", exc)
 
-    # v6.38: Execute the agent's self-scheduled follow-ups. The agent queued
-    # these itself ("check the garage actually closed in 5 minutes") — running
-    # them back through its own brain closes the loop across time. Results join
-    # the normal action flow so quiet hours / urgency routing apply.
-    try:
-        from . import followups as _fu
-        actions.extend(await _fu.async_process_due(
-            hass, config, runner=_make_followup_runner(hass, config)))
-    except Exception as exc:
-        _LOGGER.debug("Follow-up tick error: %s", exc)
-
-    # v6.40: Engage due goals — outcomes Nova is pursuing across time. Same
-    # headless brain as follow-ups; quiet while working, speaks on completion.
-    try:
-        from . import goals as _goals
-        actions.extend(await _goals.async_process_due(
-            hass, config, runner=_make_followup_runner(hass, config)))
-    except Exception as exc:
-        _LOGGER.debug("Goal tick error: %s", exc)
-
-    # Process actions
-    for action in actions:
-        await _m_delivery._emit_action(hass, config, action, sleeping)
+        # Process actions
+        for action in actions:
+            await _m_delivery._emit_action(hass, config, action, sleeping)
+    finally:
+        world.end_tick()
 
 
 def _make_followup_runner(hass, config):
@@ -777,6 +791,9 @@ async def start(hass: HomeAssistant, config: dict, entry=None) -> None:
 
     _m_state._CORE.ignore_mgr = await hass.async_add_executor_job(_m_ignore.IgnoreManager)
     _m_state._CORE.safety_mgr = SafetyManager(hass, config)
+    # An intrusion investigation or freeze warning in progress before a
+    # restart or reload carries on (situations.py, 8.24.0).
+    _m_state._CORE.safety_mgr.restore_situations()
     _m_state._CORE.lockdown_mgr = await hass.async_add_executor_job(
         _m_lockdown.LockdownManager, hass, config)          # __init__ reads lockdown_state.json
     _m_state._CORE.proactive_mgr = ProactiveManager(hass, config)

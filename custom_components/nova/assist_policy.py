@@ -584,9 +584,10 @@ async def _authorize(hass, hass_api, tool_name, tool_args, *, device_id, user_id
     from . import policy
     approval = "not_required"
     for t in c.targets:
-        ok, note, result = await policy.confirm_gate(
-            hass, t.domain, t.service, t.entity_id,
-            t.service.replace("_", " "), device_id=device_id)
+        decision = await policy.authorize(hass, policy.AuthorityRequest(
+            t.domain, t.service, t.entity_id, device_id=device_id or "",
+            user_id=user_id or "", label=t.service.replace("_", " ")))
+        ok, note, result = decision.allowed, decision.note, decision.approval
         if result != "not_required":
             approval = result
         if not ok:

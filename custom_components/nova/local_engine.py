@@ -704,10 +704,8 @@ def _policy_requires_confirmation(hass, domain, service, entity_id="",
     except Exception:
         return True
     try:
-        if device_id:
-            return bool(policy.requires_confirmation(
-                hass, domain, service, entity_id, device_id=device_id))
-        return bool(policy.requires_confirmation(hass, domain, service, entity_id))
+        return not policy.authorize_now(hass, policy.AuthorityRequest(
+            domain, service, entity_id, device_id=device_id or "")).allowed
     except Exception as exc:
         _LOGGER.warning("Local: confirmation check failed for %s.%s (%s)",
                         domain, service, exc)
@@ -739,7 +737,7 @@ def _needs_confirmation_domain(hass, domain, service, entity_id="", device_id=No
     return _policy_requires_confirmation(hass, domain, service, entity_id, device_id)
 
 
-async def _execute_action(hass, action, entity_id, args):
+async def _execute_action(hass, action, entity_id, args, device_id=None):
     try:
         domain = entity_id.split(".")[0]
         svc_map = {
@@ -759,6 +757,13 @@ async def _execute_action(hass, action, entity_id, args):
 
         if action in svc_map:
             svc_domain, svc_name = svc_map[action]
+            # The one authority check (8.24.0). Callers already send anything
+            # protected to the agent; this makes sure nothing reaches the
+            # call that would need a confirmation the fast path cannot ask.
+            from . import policy
+            if not policy.authorize_now(hass, policy.AuthorityRequest(
+                    svc_domain, svc_name, entity_id, device_id=device_id or "")).allowed:
+                return False
             svc_data = {"entity_id": entity_id}
             if action == "dim" and "brightness_pct" in args:
                 svc_data["brightness_pct"] = args["brightness_pct"]
@@ -797,7 +802,7 @@ _LOCK_COVER_SERVICE = {
 }
 
 
-async def _execute_action_verified(hass, action, entity_id, args, fname):
+async def _execute_action_verified(hass, action, entity_id, args, fname, device_id=None):
     """Single-entity wrapper around _execute_action that reports Nova's
     Phase 3 status vocabulary ("verified"/"accepted"/"unverified"/"error"),
     using the SAME entity_verify helpers and the SAME background
@@ -827,7 +832,7 @@ async def _execute_action_verified(hass, action, entity_id, args, fname):
         )
     )
 
-    ok = await _execute_action(hass, action, entity_id, args)
+    ok = await _execute_action(hass, action, entity_id, args, device_id=device_id)
     if not ok:
         await hass.async_add_executor_job(
             lambda: action_log.set_execution(action_id, "failed", reason_code="service_call_failed")
@@ -1312,7 +1317,7 @@ async def try_local(hass, text, honorific="sir", force=False, device_id=None):
             total = 0
             for eid, d in all_ents:
                 row_id = row_ids.get(eid)
-                if await _execute_action(hass, "turn_off", eid, {}):
+                if await _execute_action(hass, "turn_off", eid, {}, device_id=device_id):
                     total += 1
                     if row_id is not None:
                         await hass.async_add_executor_job(
@@ -1339,7 +1344,7 @@ async def try_local(hass, text, honorific="sir", force=False, device_id=None):
         ok = 0
         for eid, fn in entities:
             row_id = row_ids.get(eid)
-            if await _execute_action(hass, action, eid, {}):
+            if await _execute_action(hass, action, eid, {}, device_id=device_id):
                 ok += 1
                 if row_id is not None:
                     await hass.async_add_executor_job(
@@ -1390,6 +1395,8 @@ async def try_local(hass, text, honorific="sir", force=False, device_id=None):
                 await hass.async_add_executor_job(
                     lambda: action_log.set_execution(_action_id, "accepted")
                 )
+                await hass.async_add_executor_job(
+                    lambda: action_log.mark_not_checkable(_action_id))
                 return LocalResult(text=f"Activating {fname} now{addr}.", success=True)
             except Exception as exc:
                 await hass.async_add_executor_job(
@@ -1419,6 +1426,8 @@ async def try_local(hass, text, honorific="sir", force=False, device_id=None):
                 await hass.async_add_executor_job(
                     lambda: action_log.set_execution(_action_id, "accepted")
                 )
+                await hass.async_add_executor_job(
+                    lambda: action_log.mark_not_checkable(_action_id))
                 return LocalResult(text=f"Goodnight{addr}. I've triggered {fname}. Rest well.", success=True)
             except Exception:
                 await hass.async_add_executor_job(
@@ -1480,8 +1489,18 @@ async def try_local(hass, text, honorific="sir", force=False, device_id=None):
             )
         ) if lock_candidates else {}
         sent_locks: list[str] = []
+        from . import policy
         for eid in lock_candidates:
             row_id = lock_row_ids.get(eid)
+            # Locking is low risk, so this is allowed; it still goes through
+            # the one authority check (8.24.0).
+            if not policy.authorize_now(hass, policy.AuthorityRequest(
+                    "lock", "lock", eid, device_id=device_id or "")).allowed:
+                if row_id is not None:
+                    await hass.async_add_executor_job(
+                        lambda rid=row_id: action_log.set_execution(
+                            rid, "blocked", reason_code="confirmation_not_approved"))
+                continue
             try:
                 await hass.services.async_call(
                     "lock", "lock", {"entity_id": eid}, blocking=True)
@@ -1562,7 +1581,8 @@ async def try_local(hass, text, honorific="sir", force=False, device_id=None):
             _LOGGER.info("Local: '%s' on %s needs confirmation — deferring to agent",
                          action, entity_id)
             return None   # protected action → the agent runs the confirmation gate
-        status = await _execute_action_verified(hass, action, entity_id, args, fname)
+        status = await _execute_action_verified(hass, action, entity_id, args, fname,
+                                                device_id=device_id)
         success = status != "error"
         _update_ctx(entity=entity_id, domain=entity_id.split(".")[0], action=action)
         return LocalResult(

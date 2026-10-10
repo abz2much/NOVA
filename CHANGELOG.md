@@ -1,3 +1,42 @@
+## [8.24.0] — Nova's safety kernel
+
+### Stage A: safety alerts never go quiet
+- **Fixed.** "Front Door is unlocked while nobody appears to be home" went quiet for good after three days running, because the alert did not say which device it was about, so habituation could not see it was a lock. Anticipation alerts now carry their device, and habituation never quiets an alert about a lock, a cover or an alarm panel. Any that already went quiet come back.
+- **Covers are now exempt too.** That includes garage doors and gates, and also blinds: an alert about a blind no longer goes quiet after three days.
+
+### Stage B: one authority check
+- **One check.** `policy.authorize(request)` takes who asked, from where (voice, chat, panel or Nova on its own), the action and the device. Every call that can change a lock, cover, alarm, scene or script goes through it. The risk rules, voice confirmation, failing closed and the action log are unchanged.
+- **Disarm by voice needs a phone tap,** like unlock and open, whether or not voice confirmation is on.
+- **Nova on its own may only do low risk things:** lock, close, lights, heating. Never unlock, open, disarm or run a scene or script. This covers lockdown, the night sweep, offers it runs by itself, and the automatic retry after a check fails (a retry of a high risk action is no longer sent; it is marked unverified).
+- **Paths that had no check now have one:** the voice "secure" reply (locks and closes in the room), the offers executor, and the `nova.scene_by_intent` service. The voice "secure" reply now writes action log rows. With voice confirmation on, a scene picked by intent is now confirmed first, like every other scene.
+- **A test scans the code** and fails if any lock, cover, alarm, scene or script call skips the check.
+
+### Stage C: check after acting
+- **The night sweep checks before it says "secured".** About 25 seconds after locking and closing, it rereads each lock and cover. Only a lock that reads locked, or a cover that reads closed, counts. Anything else, or anything that cannot be read, is named as not secured and raised as a high alert. The sweep runs while the house is asleep, so its message goes to your phones and is never spoken. It now runs in the background, so it never holds up the 30 second safety loop.
+- **The voice "secure" reply checks the same way.** Its action log rows become verified or unverified, the result goes to the decision log, and anything not secured is raised as a high alert.
+- **Lockdown's own check is logged.** Each device it checks is written to the decision log, linked to the lockdown it belongs to. A device that cannot be read is recorded as "could not check", never as secured.
+- **Scenes, scripts and automations are marked "not checkable"** in the action log after they run, because what they do is not visible to Nova. Nothing more is promised.
+- **A check that cannot run is "unverified", never "verified".**
+
+### Stage D: one read-only picture of the house
+- **New `world.py`.** At the start of each 30 second tick Nova takes one snapshot of the house: who is home and what the alarm means (`household.py`), asleep, quiet hours, doors and windows open into the house, unlocked locks, locks it cannot read (unknown, unavailable or jammed), open covers, person motion, whether lockdown is on, and open situations.
+- **Every source in a tick sees the same snapshot.** `household.snapshot()` and `alert_path.situation()` hand out the tick's reading while it runs, and the safety tick receives it. Between ticks they read the house live, as before.
+- **A field that cannot be read is "unknown"**, never an empty list or "no", so it can never be taken to mean away or secure.
+- Nothing you see changes.
+
+### Stage E: situations survive a restart
+- **New `situations.py`**, saved to `nova/situations.json`. It holds what Nova is in the middle of, so a restart or a settings reload (the Configure dialog reloads Nova) no longer loses it.
+- **Intrusion.** An open investigation, and when its first alert went out, are saved after every tick and restored on start, so it carries on and can still confirm, without a second first alert. Only the state is saved and restored; the investigation logic is unchanged. One saved more than 10 minutes ago is dropped.
+- **Deliveries.** Each camera's package state is saved, so a parcel already on the step is not announced as new after a restart, and its pickup is still noticed. State older than 24 hours is dropped.
+- **Hazards.** The freeze warning is not repeated after a restart, and active weather warnings show as an open situation. Older than 24 hours is dropped.
+- **Fails safe.** A missing or corrupt file starts fresh, exactly as before. A failed save is logged and ignored.
+
+### Stage F: learning only from what you confirmed
+- **One allowlist.** Nova learns only from outcomes a person confirmed: a Helpful / Not helpful rating on the phone, a "false alarm" call-off, a real / false label on the Intrusion tab, and a suggestion accepted or dismissed. The interruption budget, adaptive awareness, suggestion selectivity and learned damping ignore anything else.
+- **A panel label also sets the decision's outcome** in the decision log, unless one was already given.
+- **A call-off now teaches learned damping.** "It's a false alarm" labels that intrusion's first alert as false. After three false labels for the same place and time of day, with none real, the first alert for that pattern stays quiet; the investigation still runs and a confirmed intrusion always alerts. A call-off never overwrites a label you gave on the Intrusion tab.
+- Labels given before 8.24.0 count as panel labels, which is where they came from.
+
 ## [8.23.1] — Unknown presence reaches the phones too
 
 - **A medium alert while presence is unknown now goes to the phones,** the same as when everyone is away. Before, it was neither spoken nor pushed. Unknown means a person reading unknown or unavailable, or no person entities set up. Pushed only, with the rating buttons; never spoken.
