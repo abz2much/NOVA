@@ -171,6 +171,10 @@ SERVICE_CALLERS = {
     # 8.12.0: forecast_solar.get_forecast, a read only lookup that returns the
     # hourly solar forecast for the energy outlook. Nothing is actuated.
     "energy_outlook.py",
+    # 8.32.0: voice phrases. Runs the one action a person linked to their own
+    # words, after policy.authorize/authorize_now for every target, with an
+    # action log row for each (tests/unit/test_authority.py).
+    "voice_phrase_runner.py",
 }
 ANNOUNCERS = {
     "__init__.py", "appliance_monitor.py", "briefing.py", "camera.py", "cognitive_core.py",
