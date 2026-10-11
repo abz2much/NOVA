@@ -154,25 +154,34 @@ def _satellite_for_entity(hass, entity_id: str) -> Optional[str]:
     return None
 
 
+def _satellite_pairings(hass) -> Optional[dict]:
+    """The panel's Satellite → Speaker pairings, read the way conversation.py
+    reads them: the live runtime_config, a dict or its JSON text. None when
+    unset or unreadable."""
+    try:
+        import json as _json
+        from .runtime import domain_runtime_config
+        raw = domain_runtime_config(hass).get("satellite_pairings")
+        if not raw:
+            return None
+        parsed = _json.loads(raw) if isinstance(raw, str) else raw
+        return parsed if isinstance(parsed, dict) and parsed else None
+    except Exception:
+        return None
+
+
 def _speaker_for_satellite(hass, satellite: str) -> tuple[Optional[str], list]:
-    """(tts_entity, [media_players]) to speak through for the gated path — the
-    speaker explicitly assigned to the satellite's area, else the general
-    speaker (v7.92.0 — replaced area auto-discovery; see
-    audio_routing.room_speaker's docstring for why)."""
+    """(tts_entity, [media_players]) to speak through for the gated path: the
+    same speaker a reply from this satellite uses (8.33.0): its Satellite →
+    Speaker pairing, else the speaker assigned to its room, else the general
+    speaker (audio_routing.reply_target). Never the satellite itself."""
     try:
         from . import audio_routing, tts_helper
-        area = None
-        try:
-            from homeassistant.helpers import entity_registry as er
-            reg = er.async_get(hass)
-            ent = reg.async_get(satellite)
-            if ent and ent.area_id:
-                area = ent.area_id
-        except Exception:
-            pass
-        assigned = audio_routing.room_speaker(hass, area) if area else None
-        if not assigned:
-            assigned = audio_routing.general_speaker_target(hass)
+        assigned = audio_routing.reply_target(
+            hass, satellite_entity_id=satellite,
+            satellite_pairings=_satellite_pairings(hass))
+        if assigned and assigned.startswith("assist_satellite."):
+            assigned = None
         speakers = [assigned] if assigned else []
         # resolve the Nova TTS entity: prefer the configured one, else best
         configured = _cfg(hass, "tts_engine", "") or ""

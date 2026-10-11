@@ -129,6 +129,37 @@ def _chat_user() -> Optional[str]:
     return _CHAT_USER.get()
 
 
+# A spoken yes to a held request (8.33.0). When a voice turn needed a
+# confirmation, Nova asks in its own reply and keeps the mic open; the user's
+# "yes" on the same satellite replays the request inside this scope. The
+# gate honours it only for that device and those exact targets, and only
+# after the phone tap rules, so unlock, open, disarm and standing down still
+# need the phone. Set only by the conversation's answer handling, for one
+# replay; reset when it ends.
+_APPROVED: contextvars.ContextVar[Optional[Tuple[str, frozenset]]] = contextvars.ContextVar(
+    "nova_approved_confirmation", default=None)
+
+
+@contextlib.contextmanager
+def approved_confirmation(device_id: str, targets) -> Iterator[None]:
+    """Treat confirmation as given for these (domain, service, entity_id)
+    targets, asked from this device, inside the block."""
+    allowed = frozenset((str(d), str(s), str(e or "")) for d, s, e in targets)
+    token = _APPROVED.set((str(device_id or ""), allowed))
+    try:
+        yield
+    finally:
+        _APPROVED.reset(token)
+
+
+def _approved(domain: str, service: str, entity_id: str, device_id: str) -> bool:
+    held = _APPROVED.get()
+    if not held or not device_id:
+        return False
+    dev, targets = held
+    return dev == device_id and (domain, service, entity_id or "") in targets
+
+
 def _voice_satellite_request(hass, device_id: str) -> bool:
     if not device_id:
         return False
@@ -370,6 +401,20 @@ async def confirm_gate(
 
     if not protected:
         return True, "", "not_required"
+
+    # A spoken yes the user already gave, on the same satellite, for exactly
+    # this target (8.33.0). Checked after the phone tap rules above.
+    if _approved(domain, service, entity_id, device_id):
+        return True, "", "approved"
+
+    # Asked from a voice satellite (8.33.0): never ask separately. Playing a
+    # question elsewhere, or calling ask_question / start_conversation on the
+    # satellite the user spoke to, would cancel the user's own running
+    # request. Nova's reply asks instead, and the conversation keeps the mic
+    # open on that satellite for the answer (pending_confirm.py).
+    if _voice_satellite_request(hass, device_id):
+        return False, (f"{label} {ent} needs a spoken yes first; "
+                       "ask the user in your reply").strip(), "deferred"
 
     # Confirmation required — ask. ANY failure here denies (fail closed).
     question = (f"{label} {ent} — are you sure?").strip()

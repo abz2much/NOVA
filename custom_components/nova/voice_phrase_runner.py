@@ -27,6 +27,8 @@ class RunOutcome:
     deferred: bool = False    # held for confirmation on the fast path; nothing ran
     # accepted (sent), refused (not confirmed), failed, or deferred.
     status: str = "failed"
+    # The policy approval that stopped it ("deferred", "rejected", ...), or "".
+    approval: str = ""
 
 
 @dataclass
@@ -146,9 +148,9 @@ async def _run(hass, entry, *, name, addr, device_id, user_id, honorific, may_as
             await _log(action_log.set_execution, rows.get(k), "blocked",
                        reason_code="confirmation_not_approved", reason_text=reason_text)
         if deferred:
-            return RunOutcome(None, True, "deferred")
+            return RunOutcome(None, True, "deferred", approval)
         return RunOutcome(_result(f"I need you to confirm {name} first{addr}.", False), False,
-                          "refused")
+                          "refused", approval)
 
     # Every target is allowed: one call.
     try:
