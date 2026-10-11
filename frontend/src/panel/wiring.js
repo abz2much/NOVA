@@ -160,6 +160,7 @@
     const root = this.shadowRoot;
     this._wireHomeLayout();
     this._wireVoicePhrases();
+    this._wireVoiceId();
 
     root.querySelectorAll(".settings-nav-btn").forEach(btn => {
       btn.addEventListener("click", () => {

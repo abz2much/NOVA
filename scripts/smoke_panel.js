@@ -119,6 +119,7 @@ const PANEL = {
     floor_plan_address: "123 Example St, Springfield IL", banter_level: 2, search_backend: "searxng", searxng_url: "http://sx.local:8080", calendar_tight_gap_min: 20, recognition_source: "frigate", voice_confirm_enabled: true, voice_confirm_mode: "gated", intrusion_response_timeout: 120, cameras: [{ entity_id: "camera.front", name: "Front Door", raw_name: "Front Door", outdoor: false, location_mode: "auto" }, { entity_id: "camera.back", name: "Backyard", raw_name: "Backyard", outdoor: true, location_mode: "auto" }], camera_names: {}, lockdown: { active: false },
     cast_devices: [{ entity_id: "media_player.living_room_speaker", name: "Living Room Speaker" }, { entity_id: "media_player.kitchen_speaker", name: "Kitchen Speaker" }],
     voice_id_uri: "tcp://abc123-nova-voice-id:10350", voice_id_fallback_stt: "stt.faster_whisper",
+    voice_id_token_set: true, voice_id_hidden_people: ["person.guest"], voice_id_enrol: { state: "idle" },
     voice_id_status: { state: "connected", name: "Nova Voice ID", version: "0.1.0", models: ["tiny-int8"], languages: ["en"], error: "", checked_at: 1, entity_id: "stt.nova_voice_id" },
     stt_entities: [{ entity_id: "stt.faster_whisper", name: "faster-whisper" }],
     speaker_areas: [{ area_id: "living_room", name: "Living Room" }, { area_id: "kitchen", name: "Kitchen" }],
@@ -256,6 +257,7 @@ let _intrCalledOff = false;
 let _intrAck = false;
 const _intrSnap = { image_b64: "ZmFrZQ==", camera: "camera.dining_room", ts: 1730000000, path: "/config/nova/intrusion/x.jpg" };
 const _updateConfigCalls = [];
+const _vidCalls = [];
 const _coverageCalls = [];
 let _credStatus = { groq: true, openai: false, anthropic: false, gemini: false, custom: false, ollama: false };
 const _setCredentialCalls = [];
@@ -425,6 +427,20 @@ const hass = {
       return { last_snapshot: _intrSnap, called_off: _intrCalledOff, acknowledged: _intrAck, suppressed_for: _intrCalledOff ? 600 : 0, false_alarms_24h: _intrCalledOff ? 1 : 0 };
     }
     if (m.type === "nova/voice_confirm_test") return { ok: true, satellite: "assist_satellite.basement_nova", note: "Announce fired." };
+    if (m.type && m.type.startsWith("nova/voice_id_")) {
+      _vidCalls.push(m);
+      if (m.type === "nova/voice_id_profiles") return { ok: true, model: "m", people: [
+        { person: "person.abi", name: "Abi", samples: 8, updated: 1760000000 },
+        { person: "person.guest", name: "Guest Account", samples: 0, updated: null }] };
+      if (m.type === "nova/voice_id_token_get") return { ok: true, token: "s3cret-token" };
+      if (m.type === "nova/voice_id_token_set") return { ok: true, set: !!m.token };
+      if (m.type === "nova/voice_id_record") return { ok: true, session: { state: "active", person: m.person, name: "Abi", committed: 0, needed: 8 } };
+      if (m.type === "nova/voice_id_record_status") return { ok: true, session: { state: "active", person: "person.abi", name: "Abi", committed: 3, needed: 8 } };
+      if (m.type === "nova/voice_id_record_cancel") return { ok: true, cancelled: true, session: { state: "cancelled", person: "person.abi", name: "Abi", committed: 3, needed: 8 } };
+      if (m.type === "nova/voice_id_delete") return m.all
+        ? { ok: true, deleted: ["person.abi"], all: true }
+        : { ok: false, code: "unauthorised", error: "The app's token doesn't match. Copy it from the app's Configuration tab." };
+    }
     if (m.type === "nova/list_models") {
       _listModelCalls.push({ ...m });
       if (m.provider === "custom") return {
@@ -1093,6 +1109,47 @@ if (require.main === module) setTimeout(async () => {
   checks.push(["floor plan editor: removing an opening clears its wall marker",
     fpeCardNow.querySelectorAll(".fpn-op-marker").length === 0]);
   sRoot = elNew.shadowRoot;
+
+  // ── Settings → Voice ID People (8.36.0): its own commands ──
+  elNew._render();
+  await new Promise(r => setTimeout(r, 20));
+  sRoot = elNew.shadowRoot;
+  const vidCard = () => sRoot.getElementById("settings-card-voice_id");
+  const vidText = () => vidCard()?.textContent || "";
+  const tokenField = sRoot.getElementById("vidToken");
+  checks.push(["voice id: the token field is masked, filled from the app, with an eye that shows it",
+    !!tokenField && tokenField.type === "password" && tokenField.value === "s3cret-token"
+      && !vidText().includes("s3cret-token")
+      && (() => { sRoot.getElementById("vidTokenEye").click(); return sRoot.getElementById("vidToken").type === "text"; })()]);
+  checks.push(["voice id: People lists each person with the sample count, and hides hidden accounts",
+    /Abi/.test(vidText()) && /8 samples/.test(vidText()) && !/Guest Account/.test(vidText())
+      && /Show hidden people \(1\)/.test(vidText())
+      && !!vidCard().querySelector('.vid-rec[data-person="person.abi"]')
+      && !!vidCard().querySelector('.vid-del[data-person="person.abi"]')
+      && /rooms sound different/.test(vidText()) && /never in Nova/.test(vidText())]);
+  vidCard().querySelector('.vid-rec[data-person="person.abi"]').click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["voice id: Record voice starts on the chosen satellite and shows progress with Cancel",
+    _vidCalls.some(c => c.type === "nova/voice_id_record" && c.person === "person.abi"
+      && c.satellite === "assist_satellite.basement_nova")
+      && /Recording Abi: 0 of 8/.test(vidText()) && !!sRoot.getElementById("vidCancel")]);
+  await new Promise(r => setTimeout(r, 2100));
+  checks.push(["voice id: progress updates live while recording",
+    /Recording Abi: 3 of 8/.test(vidText()) && _vidCalls.some(c => c.type === "nova/voice_id_record_status")]);
+  sRoot.getElementById("vidCancel").click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["voice id: Cancel ends it and keeps what was saved",
+    /Recording cancelled\. 3 of 8 samples were saved\./.test(vidText())]);
+  vidCard().querySelector('.vid-del[data-person="person.abi"]').click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["voice id: Delete voice shows the app's answer (a wrong token)",
+    _vidCalls.some(c => c.type === "nova/voice_id_delete" && c.person === "person.abi" && !c.all)
+      && /token doesn't match/.test(sRoot.getElementById("vidMsg").textContent)]);
+  sRoot.getElementById("vidDeleteAll").click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["voice id: Delete all voice data sends all: true",
+    _vidCalls.some(c => c.type === "nova/voice_id_delete" && c.all === true)
+      && /Deleted all voice data \(1 people\)\./.test(sRoot.getElementById("vidMsg").textContent)]);
 
   // ── Settings → Voice Phrases (8.32.0): its own commands, never the
   // generic data-cfg-key autosave ──
@@ -3073,8 +3130,9 @@ if (require.main === module) setTimeout(async () => {
       sRoot.querySelectorAll(".new-log-entry").length === 3
       && /3 entries/.test(sRoot.getElementById("newLogCount")?.textContent || "")],
     ["logs tab renders every real backend log category as a filter chip",
-      sRoot.querySelectorAll(".new-log-filter").length === 20
+      sRoot.querySelectorAll(".new-log-filter").length === 21
       && !!sRoot.querySelector('.new-log-filter[data-filter="LEARN"]')
+      && !!sRoot.querySelector('.new-log-filter[data-filter="VOICE"]')
       && !sRoot.querySelector('.new-log-filter[data-filter="ROUTE"]')], // dead category, dropped
   );
 

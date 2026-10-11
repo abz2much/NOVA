@@ -713,6 +713,31 @@ class NovaAgent(conversation.ConversationEntity):
             except Exception:
                 pass
 
+        # ── Nova Voice ID (8.36.0) ───────────────────────────────────────
+        # This request's voice result, read once (the STT entity set it in
+        # this same pipeline task). Kept on the turn and logged; nothing
+        # below reads it, so identity, the prompt and memory are unchanged.
+        # A turn from the satellite a voice recording is armed on belongs to
+        # that recording: it is answered here and never reaches dedup,
+        # phrases, the local engine or the AI.
+        turn_voice = None
+        if device_id and not is_chat:
+            try:
+                from . import voice_id as _voice_id
+                turn_voice = _voice_id.take_turn_voice()
+                nova_log("VOICE", _voice_id.log_line(turn_voice, device_id))
+            except Exception as exc:
+                _LOGGER.debug("Nova Voice ID: turn result unavailable: %s", exc)
+            from . import voice_enrol
+            enrol_reply = await voice_enrol.async_handle_turn(
+                self.hass, self.entry, device_id, turn_voice)
+            if enrol_reply is not None:
+                nova_log("VOICE", f"recording turn on device={device_id}")
+                ir = intent.IntentResponse(language=user_input.language)
+                ir.async_set_speech(enrol_reply)
+                return conversation.ConversationResult(
+                    response=ir, conversation_id=user_input.conversation_id)
+
         # ── v5.7.01: Multi-wake dedup ────────────────────────────────────
         # If another satellite already processed this exact text within
         # the dedup window, return the cached response WITHOUT routing

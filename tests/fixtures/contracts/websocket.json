@@ -1157,6 +1157,97 @@
     "literal_response_keys": [],
     "registered": true
   },
+  "nova/voice_id_delete": {
+    "admin": true,
+    "error_codes": [],
+    "fields": {
+      "all": {
+        "required": false
+      },
+      "person": {
+        "required": false
+      }
+    },
+    "literal_response_keys": [
+      "ok"
+    ],
+    "registered": true
+  },
+  "nova/voice_id_profiles": {
+    "admin": true,
+    "error_codes": [],
+    "fields": {},
+    "literal_response_keys": [
+      "code",
+      "error",
+      "model",
+      "ok",
+      "people"
+    ],
+    "registered": true
+  },
+  "nova/voice_id_record": {
+    "admin": true,
+    "error_codes": [],
+    "fields": {
+      "person": {
+        "required": true
+      },
+      "satellite": {
+        "required": true
+      }
+    },
+    "literal_response_keys": [
+      "ok",
+      "session"
+    ],
+    "registered": true
+  },
+  "nova/voice_id_record_cancel": {
+    "admin": true,
+    "error_codes": [],
+    "fields": {},
+    "literal_response_keys": [
+      "cancelled",
+      "ok",
+      "session"
+    ],
+    "registered": true
+  },
+  "nova/voice_id_record_status": {
+    "admin": true,
+    "error_codes": [],
+    "fields": {},
+    "literal_response_keys": [
+      "ok",
+      "session"
+    ],
+    "registered": true
+  },
+  "nova/voice_id_token_get": {
+    "admin": true,
+    "error_codes": [],
+    "fields": {},
+    "literal_response_keys": [
+      "ok",
+      "token"
+    ],
+    "registered": true
+  },
+  "nova/voice_id_token_set": {
+    "admin": true,
+    "error_codes": [],
+    "fields": {
+      "token": {
+        "required": true
+      }
+    },
+    "literal_response_keys": [
+      "ok",
+      "set"
+    ],
+    "registered": true
+  },
   "nova/voice_phrases_delete": {
     "admin": true,
     "error_codes": [

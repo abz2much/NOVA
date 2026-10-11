@@ -87,6 +87,8 @@ _ALARM_ENTITY_ID = re.compile(r"alarm_control_panel\.[a-z0-9_]+")
 _STT_ENTITY_ID = re.compile(r"stt\.[a-z0-9_]+")
 VOICE_ID_URI_KEY = "voice_id_uri"
 VOICE_ID_FALLBACK_KEY = "voice_id_fallback_stt"
+VOICE_ID_HIDDEN_PEOPLE_KEY = "voice_id_hidden_people"
+_PERSON_ENTITY_ID = re.compile(r"person\.[a-z0-9_]+")
 
 # Weather warnings (8.8.0).
 HAZARD_LEVEL_KEYS = ("hazard_push_level", "hazard_speak_level")
@@ -248,6 +250,10 @@ def valid_panel_value(key: str, value) -> bool:
     if key == VOICE_ID_FALLBACK_KEY:
         return value == "" or (isinstance(value, str)
                                and _STT_ENTITY_ID.fullmatch(value) is not None)
+    if key == VOICE_ID_HIDDEN_PEOPLE_KEY:
+        items = _json_string_list(value)
+        return items is not None and len(items) <= 200 and all(
+            _PERSON_ENTITY_ID.fullmatch(i) is not None for i in items)
     if key == HOST_HEALTH_PERSISTENCE_KEY:
         return _valid_bounded_number(value, *_HOST_HEALTH_PERSISTENCE_RANGE)
     if key == HOST_HEALTH_COOLDOWN_KEY:
@@ -323,6 +329,8 @@ def invalid_panel_value_message(key: str) -> str:
         return f"Key '{key}' must be empty or an address like tcp://host:10350"
     if key == VOICE_ID_FALLBACK_KEY:
         return f"Key '{key}' must be empty or an stt entity id"
+    if key == VOICE_ID_HIDDEN_PEOPLE_KEY:
+        return f"Key '{key}' must be a JSON list of person entity ids"
     if key == SLEEP_OVERRIDE_KEY:
         return f"Key '{key}' must be one of: auto, awake, asleep"
     if key in HAZARD_LEVEL_KEYS:

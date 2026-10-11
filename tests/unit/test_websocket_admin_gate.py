@@ -91,6 +91,15 @@ ADMIN_GATED_TYPES = [
     "voice_phrases_delete",
     "voice_phrases_set_enabled",
     "voice_phrases_test",
+    # Nova Voice ID (8.36.0): every command. They read and delete people's
+    # voice data in the app, start a recording, or show the app's token.
+    "voice_id_profiles",
+    "voice_id_record",
+    "voice_id_record_cancel",
+    "voice_id_record_status",
+    "voice_id_delete",
+    "voice_id_token_get",
+    "voice_id_token_set",
 ]
 
 
@@ -113,7 +122,7 @@ def test_require_admin_used_at_least_once_per_gated_command():
     # Exactly one decorator per listed command: a new admin gated command that
     # is not added to ADMIN_GATED_TYPES (or a listed one that lost its gate)
     # changes the count and fails here.
-    assert src.count("@websocket_api.require_admin") == len(ADMIN_GATED_TYPES) == 51
+    assert src.count("@websocket_api.require_admin") == len(ADMIN_GATED_TYPES) == 58
 
 
 def test_require_admin_sits_above_websocket_command_not_below():

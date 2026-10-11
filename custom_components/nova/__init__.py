@@ -1234,4 +1234,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> boo
     ok =await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if ok:
         clear_runtime(entry)
+        # A voice recording session never outlives its entry (8.36.0).
+        try:
+            from . import voice_enrol
+            voice_enrol.clear()
+        except Exception:
+            pass
     return ok
