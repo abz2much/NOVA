@@ -119,7 +119,7 @@ def _tool_messages(client):
 
 def test_registry_classifies_every_offered_tool(agent, registry):
     offered = [t["function"]["name"] for t in agent.NOVA_TOOLS]
-    assert len(offered) == 55
+    assert len(offered) == 56
     assert set(offered) == set(registry.TOOL_REGISTRY)
     for name, row in registry.TOOL_REGISTRY.items():
         assert row.executor is agent._TOOL_MAP.get(name)
@@ -158,6 +158,7 @@ def test_every_unsafe_tool_is_subagent_denied(registry, grants):
 
 _HEADLESS_FORBIDDEN = [
     "control_device", "bulk_control", "run_scene_or_script", "execute_plan",
+    "run_voice_phrase",
     "approve_suggestion", "dismiss_suggestion", "set_mode", "acknowledge_alert",
     "dismiss_intrusion", "remember", "confirm_pending_fact", "reject_pending_fact",
     "ignore_entity", "unignore_entity", "ingest_documents", "manage_autonomy",
@@ -226,6 +227,7 @@ async def test_non_dict_arguments_never_raise_out_of_run_agent(agent, monkeypatc
     ("control_device", {"entity_id": "light.hall", "action": "turn_on"}),
     ("bulk_control", {"domain": "light", "action": "turn_on"}),
     ("run_scene_or_script", {"entity_id": "scene.movie"}),
+    ("run_voice_phrase", {"phrase_id": "vp_3f9c1a2b"}),
     ("execute_plan", {"goal": "g", "steps": [{"domain": "light", "service": "turn_on",
                                               "entity_id": "light.hall"}]}),
     ("approve_suggestion", {"suggestion_id": 1}),

@@ -64,6 +64,7 @@ def test_homer_never_gets_a_denied_tool(agent):
 
 _EXPECTED_DENIED = [
     "control_device", "bulk_control", "run_scene_or_script", "execute_plan",
+    "run_voice_phrase",
     "set_mode", "dismiss_intrusion", "acknowledge_alert",
     "ignore_entity", "unignore_entity",
     "create_goal", "update_goal", "manage_goals",

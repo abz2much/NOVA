@@ -45,6 +45,103 @@ own. By default it uses a free local Piper voice. Turn on **Use Home
 Assistant default voice** and it uses the speech engine of your preferred
 Assist pipeline instead, for example Home Assistant Cloud or ElevenLabs.
 
+## Voice phrases
+
+Link something you say to something Nova runs. Say "Nova, the house is
+cold" and Nova runs your heating boost script. Set them up in **Settings →
+Voice & Speakers → Voice Phrases**.
+
+### Add a phrase
+
+1. Press **+ Add a voice phrase**.
+2. Give it a name, such as "House is cold".
+3. Add up to 10 ways of saying it: "the house is cold", "I'm cold", "it's
+   freezing in here".
+4. Pick what to run: a script, an automation, a scene, a shell command, or
+   **Advanced** for any other service Nova may use, with entity ids and
+   JSON data.
+5. Optional: the reply. Empty means "Done". `{addr}` adds ", sir" or however
+   Nova addresses whoever is home; `{honorific}` adds just that word.
+6. Save. Then try a few sentences in **Try a sentence**. It shows which
+   phrase would match and never runs anything.
+
+### Flexible or exact
+
+- **Exact** needs the same words. Case, punctuation, "Nova" at the start and
+  "please" are ignored, and "I'm" is the same as "im" or "I am".
+- **Flexible** (the default) also allows small differences: "the house is a
+  bit cold" matches "the house is cold", and a one letter slip in a longer
+  word is fine. It refuses near misses on purpose:
+  - **Opposites.** "Turn off the heating" never matches "turn on the
+    heating". This also means "the house is cold, warm it up" matches
+    nothing, because "warm" is the opposite of "cold".
+  - **Not.** "The house is not cold" or "isn't cold" never matches.
+  - **Questions.** "Is the house cold?" never matches.
+  - **Long sentences.** A sentence that only contains your phrase among many
+    other words does not match.
+  - **Ties.** If two phrases match equally well, neither runs.
+
+### Let the AI pick it by meaning
+
+Turn on **Let the AI pick this by meaning** and the AI may run the phrase
+when what you said clearly means it, even if the words differ ("it's a bit
+nippy in here"). Only phrases with this on are shown to the AI, at most 50,
+and never a shell command. The AI can only run a phrase you set up; it can
+never add or change one.
+
+### Safety
+
+- Every target goes through Nova's usual permission check, and every run is
+  in the Logs tab.
+- **Voice Confirmation.** With it on, a phrase that runs a script, an
+  automation or a scene asks first, as Nova's own "activate" does. The phrase
+  is handed to the AI to ask, so the Logs tab shows two rows for it: the
+  phrase's own row, blocked as "handed to agent", and the row of the tool
+  that asked. The card marks the phrases that will ask first.
+- **Unlock, open and disarm** still need a tap on your phone when asked by
+  voice or in the Chat tab. A phrase can't ask for that tap, so such a phrase
+  runs nothing there: Nova says it needs confirming and can't ask for that
+  right now. Say it the usual way instead ("unlock the front door").
+- A phrase with several targets runs only when every target is allowed. If
+  one needs confirming, none of them runs.
+- Nova only says what it sent. Home Assistant can't say when a script has
+  finished, so the reply never claims it worked.
+- If a phrase needs confirming and Nova is offline, it says it can't ask
+  right now and runs nothing.
+
+### Shell commands
+
+Nova never runs files itself. A shell command phrase calls one of Home
+Assistant's own `shell_command` services, set up in `configuration.yaml`.
+It runs without asking, and the AI can never pick it.
+
+To make one ask first, turn on Voice Confirmation, then add the command to
+`voice_confirm_entities` in `/config/nova/config.json`, and reload Nova
+(**Settings → Devices & Services → Nova → ⋮ → Reload**):
+
+```json
+"voice_confirm_entities": ["shell_command.heat_boost"]
+```
+
+This only works while Voice Confirmation is on. The same list exempts an
+entity from asking when you write it with a `!`, such as
+`"!script.heating_boost"`.
+
+### Offline
+
+Matching and running happen on your Home Assistant, so phrases work in the
+Chat tab and while the AI is offline. Only picking by meaning needs the AI.
+
+### What comes first
+
+1. Home Assistant answers first when it can. A sentence trigger in one of
+   your own automations with the same words wins. So does anything Home
+   Assistant handles itself when **Prefer handling commands locally** is on
+   in your Assist pipeline.
+2. Then your voice phrases.
+3. Then Nova's own built in commands, such as "turn on the kitchen light".
+4. Then the AI.
+
 ## What it works out by itself
 
 - The satellites and Cast devices it can use, for the speaker cards.
@@ -77,6 +174,8 @@ Assist pipeline instead, for example Home Assistant Cloud or ElevenLabs.
 | "No Cast devices found." | No Cast speakers for broadcasts | Add one, or use Room Speakers only. |
 | Nova speaks on a TV in that room | That TV is the room's assigned speaker | Pick another in **Settings → Room Speakers**. |
 | The voice changed after an update | Nova follows Home Assistant's default voice | Set the voice in your Assist pipeline. |
+| A voice phrase does nothing | Another phrase ties with it, the words are a near miss, or Home Assistant answered first | Try the sentence in **Try a sentence**, and check your automations for a sentence trigger with the same words. |
+| A phrase says it needs confirming | Voice Confirmation is on, or it unlocks, opens or disarms | Answer the question. For unlock, open or disarm, ask the usual way and tap your phone. |
 
 ## Settings
 
@@ -90,6 +189,9 @@ Panel, **Settings → General**:
 
 Panel, **Settings → Room Speakers**, **Satellite → Speaker** and
 **Announcement Speakers**: see above.
+
+Panel, **Settings → Voice Phrases**: the on/off switch for all phrases, and
+your phrases. See [Voice phrases](#voice-phrases).
 
 Panel, **Settings → Person Honorifics**: what Nova calls each person when they
 are home alone, or a custom address.

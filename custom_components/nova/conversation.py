@@ -228,6 +228,18 @@ def _is_addressed_to_nova(text: str) -> bool:
     return True
 
 
+def _matches_voice_phrase(text: str) -> bool:
+    """Whether these words match one of the user's voice phrases. Pure and
+    cheap, on a copy of the saved phrases. Never raises."""
+    try:
+        import copy
+        from . import nova_config, voice_phrases
+        cfg = copy.deepcopy(nova_config.get(voice_phrases.CONFIG_KEY))
+        return voice_phrases.match(text, cfg) is not None
+    except Exception:  # pylint: disable=broad-except
+        return False
+
+
 def _is_connectivity_failure(text: str) -> bool:
     """
     Detect the sentinel strings run_agent returns when ALL providers fail.
@@ -788,7 +800,10 @@ class NovaAgent(conversation.ConversationEntity):
         gate_enabled = self._opt("relevance_gate", True)
         # A Chat tab turn is always addressed to Nova, which also keeps the later
         # routing gate from dropping it.
-        is_addressed = is_chat or _is_addressed_to_nova(user_input.text)
+        # A configured voice phrase is addressed to Nova too, so "im cold" is
+        # never dropped as ambient speech (8.32.0).
+        is_addressed = (is_chat or _is_addressed_to_nova(user_input.text)
+                        or _matches_voice_phrase(user_input.text))
         relevant = bool(pending_offer) or not gate_enabled or is_addressed
 
         if not relevant:
@@ -912,6 +927,17 @@ class NovaAgent(conversation.ConversationEntity):
         except Exception as exc:
             _LOGGER.debug("Relations inject: %s", exc)
 
+        # Voice phrases the AI may pick by meaning (8.32.0): only those the
+        # user allowed, never a shell command, at most 50. Names and phrases
+        # sit inside a prompt fence; the phrase ids stay outside it.
+        try:
+            from . import voice_phrase_runner as _vpr
+            vp_block = _vpr.prompt_block()
+            if vp_block:
+                persona = persona + "\n\n" + vp_block
+        except Exception as exc:
+            _LOGGER.debug("Voice phrases inject: %s", exc)
+
         hass_api = await self._get_hass_api(user_input) if self._use_hass_api() else None
 
         cast_routed = False  # tracks whether Cast speaker is handling TTS
@@ -995,8 +1021,19 @@ class NovaAgent(conversation.ConversationEntity):
             # API cost. Only genuinely complex/creative/analytical requests
             # fall through to the LLM agent (Groq/Gemini).
             from .local_engine import try_local, score_complexity
-            local_result = await try_local(
-                self.hass, user_input.text, honorific, device_id=device_id)
+            from . import voice_phrase_runner
+            # The user's own voice phrases come before Nova's built in local
+            # commands (8.32.0). A phrase that needs confirming skips the
+            # local engine and goes to the agent with a hint to ask.
+            phrase = await voice_phrase_runner.try_phrase(
+                self.hass, user_input.text, honorific=honorific,
+                device_id=device_id, user_id=turn_user)
+            local_result = phrase.result
+            if local_result is None and not phrase.defer_hint:
+                local_result = await try_local(
+                    self.hass, user_input.text, honorific, device_id=device_id)
+            if phrase.defer_hint:
+                persona = persona + "\n\n" + phrase.defer_hint
 
             if local_result and local_result.handled:
                 response_text = local_result.text

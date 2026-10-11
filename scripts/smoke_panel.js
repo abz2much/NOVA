@@ -258,6 +258,14 @@ let _credStatus = { groq: true, openai: false, anthropic: false, gemini: false, 
 const _setCredentialCalls = [];
 const _deleteCredentialCalls = [];
 const _sayHelloCalls = [];
+// Voice phrases (8.32.0): the card's own commands, with one saved entry
+// that asks first because of Voice Confirmation.
+const _vpCalls = [];
+const _vpState = { enabled: true, entries: [{
+  phrase_id: "vp_3f9c1a2b", name: "House is cold", phrases: ["the house is cold", "i am cold"],
+  match: "flexible", allow_ai: true, enabled: true, reply: "Warming the house up{addr}.",
+  action: { service: "script.turn_on", target: { entity_id: "script.heating_boost" }, data: {} },
+}] };
 const hass = {
   config: { location_name: "Springfield IL", latitude: 39.78, longitude: -89.65 },
   states: { "lock.keypad": { state: "unlocked", attributes: { friendly_name: "Keypad Lock" } }, "lock.side_door": { state: "locked", attributes: { friendly_name: "Side Door" } }, "calendar.family": { state: "off", attributes: { friendly_name: "Family" } }, "calendar.birthdays": { state: "off", attributes: { friendly_name: "Birthdays" } }, "assist_satellite.a": { state: "idle", attributes: {} }, "camera.front": { attributes: { access_token: "tok123" } }, "camera.back": { attributes: { access_token: "tok456" } },
@@ -270,6 +278,22 @@ const hass = {
       return {};
     }
     if (m.type === "nova/get_panel_data") return PANEL;
+    if (m.type && m.type.startsWith("nova/voice_phrases_")) {
+      _vpCalls.push(m);
+      if (m.type === "nova/voice_phrases_list") return {
+        enabled: _vpState.enabled, entries: _vpState.entries,
+        allowed_domains: ["automation", "scene", "script", "shell_command"],
+        asks_first: ["vp_3f9c1a2b"] };
+      if (m.type === "nova/voice_phrases_test") return { match: /cold/.test(m.text)
+        ? { phrase_id: "vp_3f9c1a2b", name: "House is cold", phrase: "the house is cold", tier: "flexible" }
+        : null };
+      if (m.type === "nova/voice_phrases_set_enabled") { _vpState.enabled = m.enabled; return { enabled: m.enabled }; }
+      if (m.type === "nova/voice_phrases_delete") return { ok: true };
+      if (m.type === "nova/voice_phrases_save") {
+        if (!m.entry.name) throw new Error("The name must be 1 to 60 characters.");
+        return { entry: { ...m.entry, phrase_id: m.entry.phrase_id || "vp_00000002" }, warnings: [] };
+      }
+    }
     if (m.type === "nova/get_setup_health") return { overall: "warn", checks: [
       { name: "Language model", key: "llm", status: "ok", detail: "reachable" },
       { name: "Assist pipeline", key: "assist_pipeline", status: "warn",
@@ -806,7 +830,7 @@ if (require.main === module) setTimeout(async () => {
     ["settings tab renders the search box and group nav",
       !!sRoot.getElementById("settingsSearch") && sRoot.querySelectorAll(".settings-nav-btn").length === 6],
     ["settings tab has every setting card, General real",
-      sRoot.querySelectorAll(".settings-card").length === 25
+      sRoot.querySelectorAll(".settings-card").length === 26
       && /Sleep state/.test(sRoot.innerHTML) && /Announcements/.test(sRoot.innerHTML)],
     ["settings tab: General restores cognition, rich reasoning, and dashboard light controls",
       !!sRoot.querySelector('.toggle-btn[data-cfg-key="cognition_enabled"]')
@@ -1053,6 +1077,71 @@ if (require.main === module) setTimeout(async () => {
   checks.push(["floor plan editor: removing an opening clears its wall marker",
     fpeCardNow.querySelectorAll(".fpn-op-marker").length === 0]);
   sRoot = elNew.shadowRoot;
+
+  // ── Settings → Voice Phrases (8.32.0): its own commands, never the
+  // generic data-cfg-key autosave ──
+  hass.states["script.heating_boost"] = { state: "off", attributes: { friendly_name: "Heating boost" } };
+  hass.services = { shell_command: { heat_boost: {} } };
+  elNew._render();
+  await new Promise(r => setTimeout(r, 20));
+  sRoot = elNew.shadowRoot;
+  let vpCard = sRoot.getElementById("settings-card-voice_phrases");
+  const vpText = () => sRoot.getElementById("settings-card-voice_phrases")?.textContent || "";
+  checks.push(["voice phrases: a real card in Voice & Speakers that lists the saved phrase",
+    !!vpCard && vpCard.getAttribute("data-settings-group") === "voice" && !vpCard.querySelector(".stub-tag")
+      && /House is cold/.test(vpText()) && /script\.heating_boost/.test(vpText())
+      && !vpCard.querySelector("[data-cfg-key]")]);
+  checks.push(["voice phrases: an entry that asks first says so, with a link to Voice Confirmation",
+    /Asks first, because of Voice Confirmation/.test(vpText())
+      && !!vpCard.querySelector('.vp-link[data-goto="voice_confirmation"]')]);
+  checks.push(["voice phrases: the card help covers phone taps, shell commands and Home Assistant precedence",
+    /need a tap on your phone/.test(vpText()) && /shell command runs without asking/.test(vpText())
+      && /sentence triggers with the same words win/.test(vpText())]);
+  sRoot.getElementById("vpTry").value = "the house is a bit cold";
+  sRoot.getElementById("vpTryBtn").click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["voice phrases: Try a sentence shows the match and runs nothing",
+    /Matches "House is cold" \(flexible\)\. Nothing was run\./.test(sRoot.getElementById("vpTryResult").textContent)
+      && _vpCalls.some(c => c.type === "nova/voice_phrases_test")
+      && !_vpCalls.some(c => c.type === "nova/voice_phrases_save")]);
+  sRoot.querySelector('.vp-edit[data-pid="vp_3f9c1a2b"]').click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["voice phrases: Edit opens the editor filled from the entry, as a Script",
+    sRoot.getElementById("vpName")?.value === "House is cold"
+      && sRoot.querySelectorAll(".vp-phrase").length === 2
+      && sRoot.getElementById("vpKind")?.value === "script"
+      && sRoot.getElementById("vpEntity")?.value === "script.heating_boost"
+      && !!sRoot.getElementById("vpAllowAi")]);
+  sRoot.getElementById("vpKind").value = "shell";
+  sRoot.getElementById("vpKind").dispatchEvent(new sRoot.ownerDocument.defaultView.Event("change", { bubbles: true }));
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["voice phrases: a shell command hides the AI switch and offers Home Assistant's shell commands",
+    !sRoot.getElementById("vpAllowAi") && sRoot.getElementById("vpName")?.value === "House is cold"
+      && !!sRoot.querySelector('#vpShell option[value="heat_boost"]')]);
+  sRoot.getElementById("vpShell").value = "heat_boost";
+  sRoot.getElementById("vpSave").click();
+  await new Promise(r => setTimeout(r, 20));
+  const vpSaved = _vpCalls.filter(c => c.type === "nova/voice_phrases_save").slice(-1)[0];
+  checks.push(["voice phrases: Save sends the whole entry with the shell command and no AI",
+    !!vpSaved && vpSaved.entry.phrase_id === "vp_3f9c1a2b"
+      && vpSaved.entry.action.service === "shell_command.heat_boost" && !vpSaved.entry.action.target
+      && vpSaved.entry.allow_ai === false && vpSaved.entry.phrases.length === 2
+      && !sRoot.getElementById("vpName")]);
+  sRoot.getElementById("vpAdd").click();
+  await new Promise(r => setTimeout(r, 20));
+  sRoot.getElementById("vpEntity").value = "script.heating_boost";
+  sRoot.getElementById("vpSave").click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["voice phrases: a backend refusal stays in the editor and shows why",
+    !!sRoot.getElementById("vpName") && /The name must be 1 to 60 characters/.test(sRoot.getElementById("vpErrors")?.textContent || "")]);
+  sRoot.getElementById("vpCancel").click();
+  await new Promise(r => setTimeout(r, 20));
+  sRoot.getElementById("vpEnabled").click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["voice phrases: the switch uses its own command and redraws OFF",
+    _vpCalls.some(c => c.type === "nova/voice_phrases_set_enabled" && c.enabled === false)
+      && sRoot.getElementById("vpEnabled").classList.contains("off")
+      && !_updateConfigCalls.some(c => c.key === "voice_phrases")]);
 
   // ── Settings → Home layout (8.30.0): door mapping and exit doors, moved
   // from the Residence tab when the 3D house was removed ──

@@ -35,5 +35,11 @@
   "nova/list_decisions": [
     "decisions",
     "next_cursor"
+  ],
+  "nova/voice_phrases_list": [
+    "allowed_domains",
+    "asks_first",
+    "enabled",
+    "entries"
   ]
 }

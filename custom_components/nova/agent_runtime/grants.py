@@ -18,7 +18,8 @@ _LOGGER = logging.getLogger(__name__.partition(".agent_runtime")[0] + ".agent")
 # search_entities — deferred within a batch when a require_unique search is
 # also present in that same batch, so an unresolved/ambiguous entity_id can
 # never reach a service call (Phase 3, see run_agent's dispatch loop).
-_MUTATING_TOOL_NAMES = {"control_device", "bulk_control", "run_scene_or_script", "execute_plan"}
+_MUTATING_TOOL_NAMES = {"control_device", "bulk_control", "run_scene_or_script", "execute_plan",
+                        "run_voice_phrase"}
 
 
 # ── Ephemeral sub-agents (delegate_task, v6.83.0) ────────────────────────────
@@ -76,6 +77,7 @@ _LEGACY_CAPABILITY_PROFILE_ALIASES: dict = {
 # mutating, persisting or specialist tool is ever missing here.
 _SUBAGENT_DENY: set = {
     "control_device", "bulk_control", "run_scene_or_script", "execute_plan",
+    "run_voice_phrase",
     "set_mode", "dismiss_intrusion", "acknowledge_alert",
     "ignore_entity", "unignore_entity",
     "create_goal", "update_goal", "manage_goals",

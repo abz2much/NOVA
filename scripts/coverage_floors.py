@@ -91,6 +91,10 @@ FILE_FLOORS = {
     "core_runtime.py": 93,         # 96.8%
     "core_safety.py": 95,          # 98.5%
     "core_state.py": 96,           # 100.0%
+    # 8.32.0 voice phrases (measured; new files).
+    "voice_phrases.py": 90,                             # 94.0% (new)
+    "voice_phrase_runner.py": 91,                       # 94.9% (new)
+    "ws_voice_phrases.py": 96,                          # 100.0% (new)
 }
 
 

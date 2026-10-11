@@ -28,6 +28,7 @@ from .capabilities.control import (
     _exec_control_device,
     _exec_execute_plan,
     _exec_run_scene_script,
+    _exec_run_voice_phrase,
 )
 from .capabilities.diagnostics import (
     _exec_cognitive_status,
@@ -97,6 +98,7 @@ _TOOL_MAP = {
     "search_entities":     _exec_search_entities,
     "get_area_devices":    _exec_get_area_devices,
     "run_scene_or_script": _exec_run_scene_script,
+    "run_voice_phrase":    _exec_run_voice_phrase,
     "get_home_summary":    _exec_home_summary,
     "bulk_control":        _exec_bulk_control,
     "execute_plan":        _exec_execute_plan,
@@ -160,6 +162,7 @@ _CLASSIFICATION = {
     "control_device":             ("control", True, False, False, _H),
     "bulk_control":               ("control", True, False, False, _H),
     "run_scene_or_script":        ("control", True, False, False, _H),
+    "run_voice_phrase":           ("control", True, False, False, _H),
     "execute_plan":               ("control", True, False, False, _H),
     "get_entity_state":           ("home", False, False, False, _H),
     "search_entities":            ("home", False, False, False, _H),

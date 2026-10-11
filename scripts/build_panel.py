@@ -35,6 +35,7 @@ SOURCES = (
     "panel/suggestions.js",          # suggestions and automation probation
     "panel/settings-catalogue.js",   # settings groups and cards
     "panel/home-layout.js",          # Settings: Home layout card (doors, exit doors)
+    "panel/voice-phrases.js",        # Settings: Voice Phrases card
     "panel/settings-cards.js",
     "panel/settings-models.js",      # AI model roles and credentials wiring
     "panel/settings-cards-more.js",

@@ -72,6 +72,7 @@
     "review_suggestions",
     "root_cause",
     "run_scene_or_script",
+    "run_voice_phrase",
     "schedule_followup",
     "search_documents",
     "search_entities",
@@ -93,7 +94,8 @@
     "bulk_control",
     "control_device",
     "execute_plan",
-    "run_scene_or_script"
+    "run_scene_or_script",
+    "run_voice_phrase"
   ],
   "profiles": {
     "homer": {
@@ -139,6 +141,7 @@
     "remember",
     "review_suggestions",
     "run_scene_or_script",
+    "run_voice_phrase",
     "schedule_followup",
     "set_mode",
     "unignore_entity",
@@ -975,6 +978,23 @@
       },
       "required": [
         "entity_id"
+      ]
+    },
+    "run_voice_phrase": {
+      "parameters": {
+        "properties": {
+          "phrase_id": {
+            "description": "A phrase_id from the Voice phrases list, e.g. vp_3f9c1a2b.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "phrase_id"
+        ],
+        "type": "object"
+      },
+      "required": [
+        "phrase_id"
       ]
     },
     "schedule_followup": {
