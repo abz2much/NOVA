@@ -298,5 +298,15 @@
   "e.g. climate.hall, climate.landing": "ex. climate.hol, climate.palier",
   "e.g. climate.set_temperature": "ex. climate.set_temperature",
   "e.g. the house is cold": "ex. e frig în casă",
-  "— pick one —": "— alege unul —"
+  "— pick one —": "— alege unul —",
+  "App address": "Adresa aplicației",
+  "Connected": "Conectat",
+  "Fallback speech to text": "Recunoaștere vocală de rezervă",
+  "Not loaded": "Neîncărcat",
+  "Not set": "Nesetat",
+  "Set Nova Voice ID as the speech to text in your voice assistant (Settings → Voice assistants). If the app isn't running, Nova uses the fallback.": "Alege Nova Voice ID ca recunoaștere vocală în asistentul vocal (Setări → Asistenți vocali). Dacă aplicația nu rulează, Nova folosește rezerva.",
+  "Shown in the Nova Voice ID app's log": "Apare în jurnalul aplicației Nova Voice ID",
+  "Speech to text through the Nova Voice ID app, with a fallback for when the app is down.": "Recunoaștere vocală prin aplicația Nova Voice ID, cu o rezervă pentru când aplicația nu merge.",
+  "Unreachable": "Inaccesibil",
+  "Voice ID": "Voice ID"
 }

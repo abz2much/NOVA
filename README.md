@@ -74,6 +74,7 @@ Nova's settings live in two places. Day to day settings (AI models, cameras, saf
 | Save effort | Suggests automations from your habits, reminds you when to leave for appointments, and gives morning and evening briefings | [Routines and suggestions](docs/routines-and-suggestions.md) |
 | Understand your energy | Shows solar, battery and grid in one place, today's totals and a 36 hour outlook with advice | [Energy](docs/energy.md) |
 | Remember things | Keeps facts you tell it, answers from your manuals and receipts, and can read your email (read only) | [Memory and knowledge](docs/memory-and-knowledge.md) |
+| Use Nova as your speech to text | Nova Voice ID passes your speech to Whisper and gives back the same words, and falls back to your own speech to text if the app is down. Needs the [Nova Voice ID app](https://github.com/abz2much/nova-voice-id) | [Voice ID](docs/voice-and-speakers.md#voice-id) |
 | Know who is speaking | Recognises voices so it can answer the right person | [Voice recognition](docs/voice-recognition.md) |
 | Hear about bad weather | Weather warnings from Met Éireann, the US National Weather Service or a CAP feed | [Weather warnings](docs/weather-warnings.md) |
 | Find out why something broke | Checks your setup for problems and explains what it found, with fixes you apply yourself | [Getting started](docs/getting-started.md#when-something-is-not-working) |

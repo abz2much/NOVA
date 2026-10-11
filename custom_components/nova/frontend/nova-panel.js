@@ -2,7 +2,7 @@
  * frontend/src/. Edit the sources there, then run the build. */
 /*
  * Nova Command Center Panel.
- * v8.34.0
+ * v8.35.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -79,7 +79,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.34.0 ",
+      console.log("%c Nova Panel %c v8.35.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -3170,6 +3170,8 @@ ${this._htmlDashboardBody()}`;
       desc: "Daily briefing schedule, content, and delivery speakers." },
     { id: "voice_confirmation", group: "voice", title: "Voice Confirmation", real: true,
       desc: "Whether risky actions need a spoken or phone confirmation before Nova acts." },
+    { id: "voice_id", group: "voice", title: "Voice ID", real: true,
+      desc: "Speech to text through the Nova Voice ID app, with a fallback for when the app is down." },
     { id: "satellite_speaker", group: "voice", title: "Satellite → Speaker", real: true,
       desc: "Per-satellite override, for a specific satellite that shouldn't use its room's assigned speaker." },
     { id: "announcement_speakers", group: "voice", title: "Announcement Speakers", real: true,
@@ -3777,6 +3779,7 @@ ${this._htmlDashboardBody()}`;
         : c.id === "briefings" ? this._briefingsCardBody()
         : c.id === "voice_phrases" ? this._voicePhrasesCardBody()
         : c.id === "voice_confirmation" ? this._voiceConfirmationCardBody()
+        : c.id === "voice_id" ? this._voiceIdCardBody()
         : c.id === "satellite_speaker" ? this._satelliteSpeakerCardBody()
         : c.id === "announcement_speakers" ? this._announcementSpeakersCardBody()
         : c.id === "notifications" ? this._notificationsCardBody()
@@ -4733,6 +4736,35 @@ ${this._htmlDashboardBody()}`;
       </div>
       <div class="cfg-row"><button class="mode-chip" id="newVcTest">▶ TEST SATELLITE AUDIO</button></div>
       <div class="stub-body" id="newVcTestResult"></div>`;
+  }
+
+  _voiceIdCardBody() {
+    const cfg = this._data()?.config || {};
+    const st = cfg.voice_id_status || {};
+    const fallback = cfg.voice_id_fallback_stt || "";
+    const sttOpts = [["", "— none —"], ...(cfg.stt_entities || []).map(e => [e.entity_id, e.name])];
+    if (fallback && !sttOpts.some(o => o[0] === fallback)) sttOpts.push([fallback, fallback]);
+    const meta = [st.version ? `v${st.version}` : "", (st.models || []).join(", ")].filter(Boolean).join(" · ");
+    const state = st.state === "connected" ? `<span class="vid-ok">Connected</span>`
+      : st.state === "unreachable" ? `<span class="vid-bad">Unreachable</span>`
+      : st.state === "checking" ? `<span>Checking…</span>`
+      : st.state === "not_set" ? `<span>Not set</span>`
+      : `<span>Not loaded</span>`;
+    return `
+      <div class="stub-body">Set Nova Voice ID as the speech to text in your voice assistant (Settings → Voice assistants). If the app isn't running, Nova uses the fallback.</div>
+      <div class="cfg-row">
+        <label>Status</label>
+        <div>${state}${meta ? ` <span class="toggle-desc">${this._esc(meta)}</span>` : ""}</div>
+      </div>
+      <div class="cfg-row">
+        <label>App address</label>
+        <input class="cfg-field" type="text" data-cfg-key="voice_id_uri" value="${this._esc(cfg.voice_id_uri || "")}">
+      </div>
+      <div class="toggle-desc">Shown in the Nova Voice ID app's log</div>
+      <div class="cfg-row">
+        <label>Fallback speech to text</label>
+        <select class="cfg-field" data-cfg-key="voice_id_fallback_stt">${this._optSelect(sttOpts, fallback)}</select>
+      </div>`;
   }
 
   _satelliteSpeakerCardBody() {
@@ -8985,6 +9017,7 @@ ${this._htmlDashboardBody()}`;
       .vp-row{flex-wrap:wrap}.vp-row .toggle-desc{flex:1;min-width:0;overflow-wrap:anywhere}
       .vp-editor select.cfg-field{flex:1;min-width:0;max-width:100%}
       .vp-note{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:-4px 0 8px}
+      .vid-ok{color:var(--gold)}.vid-bad{color:var(--warn)}
       .vp-link{background:none;border:none;padding:0;color:var(--gold);font:inherit;cursor:pointer;text-decoration:underline}
       .mode-grid{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
       .mode-chip{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.04em;

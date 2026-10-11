@@ -278,6 +278,50 @@ def _get_alarm_panels(hass: HomeAssistant) -> list[dict]:
         return []
 
 
+def _get_voice_id_status(entry) -> dict:
+    """The Nova Voice ID card's status (8.35.0): not_set, checking,
+    connected (with the app's version and models) or unreachable."""
+    try:
+        from .runtime import lifecycle_runtime
+        runtime = lifecycle_runtime(entry) if entry is not None else None
+        entity = getattr(runtime, "voice_id", None) if runtime is not None else None
+        if entity is not None:
+            return entity.status()
+    except Exception:
+        pass
+    return {"state": "unavailable", "name": "", "version": "", "models": [],
+            "languages": [], "error": "", "checked_at": None, "entity_id": None}
+
+
+def _get_stt_entities(hass: HomeAssistant, entry) -> list[dict]:
+    """STT entities for the Voice ID fallback list, never Nova's own."""
+    own: set[str] = set()
+    try:
+        from .runtime import lifecycle_runtime
+        runtime = lifecycle_runtime(entry) if entry is not None else None
+        entity = getattr(runtime, "voice_id", None) if runtime is not None else None
+        if entity is not None and entity.entity_id:
+            own.add(entity.entity_id)
+        if entry is not None:
+            from homeassistant.helpers import entity_registry as er
+            own_id = er.async_get(hass).async_get_entity_id(
+                "stt", "nova", f"{entry.entry_id}-voice-id-stt")
+            if own_id:
+                own.add(own_id)
+    except Exception:
+        pass
+    out = []
+    try:
+        for state in hass.states.async_all("stt"):
+            if state.entity_id in own:
+                continue
+            name = (state.attributes or {}).get("friendly_name") or state.entity_id
+            out.append({"entity_id": state.entity_id, "name": str(name)})
+    except Exception:
+        return []
+    return sorted(out, key=lambda e: e["name"].lower())
+
+
 def _get_intrusion_status() -> dict:
     """Active intrusion investigation (breach point + route) for the panel."""
     try:

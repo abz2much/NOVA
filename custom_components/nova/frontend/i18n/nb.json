@@ -298,5 +298,15 @@
   "e.g. climate.hall, climate.landing": "f.eks. climate.gang, climate.trapp",
   "e.g. climate.set_temperature": "f.eks. climate.set_temperature",
   "e.g. the house is cold": "f.eks. det er kaldt i huset",
-  "— pick one —": "— velg en —"
+  "— pick one —": "— velg en —",
+  "App address": "Appadresse",
+  "Connected": "Tilkoblet",
+  "Fallback speech to text": "Reserve for tale til tekst",
+  "Not loaded": "Ikke lastet",
+  "Not set": "Ikke angitt",
+  "Set Nova Voice ID as the speech to text in your voice assistant (Settings → Voice assistants). If the app isn't running, Nova uses the fallback.": "Velg Nova Voice ID som tale til tekst i taleassistenten din (Innstillinger → Taleassistenter). Hvis appen ikke kjører, bruker Nova reserven.",
+  "Shown in the Nova Voice ID app's log": "Vises i loggen til Nova Voice ID-appen",
+  "Speech to text through the Nova Voice ID app, with a fallback for when the app is down.": "Tale til tekst gjennom Nova Voice ID-appen, med en reserve når appen er nede.",
+  "Unreachable": "Utilgjengelig",
+  "Voice ID": "Voice ID"
 }

@@ -1206,5 +1206,15 @@
   "e.g. climate.hall, climate.landing": "bijv. climate.gang, climate.overloop",
   "e.g. climate.set_temperature": "bijv. climate.set_temperature",
   "e.g. the house is cold": "bijv. het is koud in huis",
-  "— pick one —": "— kies er een —"
+  "— pick one —": "— kies er een —",
+  "App address": "App-adres",
+  "Connected": "Verbonden",
+  "Fallback speech to text": "Reserve spraak-naar-tekst",
+  "Not loaded": "Niet geladen",
+  "Not set": "Niet ingesteld",
+  "Set Nova Voice ID as the speech to text in your voice assistant (Settings → Voice assistants). If the app isn't running, Nova uses the fallback.": "Kies Nova Voice ID als spraak-naar-tekst in je spraakassistent (Instellingen → Spraakassistenten). Draait de app niet, dan gebruikt Nova de reserve.",
+  "Shown in the Nova Voice ID app's log": "Staat in het logboek van de Nova Voice ID app",
+  "Speech to text through the Nova Voice ID app, with a fallback for when the app is down.": "Spraak-naar-tekst via de Nova Voice ID app, met een reserve voor als de app niet draait.",
+  "Unreachable": "Onbereikbaar",
+  "Voice ID": "Voice ID"
 }

@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from .scheduler import NovaScheduler
     from .sentinel import NovaSentinel
     from .state_ledger import StateLedger
+    from .stt import NovaVoiceIdStt
 
 
 @dataclass(slots=True)
@@ -78,6 +79,9 @@ class NovaRuntime:
     # so a repeat doesn't ask the same provider again (cognitive/holds.py).
     # Per runtime: a reload starts empty and never inherits the old ones.
     provider_holds: ProviderHolds = field(default_factory=ProviderHolds)
+    # The Nova Voice ID STT entity while it is in HA (stt.py sets and clears
+    # it). The panel card and the health row read its status from here.
+    voice_id: NovaVoiceIdStt | None = None
 
 
 # String form keeps the alias lazy: nothing subscripts ConfigEntry at import

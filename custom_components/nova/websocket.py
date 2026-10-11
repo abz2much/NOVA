@@ -75,7 +75,9 @@ from .ws_panel_stats import (
     _get_observer_stats,
     _get_output_mutes,
     _get_sentinel_rules,
+    _get_stt_entities,
     _get_suggestions,
+    _get_voice_id_status,
 )
 # The AI settings commands live in ws_ai.py. async_register registers the
 # handlers by name; invalidate_model_cache is public and stays importable
@@ -681,6 +683,11 @@ async def ws_get_panel_data(
                 "recognition_source":   str(_runtime_opt(hass, entry, "recognition_source", "both") or "both"),
                 "voice_confirm_enabled": bool(_runtime_opt(hass, entry, "voice_confirm_enabled", False)),
                 "voice_confirm_mode":   str(_runtime_opt(hass, entry, "voice_confirm_mode", "auto") or "auto"),
+                # Nova Voice ID (8.35.0)
+                "voice_id_uri": str(_runtime_opt(hass, entry, "voice_id_uri", "") or ""),
+                "voice_id_fallback_stt": str(_runtime_opt(hass, entry, "voice_id_fallback_stt", "") or ""),
+                "voice_id_status": _get_voice_id_status(entry),
+                "stt_entities": _get_stt_entities(hass, entry),
                 "intrusion_response_timeout": _runtime_opt(hass, entry, "intrusion_response_timeout", 120),
                 "intrusion_vision_confirm": bool(_runtime_opt(hass, entry, "intrusion_vision_confirm", True)),
                 # Scheduled briefings (v6.78.0)
@@ -1030,6 +1037,8 @@ PANEL_WRITABLE_KEYS = {
     "recognition_source",        # str: both | doubletake | frigate (v6.64.1)
     "voice_confirm_enabled",      # bool: voice-confirm sensitive actions (v6.67.0)
     "voice_confirm_mode",         # str: native | gated | auto
+    "voice_id_uri",               # str: Nova Voice ID app, tcp://host:port (8.35.0)
+    "voice_id_fallback_stt",      # str: STT entity used when the app is down
     "voice_confirm_entities",     # list: extra entities to confirm / !exempt
     "satellite_audio_out",        # dict/bool: satellites whose audio routes out
     "satellite_start_action",     # dict: satellite → esphome start action
@@ -1308,6 +1317,18 @@ async def ws_update_config(
             connection.send_error(msg["id"], "no_data", "Nova runtime data not found")
             return
 
+        # The fallback is never Nova's own Voice ID entity: it would call
+        # itself (8.35.0).
+        if key == "voice_id_fallback_stt" and value:
+            own = getattr(runtime, "voice_id", None)
+            if own is not None and value == own.entity_id:
+                connection.send_error(
+                    msg["id"], "invalid_value",
+                    "The fallback can't be Nova Voice ID itself")
+                return
+        if key == "voice_id_uri" and isinstance(value, str):
+            value = value.strip()
+
         # A location override is one coordinate pair. The panel still writes
         # through nova/update_config, but either coordinate update resolves the
         # other value and saves both together. Clearing either field, or making
@@ -1437,6 +1458,11 @@ async def ws_update_config(
         if key == "lockdown_exempt_locks":   # takes effect at once (8.29.0)
             from . import cognitive_core
             await cognitive_core.apply_runtime_config(key, value)
+        if key in ("voice_id_uri", "voice_id_fallback_stt"):
+            # Check the new address now, so the card's status is current.
+            entity = getattr(runtime, "voice_id", None)
+            if entity is not None:
+                await entity.async_refresh_info()
 
         # Classifier/reasoning provider or model changed while Observer is
         # already running — refresh those two tier providers live, the same

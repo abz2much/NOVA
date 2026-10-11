@@ -66,7 +66,10 @@
     "abort": {
       "already_configured": "Nova est déjà configuré.",
       "import_failed": "Configuration Nova trouvée mais aucun LLM utilisable (ni clé API ni point de terminaison local).",
-      "already_in_progress": "La configuration de Nova est déjà ouverte dans une autre fenêtre."
+      "already_in_progress": "La configuration de Nova est déjà ouverte dans une autre fenêtre.",
+      "updated": "Nova Voice ID trouvé. Son adresse est enregistrée dans Nova.",
+      "no_nova_entry": "Nova Voice ID a été trouvé, mais Nova n'est pas encore configuré. Configurez d'abord Nova, puis redémarrez l'app Nova Voice ID.",
+      "invalid_discovery_info": "Nova Voice ID a envoyé une adresse que Nova ne peut pas utiliser. Collez plutôt l'adresse du journal de l'app dans la carte Voice ID de Nova."
     }
   },
   "selector": {

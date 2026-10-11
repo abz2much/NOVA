@@ -22,6 +22,7 @@
         : c.id === "briefings" ? this._briefingsCardBody()
         : c.id === "voice_phrases" ? this._voicePhrasesCardBody()
         : c.id === "voice_confirmation" ? this._voiceConfirmationCardBody()
+        : c.id === "voice_id" ? this._voiceIdCardBody()
         : c.id === "satellite_speaker" ? this._satelliteSpeakerCardBody()
         : c.id === "announcement_speakers" ? this._announcementSpeakersCardBody()
         : c.id === "notifications" ? this._notificationsCardBody()

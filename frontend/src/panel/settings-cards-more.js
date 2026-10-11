@@ -64,6 +64,35 @@
       <div class="stub-body" id="newVcTestResult"></div>`;
   }
 
+  _voiceIdCardBody() {
+    const cfg = this._data()?.config || {};
+    const st = cfg.voice_id_status || {};
+    const fallback = cfg.voice_id_fallback_stt || "";
+    const sttOpts = [["", "— none —"], ...(cfg.stt_entities || []).map(e => [e.entity_id, e.name])];
+    if (fallback && !sttOpts.some(o => o[0] === fallback)) sttOpts.push([fallback, fallback]);
+    const meta = [st.version ? `v${st.version}` : "", (st.models || []).join(", ")].filter(Boolean).join(" · ");
+    const state = st.state === "connected" ? `<span class="vid-ok">Connected</span>`
+      : st.state === "unreachable" ? `<span class="vid-bad">Unreachable</span>`
+      : st.state === "checking" ? `<span>Checking…</span>`
+      : st.state === "not_set" ? `<span>Not set</span>`
+      : `<span>Not loaded</span>`;
+    return `
+      <div class="stub-body">Set Nova Voice ID as the speech to text in your voice assistant (Settings → Voice assistants). If the app isn't running, Nova uses the fallback.</div>
+      <div class="cfg-row">
+        <label>Status</label>
+        <div>${state}${meta ? ` <span class="toggle-desc">${this._esc(meta)}</span>` : ""}</div>
+      </div>
+      <div class="cfg-row">
+        <label>App address</label>
+        <input class="cfg-field" type="text" data-cfg-key="voice_id_uri" value="${this._esc(cfg.voice_id_uri || "")}">
+      </div>
+      <div class="toggle-desc">Shown in the Nova Voice ID app's log</div>
+      <div class="cfg-row">
+        <label>Fallback speech to text</label>
+        <select class="cfg-field" data-cfg-key="voice_id_fallback_stt">${this._optSelect(sttOpts, fallback)}</select>
+      </div>`;
+  }
+
   _satelliteSpeakerCardBody() {
     const cfg = this._data()?.config || {};
     const satellites = cfg.satellites || [];

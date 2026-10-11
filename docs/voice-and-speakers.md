@@ -196,6 +196,28 @@ Replies on a voice satellite are kept to one or two short sentences, and
 never talk about voice phrases, tools or how Nova works. Chat replies are
 unchanged.
 
+## Voice ID
+
+Nova Voice ID is Nova's own speech to text. It needs the Nova Voice ID app,
+installed from [github.com/abz2much/nova-voice-id](https://github.com/abz2much/nova-voice-id).
+The app passes your speech to the Whisper app and gives back Whisper's words
+unchanged. Speaker recognition comes later; for now it changes nothing you
+hear.
+
+1. Install and start the Nova Voice ID app.
+2. In Nova, open **Settings → Voice & Speakers → Voice ID**. Paste the
+   address from the app's log (it looks like `tcp://<name>:10350`). The status
+   says **Connected**, with the app's version and Whisper's models.
+3. Pick a **Fallback speech to text**, usually your Whisper entity.
+4. In Home Assistant, open **Settings → Voice assistants**, pick your
+   assistant, and set its speech to text to **Nova Voice ID**.
+
+If the app is stopped or can't be reached, Nova hands the audio to the
+fallback, so voice keeps working. If the app stops halfway through a
+sentence, that one request fails; say it again. The Logs tab shows one STT
+line per request (app, fallback or error, and how long it took), never your
+words. Settings → Diagnostics shows a **Voice ID** row.
+
 ## What it works out by itself
 
 - The satellites and Cast devices it can use, for the speaker cards.
@@ -231,6 +253,8 @@ unchanged.
 | A voice phrase does nothing | Another phrase ties with it, the words are a near miss, or Home Assistant answered first | Try the sentence in **Try a sentence**, and check your automations for a sentence trigger with the same words. |
 | A phrase says it needs confirming | Voice Confirmation is on, or it unlocks, opens or disarms | Answer the question. For unlock, open or disarm, ask the usual way and tap your phone. |
 | You said yes and nothing ran | The yes was on another satellite, came after 60 seconds, or another satellite heard it first | Ask again, and answer on the same satellite. |
+| The Voice ID status says Unreachable | The app is stopped, or the address is wrong | Start the app, and paste the address from its log again. Voice still works through the fallback. |
+| Voice stopped working after picking Nova Voice ID | The app is down and no fallback is set | Pick a fallback in the Voice ID card. |
 
 ## Settings
 

@@ -233,6 +233,8 @@
     "visitor_learning",
     "voice_confirm_enabled",
     "voice_confirm_entities",
-    "voice_confirm_mode"
+    "voice_confirm_mode",
+    "voice_id_fallback_stt",
+    "voice_id_uri"
   ]
 }

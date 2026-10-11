@@ -66,7 +66,10 @@
     "abort": {
       "already_configured": "Nova este deja configurată.",
       "import_failed": "S-a găsit o configurare Nova, dar niciun LLM utilizabil (nicio cheie API și niciun endpoint local).",
-      "already_in_progress": "Configurarea Nova este deja deschisă într-o altă fereastră."
+      "already_in_progress": "Configurarea Nova este deja deschisă într-o altă fereastră.",
+      "updated": "Nova Voice ID a fost găsit. Adresa lui este salvată în Nova.",
+      "no_nova_entry": "Nova Voice ID a fost găsit, dar Nova nu este încă configurată. Configurează mai întâi Nova, apoi repornește aplicația Nova Voice ID.",
+      "invalid_discovery_info": "Nova Voice ID a trimis o adresă pe care Nova nu o poate folosi. Lipește în schimb adresa din jurnalul aplicației în cardul Voice ID din Nova."
     }
   },
   "selector": {

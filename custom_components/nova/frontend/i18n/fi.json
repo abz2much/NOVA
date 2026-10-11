@@ -298,5 +298,15 @@
   "e.g. climate.hall, climate.landing": "esim. climate.eteinen, climate.porraskaytava",
   "e.g. climate.set_temperature": "esim. climate.set_temperature",
   "e.g. the house is cold": "esim. talossa on kylmä",
-  "— pick one —": "— valitse —"
+  "— pick one —": "— valitse —",
+  "App address": "Sovelluksen osoite",
+  "Connected": "Yhdistetty",
+  "Fallback speech to text": "Varapuheentunnistus",
+  "Not loaded": "Ei ladattu",
+  "Not set": "Ei asetettu",
+  "Set Nova Voice ID as the speech to text in your voice assistant (Settings → Voice assistants). If the app isn't running, Nova uses the fallback.": "Valitse Nova Voice ID puheesta tekstiksi -palveluksi ääniavustajassasi (Asetukset → Ääniavustajat). Jos sovellus ei ole käynnissä, Nova käyttää varavaihtoehtoa.",
+  "Shown in the Nova Voice ID app's log": "Näkyy Nova Voice ID -sovelluksen lokissa",
+  "Speech to text through the Nova Voice ID app, with a fallback for when the app is down.": "Puheesta tekstiksi Nova Voice ID -sovelluksen kautta, ja varavaihtoehto, kun sovellus ei toimi.",
+  "Unreachable": "Ei tavoitettavissa",
+  "Voice ID": "Voice ID"
 }

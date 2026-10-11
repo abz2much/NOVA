@@ -84,6 +84,9 @@ _INTRUSION_RESPONSE_TIMEOUT_RANGE = (30.0, 600.0)
 
 SECURITY_ALARM_ENTITY_KEY = "security_alarm_entity"
 _ALARM_ENTITY_ID = re.compile(r"alarm_control_panel\.[a-z0-9_]+")
+_STT_ENTITY_ID = re.compile(r"stt\.[a-z0-9_]+")
+VOICE_ID_URI_KEY = "voice_id_uri"
+VOICE_ID_FALLBACK_KEY = "voice_id_fallback_stt"
 
 # Weather warnings (8.8.0).
 HAZARD_LEVEL_KEYS = ("hazard_push_level", "hazard_speak_level")
@@ -238,6 +241,13 @@ def valid_panel_value(key: str, value) -> bool:
     if key == "output_language":
         from . import output_language
         return output_language.is_valid_setting(value)
+    if key == VOICE_ID_URI_KEY:
+        # Empty turns the app off; otherwise tcp://host:port (8.35.0).
+        from .voice_id import valid_uri
+        return isinstance(value, str) and len(value) <= 512 and valid_uri(value.strip())
+    if key == VOICE_ID_FALLBACK_KEY:
+        return value == "" or (isinstance(value, str)
+                               and _STT_ENTITY_ID.fullmatch(value) is not None)
     if key == HOST_HEALTH_PERSISTENCE_KEY:
         return _valid_bounded_number(value, *_HOST_HEALTH_PERSISTENCE_RANGE)
     if key == HOST_HEALTH_COOLDOWN_KEY:
@@ -309,6 +319,10 @@ def invalid_panel_value_message(key: str) -> str:
                 f"{_range_text(*_INTRUSION_RESPONSE_TIMEOUT_RANGE)}")
     if key == SECURITY_ALARM_ENTITY_KEY:
         return f"Key '{key}' must be empty or an alarm_control_panel entity id"
+    if key == VOICE_ID_URI_KEY:
+        return f"Key '{key}' must be empty or an address like tcp://host:10350"
+    if key == VOICE_ID_FALLBACK_KEY:
+        return f"Key '{key}' must be empty or an stt entity id"
     if key == SLEEP_OVERRIDE_KEY:
         return f"Key '{key}' must be one of: auto, awake, asleep"
     if key in HAZARD_LEVEL_KEYS:

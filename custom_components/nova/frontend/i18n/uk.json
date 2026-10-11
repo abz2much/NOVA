@@ -298,5 +298,15 @@
   "e.g. climate.hall, climate.landing": "напр. climate.korydor, climate.maidanchyk",
   "e.g. climate.set_temperature": "напр. climate.set_temperature",
   "e.g. the house is cold": "напр. у будинку холодно",
-  "— pick one —": "— виберіть —"
+  "— pick one —": "— виберіть —",
+  "App address": "Адреса застосунку",
+  "Connected": "Підключено",
+  "Fallback speech to text": "Резервне розпізнавання мовлення",
+  "Not loaded": "Не завантажено",
+  "Not set": "Не задано",
+  "Set Nova Voice ID as the speech to text in your voice assistant (Settings → Voice assistants). If the app isn't running, Nova uses the fallback.": "Виберіть Nova Voice ID для розпізнавання мовлення у своєму голосовому асистенті (Налаштування → Голосові асистенти). Якщо застосунок не працює, Nova використовує резервне.",
+  "Shown in the Nova Voice ID app's log": "Указано в журналі застосунку Nova Voice ID",
+  "Speech to text through the Nova Voice ID app, with a fallback for when the app is down.": "Розпізнавання мовлення через застосунок Nova Voice ID із резервним варіантом, коли застосунок не працює.",
+  "Unreachable": "Недоступно",
+  "Voice ID": "Voice ID"
 }

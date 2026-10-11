@@ -172,7 +172,7 @@ async def test_aggregate_overall_down_when_any_active_down(sh, monkeypatch):
     monkeypatch.setattr(sh, "_check_stt", lambda h: {"name": "STT", "key": "stt", "status": "ok", "detail": ""})
     res = await sh.run_service_health(_Hass({}))
     assert res["overall"] == "down"
-    assert len(res["services"]) == 9
+    assert len(res["services"]) == 10
     # 'off' services excluded from the healthy count
     assert "healthy" in res["summary"]
 
@@ -195,7 +195,7 @@ async def test_aggregate_never_raises_on_check_error(sh, monkeypatch):
     monkeypatch.setattr(sh, "_check_tts", lambda h: (_ for _ in ()).throw(RuntimeError("x")))
     monkeypatch.setattr(sh, "_check_stt", lambda h: {"name": "STT", "key": "stt", "status": "ok", "detail": ""})
     res = await sh.run_service_health(_Hass({}))       # must not raise
-    assert "services" in res and len(res["services"]) == 9
+    assert "services" in res and len(res["services"]) == 10
 
 
 # ── agent tool registration ──────────────────────────────────────────────────
@@ -441,3 +441,38 @@ def test_scheduler_check_warns_on_repeated_failures(sh):
     out = sh._check_scheduler(_hass_with({"scheduler": sched}))
     assert out["status"] == "warn"
     assert "hazard" in out["detail"]
+
+
+# ── Voice ID (8.35.0) ────────────────────────────────────────────────────────
+
+def _voice_id_hass(monkeypatch, sh, status):
+    import sys
+    import types
+    entity = None if status is None else types.SimpleNamespace(status=lambda: status)
+    runtime = types.SimpleNamespace(voice_id=entity)
+    rt = sys.modules["jc.runtime"]
+    monkeypatch.setattr(rt, "domain_runtime", lambda hass: runtime)
+    return object()
+
+
+@pytest.mark.parametrize("status,expected", [
+    (None, "off"),
+    ({"state": "not_set"}, "off"),
+    ({"state": "connected", "version": "0.1.0"}, "ok"),
+    ({"state": "unreachable"}, "idle"),
+    ({"state": "checking"}, "idle"),
+])
+def test_voice_id_row(sh, load, monkeypatch, status, expected):
+    load("runtime")
+    sh._USAGE.clear()
+    out = sh._check_voice_id(_voice_id_hass(monkeypatch, sh, status))
+    assert out["key"] == "voice_id" and out["status"] == expected
+
+
+def test_voice_id_real_failure_is_down(sh, load, monkeypatch):
+    load("runtime")
+    sh._USAGE.clear()
+    sh.record_usage("voice_id", False, "app unreachable; used fallback")
+    out = sh._check_voice_id(_voice_id_hass(monkeypatch, sh, {"state": "connected"}))
+    sh._USAGE.clear()
+    assert out["status"] == "down" and "used fallback" in out["detail"]
