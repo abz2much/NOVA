@@ -13,7 +13,7 @@
   // this list and the color map) fell through to a bare "•" bullet with
   // no way to filter for it.
   static LOG_FILTERS = ["all", "CONV", "REPLY", "LOCAL", "LEARN", "AGENT", "AUTO", "MODE", "CONFIG",
-    "CLASSIFY", "CAMERA", "ENERGY", "BIO", "OFFER", "SAFETY", "ERROR", "WARNING", "GATE", "DEDUP", "OFFLINE"];
+    "CLASSIFY", "CAMERA", "ENERGY", "BIO", "OFFER", "SAFETY", "ERROR", "WARNING", "GATE", "DEDUP", "OFFLINE", "VOICE"];
   static LOG_CATEGORIES = {
     CONV: { color: "#5fd0e0", icon: "💬" },
     REPLY: { color: "#4fb8ff", icon: "💭" },
@@ -34,6 +34,7 @@
     GATE: { color: "var(--ink-faint)", icon: "🚧" },
     DEDUP: { color: "var(--ink-faint)", icon: "🔇" },
     OFFLINE: { color: "var(--ink-faint)", icon: "📴" },
+    VOICE: { color: "#7fe0c4", icon: "🎙️" },       // Nova Voice ID result (8.36.0)
   };
 
   _htmlLogs() {

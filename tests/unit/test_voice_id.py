@@ -8,12 +8,10 @@ real HA side (entity registration, real fallback entity, discovery).
 from __future__ import annotations
 
 import asyncio
-import enum
 import socket
 import sys
 import time
 import types
-from dataclasses import dataclass
 
 import pytest
 
@@ -27,66 +25,10 @@ TEXT = "turn on the kitchen lights"
 CHUNKS = [b"\x01\x00" * 160, b"\x02\x00" * 160, b"\x03\x00" * 160]
 
 
-# ── stand-in for homeassistant.components.stt ─────────────────────────────
-def _install_stt_stub() -> None:
-    if "homeassistant.components.stt" in sys.modules:
-        return
-    mod = types.ModuleType("homeassistant.components.stt")
+# ── stand-in for homeassistant.components.stt (tests/voice_id_fakes.py) ────
+from voice_id_fakes import install_stt_stub  # noqa: E402
 
-    mod.AudioFormats = enum.Enum("AudioFormats", {"WAV": "wav", "OGG": "ogg"})
-    mod.AudioCodecs = enum.Enum("AudioCodecs", {"PCM": "pcm", "OPUS": "opus"})
-    mod.AudioBitRates = enum.Enum("AudioBitRates", {"BITRATE_16": 16})
-    mod.AudioSampleRates = enum.Enum("AudioSampleRates", {"SAMPLERATE_16000": 16000})
-    mod.AudioChannels = enum.Enum("AudioChannels", {"CHANNEL_MONO": 1})
-    mod.SpeechResultState = enum.Enum("SpeechResultState",
-                                      {"SUCCESS": "success", "ERROR": "error"})
-
-    @dataclass
-    class SpeechMetadata:
-        language: str
-        format: object
-        codec: object
-        bit_rate: object
-        sample_rate: object
-        channel: object
-
-    @dataclass
-    class SpeechResult:
-        text: str | None
-        result: object
-
-    class SpeechToTextEntity:
-        entity_id = None
-
-        async def async_added_to_hass(self):
-            pass
-
-        async def async_will_remove_from_hass(self):
-            pass
-
-        def check_metadata(self, metadata):
-            return (metadata.language in self.supported_languages
-                    and metadata.format in self.supported_formats
-                    and metadata.codec in self.supported_codecs
-                    and metadata.bit_rate in self.supported_bit_rates
-                    and metadata.sample_rate in self.supported_sample_rates
-                    and metadata.channel in self.supported_channels)
-
-    mod.SpeechMetadata = SpeechMetadata
-    mod.SpeechResult = SpeechResult
-    mod.SpeechToTextEntity = SpeechToTextEntity
-    mod.ENTITIES = {}
-    mod.async_get_speech_to_text_entity = lambda hass, eid: mod.ENTITIES.get(eid)
-    sys.modules["homeassistant.components.stt"] = mod
-    sys.modules["homeassistant.components"].stt = mod
-
-    if "homeassistant.helpers.entity_platform" not in sys.modules:
-        ep = types.ModuleType("homeassistant.helpers.entity_platform")
-        ep.AddEntitiesCallback = object
-        sys.modules["homeassistant.helpers.entity_platform"] = ep
-
-
-_install_stt_stub()
+install_stt_stub()
 STT = sys.modules["homeassistant.components.stt"]
 
 

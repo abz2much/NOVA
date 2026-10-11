@@ -175,6 +175,9 @@ SERVICE_CALLERS = {
     # words, after policy.authorize/authorize_now for every target, with an
     # action log row for each (tests/unit/test_authority.py).
     "voice_phrase_runner.py",
+    # 8.36.0: assist_satellite.announce of a recording prompt on the
+    # satellite the user picked in the panel. Never a device action.
+    "voice_enrol.py",
 }
 ANNOUNCERS = {
     "__init__.py", "appliance_monitor.py", "briefing.py", "camera.py", "cognitive_core.py",

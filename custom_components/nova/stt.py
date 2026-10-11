@@ -8,10 +8,10 @@ untouched to the fallback STT entity, so voice keeps working.
     satellite → HA pipeline → stt.nova_voice_id → Nova Voice ID app → Whisper
                                         └─ app unreachable → fallback STT entity
 
-No speaker recognition yet: the transcript's extra ``nova_voice_id`` key is
-read and logged at debug, nothing else. Phase 2 will act on it, so it must keep
-coming back to async_process_audio_stream itself (a ContextVar set inside a
-child task never reaches the caller).
+The transcript's extra ``nova_voice_id`` block is checked and kept for this
+one request in voice_id.VOICE_RESULT (8.36.0). It is set in
+async_process_audio_stream itself: a ContextVar set inside a child task never
+reaches the caller. Nova does not use it to decide who is speaking.
 
 The fallback is called through its own async_process_audio_stream after
 check_metadata, the same way HA's assist pipeline calls an STT entity
@@ -237,6 +237,22 @@ class NovaVoiceIdStt(stt.SpeechToTextEntity):
     async def async_process_audio_stream(
         self, metadata: stt.SpeechMetadata, stream: AsyncIterable[bytes],
     ) -> stt.SpeechResult:
+        """Route the request, then keep its voice result for this request.
+
+        VOICE_RESULT is set here, in this method's own task, which is the
+        task HA's pipeline goes on to run the conversation agent in (8.36.0).
+        _route is awaited, never a child task, so nothing it does is lost.
+        The fallback and every error give status "error"."""
+        voice: list[voice_id.VoiceResult] = []
+        try:
+            return await self._route(metadata, stream, voice)
+        finally:
+            voice_id.set_turn_voice(voice[0] if voice else voice_id.error_result())
+
+    async def _route(
+        self, metadata: stt.SpeechMetadata, stream: AsyncIterable[bytes],
+        voice: list,
+    ) -> stt.SpeechResult:
         start = time.monotonic()
         uri = self._uri()
 
@@ -275,7 +291,8 @@ class NovaVoiceIdStt(stt.SpeechToTextEntity):
         finally:
             await voice_id.close(client)
 
-        status = voice_id.voice_id_status(result.voice_id)
+        voice.append(voice_id.parse_block(result.voice_id))
+        status = voice[0].status
         _LOGGER.debug("Nova Voice ID: status %s", status)
         if self._state != "connected":
             # The app is back: fetch its Info again for the card and languages.

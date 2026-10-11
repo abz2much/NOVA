@@ -466,15 +466,21 @@ class NovaConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     async def async_step_hassio(self, discovery_info) -> dict:
-        """Supervisor discovery from the Nova Voice ID app (8.35.0).
+        """Supervisor discovery from the Nova Voice ID app (8.35.0, 8.36.0).
 
-        The app announces service ``nova`` with {"uri": "tcp://<host>:10350"}.
-        This never creates an entry: with a Nova entry the address is saved
-        to its voice_id_uri setting, and without one the flow just aborts."""
-        from . import nova_config, paths, voice_id
+        The app announces service ``nova`` with {"uri": "tcp://<host>:10350",
+        "token": "..."} each time it starts. This never creates an entry. With
+        a Nova entry, each value is saved only where the field is empty or
+        still holds what the last discovery sent: a value the user typed
+        always wins (voice_id_store.async_apply_discovery). Without an entry
+        the flow just aborts. The token is never logged."""
+        from . import paths, voice_id, voice_id_store
         from .runtime import lifecycle_runtime
 
-        uri = str((getattr(discovery_info, "config", None) or {}).get("uri") or "").strip()
+        config = getattr(discovery_info, "config", None) or {}
+        uri = str(config.get("uri") or "").strip()
+        token = config.get("token")
+        token = token.strip() if isinstance(token, str) else ""
         if not uri or not voice_id.valid_uri(uri):
             _LOGGER.warning("Nova: Voice ID discovery sent an unusable address")
             return self.async_abort(reason="invalid_discovery_info")
@@ -485,18 +491,15 @@ class NovaConfigFlow(ConfigFlow, domain=DOMAIN):
         entry = entries[0]
 
         paths.configure(self.hass)
+        filled = await voice_id_store.async_apply_discovery(self.hass, entry, uri, token or None)
         runtime = lifecycle_runtime(entry)
-        if runtime is not None:
-            runtime.runtime_config["voice_id_uri"] = uri
-        persisted = await self.hass.async_add_executor_job(
-            nova_config.set, "voice_id_uri", uri)
-        if not persisted:
-            _LOGGER.warning("Nova: Voice ID address applied but not saved to disk")
         entity = getattr(runtime, "voice_id", None) if runtime is not None else None
-        if entity is not None:
+        if entity is not None and filled["uri"]:
             self.hass.async_create_background_task(
                 entity.async_refresh_info(), "nova voice id info")
-        _LOGGER.info("Nova: Voice ID app found by discovery at %s", uri)
+        _LOGGER.info("Nova: Voice ID app found by discovery at %s (address %s, token %s)",
+                     uri, "saved" if filled["uri"] else "kept yours",
+                     "saved" if filled["token"] else ("kept yours" if token else "not sent"))
         return self.async_abort(reason="updated")
 
     @staticmethod

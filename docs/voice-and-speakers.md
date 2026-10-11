@@ -201,13 +201,16 @@ unchanged.
 Nova Voice ID is Nova's own speech to text. It needs the Nova Voice ID app,
 installed from [github.com/abz2much/nova-voice-id](https://github.com/abz2much/nova-voice-id).
 The app passes your speech to the Whisper app and gives back Whisper's words
-unchanged. Speaker recognition comes later; for now it changes nothing you
-hear.
+unchanged. From app 0.2.0 it also says whose voice it heard. For now Nova only
+logs that: who Nova thinks is speaking, its replies and its memory don't
+change.
 
 1. Install and start the Nova Voice ID app.
-2. In Nova, open **Settings → Voice & Speakers → Voice ID**. Paste the
-   address from the app's log (it looks like `tcp://<name>:10350`). The status
-   says **Connected**, with the app's version and Whisper's models.
+2. In Nova, open **Settings → Voice & Speakers → Voice ID**. The app fills in
+   its address and token when Nova finds it. If it doesn't, paste the address
+   from the app's log (it looks like `tcp://<name>:10350`) and the token from
+   the app's Configuration tab. The status says **Connected**, with the app's
+   version and Whisper's models.
 3. Pick a **Fallback speech to text**, usually your Whisper entity.
 4. In Home Assistant, open **Settings → Voice assistants**, pick your
    assistant, and set its speech to text to **Nova Voice ID**.
@@ -215,8 +218,51 @@ hear.
 If the app is stopped or can't be reached, Nova hands the audio to the
 fallback, so voice keeps working. If the app stops halfway through a
 sentence, that one request fails; say it again. The Logs tab shows one STT
-line per request (app, fallback or error, and how long it took), never your
-words. Settings → Diagnostics shows a **Voice ID** row.
+line per request (app, fallback or error, and how long it took) and, for each
+voice turn, a **VOICE** line with the app's result: status, best match,
+scores, seconds of speech and the satellite. Never your words. Settings →
+Diagnostics shows a **Voice ID** row.
+
+A value you type in the address or token field always wins. The app only
+fills a field that is empty or still holds what it filled in last time.
+
+### Recording a voice
+
+The People list shows everyone in Home Assistant (`person.*`), with how many
+samples the app has for them. **Hide** tucks away accounts that aren't real
+people.
+
+1. Pick the satellite under **Record on**, then press **Record voice** next to
+   the person.
+2. The satellite says "{name}, after the wake word, please say: …". Say the
+   wake word, then the sentence. Nova never reopens the mic, so say the wake
+   word each time.
+3. Nova answers on that satellite with the next sentence, or "Sorry, once
+   more please" when the sample was too short or sounded like someone else.
+   After two tries it moves on to another sentence.
+4. After 8 samples it says "Thanks, {name}, that's done." The card shows the
+   progress as it goes, and **Cancel** stops it.
+
+Record each person on every satellite, because rooms sound different. While a
+recording runs, only the turns from that satellite go to it; the others work
+as usual. A recording turn never runs a voice phrase, a command or the AI.
+After 5 minutes it stops by itself, and it stops after three turns in a row that bring no voice result (the app is down, or that satellite's voice assistant doesn't use Nova Voice ID). Samples already saved are kept.
+
+The sentences are plain ones, never commands or questions, because Home
+Assistant answers some sentences itself before Nova hears them.
+
+### Deleting a voice
+
+**Delete voice** removes that person's voice and recordings from the app,
+after you confirm. **Delete all voice data** removes everyone's, after two
+confirmations.
+
+### Where voice data lives
+
+Only in the Nova Voice ID app, never in Nova. Nova keeps the app's address in
+its settings and the token in Home Assistant's `secrets.yaml`. The voice
+result for a request lives only for that request, and the log lines hold
+numbers and ids, not audio or words.
 
 ## What it works out by itself
 
@@ -253,6 +299,8 @@ words. Settings → Diagnostics shows a **Voice ID** row.
 | A voice phrase does nothing | Another phrase ties with it, the words are a near miss, or Home Assistant answered first | Try the sentence in **Try a sentence**, and check your automations for a sentence trigger with the same words. |
 | A phrase says it needs confirming | Voice Confirmation is on, or it unlocks, opens or disarms | Answer the question. For unlock, open or disarm, ask the usual way and tap your phone. |
 | You said yes and nothing ran | The yes was on another satellite, came after 60 seconds, or another satellite heard it first | Ask again, and answer on the same satellite. |
+| "The app's token doesn't match" | The token in Nova isn't the app's | Copy the token from the app's Configuration tab into the Voice ID card. |
+| A recording turn ran a command instead | Home Assistant handled the sentence itself | Use the sentences Nova asks for, word for word. |
 | The Voice ID status says Unreachable | The app is stopped, or the address is wrong | Start the app, and paste the address from its log again. Voice still works through the fallback. |
 | Voice stopped working after picking Nova Voice ID | The app is down and no fallback is set | Pick a fallback in the Voice ID card. |
 

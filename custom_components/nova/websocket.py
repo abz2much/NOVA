@@ -171,6 +171,16 @@ from .ws_voice_phrases import (
     ws_voice_phrases_set_enabled,
     ws_voice_phrases_test,
 )
+# The Nova Voice ID commands (8.36.0) live in ws_voice_id.py. async_register registers them by name.
+from .ws_voice_id import (
+    ws_voice_id_delete,
+    ws_voice_id_profiles,
+    ws_voice_id_record,
+    ws_voice_id_record_cancel,
+    ws_voice_id_record_status,
+    ws_voice_id_token_get,
+    ws_voice_id_token_set,
+)
 from .const import (
     CONF_BEDROOM_AREAS,
     CONF_GROUND_FLOOR_AREAS,
@@ -269,6 +279,13 @@ def async_register(hass: HomeAssistant) -> None:
         websocket_api.async_register_command(hass, ws_voice_phrases_delete)
         websocket_api.async_register_command(hass, ws_voice_phrases_set_enabled)
         websocket_api.async_register_command(hass, ws_voice_phrases_test)
+        websocket_api.async_register_command(hass, ws_voice_id_profiles)
+        websocket_api.async_register_command(hass, ws_voice_id_record)
+        websocket_api.async_register_command(hass, ws_voice_id_record_cancel)
+        websocket_api.async_register_command(hass, ws_voice_id_record_status)
+        websocket_api.async_register_command(hass, ws_voice_id_delete)
+        websocket_api.async_register_command(hass, ws_voice_id_token_get)
+        websocket_api.async_register_command(hass, ws_voice_id_token_set)
     except Exception as exc:
         _LOGGER.debug("WS command register note: %s", exc)
 
@@ -311,6 +328,24 @@ def _executor_runtime_config(entry) -> dict:
         return {}
     from .runtime import runtime_config_snapshot
     return runtime_config_snapshot(entry)
+
+
+async def _voice_id_token(hass: HomeAssistant) -> str:
+    """Whether a Voice ID token is set, for the panel. The value itself only
+    ever goes out through nova/voice_id_token_get."""
+    try:
+        from . import voice_id_store
+        return await voice_id_store.async_get_token(hass)
+    except Exception:
+        return ""
+
+
+def _get_voice_id_enrol() -> dict:
+    try:
+        from . import voice_enrol
+        return voice_enrol.status()
+    except Exception:
+        return {"state": "idle"}
 
 
 def _runtime_opt(hass: HomeAssistant, entry, key: str, default=None):
@@ -688,6 +723,9 @@ async def ws_get_panel_data(
                 "voice_id_fallback_stt": str(_runtime_opt(hass, entry, "voice_id_fallback_stt", "") or ""),
                 "voice_id_status": _get_voice_id_status(entry),
                 "stt_entities": _get_stt_entities(hass, entry),
+                "voice_id_token_set": bool(await _voice_id_token(hass)),
+                "voice_id_hidden_people": _get_runtime_json(hass, entry, "voice_id_hidden_people", []),
+                "voice_id_enrol": _get_voice_id_enrol(),
                 "intrusion_response_timeout": _runtime_opt(hass, entry, "intrusion_response_timeout", 120),
                 "intrusion_vision_confirm": bool(_runtime_opt(hass, entry, "intrusion_vision_confirm", True)),
                 # Scheduled briefings (v6.78.0)
@@ -1039,6 +1077,7 @@ PANEL_WRITABLE_KEYS = {
     "voice_confirm_mode",         # str: native | gated | auto
     "voice_id_uri",               # str: Nova Voice ID app, tcp://host:port (8.35.0)
     "voice_id_fallback_stt",      # str: STT entity used when the app is down
+    "voice_id_hidden_people",     # JSON list: person ids hidden from the Voice ID card (8.36.0)
     "voice_confirm_entities",     # list: extra entities to confirm / !exempt
     "satellite_audio_out",        # dict/bool: satellites whose audio routes out
     "satellite_start_action",     # dict: satellite → esphome start action

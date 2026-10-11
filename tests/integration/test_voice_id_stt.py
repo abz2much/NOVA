@@ -25,7 +25,8 @@ from .conftest import MockConfigEntry
 DOMAIN = "nova"
 TEXT = "what's the weather"
 CHUNKS = [b"\x01\x00" * 160, b"\x02\x00" * 160]
-KEYS = ("voice_id_uri", "voice_id_fallback_stt")
+KEYS = ("voice_id_uri", "voice_id_fallback_stt", "voice_id_uri_discovered",
+        "voice_id_token_discovered_sha256")
 
 
 def _meta(language="en"):
