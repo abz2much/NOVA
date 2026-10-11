@@ -120,7 +120,7 @@ async def test_a_phrase_that_needs_confirming_goes_to_the_agent(hass, tmp_path, 
     eng = _Engine("Shall I run House is cold?")
     local, agent = eng.patches()
     with local, agent:
-        result = await _converse(hass, entity_id, "the house is cold", "voice-1")
+        result = await _converse(hass, entity_id, "the house is a bit cold", "voice-1")
         await hass.async_block_till_done()
     assert calls == []                                   # nothing ran
     assert eng.local_calls == 0                          # the local engine never saw it
@@ -141,7 +141,7 @@ async def test_a_refusal_on_the_second_target_runs_nothing(hass, tmp_path, monke
     eng = _Engine()
     local, agent = eng.patches()
     with local, agent:
-        await _converse(hass, entity_id, "the house is cold", "voice-1")
+        await _converse(hass, entity_id, "the house is a bit cold", "voice-1")
         await hass.async_block_till_done()
     # Deferred, not dropped: the local engine never saw it, the agent did.
     assert calls == [] and eng.local_calls == 0 and len(eng.personas) == 1

@@ -241,6 +241,10 @@ async def test_run_entry_never_raises(run, fake_hass, al, monkeypatch):
 
 # ── try_phrase: the conversation step ───────────────────────────────────────
 
+# A looser match of "the house is cold" (tier flexible): it still needs a yes.
+LOOSE = "the house is a bit cold"
+
+
 async def _step(run, hass, text="Nova, the house is cold."):
     return await run.try_phrase(hass, text, honorific="sir", device_id=None, user_id="u1")
 
@@ -295,7 +299,7 @@ async def test_deferral_online_hands_the_agent_a_fenced_hint(run, pol, fake_hass
     fake.enabled = True
     cfg._cache = {"voice_phrases": {"enabled": True, "entries": [
         _entry(target=["script.a", "script.b"])]}}
-    step = await _step(run, fake_hass)
+    step = await _step(run, fake_hass, LOOSE)
     assert step.result is None and calls == []
     assert "BEGIN_VOICE_PHRASE_MATCH_" in step.defer_hint
     assert "run_scene_or_script" in step.defer_hint
@@ -308,7 +312,7 @@ async def test_deferral_names_run_voice_phrase_when_the_ai_may_pick(run, pol, fa
     _p, fake = pol
     fake.enabled = True
     cfg._cache = {"voice_phrases": {"enabled": True, "entries": [_entry(allow_ai=True)]}}
-    step = await _step(run, fake_hass)
+    step = await _step(run, fake_hass, LOOSE)
     assert "run_voice_phrase with phrase_id vp_3f9c1a2b" in step.defer_hint
 
 
@@ -317,7 +321,7 @@ async def test_deferral_offline_refuses_politely(run, pol, fake_hass, calls, cfg
     fake.enabled = True
     online["online"] = False
     cfg._cache = {"voice_phrases": {"enabled": True, "entries": [_entry()]}}
-    step = await _step(run, fake_hass)
+    step = await _step(run, fake_hass, LOOSE)
     assert step.defer_hint is None and calls == []
     assert step.result.text == (
         "House is cold needs confirming first, and I can't ask for that right now, sir.")
@@ -340,3 +344,135 @@ async def test_try_phrase_never_raises(run, fake_hass, cfg, monkeypatch):
     monkeypatch.setattr(cfg, "get", boom)
     step = await _step(run, fake_hass)
     assert step.result is None and step.defer_hint is None
+
+
+# ── 8.34.0: an exact match runs; a looser one on voice is asked by Nova ─────
+
+@pytest.fixture
+def pcf(load):
+    mod = load("pending_confirm")
+    mod.clear_all()
+    yield mod
+    mod.clear_all()
+
+
+@pytest.mark.parametrize("device", ["sat1", None])
+async def test_an_exact_match_runs_at_once_with_voice_confirmation_on(
+        run, pol, fake_hass, calls, cfg, al, pcf, device):
+    _p, fake = pol
+    fake.enabled = True
+    fake.satellites.add("sat1")
+    cfg._cache = {"voice_phrases": {"enabled": True, "entries": [
+        _entry(reply="Warming the house up{addr}.")]}}
+    step = await run.try_phrase(fake_hass, "Nova, the house is cold.", honorific="sir",
+                                device_id=device, user_id="u1")
+    assert step.defer_hint is None and step.result.success
+    assert step.result.text == "Warming the house up, sir."
+    assert calls == [("script", "turn_on", {"entity_id": "script.heating_boost"}, False)]
+    assert fake.asked == [] and pcf.get("sat1") is None
+    assert {r["approval_result"] for r in _rows(al)} == {"not_required"}
+
+
+async def test_the_exact_scope_ends_with_the_run(run, pol, fake_hass, calls, cfg, load):
+    p, fake = pol
+    fake.enabled = True
+    cfg._cache = {"voice_phrases": {"enabled": True, "entries": [_entry()]}}
+    await run.try_phrase(fake_hass, "the house is cold", honorific="", device_id=None,
+                         user_id="u1")
+    later = p.authorize_now(fake_hass, p.AuthorityRequest(
+        "script", "turn_on", "script.heating_boost"))
+    assert not later.allowed and later.approval == "deferred"
+
+
+@pytest.mark.parametrize("device", ["sat1", None])
+@pytest.mark.parametrize("service,target", [
+    ("lock.unlock", "lock.front"),
+    ("alarm_control_panel.alarm_disarm", "alarm_control_panel.home"),
+    ("cover.open_cover", "cover.garage"),
+])
+async def test_an_exact_match_never_skips_the_phone_tap_or_a_high_risk_question(
+        run, pol, fake_hass, calls, cfg, online, pcf, device, service, target):
+    _p, fake = pol
+    fake.enabled = True            # Voice Confirmation on: typed requests ask too
+    fake.satellites.add("sat1")
+    cfg._cache = {"voice_phrases": {"enabled": True, "entries": [
+        _entry(service=service, target=target)]}}
+    step = await run.try_phrase(fake_hass, "the house is cold", honorific="",
+                                device_id=device, user_id="u1")
+    assert calls == [] and fake.asked == [] and pcf.get("sat1") is None
+    assert step.defer_hint is None and not step.result.success
+    assert "needs confirming first" in step.result.text
+
+
+def test_the_exact_scope_never_covers_high_risk(load, pol, fake_hass):
+    p, fake = pol
+    fake.enabled = True
+    with p.exact_phrase_approval([("lock", "unlock", "lock.front"),
+                                  ("cover", "open_cover", "cover.garage"),
+                                  ("script", "turn_on", "script.a")]):
+        assert p.requires_confirmation(fake_hass, "lock", "unlock", "lock.front")
+        # A garage door rates medium, and is still never covered.
+        assert p.requires_confirmation(fake_hass, "cover", "open_cover", "cover.garage")
+        assert not p.requires_confirmation(fake_hass, "script", "turn_on", "script.a")
+        assert p.requires_confirmation(fake_hass, "script", "turn_on", "script.b")
+
+
+def test_the_exact_scope_fails_closed_when_risk_is_unknown(load, pol, fake_hass, monkeypatch):
+    p, fake = pol
+    fake.enabled = True
+
+    def boom(*a, **k):
+        raise RuntimeError("classify down")
+    with p.exact_phrase_approval([("script", "turn_on", "script.a")]):
+        monkeypatch.setattr(p, "classify", boom)
+        assert p._exact_approved("script", "turn_on", "script.a") is False
+
+
+async def test_a_looser_match_on_a_voice_satellite_is_asked_by_nova(
+        run, pol, fake_hass, calls, cfg, online, pcf, load):
+    _p, fake = pol
+    fake.enabled = True
+    fake.satellites.add("sat1")
+    cfg._cache = {"voice_phrases": {"enabled": True, "entries": [
+        _entry(reply="Warming the house up.", allow_ai=True)]}}
+    step = await run.try_phrase(fake_hass, LOOSE, honorific="", device_id="sat1",
+                                user_id="u1")
+    assert step.defer_hint is None                  # never handed to the AI
+    assert step.result.handled and step.result.text == "House is cold?"
+    item = pcf.get("sat1")
+    assert (item.kind, item.ref, item.user_id) == ("voice_phrase", "vp_3f9c1a2b", "u1")
+    assert calls == [] and fake.asked == []
+    res = await pcf.answer(fake_hass, "sat1", "Yes.")
+    assert res.text == "Warming the house up."
+    assert calls == [("script", "turn_on", {"entity_id": "script.heating_boost"}, False)]
+
+
+async def test_a_looser_match_from_chat_keeps_the_agent_path(run, pol, fake_hass, calls, cfg,
+                                                            online, pcf):
+    _p, fake = pol
+    fake.enabled = True
+    cfg._cache = {"voice_phrases": {"enabled": True, "entries": [_entry()]}}
+    step = await run.try_phrase(fake_hass, LOOSE, honorific="", device_id=None, user_id="u1")
+    assert step.result is None and "run_scene_or_script" in step.defer_hint
+    assert pcf._ITEMS == {} and calls == []
+
+
+async def test_the_ai_picking_a_phrase_still_needs_a_yes(pol, fake_hass, calls, cfg, load):
+    _p, fake = pol
+    fake.enabled = True
+    fake.spoken_answer = "rejected"
+    cfg._cache = {"voice_phrases": {"enabled": True, "entries": [_entry(allow_ai=True)]}}
+    ctl = load("agent_runtime.capabilities.control")
+    import json
+    res = json.loads(await ctl._exec_run_voice_phrase(
+        fake_hass, {"phrase_id": "vp_3f9c1a2b"}, device_id=None, user_id="u1"))
+    assert res["status"] == "awaiting_confirmation" and calls == []
+
+
+def test_is_voice_satellite_fails_closed(run, fake_hass, load, monkeypatch):
+    assert run._is_voice_satellite(fake_hass, None) is False
+
+    def boom(*a, **k):
+        raise RuntimeError("registry down")
+    monkeypatch.setattr(load("voice_confirm"), "is_voice_satellite_device", boom)
+    assert run._is_voice_satellite(fake_hass, "sat1") is False

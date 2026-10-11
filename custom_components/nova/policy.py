@@ -160,6 +160,42 @@ def _approved(domain: str, service: str, entity_id: str, device_id: str) -> bool
     return dev == device_id and (domain, service, entity_id or "") in targets
 
 
+# The user's own words matched one of their voice phrases exactly (8.34.0).
+# Saying a phrase word for word is the confirmation, so its own targets run
+# without a further question, on voice or Chat. Set only by
+# voice_phrase_runner.try_phrase around that one run. Checked after the phone
+# tap rules, and never for unlock, open, disarm, standing down or any other
+# high or critical risk action, on any channel.
+_EXACT: contextvars.ContextVar[Optional[frozenset]] = contextvars.ContextVar(
+    "nova_exact_phrase", default=None)
+
+
+@contextlib.contextmanager
+def exact_phrase_approval(targets) -> Iterator[None]:
+    """Treat these (domain, service, entity_id) targets as confirmed inside
+    the block: the phrase that runs them was said exactly."""
+    token = _EXACT.set(frozenset((str(d), str(s), str(e or "")) for d, s, e in targets))
+    try:
+        yield
+    finally:
+        _EXACT.reset(token)
+
+
+def _exact_approved(domain: str, service: str, entity_id: str) -> bool:
+    targets = _EXACT.get()
+    if not targets or (domain, service, entity_id or "") not in targets:
+        return False
+    # Never unlock, open, disarm or stand down, whatever their risk rating
+    # (a garage door opening rates medium): those keep every question.
+    if (domain, service) in _VOICE_BLOCKED_OPENING or (domain, service) in _SECURITY_STANDDOWN:
+        return False
+    try:
+        risk, _ = classify(domain, service, entity_id)
+    except Exception:
+        return False
+    return risk not in ("high", "critical")
+
+
 def _voice_satellite_request(hass, device_id: str) -> bool:
     if not device_id:
         return False
@@ -253,6 +289,8 @@ def requires_confirmation(hass, domain: str, service: str, entity_id: str = "",
         return True
     if (domain, service) in _SECURITY_STANDDOWN:
         return True
+    if _exact_approved(domain, service, entity_id):
+        return False      # said word for word (8.34.0); after the phone tap rules
     try:
         from . import voice_confirm
         return bool(voice_confirm.action_is_protected(hass, domain, service, entity_id))

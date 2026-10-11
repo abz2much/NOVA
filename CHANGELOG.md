@@ -1,3 +1,18 @@
+## [8.34.0] — Smooth voice phrases
+
+Say one of your voice phrases exactly and it now runs straight away. A looser match gets a short question from Nova on the speaker you spoke to, and a follow up answer keeps the conversation it belongs to.
+
+### Changed
+- **The exact words run at once.** When what you say matches one of a phrase's sayings exactly, its own targets run with no question, by voice or Chat, even with Voice Confirmation on (new `policy.exact_phrase_approval`, set only by the phrase step). Saying it word for word is the confirmation. It is checked after the phone tap rules and never covers unlock, open, disarm, calling off an intrusion or any other high risk action, on any channel: a garage door opening, which rates medium, still asks. The AI picking a phrase by meaning (`run_voice_phrase`) still needs a yes.
+- **Nova asks a looser match itself.** A flexible match that needs a yes, said on a voice satellite, is no longer handed to the AI, which could ignore the hint and reply at length. Nova replies with the phrase's name, such as "House is cold?", holds it, and the 8.33.0 answer handling runs it on a yes from that satellite. Chat keeps the agent path.
+
+### Fixed
+- **"Yes to what?"** When Nova reopens a satellite's mic itself, Home Assistant starts a new conversation id, so the answer had no history. Nova now remembers which conversation the reopen belongs to, for 60 seconds, and the next turn from that same satellite continues it once. The cross-session reseed no longer replaces that history. Chat and other satellites never use it.
+- **Short spoken replies.** A voice satellite turn that reaches the AI is told to answer in one or two short sentences and never mention voice phrases, tools, matching or other internals. Chat is unchanged.
+
+### Unchanged
+- Saved phrases load as they are; there is no new field or setting and no panel change.
+
 ## [8.33.0] — Voice confirmation on the satellite you spoke to
 
 When Nova needs you to confirm something you asked by voice, it now asks on the speaker you spoke to, keeps listening, and a spoken yes runs it. Before, the question could play in another room and a yes did nothing.

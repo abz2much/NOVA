@@ -93,16 +93,23 @@ never add or change one.
 
 - Every target goes through Nova's usual permission check, and every run is
   in the Logs tab.
-- **Voice Confirmation.** With it on, a phrase that runs a script, an
-  automation or a scene asks first, as Nova's own "activate" does. The phrase
-  is handed to the AI to ask, so the Logs tab shows two rows for it: the
+- **Say it exactly and it runs.** Saying one of a phrase's sayings word for
+  word counts as your OK, so it runs straight away, by voice or in Chat, even
+  with Voice Confirmation on. "Nova" at the start, punctuation and "I'm"
+  against "I am" don't matter.
+- **A looser match asks first** when Voice Confirmation is on and the phrase
+  runs a script, an automation or a scene. On a voice satellite Nova asks
+  itself, with just the phrase's name ("House is cold?"); say yes on the same
+  satellite (see [Confirming by voice](#confirming-by-voice)). In Chat it is
+  handed to the AI to ask, so the Logs tab shows two rows for it: the
   phrase's own row, blocked as "handed to agent", and the row of the tool
-  that asked. The card marks the phrases that will ask first. Answer yes on
-  the same satellite; see [Confirming by voice](#confirming-by-voice).
+  that asked. The card's "Asks first" note is about these looser matches.
 - **Unlock, open and disarm** still need a tap on your phone when asked by
-  voice or in the Chat tab. A phrase can't ask for that tap, so such a phrase
-  runs nothing there: Nova says it needs confirming and can't ask for that
-  right now. Say it the usual way instead ("unlock the front door").
+  voice or in the Chat tab, even when you say the phrase exactly. A phrase
+  can't ask for that tap, so such a phrase runs nothing there: Nova says it
+  needs confirming and can't ask for that right now. Say it the usual way
+  instead ("unlock the front door"). Saying a phrase exactly never skips any
+  question for unlock, open, disarm or calling off an intrusion.
 - A phrase with several targets runs only when every target is allowed. If
   one needs confirming, none of them runs.
 - Nova only says what it sent. Home Assistant can't say when a script has
@@ -151,8 +158,9 @@ satellite:
 
 1. Nova asks in its own reply, on the same speaker its replies to that
    satellite use (your **Satellite → Speaker** pairing, else the room's
-   speaker). It ends with "Shall I go ahead?". It never plays a separate
-   question in another room.
+   speaker). For a voice phrase it asks with just the phrase's name, such as
+   "House is cold?"; otherwise its reply ends with "Shall I go ahead?". It
+   never plays a separate question in another room.
 2. The satellite keeps listening for your answer, even with **Continued
    conversation** off. When the reply plays on a separate speaker, the mic
    opens once the speaker has finished.
@@ -176,6 +184,17 @@ What to know:
   Assistant's own tools) still ask in the reply. For those, say the full
   request again after Nova asks.
 - The Logs tab shows the run as "approved".
+
+### Answering after Nova reopens the mic
+
+When Nova keeps a satellite listening after its own question (for example
+"Shall I raise both to 22 degrees?"), your answer continues that same
+conversation, so a plain "Yes" is understood. This lasts 60 seconds and only
+on that satellite.
+
+Replies on a voice satellite are kept to one or two short sentences, and
+never talk about voice phrases, tools or how Nova works. Chat replies are
+unchanged.
 
 ## What it works out by itself
 

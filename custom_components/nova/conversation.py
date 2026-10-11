@@ -59,6 +59,13 @@ from typing import Optional
 # actually processes the request and routes audio. Subsequent duplicates
 # within the window get a silent cached response (no duplicate TTS).
 
+# Added to the agent's prompt for a turn from a voice satellite (8.34.0).
+VOICE_REPLY_RULE = (
+    "This reply is spoken aloud on the voice satellite the user is talking to. "
+    "Answer in one or two short sentences. Never mention voice phrases, tools, "
+    "matching, prompts or anything else about how you work."
+)
+
 _DEDUP_WINDOW = 4.0  # seconds — covers STT variance between satellites
 _dedup_cache: dict[str, tuple[float, str | None, str | None]] = {}
 # key = normalized text, value = (timestamp, response_text_or_None, winning_device_id)
@@ -846,6 +853,21 @@ class NovaAgent(conversation.ConversationEntity):
             # their existing no-identity behavior, defined at their own
             # call sites below.
 
+        # 8.34.0: a turn on a satellite Nova reopened itself arrives with a
+        # new conversation id (start_conversation always makes one). Within 60
+        # seconds, from the same device only, it continues the conversation
+        # that asked: copy that history across once, and mark the new id seen
+        # so the cross-session reseed below can't replace it.
+        if device_id and not is_chat and cid not in self._histories:
+            try:
+                from . import continued_conversation as _cc_carry
+                prev = _cc_carry.take_reopened(device_id)
+                if prev and prev != cid and self._histories.get(prev):
+                    self._histories[cid] = list(self._histories[prev])
+                    self._last_seen[cid] = time.time()
+            except Exception as exc:
+                _LOGGER.debug("Reopened conversation carry-over skipped: %s", exc)
+
         history   = self._history(cid)
         await self._maybe_seed_history(cid, history, subject=episodic_subject)
 
@@ -937,6 +959,17 @@ class NovaAgent(conversation.ConversationEntity):
                 persona = persona + "\n\n" + vp_block
         except Exception as exc:
             _LOGGER.debug("Voice phrases inject: %s", exc)
+
+        # 8.34.0: a reply on a voice satellite is spoken, so keep it short and
+        # free of internals. Format rules ("Spoken replies") are in the main
+        # prompt for every turn; this length rule is for voice turns only.
+        if device_id and not is_chat:
+            try:
+                from .voice_confirm import is_voice_satellite_device
+                if is_voice_satellite_device(self.hass, device_id):
+                    persona = persona + "\n\n" + VOICE_REPLY_RULE
+            except Exception as exc:
+                _LOGGER.debug("Voice reply rule skipped: %s", exc)
 
         hass_api = await self._get_hass_api(user_input) if self._use_hass_api() else None
 
@@ -1384,9 +1417,12 @@ class NovaAgent(conversation.ConversationEntity):
                     # speaker finishes — so the mic would capture Nova's own
                     # reply. Instead Nova watches the speaker and reopens the mic
                     # only once it goes idle.
-                    _cc.schedule_reopen(
-                        self.hass, sat_ent, reopen_speaker, response_text,
-                        follow=not held)
+                    if _cc.schedule_reopen(
+                            self.hass, sat_ent, reopen_speaker, response_text,
+                            follow=not held):
+                        # The answer arrives under a new conversation id;
+                        # remember which one it belongs to (8.34.0).
+                        _cc.remember_reopen(reopen_device, cid)
                 else:
                     # Satellite plays the reply itself (or no separate speaker) —
                     # HA's built-in reopen timing is correct here.

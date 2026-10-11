@@ -171,6 +171,16 @@ async def _run(hass, entry, *, name, addr, device_id, user_id, honorific, may_as
                       "accepted")
 
 
+def _is_voice_satellite(hass, device_id: Optional[str]) -> bool:
+    if not device_id:
+        return False
+    try:
+        from .voice_confirm import is_voice_satellite_device
+        return bool(is_voice_satellite_device(hass, device_id))
+    except Exception:  # pylint: disable=broad-except
+        return False
+
+
 def _defer_hint(entry: dict) -> Optional[str]:
     """The note for the agent when a phrase needs confirming: run it with a
     tool that asks. None when no tool can (another domain, or offline)."""
@@ -246,10 +256,29 @@ async def try_phrase(hass, text: str, *, honorific: str, device_id: Optional[str
         except Exception:  # pylint: disable=broad-except
             pass
         _LOGGER.info("Nova voice phrase: matched '%s'", found.name)
-        outcome = await run_entry(hass, entry, device_id=device_id, user_id=user_id,
-                                  honorific=honorific, may_ask=False)
+        if found.tier == "exact":
+            # Said word for word (8.34.0): that is the confirmation. Its own
+            # targets, built like run_entry's, run without a question. The
+            # phone tap rules still apply (policy.exact_phrase_approval).
+            from . import policy
+            domain, _, svc = str((entry.get("action") or {}).get("service") or "").partition(".")
+            targets = [(domain, svc, k) for k in _keys(domain, svc, entry)]
+            with policy.exact_phrase_approval(targets):
+                outcome = await run_entry(hass, entry, device_id=device_id, user_id=user_id,
+                                          honorific=honorific, may_ask=False)
+        else:
+            outcome = await run_entry(hass, entry, device_id=device_id, user_id=user_id,
+                                      honorific=honorific, may_ask=False)
         if not outcome.deferred:
             return PhraseStep(outcome.result, None)
+        if found.tier != "exact" and _is_voice_satellite(hass, device_id):
+            # A looser match on a voice satellite (8.34.0): Nova asks itself,
+            # never the AI. The answer handling (pending_confirm.answer) runs
+            # it on a yes from this satellite, and the mic stays open for it.
+            from . import pending_confirm
+            pending_confirm.put(device_id or "", pending_confirm.KIND_PHRASE,
+                                found.phrase_id, user_id)
+            return PhraseStep(_result(f"{found.name}?", True), None)
         hint = _defer_hint(entry)
         if hint:
             return PhraseStep(None, hint)
