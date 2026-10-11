@@ -18,7 +18,13 @@
       : st.state === "checking" ? `<span>Checking…</span>`
       : st.state === "not_set" ? `<span>Not set</span>`
       : `<span>Not loaded</span>`;
-    if (!this._vidSession) this._vidSession = cfg.voice_id_enrol || { state: "idle" };
+    // The panel data's session, unless this tab is already polling a newer one
+    // (a recording may have been started from another browser).
+    if (!this._vidPollTimer && cfg.voice_id_enrol
+        && (!this._vidSession || this._vidSession.state !== "active" || cfg.voice_id_enrol.state === "active")) {
+      this._vidSession = cfg.voice_id_enrol;
+    }
+    if (!this._vidSession) this._vidSession = { state: "idle" };
     const sats = (cfg.satellites || []).map(s => [s.entity_id, s.area ? `${s.name} (${s.area})` : s.name]);
     if (!sats.some(o => o[0] === this._vidSatellite)) this._vidSatellite = sats.length ? sats[0][0] : "";
     return `
@@ -60,7 +66,7 @@
 
   _vidRecordHtml() {
     const s = this._vidSession || { state: "idle" };
-    const v = { name: s.name || "", done: s.committed || 0, needed: s.needed || 8 };
+    const v = { name: this._esc(s.name || ""), done: Number(s.committed) || 0, needed: Number(s.needed) || 8 };
     if (s.state === "active") {
       return `<div class="vid-progress"><b>${this._tHtml("Recording {name}: {done} of {needed}", v)}</b>
         <button class="mode-chip" id="vidCancel">Cancel</button></div>
@@ -83,15 +89,15 @@
     const recording = (this._vidSession || {}).state === "active";
     const row = (p, isHidden) => {
       const person = this._esc(p.person);
-      const count = p.samples === 1 ? this._tHtml("1 sample") : this._tHtml("{count} samples", { count: p.samples || 0 });
-      const when = p.updated ? ` · ${this._tHtml("updated {date}", { date: new Date(p.updated * 1000).toLocaleDateString() })}` : "";
+      const count = p.samples === 1 ? this._tHtml("1 sample") : this._tHtml("{count} samples", { count: Number(p.samples) || 0 });
+      const when = p.updated ? ` · ${this._tHtml("updated {date}", { date: this._esc(new Date(p.updated * 1000).toLocaleDateString()) })}` : "";
       return `
       <div class="cfg-row vid-person">
         <label>${this._esc(p.name)}</label>
         <span class="toggle-desc">${count}${when}</span>
         <div class="vid-actions">
           ${isHidden ? "" : `<button class="mode-chip vid-rec" data-person="${person}" ${recording ? "disabled" : ""}>Record voice</button>`}
-          <button class="mode-chip vid-del" data-person="${person}" data-name="${this._esc(p.name)}" ${p.samples ? "" : "disabled"}>Delete voice</button>
+          <button class="mode-chip vid-del" data-person="${person}" data-name="${this._esc(p.name)}" ${p.samples && !recording ? "" : "disabled"}>Delete voice</button>
           <button class="mode-chip vid-hide" data-person="${person}">${isHidden ? "Show" : "Hide"}</button>
         </div>
       </div>`;
@@ -136,7 +142,10 @@
     if (!field || !cfg.voice_id_token_set || !this._hass) return;
     try {
       const res = await this._hass.callWS({ type: "nova/voice_id_token_get" });
-      if (res && res.ok && field.isConnected) field.value = res.token || "";
+      // Never over what the user is typing.
+      if (res && res.ok && field.isConnected && !field.value && field !== this.shadowRoot.activeElement) {
+        field.value = res.token || "";
+      }
     } catch (_) { /* the field just stays empty */ }
   }
 
@@ -149,7 +158,10 @@
       try {
         const res = await this._hass.callWS({ type: "nova/voice_id_record_status" });
         if (res && res.session) this._vidSession = res.session;
-      } catch (_) { return; }
+      } catch (_) {
+        this._vidPollSoon();               // try again; one failed poll never freezes it
+        return;
+      }
       this._vidRedraw();
       if (this._vidSession.state === "active") this._vidPollSoon();
       else if (before === "active") this._fetchVoiceIdPeople();

@@ -36,6 +36,10 @@ SAMPLES_NEEDED = 8
 MAX_RETRIES = 2
 SESSION_S = 300.0
 MIN_SPEECH_S = 1.5
+# Turns in a row with no usable result at all (app down, or the satellite's
+# pipeline doesn't use Nova Voice ID) before the recording gives up, so it
+# never swallows that satellite's commands for the whole 5 minutes.
+MAX_UNUSABLE = 3
 CHECK_MATCH_FROM = 2          # committed samples before the match check starts
 ANNOUNCE_TIMEOUT_S = 20.0
 
@@ -161,6 +165,15 @@ PHRASES: dict[str, dict[str, str]] = {
         "nl": "Bedankt, {name}, klaar.",
         "pt": "Obrigado, {name}, está feito.",
     },
+    "no_result": {
+        "en": "Sorry, I can't hear voices for recording on this satellite. Check that it uses Nova Voice ID.",
+        "fr": "Désolé, je ne peux pas enregistrer de voix sur ce satellite. Vérifiez qu'il utilise Nova Voice ID.",
+        "de": "Entschuldigung, auf diesem Satelliten kann ich keine Stimmen aufnehmen. Prüfe, ob er Nova Voice ID nutzt.",
+        "es": "Perdona, no puedo grabar voces en este satélite. Comprueba que usa Nova Voice ID.",
+        "it": "Scusa, non posso registrare voci su questo satellite. Controlla che usi Nova Voice ID.",
+        "nl": "Sorry, ik kan op deze satelliet geen stemmen opnemen. Controleer of hij Nova Voice ID gebruikt.",
+        "pt": "Desculpe, não consigo gravar vozes neste satélite. Verifique se usa o Nova Voice ID.",
+    },
     "stopped": {
         "en": "Sorry, I couldn't save your voice. Check the Voice ID card in Nova.",
         "fr": "Désolé, je n'ai pas pu enregistrer votre voix. Vérifiez la carte Voice ID dans Nova.",
@@ -208,6 +221,7 @@ class Session:
     prompt_index: int = 0
     committed: int = 0
     retries: int = 0
+    unusable: int = 0
     state: str = "active"           # active | done | cancelled | expired | error
     message: str = ""
     started_at: float = field(default_factory=time.monotonic)
@@ -344,6 +358,14 @@ async def async_handle_turn(hass, entry, device_id: str | None, result) -> str |
         return None
     from . import voice_id, voice_id_store
     try:
+        if result is None or result.status == "error":
+            session.unusable += 1
+            if session.unusable >= MAX_UNUSABLE:
+                session.state = "error"
+                session.message = "Recording stopped after an error."
+                return phrase("no_result", session.lang)
+        else:
+            session.unusable = 0
         usable = (result is not None and result.sample_id
                   and result.speech_s is not None and result.speech_s >= MIN_SPEECH_S)
         if usable and session.committed >= CHECK_MATCH_FROM and _someone_else(result, session.person):
@@ -361,6 +383,12 @@ async def async_handle_turn(hass, entry, device_id: str | None, result) -> str |
                     _LOGGER.warning("Nova Voice ID: saving a sample failed (%s)", exc.code)
                     return phrase("stopped", session.lang)
                 usable = False
+        if _SESSION is not session or session.state != "active":
+            # Cancelled (or replaced) while the commit was in flight: the
+            # saved sample stays in the app, but this session is over. The
+            # turn is still the recording's, so it ends silently ("") rather
+            # than going on to the AI.
+            return ""
         if usable:
             session.committed += 1
             session.retries = 0

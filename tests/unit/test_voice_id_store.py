@@ -88,3 +88,12 @@ async def test_clearing_the_token_deletes_the_secret(store, fake_hass):
                                       ("a\nb", False), ("x" * 257, False), (None, False)])
 def test_valid_token(store, token, ok):
     assert store.valid_token(token) is ok
+
+
+async def test_after_upgrade_from_8_35_the_discovered_address_still_counts(store, fake_hass):
+    """8.35.0 saved the discovered address but no last-discovered value."""
+    store._cfg["voice_id_uri"] = URI_A
+    got = await _apply(store, fake_hass, URI_A, "tok-1")
+    assert got["uri"] is True
+    got = await _apply(store, fake_hass, URI_B, "tok-1")   # the app moved
+    assert got["uri"] is True and store._cfg["voice_id_uri"] == URI_B

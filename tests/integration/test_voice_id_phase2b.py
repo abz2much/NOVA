@@ -157,6 +157,24 @@ async def test_the_turn_logs_its_voice_result_and_behaves_as_before(
             assert TEXT not in msg and TOKEN not in msg
 
 
+async def test_no_voice_line_on_an_install_without_voice_id(hass, isolated, monkeypatch):
+    """A satellite turn with no result and no app set writes no VOICE line."""
+    conv_entity = await _setup_nova(hass)
+    lines = _log(monkeypatch)
+    turn = _Turn()
+    ps = turn.patches()
+    for p in ps:
+        p.start()
+    try:
+        from homeassistant.components import conversation as conversation_component
+        await conversation_component.async_converse(
+            hass, "hello", None, Context(), agent_id=conv_entity, device_id=DEVICE)
+    finally:
+        for p in ps:
+            p.stop()
+    assert not [m for c, m in lines if c == "VOICE"]
+
+
 async def test_a_typed_turn_has_no_voice_line(hass, isolated, monkeypatch):
     conv_entity = await _setup_nova(hass)
     lines = _log(monkeypatch)
@@ -189,8 +207,11 @@ async def test_a_recording_turn_never_reaches_dedup_phrases_engine_or_ai(
         for p in ps:
             p.start()
         try:
+            lines = _log(monkeypatch)
             _heard, result = await _voice_turn(hass, conv_entity, TEXT, DEVICE)
             assert (turn.dedup, turn.phrases, turn.local, turn.agent) == (0, 0, 0, 0)
+            voice = [m for c, m in lines if c == "VOICE"]
+            assert len(voice) == 1 and voice[0].endswith("device=dev-kitchen recording")
             assert _speech(result).startswith("Thanks. Next, please say:")
             assert app.commits == [("abc_123", "person.abi")]
             # Another satellite during the session: handled normally, never committed.

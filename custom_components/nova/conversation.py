@@ -378,6 +378,14 @@ class NovaAgent(conversation.ConversationEntity):
         """
         return self._opt(key, default)
 
+    def _voice_id_set(self) -> bool:
+        """Whether a Nova Voice ID app address is set (8.36.0)."""
+        try:
+            from .voice_id_store import get_uri
+            return bool(get_uri(self.hass, self.entry))
+        except Exception:
+            return False
+
     def _satellite_pairings(self) -> dict | None:
         """The panel's satellite → speaker pairings from the live
         runtime_config (a dict, or its JSON string). Returns a non-empty dict,
@@ -722,17 +730,22 @@ class NovaAgent(conversation.ConversationEntity):
         # phrases, the local engine or the AI.
         turn_voice = None
         if device_id and not is_chat:
+            voice_line = None
             try:
                 from . import voice_id as _voice_id
                 turn_voice = _voice_id.take_turn_voice()
-                nova_log("VOICE", _voice_id.log_line(turn_voice, device_id))
+                # One VOICE line per voice turn; none on an install that
+                # doesn't use Nova Voice ID (no result and no app set).
+                if turn_voice is not None or self._voice_id_set():
+                    voice_line = _voice_id.log_line(turn_voice, device_id)
             except Exception as exc:
                 _LOGGER.debug("Nova Voice ID: turn result unavailable: %s", exc)
             from . import voice_enrol
             enrol_reply = await voice_enrol.async_handle_turn(
                 self.hass, self.entry, device_id, turn_voice)
+            if voice_line is not None:
+                nova_log("VOICE", voice_line + (" recording" if enrol_reply is not None else ""))
             if enrol_reply is not None:
-                nova_log("VOICE", f"recording turn on device={device_id}")
                 ir = intent.IntentResponse(language=user_input.language)
                 ir.async_set_speech(enrol_reply)
                 return conversation.ConversationResult(

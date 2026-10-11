@@ -336,8 +336,8 @@ def _check_block(block: Any) -> VoiceResult:
         if not isinstance(block["model"], str) or len(block["model"]) > 128:
             raise ValueError("bad model")
         out["model"] = block["model"]
-    if out.get("person") and status != "known":
-        raise ValueError("person without known")
+    if bool(out.get("person")) != (status == "known"):
+        raise ValueError("person goes with known, and only known")
     return VoiceResult(**out)
 
 

@@ -112,6 +112,10 @@ def test_no_block_or_a_broken_one_becomes_error(vid, block):
     assert vid.parse_block(block).status == "error"
 
 
+def test_known_without_a_person_is_invalid(vid):
+    assert vid.parse_block({k: v for k, v in KNOWN.items() if k != "person"}).status == "error"
+
+
 def test_a_person_without_known_is_invalid(vid):
     assert vid.parse_block({**KNOWN, "status": "not_sure"}).status == "error"
     assert vid.parse_block({k: v for k, v in KNOWN.items() if k != "person"}

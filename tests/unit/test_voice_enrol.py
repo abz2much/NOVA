@@ -236,3 +236,36 @@ def test_eight_sentences_in_every_language(enrol):
         assert all(4 <= len(s.split()) <= 12 for s in items), lang
     for key, table in enrol.PHRASES.items():
         assert set(table) == set(enrol.SENTENCES), key
+
+
+async def test_cancel_during_a_commit_is_never_overwritten(enrol, app, fake_hass, vid, load, monkeypatch):
+    await _start(enrol, fake_hass)
+    real_commit = vid.enrol_commit
+
+    async def commit_then_cancel(*a, **k):
+        count = await real_commit(*a, **k)
+        enrol.cancel()                       # Cancel pressed while the commit was in flight
+        return count
+    monkeypatch.setattr(vid, "enrol_commit", commit_then_cancel)
+    reply = await enrol.async_handle_turn(fake_hass, None, DEVICE, _res(vid, n=1))
+    assert reply == ""                       # silent, and never handed on to the AI
+    st = enrol.status()
+    assert st["state"] == "cancelled" and st["committed"] == 0
+    assert app.commits == [("s1", "person.abi")]
+
+
+async def test_three_unusable_turns_in_a_row_stop_the_recording(enrol, app, fake_hass, vid):
+    await _start(enrol, fake_hass)
+    for _ in range(2):
+        assert (await enrol.async_handle_turn(fake_hass, None, DEVICE, None)).startswith("Sorry")
+    reply = await enrol.async_handle_turn(fake_hass, None, DEVICE, vid.error_result())
+    assert "can't hear voices for recording" in reply
+    assert enrol.status()["state"] == "error"
+    assert enrol.current() is None
+
+
+async def test_a_usable_result_resets_the_unusable_count(enrol, app, fake_hass, vid):
+    await _start(enrol, fake_hass)
+    for result in (None, None, _res(vid, n=1, speech_s=0.5), None, None):
+        await enrol.async_handle_turn(fake_hass, None, DEVICE, result)
+    assert enrol.status()["state"] == "active"

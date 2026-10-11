@@ -434,7 +434,7 @@ const hass = {
         { person: "person.guest", name: "Guest Account", samples: 0, updated: null }] };
       if (m.type === "nova/voice_id_token_get") return { ok: true, token: "s3cret-token" };
       if (m.type === "nova/voice_id_token_set") return { ok: true, set: !!m.token };
-      if (m.type === "nova/voice_id_record") return { ok: true, session: { state: "active", person: m.person, name: "Abi", committed: 0, needed: 8 } };
+      if (m.type === "nova/voice_id_record") return { ok: true, session: { state: "active", person: m.person, name: "Abi<img src=x onerror=window.__vidXss=1>", committed: 0, needed: 8 } };
       if (m.type === "nova/voice_id_record_status") return { ok: true, session: { state: "active", person: "person.abi", name: "Abi", committed: 3, needed: 8 } };
       if (m.type === "nova/voice_id_record_cancel") return { ok: true, cancelled: true, session: { state: "cancelled", person: "person.abi", name: "Abi", committed: 3, needed: 8 } };
       if (m.type === "nova/voice_id_delete") return m.all
@@ -1132,7 +1132,10 @@ if (require.main === module) setTimeout(async () => {
   checks.push(["voice id: Record voice starts on the chosen satellite and shows progress with Cancel",
     _vidCalls.some(c => c.type === "nova/voice_id_record" && c.person === "person.abi"
       && c.satellite === "assist_satellite.basement_nova")
-      && /Recording Abi: 0 of 8/.test(vidText()) && !!sRoot.getElementById("vidCancel")]);
+      && /Recording Abi<img src=x onerror=window\.__vidXss=1>: 0 of 8/.test(vidText())
+      && !vidCard().querySelector("#vidRecord img") && !window.__vidXss
+      && !!sRoot.getElementById("vidCancel")
+      && vidCard().querySelector('.vid-del[data-person="person.abi"]').disabled]);
   await new Promise(r => setTimeout(r, 2100));
   checks.push(["voice id: progress updates live while recording",
     /Recording Abi: 3 of 8/.test(vidText()) && _vidCalls.some(c => c.type === "nova/voice_id_record_status")]);

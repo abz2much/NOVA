@@ -78,7 +78,9 @@ async def async_apply_discovery(hass, entry, uri: str, token: str | None) -> dic
 
     current_uri = get_uri(hass, entry)
     last_uri = str(nova_config.get(URI_DISCOVERED_KEY, "") or "")
-    if uri and (not current_uri or current_uri == last_uri):
+    # current == uri: nothing to change, and it counts as filled (an 8.35.0
+    # install saved the discovered address but no "last discovered" value).
+    if uri and (not current_uri or current_uri == last_uri or current_uri == uri):
         if current_uri != uri:
             await async_set_uri(hass, entry, uri)
         out["uri"] = True
@@ -88,7 +90,7 @@ async def async_apply_discovery(hass, entry, uri: str, token: str | None) -> dic
     if token and valid_token(token):
         current = await async_get_token(hass)
         last_sha = str(nova_config.get(TOKEN_DISCOVERED_KEY, "") or "")
-        if not current or _sha(current) == last_sha:
+        if not current or _sha(current) == last_sha or current == token:
             if current != token:
                 await async_set_token(hass, token)
             out["token"] = True

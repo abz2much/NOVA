@@ -246,7 +246,7 @@ people.
 Record each person on every satellite, because rooms sound different. While a
 recording runs, only the turns from that satellite go to it; the others work
 as usual. A recording turn never runs a voice phrase, a command or the AI.
-After 5 minutes it stops by itself. Samples already saved are kept.
+After 5 minutes it stops by itself, and it stops after three turns in a row that bring no voice result (the app is down, or that satellite's voice assistant doesn't use Nova Voice ID). Samples already saved are kept.
 
 The sentences are plain ones, never commands or questions, because Home
 Assistant answers some sentences itself before Nova hears them.
