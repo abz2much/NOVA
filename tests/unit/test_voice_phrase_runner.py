@@ -72,7 +72,7 @@ async def test_an_allowed_phrase_runs_once_with_merged_data(run, fake_hass, call
     entry = _entry(target=["script.a", "script.b"], data={"variables": {"level": 2}},
                    reply="Warming the house up{addr}.")
     out = await _go(run, fake_hass, entry)
-    assert not out.deferred
+    assert not out.deferred and out.status == "accepted"
     assert out.result.handled and out.result.success
     assert out.result.text == "Warming the house up, sir."
     assert calls == [("script", "turn_on",
@@ -133,7 +133,7 @@ async def test_fast_path_defers_when_confirmation_is_needed(run, pol, fake_hass,
     _p, fake = pol
     fake.enabled = True            # scripts ask first with Voice Confirmation on
     out = await _go(run, fake_hass, _entry())
-    assert out.deferred and out.result is None
+    assert out.deferred and out.result is None and out.status == "deferred"
     assert calls == [] and fake.asked == []      # nothing ran, nobody was asked
     (row,) = _rows(al)
     assert row["approval_result"] == "deferred"
@@ -166,7 +166,7 @@ async def test_asking_and_being_refused_blocks_and_logs(run, pol, fake_hass, cal
     fake.enabled = True
     fake.spoken_answer = "rejected"
     out = await _go(run, fake_hass, _entry(), may_ask=True)
-    assert not out.deferred and not out.result.success
+    assert not out.deferred and not out.result.success and out.status == "refused"
     assert out.result.text == "I need you to confirm House is cold first, sir."
     assert calls == [] and [how for how, _q in fake.asked] == ["spoken"]
     (row,) = _rows(al)
@@ -209,6 +209,7 @@ async def test_a_failed_call_says_so_without_the_error(run, fake_hass, al, monke
     out = await _go(run, fake_hass, _entry(target=["script.a", "script.b"]))
     assert out.result.text == "I couldn't run House is cold, sir."
     assert "secret" not in out.result.text and not out.result.success
+    assert out.status == "failed"
     assert {r["execution_result"] for r in _rows(al)} == {"failed"}
     assert {r["reason_code"] for r in _rows(al)} == {"service_call_failed"}
 

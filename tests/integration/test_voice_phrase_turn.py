@@ -202,3 +202,24 @@ async def test_with_no_phrases_nothing_changes(hass, tmp_path, monkeypatch):
     assert calls == [] and eng.local_calls == 1
     assert len(eng.personas) == 1 and "VOICE_PHRASE" not in eng.personas[0]
     assert _speech(result) == "From the agent."
+
+
+async def test_phrases_the_ai_may_pick_reach_its_prompt_fenced(hass, tmp_path, monkeypatch):
+    _isolate_conversations_db(monkeypatch, tmp_path)
+    entity_id = await _setup_nova(hass)
+    _script_calls(hass)
+    hidden = dict(_entry(phrases=("film night",)), phrase_id="vp_00000002",
+                  name="Hidden one", allow_ai=False)
+    _phrases(monkeypatch, _entry(allow_ai=True), hidden)
+    eng = _Engine()
+    local, agent = eng.patches()
+    with local, agent:
+        await _converse(hass, entity_id, "it is a bit nippy", "voice-1")
+    (persona,) = eng.personas
+    begin = persona.index("\nBEGIN_VOICE_PHRASES_")
+    end = persona.index("\nEND_VOICE_PHRASES_")
+    inside = persona[begin:end]
+    assert '[1] House is cold (e.g. "the house is cold")' in inside
+    assert "vp_" not in inside.split("\n", 2)[2]          # no id among the user's text
+    assert "1 = vp_3f9c1a2b" in persona[:begin]
+    assert "Hidden one" not in persona and "vp_00000002" not in persona

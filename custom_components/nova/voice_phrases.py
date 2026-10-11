@@ -478,13 +478,16 @@ def ai_entries(config: Any) -> list[dict]:
     return out[:MAX_PROMPT_ENTRIES]
 
 
-def prompt_lines(config: Any) -> str:
-    """One line per phrase the AI may pick: phrase_id: name (e.g. "first
-    phrase"). Empty when there are none."""
-    lines = []
-    for e in ai_entries(config):
+def prompt_lines(config: Any) -> tuple[str, list[str]]:
+    """The phrases the AI may pick, for the prompt: numbered lines holding
+    only the user's own text, "[1] name (e.g. "first phrase")", and the
+    phrase ids in the same order. The lines go inside a prompt fence and the
+    ids outside it. ("", []) when there are none."""
+    lines, ids = [], []
+    for i, e in enumerate(ai_entries(config), start=1):
         phrases = [p for p in e.get("phrases") or [] if isinstance(p, str)]
         name = " ".join(str(e.get("name") or "").split())
         first = " ".join(phrases[0].split()) if phrases else ""
-        lines.append(f'{e["phrase_id"]}: {name} (e.g. "{first}")')
-    return "\n".join(lines)
+        lines.append(f'[{i}] {name} (e.g. "{first}")')
+        ids.append(str(e["phrase_id"]))
+    return "\n".join(lines), ids

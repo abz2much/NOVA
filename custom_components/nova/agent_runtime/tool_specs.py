@@ -1467,4 +1467,24 @@ NOVA_TOOLS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_voice_phrase",
+            "description": (
+                "Run one of the user's own voice phrases when their request clearly "
+                "means it. Only use a phrase_id from the Voice phrases list. If unsure, ask."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "phrase_id": {
+                        "type": "string",
+                        "description": "A phrase_id from the Voice phrases list, e.g. vp_3f9c1a2b.",
+                    },
+                },
+                "required": ["phrase_id"],
+            },
+        },
+    },
 ]

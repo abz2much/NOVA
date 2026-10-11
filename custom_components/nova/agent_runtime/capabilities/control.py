@@ -367,6 +367,50 @@ async def _exec_run_scene_script(hass: HomeAssistant, args: dict, device_id: Opt
                             "entity_id": entity_id})
 
 
+async def _exec_run_voice_phrase(hass: HomeAssistant, args: dict, device_id: Optional[str] = None,
+                                 user_id: Optional[str] = None) -> str:
+    """Run one of the user's own voice phrases (8.32.0), picked by meaning.
+
+    Checked again here, whatever the model saw: the phrase must exist and be
+    on, the voice phrases switch must be on, the phrase must allow the AI to
+    pick it, and it may never be a shell command. Every target then goes
+    through policy.authorize, which asks when it must."""
+    import copy
+    from ... import nova_config, voice_phrases, voice_phrase_runner
+    pid = args.get("phrase_id") if isinstance(args, dict) else None
+    if not isinstance(pid, str) or not pid:
+        return json.dumps({"error": "phrase_id is required", "status": "error", "success": False})
+    cfg = copy.deepcopy(nova_config.get(voice_phrases.CONFIG_KEY))
+    if not isinstance(cfg, dict) or cfg.get("enabled", True) is False:
+        return json.dumps({"error": "Voice phrases are turned off", "status": "error",
+                           "success": False, "phrase_id": pid})
+    entry = voice_phrases.find_entry(cfg, pid)
+    if entry is None:
+        return json.dumps({"error": f"No voice phrase {pid}", "status": "error",
+                           "success": False, "phrase_id": pid})
+    if entry.get("enabled", True) is False:
+        return json.dumps({"error": "That voice phrase is turned off", "status": "error",
+                           "success": False, "phrase_id": pid})
+    service = str((entry.get("action") or {}).get("service") or "")
+    if service.startswith(voice_phrases.SHELL_DOMAIN + "."):
+        return json.dumps({"error": "A shell command phrase only runs from the user's own words",
+                           "status": "error", "success": False, "phrase_id": pid})
+    if entry.get("allow_ai") is not True:
+        return json.dumps({"error": "The user has not let the AI pick this phrase",
+                           "status": "error", "success": False, "phrase_id": pid})
+    outcome = await voice_phrase_runner.run_entry(
+        hass, entry, device_id=device_id, user_id=user_id, honorific="", may_ask=True)
+    text = outcome.result.text if outcome.result is not None else ""
+    if outcome.status == "accepted":
+        return json.dumps({"success": True, "status": "accepted", "phrase_id": pid,
+                           "action": "ran", "message": text})
+    if outcome.status in ("refused", "deferred"):
+        return json.dumps({"status": "awaiting_confirmation", "phrase_id": pid,
+                           "message": text or f"Confirmation required before running {entry.get('name')}."})
+    return json.dumps({"error": text or "The voice phrase failed", "status": "error",
+                       "success": False, "phrase_id": pid})
+
+
 async def _exec_bulk_control(hass: HomeAssistant, args: dict, device_id: Optional[str] = None,
                              user_id: Optional[str] = None) -> str:
     """Control multiple devices in a domain/area."""

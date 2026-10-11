@@ -299,12 +299,18 @@ def test_prompt_lines_lists_only_ai_entries(vp):
         _entry("vp_00000003", ["boost"], allow_ai=True, service="shell_command.boost",
                target=None),
         _entry("vp_00000004", ["bed"], allow_ai=True, enabled=False),
+        _entry("vp_00000005", ["lights\nout"], name="Bed\ntime", allow_ai=True),
     )
-    assert vp.prompt_lines(cfg) == 'vp_00000001: House is cold (e.g. "the house is cold")'
-    assert vp.prompt_lines(_cfg()) == ""
-    assert vp.prompt_lines(_cfg(enabled=False)) == ""
+    lines, ids = vp.prompt_lines(cfg)
+    assert lines == ('[1] House is cold (e.g. "the house is cold")\n'
+                     '[2] Bed time (e.g. "lights out")')
+    assert ids == ["vp_00000001", "vp_00000005"]
+    assert "vp_" not in lines                     # ids stay out of the user text
+    assert vp.prompt_lines(_cfg()) == ("", [])
+    assert vp.prompt_lines(_cfg(enabled=False)) == ("", [])
 
 
 def test_prompt_lines_caps_at_fifty(vp):
     cfg = _cfg(*[_entry(f"vp_{i:08x}", [f"phrase {i}"], allow_ai=True) for i in range(60)])
-    assert len(vp.prompt_lines(cfg).splitlines()) == 50
+    lines, ids = vp.prompt_lines(cfg)
+    assert len(lines.splitlines()) == 50 and len(ids) == 50

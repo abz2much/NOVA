@@ -927,6 +927,17 @@ class NovaAgent(conversation.ConversationEntity):
         except Exception as exc:
             _LOGGER.debug("Relations inject: %s", exc)
 
+        # Voice phrases the AI may pick by meaning (8.32.0): only those the
+        # user allowed, never a shell command, at most 50. Names and phrases
+        # sit inside a prompt fence; the phrase ids stay outside it.
+        try:
+            from . import voice_phrase_runner as _vpr
+            vp_block = _vpr.prompt_block()
+            if vp_block:
+                persona = persona + "\n\n" + vp_block
+        except Exception as exc:
+            _LOGGER.debug("Voice phrases inject: %s", exc)
+
         hass_api = await self._get_hass_api(user_input) if self._use_hass_api() else None
 
         cast_routed = False  # tracks whether Cast speaker is handling TTS

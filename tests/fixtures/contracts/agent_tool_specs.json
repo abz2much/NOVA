@@ -1245,6 +1245,25 @@
         }
       },
       "type": "function"
+    },
+    {
+      "function": {
+        "description": "Run one of the user's own voice phrases when their request clearly means it. Only use a phrase_id from the Voice phrases list. If unsure, ask.",
+        "name": "run_voice_phrase",
+        "parameters": {
+          "properties": {
+            "phrase_id": {
+              "description": "A phrase_id from the Voice phrases list, e.g. vp_3f9c1a2b.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "phrase_id"
+          ],
+          "type": "object"
+        }
+      },
+      "type": "function"
     }
   ]
 }

@@ -103,6 +103,9 @@ minute and one at a time. See [Safety and security](safety-and-security.md#chat)
 - Nova can control one device or many, run scenes and scripts, and carry
   out plans with several steps (`control_device`, `bulk_control`,
   `run_scene_or_script`, `execute_plan`).
+- It can run one of your own voice phrases when what you say clearly means
+  it, if you let it pick that phrase (`run_voice_phrase`). See
+  [Voice phrases](voice-and-speakers.md#voice-phrases).
 - It can read live state, search entities, list a room's devices and sum up
   the whole home (`get_entity_state`, `search_entities`,
   `get_area_devices`, `get_home_summary`), and read Home Assistant's history

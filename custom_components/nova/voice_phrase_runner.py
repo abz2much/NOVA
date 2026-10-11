@@ -25,6 +25,8 @@ _NON_BLOCKING = ("script", "automation", voice_phrases.SHELL_DOMAIN)
 class RunOutcome:
     result: Any = None        # local_engine.LocalResult, or None when deferred
     deferred: bool = False    # held for confirmation on the fast path; nothing ran
+    # accepted (sent), refused (not confirmed), failed, or deferred.
+    status: str = "failed"
 
 
 @dataclass
@@ -83,9 +85,9 @@ async def run_entry(hass, entry: dict, *, device_id: Optional[str], user_id: Opt
     except Exception as exc:  # pylint: disable=broad-except
         _LOGGER.warning("Nova voice phrase '%s' failed: %s", name, type(exc).__name__)
         try:
-            return RunOutcome(_result(f"I couldn't run {name}{addr}.", False), False)
+            return RunOutcome(_result(f"I couldn't run {name}{addr}.", False), False, "failed")
         except Exception:  # pylint: disable=broad-except
-            return RunOutcome(None, False)
+            return RunOutcome(None, False, "failed")
 
 
 async def _run(hass, entry, *, name, addr, device_id, user_id, honorific, may_ask) -> RunOutcome:
@@ -96,7 +98,7 @@ async def _run(hass, entry, *, name, addr, device_id, user_id, honorific, may_as
     action = entry.get("action") or {}
     domain, _, service = str(action.get("service") or "").partition(".")
     if not domain or not service:
-        return RunOutcome(_result(f"I couldn't run {name}{addr}.", False), False)
+        return RunOutcome(_result(f"I couldn't run {name}{addr}.", False), False, "failed")
     data = dict(action.get("data") or {})
     target = {}
     ids = voice_phrases.target_ids(entry)
@@ -144,8 +146,9 @@ async def _run(hass, entry, *, name, addr, device_id, user_id, honorific, may_as
             await _log(action_log.set_execution, rows.get(k), "blocked",
                        reason_code="confirmation_not_approved", reason_text=reason_text)
         if deferred:
-            return RunOutcome(None, True)
-        return RunOutcome(_result(f"I need you to confirm {name} first{addr}.", False), False)
+            return RunOutcome(None, True, "deferred")
+        return RunOutcome(_result(f"I need you to confirm {name} first{addr}.", False), False,
+                          "refused")
 
     # Every target is allowed: one call.
     try:
@@ -156,13 +159,14 @@ async def _run(hass, entry, *, name, addr, device_id, user_id, honorific, may_as
             await _log(action_log.set_execution, rows.get(k), "failed",
                        reason_code="service_call_failed")
         safe_error_message(exc, where=f"voice phrase {name}", log=True)
-        return RunOutcome(_result(f"I couldn't run {name}{addr}.", False), False)
+        return RunOutcome(_result(f"I couldn't run {name}{addr}.", False), False, "failed")
     for k in keys:
         # Home Assistant can't say when a script or automation finished:
         # accepted, never a confirmed result.
         await _log(action_log.set_execution, rows.get(k), "accepted")
         await _log(action_log.mark_not_checkable, rows.get(k))
-    return RunOutcome(_result(_fill(str(entry.get("reply") or ""), honorific), True), False)
+    return RunOutcome(_result(_fill(str(entry.get("reply") or ""), honorific), True), False,
+                      "accepted")
 
 
 def _defer_hint(entry: dict) -> Optional[str]:
@@ -193,6 +197,32 @@ def _defer_hint(entry: dict) -> Optional[str]:
             "but the user's live message did match this voice phrase, and it needs "
             f"confirmation before it runs. To run it, {how}. Run nothing else for it"),
     )
+
+
+def prompt_block() -> Optional[str]:
+    """The phrases the AI may pick by meaning, for the agent's prompt, or
+    None when there are none. The user's names and phrases sit inside a
+    prompt fence; the phrase ids and the instruction sit outside it. At most
+    voice_phrases.MAX_PROMPT_ENTRIES. Never raises."""
+    try:
+        from . import nova_config, prompt_fence
+        cfg = copy.deepcopy(nova_config.get(voice_phrases.CONFIG_KEY))
+        lines, ids = voice_phrases.prompt_lines(cfg)
+        if not ids:
+            return None
+        mapping = ", ".join(f"{i} = {pid}" for i, pid in enumerate(ids, start=1))
+        return prompt_fence.fence(
+            lines,
+            label="VOICE_PHRASES",
+            noun="are the names of the user's own voice phrases, numbered, each with one way of saying it",
+            callback_noun="a phrase name",
+            extra_instruction=(
+                "but when the user's live message clearly means one of these phrases, "
+                "you may run it with run_voice_phrase, passing the phrase_id for its "
+                f"number: {mapping}. If unsure, ask"),
+        )
+    except Exception:  # pylint: disable=broad-except
+        return None
 
 
 async def try_phrase(hass, text: str, *, honorific: str, device_id: Optional[str],
