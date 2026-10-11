@@ -20,6 +20,7 @@
         : c.id === "home_layout" ? this._homeLayoutCardBody()
         : c.id === "ai_models" ? this._aiModelsCardBody()
         : c.id === "briefings" ? this._briefingsCardBody()
+        : c.id === "voice_phrases" ? this._voicePhrasesCardBody()
         : c.id === "voice_confirmation" ? this._voiceConfirmationCardBody()
         : c.id === "satellite_speaker" ? this._satelliteSpeakerCardBody()
         : c.id === "announcement_speakers" ? this._announcementSpeakersCardBody()

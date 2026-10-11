@@ -38,6 +38,7 @@
   ],
   "nova/voice_phrases_list": [
     "allowed_domains",
+    "asks_first",
     "enabled",
     "entries"
   ]

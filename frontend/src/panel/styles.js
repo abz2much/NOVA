@@ -288,6 +288,13 @@
       input.cfg-field:hover,input.cfg-field:focus,select.cfg-field:hover,select.cfg-field:focus{border-color:var(--gold);outline:none}
       .cfg-num{width:84px;min-width:0;text-align:right}
       .door-map-sel-new{flex:1;min-width:0;max-width:220px}
+      textarea.cfg-field.vp-json{flex:1;min-width:0;background:var(--surface-2);border:1px solid var(--line-soft);color:var(--ink);
+        font-family:var(--font-mono);font-size:12px;padding:6px 9px;border-radius:8px;resize:vertical}
+      textarea.cfg-field.vp-json:focus{border-color:var(--gold);outline:none}
+      .vp-row{flex-wrap:wrap}.vp-row .toggle-desc{flex:1;min-width:0;overflow-wrap:anywhere}
+      .vp-editor select.cfg-field{flex:1;min-width:0;max-width:100%}
+      .vp-note{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:-4px 0 8px}
+      .vp-link{background:none;border:none;padding:0;color:var(--gold);font:inherit;cursor:pointer;text-decoration:underline}
       .mode-grid{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
       .mode-chip{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.04em;
         padding:6px 12px;border-radius:8px;border:1px solid var(--line-soft);background:var(--surface-2);color:var(--ink-dim);cursor:pointer}

@@ -30,6 +30,8 @@
       desc: "Assign the one speaker Nova may use per room, plus a general fallback." },
     { id: "ai_models", group: "voice", title: "AI Models", real: true,
       desc: "Provider and model per tier — main agent, classifier, reasoning, review, vision." },
+    { id: "voice_phrases", group: "voice", title: "Voice Phrases", real: true,
+      desc: "Things you say, linked to a script, automation, scene or command." },
     { id: "briefings", group: "voice", title: "Briefings", real: true,
       desc: "Daily briefing schedule, content, and delivery speakers." },
     { id: "voice_confirmation", group: "voice", title: "Voice Confirmation", real: true,

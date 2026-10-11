@@ -1180,6 +1180,7 @@
     "fields": {},
     "literal_response_keys": [
       "allowed_domains",
+      "asks_first",
       "enabled",
       "entries"
     ],

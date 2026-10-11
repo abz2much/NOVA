@@ -56,6 +56,29 @@ async def test_list_when_nothing_is_saved(wsp, hass, store):
     assert "shell_command" in res["allowed_domains"] and "script" in res["allowed_domains"]
     assert "homeassistant" not in res["allowed_domains"]
     assert res["allowed_domains"] == sorted(res["allowed_domains"])
+    assert res["asks_first"] == []
+
+
+async def test_list_says_which_entries_ask_first(wsp, hass, store, load, monkeypatch):
+    vc = load("voice_confirm")
+    monkeypatch.setattr(vc, "is_enabled", lambda h: True)
+    monkeypatch.setattr(vc, "_cfg", lambda h, k, d=None: (
+        ["shell_command.heat_boost", "!script.heating_boost"]
+        if k == "voice_confirm_entities" else d))
+    script = (await _call(wsp.ws_voice_phrases_save, hass, entry=_new())).results[0][1]["entry"]
+    hass.states.set("script.other", "off")
+    other = (await _call(wsp.ws_voice_phrases_save, hass, entry=_new(
+        name="Other", phrases=["other words"],
+        action={"service": "script.turn_on", "target": {"entity_id": "script.other"}}))
+    ).results[0][1]["entry"]
+    shell = (await _call(wsp.ws_voice_phrases_save, hass, entry=_new(
+        name="Shell", phrases=["boost it"], action={"service": "shell_command.heat_boost"}))
+    ).results[0][1]["entry"]
+    store.data["voice_phrases"]["entries"].append({"phrase_id": "vp_bad", "action": 3})
+    res = (await _call(wsp.ws_voice_phrases_list, hass)).results[0][1]
+    # The exempt script runs; the other script and the listed shell command ask.
+    assert res["asks_first"] == [other["phrase_id"], shell["phrase_id"]]
+    assert script["phrase_id"] not in res["asks_first"]
 
 
 async def test_save_adds_then_updates(wsp, hass, store):

@@ -80,6 +80,7 @@
   ],
   "da": [
    "SEND",
+   "Script",
    "Status"
   ],
   "de": [
@@ -91,6 +92,7 @@
    "Garage",
    "HYBRID",
    "Live",
+   "Name",
    "Name (optional)",
    "Orange",
    "ROUTING",
@@ -117,6 +119,7 @@
    "OFF",
    "ON",
    "REAL",
+   "Script",
    "Solar",
    "normal",
    "real",
@@ -150,6 +153,7 @@
    "Routines",
    "SATELLITE",
    "Satellites",
+   "Script",
    "Source",
    "Suggestions",
    "Vision",
@@ -164,7 +168,8 @@
    "Home",
    "OFF",
    "ON",
-   "SATELLITE"
+   "SATELLITE",
+   "Script"
   ],
   "nb": [
    "SEND",
@@ -190,6 +195,7 @@
    "Open",
    "Routine",
    "Routines",
+   "Script",
    "Status",
    "Type (room, bath, stairs, door):",
    "briefings",
@@ -212,7 +218,8 @@
   "pt": [
    "OFF",
    "ON",
-   "REAL"
+   "REAL",
+   "Script"
   ],
   "pt-br": [
    "1 min",
@@ -227,6 +234,7 @@
    "OFF",
    "ON",
    "REAL",
+   "Script",
    "Solar",
    "briefings",
    "normal",
@@ -238,7 +246,8 @@
    "CALENDAR",
    "General",
    "Include",
-   "REAL"
+   "REAL",
+   "Script"
   ],
   "sv": [
    "1 min",

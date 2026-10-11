@@ -52,6 +52,29 @@ def _current() -> dict:
     }
 
 
+def _asks_first(hass, entries: list) -> list:
+    """The phrase ids that would ask before running right now (Voice
+    Confirmation, or an id listed in voice_confirm_entities), so the card can
+    say so. The same policy check the fast path makes; nothing runs."""
+    from . import policy
+    out = []
+    for e in entries:
+        try:
+            domain, _, service = str((e.get("action") or {}).get("service") or "").partition(".")
+            if not domain or not service:
+                continue
+            if domain == voice_phrases.SHELL_DOMAIN:
+                keys = [f"{domain}.{service}"]
+            else:
+                keys = voice_phrases.target_ids(e) or [""]
+            if any(not policy.authorize_now(hass, policy.AuthorityRequest(
+                    domain, service, k)).allowed for k in keys):
+                out.append(e.get("phrase_id"))
+        except Exception:  # pylint: disable=broad-except
+            continue
+    return out
+
+
 async def _store(hass, value: dict) -> bool:
     from . import nova_config
     return bool(await hass.async_add_executor_job(
@@ -68,13 +91,15 @@ async def ws_voice_phrases_list(
     connection: websocket_api.ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """The switch, every entry, and the domains a phrase may run."""
+    """The switch, every entry, the domains a phrase may run, and which
+    entries would ask first."""
     try:
         cfg = _current()
         connection.send_result(msg["id"], {
             "enabled": cfg["enabled"],
             "entries": cfg["entries"],
             "allowed_domains": sorted(_allowed_domains() | {voice_phrases.SHELL_DOMAIN}),
+            "asks_first": _asks_first(hass, cfg["entries"]),
         })
     except Exception as exc:
         connection.send_error(msg["id"], "voice_phrases_failed",
