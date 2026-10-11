@@ -62,6 +62,30 @@ def parse_uri(uri: Any) -> tuple[str, int] | None:
     return parsed.hostname, port
 
 
+def match_language(language: str | None, supported: list[str]) -> str | None:
+    """The code in ``supported`` that best fits ``language``: the same code,
+    else the same base language ("en-US" ↔ "en", "en_GB" ↔ "en-GB"),
+    preferring the bare base code. None when nothing fits."""
+    if not language or not supported:
+        return None
+    if language in supported:
+        return language
+
+    def norm(code: str) -> str:
+        return str(code).replace("_", "-").lower()
+
+    wanted = norm(language)
+    for code in supported:
+        if norm(code) == wanted:
+            return code
+    base = wanted.split("-")[0]
+    same_base = [c for c in supported if norm(c).split("-")[0] == base]
+    for code in same_base:
+        if norm(code) == base:
+            return code
+    return same_base[0] if same_base else None
+
+
 def valid_uri(value: Any) -> bool:
     """What the panel may save: empty (off) or a ``tcp://host:port`` address."""
     return value == "" or parse_uri(value) is not None
@@ -110,10 +134,14 @@ def _client(uri: str, read_timeout: float) -> AsyncTcpClient:
 
 async def connect(uri: str, read_timeout: float = READ_TIMEOUT) -> AsyncTcpClient:
     """Open a connection to the app. Raises VoiceIdUnreachable on any failure."""
-    client = _client(uri, read_timeout)
+    try:
+        client = _client(uri, read_timeout)
+    except ValueError as exc:
+        raise VoiceIdUnreachable(_describe_exc(exc)) from exc
     try:
         await client.connect()
-    except (OSError, asyncio.TimeoutError) as exc:
+    except (OSError, asyncio.TimeoutError, ValueError) as exc:
+        # ValueError covers a host name that can't be encoded (UnicodeError).
         await close(client)
         raise VoiceIdUnreachable(_describe_exc(exc)) from exc
     return client

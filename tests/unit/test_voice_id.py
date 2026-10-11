@@ -121,6 +121,7 @@ class FakeFallback(STT.SpeechToTextEntity):
         self.entity_id = entity_id
         self._langs = list(languages)
         self.calls = []
+        self.languages_seen = []
 
     supported_formats = [STT.AudioFormats.WAV]
     supported_codecs = [STT.AudioCodecs.PCM]
@@ -136,6 +137,7 @@ class FakeFallback(STT.SpeechToTextEntity):
         already_read = getattr(stream, "read", None)
         got = [c async for c in stream]
         self.calls.append({"already_read": already_read, "chunks": got})
+        self.languages_seen.append(metadata.language)
         return STT.SpeechResult("fallback words", STT.SpeechResultState.SUCCESS)
 
 
@@ -484,18 +486,88 @@ async def test_the_connection_is_always_closed(stt_mod, voice_id, monkeypatch):
     assert all(c._writer is None for c in opened)
 
 
-async def test_a_failed_connect_drops_the_app_languages(stt_mod):
-    fb = FakeFallback(languages=["en", "fr"])
+async def test_languages_stay_stable_when_the_app_goes_down(stt_mod):
+    """HA's pipeline checks its fixed language against this list before every
+    request, so it must not flip when the app goes up or down."""
+    fb = FakeFallback(languages=["en-US", "fr-FR"])
     STT.ENTITIES[fb.entity_id] = fb
     settings = {"voice_id_fallback_stt": fb.entity_id}
     async with FakeApp() as app:
         settings["voice_id_uri"] = app.uri
         ent = _entity(stt_mod, settings)
         await ent.async_refresh_info()
-        assert ent.supported_languages == ["en", "de"]
-    await ent.async_process_audio_stream(_meta(), Stream())   # app now gone
+        up = ent.supported_languages
+    await ent.async_process_audio_stream(_meta("en"), Stream())   # app now gone
+    await ent.async_refresh_info()
     assert ent.status()["state"] == "unreachable"
-    assert ent.supported_languages == ["en", "fr"]
+    assert ent.supported_languages == up == ["en", "de", "en-US", "fr-FR"]
+
+
+async def test_region_code_fallback_gets_its_own_code(stt_mod, log_lines):
+    """Pipeline language "en", fallback that only knows "en-US" (HA Cloud style)."""
+    fb = FakeFallback(languages=["en-US", "fr-FR"])
+    STT.ENTITIES[fb.entity_id] = fb
+    ent = _entity(stt_mod, {"voice_id_uri": _closed_port_uri(),
+                            "voice_id_fallback_stt": fb.entity_id})
+    assert ent.check_metadata(_meta("en-US"))
+    result = await ent.async_process_audio_stream(_meta("en"), Stream())
+    assert result.text == "fallback words"
+    assert fb.languages_seen == ["en-US"]
+    assert fb.calls[0]["already_read"] == 0
+
+
+async def test_app_gets_its_own_language_code(stt_mod):
+    """Pipeline language "en-US" (from the fallback's list), app knows "en"."""
+    fb = FakeFallback(languages=["en-US"])
+    STT.ENTITIES[fb.entity_id] = fb
+    async with FakeApp() as app:
+        ent = _entity(stt_mod, {"voice_id_uri": app.uri,
+                                "voice_id_fallback_stt": fb.entity_id})
+        await ent.async_refresh_info()
+        assert ent.check_metadata(_meta("en-US"))
+        result = await ent.async_process_audio_stream(_meta("en-US"), Stream())
+    assert result.text == TEXT
+    sent = [e for e in app.received if Transcribe.is_type(e.type)]
+    assert Transcribe.from_event(sent[-1]).language == "en"
+
+
+@pytest.mark.parametrize("language,supported,expected", [
+    ("en", ["en", "de"], "en"),
+    ("en", ["en-US", "en-GB"], "en-US"),
+    ("en-US", ["de", "en"], "en"),
+    ("en_GB", ["en-US", "en-GB"], "en-GB"),
+    ("en-GB", ["en-US", "en"], "en"),
+    ("fr", ["en", "de"], None),
+    ("en", [], None),
+])
+def test_match_language(voice_id, language, supported, expected):
+    assert voice_id.match_language(language, supported) == expected
+
+
+async def test_a_host_that_cant_be_encoded_falls_back(stt_mod, log_lines):
+    fb = FakeFallback()
+    STT.ENTITIES[fb.entity_id] = fb
+    ent = _entity(stt_mod, {"voice_id_uri": "tcp://nova..local:10350",
+                            "voice_id_fallback_stt": fb.entity_id})
+    result = await ent.async_process_audio_stream(_meta(), Stream())
+    assert result.text == "fallback words"
+    assert fb.calls[0]["already_read"] == 0
+    await ent.async_refresh_info()             # never raises
+    assert ent.status()["state"] == "unreachable"
+
+
+async def test_a_stale_connect_failure_never_marks_the_new_address(stt_mod, monkeypatch):
+    settings = {"voice_id_uri": "tcp://old-app:10350"}
+    ent = _entity(stt_mod, settings)
+    voice_id = sys.modules["jc.voice_id"]
+
+    async def _slow_fail(uri, *a, **k):
+        settings["voice_id_uri"] = "tcp://new-app:10350"   # saved meanwhile
+        ent._info_uri, ent._state = "tcp://new-app:10350", "connected"
+        raise voice_id.VoiceIdUnreachable("refused")
+    monkeypatch.setattr(voice_id, "connect", _slow_fail)
+    await ent.async_process_audio_stream(_meta(), Stream())
+    assert ent.status()["state"] == "connected"
 
 
 @pytest.mark.parametrize("key,value,ok", [
