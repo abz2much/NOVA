@@ -1,3 +1,17 @@
+## [8.33.0] — Voice confirmation on the satellite you spoke to
+
+When Nova needs you to confirm something you asked by voice, it now asks on the speaker you spoke to, keeps listening, and a spoken yes runs it. Before, the question could play in another room and a yes did nothing.
+
+### Fixed
+- **No separate question by voice.** A request from a voice satellite that needs a spoken confirmation no longer plays "… are you sure?" on a guessed speaker or opens a mic during the turn. That question went to the first satellite's room or the general speaker, and calling `ask_question` or `start_conversation` on the satellite you spoke to cancels your own running request. Nova's reply asks instead, ending with "Shall I go ahead?", and it plays through the normal reply routing.
+- **A spoken yes now runs it.** `run_voice_phrase` and `run_scene_or_script` remember what a yes would run, one item per satellite for 60 seconds, in memory only (new `pending_confirm.py`). The next turn from that satellite is checked first, before any proactive offer: a clear yes runs it once, approved for exactly its own targets (every target of a voice phrase) through the new `policy.approved_confirmation`, and the Logs tab shows "approved". A clear no answers "OK, I won't." Anything else drops it and is answered as usual. A yes from another satellite, the Chat tab or the panel never touches it.
+- **The mic stays open for the answer** on the same satellite, even with continued conversation off and never handed to another room. When the reply plays on a separate speaker, the mic opens once that speaker has finished. Why it did not reopen before (logs of 11 October): continued conversation was on, but the AI's reply did not end with a question, which Nova needs before it reopens.
+- **Outside a voice turn**, the "are you sure?" path picks its speaker the way replies do, honouring Satellite → Speaker.
+
+### Unchanged
+- Unlock, open, disarm and calling off an intrusion by voice still need a phone tap; a spoken yes never replaces it.
+- Chat, panel and automation requests behave as before. Other tools that hit a confirmation by voice (`control_device`, `execute_plan`, `set_mode`, Home Assistant's own Assist tools) also no longer ask separately, but a spoken yes does not replay them: say the request again.
+
 ## [8.32.0]
 
 Voice phrases.

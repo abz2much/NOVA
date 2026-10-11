@@ -97,7 +97,8 @@ never add or change one.
   automation or a scene asks first, as Nova's own "activate" does. The phrase
   is handed to the AI to ask, so the Logs tab shows two rows for it: the
   phrase's own row, blocked as "handed to agent", and the row of the tool
-  that asked. The card marks the phrases that will ask first.
+  that asked. The card marks the phrases that will ask first. Answer yes on
+  the same satellite; see [Confirming by voice](#confirming-by-voice).
 - **Unlock, open and disarm** still need a tap on your phone when asked by
   voice or in the Chat tab. A phrase can't ask for that tap, so such a phrase
   runs nothing there: Nova says it needs confirming and can't ask for that
@@ -142,6 +143,40 @@ Chat tab and while the AI is offline. Only picking by meaning needs the AI.
 3. Then Nova's own built in commands, such as "turn on the kitchen light".
 4. Then the AI.
 
+## Confirming by voice
+
+With **Voice Confirmation** on, Nova asks before it runs a scene, a script,
+an automation or anything else that needs your OK. When you asked on a voice
+satellite:
+
+1. Nova asks in its own reply, on the same speaker its replies to that
+   satellite use (your **Satellite → Speaker** pairing, else the room's
+   speaker). It ends with "Shall I go ahead?". It never plays a separate
+   question in another room.
+2. The satellite keeps listening for your answer, even with **Continued
+   conversation** off. When the reply plays on a separate speaker, the mic
+   opens once the speaker has finished.
+3. Say **yes** ("Yes", "go ahead", "do it") on the **same satellite** within
+   60 seconds, and Nova runs it. Say **no** ("No", "cancel") and it won't.
+   Anything else drops the question, and Nova answers what you said as
+   usual.
+
+What to know:
+
+- Only the satellite you were asked on can say yes. A yes on another
+  satellite, in the Chat tab or in the panel does nothing, and leaves the
+  question waiting.
+- If two satellites hear your yes at the same moment, the one that hears it
+  first can take it and nothing runs. Ask again.
+- The question waits 60 seconds and is forgotten on a restart.
+- Unlock, open and disarm, and calling off an intrusion, still need a tap on
+  your phone by voice. A spoken yes never replaces that tap.
+- A yes runs what a voice phrase, or a scene, script or automation, held. Other
+  actions that need confirming (a device, a plan, a mode, or one of Home
+  Assistant's own tools) still ask in the reply. For those, say the full
+  request again after Nova asks.
+- The Logs tab shows the run as "approved".
+
 ## What it works out by itself
 
 - The satellites and Cast devices it can use, for the speaker cards.
@@ -176,6 +211,7 @@ Chat tab and while the AI is offline. Only picking by meaning needs the AI.
 | The voice changed after an update | Nova follows Home Assistant's default voice | Set the voice in your Assist pipeline. |
 | A voice phrase does nothing | Another phrase ties with it, the words are a near miss, or Home Assistant answered first | Try the sentence in **Try a sentence**, and check your automations for a sentence trigger with the same words. |
 | A phrase says it needs confirming | Voice Confirmation is on, or it unlocks, opens or disarms | Answer the question. For unlock, open or disarm, ask the usual way and tap your phone. |
+| You said yes and nothing ran | The yes was on another satellite, came after 60 seconds, or another satellite heard it first | Ask again, and answer on the same satellite. |
 
 ## Settings
 

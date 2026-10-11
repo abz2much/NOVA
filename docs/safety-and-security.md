@@ -287,9 +287,13 @@ off. Panel, **Settings → General**: **Sentinel** turns all of them on or off.
 
 Panel, **Settings → Voice Confirmation**: **Voice confirmation** asks out loud
 before sensitive actions such as unlock, garage and disarm, and listens for a
-spoken yes or no. Off by default. **Mode** chooses the satellite's own audio or
-the room speaker. An unlock or garage opening asked for by voice still needs a
-tap on your phone, whatever this setting says.
+spoken yes or no. Off by default. When you asked on a voice satellite, Nova
+asks in its own reply on that satellite's speaker and keeps listening there;
+only a yes on that same satellite counts (see
+[Confirming by voice](voice-and-speakers.md#confirming-by-voice)). **Mode**
+chooses the satellite's own audio or the room speaker for requests that did
+not come from a satellite. An unlock or garage opening asked for by voice
+still needs a tap on your phone, whatever this setting says.
 
 Only in `/config/nova/config.json`:
 

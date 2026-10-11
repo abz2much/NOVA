@@ -67,7 +67,7 @@ Nova's settings live in two places. Day to day settings (AI models, cameras, saf
 | You want to | What Nova does | Guide |
 |---|---|---|
 | Talk to your home | Voice and text conversation, with a calm, dry personality you can turn up or down | [Voice and speakers](docs/voice-and-speakers.md) |
-| Run things with your own words | "Nova, the house is cold" runs the script, automation, scene or shell command you link to it. Works offline, with the same safety checks as any other action | [Voice phrases](docs/voice-and-speakers.md#voice-phrases) |
+| Run things with your own words | "Nova, the house is cold" runs the script, automation, scene or shell command you link to it. Works offline, with the same safety checks as any other action. When it needs your OK, Nova asks on the satellite you spoke to and a spoken yes runs it | [Voice phrases](docs/voice-and-speakers.md#voice-phrases) |
 | Keep the home safe | Watches for intrusion, smoke, carbon monoxide, leaks, freezing pipes, and doors or windows left open. Can lock up at night | [Safety and security](docs/safety-and-security.md) |
 | Know who comes to the door | Analyses doorbell presses, spots packages and mail, and learns regular visitors. Can recognise faces through Frigate or Double Take | [Cameras and faces](docs/cameras-and-faces.md) |
 | Stop being nagged at the wrong time | Knows who is home, who is asleep and when quiet hours are, and speaks to the right person in the right room | [Presence and alerts](docs/presence-and-alerts.md) |
