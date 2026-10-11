@@ -308,3 +308,114 @@ async def test_the_ai_picking_by_meaning_still_waits_for_a_yes(hass, tmp_path, m
         await _say(hass, entity_id, "Yes.", a)
         await hass.async_block_till_done()
     assert calls["script"] == [("turn_on", {"entity_id": "script.heating_boost"})]
+
+
+# ── 8.34.0: the answer after a Nova driven reopen keeps its conversation ────
+
+class _Asker:
+    """The agent, faked: it asks a question, then records the history it is
+    given on the next turn."""
+
+    def __init__(self):
+        self.seen = []
+        self.personas = []
+
+    def patches(self):
+        async def try_local(*a, **k):
+            return SimpleNamespace(handled=False, text="")
+
+        async def run_agent(hass, *a, **k):
+            msgs = [m.get("content") for m in (k.get("messages") or [])]
+            self.seen.append(msgs)
+            self.personas.append(k.get("persona", ""))
+            return "Shall I raise both to 22 degrees?"
+        return (patch("custom_components.nova.local_engine.try_local", new=try_local),
+                patch("custom_components.nova.agent.run_agent", new=run_agent))
+
+
+async def _cast_setup(hass, monkeypatch, a_sat):
+    from custom_components.nova import continued_conversation, conversation as nova_conv
+    continued_conversation._REOPENED.clear()
+    monkeypatch.setattr(continued_conversation, "schedule_reopen",
+                        lambda hass, sat, spk, text, follow=True: True)
+    monkeypatch.setattr(nova_conv.NovaAgent, "_satellite_pairings",
+                        lambda self: {a_sat: "media_player.living"})
+    monkeypatch.setattr(nova_conv, "resolve_tts_entity", lambda hass, eng: "tts.nova")
+
+    async def announce(*a, **k):
+        return None
+    monkeypatch.setattr(nova_conv, "async_announce", announce)
+    hass.states.async_set("media_player.living", "idle")
+    return continued_conversation
+
+
+async def test_the_answer_on_a_reopened_satellite_keeps_its_history(hass, tmp_path,
+                                                                     monkeypatch):
+    entity_id, a, a_sat, b, _calls, _pc = await _setup(
+        hass, monkeypatch, tmp_path, continued_conversation_enabled=True)
+    cc = await _cast_setup(hass, monkeypatch, a_sat)
+    asker = _Asker()
+    local, run = asker.patches()
+    with local, run:
+        await _say(hass, entity_id, "it's freezing", a, conversation_id="conv-1")
+        assert cc._REOPENED.get(a, ("",))[0] == "conv-1"
+        # HA's start_conversation gives the follow up a brand new id.
+        await _say(hass, entity_id, "Yes.", a, conversation_id="conv-2")
+    assert "it's freezing" in asker.seen[1]
+    assert "Shall I raise both to 22 degrees?" in asker.seen[1]
+    # conv-1 was used once; this reply asked again, so its own id is next.
+    assert cc._REOPENED[a][0] == "conv-2"
+
+
+async def test_after_sixty_seconds_or_from_another_device_there_is_no_history(
+        hass, tmp_path, monkeypatch):
+    entity_id, a, a_sat, b, _calls, _pc = await _setup(
+        hass, monkeypatch, tmp_path, continued_conversation_enabled=True)
+    cc = await _cast_setup(hass, monkeypatch, a_sat)
+    asker = _Asker()
+    local, run = asker.patches()
+    with local, run:
+        await _say(hass, entity_id, "it's freezing", a, conversation_id="conv-1")
+        await _say(hass, entity_id, "Yes.", b, conversation_id="conv-b")
+        assert "it's freezing" not in asker.seen[1]
+        assert cc._REOPENED.get(a, ("",))[0] == "conv-1"       # B left it alone
+        import time
+        cc._REOPENED[a] = ("conv-1", time.monotonic() - 1)    # expired
+        await _say(hass, entity_id, "Yes.", a, conversation_id="conv-3")
+    assert "it's freezing" not in asker.seen[2]
+
+
+async def test_voice_turns_are_told_to_keep_it_short(hass, tmp_path, monkeypatch):
+    entity_id, a, _a_sat, _b, _calls, _pc = await _setup(hass, monkeypatch, tmp_path)
+    from custom_components.nova.conversation import VOICE_REPLY_RULE
+    asker = _Asker()
+    local, run = asker.patches()
+    with local, run:
+        await _say(hass, entity_id, "it's freezing", a)
+        await _say(hass, entity_id, "it's freezing", None, conversation_id="nova_chat_u1")
+        await _say(hass, entity_id, "it's freezing", None, conversation_id="typed-1")
+    assert VOICE_REPLY_RULE in asker.personas[0]
+    assert VOICE_REPLY_RULE not in asker.personas[1]       # Chat
+    assert VOICE_REPLY_RULE not in asker.personas[2]       # not a satellite
+
+
+async def test_the_carried_history_is_not_replaced_by_the_cross_session_reseed(
+        hass, tmp_path, monkeypatch):
+    # With memory threading on, a never seen conversation id is reseeded from
+    # older sessions, which REPLACES its history. The carried over turn must
+    # survive that.
+    entity_id, a, a_sat, _b, _calls, _pc = await _setup(
+        hass, monkeypatch, tmp_path, continued_conversation_enabled=True,
+        memory_threading_enabled=True)
+    await _cast_setup(hass, monkeypatch, a_sat)
+    from custom_components.nova import memory_thread
+
+    async def older(hass, hours, limit, device_id=None, subject=None):
+        return [{"role": "user", "content": "an older session", "ts": 1.0}]
+    monkeypatch.setattr(memory_thread, "load_recent", older)
+    asker = _Asker()
+    local, run = asker.patches()
+    with local, run:
+        await _say(hass, entity_id, "it's freezing", a, conversation_id="conv-1")
+        await _say(hass, entity_id, "Yes.", a, conversation_id="conv-2")
+    assert "it's freezing" in asker.seen[1]

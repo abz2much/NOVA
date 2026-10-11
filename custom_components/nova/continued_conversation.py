@@ -195,3 +195,36 @@ def schedule_reopen(hass, satellite_entity_id: str,
                               follow=follow)
     )
     return True
+
+
+# ── Keep the conversation across a Nova driven reopen (8.34.0) ──────────────
+# assist_satellite.start_conversation always starts a NEW conversation id,
+# and Nova keeps history per conversation id, so the answer to "Shall I raise
+# it to 22?" arrived with no history ("Yes to what?"). When Nova reopens a
+# satellite itself, the conversation.py turn remembers device -> its
+# conversation id for 60 seconds; the next turn from that same device with an
+# id Nova hasn't seen picks up that history, once. Memory only.
+REOPEN_TTL_SECONDS = 60.0
+_REOPENED: dict = {}   # device_id -> (conversation_id, monotonic expiry)
+
+
+def remember_reopen(device_id: str, conversation_id: str, *, now=None) -> None:
+    """The conversation a Nova driven reopen on this device belongs to."""
+    import time as _t
+    if not device_id or not conversation_id:
+        return
+    t = _t.monotonic() if now is None else now
+    _REOPENED[str(device_id)] = (str(conversation_id), t + REOPEN_TTL_SECONDS)
+
+
+def take_reopened(device_id: str, *, now=None):
+    """The remembered conversation id for this device, once, within 60
+    seconds; else None. Taking it clears it."""
+    import time as _t
+    if not device_id:
+        return None
+    held = _REOPENED.pop(str(device_id), None)
+    if held is None:
+        return None
+    cid, expires = held
+    return cid if (_t.monotonic() if now is None else now) < expires else None

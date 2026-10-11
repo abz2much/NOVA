@@ -314,3 +314,18 @@ def test_prompt_lines_caps_at_fifty(vp):
     cfg = _cfg(*[_entry(f"vp_{i:08x}", [f"phrase {i}"], allow_ai=True) for i in range(60)])
     lines, ids = vp.prompt_lines(cfg)
     assert len(lines.splitlines()) == 50 and len(ids) == 50
+
+
+def test_a_phrase_saved_on_8_33_loads_and_saves_unchanged(vp):
+    # 8.34.0 adds no field: exact or flexible is decided at match time.
+    saved = {"phrase_id": "vp_3f9c1a2b", "name": "House is cold",
+             "phrases": ["the house is cold", "I'm cold"], "match": "flexible",
+             "allow_ai": True, "enabled": True,
+             "action": {"service": "script.turn_on",
+                        "target": {"entity_id": "script.heating_boost"}, "data": {}},
+             "reply": "Warming the house up{addr}."}
+    clean, errors, warnings = vp.validate_entry(dict(saved), [saved], allowed_domains=ALLOWED)
+    assert errors == [] and warnings == [] and clean == saved
+    m = vp.match("Nova, the house is cold.", _cfg(saved))
+    assert (m.phrase_id, m.tier) == ("vp_3f9c1a2b", "exact")
+    assert vp.match("the house is a bit cold", _cfg(saved)).tier == "flexible"

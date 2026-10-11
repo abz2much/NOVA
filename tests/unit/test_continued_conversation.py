@@ -97,3 +97,45 @@ async def test_reopen_falls_back_when_speaker_never_plays(cc, fake_hass, monkeyp
     await cc._reopen_after_speaker(fake_hass, sat, spk, "Which room?")
     # still reopened, via the spoken-length fallback
     assert any(c[1] == "start_conversation" for c in fake_hass.service_calls)
+
+
+# ── 8.34.0: the conversation a Nova driven reopen belongs to ────────────────
+
+@pytest.fixture
+def carry(cc):
+    cc._REOPENED.clear()
+    yield cc
+    cc._REOPENED.clear()
+
+
+def test_a_reopen_is_remembered_once_for_sixty_seconds(carry):
+    carry.remember_reopen("satA", "conv-1", now=100.0)
+    assert carry.take_reopened("satA", now=159.0) == "conv-1"
+    assert carry.take_reopened("satA", now=159.0) is None        # one use
+
+
+def test_after_sixty_seconds_it_is_gone(carry):
+    carry.remember_reopen("satA", "conv-1", now=100.0)
+    assert carry.take_reopened("satA", now=160.0) is None
+    assert "satA" not in carry._REOPENED
+
+
+def test_another_device_never_gets_it(carry):
+    carry.remember_reopen("satA", "conv-1", now=100.0)
+    assert carry.take_reopened("satB", now=101.0) is None
+    assert carry.take_reopened("", now=101.0) is None
+    assert carry.take_reopened("satA", now=101.0) == "conv-1"
+
+
+def test_newest_reopen_wins_and_blanks_are_ignored(carry):
+    carry.remember_reopen("satA", "conv-1", now=100.0)
+    carry.remember_reopen("satA", "conv-2", now=101.0)
+    carry.remember_reopen("", "conv-3")
+    carry.remember_reopen("satB", "")
+    assert carry.take_reopened("satA", now=102.0) == "conv-2"
+    assert carry._REOPENED == {}
+
+
+def test_real_clock_is_used_by_default(carry):
+    carry.remember_reopen("satA", "conv-1")
+    assert carry.take_reopened("satA") == "conv-1"
