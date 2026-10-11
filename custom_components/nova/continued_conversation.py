@@ -137,7 +137,8 @@ def _pick_reopen_target(hass, original_satellite: str) -> str:
 
 
 async def _reopen_after_speaker(hass, satellite_entity_id: str,
-                                speaker_entity_id: str, reply_text: str) -> None:
+                                speaker_entity_id: str, reply_text: str,
+                                follow: bool = True) -> None:
     """Wait for the reply to finish on `speaker_entity_id`, then reopen the
     satellite mic to listen for the follow-up (no wake word, no announcement)."""
     import asyncio
@@ -168,7 +169,9 @@ async def _reopen_after_speaker(hass, satellite_entity_id: str,
 
     # Presence has settled by now (we waited for the reply to finish), so decide
     # whether to follow the person to another room's satellite.
-    target = _pick_reopen_target(hass, satellite_entity_id)
+    # A held confirmation (follow=False) always reopens where the question was
+    # asked: the yes only counts from that satellite.
+    target = _pick_reopen_target(hass, satellite_entity_id) if follow else satellite_entity_id
     try:
         await hass.services.async_call(
             "assist_satellite",
@@ -182,12 +185,13 @@ async def _reopen_after_speaker(hass, satellite_entity_id: str,
 
 
 def schedule_reopen(hass, satellite_entity_id: str,
-                    speaker_entity_id: str, reply_text: str) -> bool:
+                    speaker_entity_id: str, reply_text: str, *, follow: bool = True) -> bool:
     """Schedule a speaker-aware follow-up mic reopen (non-blocking). Returns True
-    if scheduled."""
+    if scheduled. follow=False never hands off to another room's satellite."""
     if not satellite_entity_id or not speaker_entity_id:
         return False
     hass.async_create_task(
-        _reopen_after_speaker(hass, satellite_entity_id, speaker_entity_id, reply_text)
+        _reopen_after_speaker(hass, satellite_entity_id, speaker_entity_id, reply_text,
+                              follow=follow)
     )
     return True

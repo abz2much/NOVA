@@ -944,6 +944,22 @@ class NovaAgent(conversation.ConversationEntity):
         reopen_speaker: str | None = None   # separate speaker the reply played on
         reopen_device: str | None = None    # the wake/voice satellite's device_id
 
+        # 8.33.0: the answer to a request held for a spoken yes on THIS
+        # satellite (pending_confirm.py). Checked before the proactive offer
+        # below: that offer is global and takes any "yes", so it must not
+        # swallow the answer. Only a voice turn from the same device reads or
+        # clears the item; Chat, the panel and other satellites never touch
+        # it. A clear yes runs the held request now; the reply then goes
+        # through the normal reply routing below.
+        confirm_result = None
+        if device_id and not is_chat:
+            try:
+                from . import pending_confirm
+                confirm_result = await pending_confirm.answer(
+                    self.hass, device_id, user_input.text, honorific=honorific)
+            except Exception as exc:
+                _LOGGER.debug("Pending confirmation answer skipped: %s", exc)
+
         # v5.9.07: Proactive offer yes/no — resolved before main pipeline.
         # honorific may be "" once nobody specific is home to address (see
         # honorific.py) — addr collapses the trailing ", {honorific}" to
@@ -953,7 +969,8 @@ class NovaAgent(conversation.ConversationEntity):
         try:
             # Reuses the SAME pending_offer object captured before the
             # relevance decision above — no second get_pending_offer() read.
-            if pending_offer:
+            # Left untouched when this turn answered a held request (8.33.0).
+            if pending_offer and confirm_result is None:
                 low = user_input.text.strip().lower()
                 affirm = low in ("yes", "yes please", "yeah", "yep", "sure",
                                  "do it", "go ahead", "please do", "okay", "ok",
@@ -1025,9 +1042,13 @@ class NovaAgent(conversation.ConversationEntity):
             # The user's own voice phrases come before Nova's built in local
             # commands (8.32.0). A phrase that needs confirming skips the
             # local engine and goes to the agent with a hint to ask.
-            phrase = await voice_phrase_runner.try_phrase(
-                self.hass, user_input.text, honorific=honorific,
-                device_id=device_id, user_id=turn_user)
+            if confirm_result is not None:
+                # This turn answered a held request (8.33.0): that is the reply.
+                phrase = voice_phrase_runner.PhraseStep(confirm_result, None)
+            else:
+                phrase = await voice_phrase_runner.try_phrase(
+                    self.hass, user_input.text, honorific=honorific,
+                    device_id=device_id, user_id=turn_user)
             local_result = phrase.result
             if local_result is None and not phrase.defer_hint:
                 local_result = await try_local(
@@ -1345,11 +1366,18 @@ class NovaAgent(conversation.ConversationEntity):
         # older HA cores may not carry the field.
         try:
             from . import continued_conversation as _cc
-            if not is_chat and _cc.enabled() and _cc.should_continue(response_text):
+            from . import pending_confirm as _pc
+            # 8.33.0: a request held for a spoken yes on this satellite always
+            # keeps the mic open for the answer, on this same satellite (never
+            # handed to another room), whatever continued conversation says.
+            # The reopen runs after this turn's pipeline has finished, so it
+            # never cancels the user's own request.
+            held = bool(device_id and not is_chat and _pc.get(device_id))
+            if not is_chat and (held or (_cc.enabled() and _cc.should_continue(response_text))):
                 sat_ent = (_cc.satellite_for_device(self.hass, reopen_device)
                            if reopen_device else None)
                 if (cast_routed and reopen_speaker and sat_ent
-                        and _cc.speaker_reopen_enabled()):
+                        and (held or _cc.speaker_reopen_enabled())):
                     # The reply is playing on a SEPARATE speaker, not the mic-only
                     # satellite. HA's continue_conversation would reopen the mic
                     # based on the satellite's own (instant) playback — before the
@@ -1357,7 +1385,8 @@ class NovaAgent(conversation.ConversationEntity):
                     # reply. Instead Nova watches the speaker and reopens the mic
                     # only once it goes idle.
                     _cc.schedule_reopen(
-                        self.hass, sat_ent, reopen_speaker, response_text)
+                        self.hass, sat_ent, reopen_speaker, response_text,
+                        follow=not held)
                 else:
                     # Satellite plays the reply itself (or no separate speaker) —
                     # HA's built-in reopen timing is correct here.

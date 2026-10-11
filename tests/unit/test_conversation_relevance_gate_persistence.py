@@ -242,7 +242,9 @@ def test_offer_handler_reuses_the_captured_pending_offer_object():
     # The later handler must branch on the SAME `pending_offer` name, not a
     # fresh local (e.g. the old `pending = cognitive_core.get_pending_offer()`
     # pattern must not come back).
-    assert "if pending_offer:" in SRC
+    # 8.33.0: it is skipped when the turn answered a held spoken
+    # confirmation, which must come first.
+    assert "if pending_offer and confirm_result is None:" in SRC
     assert "pending = cognitive_core.get_pending_offer()" not in SRC
 
 
