@@ -294,6 +294,7 @@
       .vp-row{flex-wrap:wrap}.vp-row .toggle-desc{flex:1;min-width:0;overflow-wrap:anywhere}
       .vp-editor select.cfg-field{flex:1;min-width:0;max-width:100%}
       .vp-note{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:-4px 0 8px}
+      .vid-ok{color:var(--gold)}.vid-bad{color:var(--warn)}
       .vp-link{background:none;border:none;padding:0;color:var(--gold);font:inherit;cursor:pointer;text-decoration:underline}
       .mode-grid{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
       .mode-chip{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.04em;

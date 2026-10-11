@@ -298,5 +298,15 @@
   "e.g. climate.hall, climate.landing": "örn. climate.koridor, climate.sahanlik",
   "e.g. climate.set_temperature": "örn. climate.set_temperature",
   "e.g. the house is cold": "örn. evde hava soğuk",
-  "— pick one —": "— birini seç —"
+  "— pick one —": "— birini seç —",
+  "App address": "Uygulama adresi",
+  "Connected": "Bağlı",
+  "Fallback speech to text": "Yedek konuşmadan metne",
+  "Not loaded": "Yüklenmedi",
+  "Not set": "Ayarlanmadı",
+  "Set Nova Voice ID as the speech to text in your voice assistant (Settings → Voice assistants). If the app isn't running, Nova uses the fallback.": "Ses asistanınızda konuşmadan metne olarak Nova Voice ID'yi seçin (Ayarlar → Ses asistanları). Uygulama çalışmıyorsa Nova yedeği kullanır.",
+  "Shown in the Nova Voice ID app's log": "Nova Voice ID uygulamasının günlüğünde gösterilir",
+  "Speech to text through the Nova Voice ID app, with a fallback for when the app is down.": "Nova Voice ID uygulaması üzerinden konuşmadan metne, uygulama kapalıyken bir yedekle.",
+  "Unreachable": "Ulaşılamıyor",
+  "Voice ID": "Voice ID"
 }

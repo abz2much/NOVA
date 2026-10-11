@@ -66,7 +66,10 @@
     "abort": {
       "already_configured": "Nova is already configured.",
       "import_failed": "Found a Nova config but no usable LLM (no API key and no local endpoint).",
-      "already_in_progress": "Nova setup is already open in another window."
+      "already_in_progress": "Nova setup is already open in another window.",
+      "updated": "Nova Voice ID found. Its address is saved in Nova.",
+      "no_nova_entry": "Nova Voice ID was found, but Nova isn't set up yet. Set up Nova first, then restart the Nova Voice ID app.",
+      "invalid_discovery_info": "Nova Voice ID sent an address Nova can't use. Paste the address from the app's log into Nova's Voice ID card instead."
     }
   },
   "selector": {

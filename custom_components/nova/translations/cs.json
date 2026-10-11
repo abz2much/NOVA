@@ -66,7 +66,10 @@
     "abort": {
       "already_configured": "Nova je již nastavena.",
       "import_failed": "Byla nalezena konfigurace Nova, ale bez použitelného LLM (žádný klíč API ani místní koncový bod).",
-      "already_in_progress": "Nastavení Nova je již otevřené v jiném okně."
+      "already_in_progress": "Nastavení Nova je již otevřené v jiném okně.",
+      "updated": "Nova Voice ID nalezeno. Jeho adresa je uložena v Nově.",
+      "no_nova_entry": "Nova Voice ID bylo nalezeno, ale Nova ještě není nastavena. Nejprve nastavte Novu a pak restartujte aplikaci Nova Voice ID.",
+      "invalid_discovery_info": "Nova Voice ID poslalo adresu, kterou Nova nemůže použít. Vložte místo toho adresu z protokolu aplikace do karty Voice ID v Nově."
     }
   },
   "selector": {

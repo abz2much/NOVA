@@ -66,7 +66,10 @@
     "abort": {
       "already_configured": "Nova 已設定。",
       "import_failed": "找到了 Nova 設定，但沒有可用的 LLM（沒有 API 金鑰，也沒有本地端點）。",
-      "already_in_progress": "Nova 設定已在另一個視窗中開啟。"
+      "already_in_progress": "Nova 設定已在另一個視窗中開啟。",
+      "updated": "已找到 Nova Voice ID。它的位址已儲存到 Nova。",
+      "no_nova_entry": "已找到 Nova Voice ID，但 Nova 尚未設定。請先設定 Nova，然後重新啟動 Nova Voice ID 應用程式。",
+      "invalid_discovery_info": "Nova Voice ID 傳送的位址 Nova 無法使用。請將應用程式日誌中的位址貼到 Nova 的 Voice ID 卡片中。"
     }
   },
   "selector": {

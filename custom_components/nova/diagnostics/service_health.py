@@ -398,6 +398,38 @@ def _check_database(hass) -> dict:
     return out
 
 
+def _check_voice_id(hass) -> dict:
+    """The Nova Voice ID app (8.35.0). OFF until an app address is set. A real
+    request that failed (app down, so the fallback was used, or the app broke
+    mid stream) is DOWN. An Info check that missed is only IDLE: voice still
+    works through the fallback."""
+    out: dict[str, Any] = {"name": "Voice ID", "key": "voice_id", "status": _OFF,
+                           "detail": "no app address set"}
+    from ..runtime import domain_runtime
+    runtime = domain_runtime(hass)
+    entity = getattr(runtime, "voice_id", None) if runtime is not None else None
+    status = entity.status() if entity is not None else None
+    if not status or status.get("state") == "not_set":
+        return out
+    real_fail = _recent_real_failure("voice_id")
+    if real_fail:
+        out["status"] = _DOWN
+        out["detail"] = f"a real request failed: {real_fail}"
+        return out
+    state = status.get("state")
+    if state == "connected" or _recently_used_ok("voice_id"):
+        version = status.get("version") or ""
+        out["status"] = _OK
+        out["detail"] = f"app connected{(' (v' + version + ')') if version else ''}"
+    elif state == "unreachable":
+        out["status"] = _IDLE
+        out["detail"] = "app not reachable at the last check; the fallback is used"
+    else:
+        out["status"] = _IDLE
+        out["detail"] = "checking the app"
+    return out
+
+
 def _check_scheduler(hass) -> dict:
     """Periodic-sweep scheduler health — informational. WARN if any task has been
     failing repeatedly; OFF if the scheduler isn't running yet (fresh boot)."""
@@ -490,6 +522,7 @@ async def run_service_health(hass) -> dict:
         ("Embeddings", "embeddings", _check_embeddings, True),
         ("TTS", "tts", _check_tts, False),
         ("STT", "stt", _check_stt, False),
+        ("Voice ID", "voice_id", _check_voice_id, False),
         ("Cameras", "cameras", _check_cameras, False),
         ("Routines", "routines", _check_routines, False),
         ("Conversation store", "database", _check_database, False),

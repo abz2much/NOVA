@@ -1206,5 +1206,15 @@
   "e.g. climate.hall, climate.landing": "np. climate.korytarz, climate.pietro",
   "e.g. climate.set_temperature": "np. climate.set_temperature",
   "e.g. the house is cold": "np. w domu jest zimno",
-  "— pick one —": "— wybierz —"
+  "— pick one —": "— wybierz —",
+  "App address": "Adres aplikacji",
+  "Connected": "Połączono",
+  "Fallback speech to text": "Zapasowa zamiana mowy na tekst",
+  "Not loaded": "Nie wczytano",
+  "Not set": "Nie ustawiono",
+  "Set Nova Voice ID as the speech to text in your voice assistant (Settings → Voice assistants). If the app isn't running, Nova uses the fallback.": "Ustaw Nova Voice ID jako zamianę mowy na tekst w swoim asystencie głosowym (Ustawienia → Asystenci głosowi). Gdy aplikacja nie działa, Nova używa zapasowej.",
+  "Shown in the Nova Voice ID app's log": "Widoczny w dzienniku aplikacji Nova Voice ID",
+  "Speech to text through the Nova Voice ID app, with a fallback for when the app is down.": "Zamiana mowy na tekst przez aplikację Nova Voice ID, z zapasową na czas, gdy aplikacja nie działa.",
+  "Unreachable": "Nieosiągalna",
+  "Voice ID": "Voice ID"
 }

@@ -36,6 +36,8 @@
       desc: "Daily briefing schedule, content, and delivery speakers." },
     { id: "voice_confirmation", group: "voice", title: "Voice Confirmation", real: true,
       desc: "Whether risky actions need a spoken or phone confirmation before Nova acts." },
+    { id: "voice_id", group: "voice", title: "Voice ID", real: true,
+      desc: "Speech to text through the Nova Voice ID app, with a fallback for when the app is down." },
     { id: "satellite_speaker", group: "voice", title: "Satellite → Speaker", real: true,
       desc: "Per-satellite override, for a specific satellite that shouldn't use its room's assigned speaker." },
     { id: "announcement_speakers", group: "voice", title: "Announcement Speakers", real: true,

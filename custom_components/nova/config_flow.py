@@ -465,6 +465,40 @@ class NovaConfigFlow(ConfigFlow, domain=DOMAIN):
                      if k not in (CONF_API_KEY, "groq_api_key", "schema_version")},
         )
 
+    async def async_step_hassio(self, discovery_info) -> dict:
+        """Supervisor discovery from the Nova Voice ID app (8.35.0).
+
+        The app announces service ``nova`` with {"uri": "tcp://<host>:10350"}.
+        This never creates an entry: with a Nova entry the address is saved
+        to its voice_id_uri setting, and without one the flow just aborts."""
+        from . import nova_config, paths, voice_id
+        from .runtime import lifecycle_runtime
+
+        uri = str((getattr(discovery_info, "config", None) or {}).get("uri") or "").strip()
+        if not uri or not voice_id.valid_uri(uri):
+            _LOGGER.warning("Nova: Voice ID discovery sent an unusable address")
+            return self.async_abort(reason="invalid_discovery_info")
+
+        entries = self._async_current_entries(include_ignore=False)
+        if not entries:
+            return self.async_abort(reason="no_nova_entry")
+        entry = entries[0]
+
+        paths.configure(self.hass)
+        runtime = lifecycle_runtime(entry)
+        if runtime is not None:
+            runtime.runtime_config["voice_id_uri"] = uri
+        persisted = await self.hass.async_add_executor_job(
+            nova_config.set, "voice_id_uri", uri)
+        if not persisted:
+            _LOGGER.warning("Nova: Voice ID address applied but not saved to disk")
+        entity = getattr(runtime, "voice_id", None) if runtime is not None else None
+        if entity is not None:
+            self.hass.async_create_background_task(
+                entity.async_refresh_info(), "nova voice id info")
+        _LOGGER.info("Nova: Voice ID app found by discovery at %s", uri)
+        return self.async_abort(reason="updated")
+
     @staticmethod
     @callback
     def async_get_options_flow(config_entry: ConfigEntry) -> "NovaOptionsFlow":

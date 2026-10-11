@@ -1206,5 +1206,15 @@
   "e.g. climate.hall, climate.landing": "ex. climate.corredor, climate.hall_superior",
   "e.g. climate.set_temperature": "ex. climate.set_temperature",
   "e.g. the house is cold": "ex. está frio em casa",
-  "— pick one —": "— escolha um —"
+  "— pick one —": "— escolha um —",
+  "App address": "Endereço do app",
+  "Connected": "Conectado",
+  "Fallback speech to text": "Fala para texto reserva",
+  "Not loaded": "Não carregado",
+  "Not set": "Não definido",
+  "Set Nova Voice ID as the speech to text in your voice assistant (Settings → Voice assistants). If the app isn't running, Nova uses the fallback.": "Escolha Nova Voice ID como fala para texto no seu assistente de voz (Configurações → Assistentes de voz). Se o app não estiver rodando, a Nova usa a reserva.",
+  "Shown in the Nova Voice ID app's log": "Aparece no log do app Nova Voice ID",
+  "Speech to text through the Nova Voice ID app, with a fallback for when the app is down.": "Fala para texto pelo app Nova Voice ID, com uma reserva para quando o app estiver fora do ar.",
+  "Unreachable": "Inacessível",
+  "Voice ID": "Voice ID"
 }

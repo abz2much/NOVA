@@ -66,7 +66,10 @@
     "abort": {
       "already_configured": "Nova on jo määritetty.",
       "import_failed": "Löytyi Novan määritys, mutta ei käyttökelpoista LLM:ää (ei API-avainta eikä paikallista päätepistettä).",
-      "already_in_progress": "Novan määritys on jo auki toisessa ikkunassa."
+      "already_in_progress": "Novan määritys on jo auki toisessa ikkunassa.",
+      "updated": "Nova Voice ID löytyi. Sen osoite on tallennettu Novaan.",
+      "no_nova_entry": "Nova Voice ID löytyi, mutta Novaa ei ole vielä määritetty. Määritä ensin Nova ja käynnistä sitten Nova Voice ID -sovellus uudelleen.",
+      "invalid_discovery_info": "Nova Voice ID lähetti osoitteen, jota Nova ei voi käyttää. Liitä sen sijaan osoite sovelluksen lokista Novan Voice ID -korttiin."
     }
   },
   "selector": {

@@ -66,7 +66,10 @@
     "abort": {
       "already_configured": "Nova вже налаштована.",
       "import_failed": "Знайдено конфігурацію Nova, але немає придатної LLM (немає API ключа й немає локальної кінцевої точки).",
-      "already_in_progress": "Налаштування Nova вже відкрите в іншому вікні."
+      "already_in_progress": "Налаштування Nova вже відкрите в іншому вікні.",
+      "updated": "Nova Voice ID знайдено. Його адресу збережено в Nova.",
+      "no_nova_entry": "Nova Voice ID знайдено, але Nova ще не налаштовано. Спочатку налаштуйте Nova, потім перезапустіть застосунок Nova Voice ID.",
+      "invalid_discovery_info": "Nova Voice ID надіслав адресу, яку Nova не може використати. Натомість вставте адресу з журналу застосунку в картку Voice ID у Nova."
     }
   },
   "selector": {

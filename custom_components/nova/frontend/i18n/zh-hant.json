@@ -1201,5 +1201,15 @@
   "e.g. climate.hall, climate.landing": "例如：climate.zoulang, climate.loutiting",
   "e.g. climate.set_temperature": "例如：climate.set_temperature",
   "e.g. the house is cold": "例如：家裡很冷",
-  "— pick one —": "— 請選擇 —"
+  "— pick one —": "— 請選擇 —",
+  "App address": "應用程式位址",
+  "Connected": "已連線",
+  "Fallback speech to text": "備用語音轉文字",
+  "Not loaded": "未載入",
+  "Not set": "未設定",
+  "Set Nova Voice ID as the speech to text in your voice assistant (Settings → Voice assistants). If the app isn't running, Nova uses the fallback.": "在語音助理中將 Nova Voice ID 設為語音轉文字（設定 → 語音助理）。如果應用程式未執行，Nova 會使用備用項目。",
+  "Shown in the Nova Voice ID app's log": "顯示在 Nova Voice ID 應用程式的日誌中",
+  "Speech to text through the Nova Voice ID app, with a fallback for when the app is down.": "透過 Nova Voice ID 應用程式進行語音轉文字，應用程式停止時使用備用項目。",
+  "Unreachable": "無法連線",
+  "Voice ID": "Voice ID"
 }

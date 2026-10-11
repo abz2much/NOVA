@@ -118,6 +118,9 @@ const PANEL = {
     },
     floor_plan_address: "123 Example St, Springfield IL", banter_level: 2, search_backend: "searxng", searxng_url: "http://sx.local:8080", calendar_tight_gap_min: 20, recognition_source: "frigate", voice_confirm_enabled: true, voice_confirm_mode: "gated", intrusion_response_timeout: 120, cameras: [{ entity_id: "camera.front", name: "Front Door", raw_name: "Front Door", outdoor: false, location_mode: "auto" }, { entity_id: "camera.back", name: "Backyard", raw_name: "Backyard", outdoor: true, location_mode: "auto" }], camera_names: {}, lockdown: { active: false },
     cast_devices: [{ entity_id: "media_player.living_room_speaker", name: "Living Room Speaker" }, { entity_id: "media_player.kitchen_speaker", name: "Kitchen Speaker" }],
+    voice_id_uri: "tcp://abc123-nova-voice-id:10350", voice_id_fallback_stt: "stt.faster_whisper",
+    voice_id_status: { state: "connected", name: "Nova Voice ID", version: "0.1.0", models: ["tiny-int8"], languages: ["en"], error: "", checked_at: 1, entity_id: "stt.nova_voice_id" },
+    stt_entities: [{ entity_id: "stt.faster_whisper", name: "faster-whisper" }],
     speaker_areas: [{ area_id: "living_room", name: "Living Room" }, { area_id: "kitchen", name: "Kitchen" }],
     room_speakers: { living_room: "media_player.living_room_speaker" },
     all_people: [{ entity_id: "person.alex", name: "Alex" }, { entity_id: "person.morgan", name: "Morgan" }],
@@ -830,7 +833,7 @@ if (require.main === module) setTimeout(async () => {
     ["settings tab renders the search box and group nav",
       !!sRoot.getElementById("settingsSearch") && sRoot.querySelectorAll(".settings-nav-btn").length === 6],
     ["settings tab has every setting card, General real",
-      sRoot.querySelectorAll(".settings-card").length === 26
+      sRoot.querySelectorAll(".settings-card").length === 27
       && /Sleep state/.test(sRoot.innerHTML) && /Announcements/.test(sRoot.innerHTML)],
     ["settings tab: General restores cognition, rich reasoning, and dashboard light controls",
       !!sRoot.querySelector('.toggle-btn[data-cfg-key="cognition_enabled"]')
@@ -877,6 +880,19 @@ if (require.main === module) setTimeout(async () => {
         /^(Operational Mode|Diagnostics)$/.test(c.querySelector(".panel-title")?.textContent?.trim() || ""))],
     ["settings tab: no card is silently missing (every card is real)",
       Array.from(sRoot.querySelectorAll(".settings-card")).every(c => !c.querySelector(".stub-tag"))],
+    ["settings tab: Voice ID card shows the status, app address and fallback, without Nova's own entity (8.35.0)",
+      (() => {
+        const card = sRoot.getElementById("settings-card-voice_id");
+        const uri = card && card.querySelector('input[data-cfg-key="voice_id_uri"]');
+        const sel = card && card.querySelector('select[data-cfg-key="voice_id_fallback_stt"]');
+        const opts = sel ? Array.from(sel.options).map(o => o.value) : [];
+        return !!card && card.getAttribute("data-settings-group") === "voice"
+          && !!uri && uri.value === "tcp://abc123-nova-voice-id:10350"
+          && !!sel && sel.value === "stt.faster_whisper" && !opts.includes("stt.nova_voice_id")
+          && /Connected/.test(card.textContent) && /v0\.1\.0 · tiny-int8/.test(card.textContent)
+          && /Shown in the Nova Voice ID app's log/.test(card.textContent)
+          && /Settings → Voice assistants/.test(card.textContent);
+      })()],
     ["settings tab: Security Alarm card exposes the source and opt in lockdown controls",
       (() => {
         const card = sRoot.getElementById("settings-card-security_alarm");

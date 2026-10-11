@@ -66,7 +66,10 @@
     "abort": {
       "already_configured": "Nova zaten yapılandırılmış.",
       "import_failed": "Bir Nova yapılandırması bulundu, ancak kullanılabilir bir LLM yok (API anahtarı da yerel bitiş noktası da yok).",
-      "already_in_progress": "Nova kurulumu başka bir pencerede zaten açık."
+      "already_in_progress": "Nova kurulumu başka bir pencerede zaten açık.",
+      "updated": "Nova Voice ID bulundu. Adresi Nova'ya kaydedildi.",
+      "no_nova_entry": "Nova Voice ID bulundu ancak Nova henüz kurulmadı. Önce Nova'yı kurun, ardından Nova Voice ID uygulamasını yeniden başlatın.",
+      "invalid_discovery_info": "Nova Voice ID, Nova'nın kullanamayacağı bir adres gönderdi. Bunun yerine uygulamanın günlüğündeki adresi Nova'nın Voice ID kartına yapıştırın."
     }
   },
   "selector": {

@@ -298,5 +298,15 @@
   "e.g. climate.hall, climate.landing": "napr. climate.chodba, climate.podesta",
   "e.g. climate.set_temperature": "napr. climate.set_temperature",
   "e.g. the house is cold": "napr. v dome je zima",
-  "— pick one —": "— vyberte —"
+  "— pick one —": "— vyberte —",
+  "App address": "Adresa aplikácie",
+  "Connected": "Pripojené",
+  "Fallback speech to text": "Záložný prevod reči na text",
+  "Not loaded": "Nenačítané",
+  "Not set": "Nenastavené",
+  "Set Nova Voice ID as the speech to text in your voice assistant (Settings → Voice assistants). If the app isn't running, Nova uses the fallback.": "Nastavte Nova Voice ID ako prevod reči na text vo svojom hlasovom asistentovi (Nastavenia → Hlasoví asistenti). Ak aplikácia nebeží, Nova použije zálohu.",
+  "Shown in the Nova Voice ID app's log": "Zobrazuje sa v denníku aplikácie Nova Voice ID",
+  "Speech to text through the Nova Voice ID app, with a fallback for when the app is down.": "Prevod reči na text cez aplikáciu Nova Voice ID, so zálohou pre prípad, že aplikácia nebeží.",
+  "Unreachable": "Nedostupné",
+  "Voice ID": "Voice ID"
 }

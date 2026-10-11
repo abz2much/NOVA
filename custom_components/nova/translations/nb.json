@@ -66,7 +66,10 @@
     "abort": {
       "already_configured": "Nova er allerede konfigurert.",
       "import_failed": "Fant en Nova-konfigurasjon, men ingen brukbar LLM (ingen API-nøkkel og ikke noe lokalt endepunkt).",
-      "already_in_progress": "Oppsettet av Nova er allerede åpent i et annet vindu."
+      "already_in_progress": "Oppsettet av Nova er allerede åpent i et annet vindu.",
+      "updated": "Nova Voice ID funnet. Adressen er lagret i Nova.",
+      "no_nova_entry": "Nova Voice ID ble funnet, men Nova er ikke satt opp ennå. Sett opp Nova først, og start deretter Nova Voice ID-appen på nytt.",
+      "invalid_discovery_info": "Nova Voice ID sendte en adresse Nova ikke kan bruke. Lim heller inn adressen fra appens logg i Novas Voice ID-kort."
     }
   },
   "selector": {
