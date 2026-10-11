@@ -1,3 +1,16 @@
+## [8.32.0]
+
+Voice phrases.
+
+### Added
+- **Voice phrases.** Settings → Voice & Speakers → Voice Phrases links something you say to something Nova runs: "Nova, the house is cold" runs your heating boost script. A phrase can run a script, an automation, a scene, a Home Assistant `shell_command`, or (Advanced) another service from the list the agent's plans may use, with entity ids and JSON data. Up to 100 phrases, each with up to 10 ways of saying it and an optional reply. With no phrases set up, Nova behaves exactly as before.
+- **Local matching.** Flexible (the default) or Exact. Flexible allows small differences and slips but refuses opposites ("turn off" against "turn on"), "not", questions, long sentences that only contain the phrase, and ties between two phrases. It works in the Chat tab and offline. Your phrases come before Nova's built in commands; Home Assistant's own sentence triggers, and what it answers itself with "Prefer handling commands locally" on, still come first.
+- **The same safety as any other action.** Every target goes through `policy.authorize` and gets an Actions log row, and the service is called once, only when every target is allowed. With Voice Confirmation on, a script, automation or scene phrase is handed to the agent to ask (two log rows). Unlock, open and disarm still need a phone tap by voice or Chat; a phrase can't ask for one, so there it runs nothing and says so. A shell command runs without asking unless its id is in `voice_confirm_entities`.
+- **"Try a sentence"** in the card shows which phrase would match and runs nothing. The card marks the phrases that will ask first.
+- **The AI can pick a phrase by meaning** (new `run_voice_phrase` agent tool) when you turn on "Let the AI pick this by meaning". Only those phrases are shown to the AI, at most 50, fenced as data, never a shell command. The tool checks the phrase again on the server and asks through `policy.authorize`. Sub-agents never get it.
+- New admin only websocket commands: `nova/voice_phrases_list`, `nova/voice_phrases_save`, `nova/voice_phrases_delete`, `nova/voice_phrases_set_enabled` and `nova/voice_phrases_test`. Every entry is checked in the backend: allowed domains only, targets only as entity ids of the service's own domain, no templates, no `entity_id`, `area_id`, `device_id` or `target` inside the data.
+- 60 new panel strings, translated into all 20 languages. Docs: Voice and speakers (new Voice phrases section), Settings reference, How Nova works, README.
+
 ## [8.31.0]
 
 The Chat tab.
