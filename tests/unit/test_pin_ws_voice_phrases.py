@@ -81,6 +81,30 @@ async def test_list_says_which_entries_ask_first(wsp, hass, store, load, monkeyp
     assert script["phrase_id"] not in res["asks_first"]
 
 
+@pytest.mark.parametrize("service,entity", [
+    ("lock.unlock", "lock.front"),
+    ("cover.open_cover", "cover.garage"),
+    ("alarm_control_panel.alarm_disarm", "alarm_control_panel.home"),
+])
+async def test_unlock_open_and_disarm_always_ask_first(wsp, hass, store, service, entity):
+    # Voice Confirmation is off: the phone tap for a voice request still applies.
+    domain, _, svc = service.partition(".")
+    hass.services.register(domain, svc)
+    hass.states.set(entity, "locked")
+    saved = (await _call(wsp.ws_voice_phrases_save, hass, entry=_new(
+        action={"service": service, "target": {"entity_id": entity}}))).results[0][1]["entry"]
+    res = (await _call(wsp.ws_voice_phrases_list, hass)).results[0][1]
+    assert res["asks_first"] == [saved["phrase_id"]]
+
+
+async def test_locking_does_not_ask_first(wsp, hass, store):
+    hass.services.register("lock", "lock")
+    hass.states.set("lock.front", "unlocked")
+    await _call(wsp.ws_voice_phrases_save, hass, entry=_new(
+        action={"service": "lock.lock", "target": {"entity_id": "lock.front"}}))
+    assert (await _call(wsp.ws_voice_phrases_list, hass)).results[0][1]["asks_first"] == []
+
+
 async def test_save_adds_then_updates(wsp, hass, store):
     conn = await _call(wsp.ws_voice_phrases_save, hass, entry=_new())
     (_, res), = conn.results

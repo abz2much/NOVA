@@ -54,8 +54,9 @@ def _current() -> dict:
 
 def _asks_first(hass, entries: list) -> list:
     """The phrase ids that would ask before running right now (Voice
-    Confirmation, or an id listed in voice_confirm_entities), so the card can
-    say so. The same policy check the fast path makes; nothing runs."""
+    Confirmation, an id listed in voice_confirm_entities, or the phone tap
+    for unlock, open and disarm), so the card can say so. The same policy
+    check the fast path makes, as a voice request; nothing runs."""
     from . import policy
     out = []
     for e in entries:
@@ -67,8 +68,10 @@ def _asks_first(hass, entries: list) -> list:
                 keys = [f"{domain}.{service}"]
             else:
                 keys = voice_phrases.target_ids(e) or [""]
+            # Asked as a voice request: the phone tap for unlock, open and
+            # disarm applies only to voice, and a phrase is spoken.
             if any(not policy.authorize_now(hass, policy.AuthorityRequest(
-                    domain, service, k)).allowed for k in keys):
+                    domain, service, k, source=policy.SOURCE_VOICE)).allowed for k in keys):
                 out.append(e.get("phrase_id"))
         except Exception:  # pylint: disable=broad-except
             continue
