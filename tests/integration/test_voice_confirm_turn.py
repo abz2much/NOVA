@@ -18,6 +18,9 @@ from .test_chat_turn import _isolate_conversations_db, _setup_nova, _speech
 from .test_wiring_smoke import _make_entry  # noqa: F401  (same entry as _setup_nova)
 
 PID = "vp_3f9c1a2b"
+# A looser match (tier flexible): on a voice satellite Nova itself asks
+# "House is cold?" and holds it (8.34.0). The exact words run at once.
+LOOSE = "the house is a bit cold"
 
 
 def _phrase(targets=("script.heating_boost",), allow_ai=True):
@@ -65,9 +68,9 @@ def _recorders(hass):
 
 
 class _Agent:
-    """The agent, faked: for "the house is cold" it calls Nova's real
-    run_voice_phrase tool, the way the deferral hint tells it to, and replies
-    with the tool's question. Anything else gets a plain answer."""
+    """The agent, faked: for "it is nippy in here" (no phrase matches) it
+    picks the phrase by meaning with Nova's real run_voice_phrase tool and
+    replies with the tool's question. Anything else gets a plain answer."""
 
     def __init__(self):
         self.calls = 0
@@ -84,7 +87,7 @@ class _Agent:
                 _exec_run_voice_phrase)
             self.calls += 1
             ui = k.get("user_input")
-            if "cold" not in (getattr(ui, "text", "") or ""):
+            if "nippy" not in (getattr(ui, "text", "") or ""):
                 return "Something else."
             res = json.loads(await _exec_run_voice_phrase(
                 hass, {"phrase_id": PID}, device_id=getattr(ui, "device_id", None),
@@ -121,13 +124,13 @@ async def test_a_held_request_asks_nothing_separately_and_waits_on_a(hass, tmp_p
     agent = _Agent()
     local, run = agent.patches()
     with local, run:
-        res = await _say(hass, entity_id, "the house is cold", a)
+        res = await _say(hass, entity_id, LOOSE, a)
         await hass.async_block_till_done()
     assert calls == {"script": [], "assist_satellite": [], "tts": []}
-    assert _speech(res).endswith("Shall I go ahead?")
+    assert _speech(res) == "House is cold?"
     item = pc.get(a)
     assert (item.kind, item.ref) == ("voice_phrase", PID)
-    assert agent.local_calls == 0 and agent.calls == 1
+    assert agent.local_calls == 0 and agent.calls == 0       # Nova asked, not the AI
     # The mic stays open on A for the answer, with continued conversation off.
     assert getattr(res, "continue_conversation", False) is True
 
@@ -137,7 +140,7 @@ async def test_yes_from_a_runs_it_once_and_logs_approved(hass, tmp_path, monkeyp
     agent = _Agent()
     local, run = agent.patches()
     with local, run:
-        await _say(hass, entity_id, "the house is cold", a)
+        await _say(hass, entity_id, LOOSE, a)
         res = await _say(hass, entity_id, "Yes.", a)
         await hass.async_block_till_done()
         again = await _say(hass, entity_id, "Yes.", a)
@@ -159,7 +162,7 @@ async def test_a_phrase_with_several_targets_replays_all_of_them(hass, tmp_path,
     agent = _Agent()
     local, run = agent.patches()
     with local, run:
-        await _say(hass, entity_id, "the house is cold", a)
+        await _say(hass, entity_id, LOOSE, a)
         await _say(hass, entity_id, "yes please", a)
         await hass.async_block_till_done()
     assert calls["script"] == [
@@ -171,7 +174,7 @@ async def test_yes_from_b_or_chat_runs_nothing_and_leaves_a_alone(hass, tmp_path
     agent = _Agent()
     local, run = agent.patches()
     with local, run:
-        await _say(hass, entity_id, "the house is cold", a)
+        await _say(hass, entity_id, LOOSE, a)
         await _say(hass, entity_id, "Yes.", b)
         await _say(hass, entity_id, "Yes.", None, conversation_id="nova_chat_u1")
         await hass.async_block_till_done()
@@ -198,7 +201,7 @@ async def test_no_clears_it_and_runs_nothing(hass, tmp_path, monkeypatch):
     agent = _Agent()
     local, run = agent.patches()
     with local, run:
-        await _say(hass, entity_id, "the house is cold", a)
+        await _say(hass, entity_id, LOOSE, a)
         res = await _say(hass, entity_id, "No.", a)
         await hass.async_block_till_done()
     assert _speech(res) == "OK, I won't." and calls["script"] == [] and pc.get(a) is None
@@ -210,7 +213,7 @@ async def test_an_unrelated_sentence_clears_it_and_is_handled_normally(hass, tmp
     agent = _Agent()
     local, run = agent.patches()
     with local, run:
-        await _say(hass, entity_id, "the house is cold", a)
+        await _say(hass, entity_id, LOOSE, a)
         before = agent.local_calls
         await _say(hass, entity_id, "what time is it", a)
         await hass.async_block_till_done()
@@ -232,7 +235,7 @@ async def test_yes_answers_the_held_request_not_the_proactive_offer(hass, tmp_pa
     agent = _Agent()
     local, run = agent.patches()
     with local, run:
-        await _say(hass, entity_id, "the house is cold", a)
+        await _say(hass, entity_id, LOOSE, a)
         res = await _say(hass, entity_id, "yes", a)
         await hass.async_block_till_done()
     assert calls["script"] == [("turn_on", {"entity_id": "script.heating_boost"})]
@@ -262,7 +265,7 @@ async def test_the_mic_reopens_on_a_without_handoff_when_the_reply_plays_elsewhe
     agent = _Agent()
     local, run = agent.patches()
     with local, run:
-        res = await _say(hass, entity_id, "the house is cold", a)
+        res = await _say(hass, entity_id, LOOSE, a)
         await hass.async_block_till_done()
     assert scheduled == [(a_sat, "media_player.living", False)]
     assert _speech(res) == ""                          # the Cast speaker has it
@@ -279,3 +282,29 @@ async def test_with_no_held_request_turns_are_unchanged(hass, tmp_path, monkeypa
     assert calls["script"] == [] and pc.get(a) is None
     assert agent.local_calls == 1                      # the normal path
     assert not getattr(res, "continue_conversation", False)
+
+
+async def test_the_exact_words_run_at_once(hass, tmp_path, monkeypatch):
+    entity_id, a, _a_sat, _b, calls, pc = await _setup(hass, monkeypatch, tmp_path)
+    agent = _Agent()
+    local, run = agent.patches()
+    with local, run:
+        res = await _say(hass, entity_id, "Nova, the house is cold.", a)
+        await hass.async_block_till_done()
+    assert calls["script"] == [("turn_on", {"entity_id": "script.heating_boost"})]
+    assert _speech(res) == "Warming the house up."
+    assert agent.calls == 0 and agent.local_calls == 0 and pc.get(a) is None
+    assert calls["assist_satellite"] == [] and calls["tts"] == []
+
+
+async def test_the_ai_picking_by_meaning_still_waits_for_a_yes(hass, tmp_path, monkeypatch):
+    entity_id, a, _a_sat, _b, calls, pc = await _setup(hass, monkeypatch, tmp_path)
+    agent = _Agent()
+    local, run = agent.patches()
+    with local, run:
+        res = await _say(hass, entity_id, "it is nippy in here", a)
+        assert agent.calls == 1 and _speech(res).endswith("Shall I go ahead?")
+        assert calls["script"] == [] and pc.get(a).ref == PID
+        await _say(hass, entity_id, "Yes.", a)
+        await hass.async_block_till_done()
+    assert calls["script"] == [("turn_on", {"entity_id": "script.heating_boost"})]
