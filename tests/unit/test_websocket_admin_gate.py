@@ -84,6 +84,13 @@ ADMIN_GATED_TYPES = [
     # links Nova may use. nova/list_relations is a read, open like get_knowledge.
     "relation_action",
     "edit_relation",
+    # Voice phrases (8.32.0): every command, the reads too. An entry names
+    # what Nova will run, and the test box shows which phrases exist.
+    "voice_phrases_list",
+    "voice_phrases_save",
+    "voice_phrases_delete",
+    "voice_phrases_set_enabled",
+    "voice_phrases_test",
 ]
 
 
@@ -106,7 +113,7 @@ def test_require_admin_used_at_least_once_per_gated_command():
     # Exactly one decorator per listed command: a new admin gated command that
     # is not added to ADMIN_GATED_TYPES (or a listed one that lost its gate)
     # changes the count and fails here.
-    assert src.count("@websocket_api.require_admin") == len(ADMIN_GATED_TYPES) == 46
+    assert src.count("@websocket_api.require_admin") == len(ADMIN_GATED_TYPES) == 51
 
 
 def test_require_admin_sits_above_websocket_command_not_below():

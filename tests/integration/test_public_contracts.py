@@ -135,6 +135,7 @@ async def test_registered_websocket_commands_match_contract(hass):
     "nova/list_automation_trials",
     "nova/get_spoken_history",
     "nova/list_decisions",
+    "nova/voice_phrases_list",
 ])
 async def test_read_only_command_response_shape(hass, hass_ws_client, ctype):
     """Top-level keys of a real success response on a freshly set-up entry

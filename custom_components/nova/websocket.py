@@ -161,6 +161,14 @@ from .ws_voice import (
     ws_say_hello,
     ws_voice_confirm_test,
 )
+# The Voice Phrases card's commands live in ws_voice_phrases.py. async_register registers them by name.
+from .ws_voice_phrases import (
+    ws_voice_phrases_delete,
+    ws_voice_phrases_list,
+    ws_voice_phrases_save,
+    ws_voice_phrases_set_enabled,
+    ws_voice_phrases_test,
+)
 from .const import (
     CONF_BEDROOM_AREAS,
     CONF_GROUND_FLOOR_AREAS,
@@ -254,6 +262,11 @@ def async_register(hass: HomeAssistant) -> None:
         websocket_api.async_register_command(hass, ws_list_relations)
         websocket_api.async_register_command(hass, ws_relation_action)
         websocket_api.async_register_command(hass, ws_edit_relation)
+        websocket_api.async_register_command(hass, ws_voice_phrases_list)
+        websocket_api.async_register_command(hass, ws_voice_phrases_save)
+        websocket_api.async_register_command(hass, ws_voice_phrases_delete)
+        websocket_api.async_register_command(hass, ws_voice_phrases_set_enabled)
+        websocket_api.async_register_command(hass, ws_voice_phrases_test)
     except Exception as exc:
         _LOGGER.debug("WS command register note: %s", exc)
 

@@ -1156,5 +1156,80 @@
     "fields": {},
     "literal_response_keys": [],
     "registered": true
+  },
+  "nova/voice_phrases_delete": {
+    "admin": true,
+    "error_codes": [
+      "voice_phrases_failed"
+    ],
+    "fields": {
+      "phrase_id": {
+        "required": true
+      }
+    },
+    "literal_response_keys": [
+      "ok"
+    ],
+    "registered": true
+  },
+  "nova/voice_phrases_list": {
+    "admin": true,
+    "error_codes": [
+      "voice_phrases_failed"
+    ],
+    "fields": {},
+    "literal_response_keys": [
+      "allowed_domains",
+      "enabled",
+      "entries"
+    ],
+    "registered": true
+  },
+  "nova/voice_phrases_save": {
+    "admin": true,
+    "error_codes": [
+      "invalid_value",
+      "voice_phrases_failed"
+    ],
+    "fields": {
+      "entry": {
+        "required": true
+      }
+    },
+    "literal_response_keys": [
+      "entry",
+      "warnings"
+    ],
+    "registered": true
+  },
+  "nova/voice_phrases_set_enabled": {
+    "admin": true,
+    "error_codes": [
+      "voice_phrases_failed"
+    ],
+    "fields": {
+      "enabled": {
+        "required": true
+      }
+    },
+    "literal_response_keys": [
+      "enabled"
+    ],
+    "registered": true
+  },
+  "nova/voice_phrases_test": {
+    "admin": true,
+    "error_codes": [
+      "voice_phrases_failed"
+    ],
+    "fields": {
+      "text": {
+        "required": true
+      }
+    },
+    "literal_response_keys": [
+      "match"
+    ],
+    "registered": true
   }
 }
