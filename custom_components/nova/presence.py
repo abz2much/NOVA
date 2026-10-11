@@ -15,13 +15,23 @@ from homeassistant.core import HomeAssistant
 _LOGGER = logging.getLogger(__name__)
 
 
+def person_name(hass: HomeAssistant, entity_id: str) -> str | None:
+    """The name presence (and so identity) uses for a person.* entity: its
+    friendly name, else the part after "person.". None when it isn't there.
+    Nova Voice ID's person ids map to identity votes through this (8.37.0)."""
+    state = hass.states.get(entity_id)
+    if not state:
+        return None
+    return state.attributes.get("friendly_name", entity_id.split(".", 1)[-1])
+
+
 def _person_state(hass: HomeAssistant, entity_id: str) -> dict:
     """Extract useful data from a person.* entity."""
     state = hass.states.get(entity_id)
     if not state:
         return {}
     return {
-        "name":  state.attributes.get("friendly_name", entity_id.split(".", 1)[-1]),
+        "name":  person_name(hass, entity_id),
         "state": state.state,  # 'home', 'not_home', or a zone name
         "latitude":  state.attributes.get("latitude"),
         "longitude": state.attributes.get("longitude"),

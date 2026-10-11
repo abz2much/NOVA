@@ -1269,5 +1269,7 @@
   "The satellite couldn't play the prompt.": "Спутник не смог воспроизвести подсказку.",
   "That doesn't look like the app's token. Copy it from the app's Configuration tab.": "Это не похоже на токен приложения. Скопируйте его на вкладке «Конфигурация» приложения.",
   "Nova couldn't save the token.": "Nova не удалось сохранить токен.",
-  "VOICE": "VOICE"
+  "VOICE": "VOICE",
+  "Use voice to tell who is speaking": "Определять говорящего по голосу",
+  "Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.": "По умолчанию выключено. Голос — это подсказка, кто говорит, а не ключ: для отпирания, открытия и снятия с охраны по-прежнему нужен телефон. Оставьте выключенным, пока строки VOICE на вкладке «Журналы» собирают оценки."
 }

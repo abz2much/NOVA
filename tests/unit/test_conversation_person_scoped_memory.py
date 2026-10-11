@@ -33,6 +33,13 @@ def test_identity_resolved_exactly_once_per_turn():
         f"expected exactly one `ident = identity(_module).resolve(...)` "
         f"call site in conversation.py, found {len(identity_resolve_assignments)}"
     )
+    # 8.37.0: with Voice ID deciding who is speaking, identity is resolved
+    # earlier, at the VOICE line, into voice_ident, and the call above is
+    # skipped for that turn (if voice_ident is not None: ident = voice_ident).
+    early = re.findall(r"^\s*voice_ident\s*=\s*_identity\.resolve\(", SRC, re.MULTILINE)
+    assert len(early) == 1
+    assert re.search(r"if voice_ident is not None:\s*\n\s*ident = voice_ident\s*\n\s*else:",
+                     SRC) is not None
 
 
 def test_retrieval_precedes_storage_for_the_user_turn():

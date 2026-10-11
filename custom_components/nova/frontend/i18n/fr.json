@@ -1269,5 +1269,7 @@
   "The satellite couldn't play the prompt.": "Le satellite n'a pas pu lire l'annonce.",
   "That doesn't look like the app's token. Copy it from the app's Configuration tab.": "Cela ne ressemble pas au jeton de l'app. Copiez-le depuis l'onglet Configuration de l'app.",
   "Nova couldn't save the token.": "Nova n'a pas pu enregistrer le jeton.",
-  "VOICE": "VOICE"
+  "VOICE": "VOICE",
+  "Use voice to tell who is speaking": "Reconnaître qui parle à la voix",
+  "Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.": "Désactivé par défaut. La voix est un indice sur qui parle, jamais une clé : déverrouiller, ouvrir et désarmer demandent toujours votre téléphone. Laissez-le désactivé pendant que les lignes VOICE de l'onglet Journaux collectent les scores."
 }

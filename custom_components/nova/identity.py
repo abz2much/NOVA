@@ -4,27 +4,32 @@ Nova identity resolver — "who is Nova talking to right now?"
 Per-person identity is the keystone the curated knowledge store's `subject` field
 was built for. This resolver fuses the signals already available in the home into
 a best-guess person + confidence, and is deliberately *tiered* so it works for
-everyone, with or without a GPU:
+everyone, with no GPU:
 
-  Tier 1 — presence            (no GPU)   who's home, via HA person.* entities.
-                                          A sole occupant is a strong signal.
+  Tier 1 — presence            who's home, via HA person.* entities.
+                               A sole occupant is a strong signal.
   Tier 2 — recent face         (optional) Frigate/DoubleTake recognitions from
-                                          recognition.py. Runs on Frigate, not the
-                                          HA box — no local GPU needed.
-  Tier 3 — voice fingerprint   (optional, GPU) a pluggable provider, OFF by
-                                          default. When a GPU voice-id backend is
-                                          registered it contributes the strongest
-                                          vote (voice is the most direct "who's
-                                          speaking" signal). Until then: no-op.
+                               recognition.py. Runs on Frigate, not the HA box.
+  Tier 3 — voice               (optional, OFF by default) the strongest vote,
+                               because voice is the most direct "who's speaking"
+                               signal. Two sources, never both at once:
+    • Nova Voice ID (8.37.0): the app's result for this one request, passed in
+      as resolve(voice=...) when `voice_id_identity` is on. The app runs on the
+      CPU, so no GPU is needed. Only "known" votes (0.9). A "short" or
+      "not_sure" turn on the same device within 60 s of a known one carries
+      that person at 0.6. Nothing else votes.
+    • A legacy current-speaker sensor (voice_recognition.py, registered with
+      register_voice_provider) when `identity_voice_fingerprint` is on and no
+      Voice ID result is given.
 
-The default tiers (presence + face) give a non-power-user a working identity
-system with zero setup and no GPU. Power users add accuracy by enabling the
-voice-fingerprint tier once their GPU server is online.
+Voice is a hint about who is talking, never a key: no safety or confirmation
+path reads identity (tests/unit/test_voice_safety.py).
 
 Config (all via nova_config, sensible defaults):
   identity_enabled            (default True)
   identity_min_confidence     (default 0.45)  below ⇒ "unknown"
-  identity_voice_fingerprint  (default False) the GPU tier
+  voice_id_identity           (default False) the Nova Voice ID tier
+  identity_voice_fingerprint  (default False) the legacy sensor tier
 """
 from __future__ import annotations
 
@@ -33,9 +38,12 @@ import math
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Callable, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 from homeassistant.core import HomeAssistant
+
+if TYPE_CHECKING:   # the type only: this module never imports Voice ID
+    from .voice_id import VoiceResult
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -56,6 +64,10 @@ _W_ROOM_PRESENT = 0.30   # this person is among those detected in the room
 _W_PROXIMITY = 0.35      # nearest-person by device/BLE proximity to the area
 _ROOM_FRESH_SECS = 300.0 # room recognition older than this stops counting
 _FACE_RECENCY_WINDOW = 300.0  # seconds; a face older than this carries no weight
+# Nova Voice ID follow ups (8.37.0): a short or unsure turn on the same
+# satellite soon after a known one carries that speaker, more weakly.
+_W_VOICE_CARRY = 0.6
+_VOICE_CARRY_SECS = 60.0
 
 
 @dataclass
@@ -87,6 +99,55 @@ def register_voice_provider(fn: Optional[Callable[[HomeAssistant, Optional[str]]
 
 def has_voice_provider() -> bool:
     return _VOICE_PROVIDER is not None
+
+
+# ── Nova Voice ID (8.37.0) ───────────────────────────────────────────────────
+# The app's result arrives as a voice_id.VoiceResult. It is read by its
+# fields only, so this module never imports the Voice ID modules.
+
+# device_id -> (person entity id, time). Written only for a "known" voice with
+# the switch on; read only by the same device. Cleared on unload.
+_VOICE_CARRY: dict = {}
+
+
+def voice_identity_enabled() -> bool:
+    """The Voice ID card's "Use voice to tell who is speaking" switch."""
+    return _cfg("voice_id_identity", False) is True
+
+
+def clear_voice_carry() -> None:
+    _VOICE_CARRY.clear()
+
+
+def _person_display(hass: HomeAssistant, entity_id: str) -> Optional[str]:
+    """A person.* id as identity names it: the same name presence uses."""
+    try:
+        from . import presence
+        return presence.person_name(hass, entity_id)
+    except Exception as exc:
+        _LOGGER.debug("identity: person name lookup failed: %s", exc)
+        return None
+
+
+def _voice_result_votes(hass: HomeAssistant, voice, device_id: Optional[str],
+                        now: float) -> list:
+    """[(name, weight, method)] from this request's Voice ID result."""
+    status = getattr(voice, "status", None)
+    person_id = getattr(voice, "person", None)
+    if status == "known" and person_id:
+        name = _person_display(hass, person_id)
+        if not name:
+            return []
+        if device_id:
+            _VOICE_CARRY[device_id] = (person_id, now)
+        return [(name, _W_VOICE, "voice")]
+    if status in ("short", "not_sure") and device_id:
+        carried = _VOICE_CARRY.get(device_id)
+        if carried and 0.0 <= now - carried[1] <= _VOICE_CARRY_SECS:
+            name = _person_display(hass, carried[0])
+            if name:
+                return [(name, _W_VOICE_CARRY, "voice_carry")]
+    return []
 
 
 def _voice_votes(hass: HomeAssistant, device_id: Optional[str]) -> dict:
@@ -296,7 +357,8 @@ def person_for_user(hass: HomeAssistant, user_id: Optional[str]) -> Optional[str
 
 def resolve(hass: HomeAssistant, *, device_id: Optional[str] = None,
             area_id: Optional[str] = None, now: Optional[float] = None,
-            user_id: Optional[str] = None) -> Identification:
+            user_id: Optional[str] = None,
+            voice: Optional["VoiceResult"] = None) -> Identification:
     """
     Fuse available signals into a best-guess person + confidence. Returns an
     Identification with person == 'unknown' when nothing is confident enough.
@@ -306,6 +368,10 @@ def resolve(hass: HomeAssistant, *, device_id: Optional[str] = None,
     turn. It is the one signal that is certain, so it settles the answer alone:
     the person.* entity with that user_id, or unknown when there is none. It is
     never mixed with presence or faces, which could name someone else.
+
+    `voice` (8.37.0) is this request's Nova Voice ID result. With the
+    voice_id_identity switch on, the voice tier uses only it, never the
+    registered provider. With the switch off, or no result, nothing changes.
     """
     if user_id is not None:
         name = person_for_user(hass, user_id)
@@ -354,8 +420,14 @@ def resolve(hass: HomeAssistant, *, device_id: Optional[str] = None,
         votes[name] += w
         methods.add("proximity")
 
-    # Tier 3 — voice fingerprint (optional, GPU)
-    if bool(_cfg("identity_voice_fingerprint", False)):
+    # Tier 3 — voice. Nova Voice ID's own result for this request when the
+    # switch is on (8.37.0); otherwise the legacy sensor provider, as before.
+    if voice is not None and voice_identity_enabled():
+        for name, w, method in _voice_result_votes(hass, voice, device_id, now):
+            votes[normalize(name)] += w
+            display.setdefault(normalize(name), name)
+            methods.add(method)
+    elif bool(_cfg("identity_voice_fingerprint", False)):
         for name, score in _voice_votes(hass, device_id).items():
             votes[normalize(name)] += _W_VOICE * float(score)
             display.setdefault(normalize(name), name)

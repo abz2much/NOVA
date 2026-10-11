@@ -361,5 +361,7 @@
   "The satellite couldn't play the prompt.": "Satelliitti ei voinut toistaa kehotetta.",
   "That doesn't look like the app's token. Copy it from the app's Configuration tab.": "Tämä ei näytä sovelluksen tunnukselta. Kopioi se sovelluksen Määritykset-välilehdeltä.",
   "Nova couldn't save the token.": "Nova ei voinut tallentaa tunnusta.",
-  "VOICE": "VOICE"
+  "VOICE": "VOICE",
+  "Use voice to tell who is speaking": "Tunnista puhuja äänestä",
+  "Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.": "Oletuksena pois. Ääni on vihje siitä, kuka puhuu, ei koskaan avain: lukituksen avaaminen, avaaminen ja hälytyksen poisto vaativat yhä puhelimesi. Pidä se pois päältä, kun Lokit-välilehden VOICE-rivit keräävät pisteitä."
 }

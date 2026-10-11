@@ -1240,4 +1240,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> boo
             voice_enrol.clear()
         except Exception:
             pass
+        # Nor does the Voice ID follow up memory (8.37.0).
+        try:
+            from . import identity as _identity
+            _identity.clear_voice_carry()
+        except Exception:
+            pass
     return ok

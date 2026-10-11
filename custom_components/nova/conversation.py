@@ -378,6 +378,20 @@ class NovaAgent(conversation.ConversationEntity):
         """
         return self._opt(key, default)
 
+    def _speaker_hint(self, turn_voice, voice_ident) -> str:
+        """The AI's speaker hint, only when voice decides who is speaking."""
+        if voice_ident is None or turn_voice is None:
+            return ""
+        try:
+            from . import presence, voice_id
+            first = None
+            if turn_voice.person:
+                name = presence.person_name(self.hass, turn_voice.person) or ""
+                first = name.split()[0] if name.split() else None
+            return voice_id.speaker_hint(turn_voice, first)
+        except Exception:
+            return ""
+
     def _voice_id_set(self) -> bool:
         """Whether a Nova Voice ID app address is set (8.36.0)."""
         try:
@@ -721,14 +735,19 @@ class NovaAgent(conversation.ConversationEntity):
             except Exception:
                 pass
 
-        # ── Nova Voice ID (8.36.0) ───────────────────────────────────────
+        # ── Nova Voice ID (8.36.0, 8.37.0) ───────────────────────────────
         # This request's voice result, read once (the STT entity set it in
-        # this same pipeline task). Kept on the turn and logged; nothing
-        # below reads it, so identity, the prompt and memory are unchanged.
+        # this same pipeline task), kept on the turn and logged.
         # A turn from the satellite a voice recording is armed on belongs to
         # that recording: it is answered here and never reaches dedup,
         # phrases, the local engine or the AI.
+        # 8.37.0: with "Use voice to tell who is speaking" on, identity is
+        # resolved here, once, with the result (voice_ident), and reused
+        # below; the VOICE line shows the outcome. With the switch off,
+        # voice_ident stays None and the turn is exactly as in 8.36.0.
+        # Phrases and dedup still see only the words.
         turn_voice = None
+        voice_ident = None
         if device_id and not is_chat:
             voice_line = None
             try:
@@ -743,6 +762,18 @@ class NovaAgent(conversation.ConversationEntity):
             from . import voice_enrol
             enrol_reply = await voice_enrol.async_handle_turn(
                 self.hass, self.entry, device_id, turn_voice)
+            if enrol_reply is None and turn_voice is not None:
+                try:
+                    from . import identity as _identity
+                    if _identity.voice_identity_enabled():
+                        voice_ident = _identity.resolve(
+                            self.hass, device_id=device_id, voice=turn_voice)
+                        if voice_line is not None:
+                            voice_line += (f" → {voice_ident.person} ({voice_ident.method}, "
+                                           f"{voice_ident.confidence:.2f})")
+                except Exception as exc:
+                    _LOGGER.debug("Voice identity resolve: %s", exc)
+                    voice_ident = None
             if voice_line is not None:
                 nova_log("VOICE", voice_line + (" recording" if enrol_reply is not None else ""))
             if enrol_reply is not None:
@@ -873,13 +904,19 @@ class NovaAgent(conversation.ConversationEntity):
         episodic_subject = None
         try:
             from . import identity as identity_module
-            ident = identity_module.resolve(
-                self.hass,
-                device_id=getattr(user_input, "device_id", None),
-                # Chat: the logged in user alone decides who this is. No match
-                # leaves the person unknown, so household facts only.
-                user_id=turn_user if is_chat else None,
-            )
+            # 8.37.0: already resolved with the voice result at the VOICE
+            # line (switch on); otherwise resolved here exactly as before.
+            # Either way, once per turn.
+            if voice_ident is not None:
+                ident = voice_ident
+            else:
+                ident = identity_module.resolve(
+                    self.hass,
+                    device_id=getattr(user_input, "device_id", None),
+                    # Chat: the logged in user alone decides who this is. No
+                    # match leaves the person unknown, so household facts only.
+                    user_id=turn_user if is_chat else None,
+                )
             if ident.known:
                 episodic_subject = identity_module.normalize(ident.person)
         except Exception as exc:
@@ -1186,6 +1223,11 @@ class NovaAgent(conversation.ConversationEntity):
                             self.hass,
                             messages=history,
                             persona=persona,
+                            # 8.37.0, switch on only: the fenced speaker hint
+                            # for the situation block, and the turn's identity
+                            # for tools that file facts (remember).
+                            speaker_hint=self._speaker_hint(turn_voice, voice_ident),
+                            identification=voice_ident,
                             provider_name=provider_name,
                             api_key=api_key_val,
                             model=model_val,
@@ -1254,7 +1296,10 @@ class NovaAgent(conversation.ConversationEntity):
                 # Voice learns over time: if we know who this is from other
                 # signals but the voice service doesn't yet, flag an enrollment
                 # opportunity so the pending sample can be labelled automatically.
-                voice_recognition.maybe_fire_enrollment(self.hass, dev)
+                # Never for a Nova Voice ID turn (8.37.0): its learning comes
+                # in a later phase, not from the legacy sensor's event.
+                if turn_voice is None:
+                    voice_recognition.maybe_fire_enrollment(self.hass, dev)
             except Exception:
                 pass
 

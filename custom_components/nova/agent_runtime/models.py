@@ -110,10 +110,14 @@ class ToolExecutionContext:
     user_id: Optional[str] = None
     hass_api: Any = field(default=None, repr=False, compare=False)
     user_input: Any = field(default=None, repr=False, compare=False)
+    # The turn's identity.Identification when Nova Voice ID decided who is
+    # speaking (8.37.0, switch on); None otherwise. Tools that file facts
+    # against a person (remember) use it; nothing that acts reads it.
+    identification: Any = field(default=None, repr=False, compare=False)
 
     @classmethod
     def for_turn(cls, *, user_input: Any, hass_api: Any, depth: int,
-                 headless: bool) -> "ToolExecutionContext":
+                 headless: bool, identification: Any = None) -> "ToolExecutionContext":
         if depth > 0:
             origin = ORIGIN_DELEGATED
         elif headless:
@@ -127,6 +131,7 @@ class ToolExecutionContext:
             user_id=getattr(getattr(user_input, "context", None), "user_id", None) or None,
             hass_api=hass_api,
             user_input=user_input,
+            identification=identification,
         )
 
     @property

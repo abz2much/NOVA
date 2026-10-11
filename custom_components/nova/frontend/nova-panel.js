@@ -2,7 +2,7 @@
  * frontend/src/. Edit the sources there, then run the build. */
 /*
  * Nova Command Center Panel.
- * v8.36.0
+ * v8.37.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -79,7 +79,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.36.0 ",
+      console.log("%c Nova Panel %c v8.37.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -3808,6 +3808,11 @@ ${this._htmlDashboardBody()}`;
         <label>Fallback speech to text</label>
         <select class="cfg-field" data-cfg-key="voice_id_fallback_stt">${this._optSelect(sttOpts, fallback)}</select>
       </div>
+      <div class="cfg-row">
+        <label>Use voice to tell who is speaking</label>
+        <button class="toggle-btn ${cfg.voice_id_identity ? "on" : "off"}" data-cfg-key="voice_id_identity" data-cfg-val="${cfg.voice_id_identity ? "false" : "true"}">${cfg.voice_id_identity ? "ON" : "OFF"}</button>
+      </div>
+      <div class="toggle-desc">Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.</div>
       <div class="mode-bind-head">People</div>
       <div class="stub-body">Record each person on every satellite: rooms sound different. Voice data lives only in the Nova Voice ID app, never in Nova.</div>
       <div class="cfg-row">

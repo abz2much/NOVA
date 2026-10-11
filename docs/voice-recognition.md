@@ -1,5 +1,11 @@
 # Nova Voice Recognition
 
+> **New in 8.37.0:** the easier way is the Nova Voice ID app, set up from
+> Nova's own Voice ID card. See [Voice ID](voice-and-speakers.md#voice-id).
+> This guide covers a speaker recognition service you already run. When a
+> request has a Nova Voice ID result and its switch is on, that result is
+> used and the sensor below is not.
+
 Nova can know who it is talking to by voice, combine that with who is home and
 who is on camera, and learn people's voices over time from ordinary
 conversation. This guide covers how to set it up.
