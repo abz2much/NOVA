@@ -95,6 +95,8 @@ FILE_FLOORS = {
     "voice_phrases.py": 90,                             # 94.0% (new)
     "voice_phrase_runner.py": 91,                       # 94.9% (new)
     "ws_voice_phrases.py": 96,                          # 100.0% (new)
+    # 8.33.0 spoken yes on the same satellite (measured; new file).
+    "pending_confirm.py": 96,                           # 100.0% (new)
 }
 
 

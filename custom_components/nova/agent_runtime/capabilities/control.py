@@ -288,6 +288,19 @@ async def _exec_control_device(hass: HomeAssistant, args: dict, device_id: Optio
         })
 
 
+def _hold_for_spoken_yes(hass, device_id: Optional[str], approval: str) -> bool:
+    """Whether a held request waits for a spoken yes on the next turn: it
+    came from a voice satellite and the gate deferred it (never a phone tap,
+    a refusal or an error). 8.33.0."""
+    if approval != "deferred" or not device_id:
+        return False
+    try:
+        from ...voice_confirm import is_voice_satellite_device
+        return bool(is_voice_satellite_device(hass, device_id))
+    except Exception:
+        return False
+
+
 async def _exec_run_scene_script(hass: HomeAssistant, args: dict, device_id: Optional[str] = None,
                                  user_id: Optional[str] = None) -> str:
     """Activate a scene or script."""
@@ -339,6 +352,18 @@ async def _exec_run_scene_script(hass: HomeAssistant, args: dict, device_id: Opt
         await hass.async_add_executor_job(
             lambda: action_log.set_execution(action_id, "blocked", reason_code="confirmation_not_approved")
         )
+        # Held for a spoken yes on the satellite the user spoke to (8.33.0):
+        # remember what a yes runs, and make the reply end with the question.
+        if _hold_for_spoken_yes(hass, device_id, approval_result):
+            from ... import pending_confirm
+            pending_confirm.put(device_id or "", pending_confirm.KIND_SCENE_SCRIPT,
+                                entity_id, user_id)
+            return json.dumps({
+                "status": "awaiting_confirmation",
+                "entity_id": entity_id,
+                "message": f"{label} needs a spoken yes first. {pending_confirm.ASK}",
+                "ask_user": pending_confirm.ASK,
+            })
         return json.dumps({
             "status": "awaiting_confirmation",
             "entity_id": entity_id,
@@ -405,6 +430,13 @@ async def _exec_run_voice_phrase(hass: HomeAssistant, args: dict, device_id: Opt
         return json.dumps({"success": True, "status": "accepted", "phrase_id": pid,
                            "action": "ran", "message": text})
     if outcome.status in ("refused", "deferred"):
+        if _hold_for_spoken_yes(hass, device_id, outcome.approval):
+            from ... import pending_confirm
+            pending_confirm.put(device_id or "", pending_confirm.KIND_PHRASE, pid, user_id)
+            return json.dumps({"status": "awaiting_confirmation", "phrase_id": pid,
+                               "message": f"{entry.get('name')} needs a spoken yes first. "
+                                          f"{pending_confirm.ASK}",
+                               "ask_user": pending_confirm.ASK})
         return json.dumps({"status": "awaiting_confirmation", "phrase_id": pid,
                            "message": text or f"Confirmation required before running {entry.get('name')}."})
     return json.dumps({"error": text or "The voice phrase failed", "status": "error",
