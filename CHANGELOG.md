@@ -1,6 +1,6 @@
 ## [8.37.0] — Nova Voice ID tells who is speaking
 
-Nova can now use a known voice to decide who is speaking: it feeds identity, tells the AI as a hint, carries the speaker to a short follow up on the same satellite, and files "remember…" facts against the right person. It is off by default: **Use voice to tell who is speaking** in the Voice ID card turns it on. With it off, Nova behaves exactly as 8.36.0, so a house can collect scores in the VOICE lines first.
+Nova can now use a known voice to decide who is speaking: it feeds identity, tells the AI as a hint, carries the speaker to a short follow up on the same satellite, and files "remember…" facts against the right person. It is off by default: **Use voice to tell who is speaking** in the Voice ID card turns it on. With it off, Nova behaves as 8.36.0 (one exception, below), so a house can collect scores in the VOICE lines first.
 
 ### Added
 - **Voice in identity.** `identity.resolve(..., voice=...)`. With the switch on (`voice_id_identity`), the voice tier uses only this request's Nova Voice ID result, never the registered sensor provider: `known` adds 0.9 to that person; every other status adds nothing. A known voice for Bob (0.9) beats Alice as sole occupant (0.6). The app's `person.*` ids map to identity's names through the new `presence.person_name()`, the name presence already uses (the friendly name, else the part after `person.`).
@@ -11,7 +11,7 @@ Nova can now use a known voice to decide who is speaking: it feeds identity, tel
 
 ### Changed
 - With the switch on, identity is resolved once at the VOICE line, before dedup, and reused for the turn; with it off it is resolved where it always was. Either way once per turn.
-- `maybe_fire_enrollment` (the legacy sensor's learning event) is not called for a turn with a Nova Voice ID result.
+- `maybe_fire_enrollment` (the legacy sensor's learning event) is not called for a turn with a Nova Voice ID result, whether the switch is on or off. This is the one switch-off difference from 8.36.0, and only matters to someone using both a legacy speaker sensor with auto enrol and Nova Voice ID speech to text.
 - The identity docstring: voice needs no GPU. The legacy `identity_voice_fingerprint` switch is unchanged and still drives a speaker sensor when there is no Voice ID result.
 
 ### Fixed (legacy speaker sensors, voice_recognition.py)

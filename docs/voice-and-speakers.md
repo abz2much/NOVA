@@ -229,8 +229,7 @@ fills a field that is empty or still holds what it filled in last time.
 ### Telling who is speaking
 
 **Use voice to tell who is speaking** in the Voice ID card is off by default.
-With it off, Nova behaves exactly as before and the VOICE lines just collect
-scores. Turn it on once the scores look right (see "Tuning" below). Then, on a
+With it off, Nova behaves as before and the VOICE lines just collect scores. Turn it on once the scores look right (see "Tuning" below). Then, on a
 voice turn:
 
 - A **known** voice is the strongest sign of who is talking. It counts for
@@ -244,6 +243,9 @@ voice turn:
 - "Remember that I like…" is filed against that person.
 - The VOICE line ends with Nova's decision, for example
   `→ Bob (home_prior+voice, 0.93)`.
+- Nova also uses that person for which private facts it brings into the
+  conversation and for the conversation history, just as it does with who is
+  home and faces.
 
 **Voice is a hint, never a key.** Unlocking, opening a door, disarming and
 calling off an intrusion ignore voice completely and still need a tap on your
