@@ -361,5 +361,7 @@
   "The satellite couldn't play the prompt.": "Satellitten kunne ikke spille av meldingen.",
   "That doesn't look like the app's token. Copy it from the app's Configuration tab.": "Det ser ikke ut som appens token. Kopier det fra fanen Konfigurasjon i appen.",
   "Nova couldn't save the token.": "Nova kunne ikke lagre token.",
-  "VOICE": "VOICE"
+  "VOICE": "VOICE",
+  "Use voice to tell who is speaking": "Bruk stemmen til å se hvem som snakker",
+  "Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.": "Av som standard. Stemmen er et hint om hvem som snakker, aldri en nøkkel: opplåsing, åpning og deaktivering krever fortsatt telefonen. La det være av mens VOICE-linjene i Logger-fanen samler poeng."
 }

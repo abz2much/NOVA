@@ -361,5 +361,7 @@
   "The satellite couldn't play the prompt.": "Satelit nemohol prehrať výzvu.",
   "That doesn't look like the app's token. Copy it from the app's Configuration tab.": "Toto nevyzerá ako token aplikácie. Skopírujte ho z karty Konfigurácia aplikácie.",
   "Nova couldn't save the token.": "Nova nemohla uložiť token.",
-  "VOICE": "VOICE"
+  "VOICE": "VOICE",
+  "Use voice to tell who is speaking": "Rozpoznať hovoriaceho podľa hlasu",
+  "Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.": "Predvolene vypnuté. Hlas je len nápoveda, kto hovorí, nikdy kľúč: odomknutie, otvorenie a deaktivácia stále potrebujú telefón. Nechajte to vypnuté, kým riadky VOICE na karte Denníky zbierajú skóre."
 }

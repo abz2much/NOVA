@@ -1264,5 +1264,7 @@
   "The satellite couldn't play the prompt.": "语音卫星无法播放提示。",
   "That doesn't look like the app's token. Copy it from the app's Configuration tab.": "这看起来不像应用的令牌。从应用的“配置”标签页复制。",
   "Nova couldn't save the token.": "Nova 无法保存令牌。",
-  "VOICE": "VOICE"
+  "VOICE": "VOICE",
+  "Use voice to tell who is speaking": "通过声音判断谁在说话",
+  "Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.": "默认关闭。声音只是谁在说话的提示，绝不是钥匙：开锁、打开和撤防仍需你的手机确认。在“日志”标签页的 VOICE 行收集分数期间，请保持关闭。"
 }

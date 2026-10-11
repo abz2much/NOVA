@@ -726,6 +726,7 @@ async def ws_get_panel_data(
                 "voice_id_token_set": bool(await _voice_id_token(hass)),
                 "voice_id_hidden_people": _get_runtime_json(hass, entry, "voice_id_hidden_people", []),
                 "voice_id_enrol": _get_voice_id_enrol(),
+                "voice_id_identity": _runtime_opt(hass, entry, "voice_id_identity", False) is True,
                 "intrusion_response_timeout": _runtime_opt(hass, entry, "intrusion_response_timeout", 120),
                 "intrusion_vision_confirm": bool(_runtime_opt(hass, entry, "intrusion_vision_confirm", True)),
                 # Scheduled briefings (v6.78.0)
@@ -1078,6 +1079,7 @@ PANEL_WRITABLE_KEYS = {
     "voice_id_uri",               # str: Nova Voice ID app, tcp://host:port (8.35.0)
     "voice_id_fallback_stt",      # str: STT entity used when the app is down
     "voice_id_hidden_people",     # JSON list: person ids hidden from the Voice ID card (8.36.0)
+    "voice_id_identity",          # bool: use the voice to tell who is speaking (8.37.0)
     "voice_confirm_entities",     # list: extra entities to confirm / !exempt
     "satellite_audio_out",        # dict/bool: satellites whose audio routes out
     "satellite_start_action",     # dict: satellite → esphome start action

@@ -236,6 +236,7 @@
     "voice_confirm_mode",
     "voice_id_fallback_stt",
     "voice_id_hidden_people",
+    "voice_id_identity",
     "voice_id_uri"
   ]
 }

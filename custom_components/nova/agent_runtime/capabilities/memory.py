@@ -43,7 +43,8 @@ def _save_learned(data: dict) -> None:
         _LOGGER.warning("Failed to save learned data: %s", exc)
 
 
-async def _exec_remember(hass: HomeAssistant, args: dict) -> str:
+async def _exec_remember(hass: HomeAssistant, args: dict,
+                         identification: Any = None) -> str:
     """Learn and persist a user preference, routine, or alias.
 
     Preferences/routines require human confirmation before going live
@@ -88,7 +89,14 @@ async def _exec_remember(hass: HomeAssistant, args: dict) -> str:
         from ... import knowledge
         if key == "preference":
             from ... import identity
-            k_subject = identity.resolve_subject(hass)  # this person, or "primary"
+            # The turn's own identity when Nova Voice ID decided who is
+            # speaking (8.37.0, switch on), so a spoken "remember I like..."
+            # goes to that person. Otherwise as before: this person by
+            # presence and faces, or "primary".
+            if identification is not None and getattr(identification, "known", False):
+                k_subject = identity.subject_for(identification)
+            else:
+                k_subject = identity.resolve_subject(hass)
             k_kind = "preference"
         else:
             k_subject = knowledge.DEFAULT_SUBJECT

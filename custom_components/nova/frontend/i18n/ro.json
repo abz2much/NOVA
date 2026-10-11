@@ -361,5 +361,7 @@
   "The satellite couldn't play the prompt.": "Satelitul nu a putut reda mesajul.",
   "That doesn't look like the app's token. Copy it from the app's Configuration tab.": "Nu pare tokenul aplicației. Copiază-l din fila Configurare a aplicației.",
   "Nova couldn't save the token.": "Nova nu a putut salva tokenul.",
-  "VOICE": "VOICE"
+  "VOICE": "VOICE",
+  "Use voice to tell who is speaking": "Folosește vocea ca să afli cine vorbește",
+  "Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.": "Oprit implicit. Vocea e un indiciu despre cine vorbește, niciodată o cheie: descuierea, deschiderea și dezarmarea cer în continuare telefonul. Lasă-l oprit cât timp liniile VOICE din fila Jurnale adună scoruri."
 }

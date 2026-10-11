@@ -201,9 +201,9 @@ unchanged.
 Nova Voice ID is Nova's own speech to text. It needs the Nova Voice ID app,
 installed from [github.com/abz2much/nova-voice-id](https://github.com/abz2much/nova-voice-id).
 The app passes your speech to the Whisper app and gives back Whisper's words
-unchanged. From app 0.2.0 it also says whose voice it heard. For now Nova only
-logs that: who Nova thinks is speaking, its replies and its memory don't
-change.
+unchanged. From app 0.2.0 it also says whose voice it heard. Nova logs that on
+every voice turn and, once you turn it on, uses it to tell who is speaking
+(see "Telling who is speaking" below). It is off by default.
 
 1. Install and start the Nova Voice ID app.
 2. In Nova, open **Settings → Voice & Speakers → Voice ID**. The app fills in
@@ -225,6 +225,46 @@ Diagnostics shows a **Voice ID** row.
 
 A value you type in the address or token field always wins. The app only
 fills a field that is empty or still holds what it filled in last time.
+
+### Telling who is speaking
+
+**Use voice to tell who is speaking** in the Voice ID card is off by default.
+With it off, Nova behaves exactly as before and the VOICE lines just collect
+scores. Turn it on once the scores look right (see "Tuning" below). Then, on a
+voice turn:
+
+- A **known** voice is the strongest sign of who is talking. It counts for
+  more than "only one person is home", so if Alice is home alone but the app
+  knows Bob's voice, Nova takes it to be Bob.
+- A short or unsure follow up on the **same satellite** within 60 seconds of a
+  known one keeps that speaker, more weakly. It never carries across
+  satellites.
+- Nova tells the AI who it thinks is speaking, as a hint ("not sure" when the
+  app wasn't sure), so replies and "who am I?" use the right name.
+- "Remember that I like…" is filed against that person.
+- The VOICE line ends with Nova's decision, for example
+  `→ Bob (home_prior+voice, 0.93)`.
+
+**Voice is a hint, never a key.** Unlocking, opening a door, disarming and
+calling off an intrusion ignore voice completely and still need a tap on your
+phone. A spoken "yes" to a confirmation works exactly as it did. Voice never
+logs anyone in, and typed Chat always uses the person you are logged in as.
+
+### Tuning
+
+The app decides the status with its own options (in the app's Configuration
+tab, not in Nova): `t_known`, `t_maybe`, `m_gap`, `sure_speech_s` and
+`min_speech_s`. Use the VOICE lines in the Logs tab to set them:
+
+- Look at `score` for your own commands. Set `t_known` a little below the
+  lowest score you see for yourself, and above the scores for other people.
+- With two or more people enrolled, `margin` is how far ahead the best match
+  was. Raise `m_gap` if people get mixed up; lower it if you often see
+  `not_sure` for yourself.
+- Short commands come back `not_sure` or `short` when they're under
+  `sure_speech_s` or `min_speech_s`. That's expected: the follow up carry
+  covers them on the same satellite.
+- Turn the switch on once the scores for each person stay clearly apart.
 
 ### Recording a voice
 
@@ -301,6 +341,7 @@ numbers and ids, not audio or words.
 | You said yes and nothing ran | The yes was on another satellite, came after 60 seconds, or another satellite heard it first | Ask again, and answer on the same satellite. |
 | "The app's token doesn't match" | The token in Nova isn't the app's | Copy the token from the app's Configuration tab into the Voice ID card. |
 | A recording turn ran a command instead | Home Assistant handled the sentence itself | Use the sentences Nova asks for, word for word. |
+| Nova names the wrong person | The app's thresholds let someone else's voice count as known | Check the VOICE lines' scores and raise `t_known` or `m_gap` in the app, or turn the switch off. |
 | The Voice ID status says Unreachable | The app is stopped, or the address is wrong | Start the app, and paste the address from its log again. Voice still works through the fallback. |
 | Voice stopped working after picking Nova Voice ID | The app is down and no fallback is set | Pick a fallback in the Voice ID card. |
 

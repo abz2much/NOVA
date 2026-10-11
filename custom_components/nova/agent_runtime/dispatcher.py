@@ -64,6 +64,8 @@ async def _execute_tool(
                 extra["device_id"] = ctx.device_id
             if "user_id" in params:
                 extra["user_id"] = ctx.user_id
+            if "identification" in params:
+                extra["identification"] = ctx.identification
             return await fn(hass, tool_args, **extra)
         except Exception as exc:
             return json.dumps({"error": safe_error_message(

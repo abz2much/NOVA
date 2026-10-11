@@ -9,8 +9,10 @@ speaker-recognition service and *consumes* its "who is speaking" result. Any
 backend works as long as it publishes the current speaker to Home Assistant:
 
   • VoiceBM (github.com/cybericebyte/VoiceBM) — Sherpa-ONNX, publishes over MQTT;
-    exposes a per-person ``binary_sensor.<person>_voice`` (ON while they speak)
-    and a ``sensor.*current_speaker``.
+    exposes a per-person ``binary_sensor.<person>_voice`` and a
+    ``sensor.*current_speaker``. The per-person sensor turns on when that
+    person is recognised and can stay on after they stop talking, so it is
+    only trusted while it changed recently (_fresh), like the speaker sensor.
   • speaker-recognition (github.com/EuleMitKeule/speaker-recognition) —
     Resemblyzer, exposes a current-speaker sensor via its HA integration.
   • anything else that surfaces a current-speaker entity.
@@ -47,7 +49,10 @@ _LOGGER = logging.getLogger(__name__)
 
 # States that mean "no one is speaking / not identified".
 _NO_SPEAKER = ("", "unknown", "unavailable", "none", "no_speaker",
-               "not_speaking", "idle", "off")
+               "not_speaking", "idle", "off",
+               # 8.37.0: what some backends report when unsure or for TV sound
+               # ("unbekannt" is German for unknown).
+               "uncertain", "unbekannt", "tv-noise", "tv_noise")
 _RECENCY_WINDOW = 20.0  # seconds; a current-speaker sensor older than this is stale
 _SCORE_ATTRS = ("confidence", "score", "probability", "similarity")
 
@@ -122,13 +127,16 @@ def identify(hass: HomeAssistant, device_id: Optional[str] = None) -> dict:
         return {}
     conf = float(_cfg("voice_recognition_confidence", 0.85))
 
-    # Per-person sensors (ON while that person is speaking) — inherently current.
+    # Per-person sensors (ON when that person was recognised). On is not
+    # enough: it can stay on after they stop, so a stale one is skipped too.
     if any(ch in src for ch in "*?[") or src.endswith("_voice"):
         votes: dict = {}
         for st in hass.states.async_all("binary_sensor"):
             if not fnmatch.fnmatch(st.entity_id, src):
                 continue
             if str(st.state).lower() != "on":
+                continue
+            if not _fresh(st):
                 continue
             person = _person_from_entity(st, src)
             if person:

@@ -361,5 +361,7 @@
   "The satellite couldn't play the prompt.": "O satélite não conseguiu reproduzir o aviso.",
   "That doesn't look like the app's token. Copy it from the app's Configuration tab.": "Isso não parece o token da aplicação. Copie-o do separador Configuração da aplicação.",
   "Nova couldn't save the token.": "A Nova não conseguiu guardar o token.",
-  "VOICE": "VOICE"
+  "VOICE": "VOICE",
+  "Use voice to tell who is speaking": "Usar a voz para saber quem está a falar",
+  "Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.": "Desligado por predefinição. A voz é uma pista sobre quem está a falar, nunca uma chave: destrancar, abrir e desarmar continuam a pedir o telemóvel. Deixe desligado enquanto as linhas VOICE no separador Registos recolhem pontuações."
 }

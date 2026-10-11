@@ -1264,5 +1264,7 @@
   "The satellite couldn't play the prompt.": "語音衛星無法播放提示。",
   "That doesn't look like the app's token. Copy it from the app's Configuration tab.": "這看起來不像應用程式的權杖。從應用程式的「設定」分頁複製。",
   "Nova couldn't save the token.": "Nova 無法儲存權杖。",
-  "VOICE": "VOICE"
+  "VOICE": "VOICE",
+  "Use voice to tell who is speaking": "透過聲音判斷誰在說話",
+  "Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.": "預設關閉。聲音只是誰在說話的提示，絕不是鑰匙：解鎖、開啟和解除警戒仍需你的手機確認。在「日誌」分頁的 VOICE 行收集分數期間，請保持關閉。"
 }

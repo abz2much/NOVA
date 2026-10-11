@@ -1,3 +1,28 @@
+## [8.37.0] — Nova Voice ID tells who is speaking
+
+Nova can now use a known voice to decide who is speaking: it feeds identity, tells the AI as a hint, carries the speaker to a short follow up on the same satellite, and files "remember…" facts against the right person. It is off by default: **Use voice to tell who is speaking** in the Voice ID card turns it on. With it off, Nova behaves exactly as 8.36.0, so a house can collect scores in the VOICE lines first.
+
+### Added
+- **Voice in identity.** `identity.resolve(..., voice=...)`. With the switch on (`voice_id_identity`), the voice tier uses only this request's Nova Voice ID result, never the registered sensor provider: `known` adds 0.9 to that person; every other status adds nothing. A known voice for Bob (0.9) beats Alice as sole occupant (0.6). The app's `person.*` ids map to identity's names through the new `presence.person_name()`, the name presence already uses (the friendly name, else the part after `person.`).
+- **Short follow ups.** A `short` or `not_sure` turn on the same satellite within 60 seconds of a known one carries that person at 0.6 (method `voice_carry`). Same device only, kept in memory, cleared on unload.
+- **The AI hint**, in the system prompt's situation block inside a prompt fence: "Speaker (by voice, a hint, not proof of identity): {first name}." for `known`, "Speaker: not sure." for `not_sure` with a score, nothing otherwise. Never in the user's words, the history, the phrase matcher or dedup, and never for a sub-agent.
+- **"Remember…" by voice** files the fact against the turn's identity (`ToolExecutionContext.identification`, passed to `remember`). With no voice identity it is filed as before.
+- **The VOICE line** ends with Nova's decision when the switch is on, for example `→ Bob (home_prior+voice, 0.93)`. Still no words.
+
+### Changed
+- With the switch on, identity is resolved once at the VOICE line, before dedup, and reused for the turn; with it off it is resolved where it always was. Either way once per turn.
+- `maybe_fire_enrollment` (the legacy sensor's learning event) is not called for a turn with a Nova Voice ID result.
+- The identity docstring: voice needs no GPU. The legacy `identity_voice_fingerprint` switch is unchanged and still drives a speaker sensor when there is no Voice ID result.
+
+### Fixed (legacy speaker sensors, voice_recognition.py)
+- `uncertain`, `unbekannt` and `tv-noise` now mean nobody.
+- The per-person (glob) path skips a sensor that hasn't changed recently, like the single-sensor path did.
+- The docstring no longer says VoiceBM's per-person sensor is on only while someone speaks.
+
+### Unchanged
+- Unlock, open, disarm and intrusion stand down ignore voice completely; the phone tap still applies. A test checks that no safety or confirmation module reads identity or the voice result, and that a known voice never approves a protected action.
+- A spoken "yes" to a pending confirmation, voice phrases and dedup behave as in 8.36.0. `Context.user_id` is never set from a voice (a static test checks that no Voice ID or identity code builds a Context or assigns a user id). Typed Chat turns use the logged in user alone.
+
 ## [8.36.0] — Nova Voice ID: voice results and recording
 
 Nova now reads the Nova Voice ID app's voice result for each request, logs it, and lets you record and delete each person's voice from the panel. Nova does not use the result to decide who is speaking yet: identity, the AI prompt and memory are unchanged. Needs Nova Voice ID app 0.2.0 for recognition and recording; with 0.1.0 voice works as before.

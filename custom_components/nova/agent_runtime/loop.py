@@ -248,6 +248,8 @@ async def run_agent(
     max_iterations: Optional[int] = None,
     depth: int = 0,
     profile_directive: Optional[str] = None,
+    speaker_hint: str = "",
+    identification: Optional[Any] = None,
 ) -> str:
     """Run the Nova agentic LLM loop (see _run_agent_turn). Every provider
     client the turn leases is released when it ends, however it ends."""
@@ -259,6 +261,7 @@ async def run_agent(
             temperature=temperature, config=config,
             allowed_tools=allowed_tools, max_iterations=max_iterations,
             depth=depth, profile_directive=profile_directive,
+            speaker_hint=speaker_hint, identification=identification,
             providers=_TurnProviders(hass, stack),
         )
 
@@ -280,6 +283,8 @@ async def _run_agent_turn(
     max_iterations: Optional[int] = None,
     depth: int = 0,
     profile_directive: Optional[str] = None,
+    speaker_hint: str = "",
+    identification: Optional[Any] = None,
     providers: "_TurnProviders",
 ) -> str:
     """
@@ -307,6 +312,14 @@ async def _run_agent_turn(
     except Exception:
         situation_now = ""
     situation_block = f"## Situation now\n{situation_now}\n\n" if situation_now else ""
+    # Nova Voice ID (8.37.0): who is speaking, by voice, fenced so a name can
+    # never act as an order. Only for the top-level turn, and only when the
+    # Voice ID switch is on (the caller passes "" otherwise). Never in the
+    # user's words or the history.
+    if speaker_hint and depth == 0:
+        from ..voice_id import fenced_speaker_hint
+        speaker_block = fenced_speaker_hint(speaker_hint)
+        situation_block = (situation_block or "## Situation now\n") + speaker_block + "\n\n"
     # Historical camera awareness stays separate from current situation. Its
     # bounded SQLite read runs in HA's executor and only for a top-level,
     # interactive conversation, never delegated or scheduled agent work.
@@ -346,7 +359,8 @@ async def _run_agent_turn(
     headless = depth == 0 and user_input is None
     grant = resolve_grant(allowed_tools, depth=depth, headless=headless)
     ctx = ToolExecutionContext.for_turn(user_input=user_input, hass_api=hass_api,
-                                        depth=depth, headless=headless)
+                                        depth=depth, headless=headless,
+                                        identification=identification if depth == 0 else None)
 
     system_prompt = _context.build_system_prompt(
         hass, persona=persona, grant=grant, profile_directive=profile_directive,

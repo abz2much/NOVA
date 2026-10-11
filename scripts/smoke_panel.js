@@ -119,7 +119,7 @@ const PANEL = {
     floor_plan_address: "123 Example St, Springfield IL", banter_level: 2, search_backend: "searxng", searxng_url: "http://sx.local:8080", calendar_tight_gap_min: 20, recognition_source: "frigate", voice_confirm_enabled: true, voice_confirm_mode: "gated", intrusion_response_timeout: 120, cameras: [{ entity_id: "camera.front", name: "Front Door", raw_name: "Front Door", outdoor: false, location_mode: "auto" }, { entity_id: "camera.back", name: "Backyard", raw_name: "Backyard", outdoor: true, location_mode: "auto" }], camera_names: {}, lockdown: { active: false },
     cast_devices: [{ entity_id: "media_player.living_room_speaker", name: "Living Room Speaker" }, { entity_id: "media_player.kitchen_speaker", name: "Kitchen Speaker" }],
     voice_id_uri: "tcp://abc123-nova-voice-id:10350", voice_id_fallback_stt: "stt.faster_whisper",
-    voice_id_token_set: true, voice_id_hidden_people: ["person.guest"], voice_id_enrol: { state: "idle" },
+    voice_id_token_set: true, voice_id_hidden_people: ["person.guest"], voice_id_enrol: { state: "idle" }, voice_id_identity: false,
     voice_id_status: { state: "connected", name: "Nova Voice ID", version: "0.1.0", models: ["tiny-int8"], languages: ["en"], error: "", checked_at: 1, entity_id: "stt.nova_voice_id" },
     stt_entities: [{ entity_id: "stt.faster_whisper", name: "faster-whisper" }],
     speaker_areas: [{ area_id: "living_room", name: "Living Room" }, { area_id: "kitchen", name: "Kitchen" }],
@@ -1116,6 +1116,17 @@ if (require.main === module) setTimeout(async () => {
   sRoot = elNew.shadowRoot;
   const vidCard = () => sRoot.getElementById("settings-card-voice_id");
   const vidText = () => vidCard()?.textContent || "";
+  checks.push(["voice id: the identity switch is off by default and says voice is a hint, never a key (8.37.0)",
+    (() => {
+      const t = vidCard().querySelector('button[data-cfg-key="voice_id_identity"]');
+      return !!t && t.classList.contains("off") && t.getAttribute("data-cfg-val") === "true"
+        && /Use voice to tell who is speaking/.test(vidText()) && /never a key/.test(vidText());
+    })()]);
+  vidCard().querySelector('button[data-cfg-key="voice_id_identity"]').click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["voice id: the identity switch saves voice_id_identity through nova/update_config",
+    _updateConfigCalls.some(c => c.key === "voice_id_identity" && c.value === true)]);
+  sRoot = elNew.shadowRoot;
   const tokenField = sRoot.getElementById("vidToken");
   checks.push(["voice id: the token field is masked, filled from the app, with an eye that shows it",
     !!tokenField && tokenField.type === "password" && tokenField.value === "s3cret-token"
