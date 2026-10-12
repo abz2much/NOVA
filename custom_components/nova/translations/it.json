@@ -214,6 +214,14 @@
     "voice_setup_incomplete": {
       "title": "La configurazione vocale di Nova è incompleta",
       "description": "Nova non è riuscita a completare la configurazione vocale. Cosa non ha funzionato: {failed}.\n\nPer completarla a mano: in Impostazioni → Componenti aggiuntivi, installa e avvia Piper, Whisper e openWakeWord. Poi, in Impostazioni → Assistenti vocali, crea una pipeline con Nova come agente di conversazione, Whisper per il riconoscimento vocale e Piper per la sintesi vocale. Nova ricontrolla a ogni riavvio, e questo avviso scompare da solo quando la voce funziona."
+    },
+    "retired_service": {
+      "title": "Nova: {service} sta per essere ritirato",
+      "description": "Qualcosa in Home Assistant, di solito un'automazione o uno script, ha chiamato {service}. Questo servizio verrà rimosso in una versione futura di Nova. Usa invece {replacement}.\n\nQuesto avviso scompare al riavvio di Home Assistant e ritorna solo se il servizio viene chiamato di nuovo."
+    },
+    "retired_service_no_effect": {
+      "title": "Nova: {service} sta per essere ritirato",
+      "description": "Qualcosa in Home Assistant, di solito un'automazione o uno script, ha chiamato {service}. La funzione collegata è stata rimossa, quindi la chiamata non fa nulla, e il servizio stesso verrà rimosso in una versione futura di Nova. Togli la chiamata dall'automazione o dallo script.\n\nQuesto avviso scompare al riavvio di Home Assistant e ritorna solo se il servizio viene chiamato di nuovo."
     }
   },
   "exceptions": {

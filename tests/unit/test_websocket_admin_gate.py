@@ -55,7 +55,6 @@ ADMIN_GATED_TYPES = [
     "list_decisions",
     "get_decision",
     "set_decision_outcome",
-    "replay_decision",
     "get_setup_health",
     "list_automation_inventory",
     "list_automation_trials",
@@ -122,7 +121,7 @@ def test_require_admin_used_at_least_once_per_gated_command():
     # Exactly one decorator per listed command: a new admin gated command that
     # is not added to ADMIN_GATED_TYPES (or a listed one that lost its gate)
     # changes the count and fails here.
-    assert src.count("@websocket_api.require_admin") == len(ADMIN_GATED_TYPES) == 58
+    assert src.count("@websocket_api.require_admin") == len(ADMIN_GATED_TYPES) == 57
 
 
 def test_require_admin_sits_above_websocket_command_not_below():

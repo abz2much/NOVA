@@ -130,9 +130,9 @@ async def test_the_daily_limit_stops_lookups_and_resets_next_day(gt):
     day1 = datetime.datetime(2026, 10, 9, 12, 0).timestamp()
     for _ in range(gt.DAILY_CAP):
         assert (await gt.route_minutes(hass, "walk", (1.0, 2.0), "X", now=day1))[0] == 10.0
-    assert gt.calls_today(day1) == gt.DAILY_CAP
+    assert len(hass.calls) == gt.DAILY_CAP
     minutes, why = await gt.route_minutes(hass, "walk", (1.0, 2.0), "X", now=day1)
     assert minutes is None and "daily limit" in why and len(hass.calls) == gt.DAILY_CAP
     day2 = day1 + 86400
     assert (await gt.route_minutes(hass, "walk", (1.0, 2.0), "X", now=day2))[0] == 10.0
-    assert gt.calls_today(day2) == 1
+    assert len(hass.calls) == gt.DAILY_CAP + 1

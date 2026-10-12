@@ -3,7 +3,7 @@ Assistant (PHACC).
 
 Drives the real setup and the real WebSocket commands to prove:
 
-* the panel readers (_runtime_opt, _get_runtime_json, _get_runtime_str,
+* the panel readers (_runtime_opt, _get_runtime_json,
   _get_disabled_rules) read the live NovaRuntime.runtime_config, keep the
   runtime → config.json → options → data → default precedence and their
   parsing, ignore missing, damaged or drifted Nova-shaped data planted in
@@ -243,22 +243,6 @@ async def test_runtime_json_parsing(hass):
     assert _get_runtime_json(hass, entry, "floor_plan_rooms", {}) == {"json": 1}
 
 
-async def test_runtime_str_parsing(hass):
-    from custom_components.nova import nova_config
-    from custom_components.nova.websocket import _get_runtime_str
-    entry = await _setup(hass)
-    rc = entry.runtime_data.runtime_config
-
-    assert _get_runtime_str(hass, entry, "floor_plan_units", "imperial") == "imperial"
-    nova_config.set("floor_plan_units", "json")
-    assert _get_runtime_str(hass, entry, "floor_plan_units", "imperial") == "json"
-    for raw, expected in (("left", "left"), ("", ""), (0, "0"), (False, "False")):
-        rc["floor_plan_units"] = raw
-        assert _get_runtime_str(hass, entry, "floor_plan_units", "imperial") == expected
-    rc["floor_plan_units"] = None
-    assert _get_runtime_str(hass, entry, "floor_plan_units", "imperial") == "json"
-
-
 async def test_disabled_rules_read_runtime(hass):
     from custom_components.nova.websocket import _get_disabled_rules
     entry = await _setup(hass)
@@ -277,14 +261,13 @@ async def test_disabled_rules_read_runtime(hass):
 @pytest.mark.parametrize("damage", DAMAGE)
 async def test_readers_ignore_hass_data(hass, damage):
     from custom_components.nova.websocket import (
-        _get_disabled_rules, _get_runtime_json, _get_runtime_str, _runtime_opt)
+        _get_disabled_rules, _get_runtime_json, _runtime_opt)
     entry = await _setup(hass)
     rc = entry.runtime_data.runtime_config
     rc.update({"floor_plan_units": "left", "floor_plan_elements": {"live": 1},
                "disabled_sentinel_rules": ["live"]})
     with _planted(hass, entry, damage):
         assert _runtime_opt(hass, entry, "floor_plan_units", "imperial") == "left"
-        assert _get_runtime_str(hass, entry, "floor_plan_units", "imperial") == "left"
         assert _get_runtime_json(hass, entry, "floor_plan_elements", {}) == {"live": 1}
         assert _get_disabled_rules(hass, entry) == ["live"]
 
@@ -317,12 +300,11 @@ async def test_panel_request_sees_in_place_runtime_changes(
 async def test_loaded_entry_without_runtime_fails_visibly(hass):
     from custom_components.nova.runtime import NovaRuntimeUnavailable
     from custom_components.nova.websocket import (
-        _get_disabled_rules, _get_runtime_json, _get_runtime_str, _runtime_opt)
+        _get_disabled_rules, _get_runtime_json, _runtime_opt)
     entry = await _setup(hass)
     entry.runtime_data.runtime_config["floor_plan_units"] = "left"
     with _runtime_missing(entry):
         for read in (lambda: _runtime_opt(hass, entry, "floor_plan_units", "imperial"),
-                     lambda: _get_runtime_str(hass, entry, "floor_plan_units", "imperial"),
                      lambda: _get_runtime_json(hass, entry, "floor_plan_rooms", {}),
                      lambda: _get_disabled_rules(hass, entry)):
             with pytest.raises(NovaRuntimeUnavailable):
@@ -331,14 +313,13 @@ async def test_loaded_entry_without_runtime_fails_visibly(hass):
 
 async def test_unloaded_or_missing_entry_keeps_defaults(hass):
     from custom_components.nova.websocket import (
-        _get_disabled_rules, _get_runtime_json, _get_runtime_str, _runtime_opt)
+        _get_disabled_rules, _get_runtime_json, _runtime_opt)
     entry = await _setup(hass)
     assert await hass.config_entries.async_unload(entry.entry_id)
     await hass.async_block_till_done()
     assert entry.state is ConfigEntryState.NOT_LOADED
     for e in (entry, None):
         assert _runtime_opt(hass, e, "floor_plan_units", "imperial") == "imperial"
-        assert _get_runtime_str(hass, e, "floor_plan_units", "imperial") == "imperial"
         assert _get_runtime_json(hass, e, "floor_plan_rooms", {"d": 1}) == {"d": 1}
         assert _get_disabled_rules(hass, e) == []
 

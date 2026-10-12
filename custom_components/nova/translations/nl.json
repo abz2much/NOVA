@@ -214,6 +214,14 @@
     "voice_setup_incomplete": {
       "title": "De spraakinstelling van Nova is onvolledig",
       "description": "Nova kon de spraakinstelling niet afronden. Wat mislukte: {failed}.\n\nZo rond je het zelf af: installeer en start Piper, Whisper en openWakeWord via Instellingen → Add-ons. Maak daarna via Instellingen → Spraakassistenten een pipeline met Nova als gespreksagent, Whisper voor spraak naar tekst en Piper voor tekst naar spraak. Nova controleert het opnieuw bij elke herstart, en deze melding verdwijnt vanzelf zodra spraak werkt."
+    },
+    "retired_service": {
+      "title": "Nova: {service} wordt uitgefaseerd",
+      "description": "Iets in Home Assistant, meestal een automatisering of een script, heeft {service} aangeroepen. Deze dienst wordt in een latere versie van Nova verwijderd. Gebruik in plaats daarvan {replacement}.\n\nDeze melding verdwijnt als Home Assistant opnieuw start en komt alleen terug als de dienst weer wordt aangeroepen."
+    },
+    "retired_service_no_effect": {
+      "title": "Nova: {service} wordt uitgefaseerd",
+      "description": "Iets in Home Assistant, meestal een automatisering of een script, heeft {service} aangeroepen. De functie erachter is verwijderd, dus de aanroep doet niets, en de dienst zelf wordt in een latere versie van Nova verwijderd. Haal de aanroep uit je automatisering of script.\n\nDeze melding verdwijnt als Home Assistant opnieuw start en komt alleen terug als de dienst weer wordt aangeroepen."
     }
   },
   "exceptions": {

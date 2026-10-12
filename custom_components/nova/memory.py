@@ -2,15 +2,14 @@
 Nova Long-Term Memory (v5.7.00).
 
 Provides semantic search across past conversations so Nova can recall
-context from previous interactions. Uses ChromaDB when available, falls
-back to SQLite FTS5 keyword search.
+context from previous interactions, using SQLite FTS5 keyword search.
 
 Usage:
   - store_memory(text, metadata) — save a conversation turn
   - search_memory(query, k) — retrieve k most relevant past memories
   - get_conversation_context(query) — formatted context string for prompt injection
 
-Storage: /config/nova_memory/ (ChromaDB) or nova.db FTS table (fallback)
+Storage: the memory_fts table in nova.db
 
 Scoped + fenced (v7.87.0, backlog #1 follow-up): search_memory() and
 get_conversation_context() now take a conversation_id to scope retrieval to
@@ -27,23 +26,13 @@ search vs. cross-session reseed) with the identical shape of gap.
 from __future__ import annotations
 
 import logging
-import os
-import time
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from datetime import datetime, timezone
 from typing import Optional
 
 from .persistence import sqlite as _store
 from . import paths
 
 _LOGGER = logging.getLogger(__name__)
-
-MEMORY_DIR: Optional[str] = None  # override; None resolves via paths.py
-
-
-def _memory_dir() -> str:
-    return MEMORY_DIR or paths.memory_dir()
-
 
 DB_PATH: Optional[str] = None  # override; None resolves via paths.py
 
@@ -52,36 +41,10 @@ def _db_path() -> str:
     return DB_PATH or paths.nova_db()
 
 
-_chromadb_available = False
-_collection = None
 _fts_available = False
 
 
-# ── ChromaDB initialization ─────────────────────────────────────────────────
-
-def _init_chromadb():
-    """Try to initialize ChromaDB. Returns True on success."""
-    global _chromadb_available, _collection
-    try:
-        import chromadb
-        os.makedirs(_memory_dir(), exist_ok=True)
-        client = chromadb.PersistentClient(path=_memory_dir())
-        _collection = client.get_or_create_collection(
-            name="nova_memory",
-            metadata={"hnsw:space": "cosine"},
-        )
-        _chromadb_available = True
-        _LOGGER.info("Nova memory: ChromaDB initialized at %s", _memory_dir())
-        return True
-    except ImportError:
-        _LOGGER.debug("Nova memory: ChromaDB not available, using FTS5 fallback")
-        return False
-    except Exception as exc:
-        _LOGGER.warning("Nova memory: ChromaDB init failed: %s", exc)
-        return False
-
-
-# ── SQLite FTS5 fallback ─────────────────────────────────────────────────────
+# ── SQLite FTS5 ─────────────────────────────────────────────────────
 
 def _init_fts():
     """Initialize FTS5 virtual table in the existing Nova database."""
@@ -94,7 +57,7 @@ def _init_fts():
         conn.commit()
         conn.close()
         _fts_available = True
-        _LOGGER.info("Nova memory: FTS5 fallback initialized")
+        _LOGGER.info("Nova memory: FTS5 initialized")
         return True
     except Exception as exc:
         _LOGGER.warning("Nova memory: FTS5 init failed: %s", exc)
@@ -102,11 +65,8 @@ def _init_fts():
 
 
 def _ensure_initialized():
-    """Lazy init — try ChromaDB first, then FTS5."""
-    global _chromadb_available, _fts_available
-    if _chromadb_available or _fts_available:
-        return
-    if not _init_chromadb():
+    """Lazy init of the FTS5 table."""
+    if not _fts_available:
         _init_fts()
 
 
@@ -138,7 +98,6 @@ def store_memory(
 
     _ensure_initialized()
     ts = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
-    doc_id = f"{ts}_{role}_{hash(text) % 100000}"
 
     metadata = {
         "role": role,
@@ -150,17 +109,6 @@ def store_memory(
         metadata["subject"] = subject
     if turn_id:
         metadata["turn_id"] = str(turn_id)
-
-    if _chromadb_available and _collection is not None:
-        try:
-            _collection.add(
-                documents=[text],
-                metadatas=[metadata],
-                ids=[doc_id],
-            )
-            return True
-        except Exception as exc:
-            _LOGGER.debug("ChromaDB store failed: %s", exc)
 
     if _fts_available:
         try:
@@ -205,7 +153,6 @@ def _metadata_like_pattern(key: str, value: str) -> str:
 def search_memory(
     query: str,
     k: int = 5,
-    hours: Optional[int] = None,
     conversation_id: Optional[str] = None,
     subject: Optional[str] = None,
 ) -> list[dict]:
@@ -228,47 +175,6 @@ def search_memory(
         return []
 
     _ensure_initialized()
-
-    if _chromadb_available and _collection is not None:
-        try:
-            conditions = []
-            if hours:
-                cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=hours)).isoformat()
-                conditions.append({"timestamp": {"$gte": cutoff}})
-            if conversation_id:
-                conditions.append({"conversation_id": conversation_id})
-            if subject:
-                conditions.append({"subject": subject})
-            where = None
-            if len(conditions) == 1:
-                where = conditions[0]
-            elif len(conditions) > 1:
-                where = {"$and": conditions}
-
-            results = _collection.query(
-                query_texts=[query],
-                n_results=min(k, 20),
-                where=where,
-            )
-
-            memories = []
-            if results and results.get("documents"):
-                docs = results["documents"][0]
-                metas = results["metadatas"][0] if results.get("metadatas") else [{}] * len(docs)
-                dists = results["distances"][0] if results.get("distances") else [0] * len(docs)
-                for doc, meta, dist in zip(docs, metas, dists):
-                    memories.append({
-                        "text": doc,
-                        "role": meta.get("role", ""),
-                        "timestamp": meta.get("timestamp", ""),
-                        "score": round(1.0 - dist, 3),  # cosine distance → similarity
-                        "conversation_id": meta.get("conversation_id") or None,
-                        "subject": meta.get("subject") or None,
-                        "turn_id": meta.get("turn_id") or None,
-                    })
-            return memories
-        except Exception as exc:
-            _LOGGER.debug("ChromaDB search failed: %s", exc)
 
     if _fts_available:
         try:
@@ -348,21 +254,6 @@ def _find_sibling(
     conversations table — works even after the anchor row is purged, since
     everything needed lives in the semantic-memory metadata itself."""
     _ensure_initialized()
-
-    if _chromadb_available and _collection is not None:
-        try:
-            res = _collection.get(where={"turn_id": turn_id})
-            docs = res.get("documents") or []
-            metas = res.get("metadatas") or []
-            for doc, meta in zip(docs, metas):
-                if (meta.get("conversation_id") == hit_conversation_id
-                        and meta.get("subject") == hit_subject
-                        and meta.get("role")
-                        and meta.get("role") != hit_role):
-                    return {"text": doc, "role": meta.get("role", ""),
-                            "timestamp": meta.get("timestamp", "")}
-        except Exception as exc:
-            _LOGGER.debug("ChromaDB sibling lookup failed: %s", exc)
 
     if _fts_available:
         try:
@@ -505,13 +396,7 @@ def get_memory_stats() -> dict:
         "total_memories": 0,
     }
 
-    if _chromadb_available and _collection is not None:
-        try:
-            stats["backend"] = "chromadb"
-            stats["total_memories"] = _collection.count()
-        except Exception:
-            pass
-    elif _fts_available:
+    if _fts_available:
         try:
             import sqlite3
             conn = sqlite3.connect(_db_path())

@@ -214,6 +214,14 @@
     "voice_setup_incomplete": {
       "title": "La configuración de voz de Nova está incompleta",
       "description": "Nova no pudo terminar de configurar la voz. Lo que falló: {failed}.\n\nPara terminarla a mano: en Ajustes → Complementos, instala e inicia Piper, Whisper y openWakeWord. Después, en Ajustes → Asistentes de voz, crea una canalización con Nova como agente de conversación, Whisper para voz a texto y Piper para texto a voz. Nova vuelve a comprobarlo en cada reinicio, y este aviso desaparece solo cuando la voz funcione."
+    },
+    "retired_service": {
+      "title": "Nova: {service} se va a retirar",
+      "description": "Algo en Home Assistant, normalmente una automatización o un script, llamó a {service}. Este servicio se eliminará en una versión posterior de Nova. Usa {replacement} en su lugar.\n\nEste aviso desaparece al reiniciar Home Assistant y solo vuelve si se llama de nuevo al servicio."
+    },
+    "retired_service_no_effect": {
+      "title": "Nova: {service} se va a retirar",
+      "description": "Algo en Home Assistant, normalmente una automatización o un script, llamó a {service}. La función que había detrás se ha eliminado, así que la llamada no hace nada, y el propio servicio se eliminará en una versión posterior de Nova. Quita la llamada de tu automatización o script.\n\nEste aviso desaparece al reiniciar Home Assistant y solo vuelve si se llama de nuevo al servicio."
     }
   },
   "exceptions": {

@@ -54,7 +54,6 @@ def test_party_relaxes_proactive_and_maxes_banter(modes):
     modes.set_mode("party")
     assert modes.mode_allows_proactive() is False
     assert modes.mode_banter_level() == 2
-    assert modes.mode_announce_scope() == "critical"
 
 
 def test_movie_is_near_silent(modes):
@@ -142,8 +141,6 @@ def test_scope_lab_to_areas(modes, monkeypatch):
                         lambda k, d=None: ["workshop", "garage"] if k == "lab_areas" else d)
     modes.set_mode("lab")
     assert modes.mode_scoped_to_areas() == ["workshop", "garage"]
-    assert modes.mode_active_here("workshop") is True
-    assert modes.mode_active_here("kitchen") is False
 
 
 def test_scope_movie_to_area(modes, monkeypatch):
@@ -151,18 +148,14 @@ def test_scope_movie_to_area(modes, monkeypatch):
                         lambda k, d=None: "living_room" if k == "movie_area" else d)
     modes.set_mode("movie")
     assert modes.mode_scoped_to_areas() == ["living_room"]
-    assert modes.mode_active_here("living_room") is True
-    assert modes.mode_active_here("bedroom") is False
 
 
 def test_unscoped_mode_is_whole_house(modes, monkeypatch):
     monkeypatch.setattr(modes, "_cfg", lambda k, d=None: d)
     modes.set_mode("normal")
     assert modes.mode_scoped_to_areas() == []
-    assert modes.mode_active_here("anywhere") is True     # whole-house
     modes.set_mode("lab")                                  # lab, no rooms set
     assert modes.mode_scoped_to_areas() == []
-    assert modes.mode_active_here("anywhere") is True      # falls back to whole-house
 
 
 def test_auto_evaluate_respects_hands_off(modes, monkeypatch):

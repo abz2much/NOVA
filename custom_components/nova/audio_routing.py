@@ -104,18 +104,6 @@ def _entities_by_domain(
     return [s.entity_id for s in hass.states.async_all(domain)]
 
 
-def _entities_by_domain_and_device_class(
-    hass: HomeAssistant, domain: str, device_class: str
-) -> list[str]:
-    """Return all entity_ids for (domain, device_class)."""
-    out = []
-    for s in hass.states.async_all(domain):
-        dc = s.attributes.get("device_class")
-        if dc == device_class:
-            out.append(s.entity_id)
-    return out
-
-
 # ─── Per-area discovery ──────────────────────────────────────────────────────
 
 def satellites_in_area(hass: HomeAssistant, area_id: str) -> list[str]:
@@ -655,13 +643,3 @@ def is_any_bedroom_occupied(
         if is_area_occupied(hass, area_id):
             return True, area_id
     return False, None
-
-
-def get_bedroom_presence_entities(
-    hass: HomeAssistant, bedroom_area_ids: Iterable[str]
-) -> list[str]:
-    """All occupancy sensors in any bedroom area."""
-    out = []
-    for area_id in bedroom_area_ids:
-        out.extend(presence_entities_in_area(hass, area_id))
-    return out

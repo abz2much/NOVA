@@ -7,9 +7,10 @@ events are salient enough to escalate to a cloud LLM.
 
 It is strictly ADDITIVE to the observer's existing static pre-filter: it never
 suppresses anything the static filter already escalates (no regression). It
-only *adds* escalations for genuine anomalies the static filter would miss —
-e.g. a numeric sensor spiking far outside its learned range, or a device
-changing at an hour it normally never does. The user-configurable hourly cap
+only *adds* escalations the static filter would miss, such as a device
+changing rarely or at an hour it normally never does. Numeric readings are
+never escalated on statistics alone (8.40.0): a value spike is not something
+Nova should speak about. The user-configurable hourly cap
 (`classifier_rate_limit`) remains the hard backstop on cloud cost.
 
 This module is also the substrate for future ANTICIPATION: the per-entity model
@@ -39,9 +40,6 @@ _LOGGER = logging.getLogger(__name__)
 MODEL_MAX_ENTITIES = 1500       # bound memory; evict least-recently-changed
 TRANSITION_WINDOW = 50          # keep last N transition timestamps per entity
 RARE_TRANSITIONS_PER_DAY = 3.0  # ≤ this many/day (avg) ⇒ a "rare" change
-NUMERIC_MIN_SAMPLES = 30        # need this many readings before trusting stats
-Z_SPIKE = 4.0                   # |z| ≥ this ⇒ strong anomaly
-Z_DRIFT = 3.0                   # |z| ≥ this ⇒ mild anomaly
 DEFAULT_THRESHOLD = 0.6         # salience ≥ this ⇒ escalate (anomaly path)
 
 SAFETY_CLASSES = {
@@ -58,25 +56,6 @@ _MAINTENANCE_HINTS = (
 SECURITY_DOMAINS = {"lock", "alarm_control_panel"}
 OPENING_CLASSES = {"door", "window", "garage_door", "opening"}
 
-# Diagnostic / technical numeric sensors a home butler has no business reasoning
-# about: their values legitimately swing (board/CPU temps, RF signal, reactive
-# power, link stats, frame rates), so the numeric-anomaly path would escalate
-# them endlessly. We suppress only the ANOMALY signal for these — genuine
-# safety/access triggers are unaffected (and don't apply to these anyway).
-# Matched by device_class, unit, or entity-id hint so no entity registry needed.
-_TECH_DEVICE_CLASSES = frozenset({
-    "signal_strength", "data_rate", "data_size", "frequency",
-})
-_TECH_UNITS = frozenset({
-    "dbm", "kvar", "var", "va", "kva", "hz", "khz", "mhz", "ghz",
-    "mbit/s", "kbit/s", "kb/s", "mb/s", "gb/s", "kib/s", "mib/s",
-})
-_TECH_ENTITY_HINTS = (
-    "hwmon", "signal_strength", "rssi", "linkquality", "_lqi", "uptime",
-    "packet", "cpu_", "_cpu", "package_id", "core_temp", "_temp_core",
-    "memory_use", "disk_use", "processor", "load_1m", "load_5m", "load_15m",
-    "throughput", "bytes", "framerate", "_fps",
-)
 # A safety binary_sensor is an emergency only in its ACTIVE state ("on"); an
 # alarm panel only when "triggered"/"pending". Going unavailable/unknown or
 # returning to normal (off/dry/clear) is NEVER a trigger.
@@ -139,10 +118,6 @@ class _Entry:
         self.last_changed = now
         self.first_seen = now
         self.transitions: deque = deque(maxlen=TRANSITION_WINDOW)
-        # Welford online numeric stats
-        self.n = 0
-        self.mean = 0.0
-        self.m2 = 0.0
         # change count per hour-of-day (0..23)
         self.hours = [0] * 24
         # occupancy: per-hour {state: count} — "what state is normal at hour H"
@@ -197,13 +172,6 @@ def mark_unobserved() -> None:
     _OBSERVING_SINCE = 0.0
 
 
-def _to_float(value):
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
 def _local_day(now: float) -> int:
     # Proleptic Gregorian ordinal in LOCAL time: monotonic (good for spans) and
     # unique per calendar day (good for equality).
@@ -248,14 +216,6 @@ def observe(entity_id: str, old_state, new_value, now: float) -> _Entry:
             entry.daily_first.append((day_ord, _secs_since_midnight(now)))
     entry.last_state = new_value if new_value is not None else entry.last_state
 
-    # Numeric running stats (Welford) — only for parseable numbers
-    val = _to_float(new_value)
-    if val is not None:
-        entry.n += 1
-        delta = val - entry.mean
-        entry.mean += delta / entry.n
-        entry.m2 += delta * (val - entry.mean)
-
     return entry
 
 
@@ -294,21 +254,7 @@ def _is_safety_trigger(domain, dclass, new_value) -> bool:
     return False
 
 
-def _is_technical(entity_id, dclass, unit) -> bool:
-    """A diagnostic/technical numeric sensor whose swings aren't worth reasoning
-    about (CPU/board temps, RF signal, reactive power, link stats). Matched by
-    device_class, unit, or entity-id hint so it needs no entity registry."""
-    eid = (entity_id or "").lower()
-    if any(h in eid for h in _TECH_ENTITY_HINTS):
-        return True
-    if dclass and str(dclass).lower() in _TECH_DEVICE_CLASSES:
-        return True
-    if unit and str(unit).lower() in _TECH_UNITS:
-        return True
-    return False
-
-
-def _salience(domain, dclass, new_value, entry, now, entity_id="", unit=None) -> tuple:
+def _salience(domain, dclass, new_value, entry, now, entity_id="") -> tuple:
     """Local heuristic salience in [0, 1] plus a short human reason."""
     score = 0.0
     reasons = []
@@ -325,21 +271,6 @@ def _salience(domain, dclass, new_value, entry, now, entity_id="", unit=None) ->
             score = max(score, 0.4); reasons.append("device problem reported")
     elif domain == "cover" or dclass in OPENING_CLASSES or domain in SECURITY_DOMAINS:
         score = max(score, 0.55); reasons.append("access-point")
-
-    # Numeric anomaly — the core value-add (catches spikes the static filter drops).
-    # Skipped for diagnostic/technical sensors, whose values legitimately spike and
-    # would otherwise flood the pipeline with meaningless escalations.
-    val = _to_float(new_value)
-    if (val is not None and entry.n >= NUMERIC_MIN_SAMPLES
-            and not _is_technical(entity_id, dclass, unit)):
-        variance = entry.m2 / entry.n if entry.n else 0.0
-        std = variance ** 0.5
-        if std > 1e-9:
-            z = abs(val - entry.mean) / std
-            if z >= Z_SPIKE:
-                score = max(score, 0.7); reasons.append(f"value spike (z={z:.1f})")
-            elif z >= Z_DRIFT:
-                score = max(score, 0.55); reasons.append(f"value drift (z={z:.1f})")
 
     if _is_rare(entry, now):
         score = min(1.0, score + 0.15); reasons.append("rare transition")
@@ -368,7 +299,6 @@ def process(event, threshold: float = DEFAULT_THRESHOLD) -> Decision:
         old_state = event.data.get("old_state")
         new_value = new_state.state if new_state else None
         dclass = new_state.attributes.get("device_class") if new_state else None
-        unit = new_state.attributes.get("unit_of_measurement") if new_state else None
         domain = entity_id.split(".", 1)[0] if entity_id else ""
         now = time.time()
 
@@ -383,7 +313,7 @@ def process(event, threshold: float = DEFAULT_THRESHOLD) -> Decision:
             return Decision(escalate=False, salience=0.0, reason="state recovery")
 
         entry = observe(entity_id, old_state, new_value, now)
-        score, reason = _salience(domain, dclass, new_value, entry, now, entity_id, unit)
+        score, reason = _salience(domain, dclass, new_value, entry, now, entity_id)
         escalate = score >= threshold
         if escalate:
             # An anomaly-only escalation (no safety/access driver) is subject to a
@@ -841,16 +771,6 @@ def predict_overdue(hass, now: float = None) -> list:
             })
     except Exception as exc:
         _LOGGER.debug("predict_overdue error: %s", exc)
-    return out
-
-
-def _presence_entities(hass):
-    out = []
-    for dom in PRESENCE_DOMAINS:
-        try:
-            out.extend(hass.states.async_all(dom))
-        except Exception:
-            pass
     return out
 
 
@@ -1677,7 +1597,7 @@ def _entry_to_dict(e: _Entry) -> dict:
     return {
         "last_state": e.last_state, "last_changed": e.last_changed,
         "first_seen": e.first_seen, "transitions": list(e.transitions),
-        "n": e.n, "mean": e.mean, "m2": e.m2, "hours": e.hours,
+        "hours": e.hours,
         "occ": {str(h): d for h, d in e.occ.items()},
         "daily_first": list(e.daily_first), "last_first_day": e.last_first_day,
         "depart_first": list(e.depart_first), "return_first": list(e.return_first),
@@ -1692,7 +1612,6 @@ def _entry_from_dict(d: dict) -> _Entry:
     e.last_state = d.get("last_state", "")
     e.last_changed = float(d.get("last_changed", e.first_seen))
     e.transitions = deque(d.get("transitions", []), maxlen=TRANSITION_WINDOW)
-    e.n = int(d.get("n", 0)); e.mean = float(d.get("mean", 0.0)); e.m2 = float(d.get("m2", 0.0))
     h = d.get("hours") or [0] * 24
     e.hours = h if len(h) == 24 else [0] * 24
     e.occ = {int(k): {s: int(c) for s, c in v.items()} for k, v in (d.get("occ") or {}).items()}

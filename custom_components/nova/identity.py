@@ -499,17 +499,6 @@ def resolve_subject(hass: HomeAssistant, **kwargs) -> str:
     return subject_for(resolve(hass, **kwargs))
 
 
-def quick_person(hass: HomeAssistant, area_id: Optional[str] = None) -> str:
-    """
-    Cheap identity for high-volume callers (the state-change listener). As of
-    v6.77.0 this is ROOM-AWARE: pass the event's area_id and room-scoped
-    presence/recognition is used, so attribution works in a multi-occupant house
-    instead of only when exactly one person is home. Falls back to the old
-    sole-occupant behaviour when no area is known or nothing resolves.
-    """
-    return quick_identify(hass, area_id).person
-
-
 def quick_identify(hass: HomeAssistant, area_id: Optional[str] = None) -> Identification:
     """Room-aware identity WITH confidence and candidates (v6.77.0).
 

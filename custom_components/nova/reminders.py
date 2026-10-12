@@ -85,17 +85,6 @@ def add_reminder(
         return -1
 
 
-def acknowledge_reminder(reminder_id: int) -> bool:
-    try:
-        with _connect() as conn:
-            conn.execute(
-                "UPDATE reminders SET acknowledged = 1 WHERE id = ?", (reminder_id,)
-            )
-        return True
-    except Exception:
-        return False
-
-
 def get_due_reminders(now: Optional[datetime] = None) -> list[dict]:
     """Return all reminders whose trigger time has passed and not yet fired."""
     now = now or _now_local()

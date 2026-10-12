@@ -362,7 +362,6 @@ def test_corrupt_store_fails_safely_and_is_not_touched(ps, tmp_path):
     results = ps.upgrade_existing(str(tmp_path))
     assert results["knowledge"].state == "failed"
     assert bad.read_bytes() == before
-    assert ps.last_upgrade()["knowledge"].state == "failed"
 
 
 def test_concurrent_upgrades_of_one_file_serialise(ps, schema, tmp_path):

@@ -1,7 +1,7 @@
 """Pin what the decision commands in ws_decisions.py do today (8.7.22, tests only).
 
 nova/root_cause, nova/get_calibration, nova/list_decisions, nova/get_decision,
-nova/set_decision_outcome, nova/replay_decision, nova/run_analysis and
+nova/set_decision_outcome, nova/run_analysis and
 nova/get_cognitive_status. nova/set_decision_outcome is the one write: a
 verdict feeds calibration and the adaptive thresholds. The decorators are
 stubbed to pass through, so the handler bodies run with a recording
@@ -107,11 +107,10 @@ async def test_get_decision_is_redacted_and_bounded(dec, records):
     assert d["observation"] == "o" * 500 + "…"
 
 
-async def test_get_and_replay_of_a_missing_decision_is_not_found(dec, records):
+async def test_get_of_a_missing_decision_is_not_found(dec, records):
     records.rec = None
-    for handler in (dec.ws_get_decision, dec.ws_replay_decision):
-        conn = await _call(handler, decision_id=99)
-        assert conn.errors == [(8, "not_found", "decision not found")]
+    conn = await _call(dec.ws_get_decision, decision_id=99)
+    assert conn.errors == [(8, "not_found", "decision not found")]
 
 
 def test_bounding_keeps_short_values_and_walks_lists(dec):
@@ -120,8 +119,7 @@ def test_bounding_keeps_short_values_and_walks_lists(dec):
 
 
 @pytest.mark.parametrize("handler,code", [("ws_list_decisions", "list_decisions_failed"),
-                                          ("ws_get_decision", "get_decision_failed"),
-                                          ("ws_replay_decision", "replay_decision_failed")])
+                                          ("ws_get_decision", "get_decision_failed")])
 async def test_record_read_failures_return_no_raw_text(dec, records, load, monkeypatch,
                                                        handler, code):
     dr = load("decision_record")
@@ -129,13 +127,6 @@ async def test_record_read_failures_return_no_raw_text(dec, records, load, monke
     monkeypatch.setattr(dr, "get", _raise)
     conn = await _call(getattr(dec, handler), decision_id=1, limit=5)
     assert conn.errors == [(8, code, _SAFE)]
-
-
-async def test_replay_hands_the_record_to_replay_one(dec, records, load, monkeypatch):
-    seen = []
-    monkeypatch.setattr(load("replay"), "replay_one", lambda rec: seen.append(rec) or {"r": 1})
-    conn = await _call(dec.ws_replay_decision, decision_id=3)
-    assert conn.results == [(8, {"r": 1})] and seen == [records.rec]
 
 
 # ── nova/root_cause ─────────────────────────────────────────────────────────

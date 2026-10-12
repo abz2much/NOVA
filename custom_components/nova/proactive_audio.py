@@ -590,16 +590,13 @@ async def async_setup_proactive_audio(hass: HomeAssistant, entry: ConfigEntry) -
                 area = str(nova_config.runtime_get(
                     hass, entry, AUDIT_AREA_KEY, "") or "").strip()
                 if area:
-                    await hass.services.async_call(
-                        DOMAIN,
-                        SERVICE_SPEAK,
-                        {
-                            "message": message,
-                            "target_area": area,
-                            "critical": verdict["critical"],
-                        },
-                        blocking=False,
-                    )
+                    # Straight to the dispatcher, not through nova.speak: the
+                    # service is being retired and warns whoever calls it.
+                    hass.async_create_task(_dispatch_speak(hass, tick_runtime, {
+                        "message": message,
+                        "target_area": area,
+                        "critical": verdict["critical"],
+                    }))
                 # Persist this occurrence for future recall.
                 await hass.async_add_executor_job(
                     fault_log.commit_event, verdict["message"], tags

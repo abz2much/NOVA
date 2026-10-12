@@ -25,7 +25,6 @@ AUTHORITY = {"authorize", "authorize_now"}
 NOT_SECURITY = {
     "google_travel.py:route_minutes": "Google travel time lookup",
     "notify_targets.py:async_send_configured_notifications": "phone notifications",
-    "proactive_audio.py:_run_audit": "Nova's own audit service",
     "voice_confirm.py:_start_listening": "starts a satellite listening for a yes or no",
 }
 

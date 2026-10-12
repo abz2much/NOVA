@@ -213,11 +213,6 @@ def mode_allows_auto_actions() -> bool:
     return mode_overrides().get("auto_actions", True)
 
 
-def mode_announce_scope() -> str:
-    """'all' | 'notable' | 'critical' — how selective event surfacing is."""
-    return mode_overrides().get("announce_scope", "notable")
-
-
 def mode_banter_level() -> Optional[int]:
     """Persona banter level the mode wants (0/1/2), or None to keep the user's
     configured level."""
@@ -295,11 +290,3 @@ def mode_scoped_to_areas() -> list:
     except Exception:
         pass
     return []
-
-
-def mode_active_here(area_id: str) -> bool:
-    """Whether the active mode's behavior applies in this area. A room-scoped
-    mode (Lab/Movie bound to rooms) applies only in its bound rooms; any other
-    mode applies everywhere."""
-    areas = mode_scoped_to_areas()
-    return True if not areas else (str(area_id) in areas)

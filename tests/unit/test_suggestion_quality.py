@@ -681,9 +681,6 @@ def test_presence_detector_no_longer_runs(pa, load, tmp_path, monkeypatch):
     db = str(tmp_path / "patterns.db")
     _db(load, db).close()
     an._db = db
-    called = []
-    monkeypatch.setattr(an, "_find_presence_patterns",
-                        lambda conn: called.append(1) or [])
+    assert not hasattr(an, "_find_presence_patterns")
     an._detect_patterns({}, None, None, {})
-    assert called == []
     assert "presence" in an._completed_types

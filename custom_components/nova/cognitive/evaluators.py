@@ -20,7 +20,6 @@ from typing import Callable, Optional
 
 from ..const import URGENCY_CEILINGS, URGENCY_CRITICAL
 from .models import (
-    ACTION_SILENT,
     Decision,
     EventSnapshot,
     Evidence,
@@ -627,7 +626,3 @@ def cap_reasoned_urgency(reasoned: str, classifier_urgency: str) -> str:
 def held_for_sleep(urgency: str, sleeping: bool) -> bool:
     """While someone is asleep only critical may be delivered."""
     return bool(sleeping) and urgency != "critical"
-
-
-def is_silent(d: Decision) -> bool:
-    return d.action == ACTION_SILENT

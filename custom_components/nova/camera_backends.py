@@ -188,15 +188,3 @@ def find_backend(hass: HomeAssistant, entity_id: str) -> Optional[CameraBackend]
         except Exception as exc:
             _LOGGER.debug("Backend '%s' handles() check failed: %s", backend.name, exc)
     return None
-
-
-def register_backend(backend: CameraBackend, priority: int = -1) -> None:
-    """
-    Runtime registration so third parties can add their own backend without
-    modifying this file. priority=-1 means 'append to end'.
-    """
-    if priority < 0 or priority >= len(BACKENDS):
-        BACKENDS.append(backend)
-    else:
-        BACKENDS.insert(priority, backend)
-    _LOGGER.info("Nova: registered camera backend '%s'", backend.name)

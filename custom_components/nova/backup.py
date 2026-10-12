@@ -17,7 +17,7 @@ import time
 _STATE_PATHS = [
     "nova",              # DBs (knowledge/patterns/conversations/reminders), config.json, docs, json state
     "nova.db",           # fts5 keyword-memory fallback
-    "nova_memory",       # ChromaDB semantic memory
+    "nova_memory",       # old memory store from earlier versions, if present
     "nova_persona.txt",
     "nova_routines.yaml",
 ]

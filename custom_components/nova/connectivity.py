@@ -126,12 +126,6 @@ def is_online() -> bool:
         return _BREAKER.state == _CLOSED
 
 
-def is_offline() -> bool:
-    """True if the breaker is OPEN (known degraded)."""
-    with _BREAKER.lock:
-        return _BREAKER.state == _OPEN
-
-
 def status() -> dict:
     """Snapshot for diagnostics / agent introspection."""
     with _BREAKER.lock:

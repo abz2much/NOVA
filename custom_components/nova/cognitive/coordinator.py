@@ -41,13 +41,9 @@ from .evaluators import (
     parse_summary,
 )
 from .models import (
-    ACTION_SILENT,
-    ACTION_SPEAK,
     Decision,
     EventSnapshot,
-    ORIGIN_LOCAL_MIND,
     ProviderFailure,
-    R_LOCAL_MIND,
 )
 from .provider import parse_reply
 
@@ -83,19 +79,6 @@ def local_decision(snapshot: EventSnapshot, honorific: str) -> Optional[Decision
     if winner is None:
         return None
     return presentation.voiced(winner, honorific)
-
-
-def decision_from_legacy(out: dict, *, origin: str = ORIGIN_LOCAL_MIND) -> Decision:
-    """A typed view of a legacy decision dict (a patched seam or the Local
-    Mind façade), keeping exactly the keys it carried."""
-    speak = bool(out.get("speak"))
-    extra = tuple(sorted((k, v) for k, v in out.items()
-                         if k not in ("speak", "message", "urgency", "reason")))
-    return Decision(ACTION_SPEAK if speak else ACTION_SILENT, R_LOCAL_MIND,
-                    urgency=out.get("urgency") if "urgency" in out else None,
-                    reason=out.get("reason") if "reason" in out else None,
-                    message=str(out.get("message", "")) if speak else "",
-                    origin=origin, extra=extra)
 
 
 # ── Effects: history lookup, Local Mind, cache ─────────────────────────────

@@ -905,20 +905,6 @@
     ],
     "registered": true
   },
-  "nova/replay_decision": {
-    "admin": true,
-    "error_codes": [
-      "not_found",
-      "replay_decision_failed"
-    ],
-    "fields": {
-      "decision_id": {
-        "required": true
-      }
-    },
-    "literal_response_keys": [],
-    "registered": true
-  },
   "nova/root_cause": {
     "admin": false,
     "error_codes": [

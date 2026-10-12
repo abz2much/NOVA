@@ -28,9 +28,6 @@ def _isolate_memory_stores(monkeypatch, tmp_path):
     from custom_components.nova import database, memory
     monkeypatch.setattr(database, "DB_PATH", tmp_path / "conversations.db")
     monkeypatch.setattr(memory, "DB_PATH", str(tmp_path / "nova.db"))
-    monkeypatch.setattr(memory, "MEMORY_DIR", str(tmp_path / "nova_memory"))
-    monkeypatch.setattr(memory, "_chromadb_available", False)
-    monkeypatch.setattr(memory, "_collection", None)
     monkeypatch.setattr(memory, "_fts_available", False)
     return database, memory
 

@@ -136,3 +136,57 @@ def test_every_voice_translation_key_exists_in_en_json():
     for step in ("addons", "wyoming", "pipeline"):
         assert "{step}" in strings["issues"][f"voice_setup_step_{step}"]["description"]
     assert "{failed}" in strings["issues"]["voice_setup_incomplete"]["description"]
+
+
+# ── retired services (8.40.0) ────────────────────────────────────────────────
+
+class _RetiredIR(_RecordingIR):
+    def async_create_issue(self, hass, domain, issue_id, **kw):
+        self.created.append((issue_id, kw))
+
+
+@pytest.fixture
+def retired(rn, monkeypatch):
+    fake = _RetiredIR()
+    fake.IssueSeverity = type("S", (), {"WARNING": "warning"})
+    monkeypatch.setattr(rn, "ir", fake)
+    monkeypatch.setattr(rn, "_retired_seen", set())
+    return fake
+
+
+def test_a_retired_service_warns_once_per_run_and_names_the_replacement(rn, retired, caplog):
+    rn.note_retired_service(object(), "speak", "tts.speak")
+    rn.note_retired_service(object(), "speak", "tts.speak")
+    (issue_id, kw), = retired.created
+    assert issue_id == "retired_service_speak"
+    assert kw["translation_key"] == "retired_service"
+    assert kw["translation_placeholders"] == {"service": "nova.speak", "replacement": "tts.speak"}
+    assert kw["is_persistent"] is False
+    assert sum("nova.speak is being retired" in r.message for r in caplog.records) == 1
+
+
+def test_a_service_with_no_replacement_says_the_call_does_nothing(rn, retired):
+    rn.note_retired_service(object(), "replay_policy", None)
+    (issue_id, kw), = retired.created
+    assert kw["translation_key"] == "retired_service_no_effect"
+    assert kw["translation_placeholders"] == {"service": "nova.replay_policy"}
+
+
+def test_every_retired_service_has_its_notice_text():
+    import json
+    import pathlib
+    en = json.loads((pathlib.Path(__file__).resolve().parents[2] / "custom_components"
+                     / "nova" / "translations" / "en.json").read_text())
+    assert "{replacement}" in en["issues"]["retired_service"]["description"]
+    assert "{service}" in en["issues"]["retired_service_no_effect"]["description"]
+
+
+def test_retired_service_notices_never_raise(rn, monkeypatch):
+    class _Broken:
+        IssueSeverity = type("S", (), {"WARNING": "warning"})
+
+        def async_create_issue(self, *a, **k):
+            raise RuntimeError("registry down")
+    monkeypatch.setattr(rn, "ir", _Broken())
+    monkeypatch.setattr(rn, "_retired_seen", set())
+    rn.note_retired_service(object(), "routine", "script.turn_on")

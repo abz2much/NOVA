@@ -214,6 +214,14 @@
     "voice_setup_incomplete": {
       "title": "Nastavení hlasu Nova není dokončeno",
       "description": "Nova nemohla dokončit nastavení hlasu. Co selhalo: {failed}.\n\nDokončení ručně: v Nastavení → Doplňky nainstalujte a spusťte Piper, Whisper a openWakeWord. Potom v Nastavení → Hlasoví asistenti vytvořte pipeline s Novou jako agentem pro konverzaci, Whisper pro převod řeči na text a Piper pro převod textu na řeč. Nova to při každém restartu znovu zkontroluje a toto upozornění zmizí samo, jakmile hlas funguje."
+    },
+    "retired_service": {
+      "title": "Nova: {service} bude vyřazena",
+      "description": "Něco v Home Assistantu, obvykle automatizace nebo skript, zavolalo {service}. Tato služba bude v některé příští verzi Novy odstraněna. Použijte místo ní {replacement}.\n\nTo upozornění zmizí po restartu Home Assistantu a vrátí se, jen pokud bude služba zavolána znovu."
+    },
+    "retired_service_no_effect": {
+      "title": "Nova: {service} bude vyřazena",
+      "description": "Něco v Home Assistantu, obvykle automatizace nebo skript, zavolalo {service}. Funkce za touto službou byla odstraněna, takže volání nic nedělá, a samotná služba bude v některé příští verzi Novy odstraněna. Odeberte volání z automatizace nebo skriptu.\n\nTo upozornění zmizí po restartu Home Assistantu a vrátí se, jen pokud bude služba zavolána znovu."
     }
   },
   "exceptions": {

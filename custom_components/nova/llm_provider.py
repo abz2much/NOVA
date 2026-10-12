@@ -47,7 +47,6 @@ from .providers.openai_compatible import (
     OpenAICompatibleProvider,
     OpenAIProvider,
 )
-from .providers.openai_wire import openai_style_usage
 from .providers.registry import (
     ADAPTERS,
     CLOUD_PROVIDERS,
@@ -92,11 +91,6 @@ _PROVIDER_ENDPOINT_FIELDS = {
 }
 _is_local_url = is_local_url
 _OLLAMA_TAG_RE = _OLLAMA_TAG_RE
-
-
-def _openai_style_usage(resp) -> dict:
-    """Token usage dictionary from an OpenAI-compatible completion."""
-    return openai_style_usage(resp).to_dict()
 
 
 async def chat_with_activity(

@@ -214,6 +214,14 @@
     "voice_setup_incomplete": {
       "title": "Nova ses kurulumu tamamlanmadı",
       "description": "Nova ses kurulumunu tamamlayamadı. Başarısız olan: {failed}.\n\nElle tamamlamak için: Ayarlar → Eklentiler bölümünde Piper, Whisper ve openWakeWord'ü kurun ve başlatın. Ardından Ayarlar → Sesli yardımcılar bölümünde konuşma aracısı olarak Nova, konuşmadan metne için Whisper ve metinden sese için Piper içeren bir işlem hattı oluşturun. Nova her yeniden başlatmada tekrar kontrol eder ve ses çalıştığında bu bildirim kendiliğinden kalkar."
+    },
+    "retired_service": {
+      "title": "Nova: {service} kullanımdan kaldırılıyor",
+      "description": "Home Assistant'ta bir şey, genellikle bir otomasyon ya da betik, {service} hizmetini çağırdı. Bu hizmet Nova'nın sonraki bir sürümünde kaldırılacak. Bunun yerine {replacement} kullanın.\n\nBu bildirim Home Assistant yeniden başladığında kaybolur ve yalnızca hizmet yeniden çağrılırsa geri gelir."
+    },
+    "retired_service_no_effect": {
+      "title": "Nova: {service} kullanımdan kaldırılıyor",
+      "description": "Home Assistant'ta bir şey, genellikle bir otomasyon ya da betik, {service} hizmetini çağırdı. Arkasındaki özellik kaldırıldığı için çağrı hiçbir şey yapmaz ve hizmetin kendisi de Nova'nın sonraki bir sürümünde kaldırılacak. Çağrıyı otomasyonunuzdan ya da betiğinizden çıkarın.\n\nBu bildirim Home Assistant yeniden başladığında kaybolur ve yalnızca hizmet yeniden çağrılırsa geri gelir."
     }
   },
   "exceptions": {

@@ -22,13 +22,9 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional
 
-import aiohttp
-
 from homeassistant.core import HomeAssistant, ServiceCall, Event, callback
 from homeassistant.components.camera import async_get_image as camera_get_image
 from homeassistant.helpers import entity_registry as er, device_registry as dr
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.network import get_url
 
 from .camera_backends import find_backend
 from .const import DEFAULT_VISION_MODEL, NOVA_PERSONA, DOMAIN
@@ -323,10 +319,6 @@ def active_cameras(hass) -> list:
     return [s.entity_id for s in active_camera_states(hass)]
 
 
-def camera_enabled(entity_id) -> bool:
-    return str(entity_id) not in _disabled_cameras()
-
-
 def _camera_integration(hass: HomeAssistant, entity_id: str) -> str:
     """
     Return 'frigate', 'nest', 'eufy', or 'other' based on which integration
@@ -387,60 +379,6 @@ def _frigate_camera_name(entity_id: str) -> str:
     lowercases entity IDs, but Frigate is case-insensitive on most endpoints.
     """
     return entity_id.split(".", 1)[-1]
-
-
-async def _fetch_frigate_image(
-    hass: HomeAssistant, entity_id: str
-) -> Optional[bytes]:
-    """
-    Try Frigate's higher-quality endpoints in order:
-      1. Recent event snapshot (cropped to detection, best quality)
-      2. Latest full frame
-      3. None — caller should fall back to HA's standard snapshot
-
-    Uses HA's internal URL. The /api/frigate/notifications/... endpoint is
-    public (no auth). The /api/frigate/{cam}/latest.jpg endpoint requires
-    the Frigate integration to be configured with unauthenticated access
-    or we need to fall through to the default snapshot.
-    """
-    session = async_get_clientsession(hass)
-    try:
-        base_url = get_url(hass, allow_internal=True, prefer_external=False)
-    except Exception:
-        base_url = "http://127.0.0.1:8123"
-
-    camera = _frigate_camera_name(entity_id)
-
-    # 1. Try cached event snapshot — best quality, event-cropped, public endpoint
-    cached = _EVENT_CACHE.get(entity_id)
-    if cached and cached.get("source") == "frigate":
-        age = (datetime.now(timezone.utc).replace(tzinfo=None) - cached["ts"]).total_seconds()
-        if age < EVENT_FRESH_SECONDS:
-            event_id = cached.get("event_id")
-            if event_id:
-                url = f"{base_url}/api/frigate/notifications/{event_id}/snapshot.jpg"
-                try:
-                    async with session.get(
-                        url, timeout=aiohttp.ClientTimeout(total=10)
-                    ) as resp:
-                        if resp.status == 200:
-                            data = await resp.read()
-                            if len(data) > MIN_IMAGE_SIZE:
-                                _LOGGER.debug(
-                                    "Nova: got Frigate event snapshot (%d bytes)",
-                                    len(data),
-                                )
-                                return data
-                        else:
-                            _LOGGER.debug(
-                                "Nova: Frigate event snapshot returned %d", resp.status
-                            )
-                except Exception as exc:
-                    _LOGGER.debug("Nova: Frigate event snapshot failed: %s", exc)
-
-    return None
-
-    return None
 
 
 # ─── Nest event-media fetch ──────────────────────────────────────────────────

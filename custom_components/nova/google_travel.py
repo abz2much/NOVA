@@ -41,12 +41,6 @@ _MODES = {
 _USAGE = {"day": None, "count": 0}
 
 
-def calls_today(now: float = None) -> int:
-    """How many lookups Nova has made today (local day), for diagnostics."""
-    _roll(now)
-    return int(_USAGE["count"])
-
-
 def _roll(now: float = None) -> None:
     import time
     today = datetime.date.fromtimestamp(now or time.time()).toordinal()

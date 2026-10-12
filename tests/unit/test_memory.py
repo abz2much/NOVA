@@ -8,11 +8,8 @@ asking; and get_conversation_context()'s output re-enters the LLM call
 spliced straight into the persona/system prompt with NO framing at all
 (not even a "this is historical" note) before this fix.
 
-chromadb isn't a hard dependency (not in manifest.json's requirements) and
-falls back to SQLite FTS5 -- these tests exercise the FTS5 path for real
-(isolated via a monkeypatched DB_PATH) since that's what actually runs on a
-typical install, plus a hand-rolled fake for the ChromaDB scoping logic so
-that path doesn't go untested just because the package isn't installed here.
+These tests exercise the SQLite FTS5 store for real, isolated via a
+monkeypatched DB_PATH.
 """
 from pathlib import Path
 
@@ -23,9 +20,6 @@ import pytest
 def mem(load, tmp_path, monkeypatch):
     m = load("memory")
     monkeypatch.setattr(m, "DB_PATH", str(tmp_path / "nova.db"))
-    monkeypatch.setattr(m, "MEMORY_DIR", str(tmp_path / "nova_memory"))
-    monkeypatch.setattr(m, "_chromadb_available", False)
-    monkeypatch.setattr(m, "_collection", None)
     monkeypatch.setattr(m, "_fts_available", False)
     return m
 
@@ -131,40 +125,3 @@ def test_get_conversation_context_output_is_fenced(mem, monkeypatch):
     assert "BEGIN_MEMORY_" in content and "END_MEMORY_" in content
     assert "16x20x1" in content
     assert "## Relevant past conversations" in content
-
-
-# ── ChromaDB scoping (hand-rolled fake -- chromadb isn't a hard dependency) ──
-
-class _FakeCollection:
-    def __init__(self):
-        self.last_where = "UNSET"
-
-    def query(self, query_texts, n_results, where=None):
-        self.last_where = where
-        return {"documents": [["a match"]], "metadatas": [[{"role": "user", "timestamp": "t"}]],
-                "distances": [[0.1]]}
-
-
-def test_chromadb_path_builds_conversation_id_filter(mem, monkeypatch):
-    fake = _FakeCollection()
-    monkeypatch.setattr(mem, "_chromadb_available", True)
-    monkeypatch.setattr(mem, "_collection", fake)
-    mem.search_memory("query", k=5, conversation_id="conv-a")
-    assert fake.last_where == {"conversation_id": "conv-a"}
-
-
-def test_chromadb_path_combines_hours_and_conversation_id_with_and(mem, monkeypatch):
-    fake = _FakeCollection()
-    monkeypatch.setattr(mem, "_chromadb_available", True)
-    monkeypatch.setattr(mem, "_collection", fake)
-    mem.search_memory("query", k=5, hours=24, conversation_id="conv-a")
-    assert "$and" in fake.last_where
-    assert {"conversation_id": "conv-a"} in fake.last_where["$and"]
-
-
-def test_chromadb_path_no_scope_means_no_where(mem, monkeypatch):
-    fake = _FakeCollection()
-    monkeypatch.setattr(mem, "_chromadb_available", True)
-    monkeypatch.setattr(mem, "_collection", fake)
-    mem.search_memory("query", k=5)
-    assert fake.last_where is None

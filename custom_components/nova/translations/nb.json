@@ -214,6 +214,14 @@
     "voice_setup_incomplete": {
       "title": "Novas stemmeoppsett er ikke ferdig",
       "description": "Nova kunne ikke fullføre stemmeoppsettet. Det som mislyktes: {failed}.\n\nSlik fullfører du det selv: under Innstillinger → Tillegg installerer og starter du Piper, Whisper og openWakeWord. Deretter oppretter du under Innstillinger → Taleassistenter en pipeline med Nova som samtaleagent, Whisper for tale-til-tekst og Piper for tekst-til-tale. Nova sjekker igjen ved hver omstart, og denne meldingen forsvinner av seg selv når stemmen virker."
+    },
+    "retired_service": {
+      "title": "Nova: {service} fases ut",
+      "description": "Noe i Home Assistant, vanligvis en automasjon eller et skript, kalte {service}. Denne tjenesten fjernes i en senere versjon av Nova. Bruk {replacement} i stedet.\n\nDenne meldingen forsvinner når Home Assistant starter på nytt, og kommer bare tilbake hvis tjenesten kalles igjen."
+    },
+    "retired_service_no_effect": {
+      "title": "Nova: {service} fases ut",
+      "description": "Noe i Home Assistant, vanligvis en automasjon eller et skript, kalte {service}. Funksjonen bak den er fjernet, så kallet gjør ingenting, og selve tjenesten fjernes i en senere versjon av Nova. Fjern kallet fra automasjonen eller skriptet.\n\nDenne meldingen forsvinner når Home Assistant starter på nytt, og kommer bare tilbake hvis tjenesten kalles igjen."
     }
   },
   "exceptions": {

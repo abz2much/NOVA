@@ -185,7 +185,7 @@ async def test_alert_message_never_uses_usually_as_sole_justification(cog, fake_
     assert "open" not in out[0]["message"].lower().replace("unlocked", "")  # no suggestion to open/unlock anything
 
 
-# ── Corrective fix 1: reuse presence.everyone_confidently_away(), which ─────
+# ── Corrective fix 1: reuse the shared presence check, which ──────────────
 # ── fails safe on unknown/unavailable presence, instead of duplicated logic ─
 
 async def test_all_configured_people_explicitly_away_is_true(cog, fake_hass):

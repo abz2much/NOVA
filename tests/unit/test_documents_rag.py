@@ -1,7 +1,6 @@
 """Tests for the Document RAG agent (v6.55.0): the pure chunker, PDF-graceful
-extraction routing, ingest/search through a simulated Chroma collection, and
-the honest fallbacks. ChromaDB isn't installed in the test env, so the vector
-path is exercised via a stub collection and the real FTS/none paths run as-is."""
+extraction routing, ingest/search through real FTS5 on an isolated database,
+and the honest fallbacks."""
 import json
 
 import pytest
@@ -81,50 +80,26 @@ def test_extract_pdf_without_lib_is_honest(docs, tmp_path, monkeypatch):
     assert err and ("PDF library" in err or "failed" in err)
 
 
-# ── ingest + search through a stub Chroma collection ─────────────────────────
-
-class _StubCollection:
-    """Minimal in-memory stand-in for a Chroma collection."""
-    def __init__(self):
-        self.docs, self.metas, self.ids = [], [], []
-    def add(self, documents, metadatas, ids):
-        self.docs += documents; self.metas += metadatas; self.ids += ids
-    def delete(self, where=None):
-        if where and "source" in where:
-            src = where["source"]
-            keep = [(d, m, i) for d, m, i in zip(self.docs, self.metas, self.ids)
-                    if m.get("source") != src]
-            self.docs = [x[0] for x in keep]
-            self.metas = [x[1] for x in keep]
-            self.ids = [x[2] for x in keep]
-    def query(self, query_texts, n_results, where=None):
-        # naive keyword rank so search is deterministic in tests
-        q = query_texts[0].lower()
-        scored = []
-        for d, m in zip(self.docs, self.metas):
-            overlap = sum(1 for w in q.split() if w in d.lower())
-            scored.append((overlap, d, m))
-        scored.sort(key=lambda t: -t[0])
-        top = [s for s in scored if s[0] > 0][:n_results]
-        return {
-            "documents": [[d for _, d, _ in top]],
-            "metadatas": [[m for _, _, m in top]],
-            "distances": [[0.1 for _ in top]],
-        }
-    def count(self):
-        return len(self.docs)
-    def get(self, include=None):
-        return {"metadatas": self.metas}
-
+# ── ingest + search through real FTS5 (isolated tmp DB) ──────────────────────
 
 @pytest.fixture
-def stub_docs(docs, monkeypatch):
-    col = _StubCollection()
-    monkeypatch.setattr(docs, "_chroma_ok", True)
-    monkeypatch.setattr(docs, "_collection", col)
+def stub_docs(docs, tmp_path, monkeypatch):
+    monkeypatch.setattr(docs, "_DB_PATH", str(tmp_path / "nova.db"))
     monkeypatch.setattr(docs, "_fts_ok", False)
-    monkeypatch.setattr(docs, "_initialized", True)
-    return docs, col
+    monkeypatch.setattr(docs, "_initialized", False)
+
+    class _Count:
+        def count(self):
+            return docs.library_status()["chunk_count"]
+
+        @property
+        def metas(self):
+            import sqlite3
+            conn = sqlite3.connect(str(tmp_path / "nova.db"))
+            rows = conn.execute("SELECT source FROM document_fts").fetchall()
+            conn.close()
+            return [{"source": r[0]} for r in rows]
+    return docs, _Count()
 
 
 def test_ingest_file_chunks_and_stores(stub_docs, tmp_path):
@@ -157,7 +132,6 @@ def test_search_returns_relevant_chunk(stub_docs, tmp_path):
     assert hits
     assert any("16x25x1" in h["text"] for h in hits)
     assert hits[0]["source"] == "furnace.txt"
-    assert hits[0]["score"] is not None
 
 
 def test_search_empty_query(stub_docs):
@@ -173,7 +147,7 @@ def test_library_status_reports_sources(stub_docs, tmp_path):
     d.ingest_file(str(tmp_path / "a.txt"))
     d.ingest_file(str(tmp_path / "b.txt"))
     st = d.library_status()
-    assert st["chroma"] is True
+    assert st["fts"] is True
     assert st["chunk_count"] >= 2
     names = {s["source"] for s in st["sources"]}
     assert {"a.txt", "b.txt"} <= names
@@ -257,7 +231,6 @@ def test_save_uploaded_file_rejects_oversize(docs, tmp_path, monkeypatch):
 def test_delete_source_removes_file(docs, tmp_path, monkeypatch):
     monkeypatch.setattr(docs, "DOCS_DIR", str(tmp_path / "docs"))
     monkeypatch.setattr(docs, "_fts_ok", False)
-    monkeypatch.setattr(docs, "_chroma_ok", False)
     content = _b64.b64encode(b"content here").decode()
     docs.save_uploaded_file("gone.txt", content)
     from pathlib import Path

@@ -601,35 +601,6 @@ def page_requests(
     return {"requests": requests, "next_cursor": next_cursor}
 
 
-def get_request(request_id: str, db_path: Optional[str] = None) -> Optional[dict]:
-    """All rows for one request_id, or None if it has none. Raises on a
-    genuine connect/schema failure (same convention as page_requests)."""
-    db = _resolve(db_path)
-    conn = _connect(db)
-    try:
-        rows = conn.execute(
-            "SELECT * FROM action_log WHERE request_id = ? ORDER BY id ASC",
-            (request_id,),
-        ).fetchall()
-    finally:
-        conn.close()
-    if not rows:
-        return None
-    targets = [_row_to_dict(r) for r in rows]
-    head = targets[0]
-    return {
-        "request_id": request_id,
-        "ts_created": min(t["ts_created"] for t in targets),
-        "action": head["action"],
-        "source": head["source"],
-        "requested_by_user_id": head["requested_by_user_id"],
-        "requested_by_name": head["requested_by_name"],
-        "request_device_id": head["request_device_id"],
-        "status": _aggregate_status(targets),
-        "targets": targets,
-    }
-
-
 NOT_CHECKABLE = "not_checkable"
 
 

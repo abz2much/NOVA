@@ -614,7 +614,9 @@ async def test_a_string_entity_id_and_a_caller_request_id_are_accepted(cc, fake_
     ok = await cc._execute_action_data(
         fake_hass, {"domain": "light", "service": "turn_off", "entity_ids": "light.a"},
         request_id="mine")
-    assert ok is True and al.get_request("mine")["targets"][0]["entity_id"] == "light.a"
+    (request,) = al.page_requests()["requests"]
+    assert ok is True and request["request_id"] == "mine"
+    assert request["targets"][0]["entity_id"] == "light.a"
 
 
 def test_there_is_no_autonomous_done_message_any_more(cc):

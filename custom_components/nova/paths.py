@@ -22,7 +22,7 @@ _root = _DEFAULT_ROOT
 PATTERNS_DB = "patterns.db"            # under nova/
 CONVERSATIONS_DB = "conversations.db"  # under nova/
 NOVA_DB = "nova.db"                    # at the config root (memory, documents, embeddings)
-MEMORY_DIR = "nova_memory"             # at the config root (ChromaDB)
+MEMORY_DIR = "nova_memory"             # at the config root (old memory store, kept for backups)
 LEARNED_FILE = ".nova_learned.json"    # at the config root (learned aliases)
 
 

@@ -1512,65 +1512,6 @@ class PatternAnalyzer:
                 out[eid] = series
         return out
 
-    def _find_presence_patterns(self, conn: sqlite3.Connection) -> list[DetectedPattern]:
-        """Find state changes correlated with person arrivals/departures."""
-        patterns: list[DetectedPattern] = []
-
-        # Look for state changes that happen within 5 min of person state changes
-        try:
-            action_filter = _source_filter(conn, "b")
-            rows = conn.execute(f"""
-                SELECT
-                    a.entity_id as person_entity,
-                    a.new_state as person_state,
-                    b.entity_id as device_entity,
-                    b.new_state as device_state,
-                    COUNT(*) as cnt
-                FROM state_changes a
-                JOIN state_changes b ON
-                    b.timestamp > a.timestamp AND
-                    b.timestamp <= datetime(a.timestamp, '+5 minutes') AND
-                    a.entity_id != b.entity_id
-                WHERE a.timestamp > datetime('now', '-30 days')
-                    AND a.domain = 'person'
-                    AND {action_filter}
-                GROUP BY a.entity_id, a.new_state, b.entity_id, b.new_state
-                HAVING cnt >= ?
-                ORDER BY cnt DESC
-                LIMIT 10
-            """, (max(3, MIN_OCCURRENCES // 2),)).fetchall()
-        except Exception:
-            return patterns
-
-        for row in rows:
-            person = row["person_entity"]
-            p_state = row["person_state"]
-            device = row["device_entity"]
-            d_state = row["device_state"]
-            count = row["cnt"]
-
-            action_word = "arrives" if p_state == "home" else "leaves"
-            confidence = min(1.0, count / MIN_OCCURRENCES * 0.7)
-
-            patterns.append(DetectedPattern(
-                pattern_type="presence",
-                description=(
-                    f"When {self._name(person)} {action_word}, {self._name(device)} "
-                    f"turns {d_state} ({count} times)"
-                ),
-                legacy_description=(
-                    f"When {person} {action_word}, {device} turns {d_state} "
-                    f"({count} times)"
-                ),
-                entity_ids=[person, device],
-                confidence=confidence,
-                occurrences=count,
-                details={"trigger_person": person, "trigger_state": p_state,
-                         "action_entity": device, "action_state": d_state},
-            ))
-
-        return patterns
-
     def _dominant_person(self, conn: sqlite3.Connection, table: str, *,
                          hour: int, entity: str | None = None,
                          state: str | None = None,

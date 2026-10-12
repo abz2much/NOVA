@@ -214,6 +214,14 @@
     "voice_setup_incomplete": {
       "title": "Novan puheen määritys on kesken",
       "description": "Nova ei pystynyt viimeistelemään puheen määritystä. Mikä epäonnistui: {failed}.\n\nNäin viimeistelet sen itse: avaa Asetukset → Lisäosat ja asenna ja käynnistä Piper, Whisper ja openWakeWord. Luo sitten kohdassa Asetukset → Ääniavustajat linja, jossa keskusteluagenttina on Nova, puhe tekstiksi -toimintona Whisper ja teksti puheeksi -toimintona Piper. Nova tarkistaa tilanteen uudelleen jokaisen uudelleenkäynnistyksen yhteydessä, ja tämä ilmoitus poistuu itsestään, kun puhe toimii."
+    },
+    "retired_service": {
+      "title": "Nova: {service} poistuu käytöstä",
+      "description": "Jokin Home Assistantissa, yleensä automaatio tai skripti, kutsui palvelua {service}. Tämä palvelu poistetaan myöhemmässä Novan versiossa. Käytä sen sijaan palvelua {replacement}.\n\nTämä ilmoitus poistuu, kun Home Assistant käynnistyy uudelleen, ja palaa vain, jos palvelua kutsutaan uudelleen."
+    },
+    "retired_service_no_effect": {
+      "title": "Nova: {service} poistuu käytöstä",
+      "description": "Jokin Home Assistantissa, yleensä automaatio tai skripti, kutsui palvelua {service}. Sen takana ollut toiminto on poistettu, joten kutsu ei tee mitään, ja itse palvelu poistetaan myöhemmässä Novan versiossa. Poista kutsu automaatiosta tai skriptistä.\n\nTämä ilmoitus poistuu, kun Home Assistant käynnistyy uudelleen, ja palaa vain, jos palvelua kutsutaan uudelleen."
     }
   },
   "exceptions": {

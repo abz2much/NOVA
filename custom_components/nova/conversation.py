@@ -19,7 +19,6 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import (
     ALL_SPEAKERS_VALUE,
     CONF_BROADCAST_SPEAKERS,
-    CONF_CAST_ANNOUNCE,
     CONF_CAST_SPEAKERS,
     CONF_DIRECTIVE,
     CONF_DIRECTIVE_PRESET,
@@ -527,35 +526,6 @@ class NovaAgent(conversation.ConversationEntity):
     def _use_hass_api(self) -> bool:
         return bool(self._opt(CONF_USE_HASS_API, True))
 
-    def _broadcast_fallback_speakers(self) -> list[str]:
-        """The broadcast/announcement speakers briefings deliver to (e.g. a Cast
-        group). Used as a reply fallback when the paired room speaker won't play —
-        an idle/off Cast device that accepts tts.speak and produces no sound, or a
-        mic-only satellite that can't speak the reply itself. Resolved directly
-        (not room/pairing-aware) so it can never resolve back to the same
-        non-playing speaker."""
-        import json as _json
-        for key in ("announcement_speakers", CONF_BROADCAST_SPEAKERS,
-                    CONF_CAST_SPEAKERS, "broadcast_group"):
-            raw = self._opt(key, None)
-            if not raw:
-                continue
-            if isinstance(raw, str):
-                raw = raw.strip()
-                if raw.startswith("["):
-                    try:
-                        raw = _json.loads(raw)
-                    except Exception:
-                        raw = [raw]
-                else:
-                    raw = [raw]
-            if isinstance(raw, (list, tuple)):
-                out = [str(x) for x in raw
-                       if x and not str(x).startswith("assist_satellite.")]
-                if out:
-                    return out
-        return []
-
     def _speakers(self, device_id: str | None = None) -> list[str]:
         """
         Choose which speakers to broadcast a DIRECT REPLY to.
@@ -581,27 +551,9 @@ class NovaAgent(conversation.ConversationEntity):
             satellite_pairings=sat_pairings,
         )
 
-    def _satellite_speaker(self, device_id: str) -> str | None:
-        """
-        Given the device_id of the wake-word/voice satellite, return its
-        associated media_player entity (the same physical box).
-        """
-        try:
-            from homeassistant.helpers import device_registry as dr, entity_registry as er
-            ent_reg = er.async_get(self.hass)
-            for ent in ent_reg.entities.values():
-                if ent.device_id == device_id and ent.domain == "media_player":
-                    if self.hass.states.get(ent.entity_id):
-                        return ent.entity_id
-        except Exception as exc:
-            _LOGGER.debug("Nova: satellite speaker lookup error: %s", exc)
-        return None
-
     def _tts_entity(self) -> str | None:
         return resolve_tts_entity(self.hass, self._opt(CONF_TTS_ENGINE, DEFAULT_TTS_ENGINE))
 
-    def _use_announce(self) -> bool:
-        return bool(self._opt(CONF_CAST_ANNOUNCE, True))
 
     # ── Supported languages ───────────────────────────────────────────────────
 

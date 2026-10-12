@@ -442,37 +442,6 @@ def delete(key: str) -> None:
     save()
 
 
-def init_from_addon(addon_options: dict) -> None:
-    """
-    Called by bootstrap/run.sh on addon startup.
-    Writes addon options to config.json, but only for keys that
-    aren't already set (preserves panel overrides).
-    """
-    global _loaded
-    if not _loaded:
-        load()
-
-    updated = 0
-    with _lock:
-        for key, value in addon_options.items():
-            if key not in _cache_dict():
-                _cache_dict()[key] = value
-                updated += 1
-            # Always update API keys (user might change them in addon config)
-            elif key in ("groq_api_key", "api_key", "gemini_api_key",
-                         "anthropic_api_key", "openai_api_key"):
-                if value and value != _cache_dict().get(key):
-                    _cache_dict()[key] = value
-                    updated += 1
-
-    if updated:
-        save()
-        _LOGGER.info(
-            "Nova config: merged %d addon options (preserved %d panel overrides)",
-            updated, len(addon_options) - updated,
-        )
-
-
 def init_from_entry(entry_data: dict, entry_options: dict) -> None:
     """
     Called when the HA integration loads. Backfills any settings

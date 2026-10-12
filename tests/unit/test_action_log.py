@@ -21,6 +21,29 @@ def al(load):
     return load("action_log")
 
 
+def _get_request(al, request_id, db_path=None):
+    """One request as page_requests shows it: every row for that request_id,
+    or None when it has none."""
+    conn = al._connect(al._resolve(db_path))
+    try:
+        rows = conn.execute(
+            "SELECT * FROM action_log WHERE request_id = ? ORDER BY id ASC",
+            (request_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+    if not rows:
+        return None
+    targets = [al._row_to_dict(r) for r in rows]
+    return {"request_id": request_id, "action": targets[0]["action"],
+            "source": targets[0]["source"],
+            "requested_by_user_id": targets[0]["requested_by_user_id"],
+            "requested_by_name": targets[0]["requested_by_name"],
+            "request_device_id": targets[0]["request_device_id"],
+            "ts_created": min(t["ts_created"] for t in targets),
+            "status": al._aggregate_status(targets), "targets": targets}
+
+
 @pytest.fixture
 def db_path():
     fd, path = tempfile.mkstemp(suffix=".db")
@@ -41,7 +64,7 @@ def test_start_returns_an_id_and_defaults_are_correct(al, db_path):
     aid = al.start(rid, "control_device", "voice", domain="light",
                     entity_id="light.kitchen", db_path=db_path)
     assert isinstance(aid, int)
-    got = al.get_request(rid, db_path=db_path)
+    got = _get_request(al, rid, db_path=db_path)
     assert got["targets"][0]["approval_required"] == 0
     assert got["targets"][0]["approval_result"] == "not_required"
     assert got["targets"][0]["execution_result"] == "pending"
@@ -52,7 +75,7 @@ def test_start_many_inserts_every_target_in_one_call(al, db_path):
     targets = [{"entity_id": f"light.{i}"} for i in range(6)]
     ids = al.start_many(rid, "bulk_control", "voice", targets, db_path=db_path)
     assert len(ids) == 6
-    got = al.get_request(rid, db_path=db_path)
+    got = _get_request(al, rid, db_path=db_path)
     assert len(got["targets"]) == 6
 
 
@@ -68,7 +91,7 @@ def test_set_execution_moves_pending_to_accepted_to_verified(al, db_path):
     aid = al.start(rid, "control_device", "voice", db_path=db_path)
     assert al.set_execution(aid, "accepted", db_path=db_path) is True
     assert al.set_execution(aid, "verified", db_path=db_path) is True
-    got = al.get_request(rid, db_path=db_path)
+    got = _get_request(al, rid, db_path=db_path)
     assert got["targets"][0]["execution_result"] == "verified"
 
 
@@ -78,7 +101,7 @@ def test_set_execution_cannot_skip_accepted(al, db_path):
     rid = al.new_request_id()
     aid = al.start(rid, "control_device", "voice", db_path=db_path)
     assert al.set_execution(aid, "verified", db_path=db_path) is False
-    got = al.get_request(rid, db_path=db_path)
+    got = _get_request(al, rid, db_path=db_path)
     assert got["targets"][0]["execution_result"] == "pending"
 
 
@@ -93,7 +116,7 @@ def test_duplicate_or_late_verification_callback_cannot_overwrite_terminal(al, d
     # Late/duplicate callback arrives after the row is already terminal.
     assert al.set_execution(aid, "unverified", db_path=db_path) is False
     assert al.set_execution(aid, "verified", db_path=db_path) is False
-    got = al.get_request(rid, db_path=db_path)
+    got = _get_request(al, rid, db_path=db_path)
     assert got["targets"][0]["execution_result"] == "verified"
 
 
@@ -101,7 +124,7 @@ def test_mark_awaiting_approval_moves_default_to_awaiting_once(al, db_path):
     rid = al.new_request_id()
     aid = al.start(rid, "control_device", "voice", db_path=db_path)  # default: not_required
     assert al.mark_awaiting_approval(aid, db_path=db_path) is True
-    got = al.get_request(rid, db_path=db_path)
+    got = _get_request(al, rid, db_path=db_path)
     assert got["targets"][0]["approval_result"] == "awaiting"
     assert got["targets"][0]["approval_required"] == 1
     # A second call must no-op -- it's not a re-enterable transition.
@@ -119,7 +142,7 @@ def test_set_approval_moves_awaiting_to_terminal_exactly_once(al, db_path):
     assert al.set_approval(aid, "approved", approval_required=True, db_path=db_path) is True
     # A second, duplicate resolution must no-op.
     assert al.set_approval(aid, "rejected", db_path=db_path) is False
-    got = al.get_request(rid, db_path=db_path)
+    got = _get_request(al, rid, db_path=db_path)
     assert got["targets"][0]["approval_result"] == "approved"
     assert got["targets"][0]["approval_required"] == 1
 
@@ -131,7 +154,7 @@ def test_set_approval_awaiting_to_not_required_is_permitted(al, db_path):
     aid = al.start(rid, "control_device", "voice",
                     approval_required=True, approval_result="awaiting", db_path=db_path)
     assert al.set_approval(aid, "not_required", approval_required=False, db_path=db_path) is True
-    got = al.get_request(rid, db_path=db_path)
+    got = _get_request(al, rid, db_path=db_path)
     assert got["targets"][0]["approval_result"] == "not_required"
     assert got["targets"][0]["approval_required"] == 0
 
@@ -182,9 +205,9 @@ def test_retention_keeps_or_drops_whole_requests_never_partial(al, db_path, monk
 
     # rid1 (the oldest) should be pruned entirely — either all 3 of its rows
     # survive or none do, never 1 or 2 of them.
-    got1 = al.get_request(rid1, db_path=db_path)
-    got2 = al.get_request(rid2, db_path=db_path)
-    got3 = al.get_request(rid3, db_path=db_path)
+    got1 = _get_request(al, rid1, db_path=db_path)
+    got2 = _get_request(al, rid2, db_path=db_path)
+    got3 = _get_request(al, rid3, db_path=db_path)
     assert got1 is None
     assert got2 is not None and got3 is not None
 
@@ -211,7 +234,7 @@ def test_concurrent_updates_to_separate_rows_are_all_applied(al, db_path):
         t.join(timeout=5)
 
     assert all(results.values()), results
-    got = al.get_request(rid, db_path=db_path)
+    got = _get_request(al, rid, db_path=db_path)
     assert all(t["execution_result"] == "accepted" for t in got["targets"])
 
 
@@ -376,7 +399,7 @@ def test_transient_lock_succeeds_after_retry(al, db_path, monkeypatch, no_retry_
     assert al.set_execution(aid, "verified", db_path=db_path) is True
     assert calls["n"] == 2  # one failed attempt, one successful retry — not 3
 
-    got = al.get_request(rid, db_path=db_path)
+    got = _get_request(al, rid, db_path=db_path)
     assert got["targets"][0]["execution_result"] == "verified"
 
 
@@ -402,7 +425,7 @@ def test_retry_exhaustion_fails_open_without_raising(al, db_path, monkeypatch, n
     assert calls["n"] == al._MAX_ATTEMPTS == 3
     monkeypatch.undo()  # restore the real _connect before reading back to verify
 
-    got = al.get_request(rid, db_path=db_path)
+    got = _get_request(al, rid, db_path=db_path)
     assert got["targets"][0]["execution_result"] == "accepted"  # unchanged, not corrupted
 
 
@@ -481,7 +504,7 @@ def test_no_duplicate_rows_after_start_many_retries(al, db_path, monkeypatch, no
 
     assert len(ids) == 5
     assert attempt_n["n"] == 2  # one aborted attempt, one clean retry
-    got = al.get_request(rid, db_path=db_path)
+    got = _get_request(al, rid, db_path=db_path)
     assert len(got["targets"]) == 5  # not 7 — the aborted attempt left nothing behind
 
 
@@ -515,5 +538,5 @@ def test_stale_update_cannot_overwrite_newer_terminal_state_even_after_retry(
     assert al.set_execution(aid, "unverified", db_path=db_path) is False
     assert calls["n"] == 2  # it did retry — the no-op is from the guard, not a skipped attempt
 
-    got = al.get_request(rid, db_path=db_path)
+    got = _get_request(al, rid, db_path=db_path)
     assert got["targets"][0]["execution_result"] == "verified"  # never overwritten

@@ -75,7 +75,7 @@ async def test_two_failures_open_breaker_then_skip_network(
     provider = provider_factory(exc=RuntimeError("connection refused"))
     for _ in range(2):                                   # _FAILURE_THRESHOLD = 2
         await _decide(rl, fake_hass, provider)
-    assert connectivity.is_offline() is True             # breaker OPEN
+    assert connectivity.status()["state"] == "open"             # breaker OPEN
 
     calls_before = provider.calls
     out = await _decide(rl, fake_hass, provider)
@@ -110,7 +110,7 @@ async def test_recovery_after_cooldown(
     bad = provider_factory(exc=RuntimeError("connection refused"))
     for _ in range(2):
         await _decide(rl, fake_hass, bad)
-    assert connectivity.is_offline()
+    assert connectivity.status()["state"] == "open"
 
     # Advance time past the 60s cooldown so the breaker allows a probe again.
     import time as _t

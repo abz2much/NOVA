@@ -146,8 +146,7 @@ Start with the **Diagnostics** tab.
 
 To see why Nova did or did not say something, open **Logs → Decisions**.
 Each decision shows what Nova saw, how sure it was and which model decided.
-Open one and press **REPLAY** in the Decision Lab to check whether it would
-pass your current confidence threshold. **Logs → Actions** lists every command Nova sent
+**Logs → Actions** lists every command Nova sent
 and whether it was confirmed.
 
 ## Troubleshooting

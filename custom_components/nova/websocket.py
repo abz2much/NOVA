@@ -114,7 +114,6 @@ from .ws_decisions import (
     ws_get_cognitive_status,
     ws_get_decision,
     ws_list_decisions,
-    ws_replay_decision,
     ws_root_cause,
     ws_run_analysis,
     ws_set_decision_outcome,
@@ -229,7 +228,6 @@ def async_register(hass: HomeAssistant) -> None:
         websocket_api.async_register_command(hass, ws_list_decisions)
         websocket_api.async_register_command(hass, ws_get_decision)
         websocket_api.async_register_command(hass, ws_set_decision_outcome)
-        websocket_api.async_register_command(hass, ws_replay_decision)
         websocket_api.async_register_command(hass, ws_list_models)
         websocket_api.async_register_command(hass, ws_test_provider_endpoint)
         websocket_api.async_register_command(hass, ws_apply_ai_config)
@@ -1594,33 +1592,6 @@ def _get_runtime_json(hass: HomeAssistant, entry, key: str, default):
     return default
 
 
-def _get_runtime_str(hass: HomeAssistant, entry, key: str, default: str) -> str:
-    """Read a plain string from runtime_config → nova_config → entry options."""
-    # 1. Live NovaRuntime.runtime_config
-    if entry is not None:
-        rc = _live_runtime_config(entry)
-        raw = rc.get(key)
-        if raw is not None:
-            return str(raw)
-
-    # 2. Persistent config file
-    try:
-        from . import nova_config
-        val = nova_config.get(key)
-        if val is not None:
-            return str(val)
-    except Exception:
-        pass
-
-    # 3. Entry options
-    if entry is not None:
-        raw = _entry_opt(entry, key, None)
-        if raw is not None:
-            return str(raw)
-
-    return default# ─── Memory search WebSocket command ─────────────────────────────────────────
-
-
 @websocket_api.require_admin
 @websocket_api.websocket_command({
     vol.Required("type"): "nova/get_debug_log",
@@ -1648,9 +1619,6 @@ async def ws_get_debug_log(
 
 
 # ─── Decision Record browser (Phase 1: decision explanations + feedback) ────
-
-
-# ─── Decision Lab (Phase 4: current-policy replay) ──────────────────────────
 
 
 # ─── Automation probation (Phase 3) ──────────────────────────────────────────

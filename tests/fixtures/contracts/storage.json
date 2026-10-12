@@ -95,8 +95,7 @@
   "documents": {
     "paths": [
       "nova.db",
-      "nova/documents",
-      "nova_memory"
+      "nova/documents"
     ],
     "tables": []
   },
@@ -164,8 +163,7 @@
   },
   "memory": {
     "paths": [
-      "nova.db",
-      "nova_memory"
+      "nova.db"
     ],
     "tables": []
   },

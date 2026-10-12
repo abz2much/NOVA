@@ -1,7 +1,7 @@
 """The decision record, calibration and analysis commands.
 
 Moved verbatim out of websocket.py: nova/list_decisions, nova/get_decision,
-nova/set_decision_outcome, nova/replay_decision, nova/get_calibration,
+nova/set_decision_outcome, nova/get_calibration,
 nova/run_analysis, nova/get_cognitive_status and nova/root_cause, with the
 helpers they use. The logger keeps the name it had in websocket.py.
 
@@ -210,34 +210,6 @@ async def ws_set_decision_outcome(
     except Exception as exc:
         _LOGGER.exception("ws_set_decision_outcome failed: %s", exc)
         connection.send_error(msg["id"], "set_decision_outcome_failed", safe_error_message(exc))
-
-
-@websocket_api.require_admin
-@websocket_api.websocket_command({
-    vol.Required("type"): "nova/replay_decision",
-    vol.Required("decision_id"): int,
-})
-@websocket_api.async_response
-async def ws_replay_decision(
-    hass: HomeAssistant,
-    connection: websocket_api.ActiveConnection,
-    msg: dict,
-) -> None:
-    """Read-only Decision Lab replay — current policy only, never a
-    historical reconstruction (see replay.replay_one's docstring). No writes,
-    no service calls, no LLM/cloud calls: replay_one takes a plain record
-    dict, not hass, so it has no way to perform any of those even by
-    accident."""
-    try:
-        from . import decision_record, replay
-        rec = await hass.async_add_executor_job(decision_record.get, msg["decision_id"])
-        if rec is None:
-            connection.send_error(msg["id"], "not_found", "decision not found")
-            return
-        connection.send_result(msg["id"], replay.replay_one(rec))
-    except Exception as exc:
-        _LOGGER.exception("ws_replay_decision failed: %s", exc)
-        connection.send_error(msg["id"], "replay_decision_failed", safe_error_message(exc))
 
 
 def _name_diagnostic(res, names: dict) -> None:

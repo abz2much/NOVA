@@ -132,25 +132,6 @@ def is_excluded(hass: HomeAssistant, entity_id: Optional[str],
     return False
 
 
-def excluded_entity_ids(hass: HomeAssistant) -> set:
-    """The concrete set of currently-excluded entity_ids, expanding domains and
-    labels across the live registry. For UI / bulk use — NOT the hot path, where
-    ``is_excluded`` should be called per entity instead.
-    """
-    ents, doms, labs = _exclusion_config(hass)
-    out = set(ents)
-    if not doms and not labs:
-        return out
-    try:
-        for st in hass.states.async_all():
-            eid = st.entity_id
-            if eid not in out and is_excluded(hass, eid):
-                out.add(eid)
-    except Exception:
-        pass
-    return out
-
-
 # ── object sensors are not people (8.14.0) ──────────────────────────────────
 # Camera integrations such as Frigate expose one binary_sensor per detected
 # object class, for example binary_sensor.garage_car_occupancy or
