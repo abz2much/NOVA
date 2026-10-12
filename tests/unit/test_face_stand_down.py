@@ -11,6 +11,7 @@ import pathlib
 
 import pytest
 from core_sources import core_text, core_tree
+from ws_sources import settings_schema
 
 COMP = pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova"
 ALARM = "alarm_control_panel.home"
@@ -85,8 +86,10 @@ def test_only_literal_true_enables_it_and_the_write_must_be_a_boolean(load):
 
 def test_setting_is_panel_writable_surfaced_and_applied_live():
     ws = (COMP / "websocket.py").read_text()
-    assert '"face_stand_down",             # bool, off by default' in ws
-    assert '"face_stand_down": _runtime_opt(\n                    hass, entry, "face_stand_down", False) is True,' in ws
+    setting = settings_schema().SETTINGS["face_stand_down"]
+    # A panel bool, off by default, shown as on only for a saved true.
+    assert (setting.kind, setting.default, setting.payload, setting.exact_true) == (
+        "bool", False, "plain", True)
     assert '"intrusion_requires_confinement", "face_stand_down"):\n            from . import cognitive_core' in ws
     cc = core_text()
     assert 'key in ("intrusion_requires_confinement", "face_stand_down")' in cc

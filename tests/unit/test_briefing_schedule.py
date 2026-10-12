@@ -5,7 +5,7 @@ read-back/writable registration that makes the toggles work."""
 import json
 import pathlib
 import re
-from ws_sources import ws_text
+from ws_sources import panel_config_keys, panel_writable_keys, ws_text
 
 COMP = pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova"
 INIT = (COMP / "__init__.py").read_text()
@@ -48,19 +48,20 @@ def test_hazards_included_in_briefing_content():
 
 
 def test_briefing_keys_are_writable():
-    block = WS.split("PANEL_WRITABLE_KEYS", 1)[1][:9000]
+    allow = panel_writable_keys()
     for k in ("briefing_morning_enabled", "briefing_evening_enabled",
               "briefing_morning_time", "briefing_evening_time",
               "briefing_require_home", "briefing_include_hazards"):
-        assert f'"{k}"' in block, k
+        assert k in allow, k
 
 
 def test_briefing_keys_are_surfaced_for_read_back():
     # the read-back bug class: a control the panel reads must be returned by
     # get_panel_data or it resets on re-render
+    surfaced = panel_config_keys()
     for k in ("briefing_morning_enabled", "briefing_evening_enabled",
               "briefing_morning_time", "briefing_evening_time"):
-        assert f'"{k}": ' in WS, k
+        assert k in surfaced, k
 
 
 def test_panel_briefing_toggles_are_wired():

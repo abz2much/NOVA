@@ -215,13 +215,8 @@ def websocket_contract() -> dict:
 
 
 def panel_writable_keys() -> list:
-    tree = ws_tree()
-    for node in ast.walk(tree):
-        if (isinstance(node, ast.Assign) and isinstance(node.value, ast.Set)
-                and any(isinstance(t, ast.Name) and t.id == "PANEL_WRITABLE_KEYS" for t in node.targets)):
-            # A set, so a key listed twice in the literal is one key.
-            return sorted({e.value for e in node.value.elts if isinstance(e, ast.Constant)})
-    raise AssertionError("PANEL_WRITABLE_KEYS not found in websocket.py")
+    from ws_sources import panel_writable_keys as _keys
+    return sorted(_keys())
 
 
 def panel_data_backend_keys() -> list:

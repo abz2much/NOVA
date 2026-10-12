@@ -7,25 +7,17 @@ and the user sees a save failure (e.g. the Residence tab's HOME STYLE control).
 Both sides are parsed statically from source — websocket.py can't be imported
 (heavy HA module-level imports), and the panel is JS.
 """
-import ast
 import re
 from pathlib import Path
-from ws_sources import ws_text, ws_tree
+from ws_sources import panel_config_keys, panel_writable_keys, ws_text
 
 _COMPONENT = Path(__file__).resolve().parents[2] / "custom_components" / "nova"
 _PANEL_JS = _COMPONENT / "frontend" / "nova-panel.js"
 
 
 def _allowlist() -> set[str]:
-    """The PANEL_WRITABLE_KEYS set, read from the websocket source via AST."""
-    tree = ws_tree()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Set):
-            for tgt in node.targets:
-                if isinstance(tgt, ast.Name) and tgt.id == "PANEL_WRITABLE_KEYS":
-                    return {e.value for e in node.value.elts
-                            if isinstance(e, ast.Constant)}
-    raise AssertionError("PANEL_WRITABLE_KEYS set not found in websocket.py")
+    """The PANEL_WRITABLE_KEYS set, built from settings_schema.SETTINGS."""
+    return panel_writable_keys()
 
 
 def _panel_saved_keys() -> set[str]:
@@ -85,15 +77,9 @@ def test_multiple_notify_services_are_writable():
 
 
 def _panel_data_config_keys() -> set[str]:
-    """Keys surfaced in ws_get_panel_data's `config` dict, read from the
-    "key": _runtime_opt(...) / "key": _get_... lines via regex. This is what the
+    """Keys surfaced in ws_get_panel_data's `config` dict. This is what the
     panel reads back as d.config.KEY."""
-    js = ws_text()
-    # crude but effective: any '"key":' inside the config block
-    m = re.search(r'"config":\s*\{(.*?)\n            \},', js, re.DOTALL)
-    if not m:
-        return set()
-    return set(re.findall(r'"([a-z0-9_]+)":', m.group(1)))
+    return panel_config_keys()
 
 
 def _panel_read_cfg_keys() -> set[str]:

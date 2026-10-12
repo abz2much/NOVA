@@ -1,3 +1,18 @@
+## [8.42.0] — One list of settings
+
+Every setting the panel can change now has its kind, default and check defined once, so the panel and the rest of Nova agree on what a setting is when you have never changed it.
+
+### Fixed
+- **The Announcements switch showed off on a new install** while Nova was announcing. Nova treats announcements as on until you turn them off, and the panel now shows that.
+- **Lab mode rooms did not save.** Picking the rooms Lab mode applies to was refused by Home Assistant, so the choice was lost. It now saves.
+
+### Changed
+- **Settings are checked by kind when you save them.** A switch only accepts on or off, a number field only a number, and a list or layout field only a list or layout. The panel already sends these, so nothing you do in the panel changes. Saved values are not checked again, so an older config keeps loading.
+- **The panel now receives every setting it can change**, including the 26 that were saved but never sent back, such as semantic search and the pattern thresholds.
+
+### Unchanged
+- No default changes how Nova behaves. Every alert path, quiet hours, mutes and confirmations behave as in 8.41.0.
+
 ## [8.41.0] — Nova core and optional features
 
 Smoke, carbon monoxide, gas and leak alarms now work on every install. Optional features stay off until you set them up, and the AI is only offered tools for what is set up. A new page, [What Nova includes](docs/product-scope.md), lists what is core and what is optional.
