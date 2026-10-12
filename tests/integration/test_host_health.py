@@ -95,7 +95,7 @@ async def test_persistent_problem_never_calls_a_real_service(hass, monkeypatch):
     box = {"t": 0.0}
     monkeypatch.setattr(host_health, "_now", lambda: box["t"])
     dispatched = []
-    async def _fake_dispatch(hass_, config_, message, category):
+    async def _fake_dispatch(hass_, config_, message, category, gate_key="host_health"):
         dispatched.append((category, message))
     monkeypatch.setattr(host_health, "_dispatch_alert", _fake_dispatch)
 

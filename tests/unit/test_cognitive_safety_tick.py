@@ -271,14 +271,18 @@ async def test_freeze_thresholds_are_inclusive(safety, fake_hass, clock, temp, e
     assert (action or {}).get("type") == expected
 
 
-async def test_freeze_cooldown_is_one_hour_and_critical_repeats_each_hour(
+async def test_freeze_critical_is_spoken_once_then_a_phone_reminder_every_three_hours(
         safety, fake_hass, clock):
+    # 8.39.1: it used to be spoken again every hour while it stayed critical.
     fake_hass.states.set("weather.home", "snowy", temperature=10)
-    assert (await safety._check_freeze())["type"] == "freeze_critical"
-    clock["now"] += 3599
+    first = await safety._check_freeze()
+    assert first["type"] == "freeze_critical" and first["urgency"] == "critical"
+    clock["now"] += 3 * 3600 - 1
     assert await safety._check_freeze() is None
     clock["now"] += 1
-    assert (await safety._check_freeze())["type"] == "freeze_critical"   # repeats while it stays critical
+    reminder = await safety._check_freeze()
+    assert reminder["type"] == "freeze_critical"
+    assert reminder["urgency"] == "high" and reminder["phone_only"] is True
 
 
 async def test_a_critical_alert_does_not_use_up_the_one_shot_warning(

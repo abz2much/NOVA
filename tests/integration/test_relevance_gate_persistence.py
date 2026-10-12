@@ -25,9 +25,9 @@ DOMAIN = "nova"
 
 # An utterance with no command verb, question word, device keyword, or the
 # name "Nova", and <=3 words all of which are pure discourse filler — the
-# one case conversation.py's _is_addressed_to_nova() heuristic reliably
-# rejects (its default is to PASS ambiguous input, so this is deliberately
-# chosen, not an arbitrary "sounds ambient" guess).
+# one case conversation.py's _is_addressed_to_nova() heuristic has always
+# rejected (since 8.39.1 it also rejects longer sentences with no signal;
+# this short one is kept so the test is unchanged).
 AMBIENT_TEXT = "well, actually"
 
 
@@ -50,10 +50,13 @@ async def _setup_nova(hass):
     return entity_id
 
 
-async def _converse(hass, entity_id, text, conversation_id):
+async def _converse(hass, entity_id, text, conversation_id, device_id=None):
     from homeassistant.components import conversation as conversation_component
+    from custom_components.nova import conversation as nova_conv
+    nova_conv._dedup_cache.clear()     # each test turn is its own utterance
     return await conversation_component.async_converse(
         hass, text, conversation_id, Context(), agent_id=entity_id,
+        device_id=device_id,
     )
 
 
@@ -107,19 +110,19 @@ async def test_pending_offer_lookup_failure_does_not_break_an_addressed_command(
     hass, tmp_path, monkeypatch,
 ):
     """The pending-offer capture is fail-open: if cognitive_core can't be
-    imported or get_pending_offer() raises, an ordinary addressed command
+    imported or pending_offer_for() raises, an ordinary addressed command
     must still be treated as relevant (via is_addressed) and still persist
     and route normally, not crash or get silently dropped."""
     database = _isolate_conversations_db(monkeypatch, tmp_path)
     entity_id = await _setup_nova(hass)
 
     with patch(
-        "custom_components.nova.cognitive_core.get_pending_offer",
+        "custom_components.nova.cognitive_core.pending_offer_for",
         side_effect=RuntimeError("boom"),
     ):
         result = await _converse(
             hass, entity_id, "Nova, what time is it?",
-            conversation_id="phase1-test-6",
+            conversation_id="phase1-test-6", device_id="satellite-1",
         )
 
     assert _speech(result) != ""
@@ -159,14 +162,15 @@ async def test_pending_offer_acceptance_stays_relevant_and_persists(
     entity_id = await _setup_nova(hass)
 
     with patch(
-        "custom_components.nova.cognitive_core.get_pending_offer",
-        return_value={"action": "turn_off_kitchen_lights"},
+        "custom_components.nova.cognitive_core.pending_offer_for",
+        return_value={"action": "turn_off_kitchen_lights", "offer_id": "o1"},
     ), patch(
         "custom_components.nova.cognitive_core.accept_pending_offer",
         new=AsyncMock(return_value={"ok": True, "approvals": 1}),
     ):
         result = await _converse(
             hass, entity_id, "yes", conversation_id="phase1-test-3",
+            device_id="satellite-1",
         )
 
     assert "done" in _speech(result).lower()
@@ -186,13 +190,14 @@ async def test_pending_offer_rejection_stays_relevant_and_persists(
     entity_id = await _setup_nova(hass)
 
     with patch(
-        "custom_components.nova.cognitive_core.get_pending_offer",
-        return_value={"action": "turn_off_kitchen_lights"},
+        "custom_components.nova.cognitive_core.pending_offer_for",
+        return_value={"action": "turn_off_kitchen_lights", "offer_id": "o1"},
     ), patch(
         "custom_components.nova.cognitive_core.decline_pending_offer",
     ):
         result = await _converse(
             hass, entity_id, "no", conversation_id="phase1-test-4",
+            device_id="satellite-1",
         )
 
     assert "understood" in _speech(result).lower()

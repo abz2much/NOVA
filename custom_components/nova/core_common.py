@@ -46,6 +46,8 @@ LOCKDOWN_EXEMPT_LOCKS_DEFAULT: set = set()
 LEGACY_LOCKDOWN_EXEMPT_LOCKS = ("lock.downstairs_thermo_lock", "lock.upstairs_thermo_lock")
 FREEZE_WARN_TEMP_F = 35  # outdoor temp (°F) that triggers pipe concern
 FREEZE_CRITICAL_TEMP_F = 20  # act immediately
+# After the spoken critical alert, a phone reminder at most this often (8.39.1).
+FREEZE_REMINDER_SECONDS = 3 * 3600
 
 
 def _temp_to_f(value: float, unit: str) -> float:
@@ -172,5 +174,3 @@ INTRUSION_RESPONSE_TIMEOUT_SECS = 120
 
 # ── Graduated autonomy (v5.9.07) ────────────────────────────────────────────
 # A suggestion that the user approves repeatedly earns the right to auto-apply.
-AUTONOMY_TRUST_THRESHOLD = 3     # approvals of same pattern → auto-execute tier
-AUTONOMY_MIN_CONFIDENCE = 0.80   # confidence floor for auto-execution

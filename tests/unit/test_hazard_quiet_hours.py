@@ -104,6 +104,22 @@ async def _warning_run(env, level: str, *, quiet: bool):
     await env.hm.periodic_check(_hass())
 
 
+async def test_the_store_is_saved_before_anything_is_delivered(delivery, load):
+    # 8.39.1: delivering first meant a restart between delivery and the save
+    # announced the same warning again.
+    order = []
+    delivery.monkeypatch.setattr(load("hazard_warnings"), "save_store",
+                                 lambda store, now: order.append("save") or True)
+    real_deliver = delivery.hm._deliver
+
+    async def deliver(*a, **k):
+        order.append("deliver")
+        await real_deliver(*a, **k)
+    delivery.monkeypatch.setattr(delivery.hm, "_deliver", deliver)
+    await _warning_run(delivery, "red", quiet=False)
+    assert order == ["save", "deliver"]
+
+
 async def test_orange_at_night_uses_the_real_delivery_path_for_push_only(delivery):
     await _warning_run(delivery, "orange", quiet=True)
     assert len(delivery.pushed) == 1 and delivery.spoken == []

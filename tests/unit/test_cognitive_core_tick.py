@@ -90,8 +90,13 @@ def env(cc, fake_hass, clock, monkeypatch):
     cc._CORE.safety_mgr = _Safety()
     e.safety = cc._CORE.safety_mgr
 
+    e.speaks = True     # whether a delivered offer counts as spoken aloud
+
     async def emit(hass, config, action, sleeping):
         e.emitted.append((action, sleeping))
+        if e.speaks and "offer_id" in action:
+            from jc import core_runtime
+            core_runtime.offer_spoken(action, ["media_player.lounge"], now=0.0)
     monkeypatch.setattr(cc, "_emit_action", emit)
 
     async def execute(hass, action_data, **kw):
@@ -336,40 +341,32 @@ async def test_only_one_question_is_asked_per_tick_and_the_rest_wait(cc, env):
     assert cc._CORE.proactive_mgr.marked == ["one"]                                 # "two" keeps surfacing next cycle
 
 
-async def test_a_trusted_offer_is_done_silently_and_announced_afterwards(cc, env):
+async def test_an_offer_accepted_many_times_is_still_asked_never_done_silently(cc, env):
+    # 8.39.1: there is no graduated autonomy. However often an offer was
+    # accepted, Nova asks again and never acts on its own.
     cc._CORE.proactive_mgr = _Proactive([_offer()])
     cc._CORE.autonomy_mgr = _Autonomy({"lights:lounge"})
     await cc._tick()
-    assert env.executed == [({"domain": "light", "service": "turn_on", "entity_ids": ["light.a"]},
-                             {"source": "proactive_autonomous"})]
-    (action, _), = env.emitted
-    assert action == {"type": "proactive_lights_auto", "urgency": "low", "auto_act": True,
-                      "message": "I turned the lights on for you — it was dark and you were there."}
-    assert cc._CORE.autonomous_actions == 1 and cc._CORE.pending_offer is None
-    assert cc._CORE.proactive_mgr.marked == ["dark:lounge"]                         # so it does not re-fire each cycle
-    assert env.logs == [("AUTO", "autonomous: lights:lounge → "
-                         "I turned the lights on for you — it was dark and you were th")]    # the log line cuts the message at 60
+    assert env.executed == []
+    assert _types(env) == ["proactive_lights"]
+    assert cc._CORE.pending_offer["offer_key"] == "dark:lounge"
+    assert cc._CORE.autonomous_actions == 0
 
 
-async def test_every_trusted_offer_runs_in_one_tick_and_a_question_is_still_asked(cc, env):
-    cc._CORE.proactive_mgr = _Proactive([
-        _offer(okey="a", pkey="trusted:a"), _offer(okey="b", pkey="trusted:b"),
-        _offer(okey="c", pkey="ask:c"), _offer(okey="d", pkey="ask:d")])
-    cc._CORE.autonomy_mgr = _Autonomy({"trusted:a", "trusted:b"})
-    await cc._tick()
-    assert cc._CORE.autonomous_actions == 2 and len(env.executed) == 2
-    assert [a["type"] for a, _ in env.emitted] == [
-        "proactive_lights_auto", "proactive_lights_auto", "proactive_lights"]
-    assert cc._CORE.pending_offer["offer_key"] == "c"
-
-
-async def test_current_behaviour_a_trusted_offer_whose_action_fails_is_dropped_silently(cc, env):
-    env.exec_ok = False
+async def test_a_pending_offer_carries_its_own_id_and_who_heard_it(cc, env):
     cc._CORE.proactive_mgr = _Proactive([_offer()])
-    cc._CORE.autonomy_mgr = _Autonomy({"lights:lounge"})
     await cc._tick()
-    assert env.emitted == [] and cc._CORE.autonomous_actions == 0
-    assert cc._CORE.pending_offer is None and cc._CORE.proactive_mgr.marked == []   # not asked, not retried as a question
+    offer = cc._CORE.pending_offer
+    assert len(offer["offer_id"]) == 32
+    assert offer["heard_by"] == ["media_player.lounge"] and offer["spoken_at"] == 0.0
+
+
+async def test_an_offer_that_was_not_spoken_is_not_left_waiting_for_a_yes(cc, env):
+    # Pushed to a phone only, or quietened: nobody can answer it by voice.
+    env.speaks = False
+    cc._CORE.proactive_mgr = _Proactive([_offer()])
+    await cc._tick()
+    assert _types(env) == ["proactive_lights"] and cc._CORE.pending_offer is None
 
 
 async def test_an_offer_without_a_pattern_key_is_never_autonomous(cc, env):

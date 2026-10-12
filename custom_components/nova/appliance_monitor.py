@@ -334,9 +334,15 @@ class _MonitorState:
         self.disagg: list = []           # declared appliances WITHOUT a dedicated entity
         self.claimed: set = set()        # entities owned by a declared appliance
         self.unsub = None
+        self.unsub_settle = None
         self.running = False
 
 _MON = _MonitorState()
+
+# How often a running appliance whose power has dropped is checked again
+# (8.39.1). Many plugs only report when the reading changes, so a cycle that
+# ended at 0 W would otherwise never be announced as done.
+SETTLE_CHECK_SECONDS = 30
 
 
 def _live_runtime_config() -> dict:
@@ -759,6 +765,19 @@ def _process_reading(sensor: _SensorState, power_w: float) -> Optional[str]:
             sensor.settle_start = 0.0
 
     return None
+
+
+def _settle_tick(_now=None) -> None:
+    """Re-check every running appliance that is waiting to settle, using its
+    last reading, so a cycle ends even when the sensor stops reporting."""
+    if not _MON.running:
+        return
+    for sensor in list(_MON.sensors.values()):
+        if sensor.phase != "running" or sensor.settle_start == 0.0:
+            continue
+        completed = _process_reading(sensor, sensor.last_power)
+        if completed and _MON.hass is not None:
+            _MON.hass.async_create_task(_announce_done(sensor, completed))
 
 
 # ── Event handler ───────────────────────────────────────────────────────────
@@ -1333,6 +1352,11 @@ async def start(hass: HomeAssistant, config: dict, entry=None) -> None:
 
     _MON.running = True
     _MON.unsub = hass.bus.async_listen("state_changed", _on_state_changed)
+    if _MON.sensors:
+        from datetime import timedelta
+        from homeassistant.helpers.event import async_track_time_interval
+        _MON.unsub_settle = async_track_time_interval(
+            hass, callback(_settle_tick), timedelta(seconds=SETTLE_CHECK_SECONDS))
 
     total = len(_MON.sensors) + len(_MON.natives) + (1 if _MON.delta else 0)
     identified = sum(1 for s in _MON.sensors.values() if s.identified)
@@ -1371,6 +1395,12 @@ async def stop() -> None:
             _MON.unsub()
         except Exception:
             pass
+    if _MON.unsub_settle:
+        try:
+            _MON.unsub_settle()
+        except Exception:
+            pass
+        _MON.unsub_settle = None
     _MON.sensors.clear()
     _MON.natives.clear()
     _MON.delta = None

@@ -227,10 +227,11 @@ async def test_yes_answers_the_held_request_not_the_proactive_offer(hass, tmp_pa
     from custom_components.nova import cognitive_core
     accepted = []
 
-    async def accept():
+    async def accept(offer_id=None):
         accepted.append(True)
         return {"ok": True}
-    monkeypatch.setattr(cognitive_core, "get_pending_offer", lambda: {"action": "lights_off"})
+    monkeypatch.setattr(cognitive_core, "pending_offer_for",
+                        lambda hass, device_id, **kw: {"action": "lights_off", "offer_id": "o1"})
     monkeypatch.setattr(cognitive_core, "accept_pending_offer", accept)
     agent = _Agent()
     local, run = agent.patches()

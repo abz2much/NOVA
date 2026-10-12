@@ -147,6 +147,23 @@ async def test_without_situations_the_freeze_warning_would_repeat(sit, cc, fake_
         "freeze_warning"]
 
 
+async def test_a_spoken_critical_freeze_is_not_spoken_again_after_a_restart(
+        sit, cc, fake_hass, clock):
+    sit.start()
+    fake_hass.states.set("weather.home", "cloudy", temperature=15)
+    first = _manager(cc, fake_hass)
+    actions = await first.tick(sleeping=False, anyone_home=False)
+    fake_hass.close_pending()
+    assert [(a["type"], a["urgency"]) for a in actions] == [("freeze_critical", "critical")]
+    clock["now"] += 4 * 3600                              # past the reminder interval
+    restart(sit)
+    second = _manager(cc, fake_hass)
+    actions = await second.tick(sleeping=False, anyone_home=False)
+    fake_hass.close_pending()
+    assert [(a["type"], a["urgency"], a["phone_only"]) for a in actions] == [
+        ("freeze_critical", "high", True)]
+
+
 # ── delivery ────────────────────────────────────────────────────────────────
 
 @pytest.fixture

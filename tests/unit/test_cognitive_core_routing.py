@@ -617,16 +617,7 @@ async def test_a_string_entity_id_and_a_caller_request_id_are_accepted(cc, fake_
     assert ok is True and al.get_request("mine")["targets"][0]["entity_id"] == "light.a"
 
 
-@pytest.mark.parametrize("kind,text", [
-    ("proactive_lights", "I turned the lights on for you — it was dark and you were there."),
-    ("proactive_stale_light", "I turned off a light left on in an empty room to save energy."),
-    ("proactive_hvac", "I set the climate back to eco — no one's home."),
-    ("something_else", "I handled 2 device(s) for you automatically."),
-])
-def test_the_autonomous_done_message(cc, kind, text):
-    assert cc._autonomous_done_message(
-        {"type": kind, "action_data": {"entity_ids": ["a", "b"]}}) == text
-
-
-def test_the_autonomous_done_message_copes_with_no_action_data(cc):
-    assert cc._autonomous_done_message({}) == "I handled 0 device(s) for you automatically."
+def test_there_is_no_autonomous_done_message_any_more(cc):
+    # Nova never carries out an offer on its own (8.39.1), so there is
+    # nothing to announce afterwards.
+    assert not hasattr(cc, "_autonomous_done_message")

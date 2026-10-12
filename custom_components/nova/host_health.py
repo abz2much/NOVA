@@ -568,23 +568,32 @@ def _compose_recovery_message(results: list[MetricResult]) -> str:
     return f"The host's {names} {'has' if len(results) == 1 else 'have'} recovered and stayed stable."
 
 
-async def _dispatch_alert(hass, config: dict, message: str, category: str) -> None:
+def _gate_key(results: list[MetricResult]) -> str:
+    """The output gate's key for these metrics (8.39.1). One key per metric
+    (or set of metrics), so a disk alert is never held back or quietened by
+    a CPU alert's cooldown or history."""
+    keys = sorted({r.key for r in results})
+    return "host_health." + "+".join(keys) if keys else "host_health"
+
+
+async def _dispatch_alert(hass, config: dict, message: str, category: str,
+                          gate_key: str = "host_health") -> None:
     """Route through the exact pieces every other Nova proactive monitor
     uses (appliance_monitor.py's own pattern) — no standalone dispatcher."""
     try:
         from . import output_gate
         allowed, reason = output_gate.can_announce(
-            entity_id="host_health", category=category, urgency="medium", message=message,
+            entity_id=gate_key, category=category, urgency="medium", message=message,
         )
         if not allowed:
             _LOGGER.debug("host_health: announcement suppressed: %s", reason)
             output_gate.record_announcement(
-                entity_id="host_health", category=category, urgency="medium",
+                entity_id=gate_key, category=category, urgency="medium",
                 message=message, was_spoken=False,
             )
             return
         message = output_gate.habit_note(
-            entity_id="host_health", category=category, urgency="medium", message=message,
+            entity_id=gate_key, category=category, urgency="medium", message=message,
         )
 
         from .audio_routing import observer_speak_target
@@ -624,13 +633,13 @@ async def _dispatch_alert(hass, config: dict, message: str, category: str) -> No
                 from .notify_targets import async_send_configured_notifications
                 await async_send_configured_notifications(
                     hass, config, {"message": message, "title": "Nova"},
-                    action="notify", source="proactive", entity_id="host_health",
+                    action="notify", source="proactive", entity_id=gate_key,
                 )
             except Exception as exc:
                 _LOGGER.debug("host_health: notification failed: %s", exc)
 
         output_gate.record_announcement(
-            entity_id="host_health", category=category, urgency="medium",
+            entity_id=gate_key, category=category, urgency="medium",
             message=message, was_spoken=bool(spoken or mode == "notify_only"),
         )
     except Exception as exc:
@@ -679,13 +688,15 @@ async def tick(hass, config: dict) -> dict:
             _metric_state(r.key)["last_alert_ts"] = now
         message = _compose_problem_message(newly_persistent)
         try:
-            await _dispatch_alert(hass, config, message, "host_health_problem")
+            await _dispatch_alert(hass, config, message, "host_health_problem",
+                                  _gate_key(newly_persistent))
         except Exception as exc:
             _LOGGER.debug("host_health: problem alert dispatch raised: %s", exc)
     if recovered and _alerts_enabled(config) and _recovery_announce_enabled(config):
         message = _compose_recovery_message(recovered)
         try:
-            await _dispatch_alert(hass, config, message, "host_health_recovery")
+            await _dispatch_alert(hass, config, message, "host_health_recovery",
+                                  _gate_key(recovered))
         except Exception as exc:
             _LOGGER.debug("host_health: recovery alert dispatch raised: %s", exc)
 

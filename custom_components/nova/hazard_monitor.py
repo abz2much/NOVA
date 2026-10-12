@@ -570,6 +570,9 @@ async def _poll_warnings(hass, honorific: str, *, in_quiet: bool) -> dict:
     tz = _tz(hass)
     counts: dict = {}
     changed = False
+    # Every change is saved before anything is delivered (8.39.1): a restart
+    # between the two must never announce the same warning again.
+    outbox: list = []
     for source, (complete, warnings) in fetched.items():
         before = _STORE.get(source, {})
         after, events = hw.reconcile(before, warnings, complete=complete, now=now,
@@ -588,7 +591,7 @@ async def _poll_warnings(hass, honorific: str, *, in_quiet: bool) -> dict:
             kind = event[0]
             if kind == "cancelled":
                 # Phone only, whatever the level.
-                await _deliver(hass, hw.pushed("cancelled", event[1], honorific, tz), "warning")
+                outbox.append((hw.pushed("cancelled", event[1], honorific, tz), None))
                 continue
             w, old = event[1], (event[2] if len(event) > 2 else "")
             # At or above the speak level (and the push level): spoken and
@@ -596,11 +599,16 @@ async def _poll_warnings(hass, honorific: str, *, in_quiet: bool) -> dict:
             # level after it was announced: phone only.
             speak = hw.speak_allowed(
                 w["level"], in_quiet, speak_level, push_level, night_level)
-            await _deliver(hass, hw.pushed(kind, w, honorific, tz, old), "warning",
-                           speak_text=hw.spoken(kind, w, honorific, tz, old) if speak else "")
+            outbox.append((hw.pushed(kind, w, honorific, tz, old),
+                           hw.spoken(kind, w, honorific, tz, old) if speak else ""))
         counts[source] = len(events)
     if changed:
         await hass.async_add_executor_job(hw.save_store, _STORE, now)
+    for push_text, speak_text in outbox:
+        if speak_text is None:
+            await _deliver(hass, push_text, "warning")
+        else:
+            await _deliver(hass, push_text, "warning", speak_text=speak_text)
     return counts
 
 

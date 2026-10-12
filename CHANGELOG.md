@@ -1,3 +1,23 @@
+## [8.39.1] — Nova safety and trust fixes
+
+Nova never acts on its own, only answers an offer from the room that heard it, ignores background talk better, and stops repeating a few alerts.
+
+### Fixed
+- **No more acting on its own.** An offer accepted three times used to run silently from then on. Every proactive offer now waits for a spoken yes, however often it was accepted. Grants saved by older versions are cleared on the first start. `manage_autonomy` still lists and resets the acceptance counts.
+- **An offer belongs to the room that heard it.** Each offer has its own id. It can only be answered by voice, on a satellite in a room where it was spoken, within 60 seconds. An offer that was only pushed to a phone, or not delivered, can't be accepted by voice. A yes runs the offer it answers and never a newer one, and Chat never answers an offer.
+- **Only a plain yes or no skips the relevance gate.** Before, any speech while an offer was waiting got through.
+- **Held voice confirmations** carry their own request id, logged when answered. If the held request and the answer both name a Home Assistant user and they differ, nothing runs.
+- **Background speech.** On a voice satellite, the relevance gate used to pass any sentence with no command word, so dialogue from a TV got answers. A sentence of four or more words now needs a sign it is meant for Nova: the name, a command, a home word, a short or home-related question, or a phrase like "good night", "I'm cold" or "it's chilly in here". Common verbs ("give", "stop", "make") count only with a request after them ("give me", "stop the timer", "read the news"). Short answers of up to three words still pass. Typed turns with no satellite keep the old rule.
+- **No follow-up mic during quiet hours.** The mic still reopens for the answer to a held request, but not just because a reply asked a question.
+- **A freeze is one episode.** The critical freeze alert is spoken once. While it stays below freezing, a reminder goes to the phones only, at most every three hours. The episode ends when it warms up, and this survives a restart.
+- **Host health alerts per metric.** Each metric has its own output gate key, so a CPU alert's cooldown or habituation no longer holds back a disk or memory alert.
+- **Learned facts wait for confirmation.** Facts Nova works out from patterns are stored as pending, like other facts nobody told it, and never reach the AI until a person confirms them. Facts learned this way before are moved to pending once, on upgrade. Re-learning a confirmed fact's same value keeps it confirmed.
+- **Weather warnings are saved before they are delivered,** so a restart in between can't announce the same warning twice.
+- **Appliance cycles end even when the plug goes quiet.** Many plugs only report when the reading changes, so a cycle that ended at 0 W was never announced. Running appliances waiting to settle are now checked every 30 seconds.
+
+### Unchanged
+- Safety alerts, intrusion, lockdown and the alert paths are otherwise as in 8.39.0.
+
 ## [8.39.0] — Nova Voice ID tidy up
 
 A small tidy release: the AI's speaker hint now follows who Nova decided is speaking, and the docs cover Voice ID everywhere they should.

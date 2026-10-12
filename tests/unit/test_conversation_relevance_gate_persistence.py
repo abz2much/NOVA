@@ -3,9 +3,11 @@ any state mutation relevant to reasoning memory — _maybe_seed_history()
 (which updates _last_seen[cid] and may replace the in-memory history),
 in-session history mutation, the conversation DB write, semantic-memory
 writes/recall, and curated-knowledge injection — but a reply to a pending
-offer must stay relevant (and therefore still get persisted) even when it
-doesn't parse as a plain "yes"/"no" and even when it would otherwise fail
-the addressed-to-Nova check. get_pending_offer() must be read exactly once
+offer must stay relevant (and therefore still get persisted) when it is a
+plain "yes"/"no", even though that would otherwise fail the addressed-to-Nova
+check. Since 8.39.1 only a plain yes or no to an offer this device may answer
+(pending_offer_for) skips the gate: any other speech while an offer waits
+must be addressed to Nova like everything else. The offer is read exactly once
 and that same object reused by the offer handler, not re-read.
 
 Same reasoning as test_conversation_dispatch.py and
@@ -113,48 +115,38 @@ def test_no_local_engine_or_agent_call_before_relevance_decision():
     assert _index("from .agent import run_agent") > gate_idx
 
 
-# ── 2. The formula itself: pending offer OR gate disabled OR addressed ───────
+# ── 2. The formula itself: plain offer answer OR gate disabled OR addressed ──
 
 def test_relevant_formula_present_verbatim():
-    assert "relevant = bool(pending_offer) or not gate_enabled or is_addressed" in SRC
+    assert "relevant = bool(offer_answer) or not gate_enabled or is_addressed" in SRC
 
 
 def test_relevant_truth_table_matches_the_real_source_expression():
     expr_src = _extract_relevant_expr()
     code = compile(expr_src, "<relevant-expr>", "eval")
 
-    def relevant(pending_offer, gate_enabled, is_addressed):
+    def relevant(offer_answer, gate_enabled, is_addressed):
         return eval(code, {}, {
-            "pending_offer": pending_offer,
+            "offer_answer": offer_answer,
             "gate_enabled": gate_enabled,
             "is_addressed": is_addressed,
         })
 
-    # pending_offer is the real runtime value: either None (no offer) or a
-    # truthy object (dict/etc) returned by get_pending_offer() — not a bool.
-    NO_OFFER = None
-    AN_OFFER = {"action": "turn_off_kitchen_lights"}
+    # offer_answer is "yes"/"no" for a plain answer to an offer this device
+    # may answer, else None.
+    NO_ANSWER = None
 
-    # Requirement 1: irrelevant ambient speech (no offer, gate on, not addressed)
-    assert relevant(NO_OFFER, True, False) is False
-
-    # Requirement 2: ordinary accepted command (no offer, gate on, addressed)
-    assert relevant(NO_OFFER, True, True) is True
-
-    # Requirements 3 & 4: a reply to a pending offer stays relevant regardless
-    # of whether it reads as addressed to Nova — covers both "yes"/"no"
-    # (accept/reject) and anything else said while an offer is pending.
-    assert relevant(AN_OFFER, True, False) is True
-    assert relevant(AN_OFFER, True, True) is True
-
-    # Requirement 5: disabling the relevance gate preserves persistence even
-    # for input that wouldn't otherwise look addressed to Nova.
-    assert relevant(NO_OFFER, False, False) is True
-    assert relevant(NO_OFFER, False, True) is True
-
-    # Remaining combinations, for completeness of the truth table.
-    assert relevant(AN_OFFER, False, False) is True
-    assert relevant(AN_OFFER, False, True) is True
+    # Irrelevant ambient speech (no answer, gate on, not addressed)
+    assert relevant(NO_ANSWER, True, False) is False
+    # Ordinary accepted command
+    assert relevant(NO_ANSWER, True, True) is True
+    # A plain yes or no to the offer stays relevant either way
+    assert relevant("yes", True, False) is True
+    assert relevant("no", True, True) is True
+    # Gate disabled
+    assert relevant(NO_ANSWER, False, False) is True
+    assert relevant(NO_ANSWER, False, True) is True
+    assert relevant("yes", False, False) is True
 
 
 # ── 3. No formula drift between the persistence gate and the routing gate ────
@@ -163,7 +155,7 @@ def test_is_addressed_to_nova_is_computed_exactly_once():
     # Only the definition (line ~152) and the single computation site should
     # call it — the later routing-only gate must reuse `is_addressed`, not
     # recompute it, so the two checks can never disagree.
-    calls = SRC.count("_is_addressed_to_nova(user_input.text)")
+    calls = SRC.count("_is_addressed_to_nova(user_input.text, voice=bool(device_id))")
     assert calls == 1, (
         f"expected exactly one call site for _is_addressed_to_nova(...), found {calls} — "
         f"the routing gate below the offer block must reuse `is_addressed`, not recompute it"
@@ -203,36 +195,29 @@ def test_offer_short_circuit_returns_after_persistence_writes():
     assert offer_return_idx > persistence_idx
 
 
-def test_get_pending_offer_is_called_exactly_once():
+def test_the_pending_offer_is_read_exactly_once():
     # Single read, captured before the relevance decision — the offer
     # handler below must reuse that same object, not read the pending-offer
     # state a second time.
-    calls = SRC.count(".get_pending_offer(")
-    assert calls == 1, (
-        f"expected exactly one call to get_pending_offer(...), found {calls} — "
-        f"the offer handler must reuse the object captured before the "
-        f"relevance decision, not read pending-offer state again"
-    )
+    assert SRC.count(".pending_offer_for(") == 1
+    assert SRC.count(".get_pending_offer(") == 0
 
 
 def test_pending_offer_captured_before_the_decision_has_an_exception_fallback():
-    assert "pending_offer = cognitive_core.get_pending_offer()" in SRC
+    capture = "pending_offer = (cognitive_core.pending_offer_for(self.hass, device_id)"
+    assert capture in SRC
     assert "pending_offer = None" in SRC  # exception fallback
     # Must be captured BEFORE the decision, not after.
-    assert _index("pending_offer = cognitive_core.get_pending_offer()") < _index("if not relevant:")
+    assert _index(capture) < _index("if not relevant:")
 
 
 def test_pending_offer_capture_is_fail_open_including_the_import_itself():
     # Both the import AND the read are inside the same try — an import
-    # failure (not just a get_pending_offer() failure) must also fall
-    # through cleanly, since the later offer handler references
-    # `cognitive_core` too. A companion PHACC test
-    # (test_pending_offer_lookup_failure_does_not_break_an_addressed_command)
-    # proves this behaviorally: an ordinary command still persists and
-    # routes when the lookup raises.
+    # failure (not just a lookup failure) must also fall through cleanly,
+    # since the later offer handler references `cognitive_core` too.
     capture_block = SRC[_index("try:\n            from . import cognitive_core"):_index("gate_enabled = self._opt")]
     assert "from . import cognitive_core" in capture_block
-    assert "pending_offer = cognitive_core.get_pending_offer()" in capture_block
+    assert "cognitive_core.pending_offer_for(self.hass, device_id)" in capture_block
     assert "except Exception:" in capture_block
     assert "cognitive_core = None" in capture_block
     assert "pending_offer = None" in capture_block

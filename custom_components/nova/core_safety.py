@@ -19,6 +19,7 @@ from .core_bridge import _lockdown_exempt_locks, is_lockdown
 from .core_common import (
     ALARM_ARMED_STATES,
     FREEZE_CRITICAL_TEMP_F,
+    FREEZE_REMINDER_SECONDS,
     FREEZE_WARN_TEMP_F,
     INTRUSION_CLEAR_QUIET_SECS,
     INTRUSION_INWARD_DEPTH,
@@ -56,6 +57,10 @@ class SafetyManager:
         self._last_intrusion_alert = 0.0
         self._investigation = None   # active intrusion investigation, or None
         self._freeze_warned = False
+        # A freeze is one episode (8.39.1): the critical alert is spoken once,
+        # later reminders go to the phones only, and the episode ends when it
+        # warms up again.
+        self._freeze_critical_spoken = False
         self._automatic_generation = 0
         # Seconds the night sweep waits before rereading what it locked and
         # closed (8.24.0). Slow covers report late.
@@ -89,6 +94,7 @@ class SafetyManager:
             warned, last_freeze = situations.restore_freeze()
             self._freeze_warned = warned
             self._last_freeze_alert = last_freeze
+            self._freeze_critical_spoken = situations.restore_freeze_critical()
             self._persist = True
             self._saved = self._situation_signature()
         except Exception as exc:
@@ -98,7 +104,7 @@ class SafetyManager:
         from . import situations
         inv = situations._encode_investigation(self._investigation)
         return (json.dumps([inv, self._last_intrusion_alert], sort_keys=True, default=str),
-                (self._freeze_warned, self._last_freeze_alert))
+                (self._freeze_warned, self._last_freeze_alert, self._freeze_critical_spoken))
 
     def _save_situations(self) -> None:
         """Save the intrusion and freeze state when either changed. Never
@@ -111,7 +117,8 @@ class SafetyManager:
             if intrusion_sig != self._saved[0]:
                 situations.save_intrusion(self._investigation, self._last_intrusion_alert)
             if freeze_sig != self._saved[1]:
-                situations.save_freeze(self._freeze_warned, self._last_freeze_alert)
+                situations.save_freeze(self._freeze_warned, self._last_freeze_alert,
+                                       self._freeze_critical_spoken)
             self._saved = (intrusion_sig, freeze_sig)
         except Exception as exc:
             _LOGGER.debug("Safety: could not save situations: %s", exc)
@@ -235,11 +242,18 @@ class SafetyManager:
         lang = _m_common._hass_lang(self.hass)
 
         if temp_f <= FREEZE_CRITICAL_TEMP_F:
+            reminder = self._freeze_critical_spoken
+            if reminder and (now - self._last_freeze_alert) < FREEZE_REMINDER_SECONDS:
+                return None
             self._last_freeze_alert = now
+            self._freeze_critical_spoken = True
             set_to = _fmt_temp(_f_to_unit(55, unit), unit, decimals=0)
             return {
                 "type": "freeze_critical",
-                "urgency": "critical",
+                # Spoken once per episode; after that a reminder goes to the
+                # phones only, every few hours, until it warms up.
+                "urgency": "high" if reminder else "critical",
+                "phone_only": reminder,
                 "message": _notify_i18n().message(
                     "freeze_critical", lang, honorific=honorific.title(),
                     reading=reading, set_to=set_to),
@@ -263,6 +277,7 @@ class SafetyManager:
             }
         elif temp_f > FREEZE_WARN_TEMP_F + 5:
             self._freeze_warned = False
+            self._freeze_critical_spoken = False
 
         return None
 

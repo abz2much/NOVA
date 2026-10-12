@@ -514,14 +514,12 @@ NOVA_TOOLS: list[dict[str, Any]] = [
         "function": {
             "name": "manage_autonomy",
             "description": (
-                "View or revoke Nova's autonomous-action grants. These are "
-                "proactive actions (like turning on lights in a dark occupied "
-                "room) that Nova earned the right to perform automatically "
-                "after the user accepted them repeatedly. Use 'list' to show "
-                "current grants, or 'revoke' with a pattern_key to make Nova "
-                "ask permission again. Use when the user says 'stop doing X on "
-                "your own', 'what do you do automatically', or 'what have you "
-                "learned to do'."
+                "List or reset how often the user has accepted each of "
+                "Nova's proactive offers. Nova never carries out an offer on "
+                "its own: every offer waits for a spoken yes. Use 'list' to "
+                "show the counts, or 'revoke' with a pattern_key to reset one. "
+                "Use when the user asks what Nova does on its own (the answer "
+                "is nothing without asking) or says 'stop offering X'."
             ),
             "parameters": {
                 "type": "object",

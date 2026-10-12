@@ -340,7 +340,7 @@ def _fake_clock(hh, monkeypatch, start=0.0):
 async def _tick_silent(hh, monkeypatch, hass, config):
     """tick() with alert dispatch stubbed to a no-op recorder."""
     calls = []
-    async def _fake_dispatch(hass_, config_, message, category):
+    async def _fake_dispatch(hass_, config_, message, category, gate_key="host_health"):
         calls.append((category, message))
     monkeypatch.setattr(hh, "_dispatch_alert", _fake_dispatch)
     res = await hh.tick(hass, config)

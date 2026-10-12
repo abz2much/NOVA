@@ -44,8 +44,8 @@ class ProactiveManager:
     it notices when a small action would help (dark room with someone in it,
     a light left on in an empty room, HVAC fighting an empty house) and
     OFFERS to act. It never forces — offers are spoken/pushed suggestions the
-    user can accept by voice. Graduated autonomy (see AutonomyManager) can
-    later promote a repeatedly-approved offer to silent auto-execution.
+    user can accept by voice, in the room that heard them, within a minute.
+    Nova never carries an offer out on its own, however often it was accepted.
 
     All offers respect: the global proactive kill-switch, quiet hours/sleep,
     ignore rules, and a per-opportunity cooldown so Nova never nags.
