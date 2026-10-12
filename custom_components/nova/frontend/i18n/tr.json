@@ -309,7 +309,6 @@
   "Speech to text through the Nova Voice ID app, with a fallback for when the app is down.": "Nova Voice ID uygulaması üzerinden konuşmadan metne, uygulama kapalıyken bir yedekle.",
   "Unreachable": "Ulaşılamıyor",
   "Voice ID": "Voice ID",
-  "1 sample": "1 örnek",
   "App token": "Uygulama jetonu",
   "Copy it from the app's Configuration tab.": "Uygulamanın Yapılandırma sekmesinden kopyalayın.",
   "Couldn't load the People list. Restart Home Assistant after updating, then reopen Settings.": "Kişi listesi yüklenemedi. Güncellemeden sonra Home Assistant'ı yeniden başlatın, ardından Ayarlar'ı yeniden açın.",
@@ -345,7 +344,6 @@
   "Token cleared.": "Jeton temizlendi.",
   "Token saved.": "Jeton kaydedildi.",
   "updated {date}": "güncellendi: {date}",
-  "{count} samples": "{count} örnek",
   "{name}: all {needed} samples saved.": "{name}: {needed} örneğin hepsi kaydedildi.",
   "Nova can't reach the Nova Voice ID app. Check it is running and the address is right.": "Nova, Nova Voice ID uygulamasına ulaşamıyor. Çalıştığını ve adresin doğru olduğunu kontrol edin.",
   "Set the app's token first. Copy it from the app's Configuration tab.": "Önce uygulamanın jetonunu girin. Uygulamanın Yapılandırma sekmesinden kopyalayın.",
@@ -363,5 +361,12 @@
   "Nova couldn't save the token.": "Nova jetonu kaydedemedi.",
   "VOICE": "VOICE",
   "Use voice to tell who is speaking": "Konuşanı sesinden tanı",
-  "Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.": "Varsayılan olarak kapalı. Ses, kimin konuştuğuna dair bir ipucudur, asla bir anahtar değildir: kilit açma, açma ve devre dışı bırakma hâlâ telefonunuzu gerektirir. Günlükler sekmesindeki VOICE satırları puan toplarken kapalı bırakın."
+  "Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.": "Varsayılan olarak kapalı. Ses, kimin konuştuğuna dair bir ipucudur, asla bir anahtar değildir: kilit açma, açma ve devre dışı bırakma hâlâ telefonunuzu gerektirir. Günlükler sekmesindeki VOICE satırları puan toplarken kapalı bırakın.",
+  "Improve voices from everyday use": "Sesleri günlük kullanımla geliştir",
+  "Off by default. When Nova is very sure who spoke, it adds that sample to their voice, so it keeps up with how they sound. Needs the Nova Voice ID app 0.3.0.": "Varsayılan olarak kapalı. Nova kimin konuştuğundan çok emin olduğunda o örneği kişinin sesine ekler, böylece ses nasıl duyulduğuna ayak uydurur. Nova Voice ID uygulaması 0.3.0 gerekir.",
+  "Remove learned": "Öğrenilenleri kaldır",
+  "Remove the samples Nova learned for {name}? Their recordings stay.": "Nova'nın {name} için öğrendiği örnekler kaldırılsın mı? Kayıtlar kalır.",
+  "Removed {count} learned samples for {name}.": "{name} için {count} öğrenilmiş örnek kaldırıldı.",
+  "Turn on \"Use voice to tell who is speaking\" first.": "Önce \"Konuşanı sesinden tanı\" ayarını açın.",
+  "{recorded} recorded, {learned} learned": "{recorded} kayıtlı, {learned} öğrenilmiş"
 }

@@ -90,7 +90,8 @@ class VoiceApp:
     (the last repeats). ``errors`` maps a management event to an error code.
     ``commits`` and ``management`` record what Nova sent."""
 
-    def __init__(self, blocks=None, token=TOKEN, errors=None, profiles=None, text=TEXT):
+    def __init__(self, blocks=None, token=TOKEN, errors=None, profiles=None, text=TEXT,
+                 refuse_learned=False):
         self.blocks = list(blocks or [{"v": 1, "status": "no_profiles", "model": "m", "ms": 3}])
         self.token = token
         self.errors = dict(errors or {})
@@ -98,6 +99,8 @@ class VoiceApp:
         self.text = text
         self.management: list[Event] = []
         self.commits: list[tuple[str, str]] = []
+        self.sources: list[str] = []           # 0.3.0: "enrolled" or "learned" per commit
+        self.refuse_learned = refuse_learned
         self.transcripts = 0
         self.server = None
         self.port = None
@@ -128,15 +131,37 @@ class VoiceApp:
             return Error(text="nope", code=self.errors[event.type]).event()
         if event.type == "nvid-enrol-commit":
             person = data["person"]
+            source = data.get("source", "enrolled")
+            if source not in ("enrolled", "learned"):
+                return Error(text="bad source", code="bad_request").event()
+            if source == "learned" and self.refuse_learned:
+                return Error(text="Not accepted as learned", code="refused").event()
             self.commits.append((data["sample_id"], person))
+            self.sources.append(source)
             prof = self.profiles.setdefault(person, {"person": person, "samples": 0,
                                                      "updated": 1760000000.0})
             prof["samples"] += 1
+            prof[source] = prof.get(source, 0) + 1
             return Event(type="nvid-enrol-commit-result",
-                         data={"person": person, "samples": prof["samples"]})
+                         data={"person": person, "samples": prof["samples"],
+                               "enrolled": prof.get("enrolled", 0),
+                               "learned": prof.get("learned", 0)})
         if event.type == "nvid-profile-list":
             return Event(type="nvid-profile-list-result",
                          data={"profiles": list(self.profiles.values()), "model": "m"})
+        if event.type == "nvid-profile-delete" and data.get("source") == "learned":
+            who = sorted(self.profiles) if data.get("all") is True else [data.get("person")]
+            removed, deleted = 0, []
+            for person in who:
+                prof = self.profiles.get(person)
+                if prof and prof.get("learned"):
+                    removed += prof["learned"]
+                    prof["samples"] -= prof["learned"]
+                    prof["learned"] = 0
+                    deleted.append(person)
+            return Event(type="nvid-profile-delete-result",
+                         data={"deleted": deleted, "all": data.get("all") is True,
+                               "source": "learned", "removed": removed})
         if event.type == "nvid-profile-delete":
             if data.get("all") is True:
                 gone = sorted(self.profiles)

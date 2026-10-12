@@ -1240,6 +1240,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> boo
             voice_enrol.clear()
         except Exception:
             pass
+        # Nor does what Voice ID learning has sent (8.38.0).
+        try:
+            from . import voice_learn
+            voice_learn.clear()
+        except Exception:
+            pass
         # Nor does the Voice ID follow up memory (8.37.0).
         try:
             from . import identity as _identity

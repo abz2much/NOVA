@@ -283,8 +283,54 @@ async def test_profile_list_drops_bad_rows(vid):
                 {"person": "Not A Person", "samples": 1, "updated": 1.0}]
     async with VoiceApp(profiles=profiles) as app:
         listing = await vid.profile_list(app.uri, TOKEN)
-    assert listing == {"profiles": [{"person": "person.abi", "samples": 8, "updated": 1.5}],
-                       "model": "m"}
+    # an app 0.2.0 row: no counts, so everything it has was recorded
+    assert listing == {"profiles": [{"person": "person.abi", "samples": 8, "enrolled": 8,
+                                     "learned": 0, "updated": 1.5}], "model": "m"}
+
+
+async def test_profile_list_reads_the_0_3_0_counts(vid):
+    profiles = [{"person": "person.abi", "samples": 10, "enrolled": 8, "learned": 2, "updated": 1.0},
+                {"person": "person.sam", "samples": 3, "enrolled": "x", "learned": -1, "updated": 1.0}]
+    async with VoiceApp(profiles=profiles) as app:
+        listing = await vid.profile_list(app.uri, TOKEN)
+    rows = {p["person"]: (p["enrolled"], p["learned"]) for p in listing["profiles"]}
+    assert rows == {"person.abi": (8, 2), "person.sam": (3, 0)}
+
+
+async def test_a_learned_commit_sends_source_and_a_recorded_one_does_not(vid):
+    async with VoiceApp() as app:
+        await vid.enrol_commit(app.uri, TOKEN, "a1", "person.abi")
+        await vid.enrol_commit(app.uri, TOKEN, "a2", "person.abi", source="learned")
+    assert "source" not in app.management[0].data
+    assert app.management[1].data["source"] == "learned"
+    assert app.sources == ["enrolled", "learned"]
+
+
+async def test_a_refused_reply_has_its_own_message(vid):
+    async with VoiceApp(refuse_learned=True) as app:
+        with pytest.raises(vid.VoiceIdManagementError) as err:
+            await vid.enrol_commit(app.uri, TOKEN, "a1", "person.abi", source="learned")
+    assert err.value.code == "refused"
+    assert err.value.message == "The app didn't accept this sample."
+
+
+async def test_remove_learned_sends_source_learned(vid):
+    profiles = [{"person": "person.abi", "samples": 10, "enrolled": 8, "learned": 2, "updated": 1.0}]
+    async with VoiceApp(profiles=profiles) as app:
+        out = await vid.profile_delete(app.uri, TOKEN, "person.abi", source="learned")
+        listing = await vid.profile_list(app.uri, TOKEN)
+    assert app.management[0].data == {"token": TOKEN, "person": "person.abi", "source": "learned"}
+    assert out == {"deleted": ["person.abi"], "all": False, "source": "learned", "removed": 2}
+    assert (listing["profiles"][0]["enrolled"], listing["profiles"][0]["learned"]) == (8, 0)
+
+
+async def test_an_unknown_source_is_refused_before_sending(vid):
+    async with VoiceApp() as app:
+        with pytest.raises(vid.VoiceIdManagementError):
+            await vid.enrol_commit(app.uri, TOKEN, "a1", "person.abi", source="other")
+        with pytest.raises(vid.VoiceIdManagementError):
+            await vid.profile_delete(app.uri, TOKEN, "person.abi", source="enrolled")
+    assert app.management == []
 
 
 async def test_a_bad_person_is_refused_before_sending(vid):

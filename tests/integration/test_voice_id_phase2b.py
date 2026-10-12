@@ -46,7 +46,8 @@ async def _stream():
 @pytest.fixture
 def isolated(hass, tmp_path, monkeypatch):
     """Own conversations.db and secrets.yaml; no Voice ID keys left behind."""
-    from custom_components.nova import ha_secrets, nova_config, paths, voice_enrol
+    from custom_components.nova import ha_secrets, nova_config, paths, voice_enrol, voice_learn
+    voice_learn.clear()      # sample ids are reused between tests (8.38.0)
     _isolate_conversations_db(monkeypatch, tmp_path)
     paths.configure(hass)
     monkeypatch.setattr(ha_secrets, "_secrets_path", lambda: tmp_path / "secrets.yaml")
@@ -116,14 +117,17 @@ async def _set_app(hass, uri, token=TOKEN):
 
 
 def _log(monkeypatch):
-    from custom_components.nova import websocket
+    """Every Nova Log line, whichever import a module uses (the turn imports
+    it from websocket; stt.py and voice_learn.py from ws_log)."""
+    from custom_components.nova import websocket, ws_log
     lines = []
-    real = websocket.nova_log
+    real = ws_log.nova_log
 
     def record(cat, msg):
         lines.append((cat, msg))
         real(cat, msg)
     monkeypatch.setattr(websocket, "nova_log", record)
+    monkeypatch.setattr(ws_log, "nova_log", record)
     return lines
 
 

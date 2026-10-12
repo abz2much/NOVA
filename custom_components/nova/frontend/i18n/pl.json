@@ -1217,7 +1217,6 @@
   "Speech to text through the Nova Voice ID app, with a fallback for when the app is down.": "Zamiana mowy na tekst przez aplikację Nova Voice ID, z zapasową na czas, gdy aplikacja nie działa.",
   "Unreachable": "Nieosiągalna",
   "Voice ID": "Voice ID",
-  "1 sample": "1 próbka",
   "App token": "Token aplikacji",
   "Copy it from the app's Configuration tab.": "Skopiuj go z karty Konfiguracja aplikacji.",
   "Couldn't load the People list. Restart Home Assistant after updating, then reopen Settings.": "Nie udało się wczytać listy osób. Po aktualizacji uruchom ponownie Home Assistant, a potem znów otwórz Ustawienia.",
@@ -1253,7 +1252,6 @@
   "Token cleared.": "Token wyczyszczony.",
   "Token saved.": "Token zapisany.",
   "updated {date}": "zaktualizowano {date}",
-  "{count} samples": "{count} próbek",
   "{name}: all {needed} samples saved.": "{name}: zapisano wszystkie {needed} próbek.",
   "Nova can't reach the Nova Voice ID app. Check it is running and the address is right.": "Nova nie może połączyć się z aplikacją Nova Voice ID. Sprawdź, czy działa i czy adres jest poprawny.",
   "Set the app's token first. Copy it from the app's Configuration tab.": "Najpierw wpisz token aplikacji. Skopiuj go z karty Konfiguracja aplikacji.",
@@ -1271,5 +1269,12 @@
   "Nova couldn't save the token.": "Nova nie mogła zapisać tokenu.",
   "VOICE": "VOICE",
   "Use voice to tell who is speaking": "Rozpoznawaj mówiącego po głosie",
-  "Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.": "Domyślnie wyłączone. Głos to wskazówka, kto mówi, nigdy klucz: odblokowanie, otwarcie i rozbrojenie nadal wymagają telefonu. Zostaw to wyłączone, gdy wiersze VOICE na karcie Dzienniki zbierają wyniki."
+  "Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.": "Domyślnie wyłączone. Głos to wskazówka, kto mówi, nigdy klucz: odblokowanie, otwarcie i rozbrojenie nadal wymagają telefonu. Zostaw to wyłączone, gdy wiersze VOICE na karcie Dzienniki zbierają wyniki.",
+  "Improve voices from everyday use": "Ulepszaj głosy na co dzień",
+  "Off by default. When Nova is very sure who spoke, it adds that sample to their voice, so it keeps up with how they sound. Needs the Nova Voice ID app 0.3.0.": "Domyślnie wyłączone. Gdy Nova jest bardzo pewna, kto mówił, dodaje tę próbkę do głosu tej osoby, by nadążał za tym, jak brzmi. Wymaga aplikacji Nova Voice ID 0.3.0.",
+  "Remove learned": "Usuń wyuczone",
+  "Remove the samples Nova learned for {name}? Their recordings stay.": "Usunąć próbki, których Nova nauczyła się dla osoby {name}? Nagrania zostaną.",
+  "Removed {count} learned samples for {name}.": "Usunięto {count} wyuczonych próbek osoby {name}.",
+  "Turn on \"Use voice to tell who is speaking\" first.": "Najpierw włącz „Rozpoznawaj mówiącego po głosie”.",
+  "{recorded} recorded, {learned} learned": "{recorded} nagranych, {learned} wyuczonych"
 }

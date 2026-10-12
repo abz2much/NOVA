@@ -455,6 +455,45 @@ def resolve(hass: HomeAssistant, *, device_id: Optional[str] = None,
                           "+".join(sorted(methods)), candidates)
 
 
+def non_voice_breakdown(hass: HomeAssistant, *, area_id: Optional[str] = None,
+                        now: Optional[float] = None) -> dict:
+    """Each person's non-voice evidence, per signal (8.38.0).
+
+    {normalize(name): {"sole_occupant"|"home_prior"|"face"|"room_sole"|
+    "room_present"|"proximity": weight}}. The same helpers and weights as
+    resolve(), but no voice of any kind (neither Nova Voice ID nor a legacy
+    sensor), and kept per signal so a caller can ask *which* signal agrees.
+    resolve() itself is unchanged. Empty when identity is off. Never raises.
+    Used only by voice_learn.py, to decide whether another signal agrees with
+    a known voice before a sample is learned."""
+    out: dict = defaultdict(dict)
+    try:
+        if not bool(_cfg("identity_enabled", True)):
+            return {}
+        now = now if now is not None else time.time()
+
+        def add(key: str, signal: str, weight: float) -> None:
+            out[key][signal] = out[key].get(signal, 0.0) + weight
+
+        home = _home_people(hass)
+        if len(home) == 1:
+            add(normalize(home[0]), "sole_occupant", _W_SOLE_OCCUPANT)
+        elif len(home) > 1:
+            for name in home:
+                add(normalize(name), "home_prior", _W_HOME_PRIOR)
+        for key, w in _face_votes(hass, now).items():
+            add(key, "face", w)
+        room = _room_votes(hass, area_id, now)
+        signal = "room_sole" if len(room) == 1 else "room_present"
+        for name, w in room.items():
+            add(normalize(name), signal, w)
+        for key, w in _proximity_votes(hass, area_id).items():
+            add(key, "proximity", w)
+    except Exception as exc:
+        _LOGGER.debug("identity: non-voice breakdown failed: %s", exc)
+    return {k: dict(v) for k, v in out.items()}
+
+
 def resolve_subject(hass: HomeAssistant, **kwargs) -> str:
     """Convenience: resolve and return the knowledge subject id directly."""
     return subject_for(resolve(hass, **kwargs))

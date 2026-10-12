@@ -309,7 +309,6 @@
   "Speech to text through the Nova Voice ID app, with a fallback for when the app is down.": "Voz para texto através da aplicação Nova Voice ID, com uma reserva para quando a aplicação está em baixo.",
   "Unreachable": "Inacessível",
   "Voice ID": "Voice ID",
-  "1 sample": "1 amostra",
   "App token": "Token da aplicação",
   "Copy it from the app's Configuration tab.": "Copie-o do separador Configuração da aplicação.",
   "Couldn't load the People list. Restart Home Assistant after updating, then reopen Settings.": "Não foi possível carregar a lista de pessoas. Reinicie o Home Assistant depois de atualizar e volte a abrir as Definições.",
@@ -345,7 +344,6 @@
   "Token cleared.": "Token limpo.",
   "Token saved.": "Token guardado.",
   "updated {date}": "atualizado {date}",
-  "{count} samples": "{count} amostras",
   "{name}: all {needed} samples saved.": "{name}: as {needed} amostras estão guardadas.",
   "Nova can't reach the Nova Voice ID app. Check it is running and the address is right.": "A Nova não consegue contactar a aplicação Nova Voice ID. Verifique se está a correr e se o endereço está certo.",
   "Set the app's token first. Copy it from the app's Configuration tab.": "Escreva primeiro o token da aplicação. Copie-o do separador Configuração da aplicação.",
@@ -363,5 +361,12 @@
   "Nova couldn't save the token.": "A Nova não conseguiu guardar o token.",
   "VOICE": "VOICE",
   "Use voice to tell who is speaking": "Usar a voz para saber quem está a falar",
-  "Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.": "Desligado por predefinição. A voz é uma pista sobre quem está a falar, nunca uma chave: destrancar, abrir e desarmar continuam a pedir o telemóvel. Deixe desligado enquanto as linhas VOICE no separador Registos recolhem pontuações."
+  "Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.": "Desligado por predefinição. A voz é uma pista sobre quem está a falar, nunca uma chave: destrancar, abrir e desarmar continuam a pedir o telemóvel. Deixe desligado enquanto as linhas VOICE no separador Registos recolhem pontuações.",
+  "Improve voices from everyday use": "Melhorar as vozes com o uso diário",
+  "Off by default. When Nova is very sure who spoke, it adds that sample to their voice, so it keeps up with how they sound. Needs the Nova Voice ID app 0.3.0.": "Desligado por predefinição. Quando a Nova tem muita certeza de quem falou, junta essa amostra à voz dessa pessoa, para acompanhar como soa. Precisa da aplicação Nova Voice ID 0.3.0.",
+  "Remove learned": "Remover aprendidas",
+  "Remove the samples Nova learned for {name}? Their recordings stay.": "Remover as amostras que a Nova aprendeu de {name}? As gravações ficam.",
+  "Removed {count} learned samples for {name}.": "Removidas {count} amostras aprendidas de {name}.",
+  "Turn on \"Use voice to tell who is speaking\" first.": "Ligue primeiro \"Usar a voz para saber quem está a falar\".",
+  "{recorded} recorded, {learned} learned": "{recorded} gravadas, {learned} aprendidas"
 }

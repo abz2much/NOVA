@@ -1217,7 +1217,6 @@
   "Speech to text through the Nova Voice ID app, with a fallback for when the app is down.": "Sprache-zu-Text über die Nova Voice ID App, mit einem Ersatz, falls die App nicht läuft.",
   "Unreachable": "Nicht erreichbar",
   "Voice ID": "Voice ID",
-  "1 sample": "1 Aufnahme",
   "App token": "App-Token",
   "Copy it from the app's Configuration tab.": "Kopiere es aus dem Tab Konfiguration der App.",
   "Couldn't load the People list. Restart Home Assistant after updating, then reopen Settings.": "Die Personenliste konnte nicht geladen werden. Starte Home Assistant nach dem Update neu und öffne dann die Einstellungen erneut.",
@@ -1253,7 +1252,6 @@
   "Token cleared.": "Token entfernt.",
   "Token saved.": "Token gespeichert.",
   "updated {date}": "aktualisiert {date}",
-  "{count} samples": "{count} Aufnahmen",
   "{name}: all {needed} samples saved.": "{name}: alle {needed} Aufnahmen gespeichert.",
   "Nova can't reach the Nova Voice ID app. Check it is running and the address is right.": "Nova erreicht die Nova Voice ID App nicht. Prüfe, ob sie läuft und die Adresse stimmt.",
   "Set the app's token first. Copy it from the app's Configuration tab.": "Gib zuerst das Token der App ein. Kopiere es aus dem Tab Konfiguration der App.",
@@ -1271,5 +1269,12 @@
   "Nova couldn't save the token.": "Nova konnte das Token nicht speichern.",
   "VOICE": "VOICE",
   "Use voice to tell who is speaking": "Am Stimmklang erkennen, wer spricht",
-  "Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.": "Standardmäßig aus. Die Stimme ist ein Hinweis darauf, wer spricht, nie ein Schlüssel: Aufsperren, Öffnen und Unscharfschalten brauchen weiter dein Telefon. Lass es aus, solange die VOICE-Zeilen im Tab Protokolle Werte sammeln."
+  "Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.": "Standardmäßig aus. Die Stimme ist ein Hinweis darauf, wer spricht, nie ein Schlüssel: Aufsperren, Öffnen und Unscharfschalten brauchen weiter dein Telefon. Lass es aus, solange die VOICE-Zeilen im Tab Protokolle Werte sammeln.",
+  "Improve voices from everyday use": "Stimmen im Alltag verbessern",
+  "Off by default. When Nova is very sure who spoke, it adds that sample to their voice, so it keeps up with how they sound. Needs the Nova Voice ID app 0.3.0.": "Standardmäßig aus. Wenn Nova sehr sicher ist, wer gesprochen hat, fügt es diese Aufnahme der Stimme hinzu, damit sie damit Schritt hält, wie die Person klingt. Braucht die Nova Voice ID App 0.3.0.",
+  "Remove learned": "Gelernte entfernen",
+  "Remove the samples Nova learned for {name}? Their recordings stay.": "Die von Nova für {name} gelernten Aufnahmen entfernen? Die eigenen Aufnahmen bleiben.",
+  "Removed {count} learned samples for {name}.": "{count} gelernte Aufnahmen für {name} entfernt.",
+  "Turn on \"Use voice to tell who is speaking\" first.": "Schalte zuerst „Am Stimmklang erkennen, wer spricht“ ein.",
+  "{recorded} recorded, {learned} learned": "{recorded} aufgenommen, {learned} gelernt"
 }

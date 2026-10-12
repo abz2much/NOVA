@@ -2,7 +2,7 @@
  * frontend/src/. Edit the sources there, then run the build. */
 /*
  * Nova Command Center Panel.
- * v8.37.0
+ * v8.38.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -79,7 +79,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.37.0 ",
+      console.log("%c Nova Panel %c v8.38.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -3813,6 +3813,13 @@ ${this._htmlDashboardBody()}`;
         <button class="toggle-btn ${cfg.voice_id_identity ? "on" : "off"}" data-cfg-key="voice_id_identity" data-cfg-val="${cfg.voice_id_identity ? "false" : "true"}">${cfg.voice_id_identity ? "ON" : "OFF"}</button>
       </div>
       <div class="toggle-desc">Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.</div>
+      <div class="cfg-row">
+        <label>Improve voices from everyday use</label>
+        <button class="toggle-btn ${cfg.voice_id_learning ? "on" : "off"}" data-cfg-key="voice_id_learning" data-cfg-val="${cfg.voice_id_learning ? "false" : "true"}" ${cfg.voice_id_identity ? "" : "disabled"}>${cfg.voice_id_learning ? "ON" : "OFF"}</button>
+      </div>
+      <div class="toggle-desc">${cfg.voice_id_identity
+        ? this._tHtml("Off by default. When Nova is very sure who spoke, it adds that sample to their voice, so it keeps up with how they sound. Needs the Nova Voice ID app 0.3.0.")
+        : this._tHtml("Turn on \"Use voice to tell who is speaking\" first.")}</div>
       <div class="mode-bind-head">People</div>
       <div class="stub-body">Record each person on every satellite: rooms sound different. Voice data lives only in the Nova Voice ID app, never in Nova.</div>
       <div class="cfg-row">
@@ -3852,7 +3859,9 @@ ${this._htmlDashboardBody()}`;
     const recording = (this._vidSession || {}).state === "active";
     const row = (p, isHidden) => {
       const person = this._esc(p.person);
-      const count = p.samples === 1 ? this._tHtml("1 sample") : this._tHtml("{count} samples", { count: Number(p.samples) || 0 });
+      const recorded = Number(p.enrolled ?? p.samples) || 0;
+      const learned = Number(p.learned) || 0;
+      const count = this._tHtml("{recorded} recorded, {learned} learned", { recorded, learned });
       const when = p.updated ? ` · ${this._tHtml("updated {date}", { date: this._esc(new Date(p.updated * 1000).toLocaleDateString()) })}` : "";
       return `
       <div class="cfg-row vid-person">
@@ -3861,6 +3870,7 @@ ${this._htmlDashboardBody()}`;
         <div class="vid-actions">
           ${isHidden ? "" : `<button class="mode-chip vid-rec" data-person="${person}" ${recording ? "disabled" : ""}>Record voice</button>`}
           <button class="mode-chip vid-del" data-person="${person}" data-name="${this._esc(p.name)}" ${p.samples && !recording ? "" : "disabled"}>Delete voice</button>
+          ${learned ? `<button class="mode-chip vid-del-learned" data-person="${person}" data-name="${this._esc(p.name)}" ${recording ? "disabled" : ""}>Remove learned</button>` : ""}
           <button class="mode-chip vid-hide" data-person="${person}">${isHidden ? "Show" : "Hide"}</button>
         </div>
       </div>`;
@@ -3986,6 +3996,15 @@ ${this._htmlDashboardBody()}`;
         this._vidSay(!res.ok ? res.error
           : (res.deleted || []).length ? this._t("Deleted {name}'s voice.", { name })
           : this._t("The app had no voice saved for {name}.", { name }));
+      } catch (_) { this._vidSay(this._t("Couldn't reach Nova. Reload the page and try again.")); }
+      await this._fetchVoiceIdPeople();
+    } else if (btn.classList.contains("vid-del-learned")) {
+      const name = btn.getAttribute("data-name") || person;
+      if (!window.confirm(this._t("Remove the samples Nova learned for {name}? Their recordings stay.", { name }))) return;
+      try {
+        const res = await this._hass.callWS({ type: "nova/voice_id_delete", person, source: "learned" });
+        this._vidSay(!res.ok ? res.error
+          : this._t("Removed {count} learned samples for {name}.", { count: res.removed ?? 0, name }));
       } catch (_) { this._vidSay(this._t("Couldn't reach Nova. Reload the page and try again.")); }
       await this._fetchVoiceIdPeople();
     } else if (btn.id === "vidDeleteAll") {

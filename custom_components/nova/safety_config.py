@@ -57,7 +57,7 @@ STRICT_BOOL_KEYS = frozenset({
     "observer_enabled", "announce_notify_only",
     "continued_conversation_speaker_reopen", "continued_conversation_multi_satellite",
     "has_basement", "semantic_search", "operational_mode_auto", "biometrics_enabled",
-    "voice_confirm_enabled", "onboarding_dismissed", "voice_id_identity",
+    "voice_confirm_enabled", "onboarding_dismissed", "voice_id_identity", "voice_id_learning",
     "hazard_monitor_enabled", "hazard_quakes_on", "hazard_weather_on", "hazard_disasters_on",
     "hazard_met_eireann_on", "hazard_cap_on",
     "intrusion_vision_confirm",

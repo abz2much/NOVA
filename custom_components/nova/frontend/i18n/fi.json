@@ -309,7 +309,6 @@
   "Speech to text through the Nova Voice ID app, with a fallback for when the app is down.": "Puheesta tekstiksi Nova Voice ID -sovelluksen kautta, ja varavaihtoehto, kun sovellus ei toimi.",
   "Unreachable": "Ei tavoitettavissa",
   "Voice ID": "Voice ID",
-  "1 sample": "1 näyte",
   "App token": "Sovelluksen tunnus",
   "Copy it from the app's Configuration tab.": "Kopioi se sovelluksen Määritykset-välilehdeltä.",
   "Couldn't load the People list. Restart Home Assistant after updating, then reopen Settings.": "Henkilöluetteloa ei voitu ladata. Käynnistä Home Assistant uudelleen päivityksen jälkeen ja avaa asetukset uudelleen.",
@@ -345,7 +344,6 @@
   "Token cleared.": "Tunnus tyhjennetty.",
   "Token saved.": "Tunnus tallennettu.",
   "updated {date}": "päivitetty {date}",
-  "{count} samples": "{count} näytettä",
   "{name}: all {needed} samples saved.": "{name}: kaikki {needed} näytettä tallennettu.",
   "Nova can't reach the Nova Voice ID app. Check it is running and the address is right.": "Nova ei saa yhteyttä Nova Voice ID -sovellukseen. Tarkista, että se on käynnissä ja osoite on oikein.",
   "Set the app's token first. Copy it from the app's Configuration tab.": "Anna ensin sovelluksen tunnus. Kopioi se sovelluksen Määritykset-välilehdeltä.",
@@ -363,5 +361,12 @@
   "Nova couldn't save the token.": "Nova ei voinut tallentaa tunnusta.",
   "VOICE": "VOICE",
   "Use voice to tell who is speaking": "Tunnista puhuja äänestä",
-  "Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.": "Oletuksena pois. Ääni on vihje siitä, kuka puhuu, ei koskaan avain: lukituksen avaaminen, avaaminen ja hälytyksen poisto vaativat yhä puhelimesi. Pidä se pois päältä, kun Lokit-välilehden VOICE-rivit keräävät pisteitä."
+  "Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.": "Oletuksena pois. Ääni on vihje siitä, kuka puhuu, ei koskaan avain: lukituksen avaaminen, avaaminen ja hälytyksen poisto vaativat yhä puhelimesi. Pidä se pois päältä, kun Lokit-välilehden VOICE-rivit keräävät pisteitä.",
+  "Improve voices from everyday use": "Paranna ääniä arkikäytöstä",
+  "Off by default. When Nova is very sure who spoke, it adds that sample to their voice, so it keeps up with how they sound. Needs the Nova Voice ID app 0.3.0.": "Oletuksena pois. Kun Nova on hyvin varma puhujasta, se lisää näytteen tämän ääneen, jotta ääni pysyy ajan tasalla. Vaatii Nova Voice ID -sovelluksen 0.3.0.",
+  "Remove learned": "Poista opitut",
+  "Remove the samples Nova learned for {name}? Their recordings stay.": "Poistetaanko Novan henkilölle {name} oppimat näytteet? Tallenteet jäävät.",
+  "Removed {count} learned samples for {name}.": "Poistettiin {count} opittua näytettä henkilöltä {name}.",
+  "Turn on \"Use voice to tell who is speaking\" first.": "Ota ensin käyttöön \"Tunnista puhuja äänestä\".",
+  "{recorded} recorded, {learned} learned": "{recorded} tallennettu, {learned} opittu"
 }

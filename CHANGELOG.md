@@ -1,3 +1,20 @@
+## [8.38.0] — Nova Voice ID learns from everyday use
+
+Nova can now add a voice sample from an ordinary voice command when it is very sure who spoke, so each person's voice keeps up with how they sound day to day. It is off by default, needs "Use voice to tell who is speaking" on and the Nova Voice ID app 0.3.0, and can be undone per person in one tap. With it off, Nova behaves exactly as 8.37.0.
+
+### Added
+- **Improve voices from everyday use** (`voice_id_learning`, a strict yes or no) in the Voice ID card, under the identity switch, disabled with a hint while that switch is off.
+- **Learned samples** (new `voice_learn.py`). After a voice turn has been answered, in the background, Nova commits the turn's sample with `source: "learned"` only when every one of these holds: both switches on; the app reports 0.3.0 or newer; the result is `known` with score ≥ 0.70 and at least 2.0 s of speech (`const.py`); another signal agrees; the turn is a voice satellite's and not Chat, a recording, a `voice_carry`, or an answer to a pending confirmation or a proactive offer; Nova answered it (it passed dedup, the presence gate and both relevance gates, so a duplicate from a second satellite, ignored ambient speech or an empty room never learns); the sample was never sent before; and no learned commit is in flight for that person.
+- **"Another signal agrees"**: new `identity.non_voice_breakdown()` gives each person's non-voice evidence per signal, with no voice of any kind, using the satellite's room. The voice's person needs at least 0.6 from one of these on its own (never a sum, so one camera can't count twice as a face and as the room): being the only one home, a face, or being the only one in the room; anyone else with 0.3 or more from any signal (including the 0.15 home prior) blocks it. `resolve()` is unchanged; a test checks the breakdown's totals match it.
+- **Log**: a VOICE line once the app answers, `person=… device=… + learned` or `… learn refused (refused)`. Errors are logged at debug only. No words.
+- **The app's `refused` code**, with the message "The app didn't accept this sample." A refused (or any) sample Nova has sent is never sent again, as learned or recorded.
+- **People list**: "8 recorded, 2 learned", and **Remove learned** per person (asks first, sends `nvid-profile-delete` with `source: "learned"`, refreshes the list; hidden when the count is 0). `nova/voice_id_delete` takes an optional `source: "learned"`, refused unless the app reports 0.3.0 or newer (an older app doesn't know `source`). An app older than 0.3.0 reports no counts, so everything shows as recorded.
+
+### Unchanged
+- With the learning switch off, nothing is ever sent, the same as 8.37.0.
+- Recording a voice works as before and commits as recorded (no `source`, the app's default).
+- Unlock, open, disarm and intrusion stand down ignore voice; identity, the AI hint, memory, voice phrases, pending confirmations and dedup are as in 8.37.0. Nova still keeps no voice data: only sample and person ids, in memory.
+
 ## [8.37.0] — Nova Voice ID tells who is speaking
 
 Nova can now use a known voice to decide who is speaking: it feeds identity, tells the AI as a hint, carries the speaker to a short follow up on the same satellite, and files "remember…" facts against the right person. It is off by default: **Use voice to tell who is speaking** in the Voice ID card turns it on. With it off, Nova behaves as 8.36.0 (one exception, below), so a house can collect scores in the VOICE lines first.

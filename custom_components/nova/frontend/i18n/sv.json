@@ -1217,7 +1217,6 @@
   "Speech to text through the Nova Voice ID app, with a fallback for when the app is down.": "Tal till text via Nova Voice ID-appen, med en reserv för när appen är nere.",
   "Unreachable": "Kan inte nås",
   "Voice ID": "Voice ID",
-  "1 sample": "1 prov",
   "App token": "Appens token",
   "Copy it from the app's Configuration tab.": "Kopiera den från fliken Konfiguration i appen.",
   "Couldn't load the People list. Restart Home Assistant after updating, then reopen Settings.": "Personlistan kunde inte laddas. Starta om Home Assistant efter uppdateringen och öppna sedan Inställningar igen.",
@@ -1253,7 +1252,6 @@
   "Token cleared.": "Token rensad.",
   "Token saved.": "Token sparad.",
   "updated {date}": "uppdaterad {date}",
-  "{count} samples": "{count} prov",
   "{name}: all {needed} samples saved.": "{name}: alla {needed} prov sparade.",
   "Nova can't reach the Nova Voice ID app. Check it is running and the address is right.": "Nova når inte Nova Voice ID-appen. Kontrollera att den körs och att adressen stämmer.",
   "Set the app's token first. Copy it from the app's Configuration tab.": "Ange appens token först. Kopiera den från fliken Konfiguration i appen.",
@@ -1271,5 +1269,12 @@
   "Nova couldn't save the token.": "Nova kunde inte spara token.",
   "VOICE": "VOICE",
   "Use voice to tell who is speaking": "Använd rösten för att avgöra vem som talar",
-  "Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.": "Av som standard. Rösten är en ledtråd om vem som talar, aldrig en nyckel: upplåsning, öppning och avlarmning kräver fortfarande telefonen. Låt den vara av medan VOICE-raderna under fliken Loggar samlar poäng."
+  "Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.": "Av som standard. Rösten är en ledtråd om vem som talar, aldrig en nyckel: upplåsning, öppning och avlarmning kräver fortfarande telefonen. Låt den vara av medan VOICE-raderna under fliken Loggar samlar poäng.",
+  "Improve voices from everyday use": "Förbättra röster genom vardaglig användning",
+  "Off by default. When Nova is very sure who spoke, it adds that sample to their voice, so it keeps up with how they sound. Needs the Nova Voice ID app 0.3.0.": "Av som standard. När Nova är mycket säker på vem som talade lägger den till provet i personens röst, så att den hänger med i hur de låter. Kräver Nova Voice ID-appen 0.3.0.",
+  "Remove learned": "Ta bort inlärda",
+  "Remove the samples Nova learned for {name}? Their recordings stay.": "Ta bort proven Nova har lärt sig för {name}? Inspelningarna finns kvar.",
+  "Removed {count} learned samples for {name}.": "Tog bort {count} inlärda prov för {name}.",
+  "Turn on \"Use voice to tell who is speaking\" first.": "Slå på \"Använd rösten för att avgöra vem som talar\" först.",
+  "{recorded} recorded, {learned} learned": "{recorded} inspelade, {learned} inlärda"
 }

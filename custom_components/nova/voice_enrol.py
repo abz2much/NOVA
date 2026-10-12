@@ -366,11 +366,14 @@ async def async_handle_turn(hass, entry, device_id: str | None, result) -> str |
                 return phrase("no_result", session.lang)
         else:
             session.unusable = 0
+        from . import voice_learn
         usable = (result is not None and result.sample_id
+                  and not voice_learn.was_sent(result.sample_id)
                   and result.speech_s is not None and result.speech_s >= MIN_SPEECH_S)
         if usable and session.committed >= CHECK_MATCH_FROM and _someone_else(result, session.person):
             usable = False
         if usable:
+            voice_learn.mark_sent(result.sample_id)   # never sent twice (8.38.0)
             try:
                 await voice_id.enrol_commit(
                     voice_id_store.get_uri(hass, entry),

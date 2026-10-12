@@ -31,6 +31,7 @@ def vid(load):
 def enrol(load, fake_hass, monkeypatch):
     mod = load("voice_enrol")
     mod.clear()
+    load("voice_learn").clear()      # sample ids are reused between tests (8.38.0)
     fake_hass.states.async_set("person.abi", "home", {"friendly_name": "Abi Adeyoola"})
     fake_hass.states.async_set("person.sam", "home", {"friendly_name": "Sam"})
     fake_hass.states.async_set("assist_satellite.kitchen", "idle", {})

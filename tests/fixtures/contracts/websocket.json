@@ -1166,6 +1166,9 @@
       },
       "person": {
         "required": false
+      },
+      "source": {
+        "required": false
       }
     },
     "literal_response_keys": [
