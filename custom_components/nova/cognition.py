@@ -1647,11 +1647,10 @@ def save_to_db(db_path: str, now: float = None) -> int:
     """Persist the model and the once-per-day anticipation ledger to
     patterns.db. SYNC — call via executor."""
     import json
-    import sqlite3
     try:
         alerted = _prune_alerted(_local_day(now or time.time()))
-        with sqlite3.connect(db_path, timeout=10) as conn:
-            conn.execute("PRAGMA journal_mode=WAL")
+        with _store.connect(db_path, timeout=10, row_factory=False, mkdir=False,
+                            busy_timeout_ms=None) as conn:
             _store.ensure(conn, "cognition")
             rows = [(eid, json.dumps(_entry_to_dict(e)), time.time())
                     for eid, e in list(_MODEL.items())]
@@ -1674,11 +1673,10 @@ def load_from_db(db_path: str, now: float = None) -> int:
     """Load the model and the anticipation ledger from patterns.db. SYNC —
     call via executor. A missing or corrupt ledger restores nothing."""
     import json
-    import sqlite3
     n = 0
     try:
-        with sqlite3.connect(db_path, timeout=10) as conn:
-            conn.execute("PRAGMA journal_mode=WAL")
+        with _store.connect(db_path, timeout=10, row_factory=False, mkdir=False,
+                            busy_timeout_ms=None) as conn:
             _store.ensure(conn, "cognition")
             cur = conn.execute("SELECT entity_id, data FROM cognition_model")
             for eid, data in cur.fetchall():
@@ -1691,7 +1689,8 @@ def load_from_db(db_path: str, now: float = None) -> int:
     except Exception as exc:
         _LOGGER.debug("cognition load_from_db failed: %s", exc)
     try:
-        with sqlite3.connect(db_path, timeout=10) as conn:
+        with _store.connect(db_path, timeout=10, row_factory=False, mkdir=False,
+                            busy_timeout_ms=None) as conn:
             rows = conn.execute("SELECT key, day FROM cognition_alerted").fetchall()
         for key, day in rows:
             if isinstance(key, str) and isinstance(day, int) \

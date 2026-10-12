@@ -46,10 +46,19 @@
     return `
       <div class="panel settings-card" id="settings-card-${c.id}" data-settings-group="${c.group}" data-search="${this._esc((c.title + " " + c.desc).toLowerCase())}">
         <div class="panel-head">
-          <div class="panel-title">${this._esc(c.title)}${c.real ? "" : '<span class="stub-tag">SOON</span>'}</div>
+          <div class="panel-title">${this._esc(c.title)}${c.real ? "" : '<span class="stub-tag">SOON</span>'}${this._notSetUpTag(c)}</div>
         </div>
         ${body}
       </div>`;
+  }
+
+  // An optional feature's card says when the feature is not set up yet
+  // (8.43.0). Only a backend "false" marks it, so an older backend marks
+  // nothing.
+  _notSetUpTag(c) {
+    const features = this._data()?.config?.optional_features || {};
+    if (!c.feature || features[c.feature] !== false) return "";
+    return `<span class="stub-tag">${this._esc(this._t("NOT SET UP"))}</span>`;
   }
 
   // The "Nova speaks" choice for a saved code: the base language, except

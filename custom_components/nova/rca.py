@@ -33,6 +33,7 @@ import sqlite3
 from datetime import datetime, timedelta
 from typing import Optional
 from . import paths
+from .persistence import sqlite as _store
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -91,7 +92,8 @@ def _tokens(entity_id: str) -> set:
 def _rows(db_path: str, sql: str, params: tuple) -> list[dict]:
     """Query a DB tolerantly: no file / no table / bad SQL ⇒ []."""
     try:
-        with sqlite3.connect(db_path) as conn:
+        with _store.connect(db_path, row_factory=False, mkdir=False,
+                            busy_timeout_ms=None) as conn:
             conn.row_factory = sqlite3.Row
             return [dict(r) for r in conn.execute(sql, params).fetchall()]
     except Exception:

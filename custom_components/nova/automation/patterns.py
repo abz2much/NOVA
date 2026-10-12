@@ -455,10 +455,8 @@ class PatternAnalyzer:
         try:
             if not Path(self._db).exists():
                 return None
-            conn = sqlite3.connect(self._db)
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA busy_timeout=10000")
-            conn.row_factory = sqlite3.Row
+            from ..persistence import sqlite as _store  # lazy: package layering rule
+            conn = _store.connect(self._db, mkdir=False)
             return conn
         except Exception:
             return None

@@ -28,6 +28,7 @@ from .presence import get_presence_summary
 from .tts_helper import async_announce
 from . import paths
 from typing import Optional
+from .persistence import sqlite as _store
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -122,7 +123,6 @@ def _gather_energy_anomalies(hass: HomeAssistant) -> list[str]:
 
 def _gather_overnight_events(hass: HomeAssistant, hours: int = 12) -> list[str]:
     """Sentinel events from the database in the last N hours."""
-    import sqlite3
     from pathlib import Path
     db = Path(_conversations_db())
     events = []
@@ -130,7 +130,8 @@ def _gather_overnight_events(hass: HomeAssistant, hours: int = 12) -> list[str]:
         if not db.exists():
             return []
         since = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=hours)).isoformat()
-        with sqlite3.connect(str(db)) as conn:
+        with _store.connect(str(db), row_factory=False, mkdir=False,
+                            busy_timeout_ms=None) as conn:
             rows = conn.execute(
                 "SELECT timestamp, detail FROM sentinel_events WHERE timestamp > ? "
                 "ORDER BY timestamp DESC LIMIT 10",

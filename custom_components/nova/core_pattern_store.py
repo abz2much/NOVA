@@ -28,11 +28,11 @@ class StateLogger:
         self._init_db()
 
     def _init_db(self):
-        import sqlite3
         from pathlib import Path
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
         try:
-            with sqlite3.connect(self._db_path) as conn:
+            with _store.connect(self._db_path, row_factory=False, mkdir=False,
+                                busy_timeout_ms=None) as conn:
                 _store.ensure(conn, "pattern_log", "person_patterns")
         except Exception as exc:
             _LOGGER.warning("Pattern DB init failed: %s", exc)
@@ -50,7 +50,6 @@ class StateLogger:
         (v7.109.0) is the SOURCE's own confidence in the event happening at
         all — distinct from person_confidence (confidence in WHO). None
         means the source supplied no score; never invented here."""
-        import sqlite3
         domain = entity_id.split(".")[0]
         if domain in ("automation", "script", "input_boolean", "input_number"):
             return  # Meta entities, not useful for patterns
@@ -66,7 +65,8 @@ class StateLogger:
 
         now = datetime.now()
         try:
-            with sqlite3.connect(self._db_path) as conn:
+            with _store.connect(self._db_path, row_factory=False, mkdir=False,
+                                busy_timeout_ms=None) as conn:
                 conn.execute(
                     "INSERT INTO state_changes "
                     "(timestamp, entity_id, domain, old_state, new_state, "
@@ -86,10 +86,10 @@ class StateLogger:
     def log_command(self, text: str, handled_by: str = "agent",
                      entity_ids: list = None, person: str = "unknown"):
         """Record a voice/text command for pattern analysis."""
-        import sqlite3
         now = datetime.now()
         try:
-            with sqlite3.connect(self._db_path) as conn:
+            with _store.connect(self._db_path, row_factory=False, mkdir=False,
+                                busy_timeout_ms=None) as conn:
                 conn.execute(
                     "INSERT INTO commands "
                     "(timestamp, text, handled_by, entity_ids, person, "
@@ -105,9 +105,9 @@ class StateLogger:
     def distinct_logged_entities(self) -> set:
         """Entities already present in the pattern store — skipped on backfill so
         importing history can't double-count what live logging already covers."""
-        import sqlite3
         try:
-            with sqlite3.connect(self._db_path) as conn:
+            with _store.connect(self._db_path, row_factory=False, mkdir=False,
+                                busy_timeout_ms=None) as conn:
                 return {r[0] for r in conn.execute(
                     "SELECT DISTINCT entity_id FROM state_changes")}
         except Exception:
@@ -118,7 +118,6 @@ class StateLogger:
         (timestamp_iso, entity_id, domain, old_state, new_state); hour and
         day_of_week are derived from the historical timestamp (not now), and the
         source is tagged 'history'. Returns the number inserted."""
-        import sqlite3
         prepared = []
         for row in rows:
             try:
@@ -131,7 +130,8 @@ class StateLogger:
         if not prepared:
             return 0
         try:
-            with sqlite3.connect(self._db_path) as conn:
+            with _store.connect(self._db_path, row_factory=False, mkdir=False,
+                                busy_timeout_ms=None) as conn:
                 conn.executemany(
                     "INSERT INTO state_changes "
                     "(timestamp, entity_id, domain, old_state, new_state, "
@@ -144,11 +144,11 @@ class StateLogger:
 
     def get_pattern_stats(self) -> dict:
         """Return learning statistics."""
-        import sqlite3
         stats = {"state_changes": 0, "commands": 0, "suggestions": 0,
                  "patterns": 0, "days_of_data": 0}
         try:
-            with sqlite3.connect(self._db_path) as conn:
+            with _store.connect(self._db_path, row_factory=False, mkdir=False,
+                                busy_timeout_ms=None) as conn:
                 stats["state_changes"] = conn.execute(
                     "SELECT COUNT(*) FROM state_changes").fetchone()[0]
                 stats["commands"] = conn.execute(

@@ -56,6 +56,14 @@ def _wellbeing(hass: HomeAssistant) -> bool:
     return _on(hass, "biometrics_enabled")
 
 
+def _host_health(hass: HomeAssistant) -> bool:
+    return _on(hass, "host_health_enabled")
+
+
+def _voice_id(hass: HomeAssistant) -> bool:
+    return bool(str(_setting(hass, "voice_id_uri", "") or "").strip())
+
+
 def _web_research(hass: HomeAssistant) -> bool:
     backend = str(_setting(hass, "search_backend", "off") or "off").lower()
     return backend in ("duckduckgo", "searxng")
@@ -89,6 +97,9 @@ FEATURES: dict[str, tuple[Callable[[HomeAssistant], bool], frozenset[str]]] = {
     "cameras": (_cameras, frozenset({"look_at_camera", "where_last_seen", "what_changed"})),
     "energy": (_energy, frozenset({
         "energy_status", "solar_status", "energy_report", "energy_outlook"})),
+    # No AI tools of their own; listed so the panel can mark them (8.43.0).
+    "host_health": (_host_health, frozenset()),
+    "voice_id": (_voice_id, frozenset()),
 }
 
 
@@ -115,5 +126,6 @@ def tools_not_set_up(hass: HomeAssistant) -> frozenset[str]:
 
 
 def status(hass: HomeAssistant) -> dict[str, bool]:
-    """Each optional feature and whether it is set up, for diagnostics."""
+    """Each optional feature and whether it is set up, for diagnostics and
+    the panel's "Not set up" marks."""
     return {feature: is_set_up(hass, feature) for feature in FEATURES}

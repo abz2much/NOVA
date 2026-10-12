@@ -25,7 +25,6 @@ from __future__ import annotations
 import json
 import logging
 import math
-import sqlite3
 import struct
 from typing import Optional
 
@@ -98,7 +97,8 @@ def _unpack(blob: bytes) -> list[float]:
 def init_store() -> bool:
     """Create the vector table if absent. Returns True on success."""
     try:
-        conn = sqlite3.connect(_db_path())
+        conn = _store.connect(_db_path(), row_factory=False, mkdir=False,
+                              busy_timeout_ms=None)
         _store.ensure(conn, "doc_vectors")
         conn.commit()
         conn.close()
@@ -110,7 +110,8 @@ def init_store() -> bool:
 
 def forget_source(source: str) -> None:
     try:
-        conn = sqlite3.connect(_db_path())
+        conn = _store.connect(_db_path(), row_factory=False, mkdir=False,
+                              busy_timeout_ms=None)
         conn.execute("DELETE FROM doc_vectors WHERE source = ?", (source,))
         conn.commit()
         conn.close()
@@ -125,7 +126,8 @@ def store_vectors(source: str, chunks: list[str], vectors: list[list[float]],
         return 0
     model = _model()
     try:
-        conn = sqlite3.connect(_db_path())
+        conn = _store.connect(_db_path(), row_factory=False, mkdir=False,
+                              busy_timeout_ms=None)
         conn.executemany(
             "INSERT INTO doc_vectors (source, chunk, content, dim, vec, model, "
             "ingested) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -143,7 +145,8 @@ def store_vectors(source: str, chunks: list[str], vectors: list[list[float]],
 
 def vector_count() -> int:
     try:
-        conn = sqlite3.connect(_db_path())
+        conn = _store.connect(_db_path(), row_factory=False, mkdir=False,
+                              busy_timeout_ms=None)
         n = conn.execute("SELECT COUNT(*) FROM doc_vectors").fetchone()[0]
         conn.close()
         return int(n)
@@ -173,8 +176,8 @@ def search_vectors(query_vec: list[float], k: int = 4) -> list[dict]:
     if not query_vec:
         return []
     try:
-        conn = sqlite3.connect(_db_path())
-        conn.row_factory = sqlite3.Row
+        conn = _store.connect(_db_path(), mkdir=False,
+                              busy_timeout_ms=None)
         rows = conn.execute(
             "SELECT source, chunk, content, vec FROM doc_vectors").fetchall()
         conn.close()

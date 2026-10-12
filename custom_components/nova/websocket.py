@@ -22,7 +22,7 @@ import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 
-from . import audio_routing, settings_schema, sleep_detection
+from . import audio_routing, optional_features, settings_schema, sleep_detection
 from .safe_errors import safe_error_message
 # The debug log lives in ws_log.py (it imports no Home Assistant code). Other
 # modules and tests reach these names through this module, so they stay
@@ -616,6 +616,9 @@ async def ws_get_panel_data(
                 "hazard_met_eireann_on":  _hazard_flag(hass, "hazard_met_eireann_on"),
                 "hazard_source":          _hazard_source(hass, entry),
                 "home_context_max_entities": _int_opt(hass, entry, "home_context_max_entities", 15),
+                # Which optional features are set up, so the panel can mark
+                # the cards of the rest (8.43.0).
+                "optional_features": optional_features.status(hass),
             },
         }
         connection.send_result(msg["id"], result)

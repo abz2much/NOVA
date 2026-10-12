@@ -11,10 +11,10 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 import math
 import re
-import sqlite3
 from typing import Iterable
 from . import paths
 from typing import Optional
+from .persistence import sqlite as _store
 
 
 DB_PATH: Optional[str] = None  # override; None resolves via paths.py
@@ -170,7 +170,8 @@ def read_recent_events(
     )
     events: list[CameraEvent] = []
     try:
-        with sqlite3.connect(db_path) as conn:
+        with _store.connect(db_path, row_factory=False, mkdir=False,
+                            busy_timeout_ms=None) as conn:
             rows = conn.execute(query, params).fetchall()
     except Exception:
         return []

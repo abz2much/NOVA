@@ -33,7 +33,8 @@ need nothing else.
 ## Optional: off until set up
 
 An optional feature does nothing until you set it up, and the AI is not
-offered its tools before then.
+offered its tools before then. In Settings, the Voice ID, Host Health, Cameras
+and Wellbeing Context cards say "Not set up" until their feature is.
 
 | Feature | How to set it up |
 | --- | --- |

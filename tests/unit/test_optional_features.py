@@ -35,7 +35,8 @@ def test_each_feature_is_offered_once_set_up(of):
     hass = FakeHass()
     of.saved.update({"imap_enabled": True, "imap_host": "mail.example.com",
                      "n8n_webhook_base_url": "http://n8n.local", "biometrics_enabled": True,
-                     "search_backend": "duckduckgo", "recognition_source": "frigate"})
+                     "search_backend": "duckduckgo", "recognition_source": "frigate",
+                     "host_health_enabled": True, "voice_id_uri": "tcp://voice.local:10300"})
     hass.states.set("camera.porch", "idle")
     hass.states.set("sensor.house_power", "500", device_class="power")
     assert of.tools_not_set_up(hass) == frozenset()
@@ -73,3 +74,24 @@ async def test_web_research_does_nothing_until_set_up(load, monkeypatch):
     monkeypatch.setattr(load("nova_config"), "get", lambda k, d=None: d)
     out = await wr.research(FakeHass(), "anything")
     assert "not set up" in out["error"]
+
+
+def test_features_without_tools_are_still_reported(of):
+    # Host health and Voice ID have no AI tools; the panel marks their cards.
+    hass = FakeHass()
+    assert of.status(hass)["host_health"] is False
+    assert of.status(hass)["voice_id"] is False
+    of.saved.update({"host_health_enabled": True, "voice_id_uri": "tcp://voice.local:10300"})
+    assert of.status(hass)["host_health"] is True
+    assert of.status(hass)["voice_id"] is True
+    assert of.tools_not_set_up(hass) == ALL_OPTIONAL
+
+
+def test_the_panel_marks_cards_from_the_backend_status():
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parents[2]
+    ws = (root / "custom_components" / "nova" / "websocket.py").read_text()
+    assert '"optional_features": optional_features.status(hass),' in ws
+    cat = (root / "frontend" / "src" / "panel" / "settings-catalogue.js").read_text()
+    for feature in ("voice_id", "host_health", "cameras", "wellbeing"):
+        assert f'feature: "{feature}"' in cat

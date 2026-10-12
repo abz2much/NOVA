@@ -2,7 +2,7 @@
  * frontend/src/. Edit the sources there, then run the build. */
 /*
  * Nova Command Center Panel.
- * v8.42.0
+ * v8.43.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -79,7 +79,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.42.0 ",
+      console.log("%c Nova Panel %c v8.43.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -3143,7 +3143,7 @@ ${this._htmlDashboardBody()}`;
       desc: "Daily briefing schedule, content, and delivery speakers." },
     { id: "voice_confirmation", group: "voice", title: "Voice Confirmation", real: true,
       desc: "Whether risky actions need a spoken or phone confirmation before Nova acts." },
-    { id: "voice_id", group: "voice", title: "Voice ID", real: true,
+    { id: "voice_id", group: "voice", title: "Voice ID", real: true, feature: "voice_id",
       desc: "Speech to text through the Nova Voice ID app, with a fallback for when the app is down." },
     { id: "satellite_speaker", group: "voice", title: "Satellite → Speaker", real: true,
       desc: "Per-satellite override, for a specific satellite that shouldn't use its room's assigned speaker." },
@@ -3157,7 +3157,7 @@ ${this._htmlDashboardBody()}`;
       desc: "Enable or disable individual door and lock anomaly rules." },
     { id: "hazard_monitor", group: "safety", title: "Hazard Monitor", real: true,
       desc: "One weather-warning source for your area, with optional earthquake and NASA feeds under Advanced." },
-    { id: "host_health", group: "safety", title: "Host Health", real: true,
+    { id: "host_health", group: "safety", title: "Host Health", real: true, feature: "host_health",
       desc: "Home Assistant's own System Monitor readings for the machine Nova runs on — off by default." },
     { id: "anticipation_memory", group: "learning", title: "Anticipation & Memory", real: true,
       desc: "Cross-session memory window, continued conversation, and multi-satellite follow." },
@@ -3169,7 +3169,7 @@ ${this._htmlDashboardBody()}`;
       desc: "What Nova is allowed to learn from — doors, presence, button presses." },
     { id: "excluded_entities", group: "learning", title: "Excluded Entities", real: true,
       desc: "Entities, domains, or labels Nova should ignore entirely." },
-    { id: "cameras", group: "cameras", title: "Cameras", real: true,
+    { id: "cameras", group: "cameras", title: "Cameras", real: true, feature: "cameras",
       desc: "Camera names, indoor/outdoor designation, and location overrides." },
     { id: "doorbell_training", group: "cameras", title: "Doorbell Training", real: true,
       desc: "Teach Nova to recognize regular visitors at the door." },
@@ -3177,7 +3177,7 @@ ${this._htmlDashboardBody()}`;
       desc: "Stories, garage and basement, which entity is each door, and the exit doors you leave by." },
     { id: "floor_plan_editor", group: "home", title: "Floor Plan Editor", real: true,
       desc: "Rooms, outdoor zones, property line, windows/doors/dormers, camera placement, a background image, and AI camera-coverage estimation." },
-    { id: "wellbeing_context", group: "home", title: "Wellbeing Context", real: true,
+    { id: "wellbeing_context", group: "home", title: "Wellbeing Context", real: true, feature: "wellbeing",
       desc: "Whether wearable heart-rate/sleep data reaches Nova, and which providers." },
     { id: "character_research", group: "home", title: "Nova Character & Research", real: true,
       desc: "Banter level and the web-research backend (DuckDuckGo or self-hosted SearXNG)." },
@@ -4046,10 +4046,19 @@ ${this._htmlDashboardBody()}`;
     return `
       <div class="panel settings-card" id="settings-card-${c.id}" data-settings-group="${c.group}" data-search="${this._esc((c.title + " " + c.desc).toLowerCase())}">
         <div class="panel-head">
-          <div class="panel-title">${this._esc(c.title)}${c.real ? "" : '<span class="stub-tag">SOON</span>'}</div>
+          <div class="panel-title">${this._esc(c.title)}${c.real ? "" : '<span class="stub-tag">SOON</span>'}${this._notSetUpTag(c)}</div>
         </div>
         ${body}
       </div>`;
+  }
+
+  // An optional feature's card says when the feature is not set up yet
+  // (8.43.0). Only a backend "false" marks it, so an older backend marks
+  // nothing.
+  _notSetUpTag(c) {
+    const features = this._data()?.config?.optional_features || {};
+    if (!c.feature || features[c.feature] !== false) return "";
+    return `<span class="stub-tag">${this._esc(this._t("NOT SET UP"))}</span>`;
   }
 
   // The "Nova speaks" choice for a saved code: the base language, except

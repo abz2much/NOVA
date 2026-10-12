@@ -65,8 +65,8 @@ _initialized = False
 def _init_fts() -> bool:
     global _fts_ok
     try:
-        import sqlite3
-        conn = sqlite3.connect(_db_path())
+        conn = _store.connect(_db_path(), row_factory=False, mkdir=False,
+                              busy_timeout_ms=None)
         _store.ensure(conn, "document_fts")
         conn.commit()
         conn.close()
@@ -179,8 +179,8 @@ def _forget_source(source: str) -> None:
     """Remove all chunks for a source before re-ingesting (idempotent re-scan)."""
     if _fts_ok:
         try:
-            import sqlite3
-            conn = sqlite3.connect(_db_path())
+            conn = _store.connect(_db_path(), row_factory=False, mkdir=False,
+                                  busy_timeout_ms=None)
             conn.execute("DELETE FROM document_fts WHERE source = ?", (source,))
             conn.commit()
             conn.close()
@@ -238,8 +238,8 @@ def ingest_file(path: str) -> dict:
 
     if _fts_ok:
         try:
-            import sqlite3
-            conn = sqlite3.connect(_db_path())
+            conn = _store.connect(_db_path(), row_factory=False, mkdir=False,
+                                  busy_timeout_ms=None)
             conn.executemany(
                 "INSERT INTO document_fts (content, source, chunk_id, ingested) "
                 "VALUES (?, ?, ?, ?)",
@@ -410,9 +410,9 @@ def _cfg(key: str, default):
 
 def _read_seen() -> dict:
     """Path -> mtime of every file already ingested ({} on any failure)."""
-    import sqlite3
     try:
-        with closing(sqlite3.connect(_db_path())) as conn:
+        with closing(_store.connect(_db_path(), row_factory=False, mkdir=False,
+                                    busy_timeout_ms=None)) as conn:
             _store.ensure(conn, "document_watch_seen")
             conn.commit()
             return {r[0]: r[1] for r in
@@ -423,9 +423,9 @@ def _read_seen() -> dict:
 
 def _mark_seen(key: str, mtime: float) -> None:
     """Record that `key` was ingested at this mtime. Never raises."""
-    import sqlite3
     try:
-        with closing(sqlite3.connect(_db_path())) as conn:
+        with closing(_store.connect(_db_path(), row_factory=False, mkdir=False,
+                                    busy_timeout_ms=None)) as conn:
             conn.execute("INSERT OR REPLACE INTO document_watch_seen "
                          "(path, mtime, ingested) VALUES (?, ?, ?)",
                          (key, mtime, datetime.now(timezone.utc).replace(tzinfo=None).isoformat()))
@@ -649,9 +649,8 @@ def search_documents(query: str, k: int = 4) -> list[dict]:
 
     if _fts_ok:
         try:
-            import sqlite3
-            conn = sqlite3.connect(_db_path())
-            conn.row_factory = sqlite3.Row
+            conn = _store.connect(_db_path(), mkdir=False,
+                                  busy_timeout_ms=None)
             terms = " OR ".join(re.findall(r"\w+", query)[:8]) or query
             rows = conn.execute(
                 "SELECT content, source, chunk_id, rank FROM document_fts "
@@ -674,9 +673,8 @@ def library_status() -> dict:
             "chunk_count": 0, "sources": []}
     if _fts_ok:
         try:
-            import sqlite3
-            conn = sqlite3.connect(_db_path())
-            conn.row_factory = sqlite3.Row
+            conn = _store.connect(_db_path(), mkdir=False,
+                                  busy_timeout_ms=None)
             rows = conn.execute(
                 "SELECT source, COUNT(*) n FROM document_fts GROUP BY source"
             ).fetchall()

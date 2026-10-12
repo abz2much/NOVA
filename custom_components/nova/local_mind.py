@@ -40,6 +40,7 @@ import time
 from collections import deque
 from typing import Optional
 from . import paths
+from .persistence import sqlite as _store
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -64,8 +65,8 @@ _stats = {"decisions": 0, "spoke": 0, "silent": 0}
 
 def _connect() -> Optional[sqlite3.Connection]:
     try:
-        conn = sqlite3.connect(DB_PATH or paths.patterns_db(), timeout=2.0)
-        conn.row_factory = sqlite3.Row
+        conn = _store.connect(DB_PATH or paths.patterns_db(), timeout=2.0, mkdir=False,
+                              busy_timeout_ms=None)
         return conn
     except Exception:
         return None
