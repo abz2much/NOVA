@@ -35,7 +35,7 @@ Nova can control your home when you ask. What it won't do on its own is take big
 - Home Assistant 2024.10.0 or newer, with [HACS](https://hacs.xyz) installed.
 - An AI for Nova to use. Pick one: a key from [Groq](https://console.groq.com), Anthropic, OpenAI or Gemini, or the address of a local Ollama server.
 
-Everything else is optional. Cameras are covered in [Camera setup](docs/camera-setup.md). On Home Assistant OS or Supervised, Nova sets up the voice add-ons (Piper, Whisper and openWakeWord) for you. On Container or Core installs you add them yourself.
+Everything else is optional. Cameras are covered in [Camera setup](docs/camera-setup.md). On Home Assistant OS or Supervised, Nova can set up the voice add-ons (Piper, Whisper and openWakeWord) for you: turn on "Install voice add-ons" in Settings → Anticipation & Memory. On Container or Core installs you add them yourself. [What Nova includes](docs/product-scope.md) lists every core and optional feature.
 
 ## Install
 
@@ -142,6 +142,7 @@ Nova follows Home Assistant's language, and you can choose another under Setting
 ## Guides
 
 - [Getting started](docs/getting-started.md): setup, AI models, where settings live, a tour of the panel
+- [What Nova includes](docs/product-scope.md): core features and the optional ones, and how to set each up
 - [Safety and security](docs/safety-and-security.md): intrusion, lockdown, things left open, smoke, leaks and freezing pipes
 - [Cameras and faces](docs/cameras-and-faces.md): doorbell, packages and mail, scene memory, faces
 - [Camera setup](docs/camera-setup.md): Frigate, Eufy, Nest and go2rtc

@@ -8,7 +8,8 @@ needs, what it does by itself, and what it never does without you.
 
 - **Hazards.** A smoke, gas, carbon monoxide or water leak sensor is treated
   as critical. It is announced whatever the sensor is called, and no mute or
-  quiet hours can silence it.
+  quiet hours can silence it. This works on every install, with the
+  Observer on or off (since 8.41.0), and goes to the phones as well.
 - **Freezing pipes.** When the outdoor temperature reaches 35°F (about 2°C)
   Nova warns once. At 20°F (about −7°C) it raises a critical alert.
 - **Left open (Sentinel).** A door open for 10 minutes, a window for 30, a

@@ -404,7 +404,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
                 now = _auto_time.monotonic()
 
                 if role.startswith("package_"):
-                    if not _auto_flag("package_detection", True):
+                    if not _auto_flag("package_detection", False):
                         return
                     honorific = _live_honorific(hass)
                     tts = _get_tts(hass, entry, context="package")
@@ -552,7 +552,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
     PKG_INTERVAL = timedelta(minutes=15)
 
     async def _package_tick(_now) -> None:
-        if not _auto_flag("package_detection", True):
+        if not _auto_flag("package_detection", False):
             return
         try:
             from . import package_monitor
@@ -611,7 +611,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
                     return
                 sensor_id = event.data.get("entity_id")
                 kind = _pkg_sensors.get(sensor_id)
-                if not kind or not _auto_flag("package_detection", True):
+                if not kind or not _auto_flag("package_detection", False):
                     return
                 # A background task: it may sleep 20 s, and must not hold up
                 # Home Assistant's own task tracking or shutdown.
@@ -1090,6 +1090,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
         await cognitive_core.ensure_lockdown(hass, lockdown_config)
     except Exception as exc:
         _LOGGER.warning("Nova lockdown wiring failed (non-fatal): %s", exc)
+        lockdown_config = None
+
+    # ── Cognitive core: on every install (8.41.0) ─────────────────────────
+    # Smoke, CO, gas and leak alarms, freeze warnings and intrusion checks
+    # live in the core, so it runs whether the Observer is on or not. Before
+    # 8.41.0 only the Observer started it, and the Observer is off by default.
+    try:
+        from . import cognitive_core
+        if lockdown_config is None:
+            lockdown_config = dict(_eff)
+        await cognitive_core.start(hass, lockdown_config, entry=entry)
+    except Exception as exc:
+        _LOGGER.error("Nova cognitive core failed to start: %s", exc)
 
     # ── v5.4 Command Center panel ──────────────────────────────────────────
     # Register sidebar panel. Idempotent — safe if called after reload.
@@ -1171,27 +1184,22 @@ async def async_unload_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> boo
     if reminder_watcher:
         await reminder_watcher.async_stop()
 
-    # Stop observer if it's running. observer.stop() also stops the cognitive
-    # core; otherwise stop the core here. Setup always wires lockdown
-    # (cognitive_core.ensure_lockdown) even with the observer off, and its
-    # alarm listener must not outlive the entry. cognitive_core.stop() is
-    # idempotent, so a partial observer stop followed by this is safe.
-    core_stopped = False
+    # Stop observer if it's running, then the cognitive core, which setup
+    # starts on every install (8.41.0). Its alarm listener must not outlive
+    # the entry. cognitive_core.stop() is idempotent.
     if observer_running:
         try:
             from . import observer as observer_mod
             await observer_mod.stop()
-            core_stopped = True
             if runtime is not None:
                 set_observer_running(entry, False)
         except Exception as exc:
             _LOGGER.debug("Observer stop failed: %s", exc)
-    if not core_stopped:
-        try:
-            from . import cognitive_core
-            await cognitive_core.stop()
-        except Exception as exc:
-            _LOGGER.debug("Cognitive core stop failed: %s", exc)
+    try:
+        from . import cognitive_core
+        await cognitive_core.stop()
+    except Exception as exc:
+        _LOGGER.debug("Cognitive core stop failed: %s", exc)
     # Release the stopped core's hass/config/lockdown manager so a reload
     # builds lockdown from the new instance and config, not this entry's.
     try:

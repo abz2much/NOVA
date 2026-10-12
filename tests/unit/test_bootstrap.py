@@ -69,6 +69,19 @@ def test_bootstrap_has_no_voice_download(bootstrap):
 
 # ── async_run_bootstrap guards (the safety gates) ────────────────────────────
 
+def _switched_on(k, d=None):
+    """The voice add-on install switched on (it is off until set up, 8.41.0)."""
+    return True if k == "auto_bootstrap" else d
+
+
+@pytest.mark.asyncio
+async def test_a_new_install_installs_nothing(bootstrap, nova_config, fake_hass, monkeypatch):
+    monkeypatch.setenv("SUPERVISOR_TOKEN", "tok")
+    monkeypatch.setattr(nova_config, "get", lambda k, d=None: d)
+    status = await bootstrap.async_run_bootstrap(fake_hass)
+    assert status["skipped"] == "auto_bootstrap disabled"
+
+
 @pytest.mark.asyncio
 async def test_skips_when_flag_disabled(bootstrap, nova_config, fake_hass, monkeypatch):
     monkeypatch.setenv("SUPERVISOR_TOKEN", "tok")
@@ -82,7 +95,7 @@ async def test_skips_when_flag_disabled(bootstrap, nova_config, fake_hass, monke
 @pytest.mark.asyncio
 async def test_skips_without_supervisor(bootstrap, nova_config, fake_hass, monkeypatch):
     monkeypatch.delenv("SUPERVISOR_TOKEN", raising=False)
-    monkeypatch.setattr(nova_config, "get", lambda k, d=None: d)
+    monkeypatch.setattr(nova_config, "get", _switched_on)
     status = await bootstrap.async_run_bootstrap(fake_hass)
     assert status["supervised"] is False
     assert "Supervisor" in status["skipped"]
@@ -91,7 +104,7 @@ async def test_skips_without_supervisor(bootstrap, nova_config, fake_hass, monke
 @pytest.mark.asyncio
 async def test_skips_when_already_bootstrapped(bootstrap, nova_config, fake_hass, monkeypatch):
     monkeypatch.setenv("SUPERVISOR_TOKEN", "tok")
-    monkeypatch.setattr(nova_config, "get", lambda k, d=None: d)
+    monkeypatch.setattr(nova_config, "get", _switched_on)
     version = bootstrap._current_version()
     bootstrap._write_marker(version, {"addons_ok": True})
     status = await bootstrap.async_run_bootstrap(fake_hass)
@@ -103,7 +116,7 @@ async def test_force_overrides_marker(bootstrap, nova_config, fake_hass, monkeyp
     # force=True must NOT early-return on the marker; it should proceed past the
     # marker gate (and then do real work, which we cut short by failing addons).
     monkeypatch.setenv("SUPERVISOR_TOKEN", "tok")
-    monkeypatch.setattr(nova_config, "get", lambda k, d=None: d)
+    monkeypatch.setattr(nova_config, "get", _switched_on)
     bootstrap._write_marker(bootstrap._current_version(), {"addons_ok": True})
 
     async def _no_addon(hass, slug, friendly):
@@ -279,7 +292,7 @@ async def test_create_pipeline_existing_repairs_agent(bootstrap, fake_hass):
 @pytest.mark.asyncio
 async def test_run_bootstrap_builds_pipeline_without_voice(bootstrap, nova_config, fake_hass, monkeypatch):
     monkeypatch.setenv("SUPERVISOR_TOKEN", "tok")
-    cfg = {"auto_pipeline": True}
+    cfg = {"auto_pipeline": True, "auto_bootstrap": True}
     monkeypatch.setattr(nova_config, "get", lambda k, d=None: cfg.get(k, d))
 
     async def _fake_ensure_addon(hass, slug, friendly):
@@ -330,7 +343,7 @@ class _Notices:
 
 def _wire_run(bootstrap, nova_config, monkeypatch, load, *, addons=True, pipeline=True, cfg=None):
     monkeypatch.setenv("SUPERVISOR_TOKEN", "tok")
-    cfg = {"auto_pipeline": True, **(cfg or {})}
+    cfg = {"auto_pipeline": True, "auto_bootstrap": True, **(cfg or {})}
     monkeypatch.setattr(nova_config, "get", lambda k, d=None: cfg.get(k, d))
     rn = load("repair_notices")
     notices = _Notices()

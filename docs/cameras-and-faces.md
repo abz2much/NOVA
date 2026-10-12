@@ -112,7 +112,7 @@ Panel, **Settings → Cameras**:
 | Also analyze motion events | Also looks at Frigate detection events that are not doorbell presses. Noisier. Off by default. |
 | Package Watch | Watches porch cameras for packages and mail. |
 | Visitor Learning | Keeps a quiet log of visitors. Never spoken. |
-| Face recognition source | Both (Double Take + Frigate), Frigate only, or Double Take only. |
+| Face recognition source | Off (the default), Both (Double Take + Frigate), Frigate only, or Double Take only. Nothing listens for faces while it is off. |
 | Recognition confidence | How sure a face match must be before Nova uses it. |
 | Each camera | A name for Nova, and its location. AUTO shows what Nova worked out. |
 

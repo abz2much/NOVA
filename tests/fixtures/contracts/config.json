@@ -38,7 +38,7 @@
     "CONF_USE_HASS_API": "use_hass_api",
     "CONF_VOICE_SATELLITES": "voice_satellites"
   },
-  "config_entry_schema_version": 8,
+  "config_entry_schema_version": 9,
   "config_entry_unique_id_calls": [
     "DOMAIN"
   ],
@@ -58,6 +58,7 @@
     "announcements_enabled",
     "appliance_profile",
     "arrival_front_door_entity",
+    "auto_bootstrap",
     "banter_level",
     "basement_mode",
     "biometric_entities",

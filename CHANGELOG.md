@@ -1,3 +1,18 @@
+## [8.41.0] — Nova core and optional features
+
+Smoke, carbon monoxide, gas and leak alarms now work on every install. Optional features stay off until you set them up, and the AI is only offered tools for what is set up. A new page, [What Nova includes](docs/product-scope.md), lists what is core and what is optional.
+
+### Changed
+- **Safety alarms no longer need the Observer.** Nova's core now starts on every install, not only when the Observer is on (it is off by default). A smoke, carbon monoxide, gas or water leak sensor that goes off is announced everywhere, quiet hours and sleep included, and pushed to the phones, with a fixed sentence and no AI involved. Freeze warnings, intrusion checks, lockdown, goals and follow-ups, suggestions and automatic modes run on every install too. With the Observer on, the core announces these alarms and the Observer no longer does, so nothing is said twice.
+- **Off until set up.** Package Watch, face recognition (MQTT listening for Frigate and Double Take), departure reminders, web research and the voice add-on install now start off on a new install. Turn them on in Settings. "Install voice add-ons" is a new switch in Settings → Anticipation & Memory. The face recognition source and the web research backend each have a new "Off" choice.
+- **The AI is only offered tools that are set up.** Email, the n8n specialists, wellbeing, web research, faces, cameras and energy each have their tools hidden until the feature is set up. Cameras and energy count as set up once Home Assistant has a camera, or a power or energy sensor.
+
+### Upgrading
+- Nothing turns off on upgrade. An install from before 8.41.0 that never changed Package Watch, the face recognition source, departure alerts, the web research backend or the voice add-on install keeps its old setting, saved once on the first start (config schema v9).
+
+### Unchanged
+- Every alert path, quiet hours, mutes and confirmations behave as in 8.40.0. The Observer still decides which ordinary events are worth telling you about.
+
 ## [8.40.0] — Nova clean-up: unused features removed
 
 Four features nobody used are gone, five old services start their retirement, and Nova no longer speaks up about unusual number readings.

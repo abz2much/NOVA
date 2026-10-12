@@ -91,3 +91,12 @@ def test_the_users_exclusion_still_wins(obs, monkeypatch):
     monkeypatch.setattr(ef, "is_excluded", lambda h, e, *a: True)
     o._on_state_changed(_event(*SMOKE))
     assert hass.tasks == []
+
+
+def test_the_core_owns_hazards_when_it_is_running(obs, load, monkeypatch):
+    # Since 8.41.0 the cognitive core announces hazards on every install,
+    # so a running core means the Observer must not announce them again.
+    o, hass, _, _ = obs
+    monkeypatch.setattr(load("core_state")._CORE, "running", True)
+    o._on_state_changed(_event(*SMOKE))
+    assert hass.tasks == []

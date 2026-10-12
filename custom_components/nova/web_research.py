@@ -7,6 +7,7 @@ training. Deliberately dependency-light and self-hosted-friendly:
 
   - Default backend is DuckDuckGo's Instant Answer API (api.duckduckgo.com) —
     no API key, no signup, returns a structured abstract + related topics.
+  - Off until set up (8.41.0): search_backend defaults to "off".
   - Configurable to a SearXNG instance (search_backend="searxng",
     searxng_url=...) for richer results on a box that runs one.
 
@@ -59,7 +60,11 @@ async def research(hass, query: str) -> dict:
     if not q:
         return {"query": "", "error": "empty query"}
 
-    backend = str(_cfg("search_backend", "duckduckgo")).lower()
+    backend = str(_cfg("search_backend", "off") or "off").lower()
+    if backend not in ("duckduckgo", "searxng"):
+        # Off until set up (8.41.0): no lookup leaves the house.
+        return {"query": q, "error": "web research is not set up — choose a "
+                                     "backend in Nova's settings"}
     try:
         if backend == "searxng":
             return await _searxng(hass, q)

@@ -58,6 +58,12 @@ TITLES: dict[str, dict[str, str]] = {
         "it": "Nova — Movimento rilevato", "nl": "Nova — Beweging gedetecteerd",
         "pt": "Nova — Movimento detetado",
     },
+    "critical_hazard": {
+        "en": "Nova — Safety Alarm", "fr": "Nova — Alarme de sécurité",
+        "de": "Nova — Sicherheitsalarm", "es": "Nova — Alarma de seguridad",
+        "it": "Nova — Allarme di sicurezza", "nl": "Nova — Veiligheidsalarm",
+        "pt": "Nova — Alarme de segurança",
+    },
     "lockdown": {
         "en": "Nova — House Secured", "fr": "Nova — Maison sécurisée",
         "de": "Nova — Haus gesichert", "es": "Nova — Casa asegurada",

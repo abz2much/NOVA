@@ -1214,7 +1214,7 @@ async def predict_departure(hass, now: float = None) -> list:
     out = []
     try:
         from . import nova_config
-        if not bool(nova_config.get("departure_alerts_enabled", True)):
+        if not bool(nova_config.get("departure_alerts_enabled", False)):
             return out
         try:
             lead_default = int(nova_config.get("departure_lead_minutes",

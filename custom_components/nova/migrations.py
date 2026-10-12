@@ -40,8 +40,11 @@ _LOGGER = logging.getLogger(__name__)
 #      HA area registry + bedroom_areas toggle + broadcast_group entity
 # v8 = the default lockdown exempt list became empty; existing installs keep
 #      the old two thermostat locks in their saved setting (8.28.0)
+# v9 = package watch, face recognition, departure reminders, web research and
+#      the voice add-on install are off until set up; existing installs keep
+#      them as they were (8.41.0)
 
-CURRENT_SCHEMA_VERSION = 8
+CURRENT_SCHEMA_VERSION = 9
 
 
 # ─── Migrations ──────────────────────────────────────────────────────────────
@@ -198,6 +201,43 @@ def migrate_7_to_8(data: dict, options: dict) -> tuple[dict, dict]:
     return data, options
 
 
+# Settings whose default changed in 8.41.0, with the old default an existing
+# install keeps.
+OFF_UNTIL_SET_UP_8_41: dict[str, object] = {
+    "package_detection": True,
+    "recognition_source": "both",
+    "departure_alerts_enabled": True,
+    "search_backend": "duckduckgo",
+    "auto_bootstrap": True,
+}
+
+
+def migrate_8_to_9(data: dict, options: dict) -> tuple[dict, dict]:
+    """v8 → v9: package watch, face recognition, departure reminders, web
+    research and the voice add-on install are off until set up.
+
+    An install that never saved one of these ran it by default. Write the old
+    default into the saved setting once, so this install behaves exactly as
+    before. A value already saved is left alone. A fresh install starts at
+    v9 and never runs this, so all three start off there.
+    """
+    kept = []
+    for key, old_default in OFF_UNTIL_SET_UP_8_41.items():
+        saved = None
+        try:
+            from . import nova_config
+            saved = nova_config.get(key, None)
+        except Exception:
+            saved = None
+        if saved is None and key not in options and key not in data:
+            options[key] = old_default
+            kept.append(key)
+    if kept:
+        _LOGGER.info("Nova migration v8→v9: kept the old defaults for %s",
+                     ", ".join(kept))
+    return data, options
+
+
 # (source_version, migration_function)
 MIGRATIONS: list[tuple[int, Callable]] = [
     (1, migrate_1_to_2),
@@ -207,6 +247,7 @@ MIGRATIONS: list[tuple[int, Callable]] = [
     (5, migrate_5_to_6),
     (6, migrate_6_to_7),
     (7, migrate_7_to_8),
+    (8, migrate_8_to_9),
 ]
 
 

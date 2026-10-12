@@ -171,6 +171,7 @@ _RECORDED_KINDS = {
     "intrusion_unresolved": "intrusion_unresolved",
     "freeze_warning": "hazard",
     "freeze_critical": "hazard",
+    "critical_hazard": "hazard",
 }
 
 

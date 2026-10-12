@@ -11,11 +11,14 @@ of the panel. Each main feature has its own guide, listed at the end.
 - [ ] **At least one AI provider**: a key for Groq, Anthropic, OpenAI or
   Gemini, or the address of an Ollama server on your network. You can use
   more than one.
-- [ ] **For voice:** Home Assistant OS or Supervised installs the voice add
-  ons for you. On Container or Core you add Piper, Whisper and openWakeWord
-  yourself. See [Voice and speakers](voice-and-speakers.md).
+- [ ] **For voice:** on Home Assistant OS or Supervised, turn on "Install
+  voice add-ons" (Settings → Anticipation & Memory) and Nova installs them at
+  the next restart. On Container or Core you add Piper, Whisper and
+  openWakeWord yourself. See [Voice and speakers](voice-and-speakers.md).
 
 Cameras, faces, energy and the rest are optional. Add them later.
+[What Nova includes](product-scope.md) lists what is core and what is
+optional.
 
 ## Installing
 

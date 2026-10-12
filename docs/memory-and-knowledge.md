@@ -103,7 +103,7 @@ Panel, **Settings → Nova Character & Research**:
 
 | Setting | What it does |
 |---|---|
-| Web research backend | DuckDuckGo, or your own SearXNG. |
+| Web research backend | Off (the default), DuckDuckGo, or your own SearXNG. |
 | SearXNG URL | Your SearXNG server. |
 | Calendar tight gap | Minutes between events treated as back to back. |
 
