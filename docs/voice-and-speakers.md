@@ -336,6 +336,11 @@ its settings and the token in Home Assistant's `secrets.yaml`. The voice
 result for a request lives only for that request, and the log lines hold
 numbers and ids, not audio or words.
 
+**Backups.** The app leaves voice data (profiles, recordings and scores) out
+of Home Assistant backups, so voices never leave the machine, even inside a
+backup file. After restoring a backup, or on a new machine, record each
+person's voice again. The token is in the backup, so Nova keeps working.
+
 ## What it works out by itself
 
 - The satellites and Cast devices it can use, for the speaker cards.

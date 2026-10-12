@@ -383,12 +383,17 @@ class NovaAgent(conversation.ConversationEntity):
         if voice_ident is None or turn_voice is None:
             return ""
         try:
-            from . import presence, voice_id
+            from . import identity, presence, voice_id
             first = None
+            agrees = False
             if turn_voice.person:
                 name = presence.person_name(self.hass, turn_voice.person) or ""
                 first = name.split()[0] if name.split() else None
-            return voice_id.speaker_hint(turn_voice, first)
+                # 8.39.0: the name only when the turn's final identity is
+                # the same person as the voice; otherwise "not sure".
+                agrees = bool(name) and voice_ident.known and \
+                    identity.normalize(voice_ident.person) == identity.normalize(name)
+            return voice_id.speaker_hint(turn_voice, first, identity_agrees=agrees)
         except Exception:
             return ""
 

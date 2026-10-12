@@ -41,6 +41,21 @@ need them if you edit that file by hand.
 | `voice_confirm_entities` | `config.json` only | Entity ids that must ask first while Voice Confirmation is on, or, written with a leading `!`, never ask. Use it to make a voice phrase's shell command ask first, such as `shell_command.heat_boost`. Reload Nova after editing. |
 | Mutes (`nova.shush` and `nova.unshush`) | The Muted card on the Command Center, or the services | Entity, category and blanket mutes are saved in `nova/output_mutes.json` and survive a restart. The Muted card lists them with an Unmute button and shows a banner while the blanket mute is on. Critical safety alerts are never muted. |
 
+## Voice ID
+
+All on **Settings → Voice & Speakers → Voice ID**. They need the
+[Nova Voice ID app](https://github.com/abz2much/nova-voice-id). See
+[Voice ID](voice-and-speakers.md#voice-id).
+
+| Setting | Where | What it does |
+| --- | --- | --- |
+| `voice_id_uri` | Voice ID → App address | The app's address, such as `tcp://<name>:10350`. Filled in by the app when Nova finds it; a value you type always wins. Empty turns the app off. |
+| App token | Voice ID → App token | The app's token, needed to record, list and delete voices. Kept in Home Assistant's `secrets.yaml` as `nova_voice_id_token`, never in `config.json`. Filled in by the app; a value you type always wins. |
+| `voice_id_fallback_stt` | Voice ID → Fallback speech to text | The speech to text entity used when the app can't be reached, usually your Whisper entity. Never Nova Voice ID itself. |
+| `voice_id_identity` | Voice ID → Use voice to tell who is speaking | Off by default. A known voice becomes one of the signals Nova uses to tell who is talking. A hint, never a key: unlocking, opening and disarming still need your phone. |
+| `voice_id_learning` | Voice ID → Improve voices from everyday use | Off by default. Needs `voice_id_identity` on and app 0.3.0. Adds a sample from an ordinary voice command when Nova is very sure who spoke. |
+| `voice_id_hidden_people` | Voice ID → People → Hide | People hidden from the People list, such as accounts that aren't real people. A list of `person.*` ids. |
+
 ## Safety
 
 | Setting | Where | What it does |

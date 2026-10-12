@@ -87,6 +87,22 @@ with your home's context, calls a tool, looks at the result, and answers.
 The tools are Nova's own, not the generic Home Assistant conversation
 interface. Most tools also have a control in the panel.
 
+### Voice ID
+
+With the Nova Voice ID app, Nova is the speech to text in your voice
+assistant: the satellite's audio goes to Home Assistant's pipeline, then to
+Nova Voice ID (`stt.nova_voice_id`), then to the app, which passes it to
+Whisper. The words come back unchanged, with the app's guess of who spoke.
+If the app is down, Nova hands the audio to your own speech to text instead.
+That guess is kept for that one request only.
+
+When you turn it on, a known voice is one of the signals Nova uses to tell
+who is speaking, alongside who is home, faces and rooms. It shapes which
+person's facts Nova uses and how it addresses you. It is a hint, never a
+key: no safety or confirmation path reads it, so unlocking, opening,
+disarming and calling off an intrusion still need a tap on your phone. See
+[Voice ID](voice-and-speakers.md#voice-id).
+
 ### Chat tab
 
 The Chat tab sends your message to the same agent over the `nova/chat`
@@ -195,6 +211,8 @@ themselves.
 - Voice can lock a door at once but can never unlock one or open a garage
   door. That always needs a tap on your phone, so a spoofed or faked voice
   can't open the house.
+- Knowing whose voice it is changes none of that. A voice Nova Voice ID
+  recognises is a hint about who is talking, never a key.
 - Critical safety announcements pass every gate: the rate limit, entity and
   category mutes, and a blanket `nova.shush`.
 - Smoke, gas, water and carbon monoxide are recognised from Home Assistant's

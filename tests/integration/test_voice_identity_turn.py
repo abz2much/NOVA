@@ -146,3 +146,30 @@ async def test_a_not_sure_turn_gets_the_not_sure_hint(
     assert call["speaker_hint"] == "Speaker: not sure."
     assert call["user_input"].context.user_id is None
     assert len(voice) == 1 and voice[0].startswith("status=not_sure")
+
+
+
+async def test_when_a_face_and_presence_outweigh_the_voice_the_hint_is_not_sure(
+        hass, isolated, no_switch, monkeypatch, socket_enabled):
+    """8.39.0: the voice says Bob, but Alice is home alone and a camera just saw
+    her, so identity names Alice. The AI hears "not sure", never "Bob"."""
+    conv = await _setup_nova(hass)
+    with patch("custom_components.nova.identity._home_people", new=lambda hass: ["Alice"]), \
+            patch("custom_components.nova.identity._face_votes",
+                  new=lambda hass, now, names=None: {"alice": 0.8}):
+        _result, spy, voice = await _turn(hass, monkeypatch, conv, BOB, on=True)
+    call = spy.calls[0]
+    assert call["identification"].person == "Alice"
+    assert call["speaker_hint"] == "Speaker: not sure."
+    assert " → Alice (" in voice[0]
+
+
+async def test_when_they_agree_the_name_is_shown(
+        hass, isolated, no_switch, monkeypatch, socket_enabled):
+    conv = await _setup_nova(hass)
+    with patch("custom_components.nova.identity._face_votes",
+               new=lambda hass, now, names=None: {}):
+        _result, spy, _voice = await _turn(hass, monkeypatch, conv, BOB, on=True)
+    call = spy.calls[0]
+    assert call["identification"].person == "Bob Jones"
+    assert call["speaker_hint"] == "Speaker (by voice, a hint, not proof of identity): Bob."
