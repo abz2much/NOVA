@@ -118,3 +118,20 @@ def _isolated_situations(tmp_path, monkeypatch):
     for remembered in (package_monitor._STATE, package_monitor._LAST_SPOKEN,
                        package_monitor._TRIGGER_LAST):
         remembered.clear()
+
+
+@pytest.fixture(autouse=True)
+def _no_cognitive_loop(monkeypatch):
+    """The cognitive core starts on every install since 8.41.0, and its
+    30 second loop never returns. A test that waits for background tasks
+    (async_block_till_done(wait_background_tasks=True)) would wait on it
+    forever. Here the loop returns at once; the core's state listener, hazard
+    alarms and start/stop still run, and a test that needs a tick calls
+    core_runtime._tick() itself."""
+    _enable_custom_components()
+    from custom_components.nova import core_runtime
+
+    async def _no_loop():
+        return None
+    monkeypatch.setattr(core_runtime, "_loop", _no_loop)
+    yield

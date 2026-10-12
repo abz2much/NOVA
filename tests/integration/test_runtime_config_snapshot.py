@@ -139,7 +139,9 @@ async def test_lockdown_in_flight_uses_its_snapshot(
 
     assert when_given["lockdown_on_alarm"] == "first"
     assert given == when_given
-    assert [c["lockdown_on_alarm"] for c in lockdown_calls] == ["first"]
+    # The cognitive core (on every install since 8.41.0) starts with the same
+    # snapshot and wires lockdown from it again.
+    assert [c["lockdown_on_alarm"] for c in lockdown_calls] == ["first", "first"]
 
     # The next lockdown configuration read sees the new value.
     from custom_components.nova.runtime import runtime_config_snapshot
