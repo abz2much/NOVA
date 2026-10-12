@@ -2,7 +2,7 @@
  * frontend/src/. Edit the sources there, then run the build. */
 /*
  * Nova Command Center Panel.
- * v8.41.0
+ * v8.42.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -79,7 +79,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.41.0 ",
+      console.log("%c Nova Panel %c v8.42.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -7240,7 +7240,7 @@ ${this._htmlDashboardBody()}`;
         cur = Array.isArray(cur) ? cur.slice() : [];
         const i = cur.indexOf(id);
         if (i >= 0) cur.splice(i, 1); else cur.push(id);
-        await this._saveSetting("lab_areas", cur);
+        await this._saveSetting("lab_areas", JSON.stringify(cur));
       });
     });
     const det = scope.querySelector("details.mode-bindings");

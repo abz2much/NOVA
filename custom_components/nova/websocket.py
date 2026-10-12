@@ -22,7 +22,7 @@ import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 
-from . import audio_routing, sleep_detection
+from . import audio_routing, settings_schema, sleep_detection
 from .safe_errors import safe_error_message
 # The debug log lives in ws_log.py (it imports no Home Assistant code). Other
 # modules and tests reach these names through this module, so they stay
@@ -501,7 +501,9 @@ async def ws_get_panel_data(
         uptime_str = _format_uptime(uptime_seconds)
 
         # ── Config flags for settings panel ─────────────────────────────
-        announcements_on = bool(_runtime_opt(hass, entry, "announcements_enabled", False))
+        announcements_on = bool(_runtime_opt(
+            hass, entry, "announcements_enabled",
+            settings_schema.default("announcements_enabled")))
         sentinel_on = bool(_runtime_opt(hass, entry, "sentinel_enabled", True))
 
         # Available notify services for phone notification dropdown
@@ -549,110 +551,29 @@ async def ws_get_panel_data(
                 _get_filtered_suggestions, _entity_names(hass)),
             "goals":          _get_goals(),
             "config": {
+                # Every "plain" setting, from its kind and default (settings_schema).
+                **settings_schema.payload(
+                    lambda key, default: _runtime_opt(hass, entry, key, default),
+                    lambda key, default: _get_runtime_json(hass, entry, key, default),
+                    _masked_url),
                 "announcements_enabled": announcements_on,
-                "announce_notify_only": bool(_runtime_opt(hass, entry, "announce_notify_only", False)),
                 "sentinel_enabled": sentinel_on,
                 "observer_enabled": observer_enabled_cfg,
-                "pattern_learn_doors":     bool(_runtime_opt(hass, entry, "pattern_learn_doors", False)),
-                "pattern_learn_presence":  bool(_runtime_opt(hass, entry, "pattern_learn_presence", False)),
-                "pattern_learn_buttons":   bool(_runtime_opt(hass, entry, "pattern_learn_buttons", False)),
-                # Phase 4, v7.109.0 — defaults to True (opt-out, not opt-in),
-                # unlike the doors/presence/buttons toggles above which
-                # default off: camera detections already reach Nova through
-                # an integration the administrator explicitly set up (Eufy/
-                # Frigate/Nest), so there's no new noise source being turned
-                # on by default the way "log every door" would be.
-                "camera_event_learning": bool(_runtime_opt(hass, entry, "camera_event_learning", True)),
                 "camera_historical_awareness": bool(_runtime_opt(
                     hass, entry, "camera_historical_awareness",
                     _runtime_opt(hass, entry, "camera_event_learning", True),
                 )),
-                "camera_awareness_min_observations": _runtime_opt(
-                    hass, entry, "camera_awareness_min_observations", 3,
-                ),
-                "scene_memory_enabled": _runtime_opt(
-                    hass, entry, "scene_memory_enabled", False) is True,
-                "scene_memory_retention_days": _runtime_opt(
-                    hass, entry, "scene_memory_retention_days", 14,
-                ),
-                # Phase 10 (v7.112.0) — off by default; auto-mapping only
-                # ever suggests, never enables a disabled System Monitor
-                # entity (see host_health.py).
-                "host_health_enabled": bool(_runtime_opt(hass, entry, "host_health_enabled", False)),
-                "host_health_alerts_enabled": bool(_runtime_opt(hass, entry, "host_health_alerts_enabled", False)),
-                "host_health_recovery_announce": bool(_runtime_opt(hass, entry, "host_health_recovery_announce", True)),
-                "host_health_persistence_minutes": _runtime_opt(hass, entry, "host_health_persistence_minutes", 10),
-                "host_health_cooldown_minutes": _runtime_opt(hass, entry, "host_health_cooldown_minutes", 60),
-                "host_health_mappings": _get_runtime_json(hass, entry, "host_health_mappings", {}),
-                "host_health_thresholds": _get_runtime_json(hass, entry, "host_health_thresholds", {}),
                 "host_health_status": _get_host_health_status(hass, entry),
-                "pattern_include_entities": _get_runtime_json(hass, entry, "pattern_include_entities", []),
-                "excluded_entities": _get_runtime_json(hass, entry, "excluded_entities", []),
-                "excluded_domains": _get_runtime_json(hass, entry, "excluded_domains", []),
-                "excluded_labels": _get_runtime_json(hass, entry, "excluded_labels", []),
                 "available_labels": _available_labels(hass),
-                "cognition_enabled": bool(_runtime_opt(hass, entry, "cognition_enabled", True)),
-                "camera_auto_analyze": bool(_runtime_opt(hass, entry, "camera_auto_analyze", True)),
-                "camera_auto_analyze_motion": bool(_runtime_opt(hass, entry, "camera_auto_analyze_motion", False)),
-                "package_detection": bool(_runtime_opt(hass, entry, "package_detection", False)),
-                "visitor_learning": bool(_runtime_opt(hass, entry, "visitor_learning", True)),
-                "rich_reasoning": bool(_runtime_opt(hass, entry, "rich_reasoning", False)),
-                "light_control_enabled": bool(_runtime_opt(hass, entry, "light_control_enabled", True)),
-                "departure_alerts_enabled": bool(_runtime_opt(hass, entry, "departure_alerts_enabled", False)),
-                "routine_alerts_enabled": bool(_runtime_opt(hass, entry, "routine_alerts_enabled", True)),
-                "departure_lead_minutes": _runtime_opt(hass, entry, "departure_lead_minutes", 30),
-                "routine_departure_lead_minutes": _runtime_opt(hass, entry, "routine_departure_lead_minutes", 15),
-                "departure_origin_entity": str(_runtime_opt(hass, entry, "departure_origin_entity", "") or ""),
-                "departure_osrm_url": _masked_url(_runtime_opt(hass, entry, "departure_osrm_url", "")),
-                "departure_travel_sensor": str(_runtime_opt(hass, entry, "departure_travel_sensor", "") or ""),
-                "departure_excluded_calendars": _get_runtime_json(hass, entry, "departure_excluded_calendars", []),
-                "departure_mode_walk": bool(_runtime_opt(hass, entry, "departure_mode_walk", True)),
-                "departure_mode_transit": bool(_runtime_opt(hass, entry, "departure_mode_transit", True)),
-                "departure_mode_drive": bool(_runtime_opt(hass, entry, "departure_mode_drive", True)),
-                "departure_use_google": bool(_runtime_opt(hass, entry, "departure_use_google", True)),
-                "identity_min_confidence": _runtime_opt(hass, entry, "identity_min_confidence", 0.45),
-                "ollama_num_ctx": _runtime_opt(hass, entry, "ollama_num_ctx", 8192),
-                "memory_threading_enabled": bool(_runtime_opt(hass, entry, "memory_threading_enabled", True)),
-                "memory_threading_hours": _runtime_opt(hass, entry, "memory_threading_hours", 48),
-                "memory_threading_max": _runtime_opt(hass, entry, "memory_threading_max", 12),
-                "continued_conversation_enabled": bool(_runtime_opt(hass, entry, "continued_conversation_enabled", False)),
-                "continued_conversation_speaker_reopen": bool(_runtime_opt(hass, entry, "continued_conversation_speaker_reopen", True)),
-                "continued_conversation_multi_satellite": bool(_runtime_opt(hass, entry, "continued_conversation_multi_satellite", False)),
-                "observer_group_debounce": _runtime_opt(hass, entry, "observer_group_debounce", 90),
-                "adaptive_interruption_budget": bool(_runtime_opt(hass, entry, "adaptive_interruption_budget", False)),
-                "adaptive_suggestion_threshold": bool(_runtime_opt(hass, entry, "adaptive_suggestion_threshold", False)),
-                "adaptive_awareness": bool(_runtime_opt(hass, entry, "adaptive_awareness", False)),
-                "tts_use_ha_voice": bool(_runtime_opt(hass, entry, "tts_use_ha_voice", False)),
-                "pattern_learn_motion": bool(_runtime_opt(hass, entry, "pattern_learn_motion", False)),
                 "sleep_override": sleep_detection.current_override(),
-                "sleep_prompt_enabled": bool(_runtime_opt(hass, entry, "sleep_prompt_enabled", True)),
-                "auto_bootstrap": bool(_runtime_opt(hass, entry, "auto_bootstrap", False)),
-                "sleep_prompt_time": str(_runtime_opt(hass, entry, "sleep_prompt_time", "23:00") or "23:00"),
                 "ground_floor_areas": _runtime_opt(hass, entry, CONF_GROUND_FLOOR_AREAS, []) or [],
-                "operational_mode_auto": bool(_runtime_opt(hass, entry, "operational_mode_auto", True)),
-                "lab_areas": _runtime_opt(hass, entry, "lab_areas", []) or [],
-                "movie_area": str(_runtime_opt(hass, entry, "movie_area", "") or ""),
-                "infrastructure_audit_area": str(_runtime_opt(hass, entry, "infrastructure_audit_area", "") or ""),
-                "infrastructure_audit_sensors": _get_runtime_json(hass, entry, "infrastructure_audit_sensors", []),
-                "movie_media_player": str(_runtime_opt(hass, entry, "movie_media_player", "") or ""),
                 "movie_dim_pct": int(_runtime_opt(hass, entry, "movie_dim_pct", 15) or 15),
-                "llm_base_url": _masked_url(_runtime_opt(hass, entry, "llm_base_url", "")),
-                "ollama_base_url": _masked_url(_runtime_opt(hass, entry, "ollama_base_url", "")),
-                "custom_base_url": _masked_url(_runtime_opt(hass, entry, "custom_base_url", "")),
                 "self_hosted_endpoints_migrated": bool(_runtime_opt(
                     hass, entry, "self_hosted_endpoints_migrated", False)),
                 "notify_service": current_notify,
                 "notify_services": current_notify_services,
                 "notify_services_available": notify_services,
-                "security_alarm_entity": str(_runtime_opt(
-                    hass, entry, "security_alarm_entity", "") or ""),
-                "lockdown_auto_on_arm": _runtime_opt(
-                    hass, entry, "lockdown_auto_on_arm", False) is True,
                 "lockdown_exempt_locks": _get_lockdown_exempt_locks(),
-                "intrusion_requires_confinement": _runtime_opt(
-                    hass, entry, "intrusion_requires_confinement", False) is True,
-                "face_stand_down": _runtime_opt(
-                    hass, entry, "face_stand_down", False) is True,
                 "alarm_panels": _get_alarm_panels(hass),
                 "onboarding": _get_onboarding_state(hass, entry, current_notify),
                 "sentinel_rules": _get_sentinel_rules(),
@@ -661,25 +582,14 @@ async def ws_get_panel_data(
                 "output_mutes": _get_output_mutes(),
                 "lockdown": _get_lockdown_status(),
                 "appliances": _get_appliance_status(),
-                "appliance_profile": _get_runtime_json(hass, entry, "appliance_profile", []),
-                "energy_cost_today_entity": str(_runtime_opt(hass, entry, "energy_cost_today_entity", "") or ""),
-                "energy_cost_net_entity": str(_runtime_opt(hass, entry, "energy_cost_net_entity", "") or ""),
                 "memory_stats": _get_memory_stats(),
                 "satellites": _get_satellites(hass),
                 "cast_devices": _get_cast_devices(hass),
                 "cameras": _get_cameras(hass),
                 "camera_overrides": _get_camera_overrides(),
                 "camera_names": _get_camera_names(),
-                "satellite_pairings": _get_runtime_json(hass, entry, "satellite_pairings", {}),
-                "announcement_speakers": _get_runtime_json(hass, entry, "announcement_speakers", []),
-                "room_speakers": _get_runtime_json(hass, entry, "room_speakers", {}),
-                "general_speaker": str(_runtime_opt(hass, entry, "general_speaker", "") or ""),
                 "speaker_areas": _get_speaker_assignable_areas(hass),
-                "person_honorifics": _get_runtime_json(hass, entry, "person_honorifics", {}),
                 "all_people": _get_all_people(hass),
-                "floor_plan_rooms": _get_runtime_json(hass, entry, "floor_plan_rooms", {}),
-                "floor_plan_bg": _get_runtime_json(hass, entry, "floor_plan_bg", {}),
-                "door_mapping": _get_runtime_json(hass, entry, "door_mapping", {}),
                 "garage_mode": home["garage_mode"],
                 "has_garage": home["has_garage"],
                 "exit_doors": home["exit_doors"],
@@ -687,61 +597,14 @@ async def ws_get_panel_data(
                 "exit_door_candidates": home["exit_door_candidates"],
                 "basement_mode": home["basement_mode"],
                 "home_features": home["home_features"],
-                "arrival_front_door_entity": str(_runtime_opt(hass, entry, "arrival_front_door_entity", "") or ""),
-                # AI model selection (provider + model per role) — for the
-                # Settings "AI Models" section's live-fetched dropdowns.
-                "llm_provider":        str(_runtime_opt(hass, entry, "llm_provider", "groq") or "groq"),
-                "model":               str(_runtime_opt(hass, entry, "model", "") or ""),
-                "classifier_provider": str(_runtime_opt(hass, entry, "classifier_provider", "groq") or "groq"),
-                "classifier_model":    str(_runtime_opt(hass, entry, "classifier_model", "") or ""),
-                "reasoning_provider":  str(_runtime_opt(hass, entry, "reasoning_provider", "groq") or "groq"),
-                "reasoning_model":     str(_runtime_opt(hass, entry, "reasoning_model", "") or ""),
-                "review_provider":     str(_runtime_opt(hass, entry, "review_provider", "groq") or "groq"),
-                "review_model":        str(_runtime_opt(hass, entry, "review_model", "") or ""),
-                "vision_provider":     str(_runtime_opt(hass, entry, "vision_provider", "groq") or "groq"),
-                "vision_model":        str(_runtime_opt(hass, entry, "vision_model", "") or ""),
-                "camera_reasoning_provider": str(_runtime_opt(hass, entry, "camera_reasoning_provider", "groq") or "groq"),
-                "camera_reasoning_model":    str(_runtime_opt(hass, entry, "camera_reasoning_model", "") or ""),
-                "suggestion_review_enabled": bool(_runtime_opt(hass, entry, "suggestion_review_enabled", False)),
                 "suggestion_review_provider": str(_runtime_opt(hass, entry, "suggestion_review_provider", "")
                                                   or _runtime_opt(hass, entry, "llm_provider", "") or ""),
                 "suggestion_review_model":   str(_runtime_opt(hass, entry, "suggestion_review_model", "")
                                                  or _runtime_opt(hass, entry, "model", "") or ""),
-                # Nova Character & Research — these must be surfaced here or
-                # the panel's selects snap back to their defaults on every
-                # re-render even though the value was saved (v6.64.1 fix).
-                "banter_level":         _runtime_opt(hass, entry, "banter_level", 1),
-                "search_backend":       str(_runtime_opt(hass, entry, "search_backend", "off") or "off"),
-                "searxng_url":          _masked_url(_runtime_opt(hass, entry, "searxng_url", "")),
-                "calendar_tight_gap_min": _runtime_opt(hass, entry, "calendar_tight_gap_min", 15),
-                "recognition_source":   str(_runtime_opt(hass, entry, "recognition_source", "off") or "off"),
-                "voice_confirm_enabled": bool(_runtime_opt(hass, entry, "voice_confirm_enabled", False)),
-                "voice_confirm_mode":   str(_runtime_opt(hass, entry, "voice_confirm_mode", "auto") or "auto"),
-                # Nova Voice ID (8.35.0)
-                "voice_id_uri": str(_runtime_opt(hass, entry, "voice_id_uri", "") or ""),
-                "voice_id_fallback_stt": str(_runtime_opt(hass, entry, "voice_id_fallback_stt", "") or ""),
                 "voice_id_status": _get_voice_id_status(entry),
                 "stt_entities": _get_stt_entities(hass, entry),
                 "voice_id_token_set": bool(await _voice_id_token(hass)),
-                "voice_id_hidden_people": _get_runtime_json(hass, entry, "voice_id_hidden_people", []),
                 "voice_id_enrol": _get_voice_id_enrol(),
-                "voice_id_identity": _runtime_opt(hass, entry, "voice_id_identity", False) is True,
-                "voice_id_learning": _runtime_opt(hass, entry, "voice_id_learning", False) is True,
-                "intrusion_response_timeout": _runtime_opt(hass, entry, "intrusion_response_timeout", 120),
-                "intrusion_vision_confirm": bool(_runtime_opt(hass, entry, "intrusion_vision_confirm", True)),
-                # Scheduled briefings (v6.78.0)
-                "briefing_morning_enabled": bool(_runtime_opt(hass, entry, "briefing_morning_enabled", False)),
-                "briefing_evening_enabled": bool(_runtime_opt(hass, entry, "briefing_evening_enabled", False)),
-                "briefing_morning_time": _runtime_opt(hass, entry, "briefing_morning_time", "07:30"),
-                "briefing_evening_time": _runtime_opt(hass, entry, "briefing_evening_time", "19:30"),
-                "briefing_require_home": bool(_runtime_opt(hass, entry, "briefing_require_home", True)),
-                "briefing_include_weather": bool(_runtime_opt(hass, entry, "briefing_include_weather", True)),
-                "briefing_include_calendar": bool(_runtime_opt(hass, entry, "briefing_include_calendar", True)),
-                "briefing_include_events": bool(_runtime_opt(hass, entry, "briefing_include_events", True)),
-                "briefing_include_energy": bool(_runtime_opt(hass, entry, "briefing_include_energy", True)),
-                "briefing_include_hazards": bool(_runtime_opt(hass, entry, "briefing_include_hazards", True)),
-                # Hazard monitor controls — same read-back requirement (v6.71.0)
-                "hazard_monitor_enabled": bool(_runtime_opt(hass, entry, "hazard_monitor_enabled", False)),
                 "hazard_lat":             _hazard_coordinate(hass, entry, "hazard_lat", 0),
                 "hazard_lon":             _hazard_coordinate(hass, entry, "hazard_lon", 1),
                 # 8.8.0: region-aware (off by default for an Irish home
@@ -751,33 +614,8 @@ async def ws_get_panel_data(
                 "hazard_disasters_on":    _hazard_flag(hass, "hazard_disasters_on"),
                 # Weather warnings (8.8.0)
                 "hazard_met_eireann_on":  _hazard_flag(hass, "hazard_met_eireann_on"),
-                "hazard_cap_on":          bool(_runtime_opt(hass, entry, "hazard_cap_on", False)),
                 "hazard_source":          _hazard_source(hass, entry),
-                "hazard_counties":        _get_runtime_json(hass, entry, "hazard_counties", []),
-                "hazard_push_level":      str(_runtime_opt(hass, entry, "hazard_push_level", "yellow") or "yellow"),
-                "hazard_speak_level":     str(_runtime_opt(hass, entry, "hazard_speak_level", "orange") or "orange"),
-                "hazard_night_speak_level": str(_runtime_opt(
-                    hass, entry, "hazard_night_speak_level", "red") or "red"),
-                "hazard_cap_url":         _masked_url(_runtime_opt(hass, entry, "hazard_cap_url", "")),
-                "hazard_cap_area_codes":  _get_runtime_json(hass, entry, "hazard_cap_area_codes", []),
-                "hazard_cap_area_names":  _get_runtime_json(hass, entry, "hazard_cap_area_names", []),
-                "hazard_quake_radius_km": _runtime_opt(hass, entry, "hazard_quake_radius_km", 300),
-                "hazard_quake_min_mag":   _runtime_opt(hass, entry, "hazard_quake_min_mag", 2.5),
-                # Floor plan controls — same read-back requirement: these
-                # save fine but reset on re-render unless surfaced here.
-                "floor_plan_units":     str(_runtime_opt(hass, entry, "floor_plan_units", "imperial") or "imperial"),
-                "floor_plan_elements":  _get_runtime_json(hass, entry, "floor_plan_elements", {}),
-                "floor_plan_cameras":   _get_runtime_json(hass, entry, "floor_plan_cameras", {}),
-                "floor_plan_property":  _get_runtime_json(hass, entry, "floor_plan_property", {}),
-                "floor_plan_entities":  _get_runtime_json(hass, entry, "floor_plan_entities", {}),
-                "floor_plan_bg_opacity": _runtime_opt(hass, entry, "floor_plan_bg_opacity", "0.2"),
                 "home_context_max_entities": _int_opt(hass, entry, "home_context_max_entities", 15),
-                "ui_language": _runtime_opt(hass, entry, "ui_language", "auto"),
-                "output_language": str(_runtime_opt(hass, entry, "output_language", "") or ""),
-                "disabled_cameras":     _get_runtime_json(hass, entry, "disabled_cameras", []),
-                "home_stories":         _runtime_opt(hass, entry, "home_stories", "1.5"),
-                "has_basement":         _runtime_opt(hass, entry, "has_basement", True),
-                "garage_bays":          _runtime_opt(hass, entry, "garage_bays", 3),
             },
         }
         connection.send_result(msg["id"], result)
@@ -985,216 +823,9 @@ async def ws_get_activity_log(
 
 # ─── Config update WebSocket command ─────────────────────────────────────────
 
-# Only these keys can be toggled from the panel. Prevents arbitrary writes.
-PANEL_WRITABLE_KEYS = {
-    "ui_language",
-    "output_language",             # "" or "auto" follows Home Assistant, else a language code
-    "announcements_enabled",
-    "announce_notify_only",        # bool: proactive announcements go to the phone, not the speakers (critical still speaks)
-    "sentinel_enabled",
-    "observer_enabled",
-    "pattern_learn_doors",         # learn door/window activity for routines
-    "pattern_learn_presence",      # learn presence/arrivals for routines
-    "pattern_learn_buttons",       # learn button/remote presses ("press -> scene")
-    "pattern_include_entities",    # JSON list: specific entities to always learn
-    "excluded_entities",           # JSON list: entity_ids removed from Nova's awareness
-    "excluded_domains",            # JSON list: whole domains removed from awareness
-    "excluded_labels",             # JSON list: HA labels whose entities are removed from awareness
-    "notify_service",
-    "notify_services",             # JSON list: normal alert push targets
-    "security_alarm_entity",       # str: authoritative household alarm panel
-    "lockdown_auto_on_arm",        # bool: explicit opt in for automatic lockdown
-    "lockdown_exempt_locks",       # JSON list: locks left out of lockdown and the night sweep (8.29.0)
-    "intrusion_requires_confinement",  # bool: intrusion monitoring only while locked down or alarm armed
-    "face_stand_down",             # bool, off by default: a recognised resident can stop a NEW intrusion investigation opening
-    "departure_alerts_enabled",
-    "routine_alerts_enabled",
-    "departure_lead_minutes",
-    "routine_departure_lead_minutes",  # int: remind this long before a usual departure
-    "departure_origin_entity",
-    "departure_osrm_url",
-    "departure_travel_sensor",
-    "departure_excluded_calendars",  # JSON list: calendar entity_ids that never trigger a leave alert
-    "departure_mode_walk",         # bool: leave alerts say when to head out on foot
-    "departure_mode_transit",      # bool: leave alerts say when to leave for public transport
-    "departure_mode_drive",        # bool: leave alerts say when to leave by car
-    "departure_use_google",        # bool: time the modes with Google Maps Travel Time when set up
-    "memory_threading_enabled",
-    "memory_threading_hours",
-    "memory_threading_max",
-    "continued_conversation_enabled",
-    "continued_conversation_speaker_reopen",   # bool: Nova times the follow-up mic reopen to the reply speaker finishing
-    "continued_conversation_multi_satellite",  # bool: follow-up follows the person to another room's satellite when the start room empties
-    "disabled_sentinel_rules",   # JSON list of disabled rule IDs
-    "satellite_pairings",        # JSON dict: {satellite_entity_id: cast_entity_id}
-    "announcement_speakers",     # JSON list of cast entity IDs for announcements
-    "room_speakers",             # JSON dict: {area_id: media_player_entity_id} (v7.92.0)
-    "general_speaker",           # str: fallback speaker for rooms with no assignment (v7.92.0)
-    "person_honorifics",         # JSON dict: {person_entity_id: honorific} — used only when
-                                  # that person is home alone; see honorific.py (v7.99.0)
-    "floor_plan_rooms",          # JSON: floor plan room positions per floor
-    "floor_plan_bg",             # JSON: base64 background images per floor
-    # Floor plan and home layout
-    "floor_plan_units",          # "imperial" | "metric" for room dimensions
-    "floor_plan_elements",       # JSON: placed windows/doors per floor (+ sensor map)
-    "floor_plan_cameras",        # JSON: placed cameras per floor (pos/angle/fov/range) (v7.17.0)
-    "floor_plan_property",       # JSON: property boundary polygon {points:[[x,y],...]} (v7.22.0)
-    "floor_plan_entities",       # JSON: devices pinned on the plan per floor [{e: entity_id, x, y}] (v7.101.18)
-    "floor_plan_bg_opacity",     # str/float 0-1: opacity of the imported floor-plan background image (v7.101.18)
-    "home_context_max_entities", # int: entity names per domain in the system prompt (0=counts only) (v7.23.1)
-    "disabled_cameras",          # JSON list: camera entity_ids Nova must not use
-    "home_stories",              # str: number of stories (shapes the default floor plan)
-    "has_basement",              # bool: the Basement setting before 8.27.0; a saved value still counts
-    "garage_bays",               # int: garage bay count
-    "door_mapping",              # JSON: {door slot -> entity_id} (Home layout card)
-    "arrival_front_door_entity", # str: binary_sensor gating the arrival-briefing trigger
-    # Outdoor classification (feeds the intrusion false-alarm guards)
-    "outdoor_areas",             # JSON list: extra area names treated as outdoor
-    "outdoor_entities",          # JSON list: entity globs forced outdoor
-    "indoor_entities",           # JSON list: entity globs forced indoor (wins)
-    # Web Research + Communication agents (v6.51.0)
-    "search_backend",            # str: "off" (default, 8.41.0) | "duckduckgo" | "searxng"
-    "searxng_url",               # str: SearXNG base URL when backend=searxng
-    "calendar_tight_gap_min",    # int: back-to-back gap flagged as "tight"
-    # Persona (v6.51.0)
-    "banter_level",              # int: 0 plain · 1 dry (default) · 2 full wit
-    # Local semantic search via Ollama embeddings (v6.57.0)
-    "semantic_search",           # bool: use Ollama embeddings for doc retrieval
-    "embed_model",               # str: Ollama embed model (default nomic-embed-text)
-    "embed_base_url",            # str: override Ollama host for embeddings
-    "custom_modes",              # dict: user-defined operational modes (v6.61.0)
-    "operational_mode_auto",     # bool: auto away/normal by occupancy (v7.14.0)
-    "lab_areas",                 # list: rooms Lab mode is scoped to (v7.15.0)
-    "movie_area",                # str: room Movie mode is bound to (v7.15.0)
-    "movie_media_player",        # str: Movie media_player binding (v7.15.0)
-    "movie_dim_pct",             # int: Movie mood dim level 0-100 (v7.15.0)
-    "energy_agency",             # str: advisory | opt_in | autonomous (v6.62.0)
-    "energy_peak_watts",         # float: whole-home peak threshold in watts
-    "energy_mode_bump",          # list: modes that raise energy agency one step
-    "biometrics_enabled",        # bool: read wearable context (opt-in) (v6.63.0)
-    "biometric_entities",        # dict: explicit kind→entity_id overrides
-    "recognition_source",        # str: off | both | doubletake | frigate (v6.64.1; off 8.41.0)
-    "voice_confirm_enabled",      # bool: voice-confirm sensitive actions (v6.67.0)
-    "voice_confirm_mode",         # str: native | gated | auto
-    "voice_id_uri",               # str: Nova Voice ID app, tcp://host:port (8.35.0)
-    "voice_id_fallback_stt",      # str: STT entity used when the app is down
-    "voice_id_hidden_people",     # JSON list: person ids hidden from the Voice ID card (8.36.0)
-    "voice_id_identity",          # bool: use the voice to tell who is speaking (8.37.0)
-    "voice_id_learning",          # bool: learn voices from everyday use (8.38.0)
-    "voice_confirm_entities",     # list: extra entities to confirm / !exempt
-    "satellite_audio_out",        # dict/bool: satellites whose audio routes out
-    "satellite_start_action",     # dict: satellite → esphome start action
-    "intrusion_response_timeout", # float: secs before unanswered alert escalates
-    "onboarding_dismissed",       # bool: user dismissed the first-run welcome card
-    # Multi-hazard monitor (v6.71.0)
-    "hazard_monitor_enabled",     # bool: master on/off for hazard polling
-    "hazard_lat",                 # float|"": location override latitude
-    "hazard_lon",                 # float|"": location override longitude
-    "hazard_quakes_on",           # bool: earthquake feed
-    "hazard_weather_on",          # bool: NWS severe-weather feed
-    "hazard_disasters_on",        # bool: NASA EONET disaster feed
-    "hazard_quake_radius_km",     # float: earthquake radius
-    "hazard_quake_min_mag",       # float: min magnitude to alert
-    "hazard_disaster_radius_km",  # float: disaster radius
-    "intrusion_vision_confirm",   # bool: verify Frigate person detection with Nova vision before escalating
-    "intrusion_inward_depth",     # int: rooms deep from breach motion must reach to confirm
-    # Scheduled briefings (v6.78.0)
-    "briefing_morning_enabled",   # bool: deliver a morning briefing
-    "briefing_evening_enabled",   # bool: deliver an evening briefing
-    "briefing_morning_time",      # str "HH:MM"
-    "briefing_evening_time",      # str "HH:MM"
-    "briefing_require_home",      # bool: skip when nobody is home
-    "briefing_include_weather",
-    "briefing_include_calendar",
-    "briefing_include_presence",
-    "briefing_include_events",
-    "briefing_include_energy",
-    "briefing_include_hazards",
-    # Hazard Monitor weather warnings (8.8.0)
-    "hazard_met_eireann_on",      # bool: Met Éireann warnings (on by default for an Irish home)
-    "hazard_cap_on",              # bool: a custom CAP feed (hazard_cap_url)
-    "hazard_source",              # str: met_eireann | us | custom warning source
-    "hazard_counties",            # JSON list: Met Éireann county codes (empty = nearest to home)
-    "hazard_push_level",          # str: yellow | orange | red, lowest level sent to the phone
-    "hazard_speak_level",         # str: yellow | orange | red, lowest level also spoken
-    "hazard_night_speak_level",   # str: yellow | orange | red | off, quiet-hours speech floor
-    "hazard_cap_url",             # str: https CAP document, or Atom/RSS index of them
-    "hazard_cap_area_codes",      # JSON list: CAP geocode values that mean "here"
-    "hazard_cap_area_names",      # JSON list: CAP areaDesc names that mean "here"
-    "document_watch_folders",    # str/list: extra folders to auto-ingest new docs from
-    # AI model selection (Settings → AI Models live-fetched dropdowns)
-    "llm_provider",
-    "model",
-    "llm_base_url",
-    "ollama_base_url",
-    "custom_base_url",
-    "classifier_provider",
-    "classifier_model",
-    "reasoning_provider",
-    "reasoning_model",
-    "review_provider",
-    "review_model",
-    "vision_provider",
-    "vision_model",
-    "camera_reasoning_provider",
-    "camera_reasoning_model",
-    "suggestion_review_enabled",   # bool: AI review of learned suggestions (opt in)
-    "suggestion_review_provider",
-    "suggestion_review_model",
-    "classifier_rate_limit",
-    "intrusion_notify_image_ttl_minutes",  # minutes: signed notification-image copy lifetime (v7.102.0)
-    "cognition_enabled",
-    "cognition_threshold",
-    "observer_group_debounce",      # seconds: coalesce a burst of numbered sibling entities (0 = off)
-    "adaptive_interruption_budget",  # bool: scale the announcement cap down when recent proactive decisions were unwelcome
-    "adaptive_suggestion_threshold", # bool: tune the suggestion confidence bar from how welcome recent suggestions were
-    "adaptive_awareness",            # bool: anticipation alerts learn from alerts the user mutes
-    "tts_use_ha_voice",              # bool: prefer the TTS entity of the preferred Assist pipeline
-    "infrastructure_audit_area",     # area id the infrastructure audit speaks in ("" = log only)
-    "infrastructure_audit_sensors",  # JSON list: sensors the infrastructure audit watches (empty = off, 8.28.0)
-    "pattern_learn_motion",          # bool: learn motion/occupancy triggers for "when X, do Y" suggestions (rate-limited)
-    "camera_event_learning",        # bool: feed Eufy/Frigate/Nest/vision detections into pattern learning (Phase 4, v7.109.0)
-    "camera_event_confidence_floor",  # float 0-100: minimum source-supplied confidence to record a camera event (0 = off)
-    "camera_event_dedup_window",    # float seconds: window collapsing duplicate camera events across sources
-    "camera_historical_awareness",  # bool: add repeated camera history to interactive prompts (Phase 5)
-    "camera_awareness_min_observations",  # int 3-12: historical evidence floor
-    "scene_memory_enabled",         # bool: keep camera descriptions so Nova can answer "where did I last see X"
-    "scene_memory_retention_days",  # int 1-90: how long scene memory keeps a description
-    "host_health_enabled",           # bool: master on/off for Home Assistant host telemetry (Phase 10, v7.112.0)
-    "host_health_alerts_enabled",    # bool: separate opt-in for spoken/pushed host-health alerts
-    "host_health_recovery_announce", # bool: announce a stable recovery, bounded and optional
-    "host_health_persistence_minutes",  # float 2-120: sustained-breach window before the first alert
-    "host_health_cooldown_minutes",     # float 5-720: minimum gap between repeat alerts on an unresolved problem
-    "host_health_mappings",          # dict: metric_key -> sensor.* entity_id (manual System Monitor mapping)
-    "host_health_thresholds",        # dict: metric_key -> float (per-metric alert threshold override)
-    "appliance_profile",            # JSON list of declared appliances (name/type/entity/watts)
-    "camera_auto_analyze",          # bool: auto-inspect doorbell/person camera events
-    "camera_auto_analyze_motion",   # bool: also auto-inspect motion events (noisier)
-    "package_detection",            # bool: watch porch cameras for packages & mail
-    "visitor_learning",             # bool: silent vision learning from person events
-    "rich_reasoning",               # bool: cloud-first reasoning for medium+ events
-    "llm_base_url",                 # legacy shared self-hosted endpoint
-    "ollama_base_url",              # str: dedicated Ollama endpoint
-    "custom_base_url",              # str: dedicated OpenAI-compatible endpoint
-    "pattern_min_occurrences",      # int: pattern engine repeat threshold
-    "pattern_confidence",           # float: pattern engine confidence threshold
-    "light_control_enabled",        # bool: allow toggling lights from the dashboard
-    "energy_cost_today_entity",     # str: entity_id of an install's own "cost today" sensor,
-                                     # preferred over solar.py's generic price x kWh estimate
-    "energy_cost_net_entity",       # str: entity_id of an install's own "net cost today" sensor
-                                     # (post export-credit); optional, paired with the above
-    "identity_min_confidence",      # float: face-match threshold below which a person is 'unknown'
-    "ollama_num_ctx",               # int: Ollama context window for local models
-    # Sleep state (v7.86.0)
-    "sleep_override",               # str: "auto" | "awake" | "asleep" — panel dropdown
-    "sleep_prompt_enabled",         # bool: send the nightly "Heading to bed?" prompt
-    "auto_bootstrap",               # bool: install the voice add-ons (off until set up, 8.41.0)
-    "sleep_prompt_time",            # str: HH:MM — earliest the prompt may fire
-    # Residence doors (8.26.0)
-    "garage_mode",               # str: auto | yes | no — show garage items (display only, 8.26.0)
-    "exit_doors",                # JSON list: [{entity_id, name}] exit doors the user picked (8.26.0)
-    "basement_mode",             # str: auto | yes | no — show the basement (display only, 8.27.0)
-}
+# Only these keys can be changed from the panel. Prevents arbitrary writes.
+# Each one's kind and default are in settings_schema.SETTINGS (8.42.0).
+PANEL_WRITABLE_KEYS = set(settings_schema.PANEL_KEYS)
 
 # ── Integration version ──────────────────────────────────────────────────────
 from pathlib import Path as _Path
@@ -1343,6 +974,12 @@ async def ws_update_config(
             msg["id"], "invalid_value",
             safety_config.invalid_panel_value_message(key),
         )
+        return
+
+    # The kind every setting takes, from settings_schema (8.42.0).
+    if not settings_schema.valid_kind(key, value):
+        connection.send_error(
+            msg["id"], "invalid_value", settings_schema.invalid_kind_message(key))
         return
 
     entry = _get_entry(hass)

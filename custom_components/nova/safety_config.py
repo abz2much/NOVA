@@ -4,6 +4,8 @@ from __future__ import annotations
 import json
 import re
 
+from . import settings_schema
+
 LOCKDOWN_AUTO_KEY = "lockdown_auto_on_arm"
 INTRUSION_CONFINEMENT_KEY = "intrusion_requires_confinement"
 FACE_STAND_DOWN_KEY = "face_stand_down"
@@ -46,33 +48,11 @@ SCENE_MEMORY_ENABLED_KEY = "scene_memory_enabled"
 SCENE_MEMORY_RETENTION_KEY = "scene_memory_retention_days"
 _SCENE_MEMORY_RETENTION_RANGE = (1, 90)
 
-# Panel keys that only ever hold true or false (8.7.23): every entry in
-# PANEL_WRITABLE_KEYS whose comment says bool, plus observer_enabled. The
-# panel saves each of them with a toggle button or chip, which sends a JSON
-# boolean, so a string such as "false" or "off" is refused rather than
-# stored and later read as on. satellite_audio_out is "dict/bool" and is
-# not in this set.
-STRICT_BOOL_KEYS = frozenset({
-    LOCKDOWN_AUTO_KEY, INTRUSION_CONFINEMENT_KEY, FACE_STAND_DOWN_KEY,
-    "observer_enabled", "announce_notify_only",
-    "continued_conversation_speaker_reopen", "continued_conversation_multi_satellite",
-    "has_basement", "semantic_search", "operational_mode_auto", "biometrics_enabled",
-    "voice_confirm_enabled", "onboarding_dismissed", "voice_id_identity", "voice_id_learning",
-    "hazard_monitor_enabled", "hazard_quakes_on", "hazard_weather_on", "hazard_disasters_on",
-    "hazard_met_eireann_on", "hazard_cap_on",
-    "intrusion_vision_confirm",
-    "departure_mode_walk", "departure_mode_transit", "departure_mode_drive",
-    "departure_use_google",
-    "briefing_morning_enabled", "briefing_evening_enabled", "briefing_require_home",
-    "suggestion_review_enabled", "adaptive_interruption_budget",
-    "adaptive_suggestion_threshold", "adaptive_awareness", "tts_use_ha_voice",
-    "pattern_learn_motion", "camera_event_learning", "camera_historical_awareness",
-    SCENE_MEMORY_ENABLED_KEY,
-    "host_health_enabled", "host_health_alerts_enabled", "host_health_recovery_announce",
-    "camera_auto_analyze", "camera_auto_analyze_motion", "package_detection",
-    "visitor_learning", "rich_reasoning", "light_control_enabled", "sleep_prompt_enabled",
-    "auto_bootstrap",
-})
+# Panel keys that only ever hold true or false (8.7.23): every bool setting
+# in settings_schema (8.42.0). The panel saves each of them with a toggle
+# button or chip, which sends a JSON boolean, so a string such as "false" or
+# "off" is refused rather than stored and later read as on.
+STRICT_BOOL_KEYS = settings_schema.BOOL_KEYS
 
 # How long an unanswered intrusion alert waits before the softer "couldn't
 # reach you, please check" notice (core_safety.py, default 120 seconds).

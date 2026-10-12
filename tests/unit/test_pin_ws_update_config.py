@@ -471,18 +471,13 @@ async def test_observer_enabled_needs_a_real_boolean(ws, load, store, observer, 
 _REPO = pathlib.Path(__file__).resolve().parents[2]
 
 
-def _bool_commented_keys() -> set:
-    """PANEL_WRITABLE_KEYS entries whose comment starts with "bool"."""
-    src = (_REPO / "custom_components" / "nova" / "websocket.py").read_text(encoding="utf-8")
-    body = src[src.index("PANEL_WRITABLE_KEYS = {"):]
-    body = body[:body.index("\n}\n")]
-    return set(re.findall(r'^\s*"([a-z0-9_]+)",\s*#\s*bool\b', body, re.M))
-
-
-def test_strict_booleans_are_every_bool_key_plus_observer_enabled(load):
-    # "dict/bool" (satellite_audio_out) does not match: it is not strict.
+def test_strict_booleans_are_every_bool_setting(load):
+    # satellite_audio_out takes a dict or a bool: it is not strict.
+    from ws_sources import settings_schema
     sc = load("safety_config")
-    assert set(sc.STRICT_BOOL_KEYS) == _bool_commented_keys() | {"observer_enabled"}
+    bools = {k for k, s in settings_schema().SETTINGS.items() if s.kind == "bool"}
+    assert set(sc.STRICT_BOOL_KEYS) == bools
+    assert "observer_enabled" in sc.STRICT_BOOL_KEYS
     assert "satellite_audio_out" not in sc.STRICT_BOOL_KEYS
 
 
@@ -630,7 +625,7 @@ async def test_current_behaviour_a_value_has_no_size_limit(ws, load, store):
     # Looks wrong: free text values are not bounded. A 2 MB floor plan
     # background is written to runtime_config and config.json as is, and
     # rewritten on every save.
-    big = "x" * (2 * 1024 * 1024)
+    big = '{"1f": "' + "x" * (2 * 1024 * 1024) + '"}'
     conn = await _update(ws, _hass(_entry(load)), "floor_plan_bg", big)
     assert conn.errors == [] and len(store.data["floor_plan_bg"]) == len(big)
 

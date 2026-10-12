@@ -230,20 +230,17 @@ def test_write_path_validation(load):
 
 
 def test_key_is_panel_writable_surfaced_and_documented():
-    ws = (COMP / "websocket.py").read_text()
-    tree = ast.parse(ws)
-    keys = next({e.value for e in n.value.elts} for n in ast.walk(tree)
-                if isinstance(n, ast.Assign) and isinstance(n.value, ast.Set)
-                and any(getattr(t, "id", "") == "PANEL_WRITABLE_KEYS" for t in n.targets))
-    assert "output_language" in keys
-    assert '"output_language": str(_runtime_opt(hass, entry, "output_language", "") or "")' in ws
+    from ws_sources import settings_schema
+    setting = settings_schema().SETTINGS["output_language"]
+    assert (setting.kind, setting.default, setting.payload) == ("text", "", "plain")
     # The settings table moved from the README to docs/settings-reference.md.
     assert "`output_language`" in (ROOT / "docs" / "settings-reference.md").read_text()
 
 
 def test_ui_language_is_untouched():
-    ws = (COMP / "websocket.py").read_text()
-    assert '"ui_language": _runtime_opt(hass, entry, "ui_language", "auto")' in ws
+    from ws_sources import settings_schema
+    setting = settings_schema().SETTINGS["ui_language"]
+    assert (setting.kind, setting.default, setting.payload) == ("text", "auto", "plain")
 
 
 def test_panel_language_list_matches_the_table(load):

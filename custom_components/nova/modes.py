@@ -283,6 +283,13 @@ def mode_scoped_to_areas() -> list:
         m = active_mode()
         if m == "lab":
             v = _cfg("lab_areas", []) or []
+            if isinstance(v, str):
+                # The panel saves the list as a JSON string (8.42.0).
+                import json
+                try:
+                    v = json.loads(v)
+                except ValueError:
+                    v = []
             return [str(a) for a in v if a] if isinstance(v, list) else []
         if m == "movie":
             a = _cfg("movie_area", "") or ""

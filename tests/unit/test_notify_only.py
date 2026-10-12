@@ -3,7 +3,6 @@ speakers. Critical urgency keeps speaking exactly as before. Quiet hours,
 sleep rules and every other routing rule are unchanged."""
 from __future__ import annotations
 
-import ast
 import pathlib
 import sys
 import types
@@ -58,13 +57,9 @@ def test_setting_coerces_stored_strings(load, monkeypatch, raw, expected):
 
 
 def test_setting_is_panel_writable_and_surfaced():
-    ws = (COMP / "websocket.py").read_text()
-    tree = ast.parse(ws)
-    keys = next({e.value for e in n.value.elts} for n in ast.walk(tree)
-                if isinstance(n, ast.Assign) and isinstance(n.value, ast.Set)
-                and any(getattr(t, "id", "") == "PANEL_WRITABLE_KEYS" for t in n.targets))
-    assert "announce_notify_only" in keys
-    assert '"announce_notify_only": bool(_runtime_opt(hass, entry, "announce_notify_only", False))' in ws
+    from ws_sources import settings_schema
+    setting = settings_schema().SETTINGS["announce_notify_only"]
+    assert (setting.kind, setting.default, setting.payload) == ("bool", False, "plain")
 
 
 def test_setting_is_in_the_settings_reference():

@@ -72,3 +72,39 @@ def ws_owner_module(name: str):
     patch it here: a patch on websocket (which only re exports a moved name)
     rebinds the copy websocket holds and changes nothing for the moved code."""
     return importlib.import_module(ws_owner_name(name))
+
+
+def settings_schema():
+    """custom_components/nova/settings_schema.py, loaded on its own. It
+    imports nothing from Home Assistant or the rest of Nova, so it loads
+    without the unit fakes (8.42.0)."""
+    import importlib.util
+    import sys
+    name = "_nova_settings_schema"
+    if name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(name, COMP / "settings_schema.py")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return sys.modules[name]
+
+
+def panel_writable_keys() -> set[str]:
+    """Every key nova/update_config may write: websocket.PANEL_WRITABLE_KEYS
+    is built from settings_schema.SETTINGS."""
+    return set(settings_schema().PANEL_KEYS)
+
+
+def panel_config_keys() -> set[str]:
+    """Every key in ws_get_panel_data's `config` block: the "plain" settings
+    settings_schema.payload builds, plus the entries written out in
+    websocket.py. This is what the panel reads back as d.config.KEY."""
+    keys = {k for k, s in settings_schema().SETTINGS.items() if s.payload == "plain"}
+    fn = ws_function("ws_get_panel_data")
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Dict):
+            for k, v in zip(node.keys, node.values):
+                if (isinstance(k, ast.Constant) and k.value == "config"
+                        and isinstance(v, ast.Dict)):
+                    keys |= {e.value for e in v.keys if isinstance(e, ast.Constant)}
+    return keys

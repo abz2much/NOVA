@@ -5,20 +5,12 @@ itself, unchanged by this phase).
 
 websocket.py can't be directly imported (heavy HA module-level imports —
 same reason test_panel_writable_keys.py parses it via AST instead)."""
-import ast
 
 import pytest
-from ws_sources import ws_tree
+from ws_sources import panel_writable_keys
 
 def _panel_writable_keys() -> set[str]:
-    tree = ws_tree()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign) and isinstance(node.value, ast.Set):
-            for tgt in node.targets:
-                if isinstance(tgt, ast.Name) and tgt.id == "PANEL_WRITABLE_KEYS":
-                    return {e.value for e in node.value.elts
-                            if isinstance(e, ast.Constant)}
-    raise AssertionError("PANEL_WRITABLE_KEYS set not found in the websocket source")
+    return panel_writable_keys()
 
 
 @pytest.fixture

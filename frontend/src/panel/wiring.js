@@ -665,7 +665,7 @@
         cur = Array.isArray(cur) ? cur.slice() : [];
         const i = cur.indexOf(id);
         if (i >= 0) cur.splice(i, 1); else cur.push(id);
-        await this._saveSetting("lab_areas", cur);
+        await this._saveSetting("lab_areas", JSON.stringify(cur));
       });
     });
     const det = scope.querySelector("details.mode-bindings");
