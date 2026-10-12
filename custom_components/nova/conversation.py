@@ -1154,6 +1154,12 @@ class NovaAgent(conversation.ConversationEntity):
             ir.async_set_speech("")  # silence — do not respond to ambient speech
             return conversation.ConversationResult(response=ir, conversation_id=cid)
 
+        # 8.38.0: past dedup, the presence gate and both relevance gates, so
+        # Nova answers this turn. Only now may its voice sample be learned;
+        # every earlier return leaves the candidate unanswered.
+        from . import voice_learn as _voice_learn
+        _voice_learn.mark_answered()
+
         try:
             # v5.7.00: Local engine is PRIMARY. Complexity scoring decides
             # whether to escalate to LLM. Handles 95%+ of requests at zero

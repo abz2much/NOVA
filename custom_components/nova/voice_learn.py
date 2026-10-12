@@ -13,10 +13,12 @@ never affected. A sample is committed only when every check in check() holds:
   * both switches are on, and the app is 0.3.0 or newer (an older app would
     keep a learned sample as a recorded one);
   * the result is known, with score >= 0.70 and speech_s >= 2.0 (const.py);
-  * another signal agrees: without any voice, the same person has at least
-    0.6 from being the only one home, a face, or being the only one in the
-    satellite's room, and nobody else has 0.3 or more from any signal
-    (identity.non_voice_breakdown);
+  * another signal agrees: without any voice, one signal alone gives the same
+    person at least 0.6 (being the only one home, a face, or being the only
+    one in the satellite's room), and nobody else has 0.3 or more from any
+    signal (identity.non_voice_breakdown);
+  * Nova answered the turn: it passed dedup, the presence gate and the
+    relevance gates (mark_answered);
   * it is a voice satellite's turn, not Chat, a recording, a voice_carry, an
     answer to a pending confirmation or to a proactive offer;
   * this sample was never sent before, and no learned commit is in flight for
@@ -56,6 +58,7 @@ class Candidate:
     voice: Any                      # voice_id.VoiceResult
     ident: Any                      # identity.Identification
     blocked: Optional[str] = None   # why this turn can't learn, once known
+    answered: bool = False          # set once the turn passed every gate
 
 
 # The current turn's candidate. Set and read in the conversation turn's own
@@ -127,6 +130,15 @@ def block(reason: str) -> None:
         cand.blocked = reason
 
 
+def mark_answered() -> None:
+    """The turn passed dedup, the presence gate and the relevance gates: Nova
+    answers it. A candidate without this is never learned (a duplicate,
+    ambient speech or a satellite in an empty room)."""
+    cand = _CANDIDATE.get()
+    if cand is not None:
+        cand.answered = True
+
+
 def take() -> Optional[Candidate]:
     cand = _CANDIDATE.get()
     _CANDIDATE.set(None)
@@ -136,8 +148,8 @@ def take() -> Optional[Candidate]:
 def schedule(hass, entry) -> None:
     """After the reply is built: start the commit in the background."""
     cand = take()
-    if cand is None:
-        return
+    if cand is None or not enabled():
+        return              # nothing to do: no task, nothing sent
     try:
         hass.async_create_background_task(
             async_learn(hass, entry, cand), "nova voice id learn")
@@ -181,7 +193,10 @@ def agrees(hass, person_id: str, device_id: str) -> tuple[bool, str]:
     key = identity.normalize(name)
     breakdown = identity.non_voice_breakdown(hass, area_id=_satellite_area(hass, device_id))
     own = breakdown.get(key, {})
-    strong = sum(own.get(s, 0.0) for s in AGREEING_SIGNALS)
+    # One strong signal on its own, never a sum: a single camera in the
+    # satellite's room feeds both "face" and "room_sole", and must not count
+    # twice.
+    strong = max((own.get(s, 0.0) for s in AGREEING_SIGNALS), default=0.0)
     if strong < VOICE_LEARN_AGREE_WEIGHT:
         return False, "no other signal agrees"
     for other, signals in breakdown.items():
@@ -198,6 +213,8 @@ def check(hass, entry, cand: Candidate) -> tuple[bool, str]:
         voice, ident = cand.voice, cand.ident
         if cand.blocked:
             return False, cand.blocked
+        if not cand.answered:
+            return False, "not answered"
         if getattr(voice, "status", None) != "known" or not getattr(voice, "person", None):
             return False, "not known"
         if not getattr(voice, "sample_id", None):
@@ -233,11 +250,11 @@ async def async_learn(hass, entry, cand: Candidate) -> Outcome:
     voice = cand.voice
     person = voice.person
     _IN_FLIGHT.add(person)
-    mark_sent(voice.sample_id)
     try:
-        await voice_id.enrol_commit(
-            voice_id_store.get_uri(hass, entry), await voice_id_store.async_get_token(hass),
-            voice.sample_id, person, source="learned")
+        uri = voice_id_store.get_uri(hass, entry)
+        token = await voice_id_store.async_get_token(hass)
+        mark_sent(voice.sample_id)          # just before it goes: never sent twice
+        await voice_id.enrol_commit(uri, token, voice.sample_id, person, source="learned")
     except voice_id.VoiceIdManagementError as exc:
         _LOGGER.debug("Nova Voice ID: learned sample not saved (%s)", exc.code)
         if exc.code == "refused":

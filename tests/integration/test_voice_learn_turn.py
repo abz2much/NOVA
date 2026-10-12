@@ -38,7 +38,7 @@ class _Turn:
         return [patch("custom_components.nova.local_engine.try_local", new=local),
                 patch("custom_components.nova.agent.run_agent", new=agent),
                 patch("custom_components.nova.voice_confirm.is_voice_satellite_device",
-                      new=lambda hass, device_id, strict=False: device_id == DEVICE),
+                      new=lambda hass, device_id, strict=False: device_id in (DEVICE, "dev-office")),
                 patch("custom_components.nova.voice_learn._app_version",
                       new=lambda entry: (0, 3, 0)),
                 # Faces, rooms and trackers from other tests share module state;
@@ -174,4 +174,64 @@ async def test_a_typed_chat_turn_never_learns(hass, isolated, clean, monkeypatch
             for p in ps:
                 p.stop()
             voice_id.VOICE_RESULT.set(None)
+    assert app.management == []
+
+
+
+async def test_a_duplicate_on_a_second_satellite_is_never_learned(
+        hass, isolated, clean, monkeypatch, socket_enabled):
+    """Two satellites hear the same sentence: dedup answers the second from
+    the first's reply, so only the first, which Nova answered, learns."""
+    from custom_components.nova import stt as nova_stt
+    from homeassistant.components import conversation as conversation_component, stt
+    conv = await _setup_nova(hass)
+    hass.states.async_set("person.bob", "home", {"friendly_name": "Bob Jones"})
+    hass.states.async_set("person.alice", "not_home", {"friendly_name": "Alice"})
+    _switches(hass)
+    second = {**BOB, "sample_id": "s2"}
+    async with VoiceApp(blocks=[BOB, second]) as app:
+        await _set_app(hass, app.uri)
+        turn = _Turn(app)
+        ps = turn.patches()
+        for p in ps:
+            p.start()
+        try:
+            entity = stt.async_get_speech_to_text_entity(hass, "stt.nova_voice_id")
+            assert isinstance(entity, nova_stt.NovaVoiceIdStt)
+            from .test_voice_id_phase2b import _meta, _stream
+            from custom_components.nova import conversation as nova_conv
+            nova_conv._dedup_cache.clear()
+            import time as _time
+            for device in (DEVICE, "dev-office"):
+                if device == "dev-office":
+                    # The second satellite heard the same sentence at once:
+                    # its turn falls inside the dedup window. (A test turn
+                    # takes longer than the 4 s window, so set it directly.)
+                    key = nova_conv._dedup_key(TEXT)
+                    _ts, cached, winner = nova_conv._dedup_cache[key]
+                    nova_conv._dedup_cache[key] = (_time.time(), cached, winner)
+                await entity.async_process_audio_stream(_meta(), _stream())
+                await conversation_component.async_converse(
+                    hass, TEXT, None, Context(), agent_id=conv, device_id=device)
+                # the first turn's commit finishes before the second turn, so
+                # the in-flight guard can't be what stops the second one
+                await hass.async_block_till_done(wait_background_tasks=True)
+        finally:
+            for p in ps:
+                p.stop()
+    assert app.commits == [("s1", "person.bob")]
+
+
+async def test_remove_learned_is_refused_for_an_older_app(
+        hass, isolated, clean, hass_ws_client, socket_enabled):
+    """An app older than 0.3.0 doesn't know "source", so it is never sent one."""
+    await _setup_nova(hass)
+    client = await hass_ws_client(hass)
+    async with VoiceApp(profiles=[{"person": "person.bob", "samples": 8}]) as app:
+        await _set_app(hass, app.uri)
+        with patch("custom_components.nova.voice_learn._app_version", new=lambda entry: (0, 2, 0)):
+            await client.send_json({"id": 1, "type": "nova/voice_id_delete",
+                                    "person": "person.bob", "source": "learned"})
+            reply = await client.receive_json()
+    assert reply["result"]["ok"] is False and reply["result"]["code"] == "bad_request"
     assert app.management == []

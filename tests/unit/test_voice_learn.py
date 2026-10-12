@@ -71,7 +71,8 @@ def _voice(env, **over):
 
 def _cand(env, device=DEVICE, method="sole_occupant+voice", **over):
     ident = env.idn.Identification("Bob Jones", 0.9, method, {"Bob Jones": 1.5})
-    return env.learn.Candidate(device_id=device, voice=_voice(env, **over), ident=ident)
+    return env.learn.Candidate(device_id=device, voice=_voice(env, **over), ident=ident,
+                               answered=True)
 
 
 def _bob_alone(env):
@@ -149,6 +150,7 @@ async def test_a_blocked_turn_never_learns(env, app, reason):
     _bob_alone(env)
     env.learn.offer(DEVICE, _voice(env), env.idn.Identification("Bob Jones", 0.9, "voice"))
     env.learn.block(reason)
+    env.learn.mark_answered()
     out = await env.learn.async_learn(env.hass, None, env.learn.take())
     assert out.reason == reason and app.management == []
 
@@ -252,3 +254,51 @@ async def test_the_recording_path_never_resends_a_sample(env, app, load, monkeyp
     assert app.management == []
     enrol.clear()
     assert store is not None
+
+
+
+async def test_a_turn_nova_never_answered_never_learns(env, app):
+    """A duplicate, ambient speech or an empty room returns before Nova
+    answers: the candidate is never marked answered."""
+    _bob_alone(env)
+    env.learn.offer(DEVICE, _voice(env), env.idn.Identification("Bob Jones", 0.9, "voice"))
+    out = await env.learn.async_learn(env.hass, None, env.learn.take())
+    assert out.reason == "not answered" and app.management == []
+
+
+async def test_one_camera_never_counts_twice(env, app):
+    """A face (0.4) and the same camera's room signal (0.375) add up to more
+    than 0.6, but no single signal reaches it."""
+    env.signals.update(home=["Bob Jones", "Alice"], faces={"bob_jones": 0.4},
+                       room={"bob_jones": 0.375})
+    out = await env.learn.async_learn(env.hass, None, _cand(env))
+    assert out.reason == "no other signal agrees" and app.management == []
+
+
+async def test_a_failed_token_read_never_marks_the_sample_sent(env, app, load, monkeypatch):
+    _bob_alone(env)
+    store = load("voice_id_store")
+
+    async def boom(hass):
+        raise OSError("secrets unreadable")
+    monkeypatch.setattr(store, "async_get_token", boom)
+    out = await env.learn.async_learn(env.hass, None, _cand(env))
+    assert out.reason == "error" and not env.learn.was_sent("s1")
+    assert app.management == []
+
+
+def test_schedule_starts_nothing_with_learning_off(env):
+    env.cfg["voice_id_learning"] = False
+    started = []
+    hass = types.SimpleNamespace(async_create_background_task=lambda coro, name: started.append(coro))
+    env.learn.offer(DEVICE, _voice(env), env.idn.Identification("Bob Jones", 0.9, "voice"))
+    env.learn.mark_answered()
+    env.learn.schedule(hass, None)
+    assert started == []
+
+
+@pytest.mark.parametrize("text,ok", [("0.3.0", True), ("0.3.0-beta", True), ("1.0", True),
+                                     ("0.2.9", False), ("", False), ("garbage", False)])
+def test_app_version_parsing(env, text, ok):
+    parsed = env.learn._version(text)
+    assert (parsed >= (0, 3, 0)) is ok

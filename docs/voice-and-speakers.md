@@ -263,11 +263,12 @@ sure who spoke:
 
 - the app is sure it's that person, with a good score, and the command lasted
   at least 2 seconds;
-- something other than voice agrees: they are the only one home, a camera saw
-  their face, or they are the only one seen in that satellite's room, and
-  nobody else is likely to be there;
-- it was an ordinary command on a voice satellite, not Chat, a recording, a
-  short follow up or a "yes" or "no" to a question;
+- something other than voice agrees, on its own: they are the only one home,
+  a camera clearly saw their face, or they are the only one seen in that
+  satellite's room, and nobody else is likely to be there;
+- it was an ordinary command on a voice satellite that Nova answered, not
+  Chat, a recording, a short follow up, a "yes" or "no" to a question, a
+  sentence another satellite already answered, or speech Nova ignored;
 - the reply has already been given. Learning never slows Nova down and never
   changes an answer.
 

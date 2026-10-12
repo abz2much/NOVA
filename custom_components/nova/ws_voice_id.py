@@ -145,6 +145,14 @@ async def ws_voice_id_delete(hass: HomeAssistant, connection, msg: dict) -> None
     if not uri:
         _fail(connection, msg, "unreachable", voice_id.ERROR_MESSAGES["unreachable"])
         return
+    if msg.get("source") == "learned":
+        # An app older than 0.3.0 doesn't know "source" and might delete the
+        # whole profile, so it is never sent one (8.38.0).
+        from .const import VOICE_LEARN_MIN_APP
+        from .voice_learn import _app_version
+        if _app_version(_entry) < VOICE_LEARN_MIN_APP:
+            _fail(connection, msg, "bad_request", voice_id.ERROR_MESSAGES["bad_request"])
+            return
     try:
         reply = await voice_id.profile_delete(uri, token, msg.get("person"), everyone=everyone,
                                               source=msg.get("source"))
