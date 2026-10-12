@@ -370,16 +370,22 @@ def take_turn_voice() -> VoiceResult | None:
     return result
 
 
-def speaker_hint(result: VoiceResult | None, first_name: str | None) -> str:
-    """The AI's speaker hint for this request (8.37.0), or "".
+def speaker_hint(result: VoiceResult | None, first_name: str | None,
+                 identity_agrees: bool = True) -> str:
+    """The AI's speaker hint for this request (8.37.0, 8.39.0), or "".
 
-    known: the person's first name, said to be a hint, not proof.
+    known: the person's first name, said to be a hint, not proof, but only
+    when the turn's final identity names the same person (identity_agrees).
+    When a face and presence outweigh the voice, the hint is "not sure", so
+    the AI never hears one name while facts are filed under another.
     not_sure with a best match scored: "not sure". Anything else: nothing.
     The caller fences it (prompt_fence) inside the situation block. It is
     never added to the user's words, the history, phrases or dedup."""
     if result is None:
         return ""
     if result.status == "known" and result.person and first_name:
+        if not identity_agrees:
+            return "Speaker: not sure."
         return f"Speaker (by voice, a hint, not proof of identity): {first_name}."
     if result.status == "not_sure" and result.score is not None:
         return "Speaker: not sure."

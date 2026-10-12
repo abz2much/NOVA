@@ -113,6 +113,26 @@ The Faces tab's list of residents is saved in `nova/face_roster.json`, names
 only, and readable only by Home Assistant's own user. Nova has no face
 engine of its own and keeps no face images.
 
+### Voices
+
+With the Nova Voice ID app, voice samples and the voice profiles made from
+them live only in the app, on your own machine. Nova keeps none: no audio,
+no voice prints. It holds the app's address in its settings, the token in
+`secrets.yaml`, and, for a single request, the app's result (who it thinks
+spoke, and how sure it is), which is logged as numbers and ids, never words.
+
+To delete voice data, use **Settings → Voice & Speakers → Voice ID**:
+
+- **Delete voice** next to a person removes their profile and recordings.
+- **Remove learned** removes only the samples learned from everyday use. The
+  ones you recorded stay.
+- **Delete all voice data** removes everyone's.
+
+**Backups.** The app leaves voice data out of Home Assistant backups, so
+voices never leave the machine, even inside a backup file. After restoring a
+backup, or moving to a new machine, record each person's voice again. The
+app's token is in the backup, so Nova keeps working.
+
 ### Wearables
 
 Off by default. When you turn it on, Nova reads the wearable sensors Home
@@ -160,6 +180,8 @@ not Nova, holds the keys for the integrations it uses.
 - If you run everything through Ollama and a local text to speech voice,
   nothing leaves your own network.
 - Wearable and sleep data never go to a cloud AI.
+- Voice samples and profiles never leave the Nova Voice ID app's machine,
+  and are left out of backups.
 - Camera images are never stored, apart from confirmed intrusion snapshots,
   which stay on your machine.
 - Nova never sends anything to a Nova service, because there isn't one.

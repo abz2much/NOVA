@@ -1,3 +1,21 @@
+## [8.39.0] — Nova Voice ID tidy up
+
+A small tidy release: the AI's speaker hint now follows who Nova decided is speaking, and the docs cover Voice ID everywhere they should.
+
+### Changed
+- **The AI hint follows identity.** "Speaker (by voice, a hint, not proof of identity): {first name}." is shown only when the turn's final identity names the same person as the known voice. When a face and presence outweigh the voice, the hint is "Speaker: not sure.", so the AI never hears one name while facts are filed under another. Everything else is as before: `not_sure` with a score gives "not sure", any other status gives nothing, it stays inside the prompt fence, and with "Use voice to tell who is speaking" off there is no hint at all.
+
+### Docs
+- README: the two Voice ID rows are one, with the missing full stop.
+- Settings reference: a Voice ID section with every setting (`voice_id_uri`, `voice_id_fallback_stt`, `voice_id_identity`, `voice_id_learning`, `voice_id_hidden_people`) and the token in `secrets.yaml`.
+- Privacy: voices live only in the app on your own machine, Nova keeps none, and how to delete one voice, the learned samples only, or everything.
+- How Nova works: where Voice ID sits in the voice path, and that a known voice is one identity signal, a hint and never a key.
+- Roadmap: Voice ID is done; tuning the thresholds from real scores and the empty reply after a mic reopen are left.
+- Backups (Voice ID section and Privacy): the app leaves voice data out of Home Assistant backups so it never leaves the machine; after a restore, or on a new machine, record voices again. The token is in the backup.
+
+### Unchanged
+- Safety, identity weights, learning, recording and the logs behave exactly as in 8.38.0.
+
 ## [8.38.0] — Nova Voice ID learns from everyday use
 
 Nova can now add a voice sample from an ordinary voice command when it is very sure who spoke, so each person's voice keeps up with how they sound day to day. It is off by default, needs "Use voice to tell who is speaking" on and the Nova Voice ID app 0.3.0, and can be undone per person in one tap. With it off, Nova behaves exactly as 8.37.0.

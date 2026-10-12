@@ -1,8 +1,25 @@
 # Roadmap
 
 This page lists ideas that might be added to Nova one day, for anyone curious
-about where it could go. These are ideas, not promises. None of them is built,
-and none is scheduled.
+about where it could go. These are ideas, not promises. Unless it says
+otherwise, none of them is built, and none is scheduled.
+
+## Voice ID: done, with two things left
+
+Nova Voice ID is built (8.35.0 to 8.39.0): Nova's own speech to text, voice
+results in the logs, recording and deleting voices, telling who is speaking,
+and learning from everyday use. See [Voice ID](voice-and-speakers.md#voice-id).
+What's left:
+
+- **Tuning the thresholds from real scores.** The app's `t_known`,
+  `t_maybe`, `m_gap` and speech length settings still have their starting
+  values. They should be set from the VOICE lines of real households,
+  including scores from other people's voices, before more homes rely on
+  them.
+- **The empty reply after a mic reopen.** When Nova reopens a satellite's
+  microphone for a follow up, the answer from a real satellite sometimes
+  arrives empty. That is why voice recording asks for the wake word each
+  time instead of keeping the mic open.
 
 ## Driving mode
 
