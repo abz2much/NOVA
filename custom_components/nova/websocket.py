@@ -594,11 +594,11 @@ async def ws_get_panel_data(
                 "cognition_enabled": bool(_runtime_opt(hass, entry, "cognition_enabled", True)),
                 "camera_auto_analyze": bool(_runtime_opt(hass, entry, "camera_auto_analyze", True)),
                 "camera_auto_analyze_motion": bool(_runtime_opt(hass, entry, "camera_auto_analyze_motion", False)),
-                "package_detection": bool(_runtime_opt(hass, entry, "package_detection", True)),
+                "package_detection": bool(_runtime_opt(hass, entry, "package_detection", False)),
                 "visitor_learning": bool(_runtime_opt(hass, entry, "visitor_learning", True)),
                 "rich_reasoning": bool(_runtime_opt(hass, entry, "rich_reasoning", False)),
                 "light_control_enabled": bool(_runtime_opt(hass, entry, "light_control_enabled", True)),
-                "departure_alerts_enabled": bool(_runtime_opt(hass, entry, "departure_alerts_enabled", True)),
+                "departure_alerts_enabled": bool(_runtime_opt(hass, entry, "departure_alerts_enabled", False)),
                 "routine_alerts_enabled": bool(_runtime_opt(hass, entry, "routine_alerts_enabled", True)),
                 "departure_lead_minutes": _runtime_opt(hass, entry, "departure_lead_minutes", 30),
                 "routine_departure_lead_minutes": _runtime_opt(hass, entry, "routine_departure_lead_minutes", 15),
@@ -626,6 +626,7 @@ async def ws_get_panel_data(
                 "pattern_learn_motion": bool(_runtime_opt(hass, entry, "pattern_learn_motion", False)),
                 "sleep_override": sleep_detection.current_override(),
                 "sleep_prompt_enabled": bool(_runtime_opt(hass, entry, "sleep_prompt_enabled", True)),
+                "auto_bootstrap": bool(_runtime_opt(hass, entry, "auto_bootstrap", False)),
                 "sleep_prompt_time": str(_runtime_opt(hass, entry, "sleep_prompt_time", "23:00") or "23:00"),
                 "ground_floor_areas": _runtime_opt(hass, entry, CONF_GROUND_FLOOR_AREAS, []) or [],
                 "operational_mode_auto": bool(_runtime_opt(hass, entry, "operational_mode_auto", True)),
@@ -710,10 +711,10 @@ async def ws_get_panel_data(
                 # the panel's selects snap back to their defaults on every
                 # re-render even though the value was saved (v6.64.1 fix).
                 "banter_level":         _runtime_opt(hass, entry, "banter_level", 1),
-                "search_backend":       str(_runtime_opt(hass, entry, "search_backend", "duckduckgo") or "duckduckgo"),
+                "search_backend":       str(_runtime_opt(hass, entry, "search_backend", "off") or "off"),
                 "searxng_url":          _masked_url(_runtime_opt(hass, entry, "searxng_url", "")),
                 "calendar_tight_gap_min": _runtime_opt(hass, entry, "calendar_tight_gap_min", 15),
-                "recognition_source":   str(_runtime_opt(hass, entry, "recognition_source", "both") or "both"),
+                "recognition_source":   str(_runtime_opt(hass, entry, "recognition_source", "off") or "off"),
                 "voice_confirm_enabled": bool(_runtime_opt(hass, entry, "voice_confirm_enabled", False)),
                 "voice_confirm_mode":   str(_runtime_opt(hass, entry, "voice_confirm_mode", "auto") or "auto"),
                 # Nova Voice ID (8.35.0)
@@ -1052,7 +1053,7 @@ PANEL_WRITABLE_KEYS = {
     "outdoor_entities",          # JSON list: entity globs forced outdoor
     "indoor_entities",           # JSON list: entity globs forced indoor (wins)
     # Web Research + Communication agents (v6.51.0)
-    "search_backend",            # str: "duckduckgo" (default) | "searxng"
+    "search_backend",            # str: "off" (default, 8.41.0) | "duckduckgo" | "searxng"
     "searxng_url",               # str: SearXNG base URL when backend=searxng
     "calendar_tight_gap_min",    # int: back-to-back gap flagged as "tight"
     # Persona (v6.51.0)
@@ -1072,7 +1073,7 @@ PANEL_WRITABLE_KEYS = {
     "energy_mode_bump",          # list: modes that raise energy agency one step
     "biometrics_enabled",        # bool: read wearable context (opt-in) (v6.63.0)
     "biometric_entities",        # dict: explicit kind→entity_id overrides
-    "recognition_source",        # str: both | doubletake | frigate (v6.64.1)
+    "recognition_source",        # str: off | both | doubletake | frigate (v6.64.1; off 8.41.0)
     "voice_confirm_enabled",      # bool: voice-confirm sensitive actions (v6.67.0)
     "voice_confirm_mode",         # str: native | gated | auto
     "voice_id_uri",               # str: Nova Voice ID app, tcp://host:port (8.35.0)
@@ -1187,6 +1188,7 @@ PANEL_WRITABLE_KEYS = {
     # Sleep state (v7.86.0)
     "sleep_override",               # str: "auto" | "awake" | "asleep" — panel dropdown
     "sleep_prompt_enabled",         # bool: send the nightly "Heading to bed?" prompt
+    "auto_bootstrap",               # bool: install the voice add-ons (off until set up, 8.41.0)
     "sleep_prompt_time",            # str: HH:MM — earliest the prompt may fire
     # Residence doors (8.26.0)
     "garage_mode",               # str: auto | yes | no — show garage items (display only, 8.26.0)

@@ -375,7 +375,9 @@ async def test_lockdown_gets_current_runtime_values(
     before_lockdown.append(_hook)
     entry = await _setup(hass)
     assert entry.state is ConfigEntryState.LOADED
-    assert [c["lockdown_on_alarm"] for c in lockdown_calls] == ["runtime"]
+    # Setup wires lockdown, then the cognitive core (on every install since
+    # 8.41.0) wires it again on start; both read the live runtime value.
+    assert [c["lockdown_on_alarm"] for c in lockdown_calls] == ["runtime", "runtime"]
     live = seen["runtime"].runtime_config
     assert effective_calls[-1] == live
     assert effective_calls[-1] is not live       # a snapshot, not the live dict
@@ -392,7 +394,10 @@ async def test_lockdown_without_runtime_is_non_fatal_and_visible(
     with caplog.at_level(logging.WARNING):
         entry = await _setup(hass)
     assert entry.state is ConfigEntryState.LOADED       # setup still finished
-    assert lockdown_calls == []                          # no hass.data fallback
+    # No hass.data fallback: setup's own wiring is skipped. The cognitive core
+    # (on every install since 8.41.0) then wires lockdown from the effective
+    # config it was given, never from the stale bridge.
+    assert all(c.get("lockdown_on_alarm") != "bridge" for c in lockdown_calls)
     assert any("lockdown wiring failed" in r.getMessage()
                and "Nova runtime is not available" in r.getMessage()
                for r in caplog.records)

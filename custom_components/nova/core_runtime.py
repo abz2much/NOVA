@@ -15,6 +15,7 @@ from homeassistant.core import Event, HomeAssistant
 
 from . import core_common as _m_common
 from . import core_delivery as _m_delivery
+from . import core_hazards as _m_hazards
 from . import core_ignore as _m_ignore
 from . import core_learning as _m_learning
 from . import core_lockdown as _m_lockdown
@@ -70,6 +71,11 @@ def _on_state_changed(event: Event) -> None:
     # here entirely so setting the live state for automation-trigger
     # purposes can never double-log the same event.
     if entity_id.startswith("camera_event."):
+        return
+
+    # A new smoke, CO, gas or leak alarm is announced here on every install
+    # (8.41.0), before ignore rules so none can drop it.
+    if _m_hazards.on_state_changed(_m_state._CORE.hass, _m_state._CORE.config, event):
         return
 
     # Check ignore rules

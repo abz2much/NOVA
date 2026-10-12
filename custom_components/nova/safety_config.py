@@ -71,6 +71,7 @@ STRICT_BOOL_KEYS = frozenset({
     "host_health_enabled", "host_health_alerts_enabled", "host_health_recovery_announce",
     "camera_auto_analyze", "camera_auto_analyze_motion", "package_detection",
     "visitor_learning", "rich_reasoning", "light_control_enabled", "sleep_prompt_enabled",
+    "auto_bootstrap",
 })
 
 # How long an unanswered intrusion alert waits before the softer "couldn't

@@ -271,7 +271,10 @@ async def test_headless_run_still_reads_and_reports(agent, monkeypatch):
     ], hass=hass, user_input=None)
     assert result == "Hall is on."
     offered = {t["function"]["name"] for t in client.calls[0]["tools"]}
-    assert offered == set(load_headless(agent))
+    # Optional features that are not set up are never offered (8.41.0).
+    import sys
+    not_set_up = sys.modules["jc.optional_features"].tools_not_set_up(hass)
+    assert offered == set(load_headless(agent)) - not_set_up
 
 
 def load_headless(agent):
@@ -702,7 +705,8 @@ async def test_fallback_keeps_the_grant(agent, load, monkeypatch):
     result, primary, _ = await _run(agent, monkeypatch, [RuntimeError("HTTP 500 upstream")],
                                     hass=hass, config={"x": 1}, allowed_tools=homer, depth=1)
     offered = {t["function"]["name"] for t in fallback.calls[0]["tools"]}
-    assert offered == set(homer)
+    not_set_up = load("optional_features").tools_not_set_up(hass)
+    assert offered == set(homer) - not_set_up
     assert hass.service_calls == []
     assert "not available" in _tool_messages(fallback)[-1]["content"]
 

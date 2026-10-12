@@ -2,7 +2,7 @@
  * frontend/src/. Edit the sources there, then run the build. */
 /*
  * Nova Command Center Panel.
- * v8.40.0
+ * v8.41.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -79,7 +79,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.40.0 ",
+      console.log("%c Nova Panel %c v8.41.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -5408,6 +5408,7 @@ ${this._htmlDashboardBody()}`;
       ${onOff("continued_conversation_multi_satellite", false, { label: "Follow me between rooms", sub: "reopen the mic where you moved to (needs 2+ satellites)" })}
       ${onOff("continued_conversation_speaker_reopen", true, { label: "Follow-up mic reopen (speaker-aware)" })}
       ${onOff("tts_use_ha_voice", false, { label: "Use Home Assistant default voice" })}
+      ${onOff("auto_bootstrap", false, { label: "Install voice add-ons", sub: "installs Piper, Whisper and openWakeWord and builds the voice pipeline at the next restart (Home Assistant OS only)" })}
       ${num("departure_lead_minutes", "Departure lead (min)", "30", 0, 240, 5)}
       ${num("routine_departure_lead_minutes", "Leave reminder (min)", "15", 0, 120, 5)}
       ${num("memory_threading_hours", "Memory window (hrs)", "48", 1, 336, 1)}
@@ -5670,7 +5671,7 @@ ${this._htmlDashboardBody()}`;
       </div>
       <div class="cfg-row">
         <label>Package Watch — detect packages and mail at the door</label>
-        <button class="toggle-btn ${cfg.package_detection !== false ? "on" : "off"}" data-cfg-key="package_detection" data-cfg-val="${cfg.package_detection !== false ? "false" : "true"}">${cfg.package_detection !== false ? "ON" : "OFF"}</button>
+        <button class="toggle-btn ${cfg.package_detection === true ? "on" : "off"}" data-cfg-key="package_detection" data-cfg-val="${cfg.package_detection === true ? "false" : "true"}">${cfg.package_detection === true ? "ON" : "OFF"}</button>
       </div>
       <div class="cfg-row">
         <label>Visitor Learning — silently log strangers seen at the door</label>
@@ -5678,7 +5679,7 @@ ${this._htmlDashboardBody()}`;
       </div>
       <div class="cfg-row">
         <label>Face recognition source</label>
-        <select class="cfg-field" data-cfg-key="recognition_source">${this._optSelect([["both", "Both (Double Take + Frigate)"], ["frigate", "Frigate only (sub_label)"], ["doubletake", "Double Take only"]], cfg.recognition_source || "both")}</select>
+        <select class="cfg-field" data-cfg-key="recognition_source">${this._optSelect([["off", "Off"], ["both", "Both (Double Take + Frigate)"], ["frigate", "Frigate only (sub_label)"], ["doubletake", "Double Take only"]], cfg.recognition_source || "off")}</select>
       </div>
       <div class="cfg-row">
         <label>Recognition confidence</label>
@@ -5867,7 +5868,7 @@ ${this._htmlDashboardBody()}`;
       <div class="cfg-row">
         <label>Web research backend</label>
         <select class="cfg-field" data-cfg-key="search_backend">
-          ${this._optSelect([["duckduckgo", "DuckDuckGo (no key, default)"], ["searxng", "SearXNG (self-hosted)"]], cfg.search_backend || "duckduckgo")}
+          ${this._optSelect([["off", "Off"], ["duckduckgo", "DuckDuckGo (no key)"], ["searxng", "SearXNG (self-hosted)"]], cfg.search_backend || "off")}
         </select>
       </div>
       <div class="cfg-row">

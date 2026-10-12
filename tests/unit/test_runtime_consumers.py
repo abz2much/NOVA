@@ -376,9 +376,10 @@ async def test_observer_start_merges_a_snapshot_and_records_its_owner(obs):
     assert obs._STATE.config["llm_base_url"] == "http://gpu"
     assert "other" not in obs._STATE.config            # only AI keys merge
     assert not _crossed(hass, live)                     # never the live dict
-    # The appliance monitor and cognitive core start for the same owner.
+    # The appliance monitor starts for the same owner. The cognitive core
+    # is started by setup on every install (8.41.0), never by the Observer.
     assert obs._started["appliance_monitor"] is entry
-    assert obs._started["cognitive_core"] is entry
+    assert "cognitive_core" not in obs._started
 
 
 async def test_observer_refresh_sees_newer_live_values(obs):

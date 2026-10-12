@@ -236,6 +236,15 @@ def _critical_hazard(event: Event) -> bool:
         return False
 
 
+def _core_running() -> bool:
+    """Whether the cognitive core, which owns hazard alarms, is running."""
+    try:
+        from .core_state import _CORE
+        return bool(_CORE.running)
+    except Exception:
+        return False
+
+
 def _entry_state_recovery(event: Event) -> bool:
     """An ordinary door, window, opening, garage door or lock coming back
     from unknown/unavailable (restart, integration or device recovery). Not
@@ -604,6 +613,11 @@ def _on_state_changed(event: Event) -> None:
     # limit. The output gate still decides delivery, and it lets critical
     # through.
     critical = _critical_hazard(event)
+    # Since 8.41.0 the cognitive core announces these on every install, so
+    # the Observer leaves them to it. It still handles one if the core is
+    # not running.
+    if critical and _core_running():
+        return
 
     # State recovery (v7.120.1), after critical-hazard recognition and before
     # anything classifies the event as an ordinary opening or unlock.
@@ -1139,12 +1153,8 @@ async def start(hass: HomeAssistant, config: dict, entry=None) -> None:
     except Exception as exc:
         _LOGGER.warning("Proactive briefing start failed (non-fatal): %s", exc)
 
-    # v5.8.03: Start cognitive core
-    try:
-        from . import cognitive_core
-        await cognitive_core.start(hass, config, entry=entry)
-    except Exception as exc:
-        _LOGGER.warning("Cognitive core start failed (non-fatal): %s", exc)
+    # The cognitive core is no longer started here: since 8.41.0 it runs on
+    # every install, started by setup whether the Observer is on or not.
 
 
 async def refresh_tier_providers(hass: HomeAssistant, updates: Optional[dict] = None) -> None:
@@ -1220,12 +1230,6 @@ async def stop() -> None:
     try:
         from . import proactive_briefing
         await proactive_briefing.stop()
-    except Exception:
-        pass
-    # v5.8.03: Stop cognitive core
-    try:
-        from . import cognitive_core
-        await cognitive_core.stop()
     except Exception:
         pass
     await _release_tier_providers()

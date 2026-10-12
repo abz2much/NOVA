@@ -411,12 +411,12 @@ def recent_faces(hass, limit: int = 20) -> list[dict]:
 def source_status(hass) -> dict[str, Any]:
     """What identity sources Nova can see, for the Faces tab's empty state.
     Never raises."""
-    out: dict[str, Any] = {"recognition_source": "both", "mqtt": False,
+    out: dict[str, Any] = {"recognition_source": "off", "mqtt": False,
                            "frigate_sensors": 0, "seen_recently": bool(_FACE_LOG)}
     try:
         from . import nova_config
         out["recognition_source"] = str(
-            nova_config.get("recognition_source", "both") or "both").lower()
+            nova_config.get("recognition_source", "off") or "off").lower()
     except Exception:
         pass
     try:
@@ -483,16 +483,17 @@ async def register_recognition_listener(hass: HomeAssistant) -> list:
         )
         _LOGGER.info("Nova: face recognized — %s @ %s (%.1f%%)", name, camera, confidence)
 
-    # Recognition source selection (v6.64.1): 'both' (default), 'doubletake',
-    # or 'frigate'. Running both when both are configured causes duplicate
+    # Recognition source selection (v6.64.1): 'off' (the default since
+    # 8.41.0, so nothing listens until Faces is set up), 'both',
+    # 'doubletake' or 'frigate'. Running both when both are configured causes duplicate
     # recognition events, so let the user pick. This gates only which IDENTITY
     # source fires nova_face_recognized — Frigate person *detection* (which
     # triggers camera analysis) runs regardless.
     try:
         from . import nova_config
-        _rec_source = str(nova_config.get("recognition_source", "both") or "both").lower()
+        _rec_source = str(nova_config.get("recognition_source", "off") or "off").lower()
     except Exception:
-        _rec_source = "both"
+        _rec_source = "off"
     _use_doubletake = _rec_source in ("both", "doubletake")
     _use_frigate_id = _rec_source in ("both", "frigate")
 

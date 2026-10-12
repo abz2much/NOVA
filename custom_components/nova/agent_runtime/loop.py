@@ -380,6 +380,10 @@ async def _run_agent_turn(
     # plus Home Assistant's LLM API tools; any other grant offers exactly its
     # own tools and no HA API tools. The dispatcher enforces the same grant.
     tools = _scoped_tool_list(None if grant.tools is None else set(grant.tools))
+    # An optional feature that is not set up yet is not offered (8.41.0).
+    from .. import optional_features
+    not_set_up = optional_features.tools_not_set_up(hass)
+    tools = [t for t in tools if t.get("function", {}).get("name") not in not_set_up]
     if hass_api and grant.include_ha_tools:
         tools.extend(_ha_tools_to_openai_format(
             hass_api.tools, getattr(hass_api, "custom_serializer", None)))

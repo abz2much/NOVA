@@ -107,7 +107,7 @@ Panel, **Settings → Anticipation & Memory**:
 
 | Setting | What it does |
 |---|---|
-| Departure alerts | Leave alerts for calendar events. On by default. |
+| Departure alerts | Leave alerts for calendar events. Off until you turn them on (since 8.41.0). |
 | Leave alerts: walking, public transport, driving | Which ways of travelling to include. Walking and public transport need Google Maps Travel Time. |
 | Time journeys with Google Maps Travel Time | Use that integration when it is set up. |
 | Departure lead (min) | The lead used when no travel time is known. 30 by default. |

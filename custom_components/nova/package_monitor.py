@@ -567,7 +567,7 @@ async def note_from_eufy(hass, honorific, tts_entity, speakers,
 # evaluate()'s own gates, including the 30 minute cooldown.
 
 def _package_detection_on(hass) -> bool:
-    v = _runtime(hass, "package_detection", True)
+    v = _runtime(hass, "package_detection", False)
     return v if isinstance(v, bool) else str(v).lower() in ("1", "true", "yes", "on")
 
 

@@ -332,7 +332,9 @@ async def async_run_bootstrap(hass: HomeAssistant, *, force: bool = False) -> di
     status = {"supervised": False, "addons_ok": False,
               "wyoming_ok": False, "pipeline_ok": False, "skipped": None}
 
-    if not bool(nova_config.get("auto_bootstrap", True)):
+    # Off until set up (8.41.0): a fresh install installs nothing until the
+    # voice add-ons are switched on in Settings.
+    if not bool(nova_config.get("auto_bootstrap", False)):
         status["skipped"] = "auto_bootstrap disabled"
         return status
 

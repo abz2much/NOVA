@@ -66,7 +66,7 @@ async def test_a_fresh_install_locks_every_lock(cc, fake_hass, m):
 
 async def test_a_migrated_install_keeps_its_two_locks_exempt(cc, fake_hass, m):
     _, options, ver = m.migrate_config({}, {}, current_version=7)
-    assert ver == 8 and options["lockdown_exempt_locks"] == OLD
+    assert ver == m.CURRENT_SCHEMA_VERSION and options["lockdown_exempt_locks"] == OLD
     _obey(fake_hass)
     for eid in OLD + ["lock.front"]:
         fake_hass.states.set(eid, "unlocked")
@@ -93,7 +93,7 @@ def test_a_saved_value_is_never_overwritten(m, where, value):
     else:
         m.saved["lockdown_exempt_locks"] = value
     _, out, ver = m.migrate_config(data, options, current_version=7)
-    assert ver == 8
+    assert ver == m.CURRENT_SCHEMA_VERSION
     assert out.get("lockdown_exempt_locks", "absent") == (value if where == "options" else "absent")
 
 

@@ -16,9 +16,10 @@ Nova uses where, the language it speaks, and how it addresses people.
 
 ## What it needs
 
-- [ ] **A voice pipeline.** On Home Assistant OS or Supervised, Nova installs
-  and starts the Piper, Whisper and openWakeWord add ons on its first run,
-  and creates an Assist pipeline with Nova as the conversation agent. On
+- [ ] **A voice pipeline.** On Home Assistant OS or Supervised, turn on
+  "Install voice add-ons" (Settings → Anticipation & Memory). At the next
+  restart Nova installs and starts the Piper, Whisper and openWakeWord add
+  ons and creates an Assist pipeline with Nova as the conversation agent. On
   Container or Core, install them yourself and create the pipeline in
   **Settings → Voice Assistants**.
 - [ ] **Optional: voice satellites**, such as ESP32-S3 boards running Assist
