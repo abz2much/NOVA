@@ -187,6 +187,9 @@ ANNOUNCERS = {
     # 8.7.18: ws_repeat_spoken, the panel's Repeat button and the only
     # announcer in the websocket layer, moved from websocket.py.
     "ws_voice.py",
+    # 8.44.0: the one delivery path for proactive messages (design D3).
+    # Senders leave this list as they move onto it.
+    "delivery.py",
 }
 
 
