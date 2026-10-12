@@ -13,7 +13,7 @@ _LOGGER = logging.getLogger(__name__.partition(".agent_runtime")[0] + ".agent")
 
 
 async def _exec_manage_autonomy(hass: HomeAssistant, args: dict) -> str:
-    """View or revoke graduated-autonomy grants."""
+    """List or reset accepted-offer counts. Nova never acts on its own."""
     try:
         from ... import cognitive_core
         action = args.get("action", "list")
@@ -24,7 +24,10 @@ async def _exec_manage_autonomy(hass: HomeAssistant, args: dict) -> str:
             return json.dumps(cognitive_core.revoke_autonomy(pkey))
         # default: list
         status = cognitive_core.status()
-        return json.dumps({"grants": status.get("autonomy_grants", [])})
+        return json.dumps({
+            "acts_on_its_own": False,
+            "note": "Every offer waits for a yes; these are acceptance counts only.",
+            "grants": status.get("autonomy_grants", [])})
     except Exception as exc:
         return json.dumps({"error": str(exc)})
 

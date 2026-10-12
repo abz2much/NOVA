@@ -23,7 +23,6 @@ from . import core_state as _m_state
 from .core_autonomy import AutonomyManager
 from .core_bridge import _patterns_db
 from .core_common import TICK_INTERVAL
-from .core_delivery import _autonomous_done_message
 from .core_learning import _pattern_rate_ok
 from .core_pattern_store import StateLogger
 from .core_proactive import ProactiveManager
@@ -307,37 +306,17 @@ async def _tick():
                         _oa = _offer_area(_m_state._CORE.hass, offer)
                         if _oa and _oa in mode_scope_areas:
                             continue
-                    pkey = offer.get("pattern_key", "")
-                    # Graduated autonomy: trusted actions execute silently — all of
-                    # them, since they don't need a yes/no.
-                    if pkey and _m_state._CORE.autonomy_mgr and _m_state._CORE.autonomy_mgr.is_autonomous(pkey):
-                        ok = await _m_delivery._execute_action_data(
-                            _m_state._CORE.hass, offer.get("action_data", {}),
-                            source="proactive_autonomous")
-                        if ok:
-                            _m_state._CORE.autonomous_actions += 1
-                            # Mark cooldown so the same autonomous action doesn't
-                            # re-fire every proactive cycle.
-                            okey = offer.get("offer_key")
-                            if okey:
-                                _m_state._CORE.proactive_mgr._mark_offered(okey)
-                            done_msg = _autonomous_done_message(offer)
-                            actions.append({
-                                "type": offer.get("type", "proactive") + "_auto",
-                                "urgency": "low",
-                                "message": done_msg,
-                                "auto_act": True,
-                            })
-                            from .websocket import nova_log
-                            nova_log("AUTO", f"autonomous: {pkey} → {done_msg[:60]}")
-                    elif not spoke_offer:
-                        # Offer the FIRST non-autonomous opportunity; remaining ones
-                        # wait for a later tick (their cooldown isn't marked, so they
+                    # Nova never carries an offer out on its own (8.39.1): every
+                    # one waits for a yes.
+                    if not spoke_offer:
+                        # Offer the FIRST opportunity; remaining ones wait for a
+                        # later tick (their cooldown isn't marked, so they
                         # re-surface naturally next cycle).
                         if offer.get("offer") is not False:
                             # An information only alert (8.14.0) has nothing for
                             # a "yes" to do, so it is never the pending offer.
                             _m_state._CORE.offers_made += 1
+                            offer = _bindable_offer(offer)
                             _m_state._CORE.pending_offer = offer
                         okey = offer.get("offer_key")
                         if okey:
@@ -480,6 +459,9 @@ async def _tick():
         # Process actions
         for action in actions:
             await _m_delivery._emit_action(hass, config, action, sleeping)
+            # An offer that was not spoken aloud cannot be answered by voice.
+            if action is _m_state._CORE.pending_offer and action.get("spoken_at") is None:
+                offer_not_spoken(action)
     finally:
         world.end_tick()
 
@@ -718,21 +700,126 @@ def status() -> dict:
     }
 
 
-# ── Proactive offer API (v5.9.07) ───────────────────────────────────────────
+# ── Proactive offer API (v5.9.07; bound to who heard it, 8.39.1) ───────────
+#
+# An offer can only be answered by voice, on a satellite in a room where it
+# was actually spoken, within OFFER_ANSWER_SECONDS of being spoken. An offer
+# that was only pushed to a phone, or never delivered, cannot be accepted by
+# voice at all. Each offer carries its own offer_id, so a yes always runs the
+# offer it was given to and never a newer one.
+
+OFFER_ANSWER_SECONDS = 60.0
+
+
+def _bindable_offer(offer: dict) -> dict:
+    """A copy of the offer with an id and no delivery yet."""
+    import uuid
+    bound = dict(offer)
+    bound["offer_id"] = uuid.uuid4().hex
+    bound["heard_by"] = []
+    bound["spoken_at"] = None
+    return bound
+
+
+def offer_spoken(offer: dict, speakers, *, now: Optional[float] = None) -> None:
+    """Delivery calls this once the pending offer has been spoken on these
+    speakers. Anything else is ignored."""
+    if offer is None or offer is not _m_state._CORE.pending_offer:
+        return
+    offer["heard_by"] = [str(s) for s in (speakers or []) if s]
+    offer["spoken_at"] = time.monotonic() if now is None else now
+
+
+def offer_not_spoken(offer: dict) -> None:
+    """Delivery calls this when the pending offer was pushed to a phone only,
+    or not delivered at all: nobody can answer it by voice, so it is dropped."""
+    if offer is not None and offer is _m_state._CORE.pending_offer:
+        _m_state._CORE.pending_offer = None
+
+
+def _offer_heard_on(hass, device_id: str, heard_by) -> bool:
+    """True if this voice device is in a room where the offer was spoken: one
+    of its satellites is paired with one of those speakers, or it shares an
+    area with one of them. Fails closed."""
+    if not device_id or not heard_by:
+        return False
+    heard = set(heard_by)
+    try:
+        # A speaker group counts as each speaker in it.
+        for sp in list(heard):
+            st = hass.states.get(sp)
+            attrs = getattr(st, "attributes", None) or {}
+            for key in ("group_members", "entity_id"):
+                members = attrs.get(key)
+                if isinstance(members, (list, tuple)):
+                    heard.update(str(m) for m in members if m)
+        from homeassistant.helpers import device_registry as dr
+        from homeassistant.helpers import entity_registry as er
+        from . import audio_routing, voice_confirm
+        ent_reg = er.async_get(hass)
+        satellites = []
+        for st in hass.states.async_all("assist_satellite"):
+            ent = ent_reg.async_get(st.entity_id)
+            if ent is not None and ent.device_id == device_id:
+                satellites.append(st.entity_id)
+        areas = set()
+        dev = dr.async_get(hass).async_get(device_id)
+        if dev is not None and dev.area_id:
+            areas.add(dev.area_id)
+        # Only an explicit Satellite -> Speaker pairing counts, never a
+        # fallback speaker every satellite would share.
+        pairings = voice_confirm._satellite_pairings(hass) or {}
+        for sat in satellites:
+            paired = pairings.get(sat)
+            if paired and paired in heard:
+                return True
+            area = audio_routing.entity_area(hass, sat)
+            if area:
+                areas.add(area)
+        if not areas:
+            return False
+        return any(audio_routing.entity_area(hass, sp) in areas for sp in heard)
+    except Exception as exc:  # noqa: BLE001
+        _LOGGER.debug("Offer room check failed (treated as not heard): %s", exc)
+        return False
+
 
 def get_pending_offer() -> Optional[dict]:
     """Return the offer currently awaiting a yes/no, if any."""
     return _m_state._CORE.pending_offer
 
 
-async def accept_pending_offer() -> dict:
+def pending_offer_for(hass, device_id: Optional[str], *,
+                      now: Optional[float] = None) -> Optional[dict]:
+    """The pending offer, if this voice device may answer it right now: it was
+    spoken, less than OFFER_ANSWER_SECONDS ago, in this device's room. An
+    expired offer is dropped. None for Chat, typed turns and other rooms."""
+    offer = _m_state._CORE.pending_offer
+    if not offer:
+        return None
+    spoken_at = offer.get("spoken_at")
+    if spoken_at is None:
+        return None
+    t = time.monotonic() if now is None else now
+    if t - float(spoken_at) > OFFER_ANSWER_SECONDS:
+        _m_state._CORE.pending_offer = None
+        return None
+    if not device_id or not _offer_heard_on(hass, device_id, offer.get("heard_by")):
+        return None
+    return offer
+
+
+async def accept_pending_offer(offer_id: Optional[str] = None) -> dict:
     """
-    User said yes to the pending proactive offer. Execute it and record the
-    acceptance toward graduated autonomy. Returns a result dict.
+    User said yes to the pending proactive offer. Execute it once. With an
+    offer_id, only that exact offer runs: if it has been replaced or cleared
+    since, nothing runs. Returns a result dict.
     """
     offer = _m_state._CORE.pending_offer
     if not offer:
         return {"ok": False, "reason": "no pending offer"}
+    if offer_id is not None and offer.get("offer_id") != offer_id:
+        return {"ok": False, "reason": "offer replaced"}
     _m_state._CORE.pending_offer = None
     ok = await _m_delivery._execute_action_data(
         _m_state._CORE.hass, offer.get("action_data", {}), source="proactive_accepted")
@@ -740,17 +827,17 @@ async def accept_pending_offer() -> dict:
     if ok and pkey and _m_state._CORE.autonomy_mgr:
         grant = _m_state._CORE.autonomy_mgr.record_acceptance(pkey, confidence=0.9)
         _m_state._CORE.actions_taken += 1
-        return {
-            "ok": True, "pattern_key": pkey,
-            "approvals": grant.get("approvals", 0),
-            "now_autonomous": grant.get("granted", False),
-        }
+        return {"ok": True, "pattern_key": pkey,
+                "approvals": grant.get("approvals", 0)}
     return {"ok": ok}
 
 
-def decline_pending_offer() -> dict:
-    """User said no. Clear the offer and reset trust toward that pattern."""
+def decline_pending_offer(offer_id: Optional[str] = None) -> dict:
+    """User said no. Clear the offer (only this one, with an offer_id) and
+    reset its acceptance count."""
     offer = _m_state._CORE.pending_offer
+    if offer and offer_id is not None and offer.get("offer_id") != offer_id:
+        return {"ok": False, "reason": "offer replaced"}
     _m_state._CORE.pending_offer = None
     if offer and _m_state._CORE.autonomy_mgr:
         pkey = offer.get("pattern_key", "")
@@ -760,7 +847,7 @@ def decline_pending_offer() -> dict:
 
 
 def revoke_autonomy(pattern_key: str) -> dict:
-    """Revoke a previously-granted autonomous action."""
+    """Reset an offer's acceptance count."""
     if _m_state._CORE.autonomy_mgr and _m_state._CORE.autonomy_mgr.revoke(pattern_key):
         return {"ok": True, "pattern_key": pattern_key}
     return {"ok": False, "reason": "no such grant"}

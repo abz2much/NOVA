@@ -222,7 +222,7 @@ _COMPONENTS = (
     # ── nova/knowledge.db ────────────────────────────────────────────────
     Component(
         name="facts",
-        version=2,
+        version=3,
         tables=("facts",),
         statements=(
             """CREATE TABLE IF NOT EXISTS facts (
@@ -247,6 +247,12 @@ _COMPONENTS = (
         # so it reads back as 'confirmed'. Rows that already carry a status
         # keep it exactly.
         columns=(Column("facts", "status", "TEXT NOT NULL DEFAULT 'confirmed'"),),
+        # 8.39.1: facts Nova worked out from patterns wait for a person to
+        # confirm them, like every other unasked-for fact. Ones stored before
+        # this were marked confirmed without anyone confirming them.
+        data=(DataStep(3, (
+            "UPDATE facts SET status = 'pending' "
+            "WHERE source = 'observed' AND status = 'confirmed'",)),),
     ),
     Component(
         name="relations",

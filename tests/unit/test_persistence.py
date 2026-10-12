@@ -192,6 +192,34 @@ def test_knowledge_with_status_keeps_pending_and_confirmed_exactly(ps, schema, t
         kn.DB_PATH = "/config/nova/knowledge.db"
 
 
+def test_learned_facts_stored_as_confirmed_go_back_to_pending_once(ps, schema, tmp_path):
+    # 8.39.1: facts Nova worked out from patterns were stored confirmed with
+    # nobody confirming them. The upgrade moves them to pending, once; facts a
+    # person told Nova are untouched.
+    db = str(tmp_path / "knowledge.db")
+    conn = sqlite3.connect(db)
+    ps.ensure(conn, "facts")
+    conn.executemany(
+        "INSERT INTO facts (key, value, source, status, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, 1, 1)",
+        [("learned", "1", "observed", "confirmed"), ("told", "2", "stated", "confirmed"),
+         ("asked", "3", "inferred", "pending")])
+    conn.execute(schema.LEDGER_DDL)
+    conn.execute(f"INSERT INTO {schema.LEDGER_TABLE} (component, version, applied_at) "
+                 "VALUES ('facts', 2, 'x')")
+    conn.commit()
+    conn.close()
+    assert ps.upgrade_store(db, _store(schema, "knowledge")).state == "upgraded"
+    with sqlite3.connect(db) as conn:
+        assert dict(conn.execute("SELECT key, status FROM facts")) == {
+            "learned": "pending", "told": "confirmed", "asked": "pending"}
+        conn.execute("UPDATE facts SET status = 'confirmed' WHERE key = 'learned'")
+    assert ps.upgrade_store(db, _store(schema, "knowledge")).state == "current"
+    with sqlite3.connect(db) as conn:
+        assert conn.execute(
+            "SELECT status FROM facts WHERE key = 'learned'").fetchone() == ("confirmed",)
+
+
 def test_oldest_pattern_log_gains_every_shipped_column(ps, schema, tmp_path):
     db = str(tmp_path / "patterns.db")
     _legacy(db,

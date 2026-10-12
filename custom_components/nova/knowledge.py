@@ -117,13 +117,13 @@ def remember(
     inference from clobbering things the user told us directly.
 
     status (v7.88.0): 'confirmed' by default — this covers every trusted write
-    path (the panel's own TEACH form, the `nova.remember` HA service, and
-    pattern_analyzer's observed facts all require their own pre-existing
-    authorization, so none of them need gating here). Pass status='pending' ONLY
-    from a path that isn't already trusted on its own — today, that's just
-    agent.py's `remember` tool, since the model decides on its own when to call
-    it based on everything it's seen in the conversation, including content it
-    merely read aloud. A pending fact is written but excluded from recall()/
+    path (the panel's own TEACH form and the `nova.remember` HA service both
+    require their own pre-existing
+    authorization, so none of them need gating here). Pass status='pending'
+    from a path that isn't already trusted on its own: agent.py's `remember`
+    tool (the model decides on its own when to call it) and, since 8.39.1, the
+    pattern analyzer's observed facts. Re-learning a confirmed fact's same
+    value keeps it confirmed. A pending fact is written but excluded from recall()/
     all_facts()'s default (confirmed-only) view until confirm_fact() promotes it.
 
     Returns the stored fact, or None on failure. SYNC — call via executor.
@@ -148,7 +148,7 @@ def remember(
     try:
         with conn:
             existing = conn.execute(
-                "SELECT id, source FROM facts WHERE subject = ? AND key = ?",
+                "SELECT id, source, value, status FROM facts WHERE subject = ? AND key = ?",
                 (subject, key),
             ).fetchone()
             if existing:
@@ -156,6 +156,11 @@ def remember(
                     row = conn.execute(
                         "SELECT * FROM facts WHERE id = ?", (existing["id"],)).fetchone()
                     return _row_to_fact(row)  # don't clobber a user-stated fact
+                # Learning the same value again never undoes a person's
+                # confirmation (8.39.1).
+                if (status == "pending" and existing["status"] == "confirmed"
+                        and existing["value"] == value):
+                    status = "confirmed"
                 conn.execute(
                     """
                     UPDATE facts SET value = ?, kind = ?, source = ?, confidence = ?,

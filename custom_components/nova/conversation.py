@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 import weakref
 from typing import Literal
@@ -133,12 +134,25 @@ _persona_cache: dict = {"mtime": 0.0, "text": None, "checked": 0.0}
 _PERSONA_MTIME_TTL = 30.0  # re-stat at most every 30s
 
 
+# Verbs that make an imperative on their own ("turn off the lights").
 _COMMAND_VERBS = {
-    "turn", "set", "lock", "unlock", "open", "close", "shut", "dim", "brighten",
-    "arm", "disarm", "activate", "run", "play", "pause", "stop", "mute", "unmute",
-    "increase", "decrease", "switch", "enable", "disable", "start", "resume",
-    "lower", "raise", "toggle", "cancel", "snooze", "remind", "ignore",
-    "tell", "show", "give", "list", "check", "read", "announce", "make",
+    "turn", "set", "lock", "unlock", "dim", "brighten",
+    "arm", "disarm", "activate", "pause", "mute", "unmute",
+    "increase", "decrease", "switch", "enable", "disable", "resume",
+    "lower", "raise", "toggle", "snooze", "remind", "ignore", "announce",
+}
+# Verbs that are just as common in ordinary speech ("give the line", "stop
+# it", "make a wish"). They count as a command only when followed by "me",
+# "us", "it", "my", "a timer" and the like, or a home keyword (8.39.1).
+_WEAK_VERBS = {
+    "open", "close", "shut", "run", "play", "stop", "start", "cancel",
+    "tell", "show", "give", "list", "check", "read", "make", "put", "add",
+}
+_WEAK_VERB_OBJECTS = {"me", "us", "my", "our", "it", "everything", "all"}
+# What "read the ...", "play the ..." and the like name when they are a request.
+_WEAK_VERB_TARGETS = {
+    "news", "post", "mail", "messages", "briefing", "headlines", "list",
+    "agenda", "schedule", "radio", "podcast", "playlist", "song",
 }
 _QUESTION_STARTS = {
     "what", "what's", "whats", "when", "when's", "where", "where's", "who",
@@ -152,9 +166,31 @@ _DOMAIN_KEYWORDS = {
     "light", "lights", "lamp", "lamps", "door", "doors", "lock", "locks",
     "window", "windows", "thermostat", "temperature", "heat", "heating",
     "cooling", "alarm", "scene", "fan", "blinds", "shades", "cover", "curtains",
-    "volume", "plug", "outlet", "sensor", "camera", "climate", "brightness",
-    "weather", "sump", "dehumidifier", "washer", "dryer", "thermostat",
+    "volume", "plug", "outlet", "sensor", "camera", "cameras", "climate",
+    "brightness", "weather", "forecast", "sump", "dehumidifier", "washer",
+    "dryer", "dishwasher", "heater", "boiler", "radiator", "tv", "music",
+    "timer", "timers", "reminder", "reminders", "calendar", "garage", "gate",
+    "doorbell", "energy", "electricity", "solar", "battery", "bin", "bins",
+    "humidity", "aircon", "ac", "vacuum", "kettle", "oven", "socket",
+    "radio", "podcast", "playlist", "spotify", "shopping",
 }
+# Words that make a question about the home ("is anyone home?", "what's on
+# today?"). Only questions use these: in a statement they are too common.
+_QUESTION_TOPICS = {
+    "home", "house", "anyone", "anybody", "everyone", "everybody", "today",
+    "tonight", "tomorrow", "time", "date", "day", "news", "phone", "car",
+    "rain", "raining", "cold", "hot", "warm", "outside", "inside", "upstairs",
+    "downstairs", "wifi", "password", "code",
+}
+# Whole phrases people say to a voice assistant without a command word
+# ("good night", "I'm cold"). Matched at the start of the utterance.
+_HOME_PHRASES = re.compile(
+    r"^(?:good (?:morning|night|evening|afternoon)|goodnight|night night|"
+    r"(?:i'?m|i am|we'?re|we are) (?:going to bed|off to bed|heading (?:out|off|to bed)|"
+    r"leaving|going out|off out|home|back|up|awake|cold|freezing|hot|too hot|"
+    r"too cold|warm|too warm)|"
+    r"going to bed|off to bed|(?:it'?s|it is)(?: \w+){1,3} in here|"
+    r"thank you|thanks|cheers|hello|hi|hey|never mind|nevermind)\b")
 _FILLER = {
     # Pure discourse markers / sentence fragments that are NEVER a valid
     # standalone instruction or answer. Deliberately EXCLUDES greetings (hi,
@@ -165,6 +201,10 @@ _FILLER = {
     "wait", "well", "anyway", "actually", "i", "me", "you", "we", "they",
     "it", "that", "this", "there", "here",
 }
+# Longest utterance with no signal at all that still passes: short answers
+# ("the kitchen one", "twenty minutes") are real; longer ones are almost
+# always someone else talking (8.39.1).
+_NO_SIGNAL_MAX_WORDS = 3
 
 
 def _current_time_context(hass, now=None) -> str:
@@ -174,6 +214,27 @@ def _current_time_context(hass, now=None) -> str:
         now = _dt.datetime.now()
     return (f"Current time: {format_date(now, hass)}, "
             f"{now.strftime('%-I:%M %p')}.")
+
+
+_OFFER_YES = frozenset((
+    "yes", "yes please", "yeah", "yep", "sure", "do it", "go ahead",
+    "please do", "okay", "ok", "affirmative", "please"))
+_OFFER_NO = frozenset((
+    "no", "no thanks", "nope", "don't", "do not", "negative", "leave it",
+    "nevermind", "never mind", "cancel", "stop"))
+
+
+def _offer_answer(text: str | None) -> str | None:
+    """"yes" or "no" if the whole utterance is a plain answer to an offer,
+    else None. Trailing punctuation and "Nova" are ignored."""
+    low = re.sub(r"[^\w' ]+", " ", (text or "").lower())
+    words = [w for w in low.split() if w != "nova"]
+    phrase = " ".join(words)
+    if phrase in _OFFER_YES:
+        return "yes"
+    if phrase in _OFFER_NO:
+        return "no"
+    return None
 
 
 def _turn_user_id(user_input) -> str | None:
@@ -192,46 +253,72 @@ def clear_chat_thread(conversation_id: str) -> None:
         agent._last_seen.pop(conversation_id, None)
 
 
-def _is_addressed_to_nova(text: str) -> bool:
+def _is_addressed_to_nova(text: str, voice: bool = True) -> bool:
     """
     Relevance gate: does this utterance look like it's actually addressed to
     Nova (a command or question), versus ambient speech a satellite happened
     to transcribe — TV dialogue, background conversation, sentence fragments?
 
-    Tuned for HIGH PRECISION on the PASS side: it never drops anything carrying
-    a command verb, a question word, a device keyword, or the name "Nova", so
-    a real instruction is never rejected. It only filters input that has NONE of
-    those signals and clearly reads as filler or a stray fragment. The PRIMARY
-    defense against TV noise is wake-word gating on the satellite; this is a
-    backstop for whatever slips through. Returns True = process, False = ignore.
+    Passes: the name "Nova"; a command verb ("turn", "set", "lock"...); a
+    common verb with an object that makes it a request ("tell me", "play
+    music", "stop the timer"); any home keyword (lights, heating, timer...);
+    a question that is short or about the home; a home phrase ("good night",
+    "I'm cold"); or up to three words with no signal at all, so a short
+    answer to Nova's own question still gets through, unless it is pure
+    filler. On a voice satellite everything else is ignored (8.39.1): before,
+    any longer sentence with no signal passed, and that let TV dialogue in.
+    Typed turns and other callers with no satellite (voice=False) can't hear
+    a TV, so a longer sentence still passes there unless it reads as
+    rambling narrative. Returns True = process, False = ignore.
     """
     t = (text or "").strip().lower()
     if not t:
         return False
-    words = t.split()
+    words = [w.strip(".,!?;:\"…") for w in t.split()]
+    words = [w for w in words if w]
+    if not words:
+        return False
+    phrase = " ".join(words)
 
-    # ── Positive signals — any one means: definitely process ──
     if "nova" in words:
         return True
-    if words[0].strip(".,!?") in _COMMAND_VERBS:
-        return True          # imperative — also protects compound commands
-    if words[0].strip(".,!?") in _QUESTION_STARTS:
-        return True          # a question — including multi-part ones
-    if any(w.strip(".,!?") in _DOMAIN_KEYWORDS for w in words):
-        return True          # mentions a device/control noun
+    if any(w in _DOMAIN_KEYWORDS for w in words):
+        return True
+    first = words[0]
+    if first == "please" and len(words) > 1:
+        first = words[1]
+        words = words[1:]
+    if first in _COMMAND_VERBS:
+        return True
+    if first in _WEAK_VERBS:
+        rest = words[1:]
+        if not rest:
+            return True                      # "stop", "cancel"
+        if rest[0] in _WEAK_VERB_OBJECTS:
+            return True                      # "tell me", "stop it"
+        if any(w in _WEAK_VERB_TARGETS for w in rest[:3]):
+            return True                      # "read the news", "play the radio"
+        # "give the line" is not a request; "play radio" is.
+        return len(words) == 2 and rest[0] not in ("the", "a", "an", "that", "this")
+    if first in _QUESTION_STARTS:
+        # "can you tell me...", "could you turn...": a request asked politely.
+        asks = any(w in _COMMAND_VERBS for w in words[1:]) or any(
+            w in _WEAK_VERBS and nxt in _WEAK_VERB_OBJECTS
+            for w, nxt in zip(words[1:], words[2:]))
+        return (not voice or len(words) <= 4 or asks
+                or any(w in _QUESTION_TOPICS for w in words))
+    if _HOME_PHRASES.match(phrase):
+        return True
 
-    # ── No command signal at all. Reject obvious non-commands. ──
-    # Bare interjection / filler ("So", "Yeah", "I mean", "Wait but")
-    if len(words) <= 3 and all(w.strip(".,!?'") in _FILLER for w in words):
+    # No signal at all: never pure filler, and on a satellite only a short
+    # answer passes.
+    if len(words) <= 3 and all(w.strip("'") in _FILLER for w in words):
         return False
-    # Rambling narrative with no command structure (TV dialogue tends to span
-    # multiple clauses). Only applies when NO positive signal was found above.
-    sentence_breaks = t.count(".") + t.count("?") + t.count("!")
-    if sentence_breaks >= 2 and len(words) >= 8:
-        return False
-
-    # Default: PASS. Better to occasionally answer ambient speech than to drop
-    # a real request — wake-word gating is the real filter.
+    if len(words) > _NO_SIGNAL_MAX_WORDS:
+        if voice:
+            return False
+        sentence_breaks = t.count(".") + t.count("?") + t.count("!")
+        return not (sentence_breaks >= 2 and len(words) >= 8)
     return True
 
 
@@ -355,6 +442,16 @@ class NovaAgent(conversation.ConversationEntity):
         next turn. Raises NovaRuntimeUnavailable when the entry has no
         runtime. Never falls back to another store."""
         return get_runtime(self.entry).runtime_config
+
+    def _in_quiet_hours(self) -> bool:
+        """Whether it is within the configured quiet hours now. False on error."""
+        try:
+            from . import sleep_detection
+            return sleep_detection._in_quiet_hours(
+                self._opt("observer_quiet_start", "22:00") or "22:00",
+                self._opt("observer_quiet_end", "07:00") or "07:00")
+        except Exception:
+            return False
 
     def _opt(self, key: str, default=None):
         """Config read with the canonical precedence: runtime_config →
@@ -881,20 +978,27 @@ class NovaAgent(conversation.ConversationEntity):
         # Reject irrelevant speech before it can mutate conversation memory
         # (history, DB, semantic recall, knowledge injection). Pending-offer
         # state is captured once here and reused by the offer handler below.
+        # Only a voice turn in a room where the offer was spoken, within a
+        # minute of it, can answer it (8.39.1). Chat and other rooms never do.
         try:
             from . import cognitive_core
-            pending_offer = cognitive_core.get_pending_offer()
+            pending_offer = (cognitive_core.pending_offer_for(self.hass, device_id)
+                             if device_id and not is_chat else None)
         except Exception:
             cognitive_core = None
             pending_offer = None
+        # Only a plain yes or no to that offer gets past the relevance gate:
+        # any other speech in the room still has to be addressed to Nova.
+        offer_answer = _offer_answer(user_input.text) if pending_offer else None
         gate_enabled = self._opt("relevance_gate", True)
         # A Chat tab turn is always addressed to Nova, which also keeps the later
         # routing gate from dropping it.
         # A configured voice phrase is addressed to Nova too, so "im cold" is
         # never dropped as ambient speech (8.32.0).
-        is_addressed = (is_chat or _is_addressed_to_nova(user_input.text)
+        is_addressed = (is_chat
+                        or _is_addressed_to_nova(user_input.text, voice=bool(device_id))
                         or _matches_voice_phrase(user_input.text))
-        relevant = bool(pending_offer) or not gate_enabled or is_addressed
+        relevant = bool(offer_answer) or not gate_enabled or is_addressed
 
         if not relevant:
             nova_log("GATE", f"ignored ambient input: '{user_input.text.strip()[:60]}'")
@@ -1078,7 +1182,8 @@ class NovaAgent(conversation.ConversationEntity):
             try:
                 from . import pending_confirm
                 confirm_result = await pending_confirm.answer(
-                    self.hass, device_id, user_input.text, honorific=honorific)
+                    self.hass, device_id, user_input.text, honorific=honorific,
+                    user_id=turn_user)
             except Exception as exc:
                 _LOGGER.debug("Pending confirmation answer skipped: %s", exc)
             if confirm_result is not None:
@@ -1096,38 +1201,24 @@ class NovaAgent(conversation.ConversationEntity):
             # relevance decision above — no second get_pending_offer() read.
             # Left untouched when this turn answered a held request (8.33.0).
             if pending_offer and confirm_result is None:
-                low = user_input.text.strip().lower()
-                affirm = low in ("yes", "yes please", "yeah", "yep", "sure",
-                                 "do it", "go ahead", "please do", "okay", "ok",
-                                 "affirmative", "please")
-                deny = low in ("no", "no thanks", "nope", "don't", "do not",
-                               "negative", "leave it", "nevermind", "never mind",
-                               "cancel", "stop")
-                if affirm:
-                    res = await cognitive_core.accept_pending_offer()
-                    if res.get("now_autonomous"):
-                        offer_reply = (
-                            f"Done{addr}. I've noticed you consistently "
-                            f"want this — I'll handle it automatically from now on. "
-                            f"Say 'stop doing that on your own' to revoke."
-                        )
-                    elif res.get("ok"):
-                        left = max(0, 3 - res.get("approvals", 0))
+                offer_id = pending_offer.get("offer_id")
+                if offer_answer == "yes":
+                    res = await cognitive_core.accept_pending_offer(offer_id)
+                    if res.get("ok"):
                         offer_reply = f"Done{addr}."
-                        if 0 < left <= 2:
-                            offer_reply += (
-                                " (A couple more times and I'll handle this "
-                                "automatically.)"
-                            )
+                    elif res.get("reason") == "offer replaced":
+                        offer_reply = f"That offer has passed{addr}, so I've left it."
                     else:
                         offer_reply = f"I wasn't able to complete that{addr}."
-                    nova_log("OFFER", f"accepted: {offer_reply[:60]}")
-                elif deny:
-                    cognitive_core.decline_pending_offer()
+                    nova_log("OFFER", f"accepted {offer_id} by {turn_user or 'unknown'} "
+                                      f"on {device_id}: {offer_reply[:60]}")
+                elif offer_answer == "no":
+                    cognitive_core.decline_pending_offer(offer_id)
                     offer_reply = f"Understood{addr}. I'll leave it."
-                    nova_log("OFFER", "declined")
+                    nova_log("OFFER", f"declined {offer_id} by {turn_user or 'unknown'} "
+                                      f"on {device_id}")
                 else:
-                    cognitive_core.decline_pending_offer()
+                    cognitive_core.decline_pending_offer(offer_id)
         except Exception as exc:
             _LOGGER.debug("Offer handling skipped: %s", exc)
 
@@ -1514,7 +1605,12 @@ class NovaAgent(conversation.ConversationEntity):
             # The reopen runs after this turn's pipeline has finished, so it
             # never cancels the user's own request.
             held = bool(device_id and not is_chat and _pc.get(device_id))
-            if not is_chat and (held or (_cc.enabled() and _cc.should_continue(response_text))):
+            # Quiet hours (8.39.1): the mic only reopens for a held request's
+            # yes or no, never just because the reply invited a follow-up, so
+            # a TV or a conversation in the room can't be picked up at night.
+            follow_up = (not is_chat and _cc.enabled() and _cc.should_continue(response_text)
+                         and not self._in_quiet_hours())
+            if not is_chat and (held or follow_up):
                 sat_ent = (_cc.satellite_for_device(self.hass, reopen_device)
                            if reopen_device else None)
                 if (cast_routed and reopen_speaker and sat_ent

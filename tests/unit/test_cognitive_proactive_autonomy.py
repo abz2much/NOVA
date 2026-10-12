@@ -299,22 +299,13 @@ def autonomy(cc):
     return cc.AutonomyManager()
 
 
-def test_three_confident_acceptances_earn_autonomy(cc, autonomy):
-    for n in (1, 2):
-        grant = autonomy.record_acceptance("lights:lounge", confidence=0.9)
+def test_no_number_of_acceptances_ever_earns_autonomy(cc, autonomy):
+    # 8.39.1: graduated autonomy is gone. Acceptances are only counted.
+    for n in range(1, 11):
+        grant = autonomy.record_acceptance("lights:lounge", confidence=1.0)
         assert grant["approvals"] == n and grant["granted"] is False
         assert autonomy.is_autonomous("lights:lounge") is False
-    grant = autonomy.record_acceptance("lights:lounge", confidence=0.9)
-    assert grant["granted"] is True and "granted_at" in grant
-    assert autonomy.is_autonomous("lights:lounge") is True
-    assert cc.AUTONOMY_TRUST_THRESHOLD == 3 and cc.AUTONOMY_MIN_CONFIDENCE == 0.80
-
-
-def test_low_confidence_acceptances_never_earn_autonomy_until_confidence_rises(autonomy):
-    for _ in range(5):
-        grant = autonomy.record_acceptance("k", confidence=0.79)
-    assert grant["approvals"] == 5 and grant["granted"] is False
-    assert autonomy.record_acceptance("k", confidence=0.8)["granted"] is True        # the best confidence seen counts
+    assert not hasattr(cc, "AUTONOMY_TRUST_THRESHOLD")
 
 
 def test_confidence_is_the_best_seen_not_the_latest(autonomy):
@@ -338,27 +329,12 @@ def test_one_rejection_takes_trust_back_to_zero(autonomy):
     assert len(autonomy.list_grants()) == 1
 
 
-def test_revoke_and_re_earning(autonomy):
+def test_revoke_resets_the_count(autonomy):
     assert autonomy.revoke("nope") is False
     for _ in range(3):
         autonomy.record_acceptance("k", confidence=0.9)
-    assert autonomy.revoke("k") is True and autonomy.is_autonomous("k") is False
-    for _ in range(2):
-        autonomy.record_acceptance("k", confidence=0.9)
-    assert autonomy.is_autonomous("k") is False
-    autonomy.record_acceptance("k", confidence=0.9)
-    assert autonomy.is_autonomous("k") is True
-
-
-def test_an_active_mode_can_suppress_auto_actions_but_not_grants(cc, autonomy, load, monkeypatch):
-    for _ in range(3):
-        autonomy.record_acceptance("k", confidence=0.9)
-    modes = load("modes")
-    monkeypatch.setattr(modes, "mode_allows_auto_actions", lambda: False)
-    assert autonomy.is_autonomous("k") is False
-    assert autonomy.list_grants()[0]["granted"] is True                                 # the grant itself is untouched
-    monkeypatch.setattr(modes, "mode_allows_auto_actions", lambda: (_ for _ in ()).throw(RuntimeError("x")))
-    assert autonomy.is_autonomous("k") is True                                          # a broken mode check never blocks
+    assert autonomy.revoke("k") is True
+    assert autonomy.list_grants()[0]["approvals"] == 0
 
 
 def test_unknown_or_ungranted_patterns_are_not_autonomous(autonomy):
@@ -367,14 +343,21 @@ def test_unknown_or_ungranted_patterns_are_not_autonomous(autonomy):
     assert autonomy.is_autonomous("k") is False
 
 
-def test_grants_survive_a_restart_and_list_with_the_threshold(cc, autonomy, tmp_path):
+def test_counts_survive_a_restart_and_list_with_no_threshold(cc, autonomy, tmp_path):
     for _ in range(3):
         autonomy.record_acceptance("k", confidence=0.9123)
     reloaded = cc.AutonomyManager()
-    assert reloaded.is_autonomous("k") is True
-    assert reloaded.list_grants() == [{"pattern_key": "k", "approvals": 3, "granted": True,
-                                       "threshold": 3, "confidence": 0.91}]
-    assert json.loads((tmp_path / "autonomy_grants.json").read_text())["k"]["granted"] is True
+    assert reloaded.list_grants() == [{"pattern_key": "k", "approvals": 3, "granted": False,
+                                       "confidence": 0.91}]
+
+
+def test_a_grant_saved_by_an_older_version_is_cleared_on_load(cc, tmp_path):
+    path = tmp_path / "autonomy_grants.json"
+    path.write_text(json.dumps({"k": {"approvals": 3, "granted": True, "confidence": 0.9}}))
+    mgr = cc.AutonomyManager()
+    assert mgr.is_autonomous("k") is False
+    saved = json.loads(path.read_text())["k"]
+    assert saved["granted"] is False and "revoked_at" in saved
 
 
 def test_a_corrupt_grants_file_starts_empty_and_a_failed_save_is_swallowed(cc, tmp_path, monkeypatch):
@@ -405,7 +388,7 @@ async def test_accepting_with_no_pending_offer_does_nothing(cc, fake_hass):
     assert fake_hass.service_calls == []
 
 
-async def test_accepting_runs_the_action_and_counts_toward_autonomy(cc, fake_hass):
+async def test_accepting_runs_the_action_once_and_only_counts_it(cc, fake_hass):
     cc._CORE.hass = fake_hass
     cc._CORE.autonomy_mgr = cc.AutonomyManager()
     results = []
@@ -413,9 +396,20 @@ async def test_accepting_runs_the_action_and_counts_toward_autonomy(cc, fake_has
         cc._CORE.pending_offer = _offer()
         results.append(await cc.accept_pending_offer())
     assert [r["approvals"] for r in results] == [1, 2, 3]
-    assert [r["now_autonomous"] for r in results] == [False, False, True]             # 0.9 confidence clears the bar
+    assert all("now_autonomous" not in r for r in results)
     assert cc._CORE.pending_offer is None and cc._CORE.actions_taken == 3
     assert len(service_calls(fake_hass, "light", "turn_on")) == 3
+
+
+async def test_a_yes_for_a_replaced_offer_runs_nothing(cc, fake_hass):
+    cc._CORE.hass = fake_hass
+    cc._CORE.pending_offer = _offer(offer_id="new")
+    assert await cc.accept_pending_offer("old") == {"ok": False, "reason": "offer replaced"}
+    assert cc._CORE.pending_offer["offer_id"] == "new"
+    assert fake_hass.service_calls == []
+    assert cc.decline_pending_offer("old") == {"ok": False, "reason": "offer replaced"}
+    assert cc._CORE.pending_offer is not None
+    assert (await cc.accept_pending_offer("new"))["ok"] is True
 
 
 async def test_accepting_an_offer_whose_action_fails_counts_nothing(cc, fake_hass):
@@ -445,7 +439,7 @@ async def test_declining_clears_the_offer_and_resets_that_patterns_trust(cc, fak
     cc._CORE.pending_offer = _offer()
     assert cc.decline_pending_offer() == {"ok": True}
     assert cc._CORE.pending_offer is None
-    assert cc._CORE.autonomy_mgr.is_autonomous("lights:lounge") is False
+    assert cc._CORE.autonomy_mgr.list_grants()[0]["approvals"] == 0
     assert cc.decline_pending_offer() == {"ok": True}                                   # nothing pending: still fine
     assert cc.get_pending_offer() is None
 

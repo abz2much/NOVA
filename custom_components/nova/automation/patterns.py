@@ -1718,7 +1718,9 @@ class PatternAnalyzer:
                 stored = knowledge.remember(
                     key, value, subject=subject, kind=kind, source="observed",
                     confidence=round(float(p.confidence), 3), salience=0.8,
-                    respect_stated=True,
+                    # Learned, not told: pending until a person confirms it
+                    # (8.39.1).
+                    respect_stated=True, status="pending",
                 )
                 if stored:
                     written += 1

@@ -115,10 +115,14 @@ async def _emit_action(hass, config, action, sleeping):
                 config.get("tts_premium_contexts") or [],
             )
             if tts_entity:
-                await async_announce(
+                spoken = await async_announce(
                     hass, message, tts_entity, targets,
                     context="sentinel", action_request_id=request_id,
                 )
+                # A spoken offer can be answered from these rooms (8.39.1).
+                if spoken:
+                    from . import core_runtime
+                    core_runtime.offer_spoken(action, targets)
         except Exception as exc:
             _LOGGER.warning("Cognitive: action routing failed: %s", exc)
 
@@ -379,16 +383,3 @@ async def _execute_action_data(
         )
         return False
 
-
-def _autonomous_done_message(offer: dict) -> str:
-    """Convert an offer into a past-tense 'I did this' notification."""
-    t = offer.get("type", "")
-    ad = offer.get("action_data", {})
-    n = len(ad.get("entity_ids", []))
-    if t == "proactive_lights":
-        return "I turned the lights on for you — it was dark and you were there."
-    if t == "proactive_stale_light":
-        return "I turned off a light left on in an empty room to save energy."
-    if t == "proactive_hvac":
-        return "I set the climate back to eco — no one's home."
-    return f"I handled {n} device(s) for you automatically."

@@ -215,6 +215,33 @@ def test_promote_writes_observed_fact(analyzer, knowledge, tmp_path, monkeypatch
     assert "18:00" in facts[0]["value"]
 
 
+def test_a_learned_fact_waits_for_a_person_to_confirm_it(analyzer, knowledge, tmp_path,
+                                                        monkeypatch):
+    # 8.39.1: Nova learns from confirmations, not assumptions. A fact worked
+    # out from patterns is stored pending and never reaches the model until
+    # a person confirms it.
+    monkeypatch.setattr(knowledge, "DB_PATH", str(tmp_path / "k.db"))
+    pa = analyzer.PatternAnalyzer()
+    pa._promote_to_knowledge([_pattern(analyzer, 0.9)])
+    (fact,) = knowledge.all_facts()
+    assert fact["status"] == "pending"
+    assert knowledge.all_facts(status="confirmed") == []
+    assert "18:00" not in (knowledge.prompt_block() or "")
+
+
+def test_relearning_a_confirmed_fact_keeps_it_confirmed(analyzer, knowledge, tmp_path,
+                                                       monkeypatch):
+    monkeypatch.setattr(knowledge, "DB_PATH", str(tmp_path / "k.db"))
+    pa = analyzer.PatternAnalyzer()
+    pa._promote_to_knowledge([_pattern(analyzer, 0.9)])
+    (fact,) = knowledge.all_facts()
+    knowledge.confirm_fact(fact["id"])
+    pa._promote_to_knowledge([_pattern(analyzer, 0.9)])            # same value again
+    assert knowledge.all_facts()[0]["status"] == "confirmed"
+    pa._promote_to_knowledge([_pattern(analyzer, 0.9, hour=19)])   # a new value
+    assert knowledge.all_facts()[0]["status"] == "pending"
+
+
 def test_low_confidence_not_promoted(analyzer, knowledge, tmp_path, monkeypatch):
     monkeypatch.setattr(knowledge, "DB_PATH", str(tmp_path / "k.db"))
     pa = analyzer.PatternAnalyzer()

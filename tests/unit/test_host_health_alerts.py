@@ -129,3 +129,40 @@ async def test_tick_stamps_last_alert_ts_even_if_dispatch_raises(hh, monkeypatch
 
     st = hh._STATE["cpu_percent"]
     assert st["last_alert_ts"] is not None
+
+
+async def test_each_metric_has_its_own_output_gate_key(hh, monkeypatch):
+    """8.39.1: the gate used to key every host alert as "host_health", so a
+    CPU alert's cooldown or habituation held back a later disk alert."""
+    from fakes import FakeEntityRegistry, FakeRegistryEntry
+    reg = FakeEntityRegistry()
+    reg.add(FakeRegistryEntry("sensor.cpu", "systemmonitor", unique_id="processor_use_",
+                              translation_key="processor_use"))
+    import homeassistant.helpers.entity_registry as er_mod
+    monkeypatch.setattr(er_mod, "async_get", lambda hass: reg)
+
+    hass = FakeHass()
+    hass.states.set("sensor.cpu", 95.0, unit_of_measurement="%", state_class="measurement")
+    box = {"t": 0.0}
+    monkeypatch.setattr(hh, "_now", lambda: box["t"])
+    sent = []
+
+    async def _capture(hass, config, message, category, gate_key="host_health"):
+        sent.append((category, gate_key))
+    monkeypatch.setattr(hh, "_dispatch_alert", _capture)
+
+    config = {"host_health_enabled": True, "host_health_alerts_enabled": True,
+              "host_health_persistence_minutes": 10}
+    for _ in range(6):
+        box["t"] += 120
+        await hh.tick(hass, config)
+    assert sent == [("host_health_problem", "host_health.cpu_percent")]
+
+
+def test_the_gate_key_names_every_metric_in_the_alert(hh):
+    def r(key):
+        return hh.MetricResult(key, key, True, 1.0, "%", "sensor.x", 0, 1, True, True, "ok")
+    assert hh._gate_key([r("disk_percent")]) == "host_health.disk_percent"
+    assert hh._gate_key([r("ram_percent"), r("cpu_percent")]) == \
+        "host_health.cpu_percent+ram_percent"
+    assert hh._gate_key([]) == "host_health"

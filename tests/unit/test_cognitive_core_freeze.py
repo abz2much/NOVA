@@ -93,3 +93,48 @@ async def test_metric_outdoor_sensor_unit_respected(safety, fake_hass):
         "sensor.outdoor_temp", "20", device_class="temperature",
         friendly_name="Outdoor Temperature", unit_of_measurement="°C")
     assert await _freeze(safety) is None
+
+
+# ── A freeze is one episode (8.39.1) ─────────────────────────────────────────
+
+async def test_a_critical_freeze_is_spoken_once_then_reminders_go_to_the_phones(
+        safety, fake_hass, monkeypatch, load):
+    clock = {"now": 1_000_000.0}
+    monkeypatch.setattr(load("core_safety").time, "time", lambda: clock["now"])
+    fake_hass.states.set("weather.home", "cloudy", temperature=15)
+
+    first = await _freeze(safety)
+    assert first["urgency"] == "critical" and first["phone_only"] is False
+
+    for hours in (1, 2, 2.9):                      # still freezing: nothing more yet
+        clock["now"] = 1_000_000.0 + hours * 3600
+        assert await _freeze(safety) is None
+
+    clock["now"] = 1_000_000.0 + 3 * 3600
+    reminder = await _freeze(safety)
+    assert reminder["type"] == "freeze_critical"
+    assert reminder["urgency"] == "high" and reminder["phone_only"] is True
+
+
+async def test_the_episode_ends_when_it_warms_up(safety, fake_hass, monkeypatch, load):
+    clock = {"now": 1_000_000.0}
+    monkeypatch.setattr(load("core_safety").time, "time", lambda: clock["now"])
+    fake_hass.states.set("weather.home", "cloudy", temperature=15)
+    assert (await _freeze(safety))["urgency"] == "critical"
+
+    clock["now"] += 2 * 3600
+    fake_hass.states.set("weather.home", "sunny", temperature=45)   # recovered
+    assert await _freeze(safety) is None
+
+    clock["now"] += 2 * 3600
+    fake_hass.states.set("weather.home", "cloudy", temperature=15)  # a new freeze
+    again = await _freeze(safety)
+    assert again["urgency"] == "critical" and again["phone_only"] is False
+
+
+def test_the_alert_path_keeps_a_phone_only_reminder_off_the_speakers(load):
+    alert_path = load("alert_path")
+    sit = alert_path.Situation(sleeping=False, quiet=False)
+    plan = alert_path.for_core_action(None, {}, sit, {
+        "type": "freeze_critical", "urgency": "high", "phone_only": True})
+    assert plan.push is True and plan.speak is False

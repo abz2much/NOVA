@@ -83,8 +83,6 @@ from . import core_state as _m_state
 from .core_autonomy import AutonomyManager
 from .core_common import (
     ALARM_ARMED_STATES,
-    AUTONOMY_MIN_CONFIDENCE,
-    AUTONOMY_TRUST_THRESHOLD,
     DARK_LUX_THRESHOLD,
     FREEZE_CRITICAL_TEMP_F,
     FREEZE_WARN_TEMP_F,
@@ -116,7 +114,6 @@ from .core_common import (
     write_json_atomic,
 )
 from .core_delivery import (
-    _autonomous_done_message,
     _emit_action,
     _execute_action_data,
     _live_runtime_config,
@@ -170,6 +167,7 @@ from .core_runtime import (
     intrusion_status,
     is_ignored,
     list_ignores,
+    pending_offer_for,
     release_runtime,
     revoke_autonomy,
     start,
@@ -219,8 +217,6 @@ def _patterns_db() -> str:
 # Name -> the core module that owns it.
 _OWNERS = {
     'ALARM_ARMED_STATES': _m_common,
-    'AUTONOMY_MIN_CONFIDENCE': _m_common,
-    'AUTONOMY_TRUST_THRESHOLD': _m_common,
     'AutonomyManager': _m_autonomy,
     'DARK_LUX_THRESHOLD': _m_common,
     'FREEZE_CRITICAL_TEMP_F': _m_common,
@@ -255,7 +251,6 @@ _OWNERS = {
     '_HIGH_FREQ_CLASSES': _m_learning,
     '_PATTERN_LOG_LAST': _m_learning,
     '_alarm_state_view': _m_lockdown_sync,
-    '_autonomous_done_message': _m_delivery,
     '_backfill_filter_states': _m_learning,
     '_emit_action': _m_delivery,
     '_ensure_lockdown_mgr': _m_lockdown_sync,
@@ -299,6 +294,7 @@ _OWNERS = {
     'is_outdoor_notable': _m_ignore,
     'learning_active': _m_learning,
     'list_ignores': _m_runtime,
+    'pending_offer_for': _m_runtime,
     'lockdown_status': _m_lockdown_sync,
     'log_camera_event': _m_learning,
     'log_command': _m_learning,

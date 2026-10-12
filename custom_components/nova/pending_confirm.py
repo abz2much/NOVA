@@ -10,12 +10,20 @@ from the same device only.
 In memory only: nothing survives a restart. An item lasts 60 seconds, and a
 newer one for the same device replaces the older one, so when the AI calls
 several tools in one turn the last one wins.
+
+Each item has its own request_id, logged when it is answered (8.39.1). When
+both the held request and the answer carry a Home Assistant user, they must
+be the same person, or nothing runs.
 """
 from __future__ import annotations
 
+import logging
 import time
+import uuid
 from dataclasses import dataclass
 from typing import Optional
+
+_LOGGER = logging.getLogger(__name__)
 
 TTL_SECONDS = 60.0
 KIND_PHRASE = "voice_phrase"
@@ -32,6 +40,7 @@ class Pending:
     ref: str           # the phrase_id, or the scene/script/automation entity_id
     user_id: str
     expires: float     # time.monotonic() deadline
+    request_id: str = ""
 
 
 _ITEMS: dict[str, Pending] = {}
@@ -44,7 +53,8 @@ def put(device_id: str, kind: str, ref: str, user_id: Optional[str] = None,
     if not device_id or not ref or kind not in (KIND_PHRASE, KIND_SCENE_SCRIPT):
         return None
     t = time.monotonic() if now is None else now
-    item = Pending(str(device_id), kind, str(ref), str(user_id or ""), t + TTL_SECONDS)
+    item = Pending(str(device_id), kind, str(ref), str(user_id or ""), t + TTL_SECONDS,
+                   uuid.uuid4().hex)
     _ITEMS[item.device_id] = item
     return item
 
@@ -103,7 +113,8 @@ def _result(text: str, success: bool):
     return LocalResult(text=text, success=success, handled=True)
 
 
-async def answer(hass, device_id: str, text: str, *, honorific: str = ""):
+async def answer(hass, device_id: str, text: str, *, honorific: str = "",
+                 user_id: Optional[str] = None):
     """Handle this device's held request, if it has one. A clear yes runs it
     once, approved for exactly its own targets; a clear no drops it; anything
     else drops it and returns None so the turn carries on as normal. Returns
@@ -113,10 +124,18 @@ async def answer(hass, device_id: str, text: str, *, honorific: str = ""):
     The yes can still be lost before it gets here, which is safe: nothing
     runs. The 4 second duplicate check (keyed on the words) can give it to
     another satellite that heard it first, and the opt in presence gate can
-    drop it."""
+    drop it.
+
+    When the held request and this turn both name a user and they differ,
+    the item is dropped and nothing runs."""
     try:
         item = get(device_id)
         if item is None:
+            return None
+        if item.user_id and user_id and str(user_id) != item.user_id:
+            clear(device_id)
+            _LOGGER.info("Held request %s dropped: answered by a different user",
+                         item.request_id)
             return None
         from .voice_phrases import normalise
         said = normalise(text)
@@ -127,6 +146,7 @@ async def answer(hass, device_id: str, text: str, *, honorific: str = ""):
             clear(device_id)
             return None
         clear(device_id)
+        _LOGGER.info("Held request %s confirmed on %s", item.request_id, item.device_id)
         if item.kind == KIND_PHRASE:
             return await _replay_phrase(hass, item, honorific)
         return await _replay_scene_script(hass, item, honorific)

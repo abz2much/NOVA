@@ -194,12 +194,12 @@ def restore_deliveries(now: Optional[float] = None) -> dict:
 
 # ── hazard ──────────────────────────────────────────────────────────────────
 
-def save_freeze(warned: bool, last_alert: float) -> None:
+def save_freeze(warned: bool, last_alert: float, critical_spoken: bool = False) -> None:
     if not _started or _state is None:
         return
     hazard = _state.setdefault("hazard", {})
     hazard.update(freeze_warned=bool(warned), last_freeze_alert=float(last_alert or 0.0),
-                  saved_at=time.time())
+                  freeze_critical_spoken=bool(critical_spoken), saved_at=time.time())
     _save()
 
 
@@ -213,6 +213,17 @@ def restore_freeze(now: Optional[float] = None) -> tuple[bool, float]:
         return bool(hazard.get("freeze_warned")), float(hazard.get("last_freeze_alert") or 0.0)
     except (TypeError, ValueError):
         return False, 0.0
+
+
+def restore_freeze_critical(now: Optional[float] = None) -> bool:
+    """Whether this freeze episode's critical alert was already spoken
+    (8.39.1). False when nothing fresh was saved."""
+    if not _started or _state is None:
+        return False
+    hazard = _state.get("hazard")
+    if not isinstance(hazard, dict) or not _fresh(hazard.get("saved_at"), HAZARD_MAX_AGE, now):
+        return False
+    return bool(hazard.get("freeze_critical_spoken"))
 
 
 def note_weather(active: int) -> None:
