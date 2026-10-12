@@ -50,9 +50,9 @@ def _init_fts():
     """Initialize FTS5 virtual table in the existing Nova database."""
     global _fts_available
     try:
-        import sqlite3
         db_path = _db_path()
-        conn = sqlite3.connect(db_path)
+        conn = _store.connect(db_path, row_factory=False, mkdir=False,
+                              busy_timeout_ms=None)
         _store.ensure(conn, "memory_fts")
         conn.commit()
         conn.close()
@@ -112,8 +112,9 @@ def store_memory(
 
     if _fts_available:
         try:
-            import sqlite3, json
-            conn = sqlite3.connect(_db_path())
+            import json
+            conn = _store.connect(_db_path(), row_factory=False, mkdir=False,
+                                  busy_timeout_ms=None)
             conn.execute(
                 "INSERT INTO memory_fts (content, metadata, timestamp) VALUES (?, ?, ?)",
                 (text, json.dumps(metadata), ts),
@@ -178,9 +179,9 @@ def search_memory(
 
     if _fts_available:
         try:
-            import sqlite3, json
-            conn = sqlite3.connect(_db_path())
-            conn.row_factory = sqlite3.Row
+            import json
+            conn = _store.connect(_db_path(), mkdir=False,
+                                  busy_timeout_ms=None)
             # FTS5 MATCH query
             query_clean = " OR ".join(query.split()[:8])  # limit query terms
             # FTS5 can't filter into the JSON metadata column directly, so
@@ -257,9 +258,9 @@ def _find_sibling(
 
     if _fts_available:
         try:
-            import sqlite3, json
-            conn = sqlite3.connect(_db_path())
-            conn.row_factory = sqlite3.Row
+            import json
+            conn = _store.connect(_db_path(), mkdir=False,
+                                  busy_timeout_ms=None)
             rows = conn.execute(
                 "SELECT content, metadata FROM memory_fts WHERE metadata LIKE ? ESCAPE '\\'",
                 (_metadata_like_pattern("turn_id", turn_id),),
@@ -398,8 +399,8 @@ def get_memory_stats() -> dict:
 
     if _fts_available:
         try:
-            import sqlite3
-            conn = sqlite3.connect(_db_path())
+            conn = _store.connect(_db_path(), row_factory=False, mkdir=False,
+                                  busy_timeout_ms=None)
             row = conn.execute("SELECT COUNT(*) FROM memory_fts").fetchone()
             conn.close()
             stats["backend"] = "fts5"

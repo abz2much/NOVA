@@ -714,10 +714,8 @@ class SuggestionStore:
         try:
             if not Path(self._db).exists():
                 return None
-            conn = sqlite3.connect(self._db)
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA busy_timeout=10000")
-            conn.row_factory = sqlite3.Row
+            from ..persistence import sqlite as _store  # lazy: package layering rule
+            conn = _store.connect(self._db, mkdir=False)
             return conn
         except Exception:
             return None
@@ -730,9 +728,8 @@ class SuggestionStore:
         rejected when the AI suggestion review turned it down (v7.126.0).
         An existing row keeps its own status rules."""
         try:
-            conn = sqlite3.connect(self._db)
-            conn.execute("PRAGMA journal_mode=WAL")
-            conn.execute("PRAGMA busy_timeout=10000")
+            from ..persistence import sqlite as _store  # lazy: package layering rule
+            conn = _store.connect(self._db, row_factory=False, mkdir=False)
             # The same behaviour is ONE suggestion however its counts drift.
             # Match on the pattern's stable identity (what triggers it and
             # what it does), never on the description, which embeds counts.

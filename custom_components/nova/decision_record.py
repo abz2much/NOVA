@@ -68,7 +68,7 @@ def _resolve(db_path: Optional[str]) -> str:
 
 
 def _connect(db_path: str) -> sqlite3.Connection:
-    conn = _store.connect(db_path, wal=False, busy_timeout_ms=None)
+    conn = _store.connect(db_path, busy_timeout_ms=None)
     _store.ensure(conn, "decision_records")   # every entry point self-contained
     return conn
 

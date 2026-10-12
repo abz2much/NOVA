@@ -37,7 +37,7 @@ QUIET_START = time(22, 0)
 QUIET_END   = time(7, 0)
 
 def _connect():
-    conn = _store.connect(_db_path(), wal=False, busy_timeout_ms=None)
+    conn = _store.connect(_db_path(), busy_timeout_ms=None)
     _store.ensure(conn, "reminders")
     conn.commit()
     return conn

@@ -1,3 +1,14 @@
+## [8.43.0] — Optional features marked, one database helper
+
+Settings now shows which optional features are not set up yet, and every Nova database opens the same way.
+
+### Changed
+- **"Not set up" on optional feature cards.** The Voice ID, Host Health, Cameras and Wellbeing Context cards say "Not set up" until the feature is set up, using the same checks that decide which tools the AI is offered.
+- **Every database opens through one helper**, with write-ahead logging, so reading never waits for a write. Each keeps its own wait for a busy database. The decisions, reminders, and memory and document search databases did not use write-ahead logging before. Each switches over the first time it opens after the upgrade, keeping all data. Back up the whole `nova` folder as before; Home Assistant backups already do.
+
+### Unchanged
+- Optional features already did nothing until set up: Package Watch, host health and the extra hazard feeds check their switch on every run, and face recognition only listens once a source is chosen. Nothing about what Nova says or does changes.
+
 ## [8.42.0] — One list of settings
 
 Every setting the panel can change now has its kind, default and check defined once, so the panel and the rest of Nova agree on what a setting is when you have never changed it.

@@ -45,7 +45,8 @@ def ensure_schema(db_path: Optional[str] = None) -> None:
     (cognitive_core also creates it at init; this keeps the module standalone.)"""
     db_path = db_path or _db_path()
     try:
-        with sqlite3.connect(db_path) as conn:
+        with _store.connect(db_path, row_factory=False, mkdir=False,
+                            busy_timeout_ms=None) as conn:
             _store.ensure(conn, "person_patterns")
     except Exception as exc:
         _LOGGER.debug("person_patterns ensure_schema failed: %s", exc)
@@ -66,7 +67,8 @@ def store(person: str, pattern_type: str, description: str, *,
     person = _normalize(person)
     try:
         ensure_schema(db_path)
-        with sqlite3.connect(db_path) as conn:
+        with _store.connect(db_path, row_factory=False, mkdir=False,
+                            busy_timeout_ms=None) as conn:
             if key:
                 rows = conn.execute(
                     "SELECT id FROM person_patterns WHERE person = ? AND "
@@ -111,7 +113,8 @@ def read(person: Optional[str] = None, db_path: Optional[str] = None) -> list[di
     confidence. Returns a list of dicts (column-keyed). Never raises."""
     db_path = db_path or _db_path()
     try:
-        with sqlite3.connect(db_path) as conn:
+        with _store.connect(db_path, row_factory=False, mkdir=False,
+                            busy_timeout_ms=None) as conn:
             conn.row_factory = sqlite3.Row
             if person:
                 rows = conn.execute(
