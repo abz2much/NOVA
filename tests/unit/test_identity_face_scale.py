@@ -234,7 +234,6 @@ def test_quick_identify_with_an_area_is_bounded_and_keeps_its_shape(identity, cf
     out = identity.quick_identify(fake_hass, "kitchen")
     assert out.known and out.person == "Alice" and 0.0 < out.confidence <= 1.0
     assert all(0.0 <= v <= 1.0 + 1e-9 for v in out.candidates.values()) or max(out.candidates.values()) < 2
-    assert identity.quick_person(fake_hass, "kitchen") == "Alice"
 
 
 def test_no_other_weight_or_threshold_changed(identity):

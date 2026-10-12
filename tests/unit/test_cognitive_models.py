@@ -205,10 +205,3 @@ def test_local_mind_evaluator_is_pure(m, ev):
     crit = ev.evaluate_local_mind(_snap(m, urgency="critical"), **{**kw, "flapping": True})
     assert crit.speak and crit.urgency == "critical"
 
-
-def test_the_presentation_uses_the_friendly_name(load, m):
-    pres = load("cognitive.presentation")
-    assert pres.entity_label("Kitchen Light", "light.kitchen") == "Kitchen Light"
-    assert pres.entity_label("", "light.kitchen") == "light.kitchen"
-    assert pres.entity_label("Lamp", "light.a", area="Office", collides=True) == "Lamp (Office)"
-    assert pres.entity_label("Lamp", "light.a", collides=True) == "Lamp (light.a)"

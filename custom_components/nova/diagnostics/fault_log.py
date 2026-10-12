@@ -5,7 +5,7 @@
 say "this has happened before" when a fault recurs.
 
 This is deliberately NOT the conversational long-term memory — that lives in the
-top-level ``memory.py`` (ChromaDB / FTS5) and is used by the conversation agent.
+top-level ``memory.py`` (FTS5) and is used by the conversation agent.
 This is a small, dependency-free fault ledger that belongs with diagnostics.
 
 File I/O is synchronous and lock-guarded; callers on the event loop should invoke

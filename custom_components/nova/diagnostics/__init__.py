@@ -13,11 +13,10 @@ import re
 from ..safe_errors import REDACTED
 
 from .fault_log import FaultLog
-from .heartbeat import HeartbeatMonitor
 from .monitor import Finding, InfrastructureTriage
 from .service_health import run_service_health
 
-__all__ = ["InfrastructureTriage", "Finding", "FaultLog", "HeartbeatMonitor",
+__all__ = ["InfrastructureTriage", "Finding", "FaultLog",
            "run_service_health", "async_get_config_entry_diagnostics"]
 
 _LOGGER = logging.getLogger(__name__)

@@ -209,35 +209,6 @@ def is_sleeping(
     return False, "awake"
 
 
-def should_suppress(
-    hass: HomeAssistant,
-    *,
-    urgency: str,
-    bedroom_area_ids: Iterable[str] = (),
-    quiet_start: str = "22:00",
-    quiet_end: str = "07:00",
-) -> tuple[bool, str]:
-    """
-    Should this announcement be suppressed due to sleep state?
-
-    Critical NEVER suppresses (safety override).
-    High:   audio suppressed, caller may still send push notification.
-    Medium/Low: always suppressed when sleeping.
-    """
-    if urgency == "critical":
-        return False, "critical urgency overrides sleep"
-
-    sleeping, reason = is_sleeping(
-        hass,
-        bedroom_area_ids=bedroom_area_ids,
-        quiet_start=quiet_start,
-        quiet_end=quiet_end,
-    )
-    if sleeping:
-        return True, reason
-    return False, "awake"
-
-
 def _prompt_eligible(hass: HomeAssistant, config: dict) -> bool:
     """Should `maybe_prompt_sleep` send tonight's prompt right now?"""
     if not config.get("sleep_prompt_enabled", True):

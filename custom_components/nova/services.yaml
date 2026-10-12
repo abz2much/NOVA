@@ -129,7 +129,7 @@ database_stats:
 
 replay_policy:
   name: Replay Policy
-  description: "Replay recorded decisions of a kind against confidence thresholds and report the best-separating threshold from real outcomes (fires nova_replay_result event). Read-only."
+  description: "Being retired: Replay was removed in 8.40.0, so this does nothing and will be removed in a later release."
   fields:
     kind:
       name: Kind
@@ -202,7 +202,7 @@ briefing:
 
 scene_by_intent:
   name: Activate Scene by Intent
-  description: "Nova picks the best scene matching a natural-language intent. Example intent: 'something cozy for movie night', 'bright and energetic', 'time for bed'."
+  description: "Being retired: use conversation.process with Nova instead. Nova picks the best scene matching a natural-language intent. Example intent: 'something cozy for movie night', 'bright and energetic', 'time for bed'."
   fields:
     intent:
       name: Intent
@@ -220,7 +220,7 @@ scene_by_intent:
 
 routine:
   name: Run Routine
-  description: "Run a named routine (goodnight, goodmorning, leaving, arriving). Nova narrates each step. Custom routines can be defined in /config/nova_routines.yaml."
+  description: "Being retired: use a Home Assistant script (script.turn_on) instead. Run a named routine (goodnight, goodmorning, leaving, arriving). Nova narrates each step. Custom routines can be defined in /config/nova_routines.yaml."
   fields:
     name:
       name: Routine name
@@ -448,6 +448,7 @@ check_packages:
 speak:
   name: Speak
   description: >-
+    Being retired: use tts.speak instead.
     Make a context-aware spoken announcement in a target area. Nova measures
     the room's light, noise, and media activity and shapes the delivery (volume,
     rate, whisper/projected style), ducking any active media and restoring it
@@ -506,6 +507,7 @@ speak:
 process_intent:
   name: Process intent
   description: >-
+    Being retired: use conversation.process with Nova instead.
     Route a spoken or typed phrase to a local Nova command (no cloud). If a
     confirmation window from a prior nova.speak is open, an affirmative phrase
     completes that pending action; otherwise the phrase is matched as a fresh

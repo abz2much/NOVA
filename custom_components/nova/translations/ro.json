@@ -214,6 +214,14 @@
     "voice_setup_incomplete": {
       "title": "Configurarea vocii Nova nu este completă",
       "description": "Nova nu a putut termina configurarea vocii. Ce a eșuat: {failed}.\n\nCa s-o termini manual: în Setări → Suplimente, instalează și pornește Piper, Whisper și openWakeWord. Apoi, în Setări → Asistenți vocali, creează un pipeline cu Nova ca agent de conversație, Whisper pentru transformarea vocii în text și Piper pentru transformarea textului în voce. Nova verifică din nou la fiecare repornire, iar această notificare dispare singură când vocea funcționează."
+    },
+    "retired_service": {
+      "title": "Nova: {service} va fi retras",
+      "description": "Ceva din Home Assistant, de obicei o automatizare sau un script, a apelat {service}. Acest serviciu va fi eliminat într-o versiune viitoare Nova. Folosește în schimb {replacement}.\n\nAceastă notificare dispare la repornirea Home Assistant și revine doar dacă serviciul este apelat din nou."
+    },
+    "retired_service_no_effect": {
+      "title": "Nova: {service} va fi retras",
+      "description": "Ceva din Home Assistant, de obicei o automatizare sau un script, a apelat {service}. Funcția din spatele lui a fost eliminată, așa că apelul nu face nimic, iar serviciul în sine va fi eliminat într-o versiune viitoare Nova. Elimină apelul din automatizare sau din script.\n\nAceastă notificare dispare la repornirea Home Assistant și revine doar dacă serviciul este apelat din nou."
     }
   },
   "exceptions": {

@@ -219,8 +219,3 @@ def upgrade_existing(config_dir: StrPath) -> dict[str, StoreStatus]:
     _last_upgrade.clear()
     _last_upgrade.update(results)
     return results
-
-
-def last_upgrade() -> dict[str, StoreStatus]:
-    """The most recent setup upgrade's per-store outcome (internal)."""
-    return dict(_last_upgrade)

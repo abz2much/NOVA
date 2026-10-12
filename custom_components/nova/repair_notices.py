@@ -169,3 +169,57 @@ def clear_voice_setup(hass: HomeAssistant) -> None:
             ir.async_delete_issue(hass, DOMAIN, issue_id)
         except Exception as exc:
             _LOGGER.debug("could not clear %s: %s", issue_id, exc)
+
+
+# ─── Retired services (8.40.0) ───────────────────────────────────────────────
+# A service Nova is phasing out keeps working for at least one release. The
+# first call in each run logs a warning and raises a notice naming the service
+# and what to use instead, so whoever owns the calling automation finds out
+# before the service goes. The notice is not persistent: a restart clears it,
+# and it comes back only if something calls the service again.
+
+# Each retired service, with what to use instead. None means the feature
+# behind it is gone and the call does nothing.
+RETIRED_SERVICES: dict[str, str | None] = {
+    "speak": "tts.speak",
+    "process_intent": "conversation.process",
+    "scene_by_intent": "conversation.process",
+    "routine": "script.turn_on",
+    "replay_policy": None,
+}
+
+_retired_seen: set[str] = set()
+
+
+def note_retired_service(hass: HomeAssistant, service: str,
+                         replacement: str | None) -> None:
+    """Warn once per run that ``nova.<service>`` is being retired.
+    ``replacement`` names the service to use instead; None means the feature
+    behind it is already gone. Safe to call from the event loop; never
+    raises."""
+    if service in _retired_seen:
+        return
+    _retired_seen.add(service)
+    name = f"{DOMAIN}.{service}"
+    if replacement:
+        _LOGGER.warning("%s is being retired and will be removed in a later "
+                        "Nova release; use %s instead", name, replacement)
+        key, placeholders = "retired_service", {"service": name, "replacement": replacement}
+    else:
+        _LOGGER.warning("%s is being retired and will be removed in a later "
+                        "Nova release; the feature behind it was removed, so "
+                        "the call does nothing", name)
+        key, placeholders = "retired_service_no_effect", {"service": name}
+    try:
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            f"retired_service_{service}",
+            is_fixable=False,
+            is_persistent=False,
+            severity=ir.IssueSeverity.WARNING,
+            translation_key=key,
+            translation_placeholders=placeholders,
+        )
+    except Exception as exc:
+        _LOGGER.debug("could not create retired service issue: %s", exc)

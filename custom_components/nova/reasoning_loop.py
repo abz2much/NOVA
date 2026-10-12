@@ -27,7 +27,6 @@ REASONING_SYSTEM_APPENDIX, …) keep their signatures and behaviour.
 """
 from __future__ import annotations
 
-import json
 import logging
 from typing import Optional
 
@@ -35,7 +34,6 @@ from .cognitive import coordinator as _coordinator
 from .cognitive import evaluators as _evaluators
 from .cognitive import presentation as _presentation
 from .cognitive.models import EventSnapshot
-from .cognitive.provider import extract_json_text as _extract_json_text
 from .directive_helper import build_system_prompt
 
 _LOGGER = logging.getLogger(__name__)
@@ -68,25 +66,6 @@ def _structured_hazard(device_class: str, to_state: str, event_summary: str,
         event_summary=event_summary, to_state=to_state, entity_id=entity_id,
         friendly_name=friendly_name, device_class=device_class))
     return None if d is None else _presentation.voiced(d, honorific).as_dict()
-
-
-async def _decision_from_cache(hass, cached: dict, *, honorific: str,
-                               friendly_name: str, entity_id: str,
-                               device_class: str, to_state: str,
-                               anyone_home: bool) -> dict:
-    """Build a decision from a learned cache entry (no provider call)."""
-    return await _coordinator.replay_cached(hass, cached, _snapshot(
-        entity_id=entity_id, friendly_name=friendly_name, device_class=device_class,
-        to_state=to_state, anyone_home=anyone_home), honorific)
-
-
-def _local_fallback(urgency: str, friendly_name: str, to_state: str,
-                    honorific: str) -> dict:
-    """Deterministic local decision when the provider is unavailable and
-    nothing is cached. Surfaces important events; stays quiet for routine ones."""
-    d = _evaluators.evaluate_basic_fallback(_snapshot(
-        urgency=urgency, friendly_name=friendly_name, to_state=to_state))
-    return _presentation.voiced(d, honorific).as_dict()
 
 
 def _lm_compose(honorific, friendly_name, *, device_class="", to_state="",
@@ -187,17 +166,6 @@ Your response must be JSON only:
 Keep messages short. One or two sentences. In character. No preamble. No \
 exclamation marks unless it is a genuine emergency.
 """
-
-
-def _parse_reasoning_json(raw: str) -> dict:
-    """Lenient legacy parse of the reply, kept for compatibility. Decisions
-    no longer use it: cognitive.provider.parse_reply validates replies."""
-    raw = _extract_json_text(raw)
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        _LOGGER.debug("Reasoning: could not parse JSON from: %s", raw[:300])
-        return {"speak": False, "reason": "parse_failure"}
 
 
 def _rich_mode(hass) -> bool:

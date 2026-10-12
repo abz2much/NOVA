@@ -41,7 +41,7 @@ from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 
-from . import proactive_audio
+from . import proactive_audio, repair_notices
 from .audio_routing import broadcast_target
 from .briefing import async_briefing
 from .camera import async_analyze_camera, async_auto_analyze_on_event
@@ -65,6 +65,7 @@ from .proactive_audio import (
     SPEAK_SCHEMA,
 )
 from .reminders import async_add_reminder_service
+from .repair_notices import RETIRED_SERVICES
 from .routines import async_run_routine
 from .runtime import (
     NovaConfigEntry,
@@ -255,7 +256,17 @@ def async_setup_services(hass: HomeAssistant) -> None:
 
     def _register(name: str, handler, schema: vol.Schema | None = None) -> None:
         if not hass.services.has_service(DOMAIN, name):
+            if name in RETIRED_SERVICES:
+                handler = _retiring(name, handler)
             hass.services.async_register(DOMAIN, name, handler, schema=schema)
+
+    def _retiring(name: str, handler):
+        """A service being phased out keeps working; the first call in each
+        run warns and raises a notice naming what to use instead."""
+        async def _warned(call: ServiceCall) -> None:
+            repair_notices.note_retired_service(hass, name, RETIRED_SERVICES[name])
+            await handler(call)
+        return _warned
 
     async def _camera(call: ServiceCall) -> None:
         entry, runtime = async_resolve_loaded(hass)
@@ -569,25 +580,15 @@ def async_setup_services(hass: HomeAssistant) -> None:
     _register("database_stats", _db_stats)
 
     async def _replay_policy(call: ServiceCall) -> None:
-        """Replay recorded decisions of a kind against candidate confidence
-        thresholds and report the best-separating threshold from real outcomes.
-        Read-only — evaluates history, never changes behaviour."""
+        """Replay was removed in 8.40.0. The service stays for one more
+        release so automations that call it don't fail: it does nothing but
+        fire the old result event saying so."""
         entry, runtime = async_resolve_loaded(hass)
-        from . import replay as _replay
-        kind = str(call.data.get("kind", "")).strip()
-        min_samples = call.data.get("min_samples") or _replay.DEFAULT_MIN_SAMPLES
-        result = await hass.async_add_executor_job(
-            _replay.replay_kind, kind, int(min_samples))
-        hass.bus.async_fire("nova_replay_result", result)
-        if result.get("ready"):
-            rec = result["recommended"]
-            _LOGGER.info(
-                "Replay[%s]: %d judged decisions — best threshold %.2f "
-                "(accuracy %.0f%%; would avoid %d mistakes, lose %d good calls)",
-                kind, result.get("samples", 0), rec["threshold"],
-                rec["accuracy"] * 100, rec["mistakes_avoided"], rec["good_calls_lost"])
-        else:
-            _LOGGER.info("Replay[%s]: %s", kind, result.get("reason", "no data"))
+        hass.bus.async_fire("nova_replay_result", {
+            "kind": str(call.data.get("kind", "")).strip(),
+            "ready": False,
+            "reason": "Replay was removed in Nova 8.40.0",
+        })
 
     _register(
         "replay_policy", _replay_policy,

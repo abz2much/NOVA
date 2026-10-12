@@ -19,7 +19,6 @@ import json
 import os
 import pathlib
 
-import pytest
 
 GOLDEN = pathlib.Path(__file__).resolve().parents[1] / "fixtures" / "cognitive"
 _WRITE = os.environ.get("NOVA_WRITE_COGNITIVE_GOLDEN") == "1"
@@ -179,13 +178,3 @@ def test_local_mind_flap_detection_still_suppresses_the_third_event(load, monkey
     assert third["speak"] is False and "flapping" in third["reason"]
     kw["urgency"] = "critical"
     assert lm.assess_core(**kw)["speak"] is True    # critical ignores flapping
-
-
-@pytest.mark.parametrize("raw,expected", [
-    ('{"speak": true, "message": "Sir, hello.", "urgency": "high"}',
-     {"speak": True, "message": "Sir, hello.", "urgency": "high"}),
-    ('```json\n{"speak": false, "reason": "routine"}\n```', {"speak": False, "reason": "routine"}),
-    ('Here you go: {"speak": false} thanks', {"speak": False}),
-])
-def test_readable_provider_replies_parse_as_before(reasoning_loop, raw, expected):
-    assert reasoning_loop._parse_reasoning_json(raw) == expected

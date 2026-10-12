@@ -214,6 +214,14 @@
     "voice_setup_incomplete": {
       "title": "La configuration vocale de Nova est incomplète",
       "description": "Nova n'a pas pu terminer la configuration vocale. Ce qui a échoué : {failed}.\n\nPour la terminer à la main : dans Paramètres → Modules complémentaires, installez et démarrez Piper, Whisper et openWakeWord. Puis, dans Paramètres → Assistants vocaux, créez un pipeline avec Nova comme agent de conversation, Whisper pour la reconnaissance vocale et Piper pour la synthèse vocale. Nova vérifie à nouveau à chaque redémarrage, et cet avis disparaît de lui-même dès que la voix fonctionne."
+    },
+    "retired_service": {
+      "title": "Nova : {service} va être retiré",
+      "description": "Un élément de Home Assistant, en général une automatisation ou un script, a appelé {service}. Ce service sera supprimé dans une prochaine version de Nova. Utilisez plutôt {replacement}.\n\nCet avis disparaît au redémarrage de Home Assistant et ne revient que si le service est de nouveau appelé."
+    },
+    "retired_service_no_effect": {
+      "title": "Nova : {service} va être retiré",
+      "description": "Un élément de Home Assistant, en général une automatisation ou un script, a appelé {service}. La fonction correspondante a été supprimée, l'appel ne fait donc rien, et le service lui-même sera supprimé dans une prochaine version de Nova. Retirez l'appel de votre automatisation ou de votre script.\n\nCet avis disparaît au redémarrage de Home Assistant et ne revient que si le service est de nouveau appelé."
     }
   },
   "exceptions": {

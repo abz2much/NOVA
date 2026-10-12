@@ -214,6 +214,14 @@
     "voice_setup_incomplete": {
       "title": "Die Spracheinrichtung von Nova ist unvollständig",
       "description": "Nova konnte die Sprachsteuerung nicht vollständig einrichten. Fehlgeschlagen: {failed}.\n\nSo schließen Sie es manuell ab: Installieren und starten Sie unter Einstellungen → Add-ons Piper, Whisper und openWakeWord. Erstellen Sie dann unter Einstellungen → Sprachassistenten eine Pipeline mit Nova als Konversationsagent, Whisper für Sprache zu Text und Piper für Text zu Sprache. Nova prüft bei jedem Neustart erneut, und dieser Hinweis verschwindet von selbst, sobald die Sprachsteuerung funktioniert."
+    },
+    "retired_service": {
+      "title": "Nova: {service} wird eingestellt",
+      "description": "Etwas in Home Assistant, meist eine Automation oder ein Skript, hat {service} aufgerufen. Dieser Dienst wird in einer späteren Nova-Version entfernt. Verwende stattdessen {replacement}.\n\nDieser Hinweis verschwindet beim Neustart von Home Assistant und erscheint nur wieder, wenn der Dienst erneut aufgerufen wird."
+    },
+    "retired_service_no_effect": {
+      "title": "Nova: {service} wird eingestellt",
+      "description": "Etwas in Home Assistant, meist eine Automation oder ein Skript, hat {service} aufgerufen. Die Funktion dahinter wurde entfernt, der Aufruf bewirkt also nichts, und der Dienst selbst wird in einer späteren Nova-Version entfernt. Entferne den Aufruf aus deiner Automation oder deinem Skript.\n\nDieser Hinweis verschwindet beim Neustart von Home Assistant und erscheint nur wieder, wenn der Dienst erneut aufgerufen wird."
     }
   },
   "exceptions": {

@@ -986,7 +986,7 @@
     if (d.error) return `<div class="stub-body">Couldn't reach the library — restart Home Assistant after updating, then reopen.</div>`;
     const sources = d.sources || [];
     if (!sources.length) {
-      return `<div class="stub-body">No documents ingested yet. Add PDF/.txt/.md files to <code>${this._esc(d.directory || "nova/documents in your config folder")}</code>${d.chroma ? " and press Ingest." : " and press Ingest. (Vector search needs ChromaDB; keyword fallback is active.)"}</div>`;
+      return `<div class="stub-body">No documents ingested yet. Add PDF/.txt/.md files to <code>${this._esc(d.directory || "nova/documents in your config folder")}</code> and press Ingest.</div>`;
     }
     return sources.map(s => `
       <div class="cfg-row">
@@ -1030,7 +1030,7 @@
 
   _documentLibraryCardBody() {
     const d = this._docLib || {};
-    const backend = d.chroma ? "VECTOR" : d.fts ? "KEYWORD" : "NONE";
+    const backend = d.fts ? "KEYWORD" : "NONE";
     return `
       <div class="stub-body">Drop manuals &amp; receipts (PDF, .txt, .md) into <code>${this._esc(d.directory || "nova/documents in your config folder")}</code> or upload below, then ingest. Ask Nova "what's the furnace filter size?" and it answers from your paperwork.</div>
       <div class="cfg-row"><label>Backend</label><span>${this._tHtml("{backend} · {count} chunks", { backend: this._esc(backend), count: d.chunk_count || 0 })}</span></div>

@@ -57,15 +57,6 @@ class ImagePart:
     def is_inline(self) -> bool:
         return self.url.startswith("data:")
 
-    def inline_parts(self) -> tuple[str, str]:
-        """(media_type, base64 payload) of an inline image. Raises ValueError
-        when the URL is not an inline data URL."""
-        if not self.is_inline or "," not in self.url:
-            raise ValueError("image is not an inline data URL")
-        header, payload = self.url.split(",", 1)
-        media_type = header.split(":", 1)[1].split(";", 1)[0] or "image/jpeg"
-        return media_type, payload
-
     def to_openai(self) -> dict:
         image_url: dict[str, Any] = {"url": self.url}
         if self.detail is not None:

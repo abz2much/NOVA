@@ -12,7 +12,7 @@ fill a field.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from typing import Any, Mapping, Optional
+from typing import Any, Optional
 
 # ── Actions ────────────────────────────────────────────────────────────────
 ACTION_SPEAK = "speak"
@@ -245,9 +245,6 @@ class Decision:
     def with_message(self, message: str) -> "Decision":
         return replace(self, message=message)
 
-    def with_(self, **changes) -> "Decision":
-        return replace(self, **changes)
-
     def as_dict(self) -> dict:
         """The legacy decision dict: speak, then message (when speaking),
         urgency and reason when this decision carries them."""
@@ -291,7 +288,3 @@ class ProviderFailure:
     def __post_init__(self):
         if self.kind not in FAILURE_KINDS:
             raise ValueError(f"unknown provider failure {self.kind!r}")
-
-
-def freeze_mapping(values: Optional[Mapping[str, Any]]) -> tuple[tuple[str, Any], ...]:
-    return tuple(sorted((values or {}).items()))

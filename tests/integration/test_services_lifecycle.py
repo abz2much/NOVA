@@ -122,7 +122,7 @@ def _delegates_recorded():
     from custom_components.nova import (
         action_log, automation_creator, backup, cognitive_core, doorbell_training,
         knowledge, notify_targets, observer, output_gate, package_monitor,
-        proactive_audio, replay, services, sleep_detection, tts_helper,
+        proactive_audio, services, sleep_detection, tts_helper,
     )
     from custom_components.nova.sentinel import NovaSentinel
     calls: list[str] = []
@@ -153,7 +153,7 @@ def _delegates_recorded():
         (knowledge, "forget"), (output_gate, "shush"), (output_gate, "unshush"),
         (output_gate, "status"), (sleep_detection, "set_nap"),
         (backup, "create_backup"), (backup, "restore_backup"), (action_log, "start"),
-        (replay, "replay_kind"), (proactive_audio, "_intent_router"),
+        (proactive_audio, "_intent_router"),
         (proactive_audio, "_alert_buffer"),
     ]
     with pytest.MonkeyPatch.context() as mp:
@@ -534,6 +534,37 @@ async def test_services_return_none_and_keep_their_events(hass):
     assert events[0] == ("nova_observer_nap", {"duration_minutes": 5})
     assert events[1][0] == "nova_observer_status"
     assert {"running", "sleeping", "sleep_reason", "bedroom_areas"} <= set(events[1][1])
+
+
+async def test_a_retired_service_still_runs_and_raises_one_notice(hass, monkeypatch):
+    from homeassistant.helpers import issue_registry as ir
+    from custom_components.nova import repair_notices
+    monkeypatch.setattr(repair_notices, "_retired_seen", set())
+    await _setup(hass)
+    events = []
+
+    @callback
+    def _record(event):
+        events.append(dict(event.data))
+    hass.bus.async_listen("nova_replay_result", _record)
+    assert await _call(hass, "replay_policy") is None
+    assert await _call(hass, "replay_policy") is None
+    await hass.async_block_till_done()
+    assert [e["ready"] for e in events] == [False, False]
+    issue = ir.async_get(hass).async_get_issue(DOMAIN, "retired_service_replay_policy")
+    assert issue is not None and issue.translation_key == "retired_service_no_effect"
+    assert issue.translation_placeholders == {"service": "nova.replay_policy"}
+
+
+async def test_ordinary_services_raise_no_retirement_notice(hass, monkeypatch):
+    from homeassistant.helpers import issue_registry as ir
+    from custom_components.nova import repair_notices
+    monkeypatch.setattr(repair_notices, "_retired_seen", set())
+    await _setup(hass)
+    assert await _call(hass, "observer_status") is None
+    await hass.async_block_till_done()
+    issues = ir.async_get(hass).issues
+    assert not [i for (d, i) in issues if d == DOMAIN and i.startswith("retired_service_")]
 
 
 # ── Safety paths ────────────────────────────────────────────────────────────

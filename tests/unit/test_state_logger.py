@@ -105,7 +105,7 @@ def _event(cc, entity_id, old, new):
 
 
 def test_listener_stamps_unknown_with_no_presence_signal(cc, core_state):
-    # No identity.quick_person patch needed — with nothing home, it's a
+    # No identity patch needed — with nothing home, it's a
     # real "unknown" from the resolver, not just an untouched default.
     ev = _event(cc, "light.den", "off", "on")
     cc._on_state_changed(ev)
@@ -201,9 +201,9 @@ def test_listener_records_clear_leader_as_best_guess(cc, core_state, load, monke
 def test_listener_survives_identity_failure(cc, core_state, load, monkeypatch):
     identity = load("identity")
 
-    def _boom(hass):
+    def _boom(hass, area_id=None):
         raise RuntimeError("boom")
-    monkeypatch.setattr(identity, "quick_person", _boom)
+    monkeypatch.setattr(identity, "quick_identify", _boom)
 
     ev = _event(cc, "light.den", "off", "on")
     cc._on_state_changed(ev)  # must not raise

@@ -510,7 +510,7 @@ const hass = {
       if (m.action === "test") return { ok: true, model: "nomic-embed-text", dim: 768 };
     }
     if (m.type === "nova/documents") {
-      if (m.action === "status") return { chroma: true, fts: false, chunk_count: 42, directory: "/config/nova/documents", sources: [{ source: "furnace_manual.pdf", chunks: 30 }, { source: "dishwasher_receipt.txt", chunks: 12 }] };
+      if (m.action === "status") return { fts: true, chunk_count: 42, directory: "/config/nova/documents", sources: [{ source: "furnace_manual.pdf", chunks: 30 }, { source: "dishwasher_receipt.txt", chunks: 12 }] };
       if (m.action === "ingest") return { ok: true, files_ingested: 2, files_seen: 2, total_chunks: 42 };
       if (m.action === "search") return { results: [{ text: "The furnace filter size is 16x25x1 MERV 11.", source: "furnace_manual.pdf", chunk: 4, score: 0.88 }] };
       if (m.action === "upload") return { ok: true, filename: m.filename || "uploaded.pdf", chunks: 12, embedded: 12 };
@@ -3131,7 +3131,7 @@ if (require.main === module) setTimeout(async () => {
       (() => {
         const dl = Array.from(sRoot.querySelectorAll(".settings-card")).find(c => /Document Library/.test(c.querySelector(".panel-title")?.textContent || ""));
         return !!dl && !dl.querySelector(".stub-tag")
-          && /furnace_manual\.pdf/.test(dl.textContent) && /VECTOR/.test(dl.textContent)
+          && /furnace_manual\.pdf/.test(dl.textContent) && /KEYWORD/.test(dl.textContent)
           && !!dl.querySelector("#newDoclibIngest") && !!dl.querySelector("#newVecbkToggle");
       })()],
   );

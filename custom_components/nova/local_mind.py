@@ -168,10 +168,6 @@ def _is_duplicate(friendly_name: str, entity_id: str,
 
 # ── 4. Situational judgment ──────────────────────────────────────────────────
 
-def _security_relevant(domain: str, device_class: str, to_state: str,
-                       entity_id: str) -> bool:
-    return _ev().security_relevant(domain, device_class, to_state, entity_id)
-
 
 def _case_prior(domain: str, device_class: str, category: str,
                 anyone_home: bool) -> tuple[int, int]:

@@ -1,9 +1,7 @@
 """Phase 2 — person-scoped episodic continuity and coherent exchange
 retrieval in memory.py.
 
-Same fixture shape as test_memory.py (real, isolated FTS5 for the fallback
-path; a hand-rolled fake for the ChromaDB path since chromadb isn't a hard
-dependency).
+Same fixture shape as test_memory.py (real, isolated FTS5).
 """
 import json
 
@@ -14,9 +12,6 @@ import pytest
 def mem(load, tmp_path, monkeypatch):
     m = load("memory")
     monkeypatch.setattr(m, "DB_PATH", str(tmp_path / "nova.db"))
-    monkeypatch.setattr(m, "MEMORY_DIR", str(tmp_path / "nova_memory"))
-    monkeypatch.setattr(m, "_chromadb_available", False)
-    monkeypatch.setattr(m, "_collection", None)
     monkeypatch.setattr(m, "_fts_available", False)
     return m
 
@@ -56,54 +51,6 @@ def test_turn_id_stored_as_string_not_the_word_none(mem):
     _, meta = _raw_metadata_rows(mem)[0]
     assert "turn_id" not in meta
     assert meta.get("turn_id") != "None"
-
-
-# ── ChromaDB: subject filter ─────────────────────────────────────────────────
-
-class _FakeCollection:
-    def __init__(self, docs=None):
-        self.last_where = "UNSET"
-        self.last_get_where = "UNSET"
-        self._docs = docs or []  # list of (id, text, meta) for .get()
-
-    def query(self, query_texts, n_results, where=None):
-        self.last_where = where
-        return {"documents": [["a match"]], "metadatas": [[{"role": "user", "timestamp": "t"}]],
-                "distances": [[0.1]]}
-
-    def get(self, where=None):
-        self.last_get_where = where
-        docs, metas = [], []
-        for _id, text, meta in self._docs:
-            if where and "turn_id" in where and meta.get("turn_id") != where["turn_id"]:
-                continue
-            docs.append(text)
-            metas.append(meta)
-        return {"documents": docs, "metadatas": metas}
-
-
-def test_chromadb_subject_filter_added_to_where(mem, monkeypatch):
-    fake = _FakeCollection()
-    monkeypatch.setattr(mem, "_chromadb_available", True)
-    monkeypatch.setattr(mem, "_collection", fake)
-    mem.search_memory("query", k=5, subject="alice")
-    assert fake.last_where == {"subject": "alice"}
-
-
-def test_chromadb_sibling_lookup_uses_turn_id_only_not_conversation_id(mem, monkeypatch):
-    fake = _FakeCollection(docs=[
-        ("id1", "the question", {"role": "user", "timestamp": "t1",
-                                  "conversation_id": "conv-A", "subject": "alice", "turn_id": "42"}),
-        ("id2", "the answer", {"role": "assistant", "timestamp": "t2",
-                                "conversation_id": "conv-A", "subject": "alice", "turn_id": "42"}),
-    ])
-    monkeypatch.setattr(mem, "_chromadb_available", True)
-    monkeypatch.setattr(mem, "_collection", fake)
-    sibling = mem._find_sibling("42", hit_conversation_id="conv-A", hit_subject="alice", hit_role="user")
-    assert sibling is not None
-    assert sibling["text"] == "the answer"
-    # The exact lookup used turn_id only -- no conversation_id in the where.
-    assert fake.last_get_where == {"turn_id": "42"}
 
 
 # ── FTS5: subject filter must survive a high-volume over-fetch ──────────────

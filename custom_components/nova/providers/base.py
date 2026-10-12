@@ -89,13 +89,6 @@ class LLMProvider(ABC):
     def capabilities(self, model: Optional[str] = None) -> ProviderCapabilities:
         return ProviderCapabilities(vision=False)
 
-    def supports_vision(self) -> bool:
-        """Whether this backend + model can take image inputs."""
-        return self.capabilities().vision
-
-    def supports_tools(self) -> bool:
-        """Whether this backend supports function/tool calling."""
-        return self.capabilities().tools
 
     # ── Lifecycle ───────────────────────────────────────────────────────────
 

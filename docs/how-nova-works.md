@@ -343,9 +343,6 @@ Nova tries hard not to nag you. A few of the rules:
 - **Decisions** (Logs tab): every proactive decision, with its evidence,
   confidence and the model that decided, and Helpful, Unnecessary or Wrong
   feedback.
-- **Decision Lab**: replays a past decision against your current
-  confidence threshold to show whether it would pass today. It is a policy
-  check, not a reconstruction of what happened.
 - **Setup Doctor** (Diagnostics tab): a read only health check with a plain
   fix for each problem, never applied for you.
 - **Provider Activity** (Diagnostics tab): daily totals of AI calls by

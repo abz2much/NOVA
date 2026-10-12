@@ -249,7 +249,7 @@ def test_display_names_never_reach_a_service_call():
     """Friendly names and areas are for people; a service call's target is
     always the entity_id. No value produced by the presentation helpers is
     passed to hass.services.async_call."""
-    helpers = {"display_name", "display_names", "entity_label"}
+    helpers = {"display_name", "display_names"}
     checked = 0
     for p in sorted(ROOT.rglob("*.py")):
         tree = _tree(p)

@@ -2,7 +2,7 @@
  * frontend/src/. Edit the sources there, then run the build. */
 /*
  * Nova Command Center Panel.
- * v8.39.1
+ * v8.40.0
  *
  * Started life as "Command Center" — a genuinely separate implementation
  * from the original Classic UI, built with full creative freedom over
@@ -79,7 +79,7 @@ class NovaPanel extends HTMLElement {
   connectedCallback() {
     if (!window.__novaBannerLogged) {
       window.__novaBannerLogged = true;
-      console.log("%c Nova Panel %c v8.39.1 ",
+      console.log("%c Nova Panel %c v8.40.0 ",
         "color: #f4b860; background: #1e0d06; padding: 2px 6px;",
         "color: #e2542f; background: #050403; padding: 2px 6px;");
     }
@@ -895,9 +895,6 @@ ${this._htmlDashboardBody()}`;
           <button class="mode-chip new-dec-fb" data-verdict="wrong" data-id="${this._esc(d.id)}" ${judged ? "disabled" : ""}>WRONG</button>
         </div>
         <div class="toggle-desc" id="newDecFbStatus">${judged ? `Already judged: ${this._esc(d.outcome)}` : ""}</div>
-        <div class="mode-bind-head">Decision Lab</div>
-        <div class="cfg-row"><button class="mode-chip" id="newDecReplay" data-id="${this._esc(d.id)}">REPLAY</button></div>
-        <div id="newDecReplayResult"></div>
       `);
       drawer.querySelector("#newDecCloseDrawer")?.addEventListener("click", () => {
         drawer.hidden = true; this._setHtml(drawer, "");
@@ -906,33 +903,8 @@ ${this._htmlDashboardBody()}`;
         btn.addEventListener("click", () => this._submitDecisionOutcome(
           parseInt(btn.getAttribute("data-id"), 10), btn.getAttribute("data-verdict")));
       });
-      drawer.querySelector("#newDecReplay")?.addEventListener("click", () => this._replayDecision(d.id));
     } catch (err) {
       this._setHtml(drawer, `<div class="new-log-entry-error" style="padding:12px">${this._tHtml("Error loading decision: {error}", { error: this._esc(err) })}</div>`);
-    }
-  }
-
-  async _replayDecision(id) {
-    const resultEl = this.shadowRoot?.getElementById("newDecReplayResult");
-    if (resultEl) this._setHtml(resultEl, `<div class="stub-body">Replaying…</div>`);
-    try {
-      const r = await this._hass.callWS({ type: "nova/replay_decision", decision_id: id });
-      if (!resultEl) return;
-      const row = (label, value) => `<div class="cfg-row"><label>${this._esc(label)}</label><span>${this._esc(String(value))}</span></div>`;
-      if (!r.supported) {
-        this._setHtml(resultEl, `
-          <div class="toggle-desc" style="margin-top:8px"><b>${this._esc(r.label)}</b></div>
-          <div class="stub-body">${this._esc(r.reason || "Not supported for this decision kind.")}</div>`);
-        return;
-      }
-      this._setHtml(resultEl, `
-        <div class="toggle-desc" style="margin-top:8px"><b>${this._esc(r.label)}</b></div>
-        ${row("Current suggestion threshold", r.current_threshold)}
-        ${row("Would pass current threshold", r.would_pass_current_threshold ? "Yes" : "No")}
-        ${row("Within 0.05 of threshold", r.within_0_05_of_threshold ? "Yes" : "No")}
-      `);
-    } catch (err) {
-      if (resultEl) this._setHtml(resultEl, `<div class="new-log-entry-error" style="padding:12px">${this._tHtml("Error running replay: {error}", { error: this._esc(err) })}</div>`);
     }
   }
 
@@ -5931,7 +5903,7 @@ ${this._htmlDashboardBody()}`;
     if (d.error) return `<div class="stub-body">Couldn't reach the library — restart Home Assistant after updating, then reopen.</div>`;
     const sources = d.sources || [];
     if (!sources.length) {
-      return `<div class="stub-body">No documents ingested yet. Add PDF/.txt/.md files to <code>${this._esc(d.directory || "nova/documents in your config folder")}</code>${d.chroma ? " and press Ingest." : " and press Ingest. (Vector search needs ChromaDB; keyword fallback is active.)"}</div>`;
+      return `<div class="stub-body">No documents ingested yet. Add PDF/.txt/.md files to <code>${this._esc(d.directory || "nova/documents in your config folder")}</code> and press Ingest.</div>`;
     }
     return sources.map(s => `
       <div class="cfg-row">
@@ -5975,7 +5947,7 @@ ${this._htmlDashboardBody()}`;
 
   _documentLibraryCardBody() {
     const d = this._docLib || {};
-    const backend = d.chroma ? "VECTOR" : d.fts ? "KEYWORD" : "NONE";
+    const backend = d.fts ? "KEYWORD" : "NONE";
     return `
       <div class="stub-body">Drop manuals &amp; receipts (PDF, .txt, .md) into <code>${this._esc(d.directory || "nova/documents in your config folder")}</code> or upload below, then ingest. Ask Nova "what's the furnace filter size?" and it answers from your paperwork.</div>
       <div class="cfg-row"><label>Backend</label><span>${this._tHtml("{backend} · {count} chunks", { backend: this._esc(backend), count: d.chunk_count || 0 })}</span></div>

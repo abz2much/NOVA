@@ -20,7 +20,6 @@ def discovery(load):
         "_SAFE_MODEL_DISCOVERY_ERROR": mod.SAFE_MODEL_DISCOVERY_ERROR,
         "_resolve_model_discovery_request": resolve,
         "_parse_model_list": mod.parse_model_list,
-        "_parse_model_details": mod.parse_model_details,
         "_log_model_discovery_failure": mod.log_discovery_failure,
     }
 
@@ -194,35 +193,6 @@ def test_existing_model_list_parsing_is_preserved(
 ):
     parse = discovery["_parse_model_list"]
     assert parse(provider, url, payload) == expected
-
-
-def test_ollama_model_details_use_only_server_reported_capabilities(discovery):
-    parse = discovery["_parse_model_details"]
-    details = parse("ollama", "http://ollama.lan:11434/api/tags", {"models": [{
-        "name": "qwen:latest",
-        "size": 1234,
-        "capabilities": ["completion", "tools", "thinking"],
-        "details": {
-            "family": "qwen",
-            "quantization_level": "Q4_K_M",
-            "context_length": 32768,
-        },
-    }]})
-    assert details == [{
-        "id": "qwen:latest",
-        "capabilities": ["completion", "thinking", "tools"],
-        "family": "qwen",
-        "quantization": "Q4_K_M",
-        "size": 1234,
-        "context_length": 32768,
-    }]
-
-
-def test_non_ollama_model_capabilities_are_unknown_not_guessed(discovery):
-    parse = discovery["_parse_model_details"]
-    assert parse("openai", "https://api.openai.com/v1/models", {
-        "data": [{"id": "model-with-vision-in-its-name"}],
-    }) == [{"id": "model-with-vision-in-its-name", "capabilities": []}]
 
 
 def test_failure_log_contains_only_sanitised_metadata(discovery, caplog):

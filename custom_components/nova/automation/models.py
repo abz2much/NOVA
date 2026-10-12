@@ -155,12 +155,6 @@ class NormalizedAutomation:
     conditions: tuple = ()
     actions: tuple = ()
 
-    def to_candidate(self) -> dict[str, list]:
-        """The behavioural config the classifier compares."""
-        return {"triggers": list(self.triggers),
-                "conditions": list(self.conditions),
-                "actions": list(self.actions)}
-
     def to_legacy_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {"installable": True, "alias": self.alias,
                                "trigger": list(self.triggers),

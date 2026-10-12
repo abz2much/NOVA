@@ -324,49 +324,6 @@ def set_outcome_recent(kind: str, verdict, source: str = "", max_age: float = 36
             pass
 
 
-def set_outcome_for_entity(pattern: str, verdict, source: str = "",
-                           kind_prefix: str = "anticipation",
-                           max_age: float = 86400.0,
-                           db_path: Optional[str] = None) -> int:
-    """Judge recent, still unjudged records whose ref names a matching entity.
-
-    Records link to an entity through ``ref`` = ``entity:<entity_id>``. ``pattern``
-    is an entity id or a glob ("binary_sensor.porch_*"). Only records of kinds
-    starting with ``kind_prefix`` from the last ``max_age`` seconds are judged.
-    Returns how many were judged. Never raises."""
-    import fnmatch
-    if not pattern:
-        return 0
-    db = _resolve(db_path)
-    try:
-        conn = _connect(db)
-    except Exception:
-        return 0
-    judged = 0
-    try:
-        esc = (str(kind_prefix).replace("\\", "\\\\").replace("%", "\\%")
-               .replace("_", "\\_"))
-        rows = conn.execute(
-            "SELECT id, ref FROM decision_records "
-            "WHERE kind LIKE ? ESCAPE '\\' AND outcome IS NULL AND ts >= ? "
-            "AND ref LIKE 'entity:%'",
-            (esc + "%", time.time() - float(max_age)),
-        ).fetchall()
-        for rid, ref in rows:
-            entity = str(ref)[len("entity:"):]
-            if fnmatch.fnmatchcase(entity, str(pattern)):
-                if _apply_outcome(conn, rid, verdict, source, None):
-                    judged += 1
-    except Exception:
-        return judged
-    finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
-    return judged
-
-
 def get(record_id: int, db_path: Optional[str] = None) -> Optional[dict]:
     db = _resolve(db_path)
     try:
@@ -721,4 +678,3 @@ def outcome_rate(kind: str, window_s: Optional[float] = None,
         out["unwelcome_rate"] = round(
             (counts["unnecessary"] + counts["wrong"]) / judged, 4)
     return out
-

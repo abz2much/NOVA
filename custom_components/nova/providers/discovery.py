@@ -180,10 +180,6 @@ def parse_model_infos(provider: str, url: str, data: dict) -> list[ModelInfo]:
     return sorted(result, key=lambda item: item.id)
 
 
-def parse_model_details(provider: str, url: str, data: dict) -> list[dict]:
-    return [info.to_dict() for info in parse_model_infos(provider, url, data)]
-
-
 def log_discovery_failure(provider: str, url: str, exc: Exception, *, logger=None) -> None:
     """Log bounded failure metadata without URLs, credentials, or bodies."""
     from urllib.parse import urlparse

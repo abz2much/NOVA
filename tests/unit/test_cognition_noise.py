@@ -1,9 +1,9 @@
 """Cognition noise control — v7.49.0.
 
-Diagnostic/technical sensors (board temps, RF signal, reactive power) must not
-drive numeric-anomaly escalations — their values legitimately swing and would
-flood the pipeline. And no single noisy sensor should escalate more than once
-per cooldown window. Safety/access triggers are never throttled.
+No numeric reading is escalated on statistics alone (8.40.0: 100 of 104
+rated alerts were unnecessary, many of them voltage and server load spikes).
+No single noisy entity escalates more than once per cooldown window.
+Safety/access triggers are never throttled.
 """
 from __future__ import annotations
 
@@ -37,68 +37,59 @@ def _warm(cognition, entity_id, value, dclass=None, unit=None, n=40):
         cognition.process(_ev(entity_id, value, dclass, unit))
 
 
-# ── technical / diagnostic exclusion ─────────────────────────────────────────
-def test_hwmon_spike_not_escalated(cognition):
-    eid = "sensor.home_hwmon_temperatures_core_3"
-    _warm(cognition, eid, 50.0, "temperature", "°C")
-    d = cognition.process(_ev(eid, 500.0, "temperature", "°C"))   # huge spike
+# ── numeric readings are never escalated on statistics alone (8.40.0) ──────
+@pytest.mark.parametrize("eid,dclass,unit,normal,spike", [
+    ("sensor.living_room_temperature", "temperature", "°F", 70.0, 200.0),
+    ("sensor.mains_voltage", "voltage", "V", 230.0, 900.0),
+    ("sensor.server_load", None, None, 0.5, 40.0),
+])
+def test_numeric_spike_is_never_escalated(cognition, eid, dclass, unit, normal, spike):
+    _warm(cognition, eid, normal, dclass, unit)
+    d = cognition.process(_ev(eid, spike, dclass, unit))
     assert d.escalate is False
-    assert "value spike" not in d.reason
+    assert "spike" not in d.reason and "drift" not in d.reason
 
 
-def test_signal_strength_spike_not_escalated(cognition):
-    eid = "sensor.garage_door_signal"
-    _warm(cognition, eid, -60.0, "signal_strength", "dBm")
-    d = cognition.process(_ev(eid, -5.0, "signal_strength", "dBm"))
-    assert d.escalate is False
+def test_numeric_stats_are_not_persisted(cognition):
+    _warm(cognition, "sensor.mains_voltage", 230.0, "voltage", "V")
+    saved = cognition._entry_to_dict(cognition._MODEL["sensor.mains_voltage"])
+    assert not {"n", "mean", "m2"} & set(saved)
 
 
-def test_reactive_power_kvar_not_escalated(cognition):
-    eid = "sensor.home_energy_meter_gen5_electric_consumption_kvar"
-    _warm(cognition, eid, 0.2, None, "kvar")
-    d = cognition.process(_ev(eid, 9.0, None, "kvar"))
-    assert d.escalate is False
+def test_old_saved_entries_with_numeric_stats_still_load(cognition):
+    e = cognition._entry_from_dict({"first_seen": 1.0, "n": 40, "mean": 2.0, "m2": 9.0})
+    assert e.first_seen == 1.0
 
 
-def test_room_temperature_still_escalates(cognition):
-    # a real room temperature (device_class temperature, but NOT diagnostic) must
-    # still be eligible — proves the filter doesn't over-exclude by device_class
-    eid = "sensor.living_room_temperature"
-    _warm(cognition, eid, 70.0, "temperature", "°F")
-    d = cognition.process(_ev(eid, 200.0, "temperature", "°F"))
-    assert d.escalate is True
-    assert "value spike" in d.reason
+# ── per-entity cooldown for escalations with no safety or access driver ─────
+@pytest.fixture
+def unusual(cognition, monkeypatch):
+    """Every event scores as an unusual-hour change, the kind of escalation
+    the cooldown exists for."""
+    monkeypatch.setattr(cognition, "_salience",
+                        lambda *a, **k: (0.7, "rare transition, unusual hour"))
+    return cognition
 
 
-# ── per-entity anomaly cooldown ──────────────────────────────────────────────
-def test_noisy_sensor_escalates_once_then_cools_down(cognition):
-    eid = "sensor.kitchen_bird_count"                 # not technical
-    _warm(cognition, eid, 2.0)
-    d1 = cognition.process(_ev(eid, 60.0))            # first spike -> escalates
-    assert d1.escalate is True and "value spike" in d1.reason
-    d2 = cognition.process(_ev(eid, 80.0))            # immediate second spike
-    assert d2.escalate is False                        # suppressed by cooldown
+def test_noisy_entity_escalates_once_then_cools_down(unusual):
+    assert unusual.process(_ev("switch.kettle", "on")).escalate is True
+    assert unusual.process(_ev("switch.kettle", "off")).escalate is False
 
 
-def test_cooldown_is_per_entity(cognition):
-    _warm(cognition, "sensor.bird_a", 2.0)
-    _warm(cognition, "sensor.bird_b", 2.0)
-    a = cognition.process(_ev("sensor.bird_a", 60.0))
-    b = cognition.process(_ev("sensor.bird_b", 60.0))
-    assert a.escalate is True and b.escalate is True   # different entities, both allowed
+def test_cooldown_is_per_entity(unusual):
+    assert unusual.process(_ev("switch.a", "on")).escalate is True
+    assert unusual.process(_ev("switch.b", "on")).escalate is True
 
 
-def test_cooldown_expires(cognition, monkeypatch):
+def test_cooldown_expires(unusual, monkeypatch):
     import time as _t
     base = _t.time()
-    monkeypatch.setattr(cognition.time, "time", lambda: base)
-    eid = "sensor.kitchen_bird_count"
-    _warm(cognition, eid, 2.0)
-    assert cognition.process(_ev(eid, 60.0)).escalate is True
-    assert cognition.process(_ev(eid, 80.0)).escalate is False   # within cooldown
-    monkeypatch.setattr(cognition.time, "time",
-                        lambda: base + cognition.ANOMALY_COOLDOWN + 1)
-    assert cognition.process(_ev(eid, 90.0)).escalate is True     # cooldown expired
+    monkeypatch.setattr(unusual.time, "time", lambda: base)
+    assert unusual.process(_ev("switch.kettle", "on")).escalate is True
+    assert unusual.process(_ev("switch.kettle", "off")).escalate is False
+    monkeypatch.setattr(unusual.time, "time",
+                        lambda: base + unusual.ANOMALY_COOLDOWN + 1)
+    assert unusual.process(_ev("switch.kettle", "on")).escalate is True
 
 
 # ── safety is never throttled ────────────────────────────────────────────────

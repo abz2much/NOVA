@@ -214,6 +214,14 @@
     "voice_setup_incomplete": {
       "title": "Nova 语音设置未完成",
       "description": "Nova 未能完成语音设置。失败的部分：{failed}。\n\n手动完成方法：在 设置 → 应用 中，安装并启动 Piper、Whisper 和 openWakeWord。然后在 设置 → 语音助手 中，创建一个管道，以 Nova 作为对话代理、Whisper 用于语音转文字、Piper 用于文字转语音。Nova 每次重启都会再次检查，语音可用后，此通知会自行清除。"
+    },
+    "retired_service": {
+      "title": "Nova：{service} 即将停用",
+      "description": "Home Assistant 中的某项内容（通常是自动化或脚本）调用了 {service}。此服务将在 Nova 之后的版本中移除。请改用 {replacement}。\n\nHome Assistant 重启后此通知会消失，只有再次调用该服务时才会重新出现。"
+    },
+    "retired_service_no_effect": {
+      "title": "Nova：{service} 即将停用",
+      "description": "Home Assistant 中的某项内容（通常是自动化或脚本）调用了 {service}。它背后的功能已经移除，所以这次调用不会产生任何效果，该服务本身也将在 Nova 之后的版本中移除。请从自动化或脚本中删除这次调用。\n\nHome Assistant 重启后此通知会消失，只有再次调用该服务时才会重新出现。"
     }
   },
   "exceptions": {

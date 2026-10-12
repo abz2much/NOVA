@@ -15,7 +15,7 @@ from __future__ import annotations
 import ipaddress
 import socket
 import urllib.request
-from typing import Iterable, Optional
+from typing import Optional
 from urllib.parse import urljoin, urlparse
 
 from .errors import ProviderError, ProviderErrorKind
@@ -148,7 +148,3 @@ class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
 
 def build_safe_opener(resolve: bool = True) -> urllib.request.OpenerDirector:
     return urllib.request.build_opener(SafeRedirectHandler(resolve=resolve))
-
-
-def credential_header_names(headers: Iterable[str]) -> list[str]:
-    return [h for h in headers if h.lower() in CREDENTIAL_HEADERS]

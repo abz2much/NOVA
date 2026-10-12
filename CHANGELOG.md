@@ -1,3 +1,22 @@
+## [8.40.0] — Nova clean-up: unused features removed
+
+Four features nobody used are gone, five old services start their retirement, and Nova no longer speaks up about unusual number readings.
+
+### Removed
+- **Satellite heartbeat.** It pinged satellites on fixed IP addresses and rerouted audio when one stopped answering. It needed manual setup and was never started.
+- **Replay and its button in the decision drawer.** A developer tool that re-ran past decisions against today's thresholds. The `nova/replay_decision` WebSocket command is gone with it.
+- **The ChromaDB path for memory and documents.** ChromaDB was optional and never installed by Nova. Memory and documents use Nova's own SQLite search, as they already did on every normal install. A `nova_memory` folder from an older version is left on disk and still goes into backups.
+- **Spoken "unusual reading" alerts.** Nova used to flag a number that jumped far from its usual range (voltage, server load and similar) and could speak about it. Almost all of these were rated unnecessary. Numbers are no longer escalated on statistics alone, and the running averages behind them are no longer kept. Safety sensors, doors, locks and alarms are unaffected.
+- **42 internal functions nothing called.** No visible change.
+
+### Being retired
+- `nova.speak`, `nova.process_intent`, `nova.scene_by_intent`, `nova.routine` and `nova.replay_policy` still work, and will be removed in a later release. The first call in each run logs a warning and shows a notice in Settings → Repairs naming what to use instead: `tts.speak`, `conversation.process` or `script.turn_on`. `nova.replay_policy` now does nothing, since Replay is gone. The notice clears on restart.
+- Nova's own infrastructure audit no longer goes through `nova.speak`, so it never raises that notice.
+
+### Unchanged
+- Every optional feature stays: email, wellbeing, faces, documents, semantic search, travel, extra hazard feeds, n8n, the voice fingerprint adapter, goals and follow-ups.
+- Safety alerts, intrusion, lockdown, offers and confirmations behave as in 8.39.1.
+
 ## [8.39.1] — Nova safety and trust fixes
 
 Nova never acts on its own, only answers an offer from the room that heard it, ignores background talk better, and stops repeating a few alerts.

@@ -6,15 +6,13 @@ household's manuals and receipts, so Nova can answer "what's the filter size
 for the furnace?" or "when did we buy the dishwasher?" from your own paperwork
 instead of guessing.
 
-Design, mirroring memory.py's proven ChromaDB approach exactly:
-  - A SEPARATE Chroma collection ('nova_documents') in the same persistent
-    client. Documents are a different corpus from conversation turns — a manual
-    is not a chat message, and a furnace-spec query should not surface old
-    conversations, nor should "what did I say yesterday" surface the manual.
-  - Same default embedding function Chroma uses for memory (documents are
-    embedded internally on add/query — no extra model dependency), cosine space.
-  - FTS5 fallback in the existing nova.db when ChromaDB isn't installed, so
-    keyword retrieval still works on a minimal install.
+Design:
+  - Documents are their own corpus (the document_fts table in nova.db),
+    separate from conversation turns. A manual is not a chat message, and a
+    furnace-spec query should not surface old conversations, nor should
+    "what did I say yesterday" surface the manual.
+  - Keyword retrieval through FTS5 always works. Semantic search, when it is
+    enabled, embeds the chunks through embeddings.py (search_documents_async).
 
 Ingestion source: /config/nova/documents/ — drop PDFs or .txt files there
 (via the HA File editor, Samba, etc.) and Nova ingests them. No upload UI
@@ -27,7 +25,6 @@ to the caller.
 """
 from __future__ import annotations
 
-import hashlib
 import logging
 import os
 import re
@@ -48,14 +45,6 @@ def _documents_dir() -> str:
     return DOCS_DIR or paths.nova_path("documents")
 
 
-MEMORY_DIR: Optional[str] = None  # override; None resolves via paths.py; same Chroma client as memory.py
-
-
-def _memory_dir() -> str:
-    return MEMORY_DIR or paths.memory_dir()
-
-
-_COLLECTION_NAME = "nova_documents"
 _DB_PATH: Optional[str] = None  # override; None resolves via paths.py
 
 
@@ -67,33 +56,11 @@ _CHUNK_OVERLAP = 150         # carry context across chunk boundaries
 _MAX_FILE_MB = 25            # skip absurdly large files
 _SUPPORTED = (".pdf", ".txt", ".md")
 
-_chroma_ok = False
-_collection = None
 _fts_ok = False
 _initialized = False
 
 
-# ── init (mirrors memory.py) ─────────────────────────────────────────────────
-
-def _init_chroma() -> bool:
-    global _chroma_ok, _collection
-    try:
-        import chromadb
-        client = chromadb.PersistentClient(path=_memory_dir())
-        _collection = client.get_or_create_collection(
-            name=_COLLECTION_NAME,
-            metadata={"hnsw:space": "cosine"},
-        )
-        _chroma_ok = True
-        _LOGGER.info("Nova documents: ChromaDB collection ready at %s", _memory_dir())
-        return True
-    except ImportError:
-        _LOGGER.debug("Nova documents: ChromaDB not available, FTS5 fallback")
-        return False
-    except Exception as exc:
-        _LOGGER.warning("Nova documents: ChromaDB init failed: %s", exc)
-        return False
-
+# ── init ─────────────────────────────────────────────────────────────────────
 
 def _init_fts() -> bool:
     global _fts_ok
@@ -104,7 +71,7 @@ def _init_fts() -> bool:
         conn.commit()
         conn.close()
         _fts_ok = True
-        _LOGGER.info("Nova documents: FTS5 fallback ready")
+        _LOGGER.info("Nova documents: FTS5 ready")
         return True
     except Exception as exc:
         _LOGGER.warning("Nova documents: FTS5 init failed: %s", exc)
@@ -115,8 +82,7 @@ def _ensure_init() -> None:
     global _initialized
     if _initialized:
         return
-    if not _init_chroma():
-        _init_fts()
+    _init_fts()
     _initialized = True
 
 
@@ -207,20 +173,10 @@ def chunk_text(text: str, size: int = _CHUNK_CHARS,
     return chunks
 
 
-def _doc_id(source: str, idx: int, chunk: str) -> str:
-    h = hashlib.sha1(f"{source}:{idx}:{chunk[:60]}".encode()).hexdigest()[:12]
-    return f"{source}__{idx}__{h}"
-
-
 # ── ingest ───────────────────────────────────────────────────────────────────
 
 def _forget_source(source: str) -> None:
     """Remove all chunks for a source before re-ingesting (idempotent re-scan)."""
-    if _chroma_ok and _collection is not None:
-        try:
-            _collection.delete(where={"source": source})
-        except Exception as exc:
-            _LOGGER.debug("doc forget (chroma) failed: %s", exc)
     if _fts_ok:
         try:
             import sqlite3
@@ -234,12 +190,12 @@ def _forget_source(source: str) -> None:
 
 def delete_source(filename: str) -> dict:
     """Remove a document entirely: delete its file from DOCS_DIR and purge all
-    its chunks from FTS/chroma and its vectors from the embedding store. Returns
+    its chunks from FTS and its vectors from the embedding store. Returns
     {"ok", "filename", "error"?}. Never raises."""
     safe = _safe_filename(filename)
     if not safe:
         return {"ok": False, "error": "invalid filename"}
-    # purge chunks (FTS + chroma)
+    # purge chunks (FTS)
     _forget_source(safe)
     # purge vectors
     try:
@@ -279,19 +235,6 @@ def ingest_file(path: str) -> dict:
 
     _forget_source(source)
     ingested = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
-
-    if _chroma_ok and _collection is not None:
-        try:
-            _collection.add(
-                documents=chunks,
-                metadatas=[{"source": source, "chunk": i, "ingested": ingested}
-                           for i in range(len(chunks))],
-                ids=[_doc_id(source, i, c) for i, c in enumerate(chunks)],
-            )
-            return {"source": source, "chunks": len(chunks), "ok": True,
-                    "chunk_texts": chunks, "ingested": ingested}
-        except Exception as exc:
-            _LOGGER.debug("doc chroma add failed: %s", exc)
 
     if _fts_ok:
         try:
@@ -704,25 +647,6 @@ def search_documents(query: str, k: int = 4) -> list[dict]:
         return []
     _ensure_init()
 
-    if _chroma_ok and _collection is not None:
-        try:
-            res = _collection.query(query_texts=[query], n_results=min(k, 20))
-            out = []
-            if res and res.get("documents"):
-                docs = res["documents"][0]
-                metas = res["metadatas"][0] if res.get("metadatas") else [{}] * len(docs)
-                dists = res["distances"][0] if res.get("distances") else [0] * len(docs)
-                for doc, meta, dist in zip(docs, metas, dists):
-                    out.append({
-                        "text": doc,
-                        "source": meta.get("source", ""),
-                        "chunk": meta.get("chunk", 0),
-                        "score": round(1.0 - dist, 3),
-                    })
-            return out
-        except Exception as exc:
-            _LOGGER.debug("doc chroma search failed: %s", exc)
-
     if _fts_ok:
         try:
             import sqlite3
@@ -746,21 +670,9 @@ def search_documents(query: str, k: int = 4) -> list[dict]:
 def library_status() -> dict:
     """What's in the library — backends and counts, for status/UI. Never raises."""
     _ensure_init()
-    info = {"chroma": _chroma_ok, "fts": _fts_ok, "directory": _documents_dir(),
+    info = {"fts": _fts_ok, "directory": _documents_dir(),
             "chunk_count": 0, "sources": []}
-    if _chroma_ok and _collection is not None:
-        try:
-            info["chunk_count"] = _collection.count()
-            got = _collection.get(include=["metadatas"])
-            srcs = {}
-            for m in (got.get("metadatas") or []):
-                s = m.get("source", "?")
-                srcs[s] = srcs.get(s, 0) + 1
-            info["sources"] = [{"source": s, "chunks": n}
-                               for s, n in sorted(srcs.items())]
-        except Exception as exc:
-            _LOGGER.debug("doc status (chroma) failed: %s", exc)
-    elif _fts_ok:
+    if _fts_ok:
         try:
             import sqlite3
             conn = sqlite3.connect(_db_path())

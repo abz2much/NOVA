@@ -50,12 +50,6 @@ def test_all_disabled_uses_none(cam, monkeypatch):
     assert cam.active_cameras(h) == []
 
 
-def test_camera_enabled_predicate(cam, monkeypatch):
-    monkeypatch.setattr(cam, "_disabled_cameras", lambda: {"camera.x"})
-    assert cam.camera_enabled("camera.y") is True
-    assert cam.camera_enabled("camera.x") is False
-
-
 def test_active_states_filtered(cam, monkeypatch):
     monkeypatch.setattr(cam, "_disabled_cameras", lambda: {"camera.b"})
     h = _Hass(["camera.a", "camera.b"])

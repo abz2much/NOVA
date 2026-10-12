@@ -85,16 +85,3 @@ def voiced(decision: Decision, honorific: str) -> Decision:
     if not decision.speak or decision.message:
         return decision
     return decision.with_message(render(decision.phrase, honorific))
-
-
-def entity_label(friendly_name: str, entity_id: str, area: str = "",
-                 collides: bool = False) -> str:
-    """How to name one entity to a person: its friendly name, with the area
-    when another entity shares that name, and the entity_id only when there
-    is no usable name (or no area to tell a collision apart)."""
-    name = (friendly_name or "").strip()
-    if not name:
-        return entity_id or "a device"
-    if collides:
-        return f"{name} ({area})" if area else f"{name} ({entity_id})"
-    return name

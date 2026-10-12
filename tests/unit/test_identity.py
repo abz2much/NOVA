@@ -137,36 +137,6 @@ def test_subject_for_known_and_unknown(identity, cfg, sigs, fake_hass):
     assert identity.subject_for(identity.Identification()) == "primary"
 
 
-# ── quick_person: cheap sole-occupant lookup (v6.41.0) ───────────────────────
-
-def test_quick_person_sole_occupant(identity, cfg, sigs, fake_hass):
-    sigs["home"] = ["Username"]
-    assert identity.quick_person(fake_hass) == "Username"
-
-
-def test_quick_person_multiple_home_is_unknown(identity, cfg, sigs, fake_hass):
-    sigs["home"] = ["Username", "Username2"]
-    assert identity.quick_person(fake_hass) == "unknown"
-
-
-def test_quick_person_nobody_home_is_unknown(identity, cfg, sigs, fake_hass):
-    assert identity.quick_person(fake_hass) == "unknown"
-
-
-def test_quick_person_ignores_face_and_voice(identity, cfg, sigs, fake_hass):
-    # quick_person is presence-only by design — a face vote for a second
-    # person must not disambiguate the way the full resolve() would.
-    sigs["home"] = ["Username", "Username2"]
-    _face(sigs, "camera.office", "Username2", confidence=95.0, age_seconds=3)
-    assert identity.quick_person(fake_hass) == "unknown"
-
-
-def test_quick_person_disabled_is_unknown(identity, cfg, sigs, fake_hass):
-    cfg["identity_enabled"] = False
-    sigs["home"] = ["Username"]
-    assert identity.quick_person(fake_hass) == "unknown"
-
-
 # ── room-scoped + proximity attribution (v6.77.0) ────────────────────────────
 # The point: in a multi-occupant house, sole-occupancy of the HOUSE is rare but
 # sole-occupancy of a ROOM is common. These make per-person routines possible.
@@ -241,9 +211,3 @@ def test_quick_identify_ambiguous_returns_candidates(identity, monkeypatch):
     out = identity.quick_identify(None)
     assert out.person == identity.UNKNOWN
     assert set(out.candidates) == {"Username", "Username3"}
-
-
-def test_quick_person_still_returns_a_string(identity, monkeypatch):
-    # back-compat: external callers of quick_person keep working
-    monkeypatch.setattr(identity, "_home_people", lambda h: ["Username"])
-    assert identity.quick_person(None) == "Username"
