@@ -1217,7 +1217,6 @@
   "Speech to text through the Nova Voice ID app, with a fallback for when the app is down.": "Распознавание речи через приложение Nova Voice ID с резервным вариантом на случай, если приложение не работает.",
   "Unreachable": "Недоступно",
   "Voice ID": "Voice ID",
-  "1 sample": "1 образец",
   "App token": "Токен приложения",
   "Copy it from the app's Configuration tab.": "Скопируйте его на вкладке «Конфигурация» приложения.",
   "Couldn't load the People list. Restart Home Assistant after updating, then reopen Settings.": "Не удалось загрузить список людей. Перезапустите Home Assistant после обновления и снова откройте настройки.",
@@ -1253,7 +1252,6 @@
   "Token cleared.": "Токен удалён.",
   "Token saved.": "Токен сохранён.",
   "updated {date}": "обновлено {date}",
-  "{count} samples": "Образцов: {count}",
   "{name}: all {needed} samples saved.": "{name}: сохранены все {needed} образцов.",
   "Nova can't reach the Nova Voice ID app. Check it is running and the address is right.": "Nova не может связаться с приложением Nova Voice ID. Проверьте, что оно запущено и адрес верный.",
   "Set the app's token first. Copy it from the app's Configuration tab.": "Сначала введите токен приложения. Скопируйте его на вкладке «Конфигурация» приложения.",
@@ -1271,5 +1269,12 @@
   "Nova couldn't save the token.": "Nova не удалось сохранить токен.",
   "VOICE": "VOICE",
   "Use voice to tell who is speaking": "Определять говорящего по голосу",
-  "Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.": "По умолчанию выключено. Голос — это подсказка, кто говорит, а не ключ: для отпирания, открытия и снятия с охраны по-прежнему нужен телефон. Оставьте выключенным, пока строки VOICE на вкладке «Журналы» собирают оценки."
+  "Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.": "По умолчанию выключено. Голос — это подсказка, кто говорит, а не ключ: для отпирания, открытия и снятия с охраны по-прежнему нужен телефон. Оставьте выключенным, пока строки VOICE на вкладке «Журналы» собирают оценки.",
+  "Improve voices from everyday use": "Улучшать голоса в повседневном использовании",
+  "Off by default. When Nova is very sure who spoke, it adds that sample to their voice, so it keeps up with how they sound. Needs the Nova Voice ID app 0.3.0.": "По умолчанию выключено. Когда Nova уверена, кто говорил, она добавляет этот образец к голосу человека, чтобы голос не отставал от того, как он звучит. Нужно приложение Nova Voice ID 0.3.0.",
+  "Remove learned": "Удалить выученные",
+  "Remove the samples Nova learned for {name}? Their recordings stay.": "Удалить образцы, которые Nova выучила для {name}? Записи останутся.",
+  "Removed {count} learned samples for {name}.": "Удалено выученных образцов {name}: {count}.",
+  "Turn on \"Use voice to tell who is speaking\" first.": "Сначала включите «Определять говорящего по голосу».",
+  "{recorded} recorded, {learned} learned": "Записано: {recorded}, выучено: {learned}"
 }

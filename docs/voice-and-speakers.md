@@ -252,6 +252,35 @@ calling off an intrusion ignore voice completely and still need a tap on your
 phone. A spoken "yes" to a confirmation works exactly as it did. Voice never
 logs anyone in, and typed Chat always uses the person you are logged in as.
 
+### Learning from everyday use
+
+**Improve voices from everyday use** sits under the identity switch and is off
+by default. It needs "Use voice to tell who is speaking" on and the Nova Voice
+ID app 0.3.0 or newer. When it's on, Nova adds a sample from an ordinary voice
+command to that person's voice, so it keeps up with how they sound day to day
+(a cold, a new room, the morning voice). It only does this when it is very
+sure who spoke:
+
+- the app is sure it's that person, with a good score, and the command lasted
+  at least 2 seconds;
+- something other than voice agrees: they are the only one home, a camera saw
+  their face, or they are the only one seen in that satellite's room, and
+  nobody else is likely to be there;
+- it was an ordinary command on a voice satellite, not Chat, a recording, a
+  short follow up or a "yes" or "no" to a question;
+- the reply has already been given. Learning never slows Nova down and never
+  changes an answer.
+
+The app has its own limits on top: the person needs at least 3 recorded
+samples, it takes at most 3 learned samples a day per person, and at most 16
+in all. Learned samples never replace recorded ones. The Logs tab shows
+`… + learned` when one is saved and `… learn refused (refused)` when the app
+turned one down.
+
+**To undo it**, press **Remove learned** next to the person. Their recorded
+samples stay. The People list shows both counts, for example "8 recorded, 2
+learned".
+
 ### Tuning
 
 The app decides the status with its own options (in the app's Configuration
@@ -377,6 +406,16 @@ Panel, **Settings → Anticipation & Memory**:
 | Use Home Assistant default voice | Use your preferred Assist pipeline's speech engine. Off by default. |
 | Continued conversation | Keep listening for a follow up after Nova answers. Off by default. |
 | Follow me between rooms | Reopen the microphone where you moved to. Needs two or more satellites. |
+
+Panel, **Settings → Voice & Speakers → Voice ID**:
+
+| Setting | What it does |
+|---|---|
+| App address (`voice_id_uri`) | The Nova Voice ID app's address. Filled in by the app; a value you type wins. |
+| App token | The app's token, kept in `secrets.yaml`. Filled in by the app; a value you type wins. |
+| Fallback speech to text (`voice_id_fallback_stt`) | Used when the app can't be reached. |
+| Use voice to tell who is speaking (`voice_id_identity`) | A known voice helps decide who is talking. A hint, never a key. Off by default. |
+| Improve voices from everyday use (`voice_id_learning`) | Adds a sample from everyday use when Nova is very sure who spoke. Needs the switch above and app 0.3.0. Off by default. |
 
 In **Configure → Core**, "Address me as" is the default address when no
 person specific one applies. **Configure → Routing** holds the "Broadcast

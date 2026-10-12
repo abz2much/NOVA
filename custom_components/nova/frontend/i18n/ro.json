@@ -309,7 +309,6 @@
   "Speech to text through the Nova Voice ID app, with a fallback for when the app is down.": "Recunoaștere vocală prin aplicația Nova Voice ID, cu o rezervă pentru când aplicația nu merge.",
   "Unreachable": "Inaccesibil",
   "Voice ID": "Voice ID",
-  "1 sample": "1 eșantion",
   "App token": "Tokenul aplicației",
   "Copy it from the app's Configuration tab.": "Copiază-l din fila Configurare a aplicației.",
   "Couldn't load the People list. Restart Home Assistant after updating, then reopen Settings.": "Lista de persoane nu s-a putut încărca. Repornește Home Assistant după actualizare, apoi redeschide Setările.",
@@ -345,7 +344,6 @@
   "Token cleared.": "Token șters.",
   "Token saved.": "Token salvat.",
   "updated {date}": "actualizat {date}",
-  "{count} samples": "{count} eșantioane",
   "{name}: all {needed} samples saved.": "{name}: toate cele {needed} eșantioane au fost salvate.",
   "Nova can't reach the Nova Voice ID app. Check it is running and the address is right.": "Nova nu poate contacta aplicația Nova Voice ID. Verifică dacă rulează și dacă adresa e corectă.",
   "Set the app's token first. Copy it from the app's Configuration tab.": "Introdu mai întâi tokenul aplicației. Copiază-l din fila Configurare a aplicației.",
@@ -363,5 +361,12 @@
   "Nova couldn't save the token.": "Nova nu a putut salva tokenul.",
   "VOICE": "VOICE",
   "Use voice to tell who is speaking": "Folosește vocea ca să afli cine vorbește",
-  "Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.": "Oprit implicit. Vocea e un indiciu despre cine vorbește, niciodată o cheie: descuierea, deschiderea și dezarmarea cer în continuare telefonul. Lasă-l oprit cât timp liniile VOICE din fila Jurnale adună scoruri."
+  "Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.": "Oprit implicit. Vocea e un indiciu despre cine vorbește, niciodată o cheie: descuierea, deschiderea și dezarmarea cer în continuare telefonul. Lasă-l oprit cât timp liniile VOICE din fila Jurnale adună scoruri.",
+  "Improve voices from everyday use": "Îmbunătățește vocile din folosirea zilnică",
+  "Off by default. When Nova is very sure who spoke, it adds that sample to their voice, so it keeps up with how they sound. Needs the Nova Voice ID app 0.3.0.": "Oprit implicit. Când Nova e foarte sigură cine a vorbit, adaugă eșantionul la vocea acelei persoane, ca să țină pasul cu cum sună. Necesită aplicația Nova Voice ID 0.3.0.",
+  "Remove learned": "Elimină învățate",
+  "Remove the samples Nova learned for {name}? Their recordings stay.": "Elimini eșantioanele învățate de Nova pentru {name}? Înregistrările rămân.",
+  "Removed {count} learned samples for {name}.": "Au fost eliminate {count} eșantioane învățate pentru {name}.",
+  "Turn on \"Use voice to tell who is speaking\" first.": "Pornește mai întâi „Folosește vocea ca să afli cine vorbește”.",
+  "{recorded} recorded, {learned} learned": "{recorded} înregistrate, {learned} învățate"
 }

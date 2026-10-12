@@ -49,10 +49,13 @@ def _people(hass, profiles: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "person": state.entity_id,
             "name": str((state.attributes or {}).get("friendly_name") or state.entity_id),
             "samples": p["samples"] if p else 0,
+            "enrolled": p.get("enrolled", p["samples"]) if p else 0,
+            "learned": p.get("learned", 0) if p else 0,
             "updated": p["updated"] if p else None,
         })
     for person, p in by_person.items():
         rows.append({"person": person, "name": person, "samples": p["samples"],
+                     "enrolled": p.get("enrolled", p["samples"]), "learned": p.get("learned", 0),
                      "updated": p["updated"], "missing": True})
     return sorted(rows, key=lambda r: r["name"].lower())
 
@@ -128,6 +131,7 @@ async def ws_voice_id_record_status(hass: HomeAssistant, connection, msg: dict) 
     vol.Required("type"): "nova/voice_id_delete",
     vol.Exclusive("person", "who"): _PERSON,
     vol.Exclusive("all", "who"): True,
+    vol.Optional("source"): "learned",
 })
 @websocket_api.async_response
 async def ws_voice_id_delete(hass: HomeAssistant, connection, msg: dict) -> None:
@@ -142,12 +146,14 @@ async def ws_voice_id_delete(hass: HomeAssistant, connection, msg: dict) -> None
         _fail(connection, msg, "unreachable", voice_id.ERROR_MESSAGES["unreachable"])
         return
     try:
-        reply = await voice_id.profile_delete(uri, token, msg.get("person"), everyone=everyone)
+        reply = await voice_id.profile_delete(uri, token, msg.get("person"), everyone=everyone,
+                                              source=msg.get("source"))
     except voice_id.VoiceIdManagementError as exc:
         _fail(connection, msg, exc.code, exc.message)
         return
-    _LOGGER.info("Nova Voice ID: deleted %s", "all voice data" if everyone
-                 else f"{len(reply['deleted'])} voice profile(s)")
+    _LOGGER.info("Nova Voice ID: deleted %s%s", "all voice data" if everyone
+                 else f"{len(reply['deleted'])} voice profile(s)",
+                 " (learned samples only)" if msg.get("source") else "")
     connection.send_result(msg["id"], {"ok": True, **reply})
 
 

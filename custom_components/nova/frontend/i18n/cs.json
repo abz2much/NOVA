@@ -1217,7 +1217,6 @@
   "Speech to text through the Nova Voice ID app, with a fallback for when the app is down.": "Převod řeči na text přes aplikaci Nova Voice ID, se zálohou pro případ, že aplikace neběží.",
   "Unreachable": "Nedostupné",
   "Voice ID": "Voice ID",
-  "1 sample": "1 vzorek",
   "App token": "Token aplikace",
   "Copy it from the app's Configuration tab.": "Zkopírujte ho z karty Konfigurace aplikace.",
   "Couldn't load the People list. Restart Home Assistant after updating, then reopen Settings.": "Seznam osob se nepodařilo načíst. Po aktualizaci restartujte Home Assistant a znovu otevřete Nastavení.",
@@ -1253,7 +1252,6 @@
   "Token cleared.": "Token vymazán.",
   "Token saved.": "Token uložen.",
   "updated {date}": "aktualizováno {date}",
-  "{count} samples": "{count} vzorků",
   "{name}: all {needed} samples saved.": "{name}: všech {needed} vzorků uloženo.",
   "Nova can't reach the Nova Voice ID app. Check it is running and the address is right.": "Nova se nemůže spojit s aplikací Nova Voice ID. Zkontrolujte, že běží a že adresa je správná.",
   "Set the app's token first. Copy it from the app's Configuration tab.": "Nejdřív zadejte token aplikace. Zkopírujte ho z karty Konfigurace aplikace.",
@@ -1271,5 +1269,12 @@
   "Nova couldn't save the token.": "Nova nemohla uložit token.",
   "VOICE": "VOICE",
   "Use voice to tell who is speaking": "Poznat mluvčího podle hlasu",
-  "Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.": "Ve výchozím stavu vypnuto. Hlas je jen nápověda, kdo mluví, nikdy klíč: odemčení, otevření a deaktivace stále potřebují telefon. Nechte to vypnuté, dokud řádky VOICE na kartě Protokoly sbírají skóre."
+  "Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.": "Ve výchozím stavu vypnuto. Hlas je jen nápověda, kdo mluví, nikdy klíč: odemčení, otevření a deaktivace stále potřebují telefon. Nechte to vypnuté, dokud řádky VOICE na kartě Protokoly sbírají skóre.",
+  "Improve voices from everyday use": "Zlepšovat hlasy z běžného používání",
+  "Off by default. When Nova is very sure who spoke, it adds that sample to their voice, so it keeps up with how they sound. Needs the Nova Voice ID app 0.3.0.": "Ve výchozím stavu vypnuto. Když si je Nova jistá, kdo mluvil, přidá ten vzorek k jeho hlasu, aby hlas držel krok s tím, jak zní. Vyžaduje aplikaci Nova Voice ID 0.3.0.",
+  "Remove learned": "Odebrat naučené",
+  "Remove the samples Nova learned for {name}? Their recordings stay.": "Odebrat vzorky, které se Nova naučila pro osobu {name}? Nahrávky zůstanou.",
+  "Removed {count} learned samples for {name}.": "Odebráno {count} naučených vzorků pro osobu {name}.",
+  "Turn on \"Use voice to tell who is speaking\" first.": "Nejdřív zapněte „Poznat mluvčího podle hlasu“.",
+  "{recorded} recorded, {learned} learned": "{recorded} nahraných, {learned} naučených"
 }

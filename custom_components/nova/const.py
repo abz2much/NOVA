@@ -330,3 +330,15 @@ def get_directive(preset_name: str = DEFAULT_DIRECTIVE_PRESET,
             custom = "## PRIME DIRECTIVE — YOUR UNRELENTING CORE PURPOSE\n\n" + custom
         return custom
     return DIRECTIVE_PRESETS.get(preset_name, DIRECTIVE_PRESETS[DEFAULT_DIRECTIVE_PRESET])
+
+
+# ── Nova Voice ID: learning from everyday use (8.38.0) ───────────────────────
+# A voice turn's sample is added to the app as "learned" only when Nova is
+# very sure who spoke (voice_learn.py). The app has its own limits on top
+# (docs/protocol.md in nova-voice-id: known for the same person, at least 3
+# enrolled samples, fewer than 3 learned in 24 hours, at most 16 learned).
+VOICE_LEARN_MIN_SCORE = 0.70        # the app's score for this turn
+VOICE_LEARN_MIN_SPEECH_S = 2.0      # seconds of speech in this turn
+VOICE_LEARN_AGREE_WEIGHT = 0.6      # the same person, from another signal
+VOICE_LEARN_OTHER_MAX = 0.3         # anyone else must stay below this
+VOICE_LEARN_MIN_APP = (0, 3, 0)     # the app version that knows "learned"

@@ -423,6 +423,8 @@ ERROR_MESSAGES = {
     "unreachable": "Nova can't reach the Nova Voice ID app. Check it is running and the address is right.",
     "no_token": "Set the app's token first. Copy it from the app's Configuration tab.",
     "bad_reply": "The app sent a reply Nova doesn't understand. Update the app.",
+    # 8.38.0 (app 0.3.0): a learned sample the app's own rules turned down.
+    "refused": "The app didn't accept this sample.",
 }
 
 
@@ -469,13 +471,25 @@ def _check_person(person: str) -> None:
         raise VoiceIdManagementError("bad_request")
 
 
-async def enrol_commit(uri: str, token: str, sample_id: str, person: str) -> int:
-    """Save a pending sample to a person. Returns their sample count."""
+SOURCES = ("enrolled", "learned")
+
+
+async def enrol_commit(uri: str, token: str, sample_id: str, person: str,
+                       source: str = "enrolled") -> int:
+    """Save a pending sample to a person. Returns their sample count.
+
+    ``source`` (8.38.0, app 0.3.0): "enrolled" (a recording, the app's
+    default, so it is not sent) or "learned" (everyday use, voice_learn.py).
+    The app may answer a learned commit with "refused"."""
     _check_person(person)
     if not isinstance(sample_id, str) or not SAMPLE_ID_RE.fullmatch(sample_id):
         raise VoiceIdManagementError("bad_request")
-    reply = await _manage(uri, token, "nvid-enrol-commit",
-                          {"sample_id": sample_id, "person": person})
+    if source not in SOURCES:
+        raise VoiceIdManagementError("bad_request")
+    data = {"sample_id": sample_id, "person": person}
+    if source != "enrolled":
+        data["source"] = source
+    reply = await _manage(uri, token, "nvid-enrol-commit", data)
     samples = reply.get("samples")
     if isinstance(samples, bool) or not isinstance(samples, int):
         raise VoiceIdManagementError("bad_reply")
@@ -483,18 +497,30 @@ async def enrol_commit(uri: str, token: str, sample_id: str, person: str) -> int
 
 
 async def profile_delete(uri: str, token: str, person: str | None = None, *,
-                         everyone: bool = False) -> dict[str, Any]:
-    """Delete one person's voice, or everyone's. Returns the app's reply."""
+                         everyone: bool = False, source: str | None = None) -> dict[str, Any]:
+    """Delete one person's voice, or everyone's. Returns the app's reply.
+
+    ``source="learned"`` (8.38.0, app 0.3.0) removes only the learned
+    samples; the profile and the recorded samples stay."""
     if everyone:
         data: dict[str, Any] = {"all": True}
     else:
         _check_person(person or "")
         data = {"person": person}
+    if source is not None:
+        if source != "learned":
+            raise VoiceIdManagementError("bad_request")
+        data["source"] = source
     reply = await _manage(uri, token, "nvid-profile-delete", data)
     deleted = reply.get("deleted")
     if not isinstance(deleted, list) or not all(isinstance(p, str) for p in deleted):
         raise VoiceIdManagementError("bad_reply")
-    return {"deleted": deleted, "all": reply.get("all") is True}
+    out: dict[str, Any] = {"deleted": deleted, "all": reply.get("all") is True}
+    if source is not None:
+        removed = reply.get("removed")
+        out["source"] = source
+        out["removed"] = removed if isinstance(removed, int) and not isinstance(removed, bool) else None
+    return out
 
 
 async def profile_list(uri: str, token: str) -> dict[str, Any]:
@@ -513,7 +539,15 @@ async def profile_list(uri: str, token: str) -> dict[str, Any]:
             continue
         if isinstance(updated, bool) or not isinstance(updated, (int, float)):
             updated = None
-        profiles.append({"person": person, "samples": samples, "updated": updated})
+        # 8.38.0 (app 0.3.0): recorded and learned counts. An older app
+        # sends neither, and everything it has was recorded.
+        def _count(value, default: int) -> int:
+            return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 \
+                else default
+        learned = _count(item.get("learned"), 0)
+        enrolled = _count(item.get("enrolled"), max(0, samples - learned))
+        profiles.append({"person": person, "samples": samples, "enrolled": enrolled,
+                         "learned": learned, "updated": updated})
     model = reply.get("model")
     return {"profiles": profiles, "model": model if isinstance(model, str) else ""}
 

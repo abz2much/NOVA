@@ -668,10 +668,15 @@ class NovaAgent(conversation.ConversationEntity):
         try:
             # A Chat tab turn (8.31.0) runs with the gate told so: unlock, open,
             # disarm and standing down then need a phone tap, as for voice.
-            from . import policy
+            from . import policy, voice_learn
+            voice_learn.reset()
             with policy.chat_turn(
                     getattr(user_input, "conversation_id", None), _turn_user_id(user_input)):
-                return await self._handle_message_impl(user_input, chat_log)
+                result = await self._handle_message_impl(user_input, chat_log)
+            # 8.38.0: the reply is built. Only now may this turn's voice sample
+            # be learned, in the background, so the reply is never delayed.
+            voice_learn.schedule(self.hass, self.entry)
+            return result
         except Exception:
             import traceback as _tb
             last = _tb.format_exc().strip().splitlines()[-1][:200]
@@ -771,6 +776,10 @@ class NovaAgent(conversation.ConversationEntity):
                         if voice_line is not None:
                             voice_line += (f" → {voice_ident.person} ({voice_ident.method}, "
                                            f"{voice_ident.confidence:.2f})")
+                        # 8.38.0: a candidate for learning, decided after the
+                        # reply (voice_learn.py). Nothing here waits on it.
+                        from . import voice_learn as _voice_learn
+                        _voice_learn.offer(device_id, turn_voice, voice_ident)
                 except Exception as exc:
                     _LOGGER.debug("Voice identity resolve: %s", exc)
                     voice_ident = None
@@ -1067,6 +1076,9 @@ class NovaAgent(conversation.ConversationEntity):
                     self.hass, device_id, user_input.text, honorific=honorific)
             except Exception as exc:
                 _LOGGER.debug("Pending confirmation answer skipped: %s", exc)
+            if confirm_result is not None:
+                from . import voice_learn as _voice_learn
+                _voice_learn.block("confirmation answer")   # never learned (8.38.0)
 
         # v5.9.07: Proactive offer yes/no — resolved before main pipeline.
         # honorific may be "" once nobody specific is home to address (see
@@ -1115,6 +1127,8 @@ class NovaAgent(conversation.ConversationEntity):
             _LOGGER.debug("Offer handling skipped: %s", exc)
 
         if offer_reply is not None:
+            from . import voice_learn as _voice_learn
+            _voice_learn.block("offer answer")   # a short yes/no: never learned (8.38.0)
             # Short-circuit: deliver the offer response directly.
             offer_reply = offer_reply.replace("{honorific}", honorific)
             ir = intent.IntentResponse(language=user_input.language)

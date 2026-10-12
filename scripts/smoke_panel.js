@@ -430,13 +430,15 @@ const hass = {
     if (m.type && m.type.startsWith("nova/voice_id_")) {
       _vidCalls.push(m);
       if (m.type === "nova/voice_id_profiles") return { ok: true, model: "m", people: [
-        { person: "person.abi", name: "Abi", samples: 8, updated: 1760000000 },
-        { person: "person.guest", name: "Guest Account", samples: 0, updated: null }] };
+        { person: "person.abi", name: "Abi", samples: 10, enrolled: 8, learned: 2, updated: 1760000000 },
+        { person: "person.guest", name: "Guest Account", samples: 0, enrolled: 0, learned: 0, updated: null }] };
       if (m.type === "nova/voice_id_token_get") return { ok: true, token: "s3cret-token" };
       if (m.type === "nova/voice_id_token_set") return { ok: true, set: !!m.token };
       if (m.type === "nova/voice_id_record") return { ok: true, session: { state: "active", person: m.person, name: "Abi<img src=x onerror=window.__vidXss=1>", committed: 0, needed: 8 } };
       if (m.type === "nova/voice_id_record_status") return { ok: true, session: { state: "active", person: "person.abi", name: "Abi", committed: 3, needed: 8 } };
       if (m.type === "nova/voice_id_record_cancel") return { ok: true, cancelled: true, session: { state: "cancelled", person: "person.abi", name: "Abi", committed: 3, needed: 8 } };
+      if (m.type === "nova/voice_id_delete" && m.source === "learned")
+        return { ok: true, deleted: [m.person], all: false, source: "learned", removed: 2 };
       if (m.type === "nova/voice_id_delete") return m.all
         ? { ok: true, deleted: ["person.abi"], all: true }
         : { ok: false, code: "unauthorised", error: "The app's token doesn't match. Copy it from the app's Configuration tab." };
@@ -1133,11 +1135,26 @@ if (require.main === module) setTimeout(async () => {
       && !vidText().includes("s3cret-token")
       && (() => { sRoot.getElementById("vidTokenEye").click(); return sRoot.getElementById("vidToken").type === "text"; })()]);
   checks.push(["voice id: People lists each person with the sample count, and hides hidden accounts",
-    /Abi/.test(vidText()) && /8 samples/.test(vidText()) && !/Guest Account/.test(vidText())
+    /Abi/.test(vidText()) && /8 recorded, 2 learned/.test(vidText()) && !/Guest Account/.test(vidText())
       && /Show hidden people \(1\)/.test(vidText())
       && !!vidCard().querySelector('.vid-rec[data-person="person.abi"]')
       && !!vidCard().querySelector('.vid-del[data-person="person.abi"]')
       && /rooms sound different/.test(vidText()) && /never in Nova/.test(vidText())]);
+  checks.push(["voice id: the learning switch is off and disabled, with a hint, while identity is off (8.38.0)",
+    (() => {
+      const t = vidCard().querySelector('button[data-cfg-key="voice_id_learning"]');
+      return !!t && t.disabled && t.classList.contains("off")
+        && /Turn on "Use voice to tell who is speaking" first\./.test(vidText());
+    })()]);
+  checks.push(["voice id: Remove learned shows only for people with learned samples",
+    !!vidCard().querySelector('.vid-del-learned[data-person="person.abi"]')
+      && !vidCard().querySelector('.vid-del-learned[data-person="person.guest"]')]);
+  vidCard().querySelector('.vid-del-learned[data-person="person.abi"]').click();
+  await new Promise(r => setTimeout(r, 20));
+  checks.push(["voice id: Remove learned sends source learned and refreshes the list",
+    _vidCalls.some(c => c.type === "nova/voice_id_delete" && c.person === "person.abi" && c.source === "learned")
+      && /Removed 2 learned samples for Abi\./.test(sRoot.getElementById("vidMsg").textContent)
+      && _vidCalls.filter(c => c.type === "nova/voice_id_profiles").length >= 2]);
   vidCard().querySelector('.vid-rec[data-person="person.abi"]').click();
   await new Promise(r => setTimeout(r, 20));
   checks.push(["voice id: Record voice starts on the chosen satellite and shows progress with Cancel",

@@ -309,7 +309,6 @@
   "Speech to text through the Nova Voice ID app, with a fallback for when the app is down.": "Розпізнавання мовлення через застосунок Nova Voice ID із резервним варіантом, коли застосунок не працює.",
   "Unreachable": "Недоступно",
   "Voice ID": "Voice ID",
-  "1 sample": "1 зразок",
   "App token": "Токен застосунку",
   "Copy it from the app's Configuration tab.": "Скопіюйте його на вкладці «Конфігурація» застосунку.",
   "Couldn't load the People list. Restart Home Assistant after updating, then reopen Settings.": "Не вдалося завантажити список людей. Перезапустіть Home Assistant після оновлення, а тоді знову відкрийте налаштування.",
@@ -345,7 +344,6 @@
   "Token cleared.": "Токен очищено.",
   "Token saved.": "Токен збережено.",
   "updated {date}": "оновлено {date}",
-  "{count} samples": "Зразків: {count}",
   "{name}: all {needed} samples saved.": "{name}: збережено всі {needed} зразків.",
   "Nova can't reach the Nova Voice ID app. Check it is running and the address is right.": "Nova не може зв'язатися із застосунком Nova Voice ID. Перевірте, що він працює і адреса правильна.",
   "Set the app's token first. Copy it from the app's Configuration tab.": "Спершу введіть токен застосунку. Скопіюйте його на вкладці «Конфігурація» застосунку.",
@@ -363,5 +361,12 @@
   "Nova couldn't save the token.": "Nova не вдалося зберегти токен.",
   "VOICE": "VOICE",
   "Use voice to tell who is speaking": "Визначати мовця за голосом",
-  "Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.": "Типово вимкнено. Голос — це підказка, хто говорить, а не ключ: для відмикання, відкриття та зняття з охорони досі потрібен телефон. Залиште вимкненим, поки рядки VOICE на вкладці «Журнали» збирають оцінки."
+  "Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.": "Типово вимкнено. Голос — це підказка, хто говорить, а не ключ: для відмикання, відкриття та зняття з охорони досі потрібен телефон. Залиште вимкненим, поки рядки VOICE на вкладці «Журнали» збирають оцінки.",
+  "Improve voices from everyday use": "Покращувати голоси у щоденному використанні",
+  "Off by default. When Nova is very sure who spoke, it adds that sample to their voice, so it keeps up with how they sound. Needs the Nova Voice ID app 0.3.0.": "Типово вимкнено. Коли Nova певна, хто говорив, вона додає цей зразок до голосу людини, щоб він встигав за тим, як вона звучить. Потрібен застосунок Nova Voice ID 0.3.0.",
+  "Remove learned": "Видалити вивчені",
+  "Remove the samples Nova learned for {name}? Their recordings stay.": "Видалити зразки, які Nova вивчила для {name}? Записи залишаться.",
+  "Removed {count} learned samples for {name}.": "Видалено вивчених зразків {name}: {count}.",
+  "Turn on \"Use voice to tell who is speaking\" first.": "Спершу ввімкніть «Визначати мовця за голосом».",
+  "{recorded} recorded, {learned} learned": "Записано: {recorded}, вивчено: {learned}"
 }

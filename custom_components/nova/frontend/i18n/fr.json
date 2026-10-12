@@ -1217,7 +1217,6 @@
   "Speech to text through the Nova Voice ID app, with a fallback for when the app is down.": "Reconnaissance vocale via l'app Nova Voice ID, avec une solution de secours quand l'app est arrêtée.",
   "Unreachable": "Injoignable",
   "Voice ID": "Voice ID",
-  "1 sample": "1 échantillon",
   "App token": "Jeton de l'app",
   "Copy it from the app's Configuration tab.": "Copiez-le depuis l'onglet Configuration de l'app.",
   "Couldn't load the People list. Restart Home Assistant after updating, then reopen Settings.": "Impossible de charger la liste des personnes. Redémarrez Home Assistant après la mise à jour, puis rouvrez les paramètres.",
@@ -1253,7 +1252,6 @@
   "Token cleared.": "Jeton effacé.",
   "Token saved.": "Jeton enregistré.",
   "updated {date}": "mis à jour le {date}",
-  "{count} samples": "{count} échantillons",
   "{name}: all {needed} samples saved.": "{name} : les {needed} échantillons sont enregistrés.",
   "Nova can't reach the Nova Voice ID app. Check it is running and the address is right.": "Nova ne parvient pas à joindre l'app Nova Voice ID. Vérifiez qu'elle tourne et que l'adresse est correcte.",
   "Set the app's token first. Copy it from the app's Configuration tab.": "Saisissez d'abord le jeton de l'app. Copiez-le depuis l'onglet Configuration de l'app.",
@@ -1271,5 +1269,12 @@
   "Nova couldn't save the token.": "Nova n'a pas pu enregistrer le jeton.",
   "VOICE": "VOICE",
   "Use voice to tell who is speaking": "Reconnaître qui parle à la voix",
-  "Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.": "Désactivé par défaut. La voix est un indice sur qui parle, jamais une clé : déverrouiller, ouvrir et désarmer demandent toujours votre téléphone. Laissez-le désactivé pendant que les lignes VOICE de l'onglet Journaux collectent les scores."
+  "Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.": "Désactivé par défaut. La voix est un indice sur qui parle, jamais une clé : déverrouiller, ouvrir et désarmer demandent toujours votre téléphone. Laissez-le désactivé pendant que les lignes VOICE de l'onglet Journaux collectent les scores.",
+  "Improve voices from everyday use": "Améliorer les voix au quotidien",
+  "Off by default. When Nova is very sure who spoke, it adds that sample to their voice, so it keeps up with how they sound. Needs the Nova Voice ID app 0.3.0.": "Désactivé par défaut. Quand Nova est très sûr de qui a parlé, il ajoute cet échantillon à sa voix, pour suivre l'évolution de sa façon de parler. Nécessite l'app Nova Voice ID 0.3.0.",
+  "Remove learned": "Retirer les appris",
+  "Remove the samples Nova learned for {name}? Their recordings stay.": "Retirer les échantillons que Nova a appris pour {name} ? Ses enregistrements restent.",
+  "Removed {count} learned samples for {name}.": "{count} échantillons appris retirés pour {name}.",
+  "Turn on \"Use voice to tell who is speaking\" first.": "Activez d'abord « Reconnaître qui parle à la voix ».",
+  "{recorded} recorded, {learned} learned": "{recorded} enregistrés, {learned} appris"
 }

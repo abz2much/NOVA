@@ -1217,7 +1217,6 @@
   "Speech to text through the Nova Voice ID app, with a fallback for when the app is down.": "Spraak-naar-tekst via de Nova Voice ID app, met een reserve voor als de app niet draait.",
   "Unreachable": "Onbereikbaar",
   "Voice ID": "Voice ID",
-  "1 sample": "1 opname",
   "App token": "App-token",
   "Copy it from the app's Configuration tab.": "Kopieer het uit het tabblad Configuratie van de app.",
   "Couldn't load the People list. Restart Home Assistant after updating, then reopen Settings.": "De personenlijst kon niet worden geladen. Start Home Assistant na de update opnieuw en open daarna Instellingen weer.",
@@ -1253,7 +1252,6 @@
   "Token cleared.": "Token gewist.",
   "Token saved.": "Token opgeslagen.",
   "updated {date}": "bijgewerkt {date}",
-  "{count} samples": "{count} opnames",
   "{name}: all {needed} samples saved.": "{name}: alle {needed} opnames opgeslagen.",
   "Nova can't reach the Nova Voice ID app. Check it is running and the address is right.": "Nova kan de Nova Voice ID app niet bereiken. Controleer of hij draait en of het adres klopt.",
   "Set the app's token first. Copy it from the app's Configuration tab.": "Vul eerst het token van de app in. Kopieer het uit het tabblad Configuratie van de app.",
@@ -1271,5 +1269,12 @@
   "Nova couldn't save the token.": "Nova kon het token niet opslaan.",
   "VOICE": "VOICE",
   "Use voice to tell who is speaking": "Aan de stem herkennen wie er praat",
-  "Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.": "Standaard uit. De stem is een hint over wie er praat, nooit een sleutel: ontgrendelen, openen en uitschakelen vragen nog steeds je telefoon. Laat het uit terwijl de VOICE-regels op het tabblad Logboeken scores verzamelen."
+  "Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.": "Standaard uit. De stem is een hint over wie er praat, nooit een sleutel: ontgrendelen, openen en uitschakelen vragen nog steeds je telefoon. Laat het uit terwijl de VOICE-regels op het tabblad Logboeken scores verzamelen.",
+  "Improve voices from everyday use": "Stemmen verbeteren door dagelijks gebruik",
+  "Off by default. When Nova is very sure who spoke, it adds that sample to their voice, so it keeps up with how they sound. Needs the Nova Voice ID app 0.3.0.": "Standaard uit. Als Nova heel zeker weet wie er sprak, voegt het die opname toe aan diens stem, zodat die bijblijft met hoe iemand klinkt. Vereist de Nova Voice ID app 0.3.0.",
+  "Remove learned": "Geleerde verwijderen",
+  "Remove the samples Nova learned for {name}? Their recordings stay.": "De opnames die Nova voor {name} heeft geleerd verwijderen? De eigen opnames blijven.",
+  "Removed {count} learned samples for {name}.": "{count} geleerde opnames verwijderd voor {name}.",
+  "Turn on \"Use voice to tell who is speaking\" first.": "Zet eerst \"Aan de stem herkennen wie er praat\" aan.",
+  "{recorded} recorded, {learned} learned": "{recorded} opgenomen, {learned} geleerd"
 }

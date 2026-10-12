@@ -1212,7 +1212,6 @@
   "Speech to text through the Nova Voice ID app, with a fallback for when the app is down.": "通过 Nova Voice ID 应用进行语音转文字，应用停止时使用备用项。",
   "Unreachable": "无法访问",
   "Voice ID": "Voice ID",
-  "1 sample": "1 个样本",
   "App token": "应用令牌",
   "Copy it from the app's Configuration tab.": "从应用的“配置”标签页复制。",
   "Couldn't load the People list. Restart Home Assistant after updating, then reopen Settings.": "无法加载人员列表。更新后请重启 Home Assistant，然后重新打开设置。",
@@ -1248,7 +1247,6 @@
   "Token cleared.": "令牌已清除。",
   "Token saved.": "令牌已保存。",
   "updated {date}": "更新于 {date}",
-  "{count} samples": "{count} 个样本",
   "{name}: all {needed} samples saved.": "{name}：全部 {needed} 个样本已保存。",
   "Nova can't reach the Nova Voice ID app. Check it is running and the address is right.": "Nova 无法连接 Nova Voice ID 应用。请检查它是否在运行，以及地址是否正确。",
   "Set the app's token first. Copy it from the app's Configuration tab.": "请先填写应用的令牌。从应用的“配置”标签页复制。",
@@ -1266,5 +1264,12 @@
   "Nova couldn't save the token.": "Nova 无法保存令牌。",
   "VOICE": "VOICE",
   "Use voice to tell who is speaking": "通过声音判断谁在说话",
-  "Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.": "默认关闭。声音只是谁在说话的提示，绝不是钥匙：开锁、打开和撤防仍需你的手机确认。在“日志”标签页的 VOICE 行收集分数期间，请保持关闭。"
+  "Off by default. Voice is a hint about who is talking, never a key: unlocking, opening and disarming still need your phone. Leave it off while the VOICE lines in the Logs tab collect scores.": "默认关闭。声音只是谁在说话的提示，绝不是钥匙：开锁、打开和撤防仍需你的手机确认。在“日志”标签页的 VOICE 行收集分数期间，请保持关闭。",
+  "Improve voices from everyday use": "通过日常使用改进声音",
+  "Off by default. When Nova is very sure who spoke, it adds that sample to their voice, so it keeps up with how they sound. Needs the Nova Voice ID app 0.3.0.": "默认关闭。当 Nova 非常确定是谁在说话时，会把该样本加入此人的声音，使其跟上此人声音的变化。需要 Nova Voice ID 应用 0.3.0。",
+  "Remove learned": "移除学到的",
+  "Remove the samples Nova learned for {name}? Their recordings stay.": "移除 Nova 为 {name} 学到的样本？录音会保留。",
+  "Removed {count} learned samples for {name}.": "已移除 {name} 的 {count} 个学到的样本。",
+  "Turn on \"Use voice to tell who is speaking\" first.": "请先开启“通过声音判断谁在说话”。",
+  "{recorded} recorded, {learned} learned": "已录制 {recorded} 个，已学到 {learned} 个"
 }
