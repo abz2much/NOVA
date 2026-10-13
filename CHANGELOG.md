@@ -1,3 +1,14 @@
+## [8.49.12] — Five small fixes
+
+Fixes for five possible bugs found while making 8.49.10 and 8.49.11. Each fix has a regression test that fails without it. Nothing else changes: no services, settings names, entity IDs or stored data formats.
+
+### Fixed
+- **A very old speaker setting could break broadcasts.** If the broadcast speakers setting was saved as one piece of text instead of a list, the settings upgrade set the broadcast group to its first letter. It now uses the whole value as the one speaker.
+- **A missing or text settings version stopped Nova starting.** A saved version that is empty or text now logs one clear error and is left as it is, with nothing upgraded or saved, the same as other invalid versions.
+- **The panel smoke test failed now and then.** Its System Log "stale response" check could start while an earlier request was still running, so the slow request it waits on never began. The check now waits for that request to finish first, and fails clearly if the slow request is not made. Only the test changes.
+- **Restore failed on a link stored by its full path.** A link inside Nova's data that points to its target by its full path is now stored relative to its own folder, so it restores and points at the same file.
+- **A data folder on another disk was left out of backups.** When one of Nova's data paths is itself a link (for example, a folder moved to another disk), the backup now holds what it points to. Restore puts it back through the link when the link is there, or as a plain folder when it is not.
+
 ## [8.49.11] — Backup and restore fixes
 
 Fixes for backup bugs found while writing the step 9 specs and then verified. Each fix has a regression test that fails without it. Nothing else changes: no services, settings names, entity IDs or stored data formats.

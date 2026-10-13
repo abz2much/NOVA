@@ -326,9 +326,11 @@ def test_step_6_keeps_present_bedroom_areas(mig):
     assert options["bedroom_areas"] == ["area_one"]
 
 
-def test_step_6_first_element_of_string(mig):
+def test_step_6_string_is_one_speaker(mig):
+    # 8.49.11 took the first character of a text value as the group.
     _, options = mig.migrate_6_to_7({}, {"broadcast_speakers": "media_player.one"})
-    assert options["broadcast_group"] == "m"
+    assert options["broadcast_group"] == "media_player.one"
+    assert options["broadcast_speakers"] == "media_player.one"
 
 
 def test_step_6_dict_value_raises_before_writing(mig):
@@ -563,12 +565,16 @@ def test_rerunning_from_seven_keeps_a_later_change(mig):
 
 # ── Runner: odd versions ────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("bad", [None, "3"])
-def test_none_or_string_version_raises_type_error(mig, bad):
+@pytest.mark.parametrize("bad", [None, "3", "", [9]])
+def test_none_or_text_version_is_rejected_with_one_error(mig, caplog, bad):
+    # 8.49.11 raised TypeError comparing these with the current version.
     options = {}
-    with pytest.raises(TypeError):
-        mig.migrate_config({}, options, bad)
-    assert options == {}
+    with caplog.at_level(logging.INFO, logger=mig._LOGGER.name):
+        _, out, result = mig.migrate_config({}, options, bad)
+    assert result is bad and out == {}
+    records = [r for r in caplog.records if r.name == mig._LOGGER.name]
+    assert len(records) == 1 and records[0].levelno == logging.ERROR
+    assert "invalid" in records[0].getMessage()
 
 
 @pytest.mark.parametrize("version", [0, -1, 1.5, float("nan")])
@@ -584,7 +590,8 @@ def test_invalid_version_is_rejected_with_one_error(mig, caplog, version):
 
 @pytest.mark.parametrize("version,valid", [
     (1, True), (4, True), (9, True), (12, True), (1.0, True), (True, True),
-    (0, False), (-1, False), (1.5, False), (False, False)])
+    (0, False), (-1, False), (1.5, False), (False, False),
+    (None, False), ("3", False), ("", False)])
 def test_schema_version_is_valid(mig, version, valid):
     assert mig.schema_version_is_valid(version) is valid
 

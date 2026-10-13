@@ -231,14 +231,16 @@ def test_state_path_may_be_file_or_directory(bk, tmp_path, fixed_stamp):
     assert names == ["nova", "nova.db", "nova.db/inner"]
 
 
-def test_top_level_symlink_to_outside_is_skipped(bk, tmp_path, fixed_stamp):
+def test_top_level_symlink_is_backed_up_as_its_target(bk, tmp_path, fixed_stamp):
+    # 8.49.12: a state path that is itself a link (a data folder on another
+    # disk) is trusted and archived as what it points to.
     real = tmp_path / "elsewhere"
     _write(real / "big.db", "DATA")
     cfg = tmp_path / "cfg"
     cfg.mkdir()
     os.symlink(real, cfg / "nova")
     out = bk.create_backup(str(cfg))
-    assert _names(out) == []
+    assert _names(out) == ["nova", "nova/big.db"]
 
 
 def test_dangling_top_level_symlink_is_skipped(bk, tmp_path, fixed_stamp):
@@ -415,7 +417,9 @@ def test_restore_refuses_absolute_symlink_member(bk, tmp_path):
     assert not os.path.lexists(cfg / "link")
 
 
-def test_backup_with_outside_symlink_restores_the_rest(bk, tmp_path, fixed_stamp):
+def test_linked_state_folder_restores_as_a_folder_without_the_link(bk, tmp_path, fixed_stamp):
+    # 8.49.12: with the link gone (a new machine), the folder comes back as
+    # a plain folder in the config directory.
     real = tmp_path / "elsewhere"
     _write(real / "data.db", "D")
     cfg = tmp_path / "cfg"
@@ -427,7 +431,8 @@ def test_backup_with_outside_symlink_restores_the_rest(bk, tmp_path, fixed_stamp
     os.remove(cfg / "nova.db")
     bk.restore_backup(str(cfg), made)
     assert (cfg / "nova.db").read_text() == "K"
-    assert not os.path.lexists(cfg / "nova")
+    assert not os.path.islink(cfg / "nova")
+    assert (cfg / "nova" / "data.db").read_text() == "D"
 
 
 def test_restore_clears_group_other_write(bk, tmp_path):

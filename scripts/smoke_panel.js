@@ -3358,6 +3358,11 @@ if (require.main === module) setTimeout(async () => {
     // 6) A slow System Log response that resolves AFTER the user has
     // switched to a different Logs sub-view must not touch that other
     // view's DOM (its container id no longer exists to be found/written).
+    // An earlier fetch still in flight would make the guard skip the slow
+    // one below, so wait for it to finish first (a slow machine hit this).
+    for (let i = 0; i < 200 && elNew._debugLogFetchInFlight; i++) {
+      await new Promise(res => setTimeout(res, 5));
+    }
     let resolveSlow;
     hass.callWS = async (m) => {
       if (m.type === "nova/get_debug_log") {
@@ -3367,12 +3372,14 @@ if (require.main === module) setTimeout(async () => {
     };
     elNew._logView = "system";
     elNew._render(); // kicks off a _fetchDebugLog() that is now pending on resolveSlow
+    checks.push(["system log: the slow response under test was actually requested",
+      typeof resolveSlow === "function"]);
     r = elNew.shadowRoot;
     findLogView(r, "decisions").click();
     await new Promise(res => setTimeout(res, 5));
     r = elNew.shadowRoot;
     const decisionsHtmlBeforeStale = r.getElementById("decisionEntries")?.innerHTML || "";
-    resolveSlow();
+    if (resolveSlow) resolveSlow();
     await new Promise(res => setTimeout(res, 10));
     r = elNew.shadowRoot;
     checks.push(["system log: a stale response after switching sub-views cannot overwrite the new view",
