@@ -1,208 +1,23 @@
-"""
-Nova — Config and schema migrations.
+"""Bring a Nova config entry's saved settings up to the current schema.
 
-When the addon updates and config fields change — fields renamed, removed,
-or new required fields added — migrations transform old configs into new
-ones so existing installations upgrade smoothly instead of breaking.
-
-How it works:
-  - Every config entry carries a 'schema_version' integer
-  - On setup, we check the entry's version against CURRENT_SCHEMA_VERSION
-  - If the entry is older, run each migration in sequence
-  - Save the new version back to the entry
-
-To add a new migration:
-  1. Bump CURRENT_SCHEMA_VERSION
-  2. Add a function migrate_N_to_N1(data, options) -> (data, options)
-  3. Append (N, migrate_N_to_N1) to MIGRATIONS
-
-Never delete an old migration — someone three versions behind needs all of
-them to walk forward to current.
+Each step advances ``options`` by exactly one schema version, only ever adding
+keys that are missing (using the value an older install effectively had).
+Steps never touch ``data`` beyond checking whether a key is present there, and
+never rename, remove or rewrite existing keys (one documented exception in
+step 6->7). The caller stores the version number; this module only receives
+and returns it.
 """
 from __future__ import annotations
 
 import logging
-from typing import Callable
+from typing import Any, Callable
 
 _LOGGER = logging.getLogger(__name__)
 
-
-# ─── Current schema version ──────────────────────────────────────────────────
-#
-# Bump this whenever you change what's in entry.data or entry.options.
-# v1 = initial release (Groq-only, hardcoded tts_engine)
-# v2 = added tts_premium_engine + tts_premium_contexts
-# v3 = added directive_preset + directive
-# v4 = added llm_provider + llm_base_url (multi-provider support)
-# v5 = added three-tier audio (voice_satellites/reply_speakers/broadcast_speakers)
-# v6 = added observer mode (proactive reasoning, Gemini tier providers, sleep detection)
-# v7 = area-registry-driven routing; flat entity lists removed in favor of
-#      HA area registry + bedroom_areas toggle + broadcast_group entity
-# v8 = the default lockdown exempt list became empty; existing installs keep
-#      the old two thermostat locks in their saved setting (8.28.0)
-# v9 = package watch, face recognition, departure reminders, web research and
-#      the voice add-on install are off until set up; existing installs keep
-#      them as they were (8.41.0)
-
 CURRENT_SCHEMA_VERSION = 9
 
-
-# ─── Migrations ──────────────────────────────────────────────────────────────
-
-def migrate_1_to_2(data: dict, options: dict) -> tuple[dict, dict]:
-    """v1 → v2: introduce tts_premium_engine, tts_premium_contexts."""
-    options.setdefault("tts_premium_engine", "")
-    options.setdefault(
-        "tts_premium_contexts",
-        ["briefing", "camera", "doorbell", "recognition"],
-    )
-    _LOGGER.info("Nova migration v1→v2: added premium TTS options")
-    return data, options
-
-
-def migrate_2_to_3(data: dict, options: dict) -> tuple[dict, dict]:
-    """v2 → v3: introduce directive system."""
-    options.setdefault("directive_preset", "guardian_steward")
-    options.setdefault("directive", "")
-    _LOGGER.info("Nova migration v2→v3: added prime directive")
-    return data, options
-
-
-def migrate_3_to_4(data: dict, options: dict) -> tuple[dict, dict]:
-    """v3 → v4: introduce multi-provider LLM support.
-
-    Existing installs are Groq-only. We preserve that by defaulting to
-    the same provider they already had.
-    """
-    options.setdefault("llm_provider", "groq")
-    options.setdefault("llm_base_url", "")
-    _LOGGER.info("Nova migration v3→v4: added multi-provider LLM support")
-    return data, options
-
-
-def migrate_4_to_5(data: dict, options: dict) -> tuple[dict, dict]:
-    """v4 → v5: introduce three-tier audio architecture.
-
-    Existing installs have a single 'cast_speakers' list. We keep that for
-    backward compat but ALSO promote it to 'broadcast_speakers' so proactive
-    announcements (briefings, sentinel) keep working as before. The user can
-    then split listening devices out of it via the addon UI.
-    """
-    options.setdefault("voice_satellites", [])
-    options.setdefault("reply_speakers", [])
-    # Promote legacy cast_speakers to broadcast_speakers if not already set
-    legacy = options.get("cast_speakers", [])
-    if legacy and "broadcast_speakers" not in options:
-        options["broadcast_speakers"] = list(legacy)
-    else:
-        options.setdefault("broadcast_speakers", [])
-    options.setdefault("room_routing", True)
-    _LOGGER.info(
-        "Nova migration v4→v5: three-tier audio (promoted %d legacy speakers "
-        "to broadcast_speakers; voice_satellites/reply_speakers default empty)",
-        len(legacy),
-    )
-    return data, options
-
-
-def migrate_5_to_6(data: dict, options: dict) -> tuple[dict, dict]:
-    """
-    v5 → v6: Observer Mode (proactive reasoning).
-
-    Adds all observer-related config with safe defaults:
-      - observer_enabled: False (opt-in)
-      - Gemini tier providers default to the standard allocation
-      - Presence/sleep entity lists default to empty
-      - Quiet hours default to 22:00–07:00
-    """
-    options.setdefault("observer_enabled", False)
-    options.setdefault("gemini_api_key", "")
-    options.setdefault("classifier_provider", "gemini")
-    options.setdefault("classifier_model", "gemini-2.5-flash-lite")
-    options.setdefault("reasoning_provider", "gemini")
-    options.setdefault("reasoning_model", "gemini-2.5-flash")
-    options.setdefault("review_provider", "gemini")
-    options.setdefault("review_model", "gemini-2.5-pro")
-    options.setdefault("observer_presence_entities", [])
-    options.setdefault("observer_sleep_entities", [])
-    options.setdefault("observer_ignore", [])
-    options.setdefault(
-        "observer_categories",
-        ["appliances", "doors_windows", "presence", "security"],
-    )
-    options.setdefault("observer_quiet_start", "22:00")
-    options.setdefault("observer_quiet_end", "07:00")
-    options.setdefault("notify_service", "")
-    _LOGGER.info(
-        "Nova migration v5→v6: Observer Mode config added (disabled by default)"
-    )
-    return data, options
-
-
-def migrate_6_to_7(data: dict, options: dict) -> tuple[dict, dict]:
-    """
-    v6 → v7: Area-registry-driven routing.
-
-    Removes the flat entity lists (voice_satellites, reply_speakers,
-    broadcast_speakers, observer_presence_entities, observer_sleep_entities,
-    observer_ignore, observer_categories, cast_speakers, room_routing).
-    Nova now reads HA's area registry directly.
-
-    Adds:
-      - bedroom_areas (empty list — user must toggle areas in options flow)
-      - broadcast_group (promoted from legacy broadcast_speakers[0] if any)
-
-    Keeps legacy values intact under their old keys (ignored by new code,
-    but harmless). This means a user rolling back to v6 won't find themselves
-    with an empty config — the old data is still there.
-    """
-    # Promote the first broadcast_speakers entry (if any) to broadcast_group
-    legacy_broadcast = options.get("broadcast_speakers", []) or []
-    if legacy_broadcast and not options.get("broadcast_group"):
-        options["broadcast_group"] = legacy_broadcast[0]
-        _LOGGER.info(
-            "Nova migration v6→v7: promoted broadcast_speakers[0]=%s to broadcast_group",
-            legacy_broadcast[0],
-        )
-
-    # User must pick bedrooms post-migration; empty default is safe (no sleep
-    # detection until they toggle areas in the options flow)
-    options.setdefault("bedroom_areas", [])
-
-    _LOGGER.info(
-        "Nova migration v6→v7: area-registry-driven routing. User should "
-        "review Settings → Devices & Services → Nova → Configure to set "
-        "bedroom_areas toggle."
-    )
-    return data, options
-
-
-def migrate_7_to_8(data: dict, options: dict) -> tuple[dict, dict]:
-    """v7 → v8: the built in lockdown exempt list is now empty.
-
-    Before 8.28.0, an install that never saved "lockdown_exempt_locks" left
-    two thermostat locks out of lockdown by default. Write those two into the
-    saved setting once, so this install's lockdown behaves exactly as before.
-    A value already saved (even an empty list) is left alone. A fresh install
-    starts at v8 and never runs this, so nothing is exempt there.
-    """
-    from .core_common import LEGACY_LOCKDOWN_EXEMPT_LOCKS
-    saved = None
-    try:
-        from . import nova_config
-        saved = nova_config.get("lockdown_exempt_locks", None)
-    except Exception:
-        saved = None
-    if saved is None and "lockdown_exempt_locks" not in options \
-            and "lockdown_exempt_locks" not in data:
-        options["lockdown_exempt_locks"] = list(LEGACY_LOCKDOWN_EXEMPT_LOCKS)
-        _LOGGER.info("Nova migration v7→v8: kept the old lockdown exempt locks %s",
-                     ", ".join(LEGACY_LOCKDOWN_EXEMPT_LOCKS))
-    return data, options
-
-
-# Settings whose default changed in 8.41.0, with the old default an existing
-# install keeps.
+# Settings that later releases ship switched off until set up; installs that
+# predate that change keep the value they effectively had.
 OFF_UNTIL_SET_UP_8_41: dict[str, object] = {
     "package_detection": True,
     "recognition_source": "both",
@@ -212,74 +27,152 @@ OFF_UNTIL_SET_UP_8_41: dict[str, object] = {
 }
 
 
-def migrate_8_to_9(data: dict, options: dict) -> tuple[dict, dict]:
-    """v8 → v9: package watch, face recognition, departure reminders, web
-    research and the voice add-on install are off until set up.
+def _add_missing(options: dict, defaults: dict[str, Any]) -> None:
+    """Insert each default whose key is not present in ``options`` at all."""
+    for key, value in defaults.items():
+        if key not in options:
+            options[key] = value
 
-    An install that never saved one of these ran it by default. Write the old
-    default into the saved setting once, so this install behaves exactly as
-    before. A value already saved is left alone. A fresh install starts at
-    v9 and never runs this, so all three start off there.
-    """
-    kept = []
-    for key, old_default in OFF_UNTIL_SET_UP_8_41.items():
-        saved = None
-        try:
-            from . import nova_config
-            saved = nova_config.get(key, None)
-        except Exception:
-            saved = None
-        if saved is None and key not in options and key not in data:
-            options[key] = old_default
-            kept.append(key)
-    if kept:
-        _LOGGER.info("Nova migration v8→v9: kept the old defaults for %s",
-                     ", ".join(kept))
+
+def _saved_setting(key: str) -> Any:
+    """Value saved in Nova's config.json, or None when unavailable."""
+    try:
+        from . import nova_config
+
+        return nova_config.get(key, None)
+    except Exception:  # noqa: BLE001 - an unreadable store means "not saved"
+        return None
+
+
+def migrate_1_to_2(data: dict, options: dict) -> tuple[dict, dict]:
+    """Premium TTS settings."""
+    _add_missing(options, {
+        "tts_premium_engine": "",
+        "tts_premium_contexts": ["briefing", "camera", "doorbell", "recognition"],
+    })
+    _LOGGER.info("Nova migration v1->v2: added premium TTS settings")
     return data, options
 
 
-# (source_version, migration_function)
-MIGRATIONS: list[tuple[int, Callable]] = [
-    (1, migrate_1_to_2),
-    (2, migrate_2_to_3),
-    (3, migrate_3_to_4),
-    (4, migrate_4_to_5),
-    (5, migrate_5_to_6),
-    (6, migrate_6_to_7),
-    (7, migrate_7_to_8),
-    (8, migrate_8_to_9),
+def migrate_2_to_3(data: dict, options: dict) -> tuple[dict, dict]:
+    """Directive settings."""
+    _add_missing(options, {"directive_preset": "guardian_steward", "directive": ""})
+    _LOGGER.info("Nova migration v2->v3: added directive settings")
+    return data, options
+
+
+def migrate_3_to_4(data: dict, options: dict) -> tuple[dict, dict]:
+    """Multi-provider LLM settings."""
+    _add_missing(options, {"llm_provider": "groq", "llm_base_url": ""})
+    _LOGGER.info("Nova migration v3->v4: added LLM provider settings")
+    return data, options
+
+
+def migrate_4_to_5(data: dict, options: dict) -> tuple[dict, dict]:
+    """Three-tier audio, seeded from the legacy ``cast_speakers`` list."""
+    cast_speakers = options.get("cast_speakers", [])
+    _add_missing(options, {"voice_satellites": [], "reply_speakers": []})
+    if cast_speakers and "broadcast_speakers" not in options:
+        options["broadcast_speakers"] = list(cast_speakers)
+    _add_missing(options, {"broadcast_speakers": [], "room_routing": True})
+    # len() runs after the writes on purpose: a length-less value fails the
+    # step here, leaving the keys above in place.
+    _LOGGER.info(
+        "Nova migration v4->v5: three-tier audio (%d legacy cast speakers)",
+        len(cast_speakers),
+    )
+    return data, options
+
+
+def migrate_5_to_6(data: dict, options: dict) -> tuple[dict, dict]:
+    """Observer mode settings."""
+    _add_missing(options, {
+        "observer_enabled": False,
+        "gemini_api_key": "",
+        "classifier_provider": "gemini",
+        "classifier_model": "gemini-2.5-flash-lite",
+        "reasoning_provider": "gemini",
+        "reasoning_model": "gemini-2.5-flash",
+        "review_provider": "gemini",
+        "review_model": "gemini-2.5-pro",
+        "observer_presence_entities": [],
+        "observer_sleep_entities": [],
+        "observer_ignore": [],
+        "observer_categories": ["appliances", "doors_windows", "presence", "security"],
+        "observer_quiet_start": "22:00",
+        "observer_quiet_end": "07:00",
+        "notify_service": "",
+    })
+    _LOGGER.info("Nova migration v5->v6: added observer settings")
+    return data, options
+
+
+def migrate_6_to_7(data: dict, options: dict) -> tuple[dict, dict]:
+    """Area-registry routing; legacy speaker lists are kept as they are."""
+    broadcast = options.get("broadcast_speakers") or []
+    if broadcast and not options.get("broadcast_group"):
+        options["broadcast_group"] = broadcast[0]
+        _LOGGER.info(
+            "Nova migration v6->v7: broadcast_group set to %s",
+            options["broadcast_group"],
+        )
+    _add_missing(options, {"bedroom_areas": []})
+    _LOGGER.info("Nova migration v6->v7: area-registry routing")
+    return data, options
+
+
+def migrate_7_to_8(data: dict, options: dict) -> tuple[dict, dict]:
+    """Keep the historically exempt locks for installs that never chose."""
+    from .core_common import LEGACY_LOCKDOWN_EXEMPT_LOCKS  # unguarded on purpose
+
+    key = "lockdown_exempt_locks"
+    if _saved_setting(key) is None and key not in options and key not in data:
+        options[key] = list(LEGACY_LOCKDOWN_EXEMPT_LOCKS)
+        _LOGGER.info("Nova migration v7->v8: kept legacy lockdown exempt locks")
+    return data, options
+
+
+def migrate_8_to_9(data: dict, options: dict) -> tuple[dict, dict]:
+    """Pin the old defaults of settings that are now off until set up."""
+    written = []
+    for key, old_default in OFF_UNTIL_SET_UP_8_41.items():
+        if _saved_setting(key) is None and key not in options and key not in data:
+            options[key] = old_default
+            written.append(key)
+    if written:
+        _LOGGER.info("Nova migration v8->v9: kept previous defaults for %s",
+                     ", ".join(written))
+    return data, options
+
+
+MIGRATIONS: list[tuple[int, Callable[[dict, dict], tuple[dict, dict]]]] = [
+    (1, migrate_1_to_2), (2, migrate_2_to_3), (3, migrate_3_to_4),
+    (4, migrate_4_to_5), (5, migrate_5_to_6), (6, migrate_6_to_7),
+    (7, migrate_7_to_8), (8, migrate_8_to_9),
 ]
 
 
-# ─── Runner ──────────────────────────────────────────────────────────────────
-
 def migrate_config(
-    data: dict,
-    options: dict,
-    current_version: int = 1,
+    data: dict, options: dict, current_version: int = 1
 ) -> tuple[dict, dict, int]:
-    """
-    Walk migrations forward from current_version to CURRENT_SCHEMA_VERSION.
-    Returns (new_data, new_options, new_version).
+    """Run every step from ``current_version`` up; return the version reached.
+
+    A failing step is logged and stops the walk; whatever was written so far
+    stays, and the returned version is that step's source version.
     """
     if current_version >= CURRENT_SCHEMA_VERSION:
         return data, options, current_version
 
-    _LOGGER.info(
-        "Nova: migrating config from v%d to v%d",
-        current_version, CURRENT_SCHEMA_VERSION,
-    )
-
-    for source_version, migration_fn in MIGRATIONS:
-        if current_version == source_version:
-            try:
-                data, options = migration_fn(data, options)
-                current_version = source_version + 1
-            except Exception as exc:
-                _LOGGER.error(
-                    "Nova migration v%d→v%d failed: %s",
-                    source_version, source_version + 1, exc,
-                )
-                break
-
+    _LOGGER.info("Nova migrating config from v%s to v%s",
+                 current_version, CURRENT_SCHEMA_VERSION)
+    for source, step in MIGRATIONS:
+        if source != current_version:
+            continue
+        try:
+            data, options = step(data, options)
+        except Exception as err:  # noqa: BLE001 - report and stop, never raise
+            _LOGGER.error("Nova migration v%s→v%s failed: %s",
+                          source, source + 1, err)
+            break
+        current_version = source + 1
     return data, options, current_version
