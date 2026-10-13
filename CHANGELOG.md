@@ -1,3 +1,18 @@
+## [8.48.0] — The new path for anticipation alerts, in shadow
+
+Step 7 of the independence plan: a separate path for convenience alerts (design D2). It starts with anticipation alerts, and only shadows them. Nothing Nova says changes unless you choose it, pattern by pattern.
+
+### Added
+- **The new path judges each anticipation alert in shadow.** These are the "usually has activity by now", routine start, departure reminder, comings and goings and heading home alerts. For each one, the new path works out what it would do from the same alert and the same reading of the house as the current path, and sends nothing. The current path still decides and delivers, as before.
+- **Logs → Shadow in the panel** shows each pattern with how many verdicts agree, and the latest alerts with both verdicts (said or held) and their reasons side by side.
+- **Switching a pattern to the new path is up to you.** A pattern can switch over only after at least 14 days and 10 comparisons, and only when you press Switch to new. Back to current undoes it.
+- **Stop one pattern after two Not helpful ratings in a row.** When your last two phone ratings of one pattern are both Not helpful, the Shadow view asks whether to stop that pattern. Stop it silences only that pattern, and Restart brings it back. Keep it leaves it on and asks again only after two more Not helpful ratings in a row. Nothing stops on its own, and no whole category is ever muted.
+
+### Unchanged
+- Safety and security alerts never go through the new path and can never be stopped this way: anything critical, intrusion, lockdown and freeze alerts, any alert about a lock, a cover or the alarm, and the "less secure than usual" anticipation alert.
+- Panel Decisions verdicts still don't count as ratings. Only the Helpful and Not helpful buttons on your phone do, as before.
+- The shadow comparison is kept in decisions.db for 180 days.
+
 ## [8.47.0] — An audit entry for every Observer alert decision
 
 Each time the Observer decides about an event, it now leaves one short entry in the Decision Record, so you can see why Nova spoke, held back or stayed quiet.

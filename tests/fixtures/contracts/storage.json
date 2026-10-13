@@ -188,6 +188,8 @@
       "cognition_alerted",
       "cognition_model",
       "commands",
+      "convenience_patterns",
+      "convenience_shadow",
       "conversations",
       "decision_records",
       "doc_vectors",

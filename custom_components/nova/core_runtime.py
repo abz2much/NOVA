@@ -451,8 +451,17 @@ async def _tick():
         except Exception as exc:
             _LOGGER.debug("Goal tick error: %s", exc)
 
-        # Process actions
+        # Process actions. Anticipation alerts go through the convenience
+        # path (8.48.0): its shadow verdict is worked out from this tick's
+        # reading first, then the current path delivers, unless you have
+        # switched the new path on or stopped that pattern.
+        from . import alert_path, convenience
+        reading = alert_path.situation(hass, config, sleeping=asleep_fact,
+                                       quiet=quiet_fact, house=house)
         for action in actions:
+            if convenience.eligible(action):
+                await convenience.async_handle(hass, config, action, sleeping, reading)
+                continue
             await _m_delivery._emit_action(hass, config, action, sleeping)
             # An offer that was not spoken aloud cannot be answered by voice.
             if action is _m_state._CORE.pending_offer and action.get("spoken_at") is None:

@@ -42,7 +42,7 @@
       `<button class="mode-chip new-log-filter${(this._logFilter || "all") === f ? " mode-chip-on" : ""}" data-filter="${f}">${f.toUpperCase()}</button>`).join("");
     const view = this._logView || "system";
     const title = view === "decisions" ? "Decisions" : view === "spoken_history" ? "Spoken History"
-      : view === "actions" ? "Actions" : "System Log";
+      : view === "actions" ? "Actions" : view === "shadow" ? "New path (shadow)" : "System Log";
     return `
         <div class="panel">
           <div class="panel-head">
@@ -54,9 +54,10 @@
             <button class="mode-chip new-logview${view === "decisions" ? " mode-chip-on" : ""}" data-view="decisions">DECISIONS</button>
             <button class="mode-chip new-logview${view === "spoken_history" ? " mode-chip-on" : ""}" data-view="spoken_history">SPOKEN HISTORY</button>
             <button class="mode-chip new-logview${view === "actions" ? " mode-chip-on" : ""}" data-view="actions">ACTIONS</button>
+            <button class="mode-chip new-logview${view === "shadow" ? " mode-chip-on" : ""}" data-view="shadow">SHADOW</button>
           </div>
           ${view === "decisions" ? this._htmlDecisionsView() : view === "spoken_history" ? this._htmlSpokenHistoryView()
-            : view === "actions" ? this._htmlActionsView() : `
+            : view === "actions" ? this._htmlActionsView() : view === "shadow" ? this._htmlShadowView() : `
           <div class="cfg-row">
             <input id="newLogSearch" class="cfg-field" style="flex:1" type="text" placeholder="search…" autocomplete="off" value="${this._esc(this._logSearch || "")}">
           </div>
@@ -260,6 +261,99 @@
     }).join(""));
     const loadMoreRow = this.shadowRoot?.getElementById("actionLoadMoreRow");
     if (loadMoreRow) loadMoreRow.hidden = !this._actionsCursor;
+  }
+
+  // ─── New path in shadow (8.48.0) ────────────────────────────────────────
+  // Anticipation alerts are judged twice from the same reading: by the
+  // current path, which still decides, and by the new convenience path,
+  // which only records what it would have done. This view shows each pair
+  // with its reasons, asks whether to stop a pattern after two Not helpful
+  // ratings in a row, and lets you switch the new path on per pattern once
+  // the comparison is long enough. Patterns, messages and reasons are
+  // household content, so everything goes through _esc().
+
+  _htmlShadowView() {
+    return `
+      <div class="toggle-desc" style="margin:8px 0">Nova's anticipation alerts are judged by the current path and, in shadow, by the new one. The new path sends nothing until you switch it on for a pattern.</div>
+      <div id="shadowAsks"></div>
+      <div class="mode-bind-head">Patterns</div>
+      <div id="shadowPatterns" class="new-log-entries"><div class="stub-body">Loading…</div></div>
+      <div class="mode-bind-head">Latest verdicts: current vs new</div>
+      <div id="shadowRecent" class="new-log-entries"><div class="stub-body">Loading…</div></div>
+    `;
+  }
+
+  async _fetchShadow() {
+    if (!this._hass) return;
+    try {
+      this._shadow = await this._hass.callWS({ type: "nova/convenience_status" });
+      this._renderShadow();
+    } catch (err) {
+      const c = this.shadowRoot?.getElementById("shadowPatterns");
+      if (c) this._setHtml(c, `<div class="new-log-entry-error" style="padding:12px">${this._tHtml("Error loading the comparison: {error}", { error: this._esc(err) })}</div>`);
+    }
+  }
+
+  _shadowKind(kind) {
+    return {
+      anticipation_overdue: "Usual activity", anticipation_routine: "Routine start",
+      anticipation_departure: "Departure reminder", anticipation_presence: "Comings and goings",
+      anticipation_arriving: "Heading home",
+    }[kind] || kind || "Pattern";
+  }
+
+  _renderShadow() {
+    const root = this.shadowRoot;
+    const data = this._shadow || {};
+    const patterns = data.patterns || [];
+    const btn = (key, choice, label) =>
+      `<button class="mode-chip new-shadow-choice" data-key="${this._esc(key)}" data-choice="${choice}">${label}</button>`;
+    const asks = patterns.filter(p => p.ask_stop);
+    const asksEl = root?.getElementById("shadowAsks");
+    if (asksEl) this._setHtml(asksEl, asks.map(p => `
+      <div class="panel" style="margin:8px 0">
+        <div class="toggle-desc">${this._tHtml("You rated the last two of these Not helpful. Stop this pattern? Only this one stops, and you can restart it here.")}</div>
+        <div class="cfg-row"><label>${this._esc(this._shadowKind(p.kind))}</label><span>${this._esc(p.example || p.pattern_key)}</span></div>
+        <div class="mode-grid">${btn(p.pattern_key, "stop", "STOP IT")}${btn(p.pattern_key, "keep", "KEEP IT")}</div>
+      </div>`).join(""));
+    const pEl = root?.getElementById("shadowPatterns");
+    if (pEl) this._setHtml(pEl, patterns.length ? patterns.map(p => {
+      const state = p.stopped ? "STOPPED BY YOU" : p.active ? "NEW PATH DECIDES" : p.ready ? "READY TO SWITCH" : "SHADOW";
+      const actions = [
+        p.stopped ? btn(p.pattern_key, "restart", "RESTART") : "",
+        p.active ? btn(p.pattern_key, "deactivate", "BACK TO CURRENT")
+          : (p.ready && !p.stopped ? btn(p.pattern_key, "activate", "SWITCH TO NEW") : ""),
+      ].join("");
+      return `<div class="new-log-entry">
+          <span class="new-log-cat">${this._esc(this._shadowKind(p.kind))}</span>
+          <span class="new-log-msg">${this._esc(p.example || p.pattern_key)}<br><small>${this._tHtml("{agree} of {n} verdicts agree", { agree: this._esc(p.agree), n: this._esc(p.decisions) })}${p.first_ts ? " · " + this._tHtml("since {date}", { date: this._esc(new Date(p.first_ts * 1000).toLocaleDateString()) }) : ""}</small></span>
+          <span class="diag-idle">${state}</span>
+          <span>${actions}</span>
+        </div>`;
+    }).join("") + `<div class="toggle-desc" style="margin:8px 0">${this._tHtml("A pattern can switch to the new path after {days} days and {n} comparisons.", { days: this._esc(data.min_days), n: this._esc(data.min_decisions) })}</div>`
+      : `<div class="stub-body">No anticipation alerts compared yet.</div>`);
+    const rEl = root?.getElementById("shadowRecent");
+    const recent = data.recent || [];
+    if (rEl) this._setHtml(rEl, recent.length ? recent.map(r => {
+      const same = r.actual === r.shadow;
+      return `<div class="new-log-entry">
+          <span class="new-log-ts">${this._esc(new Date(r.ts * 1000).toLocaleString())}</span>
+          <span class="new-log-msg">${this._esc(r.message)}<br>
+            <small>${this._tHtml("Current: {v} ({why})", { v: this._esc(r.actual), why: this._esc(r.actual_reason) })}</small><br>
+            <small>${this._tHtml("New: {v} ({why})", { v: this._esc(r.shadow), why: this._esc(r.shadow_reason) })}</small></span>
+          <span class="${same ? "diag-ok" : "diag-warn"}">${same ? "AGREE" : "DIFFER"}</span>
+        </div>`;
+    }).join("") : `<div class="stub-body">Nothing yet.</div>`);
+    root?.querySelectorAll(".new-shadow-choice").forEach(b => b.addEventListener("click", async () => {
+      b.setAttribute("disabled", "disabled");
+      try {
+        await this._hass.callWS({ type: "nova/convenience_choice",
+          pattern_key: b.getAttribute("data-key"), choice: b.getAttribute("data-choice") });
+      } catch (err) {
+        console.warn("Nova: convenience choice failed", err);
+      }
+      this._fetchShadow();
+    }));
   }
 
   // ─── Decisions (Phase 1: decision explanations + feedback) ─────────────
@@ -522,6 +616,7 @@
       return;
     }
     if ((this._logView || "system") === "spoken_history") return;
+    if ((this._logView || "system") === "shadow") return;
     if ((this._logView || "system") === "actions") {
       const loadMoreBtn = root.getElementById("newActionLoadMore");
       if (loadMoreBtn) loadMoreBtn.addEventListener("click", () => this._fetchActions(false));

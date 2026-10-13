@@ -99,6 +99,10 @@ ADMIN_GATED_TYPES = [
     "voice_id_delete",
     "voice_id_token_get",
     "voice_id_token_set",
+    # The convenience path (8.48.0): the comparison shows what Nova noticed
+    # about the household, and a choice changes what Nova tells it.
+    "convenience_status",
+    "convenience_choice",
 ]
 
 
@@ -121,7 +125,7 @@ def test_require_admin_used_at_least_once_per_gated_command():
     # Exactly one decorator per listed command: a new admin gated command that
     # is not added to ADMIN_GATED_TYPES (or a listed one that lost its gate)
     # changes the count and fails here.
-    assert src.count("@websocket_api.require_admin") == len(ADMIN_GATED_TYPES) == 57
+    assert src.count("@websocket_api.require_admin") == len(ADMIN_GATED_TYPES) == 59
 
 
 def test_require_admin_sits_above_websocket_command_not_below():

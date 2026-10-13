@@ -109,6 +109,7 @@ from .ws_automation import (
     ws_list_automation_trials,
     ws_suggestion_action,
 )
+from .ws_convenience import ws_convenience_choice, ws_convenience_status
 from .ws_decisions import (
     ws_get_calibration,
     ws_get_cognitive_status,
@@ -228,6 +229,8 @@ def async_register(hass: HomeAssistant) -> None:
         websocket_api.async_register_command(hass, ws_list_decisions)
         websocket_api.async_register_command(hass, ws_get_decision)
         websocket_api.async_register_command(hass, ws_set_decision_outcome)
+        websocket_api.async_register_command(hass, ws_convenience_status)
+        websocket_api.async_register_command(hass, ws_convenience_choice)
         websocket_api.async_register_command(hass, ws_list_models)
         websocket_api.async_register_command(hass, ws_test_provider_endpoint)
         websocket_api.async_register_command(hass, ws_apply_ai_config)
