@@ -1,80 +1,105 @@
-"""Lifecycle resource registry for a Nova config entry.
+"""Per-entry registry of disposables released when the config entry unloads.
 
-Collects the disposables created during setup — event-listener unsub callbacks
-and objects with a shutdown()/close() — behind one
-handle, so async_unload_entry can tear everything down with a single fail-safe
-close_all(). Each item is disposed independently (one failure never blocks the
-rest), and close_all() is idempotent, so a reload can't double-dispose or leak.
-
-Owners whose teardown is itself asynchronous (the ProviderManager, which
-closes provider clients off the event loop) register with
-add_async_closeable(); async_unload_entry awaits async_close_all(), which
-runs close_all() and then awaits each of them once.
+Setup code registers three kinds of things here: plain cancel callbacks
+("unsubs"), objects with a synchronous ``shutdown()``/``close()`` method, and
+objects with a coroutine ``async_close()`` method. A single teardown call then
+disposes each of them independently, counting successes and failures, and
+forgets them so a repeated teardown is a no-op. Nothing here depends on
+Home Assistant.
 """
+
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable, Iterable
+from typing import Any
 
 _LOGGER = logging.getLogger(__name__)
 
 
+def _sync_disposer(obj: Any) -> Any:
+    """Return the method used to tear ``obj`` down: ``shutdown`` unless falsy, else ``close``."""
+    method = getattr(obj, "shutdown", None)
+    if not method:
+        method = getattr(obj, "close", None)
+    return method
+
+
 class NovaResources:
-    """A bag of things to dispose when the entry unloads."""
+    """Collects disposables during setup and releases them on unload."""
 
-    def __init__(self):
-        self._unsubs: list = []       # callables returned by track/listen
-        self._closeables: list = []   # objects with .shutdown() or .close()
-        self._async_closeables: list = []   # objects with async_close()
+    def __init__(self) -> None:
+        self._unsubs: list[Any] = []
+        self._closeables: list[Any] = []
+        self._async_closeables: list[Any] = []
 
-    def add_unsub(self, unsub) -> None:
+    # -- registration -----------------------------------------------------
+
+    def add_unsub(self, unsub: Callable[[], Any] | Any) -> None:
+        """Register a zero-argument cancel callback; non-callables are ignored."""
         if callable(unsub):
             self._unsubs.append(unsub)
 
-    def add_unsubs(self, unsubs) -> None:
-        for u in (unsubs or []):
-            self.add_unsub(u)
+    def add_unsubs(self, unsubs: Iterable[Any] | None) -> None:
+        """Register every callable in ``unsubs``; a falsy argument registers nothing."""
+        if not unsubs:
+            return
+        for unsub in unsubs:
+            self.add_unsub(unsub)
 
-    def add_closeable(self, obj) -> None:
+    def add_closeable(self, obj: Any) -> None:
+        """Register an object disposed via ``shutdown()`` or ``close()``."""
         if obj is not None:
             self._closeables.append(obj)
 
-    def add_async_closeable(self, obj) -> None:
+    def add_async_closeable(self, obj: Any) -> None:
+        """Register an object with a callable ``async_close``; others are ignored."""
         if obj is not None and callable(getattr(obj, "async_close", None)):
             self._async_closeables.append(obj)
 
-    async def async_close_all(self) -> dict:
-        """close_all(), then await every async closeable once. Fail-safe and
-        idempotent like close_all()."""
+    # -- teardown ---------------------------------------------------------
+
+    def close_all(self) -> dict[str, int]:
+        """Dispose unsubs then closeables, forget them, and return the counts."""
+        summary = {"unsubs": 0, "closeables": 0, "errors": 0}
+
+        # Both loops iterate the live lists, so items registered during their
+        # own pass are disposed in this same call.
+        for unsub in self._unsubs:
+            try:
+                if not callable(unsub):
+                    continue
+                unsub()
+                summary["unsubs"] += 1
+            except Exception:  # noqa: BLE001 - every failure is isolated
+                summary["errors"] += 1
+
+        for obj in self._closeables:
+            try:
+                method = _sync_disposer(obj)
+                if not callable(method):
+                    continue
+                method()
+                summary["closeables"] += 1
+            except Exception:  # noqa: BLE001
+                summary["errors"] += 1
+
+        self._unsubs.clear()
+        self._closeables.clear()
+        return summary
+
+    async def async_close_all(self) -> dict[str, int]:
+        """Run :meth:`close_all`, then await each async closeable in order."""
         summary = self.close_all()
         summary["async_closeables"] = 0
+
+        # Detach before awaiting so anything registered meanwhile is left for
+        # the next teardown.
         pending, self._async_closeables = self._async_closeables, []
         for obj in pending:
             try:
                 await obj.async_close()
                 summary["async_closeables"] += 1
-            except Exception:
+            except Exception:  # noqa: BLE001
                 summary["errors"] += 1
-        return summary
-
-    def close_all(self) -> dict:
-        """Dispose everything registered, fail-safe and idempotent. Returns a
-        small summary ({unsubs, closeables, errors})."""
-        summary = {"unsubs": 0, "closeables": 0, "errors": 0}
-        for unsub in self._unsubs:
-            try:
-                if callable(unsub):
-                    unsub()
-                    summary["unsubs"] += 1
-            except Exception:
-                summary["errors"] += 1
-        for obj in self._closeables:
-            try:
-                fn = getattr(obj, "shutdown", None) or getattr(obj, "close", None)
-                if callable(fn):
-                    fn()
-                    summary["closeables"] += 1
-            except Exception:
-                summary["errors"] += 1
-        self._unsubs.clear()
-        self._closeables.clear()
         return summary
