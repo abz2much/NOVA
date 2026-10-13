@@ -1,3 +1,11 @@
+## [8.49.9] — The unload clean-up registry rewritten from scratch
+
+Step 9 finishes the startup code. The registry that remembers what Nova set up, so it can all be shut down cleanly when Nova unloads or reloads, was still a near copy of the code Nova started from. It is rewritten from an empty file, from a behaviour spec with fresh tests, without the old file. Nothing Nova does changes.
+
+### Changed
+- **Rewritten:** the unload clean-up registry.
+- **Proven the same:** the new module passes the old tests and 54 fresh ones. The old tests were then replaced by the fresh ones.
+
 ## [8.49.8] — The settings upgrade steps rewritten from scratch
 
 Step 9 continues with the startup code. The steps that upgrade saved settings from older Nova versions were still a near copy of the code Nova started from. They are rewritten from an empty file, from a behaviour spec with fresh tests, without the old file. Nothing Nova does changes.
