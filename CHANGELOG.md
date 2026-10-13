@@ -1,3 +1,11 @@
+## [8.49.4] — The offline detector rewritten from scratch
+
+Step 9 continues with the startup code. The circuit breaker that tells Nova it is offline after failed agent calls was still a near copy of the code Nova started from. It is rewritten from an empty file, from a behaviour spec with fresh tests, without the old file. Nothing Nova does changes: it still has no background check.
+
+### Changed
+- **Rewritten:** the offline detector (when Nova stops trying the agent, when it tries again, and what diagnostics show about it).
+- **Proven the same:** the new module passes every existing test that uses it and 42 fresh ones, including the offline turn in the Home Assistant test harness.
+
 ## [8.49.3] — The task scheduler rewritten from scratch
 
 Step 9 continues with the startup code, one module at a time. The scheduler that runs Nova's recurring background tasks was still a near copy of the code Nova started from. It is rewritten from an empty file, from a behaviour spec with fresh tests, without the old file. Nothing Nova does changes.
