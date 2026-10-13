@@ -1,3 +1,11 @@
+## [8.49.8] — The settings upgrade steps rewritten from scratch
+
+Step 9 continues with the startup code. The steps that upgrade saved settings from older Nova versions were still a near copy of the code Nova started from. They are rewritten from an empty file, from a behaviour spec with fresh tests, without the old file. Nothing Nova does changes.
+
+### Changed
+- **Rewritten:** the settings upgrade steps.
+- **Proven the same:** the new module passes the old tests and 71 fresh ones, and gives the same result as the old one on 30,000 generated settings files. The old tests were then replaced by the fresh ones.
+
 ## [8.49.7] — The backup and restore code rewritten from scratch
 
 Step 9 continues with the startup code. The code that packs Nova's saved files into a backup archive and restores them was still a near copy of the code Nova started from. It is rewritten from an empty file, from a behaviour spec with fresh tests, without the old file. Nothing Nova does changes.
