@@ -15,7 +15,7 @@ Each time the Observer decides about an event, it now leaves one short entry in 
 
 ### Unchanged
 - Routine events that never reach a decision get no entry: motion while someone is home, an opening while the household is in, anything the first check passes over, and anything held by the debounce or the hourly limit. They stay in the activity feed as before.
-- Nothing about what Nova says or when. The entries are written with no rating, so they change no learning unless you rate one in the panel.
+- Nothing about what Nova says or when. The entries carry no rating, so no learning reads them.
 - The home's full state is never copied into the database.
 
 ## [8.46.0] — One reading of the home, checked live before securing it
