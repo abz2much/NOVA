@@ -1,83 +1,14 @@
-"""Tests for the Web Research and Communication agents (v6.51.0). The HTTP
-paths need live egress this harness lacks, so we test the PURE shapers
-(_shape_ddg / _shape_searxng) and the pure conflict analysis exhaustively —
-those hold the actual logic; the fetch wrappers are thin."""
+"""Tests for the calendar agent's conflict analysis, and that both the web
+research and calendar tools are registered. Web research itself is covered
+in test_web_research.py."""
 from datetime import datetime, timedelta
 
 import pytest
 
 
 @pytest.fixture
-def wr(load):
-    return load("web_research")
-
-
-@pytest.fixture
 def comms(load):
     return load("comms")
-
-
-# ── web_research shapers ─────────────────────────────────────────────────────
-
-def test_ddg_abstract_becomes_answer(wr):
-    out = wr._shape_ddg("who is ada lovelace", {
-        "AbstractText": "Ada Lovelace was a 19th-century mathematician.",
-        "AbstractURL": "https://en.wikipedia.org/wiki/Ada_Lovelace",
-        "AbstractSource": "Wikipedia",
-        "RelatedTopics": [],
-    })
-    assert "mathematician" in out["answer"]
-    assert out["source_name"] == "Wikipedia"
-    assert out["backend"] == "duckduckgo"
-    assert "error" not in out
-
-
-def test_ddg_answer_field_fallback(wr):
-    out = wr._shape_ddg("2+2", {"Answer": "4", "AbstractText": ""})
-    assert out["answer"] == "4"
-
-
-def test_ddg_related_topics_capped_and_clipped(wr):
-    topics = [{"Text": f"Topic number {i} " + "x" * 300} for i in range(12)]
-    out = wr._shape_ddg("q", {"AbstractText": "abstract", "RelatedTopics": topics})
-    assert len(out["related"]) <= wr._MAX_RELATED
-    assert all(len(r) <= 161 for r in out["related"])   # clipped w/ ellipsis
-
-
-def test_ddg_empty_is_honest_error(wr):
-    out = wr._shape_ddg("asdfqwer nonsense", {"AbstractText": "", "RelatedTopics": []})
-    assert "error" in out and "no results" in out["error"]
-
-
-def test_ddg_abstract_clipped_to_max(wr):
-    out = wr._shape_ddg("q", {"AbstractText": "word " * 1000})
-    assert len(out["answer"]) <= wr._MAX_ABSTRACT + 1
-
-
-def test_searxng_first_result_wins(wr):
-    out = wr._shape_searxng("python gil", {"results": [
-        {"title": "The GIL", "content": "The global interpreter lock…", "url": "http://x", "engine": "duckduckgo"},
-        {"title": "More GIL", "url": "http://y"},
-    ]})
-    assert "interpreter" in out["answer"]
-    assert out["source"] == "http://x"
-    assert out["related"] == ["More GIL"]
-    assert out["backend"] == "searxng"
-
-
-def test_searxng_answers_fallback(wr):
-    out = wr._shape_searxng("q", {"results": [], "answers": ["42"]})
-    assert out["answer"] == "42"
-
-
-def test_searxng_empty_error(wr):
-    out = wr._shape_searxng("q", {"results": []})
-    assert "error" in out
-
-
-async def test_research_empty_query(wr):
-    out = await wr.research(None, "   ")
-    assert out["error"] == "empty query"
 
 
 def test_new_agent_tools_registered(load):

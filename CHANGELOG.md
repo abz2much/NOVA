@@ -1,3 +1,11 @@
+## [8.49.13] — Five more modules rewritten from scratch
+
+Step 9 continues. The voice style picker, the appliance noise allowance, web lookups, camera coverage and the inbox reader are rewritten from empty files. Each was first described in a behaviour spec with fresh tests; the new code was then written from that spec alone, without the old file. Nothing Nova does changes.
+
+### Changed
+- **Rewritten:** how Nova picks volume and pace for an announcement, how a running appliance's noise is allowed for, web lookups, the camera coverage judgement and the read-only inbox reader.
+- **Proven the same:** each new module passes both its fresh tests and the old ones, which were then replaced by the fresh tests.
+
 ## [8.49.12] — Five small fixes
 
 Fixes for five possible bugs found while making 8.49.10 and 8.49.11. Each fix has a regression test that fails without it. Nothing else changes: no services, settings names, entity IDs or stored data formats.
