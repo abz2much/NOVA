@@ -1,132 +1,166 @@
-"""Regression tests for the ProsodyController vocal-profile rules.
+"""How Nova sounds for one announcement (audio/prosody.py).
 
-ProsodyController is stdlib-only (no Home Assistant), so it is loaded standalone
-rather than through the jc harness. These pin the exact spec values for every
-rule branch plus the quiet-hours wrap and junk-telemetry robustness.
-"""
+The module has no Home Assistant imports, so it is loaded straight from its
+file. Each rule in the spec's table gets a case, plus the quiet window, the
+media keys, unreadable numbers and the attentive-listener rate change."""
 import importlib.util
+import math
 import pathlib
 import sys
+from datetime import datetime
 
 import pytest
 
-COMP = pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova"
+_FILE = pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova" / "audio" / "prosody.py"
 
 
-def _load_standalone(name: str, relpath: str):
-    spec = importlib.util.spec_from_file_location(name, COMP / relpath)
+def _module():
+    spec = importlib.util.spec_from_file_location("prosody_under_test", _FILE)
     mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod  # registered before exec so @dataclass resolves
+    sys.modules["prosody_under_test"] = mod
     spec.loader.exec_module(mod)
     return mod
 
 
-prosody = _load_standalone("nova_prosody", "audio/prosody.py")
+P = _module()
+KEYS = {"volume", "speech_rate", "style", "whisper_mode", "duck_media"}
 
 
-@pytest.fixture
-def pc():
-    return prosody.ProsodyController(quiet_hours_start=22, quiet_hours_end=7)
+def voice(**telemetry):
+    return P.ProsodyController().calculate_vocal_profile(telemetry)
 
 
-def test_critical_overrides_everything(pc):
-    # Even at 3am in a dark, silent room, critical is authoritative + full volume.
-    out = pc.calculate_vocal_profile(
-        {"critical_alert": True, "hour": 3, "ambient_lux": 1.0, "ambient_db": 20.0}
-    )
-    assert out == {
+def test_constants():
+    assert (P.DARK_LUX, P.QUIET_DB, P.LOUD_DB) == (5.0, 45.0, 60.0)
+    assert (P.DEFAULT_QUIET_START, P.DEFAULT_QUIET_END) == (22, 7)
+
+
+def test_profile_dataclass_is_frozen_and_converts():
+    prof = P.VocalProfile(0.5, 1.0, "neutral", False, True)
+    assert prof.as_dict() == {"volume": 0.5, "speech_rate": 1.0, "style": "neutral",
+                              "whisper_mode": False, "duck_media": True}
+    with pytest.raises(Exception):
+        prof.volume = 1.0
+
+
+def test_constructor_keeps_settings():
+    c = P.ProsodyController(46, -1, dark_lux=3.0, quiet_db=40.0, loud_db=70.0)
+    assert (c.quiet_hours_start, c.quiet_hours_end) == (22, 23)
+    assert (c.dark_lux, c.quiet_db, c.loud_db) == (3.0, 40.0, 70.0)
+
+
+@pytest.mark.parametrize("hour,expected", [
+    (21, False), (22, True), (0, True), (6, True), (7, False), (15, False)])
+def test_window_across_midnight(hour, expected):
+    assert P.ProsodyController(22, 7).in_quiet_hours(hour) is expected
+
+
+@pytest.mark.parametrize("hour,expected", [(0, False), (1, True), (5, True), (6, False)])
+def test_window_inside_one_day(hour, expected):
+    assert P.ProsodyController(1, 6).in_quiet_hours(hour) is expected
+
+
+def test_equal_start_and_end_means_no_window():
+    c = P.ProsodyController(9, 9)
+    assert not any(c.in_quiet_hours(h) for h in range(24))
+
+
+def test_critical_wins_even_in_a_dark_silent_night():
+    assert voice(critical_alert=True, hour=2, ambient_lux=0, ambient_db=10) == {
         "volume": 1.0, "speech_rate": 1.15, "style": "authoritative",
-        "whisper_mode": False, "duck_media": True,
-    }
+        "whisper_mode": False, "duck_media": True}
 
 
-def test_deep_quiet_is_whisper(pc):
-    out = pc.calculate_vocal_profile({"hour": 23, "ambient_lux": 2.0, "ambient_db": 30.0})
-    assert out["style"] == "whisper"
-    assert out["whisper_mode"] is True
-    assert out["volume"] == 0.25
-    assert out["speech_rate"] == 0.95
+def test_critical_takes_any_truthy_value():
+    assert voice(critical_alert="yes", hour=12)["style"] == "authoritative"
 
 
-def test_quiet_hours_alone_is_subdued(pc):
-    # Quiet hours but a bright room → subdued, not whisper.
-    out = pc.calculate_vocal_profile({"hour": 23, "ambient_lux": 200, "ambient_db": 30.0})
-    assert out["style"] == "subdued"
-    assert out["volume"] == 0.4
-    assert out["whisper_mode"] is False
+def test_whisper_needs_night_dark_and_quiet_together():
+    assert voice(hour=1, ambient_lux=4.9, ambient_db=44.9) == {
+        "volume": 0.25, "speech_rate": 0.95, "style": "whisper",
+        "whisper_mode": True, "duck_media": False}
 
 
-def test_subdued_ducks_media_for_audibility(pc):
-    out = pc.calculate_vocal_profile(
-        {"hour": 23, "ambient_lux": 200, "ambient_db": 30.0, "media_playing": True}
-    )
-    assert out["style"] == "subdued"
-    assert out["duck_media"] is True  # soft voice still ducks media so it's heard
+def test_night_alone_is_subdued_and_leaves_media_alone():
+    out = voice(hour=23, ambient_lux=50, ambient_db=30)
+    assert out == {"volume": 0.4, "speech_rate": 0.97, "style": "subdued",
+                   "whisper_mode": False, "duck_media": False}
 
 
-def test_loud_room_projects(pc):
-    out = pc.calculate_vocal_profile({"hour": 14, "ambient_db": 70.0})
-    assert out["style"] == "projected"
-    assert out["volume"] == 0.9
-    assert out["duck_media"] is True
+def test_subdued_ducks_playing_media():
+    assert voice(hour=23, media_active=True)["duck_media"] is True
 
 
-def test_media_playing_projects_daytime(pc):
-    out = pc.calculate_vocal_profile({"hour": 14, "ambient_db": 30.0, "media_playing": True})
-    assert out["style"] == "projected"
+def test_dark_quiet_room_by_day_is_subdued():
+    assert voice(hour=13, ambient_lux=1, ambient_db=20)["style"] == "subdued"
 
 
-def test_default_is_neutral(pc):
-    out = pc.calculate_vocal_profile({"hour": 14, "ambient_lux": 300, "ambient_db": 40.0})
+def test_night_loud_room_stays_subdued():
+    assert voice(hour=23, ambient_db=90)["style"] == "subdued"
+
+
+def test_loud_room_by_day_projects():
+    assert voice(hour=13, ambient_db=60) == {
+        "volume": 0.9, "speech_rate": 1.0, "style": "projected",
+        "whisper_mode": False, "duck_media": True}
+
+
+def test_media_by_day_projects_with_either_key():
+    assert voice(hour=13, media_active=True)["style"] == "projected"
+    assert voice(hour=13, media_playing=True)["style"] == "projected"
+
+
+def test_media_active_false_overrides_media_playing():
+    assert voice(hour=13, media_active=False, media_playing=True)["style"] == "neutral"
+
+
+def test_plain_daytime_is_neutral():
+    assert voice(hour=13, ambient_lux=5, ambient_db=45) == {
+        "volume": 0.6, "speech_rate": 1.0, "style": "neutral",
+        "whisper_mode": False, "duck_media": False}
+
+
+def test_numbers_given_as_text_are_read():
+    assert voice(hour=1, ambient_lux="2", ambient_db="20")["style"] == "whisper"
+
+
+@pytest.mark.parametrize("bad", [None, True, "unavailable", "NaN", math.inf, -math.inf, [], {}])
+def test_unreadable_noise_never_counts(bad):
+    out = voice(hour=13, ambient_db=bad, ambient_lux=bad)
     assert out["style"] == "neutral"
-    assert out["volume"] == 0.6
 
 
-def test_quiet_hours_wraps_midnight(pc):
-    assert pc.in_quiet_hours(23) is True
-    assert pc.in_quiet_hours(3) is True
-    assert pc.in_quiet_hours(7) is False   # end is exclusive
-    assert pc.in_quiet_hours(12) is False
+def test_no_telemetry_at_all():
+    c = P.ProsodyController(clock=lambda: datetime(2026, 1, 1, 12))
+    for t in (None, {}):
+        out = c.calculate_vocal_profile(t)
+        assert set(out) == KEYS and out["style"] == "neutral"
 
 
-def test_non_wrapping_quiet_window():
-    pc = prosody.ProsodyController(quiet_hours_start=1, quiet_hours_end=6)
-    assert pc.in_quiet_hours(3) is True
-    assert pc.in_quiet_hours(0) is False
-    assert pc.in_quiet_hours(6) is False
+def test_clock_is_used_when_hour_missing_or_invalid():
+    c = P.ProsodyController(clock=lambda: datetime(2026, 1, 1, 23))
+    assert c.calculate_vocal_profile({})["style"] == "subdued"
+    assert c.calculate_vocal_profile({"hour": 24})["style"] == "subdued"
+    assert c.calculate_vocal_profile({"hour": "3"})["style"] == "subdued"
+    assert c.calculate_vocal_profile({"hour": 12})["style"] == "neutral"
 
 
-@pytest.mark.parametrize("junk", [
-    {},
-    {"ambient_lux": "unavailable", "ambient_db": None},
-    {"ambient_db": "NaN", "ambient_lux": "unknown"},
-    {"critical_alert": "yes"},  # truthy non-bool
+def test_clock_not_called_when_hour_given():
+    def never():
+        raise AssertionError("clock read")
+    assert P.ProsodyController(clock=never).calculate_vocal_profile({"hour": 5})
+
+
+@pytest.mark.parametrize("telemetry,rate", [
+    ({"critical_alert": True}, 1.1),
+    ({"hour": 1, "ambient_lux": 0, "ambient_db": 0}, 0.9),
+    ({"hour": 23}, 0.92),
+    ({"hour": 12, "media_active": True}, 0.95),
+    ({"hour": 12}, 0.95),
 ])
-def test_junk_telemetry_never_crashes(pc, junk):
-    out = pc.calculate_vocal_profile(junk)
-    assert set(out) == {"volume", "speech_rate", "style", "whisper_mode", "duck_media"}
-
-
-def test_skip_preamble_eases_speech_rate(pc):
-    base = pc.calculate_vocal_profile({"critical_alert": True})
-    eased = pc.calculate_vocal_profile({"critical_alert": True, "skip_preamble": True})
-    assert eased["speech_rate"] == round(base["speech_rate"] - 0.05, 2)  # 1.15 → 1.10
-    assert eased["style"] == "authoritative"  # only the rate changes
-
-
-def test_skip_preamble_applies_to_whisper(pc):
-    eased = pc.calculate_vocal_profile(
-        {"hour": 2, "ambient_lux": 1.0, "ambient_db": 20.0, "skip_preamble": True}
-    )
-    assert eased["speech_rate"] == 0.90  # whisper 0.95 − 0.05
-    assert eased["style"] == "whisper"
-
-
-def test_skip_preamble_false_leaves_rate(pc):
-    assert pc.calculate_vocal_profile({"critical_alert": True})["speech_rate"] == 1.15
-
-
-def test_media_active_alias_projects(pc):
-    # media_active (spec key) behaves like the legacy media_playing key
-    out = pc.calculate_vocal_profile({"hour": 14, "ambient_db": 30.0, "media_active": True})
-    assert out["style"] == "projected"
+def test_attentive_listener_slows_rate_only(telemetry, rate):
+    plain = voice(**telemetry)
+    eased = voice(skip_preamble=True, **telemetry)
+    assert eased["speech_rate"] == rate
+    assert {k: v for k, v in eased.items() if k != "speech_rate"} == \
+        {k: v for k, v in plain.items() if k != "speech_rate"}

@@ -1,90 +1,65 @@
-"""Differential noise compensation for Nova.
+"""Take running appliances' noise off the room's measured sound level.
 
-A running appliance raises the room's measured ``ambient_db``, which would push the
-prosody pipeline to project louder than necessary. ``NoiseGate`` checks appliance
-power signatures (``sensor.<appliance>_power``) and, when one is drawing power,
-subtracts that appliance's known dB contribution from the raw reading before it
-reaches prosody — so a humming dishwasher doesn't make Nova shout.
-
-The dominant (loudest) running appliance sets the attenuation rather than summing,
-to avoid over-correcting when several run at once. Reads the state machine but
-imports no HA modules, so it stays a pure, directly-testable leaf.
+Reads appliance power sensors from hass.states; imports no Home Assistant
+modules so the file loads on its own.
 """
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Optional
 
 _LOGGER = logging.getLogger(__name__)
 
-DEFAULT_POWER_ON_W = 10.0  # watts above which an appliance counts as "running"
+DEFAULT_POWER_ON_W = 10.0
 
-# sensor.<appliance>_power → dB the appliance adds to the room when running.
-# A starting profile of common household appliances; map to your actual
-# power sensors. Entities that don't exist are simply ignored (no attenuation).
+# Power sensor -> dB the appliance adds to the room while running.
 DEFAULT_PROFILES: dict[str, float] = {
-    "sensor.dishwasher_power": 8.0,
-    "sensor.washer_power": 7.0,
-    "sensor.dryer_power": 9.0,
-    "sensor.microwave_power": 11.0,
-    "sensor.sump_pump_power": 9.0,
-    "sensor.dehumidifier_power": 5.0,
+    f"sensor.{name}_power": db for name, db in (
+        ("dishwasher", 8.0), ("washer", 7.0), ("dryer", 9.0),
+        ("microwave", 11.0), ("sump_pump", 9.0), ("dehumidifier", 5.0))
 }
 
 
-def _as_float(value: Any) -> float | None:
-    if value is None or isinstance(value, bool):
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
+def _watts(value: Any) -> Optional[float]:
+    if value is not None and not isinstance(value, bool):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            pass
+    return None
 
 
 class NoiseGate:
-    """Subtract running-appliance noise from the ambient_db before prosody."""
-
-    def __init__(
-        self,
-        hass,
-        profiles: dict[str, float] | None = None,
-        *,
-        power_on_threshold: float = DEFAULT_POWER_ON_W,
-    ) -> None:
+    def __init__(self, hass: Any, profiles: dict[str, float] | None = None, *,
+                 power_on_threshold: float = DEFAULT_POWER_ON_W) -> None:
         self.hass = hass
-        self.profiles = profiles if profiles is not None else DEFAULT_PROFILES
+        self.profiles = DEFAULT_PROFILES if profiles is None else profiles
         self.threshold = power_on_threshold
 
     def running_appliances(self) -> list[str]:
-        """Power sensors currently above the on-threshold."""
-        running: list[str] = []
+        running = []
         for entity_id in self.profiles:
             state = self.hass.states.get(entity_id)
             if state is None:
                 continue
-            watts = _as_float(state.state)
+            watts = _watts(state.state)
             if watts is not None and watts > self.threshold:
                 running.append(entity_id)
         return running
 
     def attenuation(self) -> float:
-        """dB to subtract: the dominant running appliance's contribution."""
         running = self.running_appliances()
         if not running:
             return 0.0
         return max(self.profiles[eid] for eid in running)
 
     def compensated_db(self, ambient_db: float | None) -> float | None:
-        """Return ``ambient_db`` with running-appliance noise removed (floored at
-        0). Passes None straight through (unknown stays unknown)."""
         if ambient_db is None:
             return None
-        atten = self.attenuation()
-        if atten <= 0.0:
+        cut = self.attenuation()
+        if cut <= 0:
             return ambient_db
-        adjusted = max(0.0, ambient_db - atten)
-        _LOGGER.debug(
-            "noise gate: ambient_db %.1f − %.1f (appliance noise) → %.1f",
-            ambient_db, atten, adjusted,
-        )
-        return adjusted
+        result = max(0.0, ambient_db - cut)
+        _LOGGER.debug("Noise gate: %.1f dB raw, %.1f dB appliance noise, %.1f dB used",
+                      ambient_db, cut, result)
+        return result

@@ -1,166 +1,147 @@
-"""
-Nova Web Research Agent (v6.51.0).
+"""The agent's web_research tool: a short, bounded web lookup.
 
-The blueprint's "Web Research Agent": real-time external knowledge retrieval so
-Nova can answer "look into X" instead of shrugging at anything past its
-training. Deliberately dependency-light and self-hosted-friendly:
-
-  - Default backend is DuckDuckGo's Instant Answer API (api.duckduckgo.com) —
-    no API key, no signup, returns a structured abstract + related topics.
-  - Off until set up (8.41.0): search_backend defaults to "off".
-  - Configurable to a SearXNG instance (search_backend="searxng",
-    searxng_url=...) for richer results on a box that runs one.
-
-This is a retrieval *tool*, not a scraper: it returns a short synthesized
-summary the agent LLM then reasons over and speaks in Nova's voice. It never
-dumps raw pages, never follows arbitrary links, and never raises — a failed
-lookup returns an honest "couldn't find that" the model can relay.
-
-Design notes:
-  - Call-time config resolution (nova_config.get at call, not import) — the
-    same discipline the DB layer learned the hard way.
-  - HTTP via HA's shared aiohttp session, hard 10s timeout, one attempt (a
-    voice interaction can't wait on retries; the model can re-ask).
-  - Result capped and sanitized so an enormous abstract can't blow the context.
+Off until a backend is chosen in Nova's settings. Backends are the DuckDuckGo
+Instant Answer API (no key) or the person's own SearXNG. One attempt with a
+10 s timeout; failures come back as an error dict, never an exception.
 """
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Any
 
 _LOGGER = logging.getLogger(__name__)
 
+_MAX_ABSTRACT = 1200
+_MAX_RELATED = 5
+_TIMEOUT = 10
+_MAX_RELATED_TEXT = 160
+
 _DDG_ENDPOINT = "https://api.duckduckgo.com/"
-_MAX_ABSTRACT = 1200          # chars — plenty for the model, bounded for context
-_MAX_RELATED = 5              # related topics to include
-_TIMEOUT = 10                 # seconds — a voice turn can't wait longer
+
+_BACKENDS = ("duckduckgo", "searxng")
 
 
-def _cfg(key: str, default):
+def _cfg(key: str, default: Any) -> Any:
     try:
         from . import nova_config
-        val = nova_config.get(key, default)
-        return val if val is not None else default
+        value = nova_config.get(key, default)
     except Exception:
         return default
+    return default if value is None else value
 
 
-def _clip(text: str, limit: int) -> str:
-    text = " ".join(str(text or "").split())
-    return text if len(text) <= limit else text[:limit].rsplit(" ", 1)[0] + "…"
+def _squash(text: Any) -> str:
+    return " ".join(str(text or "").split())
 
 
-async def research(hass, query: str) -> dict:
-    """
-    Look something up on the web. Returns a dict the agent tool serializes:
-        {"query", "answer", "source", "related": [...], "backend"}
-    or {"query", "error"} on failure. Never raises.
-    """
-    q = " ".join(str(query or "").split())
-    if not q:
-        return {"query": "", "error": "empty query"}
-
-    backend = str(_cfg("search_backend", "off") or "off").lower()
-    if backend not in ("duckduckgo", "searxng"):
-        # Off until set up (8.41.0): no lookup leaves the house.
-        return {"query": q, "error": "web research is not set up — choose a "
-                                     "backend in Nova's settings"}
-    try:
-        if backend == "searxng":
-            return await _searxng(hass, q)
-        return await _duckduckgo(hass, q)
-    except Exception as exc:
-        _LOGGER.debug("web_research(%r) failed: %s", q, exc)
-        return {"query": q, "error": f"lookup failed: {exc}"}
+def _clip(text: Any, limit: int) -> str:
+    s = _squash(text)
+    if len(s) <= limit:
+        return s
+    return s[:limit].rsplit(" ", 1)[0] + "…"
 
 
-async def _duckduckgo(hass, q: str) -> dict:
+def _error(q: str, message: str) -> dict:
+    return {"query": q, "error": message}
+
+
+def _success(q: str, answer: str, source: str, source_name: str,
+             related: list[str], backend: str) -> dict:
+    return {"query": q, "answer": answer, "source": source,
+            "source_name": source_name, "related": related, "backend": backend}
+
+
+def _shape_ddg(q: str, data: dict) -> dict:
+    data = data or {}
+    abstract = (data.get("AbstractText") or data.get("Abstract") or "").strip()
+    best = (abstract or (data.get("Answer") or "").strip()
+            or (data.get("Definition") or "").strip())
+
+    related: list[str] = []
+    for topic in (data.get("RelatedTopics") or [])[:2 * _MAX_RELATED]:
+        if isinstance(topic, dict) and topic.get("Text"):
+            related.append(_clip(topic["Text"], _MAX_RELATED_TEXT))
+            if len(related) >= _MAX_RELATED:
+                break
+
+    if not best and not related:
+        return _error(q, "no results — try rephrasing, or this may need a full web search")
+    return _success(
+        q,
+        _clip(best, _MAX_ABSTRACT) if best else "",
+        (data.get("AbstractURL") or data.get("DefinitionURL") or "").strip(),
+        (data.get("AbstractSource") or data.get("DefinitionSource") or "").strip(),
+        related,
+        "duckduckgo",
+    )
+
+
+def _shape_searxng(q: str, data: dict) -> dict:
+    data = data or {}
+    results = data.get("results") or []
+    if not results:
+        answers = data.get("answers") or []
+        if answers:
+            return _success(q, _clip(answers[0], _MAX_ABSTRACT), "", "", [], "searxng")
+        return _error(q, "no results")
+
+    top = results[0]
+    related = [_clip(r["title"], _MAX_RELATED_TEXT)
+               for r in results[1:1 + _MAX_RELATED] if r.get("title")]
+    return _success(
+        q,
+        _clip(top.get("content") or top.get("title") or "", _MAX_ABSTRACT),
+        top.get("url", ""),
+        top.get("engine", ""),
+        related,
+        "searxng",
+    )
+
+
+async def _duckduckgo(hass: Any, q: str) -> dict:
     import aiohttp
     from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
     session = async_get_clientsession(hass)
     params = {"q": q, "format": "json", "no_html": "1",
               "skip_disambig": "1", "t": "nova_home"}
-    async with session.get(
-        _DDG_ENDPOINT, params=params,
-        timeout=aiohttp.ClientTimeout(total=_TIMEOUT),
-    ) as resp:
+    async with session.get(_DDG_ENDPOINT, params=params,
+                           timeout=aiohttp.ClientTimeout(total=_TIMEOUT)) as resp:
         if resp.status != 200:
-            return {"query": q, "error": f"search returned HTTP {resp.status}"}
-        data = await resp.json(content_type=None)
-
-    return _shape_ddg(q, data)
+            return _error(q, f"search returned HTTP {resp.status}")
+        return _shape_ddg(q, await resp.json(content_type=None))
 
 
-def _shape_ddg(q: str, data: dict) -> dict:
-    """Pure DDG-response → result shaper (unit-testable without network)."""
-    data = data or {}
-    abstract = (data.get("AbstractText") or data.get("Abstract") or "").strip()
-    answer = (data.get("Answer") or "").strip()
-    definition = (data.get("Definition") or "").strip()
-    best = abstract or answer or definition
+async def _searxng(hass: Any, q: str) -> dict:
+    base = str(_cfg("searxng_url", "")).rstrip("/")
+    if not base:
+        return _error(q, "searxng_url not configured")
 
-    related = []
-    for topic in (data.get("RelatedTopics") or [])[:_MAX_RELATED * 2]:
-        if isinstance(topic, dict) and topic.get("Text"):
-            related.append(_clip(topic["Text"], 160))
-        if len(related) >= _MAX_RELATED:
-            break
-
-    if not best and not related:
-        return {"query": q, "error": "no results — try rephrasing, or this "
-                                     "may need a full web search"}
-
-    source = (data.get("AbstractURL") or data.get("DefinitionURL") or "").strip()
-    source_name = (data.get("AbstractSource")
-                   or data.get("DefinitionSource") or "").strip()
-    return {
-        "query": q,
-        "answer": _clip(best, _MAX_ABSTRACT) if best else "",
-        "source": source,
-        "source_name": source_name,
-        "related": related,
-        "backend": "duckduckgo",
-    }
-
-
-async def _searxng(hass, q: str) -> dict:
     import aiohttp
     from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-    base = str(_cfg("searxng_url", "")).rstrip("/")
-    if not base:
-        return {"query": q, "error": "searxng_url not configured"}
     session = async_get_clientsession(hass)
-    params = {"q": q, "format": "json"}
-    async with session.get(
-        f"{base}/search", params=params,
-        timeout=aiohttp.ClientTimeout(total=_TIMEOUT),
-    ) as resp:
+    async with session.get(f"{base}/search", params={"q": q, "format": "json"},
+                           timeout=aiohttp.ClientTimeout(total=_TIMEOUT)) as resp:
         if resp.status != 200:
-            return {"query": q, "error": f"searxng returned HTTP {resp.status}"}
-        data = await resp.json(content_type=None)
-    return _shape_searxng(q, data)
+            return _error(q, f"searxng returned HTTP {resp.status}")
+        return _shape_searxng(q, await resp.json(content_type=None))
 
 
-def _shape_searxng(q: str, data: dict) -> dict:
-    """Pure SearXNG-response → result shaper."""
-    results = (data or {}).get("results") or []
-    if not results:
-        answers = (data or {}).get("answers") or []
-        if answers:
-            return {"query": q, "answer": _clip(answers[0], _MAX_ABSTRACT),
-                    "source": "", "source_name": "", "related": [],
-                    "backend": "searxng"}
-        return {"query": q, "error": "no results"}
-    top = results[0]
-    related = [_clip(r.get("title", ""), 160) for r in results[1:_MAX_RELATED + 1]
-               if r.get("title")]
-    return {
-        "query": q,
-        "answer": _clip(top.get("content") or top.get("title") or "", _MAX_ABSTRACT),
-        "source": top.get("url", ""),
-        "source_name": top.get("engine", ""),
-        "related": related,
-        "backend": "searxng",
-    }
+async def research(hass: Any, query: str) -> dict:
+    """Look ``query`` up with the configured backend."""
+    q = _squash(query)
+    if not q:
+        return _error("", "empty query")
+
+    backend = str(_cfg("search_backend", "off") or "off").lower()
+    if backend not in _BACKENDS:
+        return _error(q, "web research is not set up — choose a backend in Nova's settings")
+
+    try:
+        if backend == "searxng":
+            return await _searxng(hass, q)
+        return await _duckduckgo(hass, q)
+    except Exception as exc:
+        _LOGGER.debug("Web research for %r failed: %s", q, exc)
+        return _error(q, f"lookup failed: {exc}")
