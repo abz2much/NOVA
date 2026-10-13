@@ -210,13 +210,17 @@ async def test_a_home_with_no_person_entities_still_uses_its_device_trackers(cc,
     assert env.modes_calls == [True, False]
 
 
-async def test_sleep_detection_gets_the_configured_bedrooms_and_quiet_hours(cc, env):
-    cc._CORE.config = {"bedroom_areas": ["bedroom"], "observer_quiet_start": "23:00",
-                       "observer_quiet_end": "06:30"}
+async def test_sleep_detection_gets_the_live_bedrooms_and_quiet_hours(cc, env, nova_runtime):
+    """8.46.0: the tick reads sleep through world.py, with the live panel
+    settings, like delivery and the Observer. Its own config copy is not
+    used, so the three cannot disagree."""
+    cc._CORE.config = {"bedroom_areas": ["stale"], "observer_quiet_start": "21:00"}
+    nova_runtime(env.hass, {"bedroom_areas": ["bedroom"], "observer_quiet_start": "23:00",
+                            "observer_quiet_end": "06:30"})
     await cc._tick()
     assert env.sleep_kw[-1] == {"bedroom_area_ids": ["bedroom"], "quiet_start": "23:00",
                                 "quiet_end": "06:30"}
-    cc._CORE.config = {"bedroom_areas": None}
+    nova_runtime(env.hass, {"bedroom_areas": None})
     await cc._tick()
     assert env.sleep_kw[-1] == {"bedroom_area_ids": [], "quiet_start": "22:00", "quiet_end": "07:00"}
 

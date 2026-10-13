@@ -12,7 +12,15 @@ import types
 
 import pytest
 
+from conftest import readable_devices
 from fakes import FakeHass
+
+
+def _hass():
+    """Locks and covers that read a state, for the live check (8.46.0)."""
+    h = FakeHass()
+    readable_devices(h, "lock.front", "cover.garage")
+    return h
 
 
 def _install_vc(monkeypatch, protected: bool):
@@ -45,20 +53,20 @@ def test_service_for_maps_actions(load):
 def test_needs_confirmation_true_for_protected_when_enabled(load, monkeypatch):
     le = load("local_engine")
     _install_vc(monkeypatch, protected=True)
-    assert le._needs_confirmation(None, "unlock", "lock.front") is True
-    assert le._needs_confirmation(None, "open", "cover.garage") is True
+    assert le._needs_confirmation(_hass(), "unlock", "lock.front") is True
+    assert le._needs_confirmation(_hass(), "open", "cover.garage") is True
 
 
 def test_needs_confirmation_false_when_disabled(load, monkeypatch):
     le = load("local_engine")
     _install_vc(monkeypatch, protected=False)
-    assert le._needs_confirmation(None, "unlock", "lock.front") is False
+    assert le._needs_confirmation(_hass(), "unlock", "lock.front") is False
 
 
 def test_needs_confirmation_false_for_non_actuation(load, monkeypatch):
     le = load("local_engine")
     _install_vc(monkeypatch, protected=True)      # even if "protected" says yes,
-    assert le._needs_confirmation(None, "greeting", "") is False   # no service to gate
+    assert le._needs_confirmation(_hass(), "greeting", "") is False   # no service to gate
 
 
 # ── try_local end-to-end defer behavior ───────────────────────────────────────

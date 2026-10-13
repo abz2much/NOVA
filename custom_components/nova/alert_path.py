@@ -32,6 +32,9 @@ class Situation:
     house: object = None          # household.Household, or None if unreadable
     sleeping: bool = False
     quiet: bool = False
+    # The facts this reading used, each with its source and when it was read
+    # (world.Fact.record, 8.46.0). Kept with the decision; never compared.
+    read: dict = field(default_factory=dict, compare=False)
 
     @property
     def residents(self) -> str:
@@ -43,12 +46,14 @@ class Situation:
         return bool(getattr(self.house, "anyone_home", False))
 
 
-def situation(hass, config: Optional[dict] = None, *, sleeping: bool = False,
-              quiet: bool = False, house=None) -> Situation:
-    """Read the household (household.py) and pair it with the sleep and quiet
-    hours readings the source already took. While a 30 second tick runs, the
-    household comes from that tick's world snapshot (world.py, 8.24.0).
+def situation(hass, config: Optional[dict] = None, *, sleeping=None,
+              quiet=None, house=None) -> Situation:
+    """Read the household (household.py) with sleep and quiet hours. Each
+    comes from the world.py resolvers unless the caller passes its own
+    reading (a world.Fact, or a plain True or False). While a 30 second
+    tick runs, the household comes from that tick's snapshot (8.24.0).
     Never raises."""
+    from . import world
     if house is None:
         try:
             from . import household
@@ -56,7 +61,28 @@ def situation(hass, config: Optional[dict] = None, *, sleeping: bool = False,
         except Exception as exc:
             _LOGGER.debug("alert_path: household reading failed: %s", exc)
             house = None
-    return Situation(house=house, sleeping=bool(sleeping), quiet=bool(quiet))
+    facts = {}
+    if house is not None:
+        facts["household"] = world.Fact(house, getattr(house, "source", ""),
+                                        getattr(house, "read_at", 0.0)).record()
+    else:
+        facts["household"] = world.Fact(None, "unreadable").record()
+    values = {}
+    for name, given, resolve in (("asleep", sleeping, world.asleep),
+                                 ("quiet_hours", quiet, world.quiet_hours)):
+        current = world.current()
+        if given is None and current is not None and getattr(current, name) != world.UNKNOWN:
+            # Inside a tick: the tick's own reading, so the tick agrees.
+            given = world.Fact(getattr(current, name), current.sources.get(name, ""),
+                               current.read_at)
+        if given is None:
+            given = resolve(hass)
+        elif not isinstance(given, world.Fact):
+            given = world.Fact(bool(given), "the decision's own reading")
+        facts[name] = given.record()
+        values[name] = given.value is True
+    return Situation(house=house, sleeping=values["asleep"], quiet=values["quiet_hours"],
+                     read=facts)
 
 
 def nobody_home(sit: Situation) -> bool:
@@ -120,6 +146,9 @@ def decision_fields(kind: str, *, source: str, sit: Optional[Situation] = None,
             "asleep": sit.sleeping,
             "quiet_hours": sit.quiet,
         })
+        if sit.read:
+            # Where each of those came from and when it was read (8.46.0).
+            observation["read"] = dict(sit.read)
     observation.update(facts or {})
     evidence: dict = {}
     if plan is not None:

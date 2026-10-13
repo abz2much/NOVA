@@ -71,7 +71,8 @@ def _asks_first(hass, entries: list) -> list:
             # Asked as a voice request: the phone tap for unlock, open and
             # disarm applies only to voice, and a phrase is spoken.
             if any(not policy.authorize_now(hass, policy.AuthorityRequest(
-                    domain, service, k, source=policy.SOURCE_VOICE)).allowed for k in keys):
+                    domain, service, k, source=policy.SOURCE_VOICE),
+                    live=False).allowed for k in keys):
                 out.append(e.get("phrase_id"))
         except Exception:  # pylint: disable=broad-except
             continue

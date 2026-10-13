@@ -70,16 +70,26 @@ def test_calendar_empty_omitted(sit, fake_hass, load, monkeypatch):
     assert sit._calendar(fake_hass) == ""
 
 
-def test_presence_line(sit, fake_hass, load, monkeypatch):
-    presence = load("presence")
-    monkeypatch.setattr(presence, "presence_context_string", lambda hass: "Username is home.")
+def test_presence_line(sit, fake_hass):
+    fake_hass.states.set("person.username", "home", friendly_name="Username")
     assert sit._presence(fake_hass) == "Presence: Username is home."
 
 
-def test_presence_no_entities_omitted(sit, fake_hass, load, monkeypatch):
-    presence = load("presence")
-    monkeypatch.setattr(presence, "presence_context_string",
-                        lambda hass: "No person entities configured in Home Assistant.")
+def test_presence_follows_the_household_rules(sit, fake_hass):
+    """8.46.0: the AI's presence line uses household.py, like the rest of
+    Nova. A person whose linked phone tracker reads home is home; a person
+    who cannot be read is unknown, never away; a zone is named."""
+    fake_hass.states.set("person.a", "not_home", friendly_name="A",
+                         device_trackers=["device_tracker.a_phone"])
+    fake_hass.states.set("device_tracker.a_phone", "home")
+    fake_hass.states.set("person.b", "unavailable", friendly_name="B")
+    fake_hass.states.set("person.c", "not_home", friendly_name="C")
+    fake_hass.states.set("person.d", "work", friendly_name="D")
+    assert sit._presence(fake_hass) == (
+        "Presence: A is home. B's whereabouts are unknown. C is away. D is at work.")
+
+
+def test_presence_no_entities_omitted(sit, fake_hass):
     assert sit._presence(fake_hass) == ""
 
 
@@ -96,13 +106,15 @@ def test_activity_summarizes(sit, fake_hass, set_observer):
 
 
 def test_snapshot_composites(sit, fake_hass, load, monkeypatch, set_observer):
-    presence = load("presence"); comms = load("comms"); energy = load("energy")
-    monkeypatch.setattr(presence, "presence_context_string", lambda hass: "Username is home.")
+    comms = load("comms"); energy = load("energy")
+    fake_hass.states.set("person.username", "home", friendly_name="Username")
+    people = list(fake_hass.states.async_all("person"))
     monkeypatch.setattr(comms, "agenda",
                         lambda hass, h=24: {"events": ["Dentist - 9 AM"], "conflicts": [], "count": 1})
     monkeypatch.setattr(energy, "power_status", lambda hass: {"kw": 1.2, "over_peak": False})
     set_observer("quiet")
-    monkeypatch.setattr(fake_hass.states, "async_all", lambda d=None: [])
+    monkeypatch.setattr(fake_hass.states, "async_all",
+                        lambda d=None: people if d == "person" else [])
     out = sit.snapshot(fake_hass)
     assert out.startswith("Time:")                 # time leads
     assert "Presence: Username is home." in out
@@ -116,6 +128,7 @@ def test_snapshot_never_raises_on_bad_source(sit, fake_hass, load, monkeypatch):
     def boom(hass):
         raise RuntimeError("presence exploded")
     monkeypatch.setattr(presence, "presence_context_string", boom)
-    monkeypatch.setattr(fake_hass.states, "async_all", lambda d=None: [])
+    monkeypatch.setattr(fake_hass.states, "async_all",
+                        lambda d=None: people if d == "person" else [])
     out = sit.snapshot(fake_hass)                    # must not raise
     assert "Presence:" not in out                   # bad source omitted

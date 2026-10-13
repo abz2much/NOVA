@@ -65,7 +65,7 @@ async def _run(loop, monkeypatch, script, *, fallback=None, config=None, user_in
     monkeypatch.setattr(loop._TurnProviders, "tier", tier)
 
     hass = FakeHass()
-    hass.states.set("lock.front_door", "locked", friendly_name="Front Door")
+    hass.states.set("lock.front_door", "unlocked", friendly_name="Front Door")
     result = await loop.run_agent(
         hass, messages=[{"role": "user", "content": "lock up"}], persona="P",
         provider_name="fake", api_key="", model="m",

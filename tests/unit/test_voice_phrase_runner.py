@@ -6,6 +6,15 @@ touches a real device.
 """
 import pytest
 
+from conftest import readable_devices
+
+
+@pytest.fixture(autouse=True)
+def _readable(fake_hass):
+    """The lock, garage and alarm read a state that is not already secure,
+    so the live check (8.46.0) lets the policy decide."""
+    readable_devices(fake_hass, "lock.front", "cover.garage", "alarm_control_panel.home")
+
 from test_authority import _VC
 
 

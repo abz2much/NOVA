@@ -145,24 +145,42 @@ def unlocked_locks(hass, exempt) -> list:
             if st.state == "unlocked" and st.entity_id not in exempt]
 
 
-async def secure_device(hass, entity_id: str, domain: str) -> None:
-    """Lock a lock, or close a cover, and wait for the call. Raises if the
-    call fails; callers log and audit it their own way. Goes through the one
-    authority check as Nova acting on its own (8.24.0): locking and closing
-    are low risk, so this is allowed; anything else would be refused."""
+class NotSecured(PermissionError):
+    """The live check or the policy stopped a lock or close (8.46.0).
+    `code` is the reason for the Actions log, `note` what Nova reports."""
+
+    def __init__(self, note: str, code: str = "not_authorized"):
+        super().__init__(note)
+        self.note = note
+        self.code = code
+
+
+async def secure_device(hass, entity_id: str, domain: str) -> str:
+    """Lock a lock, or close a cover, and wait for the call. Goes through the
+    one authority check as Nova acting on its own (8.24.0): locking and
+    closing are low risk, so this is allowed; anything else would be refused.
+
+    The device is checked live first (8.46.0). Returns "already_secure" when
+    it already reads locked or closed (nothing is sent), "sent" otherwise.
+    Raises NotSecured when it is skipped: it cannot be read, or its door is
+    open. Raises if the call itself fails; callers log and audit it their
+    own way."""
     from . import policy
     service = "lock" if domain == "lock" else "close_cover"
     decision = policy.authorize_now(hass, policy.AuthorityRequest(
         "lock" if domain == "lock" else "cover", service, entity_id,
         source=policy.SOURCE_AUTOMATIC))
+    if decision.already_secure:
+        return "already_secure"
     if not decision.allowed:
-        raise PermissionError(decision.note or "not authorized")
+        raise NotSecured(decision.note or "not authorized", decision.code or "not_authorized")
     if domain == "lock":
         await hass.services.async_call(
             "lock", "lock", {"entity_id": entity_id}, blocking=True)
     else:
         await hass.services.async_call(
             "cover", "close_cover", {"entity_id": entity_id}, blocking=True)
+    return "sent"
 
 
 class LockdownManager:
@@ -348,9 +366,14 @@ class LockdownManager:
         return False
 
     async def _secure_entity(self, eid: str, dom: str) -> bool:
+        """True when it was sent, or already reads secure (8.46.0)."""
         try:
             await secure_device(self.hass, eid, dom)
             return True
+        except NotSecured as exc:
+            _LOGGER.warning("Lockdown: %s skipped: %s", eid, exc.note)
+            await self._record("not secured", exc.note, entity_id=eid, assessment=exc.code)
+            return False
         except Exception as exc:
             _LOGGER.warning("Lockdown: secure %s failed: %s", eid, exc)
             return False
@@ -418,9 +441,16 @@ class LockdownManager:
             fname = st.attributes.get("friendly_name", eid)
             row_id = row_ids.get(eid)
             try:
-                await secure_device(self.hass, eid, "lock")
+                result = await secure_device(self.hass, eid, "lock")
                 if not self._automatic_operation_current(automatic_generation):
                     break
+                if result == "already_secure":
+                    # Locked since the list was made (8.46.0): nothing sent.
+                    if row_id is not None:
+                        await self.hass.async_add_executor_job(
+                            lambda rid=row_id: action_log.set_execution(
+                                rid, "blocked", reason_code="already_secure"))
+                    continue
                 locked.append((eid, fname))
                 _LOGGER.info("Lockdown: locked %s", eid)
                 if row_id is not None:
@@ -428,12 +458,20 @@ class LockdownManager:
                         lambda rid=row_id: action_log.set_execution(rid, "accepted")
                     )
             except Exception as exc:
-                _LOGGER.warning("Lockdown: failed to lock %s: %s", eid, exc)
+                # Skipped by the live check (its door is open, or it cannot
+                # be read, 8.46.0) or the command failed: named as not locked.
+                skipped = isinstance(exc, NotSecured)
+                _LOGGER.warning("Lockdown: %s %s: %s",
+                                "skipped" if skipped else "failed to lock", eid, exc)
                 self._lock_failures.append((eid, fname))
+                if skipped:
+                    await self._record("not locked", exc.note, entity_id=eid,
+                                       assessment=exc.code)
                 if row_id is not None:
                     await self.hass.async_add_executor_job(
-                        lambda rid=row_id: action_log.set_execution(
-                            rid, "failed", reason_code="service_call_failed")
+                        lambda rid=row_id, code=(exc.code if skipped else "service_call_failed"):
+                        action_log.set_execution(rid, "blocked" if skipped else "failed",
+                                                 reason_code=code)
                     )
         return locked
 

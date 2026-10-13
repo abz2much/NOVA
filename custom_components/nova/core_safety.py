@@ -1115,7 +1115,7 @@ class SafetyManager:
         # entities need securing — it owns one request_id for every target
         # it touches this run; nothing it calls creates its own row).
         from . import action_log
-        from .core_lockdown import secure_device, unlocked_locks
+        from .core_lockdown import NotSecured, secure_device, unlocked_locks
         request_id = action_log.new_request_id()
         # The locks are picked the same way as the formal lockdown (8.23.0).
         # Every open cover is closed, whatever its class: unlike the formal
@@ -1178,9 +1178,15 @@ class SafetyManager:
                 row_id = row_ids.get(eid)
                 # Auto-lock
                 try:
-                    await secure_device(self.hass, eid, "lock")
+                    result = await secure_device(self.hass, eid, "lock")
                     if not self._automatic_operation_current(automatic_generation):
                         return []
+                    if result == "already_secure":
+                        # Secured since the list was made (8.46.0): nothing sent.
+                        await self.hass.async_add_executor_job(
+                            lambda rid=row_id: action_log.set_execution(
+                                rid, "blocked", reason_code="already_secure"))
+                        continue
                     unlocked.append(fname)
                     sent.append((eid, fname, "lock", row_id))
                     _LOGGER.info("Cognitive lockdown: locked %s", eid)
@@ -1188,12 +1194,18 @@ class SafetyManager:
                         lambda rid=row_id: action_log.set_execution(rid, "accepted")
                     )
                 except Exception as exc:
-                    _LOGGER.warning("Cognitive lockdown: failed to lock %s: %s", eid, exc)
+                    # Skipped by the live check (its door is open, or it
+                    # cannot be read, 8.46.0) or the command failed: named
+                    # in the report as not secured.
+                    skipped = isinstance(exc, NotSecured)
+                    _LOGGER.warning("Cognitive lockdown: %s %s: %s",
+                                    "skipped" if skipped else "failed to lock", eid, exc)
                     failed.append(fname)
                     failed_eids.append(eid)
                     await self.hass.async_add_executor_job(
-                        lambda rid=row_id: action_log.set_execution(
-                            rid, "failed", reason_code="service_call_failed")
+                        lambda rid=row_id, code=(exc.code if skipped else "service_call_failed"):
+                        action_log.set_execution(rid, "blocked" if skipped else "failed",
+                                                 reason_code=code)
                     )
 
         # Check covers/garage
@@ -1206,9 +1218,15 @@ class SafetyManager:
                 fname = state.attributes.get("friendly_name", eid)
                 row_id = row_ids.get(eid)
                 try:
-                    await secure_device(self.hass, eid, "cover")
+                    result = await secure_device(self.hass, eid, "cover")
                     if not self._automatic_operation_current(automatic_generation):
                         return []
+                    if result == "already_secure":
+                        # Secured since the list was made (8.46.0): nothing sent.
+                        await self.hass.async_add_executor_job(
+                            lambda rid=row_id: action_log.set_execution(
+                                rid, "blocked", reason_code="already_secure"))
+                        continue
                     open_covers.append(fname)
                     sent.append((eid, fname, "cover", row_id))
                     _LOGGER.info("Cognitive lockdown: closed %s", eid)
@@ -1216,12 +1234,18 @@ class SafetyManager:
                         lambda rid=row_id: action_log.set_execution(rid, "accepted")
                     )
                 except Exception as exc:
-                    _LOGGER.warning("Cognitive lockdown: failed to close %s: %s", eid, exc)
+                    # Skipped by the live check (its door is open, or it
+                    # cannot be read, 8.46.0) or the command failed: named
+                    # in the report as not secured.
+                    skipped = isinstance(exc, NotSecured)
+                    _LOGGER.warning("Cognitive lockdown: %s %s: %s",
+                                    "skipped" if skipped else "failed to close", eid, exc)
                     failed.append(fname)
                     failed_eids.append(eid)
                     await self.hass.async_add_executor_job(
-                        lambda rid=row_id: action_log.set_execution(
-                            rid, "failed", reason_code="service_call_failed")
+                        lambda rid=row_id, code=(exc.code if skipped else "service_call_failed"):
+                        action_log.set_execution(rid, "blocked" if skipped else "failed",
+                                                 reason_code=code)
                     )
 
         if not self._automatic_operation_current(automatic_generation):

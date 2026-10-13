@@ -1488,17 +1488,26 @@ async def try_local(hass, text, honorific="sir", force=False, device_id=None):
             )
         ) if lock_candidates else {}
         sent_locks: list[str] = []
+        held_notes: list[str] = []
         from . import policy
         for eid in lock_candidates:
             row_id = lock_row_ids.get(eid)
             # Locking is low risk, so this is allowed; it still goes through
             # the one authority check (8.24.0).
-            if not policy.authorize_now(hass, policy.AuthorityRequest(
-                    "lock", "lock", eid, device_id=device_id or "")).allowed:
+            now = policy.authorize_now(hass, policy.AuthorityRequest(
+                "lock", "lock", eid, device_id=device_id or ""))
+            if not now.allowed:
+                if now.code and not now.already_secure:
+                    # The live check (8.46.0): the door is open, or the lock
+                    # or its door sensor cannot be read. Said, never skipped
+                    # silently; an open door can still be locked on request.
+                    held_notes.append(
+                        now.note + (" Ask me to lock it if you still want it locked."
+                                    if now.approval == "deferred" else ""))
                 if row_id is not None:
                     await hass.async_add_executor_job(
-                        lambda rid=row_id: action_log.set_execution(
-                            rid, "blocked", reason_code="confirmation_not_approved"))
+                        lambda rid=row_id, code=(now.code or "confirmation_not_approved"):
+                        action_log.set_execution(rid, "blocked", reason_code=code))
                 continue
             try:
                 await hass.services.async_call(
@@ -1524,7 +1533,8 @@ async def try_local(hass, text, honorific="sir", force=False, device_id=None):
         return LocalResult(
             text=(f"Goodnight{addr}. I've sent the command to turn off "
                   f"{n_lights} light{'s' if n_lights != 1 else ''} and lock "
-                  f"{n_locks} lock{'s' if n_locks != 1 else ''}. Rest well."),
+                  f"{n_locks} lock{'s' if n_locks != 1 else ''}. "
+                  + "".join(n + " " for n in held_notes) + "Rest well."),
             success=True)
 
     # Single-entity patterns

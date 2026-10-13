@@ -32,11 +32,9 @@ from typing import Optional
 from homeassistant.core import HomeAssistant, Event, callback
 from homeassistant.util import dt as dt_util
 
-from . import audio_routing, classifier, output_gate, reasoning_loop, sleep_detection
+from . import audio_routing, classifier, output_gate, reasoning_loop
+from . import sleep_detection  # noqa: F401  (read through world.py; tests patch it here)
 from .cognitive import evaluators as cognitive_rules
-from .const import (
-    DEFAULT_OBSERVER_QUIET_END, DEFAULT_OBSERVER_QUIET_START,
-)
 from .llm_provider import create_tier_provider
 
 _LOGGER = logging.getLogger(__name__)
@@ -765,36 +763,29 @@ async def _process_event(event: Event) -> None:
             old_state.state, new_state.state, urgency_hint, category,
         )
 
-        # Sleep + presence context for reasoning
-        bedroom_areas = _STATE.config.get("bedroom_areas", []) or []
-        _quiet_start = _STATE.config.get("observer_quiet_start", DEFAULT_OBSERVER_QUIET_START)
-        _quiet_end = _STATE.config.get("observer_quiet_end", DEFAULT_OBSERVER_QUIET_END)
-        sleeping, sleep_reason = sleep_detection.is_sleeping(
-            _STATE.hass,
-            bedroom_area_ids=bedroom_areas,
-            quiet_start=_quiet_start,
-            quiet_end=_quiet_end,
-        )
-        # Quiet hours are time-based and do NOT require bedroom presence. During
-        # quiet hours only CRITICAL events may speak — everything else is held to
-        # a phone notification at most. This is independent of sleep detection so
-        # announcements can't slip through just because no one is in a bedroom.
-        in_quiet_hours = sleep_detection._in_quiet_hours(_quiet_start, _quiet_end)
+        # One reading for this event (8.46.0): sleep, quiet hours and who is
+        # home from the world.py resolvers, the same ones the 30 second
+        # check and delivery use. Quiet hours are time-based and do NOT
+        # require bedroom presence: during quiet hours only CRITICAL events
+        # may speak, so announcements can't slip through just because no one
+        # is in a bedroom. Who is home comes from household.py: people, plus
+        # device trackers linked to a person, so a tracker linked to nobody
+        # (a hub, a TV) never makes an empty house look occupied. Delivery
+        # judges this event against the same reading.
+        from . import alert_path, world
+        asleep_fact = world.asleep(_STATE.hass)
+        quiet_fact = world.quiet_hours(_STATE.hass)
+        sleeping, sleep_reason = asleep_fact.value is True, asleep_fact.source
+        in_quiet_hours = quiet_fact.value is True
         occupied_areas = audio_routing.currently_occupied_areas(_STATE.hass)
         presence_context = (
             f"user appears to be sleeping ({sleep_reason})"
             if sleeping else
             f"awake; occupied areas: {occupied_areas or 'none detected'}"
         )
-
-        # Whether a registered user is home — open windows / unlocked doors are
-        # normal household state when someone's in, only notable when away.
-        # From household.py (8.22.0): people, plus device trackers linked to
-        # a person. A tracker linked to nobody (a hub, a TV) reads "home"
-        # permanently and must never make an empty house look occupied.
-        from . import alert_path
         sit = alert_path.situation(
-            _STATE.hass, _STATE.config, sleeping=sleeping, quiet=in_quiet_hours)
+            _STATE.hass, _STATE.config, sleeping=asleep_fact, quiet=quiet_fact,
+            house=world.presence(_STATE.hass, _STATE.config).value)
         anyone_home = sit.anyone_home
 
         # Tier 2: reason
@@ -862,7 +853,7 @@ async def _process_event(event: Event) -> None:
             source="observer", message=message, urgency=final_urgency,
             entity_id=entity_id, category=category, push=delivery.PUSH_HIGH,
             title="Nova" if final_urgency != "critical" else "⚠ Nova URGENT",
-            tts_context="sentinel"))
+            tts_context="sentinel", reading=sit))
         if not out.spoken:
             _LOGGER.info("Observer not spoken '%s' — %s", message, out.decision.reason)
 

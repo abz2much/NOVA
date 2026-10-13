@@ -43,7 +43,11 @@ def no_wait(cc, monkeypatch):
     monkeypatch.setattr(cc.asyncio, "sleep", fake_sleep)
 
 
-def _event(old, new):
+def _event(old, new, hass=None):
+    """A lock state change. As in Home Assistant, the state machine already
+    reads the new state when the event arrives (the live check, 8.46.0)."""
+    if hass is not None:
+        hass.states.set(LOCK, new, friendly_name="Front Door")
     return types.SimpleNamespace(data={
         "entity_id": LOCK, "old_state": FakeState(LOCK, old, {"friendly_name": "Front Door"}),
         "new_state": FakeState(LOCK, new, {"friendly_name": "Front Door"})})
@@ -65,12 +69,12 @@ async def test_the_second_unlock_is_a_critical_alert_and_the_lock_is_never_adopt
         cc, fake_hass, announced):
     mgr = await _lockdown_with_the_door_locked_by_nova(cc, fake_hass)
 
-    await cc._on_lockdown_state(_event("locked", "unlocked"))
+    await cc._on_lockdown_state(_event("locked", "unlocked", fake_hass))
     assert service_calls(fake_hass, "lock", "lock") == [("lock", "lock", {"entity_id": LOCK})]
     assert announced == []
     fake_hass.close_pending()
 
-    await cc._on_lockdown_state(_event("locked", "unlocked"))
+    await cc._on_lockdown_state(_event("locked", "unlocked", fake_hass))
     assert announced == [{"type": "lockdown_breach", "urgency": "critical", "auto_act": True,
                           "message": "Sir, Front Door was unlocked again during lockdown "
                                      "after I locked it. Please check it."}]
@@ -83,9 +87,9 @@ async def test_the_second_unlock_is_a_critical_alert_and_the_lock_is_never_adopt
 
 async def test_a_lock_is_never_exempt_after_a_restart(cc, fake_hass, announced, tmp_path):
     mgr = await _lockdown_with_the_door_locked_by_nova(cc, fake_hass)
-    await cc._on_lockdown_state(_event("locked", "unlocked"))
+    await cc._on_lockdown_state(_event("locked", "unlocked", fake_hass))
     fake_hass.close_pending()
-    await cc._on_lockdown_state(_event("locked", "unlocked"))
+    await cc._on_lockdown_state(_event("locked", "unlocked", fake_hass))
     assert LOCK not in mgr.exempt_windows
 
     # A state file written by 8.7.19 or earlier, with the lock adopted.
@@ -98,6 +102,7 @@ async def test_a_lock_is_never_exempt_after_a_restart(cc, fake_hass, announced, 
     assert restored.active is True
     assert restored.exempt_windows == {"binary_sensor.bathroom_window"}   # windows still kept
     fake_hass.service_calls.clear()
+    fake_hass.states.set(LOCK, "unlocked", friendly_name="Front Door")
     alert = await restored.handle_state_change(
         LOCK, FakeState(LOCK, "locked"), FakeState(LOCK, "unlocked", {"friendly_name": "Front Door"}))
     assert alert is None                                               # relocked like any lock
@@ -108,14 +113,14 @@ async def test_a_lock_is_never_exempt_after_a_restart(cc, fake_hass, announced, 
 async def test_the_relock_check_raises_one_critical_alert_and_sends_nothing(
         cc, fake_hass, announced, no_wait):
     mgr = await _lockdown_with_the_door_locked_by_nova(cc, fake_hass)
-    await cc._on_lockdown_state(_event("locked", "unlocked"))          # relocked, check scheduled
+    await cc._on_lockdown_state(_event("locked", "unlocked", fake_hass))          # relocked, check scheduled
     pending_checks = list(fake_hass._tasks)
     fake_hass._tasks = []
     fake_hass.states.set(LOCK, "unlocked", friendly_name="Front Door")
     for check in pending_checks:                                       # 25 s later: still unlocked
         await check
     assert [a["urgency"] for a in announced] == ["critical"]
-    await cc._on_lockdown_state(_event("locked", "unlocked"))          # the second unlock event
+    await cc._on_lockdown_state(_event("locked", "unlocked", fake_hass))          # the second unlock event
     assert [a["urgency"] for a in announced] == ["critical"]           # one alert, not two
     assert len(service_calls(fake_hass, "lock", "lock")) == 1
     assert service_calls(fake_hass, "lock", "unlock") == []
@@ -124,9 +129,9 @@ async def test_the_relock_check_raises_one_critical_alert_and_sends_nothing(
 
 async def test_a_new_lockdown_starts_with_no_adopted_locks(cc, fake_hass, announced):
     mgr = await _lockdown_with_the_door_locked_by_nova(cc, fake_hass)
-    await cc._on_lockdown_state(_event("locked", "unlocked"))
+    await cc._on_lockdown_state(_event("locked", "unlocked", fake_hass))
     fake_hass.close_pending()
-    await cc._on_lockdown_state(_event("locked", "unlocked"))
+    await cc._on_lockdown_state(_event("locked", "unlocked", fake_hass))
     await mgr.disengage("morning", manual=True)
     fake_hass.states.set(LOCK, "unlocked", friendly_name="Front Door")
     fake_hass.service_calls.clear()

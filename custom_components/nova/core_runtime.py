@@ -228,29 +228,18 @@ async def _tick():
     _m_state._CORE.tick_count += 1
     _m_state._CORE.last_tick = time.time()
 
-    from . import sleep_detection
-    bedroom_areas = config.get("bedroom_areas", []) or []
-    # (offer-area resolution for room-scoped modes lives in _offer_area, below.)
-    sleeping, _ = sleep_detection.is_sleeping(
-        hass,
-        bedroom_area_ids=bedroom_areas,
-        quiet_start=config.get("observer_quiet_start", "22:00"),
-        quiet_end=config.get("observer_quiet_end", "07:00"),
-    )
-
     # One read-only snapshot of the house for the whole tick (world.py,
     # 8.24.0): the household.py answer (people, plus device trackers linked
     # to a person; unknown is never away, motion never counts), asleep,
     # quiet hours, what is open or unlocked, lockdown, open situations.
     # Every source in this tick reads it; it is dropped when the tick ends.
+    # Sleep and quiet hours come from the world.py resolvers (8.46.0), the
+    # same ones delivery and the Observer use, with the live settings.
     from . import world
-    try:
-        quiet = sleep_detection._in_quiet_hours(
-            config.get("observer_quiet_start", "22:00"),
-            config.get("observer_quiet_end", "07:00"))
-    except Exception:
-        quiet = world.UNKNOWN
-    snap = world.begin_tick(hass, config, asleep=sleeping, quiet_hours=quiet,
+    asleep_fact = world.asleep(hass)
+    quiet_fact = world.quiet_hours(hass)
+    sleeping = asleep_fact.value is True
+    snap = world.begin_tick(hass, config, asleep=asleep_fact, quiet_hours=quiet_fact,
                             tick=_m_state._CORE.tick_count)
     try:
         from . import household

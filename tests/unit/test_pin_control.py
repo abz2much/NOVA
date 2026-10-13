@@ -168,6 +168,7 @@ async def test_a_service_failure_is_an_error_not_a_success(ctl, hass, audit, con
     async def boom(*a, **k):
         raise RuntimeError("lock offline")
     hass.services.async_call = boom
+    hass.states.set("lock.front_door", "unlocked", friendly_name="Front Door")
     res = json.loads(await ctl._exec_control_device(hass, {"entity_id": "lock.front_door",
                                                            "action": "lock"}))
     assert res["success"] is False and res["status"] == "error"

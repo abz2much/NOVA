@@ -394,7 +394,7 @@
             "friendly_name": "Front Door"
           },
           "entity_id": "lock.front_door",
-          "state": "locked"
+          "state": "unlocked"
         },
         {
           "attributes": {

@@ -10,6 +10,7 @@ the design report calls out explicitly as needing duplicate prevention.
 from __future__ import annotations
 
 import os
+import types
 import tempfile
 
 import pytest
@@ -219,7 +220,9 @@ async def test_verify_control_retry_updates_existing_row_not_a_new_one(
     monkeypatch.setattr(agent, "_state_ok", fake_state_ok)
     monkeypatch.setattr(agent, "_VERIFY_SLEEP", _no_sleep)
 
-    hass = _FakeHass()
+    # The lock still reads unlocked when the retry is decided (live check).
+    hass = _FakeHass({"lock.front_door": types.SimpleNamespace(
+        entity_id="lock.front_door", state="unlocked", attributes={})})
     await agent._verify_control(
         hass, "lock.front_door", "lock", "lock", "lock",
         {"entity_id": "lock.front_door"}, action_id=aid,
