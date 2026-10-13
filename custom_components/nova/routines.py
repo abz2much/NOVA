@@ -166,6 +166,13 @@ async def async_run_routine(
                         lambda rid=row_id, ar=approval_result: action_log.set_approval(
                             rid, ar, approval_required=(ar != "not_required"))
                     )
+                    if not ok_gate and decision.already_secure:
+                        # Already locked, closed or armed (8.46.0): nothing sent.
+                        await hass.async_add_executor_job(
+                            lambda rid=row_id: action_log.set_execution(
+                                rid, "blocked", reason_code="already_secure")
+                        )
+                        continue
                     if not ok_gate:
                         if step.get("optional"):
                             _LOGGER.debug(
@@ -177,8 +184,8 @@ async def async_run_routine(
                                 service, gate_note)
                             errors.append(f"{service}: {gate_note or 'confirmation required'}")
                         await hass.async_add_executor_job(
-                            lambda rid=row_id: action_log.set_execution(
-                                rid, "blocked", reason_code="confirmation_not_approved")
+                            lambda rid=row_id, code=(decision.code or "confirmation_not_approved"):
+                            action_log.set_execution(rid, "blocked", reason_code=code)
                         )
                         continue
 

@@ -16,6 +16,8 @@ import pathlib
 
 import pytest
 
+from conftest import readable_devices
+
 ROOT = pathlib.Path(__file__).resolve().parents[2] / "custom_components" / "nova"
 SECURITY_DOMAINS = {"lock", "cover", "alarm_control_panel", "scene", "script"}
 AUTHORITY = {"authorize", "authorize_now"}
@@ -160,6 +162,14 @@ class _VC:
 
 
 @pytest.fixture
+def readable(fake_hass):
+    """The devices the table acts on read a state that is not already
+    secure, so the live check (8.46.0) lets the policy decide."""
+    readable_devices(fake_hass, "lock.x", "cover.x", "alarm_control_panel.x",
+                     "alarm_control_panel.home")
+
+
+@pytest.fixture
 def pol(load, monkeypatch):
     p = load("policy")
     fake = _VC()
@@ -199,7 +209,7 @@ TABLE = [
 
 
 @pytest.mark.parametrize("domain,service,source,confirm_on,allowed,asked", TABLE)
-async def test_action_by_source(pol, fake_hass, domain, service, source, confirm_on,
+async def test_action_by_source(readable, pol, fake_hass, domain, service, source, confirm_on,
                                 allowed, asked):
     p, fake = pol
     fake.enabled = confirm_on
@@ -211,7 +221,7 @@ async def test_action_by_source(pol, fake_hass, domain, service, source, confirm
 
 
 @pytest.mark.parametrize("answer", ["rejected", "expired"])
-async def test_a_refused_phone_tap_blocks_the_disarm(pol, fake_hass, answer):
+async def test_a_refused_phone_tap_blocks_the_disarm(readable, pol, fake_hass, answer):
     p, fake = pol
     fake.phone_answer = answer
     d = await p.authorize(fake_hass, _req(p, "alarm_control_panel", "alarm_disarm", "voice"))
@@ -220,7 +230,7 @@ async def test_a_refused_phone_tap_blocks_the_disarm(pol, fake_hass, answer):
 
 
 @pytest.mark.parametrize("confirm_on", [False, True])
-async def test_disarm_from_a_voice_satellite_needs_a_phone_tap(pol, fake_hass, confirm_on):
+async def test_disarm_from_a_voice_satellite_needs_a_phone_tap(readable, pol, fake_hass, confirm_on):
     p, fake = pol
     fake.enabled = confirm_on
     fake.satellites.add("sat1")
@@ -231,7 +241,7 @@ async def test_disarm_from_a_voice_satellite_needs_a_phone_tap(pol, fake_hass, c
 
 
 @pytest.mark.parametrize("confirm_on", [False, True])
-def test_disarm_by_voice_is_held_where_nothing_can_be_asked(pol, fake_hass, confirm_on):
+def test_disarm_by_voice_is_held_where_nothing_can_be_asked(readable, pol, fake_hass, confirm_on):
     p, fake = pol
     fake.enabled = confirm_on
     held = p.authorize_now(fake_hass, _req(p, "alarm_control_panel", "alarm_disarm", "voice"))
@@ -240,7 +250,7 @@ def test_disarm_by_voice_is_held_where_nothing_can_be_asked(pol, fake_hass, conf
     assert ok.allowed
 
 
-async def test_it_fails_closed(pol, fake_hass, monkeypatch, load):
+async def test_it_fails_closed(readable, pol, fake_hass, monkeypatch, load):
     p, _ = pol
 
     def boom(*a, **k):
@@ -296,6 +306,24 @@ async def test_the_voice_reply_holds_a_device_that_needs_confirmation(
             for p_ in al.page_requests()["requests"] for t in p_["targets"]}
     assert rows == {"lock.back": "accepted", "lock.front": "blocked"}
     assert [c[2]["entity_id"] for c in fake_hass.service_calls] == [["lock.back"]]
+
+
+async def test_the_voice_reply_sends_nothing_to_what_is_already_secure(
+        load, fake_hass, al, pol):
+    """8.46.0: the live check. A locked lock gets no command but still counts
+    as secure in the reply; an unreadable one is held and logged why."""
+    fake_hass.states.set("lock.front", "locked")
+    fake_hass.states.set("lock.back", "unlocked")
+    fake_hass.states.set("lock.side", "unavailable")
+    r = _router(load, fake_hass)
+    out = await r.execute({"intent": "secure_area"}, "hall")
+    assert out["executed"] and sorted(out["entities"]) == ["lock.back", "lock.front"]
+    assert [c[2]["entity_id"] for c in fake_hass.service_calls] == [["lock.back"]]
+    rows = {t["entity_id"]: (t["execution_result"], t["reason_code"])
+            for p_ in al.page_requests()["requests"] for t in p_["targets"]}
+    assert rows == {"lock.back": ("accepted", None),
+                    "lock.front": ("blocked", "already_secure"),
+                    "lock.side": ("blocked", "device_unreadable")}
 
 
 async def test_an_offer_nova_runs_on_its_own_may_not_unlock(load, fake_hass, al, pol):

@@ -315,8 +315,8 @@ async def _execute_action_data(
             _LOGGER.info("Proactive action %s.%s on %s not authorized: %s",
                          domain, service, eid, decision.note or decision.approval)
             await hass.async_add_executor_job(
-                lambda: action_log.set_execution(
-                    action_id, "blocked", reason_code="not_authorized")
+                lambda code=(decision.code or "not_authorized"): action_log.set_execution(
+                    action_id, "blocked", reason_code=code)
             )
             return False
     try:

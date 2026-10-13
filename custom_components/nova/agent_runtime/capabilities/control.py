@@ -148,6 +148,18 @@ async def _exec_control_device(hass: HomeAssistant, args: dict, device_id: Optio
                     approval_required=(approval_result != "not_required"),
                 )
             )
+            if not ok and decision.code and approval_result == "not_required":
+                # Stopped by the live check (8.46.0): already secure, or the
+                # device or its door sensor cannot be read. Nothing is sent.
+                await hass.async_add_executor_job(
+                    lambda: action_log.set_execution(action_id, "blocked", reason_code=decision.code)
+                )
+                return json.dumps({
+                    "success": decision.already_secure,
+                    "status": "already_secure" if decision.already_secure else "refused",
+                    "entity_id": entity_id,
+                    "message": decision.note,
+                })
             if not ok:
                 await hass.async_add_executor_job(
                     lambda: action_log.set_execution(action_id, "blocked", reason_code="confirmation_not_approved")
@@ -487,6 +499,7 @@ async def _exec_bulk_control(hass: HomeAssistant, args: dict, device_id: Optiona
     # and synchronous, so it's known before this single transaction, letting
     # every target (attempted or policy-blocked) land in the same insert.
     plan: list[tuple[str, str, str, bool]] = []  # (eid, sd, sn, will_attempt)
+    live_notes: list[str] = []   # what the live check found (8.46.0)
     targets_for_log: list[dict] = []
     for eid in entities:
         svc_domain = eid.split(".")[0]
@@ -494,10 +507,23 @@ async def _exec_bulk_control(hass: HomeAssistant, args: dict, device_id: Optiona
             continue
         sd = svc_map[action][0] or svc_domain
         sn = svc_map[action][1]
-        will_block = not policy.authorize_now(hass, policy.AuthorityRequest(
-            sd, sn, eid, device_id=device_id or "", user_id=user_id or "")).allowed
+        now = policy.authorize_now(hass, policy.AuthorityRequest(
+            sd, sn, eid, device_id=device_id or "", user_id=user_id or ""))
+        will_block = not now.allowed
         plan.append((eid, sd, sn, not will_block))
-        if will_block:
+        if will_block and now.code:
+            live_notes.append(now.note)
+            # The live check (8.46.0): already secure, unreadable, or its
+            # door is open. Named with the reason; nothing is sent.
+            targets_for_log.append({
+                "key": eid, "domain": sd, "service": sn, "entity_id": eid,
+                "approval_required": now.approval == "deferred",
+                "approval_result": ("not_requested" if now.approval == "deferred"
+                                    else "not_required"),
+                "execution_result": "blocked", "reason_code": now.code,
+                "reason_text": now.note,
+            })
+        elif will_block:
             targets_for_log.append({
                 "key": eid, "domain": sd, "service": sn, "entity_id": eid,
                 "approval_required": True, "approval_result": "not_requested",
@@ -581,6 +607,8 @@ async def _exec_bulk_control(hass: HomeAssistant, args: dict, device_id: Optiona
         }
         if blocked:
             result["blocked"] = blocked
+        if live_notes:
+            result["checked"] = live_notes
         if failed:
             result["failed"] = failed
         return json.dumps(result)
@@ -608,6 +636,8 @@ async def _exec_bulk_control(hass: HomeAssistant, args: dict, device_id: Optiona
         result["blocked"] = blocked
         result["note"] = (f"{blocked} protected device(s) not changed in bulk; "
                           f"confirm each individually.")
+    if live_notes:
+        result["checked"] = live_notes
     if failed:
         result["failed"] = failed
     return json.dumps(result)
@@ -738,10 +768,15 @@ async def _exec_execute_plan(hass: HomeAssistant, args: dict, device_id: Optiona
                 rid, ar, approval_required=(ar != "not_required"))
         )
         if not ok_gate:
-            results.append({"step": i + 1, "description": desc,
-                            "ok": False, "error": gate_note or "confirmation required"})
+            if decision.already_secure:
+                results.append({"step": i + 1, "description": desc, "ok": True,
+                                "note": gate_note})
+            else:
+                results.append({"step": i + 1, "description": desc,
+                                "ok": False, "error": gate_note or "confirmation required"})
             await hass.async_add_executor_job(
-                lambda rid=row_id: action_log.set_execution(rid, "blocked", reason_code="confirmation_not_approved")
+                lambda rid=row_id, code=(decision.code or "confirmation_not_approved"):
+                action_log.set_execution(rid, "blocked", reason_code=code)
             )
             continue
 
@@ -877,10 +912,16 @@ async def _verify_control(hass: HomeAssistant, entity_id: str, action: str,
         from ... import policy
         retry = policy.authorize_now(hass, policy.AuthorityRequest(
             svc_domain, svc_name, entity_id, source=policy.SOURCE_AUTOMATIC))
+        if retry.already_secure:
+            # It reached the state while the retry was being decided.
+            await hass.async_add_executor_job(
+                lambda: action_log.set_execution(action_id, "verified"))
+            return
         if not retry.allowed:
             await hass.async_add_executor_job(
                 lambda: action_log.set_execution(
-                    action_id, "unverified", reason_code="retry_not_authorized"))
+                    action_id, "unverified",
+                    reason_code=retry.code or "retry_not_authorized"))
             return
         _LOGGER.info("verify: %s not %s after %s — retrying once",
                      entity_id, "/".join(expected), action)

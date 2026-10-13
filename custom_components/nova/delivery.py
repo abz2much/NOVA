@@ -46,8 +46,9 @@ can be tested and read in one place. Conversation replies never come here.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Any, Optional
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -92,6 +93,10 @@ class DeliveryRequest:
                                       # "": the source counts its own days
     asleep: Optional[bool] = None     # the source's own sleep reading (the
                                       # core's tick); None: read here
+    # The reading the source already took for this event (an
+    # alert_path.Situation, 8.46.0): sleep, quiet hours and who is home come
+    # from it instead of being read again. None: read here.
+    reading: Any = field(default=None, compare=False, hash=False)
     motion_counts: bool = False       # speaker routing may count live motion as
                                       # someone home (an intruder's movement)
     record_kind: str = ""             # Decision Record kind; empty: not recorded
@@ -113,6 +118,8 @@ class Conditions:
     gate_allowed: bool = True
     gate_reason: str = ""
     anyone_home: Optional[bool] = None   # None: unknown
+    # The reading these came from, kept for the Decision Record (8.46.0).
+    situation: Any = field(default=None, compare=False)
 
 
 @dataclass
@@ -166,23 +173,11 @@ def decide(req: DeliveryRequest, cond: Conditions) -> Decision:
 # ── reading the household ───────────────────────────────────────────────────
 
 def _setting(hass, key: str, default):
-    """The live panel setting, then the saved config, then `default`. A
-    loaded entry that has lost its runtime is logged and reads the default:
-    an alert, a critical one above all, is never dropped for it."""
-    from .runtime import NovaRuntimeUnavailable
-    try:
-        from . import nova_config
-        from .runtime import domain_runtime_config
-        rc = domain_runtime_config(hass)
-        if key in rc and rc[key] not in (None, ""):
-            return rc[key]
-        value = nova_config.get(key, None)
-        return default if value in (None, "") else value
-    except NovaRuntimeUnavailable as exc:
-        _LOGGER.warning("delivery: live settings unavailable, using defaults: %s", exc)
-        return default
-    except Exception:
-        return default
+    """The live panel setting, then the saved config, then `default`
+    (world.setting). A loaded entry that has lost its runtime reads the
+    default: an alert, a critical one above all, is never dropped for it."""
+    from . import world
+    return world.setting(hass, key, default)
 
 
 def _on(value) -> bool:
@@ -191,17 +186,17 @@ def _on(value) -> bool:
 
 
 def quiet_hours(hass) -> tuple:
-    """The household's quiet hours as ("HH:MM", "HH:MM")."""
-    from .const import DEFAULT_OBSERVER_QUIET_END, DEFAULT_OBSERVER_QUIET_START
-    return (str(_setting(hass, "observer_quiet_start", DEFAULT_OBSERVER_QUIET_START)),
-            str(_setting(hass, "observer_quiet_end", DEFAULT_OBSERVER_QUIET_END)))
+    """The household's quiet hours as ("HH:MM", "HH:MM") (world.py)."""
+    from . import world
+    return world.quiet_window(hass)
 
 
 def in_quiet_hours(hass) -> bool:
-    """Whether it is the household's quiet hours now. Never raises."""
+    """Whether it is the household's quiet hours now (world.py). Unknown
+    reads as not quiet hours. Never raises."""
     try:
-        from . import sleep_detection
-        return bool(sleep_detection._in_quiet_hours(*quiet_hours(hass)))
+        from . import world
+        return world.quiet_hours(hass).value is True
     except Exception:
         return False
 
@@ -209,31 +204,41 @@ def in_quiet_hours(hass) -> bool:
 def conditions(hass, req: DeliveryRequest) -> Conditions:
     """Read the switches, quiet hours, sleep and the output gate. Never
     raises: an unreadable rule reads as its default."""
-    from . import nova_config, settings_schema, sleep_detection
+    from . import nova_config, settings_schema
     announcements_on = _on(_setting(
         hass, "announcements_enabled", settings_schema.default("announcements_enabled")))
     try:
         notify_only = nova_config.announce_notify_only(hass)
     except Exception:
         notify_only = False
-    quiet_start, quiet_end = quiet_hours(hass)
-    quiet = in_quiet_hours(hass)
-    asleep = req.asleep
-    if asleep is None:
+    # Presence, sleep and quiet hours (8.46.0): the reading the source took
+    # for this event, or one read here from the world.py resolvers. Read
+    # once, and kept with the decision.
+    from . import alert_path, household, world
+    sit = req.reading
+    if sit is None:
+        quiet_start, quiet_end = quiet_hours(hass)
+        quiet = world.Fact(bool(in_quiet_hours(hass)),
+                           f"quiet hours setting {quiet_start}-{quiet_end}", time.time())
+        if req.asleep is None:
+            asleep = world.asleep(hass)
+        else:
+            asleep = world.Fact(bool(req.asleep),
+                                f"{req.source or 'the source'}'s own reading", time.time())
         try:
-            asleep, _why = sleep_detection.is_sleeping(
-                hass, bedroom_area_ids=_setting(hass, "bedroom_areas", []) or [],
-                quiet_start=quiet_start, quiet_end=quiet_end)
+            sit = alert_path.situation(hass, sleeping=asleep, quiet=quiet)
         except Exception:
-            asleep = False
+            sit = None
+    quiet_on = bool(getattr(sit, "quiet", False)) if sit is not None else quiet.value is True
+    if req.asleep is not None:
+        asleep_on = bool(req.asleep)
+    elif sit is not None:
+        asleep_on = bool(sit.sleeping)
+    else:
+        asleep_on = asleep.value is True
     anyone_home = None
-    try:
-        from . import alert_path, household
-        sit = alert_path.situation(hass)
-        if sit.residents != household.UNKNOWN:
-            anyone_home = sit.anyone_home
-    except Exception:
-        anyone_home = None
+    if sit is not None and sit.residents != household.UNKNOWN:
+        anyone_home = sit.anyone_home
     gate_allowed, gate_reason = True, ""
     if req.urgency != "critical" and not req.requested_by_user:
         try:
@@ -245,9 +250,9 @@ def conditions(hass, req: DeliveryRequest) -> Conditions:
         except Exception as exc:
             _LOGGER.debug("delivery: output gate unreadable: %s", exc)
     return Conditions(announcements_on=announcements_on, notify_only=notify_only,
-                      quiet_hours=bool(quiet), asleep=bool(asleep),
+                      quiet_hours=quiet_on, asleep=asleep_on,
                       gate_allowed=bool(gate_allowed), gate_reason=str(gate_reason or ""),
-                      anyone_home=anyone_home)
+                      anyone_home=anyone_home, situation=sit)
 
 
 def _speakers(hass, req: DeliveryRequest, cond: Conditions) -> tuple:
@@ -438,7 +443,8 @@ def _habit_note(req: DeliveryRequest) -> str:
 async def _record(hass, req: DeliveryRequest, cond: Conditions, out: Outcome) -> None:
     """One Decision Record entry in the shared format (alert_path)."""
     from . import alert_path
-    sit = alert_path.situation(hass, sleeping=cond.asleep, quiet=cond.quiet_hours)
+    sit = cond.situation or alert_path.situation(hass, sleeping=cond.asleep,
+                                                 quiet=cond.quiet_hours)
     plan = alert_path.Plan(alert=out.decision.delivered, speak=out.spoken,
                            push=bool(out.pushed), reason=out.decision.reason)
     await alert_path.async_record_decision(

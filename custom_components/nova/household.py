@@ -21,7 +21,8 @@ Pure reads of the state machine. Nothing here calls a service.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 
 HOME = "home"
 AWAY = "away"
@@ -112,9 +113,13 @@ def everyone_away(hass) -> bool:
 
 @dataclass(frozen=True)
 class Household:
-    """One reading of the household, taken once per tick."""
+    """One reading of the household, taken once per tick, event or request.
+    `source` says what decided the residents answer and `read_at` when it
+    was read (8.46.0); neither takes part in comparisons."""
     residents: str
     alarm_states: frozenset
+    source: str = field(default="", compare=False)
+    read_at: float = field(default=0.0, compare=False)
 
     @property
     def posture(self) -> str:
@@ -172,8 +177,35 @@ def snapshot(hass, config: dict | None = None) -> Household:
 def _live_snapshot(hass, config: dict | None = None) -> Household:
     """Read the household now: residents, and the selected alarm's state."""
     from . import alarm_source
-    states = frozenset(_lower(st) for st in alarm_source.states(hass, config))
-    return Household(residents=residents(hass), alarm_states=states)
+    alarms = list(alarm_source.states(hass, config))
+    states = frozenset(_lower(st) for st in alarms)
+    source = residents_source(hass)
+    ids = [getattr(st, "entity_id", "") for st in alarms]
+    if any(ids):
+        source += "; alarm " + ", ".join(i for i in ids if i)
+    return Household(residents=residents(hass), alarm_states=states,
+                     source=source, read_at=time.time())
+
+
+def residents_source(hass) -> str:
+    """Where the residents answer came from: each person and the reading
+    that decided it, or the device trackers when there are no people."""
+    try:
+        people = list(hass.states.async_all("person"))
+        if not people:
+            return "device trackers (no person entities)"
+        parts = []
+        for p in people:
+            reading = _person_reading(hass, p)
+            via = ""
+            if reading == HOME and _lower(p) != "home":
+                via = next((t for t in p.attributes.get("device_trackers") or ()
+                            if hass.states.get(t) is not None
+                            and _lower(hass.states.get(t)) == "home"), "")
+            parts.append(f"{p.entity_id} {reading}" + (f" via {via}" if via else ""))
+        return "people: " + ", ".join(parts)
+    except Exception:
+        return "unreadable"
 
 
 # ── shared entity rules ─────────────────────────────────────────────────────

@@ -10,7 +10,17 @@ import types
 
 import pytest
 
-from fakes import FakeHass
+from conftest import readable_devices
+from fakes import FakeHass as _BareHass
+
+
+def FakeHass():
+    """A fake hass whose lock, cover and alarm read a state that is not
+    already secure, so the live check (8.46.0) lets the policy decide."""
+    h = _BareHass()
+    readable_devices(h, "lock.front_door", "lock.front", "cover.garage_door",
+                     "cover.garage", "alarm_control_panel.home")
+    return h
 
 
 @pytest.fixture

@@ -445,6 +445,19 @@ def route_delivery(load, monkeypatch, *, quiet=lambda h: False,
     return dl
 
 
+_READABLE = {"lock": "unlocked", "cover": "open", "alarm_control_panel": "disarmed"}
+
+
+def readable_devices(hass, *entity_ids):
+    """Give each lock, cover or alarm a readable state that is not already
+    secure, for tests written before the live check (8.46.0) that act on a
+    device they never set. A device with no state is refused by that check."""
+    for eid in entity_ids:
+        domain = eid.split(".", 1)[0]
+        if hass.states.get(eid) is None and domain in _READABLE:
+            hass.states.set(eid, _READABLE[domain])
+
+
 @pytest.fixture
 def fake_hass():
     """A fresh fake Home Assistant core (named `fake_hass` to avoid colliding

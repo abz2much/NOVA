@@ -158,37 +158,47 @@ class LocalIntentRouter:
 
     # ── Authority and the action log (8.24.0) ─────────────────────────────
     def _authorized(self, domain: str, service: str, entity_ids: list[str],
-                    user_id: str | None = None) -> tuple[list[str], list[str]]:
-        """Split entity_ids into (allowed, held) by the one authority check,
-        as a voice request. Locking, closing and lights are allowed; anything
-        that would need a confirmation is held, never sent. Fails closed."""
+                    user_id: str | None = None) -> tuple[list[str], list[str], dict]:
+        """Split entity_ids into (allowed, held, why) by the one authority
+        check, as a voice request. Locking, closing and lights are allowed;
+        anything that would need a confirmation is held, never sent. `why`
+        is the live check's reason for a held device (8.46.0): already
+        secure, cannot be read, or its door is open. Fails closed."""
         allowed: list[str] = []
         held: list[str] = []
+        why: dict = {}
         try:
             from .. import policy  # lazy — keeps module HA-free
         except Exception:  # noqa: BLE001
-            return [], list(entity_ids)
+            return [], list(entity_ids), why
         for eid in entity_ids:
             try:
-                ok = policy.authorize_now(self.hass, policy.AuthorityRequest(
+                decision = policy.authorize_now(self.hass, policy.AuthorityRequest(
                     domain, service, eid, source=policy.SOURCE_VOICE,
-                    user_id=user_id or "")).allowed
+                    user_id=user_id or ""))
+                ok = decision.allowed
+                if not ok and decision.code:
+                    why[eid] = decision.code
             except Exception:  # noqa: BLE001
                 ok = False
             (allowed if ok else held).append(eid)
-        return allowed, held
+        return allowed, held, why
 
     async def _log_start(self, intent: str, domain: str, service: str,
                          allowed: list[str], held: list[str],
-                         user_id: str | None = None) -> dict:
+                         user_id: str | None = None, why: dict | None = None) -> dict:
         """One action log request for this voice reply: a row per device,
-        the held ones already blocked. Best effort; returns {entity_id: row}."""
+        the held ones already blocked, with the live check's reason when it
+        held them (8.46.0). Best effort; returns {entity_id: row}."""
+        why = why or {}
         rows: list[dict] = [{"key": e, "domain": domain, "service": service, "entity_id": e}
                             for e in allowed]
         rows += [{"key": e, "domain": domain, "service": service, "entity_id": e,
-                  "approval_required": True, "approval_result": "not_requested",
+                  "approval_required": e not in why or why[e] == "door_open",
+                  "approval_result": ("not_requested" if e not in why or why[e] == "door_open"
+                                      else "not_required"),
                   "execution_result": "blocked",
-                  "reason_code": "confirmation_unavailable_in_voice_reply"}
+                  "reason_code": why.get(e, "confirmation_unavailable_in_voice_reply")}
                  for e in held]
         if not rows:
             return _Rows()
@@ -292,11 +302,14 @@ class LocalIntentRouter:
             candidates.append(st.entity_id)
         if not candidates:
             return []
-        candidates, held = self._authorized(domain, service, candidates, user_id)
+        candidates, held, why = self._authorized(domain, service, candidates, user_id)
         row_ids = await self._log_start(intent or f"{domain}.{service}", domain, service,
-                                        candidates, held, user_id)
+                                        candidates, held, user_id, why)
+        # Already locked or closed (8.46.0): nothing is sent, and they count
+        # as secure in the reply.
+        already = [e for e in held if why.get(e) == "already_secure"]
         if not candidates:
-            return []
+            return already
 
         # Concurrency control: only act on entities we can lock at this priority.
         tokens: dict = {}
@@ -350,7 +363,7 @@ class LocalIntentRouter:
             except Exception:  # noqa: BLE001
                 pass
         self._release_all(tokens)
-        return targets
+        return targets + already
 
     def _release_all(self, tokens: dict) -> None:
         if self.mutex is None:
@@ -413,11 +426,15 @@ class LocalIntentRouter:
                 return {"executed": False, "intent": intent,
                         "reason": "nothing active to act on in this area"}
             service = "close_cover" if domain == "cover" else "turn_off"
-            allowed, held = self._authorized(str(domain), service, [entity_id], user_id)
-            row_ids = await self._log_start(intent, str(domain), service, allowed, held, user_id)
+            allowed, held, why = self._authorized(str(domain), service, [entity_id], user_id)
+            row_ids = await self._log_start(intent, str(domain), service, allowed, held,
+                                            user_id, why)
             if not allowed:
+                reason = {"already_secure": "it is already closed",
+                          "device_unreadable": "it can't be read right now"}.get(
+                    why.get(entity_id, ""), "needs a confirmation the voice reply cannot ask for")
                 return {"executed": False, "intent": intent, "entity_id": entity_id,
-                        "reason": "needs a confirmation the voice reply cannot ask for"}
+                        "reason": reason}
             token = None
             if self.mutex is not None and priority is not None:
                 token = self.mutex.try_acquire(entity_id, priority)

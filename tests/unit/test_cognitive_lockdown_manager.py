@@ -136,6 +136,8 @@ def test_open_openings_skip_appliance_excluded_and_outdoor_contacts(cc, load, fa
 
 async def test_secure_entity_sends_the_right_service_and_reports_failure(cc, fake_hass):
     mgr = _mgr(cc, fake_hass)
+    fake_hass.states.set("lock.a", "unlocked")       # read live first (8.46.0)
+    fake_hass.states.set("cover.a", "open")
     assert await mgr._secure_entity("lock.a", "lock") is True
     assert await mgr._secure_entity("cover.a", "cover") is True
     assert fake_hass.service_calls == [("lock", "lock", {"entity_id": "lock.a"}),
@@ -575,6 +577,7 @@ async def test_an_unlocked_lock_is_locked_again_and_the_attempt_is_audited(
 async def test_a_reopened_closeable_cover_is_closed_again(cc, fake_hass):
     mgr = await _active(cc, fake_hass)
     new = _st("cover.garage", "open", device_class="garage")
+    fake_hass.states.set("cover.garage", "open", device_class="garage")   # as in HA
     assert await mgr.handle_state_change("cover.garage", _st("cover.garage", "closed"), new) is None
     assert service_calls(fake_hass, "cover", "close_cover") == [
         ("cover", "close_cover", {"entity_id": "cover.garage"})]
@@ -626,6 +629,7 @@ async def test_a_lock_unlocked_a_second_time_is_a_critical_alert_and_never_adopt
     mgr = await _active(cc, fake_hass)
     new = _st("lock.front", "unlocked", friendly_name="Front")
     old = _st("lock.front", "locked")
+    fake_hass.states.set("lock.front", "unlocked", friendly_name="Front")   # as in HA
     assert await mgr.handle_state_change("lock.front", old, new) is None          # locked again
     fake_hass.close_pending()
     alert = await mgr.handle_state_change("lock.front", old, new)                  # second unlock

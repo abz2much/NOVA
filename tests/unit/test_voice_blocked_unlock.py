@@ -42,6 +42,7 @@ class _Hass:
         self._satellites = satellites or []
         self.calls = []
         self.service_calls = []
+        self.state_of = {}
 
         class _States:
             def __init__(self, outer):
@@ -53,7 +54,9 @@ class _Hass:
                 return []
 
             def get(self, eid):
-                return types.SimpleNamespace(entity_id=eid, state="locked", attributes={})
+                return types.SimpleNamespace(
+                    entity_id=eid, state=self._outer.state_of.get(eid, "locked"),
+                    attributes={})
 
         class _Services:
             def __init__(self, outer):
@@ -292,6 +295,7 @@ async def test_control_device_lock_action_not_gated_by_device_id(agent, pol, mon
     monkeypatch.setattr(pol, "confirm_gate", fake_gate)
 
     hass = _Hass()
+    hass.state_of["lock.front_door"] = "unlocked"   # the live check (8.46.0)
     out = json.loads(await agent._exec_control_device(
         hass, {"entity_id": "lock.front_door", "action": "lock"}, device_id="dev-sat-1"))
     assert out.get("success") is True

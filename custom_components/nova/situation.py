@@ -13,26 +13,50 @@ reads); the agent calls it in the executor alongside the home-context build.
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 
 _LOGGER = logging.getLogger(__name__)
 
 
 def _time(hass) -> str:
     try:
-        dt = datetime.now()
+        from homeassistant.util import dt as dt_util
+        dt = dt_util.now()
         return "Time: " + dt.strftime("%A") + " " + dt.strftime("%I:%M %p").lstrip("0")
     except Exception:
         return ""
 
 
 def _presence(hass) -> str:
+    """Who is home, by the same rule as the rest of Nova (household.py,
+    8.46.0): a person counts as home when they, or a device tracker linked
+    to them, read home; a person who cannot be read is unknown, never away."""
     try:
-        from . import presence
-        s = (presence.presence_context_string(hass) or "").strip()
-        if not s or "No person entities" in s:
+        from . import household
+        people = list(hass.states.async_all("person"))
+        if not people:
             return ""
-        return "Presence: " + s
+        bits = []
+        for person in people:
+            name = person.attributes.get("friendly_name") or person.entity_id.split(".", 1)[-1]
+            reading = household._person_reading(hass, person)
+            where = str(person.state or "")
+            if reading == household.HOME:
+                bits.append(f"{name} is home")
+            elif reading == household.UNKNOWN:
+                bits.append(f"{name}'s whereabouts are unknown")
+            elif where in ("not_home", "away"):
+                bits.append(f"{name} is away")
+            else:
+                bits.append(f"{name} is at {where.replace('_', ' ')}")
+        line = "Presence: " + ". ".join(bits) + "."
+        try:
+            from . import presence
+            rooms = (presence.get_presence_summary(hass) or {}).get("rooms") or {}
+            if rooms:
+                line += f" Occupied areas: {', '.join(rooms)}."
+        except Exception:
+            pass
+        return line
     except Exception:
         return ""
 

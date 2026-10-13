@@ -349,6 +349,7 @@ async def confirm_gate(
     target_name: str = "",
     *,
     voice: bool = False,
+    warning: str = "",
 ) -> Tuple[bool, str, str]:
     """May this action proceed now? Returns ``(allowed, note, approval_result)``.
 
@@ -375,6 +376,9 @@ async def confirm_gate(
 
     ``target_name`` is only for the question a person hears or reads; it
     never takes part in the decision.
+
+    ``warning`` (8.46.0): what the live check found (an open door, open
+    zones). The action is then always asked, and the question starts with it.
 
     ``device_id`` (v7.87.0): when given and it's a voice satellite, an
     unlock/open action is ALWAYS gated behind a phone tap — never a spoken
@@ -419,7 +423,7 @@ async def confirm_gate(
         from . import voice_confirm
     except Exception as exc:
         risk, _ = classify(domain, service, entity_id)
-        if risk == "low":
+        if risk == "low" and not warning:
             return True, "", "not_required"
         _LOGGER.warning("policy: voice_confirm import failed for %s.%s (%s); denying",
                         domain, service, exc)
@@ -427,11 +431,11 @@ async def confirm_gate(
 
     # Does this action need confirmation at all?
     try:
-        protected = standdown or bool(
+        protected = standdown or bool(warning) or bool(
             voice_confirm.action_is_protected(hass, domain, service, entity_id))
     except Exception as exc:
         risk, _ = classify(domain, service, entity_id)
-        if risk == "low":
+        if risk == "low" and not warning:
             return True, "", "not_required"
         _LOGGER.warning("policy: protection check failed for %s.%s (%s); denying",
                         domain, service, exc)
@@ -451,11 +455,12 @@ async def confirm_gate(
     # request. Nova's reply asks instead, and the conversation keeps the mic
     # open on that satellite for the answer (pending_confirm.py).
     if _voice_satellite_request(hass, device_id):
-        return False, (f"{label} {ent} needs a spoken yes first; "
+        return False, (f"{warning} {label} {ent} needs a spoken yes first; "
                        "ask the user in your reply").strip(), "deferred"
 
     # Confirmation required — ask. ANY failure here denies (fail closed).
-    question = (f"{label} {ent} — are you sure?").strip()
+    question = (f"{warning} {label} {ent} anyway — are you sure?" if warning
+                else f"{label} {ent} — are you sure?").strip()
     try:
         result = await voice_confirm.confirm_typed(hass, question, entity_id=entity_id)
     except Exception as exc:
@@ -503,6 +508,29 @@ class AuthorityDecision:
     note: str = ""
     risk: str = "low"
     source: str = ""
+    code: str = ""              # the live check's reason (safety_check.py), if it stopped this
+
+    @property
+    def already_secure(self) -> bool:
+        """Nothing was sent because the device is already locked, closed or
+        armed (8.46.0)."""
+        from .safety_check import ALREADY_SECURE
+        return self.code == ALREADY_SECURE
+
+
+def _live(hass, request: "AuthorityRequest", source: str):
+    """The live check (safety_check.py, 8.46.0) for a lock, cover or alarm
+    command, or None when it does not apply."""
+    from . import safety_check
+    if not safety_check.applies(request.domain, request.service, request.entity_id):
+        return None
+    return safety_check.check(hass, request.domain, request.service, request.entity_id,
+                              automatic=source == SOURCE_AUTOMATIC)
+
+
+def _stopped(check, risk: str, source: str) -> "AuthorityDecision":
+    """The decision when the live check stops a command before the policy."""
+    return AuthorityDecision(False, "not_required", check.note, risk, source, check.code)
 
 
 def _automatic(req: AuthorityRequest, risk: str) -> AuthorityDecision:
@@ -529,15 +557,24 @@ def _kwargs(request: AuthorityRequest, *, with_target: bool) -> dict:
     return kw
 
 
-def authorize_now(hass, request: AuthorityRequest) -> AuthorityDecision:
+def authorize_now(hass, request: AuthorityRequest, *, live: bool = True) -> AuthorityDecision:
     """The decision without asking anyone: allowed, or held because it would
     need a confirmation (approval "deferred"). For paths that cannot ask
-    (bulk control, the local fast path). Fails closed above low risk."""
+    (bulk control, the local fast path). Fails closed above low risk.
+
+    A lock, cover or alarm command is checked live first (8.46.0). `live`
+    False skips that, only for questions that send nothing (would a saved
+    phrase need a confirmation)."""
     try:
         risk, _ = classify(request.domain, request.service, request.entity_id)
     except Exception:
         risk = "critical"
     source = request.source or SOURCE_CHAT
+    check = _live(hass, request, source) if live else None
+    if check is not None and check.verdict != "go":
+        if check.verdict == "ask":
+            return AuthorityDecision(False, "deferred", check.note, risk, source, check.code)
+        return _stopped(check, risk, source)
     if source == SOURCE_AUTOMATIC:
         return _automatic(request, risk)
     try:
@@ -557,23 +594,42 @@ async def authorize(hass, request: AuthorityRequest) -> AuthorityDecision:
     """May this action run now? Asks for confirmation when it must (a
     spoken yes, or a phone tap for unlock, open, disarm and standing down an
     intrusion when asked by voice). Fails closed: any error denies anything
-    above low risk."""
+    above low risk.
+
+    A lock, cover or alarm command is checked live first (8.46.0): an
+    unreadable device is refused, one already secure gets nothing, and an
+    open door or open zones are named in the question. After a yes it is
+    checked again, since the answer can take a while."""
     try:
         risk, _ = classify(request.domain, request.service, request.entity_id)
     except Exception:
         risk = "critical"
     source = request.source or SOURCE_CHAT
+    check = _live(hass, request, source)
+    if check is not None and check.verdict not in ("go", "ask"):
+        return _stopped(check, risk, source)
     if source == SOURCE_AUTOMATIC:
         return _automatic(request, risk)
+    warning = check.note if check is not None and check.verdict == "ask" else ""
     try:
+        kw = _kwargs(request, with_target=True)
+        if warning:
+            kw["warning"] = warning
         ok, note, approval = await confirm_gate(
             hass, request.domain, request.service, request.entity_id,
-            request.label, **_kwargs(request, with_target=True))
-        return AuthorityDecision(bool(ok), approval, note, risk, source)
+            request.label, **kw)
+        if ok and check is not None and approval == "approved":
+            from . import safety_check
+            again = safety_check.after_yes(hass, request.domain, request.service,
+                                           request.entity_id, check)
+            if again.verdict != "go":
+                return AuthorityDecision(False, approval, again.note, risk, source, again.code)
+        return AuthorityDecision(bool(ok), approval, note, risk, source,
+                                 "" if ok or not warning else check.code)
     except Exception as exc:
         _LOGGER.warning("policy: authorize failed for %s.%s (%s)",
                         request.domain, request.service, exc)
-        if risk == "low":
+        if risk == "low" and not warning:
             return AuthorityDecision(True, "not_required", "", risk, source)
         return AuthorityDecision(False, "error",
                                  "authorization failed — action denied for safety",

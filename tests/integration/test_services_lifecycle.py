@@ -576,6 +576,8 @@ async def test_protected_routine_step_still_needs_confirmation_and_audit(hass, m
     async def _unlock(call):
         unlocked.append(dict(call.data))
     hass.services.async_register("lock", "unlock", _unlock)
+    # The lock reads a state, so the live check (8.46.0) hands it to the gate.
+    hass.states.async_set("lock.front_door", "locked")
 
     async def _gate(hass_, domain, svc, entity, label):
         gates.append((domain, svc, entity))

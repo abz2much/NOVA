@@ -22,6 +22,8 @@ import types
 
 import pytest
 
+from conftest import readable_devices
+
 from fakes import FakeHass
 
 SAT_DEVICE = "dev-sat-kitchen"
@@ -93,7 +95,8 @@ def home(load, monkeypatch):
     monkeypatch.setattr(le, "_CTX", le._ConvCtx())
 
     hass = FakeHass()
-    hass.states.set("lock.front_door", "locked", friendly_name="Front Door")
+    # Unlocked, so locking it has something to do (the live check, 8.46.0).
+    hass.states.set("lock.front_door", "unlocked", friendly_name="Front Door")
     hass.states.set("cover.garage_door", "closed", friendly_name="Garage Door",
                     device_class="garage")
     hass.states.set("light.porch", "off", friendly_name="Porch Light")
@@ -270,9 +273,11 @@ def test_needs_confirmation_passes_the_device_only_when_there_is_one(load, monke
         return False
 
     monkeypatch.setattr(policy, "requires_confirmation", spy)
-    le._needs_confirmation(None, "unlock", "lock.front_door", SAT_DEVICE)
-    le._needs_confirmation(None, "unlock", "lock.front_door")
-    le._needs_confirmation_domain(None, "scene", "turn_on", "scene.movie", SAT_DEVICE)
+    hass = FakeHass()
+    readable_devices(hass, "lock.front_door")
+    le._needs_confirmation(hass, "unlock", "lock.front_door", SAT_DEVICE)
+    le._needs_confirmation(hass, "unlock", "lock.front_door")
+    le._needs_confirmation_domain(hass, "scene", "turn_on", "scene.movie", SAT_DEVICE)
     assert seen == [("lock", "unlock", {"device_id": SAT_DEVICE}),
                     ("lock", "unlock", {}),
                     ("scene", "turn_on", {"device_id": SAT_DEVICE})]

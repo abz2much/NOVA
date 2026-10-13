@@ -14,6 +14,8 @@ import types
 
 import pytest
 
+from conftest import readable_devices
+
 
 # ── Fakes: Home Assistant's intent helper, tools and API instance ───────────
 
@@ -115,6 +117,12 @@ class _Api:
 
 
 class _Hass:
+    def __init__(self):
+        # Readable and not already secure, for the live check (8.46.0).
+        from fakes import FakeStates
+        self.states = FakeStates()
+        readable_devices(self, *ENTITIES)
+
     async def async_add_executor_job(self, func, *args):
         return func(*args)
 

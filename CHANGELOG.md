@@ -1,3 +1,22 @@
+## [8.46.0] — One reading of the home, checked live before securing it
+
+Nova now works out who is home, whether the house is asleep and whether it is quiet hours in one place, so no two parts of Nova can disagree. Before any lock, cover, garage door or alarm command, Nova reads the device again at that moment.
+
+### Changed
+- **One answer for presence, sleep and quiet hours.** The 30 second check, each Observer event, delivery, the household check and the AI's summary all use the same resolvers, with the live settings. Before, the 30 second check fell back to 22:00 to 07:00 from its own copy of the settings while delivery read the panel.
+- **A fresh reading for each check, event and request.** Nothing is cached. Delivery judges an Observer event against the reading that event took instead of reading the house a second time.
+- **Decision records keep where each value came from and when.** A safety decision records who was home, asleep and quiet hours, each with its source (for example a person and the phone tracker that put them at home) and the time it was read. Only the facts the decision used are kept.
+- **The AI's summary counts people the same way as the rest of Nova.** Someone whose linked phone tracker reads home is home, and a person who cannot be read is "unknown", never away.
+- **A live check before every lock, cover, garage door and alarm command.** It runs before the policy and the confirmation, for Nova acting on its own and for your own requests, and again after you say yes:
+  - A device that reads unknown, unavailable or jammed, or a door sensor or zone that cannot be read, is refused. Nothing is sent, and Nova says why. Use the Home Assistant app for a device Nova cannot read.
+  - A device already locked, closed or armed that way gets no command, and the Actions log says it was already secure.
+  - A lock whose door (a contact sensor on the same device) reads open: lockdown and the night sweep skip it and report it. Your own request is warned and asked first.
+  - Arming the alarm with doors or windows open asks first and names them.
+
+### Unchanged
+- Scenes and scripts keep needing your confirmation as before. Nova cannot see inside them, so they are not checked device by device.
+- Observer alerts still have no Decision Record entry of their own.
+
 ## [8.45.0] — Every proactive message on one set of rules
 
 The Observer, left-open reminders, appliance and host health alerts, and the core's alerts (intrusion, lockdown, freeze, offers and anticipation) now go out through the same delivery path as the rest since 8.44.0. Every proactive message follows shush, mutes, the Announcements switch, quiet hours, sleep and "Notifications only" in the same order, and its outcome is recorded.
