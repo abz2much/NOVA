@@ -39,14 +39,25 @@ class Recorder:
         self.static_raises = None
 
 
+class FakeResource:
+    def __init__(self, canonical):
+        self.canonical = canonical
+
+
 class FakeHttp:
+    """Routes added here stay for the life of this fake (one HA process)."""
+
     def __init__(self, rec):
         self.rec = rec
+        self.resources = []
+        self.app = types.SimpleNamespace(
+            router=types.SimpleNamespace(resources=lambda: list(self.resources)))
 
     async def async_register_static_paths(self, configs):
         self.rec.calls.append(("static", (list(configs),), {}))
         if self.rec.static_raises:
             raise self.rec.static_raises
+        self.resources.extend(FakeResource(c.url_path) for c in configs)
 
 
 class FakeHass:
@@ -238,12 +249,14 @@ def test_success_path_calls_in_order_with_exact_arguments(env, tmp_path):
     assert kw == {}
     assert configs == [FakeStaticPathConfig("/nova_panel_static", str(fdir), False)]
 
-    assert legacy[1] == (hass, "nova-command") and legacy[2] == {}
+    assert legacy[1] == (hass, "nova-command")
+    assert legacy[2] == {"warn_if_unknown": False}
 
     assert executor[1][0] is env.mod._hash_file
     assert executor[1][1:] == (os.path.join(str(fdir), "nova-panel.js"),)
 
-    assert preclear[1] == (hass, "nova") and preclear[2] == {}
+    assert preclear[1] == (hass, "nova")
+    assert preclear[2] == {"warn_if_unknown": False}
 
     assert register[1] == (hass,)
     assert register[2] == {
@@ -286,12 +299,20 @@ def test_module_url_changes_with_js_content(env, tmp_path):
                     f"/nova_panel_static/nova-panel.js?v={short_hash(b'two')}"]
 
 
-def test_reload_repeats_every_step_and_succeeds(env, tmp_path):
-    """Q2/Q4: idempotency is remove-then-register; static path retried."""
+def test_reload_registers_the_static_path_only_once(env, tmp_path):
+    """8.49.10: HA keeps routes for the process, so a reload must not add one."""
     make_frontend(env, tmp_path)
     assert run(env.mod.async_register_panel(env.hass)) is True
     assert run(env.mod.async_register_panel(env.hass)) is True
-    assert kinds(env.rec) == ["static", "remove", "executor", "remove", "register"] * 2
+    assert kinds(env.rec) == (["static", "remove", "executor", "remove", "register"]
+                              + ["remove", "executor", "remove", "register"])
+
+
+def test_a_new_hass_instance_registers_the_static_path_again(env, tmp_path):
+    make_frontend(env, tmp_path)
+    assert run(env.mod.async_register_panel(env.hass)) is True
+    assert run(env.mod.async_register_panel(FakeHass(env.rec))) is True
+    assert kinds(env.rec).count("static") == 2
 
 
 # ── Error containment (rules 6, 7, 13, 16-18) ────────────────────────────
@@ -308,6 +329,10 @@ def test_static_path_failure_is_swallowed(env, tmp_path, caplog, exc):
                for r in caplog.records)
     assert not any(r.levelno >= logging.WARNING for r in caplog.records
                    if r.name == LOGGER_NAME)
+    # A failed attempt is not remembered, so the next setup tries again.
+    env.rec.static_raises = None
+    assert run(env.mod.async_register_panel(env.hass)) is True
+    assert kinds(env.rec).count("static") == 2
 
 
 def test_missing_http_component_is_tolerated(env, tmp_path):

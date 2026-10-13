@@ -30,16 +30,17 @@ async def test_panel_and_static_path_register_and_reload_is_safe(hass, caplog):
     assert custom["module_url"].startswith("/nova_panel_static/nova-panel.js?v=")
     assert set(panel.config) == {"_panel_custom"}
 
-    # Quirk: the legacy and pre-removal calls do not silence HA's
-    # "unknown panel" warning on a fresh instance.
+    # 8.49.10: removing a panel that is not there yet logs no warning.
     warned = [r.getMessage() for r in caplog.records
               if r.name == "homeassistant.components.frontend"]
-    assert "Removing unknown panel nova-command" in warned
-    assert "Removing unknown panel nova" in warned
+    assert not any("Removing unknown panel" in m for m in warned), warned
 
     # The static directory is routed under the panel's static URL.
-    routes = [getattr(r.resource, "canonical", "") for r in hass.http.app.router.routes()]
-    assert any(c.startswith("/nova_panel_static") for c in routes)
+    def static_routes():
+        return sum(1 for r in hass.http.app.router.routes()
+                   if getattr(r.resource, "canonical", "").startswith("/nova_panel_static"))
+    first_routes = static_routes()
+    assert first_routes > 0
 
     # Reload: a second call succeeds, still one "nova" panel, same module URL.
     first_url = custom["module_url"]
@@ -53,3 +54,13 @@ async def test_panel_and_static_path_register_and_reload_is_safe(hass, caplog):
     assert "nova" not in hass.data[DATA_PANELS]
     assert await pr.async_register_panel(hass) is True
     assert "nova" in hass.data[DATA_PANELS]
+
+    # 8.49.10: reloads reuse the one static route instead of adding more,
+    # and log no "unknown panel" warning either.
+    for _ in range(3):
+        pr.async_unregister_panel(hass)
+        assert await pr.async_register_panel(hass) is True
+    assert static_routes() == first_routes
+    warned = [r.getMessage() for r in caplog.records
+              if r.name == "homeassistant.components.frontend"]
+    assert not any("Removing unknown panel" in m for m in warned), warned

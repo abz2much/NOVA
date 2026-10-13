@@ -216,13 +216,23 @@ def test_step_4_keeps_present_values(mig):
     assert {k: options[k] for k in start} == start
 
 
-def test_step_4_splits_a_string_legacy_value(mig):
-    # Quirk: list() on a string gives its characters.
-    _, options = mig.migrate_4_to_5({}, {"cast_speakers": "ab"})
-    assert options["broadcast_speakers"] == ["a", "b"]
+def test_step_4_treats_a_string_legacy_value_as_one_speaker(mig):
+    # 8.49.10: list() on a string used to give its characters.
+    _, options = mig.migrate_4_to_5({}, {"cast_speakers": "media_player.one"})
+    assert options["broadcast_speakers"] == ["media_player.one"]
+    assert options["cast_speakers"] == "media_player.one"
 
 
-@pytest.mark.parametrize("bad", [None, 0, False])
+def test_step_4_none_legacy_value_counts_as_no_speakers(mig):
+    # 8.49.10: len(None) used to fail the step and stall the entry at v4.
+    options = {"cast_speakers": None}
+    _, out = mig.migrate_4_to_5({}, options)
+    assert out == {"cast_speakers": None, "voice_satellites": [],
+                   "reply_speakers": [], "broadcast_speakers": [],
+                   "room_routing": True}
+
+
+@pytest.mark.parametrize("bad", [0, False])
 def test_step_4_raises_on_lengthless_legacy_after_writing(mig, bad):
     options = {"cast_speakers": bad}
     with pytest.raises(TypeError):
@@ -561,14 +571,22 @@ def test_none_or_string_version_raises_type_error(mig, bad):
     assert options == {}
 
 
-@pytest.mark.parametrize("version", [0, -1, 1.5])
-def test_unmatched_low_version_runs_nothing(mig, caplog, version):
+@pytest.mark.parametrize("version", [0, -1, 1.5, float("nan")])
+def test_invalid_version_is_rejected_with_one_error(mig, caplog, version):
     options = {}
     with caplog.at_level(logging.INFO, logger=mig._LOGGER.name):
         _, out, result = mig.migrate_config({}, options, version)
-    assert result == version and out == {}
-    assert any(r.levelno == logging.INFO for r in caplog.records
-               if r.name == mig._LOGGER.name)
+    assert result is version and out == {}
+    records = [r for r in caplog.records if r.name == mig._LOGGER.name]
+    assert len(records) == 1 and records[0].levelno == logging.ERROR
+    assert "invalid" in records[0].getMessage()
+
+
+@pytest.mark.parametrize("version,valid", [
+    (1, True), (4, True), (9, True), (12, True), (1.0, True), (True, True),
+    (0, False), (-1, False), (1.5, False), (False, False)])
+def test_schema_version_is_valid(mig, version, valid):
+    assert mig.schema_version_is_valid(version) is valid
 
 
 @pytest.mark.parametrize("version", [True, 1.0])
@@ -613,11 +631,24 @@ def test_base_exception_propagates(mig, monkeypatch):
 
 
 def test_bad_legacy_speakers_stall_at_four(mig):
-    options = {"cast_speakers": None}
+    options = {"cast_speakers": 0}
     _, out, version = mig.migrate_config({}, options, 1)
     assert version == 4
     assert out["broadcast_speakers"] == [] and out["room_routing"] is True
     assert "observer_enabled" not in out
+
+
+def test_none_legacy_speakers_reach_nine(mig):
+    _, out, version = mig.migrate_config({}, {"cast_speakers": None}, 4)
+    assert version == 9 and out["broadcast_speakers"] == []
+    assert "broadcast_group" not in out
+
+
+def test_string_legacy_speaker_becomes_the_broadcast_group(mig):
+    _, out, version = mig.migrate_config({}, {"cast_speakers": "media_player.one"}, 4)
+    assert version == 9
+    assert out["broadcast_speakers"] == ["media_player.one"]
+    assert out["broadcast_group"] == "media_player.one"
 
 
 def test_dict_broadcast_list_stalls_at_six(mig):

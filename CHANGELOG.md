@@ -1,3 +1,18 @@
+## [8.49.10] — Startup reliability fixes
+
+Fixes for bugs found while writing the step 9 specs and then verified. Each fix has a regression test that fails without it. Nothing else changes: no services, settings names, entity IDs or stored data formats.
+
+### Fixed
+- **Connectivity could stay offline until a restart.** If the one check call allowed after the cooldown was cancelled before it reported back, Nova refused every cloud call from then on. An unanswered check is now abandoned after one cooldown, and another check is allowed.
+- **Connectivity cooldown followed the wall clock.** A clock change could lengthen or shorten it. It now uses a clock that only moves forward. The "seconds ago" values in its status are never negative.
+- **Connectivity was missing from the diagnostics download.** The download now includes the connectivity status.
+- **Held startup alerts could be stranded.** If replaying alerts held during startup was cancelled, the rest were never replayed. The buffer now closes again, so a later replay delivers the rest. The cancellation still goes through.
+- **Two "Removing unknown panel" warnings on every start and reload.** Clearing the sidebar entries before registering them no longer warns when they are not there.
+- **A duplicate route for the panel's files on every reload.** The panel's files are now served once per Home Assistant run.
+- **Very old settings could fail to upgrade.** An empty legacy speaker setting stopped the upgrade at an old version on every start, and a single legacy speaker was split into its characters. An empty setting now means no speakers, and a single speaker stays one speaker.
+- **An invalid saved settings version was rewritten on every start.** A version of zero, a negative number or a fraction now logs one clear error and is left as it is, with nothing upgraded or saved.
+- **Unload failures were silent.** When something fails to shut down on unload, the failure is now logged as a warning with the error, and the rest are still shut down.
+
 ## [8.49.9] — The unload clean-up registry rewritten from scratch
 
 Step 9 finishes the startup code. The registry that remembers what Nova set up, so it can all be shut down cleanly when Nova unloads or reloads, was still a near copy of the code Nova started from. It is rewritten from an empty file, from a behaviour spec with fresh tests, without the old file. Nothing Nova does changes.

@@ -47,15 +47,21 @@ class AlertBuffer:
             return 0
         self.ready = True
         delivered = 0
-        # Checked before every removal, so items added mid-drain replay too.
-        while not self._queue.empty():
-            item = self._queue.get_nowait()
-            try:
-                await dispatch(item)
-            except Exception:  # pylint: disable=broad-except
-                _LOGGER.exception("Failed to replay buffered alert")
-                continue
-            delivered += 1
+        try:
+            # Checked before every removal, so items added mid-drain replay too.
+            while not self._queue.empty():
+                item = self._queue.get_nowait()
+                try:
+                    await dispatch(item)
+                except Exception:  # pylint: disable=broad-except
+                    _LOGGER.exception("Failed to replay buffered alert")
+                    continue
+                delivered += 1
+        except BaseException:
+            # Cancelled mid-replay: close the gate again so a later mark_ready
+            # replays whatever is still held, then let the cancellation through.
+            self.ready = False
+            raise
         return delivered
 
     def pending(self) -> int:

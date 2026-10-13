@@ -132,8 +132,7 @@ async def async_get_config_entry_diagnostics(hass, entry) -> dict:
         diag["cognitive_error"] = _err(exc)
     try:
         from .. import connectivity
-        if hasattr(connectivity, "snapshot"):
-            diag["connectivity"] = _redact(connectivity.snapshot())
+        diag["connectivity"] = _redact(connectivity.status())
     except Exception as exc:
         diag["connectivity_error"] = _err(exc)
 

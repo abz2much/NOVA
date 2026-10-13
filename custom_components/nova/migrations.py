@@ -71,6 +71,10 @@ def migrate_3_to_4(data: dict, options: dict) -> tuple[dict, dict]:
 def migrate_4_to_5(data: dict, options: dict) -> tuple[dict, dict]:
     """Three-tier audio, seeded from the legacy ``cast_speakers`` list."""
     cast_speakers = options.get("cast_speakers", [])
+    if cast_speakers is None:
+        cast_speakers = []
+    elif isinstance(cast_speakers, str):
+        cast_speakers = [cast_speakers]  # one speaker, not its characters
     _add_missing(options, {"voice_satellites": [], "reply_speakers": []})
     if cast_speakers and "broadcast_speakers" not in options:
         options["broadcast_speakers"] = list(cast_speakers)
@@ -152,15 +156,26 @@ MIGRATIONS: list[tuple[int, Callable[[dict, dict], tuple[dict, dict]]]] = [
 ]
 
 
+def schema_version_is_valid(version: Any) -> bool:
+    """True for a whole number of 1 or more (the only versions steps know)."""
+    return bool(version >= 1 and version % 1 == 0)
+
+
 def migrate_config(
     data: dict, options: dict, current_version: int = 1
 ) -> tuple[dict, dict, int]:
     """Run every step from ``current_version`` up; return the version reached.
 
     A failing step is logged and stops the walk; whatever was written so far
-    stays, and the returned version is that step's source version.
+    stays, and the returned version is that step's source version. An invalid
+    version (zero, negative or fractional) is reported once and changes nothing.
     """
     if current_version >= CURRENT_SCHEMA_VERSION:
+        return data, options, current_version
+    if not schema_version_is_valid(current_version):
+        _LOGGER.error(
+            "Nova settings schema version %r is invalid (expected a whole "
+            "number of 1 or more); settings were not migrated", current_version)
         return data, options, current_version
 
     _LOGGER.info("Nova migrating config from v%s to v%s",

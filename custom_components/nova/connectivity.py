@@ -6,7 +6,8 @@ handling; after a cooldown a single probe call is allowed through, and its
 outcome either closes the breaker or opens it again.
 
 Nothing runs in the background: every transition happens inside a public call,
-using the wall clock read at that moment. State is kept in memory only.
+using the monotonic clock read at that moment, so wall-clock steps cannot
+stretch or shorten a cooldown. State is kept in memory only.
 """
 from __future__ import annotations
 
@@ -35,6 +36,7 @@ class _BreakerState:
     consecutive_failures: int = 0
     opened_at: float = 0.0
     half_open_probes: int = 0
+    probe_at: float = 0.0  # when the latest half-open probe was handed out
     last_success: float = 0.0  # 0.0 means "never"
     last_failure: float = 0.0  # 0.0 means "never"
     total_failures: int = 0
@@ -47,7 +49,7 @@ _BREAKER = _BreakerState()
 
 def _now() -> float:
     # Looked up through the module global each time so tests can swap the clock.
-    return time.time()
+    return time.monotonic()
 
 
 def allow_request() -> bool:
@@ -62,9 +64,17 @@ def allow_request() -> bool:
             b.state = _HALF_OPEN
             b.half_open_probes = 0
             _LOGGER.info("Agent breaker cooldown elapsed; allowing a probe call")
-        # Half-open: hand out a limited number of probes.
+        # Half-open: hand out a limited number of probes. A probe whose
+        # outcome was never recorded (its call was cancelled) is abandoned
+        # after one cooldown, so another probe may go out.
+        now = _now()
+        if (b.half_open_probes >= _HALF_OPEN_MAX_PROBES
+                and now - b.probe_at >= _OPEN_COOLDOWN):
+            b.half_open_probes = 0
+            _LOGGER.info("Agent probe call never reported back; allowing another")
         if b.half_open_probes < _HALF_OPEN_MAX_PROBES:
             b.half_open_probes += 1
+            b.probe_at = now
             return True
         return False
 
@@ -134,8 +144,10 @@ def status() -> dict[str, Any]:
             "cooldown_remaining_s": cooldown,
             "total_failures": b.total_failures,
             "total_successes": b.total_successes,
-            "last_success_ago_s": int(now - b.last_success) if b.last_success else None,
-            "last_failure_ago_s": int(now - b.last_failure) if b.last_failure else None,
+            "last_success_ago_s": (
+                max(0, int(now - b.last_success)) if b.last_success else None),
+            "last_failure_ago_s": (
+                max(0, int(now - b.last_failure)) if b.last_failure else None),
         }
 
 
