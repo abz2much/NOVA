@@ -1,3 +1,11 @@
+## [8.49.6] — The sidebar panel registration rewritten from scratch
+
+Step 9 continues with the startup code. The code that adds Nova's panel to the Home Assistant sidebar and serves its files was still a near copy of the code Nova started from. It is rewritten from an empty file, from a behaviour spec with fresh tests, without the old file. Nothing Nova does changes.
+
+### Changed
+- **Rewritten:** the sidebar panel registration.
+- **Proven the same:** the new module passes 28 fresh tests, and a new real Home Assistant check shows the panel registers, survives a reload and unregisters cleanly.
+
 ## [8.49.5] — The startup alert buffer rewritten from scratch
 
 Step 9 continues with the startup code. The buffer that holds spoken alerts arriving before Nova is ready, and plays them once it is, was still a near copy of the code Nova started from. It is rewritten from an empty file, from a behaviour spec with fresh tests, without the old file. Nothing Nova does changes.
