@@ -13,7 +13,10 @@ For one flagged event it:
      provider failure and the Local Mind decides, exactly as for an
      unreachable provider;
   6. learns only validated provider verdicts (cache_policy);
-  7. returns the decision. Delivery (the output gate, routing, speech,
+  7. returns the decision, and when the caller passes a `trace` dict, says
+     in it how the decision was reached: "origin" (rule, cache, provider,
+     local_mind or fallback) and "rule" (the reason code). The Observer
+     keeps both in its Decision Record entry (8.47.0). Delivery (the output gate, routing, speech,
      notifications, policy) stays with the observer, which calls the
      existing output gate for every announcement.
 
@@ -41,6 +44,8 @@ from .evaluators import (
     parse_summary,
 )
 from .models import (
+    ORIGIN_LOCAL_MIND,
+    R_LOCAL_MIND,
     Decision,
     EventSnapshot,
     ProviderFailure,
@@ -83,7 +88,21 @@ def local_decision(snapshot: EventSnapshot, honorific: str) -> Optional[Decision
 
 # ── Effects: history lookup, Local Mind, cache ─────────────────────────────
 
-async def replay_cached(hass, cached: dict, snapshot: EventSnapshot, honorific: str) -> dict:
+def _traced(trace: Optional[dict]) -> dict:
+    """The trace keyword, only when the caller asked for one, so the
+    long-standing seams keep their call shape."""
+    return {"trace": trace} if trace is not None else {}
+
+
+def _note(trace: Optional[dict], origin: str, rule: str) -> None:
+    """Say in the caller's trace how the decision was reached."""
+    if trace is not None:
+        trace["origin"] = origin
+        trace["rule"] = rule
+
+
+async def replay_cached(hass, cached: dict, snapshot: EventSnapshot, honorific: str,
+                        trace: Optional[dict] = None) -> dict:
     """A decision from a learned cache entry. The verdict comes from the
     cache; the voice from the Local Mind's composer, with a quick history
     lookup so replayed decisions carry novelty context."""
@@ -99,10 +118,13 @@ async def replay_cached(hass, cached: dict, snapshot: EventSnapshot, honorific: 
         except Exception:
             pass
     d = decision_from_cached(snapshot, cached, grade=grade, hour=hour)
+    _note(trace, d.origin, d.reason_code)
     return presentation.voiced(d, honorific).as_dict()
 
 
-async def _local_mind(hass, snapshot: EventSnapshot, honorific: str) -> dict:
+async def _local_mind(hass, snapshot: EventSnapshot, honorific: str,
+                      trace: Optional[dict] = None) -> dict:
+    _note(trace, ORIGIN_LOCAL_MIND, R_LOCAL_MIND)
     try:
         from .. import local_mind
         return await local_mind.assess(
@@ -114,19 +136,21 @@ async def _local_mind(hass, snapshot: EventSnapshot, honorific: str) -> dict:
             recent_announcements=list(snapshot.recent_announcements))
     except Exception as exc:
         _LOGGER.debug("Local Mind error (%s) — basic fallback", exc)
-        return presentation.voiced(evaluate_basic_fallback(snapshot), honorific).as_dict()
+        d = evaluate_basic_fallback(snapshot)
+        _note(trace, d.origin, d.reason_code)
+        return presentation.voiced(d, honorific).as_dict()
 
 
 async def _provider_failure_fallback(hass, sig: str, snapshot: EventSnapshot,
-                                     honorific: str) -> dict:
+                                     honorific: str, trace: Optional[dict] = None) -> dict:
     """What a failed provider leaves: a stale but validated learned verdict
     when one exists, else the Local Mind."""
     from .. import reasoning_cache
     stale = reasoning_cache.get(sig, ignore_age=True)
     if stale is not None:
         reasoning_cache.note_hit(sig)
-        return await replay_cached(hass, stale, snapshot, honorific)
-    return await _local_mind(hass, snapshot, honorific)
+        return await replay_cached(hass, stale, snapshot, honorific, **_traced(trace))
+    return await _local_mind(hass, snapshot, honorific, **_traced(trace))
 
 
 def _learn(sig: str, decision: Decision, classifier_urgency: str) -> None:
@@ -167,7 +191,8 @@ async def decide(hass, provider, *, hooks: Hooks, honorific: str, event_summary:
                  classifier_category: str, recent_announcements: list,
                  presence_context: str = "", anyone_home: bool = False,
                  entity_id: str = "", device_class: str = "", from_state: str = "",
-                 to_state: str = "", friendly_name: str = "") -> dict:
+                 to_state: str = "", friendly_name: str = "",
+                 trace: Optional[dict] = None) -> dict:
     # A presence transition touching the literal "home" state is decided by
     # exact state comparison, never by provider judgment (see reasoning_loop).
     is_home_boundary_transition = classifier_category == "presence" and (
@@ -183,7 +208,8 @@ async def decide(hass, provider, *, hooks: Hooks, honorific: str, event_summary:
         local = hooks.local(
             event_summary, classifier_urgency, classifier_category, honorific,
             recent_announcements, anyone_home, from_state=from_state, to_state=to_state,
-            entity_id=entity_id, friendly_name=friendly_name, device_class=device_class)
+            entity_id=entity_id, friendly_name=friendly_name, device_class=device_class,
+            **_traced(trace))
         if local is not None:
             _LOGGER.info("Reasoning local: %s",
                          local.get("message", local.get("reason", ""))[:80])
@@ -214,7 +240,7 @@ async def decide(hass, provider, *, hooks: Hooks, honorific: str, event_summary:
     cached = reasoning_cache.get(sig)
     if cached is not None and not rich:
         reasoning_cache.note_hit(sig)
-        dec = await replay_cached(hass, cached, snapshot, honorific)
+        dec = await replay_cached(hass, cached, snapshot, honorific, **_traced(trace))
         _LOGGER.info("Reasoning cache hit [%s]: speak=%s", sig, dec.get("speak"))
         return dec
 
@@ -226,13 +252,13 @@ async def decide(hass, provider, *, hooks: Hooks, honorific: str, event_summary:
     if holds is not None and holds.held(sig):
         reasoning_cache.note_hit(sig)
         _LOGGER.info("Reasoning: recent unusable reply — fallback for [%s]", sig)
-        return await _provider_failure_fallback(hass, sig, snapshot, honorific)
+        return await _provider_failure_fallback(hass, sig, snapshot, honorific, **_traced(trace))
 
     # No fresh cache → we'd call the provider. Respect the breaker.
     if not connectivity.allow_request():
         reasoning_cache.note_hit(sig)
         _LOGGER.info("Reasoning: breaker OPEN — Local Mind for [%s]", sig)
-        return await _local_mind(hass, snapshot, honorific)
+        return await _local_mind(hass, snapshot, honorific, **_traced(trace))
 
     reasoning_cache.note_cloud_call()
     system = hooks.build_system_prompt(
@@ -285,7 +311,7 @@ async def decide(hass, provider, *, hooks: Hooks, honorific: str, event_summary:
     except Exception as exc:
         _LOGGER.warning("Reasoning loop failed: %s", exc)
         connectivity.record_failure()
-        return await _provider_failure_fallback(hass, sig, snapshot, honorific)
+        return await _provider_failure_fallback(hass, sig, snapshot, honorific, **_traced(trace))
 
     # Provider health follows the validated outcome, not the transport: a
     # reply that isn't a valid decision counts against the breaker.
@@ -299,11 +325,12 @@ async def decide(hass, provider, *, hooks: Hooks, honorific: str, event_summary:
             outcome.kind, outcome.detail, outcome.reply_length)
         if holds is not None:
             holds.hold(sig)
-        out = await _provider_failure_fallback(hass, sig, snapshot, honorific)
+        out = await _provider_failure_fallback(hass, sig, snapshot, honorific, **_traced(trace))
         out = dict(out)
         out.setdefault("provider_failure", outcome.kind)
         return out
 
     connectivity.record_success()
+    _note(trace, outcome.origin, outcome.reason_code)
     _learn(sig, outcome, classifier_urgency)
     return outcome.as_dict()

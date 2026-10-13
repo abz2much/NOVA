@@ -87,6 +87,7 @@ def _try_local_reasoning(
     entity_id: str = "",
     friendly_name: str = "",
     device_class: str = "",
+    trace: Optional[dict] = None,
 ) -> Optional[dict]:
     """
     Handle common events with templated responses: the local rules in
@@ -104,6 +105,8 @@ def _try_local_reasoning(
         recent_announcements=recent_announcements, anyone_home=anyone_home,
         from_state=from_state, to_state=to_state, entity_id=entity_id,
         friendly_name=friendly_name, device_class=device_class), honorific)
+    if d is not None and trace is not None:
+        trace["origin"], trace["rule"] = d.origin, d.reason_code
     return None if d is None else d.as_dict()
 
 
@@ -195,6 +198,7 @@ async def decide(
     from_state: str = "",
     to_state: str = "",
     friendly_name: str = "",
+    trace: Optional[dict] = None,
 ) -> dict:
     """
     Decide whether to speak about a flagged event.
@@ -213,4 +217,5 @@ async def decide(
         classifier_category=classifier_category,
         recent_announcements=recent_announcements, presence_context=presence_context,
         anyone_home=anyone_home, entity_id=entity_id, device_class=device_class,
-        from_state=from_state, to_state=to_state, friendly_name=friendly_name)
+        from_state=from_state, to_state=to_state, friendly_name=friendly_name,
+        trace=trace)

@@ -1,3 +1,23 @@
+## [8.47.0] — An audit entry for every Observer alert decision
+
+Each time the Observer decides about an event, it now leaves one short entry in the Decision Record, so you can see why Nova spoke, held back or stayed quiet.
+
+### Added
+- **One compact entry per Observer alert decision**, with:
+  - the event and when it happened
+  - the id of the reading it was decided on
+  - only the facts used: who was home, asleep and quiet hours, each with its source and time
+  - the rule and the reason
+  - the result: alerted, suppressed (Nova chose to speak but a rule held it) or ignored (Nova chose to stay quiet)
+  - what delivery did: spoken, pushed, or why it was held
+- **A critical hazard always gets an entry**, even when the first check passes over it.
+- **Every safety decision record names its reading too**, and says what delivery decided.
+
+### Unchanged
+- Routine events that never reach a decision get no entry: motion while someone is home, an opening while the household is in, anything the first check passes over, and anything held by the debounce or the hourly limit. They stay in the activity feed as before.
+- Nothing about what Nova says or when. The entries carry no rating, so no learning reads them.
+- The home's full state is never copied into the database.
+
 ## [8.46.0] — One reading of the home, checked live before securing it
 
 Nova now works out who is home, whether the house is asleep and whether it is quiet hours in one place, so no two parts of Nova can disagree. Before any lock, cover, garage door or alarm command, Nova reads the device again at that moment.

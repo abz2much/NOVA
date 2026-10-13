@@ -35,6 +35,9 @@ class Situation:
     # The facts this reading used, each with its source and when it was read
     # (world.Fact.record, 8.46.0). Kept with the decision; never compared.
     read: dict = field(default_factory=dict, compare=False)
+    # Names the reading (world.World.id): the tick's own while a tick runs,
+    # otherwise one taken for this decision (8.47.0).
+    snapshot_id: str = field(default="", compare=False)
 
     @property
     def residents(self) -> str:
@@ -62,6 +65,8 @@ def situation(hass, config: Optional[dict] = None, *, sleeping=None,
             _LOGGER.debug("alert_path: household reading failed: %s", exc)
             house = None
     facts = {}
+    current = world.current()
+    snapshot_id = current.id if current is not None and current.id else world.new_id()
     if house is not None:
         facts["household"] = world.Fact(house, getattr(house, "source", ""),
                                         getattr(house, "read_at", 0.0)).record()
@@ -70,7 +75,6 @@ def situation(hass, config: Optional[dict] = None, *, sleeping=None,
     values = {}
     for name, given, resolve in (("asleep", sleeping, world.asleep),
                                  ("quiet_hours", quiet, world.quiet_hours)):
-        current = world.current()
         if given is None and current is not None and getattr(current, name) != world.UNKNOWN:
             # Inside a tick: the tick's own reading, so the tick agrees.
             given = world.Fact(getattr(current, name), current.sources.get(name, ""),
@@ -82,7 +86,7 @@ def situation(hass, config: Optional[dict] = None, *, sleeping=None,
         facts[name] = given.record()
         values[name] = given.value is True
     return Situation(house=house, sleeping=values["asleep"], quiet=values["quiet_hours"],
-                     read=facts)
+                     read=facts, snapshot_id=snapshot_id)
 
 
 def nobody_home(sit: Situation) -> bool:
@@ -107,12 +111,15 @@ class Plan:
 
 # ── the decision record (8.23.0) ────────────────────────────────────────────
 # Every safety decision (intrusion, lockdown, the nighttime sweep, hazards,
-# packages and door alerts) is written to the Decision Record in one format:
+# packages and door alerts) and every Observer alert decision (8.47.0) is
+# written to the Decision Record in one format:
 #   observation     source, entity, message, residents, alarm posture,
-#                   asleep, quiet hours, plus the decision's own facts
+#                   asleep, quiet hours, plus the decision's own facts,
+#                   and "snapshot_id", the reading it was taken from
 #   interpretation  {"assessment": what Nova concluded}
 #   evidence        {"spoken", "pushed", "route"} from the delivery plan,
-#                   and "request_ids": the Actions log requests it caused
+#                   "delivery": what delivery decided, and "request_ids":
+#                   the Actions log requests it caused
 #   decision        what was done, in words
 #   reason          why
 # Records are written with no outcome, so they never change the interruption
@@ -132,7 +139,8 @@ def decision_fields(kind: str, *, source: str, sit: Optional[Situation] = None,
                     message: str = "", facts: Optional[dict] = None,
                     assessment: str = "", decision: str = "", reason: str = "",
                     ref: Optional[str] = None,
-                    request_ids: Optional[list] = None) -> dict:
+                    request_ids: Optional[list] = None,
+                    delivery: str = "") -> dict:
     """The shared Decision Record fields for one safety decision."""
     observation: dict = {"source": source}
     if entity_id:
@@ -149,12 +157,16 @@ def decision_fields(kind: str, *, source: str, sit: Optional[Situation] = None,
         if sit.read:
             # Where each of those came from and when it was read (8.46.0).
             observation["read"] = dict(sit.read)
+        if sit.snapshot_id:
+            observation["snapshot_id"] = sit.snapshot_id
     observation.update(facts or {})
     evidence: dict = {}
     if plan is not None:
         evidence = {"spoken": bool(plan.alert and plan.speak),
                     "pushed": bool(plan.alert and plan.push),
                     "route": plan.mode or None}
+    if delivery:
+        evidence["delivery"] = str(delivery)
     if request_ids:
         # The Actions log requests this decision caused (8.25.0), so a
         # decision can be traced to its commands and their checks.
