@@ -420,6 +420,23 @@ def load():
     return _load
 
 
+def route_delivery(load, monkeypatch, *, quiet=lambda h: False,
+                   announcements=lambda h: True, pushed=None):
+    """Point delivery.py (8.44.0) at a sender test's own switches: quiet
+    hours and the Announcements switch come from the given functions (read
+    at delivery time), nobody is asleep, and pushes are collected in
+    `pushed` instead of reaching a phone."""
+    dl = load("delivery")
+    monkeypatch.setattr(dl, "conditions", lambda hass, req: dl.Conditions(
+        quiet_hours=bool(quiet(hass)), announcements_on=bool(announcements(hass))))
+    if pushed is not None:
+        async def _push(hass, req, request_id):
+            pushed.append(req.message)
+            return ["phone"]
+        monkeypatch.setattr(dl, "_push", _push)
+    return dl
+
+
 @pytest.fixture
 def fake_hass():
     """A fresh fake Home Assistant core (named `fake_hass` to avoid colliding

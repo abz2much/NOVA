@@ -4,6 +4,16 @@ confirmation required before a new arrival can announce."""
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _rules(load, monkeypatch):
+    """8.44.0: package messages go out through delivery.py, read with the
+    package monitor's own quiet hours and Announcements switch."""
+    from conftest import route_delivery
+    pm = load("package_monitor")
+    route_delivery(load, monkeypatch, quiet=lambda h: pm._in_quiet_hours(h),
+                   announcements=lambda h: pm._announcements_on(h), pushed=[])
+
+
 @pytest.fixture
 def pm(load):
     return load("package_monitor")
@@ -138,6 +148,7 @@ async def test_periodic_announces_once_on_confirmed_arrival(pm, load, fake_hass,
 
     async def _announce(hass, msg, *a, **k):
         spoken.append(msg)
+        return True
     monkeypatch.setattr(tts, "async_announce", _announce)
 
     pm._STATE.clear()
@@ -170,6 +181,7 @@ async def test_eufy_delivered_announces_and_sets_state(pm, load, fake_hass, monk
 
     async def _announce(hass, msg, *a, **k):
         spoken.append(msg)
+        return True
     monkeypatch.setattr(tts, "async_announce", _announce)
     monkeypatch.setattr(pm, "_in_quiet_hours", lambda h: False)
     monkeypatch.setattr(pm, "_announcements_on", lambda h: True)
@@ -207,6 +219,7 @@ async def test_eufy_taken_while_away_announces_concern(pm, load, fake_hass, monk
 
     async def _announce(hass, msg, *a, **k):
         spoken.append(msg)
+        return True
     monkeypatch.setattr(tts, "async_announce", _announce)
     monkeypatch.setattr(pm, "_in_quiet_hours", lambda h: False)
     monkeypatch.setattr(pm, "_announcements_on", lambda h: True)
@@ -226,6 +239,7 @@ async def test_eufy_stranded_announces_nag_message(pm, load, fake_hass, monkeypa
 
     async def _announce(hass, msg, *a, **k):
         spoken.append(msg)
+        return True
     monkeypatch.setattr(tts, "async_announce", _announce)
     monkeypatch.setattr(pm, "_in_quiet_hours", lambda h: False)
     monkeypatch.setattr(pm, "_announcements_on", lambda h: True)
@@ -287,6 +301,7 @@ async def test_periodic_hallucination_single_frame_stays_quiet(pm, load, fake_ha
 
     async def _announce(hass, msg, *a, **k):
         spoken.append(msg)
+        return True
     monkeypatch.setattr(tts, "async_announce", _announce)
 
     pm._STATE.clear()

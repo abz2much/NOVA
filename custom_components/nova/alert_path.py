@@ -18,6 +18,10 @@ rules. This module holds all of those decisions:
 * record_decision  writes a safety decision to the Decision Record in one
                shared format (8.23.0).
 
+Since 8.44.0 hazards, packages, the doorbell and camera alerts go out
+through delivery.py, the one delivery request for proactive messages; the
+remaining for_*() functions move there as their sources do.
+
 Intrusion decisions stay in core_safety.py; their actions reach the speakers
 and phones through for_core_action(), like every other core action.
 """
@@ -235,40 +239,6 @@ def for_sentinel(sit: Situation, *, notify_only_setting: bool) -> Plan:
     else:
         plan = Plan(speak=True, push=True)
     return _log("sentinel", sit, "medium", plan)
-
-
-def for_hazard(sit: Situation, *, speak_allowed: bool) -> Plan:
-    """A hazard feed: earthquakes, weather warnings, natural disasters.
-
-    Always pushed to every phone first. Spoken on the whole house speakers
-    only when the caller's level rules allow it: the legacy feeds outside
-    quiet hours, the warnings by their speak and night levels."""
-    plan = Plan(push=True, push_first=True, speak=bool(speak_allowed))
-    return _log("hazard", sit, "high", plan)
-
-
-def for_package(sit: Situation, kind: str, *, announcements_on: bool) -> Plan:
-    """A package delivered, mail arrived, or a package removed.
-
-    Spoken with announcements on and outside quiet hours. A package removed
-    is only an alert while the residents are away (unknown counts as home),
-    and is then pushed to the phones as well, quiet hours or not."""
-    can_speak = announcements_on and not sit.quiet
-    if kind == "removed":
-        if not nobody_home(sit):
-            plan = Plan(alert=False, reason="someone may be home")
-        else:
-            plan = Plan(push=True, push_first=True, speak=can_speak)
-    else:
-        plan = Plan(alert=can_speak, speak=can_speak,
-                    reason="" if can_speak else "quiet hours or announcements off")
-    return _log("package", sit, "medium", plan)
-
-
-def for_doorbell(sit: Situation) -> Plan:
-    """A notable doorbell or camera event Nova chose to speak. Spoken on the
-    speakers the doorbell handler chose; no phone push, as before."""
-    return _log("doorbell", sit, "medium", Plan(speak=True))
 
 
 def for_core_action(hass, config: dict, sit: Situation, action: dict) -> Plan:

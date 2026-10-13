@@ -36,6 +36,7 @@ def gate(load, monkeypatch):
     monkeypatch.setattr(state, "mute_all", False)
     monkeypatch.setattr(state, "muted_entities", set())
     monkeypatch.setattr(state, "muted_categories", set())
+    monkeypatch.setattr(state, "history", type(state.history)(maxlen=state.history.maxlen))
     return og
 
 

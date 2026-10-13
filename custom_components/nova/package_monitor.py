@@ -207,26 +207,23 @@ def _announcements_on(hass) -> bool:
 
 
 def _in_quiet_hours(hass) -> bool:
-    try:
-        from . import sleep_detection
-        return sleep_detection._in_quiet_hours(
-            str(_runtime(hass, "observer_quiet_start", "22:00")),
-            str(_runtime(hass, "observer_quiet_end", "07:00")),
-        )
-    except Exception:
-        return False
+    """The household's quiet hours (delivery.py)."""
+    from . import delivery
+    return delivery.in_quiet_hours(hass)
 
 
-async def _push_phones(hass, message: str) -> None:
-    """Push to every phone, through the path every other Nova alert uses.
-    Never raises."""
-    try:
-        from . import cognitive_core as cc
-        core = getattr(cc, "_CORE", None)
-        await cc._notify_all_devices(hass, getattr(core, "config", None),
-                                     message, "package_removed")
-    except Exception as exc:
-        _LOGGER.debug("package: phone push failed: %s", exc)
+async def _deliver(hass, event: str, msg: str, entity_id: str, tts_entity, speakers,
+                   detected_by: str, **kw):
+    """One package message through the delivery path (8.44.0): shush, the
+    Announcements switch, quiet hours, sleep and "Notifications only" apply;
+    what is not spoken goes to the phones. Recorded as a package decision."""
+    from . import delivery
+    return await delivery.async_deliver(hass, delivery.DeliveryRequest(
+        source="package_monitor", message=msg, entity_id=entity_id,
+        category=f"package_{event}", speakers=tuple(speakers or ()),
+        tts_entity=tts_entity or "", tts_context="package", record_kind="package",
+        record_facts={"event": event, "detected_by": detected_by},
+        record_assessment=f"package {event}", **kw))
 
 
 # ── Name matching ────────────────────────────────────────────────────────────
@@ -355,27 +352,23 @@ def _log(hass, entity_id: str, kind: str, det: dict, source: str) -> None:
 async def evaluate(hass, groq_client, honorific, tts_entity, speakers,
                    entity_id: str, det: dict, source: str = "periodic") -> bool:
     """Apply a detection result to per-camera state and announce transitions."""
-    from .tts_helper import async_announce
-    from . import alert_path
+    from . import alert_path, delivery
 
     prev = _STATE.get(entity_id, {"package": False, "mail": False, "count": 0})
-    quiet = _in_quiet_hours(hass)
-    announcements_on = _announcements_on(hass)
-    # Whether each transition is spoken or pushed is decided in
-    # alert_path.for_package (8.22.0); the 30 minute cooldowns stay here.
-    sit = alert_path.situation(hass, quiet=quiet)
+    # The household's rules are applied by delivery.py (8.44.0); the 30
+    # minute cooldowns and "removed only while away" stay here.
     loc = "the front door"
     spoke = False
 
-    async def _record(event, plan, msg=""):
-        # Package decisions in the shared safety format (8.23.0).
-        await alert_path.async_record_decision(
-            hass, "package", source="package_monitor", entity_id=entity_id,
-            sit=sit, plan=plan, message=msg, facts={"event": event, "detected_by": source},
-            assessment=f"package {event}")
-
-    async def _say(msg):
-        await async_announce(hass, msg, tts_entity, speakers, context="package")
+    async def _send(event, msg, **kw):
+        nonlocal spoke
+        out = await _deliver(hass, event, msg, entity_id, tts_entity, speakers,
+                             source, **kw)
+        spoke = spoke or out.spoken
+        # The cooldown is on speech; a "removed while away" alert counts
+        # once it reached anyone.
+        if out.spoken or (event == "removed" and out.decision.delivered):
+            _mark_spoken(entity_id, event)
 
     # honorific may be "" once nobody specific is home to address (see
     # honorific.py) — kept as a plain lead-in (not persona.lead_in(), which
@@ -395,38 +388,30 @@ async def evaluate(hass, groq_client, honorific, tts_entity, speakers,
               if n and n > 1 else
               f"a package has been delivered to {loc}.")
         _log(hass, entity_id, "delivered", det, source)
-        plan = alert_path.for_package(sit, "delivered", announcements_on=announcements_on)
-        if plan.alert and _cooldown_open(entity_id, "delivered"):
-            await alert_path.deliver(plan, speak=lambda _t: _say(msg))
-            _mark_spoken(entity_id, "delivered")
-            spoke = True
-            await _record("delivered", plan, msg)
+        if _cooldown_open(entity_id, "delivered"):
+            await _send("delivered", msg)
     # Package removed
     elif prev.get("package") and not det.get("package"):
         _log(hass, entity_id, "removed", det, source)
         # Only while the residents are known to be away (unknown counts as
-        # home); then pushed, quiet hours or not, and spoken when allowed.
-        plan = alert_path.for_package(sit, "removed", announcements_on=announcements_on)
-        if plan.alert and _cooldown_open(entity_id, "removed"):
+        # home); then pushed to every phone first, and spoken when allowed.
+        sit = alert_path.situation(hass)
+        if not alert_path.nobody_home(sit):
+            await alert_path.async_record_decision(
+                hass, "package", source="package_monitor", entity_id=entity_id, sit=sit,
+                plan=alert_path.Plan(alert=False, reason="someone may be home"),
+                facts={"event": "removed", "detected_by": source},
+                assessment="package removed")
+        elif _cooldown_open(entity_id, "removed"):
             msg = _lead(f"a package was just removed from {loc} while no one is home.")
-            out = await alert_path.deliver(
-                plan, speak=lambda _t: _say(msg), push=lambda: _push_phones(hass, msg))
-            spoke = out["spoke"]
-            _mark_spoken(entity_id, "removed")
-            await _record("removed", plan, msg)
-        elif not plan.alert:
-            await _record("removed", plan)
+            await _send("removed", msg, push=delivery.PUSH_ALWAYS, all_phones=True,
+                        push_first=True, push_kind="package_removed")
 
     # Mail arrival
     if det.get("mail") and not prev.get("mail"):
         _log(hass, entity_id, "mail", det, source)
-        plan = alert_path.for_package(sit, "mail", announcements_on=announcements_on)
-        if plan.alert and _cooldown_open(entity_id, "mail"):
-            mail_msg = _lead(f"mail has arrived at {loc}.")
-            await alert_path.deliver(plan, speak=lambda _t: _say(mail_msg))
-            _mark_spoken(entity_id, "mail")
-            spoke = True
-            await _record("mail", plan, mail_msg)
+        if _cooldown_open(entity_id, "mail"):
+            await _send("mail", _lead(f"mail has arrived at {loc}."))
 
     _STATE[entity_id] = {
         "package": bool(det.get("package")),
@@ -519,8 +504,6 @@ async def note_from_eufy(hass, honorific, tts_entity, speakers,
     itself — it doesn't have a package/mail boolean to compare against, so
     it's a direct one-shot announcement instead of going through `evaluate`.
     """
-    from .tts_helper import async_announce
-
     if role == "package_delivered":
         prev = _STATE.get(entity_id, {"package": False, "mail": False, "count": 0})
         det = {"package": True, "mail": prev.get("mail", False),
@@ -536,27 +519,16 @@ async def note_from_eufy(hass, honorific, tts_entity, speakers,
         return
 
     if role == "package_stranded":
-        from . import alert_path
         det = {"package": True, "mail": False, "count": 1}
-        plan = alert_path.for_package(
-            alert_path.situation(hass, quiet=_in_quiet_hours(hass)), "stranded",
-            announcements_on=_announcements_on(hass))
-        if not plan.alert:
-            _log(hass, entity_id, "stranded", det, "eufy")
-            return
         if not _cooldown_open(entity_id, "stranded"):
             # A repeat inside 30 minutes is logged and recorded, not spoken.
             _log(hass, entity_id, "stranded", det, "eufy")
             return
         msg = (f"{honorific}, a package at the front door hasn't been picked up yet."
                if honorific else "A package at the front door hasn't been picked up yet.")
-        await alert_path.deliver(plan, speak=lambda _t: async_announce(
-            hass, msg, tts_entity, speakers, context="package"))
-        _mark_spoken(entity_id, "stranded")
-        await alert_path.async_record_decision(
-            hass, "package", source="package_monitor", entity_id=entity_id,
-            plan=plan, message=msg, facts={"event": "stranded", "detected_by": "eufy"},
-            assessment="package stranded")
+        out = await _deliver(hass, "stranded", msg, entity_id, tts_entity, speakers, "eufy")
+        if out.spoken:
+            _mark_spoken(entity_id, "stranded")
         _log(hass, entity_id, "stranded", det, "eufy")
 
 

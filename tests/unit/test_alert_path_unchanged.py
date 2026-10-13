@@ -286,12 +286,17 @@ def hazard(load, monkeypatch):
     async def _push(hass, config, message, action_type, *a, **kw):
         order.append(("push", action_type, message))
     monkeypatch.setattr(cc, "_notify_all_devices", _push)
+    monkeypatch.setattr(load("core_delivery"), "_notify_all_devices", _push)
     monkeypatch.setattr(tts, "find_best_tts_entity", lambda hass: "tts.x")
     monkeypatch.setattr(ar, "broadcast_target", lambda hass, **kw: [SPEAKER])
 
     async def _announce(hass, message, tts_entity, targets, **kw):
         order.append(("speak", message, list(targets)))
+        return True
     monkeypatch.setattr(tts, "async_announce", _announce)
+    # 8.44.0: through delivery.py, with no household rule holding it.
+    dl = load("delivery")
+    monkeypatch.setattr(dl, "conditions", lambda hass, req: dl.Conditions())
     return hm, order
 
 
@@ -323,11 +328,11 @@ def package(load, monkeypatch):
 
     async def _announce(hass, msg, *a, **k):
         out["spoken"].append(msg)
+        return True
     monkeypatch.setattr(load("tts_helper"), "async_announce", _announce)
-
-    async def _push(hass, msg):
-        out["pushed"].append(msg)
-    monkeypatch.setattr(pm, "_push_phones", _push)
+    # 8.44.0: package messages go out through delivery.py.
+    from conftest import route_delivery
+    route_delivery(load, monkeypatch, quiet=lambda h: out["quiet"], pushed=out["pushed"])
     out["pm"] = pm
     yield out
     for d in (pm._STATE, pm._LAST_SPOKEN, pm._TRIGGER_LAST):
@@ -361,7 +366,8 @@ async def test_package_quiet_hours(package, fake_hass, residents):
     await _pkg(package, fake_hass, package=True, count=2)
     await _pkg(package, fake_hass, package=False)
     assert package["spoken"] == []
-    assert package["pushed"] == (
+    # 8.44.0: in quiet hours a delivery goes to the phones instead.
+    assert package["pushed"] == ["Sir, 2 packages have been delivered to the front door."] + (
         ["Sir, a package was just removed from the front door while no one is home."]
         if residents == "away" else [])
 
@@ -395,7 +401,16 @@ async def test_doorbell(load, fake_hass, monkeypatch, residents):
 
     async def _announce(hass, message, tts_entity, targets, **kw):
         spoken.append((message, list(targets)))
-    monkeypatch.setattr(cam, "async_announce", _announce)
+        return True
+    # 8.44.0: the press goes out through delivery.py; with no rule holding
+    # it (daytime, awake, announcements on), it is spoken as before.
+    monkeypatch.setattr(load("tts_helper"), "async_announce", _announce)
+    dl = load("delivery")
+    monkeypatch.setattr(dl, "conditions", lambda hass, req: dl.Conditions())
+
+    async def _no_package(*a, **k):
+        return None
+    monkeypatch.setattr(load("package_monitor"), "note_from_doorbell", _no_package)
     res = await cam._analyze_doorbell_press(
         fake_hass, None, "Sir", "tts.x", [SPEAKER], "camera.front_doorbell", "Doorbell pressed")
     assert spoken == [("A courier is at the door.", [SPEAKER])] and res["spoke"] is True

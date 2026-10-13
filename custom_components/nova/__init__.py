@@ -497,17 +497,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
                     async def _announce_vehicle() -> None:
                         try:
                             from .camera import _camera_friendly_name
-                            from .tts_helper import async_announce
-                            from . import persona
+                            from . import delivery, persona
                             honorific = _live_honorific(hass)
                             tts = _get_tts(hass, entry, context="camera")
                             spk = _get_speakers(hass, entry)
                             name = _camera_friendly_name(hass, entity_id)
-                            await async_announce(
-                                hass,
-                                persona.lead_in(honorific, f"a vehicle was detected at {name}."),
-                                tts, spk, context="camera",
-                            )
+                            # A proactive alert: the household's rules
+                            # decide (delivery.py, 8.44.0).
+                            await delivery.async_deliver(hass, delivery.DeliveryRequest(
+                                source="vehicle", entity_id=entity_id, category="vehicle",
+                                message=persona.lead_in(
+                                    honorific, f"a vehicle was detected at {name}."),
+                                speakers=tuple(spk or ()), tts_entity=tts or "",
+                                tts_context="camera"))
                         except Exception as exc:
                             _LOGGER.debug("Nova eufy: vehicle announce failed: %s", exc)
                     hass.async_create_task(_announce_vehicle())

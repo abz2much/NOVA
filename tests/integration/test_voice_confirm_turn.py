@@ -342,6 +342,9 @@ async def _cast_setup(hass, monkeypatch, a_sat):
     monkeypatch.setattr(nova_conv.NovaAgent, "_satellite_pairings",
                         lambda self: {a_sat: "media_player.living"})
     monkeypatch.setattr(nova_conv, "resolve_tts_entity", lambda hass, eng: "tts.nova")
+    # The mic is not reopened in quiet hours (8.39.1); these tests are about
+    # the carried history, not the time they run.
+    monkeypatch.setattr(nova_conv.NovaAgent, "_in_quiet_hours", lambda self: False)
 
     async def announce(*a, **k):
         return None

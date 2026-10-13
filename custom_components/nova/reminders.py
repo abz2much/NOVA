@@ -3,14 +3,14 @@ Nova — Context-aware reminders.
 
 Unlike phone alarms, Nova reminders:
   - Check presence before speaking (silent if nobody's home)
-  - Respect quiet hours (don't speak 22:00 - 07:00 by default)
+  - Respect the household's quiet hours (wait until they end, by default)
   - Can be acknowledged ("got it, Nova") to self-silence
   - Persist across HA restarts (stored in SQLite)
 """
 from __future__ import annotations
 
 import logging
-from datetime import datetime, time, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -33,9 +33,6 @@ def _db_path() -> Path:
     return DB_PATH or Path(paths.nova_path("reminders.db"))
 
 
-QUIET_START = time(22, 0)
-QUIET_END   = time(7, 0)
-
 def _connect():
     conn = _store.connect(_db_path(), busy_timeout_ms=None)
     _store.ensure(conn, "reminders")
@@ -52,14 +49,6 @@ def _now_local() -> datetime:
     offset), so every comparison against it needs to use the same clock the
     user meant, not whatever timezone the container happens to boot in."""
     return dt_util.as_local(dt_util.utcnow()).replace(tzinfo=None)
-
-
-def _in_quiet_hours(now: Optional[datetime] = None) -> bool:
-    now = now or _now_local()
-    t = now.time()
-    if QUIET_START < QUIET_END:
-        return QUIET_START <= t <= QUIET_END
-    return t >= QUIET_START or t <= QUIET_END
 
 
 def add_reminder(
@@ -180,9 +169,11 @@ class ReminderWatcher:
 
         presence = get_presence_summary(self.hass)
 
+        from . import delivery
         for reminder in due:
-            # Skip if quiet hours and respect_quiet
-            if reminder.get("respect_quiet") and _in_quiet_hours():
+            # Wait out the household's quiet hours (8.44.0: the one setting,
+            # no longer a fixed 22:00 to 07:00 of its own).
+            if reminder.get("respect_quiet") and delivery.in_quiet_hours(self.hass):
                 _LOGGER.debug("Nova reminder '%s' deferred (quiet hours)", reminder["label"])
                 continue
             # Skip if require_home and nobody's home
@@ -199,7 +190,14 @@ class ReminderWatcher:
                 text = f"{honorific}, reminder: {reminder['label']}."
             else:
                 text = f"Reminder: {reminder['label']}."
-            await async_announce(self.hass, text, tts_entity, speakers, context="reminder")
+            # The person set this reminder, so shush and the Announcements
+            # switch never swallow it; with no speaker, or "Notifications
+            # only" on, it goes to the phones (delivery.py).
+            await delivery.async_deliver(self.hass, delivery.DeliveryRequest(
+                source="reminder", message=text, category="reminder",
+                requested_by_user=True, quiet_ok=not reminder.get("respect_quiet"),
+                speakers=tuple(speakers or ()), tts_entity=tts_entity or "",
+                tts_context="reminder"))
             await self.hass.async_add_executor_job(mark_fired, reminder["id"])
             await self.hass.async_add_executor_job(_advance_repeating, reminder)
 

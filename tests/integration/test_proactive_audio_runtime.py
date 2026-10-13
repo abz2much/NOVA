@@ -300,6 +300,8 @@ async def test_audit_speaks_only_in_the_chosen_area(hass, monkeypatch, spoken):
     monkeypatch.setattr(proactive_audio, "InfrastructureTriage", _Triage)
     monkeypatch.setattr(proactive_audio, "FaultLog", _FaultLog)
     monkeypatch.setattr(proactive_audio, "_run_predictor", _no_predictor)
+    # 8.44.0: the alert goes through delivery.py; not the time of day.
+    monkeypatch.setattr("custom_components.nova.delivery.in_quiet_hours", lambda hass_: False)
     entry = await _setup(hass)
     (run_audit,) = ticks
 

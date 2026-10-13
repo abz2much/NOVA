@@ -1,3 +1,17 @@
+## [8.44.0] — One set of rules for proactive messages
+
+Reminders, briefings, doorbell, camera and vehicle alerts, hazard warnings, package alerts and the infrastructure audit now go out through one delivery path. It applies the same rules in the same order to every one of them, so shush, the Announcements switch, quiet hours and "Notifications only" mean the same thing everywhere.
+
+### Changed
+- **One order of rules.** Critical always speaks and goes to the phones. Then a mute, shush, the hourly limit or a repeat holds the message. With the Announcements switch off nothing is spoken. In quiet hours, while the house is asleep, or with "Notifications only" on, the message goes to the phones instead of the speakers. A message no speaker takes also goes to the phones instead of being lost.
+- **Your own messages are not swallowed.** Reminders you set, your scheduled briefing and a briefing asked for with `nova.briefing` ignore shush and the Announcements switch. Reminders still wait for quiet hours to end, unless you set one to speak in quiet hours too.
+- **Reminders use the household's quiet hours**, the same Observer quiet hours every other alert uses, instead of a fixed 22:00 to 07:00 of their own.
+- **Doorbell, camera, vehicle, arrival and security briefing, package and infrastructure audit messages now follow shush, the Announcements switch, quiet hours, sleep and "Notifications only".** Before, each of these ignored some of them. A package delivered or mail arriving in quiet hours is now pushed to the phones instead of being skipped.
+- **Hazard warnings always reach every phone**, as before, even with shush on. Shush, the Announcements switch and sleep now stop the spoken copy. A warning at or above the night level is still spoken in quiet hours and while the house sleeps.
+
+### Unchanged
+- The Observer, Sentinel, appliance, host health and core alerts, and conversation replies, behave as in 8.43.0. They move onto the same path in a later release.
+
 ## [8.43.0] — Optional features marked, one database helper
 
 Settings now shows which optional features are not set up yet, and every Nova database opens the same way.

@@ -240,9 +240,10 @@ async def test_semantic_recording_does_not_duplicate_existing_announcement(hass,
     announced = []
     recorded = []
 
-    async def _fake_announce(hass_, msg, *a, **k):
-        announced.append(msg)
-    monkeypatch.setattr("custom_components.nova.tts_helper.async_announce", _fake_announce)
+    # 8.44.0: the vehicle announcement is one delivery request.
+    async def _fake_deliver(hass_, req, **k):
+        announced.append(req.message)
+    monkeypatch.setattr("custom_components.nova.delivery.async_deliver", _fake_deliver)
 
     async def _fake_record(hass_, **kw):
         recorded.append(kw)

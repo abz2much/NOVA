@@ -148,7 +148,10 @@ async def test_a_hazard(hazard, fake_hass, records):
     await hm._deliver(fake_hass, "Seismic alert.", "quake", speak_text="Seismic alert.")
     row = _one(records, "hazard")
     assert row["observation"]["source"] == "hazard_earthquake"
-    assert row["evidence"] == {"spoken": True, "pushed": True, "route": None}
+    # 8.44.0: through delivery.py, which also links the Actions log request.
+    assert {k: row["evidence"][k] for k in ("spoken", "pushed", "route")} == {
+        "spoken": True, "pushed": True, "route": None}
+    assert row["evidence"]["request_ids"]
 
 
 async def test_freeze_is_recorded_as_a_hazard(core, fake_hass, records):

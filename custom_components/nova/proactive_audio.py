@@ -321,7 +321,7 @@ async def _speak_tts(
 async def _announce(
     hass: HomeAssistant, runtime: NovaRuntime, message: str, area_id: str,
     critical: bool,
-) -> None:
+) -> bool:
     """Shape, duck, speak, and restore — best-effort, always restoring volumes.
 
     Targets are resolved through audio_routing (speakers in the area, with a
@@ -337,7 +337,7 @@ async def _announce(
             "nova.speak: no speaker resolved for area '%s' (no area speaker and "
             "no broadcast/default fallback) — nothing to announce on", area_id,
         )
-        return
+        return False
 
     telemetry = _build_telemetry(hass, area_id, targets, critical)
     profile = _PROSODY.calculate_vocal_profile(telemetry)
@@ -384,6 +384,7 @@ async def _announce(
             )
         except Exception:
             pass  # recording must never turn a delivered announcement into a failed one
+    return bool(delivered)
 
 
 def _history_phrase(matches: list[dict], honorific: str) -> str:
@@ -525,6 +526,24 @@ async def _dispatch_speak(hass: HomeAssistant, runtime: NovaRuntime, data: dict)
             _LOGGER.exception("nova.speak: failed to open feedback window")
 
 
+async def _deliver_audit(hass: HomeAssistant, runtime: NovaRuntime, message: str,
+                         target: str, critical: bool) -> None:
+    """One infrastructure audit alert through delivery.py: shush, the
+    Announcements switch, quiet hours, sleep and "Notifications only" apply
+    below critical; unspoken, it goes to the phones."""
+    from . import delivery
+    area_id = _resolve_area_id(hass, target)
+
+    async def _say(words: str) -> bool:
+        if area_id is None:
+            _LOGGER.warning("nova.speak: unknown area %r — ignoring", target)
+            return False
+        return await _announce(hass, runtime, words, area_id, critical)
+    await delivery.async_deliver(hass, delivery.DeliveryRequest(
+        source="infrastructure", message=message, category="infrastructure",
+        urgency="critical" if critical else "high"), speak=_say)
+
+
 def _boot_begin(runtime: NovaRuntime) -> None:
     """Mark the integration as initialising (gates nova.speak). Idempotent and
     reload-safe — resets readiness so a reload re-gates until ready again."""
@@ -590,13 +609,12 @@ async def async_setup_proactive_audio(hass: HomeAssistant, entry: ConfigEntry) -
                 area = str(nova_config.runtime_get(
                     hass, entry, AUDIT_AREA_KEY, "") or "").strip()
                 if area:
-                    # Straight to the dispatcher, not through nova.speak: the
+                    # One delivery request (8.44.0): the household's rules
+                    # decide, and the area's speakers say it with the
+                    # audit's own voice profile. Not through nova.speak: the
                     # service is being retired and warns whoever calls it.
-                    hass.async_create_task(_dispatch_speak(hass, tick_runtime, {
-                        "message": message,
-                        "target_area": area,
-                        "critical": verdict["critical"],
-                    }))
+                    hass.async_create_task(_deliver_audit(
+                        hass, tick_runtime, message, area, bool(verdict["critical"])))
                 # Persist this occurrence for future recall.
                 await hass.async_add_executor_job(
                     fault_log.commit_event, verdict["message"], tags
