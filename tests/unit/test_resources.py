@@ -375,18 +375,39 @@ def test_failed_items_are_forgotten_not_retried(reg):
     assert calls["n"] == 1
 
 
-def test_no_log_records_on_failure(reg, caplog):
+def test_each_failure_is_logged_with_its_exception(mod, reg, caplog):
+    # 8.49.10: failures used to be counted silently.
     caplog.set_level(logging.DEBUG)
-    reg.add_unsub(_raiser(RuntimeError("x")))
+    after = []
+    reg.add_unsub(_raiser(RuntimeError("unsub boom")))
+    reg.add_unsub(lambda: after.append("unsub"))
     reg.add_closeable(type("B", (), {"close": lambda self: 1 / 0})())
-    reg.close_all()
-    assert caplog.records == []
+    reg.add_closeable(type("C", (), {"close": lambda self: after.append("close")})())
+    summary = reg.close_all()
+    assert summary == {"unsubs": 1, "closeables": 1, "errors": 2}
+    assert after == ["unsub", "close"]
+    records = [r for r in caplog.records if r.name == mod._LOGGER.name]
+    assert [r.levelno for r in records] == [logging.WARNING, logging.WARNING]
+    assert isinstance(records[0].exc_info[1], RuntimeError)
+    assert isinstance(records[1].exc_info[1], ZeroDivisionError)
 
 
-async def test_no_log_records_on_async_failure(reg, caplog):
+async def test_async_failure_is_logged_with_its_exception(mod, reg, caplog):
     caplog.set_level(logging.DEBUG)
     reg.add_async_closeable(AClos(Journal(), "a", exc=RuntimeError("x")))
-    await reg.async_close_all()
+    reg.add_async_closeable(AClos(Journal(), "b"))
+    summary = await reg.async_close_all()
+    assert summary["async_closeables"] == 1 and summary["errors"] == 1
+    records = [r for r in caplog.records if r.name == mod._LOGGER.name]
+    assert len(records) == 1 and records[0].levelno == logging.WARNING
+    assert isinstance(records[0].exc_info[1], RuntimeError)
+
+
+def test_success_logs_nothing(reg, caplog):
+    caplog.set_level(logging.DEBUG)
+    reg.add_unsub(lambda: None)
+    reg.add_closeable(type("C", (), {"close": lambda self: None})())
+    reg.close_all()
     assert caplog.records == []
 
 

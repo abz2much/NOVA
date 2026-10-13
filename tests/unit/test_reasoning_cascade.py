@@ -113,9 +113,10 @@ async def test_recovery_after_cooldown(
     assert connectivity.status()["state"] == "open"
 
     # Advance time past the 60s cooldown so the breaker allows a probe again.
+    # The breaker reads the monotonic clock (8.49.10).
     import time as _t
-    base = _t.time()
-    monkeypatch.setattr(_t, "time", lambda: base + 120)
+    base = _t.monotonic()
+    monkeypatch.setattr(_t, "monotonic", lambda: base + 120)
 
     good = provider_factory(
         replies=['{"speak": true, "message": "Recovered, sir.", "urgency": "low"}'])

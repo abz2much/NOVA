@@ -388,11 +388,34 @@ async def test_base_exception_aborts_drain_and_keeps_rest(mod):
     with pytest.raises(asyncio.CancelledError):
         await buf.mark_ready(dispatch)
     assert got == [0]
-    assert buf.ready is True
+    # 8.49.10: the gate closes again so the leftover is not stranded.
+    assert buf.ready is False
     assert buf.pending() == 1  # item 1 consumed, item 2 still held
 
-    # Stuck until re-gated; then the leftover replays.
-    assert await buf.mark_ready(dispatch) == 0
-    buf.begin()
     assert await buf.mark_ready(dispatch) == 1
     assert got == [0, 2]
+    assert buf.ready is True and buf.pending() == 0
+
+
+async def test_task_cancelled_mid_replay_leaves_rest_replayable(mod):
+    buf = mod.AlertBuffer()
+    _fill(buf, 3)
+    started = asyncio.Event()
+    got = []
+
+    async def slow(item):
+        started.set()
+        await asyncio.sleep(10)
+
+    task = asyncio.create_task(buf.mark_ready(slow))
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert buf.ready is False and buf.pending() == 2
+
+    async def record(item):
+        got.append(item["n"])
+
+    assert await buf.mark_ready(record) == 2
+    assert got == [1, 2]

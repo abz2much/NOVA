@@ -90,7 +90,7 @@ async def failing_dump(diag, monkeypatch):
     monkeypatch.setattr(ws, "recent_conversation_log", _boom, raising=False)
     monkeypatch.setitem(sys.modules, "jc.nova_config", _module("nova_config", get_all=_boom))
     monkeypatch.setitem(sys.modules, "jc.cognitive_core", _module("cognitive_core", _CORE=_Core()))
-    monkeypatch.setitem(sys.modules, "jc.connectivity", _module("connectivity", snapshot=_boom))
+    monkeypatch.setitem(sys.modules, "jc.connectivity", _module("connectivity", status=_boom))
     for name, fn in (("cognition", "stats"), ("decision_record", "stats"),
                      ("intrusion", "status"), ("reasoning_cache", "stats")):
         monkeypatch.setitem(sys.modules, f"jc.{name}", _module(name, **{fn: _boom}))
@@ -204,3 +204,28 @@ def test_scrub_text_hides_webhook_paths(diag):
     ):
         assert diag._scrub_text(f"POST {raw} failed") == f"POST {want} failed"
     assert diag._scrub_text("the webhook trigger fired") == "the webhook trigger fired"
+
+
+async def test_connectivity_status_reaches_the_dump(diag, monkeypatch):
+    # 8.49.10: the dump used to look for a snapshot() the module never had.
+    ws = sys.modules["jc.websocket"]
+    monkeypatch.setattr(ws, "recent_debug_log", lambda n=150: [], raising=False)
+    monkeypatch.setattr(ws, "recent_conversation_log", lambda n=80: [], raising=False)
+
+    async def _health(_hass):
+        return {}
+    monkeypatch.setattr(diag, "run_service_health", _health)
+    breaker = {"state": "open", "online": False, "cooldown_remaining_s": 12}
+    monkeypatch.setitem(sys.modules, "jc.connectivity",
+                        _module("connectivity", status=lambda: dict(breaker)))
+
+    class _States:
+        def async_all(self):
+            return []
+
+        def get(self, _entity_id):
+            return None
+    dump = await diag.async_get_config_entry_diagnostics(_Hass(_States()), _Entry())
+    assert dump["connectivity"] == breaker
+    assert "connectivity_error" not in dump
+

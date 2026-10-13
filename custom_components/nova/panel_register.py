@@ -54,6 +54,17 @@ def _hash_file(path: str) -> str:
         return str(int(time.time()))
 
 
+def _static_path_served(hass: HomeAssistant) -> bool:
+    """True if this process already routes ``PANEL_STATIC_URL``; never raises."""
+    try:
+        return any(
+            getattr(resource, "canonical", None) == PANEL_STATIC_URL
+            for resource in hass.http.app.router.resources()
+        )
+    except Exception:  # noqa: BLE001 - unknown means "register it"
+        return False
+
+
 async def _register_one(
     hass: HomeAssistant,
     panel_dir: str,
@@ -76,7 +87,7 @@ async def _register_one(
 
     # Clear any earlier registration so a reload can register afresh.
     try:
-        frontend.async_remove_panel(hass, url_path)
+        frontend.async_remove_panel(hass, url_path, warn_if_unknown=False)
     except Exception:  # noqa: BLE001
         pass
 
@@ -116,16 +127,19 @@ async def async_register_panel(hass: HomeAssistant) -> bool:
         _LOGGER.error("Nova panel JS file not found: %s", js_path)
         return False
 
-    try:
-        await hass.http.async_register_static_paths(
-            [StaticPathConfig(PANEL_STATIC_URL, panel_dir, cache_headers=False)]
-        )
-    except Exception as err:  # noqa: BLE001
-        _LOGGER.debug("Static path %s not registered: %s", PANEL_STATIC_URL, err)
+    # HA keeps routes for the whole process, so a reload must not add the same
+    # route again.
+    if not _static_path_served(hass):
+        try:
+            await hass.http.async_register_static_paths(
+                [StaticPathConfig(PANEL_STATIC_URL, panel_dir, cache_headers=False)]
+            )
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Static path %s not registered: %s", PANEL_STATIC_URL, err)
 
     # Drop the sidebar entry left behind by older versions.
     try:
-        frontend.async_remove_panel(hass, CMD_URL_PATH)
+        frontend.async_remove_panel(hass, CMD_URL_PATH, warn_if_unknown=False)
     except Exception:  # noqa: BLE001
         pass
 

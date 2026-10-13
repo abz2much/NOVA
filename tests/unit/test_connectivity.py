@@ -24,6 +24,9 @@ class Clock:
     def time(self):
         return self.now
 
+    def monotonic(self):
+        return self.now
+
     def advance(self, seconds):
         self.now += seconds
 
@@ -242,11 +245,24 @@ def test_half_open_hands_out_one_probe_only(cb, clock):
     assert cb._BREAKER.half_open_probes == 1
 
 
-def test_half_open_has_no_timeout(cb, clock):
+def test_abandoned_probe_is_replaced_after_one_cooldown(cb, clock):
+    # The probe's call was cancelled, so no outcome is ever recorded.
     _half_open(cb, clock)
-    clock.advance(10 * COOLDOWN)
+    clock.advance(COOLDOWN - 0.001)
     assert cb.allow_request() is False
+    clock.advance(0.001)
+    assert cb.allow_request() is True
     assert cb.status()["state"] == "half_open"
+    assert cb._BREAKER.half_open_probes == 1
+    assert cb.allow_request() is False
+
+
+def test_replacement_probe_outcome_still_closes_or_reopens(cb, clock):
+    _half_open(cb, clock)
+    clock.advance(COOLDOWN)
+    assert cb.allow_request() is True
+    cb.record_success()
+    assert cb.status()["state"] == "closed"
 
 
 def test_more_probes_when_the_limit_is_raised(cb, clock, monkeypatch):
@@ -475,12 +491,12 @@ def test_q7_zero_clock_reads_as_never(cb, clock):
     assert st["total_successes"] == 1 and st["total_failures"] == 1
 
 
-def test_q8_backwards_clock_is_not_clamped(cb, clock):
+def test_q8_backwards_clock_clamps_ago_to_zero(cb, clock):
     cb.record_failure()
     cb.record_failure()
     clock.advance(-30)
     st = cb.status()
-    assert st["last_failure_ago_s"] == -30
+    assert st["last_failure_ago_s"] == 0
     assert st["cooldown_remaining_s"] == 90
     assert cb.allow_request() is False
 
@@ -498,3 +514,42 @@ def test_module_has_no_background_work(cb):
     names = {n for n in dir(cb) if not n.startswith("__")}
     assert not any(isinstance(getattr(cb, n), threading.Thread) for n in names)
     assert isinstance(cb.time, Clock)
+
+
+# ── 8.49.10 fixes ────────────────────────────────────────────────────────────
+
+class SplitClock:
+    """Wall clock and monotonic clock that can move independently."""
+
+    def __init__(self):
+        self.wall = 1_000_000.0
+        self.mono = 5_000.0
+
+    def time(self):
+        return self.wall
+
+    def monotonic(self):
+        return self.mono
+
+
+def test_cooldown_ignores_wall_clock_steps(cb, monkeypatch):
+    split = SplitClock()
+    monkeypatch.setattr(cb, "time", split)
+    _open(cb)
+    split.wall -= 3600            # the wall clock is stepped back an hour
+    split.mono += COOLDOWN        # while one real cooldown passes
+    split.wall += COOLDOWN
+    assert cb.allow_request() is True
+    assert cb.status()["state"] == "half_open"
+
+
+def test_ago_values_are_never_negative(cb, monkeypatch):
+    split = SplitClock()
+    monkeypatch.setattr(cb, "time", split)
+    cb.record_success()
+    cb.record_failure()
+    split.wall -= 120
+    st = cb.status()
+    assert st["last_success_ago_s"] == 0
+    assert st["last_failure_ago_s"] == 0
+

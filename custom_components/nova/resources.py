@@ -73,6 +73,8 @@ class NovaResources:
                 summary["unsubs"] += 1
             except Exception:  # noqa: BLE001 - every failure is isolated
                 summary["errors"] += 1
+                _LOGGER.warning("Nova unload: cancel callback %r failed", unsub,
+                                exc_info=True)
 
         for obj in self._closeables:
             try:
@@ -83,6 +85,7 @@ class NovaResources:
                 summary["closeables"] += 1
             except Exception:  # noqa: BLE001
                 summary["errors"] += 1
+                _LOGGER.warning("Nova unload: closing %r failed", obj, exc_info=True)
 
         self._unsubs.clear()
         self._closeables.clear()
@@ -102,4 +105,5 @@ class NovaResources:
                 summary["async_closeables"] += 1
             except Exception:  # noqa: BLE001
                 summary["errors"] += 1
+                _LOGGER.warning("Nova unload: closing %r failed", obj, exc_info=True)
         return summary

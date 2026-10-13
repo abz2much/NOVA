@@ -30,7 +30,7 @@ from .llm_provider import (
     resolve_provider_credential,
     resolve_provider_endpoint,
 )
-from .migrations import migrate_config, CURRENT_SCHEMA_VERSION
+from .migrations import migrate_config, schema_version_is_valid, CURRENT_SCHEMA_VERSION
 from .runtime import (
     NovaConfigEntry,
     NovaRuntime,
@@ -139,14 +139,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
         new_data, new_options, new_version = migrate_config(
             new_data, new_options, current_version
         )
-        new_data["schema_version"] = new_version
-        hass.config_entries.async_update_entry(
-            entry, data=new_data, options=new_options
-        )
-        _LOGGER.info(
-            "Nova: migrated config from schema v%d to v%d",
-            current_version, new_version,
-        )
+        # An invalid version was reported by migrate_config; saving it back
+        # would only repeat that on every setup with nothing migrated.
+        if schema_version_is_valid(current_version):
+            new_data["schema_version"] = new_version
+            hass.config_entries.async_update_entry(
+                entry, data=new_data, options=new_options
+            )
+            _LOGGER.info(
+                "Nova: migrated config from schema v%d to v%d",
+                current_version, new_version,
+            )
 
     honorific = entry.options.get(CONF_HONORIFIC, entry.data.get(CONF_HONORIFIC, DEFAULT_HONORIFIC))
 
