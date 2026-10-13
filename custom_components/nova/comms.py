@@ -2,24 +2,53 @@
 
 Looks at the current/next event exposed by each Home Assistant ``calendar.*``
 entity, spots double-bookings and too-tight transitions, and turns the result
-into a short, speakable agenda. Time zones are deliberately dropped: every
-timestamp is read as the wall-clock value it was written with.
+into a short, speakable agenda. Every time is compared as Home Assistant's
+local wall-clock time: a timestamp with a UTC offset is converted to it, and
+one without is taken as already local.
 """
 from __future__ import annotations
 
 import re
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 
 _DEFAULT_TIGHT_GAP_MIN = 15
 
-# Date, a 'T' or space separator, then HH:MM with optional :SS. Anything after
-# (fractional seconds, 'Z', a UTC offset) is ignored.
+# Date, a 'T' or space separator, then HH:MM with optional :SS. Fractional
+# seconds are ignored; a trailing 'Z' or UTC offset is read by _offset.
 _DATETIME_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?")
+_OFFSET_RE = re.compile(r"(?:\.\d+)?(Z|[+-]\d{2}:?\d{2})$")
+
+
+def _local(dt: datetime) -> datetime:
+    """An aware datetime as naive Home Assistant local time."""
+    try:
+        from homeassistant.util import dt as dt_util
+        return dt_util.as_local(dt).replace(tzinfo=None)
+    except Exception:  # noqa: BLE001 - outside HA, use the system zone
+        return dt.astimezone().replace(tzinfo=None)
+
+
+def _now() -> datetime:
+    """Naive Home Assistant local time now."""
+    return _local(datetime.now(timezone.utc))
+
+
+def _offset(text: str, m: "re.Match[str]") -> Optional[timezone]:
+    """The UTC offset written after the time, if any."""
+    tail = _OFFSET_RE.match(text[m.end():])
+    if not tail:
+        return None
+    raw = tail.group(1)
+    if raw == "Z":
+        return timezone.utc
+    sign = -1 if raw[0] == "-" else 1
+    digits = raw[1:].replace(":", "")
+    return timezone(sign * timedelta(hours=int(digits[:2]), minutes=int(digits[2:])))
 
 
 def _parse(ts: Any) -> Optional[datetime]:
-    """Parse an HA calendar timestamp into a naive wall-clock datetime."""
+    """Parse an HA calendar timestamp into a naive local datetime."""
     if not ts:
         return None
     try:
@@ -29,8 +58,10 @@ def _parse(ts: Any) -> Optional[datetime]:
             if not m:
                 return None
             day = date.fromisoformat(m.group(1))
-            return datetime(day.year, day.month, day.day,
+            when = datetime(day.year, day.month, day.day,
                             int(m.group(2)), int(m.group(3)), int(m.group(4) or 0))
+            zone = _offset(text, m)
+            return when if zone is None else _local(when.replace(tzinfo=zone))
         day = date.fromisoformat(text[:10])
         return datetime(day.year, day.month, day.day)
     except (ValueError, TypeError):
@@ -106,7 +137,7 @@ def agenda(hass, horizon_hours: int = 24) -> dict:
     """Spoken-style agenda for the next ``horizon_hours`` hours. Never raises."""
     try:
         gap = _tight_gap()
-        now = datetime.now()
+        now = _now()
         horizon = now + timedelta(hours=max(1, int(horizon_hours)))
         kept = sorted(
             (e for e in gather_events(hass) if e["start"] <= horizon and e["end"] >= now),

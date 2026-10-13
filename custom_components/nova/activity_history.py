@@ -142,11 +142,16 @@ def _fetch_logbook(module: Any, hass: Any, start: Any, end: Any,
                 return list(fn(hass, start, end, [entity_id]))
             return list(fn(hass, start, end))
         except TypeError:
-            # Older signature without entity scoping: widen to the whole house.
+            # Older signature without entity scoping: read the whole house and
+            # keep only the asked-for entity's rows.
             try:
-                return list(fn(hass, start, end))
+                rows = list(fn(hass, start, end))
             except Exception:  # noqa: BLE001
                 continue
+            if entity_id:
+                rows = [r for r in rows
+                        if isinstance(r, dict) and r.get("entity_id") == entity_id]
+            return rows
         except Exception:  # noqa: BLE001
             continue
     return []

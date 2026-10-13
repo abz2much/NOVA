@@ -13,6 +13,7 @@ from typing import Any, Optional
 
 import aiohttp
 from homeassistant.helpers import aiohttp_client, network
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
 _LOGGER = logging.getLogger(__name__)
@@ -89,8 +90,17 @@ class FrigateBackend(_PlatformBackend):
         return body if len(body) > MIN_IMAGE_SIZE else None
 
 
+def _nest_device_name(hass: Any, device_id: str) -> Optional[str]:
+    """The Nest API name of the HA device, from its ("nest", name) identifier."""
+    entry = dr.async_get(hass).async_get(device_id)
+    for domain, name in getattr(entry, "identifiers", None) or ():
+        if domain == "nest":
+            return str(name)
+    return None
+
+
 class NestBackend(_PlatformBackend):
-    """Fetches event media from the Nest integration's subscriber media stores."""
+    """Fetches the Nest event's own image from the Nest integration."""
 
     name = "nest"
     platforms = ("nest",)
@@ -107,10 +117,27 @@ class NestBackend(_PlatformBackend):
             return None
 
         try:
+            # Current HA: each loaded Nest entry's device manager holds the
+            # Nest device, which serves the event's media from its token.
+            nest_id = _nest_device_name(hass, device_id)
+            for entry in hass.config_entries.async_entries("nest") if nest_id else ():
+                manager = getattr(getattr(entry, "runtime_data", None), "device_manager", None)
+                device = manager.devices.get(nest_id) if manager is not None else None
+                if device is None:
+                    continue
+                media = await device.event_media_manager.get_media_from_token(event_id)
+                contents = getattr(media, "contents", None)
+                if contents and len(contents) > MIN_IMAGE_SIZE:
+                    return contents
+                return None
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Nest event media unavailable for %s: %s", entity_id, err)
+
+        try:
+            # Older HA kept subscribers with media stores in hass.data.
             nest_data = hass.data.get("nest")
             if not nest_data:
                 return None
-            # Current HA stores a dict here, which has no `subscribers` (quirk Q1).
             for subscriber in getattr(nest_data, "subscribers", []):
                 store = getattr(subscriber, "media_store", None)
                 if not store:

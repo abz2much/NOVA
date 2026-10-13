@@ -85,10 +85,11 @@ def test_person_count_parsing(sp, hass, raw, expected):
     assert r["confidence"] == (0.6 if expected > 0 else 0.0)
 
 
-def test_infinite_count_raises_quirk(sp, hass):
-    hass.states.set(COUNT, "inf")
-    with pytest.raises(OverflowError):
-        run(sp, hass)
+@pytest.mark.parametrize("state", ["inf", "-inf", "infinity"])
+def test_infinite_count_reads_as_zero(sp, hass, state):
+    # Regression (8.49.2): int(float("inf")) raised OverflowError.
+    hass.states.set(COUNT, state)
+    assert run(sp, hass)["person_count"] == 0
 
 
 @pytest.mark.parametrize("state", ["on", "ON", "true", "True", "detected", "home", "occupied"])

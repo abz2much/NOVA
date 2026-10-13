@@ -36,11 +36,8 @@ class SpatialContextEngine:
         if raw is None:
             return 0
         try:
-            value = float(raw)
-            # int() of an infinite float raises OverflowError, which is
-            # deliberately not caught here (preserved behaviour).
-            count = int(value)
-        except (TypeError, ValueError):
+            count = int(float(raw))
+        except (TypeError, ValueError, OverflowError):
             return 0
         return max(count, 0)
 

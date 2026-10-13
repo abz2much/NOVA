@@ -118,9 +118,15 @@ def test_adjacency_isolated_rooms_absent(rg):
     assert "studio" not in rg.room_adjacency(ROW)
 
 
-def test_adjacency_list_plan_raises_quirk(rg):
-    with pytest.raises(AttributeError):
-        rg.room_adjacency({"floor_plan_rooms": [room("A", 0, 0)]})
+def test_adjacency_list_plan_is_one_floor(rg):
+    # Regression (8.49.2): a plan saved as a bare list raised AttributeError.
+    plan = [room("A", 0, 0), room("B", 15, 0), room("C", 200, 0)]
+    assert rg.room_adjacency({"floor_plan_rooms": plan}) == {"a": {"b"}, "b": {"a"}}
+
+
+@pytest.mark.parametrize("plan", [7, "7", "[1, 2]", True])
+def test_adjacency_odd_plan_is_empty(rg, plan):
+    assert rg.room_adjacency({"floor_plan_rooms": plan}) == {}
 
 
 # ── _area_slug ───────────────────────────────────────────────────────────────
