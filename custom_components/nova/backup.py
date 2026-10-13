@@ -10,6 +10,7 @@ from __future__ import annotations
 import glob
 import logging
 import os
+import posixpath
 import tarfile
 import tempfile
 import threading
@@ -34,15 +35,28 @@ _BACKUP_SUBDIR = "nova_backups"
 _NAME_LOCK = threading.Lock()
 
 
-def _inside_state(config_dir: str, link: str) -> bool:
-    """True when ``link`` resolves to a place inside one of the state paths."""
+def _archive_target(config_dir: str, link: str) -> str | None:
+    """Where ``link`` resolves to, as a path inside the archive, or None when
+    that is outside every state path. A state path that is itself a link (a
+    data folder on another disk) counts as the place it points to."""
     target = os.path.realpath(link)
     root = os.path.realpath(config_dir)
     for name in _STATE_PATHS:
-        allowed = os.path.join(root, name)
+        allowed = os.path.realpath(os.path.join(root, name))
         if os.path.commonpath([allowed, target]) == allowed:
-            return True
-    return False
+            rest = os.path.relpath(target, allowed)
+            return name if rest == "." else posixpath.join(name, *rest.split(os.sep))
+    return None
+
+
+def _linked_state(config_dir: str) -> dict[str, str]:
+    """State paths that are themselves links, mapped to what they resolve to."""
+    linked = {}
+    for name in _STATE_PATHS:
+        source = os.path.join(config_dir, name)
+        if os.path.islink(source) and os.path.exists(source):
+            linked[name] = os.path.realpath(source)
+    return linked
 
 
 def create_backup(config_dir: str) -> str:
@@ -51,9 +65,16 @@ def create_backup(config_dir: str) -> str:
     os.makedirs(backup_dir, exist_ok=True)
 
     def skip_outside_links(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
-        if info.issym() and not _inside_state(config_dir, os.path.join(config_dir, info.name)):
+        if not info.issym():
+            return info
+        inside = _archive_target(config_dir, os.path.join(config_dir, info.name))
+        if inside is None:
             _LOGGER.warning("Backup skipped %s: it is a link to outside Nova's data", info.name)
             return None
+        if os.path.isabs(info.linkname):
+            # Restore refuses a link stored by its full path; store it
+            # relative to its own folder so it points at the same file.
+            info.linkname = posixpath.relpath(inside, posixpath.dirname(info.name) or ".")
         return info
 
     stamp = time.strftime("%Y%m%d-%H%M%S")
@@ -63,10 +84,13 @@ def create_backup(config_dir: str) -> str:
     fd, tmp = tempfile.mkstemp(prefix=".nova-state-", suffix=".tmp", dir=backup_dir)
     try:
         with os.fdopen(fd, "wb") as fh, tarfile.open(fileobj=fh, mode="w:gz") as tar:
+            linked = _linked_state(config_dir)
             for name in _STATE_PATHS:
                 source = os.path.join(config_dir, name)
                 if os.path.exists(source):
-                    tar.add(source, arcname=name, filter=skip_outside_links)
+                    # A state path that is a link is backed up as what it
+                    # points to, not as the link.
+                    tar.add(linked.get(name, source), arcname=name, filter=skip_outside_links)
 
         with _NAME_LOCK:
             path = os.path.join(backup_dir, f"nova-state-{stamp}.tar.gz")
@@ -98,6 +122,41 @@ def restore_backup(config_dir: str, archive: str = "") -> str:
         if not os.path.exists(path):
             raise FileNotFoundError(path)
 
+    linked = _linked_state(config_dir)
     with tarfile.open(path, "r:gz") as tar:
-        tar.extractall(config_dir, filter="data")
+        if not linked:
+            tar.extractall(config_dir, filter="data")
+            return path
+        # A state path that is a link here is restored into the place it
+        # points to; the data filter is then applied to that place.
+        members = tar.getmembers()
+        tar.extractall(config_dir, filter="data", members=[
+            m for m in members if _top(m.name) not in linked])
+        for name, target in linked.items():
+            if os.path.isdir(target):
+                # Into the folder itself, so nothing can land beside it.
+                dest = target
+                moved = [_moved(m, name + "/", "") for m in members
+                         if m.name.startswith(name + "/")]
+            else:
+                dest = os.path.dirname(target)
+                moved = [_moved(m, name, os.path.basename(target)) for m in members
+                         if m.name == name]
+            if moved:
+                tar.extractall(dest, filter="data", members=moved)
     return path
+
+
+def _top(member_name: str) -> str:
+    return member_name.split("/", 1)[0]
+
+
+def _moved(member: tarfile.TarInfo, old: str, new: str) -> tarfile.TarInfo:
+    """``member`` with its leading ``old`` swapped for ``new`` (a hard link's
+    target too, so it still names the same member)."""
+    def swap(name: str) -> str:
+        return new + name[len(old):] if name.startswith(old) else name
+    changes = {"name": swap(member.name)}
+    if member.islnk():
+        changes["linkname"] = swap(member.linkname)
+    return member.replace(**changes, deep=False)

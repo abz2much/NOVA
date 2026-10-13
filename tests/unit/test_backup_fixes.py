@@ -1,4 +1,5 @@
-"""8.49.11 regression tests for backup and restore. Each one fails on 8.49.10."""
+"""Regression tests for backup and restore. The 8.49.11 ones fail on 8.49.10;
+the 8.49.12 ones fail on 8.49.11."""
 import io
 import logging
 import os
@@ -119,3 +120,47 @@ def test_symlink_outside_nova_data_is_skipped_with_warning(bk, tmp_path, caplog)
     assert any("nova/out_link" in r.getMessage() for r in caplog.records
                if r.levelno == logging.WARNING)
     assert inside.read_text() == "REAL"
+
+
+def test_kept_link_with_a_full_path_target_restores(bk, tmp_path):
+    # 8.49.11 kept the full path, and restore's data filter refused it.
+    cfg = tmp_path / "cfg"
+    _write(cfg / "nova" / "real.txt", "REAL")
+    (cfg / "nova" / "sub").mkdir()
+    os.symlink(cfg / "nova" / "real.txt", cfg / "nova" / "sub" / "abs_link")
+    made = bk.create_backup(str(cfg))
+    with tarfile.open(made, "r:gz") as tar:
+        assert tar.getmember("nova/sub/abs_link").linkname == "../real.txt"
+    os.remove(cfg / "nova" / "sub" / "abs_link")
+    bk.restore_backup(str(cfg), made)
+    assert os.path.islink(cfg / "nova" / "sub" / "abs_link")
+    assert (cfg / "nova" / "sub" / "abs_link").read_text() == "REAL"
+
+
+def test_data_folder_that_is_a_link_is_backed_up_and_restored(bk, tmp_path):
+    # 8.49.11 skipped a state folder that is itself a link to another disk.
+    cfg = tmp_path / "cfg"
+    cfg.mkdir()
+    store = _write(tmp_path / "other_disk" / "memory" / "facts.txt", "KEPT").parent
+    os.symlink(store, cfg / "nova_memory")
+    made = bk.create_backup(str(cfg))
+    with tarfile.open(made, "r:gz") as tar:
+        assert tar.extractfile("nova_memory/facts.txt").read() == b"KEPT"
+    (store / "facts.txt").write_text("CHANGED")
+    bk.restore_backup(str(cfg), made)
+    assert os.path.islink(cfg / "nova_memory")
+    assert (store / "facts.txt").read_text() == "KEPT"
+
+
+def test_restore_through_a_linked_folder_stays_inside_it(bk, tmp_path):
+    # The data filter is applied to the linked folder itself, so a member
+    # that climbs out of it is refused instead of landing beside it.
+    cfg = tmp_path / "cfg"
+    cfg.mkdir()
+    store = tmp_path / "other_disk" / "memory"
+    store.mkdir(parents=True)
+    os.symlink(store, cfg / "nova_memory")
+    arc = _make_tgz(tmp_path / "x" / "a.tar.gz", "nova_memory/../beside.txt", b"x")
+    with pytest.raises(tarfile.OutsideDestinationError):
+        bk.restore_backup(str(cfg), str(arc))
+    assert not (tmp_path / "other_disk" / "beside.txt").exists()

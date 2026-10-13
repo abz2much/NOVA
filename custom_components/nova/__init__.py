@@ -133,7 +133,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> bool
     paths.configure(hass)
     # ── Run config migrations if entry is from an older schema ──────────────
     current_version = entry.data.get("schema_version", 1)
-    if current_version < CURRENT_SCHEMA_VERSION:
+    # A version that is not a number (None, text) goes to migrate_config too,
+    # which reports it; comparing it here would fail setup.
+    if (not isinstance(current_version, (int, float))
+            or current_version < CURRENT_SCHEMA_VERSION):
         new_data   = dict(entry.data)
         new_options = dict(entry.options)
         new_data, new_options, new_version = migrate_config(

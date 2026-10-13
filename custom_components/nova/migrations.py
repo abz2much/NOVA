@@ -115,7 +115,8 @@ def migrate_6_to_7(data: dict, options: dict) -> tuple[dict, dict]:
     """Area-registry routing; legacy speaker lists are kept as they are."""
     broadcast = options.get("broadcast_speakers") or []
     if broadcast and not options.get("broadcast_group"):
-        options["broadcast_group"] = broadcast[0]
+        # A single speaker saved as text is that speaker, not its first letter.
+        options["broadcast_group"] = broadcast if isinstance(broadcast, str) else broadcast[0]
         _LOGGER.info(
             "Nova migration v6->v7: broadcast_group set to %s",
             options["broadcast_group"],
@@ -158,6 +159,8 @@ MIGRATIONS: list[tuple[int, Callable[[dict, dict], tuple[dict, dict]]]] = [
 
 def schema_version_is_valid(version: Any) -> bool:
     """True for a whole number of 1 or more (the only versions steps know)."""
+    if not isinstance(version, (int, float)):
+        return False
     return bool(version >= 1 and version % 1 == 0)
 
 
@@ -168,9 +171,10 @@ def migrate_config(
 
     A failing step is logged and stops the walk; whatever was written so far
     stays, and the returned version is that step's source version. An invalid
-    version (zero, negative or fractional) is reported once and changes nothing.
+    version (zero, negative, fractional, missing or text) is reported once and
+    changes nothing.
     """
-    if current_version >= CURRENT_SCHEMA_VERSION:
+    if isinstance(current_version, (int, float)) and current_version >= CURRENT_SCHEMA_VERSION:
         return data, options, current_version
     if not schema_version_is_valid(current_version):
         _LOGGER.error(
