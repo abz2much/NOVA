@@ -13,8 +13,9 @@ order, to every one of them:
    briefing) still reaches the phones: shush quiets the speakers.
 3. With the Announcements switch off nothing is spoken. A high message, or
    one the source always pushes, still goes to the phones.
-4. In quiet hours, or while the house is asleep, nothing is spoken and the
-   message goes to the phones instead.
+4. In quiet hours, or while the house is asleep, nothing is spoken. A high
+   message, the person's own, or one the source always pushes goes to the
+   phones instead; an everyday (medium or low) alert is dropped (8.45.0).
 5. With "Notifications only" on, the message goes to the phones instead of
    the speakers.
 
@@ -25,6 +26,16 @@ chose the time themselves (quiet_ok: a reminder set to speak in quiet hours
 too, a briefing on their schedule, or nova.briefing called now). Sleep
 still applies, except to a hazard warning at or above the household's night
 level (sleep_ok), which is meant to wake the house.
+
+Each request may carry a repeat label (dedup_key): the same label within
+the output gate's repeat window counts as a repeat whatever the words.
+Without one, repeats are judged on the words. Habituation ("I'll stop
+mentioning this" after three days running) counts days by the entity, or by
+habit_key when given ("" when the source counts its own, as the core does).
+
+Every request's outcome (spoken, pushed, the reason and its Actions log
+request) is written to the activity log (8.45.0); safety kinds also go to
+the Decision Record (record_kind).
 
 Quiet hours are the household's one setting (observer_quiet_start and
 observer_quiet_end), read by in_quiet_hours(); no sender keeps its own.
@@ -45,7 +56,8 @@ URGENCIES = ("low", "medium", "high", "critical")
 # When a message may also go to the phones.
 PUSH_NEVER = "never"          # speakers only; held if it cannot be spoken
 PUSH_FALLBACK = "fallback"    # the phones only when it cannot be spoken
-PUSH_HIGH = "high"            # as fallback, and high is pushed as well as spoken
+PUSH_HIGH = "high"            # high and critical are pushed as well as spoken;
+                              # below high only with "Notifications only" on
 PUSH_ALWAYS = "always"        # always pushed, spoken too when allowed
 PUSH_MODES = (PUSH_NEVER, PUSH_FALLBACK, PUSH_HIGH, PUSH_ALWAYS)
 
@@ -75,6 +87,13 @@ class DeliveryRequest:
     # The source's own config, for its chosen phone services. The live
     # settings still win (notify_targets).
     config: Optional[dict] = field(default=None, compare=False, hash=False)
+    dedup_key: str = ""               # the repeat label (8.45.0); "": by the words
+    habit_key: Optional[str] = None   # habituation key; None: the entity,
+                                      # "": the source counts its own days
+    asleep: Optional[bool] = None     # the source's own sleep reading (the
+                                      # core's tick); None: read here
+    motion_counts: bool = False       # speaker routing may count live motion as
+                                      # someone home (an intruder's movement)
     record_kind: str = ""             # Decision Record kind; empty: not recorded
     record_facts: Optional[dict] = field(default=None, compare=False, hash=False)
     record_assessment: str = ""
@@ -132,10 +151,13 @@ def decide(req: DeliveryRequest, cond: Conditions) -> Decision:
             return Decision(False, also_push, "announcements off")
     if req.phone_only:
         return Decision(False, can_push, "phone only")
+    # Held for the night: only what matters goes to the phones instead.
+    night_push = can_push and (req.urgency == "high" or req.requested_by_user
+                               or req.push == PUSH_ALWAYS)
     if cond.quiet_hours and not req.quiet_ok:
-        return Decision(False, can_push, "quiet hours")
+        return Decision(False, night_push, "quiet hours")
     if cond.asleep and not req.sleep_ok:
-        return Decision(False, can_push, "asleep")
+        return Decision(False, night_push, "asleep")
     if cond.notify_only:
         return Decision(False, can_push, "notifications only")
     return Decision(True, also_push, "")
@@ -144,6 +166,10 @@ def decide(req: DeliveryRequest, cond: Conditions) -> Decision:
 # ── reading the household ───────────────────────────────────────────────────
 
 def _setting(hass, key: str, default):
+    """The live panel setting, then the saved config, then `default`. A
+    loaded entry that has lost its runtime is logged and reads the default:
+    an alert, a critical one above all, is never dropped for it."""
+    from .runtime import NovaRuntimeUnavailable
     try:
         from . import nova_config
         from .runtime import domain_runtime_config
@@ -152,6 +178,9 @@ def _setting(hass, key: str, default):
             return rc[key]
         value = nova_config.get(key, None)
         return default if value in (None, "") else value
+    except NovaRuntimeUnavailable as exc:
+        _LOGGER.warning("delivery: live settings unavailable, using defaults: %s", exc)
+        return default
     except Exception:
         return default
 
@@ -189,12 +218,14 @@ def conditions(hass, req: DeliveryRequest) -> Conditions:
         notify_only = False
     quiet_start, quiet_end = quiet_hours(hass)
     quiet = in_quiet_hours(hass)
-    try:
-        asleep, _why = sleep_detection.is_sleeping(
-            hass, bedroom_area_ids=_setting(hass, "bedroom_areas", []) or [],
-            quiet_start=quiet_start, quiet_end=quiet_end)
-    except Exception:
-        asleep = False
+    asleep = req.asleep
+    if asleep is None:
+        try:
+            asleep, _why = sleep_detection.is_sleeping(
+                hass, bedroom_area_ids=_setting(hass, "bedroom_areas", []) or [],
+                quiet_start=quiet_start, quiet_end=quiet_end)
+        except Exception:
+            asleep = False
     anyone_home = None
     try:
         from . import alert_path, household
@@ -209,7 +240,8 @@ def conditions(hass, req: DeliveryRequest) -> Conditions:
             from . import output_gate
             gate_allowed, gate_reason = output_gate.can_announce(
                 entity_id=req.entity_id, category=req.gate_category,
-                urgency=req.urgency, message=req.message)
+                urgency=req.urgency, message=req.message, dedup_key=req.dedup_key,
+                habit_key=req.habit_key)
         except Exception as exc:
             _LOGGER.debug("delivery: output gate unreadable: %s", exc)
     return Conditions(announcements_on=announcements_on, notify_only=notify_only,
@@ -218,23 +250,26 @@ def conditions(hass, req: DeliveryRequest) -> Conditions:
                       anyone_home=anyone_home)
 
 
-def _speakers(hass, req: DeliveryRequest, cond: Conditions) -> list:
-    """The source's own speakers, or the announcement speakers chosen by
-    urgency and who is home. Empty when no speaker should take it."""
+def _speakers(hass, req: DeliveryRequest, cond: Conditions) -> tuple:
+    """(targets, mode): the source's own speakers, or the announcement
+    speakers chosen by urgency and who is home. Mode "notify_only" means the
+    routing sends it to the phones (nobody home, or "Notifications only");
+    no targets otherwise means no speaker should take it."""
     if req.speakers:
-        return list(req.speakers)
+        return list(req.speakers), "source"
     try:
         from . import audio_routing
-        targets, _mode = audio_routing.observer_speak_target(
+        targets, mode = audio_routing.observer_speak_target(
             hass, urgency=req.urgency,
-            broadcast_group=_setting(hass, "broadcast_group", None) or None,
+            broadcast_group=((req.config or {}).get("broadcast_group")
+                             or _setting(hass, "broadcast_group", None) or None),
             announcement_speakers=_announcement_speakers(hass),
             is_sleeping=cond.asleep or cond.quiet_hours,
-            authoritative_anyone_home=cond.anyone_home)
-        return list(targets or [])
+            authoritative_anyone_home=None if req.motion_counts else cond.anyone_home)
+        return list(targets or []), str(mode or "")
     except Exception as exc:
-        _LOGGER.debug("delivery: speaker routing failed: %s", exc)
-        return []
+        _LOGGER.warning("delivery: speaker routing failed: %s", exc)
+        return [], "failed"
 
 
 def _announcement_speakers(hass) -> Optional[list]:
@@ -300,47 +335,88 @@ async def _push(hass, req: DeliveryRequest, request_id: str) -> list:
         return []
 
 
-async def async_deliver(hass, req: DeliveryRequest, *, speak=None) -> Outcome:
+async def async_deliver(hass, req: DeliveryRequest, *, speak=None, push=None) -> Outcome:
     """Apply the household's rules to one request and deliver it. Never
     raises. Speech that reaches no speaker goes to the phones instead,
     unless the source never pushes. A source with its own way of speaking
     (the infrastructure audit's area speech) passes `speak`, an async
-    function of the words that returns whether anything was spoken."""
+    function of the words that returns whether anything was spoken. A
+    source with its own phone notification (the core's snapshots and rating
+    buttons) passes `push`, an async function of the request id that
+    returns what took it."""
     from . import action_log
     cond = conditions(hass, req)
     decision = decide(req, cond)
     out = Outcome(decision=decision, request_id=action_log.new_request_id())
     pushed_yet = False
+    async def _send() -> list:
+        if push is None:
+            return await _push(hass, req, out.request_id)
+        try:
+            return list(await push(out.request_id) or [])
+        except Exception as exc:
+            _LOGGER.warning("delivery: %s push failed: %s", req.source, exc)
+            return []
+
     if decision.push and req.push_first:
-        out.pushed, pushed_yet = await _push(hass, req, out.request_id), True
+        out.pushed, pushed_yet = await _send(), True
     if decision.speak:
-        message = _habit_note(req)
-        if speak is not None:
-            try:
-                out.spoken = bool(await speak(message))
-            except Exception as exc:
-                _LOGGER.warning("delivery: %s speech failed: %s", req.source, exc)
-        else:
-            out.targets = _speakers(hass, req, cond)
-            out.spoken = bool(out.targets) and await _speak(
-                hass, req, message, out.targets, out.request_id)
-        if not out.spoken and req.push != PUSH_NEVER:
+        mode = "source"
+        if speak is None:
+            out.targets, mode = _speakers(hass, req, cond)
+        out.spoken = await _say(hass, req, out, speak)
+        if not out.spoken and req.push != PUSH_NEVER and mode == "notify_only":
+            decision.push = True
+            decision.reason = decision.reason or "routed to the phones"
+        elif not out.spoken and _falls_back(req):
             decision.push = True
             decision.reason = decision.reason or "no speaker took it"
     if decision.push and not pushed_yet:
-        out.pushed = await _push(hass, req, out.request_id)
+        out.pushed = await _send()
+    if (decision.reason == "notifications only" and not out.pushed
+            and (req.speakers or speak is not None)):
+        # "Notifications only" with no phone that took it: spoken after all,
+        # so it is never silently dropped.
+        out.targets = list(req.speakers)
+        out.spoken = await _say(hass, req, out, speak)
+        if out.spoken:
+            decision.reason = "notifications only, no phone took it"
     _LOGGER.info("delivery: %s urgency=%s spoken=%s pushed=%s %s",
                  req.source, req.urgency, out.spoken, bool(out.pushed), decision.reason)
     try:
         from . import output_gate
         output_gate.record_announcement(
             entity_id=req.entity_id, category=req.gate_category, urgency=req.urgency,
-            message=req.message, was_spoken=out.spoken)
+            message=req.message, was_spoken=out.spoken, dedup_key=req.dedup_key,
+            habit_key=req.habit_key,
+            source=req.source, pushed=bool(out.pushed),
+            outcome=decision.reason or ("spoken" if out.spoken else ""),
+            request_id=out.request_id)
     except Exception as exc:
         _LOGGER.debug("delivery: record failed: %s", exc)
     if req.record_kind:
         await _record(hass, req, cond, out)
     return out
+
+
+async def _say(hass, req: DeliveryRequest, out: Outcome, speak) -> bool:
+    """Speak the request: through the source's own `speak`, else on
+    out.targets. Whether anything was spoken."""
+    message = _habit_note(req)
+    if speak is not None:
+        try:
+            return bool(await speak(message))
+        except Exception as exc:
+            _LOGGER.warning("delivery: %s speech failed: %s", req.source, exc)
+            return False
+    return bool(out.targets) and await _speak(hass, req, message, out.targets, out.request_id)
+
+
+def _falls_back(req: DeliveryRequest) -> bool:
+    """Whether speech no speaker took goes to the phones instead."""
+    if req.push == PUSH_HIGH:
+        return req.urgency in ("high", "critical")
+    return req.push != PUSH_NEVER
 
 
 def _habit_note(req: DeliveryRequest) -> str:
@@ -354,7 +430,7 @@ def _habit_note(req: DeliveryRequest) -> str:
         from . import output_gate
         return output_gate.habit_note(
             entity_id=req.entity_id, category=req.gate_category,
-            urgency=req.urgency, message=words)
+            urgency=req.urgency, message=words, habit_key=req.habit_key)
     except Exception:
         return words
 

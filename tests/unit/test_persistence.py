@@ -70,7 +70,7 @@ FRESH_COLUMNS = {
     "conversations": ["id", "timestamp", "device_id", "role", "content", "subject"],
     "sentinel_events": ["id", "timestamp", "entity_id", "event_type", "detail"],
     "activity_log": ["id", "timestamp", "entity_id", "category", "urgency", "message",
-                     "was_spoken", "source"],
+                     "was_spoken", "source", "pushed", "outcome", "request_id"],
     "spoken_history": ["id", "timestamp", "text", "source", "speakers", "delivery_state",
                        "repeat_of_id", "action_request_id"],
     "facts": ["id", "kind", "subject", "key", "value", "source", "confidence", "salience",
@@ -133,11 +133,12 @@ def test_legacy_conversations_gain_subject_and_keep_rows(ps, schema, tmp_path):
     status = ps.upgrade_store(db, _store(schema, "conversations"))
     assert status.state == "upgraded"
     assert "subject" in _cols(db, "conversations")
+    assert {"pushed", "outcome", "request_id"} <= set(_cols(db, "activity_log"))
     with sqlite3.connect(db) as conn:
         assert conn.execute("SELECT content, subject FROM conversations").fetchall() == [
             ("hello", None)]
     assert {"action_log", "spoken_history"} <= _tables(db)
-    assert _ledger(db) == {"conversations": 2, "action_log": 1, "spoken_history": 2}
+    assert _ledger(db) == {"conversations": 3, "action_log": 1, "spoken_history": 2}
 
 
 def test_legacy_spoken_history_gains_nullable_action_request_id(ps, schema, tmp_path):

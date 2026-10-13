@@ -159,7 +159,7 @@ SERVICE_CALLERS = {
     "__init__.py", "agent_runtime/capabilities/control.py",
     "agent_runtime/capabilities/environment.py", "automation/installation.py",
     "cognitive_core.py", "continued_conversation.py", "intent/intent_router.py",
-    "local_engine.py", "mode_scene.py", "notify_targets.py", "observer.py",
+    "local_engine.py", "mode_scene.py", "notify_targets.py",
     "proactive_audio.py", "routines.py", "scenes.py", "services.py", "tts_helper.py",
     "voice_confirm.py",
     # v8.3.0: one persistent_notification.create for the first run welcome.
@@ -180,9 +180,8 @@ SERVICE_CALLERS = {
     "voice_enrol.py",
 }
 ANNOUNCERS = {
-    "appliance_monitor.py", "camera.py", "cognitive_core.py",
-    "conversation.py", "host_health.py",
-    "reminders.py", "routines.py", "scenes.py", "sentinel.py",
+    "camera.py", "cognitive_core.py", "conversation.py",
+    "reminders.py", "routines.py", "scenes.py",
     "services.py", "summary.py", "voice_confirm.py",
     # 8.7.18: ws_repeat_spoken, the panel's Repeat button and the only
     # announcer in the websocket layer, moved from websocket.py.
@@ -210,20 +209,20 @@ def test_no_new_announcement_path():
 
 
 def test_observer_speaks_only_after_the_output_gate():
-    """In _process_event, the output gate is consulted before _speak, and the
-    decision comes from reasoning_loop.decide (the coordinator). Since 8.22.0
-    the observer reaches the gate through alert_path.gate, which calls
-    output_gate.can_announce."""
+    """In _process_event the decision comes from reasoning_loop.decide (the
+    coordinator), then one delivery request. Since 8.45.0 delivery.py
+    consults the output gate (output_gate.can_announce) before anything is
+    spoken."""
     tree = _tree(ROOT / "observer.py")
     fn = next(n for n in ast.walk(tree)
               if isinstance(n, ast.AsyncFunctionDef) and n.name == "_process_event")
     src = ast.unparse(fn)
-    assert src.index("reasoning_loop.decide(") < src.index("alert_path.gate(")
-    assert src.index("alert_path.gate(") < src.index("await _speak(")
-    assert src.count("await _speak(") == 1
-    gate = next(n for n in ast.walk(_tree(ROOT / "alert_path.py"))
-                if isinstance(n, ast.FunctionDef) and n.name == "gate")
-    assert "output_gate.can_announce(" in ast.unparse(gate)
+    assert src.index("reasoning_loop.decide(") < src.index("delivery.async_deliver(")
+    assert src.count("delivery.async_deliver(") == 1
+    assert "async_announce" not in ast.unparse(tree)
+    cond = next(n for n in ast.walk(_tree(ROOT / "delivery.py"))
+                if isinstance(n, ast.FunctionDef) and n.name == "conditions")
+    assert "output_gate.can_announce(" in ast.unparse(cond)
 
 
 def test_reasoning_loop_decide_delegates_to_the_coordinator():

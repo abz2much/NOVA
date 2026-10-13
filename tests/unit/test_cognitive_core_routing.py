@@ -62,12 +62,14 @@ def out(cc, fake_hass, load, monkeypatch, quiet):
     async def announce(hass, message, tts_entity, targets, context="", action_request_id=None):
         rec.spoken.append({"message": message, "tts": tts_entity, "targets": list(targets),
                            "context": context, "request_id": action_request_id})
+        return True
     monkeypatch.setattr(tts, "async_announce", announce)
 
     async def push(hass, config, message, action_type, snapshot_url=None, *,
                    request_id=None, extra_data=None):
         rec.pushed.append({"message": message, "type": action_type, "snapshot": snapshot_url,
                            "request_id": request_id, "extra": extra_data})
+        return ["notify.phone"]
     monkeypatch.setattr(cc, "_push_notification", push)
 
     async def every(hass, config, message, action_type, snapshot_url=None, *, request_id=None):
@@ -76,6 +78,14 @@ def out(cc, fake_hass, load, monkeypatch, quiet):
     monkeypatch.setattr(cc, "_notify_all_devices", every)
     monkeypatch.setattr(cc, "_live_runtime_config",
                         lambda: {"announcement_speakers": rec.speakers})
+    # 8.45.0: delivery.py reads the live settings for the core's alerts, and
+    # the output gate starts clean (its repeats would leak between tests).
+    og = load("output_gate")
+    monkeypatch.setattr(og, "_STATE", og.GateState())
+    monkeypatch.setattr(load("database"), "save_activity", lambda **kw: None)
+    dl = load("delivery")
+    monkeypatch.setattr(dl, "_setting", lambda hass, key, default: (
+        rec.speakers if key == "announcement_speakers" else default))
     fake_hass.states.set(SPEAKER, "idle")
     fake_hass.states.set("person.username", "home")
     return rec
@@ -102,19 +112,23 @@ async def test_critical_is_spoken_and_pushed_even_when_asleep_and_in_quiet_hours
 
 
 @pytest.mark.parametrize("sleeping,in_quiet", [(True, False), (False, True), (True, True)])
-async def test_non_critical_while_asleep_or_in_quiet_hours_is_a_phone_push_only(
+async def test_while_asleep_or_in_quiet_hours_high_is_pushed_and_everyday_alerts_dropped(
         cc, fake_hass, out, quiet, sleeping, in_quiet):
+    # 8.45.0 (the household's choice): medium and low held by quiet hours or
+    # sleep are dropped, not pushed. High still reaches the phones.
     quiet["on"] = in_quiet
     for urgency in ("high", "medium", "low"):
-        await _emit(cc, fake_hass, _act(urgency=urgency, snapshot_url="https://x/s.jpg"), sleeping=sleeping)
+        await _emit(cc, fake_hass, _act(urgency=urgency, message=f"{urgency} alert",
+                                        snapshot_url="https://x/s.jpg"), sleeping=sleeping)
     assert out.spoken == []
-    assert [p["snapshot"] for p in out.pushed] == ["https://x/s.jpg"] * 3
+    assert [(p["message"], p["snapshot"]) for p in out.pushed] == [
+        ("high alert", "https://x/s.jpg")]
 
 
 async def test_quiet_hours_do_not_depend_on_anyone_being_in_a_bedroom(
         cc, fake_hass, out, quiet):
     quiet["on"] = True
-    await _emit(cc, fake_hass, _act(urgency="medium"), sleeping=False)
+    await _emit(cc, fake_hass, _act(urgency="high"), sleeping=False)
     assert out.spoken == [] and len(out.pushed) == 1
 
 
@@ -124,7 +138,7 @@ async def test_notify_all_goes_to_every_device_instead_of_the_single_push(
     assert len(out.devices) == 1 and out.pushed == []
     assert out.devices[0]["snapshot"] == "u" and out.devices[0]["type"] == "test_alert"
     out.devices.clear()
-    await _emit(cc, fake_hass, _act(notify_all=True), sleeping=True)                 # asleep, non critical
+    await _emit(cc, fake_hass, _act(urgency="high", notify_all=True), sleeping=True)  # asleep, high
     assert len(out.devices) == 1 and out.pushed == []
 
 
@@ -204,24 +218,20 @@ async def test_a_critical_alert_is_spoken_under_a_blanket_shush(cc, fake_hass, o
     assert len(out.spoken) == 1 and len(out.devices) == 1
 
 
-async def test_current_behaviour_cognitive_core_announcements_never_consult_the_mute_gate(
-        cc, fake_hass, out, gate):
-    """The output gate (shush, entity and category mutes, rate limit, dedup) is
-    applied by the observer and a few monitors. _emit_action never calls it, so
-    a blanket shush does not quiet a proactive offer, a freeze warning or a
-    lockdown message."""
+async def test_core_alerts_follow_shush_and_mutes(cc, fake_hass, out, gate):
+    """8.45.0: core alerts go through delivery.py, so a blanket shush or a
+    muted category holds the speakers. High still reaches the phones."""
     gate._STATE.mute_all = True
-    gate._STATE.muted_categories.add("test_alert")
-    for urgency in ("low", "medium", "high"):
+    for urgency, pushed in (("low", 0), ("medium", 0), ("high", 1)):
         out.spoken.clear()
         out.pushed.clear()
         await _emit(cc, fake_hass, _act(urgency=urgency, type="test_alert"))
-        if urgency == "low":
-            # low is only spoken from an occupied room, so it is held by routing, not by the mute
-            assert out.spoken == []
-        else:
-            assert len(out.spoken) == 1
-    assert gate._STATE.history == type(gate._STATE.history)()                     # and nothing is recorded in the gate
+        assert out.spoken == [] and len(out.pushed) == pushed, urgency
+    gate._STATE.mute_all = False
+    gate._STATE.muted_categories.add("test_alert")
+    out.pushed.clear()
+    await _emit(cc, fake_hass, _act(urgency="medium", type="test_alert", message="other"))
+    assert out.spoken == [] and out.pushed == []
 
 
 # ── notifications only mode ─────────────────────────────────────────────────
@@ -306,7 +316,7 @@ async def test_without_a_decision_there_are_no_rating_buttons(cc, fake_hass, out
 async def test_a_phone_push_while_asleep_carries_the_rating_buttons(
         cc, fake_hass, out, rating, quiet):
     quiet["on"] = True
-    await _emit(cc, fake_hass, _act(urgency="medium", decision_id=3))
+    await _emit(cc, fake_hass, _act(urgency="high", decision_id=3))
     assert out.pushed[0]["extra"] == {"rate": 3}
 
 
@@ -393,7 +403,7 @@ async def test_a_routing_failure_is_swallowed_and_logged(cc, fake_hass, out, loa
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("routing broke")))
     with caplog.at_level("WARNING"):
         await _emit(cc, fake_hass, _act(urgency="critical"))
-    assert "action routing failed" in caplog.text and cc._CORE.actions_taken == 1
+    assert "speaker routing failed" in caplog.text and cc._CORE.actions_taken == 1
 
 
 async def test_a_failing_announcement_does_not_skip_the_phone_push(
@@ -409,7 +419,7 @@ async def test_a_failing_announcement_does_not_skip_the_phone_push(
     with caplog.at_level("WARNING"):
         await _emit(cc, fake_hass, _act(urgency="critical"))
     assert len(out.pushed) == 1 and cc._CORE.actions_taken == 1
-    assert "action routing failed" in caplog.text
+    assert "speech failed" in caplog.text
     out.pushed.clear()
     await _emit(cc, fake_hass, _act(urgency="high", notify_all=True))
     assert len(out.devices) == 1                                                     # every device path too
@@ -425,7 +435,7 @@ async def test_a_failing_push_does_not_undo_the_speech_and_is_logged(
         await _emit(cc, fake_hass, _act(urgency="critical"))
         await _emit(cc, fake_hass, _act(urgency="critical", notify_all=True))
     assert len(out.spoken) == 2
-    assert caplog.text.count("action push failed") == 2
+    assert caplog.text.count("push failed") == 2
 
 
 async def test_a_failing_push_while_asleep_is_logged_not_raised(
@@ -435,7 +445,7 @@ async def test_a_failing_push_while_asleep_is_logged_not_raised(
     monkeypatch.setattr(cc, "_push_notification", boom)
     with caplog.at_level("WARNING"):
         await _emit(cc, fake_hass, _act(urgency="high"), sleeping=True)
-    assert "action push failed" in caplog.text and cc._CORE.actions_taken == 1
+    assert "push failed" in caplog.text and cc._CORE.actions_taken == 1
 
 
 async def test_a_routing_failure_still_pushes_a_critical_or_high_alert_but_not_a_medium_one(
@@ -458,13 +468,14 @@ async def test_critical_still_bypasses_sleep_quiet_hours_and_a_blanket_shush_aft
     assert len(out.spoken) == 1 and len(out.pushed) == 1
     out.spoken.clear()
     out.pushed.clear()
-    await _emit(cc, fake_hass, _act(urgency="medium"), sleeping=True)               # a non critical alert is still push only
+    await _emit(cc, fake_hass, _act(urgency="high"), sleeping=True)                 # high is still push only
     assert out.spoken == [] and len(out.pushed) == 1
 
 
 async def test_an_unusable_speaker_setting_means_a_critical_alert_is_pushed_but_not_spoken(
         cc, fake_hass, out, monkeypatch):
     monkeypatch.setattr(cc, "_live_runtime_config", lambda: {"announcement_speakers": 5})
+    out.speakers = 5
     await _emit(cc, fake_hass, _act(urgency="critical"), config={"broadcast_group": None})
     assert out.spoken == [] and len(out.pushed) == 1                                  # nothing usable: notify only
 
@@ -624,3 +635,15 @@ def test_there_is_no_autonomous_done_message_any_more(cc):
     # Nova never carries out an offer on its own (8.39.1), so there is
     # nothing to announce afterwards.
     assert not hasattr(cc, "_autonomous_done_message")
+
+
+async def test_a_report_of_what_nova_changed_always_reaches_the_phones(
+        cc, fake_hass, out, quiet, gate):
+    """8.45.0: the night sweep's note of what it locked or closed is pushed
+    even when sleep, quiet hours or shush hold an everyday alert."""
+    quiet["on"] = True
+    gate._STATE.mute_all = True
+    await _emit(cc, fake_hass, _act(urgency="low", type="lockdown", reports_change=True),
+                sleeping=True)
+    await _emit(cc, fake_hass, _act(urgency="low", message="other"), sleeping=True)
+    assert out.spoken == [] and [p["type"] for p in out.pushed] == ["lockdown"]

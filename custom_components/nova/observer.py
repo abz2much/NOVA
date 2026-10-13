@@ -844,195 +844,30 @@ async def _process_event(event: Event) -> None:
             )
             final_urgency = capped
 
-        def _record(was_spoken: bool) -> None:
-            output_gate.record_announcement(
-                entity_id=entity_id, category=category,
-                urgency=final_urgency, message=message, was_spoken=was_spoken,
-            )
-
-        # EXTRA SAFETY: during sleep, suppress anything below critical. The
-        # rule lives in alert_path.for_observer; checked first, before the
-        # output gate, as before.
-        if alert_path.held(sit, final_urgency):
-            _LOGGER.info(
-                "Observer: user sleeping, suppressing %s urgency message '%s'",
-                final_urgency, message[:80],
-            )
-            _record(False)
-            return
-
-        # Output gate (mute list, rate limit, repeats)
-        allowed, message = alert_path.gate(
-            entity_id=entity_id, category=category,
-            urgency=final_urgency, message=message,
-        )
-        if not allowed:
-            return
-
-        # Who hears it: alert_path.for_observer decides from urgency,
-        # presence, sleep and quiet hours (critical still broadcasts;
-        # high→notify; medium/low→suppressed while asleep or in quiet hours).
-        broadcast_group = _STATE.config.get("broadcast_group") or None
-        ann_speakers = _get_announcement_speakers()
-        _LOGGER.warning(
-            "Observer routing: urgency=%s, broadcast_group=%s, "
-            "ann_speakers=%s, sleeping=%s",
-            final_urgency, broadcast_group, ann_speakers, sleeping,
-        )
+        # One delivery request (8.45.0): delivery.py applies the household's
+        # rules in the shared order. Critical speaks everywhere and is
+        # pushed. A mute, shush, the hourly limit or a repeat holds the rest
+        # (output gate). With announcements off, or in quiet hours or sleep,
+        # nothing is spoken and only high goes to the phones; "Notifications
+        # only" sends it to the phones. High and critical are pushed as well
+        # as spoken. Speakers are chosen by urgency and who is home.
         if in_quiet_hours and final_urgency != "critical":
             try:
                 from .websocket import nova_log
                 nova_log("GATE", f"quiet hours — holding {final_urgency} announcement (not critical)")
             except Exception:
                 pass
-        # v5.5.2: announcements_enabled is read here, after classification
-        # and logging, so the activity feed populates even when they're off.
-        plan = alert_path.for_observer(
-            _STATE.hass, sit, final_urgency,
-            broadcast_group=broadcast_group,
-            announcement_speakers=ann_speakers,
-            announcements_on=_is_announcements_enabled(),
-        )
-        _LOGGER.warning(
-            "Observer routing result: targets=%s, mode=%s", plan.targets, plan.mode,
-        )
-
-        async def _speak_and_remember(targets):
-            spoken_to = await _speak(message, targets=targets)
-            if spoken_to:
-                try:
-                    from . import spoken_history
-                    await _STATE.hass.async_add_executor_job(
-                        spoken_history.record, message, "alert", spoken_to, None,
-                    )
-                except Exception:
-                    pass  # recording must never turn a delivered announcement into a failed one
-            # Recorded before the push, as before.
-            _record(True)
-
-        async def _push():
-            await _send_notification(message, urgency=final_urgency)
-
-        if not plan.speak:
-            _LOGGER.info("Observer not spoken '%s' — %s", message, plan.reason)
-            if plan.mode == "notify_only":
-                await alert_path.deliver(plan, push=_push)
-                _record(False)
-            else:
-                # Announcements off: recorded, then high and critical pushed.
-                if plan.record:
-                    _record(False)
-                await alert_path.deliver(plan, push=_push)
-            return
-
-        await alert_path.deliver(plan, speak=_speak_and_remember, push=_push)
+        from . import delivery
+        out = await delivery.async_deliver(_STATE.hass, delivery.DeliveryRequest(
+            source="observer", message=message, urgency=final_urgency,
+            entity_id=entity_id, category=category, push=delivery.PUSH_HIGH,
+            title="Nova" if final_urgency != "critical" else "⚠ Nova URGENT",
+            tts_context="sentinel"))
+        if not out.spoken:
+            _LOGGER.info("Observer not spoken '%s' — %s", message, out.decision.reason)
 
     except Exception as exc:
         _LOGGER.exception("Observer pipeline error: %s", exc)
-
-
-# ─── Announcement gate helper ─────────────────────────────────────────────
-
-def _is_announcements_enabled() -> bool:
-    """
-    Check whether announcements are globally enabled.
-    Reads from runtime_config (panel toggles) first, then config (addon/entry).
-    """
-    hass = _STATE.hass
-    if not hass:
-        return False
-    # Check runtime_config first (set by panel Settings toggles)
-    rc = _live_runtime_config()
-    if "announcements_enabled" in rc:
-        return bool(rc["announcements_enabled"])
-    # Fall back to _STATE.config (from addon config / entry options)
-    return bool((_STATE.config or {}).get("announcements_enabled", True))
-
-
-def _get_announcement_speakers() -> list[str] | None:
-    """
-    Read announcement_speakers from runtime_config (panel Settings toggles).
-    Returns the list if set and non-empty, else None (let audio_routing decide).
-    """
-    import json as _json
-    hass = _STATE.hass
-    if not hass:
-        return None
-    rc = _live_runtime_config()
-    try:
-        raw = rc.get("announcement_speakers")
-        if raw:
-            speakers = _json.loads(raw) if isinstance(raw, str) else raw
-            if isinstance(speakers, list) and speakers:
-                return speakers
-    except Exception as exc:
-        _LOGGER.debug("Error reading announcement_speakers: %s", exc)
-    return None
-
-
-# ─── Speaking + notification ────────────────────────────────────────────────
-
-async def _speak(message: str, *, targets: list[str]) -> list[str]:
-    """Call tts.speak for each target using configured TTS engine. Returns
-    the targets Home Assistant actually accepted the call for — used only
-    to decide whether to record Spoken History; existing routing/error
-    handling is unchanged."""
-    hass = _STATE.hass
-    # Final safety net: never speak through a TV/movie player.
-    try:
-        from .audio_routing import drop_display_targets
-        targets = drop_display_targets(hass, targets, "observer")
-    except Exception:
-        pass
-    if not targets:
-        return []
-    _LOGGER.info("Observer speaking → %s: %s", targets, message)
-
-    # Resolve TTS entity from config (same as the rest of Nova)
-    tts_entity = "tts.piper"  # fallback default
-    try:
-        from .tts_helper import resolve_tts_for_context
-        cfg = _STATE.config or {}
-        regular = cfg.get("tts_engine", "auto")
-        premium = cfg.get("tts_premium_engine") or None
-        premium_contexts = cfg.get("tts_premium_contexts") or []
-        resolved = resolve_tts_for_context(
-            hass, "sentinel", regular, premium, premium_contexts,
-        )
-        if resolved:
-            tts_entity = resolved
-    except Exception as exc:
-        _LOGGER.debug("Observer TTS resolve fallback to tts.piper: %s", exc)
-
-    succeeded = []
-    for target in targets:
-        try:
-            await hass.services.async_call(
-                "tts", "speak",
-                {
-                    "entity_id": tts_entity,
-                    "media_player_entity_id": target,
-                    "message": message,
-                    "cache": False,
-                },
-                blocking=False,
-            )
-            succeeded.append(target)
-        except Exception as exc:
-            _LOGGER.warning("tts.speak to %s failed: %s", target, exc)
-    return succeeded
-
-
-async def _send_notification(message: str, *, urgency: str) -> None:
-    """Send push notification to every configured normal target."""
-    config = dict(_STATE.config or {})
-    config.update(_live_runtime_config())
-    from .notify_targets import async_send_configured_notifications
-    title = "Nova" if urgency != "critical" else "⚠ Nova URGENT"
-    await async_send_configured_notifications(
-        _STATE.hass, config, {"title": title, "message": message},
-        action="notify", source="proactive", requested_state=urgency,
-    )
 
 
 # ─── Lifecycle ──────────────────────────────────────────────────────────────

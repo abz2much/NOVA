@@ -237,8 +237,7 @@ async def test_bug7_in_quiet_hours_it_is_pushed_but_not_spoken(pm, pkg, fake_has
     pkg["quiet"] = True
     fake_hass.states.set("person.abi", "not_home")
     await _package_then_gone(pm, fake_hass)
-    # 8.44.0: the delivery itself also goes to the phones in quiet hours.
-    assert len(pkg["pushed"]) == 2 and pkg["spoken"] == []
+    assert len(pkg["pushed"]) == 1 and pkg["spoken"] == []
     assert "while no one is home" in pkg["pushed"][-1]
 
 

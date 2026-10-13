@@ -138,6 +138,8 @@ def speakers(cc, load, monkeypatch, fake_hass):
     sd = types.ModuleType("jc.sleep_detection")
     sd._in_quiet_hours = lambda *a: False
     monkeypatch.setitem(sys.modules, "jc.sleep_detection", sd)
+    og = load("output_gate")
+    monkeypatch.setattr(og, "_STATE", og.GateState())
     return out
 
 
@@ -149,6 +151,8 @@ async def test_nothing_is_spoken_at_night(sweep, fake_hass, speakers, clock, jam
     assert [a for a in actions if a.get("type") == "lockdown"] == []   # not before checking
     await fake_hass.drain()
     assert speakers["spoken"] == []
+    # What the sweep changed always reaches the phones (8.45.0), even the
+    # low "secured" note that sleep would otherwise drop.
     assert [t for t, _ in speakers["pushed"]] == ["lockdown"]
     assert ("not fully secured" in speakers["pushed"][0][1]) is jammed
 

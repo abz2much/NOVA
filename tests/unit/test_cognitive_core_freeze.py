@@ -132,9 +132,8 @@ async def test_the_episode_ends_when_it_warms_up(safety, fake_hass, monkeypatch,
     assert again["urgency"] == "critical" and again["phone_only"] is False
 
 
-def test_the_alert_path_keeps_a_phone_only_reminder_off_the_speakers(load):
-    alert_path = load("alert_path")
-    sit = alert_path.Situation(sleeping=False, quiet=False)
-    plan = alert_path.for_core_action(None, {}, sit, {
-        "type": "freeze_critical", "urgency": "high", "phone_only": True})
-    assert plan.push is True and plan.speak is False
+def test_delivery_keeps_a_phone_only_reminder_off_the_speakers(load):
+    dl = load("delivery")
+    d = dl.decide(dl.DeliveryRequest(source="freeze_critical", message="m", urgency="high",
+                                     phone_only=True, push=dl.PUSH_ALWAYS), dl.Conditions())
+    assert d.push is True and d.speak is False

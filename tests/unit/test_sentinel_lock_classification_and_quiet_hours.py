@@ -234,19 +234,18 @@ def test_thermostat_lock_excluded_from_cache_never_schedules_duration_checks(
 
 
 async def test_announce_rule_does_not_speak_overnight_for_a_non_urgent_rule(
-    sentinel_mod, fake_hass, monkeypatch,
+    sentinel_mod, fake_hass, monkeypatch, load,
 ):
     sd = load_sleep_detection_stub(sentinel_mod, monkeypatch, sleeping=True)
     announced = []
-    async def fake_announce(hass, text, tts, speakers, context="", action_request_id=None):
-        announced.append(text)
-    monkeypatch.setattr(sentinel_mod, "async_announce", fake_announce)
+    _route(load, monkeypatch, sleeping=True, spoken=announced)
     monkeypatch.setattr(sentinel_mod, "save_sentinel_event", lambda *a, **k: None)
     monkeypatch.setattr(sentinel_mod, "save_message", lambda *a, **k: None)
 
     fake_hass.states.set("lock.front_door", "unlocked", friendly_name="Front Door")
     s = sentinel_mod.NovaSentinel(fake_hass, groq_client=None, honorific="sir",
                                    rules=[], entry=None)
+    s._speakers = lambda: ["media_player.hall"]
     rule = {"id": "lock_unlocked", "message": "{honorific}, {friendly_name} has been unlocked for {minutes} minutes."}
 
     await s._announce_rule("lock.front_door", rule, 20)
@@ -254,18 +253,17 @@ async def test_announce_rule_does_not_speak_overnight_for_a_non_urgent_rule(
     assert announced == []  # speaker never called while sleeping
 
 
-async def test_announce_rule_still_speaks_when_awake(sentinel_mod, fake_hass, monkeypatch):
+async def test_announce_rule_still_speaks_when_awake(sentinel_mod, fake_hass, monkeypatch, load):
     load_sleep_detection_stub(sentinel_mod, monkeypatch, sleeping=False)
     announced = []
-    async def fake_announce(hass, text, tts, speakers, context="", action_request_id=None):
-        announced.append(text)
-    monkeypatch.setattr(sentinel_mod, "async_announce", fake_announce)
+    _route(load, monkeypatch, sleeping=False, spoken=announced)
     monkeypatch.setattr(sentinel_mod, "save_sentinel_event", lambda *a, **k: None)
     monkeypatch.setattr(sentinel_mod, "save_message", lambda *a, **k: None)
 
     fake_hass.states.set("lock.front_door", "unlocked", friendly_name="Front Door")
     s = sentinel_mod.NovaSentinel(fake_hass, groq_client=None, honorific="sir",
                                    rules=[], entry=None)
+    s._speakers = lambda: ["media_player.hall"]
     rule = {"id": "lock_unlocked", "message": "{honorific}, {friendly_name} has been unlocked for {minutes} minutes."}
 
     await s._announce_rule("lock.front_door", rule, 20)
@@ -274,16 +272,14 @@ async def test_announce_rule_still_speaks_when_awake(sentinel_mod, fake_hass, mo
 
 
 async def test_a_generic_high_urgency_label_alone_does_not_bypass_quiet_hours(
-    sentinel_mod, fake_hass, monkeypatch,
+    sentinel_mod, fake_hass, monkeypatch, load,
 ):
     """Only urgent_security=True (not present on any DEFAULT_RULES entry)
     may bypass -- a rule merely being present in DEFAULT_RULES, or having a
     "security"-sounding id, is not enough on its own."""
     load_sleep_detection_stub(sentinel_mod, monkeypatch, sleeping=True)
     announced = []
-    async def fake_announce(hass, text, tts, speakers, context="", action_request_id=None):
-        announced.append(text)
-    monkeypatch.setattr(sentinel_mod, "async_announce", fake_announce)
+    _route(load, monkeypatch, sleeping=True, spoken=announced)
     monkeypatch.setattr(sentinel_mod, "save_sentinel_event", lambda *a, **k: None)
     monkeypatch.setattr(sentinel_mod, "save_message", lambda *a, **k: None)
 
@@ -291,6 +287,7 @@ async def test_a_generic_high_urgency_label_alone_does_not_bypass_quiet_hours(
                           friendly_name="Front Door")
     s = sentinel_mod.NovaSentinel(fake_hass, groq_client=None, honorific="sir",
                                    rules=[], entry=None)
+    s._speakers = lambda: ["media_player.hall"]
     rule = {"id": "door_left_open", "message": "{honorific}, {friendly_name} has been open for {minutes} minutes."}
     await s._announce_rule("binary_sensor.front_door", rule, 10)
     assert announced == []
@@ -299,13 +296,11 @@ async def test_a_generic_high_urgency_label_alone_does_not_bypass_quiet_hours(
 # ── Test 6 (required list): genuine urgent security event still speaks ─────
 
 async def test_a_rule_explicitly_flagged_urgent_security_still_speaks_overnight(
-    sentinel_mod, fake_hass, monkeypatch,
+    sentinel_mod, fake_hass, monkeypatch, load,
 ):
     load_sleep_detection_stub(sentinel_mod, monkeypatch, sleeping=True)
     announced = []
-    async def fake_announce(hass, text, tts, speakers, context="", action_request_id=None):
-        announced.append(text)
-    monkeypatch.setattr(sentinel_mod, "async_announce", fake_announce)
+    _route(load, monkeypatch, sleeping=True, spoken=announced)
     monkeypatch.setattr(sentinel_mod, "save_sentinel_event", lambda *a, **k: None)
     monkeypatch.setattr(sentinel_mod, "save_message", lambda *a, **k: None)
 
@@ -313,6 +308,7 @@ async def test_a_rule_explicitly_flagged_urgent_security_still_speaks_overnight(
                           friendly_name="Front Door")
     s = sentinel_mod.NovaSentinel(fake_hass, groq_client=None, honorific="sir",
                                    rules=[], entry=None)
+    s._speakers = lambda: ["media_player.hall"]
     rule = {"id": "confirmed_intrusion", "urgent_security": True,
             "message": "{honorific}, {friendly_name} — confirmed intrusion."}
     await s._announce_rule("binary_sensor.front_door", rule, 0)
@@ -345,3 +341,9 @@ def load_sleep_detection_stub(sentinel_mod, monkeypatch, *, sleeping: bool):
     sd.is_sleeping = lambda hass, **kw: (sleeping, None)
     monkeypatch.setitem(sys.modules, "jc.sleep_detection", sd)
     return sd
+
+
+def _route(load, monkeypatch, *, sleeping: bool, spoken: list):
+    """Delivery (8.45.0) reads the same sleep answer and collects speech."""
+    from conftest import route_delivery
+    route_delivery(load, monkeypatch, asleep=lambda h: sleeping, spoken=spoken, pushed=[])

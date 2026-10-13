@@ -67,11 +67,21 @@ def test_announcements_off_speaks_nothing(d, push, urgency, pushed):
     assert _say(dec) == (False, pushed)
 
 
-@pytest.mark.parametrize("cond", [dict(quiet_hours=True), dict(asleep=True),
-                                  dict(notify_only=True)])
-def test_quiet_sleep_and_notify_only_go_to_the_phones(d, cond):
-    assert _say(d.decide(_req(d), d.Conditions(**cond))) == (False, True)
-    assert _say(d.decide(_req(d, push=d.PUSH_NEVER), d.Conditions(**cond))) == (False, False)
+def test_notify_only_goes_to_the_phones(d):
+    cond = d.Conditions(notify_only=True)
+    assert _say(d.decide(_req(d), cond)) == (False, True)
+    assert _say(d.decide(_req(d, push=d.PUSH_NEVER), cond)) == (False, False)
+
+
+@pytest.mark.parametrize("cond", [dict(quiet_hours=True), dict(asleep=True)])
+def test_at_night_only_what_matters_goes_to_the_phones(d, cond):
+    c = d.Conditions(**cond)
+    for urgency in ("low", "medium"):
+        assert _say(d.decide(_req(d, urgency=urgency), c)) == (False, False)
+    assert _say(d.decide(_req(d, urgency="high"), c)) == (False, True)
+    assert _say(d.decide(_req(d, requested_by_user=True), c)) == (False, True)
+    assert _say(d.decide(_req(d, push=d.PUSH_ALWAYS), c)) == (False, True)
+    assert _say(d.decide(_req(d, urgency="high", push=d.PUSH_NEVER), c)) == (False, False)
 
 
 def test_quiet_hours_come_before_notify_only(d):
@@ -118,7 +128,7 @@ def fake(d, monkeypatch):
             "targets": ["media_player.hall"], "speech_works": True}
 
     monkeypatch.setattr(d, "conditions", lambda hass, req: sent["cond"])
-    monkeypatch.setattr(d, "_speakers", lambda hass, req, cond: list(sent["targets"]))
+    monkeypatch.setattr(d, "_speakers", lambda hass, req, cond: (list(sent["targets"]), "source"))
     monkeypatch.setattr(d, "_habit_note", lambda req: req.spoken or req.message)
 
     async def speak(hass, req, message, targets, request_id):
@@ -165,7 +175,7 @@ async def test_a_speakers_only_source_is_never_pushed(d, fake, fake_hass):
 
 async def test_deliver_records_when_asked(d, fake, fake_hass):
     fake["cond"] = d.Conditions(quiet_hours=True)
-    await d.async_deliver(fake_hass, _req(d, record_kind="package"))
+    await d.async_deliver(fake_hass, _req(d, urgency="high", record_kind="package"))
     await d.async_deliver(fake_hass, _req(d))
     assert fake["recorded"] == [("package", False, True)]
 
@@ -175,6 +185,84 @@ async def test_a_held_message_reaches_no_one(d, fake, fake_hass):
     out = await d.async_deliver(fake_hass, _req(d))
     assert not out.decision.delivered
     assert fake["spoken"] == [] and fake["pushed"] == []
+
+
+async def test_routed_to_the_phones_pushes_an_everyday_alert(d, fake, monkeypatch, fake_hass):
+    # 8.45.0: speaker routing sends it to the phones while nobody is home.
+    monkeypatch.setattr(d, "_speakers", lambda hass, req, cond: ([], "notify_only"))
+    out = await d.async_deliver(fake_hass, _req(d, push=d.PUSH_HIGH))
+    assert not out.spoken and out.pushed
+    assert out.decision.reason == "routed to the phones"
+
+
+async def test_no_speaker_drops_an_everyday_alert_that_pushes_only_when_high(
+        d, fake, fake_hass):
+    fake["targets"] = []
+    out = await d.async_deliver(fake_hass, _req(d, push=d.PUSH_HIGH))
+    assert not out.spoken and not out.pushed
+
+
+async def test_notifications_only_with_no_phone_speaks_after_all(d, fake, monkeypatch, fake_hass):
+    fake["cond"] = d.Conditions(notify_only=True)
+
+    async def no_phone(hass, req, request_id):
+        return []
+    monkeypatch.setattr(d, "_push", no_phone)
+    out = await d.async_deliver(fake_hass, _req(d, speakers=("media_player.hall",)))
+    assert out.spoken and out.decision.reason == "notifications only, no phone took it"
+
+
+async def test_a_source_push_function_gets_the_shared_request_id(d, fake, fake_hass):
+    ids = []
+
+    async def push(request_id):
+        ids.append(request_id)
+        return ["phone"]
+    out = await d.async_deliver(fake_hass, _req(d, urgency="high", push=d.PUSH_ALWAYS),
+                                push=push)
+    assert ids == [out.request_id] and out.pushed == ["phone"] and fake["pushed"] == []
+
+
+def test_motion_counts_leaves_presence_to_the_speaker_routing(d, load, monkeypatch, fake_hass):
+    seen = []
+    ar = load("audio_routing")
+    monkeypatch.setattr(ar, "observer_speak_target",
+                        lambda hass, **kw: seen.append(kw["authoritative_anyone_home"])
+                        or (["media_player.hall"], "local"))
+    cond = d.Conditions(anyone_home=False)
+    d._speakers(fake_hass, _req(d), cond)
+    d._speakers(fake_hass, _req(d, motion_counts=True), cond)
+    assert seen == [False, None]
+
+
+async def test_every_outcome_is_recorded_with_its_source(d, load, monkeypatch, fake_hass):
+    og = load("output_gate")
+    rows = []
+    monkeypatch.setattr(og, "record_announcement", lambda **kw: rows.append(kw))
+    monkeypatch.setattr(d, "conditions", lambda hass, req: d.Conditions(quiet_hours=True))
+    out = await d.async_deliver(fake_hass, _req(d, source="appliance", dedup_key="k1"))
+    assert rows == [dict(entity_id="", category="appliance", urgency="medium",
+                         message="The washer is done.", was_spoken=False, dedup_key="k1",
+                         habit_key=None,
+                         source="appliance", pushed=False, outcome="quiet hours",
+                         request_id=out.request_id)]
+
+
+def test_a_repeat_label_holds_a_repeat_whatever_its_words(load, monkeypatch):
+    og = load("output_gate")
+    monkeypatch.setattr(og, "_STATE", og.GateState())
+    hab = load("habituation")
+    monkeypatch.setattr(hab, "is_quiet", lambda k: False)
+    monkeypatch.setattr(hab, "record", lambda *a, **k: None)
+    monkeypatch.setattr(load("database"), "save_activity", lambda **kw: None)
+    og.record_announcement(entity_id="", category="offer", urgency="medium",
+                           message="Shall I turn the porch light on?", was_spoken=True,
+                           dedup_key="offer:porch")
+    assert og.can_announce(entity_id="", category="offer", urgency="medium",
+                           message="Want the outside light?", dedup_key="offer:porch") == (
+        False, "repeat of a recent message")
+    assert og.can_announce(entity_id="", category="offer", urgency="medium",
+                           message="Want the outside light?", dedup_key="offer:hall")[0]
 
 
 # ── senders ─────────────────────────────────────────────────────────────────
@@ -272,7 +360,7 @@ async def test_own_speech_is_skipped_when_the_rules_hold_it(d, fake, fake_hass):
     async def say(words):
         said.append(words)
         return True
-    out = await d.async_deliver(fake_hass, _req(d), speak=say)
+    out = await d.async_deliver(fake_hass, _req(d, urgency="high"), speak=say)
     assert said == [] and out.pushed
 
 

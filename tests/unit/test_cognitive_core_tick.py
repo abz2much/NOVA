@@ -760,16 +760,22 @@ async def test_a_loaded_entry_without_a_runtime_does_not_drop_an_awake_critical_
 
     async def announce(hass, message, tts_entity, targets, **kw):
         spoken.append(list(targets))
+        return True
 
     async def push(*a, **k):
         pushed.append(a)
+        return ["notify.phone"]
     monkeypatch.setattr(tts, "async_announce", announce)
     monkeypatch.setattr(tts, "resolve_tts_for_context", lambda *a, **k: "tts.test")
     monkeypatch.setattr(cc, "_push_notification", push)
     monkeypatch.setattr(load("sleep_detection"), "_in_quiet_hours", lambda s, e: False)
     fake_hass.states.set("media_player.house", "idle")
     states = sys.modules["homeassistant.config_entries"].ConfigEntryState
-    cc._CORE.entry = types.SimpleNamespace(state=states.LOADED, runtime_data=None, entry_id="e")
+    cc._CORE.entry = types.SimpleNamespace(state=states.LOADED, runtime_data=None, entry_id="e",
+                                           options={}, data={})
+    # delivery.py (8.45.0) reads the settings of the loaded entry.
+    fake_hass.config_entries = types.SimpleNamespace(
+        async_entries=lambda domain=None: [cc._CORE.entry])
     with caplog.at_level("WARNING"):
         await cc._emit_action(fake_hass, {"broadcast_group": "media_player.house"},
                               {"type": "intrusion_confirmed", "urgency": "critical", "message": "m"}, False)

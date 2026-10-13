@@ -16,6 +16,8 @@ import types
 
 import pytest
 
+from conftest import route_delivery
+
 
 @pytest.fixture
 def al(load):
@@ -58,18 +60,20 @@ async def test_sentinel_rule_phone_push_is_logged_and_linked_to_voice(
     announced = []
     async def fake_announce(hass, text, tts, speakers, context="", action_request_id=None):
         announced.append((text, action_request_id))
-    monkeypatch.setattr(sentinel_mod, "async_announce", fake_announce)
-    monkeypatch.setattr(
-        sentinel_mod.nova_config, "runtime_get",
-        lambda hass, entry, key, default=None:
-            "notify.mobile_app_test" if key == "notify_service" else default,
-    )
+        return True
+    tts = load("tts_helper")
+    monkeypatch.setattr(tts, "async_announce", fake_announce)
+    dl = route_delivery(load, monkeypatch)
+    monkeypatch.setattr(dl, "_notify_config",
+                        lambda hass, req: {"notify_service": "notify.mobile_app_test"})
     fake_hass.services.register("notify", "mobile_app_test")
 
     fake_hass.states.set("binary_sensor.front_door", "on", device_class="door",
                           friendly_name="Front Door")
     s = sentinel_mod.NovaSentinel(fake_hass, groq_client=None, honorific="sir",
                                    rules=[], entry=None)
+    s._speakers = lambda: ["media_player.hall"]
+    s._tts_entity = lambda: "tts.x"
     rule = {"id": "door_left_open",
             "message": "{honorific}, {friendly_name} has been open for {minutes} minutes."}
 
@@ -99,8 +103,7 @@ async def test_appliance_notify_only_push_is_logged(
     audio_routing = load("audio_routing")
     monkeypatch.setattr(audio_routing, "observer_speak_target",
                          lambda *a, **k: ([], "notify_only"))
-    sd = load("sleep_detection")
-    monkeypatch.setattr(sd, "is_sleeping", lambda *a, **k: (False, None))
+    route_delivery(load, monkeypatch)
 
     am._MON.hass = fake_hass
     am._MON.config = {"notify_service": "notify.mobile_app_test"}

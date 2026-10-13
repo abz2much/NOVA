@@ -45,6 +45,7 @@ def days(load, hab, fake_hass, monkeypatch):
 
     async def _push(hass, config, message, action_type, snap=None, **kw):
         out.append(message)
+        return ["notify.phone"]
     monkeypatch.setattr(cc, "_push_notification", _push)
     monkeypatch.setattr(cc, "_notify_all_devices", _push)
     tts = load("tts_helper")
@@ -52,8 +53,14 @@ def days(load, hab, fake_hass, monkeypatch):
 
     async def _announce(hass, message, *a, **k):
         out.append(message)
+        return True
     monkeypatch.setattr(tts, "async_announce", _announce)
     monkeypatch.setattr(load("sleep_detection"), "_in_quiet_hours", lambda *a: False)
+    # The output gate (8.45.0) starts clean and keeps the same days.
+    og = load("output_gate")
+    monkeypatch.setattr(og, "_STATE", og.GateState())
+    monkeypatch.setattr(og, "_now", lambda: clock["now"])
+    monkeypatch.setattr(load("database"), "save_activity", lambda **kw: None)
     fake_hass.states.set("media_player.hall", "idle")
 
     async def run(action, n=4):

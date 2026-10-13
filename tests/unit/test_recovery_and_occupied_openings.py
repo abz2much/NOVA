@@ -32,6 +32,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from conftest import route_delivery
+
 
 # ── Pure rules ──────────────────────────────────────────────────────────────
 
@@ -282,12 +284,13 @@ def pipeline(load, monkeypatch):
         rec["decide"].append(kw.get("entity_id"))
         return {"speak": True, "message": "The door is open.", "urgency": "medium"}
 
-    async def _speak(message, *, targets):
+    async def _speak(hass, req, message, targets, request_id):
         rec["speak"].append(message)
-        return targets
+        return True
 
-    async def _notify(message, *, urgency):
-        rec["notify"].append(message)
+    async def _notify(hass, req, request_id):
+        rec["notify"].append(req.message)
+        return ["phone"]
 
     llm = load("llm_provider")
 
@@ -297,10 +300,9 @@ def pipeline(load, monkeypatch):
     monkeypatch.setattr(llm, "chat_with_activity", _no_llm)
     monkeypatch.setattr(o.classifier, "classify", _classify)
     monkeypatch.setattr(o.reasoning_loop, "decide", _decide)
-    monkeypatch.setattr(o, "_speak", _speak)
-    monkeypatch.setattr(o, "_send_notification", _notify)
-    monkeypatch.setattr(o, "_is_announcements_enabled", lambda: True)
-    monkeypatch.setattr(o, "_get_announcement_speakers", lambda: None)
+    dl = route_delivery(load, monkeypatch)
+    monkeypatch.setattr(dl, "_speak", _speak)
+    monkeypatch.setattr(dl, "_push", _notify)
     monkeypatch.setattr(rc, "remember", lambda *a, **k: rec["cache"].append(a))
     monkeypatch.setattr(db, "save_activity", lambda **k: rec["activity"].append(k))
     monkeypatch.setattr(alarm, "states", lambda h, c=None: [

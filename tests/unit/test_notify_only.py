@@ -9,6 +9,8 @@ import types
 
 import pytest
 
+from conftest import route_delivery
+
 from fakes import FakeHass
 from test_announce_resilience import _Hass, _State, _set_nova_config, routing  # noqa: F401
 
@@ -214,6 +216,9 @@ def cc_env(load, monkeypatch):
     sd = types.ModuleType("jc.sleep_detection")
     sd._in_quiet_hours = lambda *a: False
     monkeypatch.setitem(sys.modules, "jc.sleep_detection", sd)
+    og = load("output_gate")
+    monkeypatch.setattr(og, "_STATE", og.GateState())
+    monkeypatch.setattr(load("delivery"), "in_quiet_hours", lambda hass: False)
     return cc, env
 
 
@@ -240,7 +245,8 @@ async def test_cognitive_alert_old_behaviour_when_off(cc_env, fake_hass):
     # is pushed whatever this setting says, so the setting is tested here.
     fake_hass.states.set("person.abi", "home")
     await cc._emit_action(fake_hass, {}, _alert("medium"), sleeping=False)
-    assert env.spoken == [] and env.pushes == []      # notify_only: no push for medium, as before
+    # Routed to the phones (nobody home by motion, 8.45.0 delivery.py): pushed.
+    assert env.spoken == [] and [m for m, _ in env.pushes] == ["Porch is quiet."]
 
 
 async def test_cognitive_critical_still_speaks_when_on(cc_env, fake_hass):
@@ -267,18 +273,15 @@ def sentinel_env(load, fake_hass, monkeypatch):
     env = types.SimpleNamespace(spoken=[], on=True, notify="notify.mobile_app_test")
     monkeypatch.setattr(nc, "announce_notify_only", lambda hass: env.on)
 
-    async def _announce(hass, text, tts, speakers, context="", action_request_id=None):
-        env.spoken.append(text)
-    monkeypatch.setattr(s_mod, "async_announce", _announce)
+    dl = route_delivery(load, monkeypatch, notify_only=lambda h: env.on, spoken=env.spoken)
+    monkeypatch.setattr(dl, "_notify_config", lambda hass, req: {"notify_service": env.notify})
     monkeypatch.setattr(s_mod, "save_sentinel_event", lambda *a, **k: None)
     monkeypatch.setattr(s_mod, "save_message", lambda *a, **k: None)
-    monkeypatch.setattr(
-        s_mod.nova_config, "runtime_get",
-        lambda hass, entry, key, default=None: env.notify if key == "notify_service" else default)
     fake_hass.services.register("notify", "mobile_app_test")
     fake_hass.states.set("binary_sensor.front_door", "on", device_class="door",
                          friendly_name="Front Door")
     sentinel = s_mod.NovaSentinel(fake_hass, groq_client=None, honorific="sir", rules=[], entry=None)
+    sentinel._speakers = lambda: ["media_player.hall"]
     rule = {"id": "door_left_open",
             "message": "{honorific}, {friendly_name} has been open for {minutes} minutes."}
     return sentinel, rule, env

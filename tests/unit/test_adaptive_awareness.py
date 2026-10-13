@@ -339,6 +339,7 @@ def routed(load, monkeypatch, aa):
     async def _push(hass, config, message, action_type, snap=None, *,
                     request_id=None, extra_data=None):
         pushes.append(extra_data)
+        return ["notify.phone"]
     monkeypatch.setattr(cc, "_push_notification", _push)
 
     async def _prompt(hass, config, message, decision_id):
@@ -346,20 +347,12 @@ def routed(load, monkeypatch, aa):
         return True
     monkeypatch.setattr(aa, "async_send_rating_prompt", _prompt)
 
-    tts = types.ModuleType("jc.tts_helper")
-    tts.resolve_tts_for_context = lambda *a, **k: "tts.x"
-
-    async def _announce(hass, message, *a, **k):
-        spoken.append(message)
-    tts.async_announce = _announce
-    ar = types.ModuleType("jc.audio_routing")
-    ar.observer_speak_target = lambda *a, **k: (["media_player.x"], "normal")
-    monkeypatch.setitem(sys.modules, "jc.tts_helper", tts)
-    monkeypatch.setitem(sys.modules, "jc.audio_routing", ar)
-    sd = types.ModuleType("jc.sleep_detection")
-    sd._in_quiet_hours = lambda *a: False
-    monkeypatch.setitem(sys.modules, "jc.sleep_detection", sd)
-    return cc, pushes, prompts, spoken
+    from conftest import route_delivery
+    dl = route_delivery(load, monkeypatch, spoken=spoken)
+    route = {"away": False}
+    monkeypatch.setattr(dl, "_speakers", lambda hass, req, cond: (
+        ([], "notify_only") if route["away"] else (["media_player.x"], "normal")))
+    return cc, pushes, prompts, spoken, route
 
 
 def _alert(**kw):
@@ -371,27 +364,29 @@ def _alert(**kw):
 
 
 async def test_spoken_alert_gets_a_silent_rating_prompt(routed, fake_hass, monkeypatch, load):
-    cc, pushes, prompts, spoken = routed
+    cc, pushes, prompts, spoken, route = routed
     _enable(monkeypatch, load)
     await cc._emit_action(fake_hass, {}, _alert(), sleeping=False)
     assert spoken and prompts == [("The porch usually has activity by now.", 42)]
     assert pushes == []
 
 
-async def test_alert_pushed_in_quiet_hours_carries_the_buttons(routed, fake_hass, monkeypatch, load):
-    cc, pushes, prompts, spoken = routed
+async def test_alert_pushed_while_away_carries_the_buttons(routed, fake_hass, monkeypatch, load):
+    cc, pushes, prompts, spoken, route = routed
     _enable(monkeypatch, load)
-    await cc._emit_action(fake_hass, {}, _alert(), sleeping=True)
+    route["away"] = True
+    await cc._emit_action(fake_hass, {}, _alert(), sleeping=False)
     assert not spoken and prompts == []
     assert [a["action"] for a in pushes[0]["actions"]] == [
         "NOVA_AWARE_GOOD_42", "NOVA_AWARE_BAD_42"]
 
 
 async def test_no_buttons_without_a_record_or_while_off(routed, fake_hass, monkeypatch, load):
-    cc, pushes, prompts, spoken = routed
+    cc, pushes, prompts, spoken, route = routed
     _enable(monkeypatch, load)
-    await cc._emit_action(fake_hass, {}, _alert(decision_id=None), sleeping=True)
+    route["away"] = True
+    await cc._emit_action(fake_hass, {}, _alert(decision_id=None), sleeping=False)
     assert pushes == [{}]
     _enable(monkeypatch, load, on=False)
-    await cc._emit_action(fake_hass, {}, _alert(pattern_key="overdue:other"), sleeping=True)
+    await cc._emit_action(fake_hass, {}, _alert(pattern_key="overdue:other"), sleeping=False)
     assert pushes[-1] == {}
