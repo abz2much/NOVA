@@ -1,3 +1,15 @@
+## [8.49.11] — Backup and restore fixes
+
+Fixes for backup bugs found while writing the step 9 specs and then verified. Each fix has a regression test that fails without it. Nothing else changes: no services, settings names, entity IDs or stored data formats.
+
+### Fixed
+- **A failed backup left a broken archive behind.** The archive was written straight to its final name, so an error part way through left a partial file that a plain restore then picked as the newest. It is now written to a temporary file and only moved into place once it is complete. A failed backup leaves nothing behind and never replaces an earlier archive.
+- **Learned aliases and ignore rules were not backed up.** `.nova_learned.json` and `.nova_ignore_rules.json` are now included in the archive and come back on restore.
+- **Restore could run without its safety filter.** Any internal `TypeError` during restore made it try again with no extraction filter. That retry is removed; the error is reported instead.
+- **Two backups in the same second shared one file.** The second replaced the first. The second now gets a numbered name, such as `nova-state-20300102-030405-1.tar.gz`.
+- **Restore without a file name picked the newest by name, not by time.** It now picks the archive that was written most recently.
+- **Backups followed links out of Nova's data.** A link inside Nova's data that points outside it is now skipped, with a warning naming it. Links that stay inside Nova's data are kept as before.
+
 ## [8.49.10] — Startup reliability fixes
 
 Fixes for bugs found while writing the step 9 specs and then verified. Each fix has a regression test that fails without it. Nothing else changes: no services, settings names, entity IDs or stored data formats.
