@@ -213,6 +213,33 @@
     "literal_response_keys": [],
     "registered": true
   },
+  "nova/convenience_choice": {
+    "admin": true,
+    "error_codes": [
+      "convenience_choice_failed"
+    ],
+    "fields": {
+      "choice": {
+        "required": true
+      },
+      "pattern_key": {
+        "required": true
+      }
+    },
+    "literal_response_keys": [
+      "status"
+    ],
+    "registered": true
+  },
+  "nova/convenience_status": {
+    "admin": true,
+    "error_codes": [
+      "convenience_status_failed"
+    ],
+    "fields": {},
+    "literal_response_keys": [],
+    "registered": true
+  },
   "nova/delete_credential": {
     "admin": true,
     "error_codes": [],

@@ -54,6 +54,7 @@
       if (logView === "decisions") this._fetchDecisions();
       else if (logView === "spoken_history") this._fetchSpokenHistory();
       else if (logView === "actions") this._fetchActions();
+      else if (logView === "shadow") this._fetchShadow();
       else {
         // The shell always starts each render on "Loading…" (torn down and
         // rebuilt fresh on every tab/view switch), but the entries fetched

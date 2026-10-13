@@ -29,8 +29,46 @@ def _live_runtime_config() -> dict:
     return lifecycle_runtime_config(entry)
 
 
-async def _emit_action(hass, config, action, sleeping):
-    """Announce / push a single cognitive action via the standard routing."""
+def habit_key(action: dict) -> str:
+    """The action's repeat and habituation label."""
+    return action.get("habit_key") or action.get("pattern_key") or action.get("offer_key") or ""
+
+
+def request_for(config, action: dict, sleeping, *, message: Optional[str] = None,
+                reading=None):
+    """The delivery request for one core action (8.48.0: shared with the
+    convenience path's shadow verdict, so both judge the same request).
+
+    Critical speaks everywhere and is pushed. High is always pushed, spoken
+    when the household's rules allow. Below high: a mute, shush, the
+    Announcements switch, quiet hours or sleep holds it, and it goes to the
+    phones only while nobody is known to be home or with "Notifications
+    only" on. A phone only action (the first intrusion alert while
+    residents are home) is pushed, not spoken, unless critical. Speaker
+    routing still counts live motion, so an intruder's movement while armed
+    away is still spoken. The core keeps its own habituation, so the gate
+    does not count days again; its habit key is the repeat label. A report
+    of what Nova changed itself (the night sweep's locks and covers) always
+    reaches the phones, whatever holds the speakers."""
+    from . import delivery
+    urgency = action.get("urgency", "medium")
+    action_type = action.get("type", "unknown")
+    high = urgency in ("high", "critical")
+    always = high or bool(action.get("reports_change"))
+    return delivery.DeliveryRequest(
+        source=action_type, message=action.get("message", "") if message is None else message,
+        urgency=urgency, entity_id=action.get("entity_id", "") or "", category=action_type,
+        push=delivery.PUSH_ALWAYS if always else delivery.PUSH_HIGH,
+        phone_only=bool(action.get("phone_only")) and urgency != "critical",
+        tts_context="sentinel", config=config, dedup_key=habit_key(action), habit_key="",
+        asleep=bool(sleeping), motion_counts=True,
+        record_kind=_RECORDED_KINDS.get(action_type, ""), reading=reading)
+
+
+async def _emit_action(hass, config, action, sleeping, *, reading=None) -> tuple:
+    """Announce / push a single cognitive action via the standard routing.
+    Returns (delivered, why): whether it was spoken or pushed, and the
+    reason it was held, or how it went out."""
     message = action.get("message", "")
     urgency = action.get("urgency", "medium")
     action_type = action.get("type", "unknown")
@@ -38,17 +76,17 @@ async def _emit_action(hass, config, action, sleeping):
 
     # Given three days running, it's normal for this home: the third says so,
     # later ones stay quiet (habituation.py). Emergencies are exempt.
-    habit_key = action.get("habit_key") or action.get("pattern_key") or action.get("offer_key")
+    habit = habit_key(action)
     try:
         from . import habituation
-        if habit_key and not habituation.exempt(
+        if habit and not habituation.exempt(
                 urgency=urgency, kind=action_type, entity_id=action.get("entity_id", "")):
-            if habituation.is_quiet(habit_key):
+            if habituation.is_quiet(habit):
                 _LOGGER.info("Cognitive action [%s] quiet (normal for this home): %s",
                              action_type, message[:100])
-                return
-            message = habituation.with_note(habit_key, message)
-            habituation.record(habit_key, action.get("entity_id", ""))
+                return False, "normal for this home (given three days running)"
+            message = habituation.with_note(habit, message)
+            habituation.record(habit, action.get("entity_id", ""))
     except Exception as exc:
         _LOGGER.debug("habituation check failed: %s", exc)
 
@@ -74,29 +112,11 @@ async def _emit_action(hass, config, action, sleeping):
             hass, config, message, action_type, _snap_url,
             request_id=request_id, extra_data=_rating_data(decision_id)) or [])
 
-    # One delivery request (8.45.0). Critical speaks everywhere and is
-    # pushed. High is always pushed, spoken when the household's rules allow.
-    # Below high: a mute, shush, the Announcements switch, quiet hours or
-    # sleep holds it, and it goes to the phones only while nobody is known
-    # to be home or with "Notifications only" on. A phone only action (the
-    # first intrusion alert while residents are home) is pushed, not spoken,
-    # unless critical. Speaker routing still counts live motion, so an
-    # intruder's movement while armed away is still spoken. The core keeps
-    # its own habituation above, so the gate does not count days again; its
-    # habit key is the repeat label.
-    # A report of what Nova changed itself (the night sweep's locks and
-    # covers) always reaches the phones, whatever holds the speakers.
+    # One delivery request (8.45.0); see request_for for the rules.
     from . import delivery
     high = urgency in ("high", "critical")
-    always = high or bool(action.get("reports_change"))
-    out = await delivery.async_deliver(hass, delivery.DeliveryRequest(
-        source=action_type, message=message, urgency=urgency,
-        entity_id=action.get("entity_id", "") or "", category=action_type,
-        push=delivery.PUSH_ALWAYS if always else delivery.PUSH_HIGH,
-        phone_only=bool(action.get("phone_only")) and urgency != "critical",
-        tts_context="sentinel", config=config, dedup_key=habit_key or "", habit_key="",
-        asleep=bool(sleeping),
-        motion_counts=True, record_kind=_RECORDED_KINDS.get(action_type, "")),
+    out = await delivery.async_deliver(
+        hass, request_for(config, action, sleeping, message=message, reading=reading),
         push=_push)
 
     # A spoken offer can be answered from these rooms (8.39.1).
@@ -116,6 +136,9 @@ async def _emit_action(hass, config, action, sleeping):
                 hass, config, message, decision_id)
         except Exception as exc:
             _LOGGER.debug("rating prompt failed: %s", exc)
+    delivered = bool(out.spoken or out.pushed)
+    return delivered, out.decision.reason or ("spoken" if out.spoken else
+                                              "pushed" if out.pushed else "not delivered")
 
 
 # Core action types whose delivery is a safety decision of its own (8.23.0).

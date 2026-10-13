@@ -504,6 +504,38 @@ _COMPONENTS = (
         # the column before its index can be built.
         post=("CREATE INDEX IF NOT EXISTS idx_dr_ref     ON decision_records (ref)",),
     ),
+    # The convenience path in shadow (8.48.0): what each path decided for
+    # one alert, and the per-pattern choices the person made.
+    Component(
+        name="convenience",
+        version=1,
+        tables=("convenience_shadow", "convenience_patterns"),
+        statements=(
+            """CREATE TABLE IF NOT EXISTS convenience_shadow (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts            REAL NOT NULL,
+    pattern_key   TEXT NOT NULL,
+    kind          TEXT NOT NULL,
+    snapshot_id   TEXT NOT NULL DEFAULT '',
+    decision_id   INTEGER,
+    message       TEXT NOT NULL DEFAULT '',
+    actual        TEXT NOT NULL,
+    actual_reason TEXT NOT NULL DEFAULT '',
+    shadow        TEXT NOT NULL,
+    shadow_reason TEXT NOT NULL DEFAULT '',
+    decided_by    TEXT NOT NULL DEFAULT 'current'
+)""",
+            "CREATE INDEX IF NOT EXISTS idx_cs_ts      ON convenience_shadow (ts)",
+            "CREATE INDEX IF NOT EXISTS idx_cs_pattern ON convenience_shadow (pattern_key, ts)",
+            """CREATE TABLE IF NOT EXISTS convenience_patterns (
+    pattern_key TEXT PRIMARY KEY,
+    stopped     INTEGER NOT NULL DEFAULT 0,
+    active      INTEGER NOT NULL DEFAULT 0,
+    kept_ts     REAL,
+    updated_ts  REAL NOT NULL
+)""",
+        ),
+    ),
     # ── nova/provider_activity.db ────────────────────────────────────────
     Component(
         name="provider_activity",
@@ -619,7 +651,7 @@ STORES: tuple[Store, ...] = (
     Store("patterns", "nova/patterns.db",
           ("pattern_log", "person_patterns", "cognition", "automation_trials",
            "followups", "goals"), wal=True),
-    Store("decisions", "nova/decisions.db", ("decision_records",), wal=True),
+    Store("decisions", "nova/decisions.db", ("decision_records", "convenience"), wal=True),
     Store("provider_activity", "nova/provider_activity.db",
           ("provider_activity",), wal=True),
     Store("reminders", "nova/reminders.db", ("reminders",), wal=True),
