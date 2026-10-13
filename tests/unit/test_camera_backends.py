@@ -285,11 +285,55 @@ async def test_nest_without_integration_data(cb, fake_hass):
     assert await cb.NestBackend().fetch_best_image(fake_hass, "camera.hall", NEST_CACHE) is None
 
 
-async def test_nest_dict_data_quirk(cb, fake_hass):
-    # A dict (keyed by config entry) has no `subscribers` attribute.
-    store = MediaStore()
-    fake_hass.data["nest"] = {"entry1": types.SimpleNamespace(subscribers=[
-        types.SimpleNamespace(media_store=store)])}
+class EventMedia:
+    def __init__(self, contents=BIG):
+        self.contents = contents
+        self.tokens = []
+
+    async def get_media_from_token(self, token):
+        self.tokens.append(token)
+        return types.SimpleNamespace(contents=self.contents)
+
+
+NEST_NAME = "enterprises/p1/devices/cam-1"
+
+
+@pytest.fixture
+def nest_devices(monkeypatch, fake_hass):
+    """Current HA: a loaded Nest entry whose device manager holds Nest devices
+    by API name, and the HA device registry tying dev-1 to that name."""
+    from fakes import FakeConfigEntries
+    devices = {}
+    entry = types.SimpleNamespace(
+        domain="nest", runtime_data=types.SimpleNamespace(
+            device_manager=types.SimpleNamespace(devices=devices)))
+    fake_hass.config_entries = FakeConfigEntries([
+        types.SimpleNamespace(domain="nest"), entry])   # first one not loaded
+    registry = {"dev-1": types.SimpleNamespace(identifiers={("nest", NEST_NAME)})}
+    dr = sys.modules["homeassistant.helpers.device_registry"]
+    monkeypatch.setattr(dr, "async_get", lambda hass: types.SimpleNamespace(
+        async_get=registry.get))
+    return devices
+
+
+async def test_nest_current_ha_reads_event_media(cb, fake_hass, nest_devices):
+    # Regression (8.49.2): current HA keeps no subscribers in hass.data, so
+    # Nest never returned an image.
+    media = EventMedia()
+    nest_devices[NEST_NAME] = types.SimpleNamespace(event_media_manager=media)
+    fake_hass.data["nest"] = {"entry1": object()}
+    assert await cb.NestBackend().fetch_best_image(fake_hass, "camera.hall", NEST_CACHE) == BIG
+    assert media.tokens == ["ev-9"]
+
+
+async def test_nest_current_ha_small_image_is_none(cb, fake_hass, nest_devices):
+    nest_devices[NEST_NAME] = types.SimpleNamespace(event_media_manager=EventMedia(EDGE))
+    assert await cb.NestBackend().fetch_best_image(fake_hass, "camera.hall", NEST_CACHE) is None
+
+
+async def test_nest_unknown_device_on_current_ha(cb, fake_hass, nest_devices):
+    nest_devices["other"] = types.SimpleNamespace(event_media_manager=EventMedia())
+    fake_hass.data["nest"] = {"entry1": object()}
     assert await cb.NestBackend().fetch_best_image(fake_hass, "camera.hall", NEST_CACHE) is None
 
 

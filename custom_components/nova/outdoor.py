@@ -71,6 +71,11 @@ def _cfg_list(key: str) -> list[str]:
         return []
 
 
+def _outdoor_areas() -> list[str]:
+    """Configured outdoor area names, slugged like the area they are matched to."""
+    return [_slug(item) for item in _cfg_list("outdoor_areas")]
+
+
 def _area_slug(hass: Any, entity_id: str) -> str:
     """Return the slugged HA area name of an entity, or "" if it has none."""
     if hass is None:
@@ -121,7 +126,7 @@ def is_outdoor(hass: Any, entity_id: str, friendly_name: Optional[str] = None) -
     # Layer 3: the entity's Home Assistant area (looked up via module global
     # so tests can monkeypatch it).
     area = _area_slug(hass, entity_id)
-    if area and (area in DEFAULT_OUTDOOR_AREAS or area in _cfg_list("outdoor_areas")):
+    if area and (area in DEFAULT_OUTDOOR_AREAS or area in _outdoor_areas()):
         return True
     # Layer 4: whole-word keywords in the id or friendly name.
     return bool(_KEYWORD_RE.search(eid) or _KEYWORD_RE.search(name))
@@ -160,7 +165,7 @@ def notable(
     """Whether a detection is worth notifying about (outdoor and notable type)."""
     if area_name is not None:
         slug = _slug(area_name)
-        outside = slug in DEFAULT_OUTDOOR_AREAS or slug in _cfg_list("outdoor_areas")
+        outside = slug in DEFAULT_OUTDOOR_AREAS or slug in _outdoor_areas()
     else:
         outside = is_outdoor(hass, entity_id)
     if not outside:

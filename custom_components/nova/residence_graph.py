@@ -50,7 +50,10 @@ def _floors(config: dict) -> Iterator[list[Box]]:
             return
         if not raw:
             return
-    # A non-dict plan raises AttributeError here (preserved behaviour).
+    if isinstance(raw, list):
+        raw = {"": raw}  # a bare list of rooms is one floor
+    if not isinstance(raw, dict):
+        return
     for floor in raw.values():
         if not floor:
             continue

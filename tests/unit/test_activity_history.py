@@ -343,15 +343,17 @@ async def test_logbook_private_function_last(ah, rec, hass, monkeypatch):
     assert res["entries"][0]["name"] == "old"
 
 
-async def test_logbook_typeerror_retries_unscoped_quirk(ah, rec, hass, monkeypatch):
+async def test_logbook_unscoped_retry_keeps_only_the_asked_entity(ah, rec, hass, monkeypatch):
+    # Regression (8.49.2): the retry used to return the whole house's log.
     calls = []
 
     def only_three(hass_, start, end):
         calls.append("unscoped")
-        return [{"name": "whole house"}]
+        return [{"name": "whole house", "entity_id": "light.porch"},
+                {"name": "Hall", "entity_id": "light.hall"}]
     monkeypatch.setattr(rec.lb, "async_get_events", only_three)
     res = await ah.logbook(hass, entity="light.hall")
-    assert res["entries"][0]["name"] == "whole house"
+    assert [e["name"] for e in res["entries"]] == ["Hall"]
     assert calls == ["unscoped"]
 
 

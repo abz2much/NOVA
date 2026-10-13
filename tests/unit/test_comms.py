@@ -45,10 +45,6 @@ def at(minutes):
     ("2026-03-02T08:15:30", datetime(2026, 3, 2, 8, 15, 30)),
     ("2026-03-02 08:15:30", datetime(2026, 3, 2, 8, 15, 30)),
     ("2026-03-02T08:15", datetime(2026, 3, 2, 8, 15)),
-    ("2026-03-02T08:15:30Z", datetime(2026, 3, 2, 8, 15, 30)),
-    ("2026-03-02T08:15:30+02:00", datetime(2026, 3, 2, 8, 15, 30)),
-    ("2026-03-02T08:15:30-07:00", datetime(2026, 3, 2, 8, 15, 30)),
-    ("2026-03-02T08:15:30.987654+00:00", datetime(2026, 3, 2, 8, 15, 30)),
     ("  2026-03-02  ", datetime(2026, 3, 2)),
     ("2026-03-02 later", datetime(2026, 3, 2)),
 ])
@@ -60,6 +56,43 @@ def test_parse_valid(cm, raw, expected):
 @pytest.mark.parametrize("raw", [None, "", "nonsense", "2026-13-40", "T", "12:00 noon"])
 def test_parse_invalid(cm, raw):
     assert cm._parse(raw) is None
+
+
+@pytest.fixture
+def ha_zone(monkeypatch):
+    """Home Assistant's zone set to UTC+1, unlike the test machine's."""
+    import sys
+    from datetime import timezone
+    zone = timezone(timedelta(hours=1))
+    dt = sys.modules["homeassistant.util.dt"]
+    monkeypatch.setattr(dt, "as_local", lambda v: v.astimezone(zone))
+    return zone
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("2026-03-02T08:15:30Z", datetime(2026, 3, 2, 9, 15, 30)),
+    ("2026-03-02T08:15:30+00:00", datetime(2026, 3, 2, 9, 15, 30)),
+    ("2026-03-02T08:15:30+02:00", datetime(2026, 3, 2, 7, 15, 30)),
+    ("2026-03-02T08:15:30-07:00", datetime(2026, 3, 2, 16, 15, 30)),
+    ("2026-03-02T08:15:30.987654+0000", datetime(2026, 3, 2, 9, 15, 30)),
+    ("2026-03-02 08:15:30", datetime(2026, 3, 2, 8, 15, 30)),
+])
+def test_parse_converts_offsets_to_ha_local_time(cm, ha_zone, raw, expected):
+    # Regression (8.49.2): offsets were dropped, so a UTC time read an hour out.
+    got = cm._parse(raw)
+    assert got == expected and got.tzinfo is None
+
+
+def test_agenda_compares_with_ha_local_now(cm, cfg, fake_hass, ha_zone, monkeypatch):
+    from datetime import timezone
+    local_now = datetime.now(timezone.utc).astimezone(ha_zone).replace(tzinfo=None)
+    soon = local_now + timedelta(minutes=30)
+    events = [ev("Soon", soon, soon + timedelta(minutes=10))]
+    monkeypatch.setattr(cm, "gather_events", lambda hass: list(events))
+    assert cm.agenda(fake_hass, 1)["count"] == 1
+    later = local_now + timedelta(minutes=90)
+    events[:] = [ev("Later", later, later + timedelta(minutes=10))]
+    assert cm.agenda(fake_hass, 1)["count"] == 0
 
 
 # ── gather_events ────────────────────────────────────────────────────────────

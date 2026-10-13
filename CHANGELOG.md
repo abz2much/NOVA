@@ -1,3 +1,15 @@
+## [8.49.2] — Six small fixes found during the rewrite
+
+Writing the behaviour specs for 8.49.1 turned up six old bugs that the rewrite kept on purpose, so that 8.49.1 changed nothing. They are fixed here, each with a test.
+
+### Fixed
+- **Outdoor areas you add in settings now count.** An area typed with capitals or spaces, like "Far Field", never matched, so its cameras were treated as indoors.
+- **A floor plan saved as a plain list of rooms** no longer breaks the room adjacency graph. It is read as one floor, and any other odd value gives no graph.
+- **Calendar times with a time zone** are now read in your Home Assistant time zone. A time written in UTC or with an offset used to be read as local time, so an event could show at the wrong hour, and "now" came from the system clock rather than Home Assistant's zone.
+- **"What happened with" one device** on an older logbook no longer returns the whole house's log. Only that device's entries are kept.
+- **A person count of "inf"** from a camera sensor is read as no count instead of raising an error.
+- **Nest doorbell and camera snapshots work again on current Home Assistant.** Nova was looking for the event image where older versions kept it and always came back empty, falling back to the camera's live picture. It now asks the Nest integration for the event's own image, and still tries the old place on older versions.
+
 ## [8.49.1] — Seven small modules rewritten from scratch
 
 Step 9 of the independence plan begins. Seven small modules that were still near copies of the code Nova started from are rewritten from empty files. Each was first described in a behaviour spec with fresh tests; the new code was then written from that spec alone, without the old file. Nothing Nova does changes.

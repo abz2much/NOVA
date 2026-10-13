@@ -231,10 +231,12 @@ def test_configured_area_extends(od, cfg, fake_hass, monkeypatch):
     assert od.is_outdoor(fake_hass, "camera.c1") is True
 
 
-def test_configured_area_not_slugged_quirk(od, cfg, fake_hass, monkeypatch):
+def test_configured_area_is_slugged(od, cfg, fake_hass, monkeypatch):
+    # Regression (8.49.2): "Far Field" in the settings never matched far_field.
     monkeypatch.setattr(od, "_area_slug", lambda h, e: "far_field")
     cfg["outdoor_areas"] = ["Far Field"]
-    assert od.is_outdoor(fake_hass, "camera.c1") is False
+    assert od.is_outdoor(fake_hass, "camera.c1") is True
+    assert od.notable(fake_hass, "camera.c1", "person", area_name="Far  Field") is True
 
 
 def test_area_layer_via_registries(od, cfg, fake_hass, registries):
