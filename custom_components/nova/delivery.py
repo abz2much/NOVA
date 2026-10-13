@@ -451,4 +451,5 @@ async def _record(hass, req: DeliveryRequest, cond: Conditions, out: Outcome) ->
         hass, req.record_kind, source=req.source, entity_id=req.entity_id or None,
         message=req.message, sit=sit, plan=plan,
         facts={"urgency": req.urgency, **(req.record_facts or {})},
-        assessment=req.record_assessment, request_ids=[out.request_id])
+        assessment=req.record_assessment, request_ids=[out.request_id],
+        delivery=out.decision.reason)

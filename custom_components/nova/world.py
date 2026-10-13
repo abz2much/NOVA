@@ -33,6 +33,8 @@ The snapshot holds:
   * open_situations open situations (situations.py), or UNKNOWN
   * read_at, sources when it was read, and where asleep, quiet hours and
                     the household came from (8.46.0)
+  * id              names this reading, so every decision taken from it can
+                    say which reading it used (8.47.0)
 
 A decision keeps only the facts it used (facts()), never the whole snapshot.
 
@@ -44,6 +46,7 @@ from __future__ import annotations
 
 import logging
 import time
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -176,6 +179,7 @@ class World:
     tick: int = 0
     read_at: float = 0.0
     sources: dict = field(default_factory=dict, compare=False)
+    id: str = field(default="", compare=False)
 
     def facts(self, *names: str) -> dict:
         """Only the named facts, for a decision to keep: value, source and
@@ -323,7 +327,13 @@ def read(hass, config: Optional[dict] = None, *, asleep: Any = UNKNOWN,
         lockdown_active=_read("lockdown", _lockdown_active),
         open_situations=_read("situations", _open_situations, hass),
         tick=tick,
+        id=new_id(),
     )
+
+
+def new_id() -> str:
+    """A name for one reading of the house."""
+    return uuid.uuid4().hex[:12]
 
 
 # ── the tick's snapshot ─────────────────────────────────────────────────────

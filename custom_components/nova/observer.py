@@ -678,6 +678,53 @@ def _on_state_changed(event: Event) -> None:
     _STATE.hass.async_create_task(_process_event(event))
 
 
+def _event_at(event: Event) -> str:
+    """When the event happened, as an ISO time."""
+    try:
+        return dt_util.as_local(event.time_fired).isoformat(timespec="seconds")
+    except Exception:
+        return dt_util.now().isoformat(timespec="seconds")
+
+
+async def _audit(event: Event, *, result: str, category: str, classifier_urgency: str,
+                 sit=None, trace: Optional[dict] = None, reason: str = "",
+                 urgency: str = "", message: str = "", out=None) -> None:
+    """One compact Decision Record entry for an Observer alert decision
+    (8.47.0): the event and when it happened, the reading it was decided on
+    (its snapshot id and only the facts used), the rule and reason, the
+    result (alerted, suppressed or ignored) and what delivery did. Routine
+    events that never reach a decision get none. Never raises."""
+    try:
+        from . import alert_path
+        new_state, old_state = event.data.get("new_state"), event.data.get("old_state")
+        facts = {
+            "event": {"type": category or "unclassified",
+                      "from": getattr(old_state, "state", None),
+                      "to": getattr(new_state, "state", None),
+                      "at": _event_at(event)},
+            "classifier_urgency": classifier_urgency,
+            "rule": dict(trace or {}) or {"origin": "classifier", "rule": "not_worth_considering"},
+        }
+        if urgency:
+            facts["urgency"] = urgency
+        plan = delivered = None
+        if out is not None:
+            plan = alert_path.Plan(alert=out.decision.delivered, speak=out.spoken,
+                                   push=bool(out.pushed), reason=out.decision.reason)
+            delivered = out.decision.reason or ("spoken" if out.spoken else
+                                                "pushed" if out.pushed else "not delivered")
+        if sit is None:
+            sit = alert_path.situation(_STATE.hass, _STATE.config)
+        await alert_path.async_record_decision(
+            _STATE.hass, "observer", source="observer",
+            entity_id=event.data.get("entity_id") or None, message=message, sit=sit,
+            plan=plan, facts=facts, decision=result, reason=reason,
+            request_ids=[out.request_id] if out is not None else None,
+            delivery=delivered or "")
+    except Exception as exc:
+        _LOGGER.debug("Observer audit entry failed: %s", exc)
+
+
 async def _process_event(event: Event) -> None:
     """Full async pipeline for one flagged state change."""
     try:
@@ -706,7 +753,16 @@ async def _process_event(event: Event) -> None:
             recent_activity_summary=recent_summary,
         )
 
+        # A critical hazard always gets an audit entry, even when the
+        # classifier passes over it.
+        critical = _critical_hazard(event)
+
         if not classification.get("worth_considering"):
+            if critical:
+                await _audit(event, result="ignored",
+                             category=classification.get("category", ""),
+                             classifier_urgency=classification.get("urgency", ""),
+                             reason="the classifier judged it not worth considering")
             # Still log to activity feed so the panel shows observer is working
             try:
                 from .database import save_activity
@@ -789,6 +845,7 @@ async def _process_event(event: Event) -> None:
         anyone_home = sit.anyone_home
 
         # Tier 2: reason
+        trace: dict = {}
         decision = await reasoning_loop.decide(
             _STATE.hass,
             _STATE.reasoning_provider,
@@ -809,6 +866,7 @@ async def _process_event(event: Event) -> None:
             from_state=old_state.state,
             to_state=new_state.state,
             friendly_name=friendly_name,
+            trace=trace,
         )
 
         if not decision.get("speak"):
@@ -816,6 +874,10 @@ async def _process_event(event: Event) -> None:
                 "Observer silent for %s: %s",
                 entity_id, decision.get("reason"),
             )
+            await _audit(event, result="ignored", category=category,
+                         classifier_urgency=urgency_hint, sit=sit, trace=trace,
+                         reason=str(decision.get("reason") or ""),
+                         urgency=str(decision.get("urgency") or ""))
             return
 
         message = decision["message"]
@@ -856,6 +918,10 @@ async def _process_event(event: Event) -> None:
             tts_context="sentinel", reading=sit))
         if not out.spoken:
             _LOGGER.info("Observer not spoken '%s' — %s", message, out.decision.reason)
+        await _audit(event, result="alerted" if (out.spoken or out.pushed) else "suppressed",
+                     category=category, classifier_urgency=urgency_hint, sit=sit,
+                     trace=trace, reason=str(decision.get("reason") or ""),
+                     urgency=final_urgency, message=message, out=out)
 
     except Exception as exc:
         _LOGGER.exception("Observer pipeline error: %s", exc)
