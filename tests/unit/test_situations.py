@@ -180,11 +180,11 @@ def pkg(load, monkeypatch):
 
     async def _announce(hass, msg, *a, **k):
         out["spoken"].append(msg)
+        return True
     monkeypatch.setattr(load("tts_helper"), "async_announce", _announce)
-
-    async def _push(hass, msg):
-        out["pushed"].append(msg)
-    monkeypatch.setattr(pm, "_push_phones", _push)
+    # 8.44.0: package messages go out through delivery.py.
+    from conftest import route_delivery
+    route_delivery(load, monkeypatch, pushed=out["pushed"])
     out["pm"] = pm
     yield out
     for d in (pm._STATE, pm._LAST_SPOKEN, pm._TRIGGER_LAST):

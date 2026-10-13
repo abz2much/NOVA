@@ -162,46 +162,6 @@ def test_sentinel(ap, house, residents):
     assert _out(asleep) == "phones" and not asleep.speak_if_unsent
 
 
-# ── hazards ─────────────────────────────────────────────────────────────────
-
-@pytest.mark.parametrize("residents", RESIDENTS)
-def test_hazard(ap, house, residents):
-    sit = _sit(ap, house(residents))
-    spoken = ap.for_hazard(sit, speak_allowed=True)
-    assert _out(spoken) == "both" and spoken.push_first
-    assert _out(ap.for_hazard(sit, speak_allowed=False)) == "phones"
-
-
-# ── packages ────────────────────────────────────────────────────────────────
-
-@pytest.mark.parametrize("residents,expected", [
-    ("home", "nothing"), ("away", "both"), ("unknown", "nothing")])
-def test_package_removed(ap, house, residents, expected):
-    plan = ap.for_package(_sit(ap, house(residents)), "removed", announcements_on=True)
-    assert _out(plan) == expected
-
-
-def test_package_removed_while_away_in_quiet_hours_goes_to_phones(ap, house):
-    plan = ap.for_package(_sit(ap, house("away"), quiet=True), "removed", announcements_on=True)
-    assert _out(plan) == "phones"
-
-
-@pytest.mark.parametrize("kind", ["delivered", "mail", "stranded"])
-@pytest.mark.parametrize("residents", RESIDENTS)
-def test_package_arrivals(ap, house, kind, residents):
-    hass = house(residents)
-    assert _out(ap.for_package(_sit(ap, hass), kind, announcements_on=True)) == "speakers"
-    assert _out(ap.for_package(_sit(ap, hass, quiet=True), kind, announcements_on=True)) == "nothing"
-    assert _out(ap.for_package(_sit(ap, hass), kind, announcements_on=False)) == "nothing"
-
-
-# ── doorbell ────────────────────────────────────────────────────────────────
-
-@pytest.mark.parametrize("residents", RESIDENTS)
-def test_doorbell(ap, house, residents):
-    assert _out(ap.for_doorbell(_sit(ap, house(residents)))) == "speakers"
-
-
 # ── core actions: intrusion, lockdown, freeze, offers, anticipation ─────────
 
 CORE_CONFIG = {"broadcast_group": SPEAKER}

@@ -73,7 +73,15 @@ def delivery(load, monkeypatch):
 
     async def announce(hass, text, tts_entity, speakers, **kwargs):
         spoken.append(text)
+        return True
 
+    # 8.44.0: hazards go out through delivery.py. The household's quiet
+    # hours there are the same reading the hazard monitor takes; nothing
+    # else holds a message here (awake, announcements on).
+    dl = load("delivery")
+    monkeypatch.setattr(dl, "conditions", lambda hass, req: dl.Conditions(
+        quiet_hours=hm._in_quiet_hours(hass)))
+    monkeypatch.setattr(load("core_delivery"), "_notify_all_devices", notify)
     monkeypatch.setattr(cc, "_notify_all_devices", notify)
     monkeypatch.setattr(tts, "find_best_tts_entity", lambda hass: "tts.test")
     monkeypatch.setattr(audio, "broadcast_target", lambda *args, **kwargs: ["media_player.all"])
@@ -172,12 +180,12 @@ async def test_all_legacy_paths_are_phone_only_in_quiet_hours(
 
 
 def test_quiet_hours_read_live_runtime_and_fail_open(load, monkeypatch):
+    # 8.44.0: the household's one quiet hours reading (delivery.py).
     hm = load("hazard_monitor")
     sd = load("sleep_detection")
     seen = []
-    monkeypatch.setattr(hm, "_runtime", lambda hass, key, default: {
-        "observer_quiet_start": "21:30", "observer_quiet_end": "06:15",
-    }.get(key, default))
+    monkeypatch.setattr(load("runtime"), "domain_runtime_config", lambda hass: {
+        "observer_quiet_start": "21:30", "observer_quiet_end": "06:15"})
     monkeypatch.setattr(sd, "_in_quiet_hours", lambda start, end:
                         seen.append((start, end)) or True)
     assert hm._in_quiet_hours(_hass()) is True

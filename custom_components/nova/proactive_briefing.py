@@ -400,10 +400,6 @@ async def _trigger_briefing(
     recent_hours = ARRIVAL_RECENT_HOURS if reason == "arrival" else 4
     snap_summary = get_snapshot_summary(hours=recent_hours)
 
-    # Check if anyone is home
-    from . import household
-    anyone_home = household.residents(hass) == household.HOME
-
     # Build extra context based on reason
     extra_context = ""
     if reason == "arrival":
@@ -443,9 +439,7 @@ async def _trigger_briefing(
         from .briefing import ungrounded_briefing_fact
         from .directive_helper import build_system_prompt
         from .const import BRIEFING_GROUNDING_RULE
-        from .tts_helper import resolve_tts_for_context, async_announce
-        from .audio_routing import observer_speak_target
-        from . import sleep_detection
+        from .tts_helper import resolve_tts_for_context
 
         # Gather context
         local_now = datetime.now()
@@ -581,77 +575,38 @@ async def _trigger_briefing(
 
         _LOGGER.info("Proactive briefing (%s): %s", reason, briefing_text[:100])
 
-        # Action Audit Log / Spoken History linkage (v3 correction): one
-        # request_id for this whole briefing event — the spoken copy (if
-        # any) and the phone push (if any) are two sides of the SAME
-        # request, not independent actions.
-        from . import action_log
-        request_id = action_log.new_request_id()
-
-        # Route: speak at home, push notification when away
-        if anyone_home:
-            # Check sleep
-            bedroom_areas = config.get("bedroom_areas", []) or []
-            sleeping, _ = sleep_detection.is_sleeping(
-                hass,
-                bedroom_area_ids=bedroom_areas,
-                quiet_start=config.get("observer_quiet_start", "22:00"),
-                quiet_end=config.get("observer_quiet_end", "07:00"),
-            )
-
-            if sleeping:
-                # Push to phone instead of speaking
-                await _push_to_phone(hass, config, briefing_text, reason, request_id=request_id)
-            else:
-                # Speak via announcement speakers
-                tts_entity = resolve_tts_for_context(
-                    hass, "briefing",
-                    config.get("tts_engine", "auto"),
-                    config.get("tts_premium_engine") or None,
-                    config.get("tts_premium_contexts") or [],
-                )
-                broadcast_group = config.get("broadcast_group") or None
-                targets, mode = observer_speak_target(
-                    hass, urgency="medium", broadcast_group=broadcast_group,
-                )
-                if tts_entity and targets:
-                    await async_announce(
-                        hass, briefing_text, tts_entity, targets,
-                        context="briefing", action_request_id=request_id,
-                    )
-                # Also push to phone for record
-                await _push_to_phone(hass, config, briefing_text, reason, request_id=request_id)
-        else:
-            # Everyone away — push only
-            await _push_to_phone(hass, config, briefing_text, reason, request_id=request_id)
+        # One delivery request (8.44.0): the household's rules decide. A
+        # briefing is always pushed to the phones as a record, and spoken on
+        # the announcement speakers when someone is home and the rules allow.
+        # A scheduled briefing is the person's own, at the time they chose,
+        # so shush, the Announcements switch and quiet hours never swallow
+        # it; sleep still applies, as before. Arrival, security and camera
+        # briefings follow every rule.
+        from . import delivery
+        tts_entity = resolve_tts_for_context(
+            hass, "briefing",
+            config.get("tts_engine", "auto"),
+            config.get("tts_premium_engine") or None,
+            config.get("tts_premium_contexts") or [],
+        )
+        await delivery.async_deliver(hass, delivery.DeliveryRequest(
+            source="briefing", message=briefing_text, category=f"briefing_{reason}",
+            requested_by_user=(reason == "scheduled"), quiet_ok=(reason == "scheduled"),
+            push=delivery.PUSH_ALWAYS,
+            title=_push_title(reason), tts_context="briefing",
+            tts_entity=tts_entity or "", config=config))
 
     except Exception as exc:
         _LOGGER.warning("Proactive briefing failed: %s", exc)
 
 
-async def _push_to_phone(
-    hass: HomeAssistant,
-    config: dict,
-    message: str,
-    reason: str,
-    *,
-    request_id: Optional[str] = None,
-) -> None:
-    """Push briefing to every configured normal notification target."""
-    from .notify_targets import async_send_configured_notifications
-
-    title = {
+def _push_title(reason: str) -> str:
+    return {
         "arrival": "Nova — Welcome Home",
         "security": "Nova — Security Alert",
         "scheduled": "Nova — Briefing",
         "camera": "Nova — Camera Alert",
     }.get(reason, "Nova — Briefing")
-    sent = await async_send_configured_notifications(
-        hass, config, {"message": message, "title": title},
-        request_id=request_id, action="notify", source="proactive",
-    )
-    if sent:
-        _LOGGER.info("Proactive: pushed to %d configured device(s)", len(sent))
 
 
 # ── Start / Stop ────────────────────────────────────────────────────────────

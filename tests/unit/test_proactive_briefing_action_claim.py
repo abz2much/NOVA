@@ -215,6 +215,10 @@ def briefing_mod(load, monkeypatch):
         monkeypatch, "sleep_detection",
         is_sleeping=lambda *a, **k: (False, ""),
     )
+    # 8.44.0: through delivery.py, with no household rule holding it; these
+    # tests are about wording, not the time they run or earlier alerts.
+    dl = load("delivery")
+    monkeypatch.setattr(dl, "conditions", lambda hass, req: dl.Conditions())
     mod = load("proactive_briefing")
     mod._async_announce_calls = async_announce_calls
     return mod

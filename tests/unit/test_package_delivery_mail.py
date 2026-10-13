@@ -44,8 +44,14 @@ def env(pm, load, monkeypatch):
 
     async def _announce(hass, msg, *a, **k):
         spoken.append(msg)
+        return True
     monkeypatch.setattr(load("tts_helper"), "async_announce", _announce)
     sw["spoken"] = spoken
+    # 8.44.0: package messages go out through delivery.py, with these switches.
+    from conftest import route_delivery
+    sw["pushed"] = []
+    route_delivery(load, monkeypatch, quiet=lambda h: sw["quiet"],
+                   announcements=lambda h: sw["announce"], pushed=sw["pushed"])
     logs: list[tuple] = []
     monkeypatch.setattr(pm, "_log", lambda hass, eid, kind, det, source:
                         logs.append((eid, kind, source)))

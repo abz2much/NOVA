@@ -209,11 +209,11 @@ def pkg(pm, load, monkeypatch):
 
     async def _announce(hass, msg, *a, **k):
         sw["spoken"].append(msg)
+        return True
     monkeypatch.setattr(load("tts_helper"), "async_announce", _announce)
-
-    async def _push(hass, msg):
-        sw["pushed"].append(msg)
-    monkeypatch.setattr(pm, "_push_phones", _push)
+    # 8.44.0: package messages go out through delivery.py.
+    from conftest import route_delivery
+    route_delivery(load, monkeypatch, quiet=lambda h: sw["quiet"], pushed=sw["pushed"])
     return sw
 
 
@@ -237,7 +237,9 @@ async def test_bug7_in_quiet_hours_it_is_pushed_but_not_spoken(pm, pkg, fake_has
     pkg["quiet"] = True
     fake_hass.states.set("person.abi", "not_home")
     await _package_then_gone(pm, fake_hass)
-    assert len(pkg["pushed"]) == 1 and pkg["spoken"] == []
+    # 8.44.0: the delivery itself also goes to the phones in quiet hours.
+    assert len(pkg["pushed"]) == 2 and pkg["spoken"] == []
+    assert "while no one is home" in pkg["pushed"][-1]
 
 
 @pytest.mark.parametrize("state", ["home", "unknown"])

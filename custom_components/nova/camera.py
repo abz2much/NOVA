@@ -1124,14 +1124,16 @@ async def async_analyze_camera(
     spoke = False
     if announce:
         if judgment["notable"] and judgment.get("speak"):
-            # A notable camera event is an alert: alert_path.for_doorbell
-            # decides how it goes out (8.22.0; spoken, as before).
-            from . import alert_path
-            await alert_path.deliver(
-                alert_path.for_doorbell(alert_path.situation(hass)),
-                speak=lambda _t: async_announce(
-                    hass, judgment["speak"], tts_entity, speakers, context="camera"))
-            spoke = True
+            # A notable camera event is a proactive alert: one delivery
+            # request, so shush, the Announcements switch, quiet hours and
+            # "Notifications only" apply (8.44.0). Unspoken, it goes to the
+            # phones.
+            from . import delivery
+            out = await delivery.async_deliver(hass, delivery.DeliveryRequest(
+                source="camera", message=judgment["speak"], entity_id=entity_id,
+                category="camera", speakers=tuple(speakers or ()),
+                tts_entity=tts_entity or "", tts_context="camera"))
+            spoke = out.spoken
         elif not gate_announce:
             # Manual analyze request on a non-notable scene — still report it.
             await async_announce(hass, analysis, tts_entity, speakers, context="camera")
@@ -1459,12 +1461,12 @@ async def _analyze_doorbell_press(
     # Single, notability-gated announcement for the chosen result
     if res.get("success"):
         if res.get("notable") and res.get("speak"):
-            from . import alert_path
-            await alert_path.deliver(
-                alert_path.for_doorbell(alert_path.situation(hass)),
-                speak=lambda _t: async_announce(
-                    hass, res["speak"], tts_entity, speakers, context="camera"))
-            res["spoke"] = True
+            from . import delivery
+            out = await delivery.async_deliver(hass, delivery.DeliveryRequest(
+                source="doorbell", message=res["speak"], entity_id=entity_id,
+                category="doorbell", speakers=tuple(speakers or ()),
+                tts_entity=tts_entity or "", tts_context="camera"))
+            res["spoke"] = out.spoken
         # Training data — every analysed press, regardless of whether it spoke
         try:
             from . import doorbell_training

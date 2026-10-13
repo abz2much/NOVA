@@ -197,15 +197,10 @@ def _runtime(hass, key: str, default):
 
 
 def _in_quiet_hours(hass) -> bool:
-    """The Observer quiet window; a read or parse failure is safely not quiet."""
-    try:
-        from . import sleep_detection
-        return sleep_detection._in_quiet_hours(
-            str(_runtime(hass, "observer_quiet_start", "22:00")),
-            str(_runtime(hass, "observer_quiet_end", "07:00")),
-        )
-    except Exception:
-        return False
+    """The household's quiet hours (delivery.py); a read or parse failure is
+    safely not quiet."""
+    from . import delivery
+    return delivery.in_quiet_hours(hass)
 
 
 def _json_list(key: str) -> list:
@@ -473,48 +468,33 @@ def _fmt_disaster(d: dict, honorific: str) -> str:
 
 # ── delivery ─────────────────────────────────────────────────────────────────
 
-async def _deliver(hass, push_text: str, action_key: str, *, speak_text: str = "") -> None:
-    """Push to the phones, and speak ``speak_text`` when given, through the
-    same paths every other Nova alert uses. Whether it is spoken is the
-    caller's level rule; alert_path.for_hazard turns it into the plan
-    (8.22.0). Never raises."""
-    from . import alert_path
-    sit = alert_path.situation(hass)
-    plan = alert_path.for_hazard(sit, speak_allowed=bool(speak_text))
-
-    async def _push():
-        try:
-            from . import cognitive_core as cc
-            config = getattr(cc, "_CORE", None)
-            cfg_obj = getattr(config, "config", None) if config else None
-            await cc._notify_all_devices(hass, cfg_obj, push_text, _ACTION[action_key])
-        except Exception as exc:
-            _LOGGER.debug("hazard: notify failed: %s", exc)
-
-    async def _speak(_targets):
-        # a whole-house broadcast (earthquakes/severe weather are relevant
-        # everywhere), same resolution sentinel.py uses for its own alerts
-        try:
-            from . import tts_helper, audio_routing
-            tts = tts_helper.find_best_tts_entity(hass)
-            spk = audio_routing.broadcast_target(
-                hass,
-                broadcast_group=_cfg("broadcast_group", "") or None,
-                announcement_speakers=_cfg("announcement_speakers", None),
-            )
-            if tts and spk:
-                await tts_helper.async_announce(hass, speak_text, tts, spk, context="hazard")
-        except Exception:
-            pass
-
+async def _deliver(hass, push_text: str, action_key: str, *, speak_text: str = "",
+                   night: bool = False) -> None:
+    """Push to every phone, and speak ``speak_text`` when given, through the
+    one delivery path (delivery.py, 8.44.0). Whether it may be spoken is the
+    caller's level rule; ``night`` means the household's night level allowed
+    it in quiet hours. Shush, the Announcements switch, sleep and
+    "Notifications only" apply as for every proactive message; the phones
+    always get it. Never raises."""
     try:
-        await alert_path.deliver(plan, speak=_speak, push=_push)
+        from . import audio_routing, delivery, tts_helper
+        # a whole-house broadcast: earthquakes and severe weather are
+        # relevant everywhere
+        spk = audio_routing.broadcast_target(
+            hass,
+            broadcast_group=_cfg("broadcast_group", "") or None,
+            announcement_speakers=_cfg("announcement_speakers", None),
+        ) if speak_text else []
+        await delivery.async_deliver(hass, delivery.DeliveryRequest(
+            source=_ACTION.get(action_key, action_key), message=push_text,
+            spoken=speak_text, urgency="high", category="hazard",
+            phone_only=not speak_text, quiet_ok=night, sleep_ok=night,
+            speakers=tuple(spk or ()), push=delivery.PUSH_ALWAYS, all_phones=True,
+            push_first=True,
+            tts_entity=tts_helper.find_best_tts_entity(hass) or "",
+            tts_context="hazard", record_kind="hazard"))
     except Exception as exc:
         _LOGGER.debug("hazard: delivery failed: %s", exc)
-    await alert_path.async_record_decision(
-        hass, "hazard", source=_ACTION.get(action_key, action_key), sit=sit, plan=plan,
-        message=push_text, assessment="a nearby hazard or warning",
-        reason="" if speak_text else "below the speak level, or quiet hours")
 
 
 # ── weather warnings (8.8.0) ─────────────────────────────────────────────────
@@ -591,7 +571,7 @@ async def _poll_warnings(hass, honorific: str, *, in_quiet: bool) -> dict:
             kind = event[0]
             if kind == "cancelled":
                 # Phone only, whatever the level.
-                outbox.append((hw.pushed("cancelled", event[1], honorific, tz), None))
+                outbox.append((hw.pushed("cancelled", event[1], honorific, tz), "", False))
                 continue
             w, old = event[1], (event[2] if len(event) > 2 else "")
             # At or above the speak level (and the push level): spoken and
@@ -600,15 +580,13 @@ async def _poll_warnings(hass, honorific: str, *, in_quiet: bool) -> dict:
             speak = hw.speak_allowed(
                 w["level"], in_quiet, speak_level, push_level, night_level)
             outbox.append((hw.pushed(kind, w, honorific, tz, old),
-                           hw.spoken(kind, w, honorific, tz, old) if speak else ""))
+                           hw.spoken(kind, w, honorific, tz, old) if speak else "",
+                           speak and in_quiet))
         counts[source] = len(events)
     if changed:
         await hass.async_add_executor_job(hw.save_store, _STORE, now)
-    for push_text, speak_text in outbox:
-        if speak_text is None:
-            await _deliver(hass, push_text, "warning")
-        else:
-            await _deliver(hass, push_text, "warning", speak_text=speak_text)
+    for push_text, speak_text, night in outbox:
+        await _deliver(hass, push_text, "warning", speak_text=speak_text, night=night)
     return counts
 
 

@@ -57,7 +57,7 @@ def hm(load, monkeypatch, tmp_path, cfg):
         return True, []
     monkeypatch.setattr(load("hazard_cap"), "collect", cap_collect)
 
-    async def deliver(hass, push_text, action_key, *, speak_text=""):
+    async def deliver(hass, push_text, action_key, *, speak_text="", night=False):
         st.delivered.append((push_text, action_key, speak_text))
     monkeypatch.setattr(mod, "_deliver", deliver)
     # These tests are about warning levels, not the Observer quiet window, so
@@ -239,11 +239,16 @@ async def test_deliver_uses_the_existing_push_and_speech_paths(load, monkeypatch
     ar = load("audio_routing")
     pushed, spoken = [], []
 
-    async def notify(hass, cfg_obj, message, action):
+    async def notify(hass, cfg_obj, message, action, **kw):
         pushed.append((message, action))
 
     async def announce(hass, text, tts_entity, speakers, **kw):
-        spoken.append((text, kw))
+        spoken.append((text, kw.get("context")))
+        return True
+    # 8.44.0: through delivery.py, here with no household rule holding it.
+    dl = load("delivery")
+    monkeypatch.setattr(dl, "conditions", lambda hass, req: dl.Conditions())
+    monkeypatch.setattr(load("core_delivery"), "_notify_all_devices", notify)
     monkeypatch.setattr(cc, "_notify_all_devices", notify)
     monkeypatch.setattr(tts, "find_best_tts_entity", lambda hass: "tts.x")
     monkeypatch.setattr(tts, "async_announce", announce)
@@ -251,7 +256,8 @@ async def test_deliver_uses_the_existing_push_and_speech_paths(load, monkeypatch
     await mod._deliver(FakeHass(), "push text", "warning")
     assert pushed == [("push text", "hazard_weather")] and spoken == []
     await mod._deliver(FakeHass(), "push text", "warning", speak_text="say this")
-    assert spoken == [("say this", {"context": "hazard"})]
+    assert spoken == [("say this", "hazard")]
+    assert pushed[-1] == ("push text", "hazard_weather")
 
 
 # ── readers: scan_now, status, nova/hazard, the agent tool, the briefing ────

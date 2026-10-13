@@ -25,7 +25,6 @@ from .database import get_recent_messages, save_message
 from .directive_helper import build_system_prompt
 from .locale_format import format_date
 from .presence import get_presence_summary
-from .tts_helper import async_announce
 from . import paths
 from typing import Optional
 from .persistence import sqlite as _store
@@ -392,13 +391,22 @@ async def async_briefing(
             _LOGGER.warning("Nova briefing: empty text, skipping announce")
         elif not tts_entity:
             _LOGGER.warning("Nova briefing: no TTS entity resolved")
-        elif not speakers:
-            _LOGGER.warning(
-                "Nova briefing: no announcement speakers configured — choose "
-                "them in Settings \u2192 Announcement Speakers")
         else:
-            await async_announce(hass, briefing_text, tts_entity, speakers, context="briefing")
-            announced = True
+            if not speakers:
+                _LOGGER.warning(
+                    "Nova briefing: no announcement speakers configured — choose "
+                    "them in Settings \u2192 Announcement Speakers")
+            # One delivery request (8.44.0). Calling nova.briefing is asking
+            # for it now, so shush, the Announcements switch and quiet hours
+            # never swallow it; while the house is asleep, with
+            # "Notifications only" on, or with no speaker, it goes to the
+            # phones instead.
+            from . import delivery
+            out = await delivery.async_deliver(hass, delivery.DeliveryRequest(
+                source="briefing", message=briefing_text, category="briefing_service",
+                requested_by_user=True, quiet_ok=True, speakers=tuple(speakers or ()),
+                tts_entity=tts_entity, tts_context="briefing", title="Nova — Briefing"))
+            announced = out.spoken
 
     return {"success": True, "briefing": briefing_text, "context": context,
             "announced": announced}

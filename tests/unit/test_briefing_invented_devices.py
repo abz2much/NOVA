@@ -78,9 +78,9 @@ def pb(load, monkeypatch, fake_hass):
 
     pushed = []
 
-    async def _push(hass, config, message, reason, *, request_id=None):
-        pushed.append(message)
-    monkeypatch.setattr(mod, "_push_to_phone", _push)
+    async def _deliver(hass, req):
+        pushed.append(req.message)
+    monkeypatch.setattr(load("delivery"), "async_deliver", _deliver)
     mod._pushed = pushed
     return mod
 
