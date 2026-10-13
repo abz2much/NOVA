@@ -1,100 +1,91 @@
-"""Entity concurrency control for Nova.
+"""Per-entity locks with priority preemption.
 
-``EntityLockRegistry`` enforces mutual exclusion on hardware entities so two
-commands can't drive the same device at once, with a priority ladder: a
-real-time visual-presence command preempts a lower-priority predictive one, while
-an equal-or-lower priority request is discarded while a lock is held.
-
-Locks are held across the awaited service call but the registry operations are
-synchronous dict mutations — safe on Home Assistant's single-threaded event loop,
-where no other coroutine runs between awaits. Stdlib-only, so it tests directly.
-
-Typical use:
-    reg = EntityLockRegistry()
-    async with reg.guard("lock.front_door", Priority.INTENT) as token:
-        if token is None:
-            return                      # a higher-priority command holds it
-        await hass.services.async_call(...)
+Nova commands take a lock on the entity they are about to drive. A request with
+a strictly higher priority than the current holder takes the lock over (the old
+token is flagged invalid); anything equal or lower is turned away. There is no
+queueing and no cancellation: this is plain bookkeeping for Home Assistant's
+single-threaded event loop. Standard library only, so it can load standalone.
 """
 from __future__ import annotations
 
-import contextlib
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from enum import IntEnum
 
 _LOGGER = logging.getLogger(__name__)
 
 
 class Priority(IntEnum):
-    """Higher wins. Real-time presence beats stochastic prediction; safety beats all."""
-    PREDICTIVE = 10   # stochastic habit matrix
-    ROUTINE = 20      # scheduled / background automation
-    INTENT = 30       # explicit user command
-    VISUAL = 40       # real-time visual-presence command
-    SAFETY = 50       # safety overrides everything
+    """Well-known priority levels; plain ints are accepted too."""
+
+    PREDICTIVE = 10
+    ROUTINE = 20
+    INTENT = 30
+    VISUAL = 40
+    SAFETY = 50
 
 
 class LockToken:
-    """Opaque handle for a held lock; ``valid`` flips False if preempted/released."""
+    """Proof of holding an entity's lock; ``valid`` goes False once lost."""
 
     __slots__ = ("entity", "priority", "valid")
 
     def __init__(self, entity: str, priority: int) -> None:
         self.entity = entity
-        self.priority = priority
+        self.priority = int(priority)
         self.valid = True
+
+    def __repr__(self) -> str:
+        return f"LockToken({self.entity!r}, {self.priority}, valid={self.valid})"
 
 
 class EntityLockRegistry:
-    """Priority-aware mutual-exclusion locks keyed by entity_id."""
+    """Tracks the current lock holder for each entity id."""
 
     def __init__(self) -> None:
-        self._locks: dict[str, LockToken] = {}
+        self._holders: dict[str, LockToken] = {}
+
+    def _holder(self, entity: str) -> LockToken | None:
+        token = self._holders.get(entity)
+        return token if token is not None and token.valid else None
 
     def try_acquire(self, entity: str, priority: int) -> LockToken | None:
-        """Acquire ``entity`` at ``priority``. Returns a token, or None if a lock
-        of equal-or-higher priority is already held (the incoming request is
-        discarded). A strictly-higher priority preempts the current holder."""
-        current = self._locks.get(entity)
-        if current is not None and current.valid:
-            if int(priority) > current.priority:
-                current.valid = False  # preempt the lower-priority holder
+        """Take the lock, preempting a lower-priority holder; None if refused."""
+        wanted = int(priority)
+        current = self._holder(entity)
+        if current is not None:
+            if wanted <= current.priority:
                 _LOGGER.debug(
-                    "mutex: %s preempted (held %d < incoming %d)",
-                    entity, current.priority, int(priority),
-                )
-            else:
-                _LOGGER.debug(
-                    "mutex: %s busy (held %d ≥ incoming %d) — discarding",
-                    entity, current.priority, int(priority),
+                    "Refused lock on %s at %s (held at %s)", entity, wanted, current.priority
                 )
                 return None
-        token = LockToken(entity, int(priority))
-        self._locks[entity] = token
+            _LOGGER.debug(
+                "Preempting lock on %s: %s -> %s", entity, current.priority, wanted
+            )
+            current.valid = False
+        token = LockToken(entity, wanted)
+        self._holders[entity] = token
         return token
 
     def release(self, token: LockToken | None) -> None:
-        """Release a token. Only the current holder clears the lock; a token that
-        was already preempted just goes invalid without disturbing the new holder."""
+        """Invalidate ``token``; free the entity only if it is the holder."""
         if token is None:
             return
-        current = self._locks.get(token.entity)
         token.valid = False
-        if current is token:
-            del self._locks[token.entity]
+        if self._holders.get(token.entity) is token:
+            del self._holders[token.entity]
 
     def is_locked(self, entity: str) -> bool:
-        current = self._locks.get(entity)
-        return current is not None and current.valid
+        return self._holder(entity) is not None
 
     def held_priority(self, entity: str) -> int | None:
-        current = self._locks.get(entity)
-        return current.priority if (current is not None and current.valid) else None
+        current = self._holder(entity)
+        return current.priority if current is not None else None
 
-    @contextlib.asynccontextmanager
-    async def guard(self, entity: str, priority: int):
-        """Async context manager: yields a token (or None if contended) and always
-        releases on exit."""
+    @asynccontextmanager
+    async def guard(self, entity: str, priority: int) -> AsyncIterator[LockToken | None]:
+        """Hold the lock for the block's duration (yields None if refused)."""
         token = self.try_acquire(entity, priority)
         try:
             yield token

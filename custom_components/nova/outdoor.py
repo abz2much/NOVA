@@ -1,171 +1,168 @@
-"""
-Outdoor classification — the single source of truth for "is this entity part of
-the outside world?"
+"""Indoor/outdoor classification for Home Assistant entities.
 
-Why it matters: the intrusion investigator must reason about the *inside* of the
-house. An outdoor motion sensor seeding an investigation, or a delivery driver
-on the driveway camera *confirming* one, is exactly how false alarms happen.
-Before this module, outdoor knowledge lived in two unconnected fragments (a
-six-keyword skip inside the motion scan, and a never-called notable-event
-filter); everything now asks here.
-
-Classification is layered, most-authoritative first:
-
-  1. Explicit config (the user's word is final):
-       indoor_entities   — globs; force-classify as indoor (wins over everything)
-       outdoor_entities  — globs; force-classify as outdoor
-  2. The entity's Home Assistant *area*, matched against outdoor area names
-     (defaults below, extendable via `outdoor_areas` config).
-  3. Name keywords in the entity_id / friendly name — word-bounded, so
-     'gate' matches cover.side_gate but never cover.garage_door, and
-     'front_yard' matches while a front-door contact sensor does not.
-
-Also home to the notable-outdoor-event policy (person/package/mail/damage are
-worth surfacing; generic motion, passing cars, and animals are not) that the
-vision layer consults. Dependency-light; registry lookups are guarded so this
-works everywhere, including tests. Never raises.
+Nova uses this module as its single answer to "is this entity outside the
+house?", so intrusion logic can disregard yard, driveway and street sensors.
+It also decides which outdoor detection types deserve a notification, and
+offers two pure helpers the panel uses to pin an entity indoor or outdoor.
 """
 from __future__ import annotations
 
 import fnmatch
+import json
 import re
-from typing import Optional
+from typing import Any, Optional
 
-# Area names (slugged) considered outdoor by default. Users extend via the
-# `outdoor_areas` config list.
-DEFAULT_OUTDOOR_AREAS = {
+DEFAULT_OUTDOOR_AREAS: set[str] = {
     "backyard", "back_yard", "front_yard", "front_door", "driveway", "patio",
     "porch", "side_yard", "deck", "garden", "yard", "pool", "exterior",
     "outside", "outdoor", "outdoors", "shed", "carport", "walkway", "sidewalk",
     "lawn", "curb", "gazebo",
 }
 
-# Word-bounded name keywords. Deliberate exclusions: 'front'/'door' alone
-# (breach contact sensors like binary_sensor.front_door are the *house
-# envelope*, not the yard) and 'garage' (the garage is part of the envelope —
-# its door is a breach point, not scenery).
-_NAME_RE = re.compile(
-    r"(?:^|[._\s-])(outdoor|outside|exterior|backyard|back_?yard|front_?yard|"
-    r"side_?yard|yard|garden|driveway|porch|patio|deck|shed|gazebo|carport|"
-    r"curb|street|sidewalk|walkway|lawn|pool|doorbell|mailbox|gate|fence)"
-    r"(?:$|[._\s-])", re.I)
-
-# What kinds of outdoor detections are worth telling the user about.
-NOTABLE_OUTDOOR = {
-    "person": True,       # someone on the property — always notable
+# Which outdoor detection types are worth telling the user about.
+NOTABLE_OUTDOOR: dict[str, bool] = {
+    "person": True,
     "package": True,
     "mail": True,
     "damage": True,
-    "vehicle": False,     # cars come and go; not notable by default
+    "vehicle": False,
     "animal": False,
-    "motion": False,      # wind, shadows, passing traffic
+    "motion": False,
 }
+
+# Name keywords that mark an entity as outdoor. "front", "door" and "garage"
+# are deliberately absent: front-door contacts and garage doors are envelope.
+_OUTDOOR_KEYWORDS = (
+    "outdoor", "outside", "exterior", "backyard", "back_yard", "frontyard",
+    "front_yard", "sideyard", "side_yard", "yard", "garden", "driveway",
+    "porch", "patio", "deck", "shed", "gazebo", "carport", "curb", "street",
+    "sidewalk", "walkway", "lawn", "pool", "doorbell", "mailbox", "gate",
+    "fence",
+)
+
+# A keyword counts only as a whole word: bounded by text edges, ".", "_",
+# "-" or whitespace.
+_KEYWORD_RE = re.compile(
+    r"(?:^|(?<=[._\s-]))(?:"
+    + "|".join(re.escape(k) for k in _OUTDOOR_KEYWORDS)
+    + r")(?=$|[._\s-])",
+    re.IGNORECASE,
+)
+
+
+def _slug(text: str) -> str:
+    """Strip, lower-case and collapse whitespace runs into underscores."""
+    return re.sub(r"\s+", "_", text.strip().lower())
 
 
 def _cfg_list(key: str) -> list[str]:
-    """A config value as a lowercase list (accepts list or JSON string)."""
+    """Read a list-valued Nova option, normalised; [] on anything unexpected."""
     try:
         from . import nova_config
-        val = nova_config.get(key)
-        if isinstance(val, str) and val.strip():
-            import json
-            val = json.loads(val)
-        if isinstance(val, (list, tuple)):
-            return [str(v).lower().strip() for v in val if str(v).strip()]
-    except Exception:
-        pass
-    return []
+
+        value: Any = nova_config.get(key)
+        if isinstance(value, str) and value.strip():
+            value = json.loads(value)
+        if not isinstance(value, (list, tuple)):
+            return []
+        items = (str(item).lower().strip() for item in value)
+        return [item for item in items if item]
+    except Exception:  # noqa: BLE001 - config problems must never propagate
+        return []
 
 
-def _matches_any(eid: str, fname: str, patterns: list[str]) -> bool:
-    return any(fnmatch.fnmatch(eid, p) or fnmatch.fnmatch(fname, p)
-               for p in patterns)
-
-
-def _area_slug(hass, entity_id: str) -> str:
-    """The entity's HA area name, slugged. '' when unknown (guarded)."""
+def _area_slug(hass: Any, entity_id: str) -> str:
+    """Return the slugged HA area name of an entity, or "" if it has none."""
     if hass is None:
         return ""
     try:
-        from homeassistant.helpers import (
-            entity_registry as er, device_registry as dr, area_registry as ar,
-        )
-        ent = er.async_get(hass).async_get(entity_id)
-        area_id = None
-        if ent:
-            area_id = ent.area_id
-            if not area_id and ent.device_id:
-                dev = dr.async_get(hass).async_get(ent.device_id)
-                area_id = dev.area_id if dev else None
+        from homeassistant.helpers import area_registry as ar
+        from homeassistant.helpers import device_registry as dr
+        from homeassistant.helpers import entity_registry as er
+
+        entry = er.async_get(hass).async_get(entity_id)
+        if entry is None:
+            return ""
+        area_id = getattr(entry, "area_id", None)
+        device_id = getattr(entry, "device_id", None)
+        if not area_id and device_id:
+            device = dr.async_get(hass).async_get(device_id)
+            area_id = getattr(device, "area_id", None) if device else None
         if not area_id:
             return ""
         area = ar.async_get(hass).async_get_area(area_id)
-        name = (area.name if area else area_id) or ""
-        return "_".join(str(name).strip().lower().split())
-    except Exception:
+        name = getattr(area, "name", None) if area else None
+        return _slug(str(name or area_id))
+    except Exception:  # noqa: BLE001 - registry access is best effort
         return ""
 
 
-def is_outdoor(hass, entity_id: str, friendly_name: Optional[str] = None) -> bool:
-    """Is this entity part of the outside world? Layered: explicit config →
-    HA area → name keywords. Defaults to indoor when nothing matches."""
+def _matches_any(patterns: list[str], *texts: str) -> bool:
+    return any(fnmatch.fnmatch(text, pat) for pat in patterns for text in texts)
+
+
+def is_outdoor(hass: Any, entity_id: str, friendly_name: Optional[str] = None) -> bool:
+    """Classify an entity as outdoor (True) or indoor/envelope (False)."""
     eid = (entity_id or "").lower()
-    fname = (friendly_name or "").lower()
-    if not fname and hass is not None:
-        st = hass.states.get(entity_id)
-        if st is not None:
-            fname = str(st.attributes.get("friendly_name") or "").lower()
+    if not friendly_name and hass is not None:
+        try:
+            state = hass.states.get(entity_id)
+            friendly_name = state.attributes.get("friendly_name") if state else None
+        except Exception:  # noqa: BLE001
+            friendly_name = None
+    name = (friendly_name or "").lower()
 
-    if _matches_any(eid, fname, _cfg_list("indoor_entities")):
-        return False                      # the user's word is final
-    if _matches_any(eid, fname, _cfg_list("outdoor_entities")):
+    # Layer 1: explicit indoor pins win over everything.
+    if _matches_any(_cfg_list("indoor_entities"), eid, name):
+        return False
+    # Layer 2: explicit outdoor pins.
+    if _matches_any(_cfg_list("outdoor_entities"), eid, name):
         return True
-
+    # Layer 3: the entity's Home Assistant area (looked up via module global
+    # so tests can monkeypatch it).
     area = _area_slug(hass, entity_id)
-    if area and area in (DEFAULT_OUTDOOR_AREAS | set(_cfg_list("outdoor_areas"))):
+    if area and (area in DEFAULT_OUTDOOR_AREAS or area in _cfg_list("outdoor_areas")):
         return True
-
-    return bool(_NAME_RE.search(eid) or _NAME_RE.search(fname))
+    # Layer 4: whole-word keywords in the id or friendly name.
+    return bool(_KEYWORD_RE.search(eid) or _KEYWORD_RE.search(name))
 
 
 def location_mode(entity_id: str, indoor: list[str], outdoor: list[str]) -> str:
-    """The explicit designation for this exact entity: 'indoor', 'outdoor',
-    or 'auto' (heuristics decide). Exact-id matches only — globs a user wrote
-    by hand still classify via is_outdoor, but read as 'auto' here since they
-    aren't a per-camera pin (v6.49.0)."""
+    """Report how an entity is pinned: "indoor", "outdoor" or "auto"."""
     eid = (entity_id or "").lower()
-    if eid in [str(x).lower() for x in (indoor or [])]:
+    if any(eid == str(item).lower() for item in indoor or []):
         return "indoor"
-    if eid in [str(x).lower() for x in (outdoor or [])]:
+    if any(eid == str(item).lower() for item in outdoor or []):
         return "outdoor"
     return "auto"
 
 
-def set_entity_location(indoor: list[str], outdoor: list[str], entity_id: str,
-                        mode: str) -> tuple[list[str], list[str]]:
-    """Pure pin/unpin of one entity across the two designation lists.
-    'indoor'/'outdoor' pins the exact id into that list and out of the other;
-    'auto' removes it from both (heuristics resume). Globs and other entries
-    are preserved untouched. Returns new lists; callers persist."""
+def set_entity_location(
+    indoor: list[str], outdoor: list[str], entity_id: str, mode: str
+) -> tuple[list[str], list[str]]:
+    """Return new (indoor, outdoor) lists with the entity pinned per ``mode``."""
     eid = (entity_id or "").lower().strip()
-    keep = lambda lst: [x for x in (lst or []) if str(x).lower() != eid]  # noqa: E731
-    new_in, new_out = keep(indoor), keep(outdoor)
+    new_indoor = [item for item in indoor or [] if str(item).lower() != eid]
+    new_outdoor = [item for item in outdoor or [] if str(item).lower() != eid]
     if mode == "indoor":
-        new_in.append(eid)
+        new_indoor.append(eid)
     elif mode == "outdoor":
-        new_out.append(eid)
-    return new_in, new_out
+        new_outdoor.append(eid)
+    return new_indoor, new_outdoor
 
 
-def notable(hass, entity_id: str, detection_type: str = "motion",
-            area_name: Optional[str] = None) -> bool:
-    """Is an *outdoor* event worth surfacing? Non-outdoor entities return False
-    here — indoor events are the safety manager's business, not this filter's."""
+def notable(
+    hass: Any,
+    entity_id: str,
+    detection_type: str = "motion",
+    area_name: Optional[str] = None,
+) -> bool:
+    """Whether a detection is worth notifying about (outdoor and notable type)."""
     if area_name is not None:
-        slug = "_".join(str(area_name).strip().lower().split())
-        outdoor_here = slug in (DEFAULT_OUTDOOR_AREAS | set(_cfg_list("outdoor_areas")))
+        slug = _slug(area_name)
+        outside = slug in DEFAULT_OUTDOOR_AREAS or slug in _cfg_list("outdoor_areas")
     else:
-        outdoor_here = is_outdoor(hass, entity_id)
-    if not outdoor_here:
+        outside = is_outdoor(hass, entity_id)
+    if not outside:
         return False
-    return bool(NOTABLE_OUTDOOR.get(str(detection_type).lower(), False))
+    return NOTABLE_OUTDOOR.get(str(detection_type).lower(), False)
