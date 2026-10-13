@@ -1,3 +1,11 @@
+## [8.49.7] — The backup and restore code rewritten from scratch
+
+Step 9 continues with the startup code. The code that packs Nova's saved files into a backup archive and restores them was still a near copy of the code Nova started from. It is rewritten from an empty file, from a behaviour spec with fresh tests, without the old file. Nothing Nova does changes.
+
+### Changed
+- **Rewritten:** backup and restore.
+- **Proven the same:** the new module passes the old tests and 46 fresh ones. The old tests were then replaced by the fresh ones.
+
 ## [8.49.6] — The sidebar panel registration rewritten from scratch
 
 Step 9 continues with the startup code. The code that adds Nova's panel to the Home Assistant sidebar and serves its files was still a near copy of the code Nova started from. It is rewritten from an empty file, from a behaviour spec with fresh tests, without the old file. Nothing Nova does changes.
