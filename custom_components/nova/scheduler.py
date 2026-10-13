@@ -1,133 +1,144 @@
-"""Central scheduler for Nova's periodic background tasks.
+"""Per-entry owner of Nova's recurring background ticks.
 
-One place owns the recurring "ticks" (package sweep, health sweep, hazard sweep,
-document ingest, …). Each task is named and tracked — last run, last success,
-duration, run/error counts — so diagnostics can show whether a sweep is actually
-firing, and a task that starts failing becomes visible instead of silent.
+Each periodic job is registered once under a unique name. Its timer callback
+is wrapped so every tick records timing and outcome, and a failing tick is
+logged and counted instead of escaping into the timer. ``status()`` gives a
+diagnostics snapshot and ``shutdown()`` cancels every timer in one safe call.
 
-Registration goes through Home Assistant's async_track_time_interval; the unsub
-handles are held here, so shutdown() tears every timer down in one call
-(reload-safe). The tracker is injectable, so the logic is unit-testable without
-Home Assistant.
+The timer itself comes from an injectable tracker so the logic can run without
+Home Assistant; the default tracker imports Home Assistant lazily.
 """
 from __future__ import annotations
 
 import logging
 import time
+from dataclasses import dataclass
 from datetime import timedelta
-from typing import Callable, Optional
+from typing import Any, Awaitable, Callable
 
 _LOGGER = logging.getLogger(__name__)
 
+TickCallback = Callable[[Any], Awaitable[Any]]
+Tracker = Callable[[Any, Callable[..., Awaitable[None]], timedelta], Any]
 
+
+def _default_tracker(
+    hass: Any, wrapper: Callable[..., Awaitable[None]], interval: timedelta
+) -> Any:
+    """Schedule via Home Assistant; imported here so the module stays HA-free."""
+    from homeassistant.helpers.event import async_track_time_interval
+
+    return async_track_time_interval(hass, wrapper, interval)
+
+
+@dataclass
 class _Task:
-    __slots__ = ("name", "interval_s", "cb", "unsub", "last_run", "last_success",
-                 "last_duration_ms", "run_count", "error_count",
-                 "consecutive_errors", "last_error")
+    """Registration and run bookkeeping for one named task."""
 
-    def __init__(self, name: str, interval_s: float, cb):
-        self.name = name
-        self.interval_s = interval_s
-        self.cb = cb
-        self.unsub = None
-        self.last_run = 0.0
-        self.last_success = 0.0
-        self.last_duration_ms = 0
-        self.run_count = 0
-        self.error_count = 0
-        self.consecutive_errors = 0
-        self.last_error = ""
+    name: str
+    interval_s: float
+    cb: TickCallback
+    unsub: Any = None
+    runs: int = 0
+    errors: int = 0
+    consecutive_errors: int = 0
+    last_run: float = 0.0
+    last_success: float = 0.0
+    last_duration_ms: int = 0
+    last_error: str = ""
+
+    def snapshot(self) -> dict[str, Any]:
+        return {
+            "name": self.name,
+            "interval_s": int(self.interval_s),
+            "runs": self.runs,
+            "errors": self.errors,
+            "consecutive_errors": self.consecutive_errors,
+            "last_run": self.last_run or None,
+            "last_success": self.last_success or None,
+            "last_duration_ms": self.last_duration_ms,
+            "last_error": self.last_error,
+            "healthy": self.consecutive_errors == 0,
+        }
 
 
 class NovaScheduler:
-    """Owns the periodic tasks for one config entry."""
+    """Registers named interval tasks and tracks how each tick went."""
 
-    def __init__(self, hass=None, tracker: Optional[Callable] = None):
+    def __init__(self, hass: Any = None, tracker: Tracker | None = None) -> None:
         self._hass = hass
-        self._tasks: dict = {}
-        # tracker(hass, callback, interval_timedelta) -> unsub. Defaults to HA's
-        # async_track_time_interval; overridable for tests.
-        self._tracker = tracker
+        self._tracker: Tracker = tracker or _default_tracker
+        self._tasks: dict[str, _Task] = {}
 
-    def _default_tracker(self, hass, cb, interval):
-        from homeassistant.helpers.event import async_track_time_interval
-        return async_track_time_interval(hass, cb, interval)
-
-    def add(self, name: str, interval, cb) -> bool:
-        """Register a periodic async task. ``interval`` is seconds (int/float) or
-        a timedelta. A name already registered is skipped (reload-safe against
-        double registration). Returns True if the timer was registered."""
+    def add(self, name: str, interval: Any, cb: TickCallback) -> bool:
+        """Register ``cb`` to run every ``interval``; False if skipped or refused."""
         if name in self._tasks:
-            _LOGGER.debug("scheduler: task '%s' already registered; skipping", name)
+            _LOGGER.debug("Scheduler task %s already registered; skipping", name)
             return False
-        secs = (interval.total_seconds()
-                if isinstance(interval, timedelta) else float(interval))
-        task = _Task(name, secs, cb)
 
-        async def _wrapped(now=None):
-            await self._run(task, now)
+        seconds = (
+            interval.total_seconds()
+            if isinstance(interval, timedelta)
+            else float(interval)
+        )
+        task = _Task(name=name, interval_s=seconds, cb=cb)
 
-        tracker = self._tracker or self._default_tracker
         try:
-            task.unsub = tracker(self._hass, _wrapped, timedelta(seconds=secs))
-        except Exception as exc:
-            _LOGGER.warning("scheduler: could not register '%s': %s", name, exc)
+            task.unsub = self._tracker(
+                self._hass, self._make_wrapper(task), timedelta(seconds=seconds)
+            )
+        except Exception as exc:  # noqa: BLE001 - registration must not raise
+            _LOGGER.warning("Could not schedule task %s: %s", name, exc)
             return False
+
         self._tasks[name] = task
         return True
 
-    async def _run(self, task: _Task, now=None) -> None:
-        """Run one tick, recording timing and outcome. A failing tick is logged
-        and counted, never propagated (an errored sweep can't crash the timer)."""
-        start = time.time()
-        task.last_run = start
-        task.run_count += 1
-        try:
-            await task.cb(now)
-            task.last_success = time.time()
-            task.consecutive_errors = 0
-            task.last_error = ""
-        except Exception as exc:
-            task.error_count += 1
-            task.consecutive_errors += 1
-            task.last_error = f"{type(exc).__name__}: {exc}"
-            _LOGGER.warning("scheduler: task '%s' failed (%dx in a row): %s",
-                            task.name, task.consecutive_errors, exc)
-        finally:
-            task.last_duration_ms = int((time.time() - start) * 1000)
+    @staticmethod
+    def _make_wrapper(task: _Task) -> Callable[..., Awaitable[None]]:
+        async def _tick(now: Any = None) -> None:
+            task.last_run = time.time()
+            task.runs += 1
+            started = time.monotonic()
+            try:
+                await task.cb(now)
+            except Exception as exc:  # noqa: BLE001 - contain failing ticks
+                task.errors += 1
+                task.consecutive_errors += 1
+                task.last_error = f"{type(exc).__name__}: {exc}"
+                _LOGGER.warning(
+                    "Scheduler task %s failed (%d consecutive): %s",
+                    task.name,
+                    task.consecutive_errors,
+                    task.last_error,
+                )
+            else:
+                task.last_success = time.time()
+                task.consecutive_errors = 0
+                task.last_error = ""
+            finally:
+                task.last_duration_ms = int((time.monotonic() - started) * 1000)
 
-    def status(self) -> list:
-        """A snapshot of every task, for diagnostics."""
-        out = []
-        for t in self._tasks.values():
-            out.append({
-                "name": t.name,
-                "interval_s": int(t.interval_s),
-                "runs": t.run_count,
-                "errors": t.error_count,
-                "consecutive_errors": t.consecutive_errors,
-                "last_run": t.last_run or None,
-                "last_success": t.last_success or None,
-                "last_duration_ms": t.last_duration_ms,
-                "last_error": t.last_error,
-                "healthy": t.consecutive_errors == 0,
-            })
-        return out
+        return _tick
 
-    def task_names(self) -> list:
-        return list(self._tasks.keys())
+    def status(self) -> list[dict[str, Any]]:
+        """Return a fresh snapshot per task, in registration order."""
+        return [task.snapshot() for task in self._tasks.values()]
+
+    def task_names(self) -> list[str]:
+        return list(self._tasks)
 
     def shutdown(self) -> int:
-        """Cancel every timer. Fail-safe and idempotent (safe on reload).
-        Returns the number of timers torn down."""
-        n = 0
-        for t in self._tasks.values():
-            if t.unsub:
-                try:
-                    t.unsub()
-                    n += 1
-                except Exception:
-                    pass
-                t.unsub = None
+        """Cancel every timer and forget all tasks; return how many unsubs ran."""
+        cancelled = 0
+        for task in self._tasks.values():
+            unsub, task.unsub = task.unsub, None
+            if not unsub:
+                continue
+            try:
+                unsub()
+            except Exception:  # noqa: BLE001 - teardown must never raise
+                continue
+            cancelled += 1
         self._tasks.clear()
-        return n
+        return cancelled

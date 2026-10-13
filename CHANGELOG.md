@@ -1,3 +1,11 @@
+## [8.49.3] — The task scheduler rewritten from scratch
+
+Step 9 continues with the startup code, one module at a time. The scheduler that runs Nova's recurring background tasks was still a near copy of the code Nova started from. It is rewritten from an empty file, from a behaviour spec with fresh tests, without the old file. Nothing Nova does changes.
+
+### Changed
+- **Rewritten:** the background task scheduler (the regular sweeps, health checks and refreshes, with their run counts and errors for diagnostics).
+- **Proven the same:** the new module passes the old tests and 47 fresh ones, and Nova starts and stops cleanly in the Home Assistant test harness. The old tests were then replaced by the fresh ones.
+
 ## [8.49.2] — Six small fixes found during the rewrite
 
 Writing the behaviour specs for 8.49.1 turned up six old bugs that the rewrite kept on purpose, so that 8.49.1 changed nothing. They are fixed here, each with a test.

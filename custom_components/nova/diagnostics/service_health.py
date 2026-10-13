@@ -449,7 +449,7 @@ def _check_scheduler(hass) -> dict:
     if not tasks:
         out["detail"] = "no periodic tasks"
         return out
-    failing = [t.get("name") for t in tasks if t.get("consecutive_errors", 0) >= 3]
+    failing = [str(t.get("name")) for t in tasks if t.get("consecutive_errors", 0) >= 3]
     if failing:
         out["status"] = _WARN
         out["detail"] = "%d task(s) failing: %s" % (len(failing), ", ".join(failing))
