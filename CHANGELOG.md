@@ -1,3 +1,11 @@
+## [8.49.5] — The startup alert buffer rewritten from scratch
+
+Step 9 continues with the startup code. The buffer that holds spoken alerts arriving before Nova is ready, and plays them once it is, was still a near copy of the code Nova started from. It is rewritten from an empty file, from a behaviour spec with fresh tests, without the old file. Nothing Nova does changes.
+
+### Changed
+- **Rewritten:** the startup alert buffer.
+- **Proven the same:** the new module passes the old tests and 35 fresh ones, and Nova starts in the Home Assistant test harness. The old tests were then replaced by the fresh ones.
+
 ## [8.49.4] — The offline detector rewritten from scratch
 
 Step 9 continues with the startup code. The circuit breaker that tells Nova it is offline after failed agent calls was still a near copy of the code Nova started from. It is rewritten from an empty file, from a behaviour spec with fresh tests, without the old file. Nothing Nova does changes: it still has no background check.
