@@ -1,66 +1,50 @@
-"""
-Nova local semantic search via Ollama embeddings (v6.57.0).
+"""Local semantic search over the household's documents.
 
-The "all-in-one" answer to vector search. ChromaDB's embedded mode can't
-install on Home Assistant's Python 3.14 (its onnxruntime dependency has no
-3.14 wheel), so instead of bolting on a heavy native dependency that doesn't
-build, Nova reuses the Ollama server it already talks to:
-
-  - Embeddings come from Ollama's /api/embed (nomic-embed-text by default) —
-    no API key, no Python package, no wheel to compile, works on any Python.
-  - Vectors are stored in the same nova.db SQLite file, next to the FTS
-    index — no new service, no ChromaDB.
-  - Similarity is plain cosine over stored vectors, computed in stdlib Python.
-    A few hundred chunks dotted against one query vector is trivial; no numpy.
-
-This is genuinely more in the spirit of Nova, all in one integration, than
-ChromaDB was: it
-leans on infrastructure the user already runs and adds zero install weight.
-
-Enable it from Settings; it degrades to keyword (FTS5) search whenever Ollama
-or the embed model isn't reachable. Nothing here raises to the caller.
+Embeddings come from the Ollama server Nova already uses (/api/embed, with the
+legacy /api/embeddings as a fallback). Vectors are stored as float32 blobs in
+the doc_vectors table of nova.db and compared with plain cosine similarity in
+pure Python. Opt-in from Settings. When Ollama or the model is unreachable the
+functions return None or empty so callers fall back to keyword search; nothing
+here raises to the caller.
 """
 from __future__ import annotations
 
-import json
+import contextlib
 import logging
 import math
 import struct
-from typing import Optional
+from typing import Any, Optional
 
-from .persistence import sqlite as _store
 from . import paths
+from .persistence import sqlite as _store
 
 _LOGGER = logging.getLogger(__name__)
 
-_DB_PATH: Optional[str] = None  # override; None resolves via paths.py
+_DB_PATH: Optional[str] = None        # test override
+_DEFAULT_MODEL = "nomic-embed-text"
+_TIMEOUT = 60
+_EMBED_BATCH = 32
+
+# Last embed failure reason, shown on the Settings status line. Mutated in
+# place; never rebound.
+_EMBED_LAST_ERROR: list[str] = [""]
 
 
 def _db_path() -> str:
     return _DB_PATH or paths.nova_db()
 
 
-_DEFAULT_MODEL = "nomic-embed-text"
-# Holds the most specific reason the last embed attempt failed, so the health
-# status can say *why* (model not pulled / unreachable / HTTP error) instead of
-# a generic "no vectors". Single-element list = mutable module-level cell.
-_EMBED_LAST_ERROR: list[str] = [""]
-_TIMEOUT = 60            # embedding a batch on a cold model can be slow
-_EMBED_BATCH = 32        # chunks per /api/embed call
-
-
-def _cfg(key: str, default):
+def _cfg(key: str, default: Any) -> Any:
     try:
         from . import nova_config
-        val = nova_config.get(key, default)
-        return val if val is not None else default
+        value = nova_config.get(key, default)
+        return default if value is None else value
     except Exception:
         return default
 
 
 def is_enabled() -> bool:
-    """Semantic search is on when the user opted in AND an Ollama base URL is
-    configured (embeddings need somewhere to call)."""
+    """Semantic search is switched on and an Ollama host is known."""
     return bool(_cfg("semantic_search", False)) and bool(_ollama_base())
 
 
@@ -69,24 +53,19 @@ def _model() -> str:
 
 
 def _ollama_base() -> Optional[str]:
-    """Resolve the Ollama host from the same config the LLM layer uses. Accepts
-    a bare host:port and returns a clean base (no trailing slash, no /v1)."""
-    base = (
-        _cfg("embed_base_url", "")
-        or _cfg("ollama_base_url", "")
-        or _cfg("llm_base_url", "")
-    )
-    base = str(base or "").strip().rstrip("/")
+    raw = (_cfg("embed_base_url", "") or _cfg("ollama_base_url", "")
+           or _cfg("llm_base_url", ""))
+    base = str(raw).strip().rstrip("/")
     if not base:
         return None
-    if base.endswith("/v1"):        # strip the OpenAI-compat suffix if present
+    if base.endswith("/v1"):
         base = base[:-3]
     return base
 
 
-# ── SQLite vector store ──────────────────────────────────────────────────────
+# ── vector math ─────────────────────────────────────────────────────────────
 
-def _pack(vec: list[float]) -> bytes:
+def _pack(vec) -> bytes:
     return struct.pack(f"<{len(vec)}f", *vec)
 
 
@@ -94,147 +73,101 @@ def _unpack(blob: bytes) -> list[float]:
     return list(struct.unpack(f"<{len(blob) // 4}f", blob))
 
 
-def init_store() -> bool:
-    """Create the vector table if absent. Returns True on success."""
+def _cosine(a, b) -> float:
+    if not a or not b or len(a) != len(b):
+        return -1.0
+    na = math.sqrt(sum(x * x for x in a))
+    nb = math.sqrt(sum(y * y for y in b))
+    if na == 0 or nb == 0:
+        return -1.0
+    return sum(x * y for x, y in zip(a, b)) / (na * nb)
+
+
+# ── vector store ────────────────────────────────────────────────────────────
+
+def _connect(row_factory: bool = True):
+    return _store.connect(_db_path(), mkdir=False, busy_timeout_ms=None,
+                          row_factory=row_factory)
+
+
+@contextlib.contextmanager
+def _db(row_factory: bool = True):
+    """One short connection: committed if the block finishes, always closed."""
+    conn = _connect(row_factory=row_factory)
     try:
-        conn = _store.connect(_db_path(), row_factory=False, mkdir=False,
-                              busy_timeout_ms=None)
-        _store.ensure(conn, "doc_vectors")
+        yield conn
         conn.commit()
+    finally:
         conn.close()
-        return True
+
+
+def init_store() -> bool:
+    """Create the doc_vectors table if needed."""
+    try:
+        with _db(row_factory=False) as conn:
+            _store.ensure(conn, "doc_vectors")
     except Exception as exc:
         _LOGGER.warning("doc_vectors init failed: %s", exc)
         return False
+    return True
 
 
 def forget_source(source: str) -> None:
+    """Remove every stored chunk of one document."""
     try:
-        conn = _store.connect(_db_path(), row_factory=False, mkdir=False,
-                              busy_timeout_ms=None)
-        conn.execute("DELETE FROM doc_vectors WHERE source = ?", (source,))
-        conn.commit()
-        conn.close()
+        with _db() as conn:
+            conn.execute("DELETE FROM doc_vectors WHERE source = ?", (source,))
     except Exception as exc:
         _LOGGER.debug("doc_vectors forget failed: %s", exc)
 
 
-def store_vectors(source: str, chunks: list[str], vectors: list[list[float]],
-                  ingested: str) -> int:
-    """Persist chunk vectors for a source. Returns count stored."""
+def store_vectors(source: str, chunks: list, vectors: list, ingested) -> int:
+    """Append one row per chunk. Returns how many chunks were given."""
     if not chunks or not vectors or len(chunks) != len(vectors):
         return 0
-    model = _model()
     try:
-        conn = _store.connect(_db_path(), row_factory=False, mkdir=False,
-                              busy_timeout_ms=None)
-        conn.executemany(
-            "INSERT INTO doc_vectors (source, chunk, content, dim, vec, model, "
-            "ingested) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            [(source, i, chunks[i], len(vectors[i]), _pack(vectors[i]), model,
-              ingested) for i in range(len(chunks))],
-        )
-        conn.commit()
-        n = conn.total_changes
-        conn.close()
-        return len(chunks)
+        model = _model()
+        with _db() as conn:
+            conn.executemany(
+                "INSERT INTO doc_vectors (source, chunk, content, dim, vec, model, ingested) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                [(source, n, text, len(vec), _pack(vec), model, ingested)
+                 for n, (text, vec) in enumerate(zip(chunks, vectors))])
     except Exception as exc:
         _LOGGER.debug("doc_vectors store failed: %s", exc)
         return 0
+    return len(chunks)
 
 
 def vector_count() -> int:
     try:
-        conn = _store.connect(_db_path(), row_factory=False, mkdir=False,
-                              busy_timeout_ms=None)
-        n = conn.execute("SELECT COUNT(*) FROM doc_vectors").fetchone()[0]
-        conn.close()
-        return int(n)
+        with _db() as conn:
+            return int(conn.execute("SELECT COUNT(*) FROM doc_vectors").fetchone()[0])
     except Exception:
         return 0
 
 
-# ── cosine similarity (pure Python) ──────────────────────────────────────────
-
-def _cosine(a: list[float], b: list[float]) -> float:
-    if not a or not b or len(a) != len(b):
-        return -1.0
-    dot = 0.0
-    na = 0.0
-    nb = 0.0
-    for x, y in zip(a, b):
-        dot += x * y
-        na += x * x
-        nb += y * y
-    if na == 0.0 or nb == 0.0:
-        return -1.0
-    return dot / (math.sqrt(na) * math.sqrt(nb))
-
-
-def search_vectors(query_vec: list[float], k: int = 4) -> list[dict]:
-    """Top-k stored chunks by cosine similarity to query_vec."""
+def search_vectors(query_vec, k: int = 4) -> list[dict]:
+    """The k most similar stored chunks with a positive score."""
     if not query_vec:
         return []
     try:
-        conn = _store.connect(_db_path(), mkdir=False,
-                              busy_timeout_ms=None)
-        rows = conn.execute(
-            "SELECT source, chunk, content, vec FROM doc_vectors").fetchall()
-        conn.close()
+        with _db() as conn:
+            stored = conn.execute(
+                "SELECT source, chunk, content, vec FROM doc_vectors").fetchall()
     except Exception as exc:
         _LOGGER.debug("doc_vectors read failed: %s", exc)
         return []
-
-    scored = []
-    for r in rows:
-        score = _cosine(query_vec, _unpack(r["vec"]))
-        scored.append((score, r))
-    scored.sort(key=lambda t: t[0], reverse=True)
-    out = []
-    for score, r in scored[:k]:
-        if score <= 0:
-            continue
-        out.append({"text": r["content"], "source": r["source"],
-                    "chunk": r["chunk"], "score": round(score, 3)})
-    return out
+    scored = [(_cosine(query_vec, _unpack(r["vec"])), r) for r in stored]
+    scored.sort(key=lambda s: s[0], reverse=True)
+    return [{"text": r["content"], "source": r["source"], "chunk": r["chunk"],
+             "score": round(score, 3)}
+            for score, r in scored[:k] if score > 0]
 
 
-# ── Ollama embedding calls (async, aiohttp — no new deps) ────────────────────
-
-async def embed_texts(hass, texts: list[str], _is_probe: bool = False) -> Optional[list[list[float]]]:
-    """Embed a list of strings via Ollama. Returns list of vectors, or None on
-    any failure (caller falls back to keyword). Uses /api/embed (batch), with a
-    fallback to the legacy /api/embeddings per-item for older Ollama.
-
-    Real ingest/search calls report their outcome to service_health so a genuine
-    failure marks embeddings DOWN; the synthetic probe (_is_probe=True) does not
-    self-report (a probe miss must never cry wolf)."""
-    base = _ollama_base()
-    if not base or not texts:
-        return None
-    import aiohttp
-    from homeassistant.helpers.aiohttp_client import async_get_clientsession
-    session = async_get_clientsession(hass)
-    model = _model()
-
-    out: list[list[float]] = []
-    for i in range(0, len(texts), _EMBED_BATCH):
-        batch = texts[i:i + _EMBED_BATCH]
-        vecs = await _embed_batch(session, base, model, batch)
-        if vecs is None:
-            if not _is_probe:
-                reason = _EMBED_LAST_ERROR[0] or "Ollama embed call returned no vectors"
-                _record_health(False, reason)
-            return None
-        out.extend(vecs)
-    if not _is_probe:
-        _EMBED_LAST_ERROR[0] = ""      # success clears the sticky error
-        _record_health(True)
-    return out
-
+# ── embedding over HTTP ─────────────────────────────────────────────────────
 
 def _record_health(ok: bool, detail: str = "") -> None:
-    """Report a real embedding outcome to service_health (never raises)."""
     try:
         from .diagnostics.service_health import record_usage
         record_usage("embeddings", ok, detail)
@@ -242,89 +175,106 @@ def _record_health(ok: bool, detail: str = "") -> None:
         pass
 
 
-async def _embed_batch(session, base, model, batch) -> Optional[list[list[float]]]:
+async def _embed_batch(session, base: str, model: str,
+                       batch: list) -> Optional[list[list[float]]]:
+    """Embed one batch: /api/embed first, then one text at a time through the
+    legacy /api/embeddings."""
     import aiohttp
-    # Preferred: /api/embed (batch), Ollama >= 0.2.0
-    _last_reason = ""
+
+    reason = ""
     try:
-        async with session.post(
-            f"{base}/api/embed",
-            json={"model": model, "input": batch},
-            timeout=aiohttp.ClientTimeout(total=_TIMEOUT),
-        ) as resp:
+        async with session.post(f"{base}/api/embed",
+                                json={"model": model, "input": batch},
+                                timeout=aiohttp.ClientTimeout(total=_TIMEOUT)) as resp:
             if resp.status == 200:
                 data = await resp.json(content_type=None)
                 embs = data.get("embeddings")
                 if embs and len(embs) == len(batch):
                     return embs
-                # 200 but empty — almost always the model isn't pulled
                 err = (data or {}).get("error")
-                _last_reason = (f"model '{model}' returned no embeddings"
-                                + (f" ({err})" if err else
-                                   f" — is '{model}' pulled? run: ollama pull {model}"))
+                if err:
+                    reason = f"model '{model}' returned no embeddings ({err})"
+                else:
+                    reason = (f"model '{model}' returned no embeddings — is "
+                              f"'{model}' pulled? run: ollama pull {model}")
             elif resp.status == 404:
-                _last_reason = (f"model '{model}' not found on Ollama "
-                                f"(404) — run: ollama pull {model}")
+                reason = (f"model '{model}' not found on Ollama (404) — "
+                          f"run: ollama pull {model}")
             else:
-                body = ""
                 try:
                     body = (await resp.text())[:120]
                 except Exception:
-                    pass
-                _last_reason = f"Ollama /api/embed HTTP {resp.status}: {body}"
-                _LOGGER.debug("ollama /api/embed HTTP %s", resp.status)
+                    body = ""
+                reason = f"Ollama /api/embed HTTP {resp.status}: {body}"
+                _LOGGER.debug("Embed batch failed: %s", reason)
     except Exception as exc:
-        _last_reason = f"Ollama /api/embed unreachable: {str(exc)[:100]}"
-        _LOGGER.debug("ollama /api/embed failed: %s", exc)
+        reason = f"Ollama /api/embed unreachable: {str(exc)[:100]}"
+        _LOGGER.debug("Embed batch error: %s", exc)
 
-    # Fallback: legacy /api/embeddings (single prompt per call)
-    out = []
+    out: list[list[float]] = []
     for text in batch:
         try:
-            async with session.post(
-                f"{base}/api/embeddings",
-                json={"model": model, "prompt": text},
-                timeout=aiohttp.ClientTimeout(total=_TIMEOUT),
-            ) as resp:
+            async with session.post(f"{base}/api/embeddings",
+                                    json={"model": model, "prompt": text},
+                                    timeout=aiohttp.ClientTimeout(total=_TIMEOUT)) as resp:
                 if resp.status != 200:
-                    if resp.status == 404 and not _last_reason:
-                        _last_reason = (f"model '{model}' not found — "
-                                        f"run: ollama pull {model}")
-                    _EMBED_LAST_ERROR[0] = _last_reason or f"HTTP {resp.status}"
+                    if resp.status == 404 and not reason:
+                        reason = f"model '{model}' not found — run: ollama pull {model}"
+                    _EMBED_LAST_ERROR[0] = reason or f"HTTP {resp.status}"
                     return None
-                data = await resp.json(content_type=None)
-                emb = data.get("embedding")
+                emb = (await resp.json(content_type=None)).get("embedding")
                 if not emb:
-                    _EMBED_LAST_ERROR[0] = _last_reason or (
-                        f"model '{model}' returned no embedding")
+                    _EMBED_LAST_ERROR[0] = reason or f"model '{model}' returned no embedding"
                     return None
                 out.append(emb)
         except Exception as exc:
-            _LOGGER.debug("ollama /api/embeddings failed: %s", exc)
-            _EMBED_LAST_ERROR[0] = _last_reason or f"unreachable: {str(exc)[:100]}"
+            _LOGGER.debug("Legacy embed error: %s", exc)
+            _EMBED_LAST_ERROR[0] = reason or f"unreachable: {str(exc)[:100]}"
             return None
     return out
 
 
-async def embed_one(hass, text: str, _is_probe: bool = False) -> Optional[list[float]]:
-    """Embed a single query string. None on failure."""
+async def embed_texts(hass, texts: list,
+                      _is_probe: bool = False) -> Optional[list[list[float]]]:
+    """Embed texts in batches; None when anything fails."""
+    base = _ollama_base()
+    if not base or not texts:
+        return None
+    from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+    session = async_get_clientsession(hass)
+    model = _model()
+    vectors: list[list[float]] = []
+    for i in range(0, len(texts), _EMBED_BATCH):
+        got = await _embed_batch(session, base, model, texts[i:i + _EMBED_BATCH])
+        if got is None:
+            if not _is_probe:
+                _record_health(False, _EMBED_LAST_ERROR[0]
+                               or "Ollama embed call returned no vectors")
+            return None
+        vectors.extend(got)
+    if not _is_probe:
+        _EMBED_LAST_ERROR[0] = ""
+        _record_health(True)
+    return vectors
+
+
+async def embed_one(hass, text: str,
+                    _is_probe: bool = False) -> Optional[list[float]]:
     res = await embed_texts(hass, [text], _is_probe=_is_probe)
     return res[0] if res else None
 
 
 async def probe(hass) -> dict:
-    """Check whether embeddings are reachable — for the Settings status/test.
-    Returns {"ok", "model", "base", "dim"?, "error"?}. Never raises. This is a
-    SYNTHETIC poke — it does not record usage health (a probe miss must never
-    mark the service DOWN; only real ingest/search failures do)."""
+    """Check that Ollama returns an embedding with the configured model."""
     base = _ollama_base()
     if not base:
-        return {"ok": False, "error": "no Ollama base URL configured "
-                                      "(set llm_base_url to your Ollama host)"}
+        return {"ok": False,
+                "error": "no Ollama base URL configured (set llm_base_url to your Ollama host)"}
     vec = await embed_one(hass, "nova embedding health check", _is_probe=True)
     if not vec:
-        specific = _EMBED_LAST_ERROR[0]
         return {"ok": False, "model": _model(), "base": base,
-                "error": specific or ("Ollama did not return an embedding — is "
-                         "the embed model pulled? Try: ollama pull " + _model())}
+                "error": _EMBED_LAST_ERROR[0]
+                or ("Ollama did not return an embedding — is the embed model "
+                    "pulled? Try: ollama pull " + _model())}
     return {"ok": True, "model": _model(), "base": base, "dim": len(vec)}

@@ -1,109 +1,90 @@
-"""Local infrastructure-fault history for Nova.
+"""Fault history ledger for the diagnostics layer.
 
-``FaultLog`` keeps a rolling, on-disk JSON buffer of past infrastructure faults
-(capped at the most recent 1000) and supports keyword recall so the audit can
-say "this has happened before" when a fault recurs.
-
-This is deliberately NOT the conversational long-term memory — that lives in the
-top-level ``memory.py`` (FTS5) and is used by the conversation agent.
-This is a small, dependency-free fault ledger that belongs with diagnostics.
-
-File I/O is synchronous and lock-guarded; callers on the event loop should invoke
-``commit_event`` / ``query_related_faults`` via ``hass.async_add_executor_job``.
-Persisted under /config/nova/.
-"""
+The infrastructure audit records each alert it raises here, and asks for
+earlier faults sharing a keyword so it can say how often a problem has come
+back. Stored as one JSON list, newest last, capped at MAX_ENTRIES. Standard
+library only at import time; all file I/O is synchronous (run it in the
+executor)."""
 from __future__ import annotations
 
 import json
 import logging
 import os
+import threading
 import time
-from threading import Lock
 from typing import Optional
 
 _LOGGER = logging.getLogger(__name__)
 
-DEFAULT_FAULT_LOG_PATH: Optional[str] = None  # override; None resolves via paths.py
-
-
-def _default_fault_log_path() -> str:
-    # Imported here so this stdlib-only module still loads on its own.
-    from .. import paths
-    return DEFAULT_FAULT_LOG_PATH or paths.nova_path("fault_history.json")
-
-
+# Tests may point this at a temporary file; read at call time.
+DEFAULT_FAULT_LOG_PATH: Optional[str] = None
 MAX_ENTRIES = 1000
 
 
-class FaultLog:
-    """A bounded, persisted fault ledger with keyword-overlap recall."""
+def _default_fault_log_path() -> str:
+    from .. import paths
+    if DEFAULT_FAULT_LOG_PATH:
+        return DEFAULT_FAULT_LOG_PATH
+    return paths.nova_path("fault_history.json")
 
-    def __init__(self, path: Optional[str] = None, *, max_entries: int = MAX_ENTRIES) -> None:
+
+class FaultLog:
+    """Append-only list of past faults with keyword recall."""
+
+    def __init__(self, path: Optional[str] = None, *,
+                 max_entries: int = MAX_ENTRIES) -> None:
         self.path = path or _default_fault_log_path()
         self.max_entries = max_entries
-        self._lock = Lock()
+        self._lock = threading.Lock()
 
-    # ── Persistence (guarded, corruption-tolerant) ────────────────────────
     def _load(self) -> list[dict]:
         try:
-            with open(self.path, "r", encoding="utf-8") as fh:
+            with open(self.path, encoding="utf-8") as fh:
                 data = json.load(fh)
-            return data if isinstance(data, list) else []
         except FileNotFoundError:
             return []
         except (json.JSONDecodeError, OSError) as exc:
             _LOGGER.warning("fault log unreadable (%s) — starting fresh", exc)
             return []
+        return data if isinstance(data, list) else []
 
     def _save(self, entries: list[dict]) -> None:
+        tmp = f"{self.path}.tmp"
         try:
             os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
-            tmp = f"{self.path}.tmp"
             with open(tmp, "w", encoding="utf-8") as fh:
                 json.dump(entries, fh, ensure_ascii=False)
-            os.replace(tmp, self.path)  # atomic on POSIX
+            os.replace(tmp, self.path)
         except OSError as exc:
             _LOGGER.error("Failed to persist fault log: %s", exc)
 
-    # ── Public API ────────────────────────────────────────────────────────
-    def commit_event(self, entry_text: str, tags: list[str] | None = None) -> dict:
-        """Append a fault and trim to the most recent ``max_entries``.
-
-        Returns the stored entry dict (text, tags, ts).
-        """
-        entry = {
-            "text": str(entry_text),
-            "tags": [str(t).lower() for t in (tags or [])],
-            "ts": time.time(),
-        }
+    def commit_event(self, entry_text: str,
+                     tags: list[str] | None = None) -> dict:
+        """Record one fault and return the stored entry."""
+        entry = {"text": str(entry_text), "ts": time.time(),
+                 "tags": [str(t).lower() for t in (tags or [])]}
         with self._lock:
-            entries = self._load()
-            entries.append(entry)
-            if len(entries) > self.max_entries:
-                entries = entries[-self.max_entries:]
-            self._save(entries)
+            # Slicing keeps the newest max_entries (all of them when it is 0).
+            self._save((self._load() + [entry])[-self.max_entries:])
         return entry
 
     def query_related_faults(self, target_keywords: list[str]) -> list[dict]:
-        """Return past entries whose text or tags overlap any target keyword
-        (case-insensitive substring match), oldest → newest."""
-        keywords = [str(k).lower() for k in (target_keywords or []) if str(k).strip()]
+        """Past faults whose text or tags contain any keyword (oldest first)."""
+        keywords = [str(k).lower() for k in (target_keywords or [])
+                    if str(k).strip()]
         if not keywords:
             return []
         with self._lock:
             entries = self._load()
-        out: list[dict] = []
+        hits = []
         for entry in entries:
-            haystack = (
-                str(entry.get("text", "")).lower()
-                + " "
-                + " ".join(str(t).lower() for t in entry.get("tags", []))
-            )
-            if any(kw in haystack for kw in keywords):
-                out.append(entry)
-        return out
+            haystack = (str(entry.get("text", "")).lower() + " "
+                        + " ".join(str(t).lower() for t in entry.get("tags", [])))
+            if any(k in haystack for k in keywords):
+                hits.append(entry)
+        return hits
 
     def recent(self, limit: int = 10) -> list[dict]:
-        """The most recent ``limit`` entries (newest last)."""
+        """The newest `limit` entries, newest last."""
         with self._lock:
             return self._load()[-limit:]

@@ -1,3 +1,11 @@
+## [8.49.15] — Five reasoning support modules rewritten from scratch
+
+Step 9 continues with the reasoning support group. The fault history, the "why did this happen" analysis, local document search, the home snapshot the agent sees and the habit likelihoods are rewritten from empty files, each from a behaviour spec with fresh tests. Nothing Nova does changes.
+
+### Changed
+- **Rewritten:** the fault history, root cause analysis, document search vectors, the situation snapshot and the habit predictor.
+- **Proven the same:** each new module passes both its fresh tests and the old ones, which were then replaced by the fresh tests.
+
 ## [8.49.14] — Voice recognition and wearable readings rewritten from scratch
 
 Step 9 continues. The module that reads who is speaking from an outside voice recognition service, and the module that reads wearable sensors (including the sleep signal), are rewritten from empty files, each from a behaviour spec with fresh tests. Nothing Nova does changes.

@@ -1,131 +1,121 @@
-"""
-Nova — situational snapshot (v6.87.0).
+"""The "Situation now" block for the agent's system prompt.
 
-Composites the live signals Nova already tracks — time, who's home, weather,
-the next calendar events, current power draw, and recent activity — into one
-concise picture for the agent's system prompt, so judgments are grounded in the
-current situation rather than a static device inventory alone.
-
-Each signal is gathered independently and guarded: a missing or failing source
-is omitted, never an error. Dependency-light and synchronous (cheap state
-reads); the agent calls it in the executor alongside the home-context build.
+One line each for the time, who is home, the weather, the next calendar
+events, the current power draw and recent activity. Every source is read on
+its own and guarded: a missing or failing one is simply left out. State reads
+only; the agent loop runs this in the executor.
 """
 from __future__ import annotations
 
+import functools
 import logging
+from typing import Callable
 
 _LOGGER = logging.getLogger(__name__)
 
-
-def _time(hass) -> str:
-    try:
-        from homeassistant.util import dt as dt_util
-        dt = dt_util.now()
-        return "Time: " + dt.strftime("%A") + " " + dt.strftime("%I:%M %p").lstrip("0")
-    except Exception:
-        return ""
+_Builder = Callable[[object], str]
 
 
-def _presence(hass) -> str:
-    """Who is home, by the same rule as the rest of Nova (household.py,
-    8.46.0): a person counts as home when they, or a device tracker linked
-    to them, read home; a person who cannot be read is unknown, never away."""
-    try:
-        from . import household
-        people = list(hass.states.async_all("person"))
-        if not people:
-            return ""
-        bits = []
-        for person in people:
-            name = person.attributes.get("friendly_name") or person.entity_id.split(".", 1)[-1]
-            reading = household._person_reading(hass, person)
-            where = str(person.state or "")
-            if reading == household.HOME:
-                bits.append(f"{name} is home")
-            elif reading == household.UNKNOWN:
-                bits.append(f"{name}'s whereabouts are unknown")
-            elif where in ("not_home", "away"):
-                bits.append(f"{name} is away")
-            else:
-                bits.append(f"{name} is at {where.replace('_', ' ')}")
-        line = "Presence: " + ". ".join(bits) + "."
+def _quiet_on_error(build: _Builder) -> _Builder:
+    """A source that fails contributes no line."""
+    @functools.wraps(build)
+    def run(hass) -> str:
         try:
-            from . import presence
-            rooms = (presence.get_presence_summary(hass) or {}).get("rooms") or {}
-            if rooms:
-                line += f" Occupied areas: {', '.join(rooms)}."
+            return build(hass) or ""
         except Exception:
-            pass
-        return line
+            return ""
+    return run
+
+
+@_quiet_on_error
+def _time(hass) -> str:
+    from homeassistant.util import dt as dt_util
+    now = dt_util.now()
+    clock = now.strftime("%I:%M %p").lstrip("0")
+    return f"Time: {now.strftime('%A')} {clock}"
+
+
+def _where(household, hass, person) -> str:
+    name = (person.attributes.get("friendly_name")
+            or person.entity_id.split(".", 1)[-1])
+    reading = household._person_reading(hass, person)
+    if reading == household.HOME:
+        return f"{name} is home"
+    if reading == household.UNKNOWN:
+        return f"{name}'s whereabouts are unknown"
+    zone = str(person.state or "")
+    if zone in ("not_home", "away"):
+        return f"{name} is away"
+    return f"{name} is at {zone.replace('_', ' ')}"
+
+
+def _occupied(hass) -> str:
+    try:
+        from . import presence
+        rooms = (presence.get_presence_summary(hass) or {}).get("rooms") or {}
+        return f" Occupied areas: {', '.join(rooms)}." if rooms else ""
     except Exception:
         return ""
 
 
+@_quiet_on_error
+def _presence(hass) -> str:
+    from . import household
+    people = list(hass.states.async_all("person"))
+    if not people:
+        return ""
+    said = ". ".join(_where(household, hass, p) for p in people)
+    return f"Presence: {said}." + _occupied(hass)
+
+
+@_quiet_on_error
 def _weather(hass) -> str:
-    try:
-        states = list(hass.states.async_all("weather"))
-        if not states:
-            return ""
-        st = states[0]
-        cond = str(st.state or "").replace("_", " ").strip()
-        temp = st.attributes.get("temperature")
-        unit = st.attributes.get("temperature_unit", "")
-        if cond and temp is not None:
-            return "Weather: %s, %s%s" % (cond, temp, unit)
-        return ("Weather: " + cond) if cond else ""
-    except Exception:
+    found = list(hass.states.async_all("weather"))
+    if not found:
         return ""
+    first = found[0]
+    sky = str(first.state or "").replace("_", " ").strip()
+    if not sky:
+        return ""
+    degrees = first.attributes.get("temperature")
+    if degrees is None:
+        return f"Weather: {sky}"
+    return f"Weather: {sky}, {degrees}{first.attributes.get('temperature_unit', '')}"
 
 
+@_quiet_on_error
 def _calendar(hass) -> str:
-    try:
-        from . import comms
-        ag = comms.agenda(hass, 12) or {}
-        evs = ag.get("events") or []
-        if not evs:
-            return ""
-        line = "Next up: " + "; ".join(evs[:2])
-        confs = ag.get("conflicts") or []
-        if confs:
-            line += " (" + confs[0] + ")"
-        return line
-    except Exception:
+    from . import comms
+    agenda = comms.agenda(hass, 12) or {}
+    upcoming = agenda.get("events") or []
+    if not upcoming:
         return ""
+    clashes = agenda.get("conflicts")
+    tail = f" ({clashes[0]})" if clashes else ""
+    return "Next up: " + "; ".join(upcoming[:2]) + tail
 
 
+@_quiet_on_error
 def _energy(hass) -> str:
-    try:
-        from . import energy
-        ps = energy.power_status(hass) or {}
-        kw = ps.get("kw")
-        if kw is None:
-            return ""
-        return "Power: %.1f kW%s" % (kw, " — over peak" if ps.get("over_peak") else "")
-    except Exception:
+    from . import energy
+    status = energy.power_status(hass) or {}
+    if status.get("kw") is None:
         return ""
+    peak = " — over peak" if status.get("over_peak") else ""
+    return f"Power: {status['kw']:.1f} kW{peak}"
 
 
+@_quiet_on_error
 def _activity(hass) -> str:
-    try:
-        from . import observer
-        s = (observer.get_recent_context(600) or "").strip()
-        if not s or s.startswith("quiet"):
-            return ""
-        lines = [ln.strip() for ln in s.splitlines() if ln.strip()][-3:]
-        return "Recent activity: " + "; ".join(lines)
-    except Exception:
+    from . import observer
+    recent = (observer.get_recent_context(600) or "").strip()
+    if not recent or recent.startswith("quiet"):
         return ""
+    kept = [row.strip() for row in recent.splitlines() if row.strip()][-3:]
+    return "Recent activity: " + "; ".join(kept)
 
 
 def snapshot(hass) -> str:
-    """One concise situational block composited from the live signals. Empty
-    string when nothing meaningful is available. Never raises."""
-    parts = []
-    for fn in (_time, _presence, _weather, _calendar, _energy, _activity):
-        try:
-            line = fn(hass)
-        except Exception:
-            line = ""
-        if line:
-            parts.append(line)
-    return "\n".join(parts)
+    """The situation lines joined by newlines ("" when nothing is known)."""
+    builders = (_time, _presence, _weather, _calendar, _energy, _activity)
+    return "\n".join(line for line in (build(hass) for build in builders) if line)
