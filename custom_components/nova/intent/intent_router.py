@@ -66,10 +66,11 @@ _INTENT_PATTERNS: tuple[tuple[str, tuple[str, ...]], ...] = (
     )),
 )
 
-_AFFIRMATIVE_PATTERNS: tuple[str, ...] = (
-    r"\b(yes|yeah|yep|yup|sure|ok|okay|affirmative|confirm(ed)?|proceed|go ahead|do it)\b",
-    r"\b(close|shut|secure)\s+it\b",
-)
+# A yes is a plain answer from answers.py (8.49.0, the one list every yes/no
+# question reads), or one of this window's own action words: the
+# announcement asked about closing something, so "close it" answers it.
+_ACTION_YES = ("close it", "shut it", "secure it",
+               "yes close it", "yes shut it", "yes secure it")
 
 # A phrase with any of these is never a yes and never a command (8.7.20):
 # "no, don't do it" used to confirm, and "don't secure the garage" used to
@@ -108,7 +109,8 @@ def is_affirmative(phrase: str) -> bool:
     text = phrase.lower().strip()
     if _NEGATION.search(text):
         return False
-    return any(re.search(pat, text) for pat in _AFFIRMATIVE_PATTERNS)
+    from ..answers import yes_or_no
+    return yes_or_no(text, extra_yes=_ACTION_YES) == "yes"
 
 
 class LocalIntentRouter:

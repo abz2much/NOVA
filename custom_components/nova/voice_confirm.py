@@ -48,6 +48,8 @@ from typing import Optional, Sequence
 
 from homeassistant.core import callback
 
+from .answers import NO as _SHARED_NO, YES as _SHARED_YES
+
 _LOGGER = logging.getLogger(__name__)
 
 # Domains/actions we treat as sensitive enough to voice-confirm by default.
@@ -70,10 +72,12 @@ _SENSITIVE = {
 _INDIRECTION_DOMAINS = {"scene", "script", "automation"}
 _INDIRECTION_SAFE = {"", "reload", "turn_off", "stop"}
 
-_YES = ["yes", "yeah", "yep", "do it", "confirm", "confirmed", "go ahead",
-        "unlock it", "open it", "sure", "affirmative", "please do"]
-_NO = ["no", "nope", "cancel", "leave it", "stop", "don't", "negative",
-       "abort", "never mind"]
+# The shared yes/no words (answers.py, 8.49.0), plus this channel's own:
+# here the question names the action, so "unlock it" and "open it" answer
+# it. Home Assistant matches these sentences itself, so the contractions
+# are listed as spoken.
+_YES = sorted(_SHARED_YES | {"unlock it", "open it"})
+_NO = sorted(_SHARED_NO | {"don't", "don't do it"})
 
 # How long to wait for a spoken answer / playback, before giving up (fail-safe).
 _ANSWER_TIMEOUT = 30.0

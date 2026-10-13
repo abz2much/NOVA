@@ -25,7 +25,8 @@ def _load_standalone(name: str, relpath: str):
     return mod
 
 
-ir = _load_standalone("nova_intent_router", "intent/intent_router.py")
+# Loaded in the package: is_affirmative reads answers.py (8.49.0).
+ir = importlib.import_module("jc.intent.intent_router")
 
 
 @pytest.mark.parametrize("phrase,expected", [

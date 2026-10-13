@@ -235,6 +235,11 @@ _QUERY_PATTERNS = [
     (r"(?:are\s+)?(?:any|which)\s+(?:lights?)\s+on",     "lights_on"),
     (r"(?:how\s+many)\s+lights?\s+(?:are\s+)?on",        "lights_on"),
     (r"(?:what(?:'s| is)\s+(?:the\s+)?)?(?:energy|power)\s+(?:usage|consumption)", "energy"),
+    # The temperature with no room named (8.49.0): "what's the temperature"
+    # used to read "what's the" as a device name.
+    (r"^(?:(?:hey\s+)?nova,?\s+)?(?:what(?:'s| is)\s+)?(?:the\s+)?(?:current\s+)?"
+     r"(?:indoor\s+)?temperature(?:\s+(?:inside|indoors|at\s+home|in\s+the\s+house))?"
+     r"(?:\s+now)?$",                                    "indoor_temp"),
     (r"(?:what(?:'s| is)\s+(?:the\s+)?)?weather",        "weather"),
     (r"(?:what(?:'s| is)\s+(?:it\s+)?)?(?:like\s+)?outside", "weather"),
     (r"(?:how\s+(?:warm|cold|hot))\s+is\s+it",           "weather"),
@@ -1178,6 +1183,16 @@ def _ctx_query(hass, qtype, h="sir", area_match=""):
                 return f"Current power consumption is {s.state} {unit}{addr}."
         return f"I don't have a total power sensor configured{addr}."
 
+    if qtype == "indoor_temp":
+        rooms = []
+        for s in sorted(hass.states.async_all("climate"), key=lambda c: c.entity_id):
+            temp = s.attributes.get("current_temperature")
+            if temp is not None:
+                rooms.append(f"{s.attributes.get('friendly_name', s.entity_id)} {temp}°")
+        if rooms:
+            return f"Inside it's {', '.join(rooms[:3])}{addr}."
+        qtype = "weather"   # no thermostat to read: the outdoor answer
+
     if qtype == "weather":
         for s in hass.states.async_all("weather"):
             temp = s.attributes.get("temperature", "—")
@@ -1231,12 +1246,12 @@ async def try_local(hass, text, honorific="sir", force=False, device_id=None):
     """
     PRIMARY handler. Returns LocalResult if handled, None for LLM fallback.
 
-    When force=True (offline salvage mode), the complexity gate is bypassed:
-    Nova attempts to extract and execute any actionable device command or
-    answerable query from the text even if it looks complex, because escalating
-    to the cloud LLM is not an option. Conversational/creative requests that
-    have no local handler still return None — the caller supplies an honest
-    offline response.
+    force=True means the agent cannot be reached (offline). It changes only
+    the wording of a device that could not be found: an honest local answer
+    instead of None. What is handled here is the same online and offline
+    (8.49.0): a request that needs interpretation (high complexity, no local
+    handler) still returns None, and offline the caller says so honestly
+    rather than guessing at part of it.
 
     device_id is the requesting device (conversation.py passes the voice
     satellite's). Every confirmation pre-check below receives it, so a spoken
@@ -1251,8 +1266,8 @@ async def try_local(hass, text, honorific="sir", force=False, device_id=None):
     normalized = _normalize(text)
     complexity = score_complexity(text)
 
-    # High complexity → immediate LLM (skipped in force/offline mode)
-    if complexity >= 70 and not force:
+    # High complexity → the agent; offline, the caller's honest answer.
+    if complexity >= 70:
         _LOGGER.debug("Local: complexity %d for '%s' — LLM", complexity, text[:60])
         return None
 

@@ -88,19 +88,9 @@ def clear_all() -> None:
 
 
 # ── the answer, on the next turn from the same device ───────────────────────
-# The whole utterance must be one of these, after voice_phrases.normalise
-# (case, punctuation, "Nova" and a trailing "please" do not matter, so "Yes."
-# counts). Deliberately not voice_confirm._YES: that list has "unlock it" and
-# "open it", which must never read as a yes here.
-YES = frozenset({
-    "yes", "yeah", "yep", "yup", "sure", "ok", "okay", "yes please", "please do",
-    "do it", "go ahead", "yes go ahead", "go for it", "confirm", "confirmed",
-    "affirmative", "yes do it", "yes it is",
-})
-NO = frozenset({
-    "no", "nope", "no thanks", "no thank you", "cancel", "do not", "stop",
-    "leave it", "never mind", "nevermind", "negative", "not now", "no do not",
-})
+# The whole utterance must be a plain yes or no from answers.py (8.49.0, the
+# one list every yes/no question reads). It never counts "unlock it" or
+# "open it" as a yes.
 NO_REPLY = "OK, I won't."
 
 
@@ -137,12 +127,12 @@ async def answer(hass, device_id: str, text: str, *, honorific: str = "",
             _LOGGER.info("Held request %s dropped: answered by a different user",
                          item.request_id)
             return None
-        from .voice_phrases import normalise
-        said = normalise(text)
-        if said in NO:
+        from .answers import yes_or_no
+        said = yes_or_no(text)
+        if said == "no":
             clear(device_id)
             return _result(NO_REPLY, True)
-        if said not in YES:
+        if said != "yes":
             clear(device_id)
             return None
         clear(device_id)

@@ -9,6 +9,7 @@ room got answers. The lines in TV_LINES were all transcribed and answered
 in a real home before this change; REQUESTS are phrasings that must still
 reach Nova.
 """
+import importlib
 import pathlib
 import re
 
@@ -24,10 +25,10 @@ def _section(start: str, end: str) -> str:
 
 _NS: dict = {"re": re}
 exec(_section("# Verbs that make an imperative", "def _current_time_context("), _NS)
-exec(_section("_OFFER_YES = frozenset((", "def _turn_user_id("), _NS)
 exec(_section("def _is_addressed_to_nova(", "def _matches_voice_phrase("), _NS)
 addressed = _NS["_is_addressed_to_nova"]
-offer_answer = _NS["_offer_answer"]
+# The offer answer reads answers.py, the one yes/no list (8.49.0).
+offer_answer = importlib.import_module("jc.answers").yes_or_no
 
 TV_LINES = [
     "Isn't what I'm hoping I'm sad is like my own.",
@@ -101,6 +102,7 @@ def test_offer_answer_is_only_a_plain_yes_or_no(text, expected):
 
 
 def test_only_a_plain_answer_to_a_bound_offer_skips_the_gate():
+    assert "from .answers import yes_or_no\n    return yes_or_no(text)" in SRC
     assert "relevant = bool(offer_answer) or not gate_enabled or is_addressed" in SRC
     assert "offer_answer = _offer_answer(user_input.text) if pending_offer else None" in SRC
     assert ("pending_offer = (cognitive_core.pending_offer_for(self.hass, device_id)\n"

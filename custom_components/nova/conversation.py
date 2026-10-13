@@ -215,25 +215,12 @@ def _current_time_context(hass, now=None) -> str:
             f"{now.strftime('%-I:%M %p')}.")
 
 
-_OFFER_YES = frozenset((
-    "yes", "yes please", "yeah", "yep", "sure", "do it", "go ahead",
-    "please do", "okay", "ok", "affirmative", "please"))
-_OFFER_NO = frozenset((
-    "no", "no thanks", "nope", "don't", "do not", "negative", "leave it",
-    "nevermind", "never mind", "cancel", "stop"))
-
-
 def _offer_answer(text: str | None) -> str | None:
     """"yes" or "no" if the whole utterance is a plain answer to an offer,
-    else None. Trailing punctuation and "Nova" are ignored."""
-    low = re.sub(r"[^\w' ]+", " ", (text or "").lower())
-    words = [w for w in low.split() if w != "nova"]
-    phrase = " ".join(words)
-    if phrase in _OFFER_YES:
-        return "yes"
-    if phrase in _OFFER_NO:
-        return "no"
-    return None
+    else None. The words are answers.py's, the one list every yes/no
+    question reads (8.49.0)."""
+    from .answers import yes_or_no
+    return yes_or_no(text)
 
 
 def _turn_user_id(user_input) -> str | None:

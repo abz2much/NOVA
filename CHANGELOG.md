@@ -1,3 +1,19 @@
+## [8.49.0] — Exact requests answered the same way online and offline
+
+Step 8 of the independence plan. Exact commands, status questions, "repeat that" and yes/no answers are handled by Nova itself, the same way whether the internet is up or down. Anything that needs interpretation goes to the agent, or gets an honest "I'm offline" when it can't be reached.
+
+### Changed
+- **The same request gets the same answer online and offline.** Offline, Nova used to try to act on part of a long sentence that it would have passed to the agent when online. Now a request that needs interpretation is never half-done offline: Nova says it's offline instead. The only offline difference is the wording when a device name isn't found.
+- **One list of yes and no answers.** A held request on a speaker, an offer, an announcement's reply window and a voice confirmation used to keep four lists that disagreed. They all use one now. "Unlock it" and "open it" still count as a yes only in a voice confirmation, and "close it" only in an announcement's reply window.
+
+### Fixed
+- **"What's the temperature" with no room named** reads your thermostats. With none, it gives the outdoor temperature. It used to take "what's the" as a device name.
+
+### Unchanged
+- Locks, the garage door and the alarm still don't run on a spoken request while offline: they need your phone tap.
+- Timers and reminders still need the agent.
+- Nova still notices it's offline from failed agent calls, with no background check.
+
 ## [8.48.0] — The new path for anticipation alerts, in shadow
 
 Step 7 of the independence plan: a separate path for convenience alerts (design D2). It starts with anticipation alerts, and only shadows them. Nothing Nova says changes unless you choose it, pattern by pattern.
