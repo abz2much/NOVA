@@ -1099,101 +1099,15 @@ async def _announce_done(sensor: _SensorState, appliance_label: str) -> None:
         message, sensor.peak_power, sensor.discovery_method,
     )
 
-    # Whether and how it goes out is decided in alert_path (8.22.0).
-    from . import alert_path, output_gate
-    allowed, message = alert_path.gate(
-        entity_id=sensor.entity_id, category="appliance",
-        urgency="medium", message=message,
-    )
-    if not allowed:
-        return
-
-    def _record(was_spoken: bool) -> None:
-        output_gate.record_announcement(
-            entity_id=sensor.entity_id, category="appliance",
-            urgency="medium", message=message, was_spoken=was_spoken,
-        )
-
-    # Check announcements_enabled
-    rc = _live_runtime_config()
-    announcements_on = True
-    if "announcements_enabled" in rc:
-        announcements_on = bool(rc["announcements_enabled"])
-
-    if not announcements_on:
-        _LOGGER.debug("Appliance: announcements disabled, logging only")
-        _record(False)
-        return
-
-    # Resolve TTS and speakers
-    try:
-        from .tts_helper import resolve_tts_for_context, async_announce
-        from . import sleep_detection
-
-        bedroom_areas = config.get("bedroom_areas", []) or []
-        sleeping, _ = sleep_detection.is_sleeping(
-            hass,
-            bedroom_area_ids=bedroom_areas,
-            quiet_start=config.get("observer_quiet_start", "22:00"),
-            quiet_end=config.get("observer_quiet_end", "07:00"),
-        )
-
-        broadcast_group = config.get("broadcast_group") or None
-
-        # Read announcement_speakers from runtime_config
-        ann_speakers = None
-        try:
-            import json as _json
-            raw = rc.get("announcement_speakers")
-            if raw:
-                parsed = _json.loads(raw) if isinstance(raw, str) else raw
-                if isinstance(parsed, list) and parsed:
-                    ann_speakers = parsed
-        except Exception:
-            pass
-
-        sit = alert_path.situation(hass, config, sleeping=sleeping)
-        plan = alert_path.for_appliance(
-            hass, sit, broadcast_group=broadcast_group,
-            announcement_speakers=ann_speakers, announcements_on=announcements_on,
-        )
-
-        async def _push():
-            try:
-                from .notify_targets import async_send_configured_notifications
-                await async_send_configured_notifications(
-                    hass, config, {"message": message, "title": "Nova"},
-                    action="notify", source="proactive",
-                    entity_id=sensor.entity_id,
-                )
-            except Exception as exc:
-                _LOGGER.debug("Appliance phone notification failed: %s", exc)
-
-        if not plan.speak:
-            _record(False)
-            await alert_path.deliver(plan, push=_push)
-            return
-
-        async def _speak(targets):
-            tts_entity = resolve_tts_for_context(
-                hass, "sentinel",
-                config.get("tts_engine", "auto"),
-                config.get("tts_premium_engine") or None,
-                config.get("tts_premium_contexts") or [],
-            )
-            if tts_entity and targets:
-                await async_announce(
-                    hass, message, tts_entity, targets,
-                    context="appliance",
-                )
-                _record(True)
-            else:
-                _record(False)
-
-        await alert_path.deliver(plan, speak=_speak)
-
-    except Exception as exc:
-        _LOGGER.warning("Appliance announce error: %s", exc)
+    # One delivery request (8.45.0): delivery.py applies a mute, shush, the
+    # hourly limit, the Announcements switch, quiet hours, sleep and
+    # "Notifications only", and picks the speakers by who is home. While
+    # nobody is home it goes to the phones.
+    from . import delivery
+    await delivery.async_deliver(hass, delivery.DeliveryRequest(
+        source="appliance", message=message, entity_id=sensor.entity_id,
+        category="appliance", push=delivery.PUSH_HIGH, title="Nova",
+        tts_context="sentinel", config=config, motion_counts=True))
 
 
 # ── Start / stop ────────────────────────────────────────────────────────────

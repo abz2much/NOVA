@@ -214,14 +214,20 @@ def save_activity(
     message: str = "",
     was_spoken: bool = False,
     source: str = "observer",
+    pushed: bool = False,
+    outcome: str = "",
+    request_id: str = "",
 ) -> None:
-    """Persist an activity log entry (observer event, sentinel alert, etc.)."""
+    """Persist an activity log entry (observer event, sentinel alert, etc.).
+    A proactive message also carries its outcome (delivery.py, 8.45.0):
+    whether it was pushed, why it was or was not delivered, and its request."""
     try:
         with _connect() as conn:
             conn.execute(
                 "INSERT INTO activity_log "
-                "(timestamp, entity_id, category, urgency, message, was_spoken, source) "
-                "VALUES (?,?,?,?,?,?,?)",
+                "(timestamp, entity_id, category, urgency, message, was_spoken, source,"
+                " pushed, outcome, request_id) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (
                     datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
                     entity_id,
@@ -230,6 +236,9 @@ def save_activity(
                     message,
                     1 if was_spoken else 0,
                     source,
+                    1 if pushed else 0,
+                    outcome or None,
+                    request_id or None,
                 ),
             )
     except Exception as exc:

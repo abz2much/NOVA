@@ -22,7 +22,7 @@ from .const import (
 )
 from .database import save_sentinel_event, save_message
 from .directive_helper import build_system_prompt
-from .tts_helper import resolve_tts_entity, async_announce
+from .tts_helper import resolve_tts_entity
 from . import nova_config
 
 _LOGGER = logging.getLogger(__name__)
@@ -502,65 +502,23 @@ class NovaSentinel:
             # must never look, to later conversation context, like Nova
             # already told the user about it.
             save_message("assistant", f"[Sentinel] {text}", device_id="sentinel")
-        # v5.4.8: persist to activity log for panel
-        try:
-            from .database import save_activity
-            save_activity(
-                entity_id=entity_id,
-                category=rule.get("id", "sentinel"),
-                urgency="medium",
-                message=text,
-                was_spoken=not sleeping,
-                source="sentinel",
-            )
-        except Exception:
-            pass
-        from . import action_log, alert_path
-        request_id = action_log.new_request_id()
-        # Who hears it is decided in alert_path.for_sentinel (8.22.0): always
-        # pushed; spoken unless asleep; with announce_notify_only the push is
-        # the alert, spoken only if no notification service accepts it.
-        sit = alert_path.situation(self.hass, sleeping=sleeping)
-        plan = alert_path.for_sentinel(
-            sit, notify_only_setting=nova_config.announce_notify_only(self.hass))
-
-        async def _speak(_targets):
-            await async_announce(
-                self.hass, text, self._tts_entity(), self._speakers(), context="sentinel",
-                action_request_id=request_id,
-            )
-
-        async def _push():
-            # v5.6.5: Also send phone push notification for sentinel alerts
-            sent: list[str] = []
-            try:
-                from .notify_targets import async_send_configured_notifications
-                notify_config = {
-                    "notify_services": nova_config.runtime_get(
-                        self.hass, self._entry, "notify_services", None),
-                    "notify_service": nova_config.runtime_get(
-                        self.hass, self._entry, "notify_service", ""),
-                }
-                sent = await async_send_configured_notifications(
-                    self.hass, notify_config,
-                    {"title": "Nova", "message": text},
-                    request_id=request_id, action="notify", source="proactive",
-                    entity_id=entity_id,
-                )
-            except Exception as exc:
-                _LOGGER.debug("Sentinel phone notify failed: %s", exc)
-            if plan.speak_if_unsent and not sent:
-                _LOGGER.debug("Sentinel: no notification delivered, speaking instead")
-            return sent
-
-        out = await alert_path.deliver(plan, speak=_speak, push=_push)
-        # The reminder, in the shared safety format (8.23.0).
-        await alert_path.async_record_decision(
-            self.hass, "left_open", source="sentinel", entity_id=entity_id,
-            sit=sit, plan=plan, message=text,
-            facts={"rule": rule.get("id"), "minutes": minutes,
-                   "spoken": bool(out.get("spoke"))},
-            assessment="left open past its limit", request_ids=[request_id])
+        # One delivery request (8.45.0): always pushed to the phones; spoken
+        # unless a mute, shush, the Announcements switch, quiet hours, sleep
+        # or "Notifications only" holds it (delivery.py). The reminder is
+        # recorded in the shared safety format.
+        # With no Sentinel speaker set up it goes to the phones only.
+        from . import delivery
+        speakers = tuple(self._speakers() or ())
+        await delivery.async_deliver(self.hass, delivery.DeliveryRequest(
+            source="sentinel", message=text, entity_id=entity_id,
+            category=rule.get("id", "sentinel"),
+            speakers=speakers, phone_only=not speakers,
+            tts_entity=self._tts_entity() or "",
+            tts_context="sentinel", push=delivery.PUSH_ALWAYS, title="Nova",
+            quiet_ok=speak_overnight, sleep_ok=speak_overnight,
+            record_kind="left_open",
+            record_facts={"rule": rule.get("id"), "minutes": minutes},
+            record_assessment="left open past its limit"))
 
     async def _groq_line(
         self, entity_id: str, friendly_name: str, rule: dict, minutes: int

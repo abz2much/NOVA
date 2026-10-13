@@ -21,13 +21,10 @@ new ones:
   - Diagnostics: folded into the existing ``system_diagnostics`` result
     (``diagnostics/service_health.py``) — HOMER already has that tool; this
     adds no new one.
-  - Alerts: routed through the same pieces every other Nova proactive
-    monitor already uses — ``output_gate`` (rate limit / dedup / mute),
-    ``audio_routing.observer_speak_target`` (presence-aware, occupied-room
-    routing), ``tts_helper.async_announce``, and
-    ``notify_targets.async_send_configured_notifications`` — the exact
-    pattern ``appliance_monitor.py`` uses for its own non-critical,
-    proactive announcements. No standalone alert dispatcher.
+  - Alerts: one ``delivery.py`` request, like every other proactive
+    message (8.45.0): the output gate (rate limit / dedup / mute), quiet
+    hours, sleep and the Announcements switch, presence-aware speakers, and
+    the phones when no speaker takes it. No standalone alert dispatcher.
 """
 from __future__ import annotations
 
@@ -578,70 +575,15 @@ def _gate_key(results: list[MetricResult]) -> str:
 
 async def _dispatch_alert(hass, config: dict, message: str, category: str,
                           gate_key: str = "host_health") -> None:
-    """Route through the exact pieces every other Nova proactive monitor
-    uses (appliance_monitor.py's own pattern) — no standalone dispatcher."""
+    """One delivery request (8.45.0), like every other proactive message:
+    the household's rules decide, the speakers are picked by who is home,
+    and speech no speaker takes goes to the phones."""
     try:
-        from . import output_gate
-        allowed, reason = output_gate.can_announce(
-            entity_id=gate_key, category=category, urgency="medium", message=message,
-        )
-        if not allowed:
-            _LOGGER.debug("host_health: announcement suppressed: %s", reason)
-            output_gate.record_announcement(
-                entity_id=gate_key, category=category, urgency="medium",
-                message=message, was_spoken=False,
-            )
-            return
-        message = output_gate.habit_note(
-            entity_id=gate_key, category=category, urgency="medium", message=message,
-        )
-
-        from .audio_routing import observer_speak_target
-        from . import sleep_detection
-        sleeping = False
-        try:
-            sleeping, _ = sleep_detection.is_sleeping(
-                hass,
-                bedroom_area_ids=config.get("bedroom_areas", []) or [],
-                quiet_start=config.get("observer_quiet_start", "22:00"),
-                quiet_end=config.get("observer_quiet_end", "07:00"),
-            )
-        except Exception:
-            pass
-
-        targets, mode = observer_speak_target(
-            hass, urgency="medium",
-            broadcast_group=config.get("broadcast_group") or None,
-            announcement_speakers=config.get("announcement_speakers") or None,
-            is_sleeping=sleeping,
-        )
-
-        spoken = False
-        if mode not in ("suppressed",) and targets:
-            from .tts_helper import resolve_tts_for_context, async_announce
-            tts_entity = resolve_tts_for_context(
-                hass, "host_health",
-                config.get("tts_engine", "auto"),
-                config.get("tts_premium_engine") or None,
-                config.get("tts_premium_contexts") or [],
-            )
-            if tts_entity:
-                spoken = await async_announce(hass, message, tts_entity, targets, context="host_health")
-
-        if mode == "notify_only" or not spoken:
-            try:
-                from .notify_targets import async_send_configured_notifications
-                await async_send_configured_notifications(
-                    hass, config, {"message": message, "title": "Nova"},
-                    action="notify", source="proactive", entity_id=gate_key,
-                )
-            except Exception as exc:
-                _LOGGER.debug("host_health: notification failed: %s", exc)
-
-        output_gate.record_announcement(
-            entity_id=gate_key, category=category, urgency="medium",
-            message=message, was_spoken=bool(spoken or mode == "notify_only"),
-        )
+        from . import delivery
+        await delivery.async_deliver(hass, delivery.DeliveryRequest(
+            source="host_health", message=message, entity_id=gate_key,
+            category=category, push=delivery.PUSH_FALLBACK, title="Nova",
+            tts_context="host_health", config=config, motion_counts=True))
     except Exception as exc:
         # A delivery failure must never propagate into a retry loop — the
         # caller (tick) has already stamped last_alert_ts before this runs.

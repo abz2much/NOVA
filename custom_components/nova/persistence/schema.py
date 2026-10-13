@@ -137,7 +137,7 @@ _COMPONENTS = (
     # ── nova/conversations.db ────────────────────────────────────────────
     Component(
         name="conversations",
-        version=2,
+        version=3,
         tables=("conversations", "sentinel_events", "activity_log"),
         statements=(
             """CREATE TABLE IF NOT EXISTS conversations (
@@ -169,7 +169,13 @@ _COMPONENTS = (
             "CREATE INDEX IF NOT EXISTS idx_activity_ts ON activity_log(timestamp)",
         ),
         # Person-scoped episodic continuity. No backfill: old rows read NULL.
-        columns=(Column("conversations", "subject", "TEXT"),),
+        # 8.45.0: each proactive message's outcome (delivery.py): pushed to
+        # the phones, the reason it was or was not delivered, and the
+        # Actions log request it made. Old rows read 0 / NULL.
+        columns=(Column("conversations", "subject", "TEXT"),
+                 Column("activity_log", "pushed", "INTEGER NOT NULL DEFAULT 0"),
+                 Column("activity_log", "outcome", "TEXT"),
+                 Column("activity_log", "request_id", "TEXT")),
     ),
     Component(
         name="action_log",

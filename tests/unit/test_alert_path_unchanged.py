@@ -7,10 +7,13 @@ phones, both or neither. The file only uses names that existed before
 8.22.0, so it also passes against the 8.21.0 code. All state here is fake.
 Nothing touches a real speaker, phone, alarm or lock.
 """
+import dataclasses
 import sys
 import types
 
 import pytest
+
+from conftest import route_delivery
 
 SPEAKER = "media_player.hall"
 PEOPLE = {"home": "home", "away": "not_home", "unknown": "unknown"}
@@ -32,6 +35,7 @@ def core(load, fake_hass, monkeypatch):
 
     async def _push(hass, config, message, action_type, snap=None, **kw):
         out["pushed"].append((action_type, message))
+        return ["notify.phone"]
     monkeypatch.setattr(cc, "_push_notification", _push)
     monkeypatch.setattr(cc, "_notify_all_devices", _push)
     tts = load("tts_helper")
@@ -39,7 +43,11 @@ def core(load, fake_hass, monkeypatch):
 
     async def _announce(hass, message, tts_entity, targets, **kw):
         out["spoken"].append((message, list(targets)))
+        return True
     monkeypatch.setattr(tts, "async_announce", _announce)
+    og = load("output_gate")
+    monkeypatch.setattr(og, "_STATE", og.GateState())
+    monkeypatch.setattr(load("database"), "save_activity", lambda **kw: None)
     sd = load("sleep_detection")
     monkeypatch.setattr(sd, "_in_quiet_hours", lambda *a: False)
     fake_hass.states.set(SPEAKER, "idle")
@@ -108,12 +116,13 @@ def observer(load, fake_hass, monkeypatch):
     async def _decide(*a, **kw):
         return {"speak": True, "message": "The washer has a problem.", "urgency": out["urgency"]}
 
-    async def _speak(message, *, targets):
+    async def _announce(hass, message, tts_entity, targets, **kw):
         out["spoken"].append((message, list(targets)))
-        return targets
+        return True
 
-    async def _notify(message, *, urgency):
-        out["pushed"].append((message, urgency))
+    async def _push(hass, req, request_id):
+        out["pushed"].append((req.message, req.urgency))
+        return ["notify.phone"]
 
     async def _no_llm(*a, **k):
         raise AssertionError("the provider must not be asked")
@@ -121,10 +130,14 @@ def observer(load, fake_hass, monkeypatch):
     monkeypatch.setattr(llm, "chat_with_activity", _no_llm)
     monkeypatch.setattr(o.classifier, "classify", _classify)
     monkeypatch.setattr(o.reasoning_loop, "decide", _decide)
-    monkeypatch.setattr(o, "_speak", _speak)
-    monkeypatch.setattr(o, "_send_notification", _notify)
-    monkeypatch.setattr(o, "_is_announcements_enabled", lambda: True)
-    monkeypatch.setattr(o, "_get_announcement_speakers", lambda: [SPEAKER])
+    dl = load("delivery")
+    tts = load("tts_helper")
+    monkeypatch.setattr(tts, "async_announce", _announce)
+    monkeypatch.setattr(tts, "resolve_tts_for_context", lambda *a, **k: "tts.x")
+    monkeypatch.setattr(dl, "_push", _push)
+    monkeypatch.setattr(dl, "_announcement_speakers", lambda hass: [SPEAKER])
+    monkeypatch.setattr(dl, "in_quiet_hours", lambda hass: False)
+    monkeypatch.setattr(o.output_gate, "habit_note", lambda **kw: kw["message"])
     monkeypatch.setattr(rc, "remember", lambda *a, **k: None)
     monkeypatch.setattr(db, "save_activity", lambda **k: None)
     monkeypatch.setattr(o.audio_routing, "entity_area", lambda h, e: None)
@@ -187,6 +200,7 @@ def appliance(load, fake_hass, monkeypatch):
 
     async def _announce(hass, message, tts_entity, targets, **kw):
         out["spoken"].append((message, list(targets)))
+        return True
     monkeypatch.setattr(tts, "async_announce", _announce)
     nt = load("notify_targets")
 
@@ -194,7 +208,11 @@ def appliance(load, fake_hass, monkeypatch):
         out["pushed"].append(data["message"])
         return ["notify.phone"]
     monkeypatch.setattr(nt, "async_send_configured_notifications", _send)
-    monkeypatch.setattr(am, "_live_runtime_config", lambda: {"announcement_speakers": [SPEAKER]})
+    dl = route_delivery(load, monkeypatch)
+    dl_conditions = dl.conditions
+    monkeypatch.setattr(dl, "conditions", lambda hass, req: dataclasses.replace(
+        dl_conditions(hass, req), anyone_home=load("alert_path").situation(hass).anyone_home))
+    monkeypatch.setattr(dl, "_announcement_speakers", lambda hass: [SPEAKER])
     am._MON.hass = fake_hass
     am._MON.config = {}
     fake_hass.states.set(SPEAKER, "idle")
@@ -233,22 +251,15 @@ def sentinel(load, fake_hass, monkeypatch):
     monkeypatch.setattr(sm, "save_sentinel_event", lambda *a, **k: None)
     monkeypatch.setattr(sm, "save_message", lambda *a, **k: None)
 
-    async def _announce(hass, text, tts, speakers, **kw):
-        out["spoken"].append(text)
-    monkeypatch.setattr(sm, "async_announce", _announce)
-    nt = load("notify_targets")
-
-    async def _send(hass, config, data, **kw):
-        out["pushed"].append(data["message"])
-        return ["notify.phone"]
-    monkeypatch.setattr(nt, "async_send_configured_notifications", _send)
+    route_delivery(load, monkeypatch, asleep=lambda h: out["sleeping"],
+                   spoken=out["spoken"], pushed=out["pushed"])
     sd = load("sleep_detection")
     monkeypatch.setattr(sd, "is_sleeping", lambda *a, **k: (out["sleeping"], ""))
-    monkeypatch.setattr(sm.nova_config, "announce_notify_only", lambda hass: False)
     fake_hass.states.set("binary_sensor.front_door", "on", device_class="door",
                          friendly_name="Front Door")
     out["s"] = sm.NovaSentinel(fake_hass, groq_client=None, honorific="sir",
                                rules=[], entry=None)
+    out["s"]._speakers = lambda: [SPEAKER]
     return out
 
 
@@ -331,7 +342,6 @@ def package(load, monkeypatch):
         return True
     monkeypatch.setattr(load("tts_helper"), "async_announce", _announce)
     # 8.44.0: package messages go out through delivery.py.
-    from conftest import route_delivery
     route_delivery(load, monkeypatch, quiet=lambda h: out["quiet"], pushed=out["pushed"])
     out["pm"] = pm
     yield out
@@ -366,8 +376,7 @@ async def test_package_quiet_hours(package, fake_hass, residents):
     await _pkg(package, fake_hass, package=True, count=2)
     await _pkg(package, fake_hass, package=False)
     assert package["spoken"] == []
-    # 8.44.0: in quiet hours a delivery goes to the phones instead.
-    assert package["pushed"] == ["Sir, 2 packages have been delivered to the front door."] + (
+    assert package["pushed"] == (
         ["Sir, a package was just removed from the front door while no one is home."]
         if residents == "away" else [])
 

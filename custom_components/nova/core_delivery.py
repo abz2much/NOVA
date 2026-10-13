@@ -59,110 +59,60 @@ async def _emit_action(hass, config, action, sleeping):
         action_type, urgency, message[:100],
     )
 
-    # One request_id for this whole alert — whichever notify path(s) fire
-    # below, and the voice announcement's Spoken History link, all share it.
-    from . import action_log
-    request_id = action_log.new_request_id()
     # Set on anticipation alerts: the Decision Record the user can rate.
     decision_id = action.get("decision_id")
-
-    # Route announcement. Speech and the phone push each have their own error
-    # handling (8.7.16): an announcement that raises must not skip the push for
-    # a critical alert, and a push that raises must not undo the speech.
     _snap_url = action.get("snapshot_url")
 
-    async def _push() -> None:
+    async def _push(request_id) -> list:
+        # The voice announcement and every phone share the one request id.
+        if notify_all:
+            await _notify_all_devices(hass, config, message, action_type, _snap_url,
+                                      request_id=request_id)
+            return ["all"]
+        # Adaptive awareness: the alert itself carries the rating buttons.
+        return list(await _push_notification(
+            hass, config, message, action_type, _snap_url,
+            request_id=request_id, extra_data=_rating_data(decision_id)) or [])
+
+    # One delivery request (8.45.0). Critical speaks everywhere and is
+    # pushed. High is always pushed, spoken when the household's rules allow.
+    # Below high: a mute, shush, the Announcements switch, quiet hours or
+    # sleep holds it, and it goes to the phones only while nobody is known
+    # to be home or with "Notifications only" on. A phone only action (the
+    # first intrusion alert while residents are home) is pushed, not spoken,
+    # unless critical. Speaker routing still counts live motion, so an
+    # intruder's movement while armed away is still spoken. The core keeps
+    # its own habituation above, so the gate does not count days again; its
+    # habit key is the repeat label.
+    from . import delivery
+    high = urgency in ("high", "critical")
+    out = await delivery.async_deliver(hass, delivery.DeliveryRequest(
+        source=action_type, message=message, urgency=urgency,
+        entity_id=action.get("entity_id", "") or "", category=action_type,
+        push=delivery.PUSH_ALWAYS if high else delivery.PUSH_HIGH,
+        phone_only=bool(action.get("phone_only")) and urgency != "critical",
+        tts_context="sentinel", config=config, dedup_key=habit_key or "", habit_key="",
+        asleep=bool(sleeping),
+        motion_counts=True, record_kind=_RECORDED_KINDS.get(action_type, "")),
+        push=_push)
+
+    # A spoken offer can be answered from these rooms (8.39.1).
+    if out.spoken:
         try:
-            if notify_all:
-                await _notify_all_devices(hass, config, message, action_type, _snap_url,
-                                           request_id=request_id)
-            else:
-                # Adaptive awareness: the alert itself carries the rating buttons.
-                await _push_notification(hass, config, message, action_type, _snap_url,
-                                          request_id=request_id,
-                                          extra_data=_rating_data(decision_id))
+            from . import core_runtime
+            core_runtime.offer_spoken(action, out.targets)
         except Exception as exc:
-            _LOGGER.warning("Cognitive: action push failed: %s", exc)
+            _LOGGER.debug("offer bookkeeping failed: %s", exc)
 
-    # Quiet hours: only CRITICAL may speak. Non-critical → phone push only.
-    # Time-based (independent of bedroom presence), so nothing slips through.
-    in_quiet = False
-    try:
-        from . import sleep_detection
-        in_quiet = sleep_detection._in_quiet_hours(
-            config.get("observer_quiet_start", "22:00"),
-            config.get("observer_quiet_end", "07:00"),
-        )
-    except Exception:
-        in_quiet = False
-
-    # Who hears it is decided in alert_path.for_core_action (8.22.0): phone
-    # only while asleep, in quiet hours or for a phone only action (the first
-    # intrusion alert while residents are home), unless critical.
-    from . import alert_path
-    sit = alert_path.situation(hass, config, sleeping=sleeping, quiet=in_quiet)
-    plan = alert_path.for_core_action(hass, config, sit, action)
-
-    async def _speak(targets) -> None:
-        # Speech has its own error handling (8.7.16): a failure here never
-        # skips the push for a critical or high alert.
-        try:
-            from .tts_helper import resolve_tts_for_context, async_announce
-            tts_entity = resolve_tts_for_context(
-                hass, "sentinel",
-                config.get("tts_engine", "auto"),
-                config.get("tts_premium_engine") or None,
-                config.get("tts_premium_contexts") or [],
-            )
-            if tts_entity:
-                spoken = await async_announce(
-                    hass, message, tts_entity, targets,
-                    context="sentinel", action_request_id=request_id,
-                )
-                # A spoken offer can be answered from these rooms (8.39.1).
-                if spoken:
-                    from . import core_runtime
-                    core_runtime.offer_spoken(action, targets)
-        except Exception as exc:
-            _LOGGER.warning("Cognitive: action routing failed: %s", exc)
-
-    async def _record() -> None:
-        # Safety decisions delivered here go to the Decision Record in the
-        # shared format (8.23.0). The first intrusion alert is recorded where
-        # it is decided (core_safety.py); lockdown and the sweep record their
-        # own decisions.
-        kind = _RECORDED_KINDS.get(action_type)
-        if kind:
-            await alert_path.async_record_decision(
-                hass, kind, source=action_type, sit=sit, plan=plan,
-                entity_id=action.get("entity_id"), message=message,
-                facts={"urgency": urgency}, request_ids=[request_id])
-
-    if plan.phone_only:
-        await alert_path.deliver(plan, push=_push)
-        await _record()
-        return
-
-    # Speak, offer the rating buttons, then push (critical and high, or a
-    # lower alert pushed instead of spoken).
-    await alert_path.deliver(plan, speak=_speak)
-    alert_pushed_instead = plan.pushed_instead
-
-    # Adaptive awareness: a spoken alert gets a silent phone
-    # notification with the rating buttons, so it can be rated too.
-    if (decision_id is not None and urgency not in ("critical", "high")
-            and not alert_pushed_instead):
+    # Adaptive awareness: a spoken alert gets a silent phone notification
+    # with the rating buttons, so it can be rated too.
+    if decision_id is not None and not high and out.spoken and not out.pushed:
         try:
             from . import adaptive_awareness
             await adaptive_awareness.async_send_rating_prompt(
                 hass, config, message, decision_id)
         except Exception as exc:
             _LOGGER.debug("rating prompt failed: %s", exc)
-
-    # Also push critical/high alerts to phones
-    if plan.push:
-        await _push()
-    await _record()
 
 
 # Core action types whose delivery is a safety decision of its own (8.23.0).

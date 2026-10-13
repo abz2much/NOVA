@@ -421,19 +421,27 @@ def load():
 
 
 def route_delivery(load, monkeypatch, *, quiet=lambda h: False,
-                   announcements=lambda h: True, pushed=None):
+                   announcements=lambda h: True, asleep=lambda h: False,
+                   notify_only=lambda h: False, pushed=None, spoken=None):
     """Point delivery.py (8.44.0) at a sender test's own switches: quiet
-    hours and the Announcements switch come from the given functions (read
-    at delivery time), nobody is asleep, and pushes are collected in
-    `pushed` instead of reaching a phone."""
+    hours, sleep, "Notifications only" and the Announcements switch come
+    from the given functions
+    (read at delivery time). Pushes are collected in `pushed` and speech in
+    `spoken` instead of reaching a phone or a speaker."""
     dl = load("delivery")
     monkeypatch.setattr(dl, "conditions", lambda hass, req: dl.Conditions(
-        quiet_hours=bool(quiet(hass)), announcements_on=bool(announcements(hass))))
+        quiet_hours=bool(quiet(hass)), announcements_on=bool(announcements(hass)),
+        asleep=bool(asleep(hass)), notify_only=bool(notify_only(hass))))
     if pushed is not None:
         async def _push(hass, req, request_id):
             pushed.append(req.message)
             return ["phone"]
         monkeypatch.setattr(dl, "_push", _push)
+    if spoken is not None:
+        async def _speak(hass, req, message, targets, request_id):
+            spoken.append(message)
+            return True
+        monkeypatch.setattr(dl, "_speak", _speak)
     return dl
 
 

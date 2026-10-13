@@ -1,3 +1,20 @@
+## [8.45.0] — Every proactive message on one set of rules
+
+The Observer, left-open reminders, appliance and host health alerts, and the core's alerts (intrusion, lockdown, freeze, offers and anticipation) now go out through the same delivery path as the rest since 8.44.0. Every proactive message follows shush, mutes, the Announcements switch, quiet hours, sleep and "Notifications only" in the same order, and its outcome is recorded.
+
+### Changed
+- **Everyday alerts held at night are dropped.** A medium or low alert held by quiet hours or sleep is no longer sent to the phones. A high alert, a message you set yourself, and hazard warnings still reach the phones. This also reverses 8.44.0's push of a package delivered or mail arriving in quiet hours, and the low "house secured" note from the night sweep is no longer pushed (a lock that failed to secure still is).
+- **Shush, mutes and the Announcements switch now hold Observer, left-open, appliance, host health and core alerts too.** High ones still reach the phones. Critical alerts ignore every rule, as before.
+- **Quiet hours now apply to appliance, host health and left-open speech**, as they already did for the rest.
+- **Left-open reminders always reach the phones**, as before. The spoken copy now also follows the hourly limit and repeat rules. With no Sentinel speaker set up they go to the phones only.
+- **High Observer and core alerts while the house is asleep go to the phones**, the same as in quiet hours.
+- **Repeat labels.** A message can carry a label, so a repeat within the repeat window is held even when the words differ. The core's offers and anticipation alerts use their pattern as the label.
+- **Every proactive message's outcome is recorded** in the activity log: who sent it, whether it was spoken or pushed, why not when it was held, and its Actions log request. Safety alerts still go to the Decision Record as well.
+- **"Notifications only" with no phone that takes the message** now speaks it after all on the source's own speakers, for every source (before, only left-open reminders did).
+
+### Unchanged
+- Conversation replies, and the speakers each alert picks by urgency and who is home. The core, appliance and host health alerts still count live motion as someone home, so an intruder's movement while armed away is still spoken.
+
 ## [8.44.0] — One set of rules for proactive messages
 
 Reminders, briefings, doorbell, camera and vehicle alerts, hazard warnings, package alerts and the infrastructure audit now go out through one delivery path. It applies the same rules in the same order to every one of them, so shush, the Announcements switch, quiet hours and "Notifications only" mean the same thing everywhere.

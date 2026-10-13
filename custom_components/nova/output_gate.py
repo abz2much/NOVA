@@ -112,6 +112,8 @@ def can_announce(
     message: str,
     max_per_hour: int = DEFAULT_MAX_PER_HOUR,
     dedup_minutes: int = DEFAULT_DEDUP_MINUTES,
+    dedup_key: str = "",
+    habit_key: Optional[str] = None,
 ) -> tuple[bool, str]:
     """
     Decide whether this announcement can proceed.
@@ -136,7 +138,7 @@ def can_announce(
     if category in _STATE.muted_categories:
         return False, f"category {category} is muted"
 
-    if _habituated(entity_id, urgency, category):
+    if _habituated(_habit_key(entity_id, habit_key), urgency, category, entity_id):
         return False, f"{entity_id} is normal for this home (came up days running)"
 
     # Rate limit — tightened by the adaptive interruption budget when enabled
@@ -147,33 +149,46 @@ def can_announce(
         return False, f"rate limit ({len(recent)}/{eff_max}/hour)"
 
     # Dedup: is this message (or a substring) close to something recent?
+    # A request's own repeat label (dedup_key, 8.45.0) also counts as the
+    # same message, whatever its words.
     dedup_cutoff = _now() - dedup_minutes * 60
     for past in _STATE.recent_messages:
         if past["timestamp"] < dedup_cutoff:
             continue
+        if dedup_key and past.get("key") == dedup_key:
+            return False, "repeat of a recent message"
         if _messages_similar(past["message"], message):
             return False, "duplicate of recent message"
 
     return True, "ok"
 
 
-def _habituated(entity_id: str, urgency: str, category: str) -> bool:
+def _habit_key(entity_id: str, habit_key: Optional[str]) -> str:
+    """The habituation key: the request's own when given ("" for none: the
+    source counts its own days), else the entity."""
+    return entity_id if habit_key is None else habit_key
+
+
+def _habituated(key: str, urgency: str, category: str, entity_id: str = "") -> bool:
     try:
         from . import habituation
-        return (not habituation.exempt(urgency=urgency, kind=category, entity_id=entity_id)
-                and habituation.is_quiet(entity_id))
+        return bool(key) and (not habituation.exempt(urgency=urgency, kind=category,
+                                       entity_id=entity_id or key)
+                and habituation.is_quiet(key))
     except Exception:
         return False
 
 
-def habit_note(*, entity_id: str, category: str, urgency: str, message: str) -> str:
+def habit_note(*, entity_id: str, category: str, urgency: str, message: str,
+               habit_key: Optional[str] = None) -> str:
     """The message to speak: with a closing line saying Nova will stop
     mentioning it when this is the third day running (habituation.py)."""
     try:
         from . import habituation
         if habituation.exempt(urgency=urgency, kind=category, entity_id=entity_id):
             return message
-        return habituation.with_note(entity_id, message)
+        key = _habit_key(entity_id, habit_key)
+        return habituation.with_note(key, message) if key else message
     except Exception:
         return message
 
@@ -185,8 +200,15 @@ def record_announcement(
     urgency: str,
     message: str,
     was_spoken: bool,
+    dedup_key: str = "",
+    habit_key: Optional[str] = None,
+    source: str = "observer",
+    pushed: bool = False,
+    outcome: str = "",
+    request_id: str = "",
 ) -> None:
-    """Log an announcement for history + dedup + future feedback learning."""
+    """Log an announcement for history + dedup + future feedback learning.
+    The activity log row carries the delivery outcome (8.45.0)."""
     ann = Announcement(
         timestamp=_now(),
         entity_id=entity_id,
@@ -200,11 +222,14 @@ def record_announcement(
         _STATE.recent_messages.append({
             "timestamp": _now(),
             "message": message,
+            "key": dedup_key or "",
         })
         try:
             from . import habituation
-            if not habituation.exempt(urgency=urgency, kind=category, entity_id=entity_id):
-                habituation.record(entity_id, entity_id)
+            key = _habit_key(entity_id, habit_key)
+            if key and not habituation.exempt(urgency=urgency, kind=category,
+                                              entity_id=entity_id):
+                habituation.record(key, entity_id)
         except Exception as exc:
             _LOGGER.debug("habituation record failed: %s", exc)
     # v5.4.8: persist to SQLite for panel activity log
@@ -216,7 +241,10 @@ def record_announcement(
             urgency=urgency,
             message=message,
             was_spoken=was_spoken,
-            source="observer",
+            source=source,
+            pushed=pushed,
+            outcome=outcome,
+            request_id=request_id,
         )
     except Exception:
         pass  # DB write failure is non-fatal

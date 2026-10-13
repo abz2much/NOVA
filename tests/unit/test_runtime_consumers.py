@@ -92,6 +92,12 @@ def _package(hass, entry, load):
     return load("package_monitor")._announcements_on(hass)
 
 
+def _announcements(hass, entry, load):
+    dl = load("delivery")
+    return dl.conditions(hass, dl.DeliveryRequest(
+        source="test", message="hi", requested_by_user=True)).announcements_on
+
+
 def _rich(hass, entry, load):
     return load("reasoning_loop")._rich_mode(hass)
 
@@ -125,11 +131,6 @@ CASES = [
     _Case("reasoning_loop", "rich_reasoning", True, _rich, True, False),
     _Case("observer.cognition", "cognition_enabled", False,
           _owner("observer", "_STATE")(lambda m: m._cognition_enabled()), False, True),
-    _Case("observer.announcements", "announcements_enabled", False,
-          _owner("observer", "_STATE")(lambda m: m._is_announcements_enabled()), False, True),
-    _Case("observer.speakers", "announcement_speakers", ["media_player.a"],
-          _owner("observer", "_STATE")(lambda m: m._get_announcement_speakers()),
-          ["media_player.a"], None),
     _Case("observer.rate_limit", "classifier_rate_limit", 7,
           _owner("observer", "_STATE")(lambda m: m._effective_rate_limit()), 7,
           30),
@@ -403,9 +404,11 @@ async def test_observer_start_refuses_a_lost_runtime_before_changing_state(obs, 
     assert hass.executor_args == []
 
 
-async def test_observer_notification_uses_the_owner_settings(obs, load, monkeypatch):
+async def test_delivery_notification_uses_the_owner_settings(load, monkeypatch):
+    """Observer alerts (8.45.0) go through delivery.py, which reads the
+    phone services from the live owner runtime, not a stale copy."""
     hass = FakeHass()
-    entry = _install_nova_runtime(hass, {"notify_service": "notify.live"})
+    _install_nova_runtime(hass, {"notify_service": "notify.live"})
     _bridge(hass, {"notify_service": "notify.bridge"})
     sent = []
 
@@ -413,11 +416,44 @@ async def test_observer_notification_uses_the_owner_settings(obs, load, monkeypa
         sent.append(config)
         return []
     monkeypatch.setattr(load("notify_targets"), "async_send_configured_notifications", _send)
-    monkeypatch.setattr(obs._STATE, "hass", hass)
-    monkeypatch.setattr(obs._STATE, "entry", entry)
-    monkeypatch.setattr(obs._STATE, "config", {"notify_service": "notify.boot"})
-    await obs._send_notification("hi", urgency="high")
+    dl = load("delivery")
+    await dl._push(hass, dl.DeliveryRequest(source="observer", message="hi",
+                                            urgency="high"), "r1")
     assert sent[0]["notify_service"] == "notify.live"
+
+
+@pytest.mark.parametrize("key,value,read,default", [
+    ("announcements_enabled", False, _announcements, True),
+    ("announcement_speakers", ["media_player.a"],
+     lambda hass, entry, load: load("delivery")._announcement_speakers(hass), None),
+])
+def test_delivery_reads_the_owner_runtime(load, key, value, read, default):
+    """Observer, Sentinel, appliance, host health and core alerts read their
+    settings through delivery.py (8.45.0): the live runtime, never the
+    bridge."""
+    hass = FakeHass()
+    live: dict = {}
+    entry = _install_nova_runtime(hass, live)
+    _bridge(hass, {key: value})
+    assert read(hass, entry, load) == default
+    live[key] = value
+    assert read(hass, entry, load) == value
+
+
+@pytest.mark.parametrize("key,read,default", [
+    ("announcements_enabled", _announcements, True),
+    ("announcement_speakers",
+     lambda hass, entry, load: load("delivery")._announcement_speakers(hass), None),
+])
+def test_delivery_with_a_lost_runtime_reads_the_defaults(load, caplog, key, read, default):
+    """A loaded entry that lost its runtime must not stop an alert, so
+    delivery.py logs it and reads the defaults."""
+    hass = FakeHass()
+    entry = _with_entry(hass, _bare_entry(STATES.LOADED))
+    _bridge(hass, {key: "bridge"})
+    with caplog.at_level("WARNING"):
+        assert read(hass, entry, load) == default
+    assert "live settings unavailable" in caplog.text
 
 
 def test_observer_stop_forgets_its_owner(load):
