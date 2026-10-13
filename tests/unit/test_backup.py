@@ -46,6 +46,8 @@ def _populate(root: Path) -> None:
     _write(root / "nova_memory" / "index.bin", "VECTORS")
     _write(root / "nova_persona.txt", "PERSONA")
     _write(root / "nova_routines.yaml", "routines: []")
+    _write(root / ".nova_learned.json", "{}")
+    _write(root / ".nova_ignore_rules.json", "{}")
 
 
 def _names(archive: str) -> list[str]:
@@ -74,7 +76,8 @@ def _make_tgz(path: Path, members) -> Path:
 
 def test_constants_have_exact_values(bk):
     assert bk._STATE_PATHS == [
-        "nova", "nova.db", "nova_memory", "nova_persona.txt", "nova_routines.yaml"]
+        "nova", "nova.db", "nova_memory", "nova_persona.txt", "nova_routines.yaml",
+        ".nova_learned.json", ".nova_ignore_rules.json"]
     assert isinstance(bk._STATE_PATHS, list)
     assert bk._BACKUP_SUBDIR == "nova_backups"
 
@@ -149,16 +152,17 @@ def test_archive_owner_only_even_with_permissive_umask(bk, tmp_path, fixed_stamp
     assert stat.S_IMODE(os.stat(out).st_mode) == 0o600
 
 
-def test_same_second_archive_is_overwritten_and_tightened(bk, tmp_path, fixed_stamp):
+def test_same_second_archive_gets_a_suffix_and_leaves_the_first(bk, tmp_path, fixed_stamp):
     target = _write(tmp_path / "nova_backups" / "nova-state-20300102-030405.tar.gz",
                     "not an archive at all " * 50)
     os.chmod(target, 0o644)
     _write(tmp_path / "nova.db", "FRESH")
     out = bk.create_backup(str(tmp_path))
-    assert out == str(target)
+    assert out == str(tmp_path / "nova_backups" / "nova-state-20300102-030405-1.tar.gz")
     assert stat.S_IMODE(os.stat(out).st_mode) == 0o600
     assert _names(out) == ["nova.db"]
-    assert len(list((tmp_path / "nova_backups").iterdir())) == 1
+    assert target.read_text() == "not an archive at all " * 50
+    assert len(list((tmp_path / "nova_backups").iterdir())) == 2
 
 
 def test_archive_holds_all_state_paths_with_relative_names(bk, tmp_path, fixed_stamp):
@@ -169,6 +173,7 @@ def test_archive_holds_all_state_paths_with_relative_names(bk, tmp_path, fixed_s
         "nova", "nova/store.db", "nova/config.json", "nova/docs", "nova/docs/note.md",
         "nova.db", "nova_memory", "nova_memory/index.bin",
         "nova_persona.txt", "nova_routines.yaml",
+        ".nova_learned.json", ".nova_ignore_rules.json",
     }
     assert not any(n.startswith("/") or str(tmp_path) in n for n in names)
 
@@ -203,7 +208,7 @@ def test_archive_excludes_everything_else(bk, tmp_path, fixed_stamp):
     _write(tmp_path / "nova_extra.txt", "z")
     _write(tmp_path / "nova_backups" / "nova-state-19990101-000000.tar.gz", "old")
     names = _names(bk.create_backup(str(tmp_path)))
-    for bad in (".nova_learned.json", "configuration.yaml", "secrets.yaml",
+    for bad in ("configuration.yaml", "secrets.yaml",
                 "nova_extra.txt", "nova_backups"):
         assert not any(n == bad or n.startswith(bad + "/") for n in names)
 
@@ -226,17 +231,14 @@ def test_state_path_may_be_file_or_directory(bk, tmp_path, fixed_stamp):
     assert names == ["nova", "nova.db", "nova.db/inner"]
 
 
-def test_top_level_symlink_archived_as_link_only(bk, tmp_path, fixed_stamp):
+def test_top_level_symlink_to_outside_is_skipped(bk, tmp_path, fixed_stamp):
     real = tmp_path / "elsewhere"
     _write(real / "big.db", "DATA")
     cfg = tmp_path / "cfg"
     cfg.mkdir()
     os.symlink(real, cfg / "nova")
     out = bk.create_backup(str(cfg))
-    with tarfile.open(out, "r:gz") as tar:
-        members = tar.getmembers()
-    assert [m.name for m in members] == ["nova"]
-    assert members[0].issym() and members[0].linkname == str(real)
+    assert _names(out) == []
 
 
 def test_dangling_top_level_symlink_is_skipped(bk, tmp_path, fixed_stamp):
@@ -253,7 +255,7 @@ def test_nested_symlink_kept_as_symlink(bk, tmp_path, fixed_stamp):
     assert m.issym() and m.linkname == "real.txt"
 
 
-def test_write_failure_propagates_and_leaves_partial_file(bk, tmp_path, fixed_stamp, monkeypatch):
+def test_write_failure_propagates_and_leaves_no_file(bk, tmp_path, fixed_stamp, monkeypatch):
     _populate(tmp_path)
 
     class Boom(OSError):
@@ -265,9 +267,7 @@ def test_write_failure_propagates_and_leaves_partial_file(bk, tmp_path, fixed_st
     monkeypatch.setattr(tarfile.TarFile, "add", broken_add)
     with pytest.raises(Boom):
         bk.create_backup(str(tmp_path))
-    left = tmp_path / "nova_backups" / "nova-state-20300102-030405.tar.gz"
-    assert left.exists()
-    assert stat.S_IMODE(os.stat(left).st_mode) == 0o600
+    assert list((tmp_path / "nova_backups").iterdir()) == []
 
 
 # ── restore_backup: choosing the archive ────────────────────────────────────
@@ -288,20 +288,9 @@ def test_restore_with_empty_backup_folder_raises(bk, tmp_path):
         bk.restore_backup(str(tmp_path))
 
 
-def test_restore_picks_greatest_name_not_newest_mtime(bk, tmp_path):
-    bdir = tmp_path / "nova_backups"
-    later_name = _make_tgz(bdir / "nova-state-20260101-000000.tar.gz",
-                           [("pick.txt", b"later-name", 0o644, None)])
-    older_name = _make_tgz(bdir / "nova-state-20250101-000000.tar.gz",
-                           [("pick.txt", b"older-name", 0o644, None)])
-    os.utime(later_name, (1, 1))
-    os.utime(older_name, None)
-    used = bk.restore_backup(str(tmp_path))
-    assert used == str(later_name)
-    assert (tmp_path / "pick.txt").read_text() == "later-name"
 
 
-def test_restore_hand_named_archive_outsorts_timestamps(bk, tmp_path):
+def test_restore_newest_file_wins_whatever_its_name(bk, tmp_path):
     bdir = tmp_path / "nova_backups"
     _make_tgz(bdir / "nova-state-20991231-235959.tar.gz", [("w.txt", b"stamp", 0o644, None)])
     odd = _make_tgz(bdir / "nova-state-zzz.tar.gz", [("w.txt", b"odd", 0o644, None)])
@@ -426,7 +415,7 @@ def test_restore_refuses_absolute_symlink_member(bk, tmp_path):
     assert not os.path.lexists(cfg / "link")
 
 
-def test_backup_with_absolute_symlink_cannot_be_restored(bk, tmp_path, fixed_stamp):
+def test_backup_with_outside_symlink_restores_the_rest(bk, tmp_path, fixed_stamp):
     real = tmp_path / "elsewhere"
     _write(real / "data.db", "D")
     cfg = tmp_path / "cfg"
@@ -435,8 +424,10 @@ def test_backup_with_absolute_symlink_cannot_be_restored(bk, tmp_path, fixed_sta
     _write(cfg / "nova.db", "K")
     made = bk.create_backup(str(cfg))
     os.remove(cfg / "nova")
-    with pytest.raises(tarfile.AbsoluteLinkError):
-        bk.restore_backup(str(cfg), made)
+    os.remove(cfg / "nova.db")
+    bk.restore_backup(str(cfg), made)
+    assert (cfg / "nova.db").read_text() == "K"
+    assert not os.path.lexists(cfg / "nova")
 
 
 def test_restore_clears_group_other_write(bk, tmp_path):
@@ -467,23 +458,6 @@ def test_restore_uses_data_filter(bk, tmp_path, monkeypatch):
     assert calls == [(str(cfg), (), {"filter": "data"})]
 
 
-def test_restore_falls_back_without_filter_on_type_error(bk, tmp_path, monkeypatch):
-    arc = _make_tgz(tmp_path / "x" / "a.tar.gz", [("f.txt", b"legacy", 0o644, None)])
-    calls = []
-    real = tarfile.TarFile.extractall
-
-    def old_python(self, path=".", *a, **k):
-        calls.append(dict(k))
-        if "filter" in k:
-            raise TypeError("unexpected keyword argument 'filter'")
-        return real(self, path, *a, filter="fully_trusted")
-
-    monkeypatch.setattr(tarfile.TarFile, "extractall", old_python)
-    cfg = tmp_path / "cfg"
-    cfg.mkdir()
-    assert bk.restore_backup(str(cfg), str(arc)) == str(arc)
-    assert calls == [{"filter": "data"}, {}]
-    assert (cfg / "f.txt").read_text() == "legacy"
 
 
 def test_restore_non_gzip_archive_raises_read_error(bk, tmp_path):
@@ -500,7 +474,7 @@ def test_restore_directory_as_archive_raises_os_error(bk, tmp_path):
         bk.restore_backup(str(tmp_path), "dir.tar.gz")
 
 
-def test_partial_backup_is_chosen_as_latest(bk, tmp_path, monkeypatch):
+def test_failed_backup_does_not_shadow_the_last_good_one(bk, tmp_path, monkeypatch):
     _populate(tmp_path)
     monkeypatch.setattr(time, "strftime", lambda fmt, *a: "20200101-000000")
     good = bk.create_backup(str(tmp_path))
@@ -513,6 +487,4 @@ def test_partial_backup_is_chosen_as_latest(bk, tmp_path, monkeypatch):
         m.setattr(tarfile.TarFile, "add", broken_add)
         with pytest.raises(OSError):
             bk.create_backup(str(tmp_path))
-    with pytest.raises(tarfile.TarError):
-        bk.restore_backup(str(tmp_path))
-    assert bk.restore_backup(str(tmp_path), os.path.basename(good)) == good
+    assert bk.restore_backup(str(tmp_path)) == good
