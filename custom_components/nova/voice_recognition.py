@@ -1,63 +1,50 @@
 """
-Nova voice recognition — makes Nova know who it's talking to by *voice*, and
-lets it learn people's voices over time through natural speech.
+Nova — who is speaking, read from an outside speaker-recognition service.
 
-Design (deliberately): Nova does NOT run a speaker-embedding model inside the
-Home Assistant process — that's heavy, dependency-laden, and needs the raw
-utterance audio. Instead it delegates the embedding + enrollment to a dedicated
-speaker-recognition service and *consumes* its "who is speaking" result. Any
-backend works as long as it publishes the current speaker to Home Assistant:
+The service publishes to Home Assistant in one of two ways:
 
-  • VoiceBM (github.com/cybericebyte/VoiceBM) — Sherpa-ONNX, publishes over MQTT;
-    exposes a per-person ``binary_sensor.<person>_voice`` and a
-    ``sensor.*current_speaker``. The per-person sensor turns on when that
-    person is recognised and can stay on after they stop talking, so it is
-    only trusted while it changed recently (_fresh), like the speaker sensor.
-  • speaker-recognition (github.com/EuleMitKeule/speaker-recognition) —
-    Resemblyzer, exposes a current-speaker sensor via its HA integration.
-  • anything else that surfaces a current-speaker entity.
+  - one current-speaker sensor whose state is the speaker's name, or
+  - a binary sensor per person that turns on when that person is heard.
 
-This module turns that entity into a vote for the identity resolver's voice tier
-(the strongest tier — voice is the most direct "who's speaking" signal), via the
-seam ``identity.register_voice_provider``.
+A per-person sensor can stay on after the person stops talking, so it only
+counts while it changed recently. Either way the result is offered to
+identity.py as its voice provider.
 
-Learning over time: the service does the actual enrollment, but Nova supplies
-the hard part for hands-free enrollment — the *label*. When Nova is already
-confident who's speaking from its other signals (sole occupant, or a recent
-camera face match) but the voice service doesn't recognize the voice yet, that
-utterance is an enrollment opportunity with a known answer. ``enrollment_candidate``
-surfaces it so an automation can enroll the pending sample under the right
-person — so voice profiles build themselves from ordinary conversation.
-
-Config (nova_config):
-  identity_voice_fingerprint    master enable for the identity voice tier
-  voice_recognition_source      a current-speaker sensor entity_id, OR a glob for
-                                per-person sensors, e.g. "binary_sensor.*_voice"
-  voice_recognition_confidence  fallback confidence (0..1) when the source carries
-                                no score of its own (default 0.85)
+It also spots an enrolment chance: Nova already knows who is talking from
+other signals but the voice service does not recognise them yet. It then
+fires `nova_voice_enroll_candidate` so an automation can enrol the sample.
+No model runs here.
 """
 from __future__ import annotations
 
+import contextlib
 import fnmatch
 import logging
 import time
-from typing import Optional
+from datetime import datetime, timezone
+from typing import Any, Optional
 
 from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
 
-# States that mean "no one is speaking / not identified".
-_NO_SPEAKER = ("", "unknown", "unavailable", "none", "no_speaker",
-               "not_speaking", "idle", "off",
-               # 8.37.0: what some backends report when unsure or for TV sound
-               # ("unbekannt" is German for unknown).
-               "uncertain", "unbekannt", "tv-noise", "tv_noise")
-_RECENCY_WINDOW = 20.0  # seconds; a current-speaker sensor older than this is stale
+_ENROLL_COOLDOWN = 300.0
+_RECENCY_WINDOW = 20.0
+
+# normalised person -> epoch seconds of the last enrolment event
+_last_enroll_fire: dict = {}
+
+_NO_SPEAKER = {
+    "", "unknown", "unavailable", "none", "no_speaker", "not_speaking", "idle",
+    "off", "uncertain", "unbekannt", "tv-noise", "tv_noise",
+}
 _SCORE_ATTRS = ("confidence", "score", "probability", "similarity")
+_NAME_SUFFIXES = (" voice", " speaking", " is speaking")
+_ID_SUFFIXES = ("_voice", "_speaking", "_is_speaking")
 
 
-def _cfg(key: str, default):
+def _cfg(key: str, default: Any) -> Any:
+    """The stored setting as is (None included); the default only on error."""
     try:
         from . import nova_config
         return nova_config.get(key, default)
@@ -70,162 +57,139 @@ def normalize(name: str) -> str:
     return identity.normalize(name)
 
 
-def _score_from(st, default: float) -> float:
-    """Read a 0..1 confidence from the entity's attributes, else the default.
-    Accepts 0..1 or 0..100 (percent) and clamps."""
+def _score(st: Any, default: float) -> float:
+    attrs = getattr(st, "attributes", None) or {}
     for key in _SCORE_ATTRS:
-        val = st.attributes.get(key)
-        if val is None:
+        raw = attrs.get(key)
+        if raw is None:
             continue
         try:
-            v = float(val)
+            value = float(raw)
         except (TypeError, ValueError):
             continue
-        if v > 1.0:
-            v = v / 100.0
-        return max(0.0, min(1.0, v))
+        if value > 1.0:
+            value /= 100.0
+        return max(0.0, min(1.0, value))
     return default
 
 
-def _fresh(st, window: float = _RECENCY_WINDOW) -> bool:
-    """Best-effort recency: don't attribute a stale 'last speaker' to a fresh
-    command. If no timestamp is available, assume fresh."""
+def _fresh(st: Any, window: float = _RECENCY_WINDOW) -> bool:
+    """True when the state changed within `window` seconds (or we can't tell)."""
     try:
-        from datetime import datetime, timezone
-        ts = getattr(st, "last_updated", None) or getattr(st, "last_changed", None)
-        if ts is None:
+        stamp = getattr(st, "last_updated", None) or getattr(st, "last_changed", None)
+        if not stamp:
             return True
-        return (datetime.now(timezone.utc) - ts).total_seconds() <= window
+        return (datetime.now(timezone.utc) - stamp).total_seconds() <= window
     except Exception:
         return True
 
 
-def _person_from_entity(st, pattern: str) -> str:
-    """Derive a person id from a per-person voice sensor. Prefers the friendly
-    name; falls back to the entity id with the domain and a trailing 'voice'/
-    'speaking' token stripped (binary_sensor.username_voice -> username)."""
-    fname = st.attributes.get("friendly_name")
-    if fname:
-        cleaned = fname.lower()
-        for suffix in (" voice", " speaking", " is speaking"):
-            if cleaned.endswith(suffix):
-                cleaned = cleaned[: -len(suffix)]
-        return cleaned.strip()
-    slug = st.entity_id.split(".", 1)[-1]
-    for suffix in ("_voice", "_speaking", "_is_speaking"):
-        if slug.endswith(suffix):
-            slug = slug[: -len(suffix)]
-    return slug
+def _strip_suffixes(text: str, suffixes: tuple[str, ...]) -> str:
+    for suffix in suffixes:
+        if text.endswith(suffix):
+            text = text[: -len(suffix)]
+    return text
 
 
-def identify(hass: HomeAssistant, device_id: Optional[str] = None) -> dict:
-    """The voice provider: {person -> score} for whoever is speaking now, read
-    from the configured speaker-recognition entity. Empty when nobody is
-    identified. Registered into identity's voice tier."""
+def _person_for(st: Any) -> str:
+    attrs = getattr(st, "attributes", None) or {}
+    name = attrs.get("friendly_name")
+    if name:
+        return _strip_suffixes(str(name).lower(), _NAME_SUFFIXES).strip()
+    object_id = st.entity_id.split(".", 1)[-1]
+    return _strip_suffixes(object_id, _ID_SUFFIXES)
+
+
+def _is_pattern(src: str) -> bool:
+    return any(ch in src for ch in "*?[") or src.endswith("_voice")
+
+
+def identify(hass: HomeAssistant, device_id: Optional[str] = None) -> dict[str, float]:
+    """{person: score in 0..1} for whoever the voice service hears now."""
     src = (_cfg("voice_recognition_source", "") or "").strip()
     if not src:
         return {}
     conf = float(_cfg("voice_recognition_confidence", 0.85))
 
-    # Per-person sensors (ON when that person was recognised). On is not
-    # enough: it can stay on after they stop, so a stale one is skipped too.
-    if any(ch in src for ch in "*?[") or src.endswith("_voice"):
-        votes: dict = {}
+    if _is_pattern(src):
+        found: dict[str, float] = {}
         for st in hass.states.async_all("binary_sensor"):
             if not fnmatch.fnmatch(st.entity_id, src):
                 continue
-            if str(st.state).lower() != "on":
+            if str(st.state).lower() != "on" or not _fresh(st, _RECENCY_WINDOW):
                 continue
-            if not _fresh(st):
+            person = _person_for(st)
+            if not person:
                 continue
-            person = _person_from_entity(st, src)
-            if person:
-                votes[person] = max(votes.get(person, 0.0), _score_from(st, conf))
-        return votes
+            score = _score(st, conf)
+            if score > found.get(person, -1.0):
+                found[person] = score
+        return found
 
-    # A single current-speaker sensor whose state is the speaker's name.
     st = hass.states.get(src)
     if st is None:
         return {}
     name = str(st.state).strip()
-    if name.lower() in _NO_SPEAKER:
+    if name.lower() in _NO_SPEAKER or not _fresh(st, _RECENCY_WINDOW):
         return {}
-    if not _fresh(st):
-        return {}
-    return {name: _score_from(st, conf)}
+    return {name: _score(st, conf)}
 
 
-def enrollment_candidate(hass: HomeAssistant,
-                         device_id: Optional[str] = None) -> Optional[str]:
-    """A person Nova is confident about from its *other* signals (sole
-    occupant / recent face) but whose voice the service doesn't recognize yet —
-    a labelled opportunity to enroll their voice. Returns the person id, or None.
-
-    This is what lets voice profiles build from natural speech: the answer is
-    known, so the pending sample can be enrolled under the right person with no
-    manual review."""
+def enrollment_candidate(hass: HomeAssistant, device_id: Optional[str] = None) -> Optional[str]:
+    """The person Nova knows is talking but the voice service does not."""
     from . import identity
     ident = identity.resolve(hass, device_id=device_id)
     if not ident.known:
-        return None                      # we don't know who it is either — skip
+        return None
     if "voice" in ident.method:
-        return None                      # voice already recognizes them
-    known_to_voice = {normalize(k) for k in identify(hass, device_id)}
-    if normalize(ident.person) in known_to_voice:
-        return None                      # already enrolled
+        return None
+    heard = {normalize(name) for name in identify(hass, device_id)}
+    if normalize(ident.person) in heard:
+        return None
     return ident.person
 
 
-# ── registration into the identity resolver's voice tier ─────────────────────
-
-_ENROLL_COOLDOWN = 300.0        # seconds between enroll prompts for one person
-_last_enroll_fire: dict = {}
-
-
-def maybe_fire_enrollment(hass: HomeAssistant,
-                          device_id: Optional[str] = None) -> Optional[str]:
-    """If there's a labelled enrollment opportunity, fire a rate-limited
-    ``nova_voice_enroll_candidate`` event so an automation can enroll the
-    pending sample under the right person. This is the hands-free-learning
-    trigger. Returns the person if it fired, else None. Cheap; safe per turn."""
+def maybe_fire_enrollment(hass: HomeAssistant, device_id: Optional[str] = None) -> Optional[str]:
+    """Fire the enrolment event for a candidate, at most once per person per cool-down."""
     if not bool(_cfg("identity_voice_fingerprint", False)):
         return None
     if not (_cfg("voice_recognition_source", "") or "").strip():
         return None
-    if not (_cfg("voice_recognition_auto_enroll", True)):
+    if not _cfg("voice_recognition_auto_enroll", True):
         return None
     person = enrollment_candidate(hass, device_id)
     if not person:
         return None
-    now = time.time()
     key = normalize(person)
-    if now - _last_enroll_fire.get(key, 0.0) < _ENROLL_COOLDOWN:
+    now = time.time()
+    if now - _last_enroll_fire.get(key, 0) < _ENROLL_COOLDOWN:
         return None
     _last_enroll_fire[key] = now
     try:
         hass.bus.async_fire("nova_voice_enroll_candidate",
                             {"person": person, "device_id": device_id})
-        _LOGGER.info("Voice enrollment opportunity for %s", person)
+        _LOGGER.info("Voice enrolment candidate: %s", person)
     except Exception as exc:
-        _LOGGER.debug("enroll candidate fire failed: %s", exc)
+        _LOGGER.debug("Voice enrolment event failed: %s", exc)
     return person
 
 
 def register(hass: HomeAssistant) -> None:
-    """Wire this provider into identity's voice tier. Safe to call once at setup;
-    actual voting is still gated by `identity_voice_fingerprint` and a configured
-    `voice_recognition_source`."""
+    """Offer identify() to identity.py as its voice provider."""
     try:
         from . import identity
-        identity.register_voice_provider(lambda h, dev: identify(h, dev))
+
+        def _provider(h: HomeAssistant, dev: Optional[str]) -> dict[str, float]:
+            return identify(h, dev)
+
+        identity.register_voice_provider(_provider)
         _LOGGER.debug("Voice recognition provider registered")
     except Exception as exc:
-        _LOGGER.warning("Voice recognition registration failed: %s", exc)
+        _LOGGER.warning("Voice recognition provider not registered: %s", exc)
 
 
 def unregister() -> None:
-    try:
+    """Withdraw the provider at unload; failures don't matter here."""
+    with contextlib.suppress(Exception):
         from . import identity
         identity.register_voice_provider(None)
-    except Exception:
-        pass
