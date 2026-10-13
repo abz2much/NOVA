@@ -635,3 +635,15 @@ def test_there_is_no_autonomous_done_message_any_more(cc):
     # Nova never carries out an offer on its own (8.39.1), so there is
     # nothing to announce afterwards.
     assert not hasattr(cc, "_autonomous_done_message")
+
+
+async def test_a_report_of_what_nova_changed_always_reaches_the_phones(
+        cc, fake_hass, out, quiet, gate):
+    """8.45.0: the night sweep's note of what it locked or closed is pushed
+    even when sleep, quiet hours or shush hold an everyday alert."""
+    quiet["on"] = True
+    gate._STATE.mute_all = True
+    await _emit(cc, fake_hass, _act(urgency="low", type="lockdown", reports_change=True),
+                sleeping=True)
+    await _emit(cc, fake_hass, _act(urgency="low", message="other"), sleeping=True)
+    assert out.spoken == [] and [p["type"] for p in out.pushed] == ["lockdown"]

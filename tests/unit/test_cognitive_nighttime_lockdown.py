@@ -168,7 +168,7 @@ async def test_the_message_names_what_was_locked_and_closed_and_is_low_urgency(
     parts = [i18n.message("lockdown_locked", "en", names=i18n.join_names(["Front Door", "lock.back"], "en")),
              i18n.message("lockdown_closed", "en", names=i18n.join_names(["Garage"], "en"))]
     assert action == {
-        "type": "lockdown", "urgency": "low", "auto_act": True,
+        "type": "lockdown", "urgency": "low", "auto_act": True, "reports_change": True,
         "message": i18n.message("lockdown_nighttime", "en", honorific="Sir",
                                 body=i18n.join_names(parts, "en"))}
 

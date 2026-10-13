@@ -151,14 +151,10 @@ async def test_nothing_is_spoken_at_night(sweep, fake_hass, speakers, clock, jam
     assert [a for a in actions if a.get("type") == "lockdown"] == []   # not before checking
     await fake_hass.drain()
     assert speakers["spoken"] == []
-    if jammed:
-        # A failure to secure is high, so it reaches the phones at night.
-        assert [t for t, _ in speakers["pushed"]] == ["lockdown"]
-        assert "not fully secured" in speakers["pushed"][0][1]
-    else:
-        # 8.45.0: the low "secured" note held by sleep is dropped, like every
-        # everyday alert at night (the household's choice).
-        assert speakers["pushed"] == []
+    # What the sweep changed always reaches the phones (8.45.0), even the
+    # low "secured" note that sleep would otherwise drop.
+    assert [t for t, _ in speakers["pushed"]] == ["lockdown"]
+    assert ("not fully secured" in speakers["pushed"][0][1]) is jammed
 
 
 # ── the voice "secure" reply ────────────────────────────────────────────────

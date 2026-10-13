@@ -1318,6 +1318,9 @@ class SafetyManager:
                 "urgency": "high" if (failed or reopened) else "low",
                 "message": message,
                 "auto_act": True,
+                # It reports what Nova changed, so it always reaches the
+                # phones, at night too (8.45.0).
+                "reports_change": True,
             })
 
         return actions

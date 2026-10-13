@@ -84,12 +84,15 @@ async def _emit_action(hass, config, action, sleeping):
     # intruder's movement while armed away is still spoken. The core keeps
     # its own habituation above, so the gate does not count days again; its
     # habit key is the repeat label.
+    # A report of what Nova changed itself (the night sweep's locks and
+    # covers) always reaches the phones, whatever holds the speakers.
     from . import delivery
     high = urgency in ("high", "critical")
+    always = high or bool(action.get("reports_change"))
     out = await delivery.async_deliver(hass, delivery.DeliveryRequest(
         source=action_type, message=message, urgency=urgency,
         entity_id=action.get("entity_id", "") or "", category=action_type,
-        push=delivery.PUSH_ALWAYS if high else delivery.PUSH_HIGH,
+        push=delivery.PUSH_ALWAYS if always else delivery.PUSH_HIGH,
         phone_only=bool(action.get("phone_only")) and urgency != "critical",
         tts_context="sentinel", config=config, dedup_key=habit_key or "", habit_key="",
         asleep=bool(sleeping),

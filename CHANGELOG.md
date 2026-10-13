@@ -3,7 +3,8 @@
 The Observer, left-open reminders, appliance and host health alerts, and the core's alerts (intrusion, lockdown, freeze, offers and anticipation) now go out through the same delivery path as the rest since 8.44.0. Every proactive message follows shush, mutes, the Announcements switch, quiet hours, sleep and "Notifications only" in the same order, and its outcome is recorded.
 
 ### Changed
-- **Everyday alerts held at night are dropped.** A medium or low alert held by quiet hours or sleep is no longer sent to the phones. A high alert, a message you set yourself, and hazard warnings still reach the phones. This also reverses 8.44.0's push of a package delivered or mail arriving in quiet hours, and the low "house secured" note from the night sweep is no longer pushed (a lock that failed to secure still is).
+- **Everyday alerts held at night are dropped.** A medium or low alert held by quiet hours or sleep is no longer sent to the phones. A high alert, a message you set yourself, and hazard warnings still reach the phones. This also reverses 8.44.0's push of a package delivered or mail arriving in quiet hours.
+- **A report of what Nova changed always reaches the phones.** The night sweep's note of the locks and covers it secured (only with Automatic lockdown on) is pushed whatever holds the speakers, at night too.
 - **Shush, mutes and the Announcements switch now hold Observer, left-open, appliance, host health and core alerts too.** High ones still reach the phones. Critical alerts ignore every rule, as before.
 - **Quiet hours now apply to appliance, host health and left-open speech**, as they already did for the rest.
 - **Left-open reminders always reach the phones**, as before. The spoken copy now also follows the hourly limit and repeat rules. With no Sentinel speaker set up they go to the phones only.
