@@ -1,3 +1,11 @@
+## [8.49.1] — Seven small modules rewritten from scratch
+
+Step 9 of the independence plan begins. Seven small modules that were still near copies of the code Nova started from are rewritten from empty files. Each was first described in a behaviour spec with fresh tests; the new code was then written from that spec alone, without the old file. Nothing Nova does changes.
+
+### Changed
+- **Rewritten:** the indoor/outdoor classifier, the room adjacency graph, the calendar reader, the activity history lookup, the automation lock, spatial presence and the camera image backends.
+- **Proven the same:** each new module passes both its fresh tests and the old ones, which were then replaced by the fresh tests.
+
 ## [8.49.0] — Exact requests answered the same way online and offline
 
 Step 8 of the independence plan. Exact commands, status questions, "repeat that" and yes/no answers are handled by Nova itself, the same way whether the internet is up or down. Anything that needs interpretation goes to the agent, or gets an honest "I'm offline" when it can't be reached.

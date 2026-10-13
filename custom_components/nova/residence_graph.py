@@ -1,149 +1,149 @@
-"""
-Residence graph — derives room adjacency from the Residence-tab floor plan so
-the intrusion investigator can follow a plausible route from the breach point
-inward, rather than treating any two motion zones as equivalent.
+"""Room-adjacency graph derived from the Residence tab floor plan.
 
-Floor-plan rooms are stored as boxes ({name, x, y, w, h} per floor). Two rooms
-are adjacent when their boxes touch or nearly touch. Rooms are matched to Home
-Assistant areas by name/slug so motion (which we know by area) can be located on
-the plan. Everything degrades gracefully: no plan, or names that don't line up,
-just yields an empty adjacency and the caller falls back to anchoring on the
-breach area alone.
+The user draws rectangles per floor; rooms on the same floor that touch (or sit
+within a small gap of each other) are treated as neighbours. Rooms are matched
+to Home Assistant areas by slugified name, so the intrusion investigator can ask
+which areas border a breach and how many rooms away each area is. Any missing or
+mismatched data simply yields empty results.
 """
 from __future__ import annotations
 
 import json
-import logging
-from typing import Optional
+import re
+from collections import deque
+from typing import Any, Iterator, Optional
 
-_LOGGER = logging.getLogger(__name__)
+Box = tuple[str, float, float, float, float]
 
-_ADJ_GAP = 10.0   # plan units; boxes within this of touching count as adjacent
-
-
-def slug(s) -> str:
-    return "_".join(str(s or "").strip().lower().split())
+_WHITESPACE = re.compile(r"\s+")
 
 
-def _boxes(config: dict) -> dict:
-    """floor_plan_rooms -> {floor: [(name, x, y, w, h)]}. Tolerant of shapes."""
-    raw = config.get("floor_plan_rooms") or {}
+def slug(s: Any) -> str:
+    """Normalise a name: trimmed, lower-case, whitespace runs become '_'."""
+    if s is None or s == "":
+        return ""
+    return _WHITESPACE.sub("_", str(s).strip().lower())
+
+
+def _parse_room(room: Any) -> Optional[Box]:
+    """Turn a room dict into a box, or None if it is incomplete or malformed."""
+    try:
+        name = room["name"]
+        x = float(room["x"])
+        y = float(room["y"])
+        w = float(room.get("w", 0) or 0)
+        h = float(room.get("h", 0) or 0)
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return None
+    return (name, x, y, w, h)
+
+
+def _floors(config: dict) -> Iterator[list[Box]]:
+    """Yield the list of valid room boxes for each floor of the plan."""
+    raw = config.get("floor_plan_rooms")
+    if not raw:
+        return
     if isinstance(raw, str):
         try:
             raw = json.loads(raw)
-        except Exception:
-            raw = {}
-    out: dict = {}
-    for floor, fdata in (raw or {}).items():
-        rooms = fdata.get("rooms", []) if isinstance(fdata, dict) else fdata
-        boxes = []
-        for r in rooms or []:
-            try:
-                boxes.append((r["name"], float(r["x"]), float(r["y"]),
-                              float(r.get("w", 0)), float(r.get("h", 0))))
-            except Exception:
-                continue
-        out[floor] = boxes
-    return out
+        except ValueError:
+            return
+        if not raw:
+            return
+    # A non-dict plan raises AttributeError here (preserved behaviour).
+    for floor in raw.values():
+        if not floor:
+            continue
+        rooms = (floor.get("rooms") or []) if isinstance(floor, dict) else floor
+        boxes = [b for b in (_parse_room(r) for r in rooms) if b is not None]
+        yield boxes
 
 
-def _touch(b1, b2, gap: float = _ADJ_GAP) -> bool:
-    """Do two boxes overlap or sit within `gap` of touching?"""
+def _touch(b1: Box, b2: Box, gap: float = 10.0) -> bool:
+    """True when two boxes overlap or are closer than ``gap`` on both axes."""
     _, x1, y1, w1, h1 = b1
     _, x2, y2, w2, h2 = b2
-    return (x1 - gap < x2 + w2 and x1 + w1 + gap > x2 and
-            y1 - gap < y2 + h2 and y1 + h1 + gap > y2)
+    near_x = x1 < x2 + w2 + gap and x1 + w1 + gap > x2
+    near_y = y1 < y2 + h2 + gap and y1 + h1 + gap > y2
+    return near_x and near_y
 
 
-def room_adjacency(config: dict) -> dict:
-    """{room_slug: set(adjacent room_slugs)} across all floors."""
-    adj: dict = {}
-    for boxes in _boxes(config).values():
-        for i in range(len(boxes)):
-            for j in range(i + 1, len(boxes)):
-                if _touch(boxes[i], boxes[j]):
-                    a, b = slug(boxes[i][0]), slug(boxes[j][0])
-                    if a == b:
-                        continue
-                    adj.setdefault(a, set()).add(b)
-                    adj.setdefault(b, set()).add(a)
-    return adj
+def room_adjacency(config: dict) -> dict[str, set[str]]:
+    """Map each room slug to the slugs of rooms touching it on the same floor."""
+    graph: dict[str, set[str]] = {}
+    for boxes in _floors(config):
+        for i, first in enumerate(boxes):
+            for second in boxes[i + 1:]:
+                a, b = slug(first[0]), slug(second[0])
+                if a == b or not _touch(first, second):
+                    continue
+                graph.setdefault(a, set()).add(b)
+                graph.setdefault(b, set()).add(a)
+    return graph
 
 
-def _area_slug(hass, area_id: str) -> str:
-    """An HA area_id → a room slug (the area's display name slugged, else the id)."""
+def _area_slug(hass: Any, area_id: str) -> str:
+    """Slug of the area's registry name, falling back to the slugged id."""
     try:
         from homeassistant.helpers import area_registry as ar
+
         area = ar.async_get(hass).async_get_area(area_id)
-        if area and area.name:
+        if area is not None and area.name:
             return slug(area.name)
-    except Exception:
+    except Exception:  # noqa: BLE001 - registry trouble means "use the id"
         pass
     return slug(area_id)
 
 
-def _rooms_to_areas(hass, room_slugs: set) -> set:
-    """Map a set of room slugs back to HA area_ids."""
-    result: set = set()
-    if not room_slugs:
-        return result
-    try:
-        from homeassistant.helpers import area_registry as ar
-        for area in ar.async_get(hass).async_list_areas():
-            if slug(area.name) in room_slugs:
-                result.add(area.id)
-    except Exception:
-        pass
-    return result
+def _list_areas(hass: Any) -> list[Any]:
+    from homeassistant.helpers import area_registry as ar
+
+    return list(ar.async_get(hass).async_list_areas())
 
 
-def adjacent_areas(hass, config: dict, breach_area: Optional[str]) -> set:
-    """HA area_ids adjacent to the breach area per the floor plan. Best-effort;
-    empty when there's no plan or the names don't map."""
+def adjacent_areas(hass: Any, config: dict, breach_area: Optional[str]) -> set[str]:
+    """HA area ids whose rooms border the breach area's room."""
     if not breach_area:
         return set()
-    adj = room_adjacency(config)
-    if not adj:
+    graph = room_adjacency(config)
+    if not graph:
         return set()
-    neighbors = adj.get(_area_slug(hass, breach_area), set())
-    return _rooms_to_areas(hass, neighbors)
+    neighbours = graph.get(_area_slug(hass, breach_area), set())
+    if not neighbours:
+        return set()
+    try:
+        return {a.id for a in _list_areas(hass) if slug(a.name) in neighbours}
+    except Exception:  # noqa: BLE001
+        return set()
 
 
-def hops_from_breach(hass, config: dict, breach_area: Optional[str]) -> dict:
-    """BFS distance (in rooms) of every HA area from the breach area, per the
-    floor plan (v6.74.0). {area_id: hops} with the breach at 0, its neighbors at
-    1, their neighbors at 2, and so on. This is what lets intrusion detection
-    trace motion propagating INWARD from the point of entry (a real intruder
-    moves entry → deeper rooms) rather than confirming on motion that merely
-    lingers at the entry. Empty when there's no plan or the breach doesn't map."""
+def hops_from_breach(hass: Any, config: dict, breach_area: Optional[str]) -> dict[str, int]:
+    """HA area id -> number of rooms between it and the breach area's room."""
     if not breach_area:
         return {}
-    adj = room_adjacency(config)
-    if not adj:
+    graph = room_adjacency(config)
+    if not graph:
         return {}
     start = _area_slug(hass, breach_area)
-    if start not in adj and not any(start in v for v in adj.values()):
-        # breach room isn't in the graph — can't compute depth
+    if start not in graph and not any(start in n for n in graph.values()):
         return {}
-    # BFS over room slugs
-    depth: dict = {start: 0}
-    frontier = [start]
-    while frontier:
-        nxt = []
-        for room in frontier:
-            for neigh in adj.get(room, set()):
-                if neigh not in depth:
-                    depth[neigh] = depth[room] + 1
-                    nxt.append(neigh)
-        frontier = nxt
-    # map room-slug depths back to HA area_ids
-    out: dict = {}
+
+    distance = {start: 0}
+    queue = deque([start])
+    while queue:
+        current = queue.popleft()
+        for nxt in graph.get(current, ()):
+            if nxt not in distance:
+                distance[nxt] = distance[current] + 1
+                queue.append(nxt)
+
     try:
-        from homeassistant.helpers import area_registry as ar
-        for area in ar.async_get(hass).async_list_areas():
-            s = slug(area.name)
-            if s in depth:
-                out[area.id] = depth[s]
-    except Exception:
-        pass
-    return out
+        areas = _list_areas(hass)
+    except Exception:  # noqa: BLE001
+        return {}
+    result: dict[str, int] = {}
+    for area in areas:
+        key = slug(area.name)
+        if key in distance:
+            result[area.id] = distance[key]
+    return result
