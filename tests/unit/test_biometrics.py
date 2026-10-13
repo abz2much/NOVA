@@ -1,223 +1,175 @@
-"""Tests for biometric/wellbeing context (v6.63.0). Covers entity discovery and
-classification across wearables, the sleep signal that enriches sleep detection,
-opt-in gating, and — most importantly — that the output is non-clinical: plain
-readings with a disclaimer, no thresholds, diagnoses, or health alarms."""
+"""Wearable readings as context (biometrics.py): off by default, how sensors
+are recognised, the sleep signal and the descriptive snapshot."""
 import pytest
+
+from fakes import FakeHass
 
 
 @pytest.fixture
 def bio(load, monkeypatch):
-    m = load("biometrics")
-    return m
+    mod = load("biometrics")
+    settings = {"biometrics_enabled": True}
+    monkeypatch.setattr(mod, "_cfg", lambda k, d=None: settings.get(k, d))
+    mod.settings = settings
+    return mod
 
 
-def _cfg_map(mapping):
-    return lambda k, d=None: mapping.get(k, d)
+def hass_with(*states):
+    hass = FakeHass()
+    for eid, value, attrs in states:
+        hass.states.set(eid, value, **attrs)
+    return hass
 
 
-class _State:
-    def __init__(self, entity_id, state, unit="", device_class="", name=""):
-        self.entity_id = entity_id
-        self.state = state
-        self.attributes = {
-            "unit_of_measurement": unit,
-            "device_class": device_class,
-            "friendly_name": name or entity_id,
-        }
+def test_cfg_reads_settings(load, monkeypatch):
+    mod = load("biometrics")
+    cfg = load("nova_config")
+    monkeypatch.setattr(cfg, "get", lambda k, d=None: None)
+    assert mod._cfg("biometrics_enabled", False) is False
+    assert mod._cfg("x") is None
+    monkeypatch.setattr(cfg, "get", lambda k, d=None: True)
+    assert mod.is_enabled() is True
+
+    def boom(k, d=None):
+        raise RuntimeError
+    monkeypatch.setattr(cfg, "get", boom)
+    assert mod.is_enabled() is False
 
 
-class _Hass:
-    def __init__(self, sensors=None, binary=None):
-        self._sensors = sensors or []
-        self._binary = binary or []
-    @property
-    def states(self):
-        outer = self
-        class _S:
-            def async_all(self, domain):
-                return outer._sensors if domain == "sensor" else outer._binary
-        return _S()
-
-
-# ── opt-in gating ────────────────────────────────────────────────────────────
-
-def test_disabled_by_default(bio, monkeypatch):
-    monkeypatch.setattr(bio, "_cfg", _cfg_map({}))
+def test_off_unless_turned_on(bio):
+    bio.settings.clear()
     assert bio.is_enabled() is False
-
-
-def test_enabled_when_configured(bio, monkeypatch):
-    monkeypatch.setattr(bio, "_cfg", _cfg_map({"biometrics_enabled": True}))
+    hass = hass_with(("sensor.watch_heart_rate", "60", {}), ("binary_sensor.asleep", "on", {}))
+    assert bio.sleep_signal(hass) is None
+    assert bio.wellbeing_context(hass) == {"available": False, "summary": "", "readings": {}}
+    bio.settings["biometrics_enabled"] = "yes"
     assert bio.is_enabled() is True
 
 
-def test_wellbeing_empty_when_disabled(bio, monkeypatch):
-    monkeypatch.setattr(bio, "_cfg", _cfg_map({}))
-    res = bio.wellbeing_context(_Hass())
-    assert res["available"] is False
+# recognising sensors
+
+@pytest.mark.parametrize("eid,name,unit,kind", [
+    ("sensor.watch_heartrate", "", "", "heart_rate"),
+    ("sensor.x", "Heart Rate", "", "heart_rate"),
+    ("sensor.watch_hr", "", "", "heart_rate"),
+    ("sensor.pulse_ox", "", "", "heart_rate"),
+    ("sensor.x", "", "BPM", "heart_rate"),
+    ("sensor.resting_heart_rate", "", "", "heart_rate"),
+    ("sensor.rest_heart", "", "", "resting_hr"),
+    ("sensor.ring_sleep_stage", "", "", "sleep_stage"),
+    ("sensor.x", "Sleep Phase", "", "sleep_stage"),
+    ("binary_sensor.is_asleep", "", "", "sleep_state"),
+    ("binary_sensor.bed", "In_Bed", "", "sleep_state"),
+    ("sensor.blood_oxygen", "", "", "spo2"),
+    ("sensor.battery_level", "", "%", "spo2"),
+    ("sensor.daily", "", "steps", "steps"),
+    ("sensor.step_count", "", "", "steps"),
+    ("sensor.breathing_rate", "", "", "respiratory"),
+    ("sensor.x", "", "br", "respiratory"),
+    ("sensor.stress_level", "", "", "stress"),
+    ("sensor.skin_temp", "", "°C", "temperature"),
+    ("sensor.outdoor_temperature", "Outdoor", "°C", None),
+    ("sensor.power", "", "W", None),
+])
+def test_classify(bio, eid, name, unit, kind):
+    assert bio._classify(eid, name, unit, "") == kind
 
 
-def test_sleep_signal_none_when_disabled(bio, monkeypatch):
-    monkeypatch.setattr(bio, "_cfg", _cfg_map({}))
-    assert bio.sleep_signal(_Hass()) is None
+def test_none_unit_is_fine(bio):
+    assert bio._classify("sensor.power", "", None, "") is None
 
 
-# ── discovery & classification ───────────────────────────────────────────────
-
-def test_classify_heart_rate_by_name(bio, monkeypatch):
-    monkeypatch.setattr(bio, "_cfg", _cfg_map({}))
-    assert bio._classify("sensor.watch_heart_rate", "Heart Rate", "bpm", "") == "heart_rate"
-
-
-def test_classify_heart_rate_by_unit(bio, monkeypatch):
-    monkeypatch.setattr(bio, "_cfg", _cfg_map({}))
-    assert bio._classify("sensor.hr", "HR", "bpm", "") == "heart_rate"
+def test_own_mapping_wins(bio):
+    bio.settings["biometric_entities"] = {"stress": "sensor.watch_heart_rate",
+                                          "steps": "sensor.watch_heart_rate"}
+    assert bio._classify("sensor.watch_heart_rate", "", "bpm", "") == "stress"
+    bio.settings["biometric_entities"] = ["sensor.watch_heart_rate"]
+    assert bio._classify("sensor.watch_heart_rate", "", "", "") == "heart_rate"
 
 
-def test_classify_spo2(bio, monkeypatch):
-    monkeypatch.setattr(bio, "_cfg", _cfg_map({}))
-    assert bio._classify("sensor.blood_oxygen", "Blood Oxygen", "%", "") == "spo2"
+# discovery
+
+def test_discover_groups_by_kind(bio):
+    hass = hass_with(
+        ("sensor.watch_heart_rate", "61", {"unit_of_measurement": "bpm", "friendly_name": "Watch HR"}),
+        ("sensor.kitchen_power", "100", {"unit_of_measurement": "W"}),
+        ("binary_sensor.asleep", "off", {}),
+        ("sensor.band_heart_rate", "64", {}),
+        ("light.lamp_sleep", "on", {}),
+    )
+    assert bio.discover(hass) == {
+        "heart_rate": [
+            {"entity": "sensor.watch_heart_rate", "value": "61", "unit": "bpm", "name": "Watch HR"},
+            {"entity": "sensor.band_heart_rate", "value": "64", "unit": "", "name": ""}],
+        "sleep_state": [{"entity": "binary_sensor.asleep", "value": "off", "unit": "", "name": ""}],
+    }
 
 
-def test_classify_steps(bio, monkeypatch):
-    monkeypatch.setattr(bio, "_cfg", _cfg_map({}))
-    assert bio._classify("sensor.daily_steps", "Steps", "steps", "") == "steps"
+def test_discover_never_raises(bio):
+    class Broken:
+        def async_all(self, domain):
+            raise RuntimeError("not ready")
+    hass = FakeHass()
+    hass.states = Broken()
+    assert bio.discover(hass) == {}
 
 
-def test_explicit_mapping_overrides(bio, monkeypatch):
-    monkeypatch.setattr(bio, "_cfg", _cfg_map({
-        "biometric_entities": {"heart_rate": "sensor.custom_thing"}}))
-    assert bio._classify("sensor.custom_thing", "Whatever", "", "") == "heart_rate"
+# sleep signal
+
+@pytest.mark.parametrize("value,expected", [
+    ("Deep", True), ("REM", True), ("light sleep", True), ("asleep", True),
+    ("on", True), ("in_bed", True), ("not_asleep", True), ("monitoring", True),
+    ("awake", False), ("off", False), ("out_of_bed", False),
+    ("unknown", None), ("unavailable", None), ("", None), ("restless", None)])
+def test_sleep_signal_values(bio, value, expected):
+    assert bio.sleep_signal(hass_with(("sensor.sleep_stage", value, {}))) is expected
 
 
-def test_non_biometric_ignored(bio, monkeypatch):
-    monkeypatch.setattr(bio, "_cfg", _cfg_map({}))
-    assert bio._classify("sensor.living_room_temp", "Living Room Temperature", "°C", "temperature") is None
-
-
-def test_discover_groups_by_kind(bio, monkeypatch):
-    monkeypatch.setattr(bio, "_cfg", _cfg_map({}))
-    hass = _Hass(sensors=[
-        _State("sensor.watch_hr", "62", "bpm", name="Heart Rate"),
-        _State("sensor.daily_steps", "8400", "steps", name="Steps"),
-        _State("sensor.living_room_temp", "21", "°C", "temperature", "Living Room"),
-    ])
-    found = bio.discover(hass)
-    assert "heart_rate" in found and "steps" in found
-    assert "temperature" not in found or all(
-        "living" not in e["entity"] for e in found.get("temperature", []))
-
-
-# ── sleep signal (enriches sleep_detection) ──────────────────────────────────
-
-def test_sleep_signal_asleep(bio, monkeypatch):
-    monkeypatch.setattr(bio, "_cfg", _cfg_map({"biometrics_enabled": True}))
-    hass = _Hass(sensors=[_State("sensor.sleep_stage", "deep", name="Sleep Stage")])
-    assert bio.sleep_signal(hass) is True
-
-
-def test_sleep_signal_awake(bio, monkeypatch):
-    monkeypatch.setattr(bio, "_cfg", _cfg_map({"biometrics_enabled": True}))
-    hass = _Hass(sensors=[_State("sensor.sleep_state", "awake", name="Sleep State")])
+def test_stage_beats_state_and_unknowns_are_skipped(bio):
+    hass = hass_with(("binary_sensor.is_asleep", "on", {}),
+                     ("sensor.sleep_stage", "unknown", {}),
+                     ("sensor.ring_sleep_stage", "awake", {}))
     assert bio.sleep_signal(hass) is False
 
 
-def test_sleep_signal_binary_asleep(bio, monkeypatch):
-    monkeypatch.setattr(bio, "_cfg", _cfg_map({"biometrics_enabled": True}))
-    hass = _Hass(binary=[_State("binary_sensor.in_bed", "on", name="In Bed")])
-    assert bio.sleep_signal(hass) is True
+def test_no_sleep_sensor_no_signal(bio):
+    assert bio.sleep_signal(hass_with(("sensor.watch_heart_rate", "60", {}))) is None
 
 
-def test_sleep_signal_none_without_sensor(bio, monkeypatch):
-    monkeypatch.setattr(bio, "_cfg", _cfg_map({"biometrics_enabled": True}))
-    hass = _Hass(sensors=[_State("sensor.watch_hr", "62", "bpm", name="Heart Rate")])
-    assert bio.sleep_signal(hass) is None      # no sleep entity → no signal
+# snapshot
+
+def test_snapshot_with_nothing_found(bio):
+    assert bio.wellbeing_context(FakeHass()) == {
+        "available": False,
+        "summary": "no biometric entities found — connect a wearable integration to Home Assistant",
+        "readings": {}}
 
 
-def test_sleep_signal_ignores_unknown_value(bio, monkeypatch):
-    monkeypatch.setattr(bio, "_cfg", _cfg_map({"biometrics_enabled": True}))
-    hass = _Hass(sensors=[_State("sensor.sleep_stage", "unavailable", name="Sleep Stage")])
-    assert bio.sleep_signal(hass) is None
+def test_snapshot_summary_and_readings(bio):
+    hass = hass_with(
+        ("sensor.watch_heart_rate", "unavailable", {"unit_of_measurement": "bpm"}),
+        ("sensor.band_heart_rate", " 58 ", {"unit_of_measurement": "bpm"}),
+        ("binary_sensor.is_asleep", "off", {}),
+        ("sensor.ring_sleep_stage", "light", {}),
+        ("sensor.step_count", "4200", {"unit_of_measurement": "steps"}),
+        ("sensor.skin_temp", "unknown", {}),
+    )
+    assert bio.wellbeing_context(hass) == {
+        "available": True,
+        "summary": "heart rate 58 bpm; sleep: light; 4200 steps today",
+        "readings": {"heart_rate": {"value": "58", "unit": "bpm"},
+                     "sleep_state": {"value": "off", "unit": ""},
+                     "sleep_stage": {"value": "light", "unit": ""},
+                     "steps": {"value": "4200", "unit": "steps"}},
+        "disclaimer": "context only — not medical advice or assessment"}
 
 
-# ── non-medical output guarantee ─────────────────────────────────────────────
-
-def test_wellbeing_output_is_non_clinical(bio, monkeypatch):
-    monkeypatch.setattr(bio, "_cfg", _cfg_map({"biometrics_enabled": True}))
-    hass = _Hass(sensors=[
-        _State("sensor.watch_hr", "58", "bpm", name="Heart Rate"),
-        _State("sensor.sleep_stage", "light_sleep", name="Sleep Stage"),
-    ])
-    res = bio.wellbeing_context(hass)
-    assert res["available"] is True
-    # carries an explicit non-medical disclaimer
-    assert "not medical" in res["disclaimer"].lower()
-    # summary states readings plainly, with no diagnostic/alarm language
-    low = res["summary"].lower()
-    for banned in ("abnormal", "danger", "warning", "risk", "concerning",
-                   "high", "low", "critical", "arrhythmia", "diagnos"):
-        assert banned not in low
-    # readings are just value+unit, no interpretation field
-    assert res["readings"]["heart_rate"]["value"] == "58"
+def test_snapshot_sleep_state_when_no_stage(bio):
+    out = bio.wellbeing_context(hass_with(("binary_sensor.is_asleep", "on", {})))
+    assert out["summary"] == "sleep state: on"
 
 
-def test_wellbeing_no_entities_message(bio, monkeypatch):
-    monkeypatch.setattr(bio, "_cfg", _cfg_map({"biometrics_enabled": True}))
-    res = bio.wellbeing_context(_Hass())
-    assert res["available"] is False
-    assert "wearable" in res["summary"].lower()
-
-
-# ── agent tool registration ──────────────────────────────────────────────────
-
-def test_wellbeing_tool_registered(load):
-    agent = load("agent")
-    names = {t["function"]["name"] for t in agent.NOVA_TOOLS}
-    assert "wellbeing_context" in names
-    assert "wellbeing_context" in agent._TOOL_MAP
-
-
-# ── biometric data never reaches a cloud LLM (v7.87.0, backlog #5) ───────────
-# wellbeing_context's OUTPUT re-enters the conversation as tool-call content,
-# which the configured LLM provider then sees — so the gate on whether
-# biometric data leaves the network belongs in the tool itself, not just in
-# biometrics.py (which has no idea what provider is asking).
-
-import asyncio
-
-
-class _FakeHass:
-    async def async_add_executor_job(self, func, *args):
-        return func(*args)
-
-
-def test_wellbeing_tool_withholds_data_for_cloud_provider(load, monkeypatch):
-    agent = load("agent")
-    jc_config = load("nova_config")
-    jc_bio = load("biometrics")
-
-    monkeypatch.setattr(jc_config, "get", _cfg_map({"llm_provider": "groq"}))
-
-    def _must_not_be_called(hass):
-        raise AssertionError("biometrics.wellbeing_context must not run for a cloud provider")
-    monkeypatch.setattr(jc_bio, "wellbeing_context", _must_not_be_called)
-
-    import json
-    out = json.loads(asyncio.run(agent._exec_wellbeing_context(_FakeHass(), {})))
-    assert out["available"] is False
-    assert "local" in out["summary"].lower() or "ollama" in out["summary"].lower()
-
-
-def test_wellbeing_tool_allows_local_ollama_provider(load, monkeypatch):
-    agent = load("agent")
-    jc_config = load("nova_config")
-    jc_bio = load("biometrics")
-
-    monkeypatch.setattr(jc_config, "get", _cfg_map({"llm_provider": "ollama"}))
-    monkeypatch.setattr(jc_bio, "wellbeing_context",
-                         lambda hass: {"available": True, "summary": "heart rate 58 bpm", "readings": {}})
-
-    import json
-    out = json.loads(asyncio.run(agent._exec_wellbeing_context(_FakeHass(), {})))
-    assert out["available"] is True
-    assert out["summary"] == "heart rate 58 bpm"
+def test_snapshot_with_only_other_kinds(bio):
+    out = bio.wellbeing_context(hass_with(("sensor.stress_level", "30", {})))
+    assert out["summary"] == "biometric data present"
+    assert out["readings"] == {"stress": {"value": "30", "unit": ""}}

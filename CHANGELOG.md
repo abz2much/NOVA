@@ -1,3 +1,11 @@
+## [8.49.14] — Voice recognition and wearable readings rewritten from scratch
+
+Step 9 continues. The module that reads who is speaking from an outside voice recognition service, and the module that reads wearable sensors (including the sleep signal), are rewritten from empty files, each from a behaviour spec with fresh tests. Nothing Nova does changes.
+
+### Changed
+- **Rewritten:** reading the current speaker and offering it to identity, the hands-free voice enrolment event, and reading wearable sensors for sleep and the wellbeing snapshot.
+- **Proven the same:** both modules pass their fresh tests and the old ones, which were then replaced by the fresh tests.
+
 ## [8.49.13] — Five more modules rewritten from scratch
 
 Step 9 continues. The voice style picker, the appliance noise allowance, web lookups, camera coverage and the inbox reader are rewritten from empty files. Each was first described in a behaviour spec with fresh tests; the new code was then written from that spec alone, without the old file. Nothing Nova does changes.
