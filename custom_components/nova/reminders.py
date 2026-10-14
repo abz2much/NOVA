@@ -1,36 +1,61 @@
-"""
-Nova — Context-aware reminders.
+"""Reminders the person sets ("remind me at 9 to put the bins out").
 
-Unlike phone alarms, Nova reminders:
-  - Check presence before speaking (silent if nobody's home)
-  - Respect the household's quiet hours (wait until they end, by default)
-  - Can be acknowledged ("got it, Nova") to self-silence
-  - Persist across HA restarts (stored in SQLite)
+Reminders live in SQLite and survive restarts. A watcher looks for due
+ones every 30 seconds. A due reminder waits out the household's quiet
+hours (unless it opts out) and, when it needs someone home, waits until
+someone is. It then goes to the one proactive delivery path, is marked
+fired, and moves on to its next time if it repeats. Reminders can be
+acknowledged ("got it, Nova") to self-silence.
+
+The ``nova.add_reminder`` service handler parses the time, stores the
+reminder and confirms it out loud.
 """
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
 from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.util import dt as dt_util
-from datetime import timedelta
 
+from . import paths
 from .persistence import sqlite as _store
 from .presence import get_presence_summary
 from .tts_helper import async_announce
-from . import paths
 
 _LOGGER = logging.getLogger(__name__)
 
-DB_PATH: Optional[Path] = None  # override; None resolves via paths.py
+# Tests point this at a temporary file; None means the usual location.
+DB_PATH: Optional[Path] = None
+
+_TICK = timedelta(seconds=30)
+_STEPS = {
+    "daily": timedelta(days=1),
+    "weekly": timedelta(days=7),
+    "hourly": timedelta(hours=1),
+}
+
+_INSERT = (
+    "INSERT INTO reminders "
+    "(created, label, trigger_at, repeat, require_home, respect_quiet) "
+    "VALUES (?, ?, ?, ?, ?, ?)"
+)
+_SELECT_DUE = (
+    "SELECT * FROM reminders "
+    "WHERE trigger_at <= ? AND acknowledged = 0 "
+    "AND (last_fired IS NULL OR last_fired < trigger_at)"
+)
 
 
-def _db_path() -> Path:
-    return DB_PATH or Path(paths.nova_path("reminders.db"))
+# ── store ────────────────────────────────────────────────────────────────────
+
+def _db_path():
+    if DB_PATH:
+        return DB_PATH
+    return Path(paths.nova_path("reminders.db"))
 
 
 def _connect():
@@ -41,202 +66,156 @@ def _connect():
 
 
 def _now_local() -> datetime:
-    """Naive local 'now', using Home Assistant's configured timezone rather
-    than the stdlib's bare datetime.now() (which reads the host/container
-    system timezone — often UTC on HAOS/Docker regardless of what timezone
-    the user actually configured). trigger_at is stored as a plain local ISO
-    string typed by the user or the agent (e.g. "2026-04-17T21:00:00", no
-    offset), so every comparison against it needs to use the same clock the
-    user meant, not whatever timezone the container happens to boot in."""
+    """Naive local time in Home Assistant's configured timezone."""
     return dt_util.as_local(dt_util.utcnow()).replace(tzinfo=None)
 
 
-def add_reminder(
-    label: str,
-    trigger_at: datetime,
-    repeat: Optional[str] = None,
-    require_home: bool = True,
-    respect_quiet: bool = True,
-) -> int:
-    """Insert a reminder. Returns the new row's id."""
+def add_reminder(label: str, trigger_at: datetime, repeat: Optional[str] = None,
+                 require_home: bool = True, respect_quiet: bool = True) -> int:
+    """Store one reminder; its id, or -1 when it could not be stored."""
     try:
+        created = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
         with _connect() as conn:
-            cur = conn.execute(
-                """INSERT INTO reminders (created, label, trigger_at, repeat,
-                                          require_home, respect_quiet)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (datetime.now(timezone.utc).replace(tzinfo=None).isoformat(), label, trigger_at.isoformat(),
-                 repeat, 1 if require_home else 0, 1 if respect_quiet else 0),
-            )
-            return cur.lastrowid
-    except Exception as exc:
-        _LOGGER.warning("Nova: reminder insert failed: %s", exc)
+            cur = conn.execute(_INSERT, (
+                created, label, trigger_at.isoformat(), repeat,
+                1 if require_home else 0, 1 if respect_quiet else 0,
+            ))
+            return int(cur.lastrowid or 0)
+    except Exception as err:
+        _LOGGER.warning("Could not store reminder %r: %s", label, err)
         return -1
 
 
 def get_due_reminders(now: Optional[datetime] = None) -> list[dict]:
-    """Return all reminders whose trigger time has passed and not yet fired."""
-    now = now or _now_local()
+    """Every reminder whose time has come and that has not fired since."""
+    if now is None:
+        now = _now_local()
     try:
         with _connect() as conn:
-            rows = conn.execute(
-                """SELECT * FROM reminders
-                   WHERE trigger_at <= ?
-                     AND acknowledged = 0
-                     AND (last_fired IS NULL OR last_fired < trigger_at)""",
-                (now.isoformat(),),
-            ).fetchall()
-        return [dict(r) for r in rows]
-    except Exception as exc:
-        _LOGGER.warning("Nova: reminder read error: %s", exc)
+            return [dict(row) for row in conn.execute(_SELECT_DUE, (now.isoformat(),))]
+    except Exception as err:
+        _LOGGER.warning("Could not read due reminders: %s", err)
         return []
 
 
-def mark_fired(reminder_id: int):
+def mark_fired(reminder_id: int) -> None:
     try:
         with _connect() as conn:
-            conn.execute(
-                "UPDATE reminders SET last_fired = ? WHERE id = ?",
-                (_now_local().isoformat(), reminder_id),
-            )
-    except Exception as exc:
-        _LOGGER.debug("Nova: mark_fired error: %s", exc)
+            conn.execute("UPDATE reminders SET last_fired = ? WHERE id = ?",
+                         (_now_local().isoformat(), reminder_id))
+    except Exception as err:
+        _LOGGER.debug("Could not mark reminder %s fired: %s", reminder_id, err)
 
 
 def _advance_repeating(reminder: dict) -> None:
-    """If a reminder has 'repeat', advance its trigger_at to the next occurrence."""
-    repeat = reminder.get("repeat")
-    if not repeat:
-        return
+    """Move a repeating reminder one interval past its previous time."""
     try:
-        current = datetime.fromisoformat(reminder["trigger_at"])
-        if repeat == "daily":
-            next_time = current + timedelta(days=1)
-        elif repeat == "weekly":
-            next_time = current + timedelta(days=7)
-        elif repeat == "hourly":
-            next_time = current + timedelta(hours=1)
-        else:
+        step = reminder.get("repeat")
+        if not step:
+            return
+        previous = datetime.fromisoformat(reminder["trigger_at"])
+        delta = _STEPS.get(step)
+        if delta is None:
             return
         with _connect() as conn:
             conn.execute(
                 "UPDATE reminders SET trigger_at = ?, last_fired = NULL WHERE id = ?",
-                (next_time.isoformat(), reminder["id"]),
-            )
-    except Exception as exc:
-        _LOGGER.debug("Nova: advance_repeating error: %s", exc)
+                ((previous + delta).isoformat(), reminder["id"]))
+    except Exception as err:
+        _LOGGER.debug("Could not advance reminder %s: %s", reminder.get("id"), err)
+
+
+# ── watcher ──────────────────────────────────────────────────────────────────
+
+def _reminder_text(honorific, label) -> str:
+    if honorific:
+        return f"{honorific}, reminder: {label}."
+    return f"Reminder: {label}."
 
 
 class ReminderWatcher:
-    """Periodic task that fires due reminders via TTS."""
+    """Checks for due reminders on a 30-second timer and delivers them."""
 
-    def __init__(
-        self,
-        hass: HomeAssistant,
-        honorific_getter,
-        tts_getter,
-        speakers_getter,
-    ):
-        self.hass = hass
-        self._honorific_getter = honorific_getter
-        self._tts_getter = tts_getter
-        self._speakers_getter = speakers_getter
+    def __init__(self, hass: HomeAssistant, honorific_getter, tts_getter,
+                 speakers_getter) -> None:
         self._unsub = None
+        self._speakers_getter = speakers_getter
+        self._tts_getter = tts_getter
+        self._honorific_getter = honorific_getter
+        self.hass = hass
 
     async def async_start(self) -> None:
-        self._unsub = async_track_time_interval(
-            self.hass, self._check, timedelta(seconds=30)
-        )
-        _LOGGER.info("Nova reminders active.")
+        self._unsub = async_track_time_interval(self.hass, self._check, _TICK)
+        _LOGGER.info("Reminder watcher started")
 
     async def async_stop(self) -> None:
-        if self._unsub:
-            self._unsub()
-            self._unsub = None
+        unsub, self._unsub = self._unsub, None
+        if unsub:
+            unsub()
 
     @callback
     def _check(self, now) -> None:
         self.hass.async_create_task(self._check_async())
 
     async def _check_async(self) -> None:
-        due = await self.hass.async_add_executor_job(get_due_reminders)
+        hass = self.hass
+        due = await hass.async_add_executor_job(get_due_reminders)
         if not due:
             return
-
         honorific = self._honorific_getter()
         tts_entity = self._tts_getter()
         speakers = self._speakers_getter()
-
-        presence = get_presence_summary(self.hass)
+        presence = get_presence_summary(hass)
 
         from . import delivery
+
         for reminder in due:
-            # Wait out the household's quiet hours (8.44.0: the one setting,
-            # no longer a fixed 22:00 to 07:00 of its own).
-            if reminder.get("respect_quiet") and delivery.in_quiet_hours(self.hass):
-                _LOGGER.debug("Nova reminder '%s' deferred (quiet hours)", reminder["label"])
+            respect_quiet = reminder.get("respect_quiet")
+            if respect_quiet and delivery.in_quiet_hours(hass):
+                _LOGGER.debug("Reminder %s held for quiet hours", reminder.get("id"))
                 continue
-            # Skip if require_home and nobody's home
             if reminder.get("require_home") and not presence.get("anyone_home"):
-                _LOGGER.debug("Nova reminder '%s' deferred (nobody home)", reminder["label"])
+                _LOGGER.debug("Reminder %s held until someone is home", reminder.get("id"))
                 continue
-
-            # honorific may be "" once nobody specific is home to address (see
-            # honorific.py) — kept as a plain lead-in (not persona.lead_in(),
-            # which titlecases the honorific and would change this site's
-            # existing casing) with "Reminder" capitalized only when it's
-            # opening the sentence on its own.
-            if honorific:
-                text = f"{honorific}, reminder: {reminder['label']}."
-            else:
-                text = f"Reminder: {reminder['label']}."
-            # The person set this reminder, so shush and the Announcements
-            # switch never swallow it; with no speaker, or "Notifications
-            # only" on, it goes to the phones (delivery.py).
-            await delivery.async_deliver(self.hass, delivery.DeliveryRequest(
-                source="reminder", message=text, category="reminder",
-                requested_by_user=True, quiet_ok=not reminder.get("respect_quiet"),
-                speakers=tuple(speakers or ()), tts_entity=tts_entity or "",
-                tts_context="reminder"))
-            await self.hass.async_add_executor_job(mark_fired, reminder["id"])
-            await self.hass.async_add_executor_job(_advance_repeating, reminder)
+            request = delivery.DeliveryRequest(
+                source="reminder",
+                message=_reminder_text(honorific, reminder["label"]),
+                category="reminder",
+                requested_by_user=True,
+                quiet_ok=not respect_quiet,
+                speakers=tuple(speakers or ()),
+                tts_entity=tts_entity or "",
+                tts_context="reminder",
+            )
+            await delivery.async_deliver(hass, request)
+            await hass.async_add_executor_job(mark_fired, reminder["id"])
+            await hass.async_add_executor_job(_advance_repeating, reminder)
 
 
-# Service handlers
+# ── service ──────────────────────────────────────────────────────────────────
 
-async def async_add_reminder_service(
-    hass: HomeAssistant,
-    call: ServiceCall,
-    honorific: str,
-    tts_entity: str | None,
-    speakers: list[str],
-) -> dict:
-    """Service: nova.add_reminder"""
-    label = call.data["label"]
-    trigger_str = call.data["trigger_at"]
-    repeat = call.data.get("repeat")
-    require_home = call.data.get("require_home", True)
-    respect_quiet = call.data.get("respect_quiet", True)
+async def async_add_reminder_service(hass: HomeAssistant, call: ServiceCall,
+                                     honorific: str, tts_entity: str | None,
+                                     speakers: list[str]) -> dict:
+    """The nova.add_reminder handler."""
+    data = call.data
+    label = data["label"]
+    raw_time = data["trigger_at"]
+    repeat = data.get("repeat")
+    require_home = data.get("require_home", True)
+    respect_quiet = data.get("respect_quiet", True)
 
     try:
-        trigger_at = datetime.fromisoformat(trigger_str)
+        trigger_at = datetime.fromisoformat(raw_time)
     except ValueError:
         return {"success": False, "error": "invalid_datetime"}
 
     rid = await hass.async_add_executor_job(
-        add_reminder, label, trigger_at, repeat, require_home, respect_quiet
-    )
+        add_reminder, label, trigger_at, repeat, require_home, respect_quiet)
     if rid < 0:
         return {"success": False, "error": "db_error"}
 
-    # honorific may be "" once nobody specific is home to address (see
-    # honorific.py) — addr collapses the trailing ", {honorific}" to
-    # nothing rather than a dangling comma.
     addr = f", {honorific}" if honorific else ""
-    await async_announce(
-        hass,
-        f"Reminder saved{addr}. I'll let you know.",
-        tts_entity, speakers,
-        context="reminder",
-    )
+    await async_announce(hass, f"Reminder saved{addr}. I'll let you know.",
+                         tts_entity, speakers, context="reminder")
     return {"success": True, "reminder_id": rid}

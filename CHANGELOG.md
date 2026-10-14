@@ -1,3 +1,11 @@
+## [8.49.20] — Persona, presence and reminders rewritten from scratch
+
+Step 9 continues with the people-facing user features. How Nova phrases what it says, the summary of who is home and reminders are rewritten from empty files, each from a behaviour spec with fresh tests. Nothing Nova does changes: every phrase Nova uses is the same, and reminders still go through the household delivery rules.
+
+### Changed
+- **Rewritten:** Nova's phrasing and banter levels, the who-is-home summary and the reminders watcher and service.
+- **Proven the same:** each new module passes both its fresh tests and the old ones, which were then replaced by the fresh tests.
+
 ## [8.49.19] — Six user features rewritten from scratch
 
 Step 9 continues with the user features. Follow-ups, travel times, goals, the conversation summary, the home state summary the agent reads and continued conversation are rewritten from empty files, each from a behaviour spec with fresh tests. Nothing Nova does changes.
