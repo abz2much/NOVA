@@ -1,172 +1,166 @@
 """
-Nova — Morning / on-demand briefing.
+Nova — the nova.briefing service.
 
-Gathers context from around the house and produces a Nova-style spoken
-briefing. Respects the time (good morning / good afternoon / good evening)
-and includes:
-  - Time + weather (if weather.* entity exists)
-  - Who's home (if person.* entities exist)
-  - Overnight sentinel events (last N hours)
-  - Open doors/windows right now
-  - Calendar events today (if calendar.* entity exists)
-  - Unusual energy usage
+Collects what is going on in the home (the date and time, weather, who is in
+and out, recent sentinel events, anything open or unlocked, today's calendar,
+heavy power use, nearby hazards and camera sightings), asks the language
+model to turn it into a short spoken briefing, and delivers it. When the
+model says nothing, or says something the collected facts do not support,
+Nova reads the facts out plainly instead.
 """
 from __future__ import annotations
 
 import logging
 import re
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Optional
 
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.util import dt as dt_util
 
-from .const import BRIEFING_GROUNDING_RULE, NOVA_PERSONA
-from .database import get_recent_messages, save_message
+from . import paths
+from .const import BRIEFING_GROUNDING_RULE
+from .database import save_message
 from .directive_helper import build_system_prompt
 from .locale_format import format_date
-from .presence import get_presence_summary
-from . import paths
-from typing import Optional
 from .persistence import sqlite as _store
+from .presence import get_presence_summary
 
 _LOGGER = logging.getLogger(__name__)
 
-CONVERSATIONS_DB: Optional[str] = None  # override; None resolves via paths.py; sentinel events (read only here)
+BRIEFING_MODEL = "openai/gpt-oss-120b"
+
+# Tests point this at a scratch file; None means the normal location from
+# paths.py. Only the sentinel_events table is read here.
+CONVERSATIONS_DB: Optional[str] = None
+
+_POWER_WATCH_LEVEL = 500     # a reading above this is worth mentioning
+_EVENT_LIMIT = 10
+_OPENING_CLASSES = frozenset({"door", "window", "garage_door"})
+_SERIOUS_LEVELS = ("orange", "red")
 
 
 def _conversations_db() -> str:
     return CONVERSATIONS_DB or paths.conversations_db()
 
-BRIEFING_MODEL = "openai/gpt-oss-120b"
-
 
 def _time_greeting() -> str:
     hour = datetime.now().hour
-    if hour < 12:
-        return "Good morning"
-    if hour < 17:
-        return "Good afternoon"
-    if hour < 22:
-        return "Good evening"
+    for last_hour, words in ((11, "Good morning"), (16, "Good afternoon"),
+                             (21, "Good evening")):
+        if hour <= last_hour:
+            return words
     return "Still awake"
 
 
+def _label(state) -> str:
+    return state.attributes.get("friendly_name", state.entity_id)
+
+
 def _gather_weather(hass: HomeAssistant) -> str:
-    """Return a single-line weather summary from the first weather.* entity."""
-    for state in hass.states.async_all("weather"):
-        attrs = state.attributes
-        temp = attrs.get("temperature")
-        cond = state.state
-        unit = attrs.get("temperature_unit", "°")
-        forecast = attrs.get("forecast") or []
-        high = low = None
-        if forecast:
-            today = forecast[0]
-            high = today.get("temperature")
-            low  = today.get("templow")
-        parts = [f"{cond}"]
-        if temp is not None:
-            parts.append(f"currently {temp}{unit}")
-        if high is not None and low is not None:
-            parts.append(f"high {high}{unit}, low {low}{unit}")
-        return ", ".join(parts)
-    return ""
+    """Condition, current temperature and today's range from the first
+    weather entity, joined into one line."""
+    states = hass.states.async_all("weather")
+    if not states:
+        return ""
+    first = states[0]
+    info = first.attributes
+    unit = info.get("temperature_unit", "°")
+    bits = [f"{first.state}"]
+    if info.get("temperature") is not None:
+        bits.append(f"currently {info.get('temperature')}{unit}")
+    days = info.get("forecast") or []
+    today = days[0] if days else {}
+    top, bottom = today.get("temperature"), today.get("templow")
+    if top is not None and bottom is not None:
+        bits.append(f"high {top}{unit}, low {bottom}{unit}")
+    return ", ".join(bits)
 
 
 def _gather_open_things(hass: HomeAssistant) -> list[str]:
-    """Doors, windows, locks that are currently open/unlocked."""
-    items = []
-    for state in hass.states.async_all("binary_sensor"):
-        dc = state.attributes.get("device_class")
-        if dc in ("door", "window", "garage_door") and state.state == "on":
-            name = state.attributes.get("friendly_name", state.entity_id)
-            items.append(f"{name} is open")
+    """Open doors, windows and garage doors, then unlocked locks. Locks the
+    lockdown setting exempts (a thermostat keypad lock, say) are left out."""
+    found = [f"{_label(s)} is open"
+             for s in hass.states.async_all("binary_sensor")
+             if s.state == "on" and s.attributes.get("device_class") in _OPENING_CLASSES]
     from .cognitive_core import _lockdown_exempt_locks
-    exempt = _lockdown_exempt_locks()
-    for state in hass.states.async_all("lock"):
-        if state.state == "unlocked" and state.entity_id not in exempt:
-            name = state.attributes.get("friendly_name", state.entity_id)
-            items.append(f"{name} is unlocked")
-    return items
+    skip = _lockdown_exempt_locks()
+    found.extend(f"{_label(s)} is unlocked"
+                 for s in hass.states.async_all("lock")
+                 if s.state == "unlocked" and s.entity_id not in skip)
+    return found
 
 
 def _gather_calendar(hass: HomeAssistant) -> list[str]:
-    """Today's calendar events, if a calendar.* entity exists with a next event."""
-    events = []
-    for state in hass.states.async_all("calendar"):
-        if state.state != "on":
-            continue
-        msg = state.attributes.get("message")
-        start = state.attributes.get("start_time")
-        if msg and start:
-            events.append(f"{msg} at {start[11:16]}")
-    return events
+    """The current event of each calendar that is on, with its start clock."""
+    found = []
+    for cal in hass.states.async_all("calendar"):
+        title = cal.attributes.get("message")
+        begins = cal.attributes.get("start_time")
+        if cal.state == "on" and title and begins:
+            found.append(f"{title} at {begins[11:16]}")
+    return found
 
 
 def _gather_energy_anomalies(hass: HomeAssistant) -> list[str]:
-    """Look for *power sensors showing unexpectedly high draw."""
-    anomalies = []
-    for state in hass.states.async_all("sensor"):
-        if state.attributes.get("device_class") != "power":
+    """Power sensors reading above the watch level."""
+    found = []
+    for sensor in hass.states.async_all("sensor"):
+        if sensor.attributes.get("device_class") != "power":
             continue
         try:
-            val = float(state.state)
-        except (ValueError, TypeError):
+            reading = float(sensor.state)
+        except (TypeError, ValueError):
             continue
-        if val > 500:  # arbitrary "that's a lot" threshold
-            name = state.attributes.get("friendly_name", state.entity_id)
-            unit = state.attributes.get("unit_of_measurement", "W")
-            anomalies.append(f"{name} is drawing {val:.0f}{unit}")
-    return anomalies
+        if reading <= _POWER_WATCH_LEVEL:
+            continue
+        unit = sensor.attributes.get("unit_of_measurement", "W")
+        found.append(f"{_label(sensor)} is drawing {reading:.0f}{unit}")
+    return found
+
+
+def _local_clock(stamp: str) -> str:
+    """HH:MM in local time for a naive UTC timestamp. Text that does not
+    parse keeps its own clock characters."""
+    try:
+        moment = datetime.fromisoformat(stamp).replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return stamp[11:16]
+    return moment.astimezone().strftime("%H:%M")
 
 
 def _gather_overnight_events(hass: HomeAssistant, hours: int = 12) -> list[str]:
-    """Sentinel events from the database in the last N hours."""
-    from pathlib import Path
-    db = Path(_conversations_db())
-    events = []
+    """Up to ten sentinel events from the last `hours`, newest first, each
+    as "HH:MM: detail" in local time."""
+    db_file = Path(_conversations_db())
     try:
-        if not db.exists():
+        if not db_file.exists():
             return []
-        since = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=hours)).isoformat()
-        with _store.connect(str(db), row_factory=False, mkdir=False,
+        cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=hours)
+        query = ("SELECT timestamp, detail FROM sentinel_events WHERE timestamp > ? "
+                 f"ORDER BY timestamp DESC LIMIT {_EVENT_LIMIT}")
+        with _store.connect(str(db_file), row_factory=False, mkdir=False,
                             busy_timeout_ms=None) as conn:
-            rows = conn.execute(
-                "SELECT timestamp, detail FROM sentinel_events WHERE timestamp > ? "
-                "ORDER BY timestamp DESC LIMIT 10",
-                (since,),
-            ).fetchall()
-        for ts, detail in rows:
-            # Stored as naive UTC; say the local time the household knows.
-            try:
-                at = (datetime.fromisoformat(ts).replace(tzinfo=timezone.utc)
-                      .astimezone().strftime("%H:%M"))
-            except (TypeError, ValueError):
-                at = ts[11:16]
-            events.append(f"{at}: {detail}")
+            found = conn.execute(query, (cutoff.isoformat(),)).fetchall()
+        return [f"{_local_clock(stamp)}: {detail}" for stamp, detail in found]
     except Exception as exc:
         _LOGGER.debug("Nova briefing: could not read sentinel events: %s", exc)
-    return events
+        return []
 
 
 def _plain_briefing(greeting: str, honorific: str, context_lines: list[str]) -> str:
-    """A deterministic briefing read straight from the gathered facts, used when
-    the language model returns nothing so the briefing still happens instead of
-    silently skipping."""
-    facts = [ln.strip() for ln in (context_lines or []) if ln and ln.strip()]
-    # honorific may be "" once nobody specific is home to address (see
-    # honorific.py) — drop the trailing ", {honorific}" rather than leave a
-    # dangling comma.
-    lead = f"{greeting}, {honorific}." if honorific else f"{greeting}."
-    if not facts:
-        return f"{lead} Nothing notable to report."
-    return f"{lead} " + " ".join(facts)
+    """The collected facts read out as they are, opened by the greeting.
+    With no honorific (nobody specific to address) the greeting stands
+    alone rather than ending in a stray comma."""
+    opener = f"{greeting}, {honorific}." if honorific else f"{greeting}."
+    facts = [line.strip() for line in context_lines or [] if line and line.strip()]
+    body = " ".join(facts) if facts else "Nothing notable to report."
+    return f"{opener} {body}"
 
 
-# Device words a briefing may only use when the gathered context names that
-# kind of device too. The model has copied devices from prompt examples
-# before (a garage door in a home with no garage, an unlocked front door with
-# no front door lock), and the grounding rule alone did not stop it.
+# Kinds of device the briefing may only mention when the collected facts
+# mention that kind too: (label, pattern in the briefing, pattern in the
+# facts). The model has borrowed devices from prompt examples before.
 _GROUNDED_DEVICE_WORDS = (
     ("garage", re.compile(r"\bgarages?\b"), re.compile(r"garage")),
     ("gate", re.compile(r"\bgates?\b"), re.compile(r"\bgate")),
@@ -180,233 +174,218 @@ _CLOCK_TIME = re.compile(r"\b(\d{1,2}):(\d{2})\b")
 
 
 def _clock_times(text: str) -> set[tuple[int, int]]:
-    """Clock times in `text` as (hour on a 12-hour clock, minute), so 13:29
-    and 1:29 PM compare equal."""
-    return {(int(h) % 12, int(m)) for h, m in _CLOCK_TIME.findall(text)
-            if int(h) < 24 and int(m) < 60}
+    """Each valid H:MM in the text as (hour mod 12, minute), so a 24 hour
+    time and its 12 hour reading match."""
+    found = set()
+    for hh, mm in _CLOCK_TIME.findall(text):
+        hour, minute = int(hh), int(mm)
+        if hour < 24 and minute < 60:
+            found.add((hour % 12, minute))
+    return found
 
 
 def ungrounded_briefing_fact(text: str, context: str) -> str:
-    """What the generated briefing states that the gathered context does not
-    back, or "" when everything checked is grounded.
-
-    Checks two things deterministically: a device word (door, lock, garage,
-    ...) whose kind of device the context never names, and a clock time the
-    context never gives. A briefing that fails is replaced whole by the plain
-    facts, never edited sentence by sentence."""
-    said = (text or "").lower()
-    known = (context or "").lower()
-    for label, in_briefing, in_context in _GROUNDED_DEVICE_WORDS:
-        if in_briefing.search(said) and not in_context.search(known):
+    """The first thing the briefing says that the facts do not support, or ""
+    when it all checks out. A device kind is checked first, then any clock
+    time missing from the facts (reported as "time H:MM", 12 hour). The
+    caller swaps a failing briefing for the plain facts; it is never patched."""
+    spoken = (text or "").lower()
+    facts = (context or "").lower()
+    for label, said_pattern, fact_pattern in _GROUNDED_DEVICE_WORDS:
+        if said_pattern.search(spoken) and not fact_pattern.search(facts):
             return label
-    extra = _clock_times(said) - _clock_times(known)
-    if extra:
-        h, m = sorted(extra)[0]
-        return f"time {h or 12}:{m:02d}"
-    return ""
+    unknown = sorted(_clock_times(spoken) - _clock_times(facts))
+    if not unknown:
+        return ""
+    hour, minute = unknown[0]
+    return f"time {hour or 12}:{minute:02d}"
+
+
+def _hazard_feed_bits(hz: dict) -> list[str]:
+    bits = []
+    for quake in hz.get("earthquakes") or []:
+        size = quake.get("mag")
+        what = (f"magnitude {size:.1f}" if isinstance(size, (int, float))
+                else "an earthquake")
+        bits.append(f"{what} quake {quake.get('dist_km')} km away ({quake.get('place')})")
+    for alert in hz.get("weather") or []:
+        where = f" for {alert.get('area')}" if alert.get("area") else ""
+        bits.append(f"{alert.get('severity')} weather alert: {alert.get('event')}{where}")
+    for item in hz.get("disasters") or []:
+        bits.append(f"{item.get('category')}: {item.get('title')} "
+                    f"{item.get('dist_km')} km away")
+    return bits
+
+
+def _warning_line(w: dict) -> str:
+    where = ", ".join(w.get("counties") or []) or "your area"
+    start, end = w.get("from"), w.get("to")
+    span = f" from {start} to {end}" if start and end else ""
+    level = str(w.get("level")).capitalize()
+    return (f"{w.get('source_label')} {level} {w.get('type')} warning for {where}{span}. "
+            f"Headline (quote exactly): {w.get('headline_text')}")
 
 
 def _hazard_context(hz: dict) -> list[str]:
-    """Briefing lines for a hazard_monitor.scan_now result: the legacy feeds
-    as before, and (8.8.0) only Orange and Red weather warnings, for the
-    chosen counties or areas (the scan keeps only those). The headline is
-    passed on as published, never reworded. Silent when nothing is active."""
-    lines: list[str] = []
-    if hz.get("ok"):
-        bits = []
-        for q in hz.get("earthquakes", []) or []:
-            mag = q.get("mag")
-            magtxt = f"magnitude {mag:.1f}" if isinstance(mag, (int, float)) else "an earthquake"
-            bits.append(f"{magtxt} quake {q.get('dist_km')} km away ({q.get('place')})")
-        for w in hz.get("weather", []) or []:
-            bits.append(f"{w.get('severity')} weather alert: {w.get('event')}"
-                        + (f" for {w.get('area')}" if w.get("area") else ""))
-        for d in hz.get("disasters", []) or []:
-            bits.append(f"{d.get('category')}: {d.get('title')} "
-                        f"{d.get('dist_km')} km away")
-        if bits:
-            lines.append("Active hazards nearby: " + "; ".join(bits) + ".")
-    serious = [w for w in (hz.get("warnings") or []) if w.get("level") in ("orange", "red")]
+    """Context lines from a hazard_monitor scan: one line for the quake,
+    weather alert and disaster feeds, and one for Orange or Red weather
+    warnings with their headline passed on word for word. Nothing when the
+    scan is quiet."""
+    out: list[str] = []
+    bits = _hazard_feed_bits(hz) if hz.get("ok") else []
+    if bits:
+        out.append("Active hazards nearby: " + "; ".join(bits) + ".")
+    serious = [w for w in hz.get("warnings") or [] if w.get("level") in _SERIOUS_LEVELS]
     if serious:
-        items = []
-        for w in serious:
-            where = ", ".join(w.get("counties") or []) or "your area"
-            when = (f" from {w.get('from')} to {w.get('to')}"
-                    if w.get("from") and w.get("to") else "")
-            items.append(f"{w.get('source_label')} {str(w.get('level')).capitalize()} "
-                         f"{w.get('type')} warning for {where}{when}. "
-                         f"Headline (quote exactly): {w.get('headline_text')}")
-        lines.append("Weather warnings in force:\n- " + "\n- ".join(items))
+        out.append("Weather warnings in force:\n- "
+                   + "\n- ".join(_warning_line(w) for w in serious))
+    return out
+
+
+def _presence_lines(hass: HomeAssistant) -> list[str]:
+    people = get_presence_summary(hass)["people"]
+    lines = []
+    home = [p["name"] for p in people if p["state"] == "home"]
+    away = [p["name"] for p in people if p["state"] != "home"]
+    if home:
+        lines.append(f"At home: {', '.join(home)}.")
+    if away:
+        lines.append(f"Away: {', '.join(away)}.")
     return lines
 
 
-async def async_briefing(
-    hass: HomeAssistant,
-    call: ServiceCall,
-    groq_client,
-    honorific: str,
-    tts_entity: str | None,
-    speakers: list[str],
-) -> dict:
-    """
-    Service: nova.briefing
-    Gather context and deliver a Nova-voiced briefing.
-    """
-    announce = call.data.get("announce", True)
-    include_weather  = call.data.get("include_weather", True)
-    include_calendar = call.data.get("include_calendar", True)
-    include_presence = call.data.get("include_presence", True)
-    include_events   = call.data.get("include_events", True)
-    include_energy   = call.data.get("include_energy", True)
-    overnight_hours  = int(call.data.get("hours", 12))
-
-    # Gather everything
+async def _collect_context(hass: HomeAssistant, wants, hours: int) -> list[str]:
+    """The fact lines for the briefing, in the order they are read."""
     now = datetime.now()
-    context_lines = [f"It is {format_date(now, hass)}, {now.strftime('%-I:%M %p')}."]
-
-    if include_weather:
-        weather = _gather_weather(hass)
-        if weather:
-            context_lines.append(f"Weather: {weather}.")
-
-    if include_presence:
-        presence = get_presence_summary(hass)
-        if presence["people"]:
-            home = [p["name"] for p in presence["people"] if p["state"] == "home"]
-            away = [p["name"] for p in presence["people"] if p["state"] != "home"]
-            if home:
-                context_lines.append(f"At home: {', '.join(home)}.")
-            if away:
-                context_lines.append(f"Away: {', '.join(away)}.")
-
-    if include_events:
-        events = _gather_overnight_events(hass, overnight_hours)
-        if events:
-            context_lines.append(
-                f"Events in the last {overnight_hours} hours:\n- " + "\n- ".join(events)
-            )
-
-    open_things = _gather_open_things(hass)
-    if open_things:
-        context_lines.append(f"Currently open/unlocked: {', '.join(open_things)}.")
-
-    if include_calendar:
-        cal_events = _gather_calendar(hass)
-        if cal_events:
-            context_lines.append(f"Calendar: {', '.join(cal_events)}.")
-
-    if include_energy:
-        energy = _gather_energy_anomalies(hass)
-        if energy:
-            context_lines.append(f"High power draw: {', '.join(energy)}.")
-
-    # Active natural hazards near home (v6.78.0) — earthquakes, severe weather
-    # warnings, wildfires. Read-only scan; silent when nothing is active.
-    if call.data.get("include_hazards", True):
+    lines = [f"It is {format_date(now, hass)}, {now.strftime('%-I:%M %p')}."]
+    if wants("include_weather"):
+        sky = _gather_weather(hass)
+        if sky:
+            lines.append(f"Weather: {sky}.")
+    if wants("include_presence"):
+        lines.extend(_presence_lines(hass))
+    if wants("include_events"):
+        recent = _gather_overnight_events(hass, hours)
+        if recent:
+            lines.append(f"Events in the last {hours} hours:\n- " + "\n- ".join(recent))
+    open_now = _gather_open_things(hass)
+    if open_now:
+        lines.append(f"Currently open/unlocked: {', '.join(open_now)}.")
+    if wants("include_calendar"):
+        agenda = _gather_calendar(hass)
+        if agenda:
+            lines.append(f"Calendar: {', '.join(agenda)}.")
+    if wants("include_energy"):
+        heavy = _gather_energy_anomalies(hass)
+        if heavy:
+            lines.append(f"High power draw: {', '.join(heavy)}.")
+    if wants("include_hazards"):
         try:
             from . import hazard_monitor
-            hz = await hazard_monitor.scan_now(hass)
-            context_lines.extend(_hazard_context(hz))
+            lines.extend(_hazard_context(await hazard_monitor.scan_now(hass)))
         except Exception:
             pass
-
-    # Camera detection summary from proactive briefing system
     try:
         from .proactive_briefing import get_snapshot_summary
-        snap_summary = get_snapshot_summary(hours=overnight_hours)
-        if snap_summary:
-            context_lines.append(snap_summary)
+        sightings = get_snapshot_summary(hours=hours)
+        if sightings:
+            lines.append(sightings)
     except Exception:
         pass
+    return lines
 
-    context = "\n".join(context_lines)
 
-    # Ask Groq to compose the briefing
-    greeting = _time_greeting()
-    # honorific may be "" once nobody specific is home to address (see
-    # honorific.py) — instruct the model accordingly instead of leaving a
-    # blank subject or a dangling "Begin with 'Good morning, .'"
+def _briefing_task(greeting: str, honorific: str) -> str:
     if honorific:
-        to_whom = f"to {honorific}"
-        begin_with = f"Begin with '{greeting}, {honorific}.'"
+        audience, opening = f"to {honorific}", f"{greeting}, {honorific}."
     else:
-        to_whom = "to the household"
-        begin_with = f"Begin with '{greeting}.'"
-    task = (
-        f"You are delivering a spoken briefing {to_whom}. "
-        f"{begin_with} Then concisely cover the important items. "
-        f"Under 120 words. Be efficient — do not list trivia. "
-        f"If nothing is noteworthy, say so briefly. "
-        f"Your prime directive should inform what you surface — protect, steward, "
-        f"anticipate. Lead with anything that affects their safety or wellbeing. "
+        audience, opening = "to the household", f"{greeting}."
+    return (
+        f"You are delivering a spoken briefing {audience}. Begin with '{opening}' "
+        "Then concisely cover the important items. Under 120 words. "
+        "Be efficient — do not list trivia. If nothing is noteworthy, say so briefly. "
+        "Your prime directive should inform what you surface — protect, steward, "
+        "anticipate. Lead with anything that affects their safety or wellbeing. "
         f"{BRIEFING_GROUNDING_RULE}"
     )
-    system = build_system_prompt(hass, honorific, task)
-    from . import output_language
-    system = output_language.with_language(hass, system)   # spoken: follows Nova's language
 
+
+async def _compose(hass, groq_client, system: str, context: str) -> str:
     try:
         from .providers.activity import execute_chat
-        result = await execute_chat(
+        reply = await execute_chat(
             hass, groq_client,
-            [
-                {"role": "system", "content": system},
-                {"role": "user", "content": f"Context:\n{context}"},
-            ],
+            [{"role": "system", "content": system},
+             {"role": "user", "content": f"Context:\n{context}"}],
             role="briefing", data_category="text",
             max_tokens=1500,
             temperature=0.2,
         )
-        briefing_text = (result.text or "").strip()
     except Exception as exc:
         _LOGGER.error("Nova briefing error: %s", exc)
-        briefing_text = ""
+        return ""
+    return (reply.text or "").strip()
 
-    # The model sometimes returns an empty completion (a local-model hiccup, or
-    # an unusual prompt). Rather than silently skip the announce, read the facts
-    # already gathered — a plain briefing beats no briefing.
-    if not briefing_text:
+
+async def async_briefing(
+    hass: HomeAssistant, call: ServiceCall, groq_client,
+    honorific: str, tts_entity: str | None, speakers: list[str],
+) -> dict:
+    """nova.briefing: collect the facts, have the model voice them, keep a
+    copy in the conversation history and, when asked to announce, hand it
+    to delivery as a request the person made."""
+    options = call.data
+
+    def wants(key: str) -> bool:
+        return options.get(key, True)
+
+    hours = int(options.get("hours", 12))
+    lines = await _collect_context(hass, wants, hours)
+    context = "\n".join(lines)
+
+    greeting = _time_greeting()
+    system = build_system_prompt(hass, honorific, _briefing_task(greeting, honorific))
+    from . import output_language
+    system = output_language.with_language(hass, system)   # spoken, so in Nova's language
+    text = await _compose(hass, groq_client, system, context)
+
+    if not text:
         _LOGGER.warning("Nova briefing: empty model output — reading gathered facts instead")
-        briefing_text = _plain_briefing(greeting, honorific, context_lines)
+        text = _plain_briefing(greeting, honorific, lines)
     else:
-        bad = ungrounded_briefing_fact(briefing_text, context)
-        if bad:
+        unsupported = ungrounded_briefing_fact(text, context)
+        if unsupported:
             _LOGGER.warning(
                 "Nova briefing rejected — %s is not in the gathered facts; "
-                "reading the facts instead: %s", bad, briefing_text[:200])
-            briefing_text = _plain_briefing(greeting, honorific, context_lines)
+                "reading the facts instead: %s", unsupported, text[:200])
+            text = _plain_briefing(greeting, honorific, lines)
 
-    await hass.async_add_executor_job(
-        save_message, "assistant", f"[Briefing] {briefing_text}", "briefing"
-    )
+    await hass.async_add_executor_job(save_message, "assistant", f"[Briefing] {text}",
+                                      "briefing")
 
     announced = False
-    if announce:
-        _LOGGER.info(
-            "Nova briefing announce: tts=%s, speakers=%s, text_len=%d, first_50=%s",
-            tts_entity, speakers, len(briefing_text or ""),
-            (briefing_text or "")[:50],
-        )
-        if not briefing_text:
-            _LOGGER.warning("Nova briefing: empty text, skipping announce")
-        elif not tts_entity:
-            _LOGGER.warning("Nova briefing: no TTS entity resolved")
-        else:
-            if not speakers:
-                _LOGGER.warning(
-                    "Nova briefing: no announcement speakers configured — choose "
-                    "them in Settings \u2192 Announcement Speakers")
-            # One delivery request (8.44.0). Calling nova.briefing is asking
-            # for it now, so shush, the Announcements switch and quiet hours
-            # never swallow it; while the house is asleep, with
-            # "Notifications only" on, or with no speaker, it goes to the
-            # phones instead.
-            from . import delivery
-            out = await delivery.async_deliver(hass, delivery.DeliveryRequest(
-                source="briefing", message=briefing_text, category="briefing_service",
-                requested_by_user=True, quiet_ok=True, speakers=tuple(speakers or ()),
-                tts_entity=tts_entity, tts_context="briefing", title="Nova — Briefing"))
-            announced = out.spoken
-
-    return {"success": True, "briefing": briefing_text, "context": context,
+    if options.get("announce", True):
+        announced = await _announce(hass, text, tts_entity, speakers)
+    return {"success": True, "briefing": text, "context": context,
             "announced": announced}
+
+
+async def _announce(hass, text: str, tts_entity, speakers) -> bool:
+    _LOGGER.info("Nova briefing announce: tts=%s, speakers=%s, text_len=%d, first_50=%s",
+                  tts_entity, speakers, len(text), text[:50])
+    if not tts_entity:
+        _LOGGER.warning("Nova briefing: no TTS entity resolved")
+        return False
+    if not speakers:
+        _LOGGER.warning("Nova briefing: no announcement speakers configured — choose "
+                        "them in Settings → Announcement Speakers")
+    # The person asked for this briefing, so shush, the Announcements switch
+    # and quiet hours do not hold it back. Delivery sends it to phones when
+    # the house is asleep, "Notifications only" is on, or there is no speaker.
+    from . import delivery
+    request = delivery.DeliveryRequest(
+        source="briefing", message=text, category="briefing_service",
+        requested_by_user=True, quiet_ok=True, speakers=tuple(speakers or ()),
+        tts_entity=tts_entity, tts_context="briefing", title="Nova — Briefing")
+    outcome = await delivery.async_deliver(hass, request)
+    return outcome.spoken
