@@ -246,6 +246,7 @@ def test_authorized_splits_by_policy_and_keeps_the_reason(ir, policy):
 
 def test_authorized_fails_closed_without_policy(ir, monkeypatch):
     monkeypatch.setitem(sys.modules, "jc.policy", None)
+    monkeypatch.delattr(sys.modules["jc"], "policy", raising=False)
     r = ir.LocalIntentRouter(FakeHass())
     assert r._authorized("lock", "lock", ["lock.a"]) == ([], ["lock.a"], {})
 
