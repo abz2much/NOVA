@@ -45,7 +45,7 @@ from .ws_area_helpers import (
     _area_name, _area_temp_humidity_entities, _dominant_area, _format_duration,
     _get_all_people, _get_camera_names, _get_camera_overrides, _get_cameras, _get_cast_devices,
     _get_onboarding_state, _get_satellites, _get_speaker_assignable_areas, _is_outdoor_area,
-    _satellite_count,
+    _satellite_count, area_scan,
 )
 from .ws_panel_stats import (
     _entity_names, _format_uptime, _get_alarm_panels, _get_announcements_today,
@@ -668,8 +668,11 @@ async def ws_get_panel_data(
         has_notify = bool(_chosen_notify_services(hass, entry, as_text=False))
         observer_wanted = bool(_runtime_opt(hass, entry, CONF_OBSERVER_ENABLED, False))
         online, total = _satellite_count(hass)
-        areas = _area_rows(hass, bedrooms)
-        dominant = _dominant_card(hass)
+        # One walk of the entity registry serves every room lookup below.
+        with area_scan(hass):
+            areas = _area_rows(hass, bedrooms)
+            dominant = _dominant_card(hass)
+            speaker_areas = _get_speaker_assignable_areas(hass)
 
         if observer_running:
             observer_tile = {"state": "RUNNING", "level": "live"}
@@ -760,7 +763,7 @@ async def ws_get_panel_data(
                 "cast_devices": _get_cast_devices(hass),
                 "cameras": _get_cameras(hass),
                 "camera_overrides": _get_camera_overrides(), "camera_names": _get_camera_names(),
-                "speaker_areas": _get_speaker_assignable_areas(hass),
+                "speaker_areas": speaker_areas,
                 "all_people": _get_all_people(hass),
                 "garage_mode": home["garage_mode"],
                 "has_garage": home["has_garage"],
@@ -1345,10 +1348,11 @@ async def ws_get_area_sparklines(
     refresh."""
     try:
         sensors: dict[str, dict[str, Optional[str]]] = {}
-        for area_id in _all_areas_with_anything(hass):
-            temp_sensor, humidity_sensor = _area_temp_humidity_entities(hass, area_id)
-            if temp_sensor or humidity_sensor:
-                sensors[area_id] = {"temp": temp_sensor, "humidity": humidity_sensor}
+        with area_scan(hass):
+            for area_id in _all_areas_with_anything(hass):
+                temp_sensor, humidity_sensor = _area_temp_humidity_entities(hass, area_id)
+                if temp_sensor or humidity_sensor:
+                    sensors[area_id] = {"temp": temp_sensor, "humidity": humidity_sensor}
         connection.send_result(msg["id"], {"sparklines": await _get_area_sparklines(hass, sensors)})
     except Exception as exc:
         _LOGGER.exception("get_area_sparklines failed: %s", exc)

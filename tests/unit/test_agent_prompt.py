@@ -67,6 +67,6 @@ def test_prompt_routes_weather_time_questions_to_forecast():
 
 
 def test_weather_forecast_tool_registered():
-    assert '"name": "weather_forecast"' in AGENT_SRC
+    assert '_tool("weather_forecast"' in AGENT_SRC
     assert '"weather_forecast":' in AGENT_SRC          # in _TOOL_MAP
     assert "_exec_weather_forecast" in AGENT_SRC

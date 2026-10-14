@@ -286,7 +286,9 @@ def test_rule3_the_stand_down_is_only_called_where_an_investigation_would_start(
                     and isinstance(c.func, ast.Attribute) and c.func.attr == "_face_stand_down")
             if n:
                 calls[fn.name] = n
-    assert calls == {"_check_intrusion": 3}              # away, confined, sleeping: never _investigate_step
+    # One call, shared by the away, confined and sleeping cases; never in
+    # _investigate_step.
+    assert calls == {"_check_intrusion": 1}
     src = core_text()
     step = src.split("async def _investigate_step")[1].split("\n    async def ")[0]
     assert "face_roster" not in step and "_face_stand_down" not in step

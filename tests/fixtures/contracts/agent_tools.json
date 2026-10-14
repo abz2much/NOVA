@@ -166,19 +166,19 @@
       "parameters": {
         "properties": {
           "area": {
-            "description": "Area/room name to look up all entities in (history kind only).",
+            "description": "An area or room, to cover every entity in it (history only).",
             "type": "string"
           },
           "entity": {
-            "description": "Entity name or entity_id to look up (e.g. 'front door', 'binary_sensor.back_door').",
+            "description": "The entity's name or entity_id, e.g. 'front door' or 'binary_sensor.back_door'.",
             "type": "string"
           },
           "hours": {
-            "description": "How many hours back to look (default 24).",
+            "description": "How many hours back (default 24).",
             "type": "number"
           },
           "kind": {
-            "description": "'history' for the device timeline/counts, 'logbook' for the readable narrative.",
+            "description": "'history' for the device timeline and counts, 'logbook' for the readable story.",
             "enum": [
               "history",
               "logbook"
@@ -199,7 +199,7 @@
       "parameters": {
         "properties": {
           "suggestion_id": {
-            "description": "Suggestion ID",
+            "description": "The suggestion's id.",
             "type": "integer"
           }
         },
@@ -216,7 +216,7 @@
       "parameters": {
         "properties": {
           "message": {
-            "description": "What to ask it, stated plainly as if talking to it directly.",
+            "description": "What to ask, said plainly as if to it directly.",
             "type": "string"
           }
         },
@@ -233,7 +233,7 @@
       "parameters": {
         "properties": {
           "message": {
-            "description": "What to ask it, stated plainly as if talking to it directly.",
+            "description": "What to ask, said plainly as if to it directly.",
             "type": "string"
           }
         },
@@ -250,7 +250,7 @@
       "parameters": {
         "properties": {
           "message": {
-            "description": "What to ask it, stated plainly as if talking to it directly.",
+            "description": "What to ask, said plainly as if to it directly.",
             "type": "string"
           }
         },
@@ -267,7 +267,7 @@
       "parameters": {
         "properties": {
           "message": {
-            "description": "What to ask it, stated plainly as if talking to it directly.",
+            "description": "What to ask, said plainly as if to it directly.",
             "type": "string"
           }
         },
@@ -284,7 +284,7 @@
       "parameters": {
         "properties": {
           "message": {
-            "description": "What to ask it, stated plainly as if talking to it directly.",
+            "description": "What to ask, said plainly as if to it directly.",
             "type": "string"
           }
         },
@@ -301,7 +301,7 @@
       "parameters": {
         "properties": {
           "action": {
-            "description": "Action to perform",
+            "description": "What to do.",
             "enum": [
               "turn_on",
               "turn_off",
@@ -313,11 +313,11 @@
             "type": "string"
           },
           "area_name": {
-            "description": "Optional: limit to specific area (e.g. 'kitchen')",
+            "description": "Optional: only this area, e.g. 'kitchen'.",
             "type": "string"
           },
           "domain": {
-            "description": "Device domain to control",
+            "description": "The device domain.",
             "enum": [
               "light",
               "switch",
@@ -343,7 +343,7 @@
       "parameters": {
         "properties": {
           "horizon_hours": {
-            "description": "How far ahead to look (default 24).",
+            "description": "How many hours ahead (default 24).",
             "type": "integer"
           }
         },
@@ -362,7 +362,7 @@
       "parameters": {
         "properties": {
           "fact_id": {
-            "description": "The fact_id returned by the `remember` call being confirmed.",
+            "description": "The fact_id the remember call returned.",
             "type": "integer"
           }
         },
@@ -386,7 +386,7 @@
       "parameters": {
         "properties": {
           "action": {
-            "description": "The action to perform",
+            "description": "What to do.",
             "enum": [
               "turn_on",
               "turn_off",
@@ -407,11 +407,11 @@
             "type": "string"
           },
           "entity_id": {
-            "description": "The HA entity_id (e.g. light.kitchen, lock.front_door)",
+            "description": "The entity_id, e.g. light.kitchen or lock.front_door.",
             "type": "string"
           },
           "value": {
-            "description": "Optional numeric value: brightness (0-100), temperature (degrees), volume (0-100)",
+            "description": "Optional number: brightness 0-100, temperature in degrees, or volume 0-100.",
             "type": "number"
           }
         },
@@ -430,26 +430,26 @@
       "parameters": {
         "properties": {
           "check_interval_minutes": {
-            "description": "How often to re-engage (default 30).",
+            "description": "How often to come back to it (default 30).",
             "type": "number"
           },
           "deadline_minutes": {
-            "description": "Optional: minutes until the goal must close.",
+            "description": "Optional: minutes until it must close.",
             "type": "number"
           },
           "outcome": {
-            "description": "The concrete end state to achieve.",
+            "description": "The concrete end state.",
             "type": "string"
           },
           "steps": {
-            "description": "Ordered concrete steps toward the outcome.",
+            "description": "The concrete steps, in order.",
             "items": {
               "type": "string"
             },
             "type": "array"
           },
           "title": {
-            "description": "Short name, e.g. 'Guest prep Saturday'.",
+            "description": "A short name, e.g. 'Guest prep Saturday'.",
             "type": "string"
           }
         },
@@ -468,7 +468,7 @@
       "parameters": {
         "properties": {
           "capability": {
-            "description": "Which curated read-only tool group the sub-agent gets. Ignored if 'profile' is also set. 'diagnostics' is kept as an accepted name for compatibility but is not a separate group — it resolves to the exact same HOMER specialist as profile='homer'; prefer 'profile': 'homer' directly for a fault/diagnosis request.",
+            "description": "Which read-only tool group the sub-agent gets; ignored when 'profile' is set. 'diagnostics' is still accepted but is the same HOMER specialist as profile='homer', which is the better choice for a fault.",
             "enum": [
               "scheduling",
               "inbox",
@@ -480,15 +480,15 @@
             "type": "string"
           },
           "max_turns": {
-            "description": "Optional cap on the sub-agent's tool steps (default/max depends on the capability or profile; a profile's own cap is never exceeded regardless of this value).",
+            "description": "Optional cap on the sub-agent's tool steps (the default and maximum depend on the capability or profile; a profile's own cap is never exceeded).",
             "type": "integer"
           },
           "objective": {
-            "description": "The self-contained goal for the sub-agent, stated plainly.",
+            "description": "The self contained goal for the sub-agent, said plainly.",
             "type": "string"
           },
           "profile": {
-            "description": "A named specialist sub-agent instead of a generic capability group. 'homer': Nova's read-only System Diagnostic Specialist — investigates a fault (an unavailable device, a failed automation, slow responses, connectivity/host health, 'what caused X to change') using diagnostic and state-reading tools only, and reports the likely cause, evidence, and a recommended next step. It never controls anything and cannot delegate further.",
+            "description": "A named specialist instead of a capability group. 'homer': Nova's read-only System Diagnostic Specialist. It investigates a fault (an unavailable device, a failed automation, slow responses, connectivity or host health, 'what caused X to change') with diagnostic and state-reading tools only, and reports the likely cause, the evidence and a next step. It never controls anything and cannot delegate further.",
             "enum": [
               "homer"
             ],
@@ -508,7 +508,7 @@
       "parameters": {
         "properties": {
           "reason": {
-            "description": "Optional short reason (e.g. 'it was the cat').",
+            "description": "Optional short reason, e.g. 'it was the cat'.",
             "type": "string"
           }
         },
@@ -520,7 +520,7 @@
       "parameters": {
         "properties": {
           "suggestion_id": {
-            "description": "Suggestion ID",
+            "description": "The suggestion's id.",
             "type": "integer"
           }
         },
@@ -537,7 +537,7 @@
       "parameters": {
         "properties": {
           "hours": {
-            "description": "How long the appliance runs, in hours (default 2). Sets the length of best_window.",
+            "description": "How long the appliance runs in hours (default 2); sets the length of best_window.",
             "type": "integer"
           }
         },
@@ -563,31 +563,31 @@
       "parameters": {
         "properties": {
           "goal": {
-            "description": "The high-level goal in plain language (used for the spoken summary).",
+            "description": "The goal in plain words, used for the spoken summary.",
             "type": "string"
           },
           "steps": {
-            "description": "Ordered list of actions to perform.",
+            "description": "The actions, in order.",
             "items": {
               "properties": {
                 "description": {
-                  "description": "Human summary of this step.",
+                  "description": "What this step does, in plain words.",
                   "type": "string"
                 },
                 "domain": {
-                  "description": "Entity domain, e.g. light, climate, lock, media_player, cover, switch.",
+                  "description": "The entity domain, e.g. light, climate, lock, media_player, cover, switch.",
                   "type": "string"
                 },
                 "entity_id": {
-                  "description": "Target entity_id. Use search_entities first if unsure.",
+                  "description": "The target entity_id; use search_entities first if unsure.",
                   "type": "string"
                 },
                 "service": {
-                  "description": "Service to call, e.g. turn_on, turn_off, lock, set_temperature.",
+                  "description": "The service, e.g. turn_on, turn_off, lock, set_temperature.",
                   "type": "string"
                 },
                 "service_data": {
-                  "description": "Optional extra params (brightness_pct, temperature, etc.).",
+                  "description": "Optional extra values (brightness_pct, temperature and so on).",
                   "type": "object"
                 }
               },
@@ -616,7 +616,7 @@
       "parameters": {
         "properties": {
           "area_name": {
-            "description": "The area/room name (e.g. 'kitchen', 'master bedroom')",
+            "description": "The area or room, e.g. 'kitchen' or 'master bedroom'.",
             "type": "string"
           }
         },
@@ -633,7 +633,7 @@
       "parameters": {
         "properties": {
           "entity_ids": {
-            "description": "List of entity_ids to query",
+            "description": "The entity_ids to read.",
             "items": {
               "type": "string"
             },
@@ -667,15 +667,15 @@
       "parameters": {
         "properties": {
           "duration_minutes": {
-            "description": "How long to ignore in minutes. 0 = until manually cleared.",
+            "description": "How many minutes to ignore it; 0 means until cleared.",
             "type": "integer"
           },
           "entity_pattern": {
-            "description": "Entity ID or glob pattern to ignore (e.g. 'binary_sensor.back_door', 'sensor.backyard*')",
+            "description": "An entity_id or glob pattern, e.g. 'binary_sensor.back_door' or 'sensor.backyard*'.",
             "type": "string"
           },
           "reason": {
-            "description": "Why it's being ignored (e.g. 'maintenance', 'false alarm')",
+            "description": "Why, e.g. 'maintenance' or 'false alarm'.",
             "type": "string"
           }
         },
@@ -699,15 +699,15 @@
       "parameters": {
         "properties": {
           "announce": {
-            "description": "Speak the result aloud. Default false — for a quiet background monitor, leave false and only speak if the finding warrants it.",
+            "description": "Speak the result. Default false; for a quiet background monitor leave it false and speak only if the finding warrants it.",
             "type": "boolean"
           },
           "entity_id": {
-            "description": "The camera entity_id (e.g. camera.back_door).",
+            "description": "The camera entity_id, e.g. camera.back_door.",
             "type": "string"
           },
           "question": {
-            "description": "What to check for, as a direct question the vision model should answer.",
+            "description": "What to check, as a direct question for the vision model.",
             "type": "string"
           }
         },
@@ -726,7 +726,7 @@
       "parameters": {
         "properties": {
           "entity": {
-            "description": "The name to look up, for example 'house member' or 'kitchen'.",
+            "description": "The name to look up, e.g. 'house member' or 'kitchen'.",
             "type": "string"
           }
         },
@@ -743,7 +743,7 @@
       "parameters": {
         "properties": {
           "action": {
-            "description": "list grants or revoke one",
+            "description": "list the counts, or revoke one.",
             "enum": [
               "list",
               "revoke"
@@ -751,7 +751,7 @@
             "type": "string"
           },
           "pattern_key": {
-            "description": "For revoke: the pattern_key to revoke (get it from 'list').",
+            "description": "For revoke: the pattern_key, from 'list'.",
             "type": "string"
           }
         },
@@ -776,7 +776,7 @@
             "type": "string"
           },
           "followup_id": {
-            "description": "The follow-up to cancel (from list).",
+            "description": "The follow up to cancel, from list.",
             "type": "integer"
           }
         },
@@ -801,7 +801,7 @@
             "type": "string"
           },
           "goal_id": {
-            "description": "Required for status/cancel.",
+            "description": "Needed for status and cancel.",
             "type": "integer"
           }
         },
@@ -818,15 +818,15 @@
       "parameters": {
         "properties": {
           "object": {
-            "description": "The second thing, 1 to 80 characters (for example 'bike' or 'hallway').",
+            "description": "The second thing, 1 to 80 characters (e.g. 'bike' or 'hallway').",
             "type": "string"
           },
           "predicate": {
-            "description": "How it relates: lowercase snake case, 2 to 40 characters (for example 'owns' or 'adjacent_to').",
+            "description": "How they relate, in lowercase snake case, 2 to 40 characters (e.g. 'owns' or 'adjacent_to').",
             "type": "string"
           },
           "subject": {
-            "description": "The first thing, 1 to 80 characters (for example 'house member' or 'kitchen').",
+            "description": "The first thing, 1 to 80 characters (e.g. 'house member' or 'kitchen').",
             "type": "string"
           }
         },
@@ -847,15 +847,15 @@
       "parameters": {
         "properties": {
           "folder": {
-            "description": "Mailbox folder (default INBOX).",
+            "description": "The mailbox folder (default INBOX).",
             "type": "string"
           },
           "limit": {
-            "description": "How many recent messages to read (default 5, max 20).",
+            "description": "How many recent messages (default 5, at most 20).",
             "type": "integer"
           },
           "unread_only": {
-            "description": "Only unread messages (default false).",
+            "description": "Unread messages only (default false).",
             "type": "boolean"
           }
         },
@@ -867,7 +867,7 @@
       "parameters": {
         "properties": {
           "fact_id": {
-            "description": "The fact_id returned by the `remember` call being rejected.",
+            "description": "The fact_id the remember call returned.",
             "type": "integer"
           }
         },
@@ -884,7 +884,7 @@
       "parameters": {
         "properties": {
           "relation_id": {
-            "description": "The relation_id returned by the propose_relation call being rejected.",
+            "description": "The relation_id the propose_relation call returned.",
             "type": "integer"
           }
         },
@@ -901,7 +901,7 @@
       "parameters": {
         "properties": {
           "key": {
-            "description": "Category: 'alias' (device nickname), 'preference' (user preference), 'routine' (command pattern)",
+            "description": "'alias' (a device nickname), 'preference' or 'routine' (a command pattern).",
             "enum": [
               "alias",
               "preference",
@@ -910,11 +910,11 @@
             "type": "string"
           },
           "name": {
-            "description": "The name/label (e.g. 'desk lamp', 'bedtime')",
+            "description": "The name or label, e.g. 'desk lamp' or 'bedtime'.",
             "type": "string"
           },
           "value": {
-            "description": "The mapping value (e.g. entity_id for alias, description for preference, action list for routine)",
+            "description": "The value: the entity_id for an alias, the description for a preference, the actions for a routine.",
             "type": "string"
           }
         },
@@ -942,11 +942,11 @@
       "parameters": {
         "properties": {
           "entity_id": {
-            "description": "The entity to investigate, e.g. light.kitchen",
+            "description": "The entity to investigate, e.g. light.kitchen.",
             "type": "string"
           },
           "event_time": {
-            "description": "Optional ISO timestamp of the event (e.g. '2026-07-12 03:00:00'). Omit to analyze the most recent change.",
+            "description": "Optional ISO time of the event (e.g. '2026-07-12 03:00:00'); leave out for the latest change.",
             "type": "string"
           },
           "window_minutes": {
@@ -967,7 +967,7 @@
       "parameters": {
         "properties": {
           "entity_id": {
-            "description": "The scene/script entity_id (e.g. scene.movie_time)",
+            "description": "The scene or script entity_id, e.g. scene.movie_time.",
             "type": "string"
           }
         },
@@ -1005,11 +1005,11 @@
             "type": "string"
           },
           "delay_minutes": {
-            "description": "How many minutes from now to run it.",
+            "description": "Minutes from now.",
             "type": "number"
           },
           "instruction": {
-            "description": "The self-contained instruction to execute later, e.g. 'Check lock.back_door is locked; if not, lock it and report.'",
+            "description": "The complete instruction for later, e.g. 'Check lock.back_door is locked; if not, lock it and report.'",
             "type": "string"
           }
         },
@@ -1045,15 +1045,15 @@
       "parameters": {
         "properties": {
           "domain": {
-            "description": "Optional domain filter: light, switch, lock, cover, climate, fan, media_player, sensor, binary_sensor, scene, script, automation, person",
+            "description": "Optional domain filter: light, switch, lock, cover, climate, fan, media_player, sensor, binary_sensor, scene, script, automation, person.",
             "type": "string"
           },
           "query": {
-            "description": "Search term: entity name, area name, or keyword (e.g. 'desk lamp', 'kitchen lights', 'back door')",
+            "description": "Name, area or keyword, e.g. 'desk lamp', 'kitchen lights', 'back door'.",
             "type": "string"
           },
           "require_unique": {
-            "description": "Set true when you need exactly one target entity resolved before acting on it. Set false (default) for general browsing/discovery where multiple results are expected.",
+            "description": "True when exactly one target must be resolved before acting; false (default) for browsing.",
             "type": "boolean"
           }
         },
@@ -1070,11 +1070,11 @@
       "parameters": {
         "properties": {
           "mode": {
-            "description": "The mode to activate (e.g. 'party', 'movie', 'away', 'normal').",
+            "description": "The mode, e.g. 'party', 'movie', 'away' or 'normal'.",
             "type": "string"
           },
           "reason": {
-            "description": "Optional short reason/context.",
+            "description": "Optional short reason.",
             "type": "string"
           }
         },
@@ -1105,7 +1105,7 @@
       "parameters": {
         "properties": {
           "entity_pattern": {
-            "description": "The entity pattern to stop ignoring",
+            "description": "The pattern to stop ignoring.",
             "type": "string"
           }
         },
@@ -1131,7 +1131,7 @@
             "type": "string"
           },
           "result": {
-            "description": "Closing report the user will hear.",
+            "description": "The closing report the user will hear.",
             "type": "string"
           },
           "status": {
@@ -1181,11 +1181,11 @@
       "parameters": {
         "properties": {
           "entity_id": {
-            "description": "Optional specific weather.* entity; defaults to the first one found.",
+            "description": "Optional weather.* entity; the first one found otherwise.",
             "type": "string"
           },
           "kind": {
-            "description": "'hourly' for today/when-will-it-rain questions (default), 'daily' for the multi-day outlook.",
+            "description": "'hourly' for today and when-will-it-rain (default), 'daily' for the next few days.",
             "enum": [
               "hourly",
               "daily",
