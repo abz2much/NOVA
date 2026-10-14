@@ -327,7 +327,8 @@ async def async_save_mutes(hass) -> None:
 
 def status() -> dict:
     """The gate's state for the nova.observer_status service."""
-    last_hour = _recent_within(_STATE.history, _HOUR)
+    since = _now() - _HOUR
+    last_hour = [ann for ann in _STATE.history if ann.timestamp >= since]
     spoken = [ann for ann in last_hour if ann.was_spoken]
     held = [ann for ann in last_hour if not ann.was_spoken]
     latest = spoken[-1] if spoken else None

@@ -377,13 +377,19 @@ def test_status(og):
     og.shush(entity_id="a.x")
     st = og.status()
     assert st["announcements_last_hour"] == 2
+    assert st["suppressed_last_hour"] == 1
     assert st["muted_entities"] == ["a.x", "b.x"] and st["muted_categories"] == ["c"]
     assert st["last_announcement"] == {"message": "Second", "seconds_ago": 5}
 
 
-def test_preserved_quirk_status_never_counts_suppressed(og):
+def test_status_counts_held_announcements_from_the_last_hour(og):
+    _said(og, "Old held", spoken=False)
+    og.clock["now"] += 4000
     _said(og, "Held", spoken=False)
-    assert og.status()["suppressed_last_hour"] == 0
+    _said(og, "Spoken")
+    st = og.status()
+    assert st["suppressed_last_hour"] == 1
+    assert st["announcements_last_hour"] == 1
 
 
 def test_recent_announcements(og):
