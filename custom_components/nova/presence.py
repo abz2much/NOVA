@@ -1,9 +1,10 @@
-"""
-Nova — Presence awareness.
+"""Who is home and which rooms are occupied.
 
-Reads HA's person.* entities, zone states, and (when available) mmWave room
-sensors to know who is home and where. Provides a concise summary string for
-the conversation agent's context.
+People come from Home Assistant's ``person.*`` entities; rooms come from
+occupancy binary sensors (mmWave style) that are currently on. The result
+is a structured summary for other modules and a one-line description for
+the conversation agent's prompt. Read-only: no state writes, no service
+calls, no storage. Everything here runs on the event loop.
 """
 from __future__ import annotations
 
@@ -13,107 +14,108 @@ from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
 
+_ROOM_WORDS = ("presence", "occupancy")
+_NO_PEOPLE = "No person entities configured in Home Assistant."
+
 
 def person_name(hass: HomeAssistant, entity_id: str) -> str | None:
-    """The name presence (and so identity) uses for a person.* entity: its
-    friendly name, else the part after "person.". None when it isn't there.
-    Nova Voice ID's person ids map to identity votes through this (8.37.0)."""
-    state = hass.states.get(entity_id)
-    if not state:
+    """Friendly name of a person entity, else the part of the id after the
+    first dot; None when the entity has no state."""
+    st = hass.states.get(entity_id)
+    if not st:
         return None
-    return state.attributes.get("friendly_name", entity_id.split(".", 1)[-1])
+    return st.attributes.get("friendly_name", entity_id.split(".", 1)[-1])
 
 
 def _person_state(hass: HomeAssistant, entity_id: str) -> dict:
-    """Extract useful data from a person.* entity."""
-    state = hass.states.get(entity_id)
-    if not state:
+    st = hass.states.get(entity_id)
+    if not st:
         return {}
+    attrs = st.attributes
     return {
-        "name":  person_name(hass, entity_id),
-        "state": state.state,  # 'home', 'not_home', or a zone name
-        "latitude":  state.attributes.get("latitude"),
-        "longitude": state.attributes.get("longitude"),
+        "name": person_name(hass, entity_id),
+        "state": st.state,
+        "latitude": attrs.get("latitude"),
+        "longitude": attrs.get("longitude"),
     }
+
+
+def _filters():
+    """The entity filter's two checks, or harmless stand-ins when it cannot
+    be imported."""
+    try:
+        from .entity_filter import is_excluded, is_object_sensor
+    except Exception:
+        def is_excluded(hass, entity_id, exclusions=None):  # type: ignore[misc]
+            return False
+
+        def is_object_sensor(entity_id, friendly_name=None):  # type: ignore[misc]
+            return False
+    return is_excluded, is_object_sensor
+
+
+def _room_from(name: str) -> str:
+    room = name.lower()
+    for word in _ROOM_WORDS:
+        room = room.replace(word, "")
+    return room.strip()
+
+
+def _occupied_rooms(hass: HomeAssistant) -> dict:
+    excluded, is_object = _filters()
+    rooms: dict[str, list] = {}
+    for st in hass.states.async_all("binary_sensor"):
+        if st.state != "on":
+            continue
+        if st.attributes.get("device_class") != "occupancy":
+            continue
+        if excluded(hass, st.entity_id):
+            continue
+        name = st.attributes.get("friendly_name", st.entity_id)
+        if is_object(st.entity_id, name):
+            continue
+        room = _room_from(name)
+        if room:
+            rooms.setdefault(room, [])
+    return rooms
 
 
 def get_presence_summary(hass: HomeAssistant) -> dict:
-    """
-    Return a summary of who's home and where.
-
-    Shape:
-      {
-        "total_people":  int,
-        "home_count":    int,
-        "away_count":    int,
-        "people":        [{"name": "Username", "state": "home", ...}, ...],
-        "rooms":         {"kitchen": ["Username"], "office": ["Username2"]},
-        "anyone_home":   bool,
-      }
-    """
+    """People (with their state) and occupied rooms."""
     people = []
-    for state in hass.states.async_all("person"):
-        info = _person_state(hass, state.entity_id)
-        if info:
-            people.append(info)
-
-    home_count = sum(1 for p in people if p.get("state") == "home")
-    away_count = len(people) - home_count
-
-    # Room detection via mmWave sensors — Aqara FP2 exposes sensor.*_presence
-    # with occupancy attributes, or binary_sensor.*_occupancy. We scan both.
-    rooms: dict[str, list[str]] = {}
-    try:
-        from .entity_filter import is_excluded as _excl, is_object_sensor as _is_object
-    except Exception:
-        _excl = lambda _h, _e: False
-        _is_object = lambda _e, _n=None: False
-    for state in hass.states.async_all("binary_sensor"):
-        if state.state != "on":
-            continue
-        if state.attributes.get("device_class") != "occupancy":
-            continue
-        if _excl(hass, state.entity_id):
-            continue  # user excluded this sensor (e.g. a virtual occupancy sensor)
-        name = state.attributes.get("friendly_name", state.entity_id)
-        if _is_object(state.entity_id, name):
-            continue  # a car, animal or package is not a person (8.14.0)
-        # Try to extract the room from the name (e.g. "Kitchen Presence")
-        room = name.lower().replace("presence", "").replace("occupancy", "").strip()
-        if room:
-            rooms.setdefault(room, [])
-
+    for st in hass.states.async_all("person"):
+        entry = _person_state(hass, st.entity_id)
+        if entry:
+            people.append(entry)
+    home = sum(1 for p in people if p["state"] == "home")
     return {
         "total_people": len(people),
-        "home_count":   home_count,
-        "away_count":   away_count,
-        "people":       people,
-        "rooms":        rooms,
-        "anyone_home":  home_count > 0,
+        "home_count": home,
+        "away_count": len(people) - home,
+        "people": people,
+        "rooms": _occupied_rooms(hass),
+        "anyone_home": home > 0,
     }
 
 
+def _clause(person: dict) -> str:
+    name, state = person["name"], person["state"]
+    if state == "home":
+        return f"{name} is home"
+    if state == "not_home":
+        return f"{name} is away"
+    return f"{name} is at {state.replace('_', ' ')}"
+
+
 def presence_context_string(hass: HomeAssistant) -> str:
-    """
-    One-line summary suitable for injecting into the LLM system prompt.
-    Example: "Username is home. Username2 is away. 3 presence sensors active: kitchen, office."
-    """
-    data = get_presence_summary(hass)
-    if not data["people"]:
-        return "No person entities configured in Home Assistant."
-
-    bits: list[str] = []
-    for p in data["people"]:
-        state = p["state"]
-        if state == "home":
-            bits.append(f"{p['name']} is home")
-        elif state == "not_home":
-            bits.append(f"{p['name']} is away")
-        else:
-            # A zone name like 'Work' or 'School'
-            bits.append(f"{p['name']} is at {state.replace('_', ' ')}")
-
-    summary = ". ".join(bits) + "."
-    if data["rooms"]:
-        summary += f" Occupied areas: {', '.join(data['rooms'].keys())}."
-    return summary
+    """One line for the system prompt, e.g.
+    "Alex is home. Sam is away. Occupied areas: kitchen, office." """
+    summary = get_presence_summary(hass)
+    people = summary["people"]
+    if not people:
+        return _NO_PEOPLE
+    text = ". ".join(_clause(p) for p in people) + "."
+    rooms = summary["rooms"]
+    if rooms:
+        text += " Occupied areas: " + ", ".join(rooms) + "."
+    return text
