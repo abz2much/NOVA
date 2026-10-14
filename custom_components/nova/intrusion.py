@@ -1,181 +1,248 @@
-"""
-Nova — Intrusion snapshots & false-alarm call-off (v6.68.0).
+"""Nova intrusion support: snapshots, standing down, and learning from labels.
 
-Two additions to the existing SafetyManager intrusion flow:
+The investigation itself belongs to the safety manager. This module adds:
 
-  1. Snapshot: when an intrusion is confirmed on camera, grab a still from that
-     camera and make it available with the alert — so the notification can show
-     WHO/what triggered it, and the panel can display it.
+  * Snapshots. A confirmed intrusion on camera saves a still from that camera,
+    for the alert and the panel.
+  * Standing down. The user may call an alert a false alarm, which stops
+    escalation for a cooldown and is remembered, or just acknowledge it, which
+    holds the no answer escalation for a while.
+  * A reviewable log of intrusion events the user can label real or false.
 
-  2. Call-off: let the user declare a false alarm. dismiss_intrusion() clears the
-     active investigation, suppresses further escalation for a cooldown, and
-     records the false alarm so repeated benign triggers can be learned from.
+Snapshots live in a private folder under the Nova data directory, never under
+/config/www, which Home Assistant serves at /local/ without any login. They
+reach the panel only as base64 over the admin only nova/intrusion websocket
+command. Snapshots from before that move are relocated by
+migrate_legacy_snapshots, never deleted.
 
-Snapshots are written under /config/nova/intrusion — NOT /config/www, which
-Home Assistant serves at /local/... with no authentication at all. These
-images can show a confirmed intruder's face; they're read back and sent to
-the panel as base64 over the existing @require_admin `nova/intrusion`
-websocket command instead; there is no HTTP path serving them at all, so
-there's nothing new to authenticate. (Pre-v7.102.0 this lived under
-/config/www/nova/intrusion; see migrate_legacy_snapshots() for the one-time
-move of any pre-existing files — old snapshots are relocated, never deleted.)
-Everything here is defensive and never raises to the caller.
+Nothing in this module raises to its caller.
 """
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import os
 import secrets
 import time
-import json
 from datetime import timedelta
 from pathlib import Path
 from typing import Optional
+
 from . import paths
 
 _LOGGER = logging.getLogger(__name__)
 
-_DEFAULT_NOTIFY_IMAGE_TTL_MIN = 60.0
+# Folders, each overridable (tests); None means the location from paths.py.
+SNAPSHOT_DIR: Optional[str] = None
+_LEGACY_SNAPSHOT_DIR: Optional[str] = None
+LOG_PATH: Optional[Path] = None
 
-# Private snapshot dir — never under /config/www (see module docstring).
-SNAPSHOT_DIR: Optional[str] = None  # override; None resolves via paths.py
+_MAX_SNAPSHOTS = 40
+_DEFAULT_NOTIFY_IMAGE_TTL_MIN = 60.0
+_CALLOFF_COOLDOWN = 600.0      # quiet after a false alarm call-off
+_ACK_WINDOW = 300.0            # how long an acknowledgement holds escalation
+_FALSE_ALARM_KEEP = 50
+_CALL_OFF_REACH = 7200.0       # how far back a call-off looks for its alert
+
+# Stand down state. The investigation itself is the safety manager's.
+_called_off_until = 0.0
+_acknowledged_ts = 0.0
+_last_snapshot: dict = {}      # {path, camera, ts} of the latest capture
+_false_alarms: list = []       # recent {ts, reason, camera}
+_last_decision_id: Optional[int] = None   # Decision Record id of the latest intrusion
 
 
 def _snapshot_dir() -> str:
     return SNAPSHOT_DIR or paths.nova_path("intrusion")
 
 
-_LEGACY_SNAPSHOT_DIR: Optional[str] = None  # override; None resolves via paths.py; pre-v7.102.0 location
-
-
 def _legacy_snapshot_dir() -> str:
+    """Where snapshots were kept before they went private."""
     return _LEGACY_SNAPSHOT_DIR or paths.config_path("www", "nova", "intrusion")
 
 
-_MAX_SNAPSHOTS = 40           # keep the last N, prune older
+def _because(reason: str) -> str:
+    return f" ({reason})" if reason else ""
 
-# Call-off state (module-level; the investigation itself lives in SafetyManager)
-_called_off_until = 0.0       # suppress escalation until this ts
-_CALLOFF_COOLDOWN = 600.0     # 10 min quiet after a false-alarm call-off
-_acknowledged_ts = 0.0        # user said "I see it, stand by" (not a false alarm)
-_ACK_WINDOW = 300.0           # an acknowledgement holds the auto-escalation this long
-_last_snapshot: dict = {}     # {path, url, camera, ts} of the most recent capture
-_false_alarms: list = []      # recent {ts, camera, area} for learning
-_last_decision_id: Optional[int] = None  # decision_record row id of the latest intrusion
 
+# ── acknowledge and call-off ────────────────────────────────────────────────
 
 def acknowledge(reason: str = "") -> dict:
-    """User acknowledges the alert ('I see it', 'I'm looking', 'standby') WITHOUT
-    declaring it a false alarm. This holds the no-response auto-escalation for a
-    window — the user is handling it — but does NOT suppress evidence-based
-    escalation (if a person appears on camera, Nova still alerts). Never
-    raises."""
+    """"I see it": the user is dealing with it, but it is not a false alarm.
+    Holds the no answer escalation for a while; fresh evidence, such as a
+    person on camera, still alerts."""
     global _acknowledged_ts
     _acknowledged_ts = time.time()
-    _LOGGER.info("Nova: intrusion acknowledged by user%s — holding auto-escalation",
-                 f" ({reason})" if reason else "")
+    _LOGGER.info("Nova: intrusion acknowledged by user%s, holding auto-escalation",
+                 _because(reason))
     return {"ok": True, "held_seconds": int(_ACK_WINDOW)}
 
 
 def is_acknowledged() -> bool:
-    """Whether a recent user acknowledgement is holding the no-response timeout."""
-    return (time.time() - _acknowledged_ts) < _ACK_WINDOW
+    """True while an acknowledgement still holds the no answer escalation."""
+    return time.time() - _acknowledged_ts < _ACK_WINDOW
+
+
+def set_last_decision_id(record_id) -> None:
+    """Keep the Decision Record id of the newest intrusion, so a call-off
+    judges that record and not just the newest of its kind (overlapping
+    intrusions would get it wrong)."""
+    global _last_decision_id
+    if record_id is None:
+        return
+    try:
+        _last_decision_id = int(record_id)
+    except Exception:
+        pass
+
+
+def _judge_false_alarm() -> None:
+    """Mark the intrusion's Decision Record wrong: the exact record when one is
+    known and still open, else the newest intrusion of the last two hours."""
+    global _last_decision_id
+    from . import decision_record
+    exact = _last_decision_id
+    judged = exact is not None and decision_record.set_outcome(exact, "wrong",
+                                                               "dismiss_intrusion")
+    if not judged:
+        decision_record.set_outcome_recent("intrusion", "wrong", "dismiss_intrusion",
+                                           max_age=_CALL_OFF_REACH)
+    # Forgotten only once the verdict is in.
+    _last_decision_id = None
+
+
+def dismiss_intrusion(reason: str = "") -> dict:
+    """Call the current or last intrusion a false alarm. The safety manager
+    sees is_called_off() and drops its investigation; the call-off is kept
+    for learning."""
+    global _called_off_until
+    now = time.time()
+    _called_off_until = now + _CALLOFF_COOLDOWN
+    entry = {"ts": int(now), "reason": str(reason or ""),
+             "camera": (_last_snapshot or {}).get("camera", "")}
+    _false_alarms.append(entry)
+    del _false_alarms[:-_FALSE_ALARM_KEEP]
+    _LOGGER.info("Nova: intrusion called off by user%s, suppressing escalation for %ds",
+                 _because(reason), int(_CALLOFF_COOLDOWN))
+    # The person's call-off is a confirmed label for learned damping.
+    try:
+        _label_call_off(_last_decision_id, time.time())
+    except Exception:
+        pass
+    try:
+        _judge_false_alarm()
+    except Exception:
+        pass
+    return {"ok": True, "suppressed_seconds": int(_CALLOFF_COOLDOWN), "recorded": entry}
+
+
+def is_called_off() -> bool:
+    """True while a call-off is holding escalation."""
+    return _called_off_until > time.time()
+
+
+def clear_calloff() -> None:
+    """Lift both the call-off and any acknowledgement (a new, unrelated
+    trigger)."""
+    global _called_off_until, _acknowledged_ts
+    _called_off_until = _acknowledged_ts = 0.0
+
+
+def false_alarm_count(within_seconds: float = 86400.0) -> int:
+    """Call-offs within the window (a day by default)."""
+    since = time.time() - within_seconds
+    return len([entry for entry in _false_alarms if entry.get("ts", 0) >= since])
+
+
+def status() -> dict:
+    """The panel's and agent's view of snapshots and stand down state."""
+    left = int(_called_off_until - time.time())
+    return {"last_snapshot": _last_snapshot or None, "called_off": is_called_off(),
+            "acknowledged": is_acknowledged(), "suppressed_for": max(0, left),
+            "false_alarms_24h": false_alarm_count()}
+
+
+# ── snapshots ───────────────────────────────────────────────────────────────
+
+def _write_bytes(path: str, data: bytes) -> None:
+    Path(path).write_bytes(data)
 
 
 async def capture_snapshot(hass, camera_entity: str,
                            tag: str = "intrusion") -> Optional[dict]:
-    """Grab a still from camera_entity and write it to the private snapshot
-    dir. Returns {path, camera, ts} or None. Never raises."""
+    """Save a still from the camera into the private folder. Returns
+    {path, camera, ts}, or None on any failure."""
+    global _last_snapshot
     if not camera_entity:
         return None
     try:
-        from homeassistant.components.camera import async_get_image as _get_image
-        image = await _get_image(hass, camera_entity, timeout=10)
-        content = getattr(image, "content", None)
-        if not content:
+        from homeassistant.components.camera import async_get_image
+        image = await async_get_image(hass, camera_entity, timeout=10)
+        data = getattr(image, "content", None)
+        if not data:
             return None
-        os.makedirs(_snapshot_dir(), exist_ok=True)
-        ts = int(time.time())
-        slug = camera_entity.split(".", 1)[-1]
-        fname = f"{tag}_{slug}_{ts}.jpg"
-        path = os.path.join(_snapshot_dir(), fname)
-        await hass.async_add_executor_job(_write_bytes, path, content)
+        folder = _snapshot_dir()
+        os.makedirs(folder, exist_ok=True)
+        taken = int(time.time())
+        name = camera_entity.split(".", 1)[-1]
+        path = os.path.join(folder, f"{tag}_{name}_{taken}.jpg")
+        await hass.async_add_executor_job(_write_bytes, path, data)
         _prune_old()
-        info = {
-            "path": path,
-            "camera": camera_entity,
-            "ts": ts,
-        }
-        global _last_snapshot
-        _last_snapshot = info
-        _LOGGER.info("Nova: intrusion snapshot saved from %s → %s",
-                     camera_entity, path)
-        return info
+        _last_snapshot = {"path": path, "camera": camera_entity, "ts": taken}
+        _LOGGER.info("Nova: intrusion snapshot from %s saved to %s", camera_entity, path)
+        return _last_snapshot
     except Exception as exc:
-        _LOGGER.debug("intrusion snapshot failed for %s: %s", camera_entity, exc)
+        _LOGGER.debug("intrusion: snapshot from %s failed: %s", camera_entity, exc)
         return None
 
 
-def _write_bytes(path: str, data: bytes) -> None:
-    with open(path, "wb") as f:
-        f.write(data)
-
-
 def _read_b64(path: str) -> Optional[str]:
-    """Read a snapshot file and return its base64-encoded bytes, or None.
-    Refuses to read anything outside SNAPSHOT_DIR — path comes from our own
-    stored metadata, not user input, but this costs nothing and closes off
-    a path-traversal class of bug outright. Never raises."""
+    """A snapshot as base64, or None. Paths come from Nova's own records, but
+    anything outside the snapshot folder is still refused."""
+    if not path:
+        return None
     try:
-        if not path:
-            return None
-        real_dir = os.path.realpath(_snapshot_dir())
-        real_path = os.path.realpath(path)
-        if os.path.commonpath([real_dir, real_path]) != real_dir:
+        folder = os.path.realpath(_snapshot_dir())
+        target = os.path.realpath(path)
+        if os.path.commonpath([folder, target]) != folder:
             _LOGGER.warning("intrusion: refused to read snapshot outside %s: %s",
                             _snapshot_dir(), path)
             return None
-        with open(real_path, "rb") as f:
-            return base64.b64encode(f.read()).decode("ascii")
+        return base64.b64encode(Path(target).read_bytes()).decode("ascii")
     except Exception as exc:
-        _LOGGER.debug("intrusion: snapshot read failed for %s: %s", path, exc)
+        _LOGGER.debug("intrusion: reading snapshot %s failed: %s", path, exc)
         return None
 
 
 async def get_snapshot_b64(hass, path: str) -> Optional[str]:
-    """Async wrapper for _read_b64 — file I/O off the event loop."""
+    """_read_b64 in the executor."""
     return await hass.async_add_executor_job(_read_b64, path)
 
 
 def _notify_ttl_minutes(hass) -> float:
-    """How long a notification's signed image copy lives before being
-    deleted. Configurable via `intrusion_notify_image_ttl_minutes`
-    (Settings → Devices & Services → Nova → Configure)."""
+    """Minutes a notification's image copy lives
+    (intrusion_notify_image_ttl_minutes), at least one."""
     try:
         from . import nova_config
-        v = nova_config.get("intrusion_notify_image_ttl_minutes",
-                            _DEFAULT_NOTIFY_IMAGE_TTL_MIN)
-        return max(1.0, float(v))
+        minutes = nova_config.get("intrusion_notify_image_ttl_minutes",
+                                  _DEFAULT_NOTIFY_IMAGE_TTL_MIN)
+        return max(1.0, float(minutes))
     except Exception:
         return _DEFAULT_NOTIFY_IMAGE_TTL_MIN
 
 
 def _copy_for_notify(snapshot_path: str, sub_dir: str) -> Optional[str]:
-    """Copy the private snapshot into HA's local media directory under a
-    fresh, unguessable filename. Returns the filename, or None on failure.
-    Runs in the executor."""
+    """Copy a snapshot into the media folder under a random name; returns the
+    name, or None. Runs in the executor."""
     try:
         os.makedirs(sub_dir, exist_ok=True)
-        fname = f"{secrets.token_urlsafe(16)}.jpg"
-        dst = os.path.join(sub_dir, fname)
-        with open(snapshot_path, "rb") as src_f:
-            data = src_f.read()
-        with open(dst, "wb") as dst_f:
-            dst_f.write(data)
-        return fname
+        name = f"{secrets.token_urlsafe(16)}.jpg"
+        data = Path(snapshot_path).read_bytes()
+        Path(sub_dir, name).write_bytes(data)
+        return name
     except Exception as exc:
-        _LOGGER.debug("intrusion: notification image copy failed: %s", exc)
+        _LOGGER.debug("intrusion: copying the notification image failed: %s", exc)
         return None
 
 
@@ -186,264 +253,168 @@ def _delete_notify_copy(path: str) -> None:
         pass
 
 
+def _media_source(hass) -> Optional[str]:
+    """The media folder to use: "local" when present, else the first."""
+    folders = getattr(hass.config, "media_dirs", None) or {}
+    if "local" in folders:
+        return "local"
+    return next(iter(folders), None)
+
+
 async def get_notification_image_url(hass, snapshot_path: str) -> Optional[str]:
-    """Return a short-lived, cryptographically SIGNED url for a mobile push
-    notification's image attachment. Never returns the persistent, private
-    archive path directly and never falls back to the old /config/www /
-    /local/... mechanism.
+    """A short lived signed URL for a phone notification's picture, or None.
 
-    Phones fetch a push notification's image attachment directly (iOS/
-    Android — no Authorization header support), so the file has to be
-    reachable by a plain URL. Rather than storing it anywhere permanently
-    unauthenticated, this uses Home Assistant's own media_source support:
-    the image is copied into HA's configured local media directory (under
-    an unguessable, per-notification filename) and served at /media/...,
-    which — unlike /config/www's /local/... — is a real HomeAssistantView
-    that requires either a normal auth token or a valid signed path
-    (homeassistant.components.http.auth.async_sign_path). The signed URL
-    this returns expires after `_notify_ttl_minutes()`, and the copy is
-    deleted from disk on that same schedule regardless of whether the
-    signature was ever used. The permanent, private archive in
-    SNAPSHOT_DIR is completely untouched by any of this.
-
-    Returns None (never raises) if no local media directory is configured,
-    or on any failure — the notification still sends, just without a photo.
+    Phones fetch a notification's picture with a plain URL and cannot send a
+    login, so the snapshot is copied, under a random name, into Home
+    Assistant's media folder. /media/ needs a login or a signed path, unlike
+    /local/. The signature expires after _notify_ttl_minutes and the copy is
+    deleted on the same timer, used or not. The private snapshot is left as
+    it is, and no URL ever points at it or at /local/. Without a media folder,
+    or on any failure, the notification just goes without a picture.
     """
     if not snapshot_path:
         return None
     try:
-        media_dirs = getattr(hass.config, "media_dirs", None) or {}
-        source_dir_id = "local" if "local" in media_dirs else next(iter(media_dirs), None)
-        if not source_dir_id:
-            _LOGGER.debug("intrusion: no local media directory configured; "
-                          "notification will send without a photo")
+        source = _media_source(hass)
+        if not source:
+            _LOGGER.debug("intrusion: no media folder configured, sending without a photo")
             return None
-        sub_dir = os.path.join(media_dirs[source_dir_id], "nova_intrusion")
-
-        fname = await hass.async_add_executor_job(_copy_for_notify, snapshot_path, sub_dir)
-        if not fname:
+        folder = os.path.join(hass.config.media_dirs[source], "nova_intrusion")
+        name = await hass.async_add_executor_job(_copy_for_notify, snapshot_path, folder)
+        if not name:
             return None
-        dst_path = os.path.join(sub_dir, fname)
-
-        ttl_minutes = _notify_ttl_minutes(hass)
+        copy = os.path.join(folder, name)
+        minutes = _notify_ttl_minutes(hass)
         try:
             from homeassistant.components.http.auth import async_sign_path
-            url_path = f"/media/{source_dir_id}/nova_intrusion/{fname}"
-            signed_url = async_sign_path(hass, url_path, timedelta(minutes=ttl_minutes))
+            signed = async_sign_path(hass, f"/media/{source}/nova_intrusion/{name}",
+                                     timedelta(minutes=minutes))
         except Exception as exc:
-            _LOGGER.debug("intrusion: signing notification image path failed: %s", exc)
-            await hass.async_add_executor_job(_delete_notify_copy, dst_path)
+            _LOGGER.debug("intrusion: signing the notification image failed: %s", exc)
+            await hass.async_add_executor_job(_delete_notify_copy, copy)
             return None
-
         try:
             from homeassistant.helpers.event import async_call_later
-            async_call_later(hass, ttl_minutes * 60,
-                             lambda _now: hass.async_add_executor_job(
-                                 _delete_notify_copy, dst_path))
-        except Exception as exc:
-            _LOGGER.debug("intrusion: could not schedule notification image "
-                          "cleanup, deleting immediately as a fallback: %s", exc)
-            await hass.async_add_executor_job(_delete_notify_copy, dst_path)
-            return None
 
-        return signed_url
+            def _expire(_now):
+                return hass.async_add_executor_job(_delete_notify_copy, copy)
+            async_call_later(hass, minutes * 60, _expire)
+        except Exception as exc:
+            _LOGGER.debug("intrusion: no cleanup timer for the notification image, "
+                          "deleting it now instead: %s", exc)
+            await hass.async_add_executor_job(_delete_notify_copy, copy)
+            return None
+        return signed
     except Exception as exc:
-        _LOGGER.debug("intrusion: get_notification_image_url failed: %s", exc)
+        _LOGGER.debug("intrusion: notification image url failed: %s", exc)
         return None
 
 
 def _prune_old() -> None:
+    """Keep only the newest _MAX_SNAPSHOTS stills."""
     try:
-        files = [
-            os.path.join(_snapshot_dir(), f)
-            for f in os.listdir(_snapshot_dir())
-            if f.endswith(".jpg")
-        ]
-        files.sort(key=lambda p: os.path.getmtime(p), reverse=True)
-        for old in files[_MAX_SNAPSHOTS:]:
+        folder = _snapshot_dir()
+        stills = [os.path.join(folder, name) for name in os.listdir(folder)
+                  if name.endswith(".jpg")]
+        newest_first = sorted(stills, key=os.path.getmtime, reverse=True)
+        for path in newest_first[_MAX_SNAPSHOTS:]:
             try:
-                os.remove(old)
+                os.remove(path)
             except Exception:
                 pass
     except Exception:
         pass
 
 
+def _repoint_log(old: str, new: str) -> None:
+    """Make log entries that name the old folder name the new one."""
+    _load_log()
+    touched = False
+    for event in _log:
+        where = event.get("snapshot_path") or ""
+        if where.startswith(old):
+            event["snapshot_path"] = where.replace(old, new, 1)
+            touched = True
+    if touched:
+        _save_log()
+
+
 def migrate_legacy_snapshots() -> dict:
-    """One-time move of any snapshots left under the old, unauthenticated
-    /config/www/nova/intrusion location (pre-v7.102.0) to the private
-    SNAPSHOT_DIR, and repoint any log entries that still reference the old
-    path. Files are moved, never deleted — if a destination file somehow
-    already exists, the legacy copy is left in place rather than overwritten
-    or dropped. Safe to call on every startup: a no-op once nothing legacy
-    remains. Never raises."""
-    moved = 0
-    skipped = 0
+    """Move snapshots out of the old public folder into the private one and
+    fix log entries that point at them. A file whose name already exists in
+    the private folder stays where it is: nothing is overwritten or deleted.
+    Safe on every start up; a no op once the old folder is empty."""
+    moved = skipped = 0
     try:
-        if not os.path.isdir(_legacy_snapshot_dir()):
+        legacy, private = _legacy_snapshot_dir(), _snapshot_dir()
+        if not os.path.isdir(legacy):
             return {"moved": 0, "skipped": 0}
-        os.makedirs(_snapshot_dir(), exist_ok=True)
-        for fname in os.listdir(_legacy_snapshot_dir()):
-            if not fname.endswith(".jpg"):
+        os.makedirs(private, exist_ok=True)
+        for name in os.listdir(legacy):
+            if not name.endswith(".jpg"):
                 continue
-            src = os.path.join(_legacy_snapshot_dir(), fname)
-            dst = os.path.join(_snapshot_dir(), fname)
+            target = os.path.join(private, name)
             try:
-                if os.path.exists(dst):
+                if os.path.exists(target):
                     skipped += 1
-                    continue
-                os.rename(src, dst)
-                moved += 1
+                else:
+                    os.rename(os.path.join(legacy, name), target)
+                    moved += 1
             except Exception as exc:
                 _LOGGER.warning("intrusion: could not migrate legacy snapshot %s: %s",
-                                fname, exc)
+                                name, exc)
                 skipped += 1
         if moved:
-            _load_log()
-            changed = False
-            for ev in _log:
-                p = ev.get("snapshot_path") or ""
-                if p.startswith(_legacy_snapshot_dir()):
-                    ev["snapshot_path"] = p.replace(_legacy_snapshot_dir(), _snapshot_dir(), 1)
-                    changed = True
-            if changed:
-                _save_log()
-            _LOGGER.warning(
-                "Nova: migrated %d intrusion snapshot(s) from the old, "
-                "unauthenticated %s to %s (%d left in place)%s",
-                moved, _legacy_snapshot_dir(), _snapshot_dir(), skipped,
-                " — remaining legacy files were left untouched" if skipped else "",
-            )
+            _repoint_log(legacy, private)
+            _LOGGER.warning("Nova: moved %d intrusion snapshot(s) from the public %s to %s "
+                            "(%d left in place)%s", moved, legacy, private, skipped,
+                            ", the rest are untouched" if skipped else "")
     except Exception as exc:
         _LOGGER.debug("intrusion: legacy snapshot migration skipped: %s", exc)
     return {"moved": moved, "skipped": skipped}
 
 
 def last_snapshot() -> Optional[dict]:
-    """The most recent intrusion snapshot info, or None."""
+    """The newest snapshot's details, or None."""
     return _last_snapshot or None
 
 
-# ── false-alarm call-off ─────────────────────────────────────────────────────
+# ── the event log and learning ──────────────────────────────────────────────
+# Every intrusion event is logged with its snapshot for the user to label real
+# or false. A place and time repeatedly labelled false stops the weak alerts
+# there (the first "investigating" ping and the unanswered notice). A
+# confirmed intrusion, by vision or by motion along a real route inside,
+# always alerts, whatever the labels say.
 
-def set_last_decision_id(record_id) -> None:
-    """Remember the decision_record row id of the most recent intrusion, so a
-    later call-off attaches its outcome to *that* record rather than guessing
-    the most-recent-of-kind (which mis-attributes when intrusions overlap)."""
-    global _last_decision_id
-    if record_id is not None:
-        try:
-            _last_decision_id = int(record_id)
-        except Exception:
-            pass
+_MAX_LOG = 200
+_LEARN_WINDOW = 30 * 86400.0   # labels older than this no longer count
+_LEARN_MIN_FALSE = 3           # false labels needed before weak alerts are damped
+_log: list = []
+_log_loaded = False
 
-
-def dismiss_intrusion(reason: str = "") -> dict:
-    """Declare the current/last intrusion a false alarm. Sets a suppression
-    window so the SafetyManager stops escalating, and records it. The
-    SafetyManager consults is_called_off() and clears its investigation. Never
-    raises."""
-    global _called_off_until, _last_decision_id
-    _called_off_until = time.time() + _CALLOFF_COOLDOWN
-    rec = {
-        "ts": int(time.time()),
-        "reason": str(reason or ""),
-        "camera": (_last_snapshot or {}).get("camera", ""),
-    }
-    _false_alarms.append(rec)
-    if len(_false_alarms) > 50:
-        del _false_alarms[:-50]
-    _LOGGER.info("Nova: intrusion called off by user%s — suppressing escalation "
-                 "for %ds", f" ({reason})" if reason else "", int(_CALLOFF_COOLDOWN))
-    try:  # a confirmed call-off teaches learned damping (8.24.0)
-        _label_call_off(_last_decision_id, time.time())
-    except Exception:
-        pass
-    try:  # Decision Record outcome: a called-off intrusion was a false alarm.
-        from . import decision_record
-        if _last_decision_id is not None:
-            # Attach the verdict to the exact record for this intrusion.
-            if not decision_record.set_outcome(
-                    _last_decision_id, "wrong", "dismiss_intrusion"):
-                # Already judged or gone — fall back to most-recent-of-kind.
-                decision_record.set_outcome_recent(
-                    "intrusion", "wrong", "dismiss_intrusion", max_age=7200.0)
-            _last_decision_id = None
-        else:
-            decision_record.set_outcome_recent(
-                "intrusion", "wrong", "dismiss_intrusion", max_age=7200.0)
-    except Exception:
-        pass
-    return {"ok": True, "suppressed_seconds": int(_CALLOFF_COOLDOWN), "recorded": rec}
-
-
-def is_called_off() -> bool:
-    """Whether a user call-off is currently suppressing escalation."""
-    return time.time() < _called_off_until
-
-
-def clear_calloff() -> None:
-    """Reset the suppression (e.g. on a genuinely new, unrelated trigger)."""
-    global _called_off_until, _acknowledged_ts
-    _called_off_until = 0.0
-    _acknowledged_ts = 0.0
-
-
-def false_alarm_count(within_seconds: float = 86400.0) -> int:
-    """How many false alarms the user has called off recently (for learning /
-    threshold tuning). Default window: 24h."""
-    cutoff = time.time() - within_seconds
-    return sum(1 for r in _false_alarms if r.get("ts", 0) >= cutoff)
-
-
-def status() -> dict:
-    """Snapshot + call-off status for the panel/agent."""
-    return {
-        "last_snapshot": _last_snapshot or None,
-        "called_off": is_called_off(),
-        "acknowledged": is_acknowledged(),
-        "suppressed_for": max(0, int(_called_off_until - time.time())),
-        "false_alarms_24h": false_alarm_count(),
-    }
-
-
-# ── event log + labeling + learning (v6.76.0) ────────────────────────────────
-# A reviewable history of every intrusion event with its snapshot, which the
-# user can label real/false. Those labels feed a narrow suppression: a pattern
-# repeatedly labelled a false alarm stops firing the LOW-CONFIDENCE alerts (the
-# initial "investigating" ping and the unanswered "unresolved" notice).
-#
-# HARD SAFETY RULE: learning may NEVER suppress a CONFIRMED intrusion — a person
-# confirmed on camera by vision, or motion tracing a real inward route, always
-# alerts regardless of how many times a pattern was called a false alarm. The
-# learning only damps the noisy, unconfirmed path.
-
-LOG_PATH: Optional[Path] = None  # override; None resolves via paths.py
+LABEL_SOURCE_PANEL = "panel_label"
+LABEL_SOURCE_CALL_OFF = "dismiss_intrusion"
+# Only labels a person gave are learned from. A label with no source predates
+# sources and could only have come from the panel.
+_CONFIRMED_LABEL_SOURCES = {LABEL_SOURCE_PANEL, LABEL_SOURCE_CALL_OFF}
 
 
 def _log_path() -> Path:
     return LOG_PATH or Path(paths.nova_path("intrusion_log.json"))
 
 
-_MAX_LOG = 200                 # keep the last N events
-_LEARN_WINDOW = 30 * 86400.0   # labels older than this stop counting
-_LEARN_MIN_FALSE = 3           # this many false labels ⇒ damp the weak alerts
-_log: list = []
-_log_loaded = False
-
-
 def _load_log() -> list:
-    """Read the persisted event log (once per run). Never raises."""
+    """The saved log, read from disk once per run."""
     global _log, _log_loaded
     if _log_loaded:
         return _log
     _log_loaded = True
     try:
-        if _log_path().exists():
-            with open(_log_path(), "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if isinstance(data, list):
-                _log = data[-_MAX_LOG:]
+        source = _log_path()
+        if source.exists():
+            saved = json.loads(source.read_text(encoding="utf-8"))
+            if isinstance(saved, list):
+                _log = saved[-_MAX_LOG:]
     except Exception as exc:
         _LOGGER.debug("intrusion log: load failed: %s", exc)
         _log = []
@@ -451,159 +422,132 @@ def _load_log() -> list:
 
 
 def _save_log() -> None:
-    """Persist the event log. Never raises."""
     try:
-        _log_path().parent.mkdir(parents=True, exist_ok=True)
-        with open(_log_path(), "w", encoding="utf-8") as f:
-            json.dump(_log[-_MAX_LOG:], f, indent=2, default=str)
+        target = _log_path()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(_log[-_MAX_LOG:], indent=2, default=str),
+                          encoding="utf-8")
     except Exception as exc:
         _LOGGER.debug("intrusion log: save failed: %s", exc)
 
 
 def _pattern_key(area: Optional[str], camera: Optional[str],
                  ts: Optional[float] = None) -> str:
-    """Group events by where + roughly when, so 'the kitchen window in the
-    afternoon' is one learnable pattern."""
-    where = (area or camera or "unknown").strip().lower()
-    hour = time.localtime(ts or time.time()).tm_hour
-    bucket = hour // 3           # 8 three-hour buckets across the day
-    return f"{where}|{bucket}"
+    """"place|slot": the area (else the camera) and which of the day's eight
+    three hour slots, so one place at one time of day is one pattern."""
+    place = (area or camera or "unknown").strip().lower()
+    slot = time.localtime(ts or time.time()).tm_hour // 3
+    return f"{place}|{slot}"
 
 
 def record_event(kind: str, reason: str = "", breach: Optional[str] = None,
                  breach_area: Optional[str] = None, camera: Optional[str] = None,
                  snapshot: Optional[dict] = None, zones: Optional[list] = None,
-                 max_depth: Optional[int] = None,
-                 decision_id: Optional[int] = None) -> dict:
-    """Append an intrusion event to the reviewable log. kind is one of
-    'investigating' | 'unresolved' | 'confirmed' | 'false_alarm'. Never raises."""
+                 max_depth: Optional[int] = None, decision_id: Optional[int] = None) -> dict:
+    """Log an intrusion event: investigating, unresolved, confirmed or
+    false_alarm."""
     _load_log()
-    ts = time.time()
-    ev = {
-        "id": f"evt_{int(ts)}_{len(_log)}",
-        "ts": ts,
-        "kind": str(kind or "investigating"),
-        "reason": reason or "",
-        "breach": breach or "",
-        "breach_area": breach_area or "",
-        "camera": camera or (snapshot or {}).get("camera") or "",
-        "snapshot_path": (snapshot or {}).get("path") or "",
-        "zones": list(zones or []),
-        "max_depth": max_depth,
-        "label": None,
-        "pattern": _pattern_key(breach_area, camera, ts),
-        # The Decision Record entry for this alert, so a label on the
-        # Intrusion tab also sets that decision's outcome (8.24.0).
+    now = time.time()
+    shot = snapshot or {}
+    event = {
+        "id": f"evt_{int(now)}_{len(_log)}", "ts": now,
+        "kind": str(kind or "investigating"), "reason": reason or "",
+        "breach": breach or "", "breach_area": breach_area or "",
+        "camera": camera or shot.get("camera") or "",
+        "snapshot_path": shot.get("path") or "",
+        "zones": list(zones or []), "max_depth": max_depth, "label": None,
+        "pattern": _pattern_key(breach_area, camera, now),
+        # A panel label on this event also judges this decision.
         "decision_id": decision_id,
     }
-    _log.append(ev)
-    if len(_log) > _MAX_LOG:
-        del _log[:-_MAX_LOG]
+    _log.append(event)
+    del _log[:-_MAX_LOG]
     _save_log()
-    return ev
+    return event
 
 
 def get_log(limit: int = 50) -> list:
-    """Most recent events first, for the panel."""
+    """The newest events first, for the panel."""
     _load_log()
     try:
-        limit = max(1, min(int(limit), _MAX_LOG))
-    except (ValueError, TypeError):
-        limit = 50
-    return list(reversed(_log[-limit:]))
-
-
-LABEL_SOURCE_PANEL = "panel_label"
-LABEL_SOURCE_CALL_OFF = "dismiss_intrusion"
-# Learned damping only learns from labels a person gave (8.24.0). A label
-# saved before 8.24.0 has no source; it could only come from the panel.
-_CONFIRMED_LABEL_SOURCES = {LABEL_SOURCE_PANEL, LABEL_SOURCE_CALL_OFF}
+        count = min(max(int(limit), 1), _MAX_LOG)
+    except (TypeError, ValueError):
+        count = 50
+    return _log[-count:][::-1]
 
 
 def _label_source(ev: dict) -> str:
     return ev.get("label_source") or LABEL_SOURCE_PANEL
 
 
+def _judge_labelled(event: dict, label: str) -> None:
+    """A panel label also judges the event's Decision Record entry."""
+    try:
+        from . import decision_record as dr
+        verdict = dr.OUTCOME_WRONG if label == "false" else dr.OUTCOME_GOOD
+        dr.set_outcome(int(event["decision_id"]), verdict, dr.SOURCE_PANEL_LABEL)
+    except Exception:
+        pass
+
+
 def label_event(event_id: str, label: str, source: str = LABEL_SOURCE_PANEL) -> dict:
-    """Mark an event 'real' or 'false' (or None to clear). This is the training
-    signal. A panel label also sets the outcome of the event's Decision Record
-    entry, when it has one and it is not yet judged (8.24.0). Never raises."""
+    """Label an event "real" or "false", or clear it with None or "". This is
+    what learning learns from."""
     _load_log()
     if label not in ("real", "false", None, ""):
         return {"ok": False, "error": "label must be 'real' or 'false'"}
     label = label or None
-    for ev in _log:
-        if ev.get("id") == event_id:
-            ev["label"] = label
-            ev["label_source"] = source if label else None
-            ev["labeled_ts"] = time.time()
-            _save_log()
-            if label and source == LABEL_SOURCE_PANEL and ev.get("decision_id") is not None:
-                try:
-                    from . import decision_record
-                    decision_record.set_outcome(
-                        int(ev["decision_id"]),
-                        decision_record.OUTCOME_WRONG if label == "false"
-                        else decision_record.OUTCOME_GOOD,
-                        decision_record.SOURCE_PANEL_LABEL)
-                except Exception:
-                    pass
-            return {"ok": True, "id": event_id, "label": label}
-    return {"ok": False, "error": "event not found"}
+    event = next((ev for ev in _log if ev.get("id") == event_id), None)
+    if event is None:
+        return {"ok": False, "error": "event not found"}
+    event.update(label=label, label_source=source if label else None, labeled_ts=time.time())
+    _save_log()
+    if label and source == LABEL_SOURCE_PANEL and event.get("decision_id") is not None:
+        _judge_labelled(event, label)
+    return {"ok": True, "id": event_id, "label": label}
 
 
 def _label_call_off(decision_id: Optional[int], now: float) -> Optional[str]:
-    """A confirmed "it's a false alarm" labels the intrusion's first alert
-    "false", so call-offs teach learned damping (8.24.0). The event for this
-    decision is preferred; otherwise the latest unlabelled first alert in the
-    last two hours. A label already given (say "real" from the panel) is
-    never overwritten. Returns the event id labelled, or None."""
+    """Label the intrusion's first alert "false" after a call-off. That
+    decision's alert is preferred, else the newest first alert of the last two
+    hours. If that alert already has a label it is left alone. Returns the
+    event id labelled, or None."""
     _load_log()
-    candidates = [e for e in _log if e.get("kind") == "investigating"
-                  and now - float(e.get("ts") or 0) <= 7200.0]
-    match = [e for e in candidates
-             if decision_id is not None and e.get("decision_id") == decision_id]
-    pool = match or candidates
-    for ev in reversed(pool):
-        if ev.get("label"):
-            return None
-        ev["label"] = "false"
-        ev["label_source"] = LABEL_SOURCE_CALL_OFF
-        ev["labeled_ts"] = now
-        _save_log()
-        return ev.get("id")
-    return None
+    recent = [ev for ev in _log if ev.get("kind") == "investigating"
+              and now - float(ev.get("ts") or 0) <= _CALL_OFF_REACH]
+    same = [ev for ev in recent if decision_id is not None and ev.get("decision_id") == decision_id]
+    chosen = (same or recent)[-1:]
+    if not chosen or chosen[0].get("label"):
+        return None
+    event = chosen[0]
+    event.update(label="false", label_source=LABEL_SOURCE_CALL_OFF, labeled_ts=now)
+    _save_log()
+    return event.get("id")
 
 
 def pattern_verdict(area: Optional[str], camera: Optional[str],
                     ts: Optional[float] = None) -> dict:
-    """How this location/time pattern has been labelled historically.
-    {false_count, real_count, damp} — damp=True means the weak alerts for this
-    pattern should stay quiet. A single 'real' label anywhere in the window
-    cancels damping outright: if it was ever genuinely an intruder here, we do
-    not learn to ignore it."""
+    """The labels a person gave this pattern in the learning window. damp is
+    True once there are enough false labels and not one real one: a place
+    that ever had a genuine intruder is never learned away."""
     _load_log()
     key = _pattern_key(area, camera, ts)
-    cutoff = time.time() - _LEARN_WINDOW
-    false_n = real_n = 0
+    oldest = time.time() - _LEARN_WINDOW
+    tally = {"false": 0, "real": 0}
     for ev in _log:
-        if ev.get("pattern") != key or ev.get("ts", 0) < cutoff:
+        if ev.get("pattern") != key or ev.get("ts", 0) < oldest:
             continue
-        if _label_source(ev) not in _CONFIRMED_LABEL_SOURCES:
-            continue
-        if ev.get("label") == "false":
-            false_n += 1
-        elif ev.get("label") == "real":
-            real_n += 1
-    damp = (real_n == 0) and (false_n >= _LEARN_MIN_FALSE)
-    return {"false_count": false_n, "real_count": real_n, "damp": damp,
+        if _label_source(ev) in _CONFIRMED_LABEL_SOURCES and ev.get("label") in tally:
+            tally[ev["label"]] += 1
+    damp = tally["real"] == 0 and tally["false"] >= _LEARN_MIN_FALSE
+    return {"false_count": tally["false"], "real_count": tally["real"], "damp": damp,
             "pattern": key}
 
 
 def should_damp_weak_alert(area: Optional[str], camera: Optional[str]) -> bool:
-    """True when the low-confidence alerts for this pattern should stay quiet.
-    NEVER consulted for a confirmed intrusion — only for the initial
-    'investigating' ping and the unanswered 'unresolved' notice."""
+    """Whether this pattern's weak alerts stay quiet. Only the first
+    investigating ping and the unanswered notice ask; a confirmed intrusion
+    never does."""
     try:
         return bool(pattern_verdict(area, camera).get("damp"))
     except Exception:
@@ -611,20 +555,14 @@ def should_damp_weak_alert(area: Optional[str], camera: Optional[str]) -> bool:
 
 
 def learning_summary() -> dict:
-    """Panel summary of what Nova has learned from labels."""
+    """The panel's view of what the labels have taught."""
     _load_log()
-    labeled = [e for e in _log if e.get("label")]
+    labelled = [ev for ev in _log if ev.get("label")]
     patterns: dict = {}
-    for e in labeled:
-        p = e.get("pattern") or "?"
-        d = patterns.setdefault(p, {"false": 0, "real": 0})
-        d[e["label"]] = d.get(e["label"], 0) + 1
-    damped = [p for p, d in patterns.items()
-              if d.get("real", 0) == 0 and d.get("false", 0) >= _LEARN_MIN_FALSE]
-    return {
-        "events": len(_log),
-        "labeled": len(labeled),
-        "patterns": patterns,
-        "damped_patterns": damped,
-        "min_false_to_damp": _LEARN_MIN_FALSE,
-    }
+    for ev in labelled:
+        counts = patterns.setdefault(ev.get("pattern") or "?", {"false": 0, "real": 0})
+        counts[ev["label"]] = counts.get(ev["label"], 0) + 1
+    damped = [key for key, counts in patterns.items()
+              if not counts.get("real", 0) and counts.get("false", 0) >= _LEARN_MIN_FALSE]
+    return {"events": len(_log), "labeled": len(labelled), "patterns": patterns,
+            "damped_patterns": damped, "min_false_to_damp": _LEARN_MIN_FALSE}
