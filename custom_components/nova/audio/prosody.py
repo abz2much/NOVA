@@ -1,6 +1,7 @@
 """Pick how Nova should sound for one announcement from room telemetry.
 
-Pure: reads only the telemetry dict and the clock. Standard library only so
+Pure: reads only the telemetry dict and the clock. A bool "quiet_hours" in
+the telemetry (the household's setting) wins over the built-in window. Standard library only so
 the file can be loaded on its own.
 """
 from __future__ import annotations
@@ -84,7 +85,9 @@ class ProsodyController:
         if critical:
             profile = VocalProfile(1.0, 1.15, "authoritative", False, True)
         else:
-            quiet = self.in_quiet_hours(self._hour(telemetry))
+            quiet = telemetry.get("quiet_hours")
+            if not isinstance(quiet, bool):
+                quiet = self.in_quiet_hours(self._hour(telemetry))
             dark = lux is not None and lux < self.dark_lux
             quiet_room = db is not None and db < self.quiet_db
             loud_room = db is not None and db >= self.loud_db

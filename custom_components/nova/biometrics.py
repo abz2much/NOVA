@@ -11,6 +11,7 @@ Off unless the person turns it on. Never raises to callers.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Optional
 
 _LOGGER = logging.getLogger(__name__)
@@ -97,10 +98,13 @@ def sleep_signal(hass: Any) -> Optional[bool]:
             value = str(entry["value"]).strip().lower()
             if value in _BLANK:
                 continue
-            if any(hint in value for hint in _ASLEEP_HINTS):
-                return True
-            if value in _AWAKE_VALUES:
+            # Whole words only, awake first: "not_asleep" is awake and
+            # "monitoring" is not "on".
+            if re.sub(r"[\s-]+", "_", value) in _AWAKE_VALUES:
                 return False
+            words = set(re.split(r"[^a-z0-9]+", value))
+            if any(set(hint.replace("_", " ").split()) <= words for hint in _ASLEEP_HINTS):
+                return True
     return None
 
 
