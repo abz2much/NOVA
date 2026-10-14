@@ -1,24 +1,24 @@
 """
-Nova — Facial recognition awareness (Frigate-native, DoubleTake, CompreFace).
+Nova — who has been seen, and on which camera.
 
-Two independent identity sources, either or both:
+Identity reaches Nova from up to three MQTT feeds and one set of sensors:
 
-1. Frigate-native (v6.59.0): when Frigate's own face recognition (or a plus
-   model) attaches a `sub_label` to a person event on frigate/events, Nova
-   reads it directly — no Double Take needed. This is the preferred path: one
-   fewer add-on, identity straight from the detection stream Nova already
-   watches.
+* Double Take publishes matches on ``double-take/matches``.
+* Frigate publishes person events on ``frigate/events``; a recognised face may
+  ride along as the event's ``sub_label``.
+* Newer Frigate releases publish face results on
+  ``frigate/tracked_object_update`` (``{"type": "face", "name", "score",
+  "camera"}``), the more dependable of the two Frigate routes.
+* Frigate's Home Assistant integration keeps a
+  ``sensor.<camera>_last_recognized_face`` per camera, read on demand.
 
-2. DoubleTake (optional): publishes MQTT messages to double-take/matches:
-     {"id": "<id>", "camera": "front_door",
-      "match": {"name": "Username", "confidence": 98.7, ...}, ...}
-   and creates HA sensors sensor.double_take_<name>. Still supported for setups
-   that use it.
+The ``recognition_source`` setting (off, doubletake, frigate or both) picks
+which feeds may report identity. Person detection on ``frigate/events`` runs
+whatever it says. Every reported identity lands in the same places: the per
+camera cache, the recognition log and a ``nova_face_recognized`` event, so the
+code downstream never needs to know which backend spoke.
 
-Both sources converge on the same result: they cache recent matches per camera
-(for Nova context) and fire a nova_face_recognized event on the bus (for
-automations), so downstream persona/greeting logic doesn't care which produced
-the identity. Helpers answer 'who was last seen at the front door?' in chat.
+Only the backends write identity here. Nothing a person types or says can.
 """
 from __future__ import annotations
 
@@ -34,43 +34,43 @@ _LOGGER = logging.getLogger(__name__)
 
 MATCHES_TOPIC = "double-take/matches"
 CAMERAS_TOPIC = "double-take/cameras"
-# Modern Frigate (0.14+/HA integration 5.9.2+) publishes recognized faces here
-# as {"type": "face", "name": "Username", "score": 0.93, "camera": "...", ...} and
-# exposes a sensor.<camera>_last_recognized_face per camera. This is the
-# reliable channel for Frigate-native face recognition — the older sub_label on
-# frigate/events isn't always populated. (v6.66.0)
 TRACKED_OBJECT_TOPIC = "frigate/tracked_object_update"
+_FRIGATE_EVENTS_TOPIC = "frigate/events"
 
-# Cache of recent recognitions keyed by camera entity
-# {camera_entity: {"name": "Username", "confidence": 98.7, "ts": datetime, "unknown_count": int}}
+# Latest result per camera entity:
+# {"name", "confidence" (percent), "ts" (naive UTC), "unknown_count"}.
 _RECOGNITION_CACHE: dict[str, dict] = {}
-# Cache of recent Frigate events keyed by camera entity for snapshot retrieval
+# Latest Frigate person event per camera entity, kept for snapshot lookups.
 _RECENT_EVENTS: dict[str, dict] = {}
 CACHE_MAX_AGE = timedelta(hours=2)
-CONFIDENCE_THRESHOLD = 60  # anything below this is considered uncertain
+CONFIDENCE_THRESHOLD = 60  # percent; below this a match is uncertain
 
-# The Faces tab lists sightings up to this old (the Frigate sensors hold the
-# last face indefinitely, so something has to bound them).
+# How far back the Faces tab looks.
 RECENT_FACES_MAX_AGE_S = 24 * 3600
 
-# Every recognition a backend reports, newest last. The cache above keeps only
-# the latest result per camera, so a resident seen a moment after a stranger
-# would hide the stranger. The face roster's intrusion stand down needs that
-# history (an unknown face in the window must block it), and the Faces tab
-# lists from it. Only remember_recognition() writes here, so only the backends
-# (Double Take, Frigate) can: never user text, never the conversation.
+# Every identity a backend reported, oldest first. The cache only holds the
+# newest result per camera, which would let a resident hide a stranger seen a
+# moment earlier; the intrusion stand down and the Faces tab read this log
+# instead. remember_recognition() is its only writer.
 _FACE_LOG: deque = deque(maxlen=300)
-# Frigate person detections (a person was seen, whether or not it was named).
+# Each Frigate person detection, named or not.
 _PERSON_LOG: deque = deque(maxlen=100)
 
-# Names a backend uses for "a face, but nobody we know".
+# Labels the backends give a face they could not put a name to.
 UNKNOWN_NAMES = ("unknown", "unknown person", "unknown_face", "unrecognized",
                  "unrecognised")
+_BLANK_NAMES = ("", "none", "null")
+
+# Sensor states meaning "no recognised person".
+_FACE_SENSOR_EMPTY = ("none", "unknown", "unavailable", "unknown_face", "")
+_FACE_SENSOR_SUFFIX = "_last_recognized_face"
+_SENSOR_PREFIX = "sensor."
 
 
 def is_unknown_name(name) -> bool:
-    """True for an empty name or one of the backends' "unknown" labels."""
-    return str(name or "").strip().lower() in UNKNOWN_NAMES + ("", "none", "null")
+    """Whether ``name`` is blank or one of the "unknown face" labels."""
+    label = str(name or "").strip().lower()
+    return label in UNKNOWN_NAMES or label in _BLANK_NAMES
 
 
 def _utcnow() -> datetime:
@@ -78,558 +78,479 @@ def _utcnow() -> datetime:
 
 
 def _normalize_score(raw) -> float:
-    """Frigate scores are 0..1; return a 0..100 percent. Never raises."""
-    try:
-        if raw is None:
-            return 0.0
-        v = float(raw)
-        return round(v * 100.0 if v <= 1.0 else v, 1)
-    except (ValueError, TypeError):
+    """A score as a percent to one decimal place. Values up to 1.0 are taken
+    as fractions; anything unreadable is 0.0."""
+    if raw is None:
         return 0.0
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return 0.0
+    if value <= 1.0:
+        value *= 100.0
+    return round(value, 1)
 
 
-# Values a last_recognized_face sensor uses to mean "no known person right now"
-_FACE_SENSOR_EMPTY = ("none", "unknown", "unavailable", "unknown_face", "")
+def _sensor_score(attrs) -> float:
+    if "score" in attrs:
+        return _normalize_score(attrs["score"])
+    if "confidence" in attrs:
+        return _normalize_score(attrs["confidence"])
+    return _normalize_score(attrs.get("sub_label_score"))
+
+
+def _sensor_camera(entity_id: str) -> str:
+    return entity_id[len(_SENSOR_PREFIX):len(entity_id) - len(_FACE_SENSOR_SUFFIX)]
 
 
 def read_frigate_face_sensors(hass) -> list[dict]:
-    """Read every `sensor.*_last_recognized_face` entity Frigate exposes and
-    return the ones currently naming a known person:
-    [{camera, camera_entity, name, entity, confidence}]. This is the on-demand
-    query path — it answers "who do you see / can you recognize me" from the
-    sensor states, complementing the real-time MQTT path. Never raises.
+    """Known people named by Frigate's last recognised face sensors, as
+    ``{camera, camera_entity, name, entity, confidence}``.
 
-    Note: the sensor holds the LAST recognized face and doesn't reset to none
-    the instant a person leaves, so callers should treat this as "most recently
-    seen", not "in frame right now". Confidence may live in an attribute
-    (score/confidence) when the integration provides it."""
-    out = []
+    These sensors keep the last face until another replaces it, so a row means
+    "most recently seen", not "in view now". Never raises."""
     try:
-        states = hass.states.async_all("sensor")
-    except Exception:
-        return out
-    for st in states:
+        sensors = hass.states.async_all("sensor")
+    except Exception:  # noqa: BLE001
+        return []
+    found: list[dict] = []
+    for st in sensors:
         try:
-            eid = st.entity_id
-            if not eid.endswith("_last_recognized_face"):
+            entity_id = st.entity_id
+            if not entity_id.endswith(_FACE_SENSOR_SUFFIX):
                 continue
-            val = str(st.state or "").strip()
-            if val.lower() in _FACE_SENSOR_EMPTY:
+            name = str(st.state or "").strip()
+            if name.lower() in _FACE_SENSOR_EMPTY:
                 continue
-            # derive the camera slug from sensor.<camera>_last_recognized_face
-            slug = eid[len("sensor."):-len("_last_recognized_face")]
-            attrs = st.attributes or {}
-            conf = _normalize_score(
-                attrs.get("score", attrs.get("confidence", attrs.get("sub_label_score"))))
-            out.append({
-                "camera": slug,
-                "camera_entity": f"camera.{slug}",
-                "name": val,
-                "entity": eid,
-                "confidence": conf,
+            camera = _sensor_camera(entity_id)
+            found.append({
+                "camera": camera,
+                "camera_entity": "camera." + camera,
+                "name": name,
+                "entity": entity_id,
+                "confidence": _sensor_score(st.attributes or {}),
             })
-        except Exception:
+        except Exception:  # noqa: BLE001 - one odd sensor never hides the rest
             continue
-    return out
+    return found
+
+
+def _fresh(ts, now: datetime) -> bool:
+    return not ts or now - ts <= CACHE_MAX_AGE
 
 
 def who_do_you_see(hass) -> dict:
-    """Answer 'can you recognize me / who do you see' from all available identity
-    sources — the recent-recognition cache (populated by MQTT) and the Frigate
-    face sensors. Returns {seen: [names], detail: [...], any: bool}. Never
-    raises. This is what the agent's identity query should consult so Nova can
-    say yes when Frigate is naming a face."""
-    detail = []
-    seen = []
+    """Everyone Nova can currently name, for "can you recognise me".
 
-    # 1. Frigate last_recognized_face sensors (on-demand, most reliable here)
-    for f in read_frigate_face_sensors(hass):
-        if f["name"] and f["name"].lower() not in _FACE_SENSOR_EMPTY:
-            detail.append({**f, "source": "frigate_sensor"})
-            if f["name"] not in seen:
-                seen.append(f["name"])
-
-    # 2. Recent-recognition cache (MQTT-driven, any source), still fresh
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-    for cam, rec in _RECOGNITION_CACHE.items():
-        name = rec.get("name", "")
-        ts = rec.get("ts")
+    Sensor rows come first (all of them, in ``detail``), then any person in the
+    cache within CACHE_MAX_AGE who is not already listed. Returns
+    ``{"seen": [names], "detail": [...], "any": bool}``."""
+    seen: list[str] = []
+    detail: list[dict] = []
+    for row in read_frigate_face_sensors(hass):
+        detail.append(dict(row, source="frigate_sensor"))
+        if row["name"] not in seen:
+            seen.append(row["name"])
+    now = _utcnow()
+    for camera_entity, entry in _RECOGNITION_CACHE.items():
+        name = entry.get("name", "")
         if not name or name.lower() in _FACE_SENSOR_EMPTY:
             continue
-        if ts and (now - ts) > CACHE_MAX_AGE:
+        if not _fresh(entry.get("ts"), now) or name in seen:
             continue
-        if name not in seen:
-            seen.append(name)
-            detail.append({
-                "camera_entity": cam, "name": name,
-                "confidence": rec.get("confidence", 0.0),
-                "source": "recent_cache",
-            })
-
-    return {"seen": seen, "detail": detail, "any": bool(seen)}
+        seen.append(name)
+        detail.append({"camera_entity": camera_entity, "name": name,
+                       "confidence": entry.get("confidence", 0.0),
+                       "source": "recent_cache"})
+    return {"seen": seen, "detail": detail, "any": len(seen) > 0}
 
 
 def _parse_sub_label(sub) -> tuple[str, float]:
-    """Normalize Frigate's sub_label into (name, confidence_percent).
+    """Frigate's ``sub_label`` as ``(name, percent)``.
 
-    Frigate represents a recognized face sub-label differently across versions:
-      - a bare string:            "Username"
-      - a [name, score] pair:     ["Username", 0.92]   (score 0..1)
-    Returns ("", 0.0) when there's no usable name. Never raises.
-    """
+    Accepts a bare name or a ``[name, score]`` sequence. Anything else, or a
+    score that is not a number, gives ``("", 0.0)``."""
+    if not sub:
+        return "", 0.0
+    if isinstance(sub, str):
+        return sub.strip(), 0.0
+    if not isinstance(sub, (list, tuple)):
+        return "", 0.0
+    name = str(sub[0] or "").strip()
+    score = sub[1] if len(sub) > 1 else None
+    if score is None:
+        return name, 0.0
     try:
-        if not sub:
-            return "", 0.0
-        if isinstance(sub, str):
-            return sub.strip(), 0.0
-        if isinstance(sub, (list, tuple)) and sub:
-            name = str(sub[0] or "").strip()
-            conf = 0.0
-            if len(sub) > 1 and sub[1] is not None:
-                raw = float(sub[1])
-                conf = raw * 100.0 if raw <= 1.0 else raw   # 0..1 → percent
-            return name, round(conf, 1)
-    except (ValueError, TypeError):
-        pass
-    return "", 0.0
+        value = float(score)
+    except (TypeError, ValueError):
+        return "", 0.0
+    if value <= 1.0:
+        value *= 100.0
+    return name, round(value, 1)
 
 
 def _camera_entity_from_name(camera_name: str) -> str:
-    """DoubleTake uses Frigate's camera name ('front_door'); HA entity is camera.front_door."""
-    return f"camera.{camera_name.lower()}"
+    """Frigate and Double Take name cameras like ``front_door``; Home Assistant
+    calls the same camera ``camera.front_door``."""
+    return "camera." + camera_name.lower()
 
 
 def remember_recognition(camera_name: str, name: str, confidence: float,
                          source: str = "") -> None:
-    """Store a recognition event in the in-memory cache, and in the recent
-    recognition log. `source` says which backend reported it."""
-    entity_id = _camera_entity_from_name(camera_name)
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-    prev = _RECOGNITION_CACHE.get(entity_id, {})
+    """Record one backend result in the recognition log and the camera's cache
+    entry. ``source`` names the backend."""
+    camera_entity = _camera_entity_from_name(camera_name)
+    stamp = _utcnow()
     try:
-        _FACE_LOG.append({"camera_entity": entity_id, "name": str(name or ""),
-                          "confidence": float(confidence or 0.0), "ts": now,
+        _FACE_LOG.append({"camera_entity": camera_entity, "name": str(name or ""),
+                          "confidence": float(confidence or 0.0), "ts": stamp,
                           "source": source})
-    except Exception:
+    except Exception:  # noqa: BLE001
         pass
-    _RECOGNITION_CACHE[entity_id] = {
-        "name":       name,
-        "confidence": confidence,
-        "ts":         now,
-        "unknown_count": 0 if name.lower() != "unknown" else prev.get("unknown_count", 0) + 1,
-    }
+    if name.lower() == "unknown":
+        misses = _RECOGNITION_CACHE.get(camera_entity, {}).get("unknown_count", 0) + 1
+    else:
+        misses = 0
+    _RECOGNITION_CACHE[camera_entity] = {"name": name, "confidence": confidence,
+                                         "ts": stamp, "unknown_count": misses}
 
 
 def note_person_detected(camera_name: str) -> None:
-    """Record that Frigate saw a person on this camera, named or not."""
+    """Record a Frigate person detection on this camera."""
     try:
         _PERSON_LOG.append({"camera_entity": _camera_entity_from_name(camera_name),
                             "ts": _utcnow()})
-    except Exception:
+    except Exception:  # noqa: BLE001
         pass
+
+
+def _within(log: deque, window_s: float) -> list[dict]:
+    try:
+        now = _utcnow()
+        picked = []
+        for entry in list(log):
+            age = (now - entry["ts"]).total_seconds()
+            if 0 <= age <= window_s:
+                picked.append(dict(entry, age_seconds=int(age)))
+        return picked
+    except Exception:  # noqa: BLE001
+        return []
 
 
 def recent_face_events(window_s: float) -> list[dict]:
-    """Backend recognitions from the last `window_s` seconds, oldest first,
-    each with `age_seconds`. Never raises."""
-    out: list[dict] = []
-    try:
-        now = _utcnow()
-        for e in list(_FACE_LOG):
-            age = (now - e["ts"]).total_seconds()
-            if 0 <= age <= window_s:
-                out.append({**e, "age_seconds": int(age)})
-    except Exception:
-        return []
-    return out
+    """Logged recognitions from the last ``window_s`` seconds, oldest first,
+    each with ``age_seconds``. Never raises."""
+    return _within(_FACE_LOG, window_s)
 
 
 def recent_person_detections(window_s: float) -> list[dict]:
-    """Frigate person detections from the last `window_s` seconds. Never raises."""
-    out: list[dict] = []
-    try:
-        now = _utcnow()
-        for e in list(_PERSON_LOG):
-            age = (now - e["ts"]).total_seconds()
-            if 0 <= age <= window_s:
-                out.append({**e, "age_seconds": int(age)})
-    except Exception:
-        return []
-    return out
+    """Logged person detections from the last ``window_s`` seconds. Never raises."""
+    return _within(_PERSON_LOG, window_s)
 
 
 def last_seen_at(hass: HomeAssistant, camera_entity: str) -> Optional[dict]:
-    """Return most recent recognition on that camera, or None if stale."""
-    rec = _RECOGNITION_CACHE.get(camera_entity)
-    if not rec:
+    """The camera's cache entry plus ``age_seconds`` and ``camera_entity``,
+    or None when there is none within CACHE_MAX_AGE."""
+    entry = _RECOGNITION_CACHE.get(camera_entity)
+    if not entry:
         return None
-    age = datetime.now(timezone.utc).replace(tzinfo=None) - rec["ts"]
+    age = _utcnow() - entry["ts"]
     if age > CACHE_MAX_AGE:
         return None
-    return {
-        **rec,
-        "age_seconds": int(age.total_seconds()),
-        "camera_entity": camera_entity,
-    }
+    result = dict(entry)
+    result["age_seconds"] = int(age.total_seconds())
+    result["camera_entity"] = camera_entity
+    return result
 
 
 def who_is_where(hass: HomeAssistant) -> dict[str, str]:
-    """Return {camera_entity: name} for all recent recognitions."""
-    out = {}
-    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - CACHE_MAX_AGE
-    for entity_id, rec in _RECOGNITION_CACHE.items():
-        if rec["ts"] >= cutoff and rec["confidence"] >= CONFIDENCE_THRESHOLD:
-            out[entity_id] = rec["name"]
-    return out
+    """``{camera_entity: name}`` for confident results within CACHE_MAX_AGE."""
+    oldest = _utcnow() - CACHE_MAX_AGE
+    return {camera_entity: entry["name"]
+            for camera_entity, entry in _RECOGNITION_CACHE.items()
+            if entry["ts"] >= oldest and entry["confidence"] >= CONFIDENCE_THRESHOLD}
+
+
+def _ago(seconds: int) -> str:
+    if seconds < 60:
+        return "just now"
+    if seconds < 3600:
+        return "%dm ago" % (seconds // 60)
+    return "%dh ago" % (seconds // 3600)
 
 
 def recognition_context_string(hass: HomeAssistant) -> str:
-    """One-line summary for the conversation agent's system prompt, merging the
-    MQTT-driven recognition cache with Frigate's last_recognized_face sensors —
-    so Nova can answer "can you see me" from whichever source has data."""
-    bits = []
-    seen_names = set()
-
-    # MQTT/DoubleTake cache
-    current = who_is_where(hass)
-    for entity_id, name in (current or {}).items():
-        rec = _RECOGNITION_CACHE[entity_id]
-        age = int((datetime.now(timezone.utc).replace(tzinfo=None) - rec["ts"]).total_seconds())
-        if age < 60:
-            when = "just now"
-        elif age < 3600:
-            when = f"{age // 60}m ago"
-        else:
-            when = f"{age // 3600}h ago"
-        friendly_cam = entity_id.replace("camera.", "").replace("_", " ")
-        bits.append(f"{name} seen at {friendly_cam} ({when})")
-        seen_names.add(name.lower())
-
-    # Frigate last_recognized_face sensors (may have data before an MQTT event)
+    """One line for the agent's system prompt naming recent faces, from the
+    cache first and then the Frigate sensors. Empty when there are none."""
+    parts: list[str] = []
+    named: set[str] = set()
+    now = _utcnow()
+    for camera_entity, name in who_is_where(hass).items():
+        age = int((now - _RECOGNITION_CACHE[camera_entity]["ts"]).total_seconds())
+        where = camera_entity.replace("camera.", "").replace("_", " ")
+        parts.append("%s seen at %s (%s)" % (name, where, _ago(age)))
+        named.add(name.lower())
     try:
-        for f in read_frigate_face_sensors(hass):
-            nm = f.get("name", "")
-            if nm and nm.lower() not in seen_names:
-                friendly_cam = f["camera"].replace("_", " ")
-                conf = f.get("confidence", 0)
-                tail = f" ~{conf:.0f}%" if conf else ""
-                bits.append(f"{nm} recognized at {friendly_cam}{tail}")
-                seen_names.add(nm.lower())
-    except Exception:
+        for row in read_frigate_face_sensors(hass):
+            name = row.get("name", "")
+            if not name or name.lower() in named:
+                continue
+            score = row.get("confidence", 0)
+            suffix = " ~%.0f%%" % score if score else ""
+            parts.append("%s recognized at %s%s" % (name, row["camera"].replace("_", " "),
+                                                     suffix))
+            named.add(name.lower())
+    except Exception:  # noqa: BLE001
         pass
-
-    if not bits:
-        return ""
-    return "Recent faces: " + "; ".join(bits) + "."
+    return "Recent faces: " + "; ".join(parts) + "." if parts else ""
 
 
 def _roster_names() -> set[str]:
     try:
         from . import face_roster
         return face_roster.normalized_names()
-    except Exception:
+    except Exception:  # noqa: BLE001
         return set()
 
 
 def _sensor_age_seconds(st) -> Optional[int]:
     try:
-        ts = getattr(st, "last_updated", None) or getattr(st, "last_changed", None)
-        if ts is None:
+        stamp = getattr(st, "last_updated", None) or getattr(st, "last_changed", None)
+        if stamp is None:
             return None
-        if getattr(ts, "tzinfo", None) is not None:
-            ts = ts.astimezone(timezone.utc).replace(tzinfo=None)
-        return max(0, int((_utcnow() - ts).total_seconds()))
-    except Exception:
+        if getattr(stamp, "tzinfo", None) is not None:
+            stamp = stamp.astimezone(timezone.utc).replace(tzinfo=None)
+        return max(0, int((_utcnow() - stamp).total_seconds()))
+    except Exception:  # noqa: BLE001
         return None
 
 
-def recent_faces(hass, limit: int = 20) -> list[dict]:
-    """Recently recognised faces for the Faces tab, newest first.
-
-    Merges the backends' recognition log (Double Take and Frigate over MQTT,
-    including faces named "unknown") with Frigate's `*_last_recognized_face`
-    sensors. One row per person and camera: the newest sighting wins. Each row:
-    {name, camera, camera_entity, confidence, age_seconds, known, resident,
-    source}. `known` is False for an "unknown" face. `resident` is True when the
-    name is on the face roster (matched with identity.normalize). No image is
-    read, returned or stored. Never raises."""
+def _clamp_limit(limit) -> int:
     try:
-        limit = max(1, min(int(limit), 100))
+        return min(100, max(1, int(limit)))
     except (TypeError, ValueError):
-        limit = 20
+        return 20
+
+
+def recent_faces(hass, limit: int = 20) -> list[dict]:
+    """Faces for the Faces tab, newest first, at most ``limit`` (1 to 100).
+
+    Sources are the recognition log, the per camera cache and the Frigate
+    sensors. One row per person (by identity.normalize) and camera, the newest
+    sighting winning:
+    ``{name, camera, camera_entity, confidence, age_seconds, known, resident,
+    source}``. ``known`` is False for an unknown label and ``resident`` means
+    the person is on the face roster. Rows older than RECENT_FACES_MAX_AGE_S
+    are left out. Names and numbers only, nothing visual. Never raises."""
+    count = _clamp_limit(limit)
     try:
         from .identity import normalize
-        roster = _roster_names()
-        rows: dict[tuple[str, str], dict] = {}
+        residents = _roster_names()
+        newest: dict[tuple[str, str], dict] = {}
 
-        def _offer(name, cam_entity, conf, age, source):
+        def consider(name, camera_entity, confidence, age, source):
             name = str(name or "").strip()
             if not name or age is None:
                 return
-            key = (normalize(name), cam_entity)
-            cur = rows.get(key)
-            if cur is not None and cur["age_seconds"] <= age:
+            key = (normalize(name), camera_entity)
+            held = newest.get(key)
+            if held is not None and held["age_seconds"] <= age:
                 return
             known = not is_unknown_name(name)
-            rows[key] = {
+            newest[key] = {
                 "name": name,
-                "camera": cam_entity.replace("camera.", ""),
-                "camera_entity": cam_entity,
-                "confidence": round(float(conf or 0.0), 1),
+                "camera": camera_entity.replace("camera.", ""),
+                "camera_entity": camera_entity,
+                "confidence": round(float(confidence or 0.0), 1),
                 "age_seconds": int(age),
                 "known": known,
-                "resident": known and normalize(name) in roster,
+                "resident": known and normalize(name) in residents,
                 "source": source,
             }
 
         now = _utcnow()
-        for e in list(_FACE_LOG):
-            _offer(e["name"], e["camera_entity"], e["confidence"],
-                   (now - e["ts"]).total_seconds(), e.get("source") or "mqtt")
-        for rec_cam, rec in list(_RECOGNITION_CACHE.items()):
-            _offer(rec.get("name"), rec_cam, rec.get("confidence"),
-                   (now - rec["ts"]).total_seconds(), "recent_cache")
+        for entry in list(_FACE_LOG):
+            consider(entry["name"], entry["camera_entity"], entry["confidence"],
+                     (now - entry["ts"]).total_seconds(), entry.get("source") or "mqtt")
+        for camera_entity, entry in list(_RECOGNITION_CACHE.items()):
+            consider(entry.get("name"), camera_entity, entry.get("confidence"),
+                     (now - entry["ts"]).total_seconds(), "recent_cache")
         for st in hass.states.async_all("sensor"):
-            eid = str(getattr(st, "entity_id", ""))
-            if not eid.endswith("_last_recognized_face"):
+            entity_id = str(getattr(st, "entity_id", ""))
+            if not entity_id.endswith(_FACE_SENSOR_SUFFIX):
                 continue
-            val = str(st.state or "").strip()
-            if val.lower() in _FACE_SENSOR_EMPTY:
+            name = str(st.state or "").strip()
+            if name.lower() in _FACE_SENSOR_EMPTY:
                 continue
-            attrs = st.attributes or {}
-            conf = _normalize_score(
-                attrs.get("score", attrs.get("confidence", attrs.get("sub_label_score"))))
-            slug = eid[len("sensor."):-len("_last_recognized_face")]
-            _offer(val, f"camera.{slug}", conf, _sensor_age_seconds(st), "frigate_sensor")
-        out = sorted(rows.values(), key=lambda r: r["age_seconds"])
-        return [r for r in out if r["age_seconds"] <= RECENT_FACES_MAX_AGE_S][:limit]
-    except Exception as exc:
+            consider(name, "camera." + _sensor_camera(entity_id),
+                     _sensor_score(st.attributes or {}), _sensor_age_seconds(st),
+                     "frigate_sensor")
+        rows = sorted(newest.values(), key=lambda row: row["age_seconds"])
+        rows = [row for row in rows if row["age_seconds"] <= RECENT_FACES_MAX_AGE_S]
+        return rows[:count]
+    except Exception as exc:  # noqa: BLE001
         _LOGGER.debug("recognition: recent_faces failed: %s", exc)
         return []
 
 
 def source_status(hass) -> dict[str, Any]:
-    """What identity sources Nova can see, for the Faces tab's empty state.
+    """Which identity sources are in reach, for the Faces tab's empty state.
     Never raises."""
-    out: dict[str, Any] = {"recognition_source": "off", "mqtt": False,
-                           "frigate_sensors": 0, "seen_recently": bool(_FACE_LOG)}
+    status: dict[str, Any] = {"recognition_source": "off", "mqtt": False,
+                              "frigate_sensors": 0, "seen_recently": len(_FACE_LOG) > 0}
     try:
         from . import nova_config
-        out["recognition_source"] = str(
-            nova_config.get("recognition_source", "off") or "off").lower()
-    except Exception:
+        chosen = nova_config.get("recognition_source", "off")
+        status["recognition_source"] = str(chosen or "off").lower()
+    except Exception:  # noqa: BLE001
         pass
     try:
-        out["mqtt"] = bool(hass.services.has_service("mqtt", "publish"))
-    except Exception:
+        status["mqtt"] = bool(hass.services.has_service("mqtt", "publish"))
+    except Exception:  # noqa: BLE001
         pass
     try:
-        out["frigate_sensors"] = sum(
-            1 for st in hass.states.async_all("sensor")
-            if str(getattr(st, "entity_id", "")).endswith("_last_recognized_face"))
-    except Exception:
+        status["frigate_sensors"] = len([
+            st for st in hass.states.async_all("sensor")
+            if str(getattr(st, "entity_id", "")).endswith(_FACE_SENSOR_SUFFIX)])
+    except Exception:  # noqa: BLE001
         pass
-    out["configured"] = bool(out["frigate_sensors"] or out["mqtt"] or out["seen_recently"])
-    return out
+    status["configured"] = bool(status["mqtt"] or status["frigate_sensors"]
+                                or status["seen_recently"])
+    return status
 
 
-# ─── MQTT subscription ───────────────────────────────────────────────────────
+# ─── MQTT feeds ──────────────────────────────────────────────────────────────
+
+def _identity_feeds() -> tuple[bool, bool]:
+    """(Double Take allowed, Frigate identity allowed) from recognition_source.
+    The default is off, so nothing reports identity until Faces is set up."""
+    try:
+        from . import nova_config
+        chosen = str(nova_config.get("recognition_source", "off") or "off").lower()
+    except Exception:  # noqa: BLE001
+        chosen = "off"
+    return chosen in ("both", "doubletake"), chosen in ("both", "frigate")
+
+
+def _face_event(camera: str, camera_entity: str, name: str, confidence: float,
+                is_unknown: bool) -> dict:
+    return {"camera": camera, "camera_entity": camera_entity, "name": name,
+            "confidence": confidence, "is_unknown": is_unknown,
+            "is_confident": confidence >= CONFIDENCE_THRESHOLD}
+
+
+async def _subscribe(mqtt, hass, topic: str, handler, unsubs: list, what: str,
+                     loud: bool = False) -> None:
+    try:
+        unsubs.append(await mqtt.async_subscribe(hass, topic, handler))
+    except Exception as exc:  # noqa: BLE001
+        (_LOGGER.warning if loud else _LOGGER.debug)(
+            "Nova: no subscription to %s (%s): %s", topic, what, exc)
+        return
+    _LOGGER.info("Nova: listening on %s for %s", topic, what)
+
 
 async def register_recognition_listener(hass: HomeAssistant) -> list:
-    """
-    Subscribe to DoubleTake's MQTT topic.
-    Returns list of unsub callables. Empty list if MQTT isn't configured.
-    """
-    unsubs = []
+    """Subscribe to the identity feeds ``recognition_source`` allows, plus
+    Frigate person detection. Returns the unsubscribe callables, none when
+    MQTT is missing or not set up."""
+    unsubs: list = []
     try:
         from homeassistant.components import mqtt
     except ImportError:
-        _LOGGER.info("Nova: MQTT component not available — face recognition listener skipped")
+        _LOGGER.info("Nova: no MQTT component, so no face recognition feeds")
+        return unsubs
+    if not hass.services.has_service("mqtt", "publish"):
+        _LOGGER.info("Nova: MQTT is not set up, so no face recognition feeds")
         return unsubs
 
-    # Check that MQTT is actually set up
-    if not hass.services.has_service("mqtt", "publish"):
-        _LOGGER.info("Nova: MQTT not configured — face recognition listener skipped")
-        return unsubs
+    doubletake_on, frigate_ids_on = _identity_feeds()
 
     @callback
-    def _matches_handler(msg):
-        try:
-            payload = json.loads(msg.payload) if isinstance(msg.payload, (str, bytes)) else msg.payload
-        except (json.JSONDecodeError, TypeError):
-            return
-
-        camera = payload.get("camera") or payload.get("camera_name")
-        match = payload.get("match") or {}
+    def on_doubletake(msg):
+        body = msg.payload
+        if isinstance(body, (str, bytes)):
+            try:
+                body = json.loads(body)
+            except (json.JSONDecodeError, TypeError):
+                return
+        camera = body.get("camera") or body.get("camera_name")
+        match = body.get("match") or {}
         if not camera or not match:
             return
-
         name = match.get("name", "unknown")
         confidence = float(match.get("confidence", 0))
-
         remember_recognition(camera, name, confidence, source="doubletake")
+        hass.bus.async_fire("nova_face_recognized", _face_event(
+            camera, _camera_entity_from_name(camera), name, confidence,
+            name.lower() == "unknown"))
+        _LOGGER.info("Nova: Double Take named %s on %s (%.1f%%)", name, camera, confidence)
 
-        # Fire a custom event that automations/blueprints can use
-        hass.bus.async_fire(
-            "nova_face_recognized",
-            {
-                "camera":      camera,
-                "camera_entity": _camera_entity_from_name(camera),
-                "name":        name,
-                "confidence":  confidence,
-                "is_unknown":  name.lower() == "unknown",
-                "is_confident": confidence >= CONFIDENCE_THRESHOLD,
-            },
-        )
-        _LOGGER.info("Nova: face recognized — %s @ %s (%.1f%%)", name, camera, confidence)
-
-    # Recognition source selection (v6.64.1): 'off' (the default since
-    # 8.41.0, so nothing listens until Faces is set up), 'both',
-    # 'doubletake' or 'frigate'. Running both when both are configured causes duplicate
-    # recognition events, so let the user pick. This gates only which IDENTITY
-    # source fires nova_face_recognized — Frigate person *detection* (which
-    # triggers camera analysis) runs regardless.
-    try:
-        from . import nova_config
-        _rec_source = str(nova_config.get("recognition_source", "off") or "off").lower()
-    except Exception:
-        _rec_source = "off"
-    _use_doubletake = _rec_source in ("both", "doubletake")
-    _use_frigate_id = _rec_source in ("both", "frigate")
-
-    if _use_doubletake:
+    async def on_frigate_event(msg):
         try:
-            unsub = await mqtt.async_subscribe(hass, MATCHES_TOPIC, _matches_handler)
-            unsubs.append(unsub)
-            _LOGGER.info("Nova: subscribed to %s for face recognition", MATCHES_TOPIC)
-        except Exception as exc:
-            _LOGGER.warning("Nova: could not subscribe to DoubleTake matches: %s", exc)
+            body = json.loads(msg.payload)
+            after = body.get("after", {})
+            label = after.get("label", "")
+            camera = after.get("camera", "")
+            score = after.get("top_score", 0)
+            if body.get("type") != "new" or label != "person" or score < 0.7:
+                return
+            camera_entity = "camera." + camera
+            event_id = after.get("id", "")
+            _LOGGER.info("Nova: Frigate saw a person on %s (%.1f%%, event %s)",
+                         camera, score * 100, event_id[:8])
+            note_person_detected(camera)
+            _RECENT_EVENTS[camera_entity] = {"event_id": event_id, "source": "frigate",
+                                             "ts": datetime.now()}
+            hass.bus.async_fire("nova_person_detected", {
+                "camera": camera, "camera_entity": camera_entity, "label": label,
+                "score": score, "event_id": event_id})
+            if not frigate_ids_on:
+                return
+            name, confidence = _parse_sub_label(after.get("sub_label"))
+            if not name:
+                return
+            remember_recognition(camera, name, confidence, source="frigate")
+            event = _face_event(camera, camera_entity, name, confidence,
+                                name.lower() in ("unknown", "unknown person"))
+            event["source"] = "frigate"
+            hass.bus.async_fire("nova_face_recognized", event)
+            _LOGGER.info("Nova: Frigate sub_label named %s on %s (%.1f%%)",
+                         name, camera, confidence)
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.debug("Nova: unreadable Frigate event: %s", exc)
+
+    async def on_tracked_update(msg):
+        try:
+            body = json.loads(msg.payload)
+            if body.get("type") != "face":
+                return
+            name = str(body.get("name") or "").strip()
+            if name.lower() in _BLANK_NAMES:
+                return
+            camera = str(body.get("camera") or "").strip()
+            confidence = _normalize_score(body.get("score"))
+            unknown = name.lower() in ("unknown", "unknown person")
+            if camera:
+                remember_recognition(camera, name, confidence, source="frigate_tracked")
+            event = _face_event(camera, "camera." + camera if camera else "", name,
+                                confidence, unknown)
+            event["source"] = "frigate_tracked_object"
+            hass.bus.async_fire("nova_face_recognized", event)
+            if not unknown:
+                _LOGGER.info("Nova: Frigate face update named %s on %s (%.1f%%)",
+                             name, camera or "?", confidence)
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.debug("Nova: unreadable Frigate face update: %s", exc)
+
+    if doubletake_on:
+        await _subscribe(mqtt, hass, MATCHES_TOPIC, on_doubletake, unsubs,
+                         "Double Take matches", loud=True)
     else:
-        _LOGGER.info("Nova: DoubleTake identity disabled (recognition_source=%s)", _rec_source)
-
-    # Frigate person detection via MQTT
-    FRIGATE_EVENTS_TOPIC = "frigate/events"
-    try:
-        async def _frigate_handler(msg):
-            """Handle Frigate MQTT events — trigger analysis on person detection."""
-            try:
-                payload = json.loads(msg.payload)
-                event_type = payload.get("type")
-                after = payload.get("after", {})
-                label = after.get("label", "")
-                camera = after.get("camera", "")
-                score = after.get("top_score", 0)
-
-                # Only act on new person detections with high confidence
-                if event_type != "new" or label != "person" or score < 0.7:
-                    return
-
-                camera_entity = f"camera.{camera}"
-                event_id = after.get("id", "")
-
-                _LOGGER.info(
-                    "Nova: Frigate person detected on %s (score=%.1f%%, event=%s)",
-                    camera, score * 100, event_id[:8],
-                )
-
-                note_person_detected(camera)
-
-                # Cache the event for snapshot retrieval
-                _RECENT_EVENTS[camera_entity] = {
-                    "event_id": event_id,
-                    "source": "frigate",
-                    "ts": datetime.now(),
-                }
-
-                # Fire HA event for blueprints/automations
-                hass.bus.async_fire("nova_person_detected", {
-                    "camera": camera,
-                    "camera_entity": camera_entity,
-                    "label": label,
-                    "score": score,
-                    "event_id": event_id,
-                })
-
-                # ── Frigate-native identity (v6.59.0) ──────────────────────
-                # If Frigate's own face recognition (or a +/- plus model)
-                # attached a sub_label, use it directly — no Double Take needed.
-                # sub_label is either "Name" or ["Name", score] across versions.
-                # Gated by recognition_source (v6.64.1): person detection above
-                # always runs, but identity firing honors the chosen source.
-                if _use_frigate_id:
-                    sub = after.get("sub_label")
-                    sub_name, sub_conf = _parse_sub_label(sub)
-                    if sub_name:
-                        remember_recognition(camera, sub_name, sub_conf, source="frigate")
-                        hass.bus.async_fire("nova_face_recognized", {
-                            "camera": camera,
-                            "camera_entity": camera_entity,
-                            "name": sub_name,
-                            "confidence": sub_conf,
-                            "is_unknown": sub_name.lower() in ("unknown", "unknown person"),
-                            "is_confident": sub_conf >= CONFIDENCE_THRESHOLD,
-                            "source": "frigate",
-                        })
-                        _LOGGER.info(
-                            "Nova: Frigate identified %s @ %s (%.1f%%) via sub_label",
-                            sub_name, camera, sub_conf,
-                        )
-
-            except Exception as exc:
-                _LOGGER.debug("Frigate event parse error: %s", exc)
-
-        unsub_frigate = await mqtt.async_subscribe(
-            hass, FRIGATE_EVENTS_TOPIC, _frigate_handler
-        )
-        unsubs.append(unsub_frigate)
-        _LOGGER.info("Nova: subscribed to %s for Frigate person detection", FRIGATE_EVENTS_TOPIC)
-    except Exception as exc:
-        _LOGGER.debug("Nova: Frigate MQTT subscription skipped: %s", exc)
-
-    # ── Frigate-native face recognition via tracked_object_update (v6.66.0) ──
-    # Modern Frigate publishes {"type":"face","name":"Username","score":0.93,...} to
-    # frigate/tracked_object_update. This is the RELIABLE identity channel — the
-    # sub_label on frigate/events isn't always populated, which is why Nova
-    # couldn't previously "see" a known person. Gated by recognition_source.
-    if _use_frigate_id:
-        try:
-            async def _tracked_update_handler(msg):
-                try:
-                    payload = json.loads(msg.payload)
-                    if payload.get("type") != "face":
-                        return
-                    name = str(payload.get("name") or "").strip()
-                    if not name or name.lower() in ("none", "null"):
-                        return
-                    camera = str(payload.get("camera") or "").strip()
-                    conf = _normalize_score(payload.get("score"))
-                    is_unknown = name.lower() in ("unknown", "unknown person")
-                    if camera:
-                        remember_recognition(camera, name, conf, source="frigate_tracked")
-                    hass.bus.async_fire("nova_face_recognized", {
-                        "camera": camera,
-                        "camera_entity": f"camera.{camera}" if camera else "",
-                        "name": name,
-                        "confidence": conf,
-                        "is_unknown": is_unknown,
-                        "is_confident": conf >= CONFIDENCE_THRESHOLD,
-                        "source": "frigate_tracked_object",
-                    })
-                    if not is_unknown:
-                        _LOGGER.info(
-                            "Nova: Frigate recognized %s @ %s (%.1f%%) via tracked_object_update",
-                            name, camera or "?", conf,
-                        )
-                except Exception as exc:
-                    _LOGGER.debug("Frigate tracked_object_update parse error: %s", exc)
-
-            unsub_tou = await mqtt.async_subscribe(
-                hass, TRACKED_OBJECT_TOPIC, _tracked_update_handler
-            )
-            unsubs.append(unsub_tou)
-            _LOGGER.info("Nova: subscribed to %s for Frigate face recognition",
-                         TRACKED_OBJECT_TOPIC)
-        except Exception as exc:
-            _LOGGER.debug("Nova: Frigate tracked_object_update subscription skipped: %s", exc)
-
+        _LOGGER.info("Nova: Double Take identity is off by recognition_source")
+    await _subscribe(mqtt, hass, _FRIGATE_EVENTS_TOPIC, on_frigate_event, unsubs,
+                     "Frigate person detection")
+    if frigate_ids_on:
+        await _subscribe(mqtt, hass, TRACKED_OBJECT_TOPIC, on_tracked_update, unsubs,
+                         "Frigate face recognition")
     return unsubs

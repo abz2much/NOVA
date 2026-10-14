@@ -1,686 +1,648 @@
-"""
-Nova Document RAG agent (v6.55.0).
+"""The household document library: manuals, receipts and notes Nova can
+answer from ("what size is the boiler filter?").
 
-The blueprint's "Document Analytics Agent": semantic retrieval over the
-household's manuals and receipts, so Nova can answer "what's the filter size
-for the furnace?" or "when did we buy the dishwasher?" from your own paperwork
-instead of guessing.
+Documents live as files in the Nova documents folder. Each one is split into
+overlapping chunks and indexed in its own document_fts table in nova.db,
+apart from conversation memory, so a manual never shows up as something
+said and a chat never shows up as a manual. Keyword search on that index
+always works; when semantic search is switched on the chunks are also
+embedded through embeddings.py and searched by meaning first.
 
-Design:
-  - Documents are their own corpus (the document_fts table in nova.db),
-    separate from conversation turns. A manual is not a chat message, and a
-    furnace-spec query should not surface old conversations, nor should
-    "what did I say yesterday" surface the manual.
-  - Keyword retrieval through FTS5 always works. Semantic search, when it is
-    enabled, embeds the chunks through embeddings.py (search_documents_async).
+Files arrive three ways: dropped into the folder (picked up by
+auto_ingest_new), uploaded from the panel, or found in a configured watch
+folder and copied in. Plain text and Markdown always work; PDFs need one of
+pypdf, pdfplumber or PyPDF2, and say so plainly when none is installed.
 
-Ingestion source: /config/nova/documents/ — drop PDFs or .txt files there
-(via the HA File editor, Samba, etc.) and Nova ingests them. No upload UI
-needed; it uses infrastructure the user already has, exactly like config.json.
-
-PDF text extraction degrades honestly: it tries pypdf, then pdfplumber, then
-PyPDF2; if none is installed it says so and skips that file rather than
-crashing — plain-text files always work regardless. Nothing here ever raises
-to the caller.
+Every entry point reports problems in its result and never raises.
 """
 from __future__ import annotations
 
+import base64
 import logging
 import os
 import re
+import shutil
 from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
-from .persistence import sqlite as _store
 from . import paths
+from .persistence import sqlite as _store
 
 _LOGGER = logging.getLogger(__name__)
 
-DOCS_DIR: Optional[str] = None  # override; None resolves via paths.py
+# Test overrides. None means <nova folder>/documents and nova.db.
+DOCS_DIR: Optional[str] = None
+_DB_PATH: Optional[str] = None
+
+_CHUNK_CHARS = 900            # about a paragraph or two per chunk
+_CHUNK_OVERLAP = 150          # text carried into the next chunk
+_MAX_FILE_MB = 25
+_SUPPORTED = (".pdf", ".txt", ".md")
+
+# Set once the keyword index has been prepared (or failed to be).
+_fts_ok = False
+_initialized = False
+
+_WATCH_KEY = "document_watch_folders"
+_BREAKS = ("\n\n", "\n", ". ", " ")       # preferred chunk ends, best first
 
 
 def _documents_dir() -> str:
     return DOCS_DIR or paths.nova_path("documents")
 
 
-_DB_PATH: Optional[str] = None  # override; None resolves via paths.py
-
-
 def _db_path() -> str:
     return _DB_PATH or paths.nova_db()
 
-_CHUNK_CHARS = 900            # ~1 chunk ≈ a paragraph or two — good recall granularity
-_CHUNK_OVERLAP = 150         # carry context across chunk boundaries
-_MAX_FILE_MB = 25            # skip absurdly large files
-_SUPPORTED = (".pdf", ".txt", ".md")
 
-_fts_ok = False
-_initialized = False
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
 
-# ── init ─────────────────────────────────────────────────────────────────────
+def _too_big(size: float) -> bool:
+    return size > _MAX_FILE_MB * 1_000_000
+
+
+def _supported(path: Path) -> bool:
+    return path.suffix.lower() in _SUPPORTED
+
+
+def _open_db(rows: bool = False):
+    """A connection to nova.db; ``rows`` gives name-addressable rows."""
+    if rows:
+        return _store.connect(_db_path(), mkdir=False, busy_timeout_ms=None)
+    return _store.connect(_db_path(), row_factory=False, mkdir=False,
+                          busy_timeout_ms=None)
+
+
+# ── the keyword index ───────────────────────────────────────────────────────
 
 def _init_fts() -> bool:
+    """Create the document_fts table if needed; remember whether it works."""
     global _fts_ok
     try:
-        conn = _store.connect(_db_path(), row_factory=False, mkdir=False,
-                              busy_timeout_ms=None)
-        _store.ensure(conn, "document_fts")
-        conn.commit()
-        conn.close()
-        _fts_ok = True
-        _LOGGER.info("Nova documents: FTS5 ready")
-        return True
-    except Exception as exc:
-        _LOGGER.warning("Nova documents: FTS5 init failed: %s", exc)
+        with closing(_open_db()) as conn:
+            _store.ensure(conn, "document_fts")
+            conn.commit()
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.warning("Nova documents: FTS5 init failed: %s", err)
         return False
+    _fts_ok = True
+    _LOGGER.info("Nova documents: FTS5 ready")
+    return True
 
 
 def _ensure_init() -> None:
+    """Prepare the index once per run, whether or not that succeeds."""
     global _initialized
-    if _initialized:
+    if not _initialized:
+        _init_fts()
+        _initialized = True
+
+
+def _forget_source(source: str) -> None:
+    """Drop every chunk of one document from the keyword index."""
+    if not _fts_ok:
         return
-    _init_fts()
-    _initialized = True
+    try:
+        with closing(_open_db()) as conn:
+            conn.execute("DELETE FROM document_fts WHERE source = ?", (source,))
+            conn.commit()
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.debug("Nova documents: removing %s from the index failed: %s",
+                      source, err)
 
 
-# ── PDF text extraction (graceful across libs / none) ────────────────────────
+# ── reading files ───────────────────────────────────────────────────────────
 
 def extract_text(path: str) -> tuple[str, Optional[str]]:
-    """
-    (text, error). Plain text/markdown read directly; PDFs via whichever of
-    pypdf / pdfplumber / PyPDF2 is installed. error is a human string when we
-    couldn't read it (missing lib, unreadable) — text is "" in that case.
-    """
-    p = Path(path)
-    ext = p.suffix.lower()
+    """(text, error). The error is a readable reason and the text is empty
+    when the file could not be read."""
+    suffix = Path(path).suffix.lower()
     try:
-        if ext in (".txt", ".md"):
-            return p.read_text(encoding="utf-8", errors="ignore"), None
-        if ext == ".pdf":
+        if suffix in (".txt", ".md"):
+            return Path(path).read_text(encoding="utf-8", errors="ignore"), None
+        if suffix == ".pdf":
             return _extract_pdf(path)
-        return "", f"unsupported type {ext}"
-    except Exception as exc:
-        return "", f"read error: {exc}"
+    except Exception as err:  # noqa: BLE001
+        return "", f"read error: {err}"
+    return "", f"unsupported type {suffix}"
+
+
+def _pages_text(pages) -> str:
+    return "\n".join(page.extract_text() or "" for page in pages)
+
+
+def _read_with_pypdf(path: str) -> str:
+    import pypdf
+    return _pages_text(pypdf.PdfReader(path).pages)
+
+
+def _read_with_pdfplumber(path: str) -> str:
+    import pdfplumber
+    with pdfplumber.open(path) as pdf:
+        return _pages_text(pdf.pages)
+
+
+def _read_with_pypdf2(path: str) -> str:
+    import PyPDF2
+    return _pages_text(PyPDF2.PdfReader(path).pages)
+
+
+_PDF_READERS = (("pypdf", _read_with_pypdf),
+                ("pdfplumber", _read_with_pdfplumber),
+                ("PyPDF2", _read_with_pypdf2))
 
 
 def _extract_pdf(path: str) -> tuple[str, Optional[str]]:
-    # pypdf (current), then pdfplumber (better layout), then PyPDF2 (legacy).
-    try:
-        import pypdf
-        reader = pypdf.PdfReader(path)
-        text = "\n".join((pg.extract_text() or "") for pg in reader.pages)
-        return text, None
-    except ImportError:
-        pass
-    except Exception as exc:
-        return "", f"pypdf failed: {exc}"
-    try:
-        import pdfplumber
-        with pdfplumber.open(path) as pdf:
-            text = "\n".join((pg.extract_text() or "") for pg in pdf.pages)
-        return text, None
-    except ImportError:
-        pass
-    except Exception as exc:
-        return "", f"pdfplumber failed: {exc}"
-    try:
-        import PyPDF2
-        reader = PyPDF2.PdfReader(path)
-        text = "\n".join((pg.extract_text() or "") for pg in reader.pages)
-        return text, None
-    except ImportError:
-        pass
-    except Exception as exc:
-        return "", f"PyPDF2 failed: {exc}"
+    """The PDF's text through the first installed library."""
+    for name, reader in _PDF_READERS:
+        try:
+            return reader(path), None
+        except ImportError:
+            continue
+        except Exception as err:  # noqa: BLE001
+            return "", f"{name} failed: {err}"
     return "", ("no PDF library installed — add 'pypdf' to read PDFs "
                 "(plain .txt/.md files work without it)")
 
 
-# ── chunking (pure) ──────────────────────────────────────────────────────────
+# ── chunking ────────────────────────────────────────────────────────────────
+
+def _chunk_end(text: str, start: int, size: int) -> int:
+    """Where the chunk starting at ``start`` should stop: at the best break
+    in its second half, else at ``size`` characters."""
+    end = min(start + size, len(text))
+    if end == len(text):
+        return end
+    piece = text[start:end]
+    for mark in _BREAKS:
+        at = piece.rfind(mark)
+        if at > size * 0.5:
+            return start + at + len(mark)
+    return end
+
 
 def chunk_text(text: str, size: int = _CHUNK_CHARS,
                overlap: int = _CHUNK_OVERLAP) -> list[str]:
-    """Split into overlapping chunks on paragraph/sentence-ish boundaries.
-    Pure and deterministic — the retrieval-quality core, fully testable."""
-    text = re.sub(r"[ \t]+", " ", (text or "")).strip()
-    if not text:
-        return []
-    if len(text) <= size:
-        return [text]
-
+    """Split text into chunks of at most ``size`` characters, each starting
+    ``overlap`` characters before the previous one ended. Runs of spaces
+    and tabs become one space. Pure and deterministic."""
+    clean = re.sub(r"[ \t]+", " ", text or "").strip()
+    if len(clean) <= size:
+        return [clean] if clean else []
     chunks: list[str] = []
     start = 0
-    n = len(text)
-    while start < n:
-        end = min(start + size, n)
-        if end < n:
-            # prefer to break at a paragraph, then sentence, then space
-            window = text[start:end]
-            for sep in ("\n\n", "\n", ". ", " "):
-                idx = window.rfind(sep)
-                if idx > size * 0.5:          # don't make a tiny chunk
-                    end = start + idx + len(sep)
-                    break
-        chunk = text[start:end].strip()
-        if chunk:
-            chunks.append(chunk)
-        if end >= n:
-            break
+    while True:
+        end = _chunk_end(clean, start, size)
+        piece = clean[start:end].strip()
+        if piece:
+            chunks.append(piece)
+        if end >= len(clean):
+            return chunks
         start = max(end - overlap, start + 1)
-    return chunks
 
 
-# ── ingest ───────────────────────────────────────────────────────────────────
+# ── adding and removing documents ───────────────────────────────────────────
 
-def _forget_source(source: str) -> None:
-    """Remove all chunks for a source before re-ingesting (idempotent re-scan)."""
-    if _fts_ok:
-        try:
-            conn = _store.connect(_db_path(), row_factory=False, mkdir=False,
-                                  busy_timeout_ms=None)
-            conn.execute("DELETE FROM document_fts WHERE source = ?", (source,))
-            conn.commit()
-            conn.close()
-        except Exception as exc:
-            _LOGGER.debug("doc forget (fts) failed: %s", exc)
-
-
-def delete_source(filename: str) -> dict:
-    """Remove a document entirely: delete its file from DOCS_DIR and purge all
-    its chunks from FTS and its vectors from the embedding store. Returns
-    {"ok", "filename", "error"?}. Never raises."""
-    safe = _safe_filename(filename)
-    if not safe:
-        return {"ok": False, "error": "invalid filename"}
-    # purge chunks (FTS)
-    _forget_source(safe)
-    # purge vectors
-    try:
-        from . import embeddings
-        embeddings.forget_source(safe)
-    except Exception:
-        pass
-    # remove the file
-    try:
-        p = Path(_documents_dir()) / safe
-        if p.exists():
-            p.unlink()
-    except Exception as exc:
-        # The detail (an OS error with the full path) goes to the Home
-        # Assistant log only; the panel gets the error type (8.7.23).
-        from .safe_errors import safe_error_message
-        return {"ok": False, "filename": safe,
-                "error": "file remove failed: "
-                         + safe_error_message(exc, where="document delete", log=True)}
-    return {"ok": True, "filename": safe}
+def _failed(source: str, error: str) -> dict:
+    return {"source": source, "chunks": 0, "ok": False, "error": error}
 
 
 def ingest_file(path: str) -> dict:
-    """Ingest one document file into keyword (FTS) search. Returns
-    {"source", "chunks", "ok", "chunk_texts"?, "error"?}. Never raises.
-    chunk_texts is included on success so an async caller can also embed them
-    for semantic search (v6.57.0)."""
+    """Index one file for keyword search, replacing any earlier version.
+    On success the chunks and the ingest time are returned too, so a caller
+    can embed them for semantic search."""
     _ensure_init()
     source = os.path.basename(path)
-    text, err = extract_text(path)
-    if err:
-        return {"source": source, "chunks": 0, "ok": False, "error": err}
+    text, error = extract_text(path)
+    if error:
+        return _failed(source, error)
     chunks = chunk_text(text)
     if not chunks:
-        return {"source": source, "chunks": 0, "ok": False,
-                "error": "no extractable text (scanned image PDF?)"}
-
+        return _failed(source, "no extractable text (scanned image PDF?)")
     _forget_source(source)
-    ingested = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
-
-    if _fts_ok:
-        try:
-            conn = _store.connect(_db_path(), row_factory=False, mkdir=False,
-                                  busy_timeout_ms=None)
+    if not _fts_ok:
+        return _failed(source, "no vector or FTS store available")
+    stamp = _now_iso()
+    try:
+        with closing(_open_db()) as conn:
             conn.executemany(
                 "INSERT INTO document_fts (content, source, chunk_id, ingested) "
                 "VALUES (?, ?, ?, ?)",
-                [(c, source, str(i), ingested) for i, c in enumerate(chunks)],
-            )
+                [(chunk, source, str(n), stamp) for n, chunk in enumerate(chunks)])
             conn.commit()
-            conn.close()
-            return {"source": source, "chunks": len(chunks), "ok": True,
-                    "chunk_texts": chunks, "ingested": ingested}
-        except Exception as exc:
-            return {"source": source, "chunks": 0, "ok": False,
-                    "error": f"fts store failed: {exc}"}
+    except Exception as err:  # noqa: BLE001
+        return _failed(source, f"fts store failed: {err}")
+    return {"source": source, "chunks": len(chunks), "ok": True,
+            "chunk_texts": chunks, "ingested": stamp}
 
-    return {"source": source, "chunks": 0, "ok": False,
-            "error": "no vector or FTS store available"}
+
+def ingest_directory(directory: Optional[str] = None) -> dict:
+    """Index every supported file in a folder (the library by default),
+    creating the folder when it is missing."""
+    folder = directory or _documents_dir()
+    _ensure_init()
+    try:
+        Path(folder).mkdir(parents=True, exist_ok=True)
+    except Exception as err:  # noqa: BLE001
+        return {"ok": False, "error": f"cannot access {folder}: {err}",
+                "files": [], "total_chunks": 0}
+    results = []
+    for path in sorted(Path(folder).iterdir()):
+        if not (path.is_file() and _supported(path)):
+            continue
+        try:
+            oversized = _too_big(path.stat().st_size)
+        except OSError:
+            oversized = False
+        if oversized:
+            results.append(_failed(path.name, f"larger than {_MAX_FILE_MB}MB — skipped"))
+            continue
+        results.append(ingest_file(str(path)))
+    return {"ok": True, "files": results,
+            "files_ingested": sum(1 for r in results if r.get("ok")),
+            "files_seen": len(results),
+            "total_chunks": sum(r.get("chunks", 0) for r in results),
+            "directory": folder}
+
+
+async def _embed_chunks(hass, source: str, chunks: list, ingested: str) -> Optional[int]:
+    """Replace a document's vectors. None when embedding was unavailable,
+    else how many vectors were stored."""
+    from . import embeddings
+    vectors = await embeddings.embed_texts(hass, chunks)
+    if vectors is None:
+        return None
+    await hass.async_add_executor_job(embeddings.forget_source, source)
+    return await hass.async_add_executor_job(
+        embeddings.store_vectors, source, chunks, vectors, ingested)
 
 
 async def ingest_directory_async(hass, directory: Optional[str] = None) -> dict:
-    """Ingest the documents folder, adding Ollama-embedded vectors when semantic
-    search is enabled (v6.57.0). Always does keyword (FTS) ingest; layers vector
-    embeddings on top when available. Falls back silently to keyword-only if
-    Ollama is unreachable."""
+    """Index the library, then embed it when semantic search is on. If the
+    embedding host cannot be reached the keyword index still stands."""
     from . import embeddings
-    base = await hass.async_add_executor_job(ingest_directory, directory)  # FTS ingest (sync)
-    if not base.get("ok") or not embeddings.is_enabled():
-        base["semantic"] = False
-        return base
-
+    report = await hass.async_add_executor_job(ingest_directory, directory)
+    if not report.get("ok") or not embeddings.is_enabled():
+        report["semantic"] = False
+        return report
     await hass.async_add_executor_job(embeddings.init_store)
-    embedded_files = 0
-    embedded_chunks = 0
-    semantic_error = None
-    for res in base.get("files", []):
-        if not res.get("ok") or not res.get("chunk_texts"):
+    files = chunks = 0
+    for result in report.get("files", []):
+        if not (result.get("ok") and result.get("chunk_texts")):
             continue
-        source = res["source"]
-        chunks = res["chunk_texts"]
-        vecs = await embeddings.embed_texts(hass, chunks)
-        if vecs is None:
-            semantic_error = ("Ollama embeddings unavailable — pull the embed "
-                              "model and check the host; keyword search is active")
+        stored = await _embed_chunks(hass, result["source"], result["chunk_texts"],
+                                     result.get("ingested", ""))
+        if stored is None:
+            report["semantic_error"] = ("Ollama embeddings unavailable — pull the "
+                                        "embed model and check the host; keyword "
+                                        "search is active")
             break
-        await hass.async_add_executor_job(embeddings.forget_source, source)
-        stored = await hass.async_add_executor_job(
-            embeddings.store_vectors, source, chunks, vecs,
-            res.get("ingested", ""))
         if stored:
-            embedded_files += 1
-            embedded_chunks += stored
-
-    base["semantic"] = embedded_files > 0
-    base["embedded_files"] = embedded_files
-    base["embedded_chunks"] = embedded_chunks
-    if semantic_error:
-        base["semantic_error"] = semantic_error
-    return base
+            files += 1
+            chunks += stored
+    report["semantic"] = files > 0
+    report["embedded_files"] = files
+    report["embedded_chunks"] = chunks
+    return report
 
 
-    base["embedded_chunks"] = embedded_chunks
-    if semantic_error:
-        base["semantic_error"] = semantic_error
-    return base
+async def _index_placed_file(hass, path: str, filename: str) -> tuple[dict, dict]:
+    """Index a file already in the library and embed it when semantic search
+    is on. Returns (outcome for the caller, the raw ingest result)."""
+    result = await hass.async_add_executor_job(ingest_file, path)
+    outcome: dict[str, Any] = {"ok": bool(result.get("ok")), "filename": filename,
+                               "chunks": result.get("chunks", 0)}
+    if not result.get("ok"):
+        outcome["error"] = result.get("error")
+    return outcome, result
+
+
+async def save_and_ingest_upload_from_path(hass, path: str) -> dict:
+    """Index a file already placed in the library (watch folder copies and
+    files dropped into the folder), embedding it when semantic search is on."""
+    outcome, result = await _index_placed_file(hass, path, os.path.basename(path))
+    if not outcome["ok"]:
+        return outcome
+    try:
+        from . import embeddings
+        if embeddings.is_enabled() and result.get("chunk_texts"):
+            await hass.async_add_executor_job(embeddings.init_store)
+            await _embed_chunks(hass, outcome["filename"], result["chunk_texts"],
+                                result.get("ingested", ""))
+    except Exception:  # noqa: BLE001 - keyword search already works
+        pass
+    return outcome
 
 
 def _safe_filename(name: str) -> Optional[str]:
-    """Sanitize a user-supplied filename to a bare, safe basename. Returns None
-    if it can't be made safe or isn't a supported type. Prevents path traversal
-    (../, absolute paths, separators) since this name is written to disk."""
-    import os as _os
-    import re as _re
+    """A user-given file name reduced to a safe bare name of a supported
+    type, or None. Folders, separators and odd characters never survive."""
     if not name:
         return None
-    # strip any directory components — keep only the final name
-    base = _os.path.basename(str(name).replace("\\", "/").strip())
-    # drop anything that isn't a sane filename char
-    base = _re.sub(r"[^A-Za-z0-9._ \-()]", "_", base).strip(". ")
-    if not base or base in (".", ".."):
+    bare = os.path.basename(str(name).replace("\\", "/").strip())
+    bare = re.sub(r"[^A-Za-z0-9._ \-()]", "_", bare).strip(". ")
+    if bare in ("", ".", ".."):
         return None
-    if _os.path.splitext(base)[1].lower() not in _SUPPORTED:
+    if os.path.splitext(bare)[1].lower() not in _SUPPORTED:
         return None
-    return base[:180]          # bound length
+    return bare[:180]
 
 
 def save_uploaded_file(filename: str, b64_content: str) -> dict:
-    """Write an uploaded document (base64) into DOCS_DIR, safely. Returns
-    {"ok", "filename"?, "path"?, "error"?}. Does NOT ingest — caller ingests
-    after. Never raises."""
-    import base64 as _b64
+    """Write a base64 upload into the library under a safe name. It is not
+    indexed here."""
     safe = _safe_filename(filename)
     if not safe:
-        return {"ok": False, "error": "unsupported or unsafe filename "
-                                      "(allowed: .pdf, .txt, .md)"}
+        return {"ok": False,
+                "error": "unsupported or unsafe filename (allowed: .pdf, .txt, .md)"}
     try:
-        raw = _b64.b64decode(b64_content, validate=False)
-    except Exception:
+        data = base64.b64decode(b64_content, validate=False)
+    except Exception:  # noqa: BLE001
         return {"ok": False, "error": "could not decode file content"}
-    if len(raw) > _MAX_FILE_MB * 1_000_000:
+    if _too_big(len(data)):
         return {"ok": False, "error": f"file exceeds {_MAX_FILE_MB}MB"}
     try:
-        d = Path(_documents_dir())
-        d.mkdir(parents=True, exist_ok=True)
-        dest = d / safe
-        # resolve and re-check the destination stays inside DOCS_DIR
-        if not str(dest.resolve()).startswith(str(d.resolve())):
+        library = Path(_documents_dir())
+        library.mkdir(parents=True, exist_ok=True)
+        target = library / safe
+        if not str(target.resolve()).startswith(str(library.resolve())):
             return {"ok": False, "error": "path escapes documents directory"}
-        dest.write_bytes(raw)
-        return {"ok": True, "filename": safe, "path": str(dest),
-                "bytes": len(raw)}
-    except Exception as exc:
-        return {"ok": False, "error": f"write failed: {exc}"}
+        target.write_bytes(data)
+    except Exception as err:  # noqa: BLE001
+        return {"ok": False, "error": f"write failed: {err}"}
+    return {"ok": True, "filename": safe, "path": str(target), "bytes": len(data)}
 
 
 async def save_and_ingest_upload(hass, filename: str, b64_content: str) -> dict:
-    """Save an uploaded file then ingest it (semantic-aware). Returns the save
-    result merged with per-file ingest outcome. Never raises."""
-    saved = await hass.async_add_executor_job(
-        save_uploaded_file, filename, b64_content)
+    """Save an upload, index it, and embed it when semantic search is on."""
+    saved = await hass.async_add_executor_job(save_uploaded_file, filename, b64_content)
     if not saved.get("ok"):
         return saved
-    # ingest just this file (FTS), then embed if semantic is on
-    res = await hass.async_add_executor_job(ingest_file, saved["path"])
-    out = {"ok": bool(res.get("ok")), "filename": saved["filename"],
-           "chunks": res.get("chunks", 0)}
-    if not res.get("ok"):
-        out["error"] = res.get("error")
-        return out
+    outcome, result = await _index_placed_file(hass, saved["path"], saved["filename"])
+    if not outcome["ok"]:
+        return outcome
     try:
         from . import embeddings
-        if embeddings.is_enabled() and res.get("chunk_texts"):
+        if embeddings.is_enabled() and result.get("chunk_texts"):
             await hass.async_add_executor_job(embeddings.init_store)
-            vecs = await embeddings.embed_texts(hass, res["chunk_texts"])
-            if vecs is not None:
-                await hass.async_add_executor_job(
-                    embeddings.forget_source, saved["filename"])
-                n = await hass.async_add_executor_job(
-                    embeddings.store_vectors, saved["filename"],
-                    res["chunk_texts"], vecs, res.get("ingested", ""))
-                out["embedded"] = n
+            stored = await _embed_chunks(hass, saved["filename"], result["chunk_texts"],
+                                         result.get("ingested", ""))
+            if stored is None:
+                outcome["semantic_note"] = "saved & indexed; Ollama embedding unavailable"
             else:
-                out["semantic_note"] = "saved & indexed; Ollama embedding unavailable"
-    except Exception:
+                outcome["embedded"] = stored
+    except Exception:  # noqa: BLE001 - keyword search already works
         pass
-    return out
+    return outcome
+
+
+def _forget_vectors(source: str) -> None:
+    try:
+        from . import embeddings
+    except Exception:  # noqa: BLE001 - vectors are optional
+        return
+    try:
+        embeddings.forget_source(source)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def delete_source(filename: str) -> dict:
+    """Remove a document: its keyword chunks, its vectors and its file."""
+    safe = _safe_filename(filename)
+    if not safe:
+        return {"ok": False, "error": "invalid filename"}
+    _forget_source(safe)
+    _forget_vectors(safe)
+    target = Path(_documents_dir()) / safe
+    try:
+        target.unlink(missing_ok=True)
+    except Exception as err:  # noqa: BLE001
+        # The full OS error (with its path) goes only to the Home Assistant log.
+        from .safe_errors import safe_error_message
+        reason = safe_error_message(err, where="document delete", log=True)
+        return {"ok": False, "filename": safe, "error": "file remove failed: " + reason}
+    return {"ok": True, "filename": safe}
+
+
+# ── searching ───────────────────────────────────────────────────────────────
+
+def search_documents(query: str, k: int = 4) -> list[dict]:
+    """The ``k`` best keyword matches as {"text", "source", "chunk", "score"}.
+    The query's first eight words are matched with OR."""
+    if not query or not query.strip():
+        return []
+    _ensure_init()
+    if not _fts_ok:
+        return []
+    words = re.findall(r"\w+", query)[:8]
+    match = " OR ".join(words) or query
+    try:
+        with closing(_open_db(rows=True)) as conn:
+            found = conn.execute(
+                "SELECT content, source, chunk_id, rank FROM document_fts "
+                "WHERE document_fts MATCH ? ORDER BY rank LIMIT ?",
+                (match, k)).fetchall()
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.debug("Nova documents: keyword search failed: %s", err)
+        return []
+    return [{"text": row["content"], "source": row["source"],
+             "chunk": row["chunk_id"], "score": None} for row in found]
+
+
+async def search_documents_async(hass, query: str, k: int = 4) -> list[dict]:
+    """Semantic hits when semantic search is on and finds something, else
+    keyword hits. Each hit names its engine."""
+    from . import embeddings
+    if embeddings.is_enabled():
+        vector = await embeddings.embed_one(hass, query)
+        if vector:
+            hits = await hass.async_add_executor_job(embeddings.search_vectors, vector, k)
+            if hits:
+                for hit in hits:
+                    hit["engine"] = "semantic"
+                return hits
+    hits = search_documents(query, k)
+    for hit in hits:
+        hit["engine"] = "keyword"
+    return hits
+
+
+def library_status() -> dict:
+    """The index state, the library folder and chunk counts per document."""
+    _ensure_init()
+    status: dict[str, Any] = {"fts": _fts_ok, "directory": _documents_dir(),
+                              "chunk_count": 0, "sources": []}
+    if not _fts_ok:
+        return status
+    try:
+        with closing(_open_db(rows=True)) as conn:
+            counted = conn.execute(
+                "SELECT source, COUNT(*) n FROM document_fts GROUP BY source").fetchall()
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.debug("Nova documents: status read failed: %s", err)
+        return status
+    status["sources"] = [{"source": row["source"], "chunks": row["n"]} for row in counted]
+    status["chunk_count"] = sum(entry["chunks"] for entry in status["sources"])
+    return status
+
+
+# ── picking up new files ────────────────────────────────────────────────────
+# What has been picked up is remembered (path and modification time) in the
+# document_watch_seen table, so a timed scan only touches new or changed
+# files. The blocking helpers here run in the executor.
+
+def _cfg(key: str, default):
+    """A saved Nova setting, or ``default`` when unset or unreadable."""
+    try:
+        from . import nova_config
+        value = nova_config.get(key, default)
+    except Exception:  # noqa: BLE001
+        return default
+    return default if value is None else value
 
 
 def _watch_folders() -> list[str]:
-    """Configured extra folders to scan for documents (besides DOCS_DIR)."""
-    raw = _cfg("document_watch_folders", "")
+    """The extra folders to watch, from a list or a comma or line separated
+    string."""
+    raw = _cfg(_WATCH_KEY, "")
     if not raw:
         return []
     if isinstance(raw, list):
-        items = raw
-    else:
-        items = [p.strip() for p in str(raw).replace(",", "\n").splitlines()]
-    return [p for p in items if p]
+        return [folder for folder in raw if folder]
+    parts = str(raw).replace(",", "\n").splitlines()
+    return [part.strip() for part in parts if part.strip()]
 
-
-def _cfg(key: str, default):
-    try:
-        from . import nova_config
-        val = nova_config.get(key, default)
-        return val if val is not None else default
-    except Exception:
-        return default
-
-
-# Blocking helpers for the two scans below; run them in the executor.
 
 def _read_seen() -> dict:
-    """Path -> mtime of every file already ingested ({} on any failure)."""
+    """{path: modification time} of every file picked up so far."""
     try:
-        with closing(_store.connect(_db_path(), row_factory=False, mkdir=False,
-                                    busy_timeout_ms=None)) as conn:
+        with closing(_open_db()) as conn:
             _store.ensure(conn, "document_watch_seen")
             conn.commit()
-            return {r[0]: r[1] for r in
-                    conn.execute("SELECT path, mtime FROM document_watch_seen")}
-    except Exception:
+            return dict(conn.execute("SELECT path, mtime FROM document_watch_seen"))
+    except Exception:  # noqa: BLE001
         return {}
 
 
 def _mark_seen(key: str, mtime: float) -> None:
-    """Record that `key` was ingested at this mtime. Never raises."""
     try:
-        with closing(_store.connect(_db_path(), row_factory=False, mkdir=False,
-                                    busy_timeout_ms=None)) as conn:
+        with closing(_open_db()) as conn:
             conn.execute("INSERT OR REPLACE INTO document_watch_seen "
                          "(path, mtime, ingested) VALUES (?, ?, ?)",
-                         (key, mtime, datetime.now(timezone.utc).replace(tzinfo=None).isoformat()))
+                         (key, mtime, _now_iso()))
             conn.commit()
-    except Exception:
+    except Exception:  # noqa: BLE001
         pass
 
 
 def _is_unchanged(seen: dict, key: str, mtime: float) -> bool:
+    """Picked up before at (within a second of) this modification time."""
     return key in seen and abs(seen[key] - mtime) < 1.0
 
 
+def _candidate(path: Path, seen: dict) -> Optional[tuple[str, float, str]]:
+    """(path, mtime, name) when the file is supported, small enough and new
+    or changed; else None. Raises OSError when it cannot be examined."""
+    if not (path.is_file() and _supported(path)):
+        return None
+    info = path.stat()
+    if _too_big(info.st_size) or _is_unchanged(seen, str(path), info.st_mtime):
+        return None
+    return str(path), info.st_mtime, path.name
+
+
 def _new_docs_in_library(docs: Path, seen: dict) -> list[tuple[str, float, str]]:
-    """(path, mtime, name) of each new or changed supported file in DOCS_DIR."""
-    out = []
-    for f in sorted(docs.iterdir()):
+    """New or changed files in the library folder."""
+    found = []
+    for path in sorted(docs.iterdir()):
         try:
-            if not f.is_file() or f.suffix.lower() not in _SUPPORTED:
-                continue
-            st = f.stat()
-            if st.st_size > _MAX_FILE_MB * 1_000_000:
-                continue
-            key = str(f)
-            if _is_unchanged(seen, key, st.st_mtime):
-                continue                       # already ingested this version
-            out.append((key, st.st_mtime, f.name))
-        except Exception as exc:
-            _LOGGER.debug("auto-ingest of %s failed: %s", f, exc)
-    return out
+            hit = _candidate(path, seen)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("auto-ingest of %s failed: %s", path, err)
+            continue
+        if hit:
+            found.append(hit)
+    return found
 
 
 def _new_docs_in_watch_folder(d: Path, seen: dict) -> list[tuple[str, float, str]]:
-    """(path, mtime, name) of each new or changed supported file in one watch
-    folder; [] when it is not a directory."""
+    """New or changed files in one watch folder ([] when it is not a folder)."""
     if not d.is_dir():
         return []
-    out = []
-    for f in sorted(d.iterdir()):
-        if not f.is_file() or f.suffix.lower() not in _SUPPORTED:
+    found = []
+    for path in sorted(d.iterdir()):
+        try:
+            hit = _candidate(path, seen)
+        except Exception:  # noqa: BLE001
             continue
-        try:
-            mtime = f.stat().st_mtime
-            if f.stat().st_size > _MAX_FILE_MB * 1_000_000:
-                continue
-        except Exception:
-            continue
-        key = str(f)
-        if _is_unchanged(seen, key, mtime):
-            continue          # already ingested this version
-        out.append((key, mtime, f.name))
-    return out
-
-
-async def auto_ingest_new(hass) -> dict:
-    """Ingest only NEW or CHANGED files in DOCS_DIR (v6.79.0).
-
-    ingest_directory_async re-embeds the whole folder every call, which is fine
-    for a manual rescan but would hammer Ollama if run on a timer. This variant
-    tracks each file's mtime in document_watch_seen (the same table the watch
-    folders use) and ingests a file only when it's new or its mtime changed —
-    so dropping a manual into /config/nova/documents gets picked up
-    automatically on the next scheduled scan, without re-embedding everything.
-    Never raises."""
-    docs = Path(_documents_dir())
-    if not await hass.async_add_executor_job(docs.is_dir):
-        return {"ok": True, "new_files": 0, "note": "docs dir absent"}
-
-    seen = await hass.async_add_executor_job(_read_seen)
-    pending = await hass.async_add_executor_job(_new_docs_in_library, docs, seen)
-
-    results = []
-    for key, mtime, name in pending:
-        try:
-            res = await save_and_ingest_upload_from_path(hass, key)
-            results.append({"source": name, **res})
-            if res.get("ok"):
-                await hass.async_add_executor_job(_mark_seen, key, mtime)
-        except Exception as exc:
-            _LOGGER.debug("auto-ingest of %s failed: %s", key, exc)
-
-    ingested = sum(1 for r in results if r.get("ok"))
-    return {"ok": True, "new_files": ingested, "files": results}
-
-
-async def scan_watch_folders(hass) -> dict:
-    """Ingest any NEW supported files found in configured watch folders (e.g. a
-    Downloads or Drive-sync folder). Tracks what's been seen so re-scans only
-    pick up new files. Never raises."""
-    folders = _watch_folders()
-    if not folders:
-        return {"ok": True, "watched": 0, "new_files": 0,
-                "note": "no watch folders configured"}
-
-    # remember ingested watch-file paths+mtimes in a tiny table
-    seen = await hass.async_add_executor_job(_read_seen)
-
-    new_results = []
-    for folder in folders:
-        try:
-            pending = await hass.async_add_executor_job(
-                _new_docs_in_watch_folder, Path(folder), seen)
-            for key, mtime, name in pending:
-                # ingest by copying into DOCS_DIR (keeps the library in one place)
-                copied = await hass.async_add_executor_job(
-                    _copy_into_docs, key)
-                if not copied.get("ok"):
-                    continue
-                res = await save_and_ingest_upload_from_path(hass, copied["path"])
-                new_results.append({"source": name, **res})
-                await hass.async_add_executor_job(_mark_seen, key, mtime)
-        except Exception as exc:
-            _LOGGER.debug("watch scan of %s failed: %s", folder, exc)
-
-    ingested = sum(1 for r in new_results if r.get("ok"))
-    return {"ok": True, "watched": len(folders), "new_files": ingested,
-            "files": new_results}
+        if hit:
+            found.append(hit)
+    return found
 
 
 def _copy_into_docs(src_path: str) -> dict:
-    """Copy a watched file into DOCS_DIR (sanitized name). Never raises."""
-    import shutil
+    """Copy a watched file into the library under a safe name."""
     safe = _safe_filename(os.path.basename(src_path))
     if not safe:
         return {"ok": False}
     try:
-        d = Path(_documents_dir())
-        d.mkdir(parents=True, exist_ok=True)
-        dest = d / safe
-        shutil.copy2(src_path, dest)
-        return {"ok": True, "path": str(dest), "filename": safe}
-    except Exception:
+        library = Path(_documents_dir())
+        library.mkdir(parents=True, exist_ok=True)
+        target = library / safe
+        shutil.copy2(src_path, target)
+    except Exception:  # noqa: BLE001
         return {"ok": False}
+    return {"ok": True, "path": str(target), "filename": safe}
 
 
-async def save_and_ingest_upload_from_path(hass, path: str) -> dict:
-    """Ingest an already-placed file (used by watch-folder copy). Semantic-aware."""
-    res = await hass.async_add_executor_job(ingest_file, path)
-    out = {"ok": bool(res.get("ok")), "filename": os.path.basename(path),
-           "chunks": res.get("chunks", 0)}
-    if not res.get("ok"):
-        out["error"] = res.get("error")
-        return out
-    try:
-        from . import embeddings
-        if embeddings.is_enabled() and res.get("chunk_texts"):
-            await hass.async_add_executor_job(embeddings.init_store)
-            vecs = await embeddings.embed_texts(hass, res["chunk_texts"])
-            if vecs is not None:
-                await hass.async_add_executor_job(
-                    embeddings.forget_source, out["filename"])
-                await hass.async_add_executor_job(
-                    embeddings.store_vectors, out["filename"],
-                    res["chunk_texts"], vecs, res.get("ingested", ""))
-    except Exception:
-        pass
-    return out
-
-
-async def search_documents_async(hass, query: str, k: int = 4) -> list[dict]:
-    """Retrieve document chunks, preferring Ollama semantic search when enabled,
-    falling back to keyword (FTS) otherwise (v6.57.0)."""
-    from . import embeddings
-    if embeddings.is_enabled():
-        qvec = await embeddings.embed_one(hass, query)
-        if qvec:
-            hits = await hass.async_add_executor_job(
-                embeddings.search_vectors, qvec, k)
-            if hits:
-                for h in hits:
-                    h["engine"] = "semantic"
-                return hits
-    # fall back to keyword
-    hits = search_documents(query, k)
-    for h in hits:
-        h["engine"] = "keyword"
-    return hits
-
-
-def ingest_directory(directory: Optional[str] = None) -> dict:
-    """Ingest every supported file in the documents directory. Returns a
-    summary with per-file results. Creates the directory if missing."""
-    directory = directory or _documents_dir()
-    _ensure_init()
-    d = Path(directory)
-    try:
-        d.mkdir(parents=True, exist_ok=True)
-    except Exception as exc:
-        return {"ok": False, "error": f"cannot access {directory}: {exc}",
-                "files": [], "total_chunks": 0}
-
+async def auto_ingest_new(hass) -> dict:
+    """Index only the library files that are new or changed since they were
+    last picked up, so a timed scan never re-embeds the whole library. A
+    file that fails is tried again next time."""
+    library = Path(_documents_dir())
+    if not await hass.async_add_executor_job(library.is_dir):
+        return {"ok": True, "new_files": 0, "note": "docs dir absent"}
+    seen = await hass.async_add_executor_job(_read_seen)
+    waiting = await hass.async_add_executor_job(_new_docs_in_library, library, seen)
     results = []
-    total_chunks = 0
-    for f in sorted(d.iterdir()):
-        if not f.is_file() or f.suffix.lower() not in _SUPPORTED:
-            continue
+    for key, mtime, name in waiting:
         try:
-            if f.stat().st_size > _MAX_FILE_MB * 1_000_000:
-                results.append({"source": f.name, "chunks": 0, "ok": False,
-                                "error": f"larger than {_MAX_FILE_MB}MB — skipped"})
-                continue
-        except Exception:
-            pass
-        res = ingest_file(str(f))
-        results.append(res)
-        total_chunks += res.get("chunks", 0)
-
-    ok_files = sum(1 for r in results if r.get("ok"))
-    return {"ok": True, "files": results, "files_ingested": ok_files,
-            "files_seen": len(results), "total_chunks": total_chunks,
-            "directory": directory}
+            outcome = await save_and_ingest_upload_from_path(hass, key)
+            results.append({"source": name, **outcome})
+            if outcome.get("ok"):
+                await hass.async_add_executor_job(_mark_seen, key, mtime)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("auto-ingest of %s failed: %s", key, err)
+    return {"ok": True, "new_files": sum(1 for r in results if r.get("ok")),
+            "files": results}
 
 
-# ── retrieval ────────────────────────────────────────────────────────────────
-
-def search_documents(query: str, k: int = 4) -> list[dict]:
-    """Top-k document chunks for a query.
-    Returns [{"text", "source", "chunk", "score"}]. Never raises."""
-    if not query or not query.strip():
-        return []
-    _ensure_init()
-
-    if _fts_ok:
+async def scan_watch_folders(hass) -> dict:
+    """Copy new files from the watch folders into the library and index
+    them. A copied file is remembered whether or not it indexed."""
+    folders = _watch_folders()
+    if not folders:
+        return {"ok": True, "watched": 0, "new_files": 0,
+                "note": "no watch folders configured"}
+    seen = await hass.async_add_executor_job(_read_seen)
+    results = []
+    for folder in folders:
         try:
-            conn = _store.connect(_db_path(), mkdir=False,
-                                  busy_timeout_ms=None)
-            terms = " OR ".join(re.findall(r"\w+", query)[:8]) or query
-            rows = conn.execute(
-                "SELECT content, source, chunk_id, rank FROM document_fts "
-                "WHERE document_fts MATCH ? ORDER BY rank LIMIT ?",
-                (terms, k),
-            ).fetchall()
-            conn.close()
-            return [{"text": r["content"], "source": r["source"],
-                     "chunk": r["chunk_id"], "score": None} for r in rows]
-        except Exception as exc:
-            _LOGGER.debug("doc fts search failed: %s", exc)
-
-    return []
-
-
-def library_status() -> dict:
-    """What's in the library — backends and counts, for status/UI. Never raises."""
-    _ensure_init()
-    info = {"fts": _fts_ok, "directory": _documents_dir(),
-            "chunk_count": 0, "sources": []}
-    if _fts_ok:
-        try:
-            conn = _store.connect(_db_path(), mkdir=False,
-                                  busy_timeout_ms=None)
-            rows = conn.execute(
-                "SELECT source, COUNT(*) n FROM document_fts GROUP BY source"
-            ).fetchall()
-            conn.close()
-            info["chunk_count"] = sum(r["n"] for r in rows)
-            info["sources"] = [{"source": r["source"], "chunks": r["n"]} for r in rows]
-        except Exception as exc:
-            _LOGGER.debug("doc status (fts) failed: %s", exc)
-    return info
+            waiting = await hass.async_add_executor_job(
+                _new_docs_in_watch_folder, Path(folder), seen)
+            for key, mtime, name in waiting:
+                copied = await hass.async_add_executor_job(_copy_into_docs, key)
+                if not copied.get("ok"):
+                    continue
+                outcome = await save_and_ingest_upload_from_path(hass, copied["path"])
+                results.append({"source": name, **outcome})
+                await hass.async_add_executor_job(_mark_seen, key, mtime)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("watch scan of %s failed: %s", folder, err)
+    return {"ok": True, "watched": len(folders),
+            "new_files": sum(1 for r in results if r.get("ok")), "files": results}

@@ -30,12 +30,12 @@ NOVA_OWNED_HASS_DATA: dict[tuple[str, str, str], str] = {}
 
 # Other integrations' data, which is not Nova's.
 FOREIGN_ALLOWLIST = {
-    ("camera.py", "_fetch_nest_event_image", 'nest_data = hass.data.get("nest")'):
+    ("camera.py", "_fetch_nest_event_image", 'nest = hass.data.get("nest")'):
         "the Nest integration's own data",
     ("camera_backends.py", "fetch_best_image", 'nest_data = hass.data.get("nest")'):
         "the Nest integration's own data",
     ("doorbell_training.py", "_iter_nest_doorbell_devices",
-     'data = (hass.data.get("nest") or {}).get(getattr(entry, "entry_id", ""), None)'):
+     'nest = hass.data.get("nest") or {}'):
         "the Nest integration's own data",
     ("automation/inventory.py", "_runtime_entities",
      "component = hass.data.get(DATA_COMPONENT)"):
