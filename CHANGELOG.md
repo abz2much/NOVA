@@ -1,3 +1,18 @@
+## [8.49.33] — Learned routines at the right time
+
+Phase 8 continues with the routine learner (patterns.py and suggestions.py), reviewed for real improvements and rewritten with only those. Each fix has a test that fails without it.
+
+### Fixed
+- **Learned routines fired on the hour.** A light that usually goes off around 22:45 became an automation at 22:00, 45 minutes early. Routines now keep their usual time, rounded to five minutes, in the suggestion, its description and the automation. Suggestions saved before this keep reading on the hour.
+- **Routines that drift across the hour were missed.** Off at 22:55 one night and 23:05 the next counted as two half routines, which might never reach the bar. A routine is now the busiest hour long stretch around its usual time, wherever the clock hour falls, and a device can still have more than one routine a day.
+- **The limit of 20 routines kept the busiest, not the most reliable.** A device that changes several times on some days could push out one that happens every day. The 20 most confident are kept.
+- **Repeated requests were scored against all history.** A request counted over the last 30 days was compared with how often it was ever said, so old history dragged its score down. Both now use the same 30 days.
+- **Learned "after A, then B" waited the average gap.** One slow evening stretched every wait. The typical (median) gap is used instead.
+
+### Changed
+- **The analysis pass is split into named steps.** No change in what it does.
+- **Both modules rewritten from empty files**, with every public name, stored value and reply kept.
+
 ## [8.49.32] — Blueprint fixes, service text in the translations
 
 Phase 8 starts with the files most copied from the original project: services.yaml, the two blueprints and the setup screen translations. Each was reviewed for real improvements, then rewritten with only those. Each fix has a test that fails without it.
