@@ -190,8 +190,9 @@ class _CameraWatch:
         self.entry = entry
         self.client = client
         self._nest_camera = _nest_device_to_camera
-        # One timestamp table serves person, motion, vehicle and pet across
-        # every source; doorbell presses keep their own.
+        # One timestamp table serves person, motion, vehicle and pet, keyed
+        # by camera and source so one source never silences another;
+        # doorbell presses keep their own.
         self._recent: dict[str, float] = {}
         self._pressed: dict[str, float] = {}
         self._eufy: dict[str, tuple[str, str]] = {}
@@ -268,7 +269,7 @@ class _CameraWatch:
             if self._due(self._pressed, camera, _PRESS_GAP):
                 self._analyse(camera, "Someone is at the front door", "doorbell",
                               doorbell=True)
-        elif self._due(self._recent, camera, _VISITOR_GAP):
+        elif self._due(self._recent, f"{camera}:nest", _VISITOR_GAP):
             self._observe_visitor(camera)
 
     # Frigate ---------------------------------------------------------------
@@ -298,7 +299,7 @@ class _CameraWatch:
             return
         if label and label not in _FRIGATE_LABELS:
             return
-        if not self._due(self._recent, camera, _DETECTION_GAP):
+        if not self._due(self._recent, f"{camera}:frigate", _DETECTION_GAP):
             return
         reason = f"{label.capitalize()} detected" if label else "Motion detected"
         self._analyse(camera, reason, "camera")
@@ -361,7 +362,7 @@ class _CameraWatch:
         # The one person signal worth a vision call.
         if not self._flag("visitor_learning", True):
             return
-        if not self._due(self._recent, camera, _VISITOR_GAP):
+        if not self._due(self._recent, f"{camera}:stranger", _VISITOR_GAP):
             return
         self._observe_visitor(camera)
         # Eufy already judged the face a stranger: the record stays
@@ -604,6 +605,15 @@ def _briefing_setting(key: str, default: Any) -> Any:
     return default if value is None else value
 
 
+def _briefing_on(key: str, default: bool) -> bool:
+    """A briefing switch: a real bool, or text read like the panel switches,
+    so "false" or "off" is off."""
+    value = _briefing_setting(key, default)
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in _ON_WORDS
+
+
 def _parse_hhmm(value: Any, fallback_h: int, fallback_m: int) -> tuple[int, int]:
     """"HH:MM" (anything after the minutes ignored) as (hour, minute), or the
     fallback when it is not a valid time of day."""
@@ -629,20 +639,18 @@ def _house_empty(hass: HomeAssistant) -> bool:
 async def _run_briefing(hass: HomeAssistant, entry: NovaConfigEntry,
                         llm_client: Any, kind: str) -> None:
     try:
-        if not bool(_briefing_setting(f"briefing_{kind}_enabled", False)):
+        if not _briefing_on(f"briefing_{kind}_enabled", False):
             return
-        if bool(_briefing_setting("briefing_require_home", True)) and _house_empty(hass):
+        if _briefing_on("briefing_require_home", True) and _house_empty(hass):
             _LOGGER.debug("Nova: skipping %s briefing — everyone away", kind)
             return
-        honorific = entry.options.get(
-            CONF_HONORIFIC, entry.data.get(CONF_HONORIFIC, DEFAULT_HONORIFIC))
+        honorific = _live_honorific(hass)
         tts = _get_tts(hass, entry, context="briefing")
         speakers = _get_speakers(hass, entry)
         data: dict[str, Any] = {"announce": True}
         for section in ("weather", "calendar", "presence", "events", "energy",
                         "hazards"):
-            data[f"include_{section}"] = bool(
-                _briefing_setting(f"briefing_include_{section}", True))
+            data[f"include_{section}"] = _briefing_on(f"briefing_include_{section}", True)
         # The morning looks back over the night, the evening over the day.
         data["hours"] = 12 if kind == "morning" else 14
         call = SimpleNamespace(data=data)
@@ -1117,9 +1125,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: NovaConfigEntry) -> boo
         try:
             from . import observer
             await observer.stop()
-            set_observer_running(entry, False)
         except Exception as exc:
             _LOGGER.debug("Observer stop failed: %s", exc)
+        # Unloaded either way, so never left showing as running.
+        await _attempt("Observer state reset failed: %s",
+                       lambda: set_observer_running(entry, False), level=logging.DEBUG)
     await _attempt("Cognitive core stop failed: %s", _stop_core, level=logging.DEBUG)
     await _attempt("Cognitive core release failed: %s", _release_core,
                    level=logging.DEBUG)
