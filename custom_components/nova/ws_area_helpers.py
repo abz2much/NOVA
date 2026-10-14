@@ -71,15 +71,9 @@ def _area_name(hass: HomeAssistant, area_id: str) -> str:
 
 def _rooms(hass: HomeAssistant) -> dict[str, list[str]]:
     """Every area's entity ids, from one walk of the registry. An entity
-    with no area of its own takes its device's. Entities the user excluded
-    are left out, so a room card never shows or counts them."""
+    with no area of its own takes its device's."""
     from homeassistant.helpers import device_registry as dr
     from homeassistant.helpers import entity_registry as er
-    try:
-        from .entity_filter import is_excluded
-    except Exception:
-        def is_excluded(_hass, _entity_id):
-            return False
     devices = dr.async_get(hass)
     rooms: dict[str, list[str]] = {}
     for entry in er.async_get(hass).entities.values():
@@ -87,7 +81,7 @@ def _rooms(hass: HomeAssistant) -> dict[str, list[str]]:
         if not area and entry.device_id:
             device = devices.async_get(entry.device_id)
             area = device.area_id if device else None
-        if area and not is_excluded(hass, entry.entity_id):
+        if area:
             rooms.setdefault(area, []).append(entry.entity_id)
     return rooms
 
@@ -97,10 +91,17 @@ def _entities_in_area(hass: HomeAssistant, area_id: str) -> list[str]:
     without the ones the user excluded."""
     scan = _SCAN.get()
     if scan is None or scan["hass"] is not hass:
-        return list(_rooms(hass).get(area_id, []))
-    if scan["rooms"] is None:
-        scan["rooms"] = _rooms(hass)
-    return list(scan["rooms"].get(area_id, []))
+        rooms = _rooms(hass)
+    else:
+        if scan["rooms"] is None:
+            scan["rooms"] = _rooms(hass)
+        rooms = scan["rooms"]
+    try:
+        from .entity_filter import is_excluded
+    except Exception:
+        return list(rooms.get(area_id, []))
+    # Excluded entities are never shown or counted on a room card.
+    return [e for e in rooms.get(area_id, []) if not is_excluded(hass, e)]
 
 
 def _area_capabilities(hass: HomeAssistant, area_id: str) -> list[str]:

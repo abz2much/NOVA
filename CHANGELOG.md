@@ -1,3 +1,17 @@
+## [8.49.34] — Faster panel, tidier safety code and agent tools
+
+Phase 8 continues with the room helpers, the safety manager and the agent's tool definitions, each reviewed for real improvements and rewritten with only those. Each fix has a test that fails without it.
+
+### Fixed
+- **No milder frost warning right after a critical one.** After the critical frost alert, a small rise in temperature (still below the warning level) sent a second, milder "freeze warning" in the same cold spell. It now stays quiet until the spell is over; the critical reminders to the phones are unchanged.
+
+### Changed
+- **The panel refresh walks the entity list once.** Every room card used to walk the whole entity registry about four times, so a 20 room home did around 100 walks per refresh on Home Assistant's main loop. One walk now serves every room in a refresh. The cards show the same.
+- **Agent tool descriptions rewritten.** Shorter and plainer, with every rule kept; the tool names, parameters and allowed values are unchanged.
+- **The intrusion step and the night sweep are split into named steps.** No change in what they do.
+- **The room helpers, the safety manager and the tool definitions rewritten from empty files**, keeping every public name, message and value.
+- **A stale panel translation key removed** ("I'M LOOKING", which nothing shows; the "✓ I'M LOOKING (HOLD)" button keeps its translations).
+
 ## [8.49.33] — Learned routines at the right time
 
 Phase 8 continues with the routine learner (patterns.py and suggestions.py), reviewed for real improvements and rewritten with only those. Each fix has a test that fails without it.

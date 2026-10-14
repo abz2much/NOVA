@@ -381,7 +381,6 @@
   "How cautious or talkative the proactive Observer is.": "主动观察者有多谨慎或多健谈。",
   "Hungarian": "匈牙利语",
   "Hybrid keeps the Main Agent and Vision choices, and moves background text work to Ollama. Local Text also moves the Main Agent. Vision only moves when Ollama reports a vision-capable model.": "混合模式保留主代理和视觉的选择，并将后台文本工作转到 Ollama。本地文本还会转移主代理。只有当 Ollama 报告支持视觉的模型时，视觉才会转移。",
-  "I'M LOOKING": "我在查看",
   "IDLE": "空闲",
   "INDOOR": "室内",
   "INTRUSION": "入侵",
