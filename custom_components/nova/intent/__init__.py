@@ -1,4 +1,4 @@
-"""Nova intent layer: local NLP command routing and feedback."""
+"""Nova's local voice commands (see intent_router)."""
 from __future__ import annotations
 
 from .intent_router import (
@@ -8,21 +8,16 @@ from .intent_router import (
     match_intent,
 )
 
-__all__ = [
-    "LocalIntentRouter",
-    "match_intent",
-    "is_affirmative",
-    "EVENT_FEEDBACK_WINDOW",
-    "async_setup_intents",
-]
+__all__ = ["EVENT_FEEDBACK_WINDOW", "LocalIntentRouter", "async_setup_intents",
+           "is_affirmative", "match_intent"]
 
 
 async def async_setup_intents(hass) -> None:
-    """Home Assistant's intent loader calls ``<integration>.intent.async_setup_intents``
-    for any integration that exposes an ``intent`` module. Nova's ``intent``
-    package is its own local NLP layer (LocalIntentRouter) — it routes intents
-    through the Nova conversation agent, not Home Assistant's intent registry —
-    so there are no HA intent handlers to register here. This no-op exists purely
-    so HA's loader doesn't raise AttributeError on the package (fixes 'Unexpected
-    error during intent recognition' on HA 2026.8.x)."""
+    """Does nothing, on purpose.
+
+    Home Assistant's intent loader calls async_setup_intents on any
+    integration that has an ``intent`` module, and Nova's intent package is
+    its own command layer, not a set of Home Assistant intent handlers. The
+    function only has to exist: without it Home Assistant 2026.8 logged
+    "Unexpected error during intent recognition"."""
     return None
