@@ -1,3 +1,20 @@
+## [8.49.35] — Safer service calls, voice confirmation fixes
+
+Phase 8 continues with the services module and voice confirmation, reviewed for real improvements and rewritten with only those. Each fix has a test that fails without it.
+
+### Fixed
+- **A mistyped lockdown call lifted the lockdown.** nova.lockdown took any value: a word it didn't know (such as "engaged") lifted the lockdown, and a call with no state engaged it. It now takes on or off as documented, plus engage, lock, lift and unlock; anything else, or no state, is refused with an error.
+- **Bad calls to remember, forget and train_doorbell_backlog did nothing quietly.** They now check their fields as services.yaml documents them (the backlog limit is 1 to 500) and show an error for a bad call.
+- **observer_status and test_routing ignored panel settings.** They read quiet hours, bedrooms, the broadcast group and the TTS engine from the setup entry only, so a panel configured install saw the defaults. Both now use the live settings.
+- **diagnose_doorbell looked for one fixed automation name.** It now finds automations made from Nova's doorbell blueprint, whatever folder the blueprint was imported into, so the verdict is right on every install.
+- **A spoken confirmation could wait forever.** The native path ignored the 30 second answer limit; a satellite that never answers now expires the request, and the action does not run.
+- **A quick phone tap could be missed.** Nova started listening for the Confirm or Deny tap only after sending the notification. It now listens first.
+- **A follow up question with no speaker still opened the mic and reported success.** It now reports failure and leaves the mic alone, as confirmation already did.
+- **The voice test note named one brand of speaker.** It now says "your speaker".
+
+### Changed
+- **Both modules rewritten from empty files**, keeping every public name, service, event and message.
+
 ## [8.49.34] — Faster panel, tidier safety code and agent tools
 
 Phase 8 continues with the room helpers, the safety manager and the agent's tool definitions, each reviewed for real improvements and rewritten with only those. Each fix has a test that fails without it.
