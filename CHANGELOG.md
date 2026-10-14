@@ -1,3 +1,12 @@
+## [8.49.26] — Two routing fixes and a status count
+
+Fixes for three bugs found while rewriting the announcement gate and speaker routing. Each fix has a test that fails without it. Nothing else changes.
+
+### Fixed
+- **Observer status always showed zero held announcements.** The held count only looked at announcements that were spoken. It now counts the ones held in the last hour.
+- **Excluded motion sensors still counted as someone being home.** Room checks ignored them but the whole house check did not, so an excluded sensor could make Nova think the house was occupied. The whole house check now ignores them too. A person or tracker at home still counts.
+- **A reply looked up from a voice device lost its satellite.** When nothing else fitted, the reply target came back empty instead of the device's own satellite. It now returns the satellite. Where replies are heard does not change: a reply that resolves only to its satellite still falls back to the broadcast speakers as before.
+
 ## [8.49.25] — Observer, announcements and briefing rewritten from scratch
 
 Phase 7b rewrites five modules from empty files, each from a behaviour spec with fresh tests: the observer, speaker routing, nova.speak and the infrastructure audit, the announcement gate, and the on demand briefing. Nothing Nova does changes: the same events are filtered, classified and delivered, the same speakers are chosen, and the same settings, services and stored files are used.

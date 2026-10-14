@@ -212,11 +212,13 @@ def currently_occupied_areas(hass: HomeAssistant) -> list[str]:
 
 
 def anyone_home(hass: HomeAssistant) -> bool:
-    """Whether anyone seems to be home: a presence sensor that is on
-    anywhere (with or without an area, excluded or not), or a person or
+    """Whether anyone seems to be home: a presence sensor the user has not
+    excluded that is on anywhere (with or without an area), or a person or
     device tracker at home."""
+    skip = _exclusion_check()
     for state in hass.states.async_all("binary_sensor"):
-        if _counts_as_presence(state) and _is_on(state):
+        if (_counts_as_presence(state) and _is_on(state)
+                and not skip(hass, state.entity_id)):
             return True
     return any(str(state.state).lower() == "home"
                for domain in ("person", "device_tracker")
@@ -262,8 +264,7 @@ def reply_target(
     exists), the room speaker for the satellite's area, the general
     speaker, then the satellite itself. A satellite whose area is unknown
     replies through itself. Pass the satellite entity, or a device id to
-    look it up from. The fallback always returns the satellite_entity_id
-    argument, so a device only call falls back to None."""
+    look it up from."""
     satellite, area = satellite_entity_id, None
     if satellite_entity_id:
         area = entity_area(hass, satellite_entity_id)
@@ -283,11 +284,11 @@ def reply_target(
 
     if not area:
         _LOGGER.debug("reply_target: satellite area unknown")
-        return satellite_entity_id
+        return satellite
     choice = room_speaker(hass, area) or general_speaker_target(hass)
     _LOGGER.debug("reply_target: area '%s' resolves to %s", area,
                   choice or "the satellite")
-    return choice or satellite_entity_id
+    return choice or satellite
 
 
 def reply_targets(
@@ -300,12 +301,15 @@ def reply_targets(
 ) -> list[str]:
     """Older list form of reply_target. The speaker list arguments and
     room_routing are accepted and ignored. Without a device id, or when the
-    device resolves to nothing, the broadcast speakers are returned."""
+    device resolves to nothing but its own satellite, the broadcast
+    speakers are returned."""
     found = None
     if device_id:
         found = reply_target(hass, device_id=device_id,
                              satellite_pairings=satellite_pairings)
-    return [found] if found else broadcast_target(hass)
+    if found and not found.startswith("assist_satellite."):
+        return [found]
+    return broadcast_target(hass)
 
 
 # ─── Observer announcements ─────────────────────────────────────────────────

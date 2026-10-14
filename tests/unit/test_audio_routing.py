@@ -224,10 +224,11 @@ def test_anyone_home_from_people(ar, fake_hass, entity):
     assert ar.anyone_home(fake_hass)
 
 
-def test_preserved_quirk_anyone_home_ignores_exclusions(ar, fake_hass, excluded):
-    # Room presence skips excluded sensors; the whole house check does not.
+def test_anyone_home_skips_excluded_sensors(ar, fake_hass, excluded):
     fake_hass.states.set("binary_sensor.m", "on", device_class="motion")
     excluded.add("binary_sensor.m")
+    assert not ar.anyone_home(fake_hass)
+    fake_hass.states.set("binary_sensor.n", "on", device_class="motion")
     assert ar.anyone_home(fake_hass)
 
 
@@ -285,12 +286,11 @@ def test_reply_from_a_device(ar, fake_hass, monkeypatch, cfg):
         "assist_satellite.s": "media_player.paired"}) == "media_player.paired"
 
 
-def test_preserved_quirk_device_reply_falls_back_to_no_satellite(ar, fake_hass,
-                                                                  monkeypatch):
-    # With only a device id the satellite fallback returns the satellite_entity_id
-    # argument, which is None, even when the device's satellite was found.
+def test_device_reply_falls_back_to_its_satellite(ar, fake_hass, monkeypatch):
     _registries(ar, monkeypatch, {"assist_satellite.s": {"device_id": "dev"}}, {"dev": "den"})
-    assert ar.reply_target(fake_hass, device_id="dev") is None
+    assert ar.reply_target(fake_hass, device_id="dev") == "assist_satellite.s"
+    _registries(ar, monkeypatch, {"assist_satellite.s": {"device_id": "dev"}}, {})
+    assert ar.reply_target(fake_hass, device_id="dev") == "assist_satellite.s"
 
 
 def test_reply_from_an_unknown_or_broken_device(ar, fake_hass, monkeypatch):
@@ -309,6 +309,9 @@ def test_reply_targets_shim(ar, fake_hass, monkeypatch):
     monkeypatch.setattr(ar, "broadcast_target", lambda hass: ["media_player.b"])
     assert ar.reply_targets(fake_hass, device_id="dev") == ["media_player.r"]
     assert ar.reply_targets(fake_hass, device_id="other") == ["media_player.b"]
+    # a reply that resolves only to the satellite still goes to the broadcast speakers
+    monkeypatch.setattr(ar, "reply_target", lambda hass, **kw: "assist_satellite.s")
+    assert ar.reply_targets(fake_hass, device_id="dev") == ["media_player.b"]
     assert ar.reply_targets(fake_hass, voice_satellites=["x"], reply_speakers=["y"],
                             broadcast_speakers=["z"], legacy_cast_speakers=["w"],
                             room_routing=False) == ["media_player.b"]
