@@ -551,11 +551,10 @@ async def test_with_nothing_to_watch_there_is_no_state_listener(sm, world):
     assert [k for k, *_ in sm._ev.tracked] == ["time", "time"]
 
 
-async def test_preserved_quirk_a_rescan_never_drops_the_old_listener(sm, world):
-    """The tag meant to find the old state listener is name mangled inside
-    the class, so the lookup never finds it: each changed rescan adds a new
-    listener and the old one stays until Sentinel stops. Listed as a bug for
-    Abi, not fixed here."""
+async def test_a_rescan_replaces_the_old_listener(sm, world):
+    """A rescan that changes the list removes the old state listener before
+    adding the new one, so a removed sensor stops being followed and no event
+    is handled twice."""
     hass = FakeHass()
     hass.states.async_set("binary_sensor.front", "off", {"device_class": "door"})
     s = _make(sm, hass)
@@ -567,7 +566,34 @@ async def test_preserved_quirk_a_rescan_never_drops_the_old_listener(sm, world):
     states = [t for t in sm._ev.tracked if t[0] == "state"]
     assert len(states) == 2 and sorted(states[1][1]) == ["binary_sensor.back",
                                                          "binary_sensor.front"]
-    assert states[0][3].calls == 0                   # the old listener is kept
-    assert len(s._unsubs) == 4
+    assert states[0][3].calls == 1                   # the old listener is gone
+    assert len(s._unsubs) == 3
     await s.async_stop()
     assert states[0][3].calls == 1 and states[1][3].calls == 1
+
+
+async def test_a_rescan_never_doubles_an_instant_alert(sm, world, monkeypatch):
+    """With the old listener left behind, every later state change ran twice
+    and an instant time window rule spoke twice."""
+    rule = {"id": "night_door", "domain": "binary_sensor", "device_class": "door",
+            "state": "on", "time_window": {"start": "00:00", "end": "23:59"},
+            "message": "x"}
+    hass = FakeHass()
+    hass.states.async_set("binary_sensor.front", "off", {"device_class": "door"})
+    s = sm.NovaSentinel(hass, None, "sir", rules=[rule])
+    await s.async_start()
+    hass.states.async_set("binary_sensor.back", "off", {"device_class": "door"})
+    s._refresh_entities(None)
+    announced = []
+
+    async def _announce(entity_id, r, minutes):
+        announced.append(entity_id)
+    monkeypatch.setattr(s, "_announce_rule", _announce)
+    new = types.SimpleNamespace(state="on", attributes={"device_class": "door"})
+    event = types.SimpleNamespace(data={"entity_id": "binary_sensor.front", "new_state": new,
+                                        "old_state": types.SimpleNamespace(state="off")})
+    for t in sm._ev.tracked:
+        if t[0] == "state" and t[3].calls == 0:
+            t[2](event)
+    await hass.drain()
+    assert announced == ["binary_sensor.front"]

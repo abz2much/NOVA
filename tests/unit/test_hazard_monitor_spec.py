@@ -57,8 +57,7 @@ def test_quake_wording(hm):
         "Seismic alert, sir. A magnitude 4.3 earthquake was just recorded 120 km "
         "away — 10 km N of Town.")
     assert hm._fmt_quake(dict(q, mag=None), "") == (
-        "Seismic alert. A an earthquake earthquake was just recorded 120 km away "
-        "— 10 km N of Town.")
+        "Seismic alert. An earthquake was just recorded 120 km away — 10 km N of Town.")
 
 
 def test_weather_wording(hm):

@@ -1,3 +1,11 @@
+## [8.49.29] — Two sentinel and hazard fixes
+
+Fixes for two bugs found while rewriting the sentinel and the hazard monitor. Each fix has a test that fails without it. Nothing else changes.
+
+### Fixed
+- **The sentinel kept its old state listeners after a rescan.** Every five minutes the sentinel looks for new or removed sensors. When the list changed it added a new listener but never removed the old one, so removed sensors were still followed and every later state change was handled once per listener. An instant time window rule could then speak the same alert twice. The old listener is now removed first.
+- **An earthquake with no magnitude was worded badly.** Nova said "A an earthquake earthquake was just recorded". It now says "An earthquake was just recorded". Alerts with a magnitude are unchanged.
+
 ## [8.49.28] — Cognition, decisions and safety monitors rewritten from scratch
 
 Phase 7d rewrites six modules from empty files, each from a behaviour spec with fresh tests: local cognition, the decision record, the observer's reasoning loop, the sentinel, the hazard monitor and intrusion support. Nothing Nova does changes: the same events are escalated and anticipated, the same alerts are worded and delivered the same way, and the same settings, tables and files are used.

@@ -404,10 +404,10 @@ def _addressed(honorific: str) -> str:
 
 def _fmt_quake(q: dict, honorific: str) -> str:
     mag = q.get("mag")
-    size = f"magnitude {mag:.1f}" if isinstance(mag, (int, float)) else "an earthquake"
-    # Preserved quirk: with no magnitude this reads "A an earthquake earthquake".
-    return (f"Seismic alert{_addressed(honorific)}. A {size} earthquake was just "
-            f"recorded {q['dist_km']} km away — {q['place']}.")
+    quake = (f"A magnitude {mag:.1f} earthquake" if isinstance(mag, (int, float))
+             else "An earthquake")
+    return (f"Seismic alert{_addressed(honorific)}. {quake} was just recorded "
+            f"{q['dist_km']} km away — {q['place']}.")
 
 
 def _fmt_weather(w: dict, honorific: str) -> str:
