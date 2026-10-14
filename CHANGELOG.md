@@ -1,3 +1,11 @@
+## [8.49.21] — The appliance monitor rewritten from scratch
+
+Step 9 finishes the user features with the appliance monitor, which tells you when a washer, dryer, dishwasher or other appliance has finished. It is rewritten from an empty file, from a behaviour spec with fresh tests. Nothing Nova does changes: the same appliances are found, finishes are announced with the same words and still go through the household delivery rules.
+
+### Changed
+- **Rewritten:** appliance discovery, power and job state tracking, the whole-home meter, the finish announcement and the status shown in the panel.
+- **Proven the same:** the new module passes both its fresh tests and the old ones, which were then replaced by the fresh tests.
+
 ## [8.49.20] — Persona, presence and reminders rewritten from scratch
 
 Step 9 continues with the people-facing user features. How Nova phrases what it says, the summary of who is home and reminders are rewritten from empty files, each from a behaviour spec with fresh tests. Nothing Nova does changes: every phrase Nova uses is the same, and reminders still go through the household delivery rules.
