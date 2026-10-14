@@ -1,420 +1,317 @@
 """
-Nova — Audio routing (v7.92.0, explicit per-room speaker assignment).
+Nova — choosing which speaker to talk through.
 
-HA's area registry still resolves WHICH area a satellite/event belongs to.
-But WHICH speaker plays there is no longer auto-discovered — that used to
-mean "any media_player HA happens to place in this area, minus ones tagged
-device_class 'tv'", a denylist that a stray, untagged duplicate entity can
-slip through (a real bug: Music Assistant/AirPlay/Cast integrations each
-register their own separate media_player for the same physical TV, and a
-user tagging most of them 'tv' can still miss one — see room_speaker()'s
-docstring). Room speakers are now an explicit allowlist: Nova only ever
-speaks through the ONE entity assigned to a room, plus one general
-fallback speaker for rooms with nothing assigned.
+Home Assistant's registries say which area an entity sits in. Which speaker
+plays in that area is never guessed: each room has at most one speaker the
+user assigned to it (room_speakers), and one general speaker
+(general_speaker) covers rooms with none. Satellites are listening devices
+and only speak as a last resort for a reply. Occupancy, motion and presence
+binary sensors tell Nova which rooms have someone in them.
 
-What Nova recognizes per area:
-  - SATELLITES:  entities with domain 'assist_satellite' (ears, never output)
-  - PRESENCE:    entities with domain 'binary_sensor', device_class 'occupancy'
-                 (mmWave, motion, or any occupancy detector)
+Settings read here:
+  room_speakers         {area_id: media_player}
+  general_speaker       media_player used when a room has none
+  announcement_speakers / broadcast_group
+                        the whole house speakers; nothing is spoken there
+                        until one of them is set
+  announce_notify_only  send proactive announcements to phones instead
 
-The user's routing config:
-  - bedroom_areas:    list of HA area_ids flagged for sleep detection
-  - room_speakers:    {area_id: media_player_entity_id} explicit assignment
-  - general_speaker:  single media_player entity, room-targeting fallback
-                       only (does not affect broadcast_group below)
-  - broadcast_group:  single media_player entity for critical/high urgency
-                       broadcasts (typically the "home" Cast group)
+Replies go to the panel pairing for the satellite, else the room speaker,
+else the general speaker, else the satellite itself.
 
-Routing rules:
+Observer announcements by urgency:
+  critical  whole house speakers, even while asleep; phones when none are set
+  high      whole house when awake and someone is home, else phones; with no
+            whole house speakers, the occupied rooms' speakers, then the
+            general speaker
+  medium    asleep: held back. Away: phones. Otherwise the occupied room's
+            speaker, then the general speaker if a room is occupied, then
+            the whole house speakers, then phones
+  low       asleep or no occupied room: held back. Otherwise the occupied
+            room's speaker, then the general speaker
 
-  REPLY (someone spoke to a satellite):
-    1. Get the satellite's area.
-    2. That area's assigned room speaker, if any → speak there.
-    3. Else the general speaker, if set → speak there.
-    4. Else speak through the satellite itself (its own built-in speaker).
-       Per Username's directive: "if the satellite is the only thing in
-       earshot, it wins."
-
-  OBSERVER (proactive announcement):
-    Urgency CRITICAL (smoke/leak/door forced):
-      → broadcast_group, overrides sleep state, always
-    Urgency HIGH (doorbell, security event):
-      → broadcast_group if someone is home; else mobile notification
-    Urgency MEDIUM:
-      → the room speaker assigned to the room where presence is detected,
-         else the general speaker;
-         fallback to broadcast_group if no presence detected and someone is home;
-         fallback to mobile notification if nobody home
-    Urgency LOW:
-      → the room speaker assigned to the room where presence is detected,
-         else the general speaker;
-         silent (queue) if no local presence — don't interrupt from another room
-
-  BROADCAST (briefing, sentinel, doorbell — explicit group announcement):
-      → broadcast_group / announcement_speakers, unaffected by room_speakers
-         or general_speaker; silent until the user configures one.
-
-Routing always EXCLUDES voice satellites from being output targets, except
-the explicit "satellite fallback" case in REPLY above.
+Every spoken path also passes its targets through drop_display_targets so a
+television is never spoken to.
 """
 from __future__ import annotations
 
+import json
 import logging
 from typing import Iterable, Optional
 
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import (
-    area_registry as ar,
-    device_registry as dr,
-    entity_registry as er,
-)
+from homeassistant.helpers import device_registry as dr, entity_registry as er
+
+from .entity_filter import is_object_sensor
 
 _LOGGER = logging.getLogger(__name__)
 
+_PRESENCE_CLASSES = ("occupancy", "motion", "presence")
+_OCCUPIED_WORDS = frozenset({"on", "home", "detected", "true", "occupied"})
 
-# ─── Entity / area resolution helpers ────────────────────────────────────────
 
-from .entity_filter import is_object_sensor  # noqa: E402
-
+# ─── Lookups ────────────────────────────────────────────────────────────────
 
 def entity_area(hass: HomeAssistant, entity_id: str) -> Optional[str]:
-    """Return the HA area_id for an entity (direct, or via its device).
-    Returns None if no area is assigned."""
+    """The entity's own area, else its device's area, else None."""
     try:
-        ent_reg = er.async_get(hass)
-        ent = ent_reg.async_get(entity_id)
-        if ent is None:
+        entry = er.async_get(hass).async_get(entity_id)
+        if entry is None:
             return None
-        if ent.area_id:
-            return ent.area_id
-        if ent.device_id:
-            dev_reg = dr.async_get(hass)
-            dev = dev_reg.async_get(ent.device_id)
-            if dev and dev.area_id:
-                return dev.area_id
+        if entry.area_id:
+            return entry.area_id
+        if not entry.device_id:
+            return None
+        device = dr.async_get(hass).async_get(entry.device_id)
+        return (device.area_id or None) if device else None
     except Exception as exc:
         _LOGGER.debug("area lookup failed for %s: %s", entity_id, exc)
+        return None
+
+
+def _entities_by_domain(hass: HomeAssistant, domain: str) -> list[str]:
+    return [state.entity_id for state in hass.states.async_all(domain)]
+
+
+def _setting(key: str, default):
+    try:
+        from . import nova_config
+        return nova_config.get(key, default)
+    except Exception:
+        return default
+
+
+def _present(hass: HomeAssistant, entity_id) -> Optional[str]:
+    """The entity id when it is set and Home Assistant knows it."""
+    if entity_id and hass.states.get(entity_id) is not None:
+        return entity_id
     return None
 
 
-def _entities_by_domain(
-    hass: HomeAssistant, domain: str
-) -> list[str]:
-    """Return all entity_ids for a given domain."""
-    return [s.entity_id for s in hass.states.async_all(domain)]
-
-
-# ─── Per-area discovery ──────────────────────────────────────────────────────
-
 def satellites_in_area(hass: HomeAssistant, area_id: str) -> list[str]:
-    """All assist_satellite entities whose area matches."""
-    return [
-        e for e in _entities_by_domain(hass, "assist_satellite")
-        if entity_area(hass, e) == area_id
-    ]
+    return [eid for eid in _entities_by_domain(hass, "assist_satellite")
+            if entity_area(hass, eid) == area_id]
 
 
 def room_speaker(hass: HomeAssistant, area_id: str) -> Optional[str]:
-    """The one speaker explicitly assigned to this room (v7.92.0), or None.
+    """The speaker the user assigned to this area, while it exists.
 
-    Replaces the old approach of auto-discovering every media_player HA
-    happens to place in an area and excluding TVs by device_class — a
-    denylist that a stray, untagged duplicate entity can slip through (a
-    real bug: Music Assistant/AirPlay/Cast each register their own
-    media_player for the same physical TV, and a user tagging most of them
-    'tv' can still miss one). An explicit per-room assignment is immune to
-    however many duplicate entities an integration creates, since nothing
-    is ever auto-discovered — Nova only ever considers the one entity
-    assigned here.
-    """
-    try:
-        from . import nova_config
-        assigned = (nova_config.get("room_speakers", {}) or {}).get(area_id)
-    except Exception:
-        assigned = None
-    if assigned and hass.states.get(assigned) is not None:
-        return assigned
-    return None
+    Nothing is discovered from the area itself: integrations can register
+    several media players for one television, and one of them could slip
+    past any rule that tries to filter them out."""
+    assigned = (_setting("room_speakers", {}) or {}).get(area_id)
+    return _present(hass, assigned)
 
 
 def general_speaker_target(hass: HomeAssistant) -> Optional[str]:
-    """The one general-purpose fallback speaker (v7.92.0), used when Nova
-    needs to speak in a room that has no speaker explicitly assigned. Does
-    NOT affect whole-house broadcasts (briefing/sentinel/doorbell), which
-    already use the separate, already-explicit broadcast_group/
-    announcement_speakers settings."""
-    try:
-        from . import nova_config
-        eid = nova_config.get("general_speaker", "") or ""
-    except Exception:
-        eid = ""
-    if eid and hass.states.get(eid) is not None:
-        return eid
-    return None
+    """The speaker for rooms with none assigned, while it exists. Whole
+    house broadcasts use their own settings and ignore it."""
+    return _present(hass, _setting("general_speaker", "") or "")
 
+
+# ─── Television guard ───────────────────────────────────────────────────────
 
 def _is_display_target(hass: HomeAssistant, entity_id: str, movie: str) -> bool:
-    """True if this media_player is a screen (a TV or the designated movie
-    player) and must never be a TTS/announcement target."""
+    """A television or the chosen movie player: never a speech target."""
     if not entity_id:
         return False
     if movie and entity_id == movie:
         return True
-    st = hass.states.get(entity_id)
-    if st is not None and st.attributes.get("device_class") == "tv":
-        return True
-    return False
+    state = hass.states.get(entity_id)
+    return state is not None and state.attributes.get("device_class") == "tv"
 
 
 def drop_display_targets(hass: HomeAssistant, targets, context: str = "") -> list[str]:
-    """Final safety choke point: strip TVs and the designated movie player from a
-    TTS target list, no matter how those targets were resolved. Every speech path
-    (async_announce, the observer's raw tts.speak, proactive audio) runs its
-    targets through here so a television can never be spoken to — even via a
-    routing path we haven't accounted for.
+    """Remove televisions and the movie player from a list of speech targets,
+    however the list was built. Anything removed is logged as a warning
+    naming the caller, so the route that picked a television can be found.
 
-    Any drop is logged at WARNING with the caller context, so an unexpected TV
-    target is immediately traceable to the feature that produced it.
-    """
-    # Read the designated movie player from the in-memory runtime_config (the
-    # Nova entry's NovaRuntime, seeded from config.json at setup) — NOT via
-    # nova_config.get(), whose lazy load() mutates shared module state and
-    # would perturb unrelated code/tests.
+    The movie player comes from the live runtime config rather than
+    nova_config, so reading it never triggers a config file load."""
     from .runtime import domain_runtime_config
     movie = domain_runtime_config(hass).get("movie_media_player") or ""
-    kept, dropped = [], []
-    for t in list(targets or []):
-        (dropped if _is_display_target(hass, t, movie) else kept).append(t)
+    kept: list[str] = []
+    dropped: list[str] = []
+    for target in targets or ():
+        (dropped if _is_display_target(hass, target, movie) else kept).append(target)
     if dropped:
         _LOGGER.warning(
             "Nova: refused to send TTS to display target(s) %s (context=%s) — "
             "a routing path tried to speak through a TV; speaking to %s instead",
-            dropped, context or "?", kept or "nothing",
-        )
+            dropped, context or "?", kept or "nothing")
     return kept
 
 
-def presence_entities_in_area(hass: HomeAssistant, area_id: str) -> list[str]:
-    """All binary_sensor.*_occupancy entities (device_class='occupancy' or
-    'motion' or 'presence') in the given area."""
-    occupancy_classes = ("occupancy", "motion", "presence")
-    all_bs = _entities_by_domain(hass, "binary_sensor")
+# ─── Presence ───────────────────────────────────────────────────────────────
+
+def _exclusion_check():
     try:
-        from .entity_filter import is_excluded as _excl
+        from .entity_filter import is_excluded
+        return is_excluded
     except Exception:
-        _excl = lambda _h, _e: False
-    out = []
-    for e in all_bs:
-        if _excl(hass, e):
+        return lambda _hass, _eid: False
+
+
+def _counts_as_presence(state) -> bool:
+    """A person detector: right device class, and not a car, pet or parcel
+    sensor."""
+    return (state.attributes.get("device_class") in _PRESENCE_CLASSES
+            and not is_object_sensor(state.entity_id,
+                                     state.attributes.get("friendly_name")))
+
+
+def _is_on(state) -> bool:
+    return str(state.state).lower() in _OCCUPIED_WORDS
+
+
+def presence_entities_in_area(hass: HomeAssistant, area_id: str) -> list[str]:
+    """Presence sensors in this area that the user has not excluded."""
+    skip = _exclusion_check()
+    found = []
+    for eid in _entities_by_domain(hass, "binary_sensor"):
+        if skip(hass, eid):
             continue
-        state = hass.states.get(e)
-        if state is None:
+        state = hass.states.get(eid)
+        if state is None or not _counts_as_presence(state):
             continue
-        dc = state.attributes.get("device_class")
-        if dc not in occupancy_classes:
-            continue
-        if is_object_sensor(e, state.attributes.get("friendly_name")):
-            continue  # a car, animal or package is not a person (8.14.0)
-        if entity_area(hass, e) == area_id:
-            out.append(e)
-    return out
+        if entity_area(hass, eid) == area_id:
+            found.append(eid)
+    return found
 
 
 def all_areas_with_satellite(hass: HomeAssistant) -> set[str]:
-    """Areas that have at least one satellite. Used to iterate over
-    'rooms Nova can hear from'."""
-    out = set()
-    for e in _entities_by_domain(hass, "assist_satellite"):
-        area = entity_area(hass, e)
-        if area:
-            out.add(area)
-    return out
+    """Every area Nova can hear from."""
+    areas = (entity_area(hass, eid) for eid in _entities_by_domain(hass, "assist_satellite"))
+    return {area for area in areas if area}
 
 
 def all_areas_with_presence(hass: HomeAssistant) -> set[str]:
-    """Areas that have at least one occupancy/motion/presence sensor."""
-    occupancy_classes = ("occupancy", "motion", "presence")
-    try:
-        from .entity_filter import is_excluded as _excl
-    except Exception:
-        _excl = lambda _h, _e: False
-    out = set()
-    for s in hass.states.async_all("binary_sensor"):
-        if _excl(hass, s.entity_id):
+    """Every area with a presence sensor the user has not excluded."""
+    skip = _exclusion_check()
+    found: set[str] = set()
+    for state in hass.states.async_all("binary_sensor"):
+        if skip(hass, state.entity_id) or not _counts_as_presence(state):
             continue
-        dc = s.attributes.get("device_class")
-        if dc not in occupancy_classes:
-            continue
-        if is_object_sensor(s.entity_id, s.attributes.get("friendly_name")):
-            continue  # a car, animal or package is not a person (8.14.0)
-        area = entity_area(hass, s.entity_id)
+        area = entity_area(hass, state.entity_id)
         if area:
-            out.add(area)
-    return out
+            found.add(area)
+    return found
 
-
-# ─── Presence / occupancy state ──────────────────────────────────────────────
 
 def is_area_occupied(hass: HomeAssistant, area_id: str) -> bool:
-    """Any presence sensor in this area currently reporting 'on'?"""
-    for e in presence_entities_in_area(hass, area_id):
-        state = hass.states.get(e)
-        if state is None:
-            continue
-        if str(state.state).lower() in ("on", "home", "detected", "true", "occupied"):
+    for eid in presence_entities_in_area(hass, area_id):
+        state = hass.states.get(eid)
+        if state is not None and _is_on(state):
             return True
     return False
 
 
 def currently_occupied_areas(hass: HomeAssistant) -> list[str]:
-    """All areas with at least one 'on' presence sensor right now."""
-    return [
-        area for area in all_areas_with_presence(hass)
-        if is_area_occupied(hass, area)
-    ]
+    return [area for area in all_areas_with_presence(hass)
+            if is_area_occupied(hass, area)]
 
 
 def anyone_home(hass: HomeAssistant) -> bool:
-    """True if anyone appears to be home: any occupancy/motion/presence sensor on
-    ANYWHERE (area assignment is not required — a motion sensor with no area still
-    proves presence), or any person/device_tracker reading 'home'. Guides the
-    'while no one is home' announcement clause and medium/high fallback routing."""
-    occ_classes = ("occupancy", "motion", "presence")
-    on_states = ("on", "home", "detected", "true", "occupied")
-    for s in hass.states.async_all("binary_sensor"):
-        if (s.attributes.get("device_class") in occ_classes
-                and str(s.state).lower() in on_states
-                and not is_object_sensor(s.entity_id, s.attributes.get("friendly_name"))):
+    """Whether anyone seems to be home: a presence sensor that is on
+    anywhere (with or without an area, excluded or not), or a person or
+    device tracker at home."""
+    for state in hass.states.async_all("binary_sensor"):
+        if _counts_as_presence(state) and _is_on(state):
             return True
-    for s in hass.states.async_all("person"):
-        if str(s.state).lower() == "home":
-            return True
-    for s in hass.states.async_all("device_tracker"):
-        if str(s.state).lower() == "home":
-            return True
-    return False
+    return any(str(state.state).lower() == "home"
+               for domain in ("person", "device_tracker")
+               for state in hass.states.async_all(domain))
 
 
-# ─── Routing: reply (direct speech) ──────────────────────────────────────────
+def is_any_bedroom_occupied(
+    hass: HomeAssistant, bedroom_area_ids: Iterable[str],
+) -> tuple[bool, Optional[str]]:
+    """(True, area) for the first occupied bedroom, else (False, None)."""
+    for area in bedroom_area_ids:
+        if is_area_occupied(hass, area):
+            return True, area
+    return False, None
+
+
+# ─── Replies ────────────────────────────────────────────────────────────────
+
+def _device_satellite(hass: HomeAssistant, device_id: str):
+    """(area, satellite entity) for a device id; either may be None."""
+    area = satellite = None
+    try:
+        device = dr.async_get(hass).async_get(device_id)
+        if device:
+            area = device.area_id
+        for entry in er.async_get(hass).entities.values():
+            if entry.device_id == device_id and entry.domain == "assist_satellite":
+                satellite = entry.entity_id
+                break
+    except Exception as exc:
+        _LOGGER.debug("device_id->area lookup failed: %s", exc)
+    return area, satellite
+
 
 def reply_target(
-    hass: HomeAssistant,
-    *,
-    satellite_entity_id: Optional[str] = None,
-    device_id: Optional[str] = None,
+    hass: HomeAssistant, *,
+    satellite_entity_id: Optional[str] = None, device_id: Optional[str] = None,
     satellite_pairings: Optional[dict[str, str]] = None,
 ) -> Optional[str]:
-    """
-    Pick ONE speaker for a direct reply.
+    """The one speaker for a reply to someone who spoke to a satellite.
 
-    Priority (v7.92.0 — replaced area auto-discovery with explicit
-    assignment; see room_speaker()'s docstring for why):
-      0. Explicit satellite_pairings override from panel Settings (if set).
-      1. The room speaker explicitly assigned to the satellite's area.
-      2. The general fallback speaker.
-      3. The satellite itself (its built-in speaker) if nothing else available.
-      4. None — caller should handle silence.
-
-    Takes either a satellite entity_id (preferred) or device_id.
-    satellite_pairings is {satellite_entity_id: media_player_entity_id}.
-    """
-    sat_entity = satellite_entity_id
-    sat_area = None
-
+    In order: the speaker paired with the satellite in the panel (while it
+    exists), the room speaker for the satellite's area, the general
+    speaker, then the satellite itself. A satellite whose area is unknown
+    replies through itself. Pass the satellite entity, or a device id to
+    look it up from. The fallback always returns the satellite_entity_id
+    argument, so a device only call falls back to None."""
+    satellite, area = satellite_entity_id, None
     if satellite_entity_id:
-        sat_area = entity_area(hass, satellite_entity_id)
+        area = entity_area(hass, satellite_entity_id)
     elif device_id:
-        try:
-            dev_reg = dr.async_get(hass)
-            dev = dev_reg.async_get(device_id)
-            if dev:
-                sat_area = dev.area_id
-            # Resolve the satellite entity_id from device_id for pairing lookup
-            ent_reg = er.async_get(hass)
-            for ent in ent_reg.entities.values():
-                if ent.device_id == device_id and ent.domain == "assist_satellite":
-                    sat_entity = ent.entity_id
-                    break
-        except Exception as exc:
-            _LOGGER.debug("device_id->area lookup failed: %s", exc)
+        area, found = _device_satellite(hass, device_id)
+        satellite = found or satellite
 
-    # ── Priority 0: explicit panel pairing ────────────────────────────────
-    _LOGGER.debug(
-        "reply_target ENTRY: sat_entity=%s, device_id=%s, sat_area=%s, "
-        "pairings=%s",
-        sat_entity, device_id, sat_area,
-        list(satellite_pairings.keys()) if satellite_pairings else None,
-    )
-    if satellite_pairings and sat_entity and sat_entity in satellite_pairings:
-        paired = satellite_pairings[sat_entity]
+    _LOGGER.debug("reply_target: satellite=%s device=%s area=%s pairings=%s",
+                  satellite, device_id, area,
+                  list(satellite_pairings) if satellite_pairings else None)
+    if satellite_pairings and satellite and satellite in satellite_pairings:
+        paired = satellite_pairings[satellite]
         if paired and hass.states.get(paired):
-            _LOGGER.debug(
-                "reply_target: using panel pairing %s → %s",
-                sat_entity, paired,
-            )
+            _LOGGER.debug("reply_target: paired speaker %s", paired)
             return paired
-        _LOGGER.debug(
-            "reply_target: panel pairing %s → %s but entity unavailable, "
-            "falling through",
-            sat_entity, paired,
-        )
+        _LOGGER.debug("reply_target: paired speaker %s is unavailable", paired)
 
-    if not sat_area:
-        _LOGGER.debug("reply_target: could not resolve satellite area")
-        return satellite_entity_id  # fall back: speak through satellite itself
-
-    assigned = room_speaker(hass, sat_area)
-    if assigned:
-        _LOGGER.debug("reply_target: using room speaker %s for area '%s'", assigned, sat_area)
-        return assigned
-
-    general = general_speaker_target(hass)
-    if general:
-        _LOGGER.debug(
-            "reply_target: no room speaker for area '%s', using general speaker %s",
-            sat_area, general,
-        )
-        return general
-
-    _LOGGER.debug(
-        "reply_target: no room or general speaker configured for area '%s', "
-        "replying through satellite",
-        sat_area,
-    )
-    return satellite_entity_id
+    if not area:
+        _LOGGER.debug("reply_target: satellite area unknown")
+        return satellite_entity_id
+    choice = room_speaker(hass, area) or general_speaker_target(hass)
+    _LOGGER.debug("reply_target: area '%s' resolves to %s", area,
+                  choice or "the satellite")
+    return choice or satellite_entity_id
 
 
 def reply_targets(
-    hass: HomeAssistant,
-    *,
+    hass: HomeAssistant, *,
     device_id: Optional[str] = None,
-    voice_satellites: Optional[list] = None,       # deprecated, ignored
-    reply_speakers: Optional[list] = None,          # deprecated, ignored
-    broadcast_speakers: Optional[list] = None,      # deprecated, ignored
-    legacy_cast_speakers: Optional[list] = None,    # deprecated, ignored
-    room_routing: bool = True,                       # deprecated, always on in v5.3
+    voice_satellites: Optional[list] = None, reply_speakers: Optional[list] = None,
+    broadcast_speakers: Optional[list] = None, legacy_cast_speakers: Optional[list] = None,
+    room_routing: bool = True,
     satellite_pairings: Optional[dict[str, str]] = None,
 ) -> list[str]:
-    """
-    v5.2 backward-compatibility shim — callers passed flat entity lists.
-
-    v5.3 ignores the flat lists and uses HA's area registry. Returns a
-    single-item list for consistency with the old signature.
-
-    If device_id is provided, looks up the satellite/speaker in the device's
-    area. Otherwise falls back to broadcast targets.
-    """
-    target = reply_target(
-        hass, device_id=device_id, satellite_pairings=satellite_pairings,
-    ) if device_id else None
-    return [target] if target else broadcast_target(hass)
+    """Older list form of reply_target. The speaker list arguments and
+    room_routing are accepted and ignored. Without a device id, or when the
+    device resolves to nothing, the broadcast speakers are returned."""
+    found = None
+    if device_id:
+        found = reply_target(hass, device_id=device_id,
+                             satellite_pairings=satellite_pairings)
+    return [found] if found else broadcast_target(hass)
 
 
-# ─── Routing: observer mode (proactive) ──────────────────────────────────────
+# ─── Observer announcements ─────────────────────────────────────────────────
 
 def notify_only_enabled(hass: HomeAssistant) -> bool:
-    """Whether `announce_notify_only` is on (nova_config.announce_notify_only).
-    A failed read counts as off, so nothing that should speak goes quiet."""
+    """The announce_notify_only setting; unreadable counts as off."""
     try:
         from . import nova_config
         return bool(nova_config.announce_notify_only(hass))
@@ -423,223 +320,131 @@ def notify_only_enabled(hass: HomeAssistant) -> bool:
 
 
 def observer_speak_target(
-    hass: HomeAssistant,
-    *,
-    urgency: str,
+    hass: HomeAssistant, *, urgency: str,
     broadcast_group: Optional[str] = None,
     announcement_speakers: Optional[list[str]] = None,
     is_sleeping: bool = False,
     authoritative_anyone_home: Optional[bool] = None,
 ) -> tuple[list[str], str]:
-    """Where to speak for an observer-mode announcement, as (targets, mode).
-
-    Routing rules are in `_observer_route`. With `announce_notify_only` on, any
-    non-critical announcement that would have been spoken ("local" or
-    "broadcast") becomes ([], "notify_only"), so the caller sends the phone
-    notification and nothing is spoken. Critical urgency is never changed:
-    safety alerts keep speaking. "suppressed" (sleep and quiet rules) stays
-    suppressed and an existing "notify_only" stays as it is.
-    """
+    """(targets, mode) for an observer announcement; see _observer_route.
+    With announce_notify_only on, a spoken route ("local" or "broadcast")
+    below critical becomes ([], "notify_only")."""
     targets, mode = _observer_route(
-        hass,
-        urgency=urgency,
-        broadcast_group=broadcast_group,
-        announcement_speakers=announcement_speakers,
-        is_sleeping=is_sleeping,
-        authoritative_anyone_home=authoritative_anyone_home,
-    )
-    if (urgency != "critical" and mode in ("local", "broadcast")
-            and notify_only_enabled(hass)):
+        hass, urgency=urgency, broadcast_group=broadcast_group,
+        announcement_speakers=announcement_speakers, is_sleeping=is_sleeping,
+        authoritative_anyone_home=authoritative_anyone_home)
+    spoken = mode in ("local", "broadcast")
+    if spoken and urgency != "critical" and notify_only_enabled(hass):
         return ([], "notify_only")
     return (targets, mode)
 
 
+def _first_room_speaker(hass: HomeAssistant, areas: list[str]) -> Optional[str]:
+    for area in areas:
+        assigned = room_speaker(hass, area)
+        if assigned:
+            return assigned
+    return None
+
+
 def _observer_route(
-    hass: HomeAssistant,
-    *,
-    urgency: str,
+    hass: HomeAssistant, *, urgency: str,
     broadcast_group: Optional[str] = None,
     announcement_speakers: Optional[list[str]] = None,
     is_sleeping: bool = False,
     authoritative_anyone_home: Optional[bool] = None,
 ) -> tuple[list[str], str]:
-    """
-    Decide where to speak for an observer-mode announcement.
+    """Where an observer announcement goes, as (targets, mode). The mode is
+    "local", "broadcast", "notify_only" (phones only) or "suppressed".
 
-    Returns (targets, mode) where:
-      - targets is a list of media_player entity_ids (may be empty)
-      - mode is one of: "local", "broadcast", "notify_only", "suppressed"
+    Whole house speakers are the existing announcement_speakers, else an
+    existing broadcast_group, else none at all. The per urgency rules are in
+    the module docstring.
 
-    Caller uses `mode` to decide whether to also send a phone notification
-    ("notify_only" means audio is suppressed, only the notification fires).
+    authoritative_anyone_home, when given, is the caller's own answer to
+    "is anyone home" and is used instead of anyone_home(). Motion sensors
+    can stay on for a while after the last person's tracker leaves, which
+    once sent a departure notice to a speaker in an empty house. Room
+    occupancy still comes from the live sensors either way."""
 
-    announcement_speakers: explicit list from the panel Settings toggle.
-    When set and non-empty, this overrides broadcast_group for broadcast-mode
-    announcements (but NOT for local/room routing).
-
-    authoritative_anyone_home: when the caller already computed "is anyone
-    home" from the person/device_tracker state it used to make ITS decision
-    (e.g. observer.py's presence pipeline), pass that exact boolean here so
-    MEDIUM/HIGH's home/away branch uses it instead of re-deriving its own
-    answer. Re-deriving it here calls anyone_home(hass), which also counts
-    any occupancy/motion/presence binary_sensor anywhere in the house —
-    those can read "on" for tens of seconds after the last person's
-    person/device_tracker entity has already gone not_home (clear-delay),
-    which let a genuine last-person departure fall through to a speaker
-    instead of notify_only (the 2026-09-18 08:30 incident). Leave this None
-    to keep a caller's existing behavior unchanged — it only takes effect
-    when explicitly supplied. Room-level occupied-speaker selection (which
-    legitimately needs live physical sensors) is untouched either way:
-    currently_occupied_areas() keeps using physical sensors as before.
-
-    Rules:
-      CRITICAL: always broadcast (announcement_speakers > broadcast_group > all speakers); overrides sleep
-      HIGH:     sleeping → notify only; awake+home → broadcast; away → notify
-      MEDIUM:   sleeping → suppressed; present in room → room speaker;
-                home but no room presence → broadcast; away → notify
-      LOW:      sleeping → suppressed; present in room → room speaker;
-                otherwise suppressed (queued — don't interrupt from elsewhere)
-    """
-
-    def _broadcast_speakers() -> list[str]:
-        """Resolve broadcast speakers: panel toggles > broadcast_group > all."""
+    def whole_house() -> list[str]:
         if announcement_speakers:
-            # Validate they still exist in HA
-            valid = [s for s in announcement_speakers if hass.states.get(s)]
-            if valid:
-                return valid
-        if broadcast_group:
-            if hass.states.get(broadcast_group):
-                return [broadcast_group]
-        # Silent until configured — never fall back to every speaker in the house
-        # (v7.83.0). A fresh install with nothing selected stays quiet rather
-        # than broadcasting to all devices, including TVs.
+            live = [s for s in announcement_speakers if hass.states.get(s)]
+            if live:
+                return live
+        if broadcast_group and hass.states.get(broadcast_group):
+            return [broadcast_group]
         return []
 
-    # ─── CRITICAL ────────────────────────────────────────────────────────────
     if urgency == "critical":
-        speakers = _broadcast_speakers()
+        speakers = whole_house()
         return (speakers, "broadcast") if speakers else ([], "notify_only")
 
-    home = (
-        authoritative_anyone_home
-        if authoritative_anyone_home is not None
-        else anyone_home(hass)
-    )
+    home = (anyone_home(hass) if authoritative_anyone_home is None
+            else authoritative_anyone_home)
 
-    # ─── HIGH ────────────────────────────────────────────────────────────────
+    if urgency == "low":
+        rooms = [] if is_sleeping else currently_occupied_areas(hass)
+        if not rooms:
+            return ([], "suppressed")
+        local = _first_room_speaker(hass, rooms) or general_speaker_target(hass)
+        return ([local], "local") if local else ([], "suppressed")
+
+    if urgency not in ("high", "medium"):
+        return ([], "suppressed")
+
     if urgency == "high":
         if is_sleeping or not home:
             return ([], "notify_only")
-        speakers = _broadcast_speakers()
-        if speakers:
-            return (speakers, "broadcast")
-        # no broadcast speakers at all: fall back to each occupied room's
-        # assigned speaker, then the general speaker (v7.92.0 — replaced
-        # area auto-discovery; see room_speaker()'s docstring for why)
-        occupied = currently_occupied_areas(hass)
-        targets = [t for a in occupied if (t := room_speaker(hass, a))]
-        if not targets:
-            general = general_speaker_target(hass)
-            if general:
-                targets = [general]
-        return (targets, "broadcast") if targets else ([], "notify_only")
+        speakers = whole_house()
+        if not speakers:
+            rooms = currently_occupied_areas(hass)
+            speakers = [s for s in (room_speaker(hass, a) for a in rooms) if s]
+            if not speakers:
+                general = general_speaker_target(hass)
+                speakers = [general] if general else []
+        return (speakers, "broadcast") if speakers else ([], "notify_only")
 
-    # ─── MEDIUM ──────────────────────────────────────────────────────────────
-    if urgency == "medium":
-        if is_sleeping:
-            return ([], "suppressed")
-        if not home:
-            return ([], "notify_only")
-        occupied = currently_occupied_areas(hass)
-        for area in occupied:
-            assigned = room_speaker(hass, area)
-            if assigned:
-                return ([assigned], "local")
-        if occupied:
-            general = general_speaker_target(hass)
-            if general:
-                return ([general], "local")
-        # Home but no room-level presence (could be shared state / person sensor)
-        speakers = _broadcast_speakers()
-        if speakers:
-            return (speakers, "broadcast")
-        return ([], "notify_only")
-
-    # ─── LOW ─────────────────────────────────────────────────────────────────
-    if urgency == "low":
-        if is_sleeping:
-            return ([], "suppressed")
-        occupied = currently_occupied_areas(hass)
-        if not occupied:
-            return ([], "suppressed")
-        for area in occupied:
-            assigned = room_speaker(hass, area)
-            if assigned:
-                return ([assigned], "local")
-        general = general_speaker_target(hass)
-        if general:
-            return ([general], "local")
+    # medium
+    if is_sleeping:
         return ([], "suppressed")
+    if not home:
+        return ([], "notify_only")
+    rooms = currently_occupied_areas(hass)
+    local = _first_room_speaker(hass, rooms)
+    if local is None and rooms:
+        local = general_speaker_target(hass)
+    if local:
+        return ([local], "local")
+    speakers = whole_house()
+    return (speakers, "broadcast") if speakers else ([], "notify_only")
 
-    return ([], "suppressed")
 
+# ─── Broadcasts ─────────────────────────────────────────────────────────────
 
-# ─── Routing: broadcast (briefing / sentinel / doorbell) ─────────────────────
+def _speaker_list(value):
+    """announcement_speakers as stored: a list, a JSON list, or comma text."""
+    if not isinstance(value, str):
+        return value
+    try:
+        return json.loads(value)
+    except Exception:
+        return [part.strip() for part in value.split(",") if part.strip()]
+
 
 def broadcast_target(
-    hass: HomeAssistant,
-    *,
+    hass: HomeAssistant, *,
     broadcast_group: Optional[str] = None,
     announcement_speakers: Optional[list] = None,
 ) -> list[str]:
-    """
-    Pick speakers for explicit broadcast announcements (briefing, sentinel alert,
-    doorbell, face recognition). These are always to-everyone, not room-routed.
-
-    Priority:
-      1. Configured announcement_speakers (the panel selection), validated present
-      2. Configured broadcast_group entity (single entity, typically a Cast group)
-      3. Empty list — SILENT.
-
-    Silent-until-configured (v7.83.0): with neither announcement_speakers nor a
-    broadcast_group set, this returns [] rather than every media player in the
-    house. A fresh install must never blast all speakers (and every TV) on the
-    first announcement — the user chooses their announcement speakers in
-    Settings first. Broadcasting to all was the cause of the first-launch
-    "it played on all 17 devices with no cancel" reports.
-    """
-    spk = announcement_speakers
-    if isinstance(spk, str):
-        try:
-            import json as _json
-            spk = _json.loads(spk)
-        except Exception:
-            spk = [s.strip() for s in spk.split(",") if s.strip()]
-    if isinstance(spk, (list, tuple)):
-        valid = [s for s in spk if s and hass.states.get(s) is not None]
-        if valid:
-            return valid
-
-    if broadcast_group:
-        state = hass.states.get(broadcast_group)
-        if state is not None:
-            return [broadcast_group]
-
-    # Silent until the user configures announcement speakers / a broadcast group.
-    return []
-
-
-# ─── Bedroom / sleep detection helpers ───────────────────────────────────────
-
-def is_any_bedroom_occupied(
-    hass: HomeAssistant, bedroom_area_ids: Iterable[str]
-) -> tuple[bool, Optional[str]]:
-    """
-    Return (occupied, area_id) — True + the area_id of the first bedroom
-    currently reporting occupancy, or (False, None).
-    """
-    for area_id in bedroom_area_ids:
-        if is_area_occupied(hass, area_id):
-            return True, area_id
-    return False, None
+    """Speakers for a whole house announcement (briefing, sentinel,
+    doorbell, recognition): the announcement speakers that exist, else the
+    broadcast group if it exists, else nothing. Nothing is spoken until the
+    user picks speakers, so a new install never plays on every device."""
+    speakers = _speaker_list(announcement_speakers)
+    if isinstance(speakers, (list, tuple)):
+        live = [s for s in speakers if _present(hass, s)]
+        if live:
+            return live
+    group = _present(hass, broadcast_group)
+    return [group] if group else []
