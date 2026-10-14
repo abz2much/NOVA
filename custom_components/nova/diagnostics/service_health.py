@@ -139,7 +139,9 @@ def _self_hosted_endpoint(provider: str):
     urls = ("ollama_base_url", "custom_base_url", "llm_base_url")
     try:
         from ..llm_provider import resolve_provider_endpoint
-        return resolve_provider_endpoint({f: _cfg(f, "") for f in urls}, provider)
+        config = {f: _cfg(f, "") for f in urls}
+        config["self_hosted_endpoints_migrated"] = _cfg("self_hosted_endpoints_migrated", False)
+        return resolve_provider_endpoint(config, provider)
     except (ImportError, ValueError):
         return None
 
@@ -154,7 +156,7 @@ def _breaker_status():
 
 async def _check_llm(hass) -> dict:
     row = _row("LLM", "llm")
-    provider = str(_cfg("llm_provider", "") or _cfg("provider", "") or "").strip()
+    provider = str(_cfg("llm_provider", "") or _cfg("provider", "") or "").strip().lower()
     self_hosted = provider in ("ollama", "custom")
     base = _self_hosted_endpoint(provider) if self_hosted else None
     breaker = _breaker_status()
@@ -208,7 +210,7 @@ async def _ping_ollama(hass, base: str) -> tuple[bool, str]:
         limit = aiohttp.ClientTimeout(total=8)
         async with session.get(f"{root}/api/tags", timeout=limit) as resp:
             if resp.status != 200:
-                return False, f"HTTP {resp.status} from {root}"
+                return False, f"HTTP {resp.status} from {_redact(root)}"
             try:
                 body = await resp.json(content_type=None)
                 count = len(body.get("models", []) or [])
@@ -216,7 +218,7 @@ async def _ping_ollama(hass, base: str) -> tuple[bool, str]:
                 return True, "reachable"
             return True, f"reachable — {count} model(s) available"
     except Exception as exc:
-        return False, f"unreachable: {exc}"
+        return False, f"unreachable: {str(exc).replace(root, _redact(root))}"
 
 
 # ── embeddings ──────────────────────────────────────────────────────────────
@@ -385,12 +387,26 @@ def _check_database(hass) -> dict:
     return row
 
 
+def _runtime_or_note(hass, row: dict):
+    """The domain runtime (or None). When the lookup itself breaks, `row` is
+    marked IDLE with the reason and False comes back: the check broke, not
+    the service."""
+    try:
+        from ..runtime import domain_runtime
+        return domain_runtime(hass)
+    except Exception as exc:
+        row["status"] = _IDLE
+        row["detail"] = f"health check could not verify: {exc}"
+        return False
+
+
 def _check_voice_id(hass) -> dict:
     """The Voice ID app. OFF until an address is set; a real request that
     failed is DOWN; a missed check is IDLE because the fallback still works."""
     row = _row("Voice ID", "voice_id", detail="no app address set")
-    from ..runtime import domain_runtime
-    runtime = domain_runtime(hass)
+    runtime = _runtime_or_note(hass, row)
+    if runtime is False:
+        return row
     app = getattr(runtime, "voice_id", None) if runtime is not None else None
     info = app.status() if app is not None else None
     if not info or info.get("state") == "not_set":
@@ -401,7 +417,7 @@ def _check_voice_id(hass) -> dict:
         row["detail"] = f"a real request failed: {failure}"
         return row
     state = info.get("state")
-    if state == "connected" or _recently_used_ok("voice_id"):
+    if state == "connected" or (state != "unreachable" and _recently_used_ok("voice_id")):
         version = info.get("version") or ""
         row["status"] = _OK
         # Concatenated on purpose: a non-text version raises, as it always has.
@@ -417,8 +433,9 @@ def _check_scheduler(hass) -> dict:
     """The entry's periodic task scheduler: WARN when a task keeps failing,
     OFF before it has started."""
     row = _row("Scheduler", "scheduler")
-    from ..runtime import domain_runtime
-    runtime = domain_runtime(hass)
+    runtime = _runtime_or_note(hass, row)
+    if runtime is False:
+        return row
     scheduler = runtime.scheduler if runtime is not None else None
     if scheduler is None:
         row["detail"] = "not running"
@@ -529,6 +546,8 @@ def _summarise(rows: list[dict[str, Any]]) -> tuple[str, str]:
     healthy = f"{tally[_OK]}/{len(live)} healthy"
     if tally[_DOWN]:
         return overall, f"{tally[_DOWN]} service(s) failing — {healthy}"
+    if tally[_WARN]:
+        return overall, f"{tally[_WARN]} service(s) need a look — {healthy}"
     if tally[_IDLE]:
         return overall, f"{healthy}, {tally[_IDLE]} idle (not recently used)"
     return overall, f"all {len(live)} core services healthy"
