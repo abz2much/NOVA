@@ -1,3 +1,15 @@
+## [8.49.31] — Twenty one fixes from the 7e rewrite
+
+Fixes for every bug found while rewriting setup, the panel commands, the setup screens, first run bootstrap and the service health check. Each fix has a test that fails without it. Nothing else changes.
+
+### Fixed
+- **Service health could show a password.** When the Ollama address held a `user:pass@` part, a failed ping showed the raw address in the row detail. The detail now leaves the credentials out.
+- **Service health:** with only warnings the summary no longer says "all core services healthy" but names how many need a look. A failed runtime lookup in the Voice ID or scheduler check now reads idle, like every other check, instead of down with raw error text. Once the self hosted address migration has run, the old LLM address is no longer used as a fallback. "Ollama" with a capital letter is now pinged like "ollama". Voice ID no longer says "app connected" when the app reports it cannot be reached.
+- **Setup screens:** a leftover config naming "Ollama" with a capital letter now imports. A leftover config naming ollama or custom with no usable address no longer fails the import every time; the setup dialog is shown instead. An import with no API key and a blank Groq key no longer crashes. A saved key made only of spaces is no longer tested or named as failed on screen 2.
+- **Startup:** briefing settings saved as the text "false" or "off" now count as off. Frigate, Nest and Eufy alerts on the same camera each keep their own cooldown, so one no longer silences the others. Scheduled briefings use the presence aware honorific. If the observer fails to stop on unload it is no longer shown as running.
+- **Panel commands:** a movie dim level of 0 now shows as 0. A broken value in config.json is skipped instead of returned as raw text. Clearing a hazard location reports whether it was really saved. The semantic search status is read off Home Assistant's main loop.
+- **First run bootstrap:** Wyoming reload failures are now reported. A bootstrap marker file holding a JSON list no longer stops voice setup on every start. The repair log line now shows the old agent as the "was" value.
+
 ## [8.49.30] — Setup, panel commands and health checks rewritten from scratch
 
 Phase 7e rewrites five modules from empty files, each from a behaviour spec with fresh tests: integration setup and unload, the panel's websocket commands, the setup and options screens, first run bootstrap and the service health check. Nothing Nova does changes: the same things start and stop in the same order, the panel sends and receives the same commands, existing config entries load unchanged, and the same health rows are shown.
