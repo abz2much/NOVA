@@ -36,9 +36,11 @@ def test_downsample_with_a_non_positive_limit_returns_everything(mod):
 
 def test_downsample_is_evenly_spaced(mod):
     vals = [float(i) for i in range(100)]
-    assert mod._downsample(vals, 20) == [float(i) for i in range(0, 100, 5)]
-    assert mod._downsample(vals, 7) == [0.0, 14.0, 28.0, 42.0, 57.0, 71.0, 85.0]
-    assert mod._downsample([1.0, 2.0, 3.0, 4.0, 5.0], 2) == [1.0, 3.0]
+    # 8.49.36: the spread now runs from the first to the last reading, so a
+    # sparkline ends at the current value (it used to drop the newest).
+    assert mod._downsample(vals, 20) == [float(int(i * 99 / 19 + 0.5)) for i in range(20)]
+    assert mod._downsample(vals, 7) == [0.0, 17.0, 33.0, 50.0, 66.0, 83.0, 99.0]
+    assert mod._downsample([1.0, 2.0, 3.0, 4.0, 5.0], 2) == [1.0, 5.0]
     assert mod._downsample([], 5) == []
 
 
@@ -236,8 +238,9 @@ async def test_sparklines_downsample_to_the_requested_points(mod, rec):
                "sensor.h": [{"state": str(i)} for i in range(10)]}
     out = await mod._get_area_sparklines(
         FakeHass(), {"a": {"temp": "sensor.t", "humidity": "sensor.h"}}, points=5)
-    assert out["a"]["temp"] == [0.0, 20.0, 40.0, 60.0, 80.0]
-    assert out["a"]["humidity"] == [0.0, 2.0, 4.0, 6.0, 8.0]
+    # 8.49.36: each series ends on its newest reading.
+    assert out["a"]["temp"] == [0.0, 25.0, 50.0, 74.0, 99.0]
+    assert out["a"]["humidity"] == [0.0, 2.0, 5.0, 7.0, 9.0]
 
 
 async def test_sparklines_never_raise_when_the_recorder_fails(mod, rec, caplog):
@@ -247,3 +250,30 @@ async def test_sparklines_never_raise_when_the_recorder_fails(mod, rec, caplog):
     assert out == {}
     assert any("sparkline history fetch failed: recorder busy" in r.getMessage()
                for r in caplog.records)
+
+
+# ── 8.49.36: sparklines end at now, 24 hour counts are not capped ──────────
+
+@pytest.mark.parametrize("size,n", [(100, 20), (37, 5), (21, 20), (3, 2), (50, 1)])
+def test_downsample_always_keeps_the_newest_reading(mod, size, n):
+    vals = [float(i) for i in range(size)]
+    out = mod._downsample(vals, n)
+    assert len(out) == n and out[-1] == vals[-1]
+
+
+def test_observer_counts_every_row_of_the_last_day(mod, load, tmp_path, monkeypatch):
+    db = load("database")
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "conversations.db")
+    old = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=30)).isoformat()
+    for i in range(620):
+        db.save_activity(message="flagged by cognition" if i % 2 else "not worth saying",
+                         was_spoken=i % 5 == 0)
+    with db._connect() as conn:
+        conn.execute("INSERT INTO activity_log (timestamp, message, was_spoken) VALUES (?,?,1)",
+                     (old, "flagged long ago"))
+    stats = mod._get_observer_stats()
+    assert stats["events_24h"] == 620
+    assert stats["flagged_24h"] == 310 and stats["dropped_24h"] == 310
+    assert stats["spoken_24h"] == 124
+    assert db.get_activity_counts(hours=24) == {
+        "total": 620, "spoken": 124, "flagged": 310, "dropped": 310}

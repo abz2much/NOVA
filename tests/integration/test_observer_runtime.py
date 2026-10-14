@@ -66,7 +66,8 @@ def no_panel_databases(monkeypatch):
     keep this file off the real /config."""
     from custom_components.nova import websocket
     for name, value in (("_get_knowledge_stats", {}), ("_get_observer_stats", {}),
-                        ("_get_announcements_today", 0), ("_get_memory_stats", {}),
+                        ("_get_announcements_today", 0), ("_get_activity_counts", {}),
+                        ("_get_memory_stats", {}),
                         ("_get_suggestions", []), ("_get_goals", []),
                         ("_get_doorbell_training", {})):
         monkeypatch.setattr(websocket, name, lambda *_a, value=value: value)

@@ -48,7 +48,8 @@ from .ws_area_helpers import (
     _satellite_count, area_scan,
 )
 from .ws_panel_stats import (
-    _entity_names, _format_uptime, _get_alarm_panels, _get_announcements_today,
+    _entity_names, _format_uptime, _get_activity_counts, _get_alarm_panels,
+    _get_announcements_today,
     _get_appliance_status, _get_area_sparklines, _get_doorbell_training,
     _get_filtered_suggestions, _get_goals, _get_intrusion_status, _get_knowledge_stats,
     _get_lockdown_status, _get_observer_stats, _get_output_mutes, _get_sentinel_rules,
@@ -695,6 +696,9 @@ async def ws_get_panel_data(
         first_notify = picked_notify[0] if picked_notify else ""
         # The doorbell log is read whole on every poll: keep it off the loop.
         doorbell = await hass.async_add_executor_job(_get_doorbell_training, hass)
+        # The SQLite reads behind the tiles, together in one executor job.
+        announced, knowledge_stats, activity_24h = await hass.async_add_executor_job(
+            lambda: (_get_announcements_today(), _get_knowledge_stats(), _get_activity_counts()))
         home = _get_home_doors(hass, entry)
         review_provider = (_runtime_opt(hass, entry, "suggestion_review_provider", "")
                            or _runtime_opt(hass, entry, "llm_provider", "") or "")
@@ -709,7 +713,7 @@ async def ws_get_panel_data(
             "meta": {
                 "bedrooms": len(bedrooms),
                 "areas_monitored": len(areas),
-                "announcements_today": _get_announcements_today(),
+                "announcements_today": announced,
                 "est_cost": _DASH,
                 "uptime": uptime,
             },
@@ -719,7 +723,7 @@ async def ws_get_panel_data(
             "doorbell_training": doorbell,
             "lockdown": _get_lockdown_status(),
             "intrusion": _get_intrusion_status(),
-            "knowledge": _get_knowledge_stats(),
+            "knowledge": knowledge_stats,
             # Both read patterns.db, so both run in the executor.
             "suggestions": await hass.async_add_executor_job(
                 _get_suggestions, _entity_names(hass)),
@@ -754,7 +758,7 @@ async def ws_get_panel_data(
                 "onboarding": _get_onboarding_state(hass, entry, first_notify),
                 "sentinel_rules": _get_sentinel_rules(),
                 "disabled_sentinel_rules": _get_disabled_rules(hass, entry),
-                "observer_stats": _get_observer_stats(),
+                "observer_stats": _get_observer_stats(activity_24h),
                 "output_mutes": _get_output_mutes(),
                 "lockdown": _get_lockdown_status(),
                 "appliances": _get_appliance_status(),

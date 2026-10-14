@@ -1,3 +1,18 @@
+## [8.49.36] — Safety checks never wait on AI, truer panel numbers
+
+Phase 8 continues with the cognitive core's runtime, the camera commands and the panel's stat helpers, reviewed for real improvements and rewritten with only those. Each fix has a test that fails without it.
+
+### Fixed
+- **A slow AI provider could delay the next safety check.** Pattern analysis with its AI review, due follow ups and due goals ran inside the same 30 second tick as lockdown and safety. They now run in one background job beside the tick; whatever that job reports is delivered by the next tick, through the same quiet hours and mute rules as before.
+- **One failing alert lost the rest of the tick.** If delivering one alert raised an error, every alert after it in that tick was dropped. Each alert is now sent on its own, and a failure is logged and skips only that one.
+- **Busy homes saw their 24 hour counts stop at 500.** The observer card counted a capped list of rows. Events, spoken, flagged and dropped are now counted in the database.
+- **Sparklines dropped the latest reading.** When a room's history was thinned, the line could stop short of the current value. It now always ends on the newest reading.
+- **The mmWave rooms on the Residence tab ignored recent activity.** Rooms detecting now still come first, then the most recently active, then by name, as the tab describes.
+
+### Changed
+- **Panel refresh reads its databases off Home Assistant's main loop.** Today's announcements, knowledge counts and the observer's activity counts are read together in one background job instead of on the event loop.
+- **The cognitive core's runtime, the camera commands and the panel's stat helpers rewritten from empty files**, keeping every public name, command, message and value.
+
 ## [8.49.35] — Safer service calls, voice confirmation fixes
 
 Phase 8 continues with the services module and voice confirmation, reviewed for real improvements and rewritten with only those. Each fix has a test that fails without it.

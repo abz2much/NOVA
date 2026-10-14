@@ -387,3 +387,21 @@ async def test_mmwave_still_shows_real_mmwave_motion_and_person_sensors(cams, lo
         assert rooms[area]["state"] == "detecting" and rooms[area]["detecting_count"] == 1
         assert [s["entity_id"] for s in rooms[area]["sensors"]] == [eid]
     assert res["summary"] == {"rooms_with_mmwave": 3, "rooms_detecting": 3, "total_sensors": 3}
+
+
+# ── 8.49.36: rooms follow the documented order ──────────────────────────────
+
+async def test_mmwave_orders_detecting_then_most_recent_then_name(cams, load, monkeypatch):
+    import datetime as dt
+    now = dt.datetime.now(dt.timezone.utc)
+    hass = _hass()
+    ages = {"a": ("off", 3600), "b": ("off", 60), "c": ("on", 600), "d": ("on", 5), "e": ("off", 60)}
+    for area, (state, secs) in ages.items():
+        hass.states.set(f"binary_sensor.{area}", state, last_changed=now - dt.timedelta(seconds=secs))
+    monkeypatch.setattr(cams, "_all_areas_with_anything", lambda h: list(ages))
+    monkeypatch.setattr(load("audio_routing"), "presence_entities_in_area",
+                        lambda h, a: [f"binary_sensor.{a}"])
+    monkeypatch.setattr(cams, "_area_name", lambda h, a: a.upper())
+    monkeypatch.setattr(cams, "_is_outdoor_area", lambda h, a: False)
+    res = (await _call(cams.ws_mmwave_overview, hass)).results[0][1]
+    assert [r["area_id"] for r in res["rooms"]] == ["d", "c", "b", "e", "a"]
